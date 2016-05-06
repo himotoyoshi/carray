@@ -1,5 +1,11 @@
 
-files = Dir.glob("**/*") - [ 
+
+Gem::Specification::new do |s|
+  require_relative "./version"
+  
+  version, date = carray_version()
+
+  files = Dir.glob("**/*") - [ 
                             Dir.glob("vendor"),
                             Dir.glob("ext/**/{Makefile,mkmf.log}"),
                             Dir.glob("**/*.{o,so,bundle}"),
@@ -7,11 +13,7 @@ files = Dir.glob("**/*") - [
                             Dir.glob("carray-*.gem"), 
                            ].flatten
 
-Gem::Specification::new do |s|
-  require "./version.rb"
-  version, date = carray_version()
-
-  s.platform = Gem::Platform::RUBY
+  s.platform    = Gem::Platform::RUBY
   s.name        = "carray"
   s.summary     = "Multi-dimesional array class"
   s.description = <<-HERE
@@ -25,6 +27,8 @@ Gem::Specification::new do |s|
   s.email       = ""
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
+  s.extensions  = [ "extconf.rb" ] + 
+                     Dir["ext/*/extconf.rb"].select{|f| File.exist?(f) }
   s.has_rdoc    = true
   s.rdoc_options = [
 		"--main=rdoc_main.rb", 
@@ -34,6 +38,5 @@ Gem::Specification::new do |s|
 		"rdoc_stat.rb", 
 		Dir.glob("lib/carray/**/*.rb")
 	].flatten
-  s.requirements << "C compiler supports C99 complex and "
   s.required_ruby_version = ">= 1.8.1"
 end
