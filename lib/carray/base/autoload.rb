@@ -58,17 +58,13 @@ module CA
   def self.each_load_path (name) # :nodoc:
     autoload_dirs = $:.clone
     if defined? Gem
-      if Gem::VERSION >= "1.7.0"
-        begin
-          Gem::Specification.each do |spec|
-            if spec.name =~ /carray/
-              autoload_dirs.push(spec.full_gem_path)
-            end
+      begin
+        Gem::Specification.each do |spec|
+          if spec.name =~ /carray/
+            autoload_dirs.push(spec.require_paths.first)
           end
-        rescue Gem::LoadError
         end
-      else
-        autoload_dirs.push(*Gem.all_load_paths.grep(/carray/))
+      rescue Gem::LoadError
       end
     end
     autoload_dirs.each do |path|
