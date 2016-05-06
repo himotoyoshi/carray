@@ -1,0 +1,73 @@
+Note for developper
+===================
+
+Make targets
+------------
+
+### create Makefile
+
+    ruby extconf.rb
+
+### build extensions
+
+    make all
+    
+### install via RubyGems
+
+    make build-gem
+    make install-gem
+    make uninstall-gem  ### for uninstall this version
+
+### install via extconf.rb
+
+    ruby extconf.rb
+    make all
+    make install
+
+### cleaning temporary files
+
+    make clean
+    make distclean
+
+### create gem package
+
+    make package        ### -> rake package
+    
+### run test
+
+    make test           ### -> rake test
+
+Utility scripts
+---------------
+
+### check version.h
+
+    ruby version.rb
+
+### check installed ruby-carray environment
+
+    ruby -v -e "require 'carray/info'"
+    
+Check Points for Debug 
+----------------------
+
+  * 'elements' should be checked with double float number
+
+  * ca_update_mask/ca_attach/ca_create_mask/ca_has_mask should be called 
+    before ca->mask refered
+
+  * Avoid the exposition of raw VALUE data in object array
+
+    + CArray#refer, CArray#member, CArray#bitarray, CArray#bitfield
+    + CArray#transform, CArray#load, CArray#dump
+    + CArray#swap_bytes!, CArray#swap_bytes
+
+  * inherit data_class when copy
+
+    + rb_ca_copy, rb_ca_template
+    + rb_ca_unmask_copy
+
+OpenMP
+------
+
+  * '--with-cc="gcc -fopenmp"' ... and so on.

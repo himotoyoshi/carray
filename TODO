@@ -1,0 +1,5 @@
+- CArray#section should treat mask (-> currently CArray#bin uses inherit_mask)
+- CArray#differentiate should treat mask 
+* CArray#search should permit a CArray argument (use lfind ?)
+* append API ca_get_range(vrange, size, *first, *last)
+* ca_cast_self_or_other should treat NArray directly
