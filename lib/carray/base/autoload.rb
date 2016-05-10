@@ -61,7 +61,12 @@ module CA
       begin
         Gem::Specification.each do |spec|
           if spec.name =~ /carray/
-            autoload_dirs.push(spec.require_paths.first)
+            spec.require_paths.each do |path|
+              if path !~ /^\//
+                path = File.join(spec.full_gem_path, path)
+              end
+              autoload_dirs.push(path)                
+            end
           end
         end
       rescue Gem::LoadError
