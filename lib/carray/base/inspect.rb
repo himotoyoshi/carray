@@ -126,12 +126,10 @@ class CArray::Inspector  # :nodoc:
       lambda{|x| "%i" % x }
     when CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64
       lambda{|x| "%u" % x }
-    when CA_FLOAT32
-      lambda{|x| "%.5g" % x }
-    when CA_FLOAT64, CA_FLOAT128
-      lambda{|x| "%.8g" % x }
+    when CA_FLOAT32, CA_FLOAT64, CA_FLOAT128
+      lambda{|x| "%g" % x }
     when CA_CMPLX64, CA_CMPLX128, CA_CMPLX256
-      lambda{|x| format("%.5g%s%.5gi",
+      lambda{|x| format("%g%s%gi",
                         x.real, (x.imag >= 0) ? "+" : "-", x.imag.abs) }
     when CA_FIXLEN
       if @carray.data_class
