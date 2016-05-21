@@ -512,6 +512,10 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
         info->index[0].scalar = addr;
         return;
       }
+      else if ( arg == Qnil ) {
+        info->type = CA_REG_FLATTEN;
+        return;	
+      }
       else { /* ca[i..j] -> CA_REG_ADDRESS_COMPLEX */
         info->type = CA_REG_ADDRESS_COMPLEX;
         return;
@@ -1227,6 +1231,9 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_ADDRESS:
     obj = rb_ca_ref_address(self, &info);
     break;
+  case CA_REG_FLATTEN:
+    obj = rb_ca_refer_new_flatten(self);
+    break;
   case CA_REG_POINT:
     obj = rb_ca_ref_point(self, &info);
     break;
@@ -1310,6 +1317,10 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     goto retry;
   case CA_REG_ADDRESS:
     obj = rb_ca_store_address(self, &info, rval);
+    break;
+  case CA_REG_FLATTEN:
+    self = rb_ca_refer_new_flatten(self);
+    obj = rb_ca_store_all(self, rval);
     break;
   case CA_REG_POINT:
     obj = rb_ca_store_point(self, &info, rval);
@@ -1584,6 +1595,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
     }
     return rindex;
   case CA_REG_ADDRESS_COMPLEX:
+  case CA_REG_FLATTEN:
     self = rb_ca_refer_new_flatten(self);
     return rb_ca_normalize_index(self, ridx);
   default:
@@ -1779,6 +1791,7 @@ Init_carray_access ()
   rb_define_const(rb_cObject, "CA_REG_NONE",     INT2NUM(CA_REG_NONE));
   rb_define_const(rb_cObject, "CA_REG_ALL",      INT2NUM(CA_REG_ALL));
   rb_define_const(rb_cObject, "CA_REG_ADDRESS",  INT2NUM(CA_REG_ADDRESS));
+  rb_define_const(rb_cObject, "CA_REG_FLATTEN",  INT2NUM(CA_REG_FLATTEN));
   rb_define_const(rb_cObject, "CA_REG_ADDRESS_COMPLEX",
                                                  INT2NUM(CA_REG_ADDRESS_COMPLEX));
   rb_define_const(rb_cObject, "CA_REG_POINT",    INT2NUM(CA_REG_POINT));
