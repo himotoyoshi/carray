@@ -599,7 +599,7 @@ class CArray
 
   #
   # CArray.span(data_type, range[, step])
-  # CArray.span(range[, step]) -> data_type guessed by range.first typ
+  # CArray.span(range[, step]) -> data_type guessed by range.first type
   #
 
   def self.span (*argv)
@@ -608,7 +608,7 @@ class CArray
     else
       type, = *CArray.guess_type_and_bytes(argv.shift, nil)
     end
-    range, step = argv[0], argv[1] || 1
+    range, step = argv[0], argv[1]
     start, stop = range.begin, range.end
     if step == 0
       raise "step should not be 0"
@@ -624,11 +624,9 @@ class CArray
       end
     end
     if type == CA_OBJECT and not step
-      return CA_OBJECT(range.map)
+      return CA_OBJECT(range.to_a)
     else
-#      start = start.to_s.to_r
-#      stop  = stop.to_s.to_r
-#      step  = step.to_s.to_r
+      step ||= 1
       if range.exclude_end?
         n = ((stop - start).abs/step).floor
       else
