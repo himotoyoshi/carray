@@ -1,3 +1,5 @@
 *.gem
 Gemfile
 Gemfile.lock
+*.o
+.DS_Store
