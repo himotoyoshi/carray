@@ -21,10 +21,10 @@ VALUE rb_cCAUnboundRepeat;
 
 int
 ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
-                int32_t rep_rank, int32_t *rep_dim)
+                int32_t rep_rank, ca_size_t *rep_dim)
 {
   int8_t data_type, rank;
-  int32_t bytes, elements;
+  ca_size_t bytes, elements;
 
   /* check arguments */
 
@@ -43,17 +43,17 @@ ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
   ca->rep_rank  = rep_rank;
-  ca->rep_dim   = ALLOC_N(int32_t, rep_rank);
+  ca->rep_dim   = ALLOC_N(ca_size_t, rep_rank);
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(int32_t));
-  memcpy(ca->rep_dim, rep_dim, rep_rank * sizeof(int32_t));
+  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
+  memcpy(ca->rep_dim, rep_dim, rep_rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -63,7 +63,7 @@ ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
 }
 
 CAUnboundRepeat *
-ca_ubrep_new (CArray *parent, int32_t rep_rank, int32_t *rep_dim)
+ca_ubrep_new (CArray *parent, int32_t rep_rank, ca_size_t *rep_dim)
 {
   CAUnboundRepeat *ca = ALLOC(CAUnboundRepeat);
   ca_ubrep_setup(ca, parent, rep_rank, rep_dim);
@@ -92,42 +92,42 @@ ca_ubrep_func_clone (void *ap)
 }
 
 static char *
-ca_ubrep_func_ptr_at_addr (void *ap, int32_t addr)
+ca_ubrep_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   return ca_ptr_at_addr(ca->parent, addr);
 }
 
 static char *
-ca_ubrep_func_ptr_at_index (void *ap, int32_t *idx)
+ca_ubrep_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   return ca_ptr_at_index(ca->parent, idx);
 }
 
 static void
-ca_ubrep_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_ubrep_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   ca_fetch_addr(ca->parent, addr, ptr);
 }
 
 static void
-ca_ubrep_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_ubrep_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   ca_fetch_index(ca->parent, idx, ptr);
 }
 
 static void
-ca_ubrep_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_ubrep_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   ca_store_addr(ca->parent, addr, ptr);
 }
 
 static void
-ca_ubrep_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_ubrep_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   ca_store_index(ca->parent, idx, ptr);
@@ -239,7 +239,7 @@ ca_operation_function_t ca_ubrep_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_ubrep_new (VALUE cary, int32_t rep_rank, int32_t *rep_dim)
+rb_ca_ubrep_new (VALUE cary, int32_t rep_rank, ca_size_t *rep_dim)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -257,9 +257,10 @@ VALUE
 rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  int32_t rank, dim[CA_RANK_MAX];
-  int32_t rep_rank, rep_dim[CA_RANK_MAX];
-  int32_t count, i;
+  ca_size_t rank, dim[CA_RANK_MAX];
+  int32_t rep_rank;
+  ca_size_t rep_dim[CA_RANK_MAX];
+  ca_size_t count, i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -298,7 +299,7 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
       return self;
     }
     else {
-      return rb_ca_unbound_repeat(RARRAY_LEN(args), RARRAY_PTR(args), self);
+      return rb_ca_unbound_repeat((int)RARRAY_LEN(args), RARRAY_PTR(args), self);
     }
   }
   else if ( argc == 2 && 
@@ -384,9 +385,9 @@ rb_ca_ubrep_initialize_copy (VALUE self, VALUE other)
 
 /*
 static CARepeat *
-ca_ubrep_bind (CAUnboundRepeat *ca, int32_t new_rank, int32_t *new_dim)
+ca_ubrep_bind (CAUnboundRepeat *ca, int32_t new_rank, ca_size_t *new_dim)
 {
-  int32_t rep_spec[CA_RANK_MAX];
+  ca_size_t rep_spec[CA_RANK_MAX];
   int i;
   if ( ca->rep_rank != new_rank ) {
     rb_raise(rb_eArgError, "invalid new_rank");
@@ -404,12 +405,12 @@ ca_ubrep_bind (CAUnboundRepeat *ca, int32_t new_rank, int32_t *new_dim)
 */
 
 VALUE
-ca_ubrep_bind2 (VALUE self, int32_t new_rank, int32_t *new_dim)
+ca_ubrep_bind2 (VALUE self, int32_t new_rank, ca_size_t *new_dim)
 {
   CAUnboundRepeat *ca;
-  int32_t rep_spec[CA_RANK_MAX];
-  int32_t upr_spec[CA_RANK_MAX];
-  int32_t srp_spec[CA_RANK_MAX];
+  ca_size_t rep_spec[CA_RANK_MAX];
+  ca_size_t upr_spec[CA_RANK_MAX];
+  ca_size_t srp_spec[CA_RANK_MAX];
   int uprep = 0, srp_rank;
   int i;
 
@@ -494,7 +495,7 @@ static VALUE
 rb_ca_ubrep_bind (int argc, VALUE *argv, VALUE self)
 {
   CAUnboundRepeat *ca;
-  int32_t rep_spec[CA_RANK_MAX];
+  ca_size_t rep_spec[CA_RANK_MAX];
   int i;
 
   Data_Get_Struct(self, CAUnboundRepeat, ca);
@@ -504,7 +505,7 @@ rb_ca_ubrep_bind (int argc, VALUE *argv, VALUE self)
   }
   for (i=0; i<argc; i++) {
     if ( ca->rep_dim[i] == 0 ) {
-      rep_spec[i] = NUM2INT(argv[i]);
+      rep_spec[i] = NUM2SIZE(argv[i]);
     }
     else {
       rep_spec[i] = 0;
@@ -526,7 +527,7 @@ rb_ca_ubrep_spec (VALUE self)
   spec = rb_ary_new2(ca->rep_rank);
   for (i=0; i<ca->rep_rank; i++) {
     if ( ca->rep_dim[i] ) {
-      rb_ary_store(spec, i, INT2NUM(ca->rep_dim[i]));
+      rb_ary_store(spec, i, SIZE2NUM(ca->rep_dim[i]));
     }
     else {
       rb_ary_store(spec, i, ID2SYM(rb_intern("*")));

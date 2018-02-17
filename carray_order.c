@@ -67,9 +67,9 @@ rb_ca_value_not_masked (VALUE self)
 static void
 ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
-  int32_t map_elements = ca->elements;
-  int32_t *ip = (int32_t*) ci->ptr;
-  int32_t n, i;
+  ca_size_t map_elements = ca->elements;
+  ca_size_t *ip = (ca_size_t*) ci->ptr;
+  ca_size_t n, i;
   boolean8_t *mi, *ma;
   boolean8_t *mio, *mii, *mia;
 
@@ -154,12 +154,12 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
 
-  rb_scan_args(argc, argv, "12", &rindex, &vlfval, &vufval);
+  rb_scan_args(argc, argv, "12", (VALUE *) &rindex, (VALUE *) &vlfval, (VALUE *) &vufval);
 
   Data_Get_Struct(self, CArray, ca);
 
   rb_check_carray_object(rindex);
-  ci = ca_wrap_readonly(rindex, CA_INT32);
+  ci = ca_wrap_readonly(rindex, CA_SIZE);
 
   lfval = malloc_with_check(ca->bytes);
   ufval = malloc_with_check(ca->bytes);
@@ -215,7 +215,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
 
 #define proc_reverse_bang_data()                        \
   {                                                     \
-    int32_t bytes = ca->bytes;                          \
+    ca_size_t bytes = ca->bytes;                          \
     char *p = ca->ptr;                                  \
     char *q = ca->ptr + bytes * (ca->elements - 1);     \
     char *v = malloc_with_check(bytes);                     \
@@ -299,7 +299,7 @@ rb_ca_reversed_copy (VALUE self)
 /* ------------------------------------------------------------------------- */
 
 typedef struct {
-  int32_t bytes;
+  ca_size_t bytes;
   char   *ptr;
 } cmp_data;
 
@@ -410,7 +410,7 @@ rb_ca_sort_bang (VALUE self)
   if ( ca_is_fixlen_type(ca) ) {
     cmp_data *cmp_ptr, *p;
     char *ca_ptr, *q;
-    int32_t i;
+    ca_size_t i;
     cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
     ca_ptr  = malloc_with_check(ca_length(ca));
     for (i=0, p=cmp_ptr, q=ca->ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
@@ -468,7 +468,7 @@ rb_ca_sorted_copy (VALUE self)
 
 #define proc_shuffle(type)                      \
   {                                             \
-    int32_t idx, jdx;                           \
+    ca_size_t idx, jdx;                           \
     type *ptr, *p, *q;                          \
     type t1;                                    \
     ptr = (type *) ca->ptr;                     \
@@ -498,10 +498,10 @@ rb_ca_sorted_copy (VALUE self)
 
 #define proc_shuffle_fixlen()                   \
   {                                             \
-    int32_t idx, jdx;                           \
+    ca_size_t idx, jdx;                           \
     char *ptr, *p, *q;                          \
     char *t = (char*) malloc_with_check(ca->bytes); \
-    int32_t bytes = ca->bytes;                  \
+    ca_size_t bytes = ca->bytes;                  \
     ptr = ca->ptr;                              \
     if ( ca->mask ) {                           \
       boolean8_t *mptr, *mp, *mq;                \
@@ -636,18 +636,18 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
     volatile VALUE vidx;
     CArray *cv, *co;
     char *ptr, *val;
-    int32_t i, idx;
+    ca_size_t i, idx;
     Data_Get_Struct(rval, CArray, cv);
     if ( ca->data_type != cv->data_type ) {
       cv = ca_wrap_readonly(rval, ca->data_type);
     }
-    co = carray_new(CA_INT32, cv->rank, cv->dim, 0, NULL);
+    co = carray_new(CA_SIZE, cv->rank, cv->dim, 0, NULL);
     out = ca_wrap_struct(co);
     ca_attach(cv);
     if ( ca_is_fixlen_type(ca) ) {
       cmp_data *cmp_ptr, *p, *ptr, cmp_val;
       char *q;
-      int32_t i;
+      ca_size_t i;
       cmp_val.bytes = ca->bytes;
       cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
       for (i=0, p=cmp_ptr, q=ca->ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
@@ -658,7 +658,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
         cmp_val.ptr = ca_ptr_at_addr(cv, i);
         ptr = bsearch(&cmp_val, cmp_ptr, ca->elements, sizeof(cmp_data),
                       ca_qsort_cmp[CA_FIXLEN]);
-        vidx = ( ! ptr ) ? CA_UNDEF : INT2NUM(ptr - cmp_ptr);      
+        vidx = ( ! ptr ) ? CA_UNDEF : SIZE2NUM(ptr - cmp_ptr);      
         rb_ca_store_addr(out, i, vidx);
       }
       free(cmp_ptr);
@@ -685,7 +685,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
     if ( ca_is_fixlen_type(ca) ) {
       cmp_data *cmp_ptr, *p, *ptr, cmp_val;
       char *q;
-      int32_t i;
+      ca_size_t i;
       cmp_val.bytes = ca->bytes;
       cmp_val.ptr   = val;
       cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
@@ -695,14 +695,14 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
       }
       ptr = bsearch(&cmp_val, cmp_ptr, ca->elements, sizeof(cmp_data),
                     ca_qsort_cmp[CA_FIXLEN]);
-      out = ( ! ptr ) ? Qnil : INT2NUM((ptr - cmp_ptr));
+      out = ( ! ptr ) ? Qnil : SIZE2NUM((ptr - cmp_ptr));
       free(cmp_ptr);
     }
     else {
       char *ptr;
       ptr = bsearch(val, ca->ptr, ca->elements, ca->bytes,
                     ca_qsort_cmp[ca->data_type]);
-      out = ( ! ptr ) ? Qnil : INT2NUM((ptr - ca->ptr)/ca->bytes);
+      out = ( ! ptr ) ? Qnil : SIZE2NUM((ptr - ca->ptr)/ca->bytes);
     }
   }
   ca_detach(ca);
@@ -729,8 +729,8 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
   {                                                          \
     type *ptr = (type *) ca->ptr;                            \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) NUM2LONG(value);                      \
-    int32_t i;                                               \
+    type val  = (type) NUM2LL(value);                      \
+    ca_size_t i;                                               \
     if ( m ) {                                               \
       for (i=0; i<ca->elements; i++, ptr++) {                \
         if ( ! *m++ ) {                                      \
@@ -757,7 +757,7 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) NUM2DBL(value);                       \
     double eps  = (NIL_P(veps)) ? defeps*fabs(val) : NUM2DBL(veps); \
-    int32_t i;                                               \
+    ca_size_t i;                                               \
     if ( m ) {                                               \
       for (i=0; i<ca->elements; i++, ptr++) {                \
         if ( ! *m++ ) {                                      \
@@ -784,7 +784,7 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) NUM2CC(value);                        \
     double eps  = (NIL_P(veps)) ? defeps*cabs(val) : NUM2DBL(veps); \
-    int32_t i;                                               \
+    ca_size_t i;                                               \
     if ( m ) {                                               \
       for (i=0; i<ca->elements; i++, ptr++) {                \
         if ( ! *m++ ) {                                      \
@@ -809,7 +809,7 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
   {                                                          \
     VALUE *ptr = (VALUE *) ca->ptr;                          \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    int32_t i;                                               \
+    ca_size_t i;                                               \
     if ( m ) {                                               \
       for (i=0; i<ca->elements; i++, ptr++) {                \
         if ( ! *m++ ) {                                      \
@@ -843,9 +843,9 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE value, veps;
   CArray *ca;
-  int32_t addr;
+  ca_size_t addr;
 
-  rb_scan_args(argc, argv, "11", &value, &veps);
+  rb_scan_args(argc, argv, "11", (VALUE *) &value, (VALUE *) &veps);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -878,7 +878,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
 
   ca_detach(ca);
 
-  return ( addr == -1 ) ? Qnil : LONG2NUM(addr);
+  return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
 /* rdoc:
@@ -904,7 +904,7 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
     type val  = (type) from(value);                     \
     double trial;                                       \
     double diff = 1.0/0.0;                              \
-    int32_t i;                                          \
+    ca_size_t i;                                          \
     addr = -1;                                           \
     if ( m ) {                                          \
       for (i=0; i<ca->elements; i++, ptr++) {           \
@@ -935,7 +935,7 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
     VALUE val  = value;                     \
     VALUE trial;                                       \
     VALUE diff = rb_float_new(1.0/0.0);                              \
-    int32_t i;                                          \
+    ca_size_t i;                                          \
     addr = -1;                                           \
     if ( m ) {                                          \
       for (i=0; i<ca->elements; i++, ptr++) {           \
@@ -970,7 +970,7 @@ static VALUE
 rb_ca_linear_search_nearest (VALUE self, VALUE value)
 {
   CArray *ca;
-  int32_t addr;
+  ca_size_t addr;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1001,7 +1001,7 @@ rb_ca_linear_search_nearest (VALUE self, VALUE value)
 
   ca_detach(ca);
 
-  return ( addr == -1 ) ? Qnil : LONG2NUM(addr);
+  return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
 static VALUE

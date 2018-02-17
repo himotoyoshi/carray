@@ -22,12 +22,12 @@ VALUE rb_cCADimIterator;
 
 typedef struct {
   int8_t  rank;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
-  CArray * (*kernel_at_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_at_index)(void *, int32_t *, CArray *);
-  CArray * (*kernel_move_to_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_move_to_index)(void *, int32_t *, CArray *);
+  CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_at_index)(void *, ca_size_t *, CArray *);
+  CArray * (*kernel_move_to_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_move_to_index)(void *, ca_size_t *, CArray *);
   /* ----------- */
   CArray  *kernel;
   int8_t   symflag[CA_RANK_MAX];
@@ -37,11 +37,12 @@ typedef struct {
 /* -------------------------------------------------------------------- */
 
 static CArray *
-ca_di_kernel_at_index (void *it, int32_t *idx, CArray *ref)
+ca_di_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
 {
   CADimIterator *dit = (CADimIterator *)it;
   CABlock *kernel;
-  int32_t i, val;
+  int8_t i;
+  ca_size_t val;
 
   if ( ref == dit->reference ) {
     kernel = ca_clone(dit->kernel);
@@ -70,12 +71,12 @@ ca_di_kernel_at_index (void *it, int32_t *idx, CArray *ref)
 }
 
 static CArray *
-ca_di_kernel_at_addr (void *it, int32_t addr, CArray *ref)
+ca_di_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CADimIterator *dit = (CADimIterator *) it;
-  int32_t *dim = dit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = dit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=dit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -84,11 +85,12 @@ ca_di_kernel_at_addr (void *it, int32_t addr, CArray *ref)
 }
 
 static CArray *
-ca_di_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
+ca_di_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 {
   CADimIterator *dit = (CADimIterator *)it;
   CABlock *kernel = (CABlock *) kern;
-  int32_t i, val;
+  int8_t i;
+  ca_size_t val;
 
   ca_update_mask(kernel);
 
@@ -106,12 +108,12 @@ ca_di_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
 }
 
 static CArray *
-ca_di_kernel_move_to_addr (void *it, int32_t addr, CArray *ref)
+ca_di_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CADimIterator *dit = (CADimIterator *) it;
-  int32_t *dim = dit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = dit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=dit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -157,11 +159,11 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
 
   for (i=0; i<info->rank; i++) {
     if ( info->index_type[i] == CA_IDX_SCALAR ) {
-      rb_ary_store(rindex, i, INT2NUM(info->index[i].scalar));
+      rb_ary_store(rindex, i, SIZE2NUM(info->index[i].scalar));
       continue; /* escape from j++ */
     }
     else if ( info->index_type[i] == CA_IDX_SYMBOL ) {
-      rb_ary_store(rindex, i, rb_ary_new3(1,INT2NUM(0)));
+      rb_ary_store(rindex, i, rb_ary_new3(1, SIZE2NUM(0)));
       it->symflag[j]       = 1;
       it->symindex[rank] = j;
       rank++;
@@ -172,9 +174,9 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
     }
     else if ( info->index_type[i] == CA_IDX_BLOCK ) {
       rb_ary_store(rindex, i,
-                   rb_ary_new3(3, INT2NUM(0),
-                               INT2NUM(info->index[i].block.count),
-                               INT2NUM(1)));
+                   rb_ary_new3(3, SIZE2NUM(0),
+                               SIZE2NUM(info->index[i].block.count),
+                               SIZE2NUM(1)));
       it->symflag[j] = 0;
     }
     j++;

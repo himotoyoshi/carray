@@ -11,6 +11,17 @@
 #
 # ----------------------------------------------------------------------------
 
+have_type_long_double = false
+
+open("carray_config.h") { |io|
+	while line = io.gets
+	  case line
+  	when /HAVE_TYPE_LONG_DOUBLE *1/
+      have_type_long_double = true
+    end
+  end	  
+}
+
 def macro_expand (text, values)
   text = text.clone
   values.each do |key, val|
@@ -28,7 +39,7 @@ TYPEINFO = {
                 'type2obj' => 'LONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -43,7 +54,7 @@ TYPEINFO = {
                 'type2obj' => 'LONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -58,7 +69,7 @@ TYPEINFO = {
                 'type2obj' => 'ULONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -73,7 +84,7 @@ TYPEINFO = {
                 'type2obj' => 'LONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -88,7 +99,7 @@ TYPEINFO = {
                 'type2obj' => 'ULONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -103,7 +114,7 @@ TYPEINFO = {
                 'type2obj' => 'LONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -118,7 +129,7 @@ TYPEINFO = {
                 'type2obj' => 'ULONG2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -133,7 +144,7 @@ TYPEINFO = {
                 'type2obj' => 'LL2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -148,7 +159,7 @@ TYPEINFO = {
                 'type2obj' => 'ULL2NUM',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -163,7 +174,7 @@ TYPEINFO = {
                 'type2obj' => 'rb_float_new',
                 'type2dbl' => '(float64_t)',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -178,7 +189,7 @@ TYPEINFO = {
                 'type2obj' => 'rb_float_new',
                 'type2dbl' => '',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -193,7 +204,7 @@ TYPEINFO = {
                 'type2obj' => 'rb_float_new',
                 'type2dbl' => '',
                 'int2type' => '',
-                'atype' => 'double',
+                'atype' => have_type_long_double ? 'long double' : 'double',
                 'azero' => '0.0',
                 'aone' => '1.0',
                 'atype2obj' => 'rb_float_new',
@@ -247,7 +258,7 @@ TYPEINFO = {
               },
   'VALUE' => {
                 'type' => "VALUE",
-                'zero' => 'INT2FIX(0)',
+                'zero' => 'INT2NUM(0)',
                 'dat2type' => '',
                 'obj2type' => '',
                 'type2obj' => '',
@@ -289,10 +300,10 @@ header = <<HERE_END
 #include "carray.h"
 
 typedef struct {
-  int32_t    offset;
-  int32_t    count;
-  int32_t    step;
-  int32_t   *addr;
+  ca_size_t    offset;
+  ca_size_t    count;
+  ca_size_t    step;
+  ca_size_t   *addr;
 } CAStatIterator;
 
 typedef void (*ca_stat_proc_t)();
@@ -363,16 +374,16 @@ text = <<'HERE_END'
 /* ============================= */
 
 static void
-ca_proc_prod_<type> (int32_t elements, int32_t min_count,
+ca_proc_prod_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
-                     boolean8_t *retmask, <atype> *retval)
+                     boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> prod = <aone>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -398,7 +409,7 @@ ca_proc_prod_<type> (int32_t elements, int32_t min_count,
     if ( retmask ) {
       *retmask = ( count > min_count ) ? 1 : 0;
     }
-    *retval  = prod;
+    *retval  = <type2dbl>(prod);
   }
 }
 
@@ -407,14 +418,14 @@ ca_proc_prod_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_count_<type> (int32_t elements, int32_t min_count,
+ca_proc_count_<type> (ca_size_t elements, ca_size_t min_count,
                       boolean8_t *m, void *ptr, CAStatIterator *it,
                       int return_object, VALUE *retobj,
-                      boolean8_t *retmask, int32_t *retval)
+                      boolean8_t *retmask, ca_size_t *retval)
 {
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -425,7 +436,7 @@ ca_proc_count_<type> (int32_t elements, int32_t min_count,
     }
   }
   if ( return_object ) {
-    *retobj = ( count > min_count ) ? CA_UNDEF : LONG2NUM(elements - count);
+    *retobj = ( count > min_count ) ? CA_UNDEF : SIZE2NUM(elements - count);
   }
   else {
     if ( retmask ) {
@@ -436,16 +447,16 @@ ca_proc_count_<type> (int32_t elements, int32_t min_count,
 }
 
 static void
-ca_proc_sum_<type> (int32_t elements, int32_t min_count,
+ca_proc_sum_<type> (ca_size_t elements, ca_size_t min_count,
                     boolean8_t *m, void *ptr, CAStatIterator *it,
                     int return_object, VALUE *retobj,
                     boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *)it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *)it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -481,16 +492,16 @@ ca_proc_sum_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_mean_<type> (int32_t elements, int32_t min_count,
+ca_proc_mean_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
                      boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>, ave;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -526,16 +537,16 @@ ca_proc_mean_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_variancep_<type> (int32_t elements, int32_t min_count,
+ca_proc_variancep_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
                      boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>, sum2 = <azero>, ave, var, diff;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -595,16 +606,16 @@ ca_proc_variancep_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_stddevp_<type> (int32_t elements, int32_t min_count,
+ca_proc_stddevp_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
                      boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>, sum2 = <azero>, ave, var, diff;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -664,16 +675,16 @@ ca_proc_stddevp_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_variance_<type> (int32_t elements, int32_t min_count,
+ca_proc_variance_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
                      boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>, sum2 = <azero>, ave, var, diff;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -733,16 +744,16 @@ ca_proc_variance_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_stddev_<type> (int32_t elements, int32_t min_count,
+ca_proc_stddev_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
                      boolean8_t *retmask, <atype> *retval)
 {
   volatile <atype> sum = <azero>, sum2 = <azero>, ave, var, diff;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -802,17 +813,17 @@ ca_proc_stddev_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_min_<type> (int32_t elements, int32_t min_count,
+ca_proc_min_<type> (ca_size_t elements, ca_size_t min_count,
                     boolean8_t *m, void *ptr, CAStatIterator *it,
                     int return_object, VALUE *retobj,
                     boolean8_t *retmask, <type> *retval)
 {
   <type> min = <zero>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t addr;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t addr;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     addr = -1;
@@ -870,17 +881,17 @@ ca_proc_min_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_min_addr_<type> (int32_t elements, int32_t min_count,
+ca_proc_min_addr_<type> (ca_size_t elements, ca_size_t min_count,
                          boolean8_t *m, void *ptr, CAStatIterator *it,
                          int return_object, VALUE *retobj,
-                         boolean8_t *retmask, int32_t *retval)
+                         boolean8_t *retmask, ca_size_t *retval)
 {
   <type> min = <zero>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t addr;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t addr;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     addr = -1;
@@ -924,7 +935,7 @@ ca_proc_min_addr_<type> (int32_t elements, int32_t min_count,
   }
   if ( return_object ) {
     *retobj = ( count > min_count ) ? CA_UNDEF
-                                    : ( addr < 0 ) ? Qnil : LONG2NUM(addr);
+                                    : ( addr < 0 ) ? Qnil : SIZE2NUM(addr);
   }
   else {
     if ( retmask ) {
@@ -939,17 +950,17 @@ ca_proc_min_addr_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_max_<type> (int32_t elements, int32_t min_count,
+ca_proc_max_<type> (ca_size_t elements, ca_size_t min_count,
                     boolean8_t *m, void *ptr, CAStatIterator *it,
                     int return_object, VALUE *retobj,
                     boolean8_t *retmask, <type> *retval)
 {
   <type> max = 0;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t addr;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t addr;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     addr = -1;
@@ -1007,17 +1018,17 @@ ca_proc_max_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_max_addr_<type> (int32_t elements, int32_t min_count,
+ca_proc_max_addr_<type> (ca_size_t elements, ca_size_t min_count,
                          boolean8_t *m, void *ptr, CAStatIterator *it,
                          int return_object, VALUE *retobj,
-                         boolean8_t *retmask, int32_t *retval)
+                         boolean8_t *retmask, ca_size_t *retval)
 {
   <type> max = 0;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t addr;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t addr;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     addr = -1;
@@ -1061,7 +1072,7 @@ ca_proc_max_addr_<type> (int32_t elements, int32_t min_count,
   }
   if ( return_object ) {
     *retobj = ( count > min_count ) ? CA_UNDEF
-                                    : ( addr < 0 ) ? Qnil : LONG2NUM(addr);
+                                    : ( addr < 0 ) ? Qnil : SIZE2NUM(addr);
   }
   else {
     if ( retmask ) {
@@ -1077,13 +1088,13 @@ ca_proc_max_addr_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_cumcount_<type> (int32_t elements, int32_t min_count,
+ca_proc_cumcount_<type> (ca_size_t elements, ca_size_t min_count,
                          boolean8_t *m, void *ptr, CAStatIterator *it,
-                         boolean8_t *retmask, int32_t *retval)
+                         boolean8_t *retmask, ca_size_t *retval)
 {
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -1117,15 +1128,15 @@ ca_proc_cumcount_<type> (int32_t elements, int32_t min_count,
 /* ============================= */
 
 static void
-ca_proc_cumsum_<type> (int32_t elements, int32_t min_count,
+ca_proc_cumsum_<type> (ca_size_t elements, ca_size_t min_count,
                        boolean8_t *m, void *ptr, CAStatIterator *it,
                        boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -1230,16 +1241,16 @@ text = <<'HERE_END'
 /* ============================= */
 
 static void
-ca_proc_accum_<type> (int32_t elements, int32_t min_count,
+ca_proc_accum_<type> (ca_size_t elements, ca_size_t min_count,
                       boolean8_t *m, void *ptr, CAStatIterator *it,
                       int return_object, VALUE *retobj,
                       boolean8_t *retmask, <type> *retval)
 {
   <type> sum = <zero>;
   <type> *p = (<type> *) ptr;
-  int32_t *a = (int32_t *) it;
-  int32_t count = 0;
-  int32_t i;
+  ca_size_t *a = (ca_size_t *) it;
+  ca_size_t count = 0;
+  ca_size_t i;
   iterator_rewind(it);
   if ( m ) {
     for (i=0; i<elements; i++) {
@@ -1332,7 +1343,7 @@ rb_ca_stat_1d (VALUE self, VALUE rmc, VALUE vfval,
   CArray *ca;
   CAStatIterator it;
   boolean8_t *m;
-  int32_t mc;
+  ca_size_t mc;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1348,7 +1359,7 @@ rb_ca_stat_1d (VALUE self, VALUE rmc, VALUE vfval,
   else {
     ca_attach(ca);
     m = ( ca->mask ) ? (boolean8_t *)ca->mask->ptr : NULL;
-    mc = ( ( ! ca_has_mask(ca) ) || NIL_P(rmc)) ? ca->elements - 1 : NUM2LONG(rmc);
+    mc = ( ( ! ca_has_mask(ca) ) || NIL_P(rmc)) ? ca->elements - 1 : NUM2SIZE(rmc);
     if ( mc < 0 ) {
       mc += ca->elements;
     }
@@ -1365,13 +1376,13 @@ rb_ca_stat_1d (VALUE self, VALUE rmc, VALUE vfval,
 }
 
 static void
-ca_stat_nd_contig_loop (CArray *ca, CArray *co, int32_t mc,
+ca_stat_nd_contig_loop (CArray *ca, CArray *co, ca_size_t mc,
                         ca_stat_proc_t *ca_proc,
-                        int level, int32_t *idx, char **op, boolean8_t **om)
+                        int level, ca_size_t *idx, char **op, boolean8_t **om)
 {
   void *p;
   boolean8_t *m;
-  int32_t i, n;
+  ca_size_t i, n;
   if ( level == co->rank ) {
     CAStatIterator it;
     n = ca->elements/co->elements;
@@ -1400,7 +1411,7 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
 {
   volatile VALUE out;
   CArray *ca, *co;
-  int32_t mc, ndim;
+  ca_size_t mc, ndim;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1426,7 +1437,7 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
     mc = ca->elements/co->elements - 1;
   }
   else {
-    mc = NUM2LONG(rmc);
+    mc = NUM2SIZE(rmc);
   }
 
   if ( mc < 0 ) {
@@ -1434,10 +1445,10 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   }
 
   {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     char *op;
     boolean8_t *om;
-    int32_t i;
+    int8_t i;
     for (i=0; i<ca->rank; i++) {
       idx[i] = 0;
     }
@@ -1457,22 +1468,22 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
 }
 
 static void
-ca_stat_get_offset_loop (CArray *ca, int32_t *dm,
-                        int level, int32_t *idx,
-                        int level1, int32_t *idx1,
+ca_stat_get_offset_loop (CArray *ca, ca_size_t *dm,
+                        int level, ca_size_t *idx,
+                        int level1, ca_size_t *idx1,
                         CArray *offset)
 {
-  int32_t i;
+  ca_size_t i;
   if ( level == ca->rank - 1 ) {
     if ( dm[level] == 0 ) {
       idx[level] = 0;
-      *(int32_t *)ca_ptr_at_index(offset, idx1) = ca_index2addr(ca, idx);
+      *(ca_size_t *)ca_ptr_at_index(offset, idx1) = ca_index2addr(ca, idx);
     }
     else {
       for (i=0; i<ca->dim[level]; i++) {
         idx[level] = i;
         idx1[level1] = i;
-        *(int32_t *)ca_ptr_at_index(offset, idx1) = ca_index2addr(ca, idx);
+        *(ca_size_t *)ca_ptr_at_index(offset, idx1) = ca_index2addr(ca, idx);
       }
     }
   }
@@ -1496,15 +1507,15 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
                         int8_t data_type, ca_stat_proc_t *ca_proc)
 {
   volatile VALUE out;
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx1[CA_RANK_MAX];
-  int32_t out_dim[CA_RANK_MAX];
-  int32_t loop_dim[CA_RANK_MAX];
-  int32_t dm[CA_RANK_MAX], dn[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx1[CA_RANK_MAX];
+  ca_size_t out_dim[CA_RANK_MAX];
+  ca_size_t loop_dim[CA_RANK_MAX];
+  ca_size_t dm[CA_RANK_MAX], dn[CA_RANK_MAX];
   CArray *ca, *co, *first, *offset;
-  int32_t out_rank, loop_rank;
-  int32_t mc;
-  int32_t i, k;
+  ca_size_t out_rank, loop_rank;
+  ca_size_t mc;
+  ca_size_t i, k;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1514,7 +1525,7 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   }
 
   for (i=0; i<RARRAY_LEN(vaxis); i++) {
-    k = NUM2INT(rb_ary_entry(vaxis, i));
+    k = NUM2SIZE(rb_ary_entry(vaxis, i));
     dm[k] = 1;
     dn[k] = 0;
   }
@@ -1535,10 +1546,10 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   out    = rb_carray_new(data_type, out_rank, out_dim, 0, NULL);
   Data_Get_Struct(out, CArray, co);
   
-  first  = carray_new(CA_INT32, out_rank, out_dim, 0, NULL);
+  first  = carray_new(CA_SIZE, out_rank, out_dim, 0, NULL);
   first->ptr = realloc(first->ptr, first->bytes*(first->elements+1));
 
-  offset = carray_new(CA_INT32, loop_rank, loop_dim, 0, NULL);
+  offset = carray_new(CA_SIZE, loop_rank, loop_dim, 0, NULL);
   offset->ptr = realloc(offset->ptr, offset->bytes*(offset->elements+1));
 
   ca_stat_get_offset_loop(ca, dn, 0, idx, 0, idx1, first);
@@ -1552,7 +1563,7 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
     mc = offset->elements - 1;
   }
   else {
-    mc = NUM2LONG(rmc);
+    mc = NUM2SIZE(rmc);
   }
 
   if ( mc < 0 ) {
@@ -1563,14 +1574,14 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
 
   {
     CAStatIterator it, jt;
-    int32_t *a = (int32_t *) (&it);
+    ca_size_t *a = (ca_size_t *) (&it);
     boolean8_t *m0, *m, *om;
     char *p, *op;
 
     it.step = 1;
-    it.addr = (int32_t *)first->ptr;
+    it.addr = (ca_size_t *)first->ptr;
     jt.step = 1;
-    jt.addr = (int32_t *)offset->ptr;
+    jt.addr = (ca_size_t *)offset->ptr;
 
     m0 = ( ca->mask && ca->mask->ptr ) ? (boolean8_t *)ca->mask->ptr : NULL;
     om = ( co->mask && co->mask->ptr ) ? (boolean8_t *)co->mask->ptr : NULL;
@@ -1622,21 +1633,21 @@ rb_ca_stat_general (int argc, VALUE *argv, VALUE self,
              "don't specify mask_limit and min_count simaltaniously");
   }
   else if ( ! NIL_P(rmin_count) ) {
-    int min_count = NUM2LONG(rmin_count);
+    ca_size_t min_count = NUM2SIZE(rmin_count);
     if ( min_count == 0 ) {
       rmc = Qnil;
     }
     else {
-      rmc = LONG2NUM(-min_count);
+      rmc = SIZE2NUM(-min_count);
     }
   }
   else if ( ! NIL_P(rmask_limit) ) {
-    int mask_limit = NUM2LONG(rmask_limit);
+    ca_size_t mask_limit = NUM2SIZE(rmask_limit);
     if ( mask_limit == 0 ) {
       rmc = Qnil;
     }
     else {
-      rmc = LONG2NUM(mask_limit-1);
+      rmc = SIZE2NUM(mask_limit-1);
     }
   }
   else {
@@ -1655,13 +1666,13 @@ rb_ca_stat_general (int argc, VALUE *argv, VALUE self,
   }
   else {
     int is_contig = 1;
-    int i, k;
+    ca_size_t i, k;
 
     vaxis = rb_funcall(vaxis, rb_intern("sort"), 0);
     vaxis = rb_funcall(vaxis, rb_intern("uniq"), 0);
 
     for (i=0; i<RARRAY_LEN(vaxis); i++) {
-      k = NUM2INT(rb_ary_entry(vaxis, RARRAY_LEN(vaxis)-1-i));
+      k = NUM2SIZE(rb_ary_entry(vaxis, RARRAY_LEN(vaxis)-1-i));
       CA_CHECK_INDEX(k, ca->rank);
       if ( k != ca->rank-1-i ) {
         is_contig = 0;
@@ -1773,11 +1784,11 @@ static VALUE
 rb_ca_stat_type2 (int argc, VALUE *argv, VALUE self,
                   int8_t data_type, ca_stat_proc_t *ca_proc)
 {
-  VALUE out, rmc, rfval;
+  volatile VALUE out, rmc, rfval;
   CArray *ca, *co;
-  int32_t mc;
+  ca_size_t mc;
 
-  rb_scan_args(argc, argv, "02", &rmc, &rfval);
+  rb_scan_args(argc, argv, "02", (VALUE *) &rmc, (VALUE *) &rfval);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1801,7 +1812,7 @@ rb_ca_stat_type2 (int argc, VALUE *argv, VALUE self,
     if ( ca->mask ) {
       m = (boolean8_t *)ca->mask->ptr;
     }
-    mc = ( (! ca->mask) || NIL_P(rmc) ) ? ca->elements - 1 : NUM2LONG(rmc);
+    mc = ( (! ca->mask) || NIL_P(rmc) ) ? ca->elements - 1 : NUM2SIZE(rmc);
     if ( mc < 0 ) {
       mc += ca->elements;
     }
@@ -1823,13 +1834,13 @@ rb_ca_stat_type2 (int argc, VALUE *argv, VALUE self,
 }
 
 static void
-ca_dimstat_type2_loop (CArray *ca, CArray *co, int32_t mc,
+ca_dimstat_type2_loop (CArray *ca, CArray *co, ca_size_t mc,
                        ca_stat_proc_t *ca_proc,
-                       int level, int32_t *idx, char **op, boolean8_t **om)
+                       int level, ca_size_t *idx, char **op, boolean8_t **om)
 {
   void *p;
   boolean8_t *m;
-  int32_t i, n;
+  ca_size_t i, n;
   if ( level == co->rank ) {
     CAStatIterator it;
     n = ca->elements/co->elements;
@@ -1854,12 +1865,12 @@ ca_dimstat_type2_loop (CArray *ca, CArray *co, int32_t mc,
 }
 
 static void
-ca_dimstat_type2 (CArray *ca, CArray *co, int32_t mc, ca_stat_proc_t *ca_proc)
+ca_dimstat_type2 (CArray *ca, CArray *co, ca_size_t mc, ca_stat_proc_t *ca_proc)
 {
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   char *op;
   boolean8_t *om;
-  int32_t i;
+  int8_t i;
   for (i=0; i<ca->rank; i++) {
     idx[i] = 0;
   }
@@ -1878,11 +1889,11 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
   volatile VALUE rndim, rmc, rfval;
   volatile VALUE out;
   CArray *ca, *co;
-  int32_t odim[CA_RANK_MAX], n;
-  int32_t mc, ndim;
+  ca_size_t odim[CA_RANK_MAX], n;
+  ca_size_t mc, ndim;
   int32_t i;
 
-  rb_scan_args(argc, argv, "12", &rndim, &rmc, &rfval);
+  rb_scan_args(argc, argv, "12", (VALUE *) &rndim, (VALUE *) &rmc, (VALUE *) &rfval);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1892,7 +1903,7 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
              ca_type_name[ca->data_type]);
   }
 
-  ndim = NUM2INT(rndim);
+  ndim = NUM2SIZE(rndim);
   if ( ndim <= 0 || ndim > ca->rank ) {
     rb_raise(rb_eRuntimeError, "invalid dimension specified");
   }
@@ -1915,7 +1926,7 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
     mc = ca->elements/co->elements - 1;
   }
   else {
-    mc = NUM2LONG(rmc);
+    mc = NUM2SIZE(rmc);
   }
 
   if ( mc < 0 ) {

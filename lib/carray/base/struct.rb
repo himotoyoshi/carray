@@ -303,7 +303,7 @@ class CA::Struct::Builder  # :nodoc:
       else
         data_type, @bytes = CArray.guess_type_and_bytes(@type, @opt[:bytes])
         if data_type == CA_OBJECT
-          raise("CA_OBJECT type can't be a member of struct or union")
+          raise RuntimeError, "CA_OBJECT type can't be a member of struct or union"
         end 
         @byte_length = @bytes
       end

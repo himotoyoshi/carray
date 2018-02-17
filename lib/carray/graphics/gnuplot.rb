@@ -511,13 +511,13 @@ class CA::Gnuplot # :nodoc:
     list = list.clone
     conf = []
     while not list.empty? and
-          ( list.last.is_a?(Fixnum) or
+          ( list.last.is_a?(Integer) or
             list.last.is_a?(Symbol) or
             list.last.is_a?(String) or
             list.last.nil? )
       conf.unshift(list.pop)
     end
-    if conf.last.is_a?(Fixnum)
+    if conf.last.is_a?(Integer)
       idx = conf.pop
       case idx
       when 1,2
@@ -1920,17 +1920,21 @@ __EOD__
       end
 
       lines = text.split("\n").map{|line| line.strip }
-
-      model   = "RGB"
+      
+      model   = "HSV"
       entries = []
       lines.each do |line|
         case line
-        when /\A\#\s*COLOR_MODEL\s*=\s*\+(.+)\s*\Z/
+        when /\A\#\s*COLOR_MODEL\s*=\s*(.+)\s*\Z/
           model = $1.upcase
         when /\A\Z/, /\A#/, /\A([FBN])\s*(.*)\Z/
           next
         else
-          entries.push(line.split(/\s+/)[0,8].map{|x| x.to_f})
+          list = line.split(/\s+/)
+          list[1] = list[1].split(/\-/)
+          list[3] = list[3].split(/\-/)
+          list = list.flatten.map{|x| x.to_f}
+          entries.push(list)
         end
       end
 
@@ -1946,7 +1950,6 @@ __EOD__
         color[level, nil] = entry[5, 3]
         level += 1
       end
-
       if model =~ /HSV/
         color[nil, 0] /= 360
       else

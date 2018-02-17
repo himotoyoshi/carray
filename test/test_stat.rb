@@ -9,7 +9,7 @@ class TestCArrayStat < Test::Unit::TestCase
     # ---
     a = CArray.int32(10).seq!(1) ### [1, 2, ..., 10]
     s = a.min
-    assert_instance_of(Fixnum, s)
+    #assert_instance_of(Integer, s)
     assert_equal(1, s)
 
     # ---
@@ -53,7 +53,7 @@ class TestCArrayStat < Test::Unit::TestCase
     # ---
     a = CArray.int32(10).seq!(1) ### [1, 2, ..., 10]
     s = a.max
-    assert_instance_of(Fixnum, s)
+    #assert_instance_of(Integer, s)
     assert_equal(10, s)
 
     # ---

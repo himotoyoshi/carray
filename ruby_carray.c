@@ -164,6 +164,8 @@ Init_carray_ext ()
   rb_define_const(rb_cObject, "CA_DOUBLE",      INT2NUM(CA_DOUBLE));
   rb_define_const(rb_cObject, "CA_COMPLEX",     INT2NUM(CA_COMPLEX));
   rb_define_const(rb_cObject, "CA_DCOMPLEX",    INT2NUM(CA_DCOMPLEX));
+  rb_define_const(rb_cObject, "CA_SIZE",        INT2NUM(CA_SIZE));
+
 
   rb_define_const(rb_cObject, "CA_ALIGN_VOIDP",    INT2NUM(CA_ALIGN_VOIDP));
   rb_define_const(rb_cObject, "CA_ALIGN_FIXLEN",   INT2NUM(CA_ALIGN_INT8));

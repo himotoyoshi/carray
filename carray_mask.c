@@ -39,7 +39,7 @@ ca_has_mask (void *ap)
   else if ( ca_is_caobject(ca) ) { /* CAObject */
     CAObject *co = (CAObject *) ca;
     if ( rb_obj_respond_to(co->self, rb_intern("mask_created?"), Qtrue) ) {
-      return rb_funcall(co->self, rb_intern("mask_created?"), 0);
+      return RTEST(rb_funcall(co->self, rb_intern("mask_created?"), 0));
     }
     return ( ca->mask != NULL ) ? 1 : 0;
   }
@@ -60,7 +60,7 @@ ca_is_any_masked (void *ap)
 {
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
-  int32_t i;
+  ca_size_t i;
   int flag = 0;
 
   ca_update_mask(ca);
@@ -84,7 +84,7 @@ ca_is_all_masked (void *ap)
 {
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
-  int32_t i;
+  ca_size_t i;
   int flag;
 
   ca_update_mask(ca);
@@ -177,20 +177,20 @@ ca_setup_mask (void *ap, CArray *mask)
 }
 
 /*
-  ca_copy_mask_overlay_n (void *ap, int32_t elements, int n, CArray **slist)
+  ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
 
   + slist[i] can be NULL (simply skipped)
 
  */
 
 void
-ca_copy_mask_overlay_n (void *ap, int32_t elements, int n, CArray **slist)
+ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
 {
   CArray *ca = (CArray *) ap;
   CArray *cs;
   boolean8_t *ma, *ms;
   int i, some_has_mask = 0;
-  int32_t j;
+  ca_size_t j;
 
   for (i=0; i<n; i++) {
     if ( slist[i] && ca_has_mask(slist[i]) ) {
@@ -247,7 +247,7 @@ ca_copy_mask_overlay_n (void *ap, int32_t elements, int n, CArray **slist)
 }
 
 void
-ca_copy_mask_overlay (void *ap, int32_t elements, int n, ...)
+ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
@@ -267,7 +267,7 @@ ca_copy_mask_overlay (void *ap, int32_t elements, int n, ...)
 }
 
 void
-ca_copy_mask_overwrite_n (void *ap, int32_t elements, int n, CArray **slist)
+ca_copy_mask_overwrite_n (void *ap, ca_size_t elements, int n, CArray **slist)
 {
   CArray *ca = (CArray *) ap;
 
@@ -281,7 +281,7 @@ ca_copy_mask_overwrite_n (void *ap, int32_t elements, int n, CArray **slist)
 }
 
 void
-ca_copy_mask_overwrite (void *ap, int32_t elements, int n, ...)
+ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
@@ -315,12 +315,12 @@ ca_copy_mask (void *ap, void *ao)
   ca_copy_mask_overlay(ca, ca->elements, 1, co);
 }
 
-int32_t
+ca_size_t
 ca_count_masked (void *ap)
 {
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
-  int32_t i, count = 0;
+  ca_size_t i, count = 0;
 
   ca_update_mask(ca);
 
@@ -338,7 +338,7 @@ ca_count_masked (void *ap)
   return count;
 }
 
-int32_t
+ca_size_t
 ca_count_not_masked (void *ap)
 {
   CArray *ca = (CArray *) ap;
@@ -347,7 +347,7 @@ ca_count_not_masked (void *ap)
 
 #define proc_fill_bang(type)                    \
   {                                             \
-    int32_t i;                                  \
+    ca_size_t i;                                  \
     type *p = (type *)ca->ptr;                  \
     type  v = *(type *)fill_value;              \
     boolean8_t *m = (boolean8_t *) ca->mask->ptr; \
@@ -362,7 +362,7 @@ ca_count_not_masked (void *ap)
 
 #define proc_fill_bang_fixlen()                 \
   {                                             \
-    int32_t i;                                  \
+    ca_size_t i;                                  \
     char *p = ca->ptr;                          \
     boolean8_t *m = (boolean8_t *) ca->mask->ptr; \
     for (i=0; i<ca->elements; i++) {            \
@@ -424,7 +424,7 @@ ca_unmask_copy (void *ap, char *fill_value)
   CArray *co;
   char *p, *q;
   boolean8_t *m;
-  int32_t i;
+  ca_size_t i;
 
   co = ca_template(ca);
   ca_copy_data(ca, co->ptr);
@@ -451,7 +451,7 @@ ca_invert_mask (void *ap)
 {
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
-  int32_t i;
+  ca_size_t i;
 
   ca_update_mask(ca);
 
@@ -475,7 +475,7 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
 {
   boolean8_t *m, *mp, *ms;
   CArray *cs;
-  int32_t j, elements = -1;
+  ca_size_t j, elements = -1;
   int i, some_has_mask = 0;
 
   for (i=0; i<n; i++) {
@@ -771,7 +771,7 @@ rb_ca_is_masked (VALUE self)
   CArray *ca, *cm, *co;
   boolean8_t zero = 0;
   boolean8_t *m, *p;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -814,7 +814,7 @@ rb_ca_is_not_masked (VALUE self)
   CArray *ca, *cm, *co;
   boolean8_t one = 1;
   boolean8_t *m, *p;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -853,7 +853,7 @@ rb_ca_count_masked (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return INT2NUM(ca_count_masked(ca));
+  return SIZE2NUM(ca_count_masked(ca));
 }
 
 /* rdoc:
@@ -869,7 +869,7 @@ rb_ca_count_not_masked (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return INT2NUM(ca_count_not_masked(ca));
+  return SIZE2NUM(ca_count_not_masked(ca));
 }
 
 static VALUE

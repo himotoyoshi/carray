@@ -20,13 +20,13 @@ VALUE rb_cCABlock;
 */
 
 static int
-ca_block_setup (CABlock *ca, CArray *parent, int8_t rank, int32_t *dim,
-               int32_t *start, int32_t *step, int32_t *count, int32_t offset)
+ca_block_setup (CABlock *ca, CArray *parent, int8_t rank, ca_size_t *dim,
+               ca_size_t *start, ca_size_t *step, ca_size_t *count, ca_size_t offset)
 {
   int8_t data_type;
   int8_t maxdim_index;
-  int32_t maxdim_step, maxdim_step0;
-  int32_t elements, bytes;
+  ca_size_t maxdim_step, maxdim_step0;
+  ca_size_t elements, bytes;
   int  i;
 
   data_type = parent->data_type;
@@ -67,10 +67,10 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t rank, int32_t *dim,
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->offset    = offset;
-  ca->start     = ALLOC_N(int32_t, rank);
-  ca->step      = ALLOC_N(int32_t, rank);
-  ca->count     = ALLOC_N(int32_t, rank);
-  ca->size0     = ALLOC_N(int32_t, rank);
+  ca->start     = ALLOC_N(ca_size_t, rank);
+  ca->step      = ALLOC_N(ca_size_t, rank);
+  ca->count     = ALLOC_N(ca_size_t, rank);
+  ca->size0     = ALLOC_N(ca_size_t, rank);
 
   ca->maxdim_index = maxdim_index;
   ca->maxdim_step  = maxdim_step;
@@ -80,10 +80,10 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t rank, int32_t *dim,
 
   ca->dim = ca->count; /* ca->dim should not be free */
 
-  memcpy(ca->start, start, rank * sizeof(int32_t));
-  memcpy(ca->step,  step,  rank * sizeof(int32_t));
-  memcpy(ca->count, count, rank * sizeof(int32_t));
-  memcpy(ca->size0,  dim,  rank * sizeof(int32_t));
+  memcpy(ca->start, start, rank * sizeof(ca_size_t));
+  memcpy(ca->step,  step,  rank * sizeof(ca_size_t));
+  memcpy(ca->count, count, rank * sizeof(ca_size_t));
+  memcpy(ca->size0,  dim,  rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -93,8 +93,8 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t rank, int32_t *dim,
 }
 
 CABlock *
-ca_block_new (CArray *parent, int8_t rank, int32_t *dim,
-             int32_t *start, int32_t *step, int32_t *count, int32_t offset)
+ca_block_new (CArray *parent, int8_t rank, ca_size_t *dim,
+             ca_size_t *start, ca_size_t *step, ca_size_t *count, ca_size_t offset)
 {
   CABlock *ca = ALLOC(CABlock);
   ca_block_setup(ca, parent, rank, dim, start, step, count, offset);
@@ -131,24 +131,24 @@ ca_block_func_clone (void *ap)
 }
 
 static char *
-ca_block_func_ptr_at_index (void *ap, int32_t *idx) ;
+ca_block_func_ptr_at_index (void *ap, ca_size_t *idx) ;
 
 static char *
-ca_block_func_ptr_at_addr (void *ap, int32_t addr)
+ca_block_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CABlock *ca = (CABlock *) ap;
   if ( ca->ptr ) {
     return ca->ptr + ca->bytes * addr;
   }
   else {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     return ca_block_func_ptr_at_index(ca, idx);
   }
 }
 
 static char *
-ca_block_func_ptr_at_index (void *ap, int32_t *idx)
+ca_block_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CABlock *ca = (CABlock *) ap;
 
@@ -156,10 +156,11 @@ ca_block_func_ptr_at_index (void *ap, int32_t *idx)
     return ca_array_func_ptr_at_index(ca, idx);
   }
   else {
-    int32_t *start = ca->start;
-    int32_t *step  = ca->step;
-    int32_t *size0 = ca->size0;
-    int32_t  n, i;
+    ca_size_t *start = ca->start;
+    ca_size_t *step  = ca->step;
+    ca_size_t *size0 = ca->size0;
+    int8_t   i;
+    ca_size_t  n;
     n = start[0] + idx[0]*step[0];
     for (i=1; i<ca->rank; i++) {
       n *= size0[i];
@@ -176,13 +177,14 @@ ca_block_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_block_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_block_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABlock *ca = (CABlock *) ap;
-  int32_t *start = ca->start;
-  int32_t *step  = ca->step;
-  int32_t *size0 = ca->size0;
-  int32_t  n, i;
+  ca_size_t *start = ca->start;
+  ca_size_t *step  = ca->step;
+  ca_size_t *size0 = ca->size0;
+  int8_t   i;
+  ca_size_t  n;
   n = start[0] + idx[0]*step[0];
   for (i=1; i<ca->rank; i++) {
     n *= size0[i];
@@ -193,13 +195,14 @@ ca_block_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_block_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_block_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABlock *ca = (CABlock *) ap;
-  int32_t *start = ca->start;
-  int32_t *step  = ca->step;
-  int32_t *size0 = ca->size0;
-  int32_t  n, i;
+  ca_size_t *start = ca->start;
+  ca_size_t *step  = ca->step;
+  ca_size_t *size0 = ca->size0;
+  int8_t   i;
+  ca_size_t  n;
   n = start[0] + idx[0]*step[0];
   for (i=1; i<ca->rank; i++) {
     n *= size0[i];
@@ -317,8 +320,8 @@ ca_operation_function_t ca_block_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_block_new (VALUE cary, int8_t rank, int32_t *dim,
-                int32_t *start, int32_t *step, int32_t *count, int32_t offset)
+rb_ca_block_new (VALUE cary, int8_t rank, ca_size_t *dim,
+                ca_size_t *start, ca_size_t *step, ca_size_t *count, ca_size_t offset)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -343,10 +346,10 @@ static void *mfill_step(void *dest,
              size_t bytes, size_t n, size_t dstep, const void *src);
 
 static void
-ca_block_attach_loop2 (CABlock *ca, int8_t level, int32_t saddr, int32_t saddr0)
+ca_block_attach_loop2 (CABlock *ca, int8_t level, ca_size_t saddr, ca_size_t saddr0)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, addr0, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, addr0, i;
 
   if ( level == ca->rank - 1 ) {
     if ( ca->parent->ptr ) {
@@ -378,10 +381,10 @@ ca_block_attach_loop2 (CABlock *ca, int8_t level, int32_t saddr, int32_t saddr0)
 }
 
 static void
-ca_block_attach_loop (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
+ca_block_attach_loop (CABlock *ca, ca_size_t level, ca_size_t saddr, ca_size_t saddr0)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, addr0, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, addr0, i;
 
   if ( level == ca->rank - 1 ) {
     if ( level == ca->maxdim_index ) {
@@ -395,8 +398,8 @@ ca_block_attach_loop (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
       char *p = ca_ptr_at_addr(ca, saddr* ca->dim[level]);
       char *q = ca_ptr_at_addr(ca->parent,
                 saddr0*ca->size0[level]+ca->start[level]+ca->offset);
-      int32_t pstep = ca->bytes;
-      int32_t qstep = ca->bytes*ca->step[level];
+      ca_size_t pstep = ca->bytes;
+      ca_size_t qstep = ca->bytes*ca->step[level];
       for (i=0; i<count; i++) {
         mcopy_step(p,
                    q,
@@ -427,7 +430,7 @@ ca_block_attach_loop (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
 static void
 ca_block_attach (CABlock *ca)
 {
-  int32_t addr = 0, addr0 = 0;
+  ca_size_t addr = 0, addr0 = 0;
   if ( ca->rank <= 2 ) {
     ca_block_attach_loop2(ca, 0, addr, addr0);
   }
@@ -437,10 +440,10 @@ ca_block_attach (CABlock *ca)
 }
 
 static void
-ca_block_sync_loop2 (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
+ca_block_sync_loop2 (CABlock *ca, int8_t level, ca_size_t saddr, ca_size_t saddr0)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, addr0, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, addr0, i;
 
   if ( level == ca->rank - 1 ) {
     if ( ca->parent->ptr ) {
@@ -471,10 +474,10 @@ ca_block_sync_loop2 (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
 }
 
 static void
-ca_block_sync_loop (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
+ca_block_sync_loop (CABlock *ca, int8_t level, ca_size_t saddr, ca_size_t saddr0)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, addr0, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, addr0, i;
 
   if ( level == ca->rank - 1 ) {
     if ( level == ca->maxdim_index ) {
@@ -516,7 +519,7 @@ ca_block_sync_loop (CABlock *ca, int32_t level, int32_t saddr, int32_t saddr0)
 static void
 ca_block_sync (CABlock *cb)
 {
-  int32_t addr = 0, addr0 = 0;
+  ca_size_t addr = 0, addr0 = 0;
   if ( cb->rank <= 2 ) {
     ca_block_sync_loop2(cb, 0, addr, addr0);
   }
@@ -526,10 +529,10 @@ ca_block_sync (CABlock *cb)
 }
 
 static void
-ca_block_fill_loop2 (CABlock *ca, int32_t level, int32_t saddr, char *val)
+ca_block_fill_loop2 (CABlock *ca, int8_t level, ca_size_t saddr, char *val)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, i;
   if ( level == ca->rank - 1 ) {
     addr = saddr * ca->dim[level];
     mfill_step(ca_ptr_at_addr(ca, addr),
@@ -544,10 +547,10 @@ ca_block_fill_loop2 (CABlock *ca, int32_t level, int32_t saddr, char *val)
 }
 
 static void
-ca_block_fill_loop (CABlock *ca, int32_t level, int32_t saddr, char *val)
+ca_block_fill_loop (CABlock *ca, int8_t level, ca_size_t saddr, char *val)
 {
-  int32_t count = ca->count[level];
-  int32_t addr, i;
+  ca_size_t count = ca->count[level];
+  ca_size_t addr, i;
   if ( level == ca->rank - 1 ) {
     if ( level == ca->maxdim_index ) {
       addr = saddr * ca->dim[level];
@@ -582,7 +585,7 @@ ca_block_fill_loop (CABlock *ca, int32_t level, int32_t saddr, char *val)
 static void
 ca_block_fill (CABlock *ca, char *val)
 {
-  int32_t addr = 0;
+  ca_size_t addr = 0;
   if ( ca->rank <= 2 ) {
     ca_block_fill_loop2(ca, 0, addr, val);
   }
@@ -605,7 +608,7 @@ mcopy_step (void *dest, const void *src,
     int *dp = (int*) dest;
     char *scp;
     char *dcp;
-    int32_t i;
+    ca_size_t i;
     for (i=words; i; i--) {
       *dp++ = *sp++;
     }
@@ -698,8 +701,8 @@ static VALUE
 rb_cb_initialize_copy (VALUE self, VALUE other)
 {
   CABlock *ca, *cs;
-  int32_t shrink[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t shrink[CA_RANK_MAX];
+  int8_t i;
 
   Data_Get_Struct(self,  CABlock, ca);
   Data_Get_Struct(other, CABlock, cs);
@@ -723,7 +726,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
   {                                 \
     volatile VALUE ary;             \
     CABlock *cb;                    \
-    int32_t i;                              \
+    int8_t i;                              \
     Data_Get_Struct(self, CABlock, cb);     \
     ary = rb_ary_new2(cb->rank);            \
     for (i=0; i<cb->rank; i++) {                    \
@@ -757,7 +760,7 @@ rb_cb_offset (VALUE self)
 {
   CABlock *cb;
   Data_Get_Struct(self, CABlock, cb);
-  return INT2NUM(cb->offset);
+  return SIZE2NUM(cb->offset);
 }
 
 /* rdoc:
@@ -771,8 +774,9 @@ static VALUE
 rb_cb_idx2addr0 (int argc, VALUE *argv, VALUE self)
 {
   CABlock *cb;
-  int32_t addr;
-  int32_t i, idxi;
+  ca_size_t addr;
+  int8_t i;
+  ca_size_t idxi;
 
   Data_Get_Struct(self, CABlock, cb);
 
@@ -783,12 +787,12 @@ rb_cb_idx2addr0 (int argc, VALUE *argv, VALUE self)
 
   addr = 0;
   for (i=0; i<cb->rank; i++) {
-    idxi = NUM2INT(argv[i]);
+    idxi = NUM2SIZE(argv[i]);
     CA_CHECK_INDEX(idxi, cb->dim[i]);
     addr = cb->size0[i] * addr + cb->start[i] + idxi * cb->step[i];
   }
 
-  return INT2NUM(addr + cb->offset);
+  return SIZE2NUM(addr + cb->offset);
 }
 
 /* rdoc:
@@ -802,9 +806,9 @@ static VALUE
 rb_cb_addr2addr0 (VALUE self, VALUE raddr)
 {
   CABlock *cb;
-  int32_t addr = NUM2INT(raddr);
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t addr = NUM2SIZE(raddr);
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
 
   Data_Get_Struct(self, CABlock, cb);
 
@@ -816,7 +820,7 @@ rb_cb_addr2addr0 (VALUE self, VALUE raddr)
     addr += cb->start[i] + idx[i] * cb->step[i];
   }
 
-  return INT2NUM(addr + cb->offset);
+  return SIZE2NUM(addr + cb->offset);
 }
 
 
@@ -831,7 +835,8 @@ static VALUE
 rb_cb_move (int argc, VALUE *argv, VALUE self)
 {
   CABlock *cb;
-  int32_t start, i;
+  ca_size_t start;
+  int8_t i;
 
   Data_Get_Struct(self, CABlock, cb);
 
@@ -842,7 +847,7 @@ rb_cb_move (int argc, VALUE *argv, VALUE self)
   ca_update_mask(cb);
 
   for (i=0; i<cb->rank; i++) {
-    start = NUM2LONG(argv[i]);
+    start = NUM2SIZE(argv[i]);
     if ( start < 0 ) {
       start += cb->size0[i];
     }

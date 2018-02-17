@@ -17,7 +17,7 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
                           VALUE rcx0)
 {
   CArray *cx0;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 1 ) {
     rb_raise(rb_eRuntimeError,
@@ -31,8 +31,8 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
   {
     char      *p0;
     char      *q0;
-    int32_t    s0;
-    int32_t    k;
+    ca_size_t    s0;
+    ca_size_t    k;
     n = ca_set_iterator(1, cx0, &q0, &s0);
     s0 *= cx0->bytes;
     #ifdef _OPENMP
@@ -57,7 +57,7 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
 {
   CArray *cx0, *cx1;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 2 ) {
     rb_raise(rb_eRuntimeError,
@@ -82,8 +82,8 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
   {
     char      *p0, *p1;
     char      *q0, *q1;
-    int32_t    s0,  s1;
-    int32_t    k;
+    ca_size_t    s0,  s1;
+    ca_size_t    k;
 
     n = ca_set_iterator(2, cx0, &q0, &s0,
                            cx1, &q1, &s1);
@@ -129,7 +129,7 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
 {
   CArray *cx0, *cx1, *cx2;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 3 ) {
     rb_raise(rb_eRuntimeError,
@@ -157,8 +157,8 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
   {
     char      *p0, *p1, *p2;
     char      *q0, *q1, *q2;
-    int32_t    s0,  s1,  s2;
-    int32_t    k;
+    ca_size_t    s0,  s1,  s2;
+    ca_size_t    k;
 
     n = ca_set_iterator(3, cx0, &q0, &s0,
                            cx1, &q1, &s1,
@@ -209,7 +209,7 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
 {
   CArray *cx0, *cx1, *cx2, *cx3;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 4 ) {
     rb_raise(rb_eRuntimeError,
@@ -240,8 +240,8 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
   {
     char      *p0, *p1, *p2, *p3;
     char      *q0, *q1, *q2, *q3;
-    int32_t    s0,  s1,  s2,  s3;
-    int32_t    k;
+    ca_size_t    s0,  s1,  s2,  s3;
+    ca_size_t    k;
 
     n = ca_set_iterator(4, cx0, &q0, &s0,
                            cx1, &q1, &s1,
@@ -298,7 +298,7 @@ ca_call_cfunc_5 (void (*func)(void*,void*,void*,void*,void*), const char *fsync,
 {
   CArray *cx0, *cx1, *cx2, *cx3, *cx4;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 5 ) {
     rb_raise(rb_eRuntimeError,
@@ -332,8 +332,8 @@ ca_call_cfunc_5 (void (*func)(void*,void*,void*,void*,void*), const char *fsync,
   {
     char      *p0, *p1, *p2, *p3, *p4;
     char      *q0, *q1, *q2, *q3, *q4;
-    int32_t    s0,  s1,  s2,  s3,  s4;
-    int32_t    k;
+    ca_size_t    s0,  s1,  s2,  s3,  s4;
+    ca_size_t    k;
 
     n = ca_set_iterator(5, cx0, &q0, &s0,
                            cx1, &q1, &s1,
@@ -395,7 +395,7 @@ ca_call_cfunc_6 (void (*func)(void*,void*,void*,void*,void*,void*), const char *
 {
   CArray *cx0, *cx1, *cx2, *cx3, *cx4, *cx5;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 6 ) {
     rb_raise(rb_eRuntimeError,
@@ -432,8 +432,8 @@ ca_call_cfunc_6 (void (*func)(void*,void*,void*,void*,void*,void*), const char *
   {
     char      *p0, *p1, *p2, *p3, *p4, *p5;
     char      *q0, *q1, *q2, *q3, *q4, *q5;
-    int32_t    s0,  s1,  s2,  s3,  s4,  s5;
-    int32_t    k;
+    ca_size_t    s0,  s1,  s2,  s3,  s4,  s5;
+    ca_size_t    k;
 
     n = ca_set_iterator(6, cx0, &q0, &s0,
                            cx1, &q1, &s1,
@@ -500,7 +500,7 @@ ca_call_cfunc_7 (void (*func)(void*,void*,void*,void*,void*,void*,void*), const 
 {
   CArray *cx0, *cx1, *cx2, *cx3, *cx4, *cx5, *cx6;
   boolean8_t *m0 = NULL, *m;
-  int32_t n;
+  ca_size_t n;
 
   if ( strlen(fsync) != 7 ) {
     rb_raise(rb_eRuntimeError,
@@ -540,8 +540,8 @@ ca_call_cfunc_7 (void (*func)(void*,void*,void*,void*,void*,void*,void*), const 
   {
     char      *p0, *p1, *p2, *p3, *p4, *p5, *p6;
     char      *q0, *q1, *q2, *q3, *q4, *q5, *q6;
-    int32_t    s0,  s1,  s2,  s3,  s4,  s5,  s6;
-    int32_t    k;
+    ca_size_t    s0,  s1,  s2,  s3,  s4,  s5,  s6;
+    ca_size_t    k;
 
     n = ca_set_iterator(7, cx0, &q0, &s0,
                            cx1, &q1, &s1,

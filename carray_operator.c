@@ -150,8 +150,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     }
     else {                                         /* array vs array */
       if ( ca1->elements != ca2->elements ) {
-        rb_raise(rb_eRuntimeError, "elements mismatch (%i <-> %i)",
-                                 ca1->elements, ca2->elements);
+        rb_raise(rb_eRuntimeError, "elements mismatch (%lld <-> %lld)",
+                                   (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
       if ( ca_has_mask(ca1) || ca_has_mask(ca2) ) {
         ca3 = ca_template_safe(ca1);              
@@ -212,8 +212,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
     }
     else {                                         /* scalar vs array */
       if ( ca1->elements != ca2->elements ) {
-        rb_raise(rb_eRuntimeError, "elements mismatch (%i <-> %i)",
-                                 ca1->elements, ca2->elements);
+        rb_raise(rb_eRuntimeError, "elements mismatch (%lld <-> %lld)",
+                                 (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
 
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
@@ -233,8 +233,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
     }
     else {                                          /* array vs array */
       if ( ca1->elements != ca2->elements ) {
-        rb_raise(rb_eRuntimeError, "elements mismatch in binop (%i <-> %i)",
-                                 ca1->elements, ca2->elements);
+        rb_raise(rb_eRuntimeError, "elements mismatch in binop (%lld <-> %lld)",
+                                 (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
 
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
@@ -284,6 +284,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   return out;
 }
+
 
 extern ca_monop_func_t ca_bincmp_eq[CA_NTYPE];
 extern ca_monop_func_t ca_bincmp_ne[CA_NTYPE];
@@ -352,8 +353,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
     }
     else {                                          /* array vs array */
       if ( ca1->elements != ca2->elements ) {
-        rb_raise(rb_eRuntimeError, "elements mismatch in bincmp (%i <-> %i)",
-                                 ca1->elements, ca2->elements);
+        rb_raise(rb_eRuntimeError, "elements mismatch in bincmp (%lld <-> %lld)",
+                                 (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
       out = rb_carray_new(CA_BOOLEAN, ca1->rank, ca1->dim, 0, NULL);
       Data_Get_Struct(out, CArray, ca3);
@@ -378,28 +379,28 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
 }
 
 void
-ca_monop_not_implement(int32_t n, char *ptr1, char *ptr2)
+ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data type for monop (not implemented)");
 }
 
 void
-ca_binop_not_implement(int32_t n, char *ptr1, char *ptr2, char *ptr3)
+ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data_type for binop (not implemented)");
 }
 
 void
-ca_moncmp_not_implement(int32_t n, char *ptr1, char *ptr2)
+ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data_type for moncmp (not implemented)");
 }
 
 void
-ca_bincmp_not_implement (int32_t n, char *ptr1, char *ptr2, char *ptr3)
+ca_bincmp_not_implement (ca_size_t n, char *ptr1, char *ptr2, char *ptr3)
 {
   rb_raise(rb_eTypeError, "invalid data_type for bincmp (not implemented)");
 }
@@ -470,11 +471,11 @@ rb_ca_coerce (VALUE self, VALUE other)
   { \
     type *p1 = (type*)ca->ptr; \
     type *p2; \
-    int   s2; \
+    ca_size_t   s2; \
     boolean8_t *m = mi; \
     type sum  = 0; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     ca_set_iterator(1, cw, &p2, &s2); \
     if ( m ) { \
       count = 0; \
@@ -509,10 +510,10 @@ rb_ca_mul_add (int argc, VALUE *argv, volatile VALUE self)
   volatile VALUE rfval = Qnil;
   CArray *ca, *cw;
   boolean8_t *mi = NULL;
-  int min_count;
+  ca_size_t min_count;
 
   /* FIXME: to parse :mask_limit, :fill_value */
-  rb_scan_args(argc, argv, "12", &weight, &rmin_count, &rfval);
+  rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *) &rmin_count, (VALUE *) &rfval);
 
   /* do implicit casting and resolving unbound repeat array */
   rb_ca_cast_self_or_other(&self, &weight);
@@ -533,7 +534,7 @@ rb_ca_mul_add (int argc, VALUE *argv, volatile VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ( ! mi ) ) ?
-                                   ca->elements - 1 : NUM2INT(rmin_count);
+                                   ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;

@@ -23,9 +23,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -50,11 +50,11 @@ int
 ca_mapping_setup (CAMapping *ca, CArray *parent, CArray *mapper, int share)
 {
   int8_t rank, data_type;
-  int32_t elements, bytes;
-  int32_t *p;
-  int32_t i;
+  ca_size_t elements, bytes;
+  ca_size_t *p;
+  ca_size_t i;
 
-  ca_check_type(mapper, CA_INT32);
+  ca_check_type(mapper, CA_SIZE);
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
@@ -72,13 +72,13 @@ ca_mapping_setup (CAMapping *ca, CArray *parent, CArray *mapper, int share)
   ca->rank      = rank;
   ca->elements  = elements;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  memcpy(ca->dim, mapper->dim, rank * sizeof(int32_t));
+  memcpy(ca->dim, mapper->dim, rank * sizeof(ca_size_t));
 
   if ( share ) {
     ca_set_flag(ca, CA_FLAG_SHARE_INDEX);
@@ -97,7 +97,7 @@ ca_mapping_setup (CAMapping *ca, CArray *parent, CArray *mapper, int share)
     ca_create_mask(ca);
   }
 
-  p = (int32_t*)ca->mapper->ptr;
+  p = (ca_size_t*)ca->mapper->ptr;
   for (i=0; i<ca->elements; i++) {
     CA_CHECK_INDEX(*p, parent->elements);
     p++;
@@ -154,11 +154,11 @@ ca_mapping_func_clone (void *ap)
 }
 
 static char *
-ca_mapping_func_ptr_at_addr (void *ap, int32_t addr)
+ca_mapping_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAMapping *ca = (CAMapping *) ap;
   if ( ! ca->ptr ) {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index((CArray *)ca, addr, idx);
     return ca_ptr_at_index(ca, idx);
   }
@@ -168,17 +168,18 @@ ca_mapping_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_mapping_func_ptr_at_index (void *ap, int32_t *idx)
+ca_mapping_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAMapping *ca = (CAMapping *) ap;
   if ( ! ca->ptr ) {
-    int32_t *dim = ca->dim;
-    int32_t  n, i;
+    ca_size_t *dim = ca->dim;
+    int8_t   i;
+    ca_size_t  n;
     n = idx[0];
     for (i=1; i<ca->rank; i++) {
       n = dim[i]*n+idx[i];
     }
-    n = *(int32_t*) ca_ptr_at_addr(ca->mapper, n);
+    n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);
     if ( ca->parent->ptr == NULL ) {
       return ca_ptr_at_addr(ca->parent, n);
     }
@@ -192,30 +193,32 @@ ca_mapping_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_mapping_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_mapping_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAMapping *ca = (CAMapping *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t   i;
+  ca_size_t  n;
   n = idx[0];
   for (i=1; i<ca->rank; i++) {
     n = dim[i]*n+idx[i];
   }
-  n = *(int32_t*) ca_ptr_at_addr(ca->mapper, n);
+  n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);
   ca_fetch_addr(ca->parent, n, ptr);
 }
 
 static void
-ca_mapping_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_mapping_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAMapping *ca = (CAMapping *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t   i;
+  ca_size_t  n;
   n = idx[0];
   for (i=1; i<ca->rank; i++) {
     n = dim[i]*n+idx[i];
   }
-  n = *(int32_t*) ca_ptr_at_addr(ca->mapper, n);
+  n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);
   ca_store_addr(ca->parent, n, ptr);
 }
 
@@ -331,8 +334,8 @@ ca_operation_function_t ca_mapping_func = {
 static void
 ca_mapping_attach (CAMapping *ca)
 {
-  int32_t *ip = (int32_t*) ca_ptr_at_addr(ca->mapper, 0);
-  int32_t i;
+  ca_size_t *ip = (ca_size_t*) ca_ptr_at_addr(ca->mapper, 0);
+  ca_size_t i;
 
 #define proc_mapping_attach(type) \
   { \
@@ -409,8 +412,8 @@ ca_mapping_attach (CAMapping *ca)
 static void
 ca_mapping_sync (CAMapping *ca)
 {
-  int32_t *ip = (int32_t*) ca_ptr_at_addr(ca->mapper, 0);
-  int32_t i;
+  ca_size_t *ip = (ca_size_t*) ca_ptr_at_addr(ca->mapper, 0);
+  ca_size_t i;
 
   switch ( ca->bytes ) {
   case 1: 
@@ -478,8 +481,8 @@ ca_mapping_sync (CAMapping *ca)
 static void
 ca_mapping_fill (CAMapping *ca, char *ptr)
 {
-  int32_t *ip = (int32_t*) ca_ptr_at_addr(ca->mapper, 0);
-  int32_t i;
+  ca_size_t *ip = (ca_size_t*) ca_ptr_at_addr(ca->mapper, 0);
+  ca_size_t i;
 
   switch ( ca->bytes ) {
   case 1: 
@@ -569,10 +572,10 @@ rb_ca_mapping (int argc, VALUE *argv, VALUE self)
   CArray *mapper;
   Data_Get_Struct(self, CArray, ca);
 
-  rb_scan_args(argc, argv, "1", &rmapper);
+  rb_scan_args(argc, argv, "1", (VALUE *) &rmapper);
   rb_check_carray_object(rmapper);
 
-  mapper = ca_wrap_readonly(rmapper, CA_INT32);
+  mapper = ca_wrap_readonly(rmapper, CA_SIZE);
 
   obj = rb_ca_mapping_new(self, mapper);
 

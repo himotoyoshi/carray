@@ -114,7 +114,7 @@ class FortranSequential
         case fmt = fmts.shift
         when String
           list = []
-          specs = fmt.scan(/(?:\d+)(?:a\[\d+\]|\w)/)
+          specs = fmt.scan(/(?:\d+|)(?:a\[\d+\]|\w)/)
           while not specs.empty?
             case specs.shift
             when /(\d+)?a\[(\d+)\]/
@@ -196,7 +196,7 @@ class FortranSequential
         end
         case fmt
         when String
-          specs = fmt.scan(/(?:\d+)(?:a\[\d+\]|\w)/)
+          specs = fmt.scan(/(?:\d+|)(?:a\[\d+\]|\w)/)
           while not specs.empty?
             case specs.shift
             when /(\d+)?a\[(\d+)\]/

@@ -20,6 +20,25 @@
 #include "st.h"
 #endif
 
+#if RUBY_VERSION_CODE >= 240
+#define RSTRUCT_EMBED_LEN_MAX RSTRUCT_EMBED_LEN_MAX
+enum {
+  RSTRUCT_EMBED_LEN_MAX = 3,
+  RSTRUCT_ENUM_END
+};
+struct RStruct {
+    struct RBasic basic;
+    union {
+        struct {
+            long len;
+            const VALUE *ptr;
+        } heap;
+        const VALUE ary[RSTRUCT_EMBED_LEN_MAX];
+    } as;
+};
+#define RSTRUCT(obj) (R_CAST(RStruct)(obj))
+#endif
+
 #if RUBY_VERSION_CODE >= 190
 #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
 #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
@@ -52,20 +71,20 @@ ca_debug () {}
 
 /* ------------------------------------------------------------------- */
 
-int32_t
+ca_size_t
 ca_set_iterator (int n, ...)
 {
   CArray *ca;
   char   **p;
-  int    *s;
-  int32_t max = -1;
+  ca_size_t *s;
+  ca_size_t max = -1;
   int     all_scalar = 1;
   va_list args;
   va_start(args, n);
   while ( n-- ) {
     ca = va_arg(args, CArray *);
     p  = va_arg(args, char **);
-    s  = va_arg(args, int *);
+    s  = va_arg(args, ca_size_t *);
     *p = ca->ptr;
     if ( ca_is_scalar(ca) ) {
       *s = 0;
@@ -93,11 +112,11 @@ ca_set_iterator (int n, ...)
 
 /* ------------------------------------------------------------------- */
 
-int32_t
+ca_size_t
 ca_get_loop_count (int n, ...)
 {
   CArray *ca;
-  int32_t elements = -1;
+  ca_size_t elements = -1;
   int32_t is_scalar = 1;
   va_list args;
   va_start(args, n);
@@ -143,9 +162,10 @@ ca_get_loop_count (int n, ...)
 */
 
 void
-ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
+ca_parse_range (VALUE arg, ca_size_t size, 
+                ca_size_t *poffset, ca_size_t *pcount, ca_size_t *pstep)
 {
-  int32_t first, start, last, count, step, bound, excl;
+  ca_size_t first, start, last, count, step, bound, excl;
 
  retry:
 
@@ -156,7 +176,7 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = FIX2INT(arg);
+    start = NUM2SIZE(arg);
     CA_CHECK_INDEX(start, size);
     *poffset = start;
     *pcount  = 1;
@@ -164,8 +184,8 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    first = NUM2INT(RANGE_BEG(arg));
-    last  = NUM2INT(RANGE_END(arg));
+    first = NUM2SIZE(RANGE_BEG(arg));
+    last  = NUM2SIZE(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     CA_CHECK_INDEX(first, size);
     if ( last < 0 ) {
@@ -179,7 +199,7 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
                "invalid index range");
     }
     *poffset = first;
-    *pcount  = abs(last - first) + 1;
+    *pcount  = llabs(last - first) + 1;
     *pstep   = 1;
   }
   else if ( TYPE(arg) == T_ARRAY ) {
@@ -191,12 +211,12 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
       VALUE arg0 = rb_ary_entry(arg, 0);
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
-        step  = NUM2INT(arg1);
+        step  = NUM2SIZE(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eRuntimeError, "step should not be 0");
         }
         start = 0;
-        count = (size-1)/abs(step) + 1;
+        count = (size-1)/llabs(step) + 1;
         bound = start + (count - 1)*step;
         CA_CHECK_INDEX(start, size);
         CA_CHECK_INDEX(bound, size);
@@ -205,10 +225,10 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2INT(RANGE_BEG(arg0));
-        last  = NUM2INT(RANGE_END(arg0));
+        start = NUM2SIZE(RANGE_BEG(arg0));
+        last  = NUM2SIZE(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2INT(arg1);
+        step  = NUM2SIZE(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eRuntimeError, "step should not be 0");
         }
@@ -226,7 +246,7 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
           count = 1;
         }
         else {
-          count = abs(last - start)/abs(step) + 1;
+          count = llabs(last - start)/llabs(step) + 1;
         }
         bound = start + (count - 1)*step;
         CA_CHECK_INDEX(bound, size);
@@ -235,8 +255,8 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
         *pstep   = step;
       }
       else {                            /* [i,n] */
-        start = NUM2INT(arg0);
-        count = NUM2INT(arg1);
+        start = NUM2SIZE(arg0);
+        count = NUM2SIZE(arg1);
         bound = start + (count - 1);
         CA_CHECK_INDEX(start, size);
         CA_CHECK_INDEX(bound, size);
@@ -246,9 +266,9 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2INT(rb_ary_entry(arg, 0));
-      count = NUM2INT(rb_ary_entry(arg, 1));
-      step  = NUM2INT(rb_ary_entry(arg, 2));
+      start = NUM2SIZE(rb_ary_entry(arg, 0));
+      count = NUM2SIZE(rb_ary_entry(arg, 1));
+      step  = NUM2SIZE(rb_ary_entry(arg, 2));
       if ( step == 0 ) {
         rb_raise(rb_eRuntimeError, "step should not be 0");
       }
@@ -269,10 +289,10 @@ ca_parse_range (VALUE arg, int size, int *poffset, int *pcount, int *pstep)
 }
 
 void
-ca_parse_range_without_check (VALUE arg, int size,
-                              int *poffset, int *pcount, int *pstep)
+ca_parse_range_without_check (VALUE arg, ca_size_t size,
+                              ca_size_t *poffset, ca_size_t *pcount, ca_size_t *pstep)
 {
-  int32_t first, start, last, count, step, bound, excl;
+  ca_size_t first, start, last, count, step, bound, excl;
 
  retry:
 
@@ -283,15 +303,15 @@ ca_parse_range_without_check (VALUE arg, int size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = FIX2INT(arg);
+    start = NUM2SIZE(arg);
     *poffset = start;
     *pcount  = 1;
     *pstep   = 1;
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    first = NUM2INT(RANGE_BEG(arg));
-    last  = NUM2INT(RANGE_END(arg));
+    first = NUM2SIZE(RANGE_BEG(arg));
+    last  = NUM2SIZE(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     if ( excl ) {
       last += ( (last>=first) ? -1 : 1 );
@@ -310,30 +330,30 @@ ca_parse_range_without_check (VALUE arg, int size,
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
         start = 0;
-        step  = NUM2INT(arg1);
-        count = (size-1)/abs(step) + 1;
+        step  = NUM2SIZE(arg1);
+        count = (size-1)/llabs(step) + 1;
         bound = start + (count - 1)*step;
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2INT(RANGE_BEG(arg0));
-        last  = NUM2INT(RANGE_END(arg0));
+        start = NUM2SIZE(RANGE_BEG(arg0));
+        last  = NUM2SIZE(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2INT(arg1);
+        step  = NUM2SIZE(arg1);
         if ( excl ) {
           last += ( (last>=start) ? -1 : 1 );
         }
-        count = (last - start)/abs(step) + 1;
+        count = (last - start)/llabs(step) + 1;
         bound = start + (count - 1)*step;
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
       }
       else {                            /* [i,n] */
-        start = NUM2INT(arg0);
-        count = NUM2INT(arg1);
+        start = NUM2SIZE(arg0);
+        count = NUM2SIZE(arg1);
         bound = start + (count - 1);
         *poffset = start;
         *pcount  = count;
@@ -341,9 +361,9 @@ ca_parse_range_without_check (VALUE arg, int size,
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2INT(rb_ary_entry(arg, 0));
-      count = NUM2INT(rb_ary_entry(arg, 1));
-      step  = NUM2INT(rb_ary_entry(arg, 2));
+      start = NUM2SIZE(rb_ary_entry(arg, 0));
+      count = NUM2SIZE(rb_ary_entry(arg, 1));
+      step  = NUM2SIZE(rb_ary_entry(arg, 2));
       bound = start + (count - 1)*step;
       *poffset = start;
       *pcount  = count;
@@ -358,8 +378,8 @@ ca_parse_range_without_check (VALUE arg, int size,
   }
 }
 
-int32_t
-ca_bounds_normalize_index (int8_t bounds, int32_t size0, int32_t k)
+ca_size_t
+ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
 {
   switch ( bounds ) {
   case CA_BOUNDS_MASK:
@@ -409,7 +429,7 @@ rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
   double value;
   int count;
 
-  rb_scan_args(argc, argv, "11", &rstr, &rfval);
+  rb_scan_args(argc, argv, "11", (VALUE *)&rstr, (VALUE *)&rfval);
 
   if ( NIL_P(rstr) ) {
     return ( NIL_P(rfval) ) ? rb_float_new(0.0/0.0) : rfval;
@@ -434,10 +454,10 @@ rb_ca_s_scan_int (int argc, VALUE *argv, VALUE self)
   long value;
   int count;
 
-  rb_scan_args(argc, argv, "11", &rstr, &rfval);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rstr, (VALUE *) &rfval);
 
   if ( NIL_P(rstr) ) {
-    return ( NIL_P(rfval) ) ? INT2FIX(0) : rfval;
+    return ( NIL_P(rfval) ) ? INT2NUM(0) : rfval;
   }
 
   Check_Type(rstr, T_STRING);
@@ -445,15 +465,15 @@ rb_ca_s_scan_int (int argc, VALUE *argv, VALUE self)
   count = sscanf(StringValuePtr(rstr), "%li", &value);
 
   if ( count == 1 ) {
-    return LONG2NUM(value);
+    return SIZE2NUM(value);
   }
   else {
-    return ( NIL_P(rfval) ) ? INT2FIX(0) : rfval;
+    return ( NIL_P(rfval) ) ? INT2NUM(0) : rfval;
   }
 }
 
 static const struct {
-  char *name;
+  const char *name;
   int  data_type;
 } ca_name_to_type[] = {
   { "fixlen", CA_FIXLEN },
@@ -491,10 +511,11 @@ rb_ca_guess_type (VALUE obj)
   VALUE inspect;
 
   if ( TYPE(obj) == T_FIXNUM ) {
-    return NUM2INT(obj);
+    return NUM2SIZE(obj);
   }
   else if ( TYPE(obj) == T_STRING ) {
-    char *name0, *name = StringValuePtr(obj);
+    const char *name0;
+    char *name = StringValuePtr(obj);
     int i;
     i = 0;
     while ( ( name0 = ca_name_to_type[i].name ) ) {
@@ -520,20 +541,20 @@ rb_ca_guess_type (VALUE obj)
 
 void
 rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
-                            int8_t *data_type, int32_t *bytes)
+                            int8_t *data_type, ca_size_t *bytes)
 {
   *data_type = rb_ca_guess_type(rtype);
 
   if ( *data_type == CA_FIXLEN ) {
     if ( TYPE(rtype) == T_CLASS ) {
-      *bytes = NUM2INT(rb_const_get(rtype, rb_intern("DATA_SIZE")));
+      *bytes = NUM2SIZE(rb_const_get(rtype, rb_intern("DATA_SIZE")));
     }
     else {
       if ( NIL_P(rbytes) ) {
         *bytes = 0;
       }
       else {
-        *bytes = NUM2INT(rbytes);
+        *bytes = NUM2SIZE(rbytes);
       }
     }
   }
@@ -553,10 +574,10 @@ rb_ca_s_guess_type_and_bytes (int argc, VALUE *argv, VALUE klass)
 {
   VALUE rtype, rbytes;
   int8_t data_type;
-  int32_t bytes;
-  rb_scan_args(argc, argv, "11", &rtype, &rbytes);
+  ca_size_t bytes;
+  rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &rbytes);
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
-  return rb_assoc_new(INT2FIX(data_type), LONG2NUM(bytes));
+  return rb_assoc_new(INT2NUM(data_type), SIZE2NUM(bytes));
 }
 
 VALUE

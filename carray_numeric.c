@@ -13,6 +13,11 @@
 #include "ruby.h"
 #include "carray.h"
 
+#if RUBY_VERSION_CODE >= 240
+# define rb_cFixnum rb_cInteger
+# define rb_cBignum rb_cInteger
+#endif
+
 VALUE CA_NAN, CA_INF;
 
 static ID id___or__;
@@ -141,7 +146,7 @@ rb_hack_star (VALUE x, VALUE y)
     type *p = (type *) ca->ptr;                 \
     double *q = (double *) co->ptr;             \
     boolean8_t *m = (ca->mask) ? (boolean8_t *) ca->mask->ptr : NULL; \
-    int32_t i;                                  \
+    ca_size_t i;                                  \
     if ( m ) {                                  \
       for (i=ca->elements; i; i--, p++, q++) {  \
         if ( ! *m++ )                           \

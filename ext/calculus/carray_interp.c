@@ -15,9 +15,9 @@
 #include <math.h>
 
 static int
-find_index (int n, double *y, double yy, int *major, double *frac)
+find_index (ca_size_t n, double *y, double yy, ca_size_t *major, double *frac)
 {
-  int   a, b, c, x1;
+  ca_size_t  a, b, c, x1;
   double ya, yb, yc;
   double y1, y2;
 
@@ -33,7 +33,7 @@ find_index (int n, double *y, double yy, int *major, double *frac)
 
   /* check for equally spaced scale */
 
-  a = (int)((yy-y[0])/(y[n-1]-y[0])*(n-1));
+  a = (ca_size_t)((yy-y[0])/(y[n-1]-y[0])*(n-1));
 
   if ( a >= 0 && a < n-1 ) {
     if ( (y[a] - yy) * (y[a+1] - yy) <= 0 ) {
@@ -118,7 +118,7 @@ find_index (int n, double *y, double yy, int *major, double *frac)
 */
 
 static int
-linear_interp_loop (CArray *ca, int *major, double *frac,
+linear_interp_loop (CArray *ca, ca_size_t *major, double *frac,
                     int level, int32_t *idx, double wt, double *valp)
 {
   double tmp;
@@ -154,9 +154,9 @@ linear_interp_loop (CArray *ca, int *major, double *frac,
 }
 
 static double
-linear_interp (CArray *ca, int *major, double *frac)
+linear_interp (CArray *ca, ca_size_t *major, double *frac)
 {
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   double value = 0;
   linear_interp_loop(ca, major, frac, 0, idx, 1, &value);
   return value;
@@ -171,12 +171,12 @@ If value[n] is NaN, the interpolation will be made for each index of the dimensi
 static int
 ca_interpolate_loop (CArray *ca, double **scale,
                      CArray **value,
-                     int *major, double *frac,
+                     ca_size_t *major, double *frac,
                      int level, double **dstp)
 {
   double val, frc;
-  int maj;
-  int i;
+  ca_size_t maj;
+  ca_size_t i;
   if ( level == ca->rank-1 ) {
     if ( ! value[level] ) {
       for (i=0; i<ca->dim[level]; i++) {
@@ -221,7 +221,7 @@ ca_interpolate_loop (CArray *ca, double **scale,
 int
 ca_interpolate (CArray *ca, double **scale, CArray **value, double *outp)
 {
-  int major[CA_RANK_MAX];
+  ca_size_t major[CA_RANK_MAX];
   double frac[CA_RANK_MAX];
   int status;
 
@@ -239,7 +239,8 @@ rb_ca_interpolate_bilinear (int argc, VALUE *argv, volatile VALUE self)
   double *scales[CA_RANK_MAX];
   CArray *values[CA_RANK_MAX];
   CArray *scales_ca[CA_RANK_MAX];
-  int32_t out_rank, out_dim[CA_RANK_MAX];
+  int8_t out_rank;
+  ca_size_t out_dim[CA_RANK_MAX];
   int i;
 
   rb_scan_args(argc, argv, "2", &vscales, &vvalues);

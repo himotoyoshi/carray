@@ -31,7 +31,7 @@ ca_iter_rank (VALUE self)
 }
 
 void
-ca_iter_dim (VALUE self, int32_t *dim)
+ca_iter_dim (VALUE self, ca_size_t *dim)
 {
   int i;
   if ( TYPE(self) == T_DATA ) {
@@ -44,15 +44,15 @@ ca_iter_dim (VALUE self, int32_t *dim)
   else {
     VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
-    int rank;
-    rank = NUM2LONG(rrank);
+    int8_t rank;
+    rank = (int8_t) NUM2INT(rrank);
     for (i=0; i<rank; i++) {
-      dim[i] = NUM2LONG(rb_ary_entry(rdim, i));
+      dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     }
   }
 }
 
-int32_t
+ca_size_t
 ca_iter_elements (VALUE self)
 {
   int i, elements;
@@ -67,10 +67,10 @@ ca_iter_elements (VALUE self)
   else {
     VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
-    int rank = NUM2LONG(rrank);
+    int8_t rank = (int8_t) NUM2INT(rrank);
     elements = 1;
     for (i=0; i<rank; i++) {
-      elements *= NUM2LONG(rb_ary_entry(rdim, i));
+      elements *= NUM2SIZE(rb_ary_entry(rdim, i));
     }
   }
   return elements;
@@ -83,7 +83,7 @@ ca_iter_reference (VALUE self)
 }
 
 VALUE
-ca_iter_kernel_at_addr (VALUE self, int32_t addr, VALUE rref)
+ca_iter_kernel_at_addr (VALUE self, ca_size_t addr, VALUE rref)
 {
   volatile VALUE rker;
   if ( TYPE(self) == T_DATA ) {
@@ -98,13 +98,13 @@ ca_iter_kernel_at_addr (VALUE self, int32_t addr, VALUE rref)
   }
   else {
     rker = rb_funcall(self, rb_intern("kernel_at_addr"), 2,
-                      INT2NUM(addr), rref);
+                      SIZE2NUM(addr), rref);
   }
   return rker;
 }
 
 VALUE
-ca_iter_kernel_at_index (VALUE self, int32_t *idx, VALUE rref)
+ca_iter_kernel_at_index (VALUE self, ca_size_t *idx, VALUE rref)
 {
   VALUE rker;
   if ( TYPE(self) == T_DATA ) {
@@ -123,7 +123,7 @@ ca_iter_kernel_at_index (VALUE self, int32_t *idx, VALUE rref)
     int i;
     vidx = rb_ary_new2(rank);
     for (i=0; i<rank; i++) {
-      rb_ary_store(vidx, i, INT2NUM(idx[i]));
+      rb_ary_store(vidx, i, SIZE2NUM(idx[i]));
     }
     rker = rb_funcall(self, rb_intern("kernel_at_index"), 2,
                       vidx, rref);
@@ -132,7 +132,7 @@ ca_iter_kernel_at_index (VALUE self, int32_t *idx, VALUE rref)
 }
 
 VALUE
-ca_iter_kernel_move_to_addr (VALUE self, int32_t addr, VALUE rref)
+ca_iter_kernel_move_to_addr (VALUE self, ca_size_t addr, VALUE rref)
 {
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
@@ -143,13 +143,13 @@ ca_iter_kernel_move_to_addr (VALUE self, int32_t addr, VALUE rref)
   }
   else {
     rb_funcall(self, rb_intern("kernel_move_to_addr"), 2,
-                      INT2NUM(addr), rref);
+                      SIZE2NUM(addr), rref);
   }
   return rref;
 }
 
 VALUE
-ca_iter_kernel_move_to_index (VALUE self, int32_t *idx, VALUE rref)
+ca_iter_kernel_move_to_index (VALUE self, ca_size_t *idx, VALUE rref)
 {
   VALUE rker;
   if ( TYPE(self) == T_DATA ) {
@@ -165,7 +165,7 @@ ca_iter_kernel_move_to_index (VALUE self, int32_t *idx, VALUE rref)
     int i;
     vidx = rb_ary_new2(rank);
     for (i=0; i<rank; i++) {
-      rb_ary_store(vidx, i, INT2NUM(idx[i]));
+      rb_ary_store(vidx, i, SIZE2NUM(idx[i]));
     }
     rker = rb_funcall(self, rb_intern("kernel_move_to_index"), 2,
                       vidx, rref);
@@ -180,7 +180,7 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
   volatile VALUE obj;
   CArray *co;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
   int i;
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -194,9 +194,9 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
     VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
     int8_t rank = NUM2LONG(rrank);
-    int32_t dim[CA_RANK_MAX];
+    ca_size_t dim[CA_RANK_MAX];
     for (i=0; i<rank; i++) {
-      dim[i] = NUM2LONG(rb_ary_entry(rdim, i));
+      dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     }
     co = carray_new_safe(data_type, rank, dim, bytes, NULL);
   }
@@ -216,6 +216,7 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
   end
 */
 
+
 VALUE
 rb_ca_iter_rank (VALUE self)
 {
@@ -233,13 +234,13 @@ VALUE
 rb_ca_iter_dim (VALUE self)
 {
   VALUE rdim;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   int8_t rank = ca_iter_rank(self);
   int i;
   ca_iter_dim(self, dim);
   rdim = rb_ary_new2(rank);
   for (i=0; i<rank; i++) {
-    rb_ary_store(rdim, i, INT2NUM(dim[i]));
+    rb_ary_store(rdim, i, SIZE2NUM(dim[i]));
   }
   return rdim;
 }
@@ -254,7 +255,7 @@ rb_ca_iter_dim (VALUE self)
 VALUE
 rb_ca_iter_elements (VALUE self)
 {
-  return LONG2NUM(ca_iter_elements(self));
+  return SIZE2NUM(ca_iter_elements(self));
 }
 
 /* rdoc:
@@ -281,11 +282,11 @@ VALUE
 rb_ca_iter_kernel_at_addr (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE raddr, rcarray;
-  rb_scan_args(argc, argv, "11", &raddr, &rcarray);
+  rb_scan_args(argc, argv, "11", (VALUE *) &raddr, (VALUE *) &rcarray);
   if ( NIL_P(rcarray) ) {
     rcarray = rb_ca_iter_reference(self);
   }
-  return ca_iter_kernel_at_addr(self, NUM2LONG(raddr), rcarray);
+  return ca_iter_kernel_at_addr(self, NUM2SIZE(raddr), rcarray);
 }
 
 /* rdoc:
@@ -299,18 +300,18 @@ VALUE
 rb_ca_iter_kernel_at_index (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rindex, rcarray;
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   int8_t  rank = ca_iter_rank(self);
   int i;
 
-  rb_scan_args(argc, argv, "11", &rindex, &rcarray);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rindex, (VALUE *) &rcarray);
 
   if ( NIL_P(rcarray) ) {
     rcarray = rb_ca_iter_reference(self);
   }
 
   for (i=0; i<rank; i++) {
-    idx[i] = NUM2LONG(rb_ary_entry(rindex, i));
+    idx[i] = NUM2SIZE(rb_ary_entry(rindex, i));
   }
 
   return ca_iter_kernel_at_index(self, idx, rcarray);
@@ -326,7 +327,7 @@ rb_ca_iter_kernel_at_index (int argc, VALUE *argv, VALUE self)
 VALUE
 rb_ca_iter_kernel_move_to_addr (VALUE self, VALUE raddr, VALUE rker)
 {
-  return ca_iter_kernel_move_to_addr(self, NUM2LONG(raddr), rker);
+  return ca_iter_kernel_move_to_addr(self, NUM2SIZE(raddr), rker);
 }
 
 /* rdoc:
@@ -339,12 +340,12 @@ rb_ca_iter_kernel_move_to_addr (VALUE self, VALUE raddr, VALUE rker)
 VALUE
 rb_ca_iter_kernel_move_to_index (VALUE self, VALUE rindex, VALUE rker)
 {
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   int8_t  rank = ca_iter_rank(self);
   int i;
 
   for (i=0; i<rank; i++) {
-    idx[i] = NUM2LONG(rb_ary_entry(rindex, i));
+    idx[i] = NUM2SIZE(rb_ary_entry(rindex, i));
   }
 
   return ca_iter_kernel_move_to_index(self, idx, rker);
@@ -382,9 +383,9 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rtype, rbytes, routput, rref, rker, rout;
   CArray *co, *cr, *ck;
-  int32_t elements;
+  ca_size_t elements;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
   int i;
 
   if ( argc < 1 ) {
@@ -398,12 +399,12 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
   
   if ( NIL_P(argv[0]) ) {
     rtype = INT2NUM(cr->data_type);
-    rbytes = INT2NUM(cr->bytes);
+    rbytes = SIZE2NUM(cr->bytes);
   }
   else {
     rb_ca_guess_type_and_bytes(argv[0], Qnil, &data_type, &bytes);
     rtype = INT2NUM(data_type);
-    rbytes = INT2NUM(bytes);
+    rbytes = SIZE2NUM(bytes);
   }
   argc--;
   argv++;
@@ -481,7 +482,7 @@ rb_ca_iter_filter (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE routput, rref, rker, rout;
   CArray *co, *cr, *ck, *cq;
-  int32_t elements;
+  ca_size_t elements;
   int8_t data_type;
   int i;
 
@@ -558,7 +559,7 @@ rb_ca_iter_evaluate (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rref, rker;
   CArray *cr, *ck;
-  int32_t elements;
+  ca_size_t elements;
   int i;
 
   elements = ca_iter_elements(self);

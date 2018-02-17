@@ -25,9 +25,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -35,24 +35,24 @@ typedef struct {
   uint8_t   nosync;
   // ---------- 
   int8_t    maxdim_index;
-  int32_t   maxdim_step;
-  int32_t   maxdim_step0;
-  int32_t   offset;
-  int32_t  *start;
-  int32_t  *step;
-  int32_t  *count;
-  int32_t  *size0;
+  ca_size_t   maxdim_step;
+  ca_size_t   maxdim_step0;
+  ca_size_t   offset;
+  ca_size_t  *start;
+  ca_size_t  *step;
+  ca_size_t  *count;
+  ca_size_t  *size0;
 } CABlock;                  // 68 + 20*(rank) (bytes) 
 */
 
 typedef struct {
   int8_t  rank;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
-  CArray * (*kernel_at_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_at_index)(void *, int32_t *, CArray *);
-  CArray * (*kernel_move_to_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_move_to_index)(void *, int32_t *, CArray *);
+  CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_at_index)(void *, ca_size_t *, CArray *);
+  CArray * (*kernel_move_to_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_move_to_index)(void *, ca_size_t *, CArray *);
   /* ----------- */
   CABlock *kernel;
 } CABlockIterator;
@@ -60,11 +60,12 @@ typedef struct {
 /* ----------------------------------------------------------------- */
 
 static CArray *
-ca_bi_kernel_at_index (void *it, int32_t *idx, CArray *ref)
+ca_bi_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
 {
   CABlockIterator *bit = (CABlockIterator *) it;
   CABlock *kernel;
-  int32_t i, j;
+  int8_t  i;
+  ca_size_t j;
 
   if ( ref == bit->reference ) {
     kernel = (CABlock *)ca_clone(bit->kernel);
@@ -92,12 +93,12 @@ ca_bi_kernel_at_index (void *it, int32_t *idx, CArray *ref)
 }
 
 static CArray *
-ca_bi_kernel_at_addr (void *it, int32_t addr, CArray *ref)
+ca_bi_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CABlockIterator *bit = (CABlockIterator *) it;
-  int32_t *dim = bit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = bit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=bit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -107,11 +108,12 @@ ca_bi_kernel_at_addr (void *it, int32_t addr, CArray *ref)
 
 
 static CArray *
-ca_bi_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
+ca_bi_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 {
   CABlockIterator *bit = (CABlockIterator *) it;
   CABlock *kernel = (CABlock *) kern;
-  int32_t i, j;
+  int8_t  i;
+  ca_size_t j;
 
   ca_update_mask(kernel);
 
@@ -128,12 +130,12 @@ ca_bi_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
 }
 
 static CArray *
-ca_bi_kernel_move_to_addr (void *it, int32_t addr, CArray *ref)
+ca_bi_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CABlockIterator *bit = (CABlockIterator *) it;
-  int32_t *dim = bit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = bit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=bit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -147,8 +149,8 @@ ca_bi_setup (VALUE self, VALUE rref, VALUE rker)
   CABlockIterator *it;
   CArray *ref;
   CABlock *ker;
-  int32_t dim[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t dim[CA_RANK_MAX];
+  int8_t i;
 
   rker = rb_obj_clone(rker);
 
@@ -173,7 +175,7 @@ ca_bi_setup (VALUE self, VALUE rref, VALUE rker)
   }
 
   it->rank      = ref->rank;
-  memcpy(it->dim, dim, it->rank * sizeof(int32_t));
+  memcpy(it->dim, dim, it->rank * sizeof(ca_size_t));
   it->reference = ref;
   it->kernel    = ker;
   it->kernel_at_addr  = ca_bi_kernel_at_addr;

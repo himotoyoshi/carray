@@ -14,15 +14,15 @@
 
 typedef struct {
   int8_t  rank;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
-  CArray * (*kernel_at_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_at_index)(void *, int32_t *, CArray *);
-  CArray * (*kernel_move_to_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_move_to_index)(void *, int32_t *, CArray *);
+  CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_at_index)(void *, ca_size_t *, CArray *);
+  CArray * (*kernel_move_to_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_move_to_index)(void *, ca_size_t *, CArray *);
   /* ----------- */
   CArray *kernel;
-  int32_t offset[CA_RANK_MAX];
+  ca_size_t offset[CA_RANK_MAX];
 } CAWindowIterator;
 
 VALUE rb_cCAWindowIterator;
@@ -38,15 +38,16 @@ extern int8_t CA_OBJ_WINDOW;
 
 CAWindow *
 ca_window_new (CArray *carray,
-             int32_t *start, int32_t *count, int8_t bounds, char *fill);
+             ca_size_t *start, ca_size_t *count, int8_t bounds, char *fill);
 
 
 static CArray *
-ca_vi_kernel_at_index (void *it, int32_t *idx, CArray *ref)
+ca_vi_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
 {
   CAWindowIterator *vit = (CAWindowIterator *) it;
   CAWindow *kernel;
-  int32_t i, j;
+  int8_t  i;
+  ca_size_t j;
 
   if ( ref == vit->reference ) {
     kernel = (CAWindow *)ca_clone(vit->kernel);
@@ -71,12 +72,12 @@ ca_vi_kernel_at_index (void *it, int32_t *idx, CArray *ref)
 }
 
 static CArray *
-ca_vi_kernel_at_addr (void *it, int32_t addr, CArray *ref)
+ca_vi_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CAWindowIterator *vit = (CAWindowIterator *) it;
-  int32_t *dim = vit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = vit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=vit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -85,13 +86,14 @@ ca_vi_kernel_at_addr (void *it, int32_t addr, CArray *ref)
 }
 
 static CArray *
-ca_vi_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
+ca_vi_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 {
   CAWindowIterator *vit = (CAWindowIterator *) it;
   CAWindow *kernel = (CAWindow *) kern;
-  int32_t *dim    = vit->dim;
-  int32_t *offset = vit->offset;
-  int32_t i, j;
+  ca_size_t *dim    = vit->dim;
+  ca_size_t *offset = vit->offset;
+  int8_t  i;
+  ca_size_t j;
 
   ca_update_mask(kernel);
 
@@ -108,12 +110,12 @@ ca_vi_kernel_move_to_index (void *it, int32_t *idx, CArray *kern)
 }
 
 static CArray *
-ca_vi_kernel_move_to_addr (void *it, int32_t addr, CArray *ref)
+ca_vi_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
 {
   CAWindowIterator *vit = (CAWindowIterator *) it;
-  int32_t *dim = vit->dim;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *dim = vit->dim;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   for (i=vit->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -126,7 +128,7 @@ ca_vi_setup (VALUE self, VALUE rref, VALUE rker)
 {
   CAWindowIterator *it;
   CArray *ref, *ker;
-  int32_t i;
+  int8_t i;
 
   rker = rb_obj_clone(rker);
 
@@ -139,7 +141,7 @@ ca_vi_setup (VALUE self, VALUE rref, VALUE rker)
   }
 
   it->rank      = ref->rank;
-  memcpy(it->dim, ref->dim, it->rank * sizeof(int32_t));
+  memcpy(it->dim, ref->dim, it->rank * sizeof(ca_size_t));
   it->reference = ref;
   it->kernel    = ker;
   it->kernel_at_addr  = ca_vi_kernel_at_addr;

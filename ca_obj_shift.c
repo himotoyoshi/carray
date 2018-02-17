@@ -24,16 +24,16 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t  *shift;
+  ca_size_t  *shift;
   char     *fill;
   int8_t   *roll;
   int       fill_mask;
@@ -45,10 +45,10 @@ static int8_t CA_OBJ_SHIFT;
 
 int
 ca_shift_setup (CAShift *ca, CArray *parent,
-               int32_t *shift, char *fill, int8_t *roll)
+               ca_size_t *shift, char *fill, int8_t *roll)
 {
   int8_t data_type, rank;
-  int32_t elements, bytes;
+  ca_size_t elements, bytes;
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
@@ -64,17 +64,17 @@ ca_shift_setup (CAShift *ca, CArray *parent,
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
-  ca->shift     = ALLOC_N(int32_t, rank);
+  ca->shift     = ALLOC_N(ca_size_t, rank);
   ca->fill      = ALLOC_N(char, ca->bytes);
   ca->roll      = ALLOC_N(int8_t, rank);
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(int32_t));
-  memcpy(ca->shift, shift, rank * sizeof(int32_t));
+  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
+  memcpy(ca->shift, shift, rank * sizeof(ca_size_t));
   memcpy(ca->roll, roll, rank * sizeof(int8_t));
 
   if ( fill ) {
@@ -94,7 +94,7 @@ ca_shift_setup (CAShift *ca, CArray *parent,
 }
 
 CAShift *
-ca_shift_new (CArray *parent, int32_t *shift, char *fill, int8_t *roll)
+ca_shift_new (CArray *parent, ca_size_t *shift, char *fill, int8_t *roll)
 {
   CAShift *ca = ALLOC(CAShift);
   ca_shift_setup(ca, parent, shift, fill, roll);
@@ -119,11 +119,11 @@ static void ca_shift_attach (CAShift *ca);
 static void ca_shift_sync (CAShift *ca);
 static void ca_shift_fill (CAShift *ca, char *ptr);
 
-static int32_t
-ca_shift_normalized_roll_shift (CAShift *ca, int32_t i)
+static ca_size_t
+ca_shift_normalized_roll_shift (CAShift *ca, ca_size_t i)
 {
-  int32_t dim   = ca->dim[i];
-  int32_t shift = ca->shift[i];
+  ca_size_t dim   = ca->dim[i];
+  ca_size_t shift = ca->shift[i];
   if ( shift >= 0 ) {
     return shift % dim;
   }
@@ -132,12 +132,12 @@ ca_shift_normalized_roll_shift (CAShift *ca, int32_t i)
   }
 }
 
-static int32_t
-ca_shift_rolled_index (CAShift *ca, int32_t i, int32_t k)
+static ca_size_t
+ca_shift_rolled_index (CAShift *ca, ca_size_t i, ca_size_t k)
 {
-  int32_t dim = ca->dim[i];
-  int32_t shift = ca->shift[i];
-  int32_t idx = k - shift;
+  ca_size_t dim = ca->dim[i];
+  ca_size_t shift = ca->shift[i];
+  ca_size_t idx = k - shift;
   if ( idx >= 0 ) {
     return idx % dim;
   }
@@ -147,12 +147,12 @@ ca_shift_rolled_index (CAShift *ca, int32_t i, int32_t k)
   }
 }
 
-static int32_t
-ca_shift_shifted_index (CAShift *ca, int32_t i, int32_t k)
+static ca_size_t
+ca_shift_shifted_index (CAShift *ca, ca_size_t i, ca_size_t k)
 {
-  int32_t dim   = ca->dim[i];
-  int32_t shift = ca->shift[i];
-  int32_t idx   = k - shift;
+  ca_size_t dim   = ca->dim[i];
+  ca_size_t shift = ca->shift[i];
+  ca_size_t idx   = k - shift;
   if ( idx < 0 || idx >= dim ) {
     return -1;
   }
@@ -171,11 +171,11 @@ ca_shift_func_clone (void *ap)
 }
 
 static char *
-ca_shift_func_ptr_at_addr (void *ap, int32_t addr)
+ca_shift_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAShift *ca = (CAShift *) ap;
   if ( ! ca->ptr ) {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index((CArray *)ca, addr, idx);
     return ca_ptr_at_index(ca, idx);
   }
@@ -185,13 +185,14 @@ ca_shift_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_shift_func_ptr_at_index (void *ap, int32_t *idx)
+ca_shift_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAShift *ca = (CAShift *) ap;
   if ( ! ca->ptr ) {
-    int32_t *dim    = ca->dim;
+    ca_size_t *dim    = ca->dim;
     int8_t *roll = ca->roll;
-    int32_t i, k, n;
+    int8_t i;
+    ca_size_t k, n;
     n = 0;
     for (i=0; i<ca->rank; i++) {
       k = idx[i];
@@ -221,12 +222,13 @@ ca_shift_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_shift_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_shift_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAShift *ca = (CAShift *) ap;
-  int32_t *dim    = ca->dim;
+  ca_size_t *dim    = ca->dim;
   int8_t *roll = ca->roll;
-  int32_t i, k, n;
+  int8_t  i;
+  ca_size_t k, n;
   n = 0;
   for (i=0; i<ca->rank; i++) {
     k = idx[i];
@@ -247,12 +249,13 @@ ca_shift_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_shift_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_shift_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAShift *ca = (CAShift *) ap;
-  int32_t *dim    = ca->dim;
+  ca_size_t *dim    = ca->dim;
   int8_t *roll = ca->roll;
-  int32_t i, k, n;
+  int8_t i;
+  ca_size_t k, n;
   n = 0;
   for (i=0; i<ca->rank; i++) {
     k = idx[i];
@@ -391,13 +394,13 @@ ca_operation_function_t ca_shift_func = {
 /* ------------------------------------------------------------------- */
 
 static void
-ca_shift_attach_loop (CAShift *ca, int16_t level, int32_t *idx, int32_t *idx0,
+ca_shift_attach_loop (CAShift *ca, int16_t level, ca_size_t *idx, ca_size_t *idx0,
                                                                   int32_t fill)
 {
-  int32_t dim   = ca->dim[level];
-  int32_t shift = ca->shift[level];
+  ca_size_t dim   = ca->dim[level];
+  ca_size_t shift = ca->shift[level];
   int8_t roll = ca->roll[level];
-  int32_t i;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     if ( fill ) {
@@ -545,18 +548,18 @@ ca_shift_attach_loop (CAShift *ca, int16_t level, int32_t *idx, int32_t *idx0,
 static void
 ca_shift_attach (CAShift *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_shift_attach_loop(ca, (int16_t) 0, idx, idx0, 0);
 }
 
 static void
-ca_shift_sync_loop (CAShift *ca, int16_t level, int32_t *idx, int32_t *idx0)
+ca_shift_sync_loop (CAShift *ca, int16_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t dim   = ca->dim[level];
-  int32_t shift = ca->shift[level];
+  ca_size_t dim   = ca->dim[level];
+  ca_size_t shift = ca->shift[level];
   int8_t roll = ca->roll[level];
-  int32_t i;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     if ( ! shift ) {
@@ -688,19 +691,19 @@ ca_shift_sync_loop (CAShift *ca, int16_t level, int32_t *idx, int32_t *idx0)
 static void
 ca_shift_sync (CAShift *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_shift_sync_loop(ca, (int16_t) 0, idx, idx0);
 }
 
 static void
 ca_shift_fill_loop (CAShift *ca, char *ptr,
-                  int16_t level, int32_t *idx0)
+                  int16_t level, ca_size_t *idx0)
 {
-  int32_t dim   = ca->dim[level];
-  int32_t shift = ca->shift[level];
+  ca_size_t dim   = ca->dim[level];
+  ca_size_t shift = ca->shift[level];
   int8_t roll = ca->roll[level];
-  int32_t i;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     if ( ( ! shift ) || roll ) {
@@ -783,7 +786,7 @@ ca_shift_fill_loop (CAShift *ca, char *ptr,
 static void
 ca_shift_fill (CAShift *ca, char *ptr)
 {
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_shift_fill_loop(ca, ptr, (int16_t) 0, idx0);
 }
 
@@ -811,7 +814,7 @@ rb_ca_shift_set_fill_value (VALUE self, VALUE rfval)
 */
 
 VALUE
-rb_ca_shift_new (VALUE cary, int32_t *shift, char *fill, int8_t *roll)
+rb_ca_shift_new (VALUE cary, ca_size_t *shift, char *fill, int8_t *roll)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -838,10 +841,10 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, ropt, rfval = CA_NIL, rroll = Qnil, rcs;
   CArray *ca;
   CScalar *cs;
-  int32_t shift[CA_RANK_MAX];
+  ca_size_t shift[CA_RANK_MAX];
   int8_t roll[CA_RANK_MAX];
   char *fill = NULL;
-  int32_t i;
+  int8_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -853,7 +856,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   }
 
   for (i=0; i<ca->rank; i++) {
-    shift[i] = NUM2INT(argv[i]);
+    shift[i] = NUM2SIZE(argv[i]);
   }
 
   if ( rfval == CA_NIL ) {
@@ -870,7 +873,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
     Data_Get_Struct(rcs, CScalar, cs);
     fill = cs->ptr;
     if ( ca_is_object_type(ca) ) {
-      *(VALUE *)fill = INT2FIX(0);
+      *(VALUE *)fill = INT2NUM(0);
     }
     else {
       memset(fill, 0, cs->bytes);

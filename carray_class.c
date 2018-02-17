@@ -70,9 +70,9 @@ static VALUE
 rb_ca_s_sizeof (VALUE klass, VALUE rtype)
 {
   int8_t data_type;
-  int32_t bytes;
-  rb_ca_guess_type_and_bytes(rtype, INT2FIX(0), &data_type, &bytes);
-  return LONG2NUM(bytes);
+  ca_size_t bytes;
+  rb_ca_guess_type_and_bytes(rtype, INT2NUM(0), &data_type, &bytes);
+  return SIZE2NUM(bytes);
 }
 
 
