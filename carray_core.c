@@ -329,7 +329,7 @@ ca_mark (void *ap)
   if ( ca_is_object_type(ca) ) {    /* object type array */
     if ( ca_is_attached(ca) ) { /* entity array */
       VALUE *p = (VALUE*) ca->ptr;
-      int32_t n = ca->elements;
+      ca_size_t n = ca->elements;
       while ( n-- ) {
         rb_gc_mark(*p++);
       }
@@ -377,11 +377,11 @@ ca_wrap_struct (void *ap)
 /* calculate index from address */
 
 void
-ca_addr2index (void *ap, int32_t addr, int32_t *idx)
+ca_addr2index (void *ap, ca_size_t addr, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
-  int32_t *dim = ca->dim;
-  int32_t i;
+  ca_size_t *dim = ca->dim;
+  int8_t i;
   for (i=ca->rank-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
@@ -390,12 +390,13 @@ ca_addr2index (void *ap, int32_t addr, int32_t *idx)
 
 /* calculate address from index */
 
-int32_t
-ca_index2addr (void *ap, int32_t *idx)
+ca_size_t
+ca_index2addr (void *ap, ca_size_t *idx)
 {
   CArray  *ca  = (CArray *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t   i;
+  ca_size_t  n;
   n = idx[0];
   for (i=1; i<ca->rank; i++) {
     n = dim[i]*n+idx[i];
@@ -457,7 +458,7 @@ ca_test_cyclic_check(void *ap, void *ptr)
 /* return pointer of the element at given address */
 
 void *
-ca_ptr_at_addr (void *ap, int32_t addr)
+ca_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CArray *ca = (CArray *) ap;
 
@@ -478,7 +479,7 @@ ca_ptr_at_addr (void *ap, int32_t addr)
 /* return pointer of the element at given index */
 
 void *
-ca_ptr_at_index (void *ap, int32_t *idx)
+ca_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
   return ca_func[ca->obj_type].ptr_at_index(ca, idx);
@@ -487,7 +488,7 @@ ca_ptr_at_index (void *ap, int32_t *idx)
 /* fetch data of the element at given address to memory pointed by pval */
 
 void
-ca_fetch_addr (void *ap, int32_t addr, void *pval)
+ca_fetch_addr (void *ap, ca_size_t addr, void *pval)
 {
   CArray *ca = (CArray *) ap;
   char *ptr  = (char *)pval;
@@ -501,7 +502,7 @@ ca_fetch_addr (void *ap, int32_t addr, void *pval)
     ca_func[ca->obj_type].fetch_addr(ca, addr, ptr);
   }
   else if ( ca_func[ca->obj_type].fetch_index ) { /* delegate -> fetch_index */
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ca_func[ca->obj_type].fetch_index(ca, idx, ptr);
   }
@@ -520,7 +521,7 @@ ca_fetch_addr (void *ap, int32_t addr, void *pval)
 /* store value pointed by pval to the element at given address */
 
 void
-ca_store_addr (void *ap, int32_t addr, void *pval)
+ca_store_addr (void *ap, ca_size_t addr, void *pval)
 {
   CArray *ca = (CArray *) ap;
   char *ptr = (char *)pval;
@@ -539,7 +540,7 @@ ca_store_addr (void *ap, int32_t addr, void *pval)
     ca_func[ca->obj_type].store_addr(ca, addr, ptr);
   }
   else if ( ca_func[ca->obj_type].store_index ) { /* delegate -> store_index */
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ca_func[ca->obj_type].store_index(ca, idx, ptr);
   }
@@ -558,7 +559,7 @@ ca_store_addr (void *ap, int32_t addr, void *pval)
 /* fetch data of the element at given index to memory pointed by pval */
 
 void
-ca_fetch_index (void *ap, int32_t *idx, void *pval)
+ca_fetch_index (void *ap, ca_size_t *idx, void *pval)
 {
   CArray *ca = (CArray *) ap;
   char *ptr = (char *)pval;
@@ -569,7 +570,7 @@ ca_fetch_index (void *ap, int32_t *idx, void *pval)
     ca_func[ca->obj_type].fetch_index(ca, idx, ptr);
   }
   else if ( ca_func[ca->obj_type].fetch_addr ) { /* delegate -> fetch_addr */
-    int32_t addr = ca_index2addr(ca, idx);
+    ca_size_t addr = ca_index2addr(ca, idx);
     ca_func[ca->obj_type].fetch_addr(ca, addr, ptr);
   }
   else {
@@ -588,7 +589,7 @@ ca_fetch_index (void *ap, int32_t *idx, void *pval)
 /* store value pointed by pval to the element at given index */
 
 void
-ca_store_index (void *ap, int32_t *idx, void *pval)
+ca_store_index (void *ap, ca_size_t *idx, void *pval)
 {
   CArray *ca = (CArray *) ap;
   char *ptr = (char *) pval;
@@ -604,7 +605,7 @@ ca_store_index (void *ap, int32_t *idx, void *pval)
     ca_func[ca->obj_type].store_index(ca, idx, ptr);
   }
   else if ( ca_func[ca->obj_type].store_addr ) { /* delegate -> store_addr */
-    int32_t addr = ca_index2addr(ca, idx);
+    ca_size_t addr = ca_index2addr(ca, idx);
     ca_func[ca->obj_type].store_addr(ca, addr, ptr);
   }
   else {
@@ -648,9 +649,9 @@ ca_allocate (void *ap)
   }
 
   if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
-    volatile VALUE rzero = INT2FIX(0);
+    volatile VALUE rzero = INT2NUM(0);
     VALUE *p = (VALUE*)ca->ptr;
-    int32_t i;
+    ca_size_t i;
     for (i=0; i<ca->elements; i++) {
       *p++ = rzero;
     }
@@ -1205,7 +1206,7 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
   }
   else if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
     VALUE member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
-    sym = rb_ary_entry(member_names, NUM2INT(sym));
+    sym = rb_ary_entry(member_names, NUM2SIZE(sym));
   }
 
   obj = rb_hash_aref(member, sym);

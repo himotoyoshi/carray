@@ -155,7 +155,7 @@ class TestCArrayRefStore < Test::Unit::TestCase
     a = CArray.int(3,3).seq!
     assert_equal(CA_INT([4]), a[[4]])
     assert_equal(CA_INT([0,1,2,3]), a[[0..3]])
-    assert_equal(CABlock, a[nil].class)
+    assert_equal(CARefer, a[nil].class)
     assert_equal(CA_INT([0,1,2,3,4,5,6,7,8]), a[nil])
     assert_raise(IndexError) { a[0..9] }
     assert_raise(IndexError) { a[-10..-1] }

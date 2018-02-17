@@ -148,7 +148,7 @@ monfunc("rcp", "rcp",
       INT_TYPES => "if ((#1)==0) {ca_zerodiv();}; (#2) = 1/(#1);",
       FLOAT_TYPES => "(#2) = 1/(#1);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = 1/(#1);" : nil,
-      OBJ_TYPES => '(#2) = rb_funcall(INT2FIX(1), id_slash, 1, (#1));')
+      OBJ_TYPES => '(#2) = rb_funcall(INT2NUM(1), id_slash, 1, (#1));')
 monfunc("sqrt", "sqrt",
       FLOAT_TYPES => "(#2) = sqrt(#1);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = csqrt(#1);" : nil,
@@ -283,10 +283,10 @@ static VALUE
 rb_ca_bit_and (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_bit_and_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_bit_and_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_bit_and_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_bit_and_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_bit_and_i(self, other);
@@ -297,10 +297,10 @@ static VALUE
 rb_ca_bit_or (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_bit_or_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_bit_or_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_bit_or_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_bit_or_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_bit_or_i(self, other);
@@ -311,10 +311,10 @@ static VALUE
 rb_ca_bit_xor (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_bit_xor_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_bit_xor_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_bit_xor_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_bit_xor_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_bit_xor_i(self, other);
@@ -415,10 +415,10 @@ static VALUE
 rb_ca_and (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_and_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_and_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_and_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_and_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_and_i(self, other);
@@ -429,10 +429,10 @@ static VALUE
 rb_ca_or (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_or_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_or_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_or_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_or_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_or_i(self, other);
@@ -443,10 +443,10 @@ static VALUE
 rb_ca_xor (VALUE self, VALUE other)
 {
   if ( rb_ca_is_boolean_type(self) ) {
-    return rb_ca_xor_i(self, rb_ca_wrap_readonly(other, INT2FIX(CA_BOOLEAN)));
+    return rb_ca_xor_i(self, rb_ca_wrap_readonly(other, INT2NUM(CA_BOOLEAN)));
   }
   else if ( rb_obj_is_carray(other) && rb_ca_is_boolean_type(other) ) {
-    return rb_ca_xor_i(rb_ca_wrap_readonly(self, INT2FIX(CA_BOOLEAN)), other);
+    return rb_ca_xor_i(rb_ca_wrap_readonly(self, INT2NUM(CA_BOOLEAN)), other);
   }
   else {
     return rb_ca_xor_i(self, other);
@@ -571,7 +571,7 @@ op_powi_fc(cmplx64_t);
 op_powi_fc(cmplx128_t);
 
 static void
-ca_ipower_float32_t (int32_t n, boolean8_t *m,
+ca_ipower_float32_t (ca_size_t n, boolean8_t *m,
                      char *ptr1, int32_t ipow, char *ptr2)
 {
   float32_t *p1 = (float32_t *) ptr1, *p2 = (float32_t *) ptr2;
@@ -586,7 +586,7 @@ ca_ipower_float32_t (int32_t n, boolean8_t *m,
 }
 
 static void
-ca_ipower_float64_t (int32_t n, boolean8_t *m,
+ca_ipower_float64_t (ca_size_t n, boolean8_t *m,
                      char *ptr1, int32_t ipow, char *ptr2)
 {
   float64_t *p1 = (float64_t *) ptr1, *p2 = (float64_t *) ptr2;
@@ -601,7 +601,7 @@ ca_ipower_float64_t (int32_t n, boolean8_t *m,
 }
 
 static void
-ca_ipower_float128_t (int32_t n, boolean8_t *m,
+ca_ipower_float128_t (ca_size_t n, boolean8_t *m,
                      char *ptr1, int32_t ipow, char *ptr2)
 {
   float128_t *p1 = (float128_t *) ptr1, *p2 = (float128_t *) ptr2;
@@ -616,7 +616,7 @@ ca_ipower_float128_t (int32_t n, boolean8_t *m,
 }
 
 static void
-ca_ipower_cmplx64_t (int32_t n, boolean8_t *m,
+ca_ipower_cmplx64_t (ca_size_t n, boolean8_t *m,
                      char *ptr1, int32_t ipow, char *ptr2)
 {
   cmplx64_t *p1 = (cmplx64_t *) ptr1, *p2 = (cmplx64_t *) ptr2;
@@ -631,7 +631,7 @@ ca_ipower_cmplx64_t (int32_t n, boolean8_t *m,
 }
 
 static void
-ca_ipower_cmplx128_t (int32_t n, boolean8_t *m,
+ca_ipower_cmplx128_t (ca_size_t n, boolean8_t *m,
                      char *ptr1, int32_t ipow, char *ptr2)
 {
   cmplx128_t *p1 = (cmplx128_t *) ptr1, *p2 = (cmplx128_t *) ptr2;

@@ -39,7 +39,7 @@ qcmp_## type (type *a, type *b) \
 }
 
 static int
-qcmp_data (char *a, char *b, int32_t bytes)
+qcmp_data (char *a, char *b, ca_size_t bytes)
 {
   int cmp;
   cmp = memcmp(a, b, bytes);
@@ -105,7 +105,7 @@ struct cmp_base {
 };
 
 struct cmp_data {
-  int32_t  i;
+  ca_size_t  i;
   struct cmp_base *base;
 };
 
@@ -115,15 +115,15 @@ qcmp_func (struct cmp_data *a, struct cmp_data *b)
   struct cmp_base *base = a->base;
   int n = base->n;
   CArray **ca = base->ca;
-  int32_t ia = a->i;
-  int32_t ib = b->i;
+  ca_size_t ia = a->i;
+  ca_size_t ib = b->i;
   int result;
   int i;
   for (i=0; i<n; i++) {
     int8_t data_type = ca[i]->data_type;
     char  *ptr = ca[i]->ptr;
     boolean8_t  *m = ( ca[i]->mask ) ? (boolean8_t *) ca[i]->mask->ptr : NULL;
-    int32_t bytes = ca[i]->bytes;
+    ca_size_t bytes = ca[i]->bytes;
     if ( ( ! m ) || 
          ( ( ! m[ia] ) && ( ! m[ib] ) ) ) {
       if ( data_type == CA_FIXLEN ) {
@@ -170,21 +170,21 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   CArray *co;
   struct cmp_base *base;
   struct cmp_data *data;
-  int32_t elements;
-  int32_t *q;
+  ca_size_t elements;
+  ca_size_t *q;
   int j;
-  int32_t i;
+  ca_size_t i;
   
   if ( argc <= 0 ) {
     rb_raise(rb_eArgError, "no arg given");
   }
 
   rb_check_carray_object(argv[0]);
-  elements = NUM2LONG(rb_ca_elements(argv[0]));
+  elements = NUM2SIZE(rb_ca_elements(argv[0]));
   
   for (j=0; j<argc; j++) {
     rb_check_carray_object(argv[j]);
-    if ( elements != NUM2LONG(rb_ca_elements(argv[j])) ) {
+    if ( elements != NUM2SIZE(rb_ca_elements(argv[j])) ) {
       rb_raise(rb_eArgError, "elements mismatch");
     }
   }
@@ -214,9 +214,9 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
             (int (*)(const void*,const void*)) qcmp_func);
 #endif
 
-  out = rb_ca_template_with_type(argv[0], INT2FIX(CA_INT32), INT2FIX(0));
+  out = rb_ca_template_with_type(argv[0], INT2NUM(CA_SIZE), INT2NUM(0));
   Data_Get_Struct(out, CArray, co);
-  q = (int32_t *) co->ptr;
+  q = (ca_size_t *) co->ptr;
   
   for (i=0; i<elements; i++) {
     *q = data[i].i;

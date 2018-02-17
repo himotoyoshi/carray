@@ -18,7 +18,7 @@
 /* ----------------------------------------------------------------- */
 
 static double
-simpson (double *x, double *y, int n)
+simpson (double *x, double *y, ca_size_t n)
 {
   double s;
 
@@ -53,7 +53,7 @@ simpson (double *x, double *y, int n)
   else {
     double x0, x1, x2;
     double h, m, c0, c1, c2;
-    int i;
+    ca_size_t i;
     s = 0.0;
     for (i=0; i<n-2; i+=2) {
       x0 = x[i];
@@ -100,10 +100,10 @@ rb_ca_integrate (volatile VALUE self, volatile VALUE vsc)
 
 /* ----------------------------------------------------------------- */
 
-static int
-linear_index (int n, double *y, double yy, double *idx)
+static ca_size_t
+linear_index (ca_size_t n, double *y, double yy, double *idx)
 {
-  int   a, b, c, x1;
+  ca_size_t a, b, c, x1;
   double ya, yb, yc;
   double y1, y2;
   double rest;
@@ -120,7 +120,7 @@ linear_index (int n, double *y, double yy, double *idx)
 
   /* check for equally spaced scale */
 
-  a = (int)((yy-y[0])/(y[n-1]-y[0])*(n-1));
+  a = (ca_size_t)((yy-y[0])/(y[n-1]-y[0])*(n-1));
 
   if ( a >= 0 && a < n-1 ) {
     if ( (y[a] - yy) * (y[a+1] - yy) <= 0 ) { /* lucky case */
@@ -193,11 +193,11 @@ rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
 {
   volatile VALUE out, out0;
   CArray *ca, *sc, *cx, *co0, *co;
-  int32_t n;
+  ca_size_t n;
   double *x;
   double *px;
   double *po;
-  int i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -246,7 +246,7 @@ rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
   ca_detach_n(3, sc, cx, co);
 
   if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2FIX(0));
+    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
   }
   else {
     return out0;
@@ -496,10 +496,10 @@ deriv_penta (double *x, double *y, double xx)
 }
 
 static double
-interpolate_linear (double *x, double *y, int n, double xx)
+interpolate_linear (double *x, double *y, ca_size_t n, double xx)
 {
   double ri;
-  int i0;
+  ca_size_t i0;
   if ( n == 1) {
     return y[0];
   }
@@ -524,10 +524,10 @@ interpolate_linear (double *x, double *y, int n, double xx)
 }
 
 static double
-interpolate_cubic (double *x, double *y, int n, double xx)
+interpolate_cubic (double *x, double *y, ca_size_t n, double xx)
 {
   double ri;
-  int i0;
+  ca_size_t i0;
   if ( n == 1) {
     return y[0];
   }
@@ -558,10 +558,10 @@ interpolate_cubic (double *x, double *y, int n, double xx)
 }
 
 static double
-differentiate (double *x, double *y, int n, double xx)
+differentiate (double *x, double *y, ca_size_t n, double xx)
 {
   double ri;
-  int i0;
+  ca_size_t i0;
   switch ( n ) {
   case 1:
     return 0.0/0.0;
@@ -600,7 +600,7 @@ rb_ca_interpolate (int argc, VALUE *argv, VALUE self)
   char *typename = NULL;
   int type = 0;
   double *px, *po;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -611,7 +611,6 @@ rb_ca_interpolate (int argc, VALUE *argv, VALUE self)
     Check_Type(rtype, T_STRING);
     typename = StringValuePtr(rtype);
   }
-
 
   if ( typename == NULL || ! strncmp("cubic", typename, 5) ) {
     type = 3;
@@ -698,7 +697,7 @@ rb_ca_interpolate (int argc, VALUE *argv, VALUE self)
   ca_detach_n(4, cv, sc, cx, co);
 
   if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2FIX(0));
+    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
   }
   else {
     return out0;
@@ -713,7 +712,7 @@ rb_ca_differentiate (volatile VALUE self,
   volatile VALUE out0, out;
   CArray *ca, *cv, *sc, *cx, *co0, *co;
   double *px, *po;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -769,7 +768,7 @@ rb_ca_differentiate (volatile VALUE self,
   ca_detach_n(4, cv, sc, cx, co);
 
   if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2FIX(0));
+    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
   }
   else {
     return out0;

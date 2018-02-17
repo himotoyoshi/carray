@@ -45,7 +45,7 @@ ca_check_rank (void *ap, int rank)
 }
 
 void
-ca_check_shape (void *ap, int rank, int32_t *dim)
+ca_check_shape (void *ap, int rank, ca_size_t *dim)
 {
   CArray *ca = (CArray *) ap;
   int i;
@@ -110,7 +110,7 @@ ca_check_same_shape (void *ap1, void *ap2)
 }
 
 void
-ca_check_index (void *ap, int32_t *idx)
+ca_check_index (void *ap, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
   int i;
@@ -154,10 +154,10 @@ ca_has_same_shape (void *ap1, void *ap2)
 }
 
 int
-ca_is_valid_index (void *ap, int32_t *idx)
+ca_is_valid_index (void *ap, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
-  int32_t i;
+  int8_t i;
   for (i=0; i<ca->rank; i++) {
     if ( idx[i] < 0 || idx[i] >= ca->dim[i] ) {
       return 0;
@@ -231,7 +231,7 @@ static VALUE
 rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  int32_t idx;
+  ca_size_t idx;
   int i;
 
   Data_Get_Struct(self, CArray, ca);
@@ -241,7 +241,7 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
              "invalid # of arguments (%i for %i)", argc, ca->rank);
   }
   for (i=0; i<ca->rank; i++) {
-    idx = NUM2INT(argv[i]);
+    idx = NUM2SIZE(argv[i]);
     if ( idx < 0 ) {
       idx += ca->dim[i];
     }
@@ -264,10 +264,10 @@ static VALUE
 rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 {
   CArray *ca;
-  int32_t addr;
+  ca_size_t addr;
 
   Data_Get_Struct(self, CArray, ca);
-  addr = NUM2LONG(raddr);
+  addr = NUM2SIZE(raddr);
   if ( addr < 0 ) {
     addr += ca->elements;
   }
@@ -363,8 +363,8 @@ ca_equal (void *ap, void *bp)
   int flag = 1;
   int masked_a, masked_b;
   boolean8_t *ma, *mb;
-  int32_t i;
-  int32_t bytes;
+  ca_size_t i;
+  ca_size_t bytes;
   char *pa;
   char *pb;
   ca_eql_func eql;
@@ -497,9 +497,9 @@ rb_ca_equal (VALUE self, VALUE other)
  */
 
 int32_t
-ca_mem_hash (char *mp, int32_t mlen)
+ca_mem_hash (char *mp, ca_size_t mlen)
 {
-  register int32_t len = mlen;
+  register ca_size_t len = mlen;
   register char   *p   = mp;
   register int32_t key = 0;
   while (len--) {
@@ -509,13 +509,13 @@ ca_mem_hash (char *mp, int32_t mlen)
   return key;
 }
 
-static long
+static int32_t
 ca_hash (CArray *ca)
 {
-  long hash;
+  int32_t hash;
 
   if ( ca_is_any_masked(ca) ) {
-    int32_t bytes = ca->bytes;
+    ca_size_t bytes = ca->bytes;
     boolean8_t *m = (boolean8_t*) ca->mask->ptr;
     /* char *tptr = ALLOC_N(char, ca_length(ca)); */
     char *tptr = malloc_with_check(ca_length(ca));
@@ -556,7 +556,7 @@ VALUE
 rb_ca_hash (VALUE self)
 {
   CArray *ca;
-  long hash;
+  int32_t hash;
 
   Data_Get_Struct(self, CArray, ca);
   hash = ca_hash(ca);

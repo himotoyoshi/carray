@@ -9,7 +9,7 @@ class TestCArrayOrder < Test::Unit::TestCase
     # ---
     a = CArray.int(3,3).seq!
     c = (a % 2).eq(0)
-    assert_equal(a[c], c.where)
+    assert_equal(a[c], c.where.int)
   end
 
   def test_index
@@ -66,14 +66,14 @@ class TestCArrayOrder < Test::Unit::TestCase
                   [0,1,2],
                   [8,7,6]])
     # ---
-    assert_equal(CA_INT32([[3,4,5],
+    assert_equal(CA_SIZE([[3,4,5],
                            [2,1,0],
                            [8,7,6]]), a.sort_addr)
     assert_equal(CA_INT32([[5,4,3],
                            [0,1,2],
                            [8,7,6]]), a.order)
     # ---
-    assert_equal(CA_INT32([[6,7,8],
+    assert_equal(CA_SIZE([[6,7,8],
                            [0,1,2],
                            [5,4,3]]), a.sort_addr.reverse)
     assert_equal(CA_INT32([[3,4,5],

@@ -179,6 +179,7 @@ typedef int8_t boolean8_t;
    typedef dummy_t  cmplx256_t;
 #endif
 
+
 #include <stddef.h>
 
 #define CA_ALIGN_VOIDP    offsetof(struct { char c; void   *x; }, x)
@@ -198,7 +199,6 @@ typedef int8_t boolean8_t;
 
 #define CA_OBJ_TYPE_MAX  256
 #define CA_RANK_MAX      16
-#define CA_LENGTH_MAX    0x7fffffff
 #define CA_ATTACH_MAX    0x80000000
 
 #define CA_FLAG_SCALAR           1
@@ -272,17 +272,34 @@ enum {
 
 /* -------------------------------------------------------------------- */
 
+#ifdef HAVE_TYPE_INT64_T
+   typedef int64_t ca_size_t;
+   #define CA_SIZE CA_INT64
+   #define NUM2SIZE(x) NUM2LL(x)
+   #define SIZE2NUM(x) LL2NUM(x)
+   #define CA_LENGTH_MAX    0x7fffffffffffffff
+#else
+   typedef int32_t ca_size_t;
+   #define CA_SIZE CA_INT32
+   #define NUM2SIZE(x) NUM2LONG(x)
+   #define SIZE2NUM(x) LONG2NUM(x)
+   #define CA_LENGTH_MAX    0x7fffffff 
+#endif
+
+/* -------------------------------------------------------------------- */
+
+
 typedef struct {
   int32_t obj_type;
   int32_t entity_type;
   void   (*free_object)  (void *ap);
   void * (*clone)        (void *ap);
-  char * (*ptr_at_addr)  (void *ap, int32_t addr);
-  char * (*ptr_at_index) (void *ap, int32_t *idx);
-  void   (*fetch_addr)   (void *ap, int32_t addr, void *data);
-  void   (*fetch_index)  (void *ap, int32_t *idx, void *data);
-  void   (*store_addr)   (void *ap, int32_t addr, void *data);
-  void   (*store_index)  (void *ap, int32_t *idx, void *data);
+  char * (*ptr_at_addr)  (void *ap, ca_size_t addr);
+  char * (*ptr_at_index) (void *ap, ca_size_t *idx);
+  void   (*fetch_addr)   (void *ap, ca_size_t addr, void *data);
+  void   (*fetch_index)  (void *ap, ca_size_t *idx, void *data);
+  void   (*store_addr)   (void *ap, ca_size_t addr, void *data);
+  void   (*store_index)  (void *ap, ca_size_t *idx, void *data);
   void   (*allocate)     (void *ap);
   void   (*attach)       (void *ap);
   void   (*sync)         (void *ap);
@@ -296,12 +313,12 @@ typedef struct {
 /* default operation_function */
 
 void * ca_array_func_clone        (void *ap);
-char * ca_array_func_ptr_at_addr  (void *ap, int32_t addr);
-char * ca_array_func_ptr_at_index (void *ap, int32_t *idx);
-void   ca_array_func_fetch_addr   (void *ap, int32_t addr, void *ptr);
-void   ca_array_func_fetch_index  (void *ap, int32_t *idx, void *ptr);
-void   ca_array_func_store_addr   (void *ap, int32_t addr, void *ptr);
-void   ca_array_func_store_index  (void *ap, int32_t *idx, void *ptr);
+char * ca_array_func_ptr_at_addr  (void *ap, ca_size_t addr);
+char * ca_array_func_ptr_at_index (void *ap, ca_size_t *idx);
+void   ca_array_func_fetch_addr   (void *ap, ca_size_t addr, void *ptr);
+void   ca_array_func_fetch_index  (void *ap, ca_size_t *idx, void *ptr);
+void   ca_array_func_store_addr   (void *ap, ca_size_t addr, void *ptr);
+void   ca_array_func_store_index  (void *ap, ca_size_t *idx, void *ptr);
 void   ca_array_func_allocate     (void *ap);
 void   ca_array_func_attach       (void *ap);
 void   ca_array_func_sync         (void *ap);
@@ -322,9 +339,9 @@ struct _CArray {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
 };                         /* 28 + 4*rank (bytes) */
@@ -336,12 +353,12 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
-  int32_t  _dim;
+  ca_size_t  _dim;
 } CScalar;                 /* 32 (bytes) */
 
 typedef struct {
@@ -349,9 +366,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -364,9 +381,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -377,8 +394,8 @@ typedef struct {
                          /* 1  : deformed */
                          /* -2 : divided */
                          /* 2  : spanned  */
-  int32_t   ratio;
-  int32_t   offset;
+  ca_size_t   ratio;
+  ca_size_t   offset;
   CArray   *mask0;
 } CARefer;                 /* 52 + 4*(rank) (bytes) */
 
@@ -387,9 +404,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -397,13 +414,13 @@ typedef struct {
   uint8_t   nosync;
   /* ---------- */
   int8_t    maxdim_index;
-  int32_t   maxdim_step;
-  int32_t   maxdim_step0;
-  int32_t   offset;
-  int32_t  *start;
-  int32_t  *step;
-  int32_t  *count;
-  int32_t  *size0;
+  ca_size_t   maxdim_step;
+  ca_size_t   maxdim_step0;
+  ca_size_t   offset;
+  ca_size_t  *start;
+  ca_size_t  *step;
+  ca_size_t  *count;
+  ca_size_t  *size0;
 } CABlock;                 /* 68 + 20*(rank) (bytes) */
 
 typedef struct {
@@ -411,9 +428,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -421,9 +438,9 @@ typedef struct {
   uint8_t   nosync;
   /* ---------- */
   uint8_t   bounds;
-  int32_t  *start;
-  int32_t  *count;
-  int32_t  *size0;
+  ca_size_t  *start;
+  ca_size_t  *count;
+  ca_size_t  *size0;
   char     *fill;
 } CAWindow;                /* 56 + 16*(rank) + 1*(bytes) (bytes) */
 
@@ -432,9 +449,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -455,9 +472,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   /* -------------*/
@@ -469,20 +486,20 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t  *count;
-  int32_t   repeat_level;
-  int32_t   repeat_num;
-  int32_t   contig_level;
-  int32_t   contig_num;
+  ca_size_t  *count;
+  ca_size_t   repeat_level;
+  ca_size_t   repeat_num;
+  ca_size_t   contig_level;
+  ca_size_t   contig_num;
 } CARepeat;                /* 60 + 8*(rank) (bytes) */
 
 typedef struct {
@@ -490,9 +507,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -500,12 +517,12 @@ typedef struct {
   uint8_t   nosync;
   /* -------------*/
   int8_t    rep_rank;
-  int32_t  *rep_dim;
+  ca_size_t  *rep_dim;
 } CAUnboundRepeat;         /* 44 + 8*(rank) (bytes) */
 
 /* 
    CAReduce is an internal class 
-   used only in reference as data_type with different byte size
+   used only in ca_obj_refer.c.
 */
 
 typedef struct {
@@ -513,29 +530,29 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* ---- */
-  int32_t   count;
-  int32_t   offset;
+  ca_size_t   count;
+  ca_size_t   offset;
 } CAReduce;
 
 /* -------------------------------------------------------------------- */
 
 typedef struct {
   int8_t  rank;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
-  CArray * (*kernel_at_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_at_index)(void *, int32_t *, CArray *);
-  CArray * (*kernel_move_to_addr)(void *, int32_t, CArray *);
-  CArray * (*kernel_move_to_index)(void *, int32_t *, CArray *);
+  CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_at_index)(void *, ca_size_t *, CArray *);
+  CArray * (*kernel_move_to_addr)(void *, ca_size_t, CArray *);
+  CArray * (*kernel_move_to_index)(void *, ca_size_t *, CArray *);
 } CAIterator;
 
 /* -------------------------------------------------------------------- */
@@ -597,7 +614,7 @@ extern int ca_obj_num;
 
 #define CA_CHECK_DIM(rank, dim)     \
   { \
-    int32_t i_; \
+    int8_t i_; \
     for (i_=0; i_<rank; i_++) { \
       if ( dim[i_] < 0 ) { \
         rb_raise(rb_eRuntimeError, "negative size dimension at %i-dim", i_);  \
@@ -623,12 +640,12 @@ extern int ca_obj_num;
     index += (dim);     \
   } \
   if ( index < 0 || index >= (dim) ) { \
-    rb_raise(rb_eIndexError, "index out of range ( %i <=> 0..%i )", index, dim-1); \
+    rb_raise(rb_eIndexError, "index out of range ( %lld <=> 0..%lld )", (ca_size_t) index, (ca_size_t) dim-1); \
   }
 
 #define CA_CHECK_BOUND(ca, idx) \
   { \
-    int32_t i; \
+    int8_t i; \
     for (i=0; i<ca->rank; i++) { \
       if ( idx[i] < 0 || idx[i] >= ca->dim[i] )  { \
         rb_raise(rb_eRuntimeError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
@@ -663,12 +680,12 @@ boolean8_t OBJ2BOOL (VALUE v);
 
 unsigned long rb_obj2ulong (VALUE);
 long          rb_obj2long (VALUE);
-#define   OBJ2LONG(x) (FIXNUM_P(x)?FIX2LONG(x):rb_obj2long((VALUE)x))
+#define   OBJ2LONG(x)  rb_obj2long((VALUE)x)
 #define   OBJ2ULONG(x) rb_obj2ulong((VALUE)x)
 
 long long          rb_obj2ll (VALUE);
 unsigned long long rb_obj2ull (VALUE);
-#define   OBJ2LL(x) (FIXNUM_P(x)?FIX2LONG(x):rb_obj2ll((VALUE)x))
+#define   OBJ2LL(x)  rb_obj2ll((VALUE)x)
 #define   OBJ2ULL(x) rb_obj2ull((VALUE)x)
 
 double    OBJ2DBL (VALUE v);
@@ -704,11 +721,11 @@ enum {
 }; /* CA_INDEX_TYPE */
 
 typedef union {
-  int32_t scalar;
+  ca_size_t scalar;
   struct {
-    int32_t start;
-    int32_t step;
-    int32_t count;
+    ca_size_t start;
+    ca_size_t step;
+    ca_size_t count;
   } block;
   struct {
     ID id;
@@ -728,10 +745,20 @@ typedef struct {
 
 /* -------------------------------------------------------------------- */
 
-typedef void (*ca_monop_func_t)();
-typedef void (*ca_binop_func_t)();
-typedef void (*ca_moncmp_func_t)();
-typedef void (*ca_bincmp_func_t)();
+typedef void (*ca_monop_func_t)(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2);
+typedef void (*ca_binop_func_t)(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2, 
+                                char *ptr3, ca_size_t i3);
+typedef void (*ca_moncmp_func_t)(ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t i1, 
+                                 boolean8_t *ptr2, ca_size_t i2);
+typedef void (*ca_bincmp_func_t)(ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t b1, ca_size_t i1, 
+                                 char *ptr2, ca_size_t b2, ca_size_t i2, 
+                                 char *ptr3, ca_size_t b3, ca_size_t i3);
 
 VALUE rb_ca_call_monop (VALUE self, ca_monop_func_t func[]);
 VALUE rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[]);
@@ -739,10 +766,10 @@ VALUE rb_ca_call_binop (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[]);
 VALUE rb_ca_call_bincmp (VALUE self, VALUE other, ca_bincmp_func_t func[]);
-void  ca_monop_not_implement(int32_t n, char *ptr1, char *ptr2);
-void  ca_binop_not_implement(int32_t n, char *ptr1, char *ptr2, char *ptr3);
-void  ca_moncmp_not_implement(int32_t n, char *ptr1, char *ptr2);
-void  ca_bincmp_not_implement(int32_t n, char *ptr1, char *ptr2, char *ptr3);
+void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2);
+void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
+void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2);
+void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
 VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 
 /* -------------------------------------------------------------------- */
@@ -750,50 +777,50 @@ VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 /* --- ca_obj_array.c --- */
 
 int  carray_setup (CArray *ca,
-                   int8_t data_type, int8_t rank, int32_t *dim, 
-                   int32_t bytes, CArray *mask);
+                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   ca_size_t bytes, CArray *mask);
 
 int  carray_safe_setup (CArray *ca,
-                   int8_t data_type, int8_t rank, int32_t *dim, 
-                   int32_t bytes, CArray *mask);
+                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   ca_size_t bytes, CArray *mask);
 
 int  ca_wrap_setup_null (CArray *ca,
-                   int8_t data_type, int8_t rank, int32_t *dim, 
-                   int32_t bytes, CArray *mask);
+                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   ca_size_t bytes, CArray *mask);
 
 void free_carray (void *ap);
 void free_ca_wrap (void *ap);
 
 CArray  *carray_new (int8_t data_type,
-                     int8_t rank, int32_t *dim, int32_t bytes, CArray *ma);
+                     int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *ma);
 CArray  *carray_new_safe (int8_t data_type,
-                          int8_t rank, int32_t *dim, int32_t bytes, CArray *mask);
+                          int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 VALUE    rb_carray_new (int8_t data_type,
-                        int8_t rank, int32_t *dim, int32_t bytes, CArray *mask);
+                        int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 VALUE    rb_carray_new_safe (int8_t data_type,
-                             int8_t rank, int32_t *dim, int32_t bytes, CArray *mask);
+                             int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 
 CAWrap  *ca_wrap_new (int8_t data_type,
-                      int8_t rank, int32_t *dim, int32_t bytes,
+                      int8_t rank, ca_size_t *dim, ca_size_t bytes,
                       CArray *mask, char *ptr);
 
 CAWrap  *ca_wrap_new_null (int8_t data_type,
-                          int8_t rank, int32_t *dim, int32_t bytes,
+                          int8_t rank, ca_size_t *dim, ca_size_t bytes,
                           CArray *mask);
 
-CScalar *cscalar_new (int8_t data_type, int32_t bytes, CArray *ma);
-CScalar *cscalar_new2 (int8_t data_type, int32_t bytes, char *val);
-VALUE    rb_cscalar_new (int8_t data_type, int32_t bytes, CArray *mask);
-VALUE    rb_cscalar_new_with_value (int8_t data_type, int32_t bytes, VALUE rval);
+CScalar *cscalar_new (int8_t data_type, ca_size_t bytes, CArray *ma);
+CScalar *cscalar_new2 (int8_t data_type, ca_size_t bytes, char *val);
+VALUE    rb_cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask);
+VALUE    rb_cscalar_new_with_value (int8_t data_type, ca_size_t bytes, VALUE rval);
 
 /* --- ca_obj_refer.c --- */
 
 CARefer *ca_refer_new (CArray *ca,
-                       int8_t data_type, int8_t rank, int32_t *dim,
-                       int32_t bytes, int32_t offset);
+                       int8_t data_type, int8_t rank, ca_size_t *dim,
+                       ca_size_t bytes, ca_size_t offset);
 VALUE    rb_ca_refer_new (VALUE self,
-                       int8_t data_type, int8_t rank, int32_t *dim,
-                       int32_t bytes, int32_t offset);
+                       int8_t data_type, int8_t rank, ca_size_t *dim,
+                       ca_size_t bytes, ca_size_t offset);
 
 /* --- ca_obj_farray.c --- */
 
@@ -802,12 +829,12 @@ VALUE    rb_ca_farray (VALUE self);
 /* --- ca_obj_block.c --- */
 
 CABlock *ca_block_new (CArray *carray,
-                       int8_t rank, int32_t *dim,
-                       int32_t *start, int32_t *step, int32_t *count,
-                       int32_t offset);
-VALUE    rb_ca_block_new (VALUE cary, int8_t rank, int32_t *dim,
-                       int32_t *start, int32_t *step, int32_t *count,
-                       int32_t offset);
+                       int8_t rank, ca_size_t *dim,
+                       ca_size_t *start, ca_size_t *step, ca_size_t *count,
+                       ca_size_t offset);
+VALUE    rb_ca_block_new (VALUE cary, int8_t rank, ca_size_t *dim,
+                       ca_size_t *start, ca_size_t *step, ca_size_t *count,
+                       ca_size_t offset);
 
 /* --- ca_obj_select.c --- */
 
@@ -816,7 +843,7 @@ VALUE    rb_ca_select_new_share (VALUE cary, VALUE select);
 
 /* --- ca_obj_grid.c --- */
 
-VALUE   rb_ca_grid_new (VALUE cary, int32_t *dim, CArray **grid);
+VALUE   rb_ca_grid_new (VALUE cary, ca_size_t *dim, CArray **grid);
 VALUE   rb_ca_grid (int argc, VALUE *argv, VALUE self);
 
 /* --- ca_obj_mapping.c --- */
@@ -827,27 +854,27 @@ VALUE   rb_ca_mapping (int argc, VALUE *argv, VALUE self);
 /* --- ca_obj_field.c --- */
 
 VALUE   rb_ca_field_new (VALUE cary,
-                        int32_t offset, int8_t data_type, int32_t bytes);
+                        ca_size_t offset, int8_t data_type, ca_size_t bytes);
 VALUE   rb_ca_field (int argc, VALUE *argv, VALUE self);
 
 /* --- ca_obj_fake.c --- */
 
-VALUE   rb_ca_fake_new (VALUE cary, int8_t data_type, int32_t bytes);
+VALUE   rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes);
 VALUE   rb_ca_fake_type (VALUE self, VALUE rtype, VALUE rbytes);
 
 /* --- ca_obj_repeat.c --- */
 
-CARepeat *ca_repeat_new (CArray *carray, int8_t rank, int32_t *count);
+CARepeat *ca_repeat_new (CArray *carray, int8_t rank, ca_size_t *count);
 
-VALUE   rb_ca_repeat_new (VALUE cary, int8_t rank, int32_t *count);
+VALUE   rb_ca_repeat_new (VALUE cary, int8_t rank, ca_size_t *count);
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
-VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_rank, int32_t *rep_dim);
+VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_rank, ca_size_t *rep_dim);
 VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
 /* --- ca_obj_reduce.c --- */
 
-CAReduce *ca_reduce_new (CArray *carray, int32_t count, int32_t offset);
+CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 
 /* --- ca_iter_dimension --- */
 
@@ -895,14 +922,14 @@ int     ca_is_object_type (void *ap);
 void    ca_check_type (void *ap, int8_t data_type);
 #define ca_check_data_type(ap, data_type) ca_check_type(ap, data_type)
 void    ca_check_rank (void *ap, int rank);
-void    ca_check_shape (void *ap, int rank, int32_t *dim);
+void    ca_check_shape (void *ap, int rank, ca_size_t *dim);
 void    ca_check_same_data_type (void *ap1, void *ap2);
 void    ca_check_same_rank (void *ap1, void *ap2);
 void    ca_check_same_elements (void *ap1, void *ap2);
 void    ca_check_same_shape (void *ap1, void *ap2);
-void    ca_check_index (void *ap, int32_t *idx);
+void    ca_check_index (void *ap, ca_size_t *idx);
 void    ca_check_data_class (VALUE rtype);
-int     ca_is_valid_index (void *ap, int32_t *idx);
+int     ca_is_valid_index (void *ap, ca_size_t *idx);
 
 /* API : allocate, attach, update, sync, detach */
 
@@ -924,25 +951,25 @@ void   *ca_clone (void *ap);          /* use rb_obj_clone() */
 CArray *ca_copy (void *ap);           /* use rb_ca_copy() */
 CArray *ca_template (void *ap);       /* use rb_ca_template() */
 CArray *ca_template_safe (void *ap);  /* use rb_ca_template() */
-CArray *ca_template_safe2 (void *ap, int8_t data_type, int32_t bytes);
+CArray *ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes);
                                       /* use rb_ca_template() */
 
-void    ca_paste (void *ap, int32_t *idx, void *sp);
-void    ca_cut (void *ap, int32_t *offset, void *sp);
+void    ca_paste (void *ap, ca_size_t *idx, void *sp);
+void    ca_cut (void *ap, ca_size_t *offset, void *sp);
 void    ca_fill (void *ap, void *ptr);
 
 /* API : fetch, store */
 
-void    ca_addr2index (void *ap, int32_t addr, int32_t *idx);
-int32_t ca_index2addr (void *ap, int32_t *idx);
+void    ca_addr2index (void *ap, ca_size_t addr, ca_size_t *idx);
+ca_size_t ca_index2addr (void *ap, ca_size_t *idx);
 
-void   *ca_ptr_at_index (void *ap, int32_t *idx);
-void   *ca_ptr_at_addr (void *ap, int32_t addr);
+void   *ca_ptr_at_index (void *ap, ca_size_t *idx);
+void   *ca_ptr_at_addr (void *ap, ca_size_t addr);
 
-void    ca_fetch_index (void *ap, int32_t *idx, void *ptr);
-void    ca_fetch_addr (void *ap, int32_t addr, void *ptr);
-void    ca_store_index (void *ap, int32_t *idx, void *ptr);
-void    ca_store_addr (void *ap, int32_t addr, void *ptr);
+void    ca_fetch_index (void *ap, ca_size_t *idx, void *ptr);
+void    ca_fetch_addr (void *ap, ca_size_t addr, void *ptr);
+void    ca_store_index (void *ap, ca_size_t *idx, void *ptr);
+void    ca_store_addr (void *ap, ca_size_t addr, void *ptr);
 
 void    ca_copy_data (void *ap, char *ptr);
 void    ca_sync_data (void *ap, char *ptr);
@@ -962,21 +989,21 @@ void    ca_create_mask (void *ap);
 void    ca_clear_mask (void *ap);
 void    ca_setup_mask (void *ap, CArray *mask);
 void    ca_copy_mask (void *ap, void *ao);
-void    ca_copy_mask_overlay_n (void *ap, int32_t elements, int n, CArray **slist);
-void    ca_copy_mask_overlay (void *ap, int32_t elements, int n, ...);
-void    ca_copy_mask_overwrite_n (void *ap, int32_t elements, int n, CArray **slist);
-void    ca_copy_mask_overwrite (void *ap, int32_t elements, int n, ...);
-int32_t ca_count_masked (void *ap);
-int32_t ca_count_not_masked (void *ap);
+void    ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist);
+void    ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...);
+void    ca_copy_mask_overwrite_n (void *ap, ca_size_t elements, int n, CArray **slist);
+void    ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...);
+ca_size_t ca_count_masked (void *ap);
+ca_size_t ca_count_not_masked (void *ap);
 void    ca_unmask (void *ap, char *fill_value);
 CArray *ca_unmasked_copy (void *ap, char *fill_value);
 
 /* API : cast, conversion */
 
-typedef void (*ca_cast_func_t)(int32_t, CArray *, void *, CArray *, void *, boolean8_t *);
+typedef void (*ca_cast_func_t)(ca_size_t, CArray *, void *, CArray *, void *, boolean8_t *);
 extern  ca_cast_func_t ca_cast_func_table[CA_NTYPE][CA_NTYPE];
-void    ca_cast_block(int32_t n, void *a1, void *ptr1, void *a2, void *ptr2);
-void    ca_cast_block_with_mask (int32_t n, void *ap1, void *ptr1,
+void    ca_cast_block(ca_size_t n, void *a1, void *ptr1, void *a2, void *ptr2);
+void    ca_cast_block_with_mask (ca_size_t n, void *ap1, void *ptr1,
                                  void *ap2, void *ptr2, boolean8_t *m);
 void    ca_ptr2ptr   (void *ca1, void *ptr1, void *ca2, void *ptr2);
 void    ca_ptr2val (void *ap1, void *ptr1, int8_t data_type2, void *ptr2);
@@ -986,7 +1013,7 @@ VALUE   ca_ptr2obj (void *ap, void *ptr);            /* use rb_ca_ptr2obj() */
 void    ca_obj2ptr (void *ap, VALUE obj, void *ptr); /* use rb_ca_ptr2obj() */
 
 void    ca_block_from_carray(CArray *cs,
-                    int32_t *start, int32_t *step, int32_t *count, CArray *ca);
+                    ca_size_t *start, ca_size_t *step, ca_size_t *count, CArray *ca);
 
 #define ca_wrap_writable(obj, data_type) \
   (obj = rb_ca_wrap_writable(obj, INT2NUM(data_type)), (CArray*) DATA_PTR(obj))
@@ -994,7 +1021,7 @@ void    ca_block_from_carray(CArray *cs,
   (obj = rb_ca_wrap_readonly(obj, INT2NUM(data_type)), (CArray*) DATA_PTR(obj))
 
 VALUE   rb_carray_wrap_ptr (int8_t data_type,
-                            int8_t rank, int32_t *dim, int32_t bytes,
+                            int8_t rank, ca_size_t *dim, ca_size_t bytes,
                             CArray *mask, char *ptr, VALUE refer);
 
 void * ca_to_cptr (void *ap);
@@ -1004,19 +1031,19 @@ void * ca_to_cptr (void *ap);
 boolean8_t *ca_allocate_mask_iterator (int n, ...);
 boolean8_t *ca_allocate_mask_iterator_n (int n, CArray **slist);
 
-int32_t ca_get_loop_count (int n, ...);
-int32_t ca_set_iterator (int n, ...);
+ca_size_t ca_get_loop_count (int n, ...);
+ca_size_t ca_set_iterator (int n, ...);
 
-void    ca_swap_bytes (char *p, int32_t bytes, int32_t elements);
-void    ca_parse_range (VALUE vrange, int size,
-                        int *offset, int *count, int *step);
-void    ca_parse_range_without_check (VALUE arg, int size,
-                        int *offset, int *count, int *step);
+void    ca_swap_bytes (char *p, ca_size_t bytes, ca_size_t elements);
+void    ca_parse_range (VALUE vrange, ca_size_t size,
+                        ca_size_t *offset, ca_size_t *count, ca_size_t *step);
+void    ca_parse_range_without_check (VALUE arg, ca_size_t size,
+                        ca_size_t *offset, ca_size_t *count, ca_size_t *step);
 
 int     ca_equal (void *ap, void *bp);
 void    ca_zerodiv(void);
 int32_t ca_rand (double rmax);
-int32_t ca_bounds_normalize_index (int8_t bounds, int32_t size0, int32_t k);
+ca_size_t ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k);
 
 /* API : high level */
 
@@ -1036,12 +1063,12 @@ VALUE   ca_wrap_struct (void *ap);
 /* query data_type */
 int8_t  rb_ca_guess_type (VALUE obj);
 void    rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
-                                    int8_t *data_type, int32_t *bytes);
+                                    int8_t *data_type, ca_size_t *bytes);
 int     rb_ca_is_type (VALUE arg, int type);
 
 /* scan index */ 
-void    rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t elements,
-                          int argc, VALUE *argv, CAIndexInfo *info);
+void    rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t elements,
+                          long argc, VALUE *argv, CAIndexInfo *info);
 
 /* cast */
 void    rb_ca_cast_self (volatile VALUE *self);
@@ -1141,15 +1168,15 @@ VALUE   rb_ca_addr2index (VALUE self, VALUE raddr);
 /* elemental access like ca[i,j,k] or ca[addr] */
 VALUE   rb_ca_ptr2obj (VALUE self, void *ptr);
 #define rb_ca_fetch_ptr(self, ptr) rb_ca_ptr2obj(self, ptr)
-VALUE   rb_ca_fetch_index (VALUE self, int32_t *idx);
-VALUE   rb_ca_fetch_addr (VALUE self, int32_t addr);
+VALUE   rb_ca_fetch_index (VALUE self, ca_size_t *idx);
+VALUE   rb_ca_fetch_addr (VALUE self, ca_size_t addr);
 VALUE   rb_ca_fetch (VALUE self, VALUE index);
 VALUE   rb_ca_fetch2 (VALUE self, int n, VALUE *vindex);
 
 VALUE   rb_ca_obj2ptr (VALUE self, VALUE val, void *ptr);
 #define rb_ca_store_ptr(self, ptr, val) rb_ca_obj2ptr(self, val, ptr)
-VALUE   rb_ca_store_index (VALUE self, int32_t *idx, VALUE val);
-VALUE   rb_ca_store_addr (VALUE self, int32_t addr, VALUE val);
+VALUE   rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE val);
+VALUE   rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE val);
 VALUE   rb_ca_store (VALUE self, VALUE index, VALUE val);
 VALUE   rb_ca_store2 (VALUE self, int n, VALUE *vindex, VALUE val);
 VALUE   rb_ca_store_all (VALUE self, VALUE val);
@@ -1166,7 +1193,7 @@ VALUE   rb_ca_elem_test_masked (VALUE self, VALUE vidx1);
 /* data type conversion */
 VALUE   rb_ca_ptr2ptr (VALUE ra1, void *ptr1, VALUE ra2, void *ptr2);
 #define rb_ca_cast_ptr (VALUE ra1, void *ptr1, VALUE ra2, void *ptr2);
-VALUE   rb_ca_cast_block (int32_t n, VALUE ra1, void *ptr1,
+VALUE   rb_ca_cast_block (ca_size_t n, VALUE ra1, void *ptr1,
                           VALUE ra2, void *ptr2);
 
 VALUE   rb_ca_to_type (VALUE self, VALUE rtype, VALUE rbytes);

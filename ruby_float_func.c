@@ -77,7 +77,12 @@ Init_numeric_float_function ()
   rb_define_method(mod, "distance", rb_num_distance, 1);    
 
   rb_include_module(rb_cFloat, mod);
+#if RUBY_VERSION_CODE >= 240
+  rb_include_module(rb_cInteger, mod);
+#else
   rb_include_module(rb_cFixnum, mod);
   rb_include_module(rb_cBignum, mod);  
+#endif
+
 }
 

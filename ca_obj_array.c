@@ -15,8 +15,6 @@
 #include "rubysig.h"
 #endif
 
-
-
 /* ------------------------------------------------------------------- */
 
 VALUE rb_cCArray, rb_cCAWrap, rb_cCScalar, rb_cCAVirtual;
@@ -119,12 +117,13 @@ rb_ca_reset_gc_interval (VALUE self)
 
 static int
 carray_setup_i (CArray *ca,
-                int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+                int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                 CArray *mask, int allocate, int use_calloc)
 {
-  int32_t elements;
+  ca_size_t elements;
   double  length;
-  int32_t i;
+  int8_t i;
+  ca_size_t k;
 
   /* check arguments */
   CA_CHECK_DATA_TYPE(data_type);
@@ -157,8 +156,8 @@ carray_setup_i (CArray *ca,
   ca->rank      = rank;
   ca->bytes     = bytes;
   ca->elements  = elements;
-  ca->dim       = ALLOC_N(int32_t, rank);
-  memcpy(ca->dim, dim, rank*sizeof(int32_t));
+  ca->dim       = ALLOC_N(ca_size_t, rank);
+  memcpy(ca->dim, dim, rank*sizeof(ca_size_t));
 
   if ( allocate ) {                                      /* allocate == true */
 
@@ -178,9 +177,9 @@ carray_setup_i (CArray *ca,
 
     /* initialize elements with Qnil for CA_OBJECT data_type */
     if ( allocate && data_type == CA_OBJECT ) {
-      volatile VALUE zero = INT2FIX(0);
+      volatile VALUE zero = SIZE2NUM(0);
       VALUE *p = (VALUE *) ca->ptr;
-      for (i=0; i<elements; i++) {
+      for (k=0; k<elements; k++) {
         *p++ = zero;
       }
     }
@@ -202,21 +201,21 @@ carray_setup_i (CArray *ca,
 
 int
 carray_setup (CArray *ca,
-  int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes, CArray *mask)
+  int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask)
 {
   return carray_setup_i(ca, data_type, rank, dim, bytes, mask, 1, 0);
 }
 
 int
 carray_safe_setup (CArray *ca,
-  int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes, CArray *mask)
+  int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask)
 {
   return carray_setup_i(ca, data_type, rank, dim, bytes, mask, 1, 1);
 }
 
 int
 ca_wrap_setup (CArray *ca,
-               int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+               int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                CArray *mask, char *ptr)
 {
   int ret;
@@ -231,7 +230,7 @@ ca_wrap_setup (CArray *ca,
 
 int
 ca_wrap_setup_null (CArray *ca,
-                    int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+                    int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                     CArray *mask)
 {
   int ret;
@@ -242,7 +241,7 @@ ca_wrap_setup_null (CArray *ca,
 }
 
 CArray *
-carray_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+carray_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca  = ALLOC(CArray);
@@ -251,7 +250,7 @@ carray_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
 }
 
 CArray *
-carray_new_safe (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+carray_new_safe (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca  = ALLOC(CArray);
@@ -260,7 +259,7 @@ carray_new_safe (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
 }
 
 CAWrap *
-ca_wrap_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+ca_wrap_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
             CArray *mask, char *ptr)
 {
   CAWrap *ca  = ALLOC(CAWrap);
@@ -269,7 +268,7 @@ ca_wrap_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
 }
 
 CAWrap *
-ca_wrap_new_null (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+ca_wrap_new_null (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                   CArray *mask)
 {
   CAWrap *ca  = ALLOC(CAWrap);
@@ -306,7 +305,7 @@ free_ca_wrap (void *ap)
 
 static int
 cscalar_setup (CScalar *ca,
-               int8_t data_type, int32_t bytes, CArray *mask)
+               int8_t data_type, ca_size_t bytes, CArray *mask)
 {
   CA_CHECK_DATA_TYPE(data_type);
   CA_CHECK_BYTES(data_type, bytes);
@@ -326,7 +325,7 @@ cscalar_setup (CScalar *ca,
   ca_mem_usage += (double)(ca->bytes);
 
   if ( data_type == CA_OBJECT ) {
-    *((VALUE*) ca->ptr) = INT2FIX(0);
+    *((VALUE*) ca->ptr) = SIZE2NUM(0);
   }
   else {
     MEMZERO(ca->ptr, char, ca->bytes);
@@ -346,7 +345,7 @@ cscalar_setup (CScalar *ca,
  */
 
 CScalar *
-cscalar_new (int8_t data_type, int32_t bytes, CArray *mask)
+cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
   CScalar *ca = ALLOC(CScalar);
   cscalar_setup(ca, data_type, bytes, mask);
@@ -358,7 +357,7 @@ cscalar_new (int8_t data_type, int32_t bytes, CArray *mask)
  */
 
 CScalar *
-cscalar_new2 (int8_t data_type, int32_t bytes, char *val)
+cscalar_new2 (int8_t data_type, ca_size_t bytes, char *val)
 {
   CScalar *ca = ALLOC(CScalar);
   cscalar_setup(ca, data_type, bytes, NULL);
@@ -395,18 +394,19 @@ ca_array_func_clone (void *ap)
 }
 
 char *
-ca_array_func_ptr_at_addr (void *ap, int32_t addr)
+ca_array_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CArray *ca = (CArray *) ap;
   return ca->ptr + ca->bytes * addr;
 }
 
 char *
-ca_array_func_ptr_at_index (void *ap, int32_t *idx)
+ca_array_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CArray  *ca  = (CArray *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t     i;
+  ca_size_t  n;
   n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[rank-1] */
   for (i=1; i<ca->rank; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[rank-1] */
     n = dim[i]*n+idx[i];       /*    ... + idx[rank-2]*dim[1] + idx[rank-1] */
@@ -415,18 +415,19 @@ ca_array_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 void
-ca_array_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_array_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CArray  *ca  = (CArray *) ap;
   memcpy(ptr, ca->ptr + ca->bytes * addr, ca->bytes);
 }
 
 void
-ca_array_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_array_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CArray  *ca  = (CArray *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t     i;
+  ca_size_t  n;
   n = idx[0];
   for (i=1; i<ca->rank; i++) {
     n = dim[i]*n+idx[i];
@@ -435,18 +436,19 @@ ca_array_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 void
-ca_array_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_array_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CArray  *ca  = (CArray *) ap;
   memcpy(ca->ptr + ca->bytes * addr, ptr, ca->bytes);
 }
 
 void
-ca_array_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_array_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CArray  *ca  = (CArray *) ap;
-  int32_t *dim = ca->dim;
-  int32_t  n, i;
+  ca_size_t *dim = ca->dim;
+  int8_t     i;
+  ca_size_t  n;
   n = idx[0];
   for (i=1; i<ca->rank; i++) {
     n = dim[i]*n+idx[i];
@@ -495,8 +497,8 @@ ca_array_func_sync_data (void *ap, void *ptr)
 
 #define proc_fill_bang_fixlen()                 \
   {                                             \
-    int32_t i;                                  \
-    int32_t bytes = ca->bytes;                  \
+    ca_size_t i;                                  \
+    ca_size_t bytes = ca->bytes;                  \
     char *p = ca->ptr;                          \
     for (i=ca->elements; i; i--, p+=bytes) {    \
       memcpy(p, val, bytes);                    \
@@ -505,7 +507,7 @@ ca_array_func_sync_data (void *ap, void *ptr)
 
 #define proc_fill_bang(type)                    \
   {                                             \
-    int32_t i;                                  \
+    ca_size_t i;                                  \
     type *p = (type *)ca->ptr;                  \
     type  v = *(type *)val;                     \
     for (i=ca->elements; i; i--, p++) {         \
@@ -604,14 +606,14 @@ ca_scalar_func_clone (void *ap)
 }
 
 char *
-ca_scalar_func_ptr_at_addr (void *ap, int32_t addr)
+ca_scalar_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CArray *ca = (CArray *) ap;
   return ca->ptr;
 }
 
 char *
-ca_scalar_func_ptr_at_index (void *ap, int32_t *idx)
+ca_scalar_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CArray  *ca  = (CArray *) ap;
   return ca->ptr;
@@ -652,7 +654,7 @@ ca_operation_function_t ca_scalar_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_carray_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+rb_carray_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                CArray *mask)
 {
   CArray *ca = carray_new(data_type, rank, dim, bytes, mask);
@@ -660,7 +662,7 @@ rb_carray_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
 }
 
 VALUE
-rb_carray_new_safe (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
+rb_carray_new_safe (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
                     CArray *mask)
 {
   CArray *ca = carray_new_safe(data_type, rank, dim, bytes, mask);
@@ -668,14 +670,14 @@ rb_carray_new_safe (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes,
 }
 
 VALUE
-rb_cscalar_new (int8_t data_type, int32_t bytes, CArray *mask)
+rb_cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
   CScalar *ca = cscalar_new(data_type, bytes, mask);
   return ca_wrap_struct(ca);
 }
 
 VALUE
-rb_cscalar_new_with_value (int8_t data_type, int32_t bytes, VALUE rval)
+rb_cscalar_new_with_value (int8_t data_type, ca_size_t bytes, VALUE rval)
 {
   volatile VALUE obj;
   obj = rb_cscalar_new(data_type, bytes, NULL);
@@ -719,11 +721,11 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   volatile VALUE rtype, rdim, ropt, rbytes = Qnil;
   CArray *ca;
   int8_t data_type, rank;
-  int32_t dim[CA_RANK_MAX];
-  int32_t bytes;
-  int32_t i;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t bytes;
+  int8_t i;
 
-  rb_scan_args(argc, argv, "21", &rtype, &rdim, &ropt);
+  rb_scan_args(argc, argv, "21", (VALUE *)&rtype, (VALUE *) &rdim, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -732,7 +734,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   Check_Type(rdim, T_ARRAY);
   rank = RARRAY_LEN(rdim);
   for (i=0; i<rank; i++) {
-    dim[i] = NUM2INT(rb_ary_entry(rdim, i));
+    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -836,11 +838,11 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, target, rtype, rdim, ropt, rbytes = Qnil;
   CArray *ca;
   int8_t data_type, rank;
-  int32_t dim[CA_RANK_MAX];
-  int32_t bytes;
-  int32_t i;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t bytes;
+  int8_t i;
 
-  rb_scan_args(argc, argv, "21", &rtype, &rdim, &ropt);
+  rb_scan_args(argc, argv, "21", (VALUE *) &rtype, (VALUE *) &rdim, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -848,7 +850,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   Check_Type(rdim, T_ARRAY);
   rank = RARRAY_LEN(rdim);
   for (i=0; i<rank; i++) {
-    dim[i] = NUM2INT(rb_ary_entry(rdim, i));
+    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
   target = rb_yield_values(0);
@@ -863,8 +865,8 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
 }
 
 VALUE
-rb_carray_wrap_ptr (int8_t data_type, int8_t rank, int32_t *dim,
-        int32_t bytes, CArray *mask, char *ptr, VALUE refer)
+rb_carray_wrap_ptr (int8_t data_type, int8_t rank, ca_size_t *dim,
+        ca_size_t bytes, CArray *mask, char *ptr, VALUE refer)
 {
   volatile VALUE obj;
   CArray *ca;
@@ -906,9 +908,9 @@ rb_cs_initialize (int argc, VALUE *argv, VALUE self)
   volatile VALUE rtype, ropt, rbytes = Qnil;
   CScalar *ca;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
 
-  rb_scan_args(argc, argv, "11", &rtype, &ropt);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);

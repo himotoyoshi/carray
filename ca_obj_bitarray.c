@@ -17,17 +17,17 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t   bytelen;
-  int32_t   bitlen;
+  ca_size_t   bytelen;
+  ca_size_t   bitlen;
 } CABitarray;
 
 static int8_t CA_OBJ_BITARRAY;
@@ -56,7 +56,7 @@ int
 ca_bitarray_setup (CABitarray *ca, CArray *parent)
 {
   int8_t rank;
-  int32_t bitlen, elements;
+  ca_size_t bitlen, elements;
 
   /* check arguments */
 
@@ -76,7 +76,7 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -85,7 +85,7 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   ca->bytelen   = parent->bytes;
   ca->bitlen    = bitlen;
 
-  memcpy(ca->dim, parent->dim, (rank-1) * sizeof(int32_t));
+  memcpy(ca->dim, parent->dim, (rank-1) * sizeof(ca_size_t));
   ca->dim[rank-1] = bitlen;
 
   if ( ca_has_mask(parent) ) {
@@ -128,7 +128,7 @@ ca_bitarray_func_clone (void *ap)
 }
 
 static char *
-ca_bitarray_func_ptr_at_addr (void *ap, int32_t addr)
+ca_bitarray_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CABitarray *ca = (CABitarray *) ap;
   if ( ! ca->ptr ) {
@@ -141,7 +141,7 @@ ca_bitarray_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_bitarray_func_ptr_at_index (void *ap, int32_t *idx)
+ca_bitarray_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CABitarray *ca = (CABitarray *) ap;
   if ( ! ca->ptr ) {
@@ -154,13 +154,13 @@ ca_bitarray_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_bitarray_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_bitarray_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitarray *ca = (CABitarray *) ap;
-  int32_t bytes  = ca->parent->bytes;
-  int32_t offset = idx[ca->rank-1];
-  int32_t major, minor;
-
+  ca_size_t bytes  = ca->parent->bytes;
+  ca_size_t offset = idx[ca->rank-1];
+  ca_size_t major, minor;
+  
   if ( ca_endian == CA_BIG_ENDIAN &&
        ca->parent->bytes != 1 &&
        ( ! ca_is_fixlen_type(ca->parent) ) ) {
@@ -186,13 +186,13 @@ ca_bitarray_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_bitarray_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_bitarray_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitarray *ca = (CABitarray *) ap;
   uint8_t test = *(uint8_t *) ptr;
-  int32_t offset = idx[ca->rank-1];
-  int32_t bytes  = ca->parent->bytes;
-  int32_t major, minor;
+  ca_size_t offset = idx[ca->rank-1];
+  ca_size_t bytes  = ca->parent->bytes;
+  ca_size_t major, minor;
 
   if ( ca_endian == CA_BIG_ENDIAN &&
        ca->parent->bytes != 1 &&
@@ -307,8 +307,8 @@ static void
 ca_bitarray_func_create_mask (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
-  int32_t count[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t count[CA_RANK_MAX];
+  int8_t i;
 
   for (i=0; i<ca->rank-1; i++) {
     count[i] = 0;
@@ -354,9 +354,9 @@ ca_bitarray_attach (CABitarray *ca)
   uint8_t *q = (uint8_t *)ca_ptr_at_addr(ca->parent, 0);
   uint8_t *r;
   uint8_t rr;
-  int32_t elements = ca->parent->elements;
-  int32_t bytes = ca->parent->bytes;
-  int32_t n, m;
+  ca_size_t elements = ca->parent->elements;
+  ca_size_t bytes = ca->parent->bytes;
+  ca_size_t n, m;
   if ( ca_endian == CA_BIG_ENDIAN &&
        ca->parent->bytes != 1 &&
        ( ! ca_is_fixlen_type(ca->parent) ) ) {
@@ -401,9 +401,9 @@ ca_bitarray_sync (CABitarray *ca)
   boolean8_t *p = (boolean8_t *)ca_ptr_at_addr(ca, 0);
   uint8_t *q = (uint8_t *)ca_ptr_at_addr(ca->parent, 0);
   uint8_t *r;
-  int32_t elements = ca->parent->elements;
-  int32_t bytes = ca->parent->bytes;
-  int32_t n, m, i;
+  ca_size_t elements = ca->parent->elements;
+  ca_size_t bytes = ca->parent->bytes;
+  ca_size_t n, m, i;
   if ( ca_endian == CA_BIG_ENDIAN &&
        ca->parent->bytes != 1 &&
        ( ! ca_is_fixlen_type(ca->parent) ) ) {

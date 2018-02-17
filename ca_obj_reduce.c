@@ -24,9 +24,9 @@ static VALUE rb_cCAReduce;
 /* ------------------------------------------------------------------- */
 
 int
-ca_reduce_setup (CAReduce *ca, CArray *parent, int32_t count, int32_t offset)
+ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset)
 {
-  int32_t elements;
+  ca_size_t elements;
 
   /* check arguments */
 
@@ -66,7 +66,7 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, int32_t count, int32_t offset)
 }
 
 CAReduce *
-ca_reduce_new (CArray *parent, int32_t count, int32_t offset)
+ca_reduce_new (CArray *parent, ca_size_t count, ca_size_t offset)
 {
   CAReduce *ca = ALLOC(CAReduce);
   ca_reduce_setup(ca, parent, count, offset);
@@ -94,21 +94,21 @@ ca_reduce_func_clone (void *ap)
 }
 
 static char *
-ca_reduce_func_ptr_at_addr (void *ap, int32_t addr)
+ca_reduce_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAReduce *ca = (CAReduce *) ap;
   return ca->ptr + addr;
 }
 
 static char *
-ca_reduce_func_ptr_at_index (void *ap, int32_t *idx)
+ca_reduce_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAReduce *ca = (CAReduce *) ap;
   return ca_func[CA_OBJ_ARRAY].ptr_at_index(ca, idx);
 }
 
 static void
-ca_reduce_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_reduce_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAReduce *ca = (CAReduce *) ap;
   char q;
@@ -124,10 +124,10 @@ ca_reduce_func_fetch_addr (void *ap, int32_t addr, void *ptr)
 }
 
 static void
-ca_reduce_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_reduce_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAReduce *ca = (CAReduce *) ap;
-  int32_t i;
+  ca_size_t i;
   for (i=0; i<ca->count; i++) {
     ca_store_addr(ca->parent, addr*ca->count+i+ca->offset, ptr);
   }
@@ -147,7 +147,7 @@ ca_reduce_func_attach (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
   char *p;
-  int32_t i;
+  ca_size_t i;
   ca_attach(ca->parent);
   /* ca->ptr = ALLOC_N(char, ca->elements); */
   ca->ptr = malloc_with_check(ca_length(ca));  
@@ -163,7 +163,7 @@ ca_reduce_func_sync (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
   char *p;
-  int32_t i;
+  ca_size_t i;
   p = ca->ptr;
   ca_attach(ca->parent);
   for (i=0; i<ca->elements; i++) {
@@ -187,7 +187,7 @@ static void
 ca_reduce_func_copy_data (void *ap, void *ptr)
 {
   CAReduce *ca = (CAReduce *) ap;
-  int32_t i;
+  ca_size_t i;
   char *p;
   ca_attach(ca->parent);
   p = ptr;
@@ -203,7 +203,7 @@ ca_reduce_func_sync_data (void *ap, void *ptr)
 {
   CAReduce *ca = (CAReduce *) ap;
   char *p;
-  int32_t i;
+  ca_size_t i;
   ca_attach(ca->parent);
   p = ptr;
   for (i=0; i<ca->elements; i++) {
@@ -218,7 +218,7 @@ static void
 ca_reduce_func_fill_data (void *ap, void *ptr)
 {
   CAReduce *ca = (CAReduce *) ap;
-  int32_t i;
+  ca_size_t i;
   ca_attach(ca->parent);
   for (i=0; i<ca->elements; i++) {
     ca_reduce_func_store_addr(ca, i, ptr);

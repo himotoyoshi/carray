@@ -68,8 +68,15 @@ class CArray
         insert.execute [self[i]]
       end
     else
-      dim0.times do |i|
-        insert.execute self[i,nil].to_a
+      begin
+        dim0.times do |i|
+          begin
+           insert.execute self[i,nil].to_a
+          rescue
+            puts self[i,nil].to_a
+            raise $!
+          end
+        end
       end
     end
     database.commit if transaction

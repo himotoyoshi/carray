@@ -68,6 +68,8 @@ end
 
 $CFLAGS += " -Wall -O2"
 # $CFLAGS += " -m128bit-long-double"  ### gcc only
+# $CFLAGS += " -Wno-absolute-value"
+# $LDFLAGS += " -L/usr/local/opt/llvm/lib -Wl,-rpath,/usr/local/opt/llvm/lib"
 
 # --- check data types
 
@@ -118,6 +120,9 @@ else
 	have_type("long long", header)
 	have_type("float", header)
 	have_type("double", header)
+  if have_type("long double", header)
+    check_sizeof("long double")
+  end
   if have_header("complex.h")
     complex_h = "complex.h"
     have_type("float complex",  complex_h)

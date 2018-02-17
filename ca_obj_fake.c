@@ -17,9 +17,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -39,10 +39,10 @@ static VALUE rb_cCAFake;
 /* ------------------------------------------------------------------- */
 
 int
-ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, int32_t bytes)
+ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 {
   int8_t rank;
-  int32_t *dim, elements;
+  ca_size_t *dim, elements;
 
   /* check arguments */
 
@@ -61,13 +61,13 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, int32_t bytes)
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  memcpy(ca->dim, dim, rank * sizeof(int32_t));
+  memcpy(ca->dim, dim, rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -81,7 +81,7 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, int32_t bytes)
 }
 
 CAFake *
-ca_fake_new (CArray *parent, int8_t data_type, int32_t bytes)
+ca_fake_new (CArray *parent, int8_t data_type, ca_size_t bytes)
 {
   CAFake *ca = ALLOC(CAFake);
   ca_fake_setup(ca, parent, data_type, bytes);
@@ -110,21 +110,21 @@ ca_fake_func_clone (void *ap)
 }
 
 static char *
-ca_fake_func_ptr_at_addr (void *ap, int32_t addr)
+ca_fake_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAFake *ca = (CAFake *) ap;
   return ca->ptr + ca->bytes * addr;
 }
 
 static char *
-ca_fake_func_ptr_at_index (void *ap, int32_t *idx)
+ca_fake_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAFake *ca = (CAFake *) ap;
   return ca_func[CA_OBJ_ARRAY].ptr_at_index(ca, idx);
 }
 
 static void
-ca_fake_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_fake_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFake *ca = (CAFake *) ap;
   if ( ca->parent->bytes <= 32 ) {
@@ -141,7 +141,7 @@ ca_fake_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_fake_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_fake_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFake *ca = (CAFake *) ap;
   if ( ca->parent->bytes <= 32 ) {
@@ -168,8 +168,8 @@ ca_fake_func_allocate (void *ap)
   /* initialize elements with 0 for CA_OBJECT data_type */
   if ( ca->data_type == CA_OBJECT ) {
     VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = INT2FIX(0);
-    int32_t i;
+    VALUE zero = SIZE2NUM(0);
+    ca_size_t i;
     for (i=0; i<ca->elements; i++) {
       *p++ = zero;
     }
@@ -189,8 +189,8 @@ ca_fake_func_attach (void *ap)
   /* initialize elements with 0 for CA_OBJECT data_type */
   if ( ca->data_type == CA_OBJECT ) {
     VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = INT2FIX(0);
-    int32_t i;
+    VALUE zero = SIZE2NUM(0);
+    ca_size_t i;
     for (i=0; i<ca->elements; i++) {
       *p++ = zero;
     }
@@ -315,7 +315,7 @@ ca_operation_function_t ca_fake_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_fake_new (VALUE cary, int8_t data_type, int32_t bytes)
+rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -341,11 +341,11 @@ rb_ca_fake (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, rtype, ropt, rbytes = Qnil;
   CArray *ca;
   int8_t  data_type;
-  int32_t bytes;
+  ca_size_t bytes;
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_scan_args(argc, argv, "11", &rtype, &ropt);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -360,7 +360,7 @@ rb_ca_fake_type (VALUE self, VALUE rtype, VALUE rbytes)
 {
   volatile VALUE obj;
   int8_t  data_type;
-  int32_t bytes;
+  ca_size_t bytes;
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
   obj = rb_ca_fake_new(self, data_type, bytes);
   rb_ca_data_type_import(obj, rtype);

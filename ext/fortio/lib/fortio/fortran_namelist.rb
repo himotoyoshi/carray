@@ -62,7 +62,7 @@ def fortran_namelist (name, out)
     end
     " #{ident} = #{value}" 
   }
-  return ["&#{name}", list.join(",\n") + "  /"].join("\n")
+  return ["&#{name}", list.join(",\n") + "  /", ""].join("\n")
 end
 
 def fortran_namelist_read (io, name=nil, out={})

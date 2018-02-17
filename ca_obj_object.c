@@ -59,7 +59,7 @@ static VALUE rb_cCAObjectMask;
 
 
 static CAObjectMask *
-ca_objmask_new (VALUE array, int8_t rank, int32_t *dim)
+ca_objmask_new (VALUE array, int8_t rank, ca_size_t *dim)
 {
   CAObjectMask *ca = ALLOC(CAObjectMask);
   ca_wrap_setup_null((CArray *)ca, CA_BOOLEAN, rank, dim, 0, NULL);
@@ -85,24 +85,24 @@ ca_objmask_func_clone (void *ap)
 }
 
 void
-ca_objmask_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_objmask_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
   volatile VALUE ridx, raddr, rval;
   int i;
 
   if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_addr"), Qtrue) ) {
-    raddr = LONG2NUM(addr);
+    raddr = SIZE2NUM(addr);
     rval = rb_funcall(ca->array, rb_intern("mask_fetch_addr"), 1, raddr);
     *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
     ca_array_func_store_addr(ca, addr, ptr);        
   }
   else if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_index"), Qtrue) ) {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_funcall(ca->array, rb_intern("mask_fetch_index"), 1, ridx);
     *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
@@ -114,7 +114,7 @@ ca_objmask_func_fetch_addr (void *ap, int32_t addr, void *ptr)
 }
 
 void
-ca_objmask_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_objmask_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
   volatile VALUE ridx, raddr, rval;
@@ -123,15 +123,15 @@ ca_objmask_func_fetch_index (void *ap, int32_t *idx, void *ptr)
   if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_index"), Qtrue) ) {
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_funcall(ca->array, rb_intern("mask_fetch_index"), 1, ridx);
     *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
     ca_array_func_store_index(ca, idx, ptr);        
   }
   else if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_addr"), Qtrue) ) {
-    int32_t addr = ca_index2addr(ca, idx);
-    raddr = LONG2NUM(addr);
+    ca_size_t addr = ca_index2addr(ca, idx);
+    raddr = SIZE2NUM(addr);
     rval = rb_funcall(ca->array, rb_intern("mask_fetch_addr"), 1, raddr);
     *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
     ca_array_func_store_addr(ca, addr, ptr);        
@@ -143,49 +143,49 @@ ca_objmask_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 
 
 void
-ca_objmask_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_objmask_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
   volatile VALUE ridx, raddr, rval;
   int i;
 
   ca_array_func_store_addr(ca, addr, ptr);
-  rval = INT2FIX( *(uint8_t*)ptr );
+  rval = INT2NUM( *(uint8_t*)ptr );
   if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_addr"), Qtrue) ) {
-    raddr = LONG2NUM(addr);
+    raddr = SIZE2NUM(addr);
     rb_funcall(ca->array, rb_intern("mask_store_addr"), 2, raddr, rval);
   }
   else if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_index"), Qtrue) ) {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rb_funcall(ca->array, rb_intern("mask_store_index"), 2, ridx, rval);
   }
 }
 
 void
-ca_objmask_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_objmask_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
   volatile VALUE ridx, raddr, rval;
   int i;
 
   ca_array_func_store_index(ca, idx, ptr);  
-  rval = INT2FIX( *(uint8_t*)ptr );
+  rval = INT2NUM( *(uint8_t*)ptr );
 
   if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_index"), Qtrue) ) {
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rb_funcall(ca->array, rb_intern("mask_store_index"), 2, ridx, rval);
   }
   else if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_addr"), Qtrue) ) {
-    int32_t addr = ca_index2addr(ca, idx);
-    raddr = LONG2NUM(addr);
+    ca_size_t addr = ca_index2addr(ca, idx);
+    raddr = SIZE2NUM(addr);
     rb_funcall(ca->array, rb_intern("mask_store_addr"), 2, raddr, rval);
   }
 
@@ -250,7 +250,7 @@ ca_objmask_func_fill_data (void *ap, void *val)
   ca_array_func_fill_data(ca, val);
   if ( rb_obj_respond_to(ca->array, rb_intern("mask_fill_data"), Qtrue) ) {  
     rb_funcall(ca->array, rb_intern("mask_fill_data"), 
-                          1, INT2FIX(*(uint8_t*)val));
+                          1, INT2NUM(*(uint8_t*)val));
   }
 }
 
@@ -301,11 +301,11 @@ rb_ca_objmask_initialize_copy (VALUE self, VALUE other)
 
 static int
 ca_object_setup (CAObject *ca,
-               int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes)
+               int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes)
 {
-  int32_t elements;
+  ca_size_t elements;
   double  length;
-  int32_t i;
+  int8_t i;
 
   /* check arguments */
 
@@ -339,17 +339,17 @@ ca_object_setup (CAObject *ca,
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->data      = ca_wrap_new_null(data_type, rank, dim, bytes, NULL);
 
-  memcpy(ca->dim, dim, rank * sizeof(int32_t));
+  memcpy(ca->dim, dim, rank * sizeof(ca_size_t));
 
   return 0;
 }
 
 static CAObject *
-ca_object_new (int8_t data_type, int8_t rank, int32_t *dim, int32_t bytes)
+ca_object_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes)
 {
   CAObject *ca = ALLOC(CAObject);
   ca_object_setup(ca, data_type, rank, dim, bytes);
@@ -380,13 +380,13 @@ ca_object_func_clone (void *ap)
 #define ca_object_func_ptr_at_index ca_array_func_ptr_at_index
 
 static void
-ca_object_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_object_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAObject *ca = (CAObject *) ap;
   volatile VALUE ridx, raddr, rval;
   int i;
   if ( rb_obj_respond_to(ca->self, rb_intern("fetch_addr"), Qtrue) ) {
-    raddr = LONG2NUM(addr);
+    raddr = SIZE2NUM(addr);
     rval = rb_funcall(ca->self, rb_intern("fetch_addr"), 1, raddr);
     if ( rval == CA_UNDEF ) {
       ca_update_mask(ca);
@@ -395,7 +395,7 @@ ca_object_func_fetch_addr (void *ap, int32_t addr, void *ptr)
       }
       *(boolean8_t*)ca_ptr_at_addr(ca->mask, addr) = 1;
       if ( ca->data_type == CA_OBJECT ) {
-        rb_ca_obj2ptr(ca->self, INT2FIX(0), ptr);
+        rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
       }
     }
     else {
@@ -406,11 +406,11 @@ ca_object_func_fetch_addr (void *ap, int32_t addr, void *ptr)
     }
   }
   else {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_funcall(ca->self, rb_intern("fetch_index"), 1, ridx);
     if ( rval == CA_UNDEF ) {
@@ -420,7 +420,7 @@ ca_object_func_fetch_addr (void *ap, int32_t addr, void *ptr)
       }
       *(boolean8_t*)ca_ptr_at_index(ca->mask, idx) = 1;
       if ( ca->data_type == CA_OBJECT ) {
-        rb_ca_obj2ptr(ca->self, INT2FIX(0), ptr);
+        rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
       }
     }
     else {
@@ -433,7 +433,7 @@ ca_object_func_fetch_addr (void *ap, int32_t addr, void *ptr)
 }
 
 static void
-ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_object_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAObject *ca = (CAObject *) ap;
   volatile VALUE ridx, raddr, rval;
@@ -441,7 +441,7 @@ ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
   if ( rb_obj_respond_to(ca->self, rb_intern("fetch_index"), Qtrue) ) {
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_funcall(ca->self, rb_intern("fetch_index"), 1, ridx);
     if ( rval == CA_UNDEF ) {
@@ -451,7 +451,7 @@ ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
       }
       *(boolean8_t*)ca_ptr_at_index(ca->mask, idx) = 1;
       if ( ca->data_type == CA_OBJECT ) {
-        rb_ca_obj2ptr(ca->self, INT2FIX(0), ptr);
+        rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
       }
     }
     else {
@@ -462,8 +462,8 @@ ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
     }
   }
   else {
-    int32_t addr = ca_index2addr(ca, idx);
-    raddr = LONG2NUM(addr);
+    ca_size_t addr = ca_index2addr(ca, idx);
+    raddr = SIZE2NUM(addr);
     rval = rb_funcall(ca->self, rb_intern("fetch_addr"), 1, raddr);
     if ( rval == CA_UNDEF ) {
       ca_update_mask(ca);
@@ -472,7 +472,7 @@ ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
       }
       *(boolean8_t*)ca_ptr_at_addr(ca->mask, addr) = 1;
       if ( ca->data_type == CA_OBJECT ) {
-        rb_ca_obj2ptr(ca->self, INT2FIX(0), ptr);
+        rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
       }
     }
     else {
@@ -485,22 +485,22 @@ ca_object_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_object_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_object_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAObject *ca = (CAObject *) ap;
   volatile VALUE ridx, raddr, rval;
   int i;
   if ( rb_obj_respond_to(ca->self, rb_intern("store_addr"), Qtrue) ) {
-    raddr = LONG2NUM(addr);
+    raddr = SIZE2NUM(addr);
     rval = rb_ca_ptr2obj(ca->self, ptr);
     rb_funcall(ca->self, rb_intern("store_addr"), 2, raddr, rval);
   }
   else {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index(ca, addr, idx);
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_ca_ptr2obj(ca->self, ptr);
     rb_funcall(ca->self, rb_intern("store_index"), 2, ridx, rval);
@@ -508,7 +508,7 @@ ca_object_func_store_addr (void *ap, int32_t addr, void *ptr)
 }
 
 static void
-ca_object_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_object_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAObject *ca = (CAObject *) ap;
   volatile VALUE ridx, raddr, rval;
@@ -516,14 +516,14 @@ ca_object_func_store_index (void *ap, int32_t *idx, void *ptr)
   if ( rb_obj_respond_to(ca->self, rb_intern("store_index"), Qtrue) ) {
     ridx = rb_ary_new2(ca->rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(ridx, i, INT2NUM(idx[i]));
+      rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
     }
     rval = rb_ca_ptr2obj(ca->self, ptr);
     rb_funcall(ca->self, rb_intern("store_index"), 2, ridx, rval);
   }
   else {
-    int32_t addr = ca_index2addr(ca, idx);
-    raddr = LONG2NUM(addr);
+    ca_size_t addr = ca_index2addr(ca, idx);
+    raddr = SIZE2NUM(addr);
     rval = rb_ca_ptr2obj(ca->self, ptr);
     rb_funcall(ca->self, rb_intern("store_addr"), 2, raddr, rval);
   }
@@ -537,8 +537,8 @@ ca_object_func_allocate (void *ap)
   ca->data->ptr = malloc_with_check(ca_length(ca));  
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
-    VALUE zero = INT2FIX(0);
-    int32_t i;
+    VALUE zero = INT2NUM(0);
+    ca_size_t i;
     for (i=0; i<ca->elements; i++) {
       *p++ = zero;
     }
@@ -555,8 +555,8 @@ ca_object_func_attach (void *ap)
   ca->data->ptr = malloc_with_check(ca_length(ca));  
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
-    VALUE zero = INT2FIX(0);
-    int32_t i;
+    VALUE zero = INT2NUM(0);
+    ca_size_t i;
     for (i=0; i<ca->elements; i++) {
       *p++ = zero;
     }
@@ -704,11 +704,11 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   volatile VALUE rtype, rdim, ropt, rbytes = Qnil, rrdonly = Qnil, rparent = Qnil, rdata;
   CAObject *ca;
   int8_t data_type, rank;
-  int32_t dim[CA_RANK_MAX];
-  int32_t bytes;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t bytes;
   int i;
 
-  rb_scan_args(argc, argv, "21", &rtype, &rdim, &ropt);
+  rb_scan_args(argc, argv, "21", (VALUE *) &rtype, (VALUE *) &rdim, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes,read_only,parent", 
                   &rbytes, &rrdonly, &rparent);
 
@@ -723,7 +723,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
 
   rank = RARRAY_LEN(rdim);
   for (i=0; i<rank; i++) {
-    dim[i] = NUM2INT(rb_ary_entry(rdim, i));
+    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
   Data_Get_Struct(self, CAObject, ca);

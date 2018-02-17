@@ -17,18 +17,18 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t   byte_offset;
-  int32_t   bit_offset;
-  uint32_t  bit_mask;
+  ca_size_t   byte_offset;
+  ca_size_t   bit_offset;
+  uint64_t  bit_mask;
 } CABitfield;
 
 static int8_t CA_OBJ_BITFIELD;
@@ -40,12 +40,12 @@ static VALUE rb_cCABitfield;
   end
 */
 
-static int
-bitfield_bitlen (uint32_t bit_mask, int32_t bytes)
+static ca_size_t
+bitfield_bitlen (uint64_t bit_mask, ca_size_t bytes)
 {
-  int bitsize = bytes * 8;
-  int count = 0;
-  int i;
+  ca_size_t bitsize = bytes * 8;
+  ca_size_t count = 0;
+  ca_size_t i;
   for (i=0; i<bitsize; i++) {
     if ( ( bit_mask >> i ) & 1 ) {
       count++;
@@ -55,12 +55,12 @@ bitfield_bitlen (uint32_t bit_mask, int32_t bytes)
 }
 
 static void
-bitfield_fetch(char *dst, int dbytes, 
-                   char *src, int sbytes,
-                   int32_t byte_offset, int32_t bit_offset, uint32_t bit_mask,
-                   int32_t elements)
+bitfield_fetch(char *dst, ca_size_t dbytes, 
+                   char *src, ca_size_t sbytes,
+                   ca_size_t byte_offset, ca_size_t bit_offset, uint64_t bit_mask,
+                   ca_size_t elements)
 {
-  int k;
+  ca_size_t k;
   switch ( dbytes ) {
   case 1: {
     char   *p;
@@ -128,12 +128,12 @@ bitfield_fetch(char *dst, int dbytes,
 }
 
 static void
-bitfield_store(char *src, int sbytes,
-                   char *dst, int dbytes, 
-                   int32_t byte_offset, int32_t bit_offset, uint32_t bit_mask,
-                   int32_t elements)
+bitfield_store(char *src, ca_size_t sbytes,
+                   char *dst, ca_size_t dbytes, 
+                   ca_size_t byte_offset, ca_size_t bit_offset, uint64_t bit_mask,
+                   ca_size_t elements)
 {
-  int k;
+  ca_size_t k;
   switch ( dbytes ) {
   case 1: {
     char   *q;
@@ -209,16 +209,16 @@ bitfield_store(char *src, int sbytes,
 
 int
 ca_bitfield_setup (CABitfield *ca, CArray *parent,
-                   int offset, int bitlen)
+                   ca_size_t offset, ca_size_t bitlen)
 {
   int8_t rank;
   int8_t data_type;
-  int32_t bytes = 0, elements;
-  int bitsize;
-  int32_t  byte_offset;
-  int32_t  bit_offset;
-  uint32_t bit_mask;
-  int i;
+  ca_size_t bytes = 0, elements;
+  ca_size_t bitsize;
+  ca_size_t  byte_offset;
+  ca_size_t  bit_offset;
+  uint64_t bit_mask;
+  ca_size_t i;
 
   /* check arguments */
 
@@ -298,7 +298,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -308,7 +308,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->bit_offset  = bit_offset;
   ca->bit_mask    = bit_mask;
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(int32_t));
+  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -318,7 +318,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 }
 
 CABitfield *
-ca_bitfield_new (CArray *parent, int offset, int bitlen)
+ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen)
 {
   CABitfield *ca = ALLOC(CABitfield);
   ca_bitfield_setup(ca, parent, offset, bitlen);
@@ -352,7 +352,7 @@ ca_bitfield_func_clone (void *ap)
 }
 
 static char *
-ca_bitfield_func_ptr_at_addr (void *ap, int32_t addr)
+ca_bitfield_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CABitfield *ca = (CABitfield *) ap;
   if ( ! ca->ptr ) {
@@ -365,7 +365,7 @@ ca_bitfield_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_bitfield_func_ptr_at_index (void *ap, int32_t *idx)
+ca_bitfield_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CABitfield *ca = (CABitfield *) ap;
   if ( ! ca->ptr ) {
@@ -378,7 +378,7 @@ ca_bitfield_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_bitfield_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_bitfield_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitfield *ca = (CABitfield *) ap;
   char *v = xmalloc(ca->parent->bytes);
@@ -390,7 +390,7 @@ ca_bitfield_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_bitfield_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_bitfield_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitfield *ca = (CABitfield *) ap;
   char *v = xmalloc(ca->parent->bytes);
@@ -529,12 +529,12 @@ static void
 ca_bitfield_fill (CABitfield *ca, char *ptr)
 {
   char *q = ca->parent->ptr;
-  int32_t bytesp = ca->bytes;
-  int32_t bytesq = ca->parent->bytes;
-  int32_t byte_offset = ca->byte_offset;
-  int32_t bit_offset = ca->bit_offset;
-  uint32_t bit_mask = ca->bit_mask;
-  int32_t i;
+  ca_size_t bytesp = ca->bytes;
+  ca_size_t bytesq = ca->parent->bytes;
+  ca_size_t byte_offset = ca->byte_offset;
+  ca_size_t bit_offset = ca->bit_offset;
+  uint64_t bit_mask = ca->bit_mask;
+  ca_size_t i;
 
   for (i=0; i<ca->elements; i++) {
     bitfield_store(ptr, bytesp, q, bytesq, 
@@ -546,7 +546,7 @@ ca_bitfield_fill (CABitfield *ca, char *ptr)
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_bitfield_new (VALUE cary, int offset, int bitlen)
+rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -571,10 +571,11 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rrange, rtype;
   CArray *ca;
-  int offset, bitlen, step, data_type = CA_NONE;
-  int bitsize;
+  ca_size_t offset, bitlen, step;
+  int data_type = CA_NONE;
+  ca_size_t bitsize;
 
-  rb_scan_args(argc, argv, "11", &rrange, &rtype);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rrange, (VALUE *) &rtype);
 
   Data_Get_Struct(self, CArray, ca);
 

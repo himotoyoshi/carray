@@ -76,7 +76,7 @@ rb_num2cc(VALUE num)
   }
   switch ( TYPE(num) ) {
   case T_FIXNUM:
-    return (double complex) FIX2LONG(num);
+    return (double complex) NUM2LONG(num);
   case T_BIGNUM:
     return (double complex) rb_big2dbl(num);
   case T_FLOAT:
@@ -108,7 +108,7 @@ rb_num_to_cc (VALUE num)
   }
   switch ( TYPE(num) ) {
   case T_FIXNUM:
-    return rb_ccomplex_new((double complex) FIX2LONG(num));
+    return rb_ccomplex_new((double complex) NUM2LONG(num));
   case T_BIGNUM:
     return rb_ccomplex_new((double complex) rb_big2dbl(num));
   case T_FLOAT:
@@ -175,7 +175,7 @@ rb_cc_initialize (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, double complex, cp);
 
-  rb_scan_args(argc, argv, "11", &rre, &rim);
+  rb_scan_args(argc, argv, "11", (VALUE *)&rre, (VALUE *)&rim);
 
   if ( NIL_P(rim) ) {
     *cp = NUM2DBL(rre);

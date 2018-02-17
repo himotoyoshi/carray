@@ -27,11 +27,11 @@
     type *q   = (type *) co->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     boolean8_t *n = NULL; \
-    type fval = ( ! NIL_P(rfval) ) ? from(rfval) : (type)(0.0); \
+    type fval = ( ! NIL_P(rfval) ) ? (type) from(rfval) : (type)(0.0); \
     type min  = *ptr; \
     type val; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       count = 0; \
       ca_create_mask(co); \
@@ -85,10 +85,10 @@ rb_ca_cummin (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rmin_count = Qnil, rfval = Qnil, obj;
   CArray *ca, *co;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 0 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -97,7 +97,7 @@ rb_ca_cummin (int argc, VALUE *argv, VALUE self)
   obj = ca_wrap_struct(co);
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                  ca->elements - 1 : NUM2INT(rmin_count);
+                                  ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -135,11 +135,11 @@ rb_ca_cummin (int argc, VALUE *argv, VALUE self)
     type *q   = (type *) co->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     boolean8_t *n = NULL; \
-    type fval = ( ! NIL_P(rfval) ) ? from(rfval) : (type)(0.0); \
+    type fval = ( ! NIL_P(rfval) ) ? (type) from(rfval) : (type)(0.0); \
     type max  = *ptr; \
     type val; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       count = 0; \
       ca_create_mask(co); \
@@ -192,10 +192,10 @@ rb_ca_cummax (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rmin_count = Qnil, rfval = Qnil, obj;
   CArray *ca, *co;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 0 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -204,7 +204,7 @@ rb_ca_cummax (int argc, VALUE *argv, VALUE self)
   obj = ca_wrap_struct(co);
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                  ca->elements - 1 : NUM2INT(rmin_count);
+                                  ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -243,10 +243,10 @@ rb_ca_cummax (int argc, VALUE *argv, VALUE self)
     atype *q   = (atype *) co->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     boolean8_t *n = NULL; \
-    atype fval = ( ! NIL_P(rfval) ) ? from(rfval) : (atype)(0.0); \
+    atype fval = ( ! NIL_P(rfval) ) ? (type) from(rfval) : (atype)(0.0); \
     atype prod  = (atype)(1.0); \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       count = 0; \
       ca_create_mask(co); \
@@ -284,10 +284,10 @@ rb_ca_cumprod (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rmin_count = Qnil, rfval = Qnil;
   CArray *ca, *co;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 0 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -300,7 +300,7 @@ rb_ca_cumprod (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                  ca->elements - 1 : NUM2INT(rmin_count);
+                                  ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -342,11 +342,11 @@ rb_ca_cumprod (int argc, VALUE *argv, VALUE self)
   { \
     type *p1 = (type*)ca->ptr; \
     type *p2; \
-    int   s2; \
+    ca_size_t  s2; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     atype sum  = 0.0; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     ca_set_iterator(1, cw, &p2, &s2); \
     if ( m ) { \
       count = 0; \
@@ -377,10 +377,10 @@ rb_ca_wsum (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, weight = argv[0], rmin_count = Qnil, rfval = Qnil, tmp;
   CArray *ca, *cw;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 1 ) {
-    rb_scan_args(argc, argv, "12", &weight, &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -399,7 +399,7 @@ rb_ca_wsum (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ( ! ca_has_mask(ca) ) ) ?
-                                   ca->elements - 1 : NUM2INT(rmin_count);
+                                   ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -440,14 +440,14 @@ rb_ca_wsum (int argc, VALUE *argv, VALUE self)
   { \
     type *p1 = (type *) ca->ptr; \
     type *p2; \
-    int   s2; \
+    ca_size_t  s2; \
     atype *q   = (atype *) co->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     boolean8_t *n = NULL; \
-    atype fval = ( ! NIL_P(rfval) ) ? from(rfval) : (atype)(0.0); \
+    atype fval = ( ! NIL_P(rfval) ) ? (type) from(rfval) : (atype)(0.0); \
     atype sum  = 0.0; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     ca_set_iterator(1, cw, &p2, &s2); \
     if ( m ) { \
       count = 0; \
@@ -486,10 +486,10 @@ rb_ca_cumwsum (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE weight = argv[0], rmin_count = Qnil, rfval = Qnil, tmp;
   CArray *ca, *cw, *co;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 1 ) {
-    rb_scan_args(argc, argv, "12", &weight, &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *)  &rmin_count, (VALUE *)  &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -511,7 +511,7 @@ rb_ca_cumwsum (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ( ! ca_has_mask(ca) ) ) ?
-                                   ca->elements - 1 : NUM2INT(rmin_count);
+                                   ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -552,13 +552,13 @@ rb_ca_cumwsum (int argc, VALUE *argv, VALUE self)
   { \
     type *p1 = (type*)ca->ptr; \
     type *p2 = (type*)cw->ptr; \
-    int   s2; \
+    ca_size_t   s2; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     atype sum = 0.0; \
     atype den = 0.0; \
     atype ave; \
-    int32_t count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t i; \
     ca_set_iterator(1, cw, &p2, &s2); \
     if ( m ) { \
       count = 0; \
@@ -591,10 +591,10 @@ rb_ca_wmean (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, weight = argv[0], rmin_count = Qnil, rfval = Qnil, tmp;
   CArray *ca, *cw;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 1 ) {
-    rb_scan_args(argc, argv, "12", &weight, &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -613,7 +613,7 @@ rb_ca_wmean (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ( ! ca_has_mask(ca) ) ) ?
-                                   ca->elements - 1 : NUM2INT(rmin_count);
+                                   ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -657,9 +657,9 @@ rb_ca_wmean (int argc, VALUE *argv, VALUE self)
     double sum  = 0.0; \
     double sum2 = 0.0; \
     double del, var, ave; \
-    int32_t count = 0; \
-    int32_t nvalid; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t nvalid; \
+    ca_size_t i; \
     if ( m ) { \
       count = 0; \
       for (i=ca->elements; i; i--, ptr++) { \
@@ -708,10 +708,10 @@ rb_ca_variancep (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 0 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -721,7 +721,7 @@ rb_ca_variancep (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -760,9 +760,9 @@ rb_ca_variancep (int argc, VALUE *argv, VALUE self)
     double sum  = 0.0; \
     double sum2 = 0.0; \
     double del, var, ave; \
-    int32_t count = 0; \
-    int32_t nvalid; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t nvalid; \
+    ca_size_t i; \
     if ( m ) { \
       count = 0; \
       for (i=ca->elements; i; i--, ptr++) { \
@@ -811,10 +811,10 @@ rb_ca_variance (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 0 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -824,7 +824,7 @@ rb_ca_variance (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -859,10 +859,10 @@ rb_ca_count_true (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 1 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -877,7 +877,7 @@ rb_ca_count_true (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -888,9 +888,9 @@ rb_ca_count_true (int argc, VALUE *argv, VALUE self)
   {
     boolean8_t *ptr = (boolean8_t *) ca->ptr;
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL;
-    int32_t count = 0;
-    int32_t value_count = 0;
-    int32_t i;
+    ca_size_t count = 0;
+    ca_size_t value_count = 0;
+    ca_size_t i;
     if ( m ) {
       for (i=0; i<ca->elements; i++) {
         if ( *m ) {
@@ -914,7 +914,7 @@ rb_ca_count_true (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
     }
     else {
-      out = LONG2NUM(value_count);
+      out = SIZE2NUM(value_count);
     }
   }
 
@@ -928,10 +928,10 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 1 ) {
-    rb_scan_args(argc, argv, "02", &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -946,7 +946,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -957,9 +957,9 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
   {
     boolean8_t *ptr = (boolean8_t *) ca->ptr;
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL;
-    int32_t count = 0;
-    int32_t value_count = 0;
-    int32_t i;
+    ca_size_t count = 0;
+    ca_size_t value_count = 0;
+    ca_size_t i;
     if ( m ) {
       for (i=0; i<ca->elements; i++) {
         if ( *m ) {
@@ -983,7 +983,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
     }
     else {
-      out = LONG2NUM(value_count);
+      out = SIZE2NUM(value_count);
     }
   }
 
@@ -999,9 +999,9 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
     type *ptr = (type *) ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
-    int32_t count = 0; \
-    int32_t value_count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t value_count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++)       { \
         if ( ! *m++ ) { \
@@ -1025,7 +1025,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval; \
     } \
     else { \
-      out = LONG2NUM(value_count); \
+      out = SIZE2NUM(value_count); \
     } \
   }
 
@@ -1034,9 +1034,9 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
     char *ptr = ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     char *val = ALLOCA_N(char, ca->bytes); \
-    int32_t count = 0; \
-    int32_t value_count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t value_count = 0; \
+    ca_size_t i; \
     rb_ca_obj2ptr(self, value, val); \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr+=ca->bytes) {\
@@ -1061,7 +1061,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval; \
     } \
     else { \
-      out = LONG2NUM(value_count); \
+      out = SIZE2NUM(value_count); \
     } \
   }
 
@@ -1070,9 +1070,9 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
     VALUE *ptr = (VALUE *)ca->ptr;                                 \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     VALUE val = value; \
-    int32_t count = 0; \
-    int32_t value_count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t value_count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--) {\
         if ( ! *m++ ) { \
@@ -1098,7 +1098,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval; \
     } \
     else { \
-      out = LONG2NUM(value_count); \
+      out = SIZE2NUM(value_count); \
     } \
   }
 
@@ -1107,9 +1107,9 @@ rb_ca_count_equal (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, value, rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
-  rb_scan_args(argc, argv, "12", &value, &rmin_count, &rfval);
+  rb_scan_args(argc, argv, "12", (VALUE *) &value, (VALUE *) &rmin_count, (VALUE *) &rfval);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1118,7 +1118,7 @@ rb_ca_count_equal (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -1163,9 +1163,9 @@ rb_ca_count_equal (int argc, VALUE *argv, VALUE self)
     type val  = (type) from(value); \
     double rtol = fabs(NUM2DBL(reps)); \
     double vabs = nabs(val); \
-    int32_t count = 0; \
-    int32_t value_count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t value_count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++)       { \
         if ( ! *m++ ) { \
@@ -1190,7 +1190,7 @@ rb_ca_count_equal (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval; \
     } \
     else { \
-      out = LONG2NUM(value_count); \
+      out = SIZE2NUM(value_count); \
     } \
   }
 
@@ -1200,10 +1200,10 @@ rb_ca_count_equiv (int argc, VALUE *argv, VALUE self)
   volatile VALUE out, value = argv[0], reps = argv[1],
                       rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 2 ) {
-    rb_scan_args(argc, argv, "22", &value, &reps, &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "22", (VALUE *) &value, (VALUE *) &reps, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -1213,7 +1213,7 @@ rb_ca_count_equiv (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -1255,9 +1255,9 @@ rb_ca_count_equiv (int argc, VALUE *argv, VALUE self)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
     double atol = fabs(NUM2DBL(aeps)); \
-    int32_t count = 0; \
-    int32_t value_count = 0; \
-    int32_t i; \
+    ca_size_t count = 0; \
+    ca_size_t value_count = 0; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++)       { \
         if ( ! *m++ ) { \
@@ -1281,7 +1281,7 @@ rb_ca_count_equiv (int argc, VALUE *argv, VALUE self)
       out = ( NIL_P(rfval) ) ? CA_UNDEF : rfval; \
     } \
     else { \
-      out = LONG2NUM(value_count); \
+      out = SIZE2NUM(value_count); \
     } \
   }
 
@@ -1291,10 +1291,10 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
   volatile VALUE out, value = argv[0], aeps = argv[1],
                       rmin_count = Qnil, rfval = Qnil;
   CArray *ca;
-  int min_count;
+  ca_size_t min_count;
 
   if ( argc > 2 ) {
-    rb_scan_args(argc, argv, "22", &value, &aeps, &rmin_count, &rfval);
+    rb_scan_args(argc, argv, "22", (VALUE *) &value, (VALUE *) &aeps, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
   Data_Get_Struct(self, CArray, ca);
@@ -1304,7 +1304,7 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
-                                     ca->elements - 1 : NUM2INT(rmin_count);
+                                     ca->elements - 1 : NUM2SIZE(rmin_count);
 
   if ( min_count < 0 ) {
     min_count += ca->elements;
@@ -1345,7 +1345,7 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
     type *ptr = (type *) ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ( ! *m++ ) && *ptr != val ) {  \
@@ -1369,7 +1369,7 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
     VALUE *ptr = (VALUE *) ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     VALUE val  = value; \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ( ! *m++ ) && ! rb_equal(*ptr,val) ) {      \
@@ -1393,7 +1393,7 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
     char *ptr = ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     char *val = ALLOCA_N(char, ca->bytes); \
-    int32_t i; \
+    ca_size_t i; \
     rb_ca_obj2ptr(self, value, val); \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr+=ca->bytes) { \
@@ -1420,7 +1420,7 @@ rb_ca_all_equal_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qtrue;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "1", &value);
+  rb_scan_args(argc, argv, "1", (VALUE *) &value);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1463,7 +1463,7 @@ rb_ca_all_equal_p (int argc, VALUE *argv, VALUE self)
     type val  = (type) from(value); \
     double rtol = fabs(NUM2DBL(reps)); \
     double vabs = nabs(val); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ! *m++ ) {             \
@@ -1493,7 +1493,7 @@ rb_ca_all_equiv_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qtrue;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "2", &value, &reps);
+  rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &reps);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1533,7 +1533,7 @@ rb_ca_all_equiv_p (int argc, VALUE *argv, VALUE self)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
     double atol = fabs(NUM2DBL(aeps)); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ! *m++ ) { \
@@ -1561,7 +1561,7 @@ rb_ca_all_close_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qtrue;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "2", &value, &aeps);
+  rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &aeps);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1600,7 +1600,7 @@ rb_ca_all_close_p (int argc, VALUE *argv, VALUE self)
     type *ptr = (type *) ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ( ! *m++ ) && *ptr == val ) {  \
@@ -1624,7 +1624,7 @@ rb_ca_all_close_p (int argc, VALUE *argv, VALUE self)
     VALUE *ptr = (VALUE *) ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     VALUE val  = value; \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr++) { \
         if ( ( ! *m++ ) && rb_equal(*ptr,val) ) {       \
@@ -1648,7 +1648,7 @@ rb_ca_all_close_p (int argc, VALUE *argv, VALUE self)
     char *ptr = ca->ptr; \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     char *val = ALLOCA_N(char, ca->bytes); \
-    int32_t i; \
+    ca_size_t i; \
     rb_ca_obj2ptr(self, value, val); \
     if ( m ) { \
       for (i=ca->elements; i; i--, ptr+=ca->bytes) \
@@ -1673,7 +1673,7 @@ rb_ca_any_equal_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qfalse;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "1", &value);
+  rb_scan_args(argc, argv, "1", (VALUE *) &value);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1716,7 +1716,7 @@ rb_ca_any_equal_p (int argc, VALUE *argv, VALUE self)
     type val  = (type) from(value); \
     double rtol = fabs(NUM2DBL(reps)); \
     double vabs = nabs(val); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
     for (i=ca->elements; i; i--, ptr++) { \
         if ( ! *m++ ) { \
@@ -1746,7 +1746,7 @@ rb_ca_any_equiv_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qfalse;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "2", &value, &reps);
+  rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &reps);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1786,9 +1786,9 @@ rb_ca_any_equiv_p (int argc, VALUE *argv, VALUE self)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type val  = (type) from(value); \
     double atol = fabs(NUM2DBL(aeps)); \
-    int32_t i; \
+    ca_size_t i; \
     if ( m ) { \
-    for (i=ca->elements; i; i--, ptr++) { \
+      for (i=ca->elements; i; i--, ptr++) { \
         if ( ! *m++ ) { \
           if ( nabs(*ptr - val) <= atol ) {\
             flag = Qtrue; \
@@ -1814,7 +1814,7 @@ rb_ca_any_close_p (int argc, VALUE *argv, VALUE self)
   volatile VALUE flag = Qfalse;
   CArray *ca;
 
-  rb_scan_args(argc, argv, "2", &value, &aeps);
+  rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &aeps);
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1832,15 +1832,15 @@ rb_ca_any_close_p (int argc, VALUE *argv, VALUE self)
   case CA_UINT64:  proc_any_close(uint64_t,NUM2ULL,fabs); break;
   case CA_FLOAT32: proc_any_close(float32_t,NUM2DBL,fabs); break;
   case CA_FLOAT64: proc_any_close(float64_t,NUM2DBL,fabs); break;
-  case CA_FLOAT128: proc_any_close(float128_t,NUM2DBL,fabs); break;
+  case CA_FLOAT128: proc_any_close(float128_t,NUM2DBL,fabsl); break;
 #ifdef HAVE_COMPLEX_H
   case CA_CMPLX64:  proc_any_close(cmplx64_t,NUM2CC,cabs); break;
   case CA_CMPLX128: proc_any_close(cmplx128_t,NUM2CC,cabs); break;
-  case CA_CMPLX256: proc_any_close(cmplx256_t,NUM2CC,cabs); break;
+  case CA_CMPLX256: proc_any_close(cmplx256_t,NUM2CC,cabsl); break;
 #endif
   default: rb_raise(rb_eCADataTypeError, "invalid data type");
   }
-
+  
   ca_detach(ca);
 
   return flag;
@@ -1874,18 +1874,18 @@ rb_ca_none_close_p (int argc, VALUE *argv, VALUE self)
     double max  = NUM2DBL(vmax); \
     double diff = (max - min)/icls; \
     double trial; \
-    int32_t i; \
+    ca_size_t i; \
     for (i=0; i<=icls+1; i++) \
       cls[i] = diff*i + min; \
     for (i=0; i<ca->elements; i++, ptr++) { \
       if ( m && *m++ ) continue; \
       trial = (double)from(*ptr); \
       if ( diff > 0 && trial >= min && trial <= max ) { \
-        idx = (int32_t) ( (trial - min)/diff ); \
+        idx = (ca_size_t) ( (trial - min)/diff ); \
         hist[idx]++; \
       } \
       else if ( diff < 0 && trial >= max && trial <= min ) { \
-        idx = (int32_t) ( (trial - min)/diff ); \
+        idx = (ca_size_t) ( (trial - min)/diff ); \
         hist[idx]++; \
       } \
     } \
@@ -1897,25 +1897,25 @@ rb_ca_histogram (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE vnum, vmin, vmax;
   CArray *ca, *co;
-  int32_t i, idx, icls;
-  int32_t *hist;
-  int32_t dim[2] = {0, 3};
+  ca_size_t i, idx, icls;
+  ca_size_t *hist;
+  ca_size_t dim[2] = {0, 3};
   double *cls, *p;
 
   rb_scan_args(argc, argv, "3", &vnum, &vmin, &vmax);
 
   Data_Get_Struct(self, CArray, ca);
 
-  icls = NUM2LONG(vnum);
+  icls = NUM2SIZE(vnum);
 
   if ( icls < 1 ) {
     rb_raise(rb_eArgError, "bin number must be larger than 1");
   }
 
-  hist = ALLOC_N(int32_t, icls+1);
+  hist = ALLOC_N(ca_size_t, icls+1);
   cls  = ALLOC_N(double, icls+2);
 
-  MEMZERO(hist, int32_t, icls+1);
+  MEMZERO(hist, ca_size_t, icls+1);
   MEMZERO(cls, double, icls+2);
 
   ca_attach(ca);
@@ -1962,7 +1962,7 @@ rb_ca_histogram (int argc, VALUE *argv, VALUE self)
 
 #define proc_grade(type, from)                             \
   {                                                          \
-    int32_t *dst = (int32_t *) sa->ptr;                      \
+    ca_size_t *dst = (ca_size_t *) sa->ptr;                      \
     boolean8_t *m   = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     boolean8_t *dm  = (sa->mask) ? (boolean8_t*) sa->mask->ptr : NULL; \
     type   *ptr = (type *) ca->ptr;                          \
@@ -1971,7 +1971,7 @@ rb_ca_histogram (int argc, VALUE *argv, VALUE self)
     type   miss = 0;                                         \
     double diff = max - min;                                 \
     double trial;                                            \
-    int32_t i;                                               \
+    ca_size_t i;                                               \
     if ( min > max ) {                                       \
       rb_raise(rb_eRuntimeError, "invalid (min, max) range");   \
     }                                                        \
@@ -1994,7 +1994,7 @@ rb_ca_histogram (int argc, VALUE *argv, VALUE self)
           *dm = 1;                                           \
         }                                                    \
         else {                                                  \
-          *dst = (int32_t) floor( ((trial-min)/diff) * icls );  \
+          *dst = (ca_size_t) floor( ((trial-min)/diff) * icls );  \
         }                                                       \
         dst++;                                                  \
         if ( dm ) {                                             \
@@ -2009,9 +2009,9 @@ rb_ca_grade (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out, vnum, vmin, vmax;
   CArray *ca, *sa;
-  int32_t icls;
+  ca_size_t icls;
 
-  rb_scan_args(argc, argv, "12", &vnum, &vmin, &vmax);
+  rb_scan_args(argc, argv, "12", (VALUE *) &vnum, (VALUE *) &vmin, (VALUE *) &vmax);
 
   if ( NIL_P(vmin) ) {
     vmin = rb_funcall(self, rb_intern("min"), 0);
@@ -2029,7 +2029,7 @@ rb_ca_grade (int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eArgError, "bin number must be larger than 1");
   }
 
-  out = rb_carray_new_safe(CA_INT32, ca->rank, ca->dim, 0, NULL);
+  out = rb_carray_new_safe(CA_SIZE, ca->rank, ca->dim, 0, NULL);
   Data_Get_Struct(out, CArray, sa);
 
   ca_attach(ca);

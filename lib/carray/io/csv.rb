@@ -381,14 +381,15 @@ module CA
 
   class CSVWriter      # :nodoc:
 
-    def initialize (sep=",", rs=$/, &block)
+    def initialize (sep=",", rs=$/, fill="", &block)
       @block = block
       @sep   = sep
       @rs    = rs
+      @fill  = fill
     end
 
     def write_io (table, io)
-      return Processor.new(table, io, @sep, @rs, &@block).run
+      return Processor.new(table, io, @sep, @rs, @fill, &@block).run
     end
 
     def write_string (table, string) 
@@ -404,16 +405,20 @@ module CA
 
     class Processor   # :nodoc:
 
-      def initialize (table, io, sep, rs, &block)
+      def initialize (table, io, sep, rs, fill, &block)
         @io       = io
         @sep      = sep
         @rs       = rs
+        @fill     = fill
         @block    = block || proc { body }
         if table.has_data_class?
           @names = table.members
           @table = CArray.merge(CA_OBJECT, table[nil].fields)
         else
           @names = table.instance_exec{ @names }
+          if @names.nil?
+            @names = table.instance_exec{ @column_names }          
+          end
           case
           when table.rank > 2
             @table = table.reshape(false,nil).object
@@ -422,6 +427,9 @@ module CA
           else
             @table = table.object  ### convert to CA_OBJECT
           end
+        end
+        if @table.has_mask?
+          @table.unmask(@fill)
         end
         @regexp_simple = /#{@sep}/o
       end
@@ -451,7 +459,7 @@ module CA
       end
 
       # puts header
-      def header (list=@names)
+      def header (list = @names)
         @io.write list.map{|s| csv_quote(s)}.join(@sep)
         @io.write(@rs)
       end
@@ -464,25 +472,29 @@ module CA
 
       # write value
       # If option :strict is set, do csv_quote for string element
-      def body (opt = {:strict=>true})
-        if opt[:strict]
+      def body (strict: true, format: nil)
+        if strict
           case @table.data_type
           when CA_OBJECT
-            table = @table
+            table = @table.to_ca
             table[:is_kind_of, String].map! { |s| csv_quote(s) } 
           when CA_FIXLEN
             table = @table.object
             table.map! { |s| csv_quote(s) }
           else
-            table = @table.object         
-          end
-          table.dim0.times do |i|
-            @io.write table[i,nil].to_a.join(@sep)
-            @io.write(@rs)
+            table = @table.object 
           end
         else
-          @table.dim0.times do |i|
-            @io.write @table[i,nil].to_a.join(@sep)
+          table = @table
+        end
+        if format
+          table.dim0.times do |i|
+            @io.write Kernel::format(format,*table[i,nil].to_a)
+            @io.write(@rs)
+          end          
+        else
+          table.dim0.times do |i|
+            @io.write table[i,nil].to_a.join(@sep)
             @io.write(@rs)
           end
         end
@@ -525,15 +537,15 @@ class CArray
     end
   end
 
-  def save_csv (file, option = {}, rs: $/, sep: ",", mode: "w", &block)
-    option = {:sep=>sep, :rs=>rs, :mode=>mode}.update(option)
-    writer = CA::CSVWriter.new(option[:sep], option[:rs], &block)
+  def save_csv (file, option = {}, rs: $/, sep: ",", fill: "", mode: "w", &block)
+    option = {:sep=>sep, :rs=>rs, :fill=>fill, :mode=>mode}.update(option)
+    writer = CA::CSVWriter.new(option[:sep], option[:rs], option[:fill], &block)
     return writer.write_file(self, file, option[:mode])
   end
 
-  def to_csv (io="", option ={}, rs: $/, sep: ",", &block)
-    option = {:sep=>sep, :rs=>rs}.update(option)
-    writer = CA::CSVWriter.new(option[:sep], option[:rs], &block)
+  def to_csv (io="", option ={}, rs: $/, sep: ",", fill: "", &block)
+    option = {:sep=>sep, :rs=>rs, :fill=>fill}.update(option)
+    writer = CA::CSVWriter.new(option[:sep], option[:rs], option[:fill], &block)
     case io
     when IO, StringIO
       return writer.write_io(self, io)

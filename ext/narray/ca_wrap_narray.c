@@ -123,7 +123,7 @@ rb_cary_na_ref_new_i (int argc, VALUE *argv, VALUE self, VALUE klass)
 {
   CArray *orig;
   struct NARRAY *ary;
-  int i;
+  int8_t i;
 
   Data_Get_Struct(self, CArray, orig);
 
@@ -147,20 +147,20 @@ rb_cary_na_ref_new_i (int argc, VALUE *argv, VALUE self, VALUE klass)
     ary->rank = orig->rank;
     ary->shape = ALLOC_N(int, ary->rank);
     for (i=0; i<ary->rank; i++) {
-      ary->shape[i] = orig->dim[ary->rank-1-i];
+      ary->shape[i] = (int) orig->dim[ary->rank-1-i];
     }
-    ary->total = orig->elements;
+    ary->total = (int) orig->elements;
     ary->ptr   = orig->ptr;
   }
   else {
-    int32_t elements = 1;
+    ca_size_t elements = 1;
     ary->rank = argc;
     ary->shape = ALLOC_N(int, ary->rank);
     for (i=0; i<ary->rank; i++) {
       ary->shape[i] = NUM2INT(argv[i]);
       elements *= ary->shape[i];
     }
-    ary->total = elements;
+    ary->total = (int) elements;
     ary->ptr   = orig->ptr;
     if ( elements != orig->elements ) {
       free(ary->shape);
@@ -221,7 +221,14 @@ rb_cary_to_na_bang_i (VALUE self, VALUE klass)
     obj = na_make_empty(type, klass);
   }
   else {
-    obj = na_make_object(type, ca->rank, (int *) ca->dim, klass);
+    int shape[127];
+    int i;
+
+    for (i=0; i<ca->rank; i++) {
+      shape[i] = (int) ca->dim[ca->rank-i-1];
+    }
+
+    obj = na_make_object(type, ca->rank, shape, klass);
     GetNArray(obj, na);
 
     fary = rb_ca_farray(self);
@@ -281,12 +288,14 @@ rb_cary_to_na_i (VALUE self, VALUE klass)
     obj = na_make_empty(type, klass);
   }
   else {
-    obj = na_make_object(type, ca->rank, (int *) ca->dim, klass);
-    GetNArray(obj, na);
-
+    int shape[127];
+    
     for (i=0; i<ca->rank; i++) {
-      na->shape[i] = ca->dim[ca->rank-i-1];
+      shape[i] = (int) ca->dim[ca->rank-i-1];
     }
+
+    obj = na_make_object(type, ca->rank, shape, klass);
+    GetNArray(obj, na);
 
     ca_copy_data(ca, na->ptr);
   }
@@ -337,7 +346,7 @@ rb_na_ca_ref_new (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
   struct NARRAY *na;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   int8_t data_type;
   int i;
 
@@ -346,7 +355,7 @@ rb_na_ca_ref_new (int argc, VALUE *argv, VALUE self)
   data_type = na_typecode_to_ca_data_type(na->type);
 
   if ( na->total == 0 ) {
-    int32_t zero = 0;
+    ca_size_t zero = 0;
     obj = rb_carray_wrap_ptr(data_type, 1, &zero, 0, NULL,
                              &EMPTY_ARRAY_PTR, self); /* avoid ca->ptr == NULL */
   }
@@ -387,16 +396,16 @@ rb_na_to_ca (VALUE self)
   volatile VALUE obj;
   CArray *ca;
   struct NARRAY *na;
-  int32_t dim[CA_RANK_MAX];
-  int32_t data_type;
-  int32_t i;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t data_type;
+  ca_size_t i;
 
   GetNArray(self, na);
 
   data_type = na_typecode_to_ca_data_type(na->type);
 
   if ( na->total == 0 ) {
-    int32_t zero = 0;
+    ca_size_t zero = 0;
     obj = rb_carray_new(data_type, 1, &zero, 0, NULL);
   }
   else {
@@ -430,16 +439,16 @@ rb_na_to_ca_bang (VALUE self)
   volatile VALUE obj, fary;
   CArray *ca;
   struct NARRAY *na;
-  int32_t dim[CA_RANK_MAX];
-  int32_t data_type;
-  int32_t i;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t data_type;
+  ca_size_t i;
 
   GetNArray(self, na);
 
   data_type = na_typecode_to_ca_data_type(na->type);
 
   if ( na->total == 0 ) {
-    int32_t zero = 0;
+    ca_size_t zero = 0;
     obj = rb_carray_new(data_type, 1, &zero, 0, NULL);
   }
   else {
@@ -449,7 +458,7 @@ rb_na_to_ca_bang (VALUE self)
       dim[i] = na->shape[na->rank-i-1];
     }
 
-    obj = rb_carray_new(data_type, na->rank, na->shape, 0, NULL);
+    obj = rb_carray_new(data_type, na->rank, dim, 0, NULL);
     fary = rb_ca_farray(obj);
     Data_Get_Struct(fary, CArray, ca);
 

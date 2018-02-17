@@ -36,7 +36,7 @@ rb_ff_read_F (VALUE mod, VALUE vbuffer, VALUE vscale, VALUE vlength, VALUE vprec
 {
   double val;
   int status;
-  status = read_F(StringValuePtr(vbuffer), RSTRING_LEN(vbuffer),
+  status = read_F(StringValuePtr(vbuffer), (int) RSTRING_LEN(vbuffer),
                   NUM2INT(vscale), NUM2INT(vlength), NUM2INT(vprec), &val);
   if ( ! status ) {
     rb_raise(rb_eRuntimeError, "invalid string for F descriptor");
