@@ -31,17 +31,15 @@ Gem::Specification::new do |s|
                      Dir["ext/*/extconf.rb"].select{|f| File.exist?(f) }
   s.has_rdoc    = true
   s.rdoc_options = [
-		"--main=rdoc_main.rb", 
+		"--main rdoc_main.rb", 
 		"rdoc_main.rb", 
 		"rdoc_ext.rb",
 		"rdoc_math.rb", 
 		"rdoc_stat.rb", 
-		Dir.glob("lib/carray/**/*.rb")
+		Dir.glob("lib/carray/**/*.rb"),
 	].flatten
   s.required_ruby_version = ">= 1.8.1"
   s.add_runtime_dependency 'narray', '~> 0.6.1.1'
   s.add_runtime_dependency 'narray_miss', '~> 1.3'
-  s.add_runtime_dependency 'axlsx', '~> 2.0'
-  s.add_runtime_dependency 'spreadsheet', '~> 1.1'
   s.add_runtime_dependency 'sqlite3', '~> 1.3'
 end

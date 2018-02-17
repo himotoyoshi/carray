@@ -22,7 +22,7 @@ OBJ2BOOL (VALUE v)
     return 1;
   }
   else if ( rb_obj_is_kind_of(v, rb_cInteger) ) {
-    int flag = NUM2LONG(v);
+    int flag = NUM2INT(v);
     if ( flag == 0 || flag == 1 ) {
       return flag;
     }
@@ -37,7 +37,7 @@ OBJ2BOOL (VALUE v)
 VALUE
 BOOL2OBJ (boolean8_t x)
 {
-  return ( x != 0 ) ? INT2FIX(1) : INT2FIX(0);
+  return ( x != 0 ) ? INT2NUM(1) : INT2NUM(0);
 }
 
 double
@@ -80,7 +80,7 @@ rb_obj2long (VALUE val)
 {
   switch ( TYPE(val) ) {
   case T_FIXNUM:
-    return FIX2LONG(val);
+    return NUM2LONG(val);
   case T_BIGNUM:
     return (long) NUM2LL(val);
   case T_NIL:
@@ -96,7 +96,7 @@ rb_obj2ulong (VALUE val)
 {
   switch ( TYPE(val) ) {
   case T_FIXNUM:
-    return FIX2ULONG(val);
+    return NUM2ULONG(val);
   case T_BIGNUM:
     return (unsigned long) rb_num2ull(val);
   case T_NIL:
@@ -112,7 +112,7 @@ rb_obj2ll (VALUE val)
 {
   switch ( TYPE(val) ) {
   case T_FIXNUM:
-    return FIX2LONG(val);
+    return NUM2LONG(val);
   case T_NIL:
     rb_raise(rb_eTypeError, "no implicit conversion fron nil to integer");
     break;
@@ -126,7 +126,7 @@ rb_obj2ull (VALUE val)
 {
   switch ( TYPE(val) ) {
   case T_FIXNUM:
-    return FIX2ULONG(val);
+    return NUM2ULONG(val);
   case T_NIL:
     rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
     break;
@@ -136,7 +136,7 @@ rb_obj2ull (VALUE val)
 }
 
 void
-ca_cast_block (int32_t n, void *ap1, void *ptr1,
+ca_cast_block (ca_size_t n, void *ap1, void *ptr1,
                void *ap2, void *ptr2)
 {
   CArray *ca1 = (CArray *) ap1;
@@ -149,7 +149,7 @@ ca_cast_block (int32_t n, void *ap1, void *ptr1,
 }
 
 void
-ca_cast_block_with_mask (int32_t n, void *ap1, void *ptr1,
+ca_cast_block_with_mask (ca_size_t n, void *ap1, void *ptr1,
                          void *ap2, void *ptr2, boolean8_t *m)
 {
   CArray *ca1 = (CArray *) ap1;
@@ -251,7 +251,7 @@ rb_ca_data_class_to_object (VALUE self)
 }
 
 static VALUE
-rb_ca_object_to_data_class (VALUE self, VALUE rtype, int32_t bytes) 
+rb_ca_object_to_data_class (VALUE self, VALUE rtype, ca_size_t bytes) 
 {
   volatile VALUE obj, rval;
   CArray *ca;
@@ -289,11 +289,11 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
   CArray *ca, *cb;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_scan_args(argc, argv, "11", &rtype, &ropt);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -357,7 +357,7 @@ rb_ca_to_fixlen (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE list[2];
-  rb_scan_args(argc, argv, "0");
+//  rb_scan_args(argc, argv, "0");
   list[0] = INT2NUM(CA_FIXLEN);
   list[1] = ropt;
   return rb_ca_to_type_internal(2, list, self);
@@ -425,9 +425,9 @@ rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
   CArray *ca;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
 
-  rb_scan_args(argc, argv, "11", &rtype, &ropt);
+  rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
@@ -470,7 +470,7 @@ rb_ca_as_fixlen (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rtype, ropt = rb_pop_options(&argc, &argv);
   VALUE list[2];
-  rb_scan_args(argc, argv, "01", &rtype);
+  rb_scan_args(argc, argv, "01", (VALUE *)  &rtype);
   list[0] = ( NIL_P(rtype) ) ? INT2NUM(CA_FIXLEN) : rtype;
   list[1] = ropt;
   return rb_ca_as_type_internal(2, list, self);
@@ -530,7 +530,7 @@ VALUE rb_ca_as_type_method(VALUE,    CA_OBJECT);
 /* ------------------------------------------------------------------------*/
 
 VALUE
-rb_ca_cast_block (int32_t n, VALUE ra1, void *ptr1,
+rb_ca_cast_block (ca_size_t n, VALUE ra1, void *ptr1,
                   VALUE ra2, void *ptr2)
 {
   CArray *ca1, *ca2;
@@ -652,7 +652,7 @@ static VALUE
 rb_ca_s_wrap_writable (int argc, VALUE *argv, VALUE klass)
 {
   volatile VALUE obj, rtype;
-  rb_scan_args(argc, argv, "11", &obj, &rtype);
+  rb_scan_args(argc, argv, "11", (VALUE *) &obj, (VALUE *) &rtype);
   return rb_ca_wrap_writable(obj, rtype);
 }
 
@@ -770,7 +770,7 @@ static VALUE
 rb_ca_s_wrap_readonly (int argc, VALUE *argv, VALUE klass)
 {
   volatile VALUE obj, rtype;
-  rb_scan_args(argc, argv, "11", &obj, &rtype);
+  rb_scan_args(argc, argv, "11", (VALUE *) &obj, (VALUE *) &rtype);
   return rb_ca_wrap_readonly(obj, rtype);
 }
 
@@ -781,15 +781,8 @@ rb_ca_cast (volatile VALUE self)
   if ( ! rb_obj_is_carray(obj) ) {
     switch ( TYPE(obj) ) {
     case T_FIXNUM:
-      obj = rb_cscalar_new_with_value(CA_INT32, 0, obj);
-      break;
     case T_BIGNUM:
-        if ( ca_valid[CA_INT64] ) {
-          obj = rb_cscalar_new_with_value(CA_INT64, 0, obj);          
-        }
-        else {
-          obj = rb_cscalar_new_with_value(CA_INT32, 0, obj);
-        }
+      obj = rb_cscalar_new_with_value(CA_INT64, 0, obj);
       break;
     case T_FLOAT:
       obj = rb_cscalar_new_with_value(CA_FLOAT64, 0, obj);
@@ -837,37 +830,37 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     self_is_object = 1;
     if ( rb_ca_is_object_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_OBJECT, 0, *self);
-      return;
     }
-    switch ( TYPE(*self) ) {
-    case T_FIXNUM:
-      *self = rb_cscalar_new_with_value(CA_INT32, 0, *self);
-      break;
-    case T_BIGNUM:
-      if ( ca_valid[CA_INT64] ) {
-        *self = rb_cscalar_new_with_value(CA_INT64, 0, *self);          
-      }
-      else {
-        *self = rb_cscalar_new_with_value(CA_INT32, 0, *self);
-      }
-      break;
-    case T_FLOAT:
+    else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
-      break;
-    case T_TRUE:
-    case T_FALSE:
-      *self = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *self);
-      break;
-    default:
+    }
 #ifdef HAVE_COMPLEX_H
-      if ( rb_obj_is_kind_of(*self, rb_cCComplex) ) {
-        *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
+    else if ( rb_ca_is_complex_type(*other) ) {
+      *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
+    }
+#endif
+    else {
+      switch ( TYPE(*self) ) {
+      case T_FIXNUM:
+        *self = rb_cscalar_new_with_value(CA_INT64, 0, *self);
+        break;
+      case T_FLOAT:
+        *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
+        break;
+      case T_TRUE:
+      case T_FALSE:
+        *self = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *self);
+        break;
+      default:
+  #ifdef HAVE_COMPLEX_H
+        if ( rb_obj_is_kind_of(*self, rb_cCComplex) ) {
+          *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
+          break;
+        }
+  #endif
+        *self = rb_cscalar_new_with_value(CA_OBJECT, 0, *self);
         break;
       }
-#endif
-
-      *self = rb_cscalar_new_with_value(CA_OBJECT, 0, *self);
-      break;
     }
   }
 
@@ -876,38 +869,38 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
-      return;
     }
-
-    switch ( TYPE(*other) ) {
-    case T_FIXNUM:
-      *other = rb_cscalar_new_with_value(CA_INT32, 0, *other);
-      break;
-    case T_BIGNUM:
-        if ( ca_valid[CA_INT64] ) {
-          *other = rb_cscalar_new_with_value(CA_INT64, 0, *other);          
-        }
-        else {
-          *other = rb_cscalar_new_with_value(CA_INT32, 0, *other);
-        }
-      break;
-    case T_FLOAT:
+    else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
-      break;
-    case T_TRUE:
-    case T_FALSE:
-      *other = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *other);
-      break;
-    default:
+    }
 #ifdef HAVE_COMPLEX_H
-      if ( rb_obj_is_kind_of(*other, rb_cCComplex) ) {
-        *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
+    else if ( rb_ca_is_complex_type(*self) ) {
+      *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
+    }
+#endif
+    else {
+      switch ( TYPE(*other) ) {
+      case T_FIXNUM:
+      case T_BIGNUM:
+        *other = rb_cscalar_new_with_value(CA_INT64, 0, *other);
+        break;
+      case T_FLOAT:
+        *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
+        break;
+      case T_TRUE:
+      case T_FALSE:
+        *other = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *other);
+        break;
+      default:
+#ifdef HAVE_COMPLEX_H
+        if ( rb_obj_is_kind_of(*other, rb_cCComplex) ) {
+          *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
+          break;
+        }
+#endif
+        *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
         break;
       }
-#endif
-
-      *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
-      break;
     }
   }
 
@@ -934,7 +927,7 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
         return;
       }
       else if ( test > 0 ) {
-        *other = rb_ca_wrap_readonly(*other, INT2FIX(ca->data_type));
+        *other = rb_ca_wrap_readonly(*other, INT2NUM(ca->data_type));
         return;
       }
     }
@@ -945,7 +938,7 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
         return;
       }
       else if ( test > 0 ) {
-        *self = rb_ca_wrap_readonly(*self, INT2FIX(cb->data_type));
+        *self = rb_ca_wrap_readonly(*self, INT2NUM(cb->data_type));
         return;
       }
     }
@@ -957,14 +950,14 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     return;
   }
   else if ( test > 0 ) {
-    *other = rb_ca_wrap_readonly(*other, INT2FIX(ca->data_type));
+    *other = rb_ca_wrap_readonly(*other, INT2NUM(ca->data_type));
     return;
   }
 
   test = ca_cast_table[ca->data_type][cb->data_type];
 
   if ( test > 0 ) {
-    *self = rb_ca_wrap_readonly(*self, INT2FIX(cb->data_type));
+    *self = rb_ca_wrap_readonly(*self, INT2NUM(cb->data_type));
     return;
   }
 
@@ -998,44 +991,47 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
+    }
+    else if ( rb_ca_is_float_type(*self) ) {
+      *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
+    }
+#ifdef HAVE_COMPLEX_H
+    else if ( rb_ca_is_complex_type(*self) ) {
+      *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
       return;
     }
-    switch ( TYPE(*other) ) {
-    case T_FIXNUM:
-      *other = rb_cscalar_new_with_value(CA_INT32, 0, *other);
-      break;
-    case T_BIGNUM:
-        if ( ca_valid[CA_INT64] ) {
-          *other = rb_cscalar_new_with_value(CA_INT64, 0, *other);          
+#endif
+    else {
+      switch ( TYPE(*other) ) {
+      case T_FIXNUM:
+      case T_BIGNUM:
+        *other = rb_cscalar_new_with_value(CA_INT64, 0, *other);
+        break;
+      case T_FLOAT:
+        *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
+        break;
+      case T_TRUE:
+      case T_FALSE:
+        *other = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *other);
+        break;
+      default:
+  #ifdef HAVE_COMPLEX_H
+        if ( rb_obj_is_kind_of(*other, rb_cCComplex) ) {
+          *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
+          break;
         }
-        else {
-          *other = rb_cscalar_new_with_value(CA_INT32, 0, *other);
-        }
-      break;
-    case T_FLOAT:
-      *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
-      break;
-    case T_TRUE:
-    case T_FALSE:
-      *other = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *other);
-      break;
-    default:
-#ifdef HAVE_COMPLEX_H
-      if ( rb_obj_is_kind_of(*other, rb_cCComplex) ) {
-        *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
+  #endif
+        *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
         break;
       }
-#endif
-      *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
-      break;
     }
-
+    
     Data_Get_Struct(*other, CScalar, cs);
 
     test0 = ca_cast_table2[cs->data_type][ca->data_type];
 
     if ( test0 > 0 ) {
-      *other = rb_ca_wrap_readonly(*other, INT2FIX(ca->data_type));
+      *other = rb_ca_wrap_readonly(*other, INT2NUM(ca->data_type));
     }
 
   }
@@ -1053,7 +1049,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
     return;
   }
   else if ( test1 > 0 ) {
-    *other = rb_ca_wrap_readonly(*other, INT2FIX(ca->data_type));
+    *other = rb_ca_wrap_readonly(*other, INT2NUM(ca->data_type));
     return;
   }
 

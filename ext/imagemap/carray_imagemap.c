@@ -37,9 +37,9 @@ static void
 draw_linex (CArray *ca, float x0, float y0, float x1, float y1, char *ptr)
 {
   float x, y;
-  int ix, iy;
-  int dim0 = ca->dim[0];
-  int dim1 = ca->dim[1];
+  ca_size_t ix, iy;
+  ca_size_t dim0 = ca->dim[0];
+  ca_size_t dim1 = ca->dim[1];
   float a = (y1-y0)/(x1-x0);
   for (x=x0; x<x1; x+=1) {
     y = a*(x-x0)+y0;
@@ -56,9 +56,9 @@ static void
 draw_liney (CArray *ca, float x0, float y0, float x1, float y1, char *ptr)
 {
   float x, y;
-  int ix, iy;
-  int dim0 = ca->dim[0];
-  int dim1 = ca->dim[1];
+  ca_size_t ix, iy;
+  ca_size_t dim0 = ca->dim[0];
+  ca_size_t dim1 = ca->dim[1];
   float a = (x1-x0)/(y1-y0);
   for (y=y0; y<y1; y+=1) {
     x = a*(y-y0)+x0;
@@ -136,8 +136,8 @@ fill_rect (CArray *image, float x[4], float y[4], char *ptr)
   CArray *mask;
   float xmin, xmax, ymin, ymax;
   float gx[4], gy[4];
-  int32_t dim[2];
-  int32_t i, j, ixmin, iymin, ixmax, iymax;
+  ca_size_t dim[2];
+  ca_size_t i, j, ixmin, iymin, ixmax, iymax;
   char  one = 1;
 
   xmin = x[0];
@@ -162,11 +162,11 @@ fill_rect (CArray *image, float x[4], float y[4], char *ptr)
     }
   }
 
-  ixmin = (int32_t) floor(xmin);
-  iymin = (int32_t) floor(ymin);
+  ixmin = (ca_size_t) floor(xmin);
+  iymin = (ca_size_t) floor(ymin);
 
-  ixmax = (int32_t) ceil(xmax) + 1;
-  iymax = (int32_t) ceil(ymax) + 1;
+  ixmax = (ca_size_t) ceil(xmax) + 1;
+  iymax = (ca_size_t) ceil(ymax) + 1;
 
   dim[0] = ixmax - ixmin + 1;
   dim[1] = iymax - iymin + 1;
@@ -240,7 +240,7 @@ rb_im_fill_rect (VALUE self,
 }
 
 void
-draw_hline_gradation (CArray *image, int iy, 
+draw_hline_gradation (CArray *image, ca_size_t iy, 
           float x0, float x1, float z0, float z1);
 
 static VALUE
@@ -251,7 +251,7 @@ rb_img_draw_hline_gradation (VALUE self, VALUE viy,
 
   Data_Get_Struct(self, CArray, image);
 
-  draw_hline_gradation(image, NUM2INT(viy),
+  draw_hline_gradation(image, NUM2SIZE(viy),
            NUM2DBL(vx0), NUM2DBL(vx1), NUM2DBL(vz0), NUM2DBL(vz1));
 
   return Qnil;

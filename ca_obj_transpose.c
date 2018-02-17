@@ -17,17 +17,17 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t  *imap;
-  int32_t   step;
+  ca_size_t  *imap;
+  ca_size_t   step;
 } CATrans;
 
 static int8_t CA_OBJ_TRANSPOSE;
@@ -42,14 +42,15 @@ static VALUE rb_cCATrans;
 /* ------------------------------------------------------------------- */
 
 int
-ca_trans_setup (CATrans *ca, CArray *parent, int32_t *imap)
+ca_trans_setup (CATrans *ca, CArray *parent, ca_size_t *imap)
 {
   int8_t data_type, rank;
-  int32_t bytes, elements;
-  int32_t *dim0;
-  int32_t newdim[CA_RANK_MAX];
-  int32_t map[CA_RANK_MAX];
-  int i, idim, step;
+  ca_size_t bytes, elements;
+  ca_size_t *dim0;
+  ca_size_t newdim[CA_RANK_MAX];
+  ca_size_t map[CA_RANK_MAX];
+  int8_t i;
+  ca_size_t idim, step;
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
@@ -89,16 +90,16 @@ ca_trans_setup (CATrans *ca, CArray *parent, int32_t *imap)
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
-  ca->imap      = ALLOC_N(int32_t, rank);
+  ca->imap      = ALLOC_N(ca_size_t, rank);
   ca->step      = step;
 
-  memcpy(ca->dim,  newdim, rank * sizeof(int32_t));
-  memcpy(ca->imap, imap,   rank * sizeof(int32_t));
+  memcpy(ca->dim,  newdim, rank * sizeof(ca_size_t));
+  memcpy(ca->imap, imap,   rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -108,7 +109,7 @@ ca_trans_setup (CATrans *ca, CArray *parent, int32_t *imap)
 }
 
 CATrans *
-ca_trans_new (CArray *parent, int32_t *imap)
+ca_trans_new (CArray *parent, ca_size_t *imap)
 {
   CATrans *ca = ALLOC(CATrans);
   ca_trans_setup(ca, parent, imap);
@@ -142,30 +143,30 @@ ca_trans_func_clone (void *ap)
 }
 
 static char *
-ca_trans_func_ptr_at_addr (void *ap, int32_t addr)
+ca_trans_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CATrans *ca = (CATrans *) ap;
   if ( ca->ptr ) {
     return ca->ptr + ca->bytes * addr;
   }
   else {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index((CArray *)ca, addr, idx);
     return ca_ptr_at_index(ca, idx);
   }
 }
 
 static char *
-ca_trans_func_ptr_at_index (void *ap, int32_t *idx)
+ca_trans_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CATrans *ca = (CATrans *) ap;
   if ( ca->ptr ) {
     return ca_array_func_ptr_at_index(ca, idx);
   }
   else {
-    int32_t *imap = ca->imap;
-    int32_t idx0[CA_RANK_MAX];
-    int32_t i;
+    ca_size_t *imap = ca->imap;
+    ca_size_t idx0[CA_RANK_MAX];
+    int8_t i;
     for (i=0; i<ca->rank; i++) {
       idx0[imap[i]] = idx[i];
     }
@@ -174,12 +175,12 @@ ca_trans_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_trans_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_trans_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CATrans *ca = (CATrans *) ap;
-  int32_t *imap = ca->imap;
-  int32_t idx0[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *imap = ca->imap;
+  ca_size_t idx0[CA_RANK_MAX];
+  int8_t i;
   for (i=0; i<ca->rank; i++) {
     idx0[imap[i]] = idx[i];
   }
@@ -187,12 +188,12 @@ ca_trans_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_trans_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_trans_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CATrans *ca = (CATrans *) ap;
-  int32_t *imap = ca->imap;
-  int32_t idx0[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t *imap = ca->imap;
+  ca_size_t idx0[CA_RANK_MAX];
+  int8_t i;
   for (i=0; i<ca->rank; i++) {
     idx0[imap[i]] = idx[i];
   }
@@ -303,12 +304,12 @@ ca_operation_function_t ca_trans_func = {
 /* ------------------------------------------------------------------- */
 
 static void
-ca_trans_attach_loop (CATrans *ca, int8_t level, int32_t *idx, int32_t *idx0)
+ca_trans_attach_loop (CATrans *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t step = ca->step;
-  int32_t dim = ca->dim[level];
-  int32_t *imap = ca->imap;
-  int32_t i;
+  ca_size_t step = ca->step;
+  ca_size_t dim = ca->dim[level];
+  ca_size_t *imap = ca->imap;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     idx[level] = 0;
@@ -378,18 +379,18 @@ ca_trans_attach_loop (CATrans *ca, int8_t level, int32_t *idx, int32_t *idx0)
 static void
 ca_trans_attach (CATrans *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_trans_attach_loop(ca, 0, idx, idx0);
 }
 
 static void
-ca_trans_sync_loop (CATrans *ca, int8_t level, int32_t *idx, int32_t *idx0)
+ca_trans_sync_loop (CATrans *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t step = ca->step;
-  int32_t dim = ca->dim[level];
-  int32_t *imap = ca->imap;
-  int32_t i;
+  ca_size_t step = ca->step;
+  ca_size_t dim = ca->dim[level];
+  ca_size_t *imap = ca->imap;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     idx[level] = 0;
@@ -459,18 +460,18 @@ ca_trans_sync_loop (CATrans *ca, int8_t level, int32_t *idx, int32_t *idx0)
 static void
 ca_trans_sync (CATrans *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_trans_sync_loop(ca, 0, idx, idx0);
 }
 
 /*
 static void
 ca_trans_fill_loop (CATrans *ca, char *ptr,
-                   int8_t level, int32_t *idx0)
+                   int8_t level, ca_size_t *idx0)
 {
-  int32_t *imap = ca->imap;
-  int32_t i;
+  ca_size_t *imap = ca->imap;
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
@@ -496,7 +497,7 @@ ca_trans_fill (CATrans *ca, char *ptr)
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_trans_new (VALUE cary, int32_t *imap)
+rb_ca_trans_new (VALUE cary, ca_size_t *imap)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -522,8 +523,8 @@ rb_ca_trans (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
   CArray *ca;
-  int32_t imap[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t imap[CA_RANK_MAX];
+  int8_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -534,7 +535,7 @@ rb_ca_trans (int argc, VALUE *argv, VALUE self)
   }
   else if ( argc == ca->rank ) {
     for (i=0; i<ca->rank; i++) {
-      imap[i] = NUM2INT(argv[i]);
+      imap[i] = NUM2SIZE(argv[i]);
     }
   }
   else {

@@ -12,6 +12,25 @@
 
 #include "carray.h"
 
+#if RUBY_VERSION_CODE >= 240
+#define RSTRUCT_EMBED_LEN_MAX RSTRUCT_EMBED_LEN_MAX
+enum {
+  RSTRUCT_EMBED_LEN_MAX = 3,
+  RSTRUCT_ENUM_END
+};
+struct RStruct {
+    struct RBasic basic;
+    union {
+        struct {
+            long len;
+            const VALUE *ptr;
+        } heap;
+        const VALUE ary[RSTRUCT_EMBED_LEN_MAX];
+    } as;
+};
+#define RSTRUCT(obj) (R_CAST(RStruct)(obj))
+#endif
+
 #if RUBY_VERSION_CODE >= 190
 #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
 #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
@@ -28,7 +47,7 @@ static VALUE sym_star, sym_perc;
 static VALUE S_CAInfo;
 
 VALUE
-rb_ca_store_index (VALUE self, int32_t *idx, VALUE rval)
+rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
 {
   CArray *ca;
   boolean8_t zero = 0, one = 1;
@@ -56,8 +75,8 @@ rb_ca_store_index (VALUE self, int32_t *idx, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 32) {
-      char v[32];
+    if ( ca->bytes <= 64) {
+      char v[64];
       rb_ca_obj2ptr(self, rval, v);
       ca_store_index(ca, idx, v);
     }
@@ -73,7 +92,7 @@ rb_ca_store_index (VALUE self, int32_t *idx, VALUE rval)
 }
 
 VALUE
-rb_ca_fetch_index (VALUE self, int32_t *idx)
+rb_ca_fetch_index (VALUE self, ca_size_t *idx)
 {
   volatile VALUE out;
   CArray *ca;
@@ -84,8 +103,8 @@ rb_ca_fetch_index (VALUE self, int32_t *idx)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 32) {
-    char v[32];
+  if ( ca->bytes <= 64) {
+    char v[64];
     ca_fetch_index(ca, idx, v);
     out = rb_ca_ptr2obj(self, v);
   }
@@ -110,7 +129,7 @@ rb_ca_fetch_index (VALUE self, int32_t *idx)
 }
 
 VALUE
-rb_ca_store_addr (VALUE self, int32_t addr, VALUE rval)
+rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
 {
   CArray *ca;
   boolean8_t zero = 0, one = 1;
@@ -136,8 +155,8 @@ rb_ca_store_addr (VALUE self, int32_t addr, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 32) {
-      char v[32];
+    if ( ca->bytes <= 64) {
+      char v[64];
       rb_ca_obj2ptr(self, rval, v);
       ca_store_addr(ca, addr, v);
     }
@@ -153,7 +172,7 @@ rb_ca_store_addr (VALUE self, int32_t addr, VALUE rval)
 }
 
 VALUE
-rb_ca_fetch_addr (VALUE self, int32_t addr)
+rb_ca_fetch_addr (VALUE self, ca_size_t addr)
 {
   volatile VALUE out;
   CArray *ca;
@@ -164,8 +183,8 @@ rb_ca_fetch_addr (VALUE self, int32_t addr)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 32) {
-    char v[32];
+  if ( ca->bytes <= 64) {
+    char v[64];
     ca_fetch_addr(ca, addr, v);
     out = rb_ca_ptr2obj(self, v);
   }
@@ -242,7 +261,7 @@ rb_ca_fill_copy (VALUE self, VALUE rval)
 /* -------------------------------------------------------------------- */
 
 static void
-ary_guess_shape (VALUE ary, int level, int *max_level, int32_t *dim)
+ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
 {
   volatile VALUE ary0;
   if ( level > CA_RANK_MAX ) {
@@ -259,8 +278,8 @@ ary_guess_shape (VALUE ary, int level, int *max_level, int32_t *dim)
       dim[level] = RARRAY_LEN(ary);
       ary0 = rb_ary_entry(ary, 0);
       if ( TYPE(ary0) == T_ARRAY ) {
-        int32_t dim0 = RARRAY_LEN(ary0);
-        int32_t i;
+        ca_size_t dim0 = RARRAY_LEN(ary0);
+        ca_size_t i;
         int flag = 0;
         for (i=0; i<dim[level]; i++) {
           VALUE x = rb_ary_entry(ary, i);
@@ -283,13 +302,13 @@ static VALUE
 rb_ca_s_guess_array_shape (VALUE self, VALUE ary)
 {
   volatile VALUE out;
-  int32_t dim[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
   int max_level = -1;
   int i;
   ary_guess_shape(ary, 0, &max_level, dim);
   out = rb_ary_new2(max_level);
   for (i=0; i<max_level+1; i++) {
-    rb_ary_store(out, i, INT2NUM(dim[i]));
+    rb_ary_store(out, i, SIZE2NUM(dim[i]));
   }
   return out;
 }
@@ -319,11 +338,11 @@ ary_flatten_upto_level (VALUE ary, int max_level, int level,
 }
 
 static VALUE
-rb_ary_flatten_for_elements (VALUE ary, int32_t elements, void *ap)
+rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
 {
   CArray *ca = (CArray *) ap;
-  int32_t dim[CA_RANK_MAX];
-  int32_t total;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t total;
   int max_level = -1, level = -1;
   int same_shape, is_object = ( ca_is_object_type(ca) );
   int i;
@@ -348,7 +367,7 @@ rb_ary_flatten_for_elements (VALUE ary, int32_t elements, void *ap)
       rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
     }
     else {
-      VALUE out = rb_ary_new2(elements);
+      VALUE out = rb_ary_new2(0);
       int len = 0;
       ary_flatten_upto_level(ary, max_level, 0, out, &len);
       if ( len != elements ) {
@@ -374,7 +393,7 @@ rb_ary_flatten_for_elements (VALUE ary, int32_t elements, void *ap)
     }
 
     if ( same_shape ) {
-      VALUE out = rb_ary_new2(elements);
+      VALUE out = rb_ary_new2(0);
       int len = 0;
       ary_flatten_upto_level(ary, ca->rank-1, 0, out, &len);
 
@@ -396,7 +415,7 @@ rb_ary_flatten_for_elements (VALUE ary, int32_t elements, void *ap)
       }
 
       if ( level >= 0 ) {
-        VALUE out = rb_ary_new2(elements);
+        VALUE out = rb_ary_new2(0);
         int len = 0;
         ary_flatten_upto_level(ary, level, 0, out, &len);
         if ( len != elements ) {
@@ -419,13 +438,13 @@ rb_ary_flatten_for_elements (VALUE ary, int32_t elements, void *ap)
   }                                                                     \
   if ( index < 0 || index >= (dim) ) {                                  \
     rb_raise(rb_eIndexError,                                            \
-             "index out of range at %i-dim ( %i <=> 0..%i )",        \
-             i, index, dim-1);                                          \
+             "index out of range at %i-dim ( %lld <=> 0..%lld )",        \
+             i, (ca_size_t) index, (ca_size_t) (dim-1));                                          \
   }
 
 void
-rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
-                  int argc, VALUE *argv, CAIndexInfo *info)
+rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t ca_elements,
+                  long argc, VALUE *argv, CAIndexInfo *info)
 {
   int32_t i;
 
@@ -476,8 +495,8 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
                                          /* ca[selector] -> CA_REG_SELECT */
         if ( ca_elements != cs->elements ) {
           rb_raise(rb_eRuntimeError,
-           "mismatch of # of elements ( %i <=> %i ) in reference by selection",
-                   cs->elements, ca_elements);
+           "mismatch of # of elements ( %lld <=> %lld ) in reference by selection",
+                   (ca_size_t) cs->elements, (ca_size_t) ca_elements);
         }
         info->type   = CA_REG_SELECT;
         info->select = cs;
@@ -504,10 +523,10 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
 
     if ( ca_rank > 1 ) { /* ca.rank > 1 */
       if ( rb_obj_is_kind_of(arg, rb_cInteger) ) { /* ca[n] -> CA_REG_ADDRESS */
-        int32_t addr;
+        ca_size_t addr;
         info->type = CA_REG_ADDRESS;
         info->rank = 1;
-        addr = NUM2INT(arg);
+        addr = NUM2SIZE(arg);
         CA_CHECK_INDEX(addr, ca_elements);
         info->index[0].scalar = addr;
         return;
@@ -526,8 +545,8 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
   /* continue to next section */
 
   if ( argc >= 1 ) {
-    int32_t is_point = 0, is_all = 0, is_iterator = 0, is_repeat=0, is_grid=0;
-    int32_t has_rubber = 0;
+    int8_t  is_point = 0, is_all = 0, is_iterator = 0, is_repeat=0, is_grid=0;
+    int8_t  has_rubber = 0;
     int32_t *index_type = info->index_type;
     CAIndex *index = info->index;
 
@@ -555,7 +574,7 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
     if ( ! has_rubber && ca_rank != argc ) {
       rb_raise(rb_eIndexError,
                "number of indices exceeds the rank of carray (%i > %i)",
-               argc, ca_rank);
+               (int) argc, ca_rank);
     }
 
     info->rank = argc;
@@ -566,9 +585,9 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
     retry:
 
       if ( rb_obj_is_kind_of(arg, rb_cInteger) ) { /* ca[--,i,--] */
-        int32_t scalar;
+        ca_size_t scalar;
         index_type[i] = CA_IDX_SCALAR;
-        scalar = NUM2INT(arg);
+        scalar = NUM2SIZE(arg);
         CA_CHECK_INDEX_AT(scalar, ca_dim[i], i);
         index[i].scalar = scalar;
       }
@@ -576,8 +595,8 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
         index_type[i] = CA_IDX_ALL;
       }
       else if ( arg == Qfalse ) { /* ca[--,false,--] */
-        int32_t rrank = ca_rank - argc + 1;
-        int32_t j;
+        int8_t rrank = ca_rank - argc + 1;
+        int8_t j;
         for (j=0; j<rrank; j++) {
           index_type[i+j] = CA_IDX_ALL;
         }
@@ -587,14 +606,14 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
         info->rank = ca_rank;
       }
       else if ( rb_obj_is_kind_of(arg, rb_cRange) ) { /* ca[--,i..j,--] */
-        int32_t first, last, excl, count, step;
+        ca_size_t first, last, excl, count, step;
         volatile VALUE iv_beg, iv_end, iv_excl;
         iv_beg  = RANGE_BEG(arg);
         iv_end  = RANGE_END(arg);
         iv_excl = RANGE_EXCL(arg);
         index_type[i] = CA_IDX_BLOCK; /* convert to block */
-        first = NUM2INT(iv_beg);
-        last  = NUM2INT(iv_end);
+        first = NUM2SIZE(iv_beg);
+        last  = NUM2SIZE(iv_end);
         excl  = RTEST(iv_excl);
         CA_CHECK_INDEX_AT(first, ca_dim[i], i);
 
@@ -612,11 +631,11 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
           }
           if ( last < 0 || last >= ca_dim[i] ) {
             rb_raise(rb_eIndexError,
-                     "index %i is out of range (0..%i) at %i-dim",
-                     last, ca_dim[i]-1, i);
+                     "index %lld is out of range (0..%lld) at %i-dim",
+                     (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
           }
           index[i].block.start = first;
-          index[i].block.count = count = abs(last - first) + 1;
+          index[i].block.count = count = llabs(last - first) + 1;
           index[i].block.step  = step  = ( last >= first ) ? 1 : -1;
         }
       }
@@ -632,8 +651,8 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
             goto retry;
           }
           else {                         /* ca[--,[i],--]*/
-            int32_t start;
-            start = NUM2INT(arg0);
+            ca_size_t start;
+            start = NUM2SIZE(arg0);
             CA_CHECK_INDEX_AT(start, ca_dim[i], i);
             index_type[i] = CA_IDX_BLOCK;
             index[i].block.start = start;
@@ -645,8 +664,8 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
           VALUE arg0 = rb_ary_entry(arg, 0);
           VALUE arg1 = rb_ary_entry(arg, 1);
           if ( NIL_P(arg0) ) {              /* ca[--,[nil,k],--]*/
-            int32_t start, last, count, step, bound;
-            step  = NUM2INT(arg1);
+            ca_size_t start, last, count, step, bound;
+            step  = NUM2SIZE(arg1);
             if ( step == 0 ) {
               rb_raise(rb_eRuntimeError, 
                        "step in index equals to 0 in block reference");
@@ -667,11 +686,11 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
             index[i].block.step  = step;
           }
           else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* ca[--,[i..j,k],--]*/
-            int32_t start, last, excl, count, step, bound;
-            start = NUM2INT(RANGE_BEG(arg0));
-            last  = NUM2INT(RANGE_END(arg0));
+            ca_size_t start, last, excl, count, step, bound;
+            start = NUM2SIZE(RANGE_BEG(arg0));
+            last  = NUM2SIZE(RANGE_END(arg0));
             excl  = RTEST(RANGE_EXCL(arg0));
-            step  = NUM2INT(arg1);
+            step  = NUM2SIZE(arg1);
             if ( step == 0 ) {
               rb_raise(rb_eRuntimeError, 
                        "step in index equals to 0 in block reference");
@@ -692,14 +711,14 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
               }
               if ( last < 0 || last >= ca_dim[i] ) {
                 rb_raise(rb_eIndexError,
-                         "index %i is out of range (0..%i) at %i-dim",
-                         last, ca_dim[i]-1, i);
+                         "index %lld is out of range (0..%lld) at %i-dim",
+                         (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
               }
               if ( (last - start) * step < 0 ) {
                 count = 1;
               }
               else {
-                count = abs(last - start)/abs(step) + 1;
+                count = llabs(last - start)/llabs(step) + 1;
               }
               bound = start + (count - 1)*step;
               CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
@@ -709,9 +728,9 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
             }
           }
           else {                            /* ca[--,[i,j],--]*/
-            int32_t start, count, bound;
-            start = NUM2INT(arg0);
-            count = NUM2INT(arg1);
+            ca_size_t start, count, bound;
+            start = NUM2SIZE(arg0);
+            count = NUM2SIZE(arg1);
             bound = start + (count - 1);
             CA_CHECK_INDEX_AT(start, ca_dim[i], i);
             CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
@@ -722,10 +741,10 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
           }
         }
         else if ( RARRAY_LEN(arg) == 3 ) { /* ca[--,[i,j,k],--]*/
-          int32_t start, count, step, bound;
-          start = NUM2INT(rb_ary_entry(arg, 0));
-          count = NUM2INT(rb_ary_entry(arg, 1));
-          step  = NUM2INT(rb_ary_entry(arg, 2));
+          ca_size_t start, count, step, bound;
+          start = NUM2SIZE(rb_ary_entry(arg, 0));
+          count = NUM2SIZE(rb_ary_entry(arg, 1));
+          step  = NUM2SIZE(rb_ary_entry(arg, 2));
           if ( step == 0 ) {
             rb_raise(rb_eRuntimeError, 
                      "step in index equals to 0 in block reference");
@@ -833,7 +852,7 @@ rb_ca_scan_index (int ca_rank, int32_t *ca_dim, int32_t ca_elements,
     if ( info->type == CA_REG_ITERATOR ) {
       for (i=0; i<info->rank; i++) {
         if ( info->index_type[i] == CA_IDX_SCALAR ) {
-          int32_t start = info->index[i].scalar;
+          ca_size_t start = info->index[i].scalar;
           info->index_type[i] = CA_IDX_BLOCK;
           info->index[i].block.start = start;
           info->index[i].block.step  = 1;
@@ -852,7 +871,7 @@ static VALUE
 rb_ca_ref_address (VALUE self, CAIndexInfo *info)
 {
   CArray *ca;
-  int32_t addr;
+  ca_size_t addr;
   Data_Get_Struct(self, CArray, ca);
   addr = info->index[0].scalar;
   return rb_ca_fetch_addr(self, addr);
@@ -862,7 +881,7 @@ static VALUE
 rb_ca_store_address (VALUE self, CAIndexInfo *info, volatile VALUE rval)
 {
   CArray *ca;
-  int32_t addr;
+  ca_size_t addr;
   Data_Get_Struct(self, CArray, ca);
   addr = info->index[0].scalar;
   if ( rb_obj_is_cscalar(rval) ) {
@@ -876,8 +895,8 @@ static VALUE
 rb_ca_ref_point (VALUE self, CAIndexInfo *info)
 {
   CArray *ca;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   Data_Get_Struct(self, CArray, ca);
   for (i=0; i<ca->rank; i++) {
     idx[i] = info->index[i].scalar;
@@ -889,8 +908,8 @@ static VALUE
 rb_ca_store_point (VALUE self, CAIndexInfo *info, volatile VALUE val)
 {
   CArray *ca;
-  int32_t idx[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t idx[CA_RANK_MAX];
+  int8_t i;
   Data_Get_Struct(self, CArray, ca);
   for (i=0; i<ca->rank; i++) {
     idx[i] = info->index[i].scalar;
@@ -938,8 +957,8 @@ rb_ca_store_all (VALUE self, VALUE rval)
 
     if ( ca->elements != cv->elements ) {
       rb_raise(rb_eRuntimeError,
-               "mismatch in data size (%i <-> %i) for storing to carray", 
-               ca->elements, cv->elements);
+               "mismatch in data size (%lld <-> %lld) for storing to carray", 
+               (ca_size_t) ca->elements, (ca_size_t) cv->elements);
     }
 
     ca_attach(cv);
@@ -965,7 +984,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
   else if ( TYPE(rval) == T_ARRAY ) {
     volatile VALUE list =
                  rb_ary_flatten_for_elements(rval, ca->elements, ca);
-    int32_t i;
+    ca_size_t i;
     if ( NIL_P(list) ) {
       rb_raise(rb_eRuntimeError,
                "failed to guess data size of given array");
@@ -1022,28 +1041,28 @@ rb_ca_store_all (VALUE self, VALUE rval)
 }
 
 static void
-rb_ca_index_restruct_block (int16_t *rankp, int32_t *shrink, int32_t *dim,
-                            int32_t *start, int32_t *step, int32_t *count,
-                            int32_t *offsetp)
+rb_ca_index_restruct_block (int16_t *rankp, ca_size_t *shrink, ca_size_t *dim,
+                            ca_size_t *start, ca_size_t *step, ca_size_t *count,
+                            ca_size_t *offsetp)
 {
-  int32_t dim0[CA_RANK_MAX];
-  int32_t start0[CA_RANK_MAX];
-  int32_t step0[CA_RANK_MAX];
-  int32_t count0[CA_RANK_MAX];
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t dim0[CA_RANK_MAX];
+  ca_size_t start0[CA_RANK_MAX];
+  ca_size_t step0[CA_RANK_MAX];
+  ca_size_t count0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   int16_t rank0, rank;
-  int32_t offset0, offset, length;
-  int32_t k, n;
-  int32_t i, j, m;
+  ca_size_t offset0, offset, length;
+  ca_size_t k, n;
+  ca_size_t i, j, m;
 
   rank0   = *rankp;
   offset0 = *offsetp;
 
   /* store original start, step, count to start0, step0, count0 */
-  memcpy(dim0,   dim,   sizeof(int32_t) * rank0);
-  memcpy(start0, start, sizeof(int32_t) * rank0);
-  memcpy(step0,  step,  sizeof(int32_t) * rank0);
-  memcpy(count0, count, sizeof(int32_t) * rank0);
+  memcpy(dim0,   dim,   sizeof(ca_size_t) * rank0);
+  memcpy(start0, start, sizeof(ca_size_t) * rank0);
+  memcpy(step0,  step,  sizeof(ca_size_t) * rank0);
+  memcpy(count0, count, sizeof(ca_size_t) * rank0);
 
   /* classify and calc rank */
   n = -1;
@@ -1118,16 +1137,16 @@ rb_ca_ref_block (VALUE self, CAIndexInfo *info)
 {
   volatile VALUE refer;
   CArray *ca;
-  int32_t dim[CA_RANK_MAX];
-  int32_t start[CA_RANK_MAX];
-  int32_t step[CA_RANK_MAX];
-  int32_t count[CA_RANK_MAX];
-  int32_t shrink[CA_RANK_MAX];
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t start[CA_RANK_MAX];
+  ca_size_t step[CA_RANK_MAX];
+  ca_size_t count[CA_RANK_MAX];
+  ca_size_t shrink[CA_RANK_MAX];
   int16_t rank = 0;
-  int32_t offset = 0;
-  int32_t flag = 0;
-  int32_t elements;
-  int32_t i;
+  ca_size_t offset = 0;
+  ca_size_t flag = 0;
+  ca_size_t elements;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -1198,7 +1217,7 @@ static VALUE
 rb_ca_refer_new_flatten (VALUE self)
 {
   CArray *ca;
-  int32_t dim0;
+  ca_size_t dim0;
 
   Data_Get_Struct(self, CArray, ca);
   dim0 = ca->elements;
@@ -1253,7 +1272,7 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_repeat(argc, argv, self);
     break;
   case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), argc, argv);
+    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
     break;
   case CA_REG_MAPPING:
     obj = rb_ca_mapping(argc, argv, self);
@@ -1350,7 +1369,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), argc, argv);
+    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
     obj = rb_ca_store_all(obj, rval);
     break;
   case CA_REG_MAPPING: {
@@ -1367,7 +1386,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     volatile VALUE idx;
     Data_Get_Struct(self, CArray, ca);
     ca_attach(ca);
-    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    idx = rb_funcall2(self, SYM2ID(info.symbol), (int)(argc-1), argv+1);
     obj = rb_ca_store(self, idx, rval);
     ca_detach(ca);
     break;
@@ -1393,7 +1412,7 @@ rb_ca_fetch (VALUE self, VALUE index)
 {
   switch ( TYPE(index) ) {
   case T_ARRAY:
-    return rb_ca_fetch_method(RARRAY_LEN(index), RARRAY_PTR(index), self);
+    return rb_ca_fetch_method((int) RARRAY_LEN(index), RARRAY_PTR(index), self);
   default:
     return rb_ca_fetch_method(1, &index, self);
   }
@@ -1412,7 +1431,7 @@ rb_ca_store (VALUE self, VALUE index, VALUE rval)
   case T_ARRAY:
     index = rb_obj_clone(index);
     rb_ary_push(index, rval);
-    return rb_ca_store_method(RARRAY_LEN(index), RARRAY_PTR(index), self);
+    return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
   default: {
     VALUE rindex[2] = { index, rval };
     return rb_ca_store_method(2, rindex, self);
@@ -1425,7 +1444,7 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 {
   VALUE index = rb_ary_new4(n, rindex);
   rb_ary_push(index, rval);
-  return rb_ca_store_method(RARRAY_LEN(index), RARRAY_PTR(index), self);
+  return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
 }
 
 /* rdoc:
@@ -1439,17 +1458,17 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   volatile VALUE rtype, rrank, rindex;
   CAIndexInfo info;
   int     rank;
-  int32_t dim[CA_RANK_MAX];
-  int32_t elements;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t elements;
   int i;
 
   Check_Type(rdim, T_ARRAY);
   Check_Type(ridx, T_ARRAY);
 
   elements = 1;
-  rank = RARRAY_LEN(rdim);
+  rank = (int) RARRAY_LEN(rdim);
   for (i=0; i<rank; i++) {
-    dim[i] = NUM2LONG(rb_ary_entry(rdim, i));
+    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     elements *= dim[i];
   }
 
@@ -1468,22 +1487,22 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_ALL:
     break;
   case CA_REG_ADDRESS:
-    rb_ary_store(rindex, 0, LONG2NUM(info.index[0].scalar));
+    rb_ary_store(rindex, 0, SIZE2NUM(info.index[0].scalar));
     break;
   case CA_REG_ADDRESS_COMPLEX: {
     volatile VALUE rinfo;
-    int32_t elements = 1;
+    ca_size_t elements = 1;
     for (i=0; i<rank; i++) {
       elements *= dim[i];
     }
-    rinfo = rb_ca_s_scan_index(self, rb_ary_new3(1, LONG2NUM(elements)), ridx);
-    rtype = LONG2NUM(CA_REG_ADDRESS_COMPLEX);
+    rinfo = rb_ca_s_scan_index(self, rb_ary_new3(1, SIZE2NUM(elements)), ridx);
+    rtype = INT2NUM(CA_REG_ADDRESS_COMPLEX);
     rindex = rb_struct_aref(rinfo, rb_str_new2("index"));
     break;
   }
   case CA_REG_POINT:
     for (i=0; i<rank; i++) {
-      rb_ary_store(rindex, i, LONG2NUM(info.index[i].scalar));
+      rb_ary_store(rindex, i, SIZE2NUM(info.index[i].scalar));
     }
     break;
   case CA_REG_SELECT:
@@ -1493,21 +1512,21 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
     for (i=0; i<rank; i++) {
       switch ( info.index_type[i] ) {
       case CA_IDX_SCALAR:
-        rb_ary_store(rindex, i, LONG2NUM(info.index[i].scalar));
+        rb_ary_store(rindex, i, SIZE2NUM(info.index[i].scalar));
         break;
       case CA_IDX_ALL:
         rb_ary_store(rindex, i,
                      rb_ary_new3(3,
-                                 LONG2NUM(0),
+                                 INT2NUM(0),
                                  rb_ary_entry(rdim, i),
-                                 LONG2NUM(1)));
+                                 INT2NUM(1)));
         break;
       case CA_IDX_BLOCK:
         rb_ary_store(rindex, i,
                      rb_ary_new3(3,
-                                 LONG2NUM(info.index[i].block.start),
-                                 LONG2NUM(info.index[i].block.count),
-                                 LONG2NUM(info.index[i].block.step)));
+                                 SIZE2NUM(info.index[i].block.start),
+                                 SIZE2NUM(info.index[i].block.count),
+                                 SIZE2NUM(info.index[i].block.step)));
         break;
       case CA_IDX_SYMBOL:
         rb_ary_store(rindex, i,
@@ -1560,12 +1579,12 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
   case CA_REG_SELECT:
   case CA_REG_ADDRESS:
     rindex = rb_ary_new2(info.rank);
-    rb_ary_store(rindex, 0, LONG2NUM(info.index[0].scalar));
+    rb_ary_store(rindex, 0, SIZE2NUM(info.index[0].scalar));
     return rindex;
   case CA_REG_POINT:
     rindex = rb_ary_new2(info.rank);
     for (i=0; i<ca->rank; i++) {
-      rb_ary_store(rindex, i, LONG2NUM(info.index[i].scalar));
+      rb_ary_store(rindex, i, SIZE2NUM(info.index[i].scalar));
     }
     return rindex;
   case CA_REG_BLOCK:
@@ -1574,7 +1593,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
     for (i=0; i<ca->rank; i++) {
       switch ( info.index_type[i] ) {
       case CA_IDX_SCALAR:
-        rb_ary_store(rindex, i, LONG2NUM(info.index[i].scalar));
+        rb_ary_store(rindex, i, SIZE2NUM(info.index[i].scalar));
         break;
       case CA_IDX_ALL:
         rb_ary_store(rindex, i, Qnil);
@@ -1582,9 +1601,9 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
       case CA_IDX_BLOCK:
         rb_ary_store(rindex, i,
                      rb_ary_new3(3,
-                                 LONG2NUM(info.index[i].block.start),
-                                 LONG2NUM(info.index[i].block.count),
-                                 LONG2NUM(info.index[i].block.step)));
+                                 SIZE2NUM(info.index[i].block.start),
+                                 SIZE2NUM(info.index[i].block.count),
+                                 SIZE2NUM(info.index[i].block.step)));
         break;
       case CA_IDX_SYMBOL:
         rb_ary_store(rindex, i, ID2SYM(info.index[i].symbol.id));
@@ -1619,22 +1638,22 @@ rb_ca_addr2index (VALUE self, VALUE raddr)
 {
   volatile VALUE out;
   CArray *ca;
-  int32_t *dim;
-  int32_t addr;
+  ca_size_t *dim;
+  ca_size_t addr;
   int i;
 
   Data_Get_Struct(self, CArray, ca);
 
-  addr = NUM2INT(raddr);
+  addr = NUM2SIZE(raddr);
   if ( addr < 0 || addr >= ca->elements ) {
     rb_raise(rb_eArgError,
-             "address %i is out of range (0..%i)",
-             addr, ca->elements-1);
+             "address %lld is out of range (0..%lld)",
+             (ca_size_t) addr, (ca_size_t) (ca->elements-1));
   }
   dim = ca->dim;
   out = rb_ary_new2(ca->rank);
   for (i=ca->rank-1; i>=0; i--) { /* in descending order */
-    rb_ary_store(out, i, LONG2NUM(addr % dim[i]));
+    rb_ary_store(out, i, SIZE2NUM(addr % dim[i]));
     addr /= dim[i];
   }
 
@@ -1653,10 +1672,11 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
   CArray  *ca, *co, *cidx[CA_RANK_MAX];
-  int32_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
-  int32_t *dim;
-  int32_t addr, elements = 0;
-  int32_t i, k, n;
+  ca_size_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
+  ca_size_t *dim;
+  ca_size_t addr, elements = 0;
+  int8_t i;
+  ca_size_t k, n;
   boolean8_t *m;
   int     all_number = 1;
 
@@ -1677,16 +1697,16 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
     dim = ca->dim;
     addr = 0;
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(argv[i]);
+      k = NUM2SIZE(argv[i]);
       CA_CHECK_INDEX(k, dim[i]);
       addr = dim[i] * addr + k;
     }
-    return LONG2NUM(addr);
+    return SIZE2NUM(addr);
   }
 
   elements = 1;
   for (i=0; i<ca->rank; i++) {
-    cidx[i] = ca_wrap_readonly(argv[i], CA_INT32);
+    cidx[i] = ca_wrap_readonly(argv[i], CA_SIZE);
     if ( ! ca_is_scalar(cidx[i]) ) {
       if ( elements == 1 ) {
         elements = cidx[i]->elements;
@@ -1702,10 +1722,10 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
     ca_set_iterator(1, cidx[i], &p[i], &s[i]);
   }
 
-  obj = rb_carray_new(CA_INT32, 1, &elements, 0, NULL);
+  obj = rb_carray_new(CA_SIZE, 1, &elements, 0, NULL);
   Data_Get_Struct(obj, CArray, co);
 
-  q = (int32_t *) co->ptr;
+  q = (ca_size_t *) co->ptr;
 
   ca_copy_mask_overwrite_n(co, elements, ca->rank, cidx);
   m = ( co->mask ) ? (boolean8_t *) co->mask->ptr : NULL;

@@ -85,11 +85,11 @@ bit_width (uint32_t max)
 }
 
 static void
-ca_monop_random_boolean8_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_boolean8_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   boolean8_t *q1 = (boolean8_t *) ptr1, *p1;
   uint32_t val;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 1 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -100,19 +100,19 @@ ca_monop_random_boolean8_t (int n, char *ptr1, int i1, uint32_t max)
   #endif
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
-    val = genrand_int32();
+    val = (uint32_t) genrand_int32();
     val >>= 31;
     *(int8_t*)p1 = (int8_t) val;
   }
 }
 
 static void
-ca_monop_random_int8_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_int8_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   int8_t *q1 = (int8_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 0x80 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -126,7 +126,7 @@ ca_monop_random_int8_t (int n, char *ptr1, int i1, uint32_t max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(int8_t*)p1 = (int8_t) val;
@@ -134,12 +134,12 @@ ca_monop_random_int8_t (int n, char *ptr1, int i1, uint32_t max)
 }
 
 static void
-ca_monop_random_uint8_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_uint8_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   uint8_t *q1 = (uint8_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 0x100 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -153,7 +153,7 @@ ca_monop_random_uint8_t (int n, char *ptr1, int i1, uint32_t max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(uint8_t*)p1 = (uint8_t) val;
@@ -161,12 +161,12 @@ ca_monop_random_uint8_t (int n, char *ptr1, int i1, uint32_t max)
 }
 
 static void
-ca_monop_random_int16_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_int16_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   int16_t *q1 = (int16_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 0x8000 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -180,7 +180,7 @@ ca_monop_random_int16_t (int n, char *ptr1, int i1, uint32_t max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(int16_t*)p1 = (int16_t) val;
@@ -188,12 +188,12 @@ ca_monop_random_int16_t (int n, char *ptr1, int i1, uint32_t max)
 }
 
 static void
-ca_monop_random_uint16_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_uint16_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   uint16_t *q1 = (uint16_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 0x10000 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -207,7 +207,7 @@ ca_monop_random_uint16_t (int n, char *ptr1, int i1, uint32_t max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(uint16_t*)p1 = (uint16_t) val;
@@ -216,12 +216,12 @@ ca_monop_random_uint16_t (int n, char *ptr1, int i1, uint32_t max)
 
 
 static void
-ca_monop_random_int32_t (int n, char *ptr1, int i1, uint32_t max)
+ca_monop_random_int32_t (ca_size_t n, char *ptr1, int i1, uint32_t max)
 {
   int32_t *q1 = (int32_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 0x80000000 ) {
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -235,7 +235,7 @@ ca_monop_random_int32_t (int n, char *ptr1, int i1, uint32_t max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(int32_t*)p1 = (int32_t) val;
@@ -243,12 +243,12 @@ ca_monop_random_int32_t (int n, char *ptr1, int i1, uint32_t max)
 }
 
 static void
-ca_monop_random_uint32_t (int n, char *ptr1, int i1, double max)
+ca_monop_random_uint32_t (ca_size_t n, char *ptr1, int i1, double max)
 {
   uint32_t *q1 = (uint32_t *) ptr1, *p1;
   uint32_t val;
   int shift;
-  int32_t k;
+  ca_size_t k;
 
   if ( max > 4294967296.0 ) { /* 0x100000000 */
     rb_raise(rb_eArgError, "given maximum number is out of range");
@@ -267,7 +267,7 @@ ca_monop_random_uint32_t (int n, char *ptr1, int i1, double max)
   for (k=0; k<n; k++) {
     p1 = q1 + k*i1;
     do {
-      val = genrand_int32();
+      val = (uint32_t) genrand_int32();
       val >>= shift;
     } while ( val >= max );
     *(uint32_t*)p1 = (uint32_t) val;
@@ -275,10 +275,10 @@ ca_monop_random_uint32_t (int n, char *ptr1, int i1, double max)
 }
 
 static void
-ca_monop_random_float32_t(int n, char *ptr1, int i1, double rmax)
+ca_monop_random_float32_t(ca_size_t n, char *ptr1, int i1, double rmax)
 {
   float32_t *q1 = (float32_t *) ptr1, *p1;
-  int32_t k;
+  ca_size_t k;
   #ifdef _OPENMP
   #pragma omp parallel for private(p1)
   #endif
@@ -289,10 +289,10 @@ ca_monop_random_float32_t(int n, char *ptr1, int i1, double rmax)
 }
 
 static void
-ca_monop_random_float64_t(int n, char *ptr1, int i1, double rmax)
+ca_monop_random_float64_t(ca_size_t n, char *ptr1, int i1, double rmax)
 {
   float64_t *q1 = (float64_t *) ptr1, *p1;
-  int32_t k;
+  ca_size_t k;
   #ifdef _OPENMP
   #pragma omp parallel for private(p1)
   #endif
@@ -305,10 +305,10 @@ ca_monop_random_float64_t(int n, char *ptr1, int i1, double rmax)
 #ifdef HAVE_COMPLEX_H
 
 static void
-ca_monop_random_cmplx64_t(int n, char *ptr1, int i1, double rmax, double imax)
+ca_monop_random_cmplx64_t(ca_size_t n, char *ptr1, int i1, double rmax, double imax)
 {
   cmplx64_t *q1 = (cmplx64_t *) ptr1, *p1;
-  int32_t k;
+  ca_size_t k;
   #ifdef _OPENMP
   #pragma omp parallel for private(p1)
   #endif
@@ -319,10 +319,10 @@ ca_monop_random_cmplx64_t(int n, char *ptr1, int i1, double rmax, double imax)
 }
 
 static void
-ca_monop_random_cmplx128_t(int n, char *ptr1, int i1, double rmax, double imax)
+ca_monop_random_cmplx128_t(ca_size_t n, char *ptr1, int i1, double rmax, double imax)
 {
   cmplx128_t *q1 = (cmplx128_t *) ptr1, *p1;
-  int32_t k;
+  ca_size_t k;
   #ifdef _OPENMP
   #pragma omp parallel for private(p1)
   #endif
@@ -334,7 +334,9 @@ ca_monop_random_cmplx128_t(int n, char *ptr1, int i1, double rmax, double imax)
 
 #endif
 
-ca_monop_func_t
+typedef void (*ca_random_func_t)();
+
+ca_random_func_t
 ca_monop_random[CA_NTYPE] = {
   ca_monop_not_implement,
   ca_monop_random_boolean8_t,
@@ -382,7 +384,7 @@ rb_ca_random (int argc, VALUE *argv, VALUE self)
   if ( ca_is_object_type(ca) ) {
     CArray *dmy;
     VALUE  *p;
-    int i;
+    ca_size_t i;
 
     rb_scan_args(argc, argv, "01", &rrmax);
     if ( NIL_P(rrmax) ) {
@@ -513,7 +515,7 @@ ca_rand (double rmax)
   shift = 32 - bit_width((uint32_t)rmax);
 
   do {
-    val = genrand_int32();
+    val = (uint32_t) genrand_int32();
     val >>= shift;
   } while ( val >= (uint32_t) rmax );
 

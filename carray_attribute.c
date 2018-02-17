@@ -17,7 +17,7 @@
 /* rdoc
   class CArray
     # returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
-    # Because the object type can be known from the class of the object,
+    # Since the object type can be known from the class of the object,
     # this attribute method is rarely used.
     def obj_type
     end
@@ -29,7 +29,7 @@ rb_ca_obj_type (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return LONG2NUM(ca->obj_type);
+  return INT2NUM(ca->obj_type);
 }
 
 /* rdoc
@@ -45,13 +45,16 @@ rb_ca_data_type (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return LONG2NUM(ca->data_type);
+  return INT2NUM(ca->data_type);
 }
 
 /* rdoc
   class CArray
-    # returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
+		# use CArray#ndims instead of this methods after carray-1.3.0
     def rank
+    end
+    # returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
+    def ndims
     end
   end
 */
@@ -61,7 +64,7 @@ rb_ca_rank (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return LONG2NUM(ca->rank);
+  return INT2NUM(ca->rank);
 }
 
 /* rdoc
@@ -81,7 +84,7 @@ rb_ca_bytes (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return LONG2NUM(ca->bytes);
+  return SIZE2NUM(ca->bytes);
 }
 
 /* rdoc:
@@ -103,14 +106,20 @@ rb_ca_elements (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return LONG2NUM(ca->elements);
+  return SIZE2NUM(ca->elements);
 }
 
 /* rdoc:
   class CArray
+    # use CArray#shape instead of this method after carray-1.3.0
     # returns the Array object contains the dimensional shape of array
     # (e.g. [2,3] for 2D 2x3 array, ...).
     def dim
+    end
+
+    # returns the Array object contains the dimensional shape of array
+    # (e.g. [2,3] for 2D 2x3 array, ...).
+    def shape
     end
 
     # short-hand for dim[0]
@@ -140,7 +149,7 @@ rb_ca_dim (VALUE self)
   Data_Get_Struct(self, CArray, ca);
   dim = rb_ary_new2(ca->rank);
   for (i=0; i<ca->rank; i++) {
-    rb_ary_store(dim, i, LONG2NUM(ca->dim[i]));
+    rb_ary_store(dim, i, SIZE2NUM(ca->dim[i]));
   }
   return dim;
 }
@@ -150,7 +159,7 @@ rb_ca_dim0 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return INT2NUM(ca->dim[0]);
+  return SIZE2NUM(ca->dim[0]);
 }
 
 VALUE
@@ -158,7 +167,7 @@ rb_ca_dim1 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 2 ) ? INT2NUM(ca->dim[1]) : Qnil;
+  return ( ca->rank >= 2 ) ? SIZE2NUM(ca->dim[1]) : Qnil;
 }
 
 VALUE
@@ -166,7 +175,7 @@ rb_ca_dim2 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 3 ) ? INT2NUM(ca->dim[2]) : Qnil;
+  return ( ca->rank >= 3 ) ? SIZE2NUM(ca->dim[2]) : Qnil;
 }
 
 VALUE
@@ -174,7 +183,7 @@ rb_ca_dim3 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 4 ) ? INT2NUM(ca->dim[3]) : Qnil;
+  return ( ca->rank >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
 }
 
 /* rdoc:
@@ -859,7 +868,9 @@ Init_carray_attribute ()
   rb_define_method(rb_cCArray, "obj_type", rb_ca_obj_type, 0);
   rb_define_method(rb_cCArray, "data_type", rb_ca_data_type, 0);
   rb_define_method(rb_cCArray, "bytes", rb_ca_bytes, 0);
-  rb_define_method(rb_cCArray, "rank", rb_ca_rank, 0);
+  rb_define_method(rb_cCArray, "rank", rb_ca_rank, 0); 
+  rb_define_method(rb_cCArray, "ndim", rb_ca_rank, 0); /* after carray-1.3.0 */
+  rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0); /* after carray-1.3.0 */
   rb_define_method(rb_cCArray, "dim", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim0", rb_ca_dim0, 0);
   rb_define_method(rb_cCArray, "dim1", rb_ca_dim1, 0);

@@ -27,11 +27,11 @@ def monfunc (op, name, hash)
         omp_ok = ( type != "VALUE" ) ? 1 : 0
         io.print %{
 static void
-ca_monop_#{name}_#{type} (int32_t n, boolean8_t *m, char *ptr1, int32_t i1, char *ptr2, int32_t i2)
+ca_monop_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1, char *ptr2, ca_size_t i2)
 {
   #{type} *q1 = (#{type} *) ptr1, *q2 = (#{type} *) ptr2;
   #{type} *p1 = q1, *p2 = q2;
-  int32_t k;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm;
     #if defined(_OPENMP) && #{omp_ok}
@@ -94,7 +94,7 @@ static VALUE rb_ca_#{name} (VALUE self)
 static VALUE rb_ca_#{name} (VALUE self)
 { 
   if ( rb_ca_is_integer_type(self) ) {
-    self = rb_ca_wrap_readonly(self, INT2FIX(CA_FLOAT64));
+    self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
   }
   return rb_ca_call_monop(self, ca_monop_#{name}); 
 }
@@ -138,11 +138,11 @@ def monop (op, name, hash)
         omp_ok = ( type != "VALUE" ) ? 1 : 0
         io.print %{
 static void
-ca_monop_#{name}_#{type} (int32_t n, boolean8_t *m, char *ptr1, int32_t i1, char *ptr2, int32_t i2)
+ca_monop_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1, char *ptr2, ca_size_t i2)
 {
   #{type} *q1 = (#{type} *) ptr1, *q2 = (#{type} *) ptr2;
   #{type} *p1 = q1, *p2 = q2;
-  int32_t k;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm;
     #if defined(_OPENMP) && #{omp_ok}
@@ -228,11 +228,11 @@ def binop (op, name, hash)
         omp_ok = ( type != "VALUE" ) ? 1 : 0
         io.print %{
 static void
-ca_binop_#{name}_#{type} (int32_t n, boolean8_t *m, char *ptr1, int32_t i1, char *ptr2, int32_t i2, char *ptr3, int32_t i3)
+ca_binop_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1, char *ptr2, ca_size_t i2, char *ptr3, ca_size_t i3)
 {
   #{type} *q1 = (#{type} *) ptr1, *q2 = (#{type} *) ptr2, *q3 = (#{type} *) ptr3;
   #{type} *p1 = q1, *p2 = q2, *p3 = q3;
-  int32_t k;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm;
     #if defined(_OPENMP) && #{omp_ok}
@@ -320,13 +320,13 @@ def moncmp (op, name, hash)
         omp_ok = ( type != "VALUE" ) ? 1 : 0
         io.print %{
 static void
-ca_moncmp_#{name}_#{type} (int32_t n, boolean8_t *m, char *ptr1, int32_t i1, boolean8_t *ptr2, int32_t i2)
+ca_moncmp_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1, boolean8_t *ptr2, ca_size_t i2)
 {
   #{type} *q1 = (#{type} *) ptr1;
   #{type} *p1 = q1;
   boolean8_t *q2 = (boolean8_t *) ptr2;
   boolean8_t *p2 = q2;
-  int32_t k;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm = m;
     #if defined(_OPENMP) && #{omp_ok}
@@ -415,16 +415,16 @@ def bincmp (op, name, hash)
           omp_ok = ( type != "VALUE" ) ? 1 : 0
           io.print %{
 static void
-ca_bincmp_#{name}_#{type} (int32_t n, boolean8_t *m, 
-                           char *ptr1, int32_t b1, int32_t i1, 
-                           char *ptr2, int32_t b2, int32_t i2, 
-                           char *ptr3, int32_t b3, int32_t i3)
+ca_bincmp_#{name}_#{type} (ca_size_t n, boolean8_t *m, 
+                           char *ptr1, ca_size_t b1, ca_size_t i1, 
+                           char *ptr2, ca_size_t b2, ca_size_t i2, 
+                           char *ptr3, ca_size_t b3, ca_size_t i3)
 {
   #{type} *q1 = (#{type} *) ptr1, *q2 = (#{type} *) ptr2;
   #{type} *p1 = q1, *p2 = q2;
   boolean8_t *q3 = (boolean8_t *) ptr3;
   boolean8_t *p3 = q3;
-  int32_t k;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm = m;
     #if defined(_OPENMP) && #{omp_ok}
@@ -461,17 +461,17 @@ ca_bincmp_#{name}_#{type} (int32_t n, boolean8_t *m,
           omp_ok = 1
           io.print %{
 static void
-ca_bincmp_#{name}_#{type} (int32_t n, boolean8_t *m, 
-                           char *ptr1, int32_t b1, int32_t i1, 
-                           char *ptr2, int32_t b2, int32_t i2, 
-                           char *ptr3, int32_t b3, int32_t i3)
+ca_bincmp_#{name}_#{type} (ca_size_t n, boolean8_t *m, 
+                           char *ptr1, ca_size_t b1, ca_size_t i1, 
+                           char *ptr2, ca_size_t b2, ca_size_t i2, 
+                           char *ptr3, ca_size_t b3, ca_size_t i3)
 {
   char *q1 = ptr1, *q2 = ptr2;
   char *p1 = q1, *p2 = q2;
   boolean8_t *q3 = (boolean8_t *) ptr3;
   boolean8_t *p3 = q3;
-  int32_t s1 = b1*i1, s2 = b2*i2, s3 = b3*i3;
-  int32_t k;
+  ca_size_t s1 = b1*i1, s2 = b2*i2, s3 = b3*i3;
+  ca_size_t k;
   if ( m ) {
     boolean8_t *pm = m;
     #if defined(_OPENMP) && #{omp_ok}

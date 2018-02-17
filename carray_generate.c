@@ -31,7 +31,7 @@
 static VALUE
 rb_ca_boolean_set (int argc, VALUE *argv, VALUE self)
 {
-  VALUE one = INT2FIX(1);
+  VALUE one = INT2NUM(1);
   rb_ca_modify(self);
   if ( ! rb_ca_is_boolean_type(self) ) {
     rb_raise(rb_eCADataTypeError, "reciever should be a boolean array");
@@ -43,7 +43,7 @@ rb_ca_boolean_set (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_boolean_unset (int argc, VALUE *argv, VALUE self)
 {
-  VALUE zero = INT2FIX(0);
+  VALUE zero = INT2NUM(0);
   rb_ca_modify(self);
   if ( ! rb_ca_is_boolean_type(self) ) {
     rb_raise(rb_eCADataTypeError, "reciever should be a boolean array");
@@ -68,8 +68,8 @@ rb_ca_where (VALUE self)
   volatile VALUE bool, obj;
   CArray *ca, *co;
   boolean8_t *p, *m;
-  int32_t *q;
-  int32_t i, count;
+  ca_size_t *q;
+  ca_size_t i, count;
 
   bool = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
 
@@ -95,12 +95,12 @@ rb_ca_where (VALUE self)
   }
 
   /* create output array */
-  obj = rb_carray_new(CA_INT32, 1, &count, 0, NULL);
+  obj = rb_carray_new(CA_SIZE, 1, &count, 0, NULL);
   Data_Get_Struct(obj, CArray, co);
 
   /* store address which elements is true to output array */
   p = (boolean8_t *) ca->ptr;
-  q = (int32_t *) co->ptr;
+  q = (ca_size_t *) co->ptr;
   m = ca_mask_ptr(ca);
   if ( m )  {
     for (i=0; i<ca->elements; i++) {  /* not-masked && true */
@@ -125,25 +125,25 @@ rb_ca_where (VALUE self)
 #define proc_seq_bang(type, from, to)       \
   {                                         \
     type *p = (type *)ca->ptr;              \
-    int32_t i;                              \
+    ca_size_t i;                              \
     if ( NIL_P(roffset) && NIL_P(rstep) ) { \
       for (i=0; i<ca->elements; i++) {    \
-        *p++ = to(i);                     \
+        *p++ = (type) to(i);                     \
       }                                   \
     }                                     \
     else if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||              \
               rb_obj_is_kind_of(roffset, rb_cFloat) ) {            \
-      type offset = (NIL_P(roffset)) ? (type) 0 : from(roffset);  \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
       double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);          \
       for (i=0; i<ca->elements; i++) {    \
-        *p++ = to(step*i+offset);         \
+        *p++ = (type) to(step*i+offset);         \
       }                                   \
     }                                     \
     else {                                \
-      type offset = (NIL_P(roffset)) ? (type) 0 : from(roffset); \
-      type step   = (NIL_P(rstep)) ? (type) 1 : from(rstep);     \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset); \
+      type step   = (NIL_P(rstep)) ? (type) 1 : (type) from(rstep);     \
       for (i=0; i<ca->elements; i++) {    \
-        *p++ = to(step*i+offset);         \
+        *p++ = (type) to(step*i+offset);         \
       }                                   \
     }                                     \
   }
@@ -151,25 +151,25 @@ rb_ca_where (VALUE self)
 #define proc_seq_bang_with_block(type, from, to)       \
   {                                                    \
     type *p = (type *)ca->ptr;                         \
-    int32_t i;                                         \
+    ca_size_t i;                                         \
     if ( NIL_P(roffset) && NIL_P(rstep) ) {            \
       for (i=0; i<ca->elements; i++) {                 \
-        *p++ = from(rb_yield(INT2NUM(i)));             \
+        *p++ = (type) from(rb_yield(SIZE2NUM(i)));             \
       }                                                \
     }                                                             \
     else if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||              \
               rb_obj_is_kind_of(roffset, rb_cFloat)) {            \
-      type offset = (NIL_P(roffset)) ? (type) 0 : from(roffset);  \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
       double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);          \
       for (i=0; i<ca->elements; i++) {                            \
-        *p++ = from(rb_yield(rb_float_new(step*i+offset)));       \
+        *p++ = (type) from(rb_yield(rb_float_new(step*i+offset)));       \
       }                                                           \
     }                                                             \
     else {                                                        \
-      type offset = (NIL_P(roffset)) ? (type) 0 : from(roffset);  \
-      type step   = (NIL_P(rstep)) ? (type) 1 : from(rstep);      \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
+      type step   = (NIL_P(rstep)) ? (type) 1 : (type) from(rstep);      \
       for (i=0; i<ca->elements; i++) {                            \
-        *p++ = from(rb_yield(INT2NUM(step*i+offset)));            \
+        *p++ = (type) from(rb_yield(SIZE2NUM(step*i+offset)));            \
       }                                                           \
     }                                                             \
   }
@@ -180,11 +180,11 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
   volatile VALUE roffset, rstep, rval, rmethod = Qnil;
   CArray *ca;
   VALUE *p;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_scan_args((argc>2) ? 2 : argc, argv, "02", &roffset, &rstep);
+  rb_scan_args((argc>2) ? 2 : argc, argv, "02", (VALUE *) &roffset, (VALUE *) &rstep);
 
   if ( TYPE(rstep) == T_SYMBOL ) {                /* e.g. a.seq("a", :succ) */
     rmethod = rstep;
@@ -280,7 +280,7 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
     return rb_ca_seq_bang_object(argc, argv, self);
   }
 
-  rb_scan_args(argc, argv, "02", &roffset, &rstep);
+  rb_scan_args(argc, argv, "02", (VALUE *) &roffset, (VALUE *) &rstep);
 
   ca_allocate(ca);
 
@@ -376,11 +376,11 @@ rb_ca_seq2 (VALUE self, int n, VALUE *args)
 
 
 void
-ca_swap_bytes (char *ptr, int32_t bytes, int32_t elements)
+ca_swap_bytes (char *ptr, ca_size_t bytes, ca_size_t elements)
 {
   char *p;
   char val;
-  int32_t i;
+  ca_size_t i;
 
 #define SWAP_BYTE(a, b) (val = (a), (a) = (b), (b) = val)
 
@@ -568,7 +568,7 @@ rb_ca_swap_bytes (VALUE self)
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
     type min  = (type) from(rmin);                                 \
     type max  = (type) from(rmax);                                 \
-    int32_t i;                                                     \
+    ca_size_t i;                                                     \
     if ( m && rfval == CA_UNDEF) {                                 \
       for (i=ca->elements; i; i--, ptr++, m++) {                   \
         if ( ! *m ) {                                              \
@@ -579,7 +579,7 @@ rb_ca_swap_bytes (VALUE self)
     }                                                              \
     else {                                                         \
       int  has_fill = ! ( NIL_P(rfval) );                          \
-      type fill = (has_fill) ? from(rfval) : (type) 0;             \
+      type fill = (has_fill) ? (type) from(rfval) : (type) 0;             \
       if ( m ) {                                                   \
         for (i=ca->elements; i; i--, ptr++) {                      \
           if ( ! *m++ ) {                                          \
@@ -624,7 +624,7 @@ rb_ca_trim_bang (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_scan_args(argc, argv, "21", &rmin, &rmax, &rfval);
+  rb_scan_args(argc, argv, "21", (VALUE *) &rmin, (VALUE *) &rmax, (VALUE *) &rfval);
 
   if ( rfval == CA_UNDEF ) {
     ca_create_mask(ca);
@@ -633,10 +633,10 @@ rb_ca_trim_bang (int argc, VALUE *argv, VALUE self)
   ca_attach(ca);
 
   switch ( ca->data_type ) {
-  case CA_INT8:     proc_trim_bang(int8_t,     NUM2LONG);  break;
-  case CA_UINT8:    proc_trim_bang(uint8_t,   NUM2ULONG); break;
-  case CA_INT16:    proc_trim_bang(int16_t,    NUM2LONG);  break;
-  case CA_UINT16:   proc_trim_bang(uint16_t,  NUM2LONG);  break;
+  case CA_INT8:     proc_trim_bang(int8_t,    NUM2INT);  break;
+  case CA_UINT8:    proc_trim_bang(uint8_t,   NUM2UINT); break;
+  case CA_INT16:    proc_trim_bang(int16_t,    NUM2INT);  break;
+  case CA_UINT16:   proc_trim_bang(uint16_t,  NUM2INT);  break;
   case CA_INT32:    proc_trim_bang(int32_t,    NUM2LONG);  break;
   case CA_UINT32:   proc_trim_bang(uint32_t,  NUM2LONG);  break;
   case CA_INT64:    proc_trim_bang(int64_t,    NUM2LONG);  break;

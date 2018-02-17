@@ -53,11 +53,11 @@ class CArray::Serializer   # :nodoc:
     char_p    :data_type_name, :bytes=>8
     char_p    :endian,         :bytes=>4
     int32     :data_type
-    int32     :bytes
+    int64     :bytes
     int32     :rank
-    int32     :elements
+    int64     :elements
     int32     :has_mask
-    array     :dim,            :type => CArray.int32(CA_RANK_MAX)
+    array     :dim,            :type => CArray.int64(CA_RANK_MAX)
     int32     :has_attr
   }
 

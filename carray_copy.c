@@ -89,7 +89,7 @@ ca_template_safe (void *ap)
 }
 
 CArray *
-ca_template_safe2 (void *ap, int8_t data_type, int32_t bytes)
+ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
 {
   CArray *ca = (CArray *) ap;
   CA_CHECK_DATA_TYPE(data_type);
@@ -119,9 +119,9 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, rtype, rbytes = Qnil;
   CArray *ca, *co;
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
 
-  rb_scan_args(argc, argv, "01", &rtype);
+  rb_scan_args(argc, argv, "01", (VALUE *) &rtype);
   rb_scan_options(ropt, "bytes", &rbytes);
 
   Data_Get_Struct(self, CArray, ca);
@@ -168,7 +168,7 @@ rb_ca_template_n (int n, ...)
 {
   volatile VALUE varg, obj;
   CArray *ca;
-  int32_t elements = -1;
+  ca_size_t elements = -1;
   va_list vargs;
   int i;
 
@@ -204,11 +204,11 @@ rb_ca_template_n (int n, ...)
 /* ------------------------------------------------------------------- */
 
 static void
-ca_paste_loop (CArray *ca, int32_t *offset, int32_t *offset0,
-               int32_t *size, CArray *cs,
-               int32_t level, int32_t *idx, int32_t *idx0)
+ca_paste_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
+               ca_size_t *size, CArray *cs,
+               int32_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t i;
+  ca_size_t i;
   if ( level == ca->rank - 1 ) {
     idx[level] = offset[level];
     idx0[level] = offset0[level];
@@ -229,15 +229,15 @@ ca_paste_loop (CArray *ca, int32_t *offset, int32_t *offset0,
 /* ------------------------------------------------------------------- */
 
 void
-ca_paste (void *ap, int32_t *offset, void *sp)
+ca_paste (void *ap, ca_size_t *offset, void *sp)
 {
   CArray *ca = (CArray *) ap;
   CArray *cs = (CArray *) sp;
-  int32_t size[CA_RANK_MAX];
-  int32_t offset0[CA_RANK_MAX];
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
-  int32_t i;
+  ca_size_t size[CA_RANK_MAX];
+  ca_size_t offset0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
+  int8_t i;
 
   ca_check_same_data_type(ca, cs);
   ca_check_same_rank(ca, cs);
@@ -298,7 +298,7 @@ static VALUE
 rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
 {
   CArray *ca, *cs;
-  int32_t offset[CA_RANK_MAX];
+  ca_size_t offset[CA_RANK_MAX];
   int i;
 
   rb_ca_modify(self);
@@ -313,7 +313,7 @@ rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
   }
 
   for (i=0; i<ca->rank; i++) {
-    offset[i] = NUM2INT(rb_ary_entry(roffset,i));
+    offset[i] = NUM2SIZE(rb_ary_entry(roffset,i));
   }
 
   cs = ca_wrap_readonly(rsrc, ca->data_type);
@@ -325,11 +325,11 @@ rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
 
 
 static void
-ca_clip_loop (CArray *ca, int32_t *offset, int32_t *offset0,
-               int32_t *size, CArray *cs,
-               int32_t level, int32_t *idx, int32_t *idx0)
+ca_clip_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
+               ca_size_t *size, CArray *cs,
+               int32_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t i;
+  ca_size_t i;
   if ( level == ca->rank - 1 ) {
     idx[level] = offset[level];
     idx0[level] = offset0[level];
@@ -347,14 +347,14 @@ ca_clip_loop (CArray *ca, int32_t *offset, int32_t *offset0,
 /* ------------------------------------------------------------------- */
 
 void
-ca_clip (void *ap, int32_t *offset, void *sp)
+ca_clip (void *ap, ca_size_t *offset, void *sp)
 {
   CArray *ca = (CArray *) ap;
   CArray *cs = (CArray *) sp;
-  int32_t size[CA_RANK_MAX];
-  int32_t offset0[CA_RANK_MAX];
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t size[CA_RANK_MAX];
+  ca_size_t offset0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   int i;
 
   ca_check_same_data_type(ca, cs);
@@ -414,7 +414,7 @@ static VALUE
 rb_ca_clip (VALUE self, VALUE roffset, VALUE rsrc)
 {
   CArray *ca, *cs;
-  int32_t offset[CA_RANK_MAX];
+  ca_size_t offset[CA_RANK_MAX];
   int i;
 
   Data_Get_Struct(self, CArray, ca);
@@ -427,7 +427,7 @@ rb_ca_clip (VALUE self, VALUE roffset, VALUE rsrc)
   }
 
   for (i=0; i<ca->rank; i++) {
-    offset[i] = NUM2INT(rb_ary_entry(roffset, i));
+    offset[i] = NUM2SIZE(rb_ary_entry(roffset, i));
   }
 
   cs = ca_wrap_writable(rsrc, ca->data_type);

@@ -163,6 +163,10 @@ class CArray
       depth = "-depth 8"
     when CA_INT16, CA_UINT16
       depth = "-depth 16"
+    when CA_FLOAT32
+      depth = "-depth 32"
+    when CA_FLOAT64
+      depth = "-depth 64"
     when CA_FIXLEN
       depth = "-depth #{8*bytes}"
     else
@@ -226,6 +230,9 @@ class CArray
   end
 
 end
+
+
+
 
 
 

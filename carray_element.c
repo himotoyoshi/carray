@@ -26,9 +26,10 @@ VALUE
 rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 {
   CArray *ca;
-  int32_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
-  int32_t addr1 = 0, addr2 = 0;
-  int32_t i,k;
+  ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
+  ca_size_t addr1 = 0, addr2 = 0;
+  int8_t  i;
+  ca_size_t k;
   int     has_mask, has_index1, has_index2;
   char   _val1[32], _val2[32];
   char   *val1 = _val1, *val2 = _val2;
@@ -48,7 +49,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx1, i));
+      k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
     }
@@ -59,7 +60,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
   else {
-    k = NUM2INT(ridx1);
+    k = NUM2SIZE(ridx1);
     CA_CHECK_INDEX(k, ca->elements);
     addr1 = k;
     has_index1 = 0;
@@ -71,7 +72,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 
   if ( TYPE(ridx2) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx2, i));
+      k = NUM2SIZE(rb_ary_entry(ridx2, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx2[i] = k;
     }
@@ -82,7 +83,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
   else {
-    k = NUM2INT(ridx2);
+    k = NUM2SIZE(ridx2);
     CA_CHECK_INDEX(k, ca->elements);
     addr2 = k;
     has_index2 = 0;
@@ -137,9 +138,10 @@ VALUE
 rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 {
   CArray *ca;
-  int32_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
-  int32_t addr1 = 0, addr2 = 0;
-  int32_t i,k;
+  ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
+  ca_size_t addr1 = 0, addr2 = 0;
+  int8_t  i;
+  ca_size_t k;
   int     has_mask;
   char   _val[32];
   char   *val = _val;
@@ -158,7 +160,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx1, i));
+      k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
     }
@@ -168,7 +170,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
   else {
-    k = NUM2INT(ridx1);
+    k = NUM2SIZE(ridx1);
     CA_CHECK_INDEX(k, ca->elements);
     addr1 = k;
     ca_fetch_addr(ca, addr1, val);
@@ -179,7 +181,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 
   if ( TYPE(ridx2) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx2, i));
+      k = NUM2SIZE(rb_ary_entry(ridx2, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx2[i] = k;
     }
@@ -189,7 +191,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
   else {
-    k = NUM2INT(ridx2);
+    k = NUM2SIZE(ridx2);
     CA_CHECK_INDEX(k, ca->elements);
     addr2 = k;
     ca_store_addr(ca, addr2, val);
@@ -216,9 +218,10 @@ VALUE
 rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
 {
   CArray *ca;
-  int32_t idx[CA_RANK_MAX];
-  int32_t addr = 0;
-  int32_t i,k;
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t addr = 0;
+  int8_t  i;
+  ca_size_t k;
 
   rb_ca_modify(self);
 
@@ -226,14 +229,14 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
 
   if ( TYPE(ridx) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx, i));
+      k = NUM2SIZE(rb_ary_entry(ridx, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx[i] = k;
     }
     rb_ca_store_index(self, idx, obj);
   }
   else {
-    k = NUM2INT(ridx);
+    k = NUM2SIZE(ridx);
     CA_CHECK_INDEX(k, ca->elements);
     addr = k;
     rb_ca_store_addr(self, addr, obj);
@@ -253,22 +256,23 @@ VALUE
 rb_ca_elem_fetch (VALUE self, VALUE ridx)
 {
   CArray *ca;
-  int32_t idx[CA_RANK_MAX];
-  int32_t addr = 0;
-  int32_t i,k;
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t addr = 0;
+  int8_t  i;
+  ca_size_t k;
 
   Data_Get_Struct(self, CArray, ca);
 
   if ( TYPE(ridx) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx, i));
+      k = NUM2SIZE(rb_ary_entry(ridx, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx[i] = k;
     }
     return rb_ca_fetch_index(self, idx);
   }
   else {
-    k = NUM2INT(ridx);
+    k = NUM2SIZE(ridx);
     CA_CHECK_INDEX(k, ca->elements);
     addr = k;
     return rb_ca_fetch_addr(self, addr);
@@ -287,9 +291,10 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
 {
   volatile VALUE out;
   CArray *ca;
-  int32_t idx1[CA_RANK_MAX];
-  int32_t addr1 = 0;
-  int32_t i,k;
+  ca_size_t idx1[CA_RANK_MAX];
+  ca_size_t addr1 = 0;
+  int8_t  i;
+  ca_size_t k;
   int     has_index1 = 0;
   int     has_mask;
   char   _val[8];
@@ -310,7 +315,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx1, i));
+      k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
     }
@@ -326,7 +331,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
     has_index1 = 1;
   }
   else {
-    k = NUM2INT(ridx1);
+    k = NUM2SIZE(ridx1);
     CA_CHECK_INDEX(k, ca->elements);
     addr1 = k;
     if ( has_mask ) {
@@ -347,8 +352,8 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
   case CA_UINT16: out = UINT2NUM(++*((uint16_t*) val)); break;
   case CA_INT32:  out = INT2NUM(++*((int32_t*) val)); break;
   case CA_UINT32: out = UINT2NUM(++*((uint32_t*) val)); break;
-  case CA_INT64:  out = INT2NUM(++*((int64_t*) val)); break;
-  case CA_UINT64: out = UINT2NUM(++*((uint64_t*) val)); break;
+  case CA_INT64:  out = LL2NUM(++*((int64_t*) val)); break;
+  case CA_UINT64: out = ULL2NUM(++*((uint64_t*) val)); break;
   }
 
   if ( has_index1 ) {
@@ -373,9 +378,10 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
 {
   volatile VALUE out;
   CArray *ca;
-  int32_t idx1[CA_RANK_MAX];
-  int32_t addr1 = 0;
-  int32_t i,k;
+  ca_size_t idx1[CA_RANK_MAX];
+  ca_size_t addr1 = 0;
+  int8_t  i;
+  ca_size_t k;
   int     has_index1 = 0;
   int     has_mask;
   char   _val[8];
@@ -396,7 +402,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx1, i));
+      k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
     }
@@ -412,7 +418,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
     has_index1 = 1;
   }
   else {
-    k = NUM2INT(ridx1);
+    k = NUM2SIZE(ridx1);
     CA_CHECK_INDEX(k, ca->elements);
     addr1 = k;
     if ( has_mask ) {
@@ -458,9 +464,10 @@ VALUE
 rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
 {
   CArray *ca;
-  int32_t idx1[CA_RANK_MAX];
-  int32_t addr1 = 0;
-  int32_t i, k;
+  ca_size_t idx1[CA_RANK_MAX];
+  ca_size_t addr1 = 0;
+  int8_t  i;
+  ca_size_t k;
   boolean8_t m = 0;
 
   Data_Get_Struct(self, CArray, ca);
@@ -469,7 +476,7 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     for (i=0; i<ca->rank; i++) {
-      k = NUM2INT(rb_ary_entry(ridx1, i));
+      k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
     }
@@ -478,7 +485,7 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
     }
   }
   else {
-    k = NUM2INT(ridx1);
+    k = NUM2SIZE(ridx1);
     CA_CHECK_INDEX(k, ca->elements);
     addr1 = k;
     if ( ca->mask ) {
@@ -503,22 +510,23 @@ static VALUE
 rb_ca_incr_addr (volatile VALUE self, volatile VALUE raddr)
 {
   CArray  *ca, *ci;
-  int32_t *q, *p, k, elements;
-  int32_t i;
+  int64_t *q, *p;
+  ca_size_t k, elements;
+  ca_size_t i;
   boolean8_t *m;
 
   rb_ca_modify(self);
 
-  self = rb_ca_wrap_writable(self, INT2FIX(CA_INT32));
-  raddr = rb_ca_wrap_readonly(raddr, INT2FIX(CA_INT32));
+  self = rb_ca_wrap_writable(self, INT2NUM(CA_INT64));
+  raddr = rb_ca_wrap_readonly(raddr, INT2NUM(CA_INT64));
   
   Data_Get_Struct(self, CArray, ca);
   Data_Get_Struct(raddr, CArray, ci);
 
   ca_attach_n(2, ca, ci);
 
-  q = (int32_t *) ca->ptr;
-  p = (int32_t *) ci->ptr;
+  q = (int64_t *) ca->ptr;
+  p = (int64_t *) ci->ptr;
   m = ( ci->mask ) ? (boolean8_t *) ci->mask->ptr : NULL;
 
   elements = ca->elements;

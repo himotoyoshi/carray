@@ -17,16 +17,16 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* --------------- */
-  int32_t   step;
+  ca_size_t   step;
 } CAFarray;
 
 static int8_t CA_OBJ_FARRAY;
@@ -44,7 +44,7 @@ int
 ca_farray_setup (CAFarray *ca, CArray *parent)
 {
   int8_t rank, data_type;
-  int32_t *dim, elements, bytes;
+  ca_size_t *dim, elements, bytes;
   int i;
 
   /* check arguments */
@@ -63,7 +63,7 @@ ca_farray_setup (CAFarray *ca, CArray *parent)
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -121,11 +121,11 @@ ca_farray_func_clone (void *ap)
 #define ca_farray_func_ptr_at_index ca_array_func_ptr_at_index
 
 static void
-ca_farray_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_farray_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFarray *ca = (CAFarray *) ap;
   int8_t  rank = ca->rank;
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   int i;
   for (i=0; i<rank; i++) {
     idx0[i] = idx[rank-1-i];
@@ -134,11 +134,11 @@ ca_farray_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_farray_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_farray_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFarray *ca = (CAFarray *) ap;
   int8_t  rank = ca->rank;
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   int i;
   for (i=0; i<rank; i++) {
     idx0[i] = idx[rank-1-i];
@@ -253,11 +253,11 @@ ca_operation_function_t ca_farray_func = {
 
 
 static void
-ca_fa_attach_loop (CAFarray *ca, int8_t level, int32_t *idx, int32_t *idx0)
+ca_fa_attach_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t step = ca->step;
-  int32_t dim = ca->dim[level];
-  int32_t i;
+  ca_size_t step = ca->step;
+  ca_size_t dim = ca->dim[level];
+  ca_size_t i;
   if ( level == ca->rank - 1 ) {
     idx[level] = 0;
     idx0[0]    = 0;
@@ -327,17 +327,17 @@ ca_fa_attach_loop (CAFarray *ca, int8_t level, int32_t *idx, int32_t *idx0)
 static void
 ca_fa_attach (CAFarray *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_fa_attach_loop(ca, 0, idx, idx0);
 }
 
 static void
-ca_fa_sync_loop (CAFarray *ca, int8_t level, int32_t *idx, int32_t *idx0)
+ca_fa_sync_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
 {
-  int32_t step = ca->step;
-  int32_t dim  = ca->dim[level];
-  int32_t i;
+  ca_size_t step = ca->step;
+  ca_size_t dim  = ca->dim[level];
+  ca_size_t i;
 
   if ( level == ca->rank - 1 ) {
     idx[level] = 0;
@@ -407,8 +407,8 @@ ca_fa_sync_loop (CAFarray *ca, int8_t level, int32_t *idx, int32_t *idx0)
 static void
 ca_fa_sync (CAFarray *ca)
 {
-  int32_t idx[CA_RANK_MAX];
-  int32_t idx0[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t idx0[CA_RANK_MAX];
   ca_fa_sync_loop(ca, 0, idx, idx0);
 }
 

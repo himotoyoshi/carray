@@ -20,7 +20,7 @@ end
 
 class Array                          # :nodoc:
   def +@
-    return CA_INT32(self)
+    return CA_SIZE(self)
   end
   def to_ca
     return CA_OBJECT(self)
@@ -29,7 +29,7 @@ end
 
 class Range                          # :nodoc: 
   def +@
-    return CA_INT32(self)    
+    return CA_SIZE(self)    
   end
   def to_ca
     return CA_OBJECT(self)
@@ -149,6 +149,7 @@ end
  "CA_DOUBLE",
  "CA_COMPLEX",
  "CA_DCOMPLEX",
+ "CA_SIZE",
 ].each do |name|
   eval %{
     def #{name} (*val)
@@ -316,6 +317,18 @@ class CArray
 
   def flatten
     return reshape(elements).to_ca
+  end
+
+  # pulled
+
+  def pulled (*args)
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx]
+  end
+  
+  def pull (*args)
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx].to_ca
   end
 
   # reversed
@@ -908,7 +921,7 @@ class CArray
   def self.join (*argv)
     # get options
     case argv.first
-    when Fixnum, Symbol, String
+    when Integer, Symbol, String
       type, = *CArray.guess_type_and_bytes(argv.shift, 0)
     else
       type = argv.flatten.first.data_type

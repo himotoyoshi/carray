@@ -37,7 +37,7 @@ load 'test_extream.rb'
 load 'test_generate.rb'
 load 'test_index.rb'
 load 'test_mask.rb'
-#load 'test_math.rb'
+load 'test_math.rb'
 load 'test_narray.rb' if defined?(CArray::HAVE_NARRAY)
 load 'test_order.rb'
 load 'test_random.rb'
@@ -48,3 +48,4 @@ load 'test_virtual.rb'
 #
 load 'test_creation.rb'
 #
+load 'test_130.rb'

@@ -17,16 +17,16 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int32_t   offset;
+  ca_size_t   offset;
 } CAField;
 
 static int8_t CA_OBJ_FIELD;
@@ -42,10 +42,10 @@ static VALUE rb_cCAField;
 
 int
 ca_field_setup (CAField *ca, CArray *parent,
-                int32_t offset, int8_t data_type, int32_t bytes)
+                ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
   int8_t rank;
-  int32_t elements;
+  ca_size_t elements;
 
   /* check arguments */
 
@@ -75,14 +75,14 @@ ca_field_setup (CAField *ca, CArray *parent,
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(int32_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, rank);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->offset    = offset;
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(int32_t));
+  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -96,7 +96,7 @@ ca_field_setup (CAField *ca, CArray *parent,
 }
 
 CAField *
-ca_field_new (CArray *parent, int32_t offset, int8_t data_type, int32_t bytes)
+ca_field_new (CArray *parent, ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
   CAField *ca = ALLOC(CAField);
   ca_field_setup(ca, parent, offset, data_type, bytes);
@@ -128,11 +128,11 @@ ca_field_func_clone (void *ap)
 }
 
 static char *
-ca_field_func_ptr_at_addr (void *ap, int32_t addr)
+ca_field_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CAField *ca = (CAField *) ap;
   if ( ! ca->ptr ) {
-    int32_t idx[CA_RANK_MAX];
+    ca_size_t idx[CA_RANK_MAX];
     ca_addr2index((CArray *)ca, addr, idx);
     return ca_ptr_at_index(ca, idx);
   }
@@ -142,12 +142,13 @@ ca_field_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_field_func_ptr_at_index (void *ap, int32_t *idx)
+ca_field_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CAField *ca = (CAField *) ap;
   if ( ! ca->ptr ) {
-    int32_t *dim    = ca->dim;
-    int32_t i, n;
+    ca_size_t *dim    = ca->dim;
+    int8_t i;
+    ca_size_t n;
     n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[rank-1] */
     for (i=1; i<ca->rank; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[rank-1] */
       n = dim[i]*n+idx[i];       /*    ... + idx[rank-2]*dim[1] + idx[rank-1] */
@@ -166,7 +167,7 @@ ca_field_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_field_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_field_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAField *ca = (CAField *) ap;
   if ( ca->parent->bytes <= 32 ) {
@@ -183,7 +184,7 @@ ca_field_func_fetch_index (void *ap, int32_t *idx, void *ptr)
 }
 
 static void
-ca_field_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_field_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAField *ca = (CAField *) ap;
   if ( ca->parent->bytes <= 32 ) {
@@ -313,9 +314,9 @@ ca_operation_function_t ca_field_func = {
 static void
 ca_field_attach (CAField *ca)
 {
-  int32_t pbytes = ca->parent->bytes;
-  int32_t bytes = ca->bytes;
-  int32_t n = ca->elements;
+  ca_size_t pbytes = ca->parent->bytes;
+  ca_size_t bytes = ca->bytes;
+  ca_size_t n = ca->elements;
 
   switch ( ca->data_type ) {
   case CA_BOOLEAN:
@@ -380,9 +381,9 @@ ca_field_attach (CAField *ca)
 static void
 ca_field_sync (CAField *ca)
 {
-  int32_t pbytes = ca->parent->bytes;
-  int32_t bytes = ca->bytes;
-  int32_t n = ca->elements;
+  ca_size_t pbytes = ca->parent->bytes;
+  ca_size_t bytes = ca->bytes;
+  ca_size_t n = ca->elements;
 
   switch ( ca->data_type ) {
   case CA_BOOLEAN:
@@ -447,8 +448,8 @@ ca_field_sync (CAField *ca)
 static void
 ca_field_fill (CAField *ca, char *ptr)
 {
-  int32_t pbytes = ca->parent->bytes;
-  int32_t n = ca->elements;
+  ca_size_t pbytes = ca->parent->bytes;
+  ca_size_t n = ca->elements;
   char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
 
   switch ( ca->data_type ) {
@@ -509,7 +510,7 @@ ca_field_fill (CAField *ca, char *ptr)
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_field_new (VALUE cary, int32_t offset, int8_t data_type, int32_t bytes)
+rb_ca_field_new (VALUE cary, ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -562,7 +563,7 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj, voffset, rtype, ropt, rbytes = Qnil;
   CArray *ca;
   int8_t  data_type;
-  int32_t offset, bytes;
+  ca_size_t offset, bytes;
 
   if ( argc == 1 ) {
     return rb_ca_field_as_member(self, argv[0]);
@@ -574,16 +575,16 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
   /* CArray#field(offset, data_class) */
   /* CArray#field(offset, template) */
 
-  rb_scan_args(argc, argv, "21", &voffset, &rtype, &ropt);
+  rb_scan_args(argc, argv, "21", (VALUE *) &voffset, (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
-  offset = NUM2INT(voffset);
+  offset = NUM2SIZE(voffset);
 
   if ( rb_obj_is_carray(rtype) ) {
     CArray *ct;
-    int32_t dim[CA_RANK_MAX];
+    ca_size_t dim[CA_RANK_MAX];
     int8_t rank;
-    int i, j;
+    int8_t i, j;
     Data_Get_Struct(rtype, CArray, ct);
     data_type = CA_FIXLEN;
     bytes     = ct->bytes * ct->elements;

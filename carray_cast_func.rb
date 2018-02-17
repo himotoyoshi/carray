@@ -169,7 +169,7 @@ puts %{
 #include "carray.h"
 
 static void
-ca_cast_not_implemented(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+ca_cast_not_implemented(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
 {
   rb_raise(rb_eCADataTypeError, 
            "can not cast data type from <%s> to <%s>",
@@ -187,12 +187,12 @@ FIXLEN.each do |type1|
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          char *p1 = ptr1;
-         int32_t bytes1;
+         ca_size_t bytes1;
          char *p2 = ptr2;
-         int32_t bytes2;
+         ca_size_t bytes2;
          if ( a1 == NULL || a2 == NULL ) {
            rb_raise(rb_eRuntimeError, "[BUG] failed to cast fixlen -> fixlen");
          }
@@ -240,10 +240,10 @@ FIXLEN.each do |type1|
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          char  *p1 = ptr1;
-         int32_t bytes;
+         ca_size_t bytes;
          VALUE *p2 = ptr2;
          if ( a1 == NULL ) {
            rb_raise(rb_eRuntimeError, "[BUG] failed to cast fixlen -> object");
@@ -278,7 +278,7 @@ puts
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          #{ctype1} *p1 = ptr1;
          #{ctype2} *p2 = ptr2;
@@ -325,13 +325,13 @@ puts
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          #{ctype1} *q1 = ptr1;
          #{ctype1} *p1 = q1;
          #{ctype2} *q2 = ptr2;
          #{ctype2} *p2 = q2;
-         int32_t k;
+         ca_size_t k;
          if ( m ) {
            boolean8_t *pm = m;
            #ifdef _OPENMP
@@ -375,18 +375,18 @@ puts
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          #{ctype1} *p1 = ptr1;
          VALUE *p2 = ptr2;
          if ( m ) {
            while ( n-- ) { 
-             if ( !*m ) { *p2 = #{conv}(*p1); } 
+             if ( !*m ) { *p2 = (VALUE) #{conv}(*p1); } 
              p1++; p2++; m++;
            }
          }
          else {
-           while ( n-- ) { *p2 = #{conv}(*p1); p1++; p2++; }
+           while ( n-- ) { *p2 = (VALUE) #{conv}(*p1); p1++; p2++; }
          }
          return;
       }
@@ -404,11 +404,11 @@ OBJECT.each do |type1|
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          VALUE *p1 = ptr1;
          char *p2 = ptr2;
-         int32_t bytes;
+         ca_size_t bytes;
          if ( a2 == NULL ) {
            rb_raise(rb_eRuntimeError, "[BUG] failed to cast object -> fixlen");
          }
@@ -463,18 +463,18 @@ OBJECT.each do |type1|
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
     puts <<-END_DEF  .gsub(/^ {6}/, '')
       static void
-      ca_cast_#{ctype1}_#{ctype2}(int32_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
+      ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
          VALUE *p1 = ptr1;
          #{ctype2} *p2 = ptr2;
          if ( m ) {
            while ( n-- ) { 
-             if ( !*m ) { *p2 = #{conv}(*p1); }
+             if ( !*m ) { *p2 = (#{ctype2}) #{conv}(*p1); }
              p1++; p2++; m++;
            }
          }
          else {
-           while ( n-- ) { *p2 = #{conv}(*p1); p1++; p2++; }
+           while ( n-- ) { *p2 = (#{ctype2}) #{conv}(*p1); p1++; p2++; }
          }
          return;
       }

@@ -24,9 +24,9 @@ typedef struct {
   int8_t    data_type;
   int8_t    rank;
   int32_t   flags;
-  int32_t   bytes;
-  int32_t   elements;
-  int32_t  *dim;  /* point to _dim */
+  ca_size_t   bytes;
+  ca_size_t   elements;
+  ca_size_t  *dim;  /* point to _dim */
   char     *ptr;
   CArray   *mask;
   CArray   *parent;
@@ -34,7 +34,7 @@ typedef struct {
   uint8_t   nosync;
   /* ---------- */
   CArray   *select;
-  int32_t  _dim;
+  ca_size_t  _dim;
 } CASelect;
 
 /* ------------------------------------------------------------------- */
@@ -43,7 +43,7 @@ static int
 ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
 {
   int8_t data_type;
-  int32_t bytes;
+  ca_size_t bytes;
   int i;
 
   if ( ! ca_is_boolean_type(select) ) {
@@ -157,7 +157,7 @@ ca_select_func_clone (void *ap)
 }
 
 static char *
-ca_select_func_ptr_at_addr (void *ap, int32_t addr)
+ca_select_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CASelect *ca = (CASelect *) ap;
 
@@ -165,8 +165,8 @@ ca_select_func_ptr_at_addr (void *ap, int32_t addr)
     return ca->ptr + ca->bytes * addr;
   }
   else {
-    int32_t n, i, a;
-    int32_t elements = ca->select->elements;
+    ca_size_t n, i, a;
+    ca_size_t elements = ca->select->elements;
     boolean8_t  s;
 
     n = 0;
@@ -192,10 +192,10 @@ ca_select_func_ptr_at_addr (void *ap, int32_t addr)
 }
 
 static char *
-ca_select_func_ptr_at_index (void *ap, int32_t *idx)
+ca_select_func_ptr_at_index (void *ap, ca_size_t *idx)
 {
   CASelect *ca = (CASelect *) ap;
-  int32_t addr = idx[0];
+  ca_size_t addr = idx[0];
 
   if ( ca->ptr ) {
     return ca->ptr + ca->bytes * addr;
@@ -206,11 +206,11 @@ ca_select_func_ptr_at_index (void *ap, int32_t *idx)
 }
 
 static void
-ca_select_func_fetch_addr (void *ap, int32_t addr, void *ptr)
+ca_select_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CASelect *ca = (CASelect *) ap;
-  int32_t n, i, a;
-  int32_t elements = ca->select->elements;
+  ca_size_t n, i, a;
+  ca_size_t elements = ca->select->elements;
   boolean8_t  s;
   n = 0;
   a = 0;
@@ -227,17 +227,17 @@ ca_select_func_fetch_addr (void *ap, int32_t addr, void *ptr)
 }
 
 static void
-ca_select_func_fetch_index (void *ap, int32_t *idx, void *ptr)
+ca_select_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   ca_select_func_fetch_addr(ap, idx[0], ptr);
 }
 
 static void
-ca_select_func_store_addr (void *ap, int32_t addr, void *ptr)
+ca_select_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CASelect *ca = (CASelect *) ap;
-  int32_t n, i, a;
-  int32_t elements = ca->select->elements;
+  ca_size_t n, i, a;
+  ca_size_t elements = ca->select->elements;
   boolean8_t  s;
   n = 0;
   a = 0;
@@ -254,7 +254,7 @@ ca_select_func_store_addr (void *ap, int32_t addr, void *ptr)
 }
 
 static void
-ca_select_func_store_index (void *ap, int32_t *idx, void *ptr)
+ca_select_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   ca_select_func_store_addr(ap, idx[0], ptr);
 }
@@ -418,7 +418,7 @@ void
 ca_select_to_ptr (CArray *ca, CArray *select, char *ptr)
 {
   boolean8_t *s = (boolean8_t*) select->ptr;
-  int32_t i;
+  ca_size_t i;
 
   switch ( ca->bytes ) {
   case 1: proc_select_to_ptr(int8_t); break;
@@ -427,7 +427,7 @@ ca_select_to_ptr (CArray *ca, CArray *select, char *ptr)
   case 8: proc_select_to_ptr(float64_t); break;
   default: {
     char *p = ptr, *q = ca->ptr;
-    int32_t bytes = ca->bytes;
+    ca_size_t bytes = ca->bytes;
     for (i=ca->elements; i; i--) {
       if ( *s ) {
         memcpy(q, p, bytes);
@@ -459,7 +459,7 @@ void
 ca_select_from_ptr (CArray *ca, CArray *select, char *ptr)
 {
   boolean8_t *s = (boolean8_t *) select->ptr;
-  int32_t i;
+  ca_size_t i;
 
   switch ( ca->bytes ) {
   case 1: proc_select_from_ptr(int8_t); break;
@@ -469,7 +469,7 @@ ca_select_from_ptr (CArray *ca, CArray *select, char *ptr)
   default: {
     char *p = ptr;
     char *q = ca->ptr;
-    int32_t bytes = ca->bytes;
+    ca_size_t bytes = ca->bytes;
     for (i=ca->elements; i; i--) {
       if ( *s ) {
         memcpy(q, p, bytes);
@@ -501,7 +501,7 @@ void
 ca_select_fill (CArray *ca, CArray *select, char *valp)
 {
   boolean8_t *s = (boolean8_t *) select->ptr;
-  int32_t i;
+  ca_size_t i;
 
   switch ( ca->bytes ) {
   case 1: proc_select_fill(int8_t); break;
@@ -510,7 +510,7 @@ ca_select_fill (CArray *ca, CArray *select, char *valp)
   case 8: proc_select_fill(float64_t); break;
   default: {
     char *q = ca->ptr;
-    int32_t bytes = ca->bytes;
+    ca_size_t bytes = ca->bytes;
     for (i=ca->elements; i; i--) {
       if ( *s ) {
         memcpy(q, valp, bytes);

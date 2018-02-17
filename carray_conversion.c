@@ -19,11 +19,11 @@
 #endif
 
 static void
-rb_ca_to_a_loop (VALUE self, int32_t level, int32_t *idx, VALUE ary)
+rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
 {
   volatile VALUE obj;
   CArray *ca;
-  int32_t i;
+  ca_size_t i;
 
   Data_Get_Struct(self, CArray, ca);
 
@@ -57,7 +57,7 @@ rb_ca_to_a (VALUE self)
 {
   volatile VALUE ary;
   CArray *ca;
-  int32_t idx[CA_RANK_MAX];
+  ca_size_t idx[CA_RANK_MAX];
   Data_Get_Struct(self, CArray, ca);
   ary = rb_ary_new2(ca->dim[0]);
   ca_attach(ca);
@@ -80,7 +80,7 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
   CArray *ca;
-  int32_t i;
+  ca_size_t i;
 
   obj = rb_apply(self, rb_intern("template"), rb_ary_new4(argc, argv));
 
@@ -235,15 +235,15 @@ rb_ca_load_binary (VALUE self, VALUE io)
   case T_STRING:
     if ( ca_length(ca) > RSTRING_LEN(io) ) {
       rb_raise(rb_eRuntimeError,
-               "data size mismatch (%li for %i)",
-               RSTRING_LEN(io), ca_length(ca));
+               "data size mismatch (%lld for %lld)",
+               (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
     memcpy(ca->ptr, StringValuePtr(io), ca_length(ca));
     OBJ_INFECT(self, io);
     break;
   default:
     if ( rb_respond_to(io, rb_intern("read") ) ) {
-      VALUE buf = rb_funcall(io, rb_intern("read"), 1, INT2NUM(ca_length(ca)));
+      VALUE buf = rb_funcall(io, rb_intern("read"), 1, SIZE2NUM(ca_length(ca)));
       memcpy(ca->ptr, StringValuePtr(buf), ca_length(ca));
       OBJ_INFECT(self, io);
     }
@@ -271,10 +271,10 @@ ca_to_cptr (void *ap)
   CArray *ca = (CArray *) ap;
   void **ptr, **p, **r;
   char *q;
-  int offset[CA_RANK_MAX];
-  int count[CA_RANK_MAX];
-  int32_t ptr_num;
-  int32_t i, j;
+  ca_size_t offset[CA_RANK_MAX];
+  ca_size_t count[CA_RANK_MAX];
+  ca_size_t ptr_num;
+  ca_size_t i, j;
   
   if ( ! ca_is_attached(ca) ) {
     rb_raise(rb_eRuntimeError, "[BUG] ca_to_cptr called for detached array");
@@ -331,12 +331,12 @@ rb_ca_format (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, elem, val;
   CArray *ca;
-  int32_t i, j;
+  ca_size_t i, j;
   ID id_format = rb_intern("format");
 
   Data_Get_Struct(self, CArray, ca);
 
-  obj = rb_ca_template_with_type(self, INT2FIX(CA_OBJECT), INT2FIX(0));
+  obj = rb_ca_template_with_type(self, INT2NUM(CA_OBJECT), INT2NUM(0));
 
   ca_attach(ca);
   if ( ca_has_mask(ca) ) {
@@ -379,7 +379,7 @@ rb_ca_strptime (VALUE self, VALUE rfmt)
   CArray *ca;
   char *fmt;
   struct tm tmv;
-  int32_t i;
+  ca_size_t i;
   
   ca = ca_wrap_readonly(self, CA_OBJECT);
 
@@ -431,7 +431,7 @@ rb_ca_strftime (VALUE self, VALUE rfmt)
 {
   volatile VALUE obj, elem, val;
   CArray *ca;
-  int32_t i;
+  ca_size_t i;
   ID id_strftime = rb_intern("strftime");
   
   ca = ca_wrap_readonly(self, CA_OBJECT);
