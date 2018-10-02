@@ -105,6 +105,8 @@ ca_is_all_masked (void *ap)
   }
 }
 
+/* create mask array if array has mask but has not mask array */
+
 void
 ca_update_mask (void *ap)
 {
@@ -131,7 +133,7 @@ ca_create_mask (void *ap)
 
   if ( ! ca->mask ) {
     ca_func[ca->obj_type].create_mask(ca);
-    ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY);
+    ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
     if ( ca_is_virtual(ca) ) {
       if ( CAVIRTUAL(ca)->attach ) {
         ca_attach(ca->mask);
