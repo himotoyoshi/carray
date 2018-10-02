@@ -317,7 +317,7 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
     args = ID2SYM(rb_intern("*"));
     obj  = rb_ca_unbound_repeat(1, (VALUE*)&args, self);
     return ca_ubrep_bind_with(obj, argv[0]);
-  }    
+  }
 
   rep_rank = argc;
 
