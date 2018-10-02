@@ -58,18 +58,21 @@ module CA
   def self.each_load_path (name) # :nodoc:
     autoload_dirs = $:.clone
     if defined? Gem
-      begin
-        Gem::Specification.each do |spec|
-          if spec.name =~ /carray/
-            spec.require_paths.each do |path|
-              if path !~ /^\//
-                path = File.join(spec.full_gem_path, path)
-              end
-              autoload_dirs.push(path)                
-            end
-          end
+      autoload_dirs.push File.expand_path(File.join(__FILE__,"..","..",".."))
+      accounted = {}
+      Gem::Specification.each do |spec|
+        if accounted.has_key?(spec.name)
+          next
         end
-      rescue Gem::LoadError
+        if spec.name =~ /carray\-/
+          spec.require_paths.each do |path|
+            if path !~ /^\//
+              path = File.join(spec.full_gem_path, path)
+            end
+            autoload_dirs.push(path)                
+          end
+          accounted[spec.name] = true
+        end
       end
     end
     autoload_dirs.each do |path|
@@ -87,7 +90,10 @@ end
 CA.each_load_path("carray/autoload") {
   Dir["autoload_*.rb"].each do |basename|
     if basename =~ /\A(autoload_.+)\.rb\Z/
-      require "carray/autoload/" + $1
+      begin
+        require "carray/autoload/" + $1
+      rescue LoadError
+      end
     end
   end
 }
