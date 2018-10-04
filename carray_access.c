@@ -1489,6 +1489,8 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_ADDRESS:
     rb_ary_store(rindex, 0, SIZE2NUM(info.index[0].scalar));
     break;
+  case CA_REG_FLATTEN:
+    break;
   case CA_REG_ADDRESS_COMPLEX: {
     volatile VALUE rinfo;
     ca_size_t elements = 1;
