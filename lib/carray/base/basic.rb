@@ -374,15 +374,23 @@ class CArray
   # Reutrns the reference which rank is reduced 
   # by eliminating the dimensions which size == 1 
   def compacted
-    newdim = dim.reject{|x| x == 1 }
-    return ( rank != newdim.size ) ? reshape(*newdim) : self[]
+    if rank == 1
+      return self[]
+    else
+      newdim = dim.reject{|x| x == 1 }
+      return ( rank != newdim.size ) ? reshape(*newdim) : self[]
+    end
   end
 
   # Returns the array which rank is reduced 
   # by eliminating the dimensions which size == 1 
   def compact
-    newdim = dim.reject{|x| x == 1 }
-    return ( rank != newdim.size ) ? reshape(*newdim).to_ca : self.to_ca
+    if rank == 1
+      return self.to_ca
+    else
+      newdim = dim.reject{|x| x == 1 }
+      return ( rank != newdim.size ) ? reshape(*newdim).to_ca : self.to_ca
+    end
   end
 
   # Returns the reference which elements are sorted by the comparison method
@@ -700,6 +708,10 @@ class CArray
     end
   end
 
+  #
+  #
+  #
+
   def indices
     list = Array.new(rank) {|i|
       rpt = self.dim
@@ -737,13 +749,24 @@ class CArray
   end
 
   # Array#join like method
+  #
+  # > a = CArray.object(3,3).seq("a",:succ)
+  # => <CArray.object(3,3): elem=9 mem=72b
+  # [ [ "a", "b", "c" ],
+  #   [ "d", "e", "f" ],
+  #   [ "g", "h", "i" ] ]>
+  # 
+  # > a.join("\n",",")
+  # => "a,b,c\nd,e,f\ng,h,i"
+  #
 
   def join (*argv)
     case argv.size
     when 0
       return to_a.join()
     when 1
-      return to_a.join(argv[0])
+      sep = argv.shift
+      return to_a.join(sep)
     else
       sep = argv.shift
       return self[:i, false].map { |s|
@@ -786,11 +809,21 @@ class CArray
 
   #
   #  ref = CA_INT([[0,1,2],[1,2,0],[2,0,1]])
+  #  a = CArray.int(3,3).seq(1)
+  #  b = CArray.int(3,3).seq(11)
+  #  c = CArray.int(3,3).seq(21)
+  #
+  #  CArray.pickup(CA_OBJECT, ref, [a,b,c])
+  #  => <CArray.object(3,3): elem=9 mem=72b
+  #  [ [ 1, 12, 23 ],
+  #    [ 14, 25, 6 ],
+  #    [ 27, 8, 19 ] ]>
+  #
   #  CArray.pickup(CA_OBJECT, ref, ["a","b","c"])
   #  => <CArray.object(3,3): elem=9 mem=36b
-  #     [ [ "a", "b", "c" ],
-  #       [ "b", "c", "a" ],
-  #       [ "c", "a", "b" ] ]>
+  #  [ [ "a", "b", "c" ],
+  #    [ "b", "c", "a" ],
+  #    [ "c", "a", "b" ] ]>
   #
   def self.pickup (data_type, ref, args)
     out = ref.template(data_type)
@@ -980,7 +1013,17 @@ class CArray
     end
   end
   
-  # ---
+  # Returns object carray has elements of splitted carray at dimensions 
+  #      which is given by arguments
+  #
+  #    a = CA_INT([[1,2,3], [4,5,6], [7,8,9]])
+  #
+  #    a.split(0) 
+  #      [1,2,3], [4,5,6], [7,8,9]
+  #
+  #    a.split(1)
+  #      [1,4,7], [2,5,8], [3,6,9]
+  #
 
   def split (*argv)
     odim = dim.values_at(*argv)
@@ -997,13 +1040,14 @@ class CArray
     return out
   end
 
-
 end
 
 class CAUnboundRepeat
+
   def template (*argv, &block)
     return parent.template(*argv,&block)[*spec.map{|x| x != :* ? nil : x}]
   end
+
 end
 
 class Numeric
@@ -1026,37 +1070,21 @@ class Numeric
     end
   end
   
-  [
-    :boolean,
-    :int8,
-    :uint8,
-    :int16,
-    :uint16,
-    :int32,
-    :uint32,
-    :int64,
-    :uint64,
-    :float32,
-    :float64,
-    :float128,
-    :cmplx64,
-    :cmplx128,
-    :cmplx256,
-    :byte,
-    :short,
-    :int,
-    :float,
-    :double,
-    :complex,
-    :dcomplex,
-    :object
-  ].each do |name|
-    class_eval %{
-      def #{name} ()
-        CScalar.new(#{name.inspect}) {self}
-      end
-    }
-  end
-
 end
+
+module CA
+  
+  def self.meshgrid (*args)
+    dim = args.map(&:size)
+    out = []
+    args.each_with_index do |arg, i|
+      newdim = dim.dup
+      newdim[i] = :%
+      out[i] = arg[*newdim].to_ca
+    end
+    return *out
+  end
+  
+end
+
 

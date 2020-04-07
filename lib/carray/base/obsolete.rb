@@ -71,6 +71,7 @@ class CArray
     return b
   end
 
+
 =begin
   def histogram (klass)
     c = CArray.int32(klass.elements-1)
@@ -89,5 +90,42 @@ class CArray
     return c
   end
 =end
+
+end
+
+class Numeric
+  
+  [
+    :boolean,
+    :int8,
+    :uint8,
+    :int16,
+    :uint16,
+    :int32,
+    :uint32,
+    :int64,
+    :uint64,
+    :float32,
+    :float64,
+    :float128,
+    :cmplx64,
+    :cmplx128,
+    :cmplx256,
+    :byte,
+    :short,
+    :int,
+    :float,
+    :double,
+    :complex,
+    :dcomplex,
+    :object
+  ].each do |name|
+    class_eval %{
+      def #{name} ()
+        warn "Numeric##{name} will be obsolete"
+        CScalar.new(#{name.inspect}) {self}
+      end
+    }
+  end
 
 end

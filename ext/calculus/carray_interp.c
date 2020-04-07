@@ -119,7 +119,7 @@ find_index (ca_size_t n, double *y, double yy, ca_size_t *major, double *frac)
 
 static int
 linear_interp_loop (CArray *ca, ca_size_t *major, double *frac,
-                    int level, int32_t *idx, double wt, double *valp)
+                    int level, ca_size_t *idx, double wt, double *valp)
 {
   double tmp;
 
@@ -177,6 +177,7 @@ ca_interpolate_loop (CArray *ca, double **scale,
   double val, frc;
   ca_size_t maj;
   ca_size_t i;
+  
   if ( level == ca->rank-1 ) {
     if ( ! value[level] ) {
       for (i=0; i<ca->dim[level]; i++) {
@@ -302,6 +303,7 @@ rb_ca_interpolate_bilinear (int argc, VALUE *argv, volatile VALUE self)
       ca_attach(values[i]);
     }
   }
+
 
   ca_attach(ca);
   ca_interpolate(ca, scales, values, (double*) co->ptr);

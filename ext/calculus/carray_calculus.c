@@ -498,63 +498,127 @@ deriv_penta (double *x, double *y, double xx)
 static double
 interpolate_linear (double *x, double *y, ca_size_t n, double xx)
 {
+  double xt[2];
   double ri;
   ca_size_t i0;
   if ( n == 1) {
     return y[0];
   }
-  if ( xx == x[0] ) {
-    return y[0];
+  if ( x != NULL ) {
+    if ( xx == x[0] ) {
+      return y[0];
+    }
+    if ( xx == x[1] ) {
+      return y[1];
+    }
+    if ( n == 2 ) {
+      return interp_lin(x, y, xx);
+    }
+    linear_index(n, x, xx, &ri);
+    i0 = floor(ri);
+    if ( i0 <= 0 ) {
+      i0 = 0;
+    }
+    else if ( i0 + 1 >= n - 1 ) {
+      i0 = n - 2;
+    }
+    return interp_lin(&x[i0], &y[i0], xx);
   }
-  if ( xx == x[1] ) {
-    return y[1];
+  else {
+    if ( xx == 0 ) {
+      return y[0];
+    }
+    if ( xx == 1 ) {
+      return y[1];
+    }
+    if ( n == 2 ) {
+      xt[0] = 0.0;
+      xt[1] = 1.0;
+      return interp_lin(xt, y, xx);
+    }
+    i0 = floor(xx);
+    if ( i0 <= 0 ) {
+      i0 = 0;
+    }
+    else if ( i0 + 1 >= n - 1 ) {
+      i0 = n - 2;
+    }
+    xt[0] = i0;
+    xt[1] = i0+1;
+    return interp_lin(xt, &y[i0], xx);
   }
-  if ( n == 2 ) {
-    return interp_lin(x, y, xx);
-  }
-  linear_index(n, x, xx, &ri);
-  i0 = floor(ri);
-  if ( i0 <= 0 ) {
-    i0 = 0;
-  }
-  else if ( i0 + 1 >= n - 1 ) {
-    i0 = n - 2;
-  }
-  return interp_lin(&x[i0], &y[i0], xx);
 }
 
 static double
 interpolate_cubic (double *x, double *y, ca_size_t n, double xx)
 {
+  static double xt[4];
   double ri;
   ca_size_t i0;
   if ( n == 1) {
     return y[0];
   }
-  if ( xx == x[0] ) {
-    return y[0];
+  if ( x != NULL ) {
+    if ( xx == x[0] ) {
+      return y[0];
+    }
+    if ( xx == x[1] ) {
+      return y[1];
+    }
+    if ( xx == x[2] ) {
+      return y[2];
+    }
+    if ( n == 2 ) {
+      return interp_lin(x, y, xx);
+    }
+    if ( n == 3 ) {
+      return interp_qual(x, y, xx);
+    }
+    linear_index(n, x, xx, &ri);
+    i0 = floor(ri) - 1;
+    if ( i0 <= 0 ) {
+      i0 = 0;
+    }
+    else if ( i0 + 3 >= n - 1 ) {
+      i0 = n - 4;
+    }
+    return interp_cubic(&x[i0], &y[i0], xx);
   }
-  if ( xx == x[1] ) {
-    return y[1];
+  else {    
+    if ( xx == 0 ) {
+      return y[0];
+    }
+    if ( xx == 1 ) {
+      return y[1];
+    }
+    if ( xx == 2 ) {
+      return y[2];
+    }    
+    if ( n == 2 ) {
+      xt[0] = 0.0;
+      xt[1] = 1.0;
+      return interp_lin(xt, y, xx);
+    }
+    if ( n == 3 ) {
+      xt[0] = 0.0;
+      xt[1] = 1.0;
+      xt[2] = 2.0;
+      return interp_qual(xt, y, xx);
+    }
+    ri = xx;
+    i0 = floor(ri) - 1;
+    if ( i0 <= 0 ) {
+      i0 = 0;
+    }
+    else if ( i0 + 3 >= n - 1 ) {
+      i0 = n - 4;
+    }
+    xt[0] = i0;
+    xt[1] = i0+1;
+    xt[2] = i0+2;
+    xt[3] = i0+3;
+    return interp_cubic(xt, &y[i0], xx);
   }
-  if ( xx == x[2] ) {
-    return y[2];
-  }
-  if ( n == 2 ) {
-    return interp_lin(x, y, xx);
-  }
-  if ( n == 3 ) {
-    return interp_qual(x, y, xx);
-  }
-  linear_index(n, x, xx, &ri);
-  i0 = floor(ri) - 1;
-  if ( i0 <= 0 ) {
-    i0 = 0;
-  }
-  else if ( i0 + 3 >= n - 1 ) {
-    i0 = n - 4;
-  }
-  return interp_cubic(&x[i0], &y[i0], xx);
 }
 
 static double
@@ -624,77 +688,153 @@ rb_ca_interpolate (int argc, VALUE *argv, VALUE self)
              "invalid interpolation type <%s>", StringValuePtr(inspect));
   }
 
-  cv = ca_wrap_readonly(rval, CA_DOUBLE);
-  sc = ca_wrap_readonly(vsc,  CA_DOUBLE);
+  if ( ! NIL_P(vsc) ) {
 
-  if ( ca_is_any_masked(cv) || ca_is_any_masked(sc) ) {
-    rb_raise(rb_eRuntimeError,
-             "can't calculate interpolation when masked elements exist");
-  }
+    cv = ca_wrap_readonly(rval, CA_DOUBLE);
+    sc = ca_wrap_readonly(vsc,  CA_DOUBLE);
 
-  if ( cv->elements != sc->elements ) {
-    rb_raise(rb_eRuntimeError, "data num mismatch with scale");
-  }
+    if ( ca_is_any_masked(cv) || ca_is_any_masked(sc) ) {
+      rb_raise(rb_eRuntimeError,
+               "can't calculate interpolation when masked elements exist");
+    }
 
-  cx = ca_wrap_readonly(vx,   CA_DOUBLE);
+    if ( cv->elements != sc->elements ) {
+      rb_raise(rb_eRuntimeError, "data num mismatch with scale");
+    }
 
-  co0 = carray_new(ca->data_type, cx->rank, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_DOUBLE);
+    cx = ca_wrap_readonly(vx,   CA_DOUBLE);
 
-  ca_attach_n(4, cv, sc, cx, co);
+    co0 = carray_new(ca->data_type, cx->rank, cx->dim, 0, NULL);
+    out = out0 = ca_wrap_struct(co0);
+    co = ca_wrap_writable(out, CA_DOUBLE);
 
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
+    ca_attach_n(4, cv, sc, cx, co);
 
-  ca_update_mask(cx);
-  if ( cx->mask ) {
-    boolean8_t *mx, *mo;
-    ca_create_mask(co);
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-    if ( type == 3 ) {
-      for (i=0; i<cx->elements; i++) {
-        if ( ! *mx ) {
-          *po = interpolate_cubic((double*)sc->ptr, (double*)cv->ptr, 
-                                  cv->elements, *px);
+    px = (double*) cx->ptr;
+    po = (double*) co->ptr;
+
+    ca_update_mask(cx);
+    if ( cx->mask ) {
+      boolean8_t *mx, *mo;
+      ca_create_mask(co);
+      mx = (boolean8_t *) cx->mask->ptr;
+      mo = (boolean8_t *) co->mask->ptr;
+      if ( type == 3 ) {
+        for (i=0; i<cx->elements; i++) {
+          if ( ! *mx ) {
+            *po = interpolate_cubic((double*)sc->ptr, (double*)cv->ptr, 
+                                    cv->elements, *px);
+          }
+          else {
+            *mo = 1;
+          }
+          mx++; mo++; po++; px++;
         }
-        else {
-          *mo = 1;
+      }
+      else {
+        for (i=0; i<cx->elements; i++) {
+          if ( ! *mx ) {
+            *po = interpolate_linear((double*)sc->ptr, (double*)cv->ptr, 
+                                     cv->elements, *px);
+          }
+          else {
+            *mo = 1;
+          }
+          mx++; mo++; po++; px++;
         }
-        mx++; mo++; po++; px++;
       }
     }
     else {
-      for (i=0; i<cx->elements; i++) {
-        if ( ! *mx ) {
-          *po = interpolate_linear((double*)sc->ptr, (double*)cv->ptr, 
-                                   cv->elements, *px);
+      if ( type == 3 ) {
+        for (i=0; i<cx->elements; i++) {
+          *po++ = interpolate_cubic((double*)sc->ptr, (double*)cv->ptr, 
+                                    cv->elements, *px++);
         }
-        else {
-          *mo = 1;
+      }
+      else {
+        for (i=0; i<cx->elements; i++) {
+          *po++ = interpolate_linear((double*)sc->ptr, (double*)cv->ptr, 
+                                     cv->elements, *px++);
         }
-        mx++; mo++; po++; px++;
       }
     }
+
+    ca_sync(co);
+    ca_detach_n(4, cv, sc, cx, co);
+
   }
   else {
-    if ( type == 3 ) {
-      for (i=0; i<cx->elements; i++) {
-        *po++ = interpolate_cubic((double*)sc->ptr, (double*)cv->ptr, 
-                                  cv->elements, *px++);
+
+    
+    cv = ca_wrap_readonly(rval, CA_DOUBLE);
+
+
+    if ( ca_is_any_masked(cv) ) {
+      rb_raise(rb_eRuntimeError,
+               "can't calculate interpolation when masked elements exist");
+    }
+
+    cx = ca_wrap_readonly(vx,   CA_DOUBLE);
+
+    co0 = carray_new(ca->data_type, cx->rank, cx->dim, 0, NULL);
+    out = out0 = ca_wrap_struct(co0);
+    co = ca_wrap_writable(out, CA_DOUBLE);
+
+    ca_attach_n(3, cv, cx, co);
+
+    px = (double*) cx->ptr;
+    po = (double*) co->ptr;
+
+    ca_update_mask(cx);
+    if ( cx->mask ) {
+      boolean8_t *mx, *mo;
+      ca_create_mask(co);
+      mx = (boolean8_t *) cx->mask->ptr;
+      mo = (boolean8_t *) co->mask->ptr;
+      if ( type == 3 ) {
+        for (i=0; i<cx->elements; i++) {
+          if ( ! *mx ) {
+            *po = interpolate_cubic(NULL, (double*)cv->ptr, 
+                                    cv->elements, *px);
+          }
+          else {
+            *mo = 1;
+          }
+          mx++; mo++; po++; px++;
+        }
+      }
+      else {
+        for (i=0; i<cx->elements; i++) {
+          if ( ! *mx ) {
+            *po = interpolate_linear(NULL, (double*)cv->ptr, 
+                                     cv->elements, *px);
+          }
+          else {
+            *mo = 1;
+          }
+          mx++; mo++; po++; px++;
+        }
       }
     }
     else {
-      for (i=0; i<cx->elements; i++) {
-        *po++ = interpolate_linear((double*)sc->ptr, (double*)cv->ptr, 
-                                   cv->elements, *px++);
+      if ( type == 3 ) {
+        for (i=0; i<cx->elements; i++) {
+          *po++ = interpolate_cubic(NULL, (double*)cv->ptr, 
+                                    cv->elements, *px++);
+        }
+      }
+      else {
+        for (i=0; i<cx->elements; i++) {
+          *po++ = interpolate_linear(NULL, (double*)cv->ptr, 
+                                     cv->elements, *px++);
+        }
       }
     }
-  }
 
-  ca_sync(co);
-  ca_detach_n(4, cv, sc, cx, co);
+    ca_sync(co);
+    ca_detach_n(3, cv, cx, co);    
+    
+  }
 
   if ( rb_ca_is_scalar(vx) ) {
     return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
@@ -716,18 +856,18 @@ rb_ca_differentiate (volatile VALUE self,
 
   Data_Get_Struct(self, CArray, ca);
 
-  cv = ca_wrap_readonly(rval, CA_DOUBLE);
   sc = ca_wrap_readonly(vsc,  CA_DOUBLE);
 
-  if ( ca_is_any_masked(cv) || ca_is_any_masked(sc) ) {
+  if ( ca_is_any_masked(ca) || ca_is_any_masked(sc) ) {
     rb_raise(rb_eRuntimeError,
              "can't calculate differentiation when masked elements exist");
   }
 
-  if ( cv->elements != sc->elements ) {
+  if ( ca->elements != sc->elements ) {
     rb_raise(rb_eRuntimeError, "data num mismatch with scale");
   }
 
+  cv = ca_wrap_readonly(rval, CA_DOUBLE);
   cx = ca_wrap_readonly(vx,   CA_DOUBLE);
 
   co0 = carray_new(ca->data_type, cx->rank, cx->dim, 0, NULL);
@@ -747,8 +887,8 @@ rb_ca_differentiate (volatile VALUE self,
     mo = (boolean8_t *) co->mask->ptr;
     for (i=0; i<cx->elements; i++) {
       if ( ! *mx ) {
-        *po = differentiate((double*)sc->ptr, (double*)ca->ptr, 
-                            ca->elements, *px);
+        *po = differentiate((double*)sc->ptr, (double*)cv->ptr, 
+                            cv->elements, *px);
       }
       else {
         *mo = 1;
@@ -758,8 +898,8 @@ rb_ca_differentiate (volatile VALUE self,
   }
   else {
     for (i=0; i<cx->elements; i++) {
-      *po = differentiate((double*)sc->ptr, (double*)ca->ptr, 
-                          ca->elements, *px);
+      *po = differentiate((double*)sc->ptr, (double*)cv->ptr, 
+                          cv->elements, *px);
       px++, po++;
     }
   }
