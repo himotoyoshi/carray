@@ -387,7 +387,9 @@ class FortranFormatParser
     def read (io, list, state)
       str = nil
       if length
-        list << (str = io.read(length))
+        count.times do 
+          list << (str = io.read(length))
+        end
       else
         list << (str = io.read)
       end
@@ -461,7 +463,7 @@ class FortranFormatParser
         if state.zero 
           list << str.gsub(/ /,'0').to_i
         else
-          list << Integer(str)
+          list << str.to_i
         end
       end
     rescue
