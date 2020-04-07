@@ -28,7 +28,7 @@ class CA::Gnuplot # :nodoc:
     TMPDIR = "."    
   end
 
-  def initialize (command = "gnuplot", stdout: STDOUT, &block)
+  def initialize (command = "gnuplot", stdout: STDOUT, timezone: "", &block)
     begin
       @io, @stdout, @stderr = Open3.popen3(command + " -noraise")
     rescue NotImplementedError
@@ -59,7 +59,7 @@ class CA::Gnuplot # :nodoc:
 
     @gnuplot_version = evaluate("GPVAL_VERSION").to_f
 
-    epoch  = evaluate %{strftime("%Y-%m-%d",0)}
+    epoch  = evaluate %{strftime("%Y-%m-%d %H:%M:%S #{timezone}",0)}
     @EP_T  = Time.parse(epoch)
     @EP_D  = Date.parse(epoch)
     @EP_DT = DateTime.parse(epoch)
@@ -428,35 +428,47 @@ class CA::Gnuplot # :nodoc:
     put("set output '#{text}'")
   end
 
-  def time (data)
+  def time (data, timezone = nil)
+
+    if timezone
+      epoch  = evaluate %{strftime("%Y-%m-%d %H:%M:%S #{timezone}",0)}
+      ep_t   = Time.parse(epoch)
+      ep_d   = Date.parse(epoch)
+      ep_dt  = DateTime.parse(epoch)
+    else
+      ep_t   = @EP_T
+      ep_d   = @EP_D
+      ep_dt  = @EP_DT
+    end
+
     case data
     when Numeric
       data
     when String
       Time.parse(data) - @EP_T
     when Time
-      data - @EP_T
+      data - ep_t
     when Date
-      (data - @EP_D)*86400
+      (data - ep_d)*86400
     when DateTime
-      (data - @EP_DT)*86400
+      (data - ep_dt)*86400
     when CArray
       return data.convert(CA_DOUBLE){|x|
         case x
         when Numeric
           x
         when Time
-          x - @EP_T
+          x - ep_t
         when Date
-          (x - @EP_D)*86400
+          (x - ep_d)*86400
         when DateTime
-          (x - @EP_DT)*86400
+          (x - ep_dt)*86400
         when String
-          Time.parse(x) - @EP_T
+          Time.parse(x) - ep_t
         end
       }
     when Range
-      time(data.first)..time(data.last)
+      time(data.first, timezone)..time(data.last, timezone)
     end
   end
 
@@ -1282,9 +1294,9 @@ e
   end
 
   #
-  def set_xtics_monthly (start, last, fmt = nil, interval=nil, linewidth = 1, style = "lc rgb 'black' back")
-    unless fmt
-      fmt = "%b"
+  def set_xtics_monthly (start, last, format: nil, interval: nil, linewidth: 1, style: "lc rgb 'black' back", grid: false)
+    unless format
+      format = "%b"
     end
     unless interval
       interval = 3
@@ -1315,7 +1327,7 @@ e
     d = start
     while d <= last
       set %{ xtics add ('' #{time(d)} 1) }
-      set %{ xtics add ('#{d.strftime(fmt)}' #{time(d+15)} 0) }
+      set %{ xtics add ('#{d.strftime(format)}' #{time(d+15)} 0) }
       case interval
       when -2,2
         set %{ x2tics add ('' #{time(d+15)} 1) }
@@ -1332,7 +1344,7 @@ e
       end
       d >>= 1
     end
-    if linewidth > 0
+    if grid and linewidth > 0
       d = start >> 1
       while d < last
         set %{ arrow nohead from #{time(d)}, graph 0 
@@ -1834,6 +1846,16 @@ __EOD__
                                     6 '#ff7000', \
                                     7 '#ee0000', \
                                     8 '#7f0000')}
+      when "matlab50"
+        gp.set %{ palette defined ( 0 '#00009080', \
+                                    1 '#000fff80', \
+                                    2 '#0090ff80', \
+                                    3 '#0fffee80', \
+                                    4 '#90ff7080', \
+                                    5 '#ffee0080', \
+                                    6 '#ff700080', \
+                                    7 '#ee000080', \
+                                    8 '#7f000080')}
       when "matlabw"
         gp.set %{ palette defined ( 0 'white',
                                     0.01 '#000090', \

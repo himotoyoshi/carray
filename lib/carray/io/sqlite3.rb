@@ -86,9 +86,15 @@ class CArray
 
   def unblob (type, subdim = nil)
     bytes = CArray.sizeof(type)
-    elem  = self[0]
+    elem = nil
+    self.each do |e|
+      unless e.nil?
+        elem = e
+        break
+      end
+    end
     if elem == nil and subdim == nil
-      raise "first element is nil, please specify dimension."
+      raise "all element is nil, please specify dimension."
     end
     unless subdim
       subdim = [elem.bytesize/bytes]

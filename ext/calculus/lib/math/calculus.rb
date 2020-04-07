@@ -25,7 +25,7 @@ class CArray
     return self
   end
 
-  def solve (sc, val, eps = 100 * Float::EPSILON)
+  def solve (sc, val, type: "cubic", eps: 100 * Float::EPSILON)
     func = self - val
     list, output = [], []
     (0...dim0-1).each do |i|
@@ -43,13 +43,13 @@ class CArray
       sx[0], sx[3] = sc[i], sc[i+1]
       sy[0], sy[3] = func[i], func[i+1]
       sx[1], sx[2] = (2.0*sx[0]+sx[3])/3.0, (sx[0]+2.0*sx[3])/3.0
-      sy[1], sy[2] = func.interpolate(sc, sx[1], :type=>"linear"), func.interpolate(sc, sx[2], :type=>"linear")
-      output.push(sx.interpolate(sy, 0))
+      sy[1], sy[2] = func.interpolate(sc, sx[1], type: type), func.interpolate(sc, sx[2], type: type)
+      output.push(sx.interpolate(sy, 0, type: type))
     end
     return output.uniq
   end
 
-  def solve2 (sc, eps = 100 * Float::EPSILON)
+  def solve2 (sc, eps: 100 * Float::EPSILON)
     retvals = []
     self.dim1.times do |j|
       func = self[nil,j].to_ca

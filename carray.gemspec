@@ -29,9 +29,8 @@ Gem::Specification::new do |s|
   s.files       = files
   s.extensions  = [ "extconf.rb" ] + 
                      Dir["ext/*/extconf.rb"].select{|f| File.exist?(f) }
-  s.has_rdoc    = true
   s.rdoc_options = [
-		"--main rdoc_main.rb", 
+		"-m rdoc_main.rb", 
 		"rdoc_main.rb", 
 		"rdoc_ext.rb",
 		"rdoc_math.rb", 

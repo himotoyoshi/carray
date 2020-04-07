@@ -72,6 +72,7 @@ class CArray
   def extend_as_table (column_names)
     self.extend CA::TableMethods
     self.column_names = column_names
+    self
   end
     
 end

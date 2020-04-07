@@ -97,7 +97,7 @@ class CA::Struct
   class << self
     
     def inspect
-      return name.empty? ? "AnonStruct" : name
+      return name.nil? ? "AnonStruct" : name
     end
     
     def [] (*argv)
@@ -267,7 +267,7 @@ end
 class CA::Union < CA::Struct
   class << self
     def inspect
-      return name.empty? ? "AnonUnion" : name
+      return name.nil? ? "AnonUnion" : name
     end
   end
 end
@@ -562,7 +562,7 @@ class CA::Struct
     output = ""
     table  = self::MEMBER_TABLE
     stlist = []
-    if self.name.empty?
+    if self.name.nil?
       if self <= CA::Union
         prefix = "union"
       else
@@ -584,7 +584,7 @@ class CA::Struct
       when Class
         if type < CA::Struct
           stlist << type
-          if type.name.empty?
+          if type.name.nil?
             if type <= CA::Union
               prefix = "union"
             else
