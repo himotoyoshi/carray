@@ -66,41 +66,40 @@
 #   data.to_csv([io|string]) { ... definitions ... }
 #
 
-require "stringio"
-require "strscan"
 require "carray/io/table"
+require "stringio"
+require "rcsv"
 
 module CA
 
-  class CSVReader  # :nodoc:
-
-    def initialize (sep=",", rs=$/, &block)
+  class CSVReader
+  
+    def initialize (sep: ",", rs: $/, &block)
+      @sep = sep
+      @rs  = rs
       @block = block
-      @sep   = sep
-      @rs    = rs
     end
 
     def read_io (io)
-      return Processor.new(io, @sep, @rs, &@block).run
+      return Processor.new(io, sep: @sep, rs: @rs, &@block).run
     end
 
     def read_string (string)
       return read_io(StringIO.new(string))
     end
 
-    def read_file (filename)
-      open(filename) { |io|
+    def read_file (filename, encoding: nil)
+      File.open(filename, encoding: encoding) { |io|
         return read_io(io)
       }
     end
-
-    class Processor  # :nodoc:
-      
-      def initialize (io, sep, rs=$/, &block)
+  
+    class Processor 
+    
+      def initialize (io, sep:, rs:, &block)
         @io       = io
         @sep      = sep
         @rs       = rs
-        @sc       = StringScanner.new("")
         @block    = block || proc { body }
         @namelist = nil
         @names    = nil
@@ -116,7 +115,7 @@ module CA
         @regexp_pat4    = /\A(?:""|) *#{@sep} */ 
       end
 
-      def run 
+      def run
         case @block.arity
         when 1
           @block.call(self)
@@ -124,6 +123,15 @@ module CA
           instance_exec(&@block)
         else
           raise "invalid block paramter"
+        end
+        if @header.has_key?("names")          
+          @header["names"].each_with_index do |name, k|
+            if name.nil? or name.empty?
+              @header["names"][k] = "c#{k}"
+            end
+          end
+        else
+          @header["names"] = (0...@cols).map{|k| "c#{k}"}
         end
         header = @header
         note  = @note
@@ -169,7 +177,7 @@ module CA
         @headerlist.push(name)
         return list
       end
-      
+
       attr_reader :names
 
       def note (n=1)
@@ -183,12 +191,8 @@ module CA
         n.times { @io.gets(@rs) }
       end
 
-      def body (n=nil, cols=nil)
-        unless n
-          n = 0x80000000
-        end
+      def body (cols=nil)
         data = []
-        count = 0
 
         if cols
           @cols = cols
@@ -202,34 +206,26 @@ module CA
             return
           end
           data.push(list)
-          count += 1
           @cols = list.size
         end
-
-        lsize = nil
-        while count < n and list = csv_feed(@cols)
-          lsize = list.size
-          if lsize == @cols
-            data.push(list)             
-          elsif lsize <= @cols
-            record = Array.new(@cols, nil)
-            record[0,lsize] = list
-            data.push(record)
-          else
-            extra = Array.new(lsize - @cols, nil)
-            data.each do |row|
-              row.push(*extra)
-            end
-            data.push(list)
-            @cols = lsize
-#            raise "csv parse error : too large column number at line #{@io.lineno}"
-          end
-          count += 1
+        unless @io.eof?
+          data += Rcsv.parse(@io, column_sparator: @sep, header: :none)
         end
-
         @rows  = data.size
         @table = CArray.object(@rows, @cols){ data }
         @table[:eq,""] = nil
+      end
+
+      def rename (name, newname)
+        names = @header["names"]
+        i = names.index(name)
+        names[i] = newname
+        @names = @header["names"]
+      end
+
+      def downcase
+        @header["names"] = @header["names"].map(&:downcase)
+        @names = @header["names"]
       end
 
       def select (*namelist)
@@ -258,6 +254,7 @@ module CA
           @header.keys.each do |k|
             @header[k] = @header[k].values_at(*index_list)
           end
+          @names = @header["names"]
         else
           raise
         end
@@ -374,7 +371,9 @@ module CA
       end
 
     end
+  
   end
+  
 end
 
 module CA
@@ -518,15 +517,13 @@ end
 
 class CArray
 
-  def self.load_csv (file, option={}, rs: $/, sep: ",", &block)
-    option = {:sep=>sep, :rs=>rs}.update(option)
-    reader = CA::CSVReader.new(option[:sep], option[:rs], &block)
-    return reader.read_file(file)
+  def self.load_csv (file, sep: ",", rs: $/, encoding: nil, &block)
+    reader = CA::CSVReader.new(sep: sep, rs: rs, &block)
+    return reader.read_file(file, encoding: encoding)
   end
-
-  def self.from_csv (io, option={}, rs: $/, sep: ",", &block)
-    option = {:sep=>sep, :rs=>rs}.update(option)
-    reader = CA::CSVReader.new(option[:sep], option[:rs], &block)
+  
+  def self.from_csv (io, sep: ",", rs: $/, &block)
+    reader = CA::CSVReader.new(sep: sep, rs: rs, &block)
     case io
     when IO, StringIO
       return reader.read_io(io)
