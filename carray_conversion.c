@@ -508,10 +508,10 @@ Init_carray_conversion ()
   /* DO NOT define CArray#to_ary, it makes trouble with various situations */
   /* rb_define_method(rb_cCArray, "to_ary", rb_ca_to_a, 0); */ 
 
-  rb_define_method(rb_cCArray, "frmt", rb_ca_format, -1); 
+  rb_define_method(rb_cCArray, "str_format", rb_ca_format, -1); 
 
-  rb_define_method(rb_cCArray, "strptime", rb_ca_strptime, 1);
-  rb_define_method(rb_cCArray, "strftime", rb_ca_strftime, 1);
+  rb_define_method(rb_cCArray, "str_strptime", rb_ca_strptime, 1);
+  rb_define_method(rb_cCArray, "str_strftime", rb_ca_strftime, 1);
 
   rb_define_method(rb_cCArray, "test_ca_to_cptr", rb_test_ca_to_cptr, 0);
 

@@ -429,7 +429,6 @@ class CA::Gnuplot # :nodoc:
   end
 
   def time (data, timezone = nil)
-
     if timezone
       epoch  = evaluate %{strftime("%Y-%m-%d %H:%M:%S #{timezone}",0)}
       ep_t   = Time.parse(epoch)
@@ -451,7 +450,7 @@ class CA::Gnuplot # :nodoc:
     when Date
       (data - ep_d)*86400
     when DateTime
-      (data - ep_dt)*86400
+      (data - ep_dt + data.offset)*86400
     when CArray
       return data.convert(CA_DOUBLE){|x|
         case x
@@ -459,10 +458,10 @@ class CA::Gnuplot # :nodoc:
           x
         when Time
           x - ep_t
+        when DateTime
+          (x - ep_dt + x.offset)*86400
         when Date
           (x - ep_d)*86400
-        when DateTime
-          (x - ep_dt)*86400
         when String
           Time.parse(x) - ep_t
         end

@@ -148,7 +148,7 @@ class CArray
   def quo (other)
     case 
     when integer?
-      return double/other
+      return object.quo_i(other)
     when object?
       return quo_i(other)
     else

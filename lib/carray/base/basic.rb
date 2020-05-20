@@ -802,8 +802,8 @@ class CArray
     return obj
   end
 
-end
 
+end
 
 class CArray
 
