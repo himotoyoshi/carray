@@ -510,9 +510,15 @@ rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t ca_elements,
       }
     }
 
-    if ( TYPE(arg) == T_STRING ) {  /* ca["field"] -> CA_REG_MEMBER */
-      info->type   = CA_REG_MEMBER;
-      info->symbol = ID2SYM(rb_intern(StringValuePtr(arg)));
+    if ( TYPE(arg) == T_STRING ) {  
+      if ( StringValuePtr(arg)[0] == '@' ) { /* ca["@name"] -> CA_REG_ATTRIBUTE */
+        info->type   = CA_REG_ATTRIBUTE;
+        info->symbol = rb_str_new2(StringValuePtr(arg)+1);
+      }
+      else {                                 /* ca["field"] -> CA_REG_MEMBER */
+        info->type   = CA_REG_MEMBER;
+        info->symbol = ID2SYM(rb_intern(StringValuePtr(arg)));
+      }
       return;
     }
 
@@ -1298,6 +1304,11 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     }
     break;
   }
+  case CA_REG_ATTRIBUTE: {
+    obj = rb_funcall(self, rb_intern("attribute"), 0);
+    obj = rb_hash_aref(obj, info.symbol);
+    break;
+  }
   default:
     rb_raise(rb_eIndexError, "invalid index specified");
   }
@@ -1401,6 +1412,11 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eIndexError, 
                "can't store member of carray doesn't have data_class");
     }
+    break;
+  }
+  case CA_REG_ATTRIBUTE: {
+    obj = rb_funcall(self, rb_intern("attribute"), 0);
+    obj = rb_hash_aset(obj, info.symbol, rval);
     break;
   }
   }
@@ -1547,6 +1563,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_METHOD_CALL:
   case CA_REG_UNBOUND_REPEAT:
   case CA_REG_MEMBER:  
+  case CA_REG_ATTRIBUTE:  
     break;
   default:
     rb_raise(rb_eArgError, "unknown index specification");
@@ -1828,6 +1845,7 @@ Init_carray_access ()
   rb_define_const(rb_cObject, "CA_REG_UNBOUND_REPEAT",
                                                  INT2NUM(CA_REG_UNBOUND_REPEAT));
   rb_define_const(rb_cObject, "CA_REG_MEMBER",   INT2NUM(CA_REG_MEMBER));
+  rb_define_const(rb_cObject, "CA_REG_ATTRIBUTE",   INT2NUM(CA_REG_ATTRIBUTE));
 
 }
 

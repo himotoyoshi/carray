@@ -1,15 +1,13 @@
-
-
 Gem::Specification::new do |s|
-  require_relative "./version"
-  
-  version, date = carray_version()
+
+  version = "1.3.8"
 
   files = Dir.glob("**/*") - [ 
                             Dir.glob("vendor"),
                             Dir.glob("ext/**/{Makefile,mkmf.log}"),
                             Dir.glob("**/*.{o,so,bundle}"),
                             Dir.glob("**/*~"),
+                            Dir.glob("doc/**/*"),
                             Dir.glob("carray-*.gem"), 
                            ].flatten
 
@@ -41,4 +39,6 @@ Gem::Specification::new do |s|
   s.add_runtime_dependency 'narray', '~> 0.6.1.1'
   s.add_runtime_dependency 'narray_miss', '~> 1.3'
   s.add_runtime_dependency 'sqlite3', '~> 1.3'
+  s.add_runtime_dependency 'rcsv', '~> 0.3.1'
 end
+
