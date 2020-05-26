@@ -743,6 +743,14 @@ class CArray
     return template(:boolean) { 1 }
   end
 
+  def contains (*list)
+    result = self.false()
+    list.each do |item|
+      result = result | self.eq(item)
+    end
+    return result 
+  end
+
   # Returns map
   def map (&block)
     return self.convert(CA_OBJECT, &block).to_a

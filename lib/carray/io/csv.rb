@@ -69,6 +69,7 @@
 require "carray/io/table"
 require "stringio"
 require "rcsv"
+require "strscan"
 
 module CA
 
@@ -113,6 +114,7 @@ module CA
         @regexp_pat2    = /\A"([^"]+)" *#{@sep} */
         @regexp_pat3    = /\A"((?:[^"]+|"")+)" *#{@sep} */
         @regexp_pat4    = /\A(?:""|) *#{@sep} */ 
+        @sc       = StringScanner.new("")
       end
 
       def run
@@ -164,6 +166,8 @@ module CA
         return namelist
       end
 
+      alias columns column_names
+
       def header (name = "names")
         name = name.to_s
         list = csv_feed()
@@ -191,9 +195,9 @@ module CA
         n.times { @io.gets(@rs) }
       end
 
-      def body (cols=nil)
+      def body (n=nil, cols=nil)
         data = []
-
+        count = 0
         if cols
           @cols = cols
         elsif @names
@@ -206,10 +210,34 @@ module CA
             return
           end
           data.push(list)
+          count += 1
           @cols = list.size
         end
-        unless @io.eof?
-          data += Rcsv.parse(@io, column_sparator: @sep, header: :none)
+        if n
+          lsize = nil
+          while count < n and list = csv_feed(@cols)
+            lsize = list.size
+            if lsize == @cols
+              data.push(list)             
+            elsif lsize <= @cols
+              record = Array.new(@cols, nil)
+              record[0,lsize] = list
+              data.push(record)
+            else
+              extra = Array.new(lsize - @cols, nil)
+              data.each do |row|
+                row.push(*extra)
+              end
+              data.push(list)
+              @cols = lsize
+  #            raise "csv parse error : too large column number at line #{@io.lineno}"
+            end
+            count += 1
+          end
+        else
+          unless @io.eof?
+            data += Rcsv.parse(@io, column_sparator: @sep, header: :none)
+          end
         end
         @rows  = data.size
         @table = CArray.object(@rows, @cols){ data }
