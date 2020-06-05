@@ -289,7 +289,12 @@ ca_binop_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1, 
   io.puts
   io.print %{
 static VALUE rb_ca_#{name} (VALUE self, VALUE other)
-{ return rb_ca_call_binop(self, other, ca_binop_#{name}); }
+{ 
+  if ( ! rb_ca_test_castable(other) ) {
+    return rb_ca_binop_pass_to_other(self, other, rb_intern("#{op}"));
+  }
+  return rb_ca_call_binop(self, other, ca_binop_#{name}); 
+}
 static VALUE rb_ca_#{name}_bang (VALUE self, VALUE other)
 { return rb_ca_call_binop_bang(self, other, ca_binop_#{name}); }
   }
@@ -529,7 +534,12 @@ ca_bincmp_#{name}_#{type} (ca_size_t n, boolean8_t *m,
   io.puts
   io.print %{
 static VALUE rb_ca_#{name} (VALUE self, VALUE other)
-{ return rb_ca_call_bincmp(self, other, ca_bincmp_#{name}); }
+{ 
+  if ( ! rb_ca_test_castable(other) ) {
+    return rb_ca_binop_pass_to_other(self, other, rb_intern("#{op}"));
+  }
+  return rb_ca_call_bincmp(self, other, ca_bincmp_#{name});
+}
   }
   DEFINITIONS << io.string
   if op

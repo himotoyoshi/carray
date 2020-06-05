@@ -84,6 +84,29 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
   return self;
 }
 
+int
+rb_ca_test_castable (VALUE other)
+{
+  volatile VALUE retval;
+  if ( rb_respond_to(other, rb_intern("castable_to_carray?")) ) {
+    retval = rb_funcall(other, rb_intern("castable_to_carray?"), 0);
+    return RTEST(retval); 
+  }
+  else {
+    return 1;
+  }
+}
+
+VALUE 
+rb_ca_binop_pass_to_other (VALUE self, VALUE other, ID method)
+{
+  volatile VALUE pair;
+  pair = rb_funcall(other, rb_intern("coerce"), 1, self);
+  self  = rb_ary_entry(pair, 0);
+  other = rb_ary_entry(pair, 1);
+  return rb_funcall(self, method, 1, other);
+}
+
 VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])

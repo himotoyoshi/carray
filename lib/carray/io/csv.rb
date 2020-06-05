@@ -236,7 +236,7 @@ module CA
           end
         else
           unless @io.eof?
-            data += Rcsv.parse(@io, column_sparator: @sep, header: :none)
+            data += Rcsv.parse(@io, column_separator: @sep, header: :none)
           end
         end
         @rows  = data.size

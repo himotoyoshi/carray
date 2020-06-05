@@ -696,7 +696,7 @@ class CArray
     return CArray.int32(*dim).seq!
   end
 
-  def index (n)
+  def index (n = 0)
     unless n.is_a?(Integer)
       raise ArgumentError, "argument should be an integer"
     end
