@@ -228,22 +228,22 @@ binop("pmin", "pmin",
       CMPLX_TYPES => nil,
       OBJ_TYPES =>'(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);')
 
-binop("add", "add",
+binop("+", "add",
       ALL_TYPES =>"(#3) = (#1) + (#2);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#1) + (#2);" : nil,
       OBJ_TYPES =>'(#3) = rb_funcall((#1), id_plus, 1, (#2));')
 
-binop("sub", "sub",
+binop("-", "sub",
       ALL_TYPES => "(#3) = (#1) - (#2);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#1) - (#2);" : nil,
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_minus, 1, (#2));')
 
-binop("mul", "mul",
+binop("*", "mul",
       ALL_TYPES => "(#3) = (#1) * (#2);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#1) * (#2);" : nil,
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_star, 1, (#2));')
 
-binop("div", "div",
+binop("/", "div",
       INT_TYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
       FLOAT_TYPES => "(#3) = (#1) / (#2);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#1) / (#2);" : nil,
@@ -258,21 +258,21 @@ binop("rcp_mul", "rcp_mul",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#2) / (#1);" : nil,
       OBJ_TYPES => '(#3) = rb_funcall((#2), id_slash, 1, (#1));')
 
-binop("mod", "mod",
+binop("%", "mod",
       INT_TYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_percent, 1, (#2));')
 
-binop("bit_and", "bit_and_i",
+binop("&", "bit_and_i",
       BOOL_TYPES => "(#3) = (#1) & (#2);",
       INT_TYPES => "(#3) = (#1) & (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_and, 1, (#2));')
 
-binop("bit_or", "bit_or_i",
+binop("|", "bit_or_i",
       BOOL_TYPES => "(#3) = (#1) | (#2);",
       INT_TYPES => "(#3) = (#1) | (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_or, 1, (#2));')
 
-binop("bit_xor", "bit_xor_i",
+binop("^", "bit_xor_i",
       BOOL_TYPES => "(#3) = ((#1) != (#2)) ? 1 : 0;",
       INT_TYPES => "(#3) = (#1) ^ (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_xor, 1, (#2));')
@@ -329,11 +329,11 @@ METHODS << %{
   rb_define_method(rb_cCArray, "bit_xor", rb_ca_bit_xor, 1);
 }
 
-binop("bit_lshift", "bit_lshift",
+binop("<<", "bit_lshift",
       INT_TYPES => "(#3) = (#1) << (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_lshift, 1, (#2));')
 
-binop("bit_rshift", "bit_rshift",
+binop(">>", "bit_rshift",
       INT_TYPES => "(#3) = (#1) >> (#2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_rshift, 1, (#2));')
 
@@ -461,16 +461,16 @@ METHODS << %{
   rb_define_method(rb_cCArray, "xor", rb_ca_xor, 1);
 }
 
-alias_op("+", "add")
-alias_op("-", "sub")
-alias_op("*", "mul")
-alias_op("/", "div")
-alias_op("%", "mod")
-alias_op("&", "bit_and")
-alias_op("|", "bit_or")
-alias_op("^", "bit_xor")
-alias_op("<<", "bit_lshift")
-alias_op(">>", "bit_rshift")
+alias_op("add", "+")
+alias_op("sub", "-")
+alias_op("mul", "*")
+alias_op("div", "/")
+alias_op("mod", "%")
+alias_op("bit_and", "&")
+alias_op("bit_or", "|")
+alias_op("bit_xor", "^")
+alias_op("bit_lshift", "<<")
+alias_op("bit_rshift", ">>")
 
 #alias_op("==", "eq")
 #alias_op("!=", "ne")
@@ -752,7 +752,7 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
 
 }
 
-binop("power", "power",
+binop("**", "power",
       INT_TYPES   => "(#3) = op_powi_<type>((#1), (#2));",
       FLOAT_TYPES => "(#3) = pow((#1), (#2));",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = cpow((#1), (#2));" : nil,
@@ -803,7 +803,7 @@ METHODS << %{
   rb_define_method(rb_cCArray, "pow!", rb_ca_pow_bang, 1);
 }
 
-alias_op("**", "pow")
+alias_op("pow", "**")
 
 METHODS << %{
   id_equal = rb_intern("==");

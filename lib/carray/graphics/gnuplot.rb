@@ -451,6 +451,8 @@ class CA::Gnuplot # :nodoc:
       (data - ep_d)*86400
     when DateTime
       (data - ep_dt + data.offset)*86400
+    when CATimeIndex
+      (data.time - ep_dt + data.offset)*86400
     when CArray
       return data.convert(CA_DOUBLE){|x|
         case x
@@ -1784,7 +1786,7 @@ __EOD__
       gp.put(pal.to_gnuplot)
     end
 
-    def self.set_palette_gmt (gp, name, opt)
+   def self.set_palette_gmt (gp, name, opt)
       cpt = ColorPalette::CPT(name, :continuous=>opt[:continuous])
       if opt[:use_scale]
         min, max = cpt.min, cpt.max

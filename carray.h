@@ -1071,7 +1071,10 @@ int     rb_ca_is_type (VALUE arg, int type);
 void    rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t elements,
                           long argc, VALUE *argv, CAIndexInfo *info);
 
+
 /* cast */
+int     rb_ca_test_castable (VALUE other);
+VALUE   rb_ca_binop_pass_to_other (VALUE self, VALUE other, ID method);
 void    rb_ca_cast_self (volatile VALUE *self);
 void    rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other);
 void    rb_ca_cast_other (VALUE *self, volatile VALUE *other);
