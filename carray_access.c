@@ -618,8 +618,18 @@ rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t ca_elements,
         iv_end  = RANGE_END(arg);
         iv_excl = RANGE_EXCL(arg);
         index_type[i] = CA_IDX_BLOCK; /* convert to block */
-        first = NUM2SIZE(iv_beg);
-        last  = NUM2SIZE(iv_end);
+        if ( NIL_P(iv_beg) ) {
+          first = 0;                    
+        }
+        else {
+          first = NUM2SIZE(iv_beg);          
+        }
+        if ( NIL_P(iv_end) ) {
+          last  = -1;
+        }
+        else {
+          last  = NUM2SIZE(iv_end);          
+        }
         excl  = RTEST(iv_excl);
         CA_CHECK_INDEX_AT(first, ca_dim[i], i);
 
@@ -693,9 +703,23 @@ rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t ca_elements,
           }
           else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* ca[--,[i..j,k],--]*/
             ca_size_t start, last, excl, count, step, bound;
-            start = NUM2SIZE(RANGE_BEG(arg0));
-            last  = NUM2SIZE(RANGE_END(arg0));
-            excl  = RTEST(RANGE_EXCL(arg0));
+            volatile VALUE iv_beg, iv_end, iv_excl;
+            iv_beg  = RANGE_BEG(arg0);
+            iv_end  = RANGE_END(arg0);
+            iv_excl = RANGE_EXCL(arg0);
+            if ( NIL_P(iv_beg) ) {
+              start = 0;                    
+            }
+            else {
+              start = NUM2SIZE(iv_beg);          
+            }
+            if ( NIL_P(iv_end) ) {
+              last  = -1;
+            }
+            else {
+              last  = NUM2SIZE(iv_end);          
+            }
+            excl  = RTEST(iv_excl);
             step  = NUM2SIZE(arg1);
             if ( step == 0 ) {
               rb_raise(rb_eRuntimeError, 
