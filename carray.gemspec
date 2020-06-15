@@ -3,13 +3,12 @@ Gem::Specification::new do |s|
   version = "1.3.8"
 
   files = Dir.glob("**/*") - [ 
-                            Dir.glob("vendor"),
-                            Dir.glob("ext/**/{Makefile,mkmf.log}"),
-                            Dir.glob("**/*.{o,so,bundle}"),
-                            Dir.glob("**/*~"),
-                            Dir.glob("doc/**/*"),
-                            Dir.glob("carray-*.gem"), 
-                           ].flatten
+                               Dir.glob("carray-*.gem"), 
+                               Dir.glob("ext/**/{Makefile,mkmf.log}"),
+                               Dir.glob("**/*.{o,so,bundle}"),
+                               Dir.glob("**/*~"),
+                               Dir.glob("doc/**/*"),
+                             ].flatten
 
   s.platform    = Gem::Platform::RUBY
   s.name        = "carray"
@@ -36,9 +35,5 @@ Gem::Specification::new do |s|
 		Dir.glob("lib/carray/**/*.rb"),
 	].flatten
   s.required_ruby_version = ">= 1.8.1"
-  s.add_runtime_dependency 'narray', '~> 0.6.1.1'
-  s.add_runtime_dependency 'narray_miss', '~> 1.3'
-  s.add_runtime_dependency 'sqlite3', '~> 1.3'
-  s.add_runtime_dependency 'rcsv', '~> 0.3.1'
 end
 
