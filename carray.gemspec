@@ -1,6 +1,6 @@
 Gem::Specification::new do |s|
 
-  version = "1.3.8"
+  version = "1.4.0"
 
   files = Dir.glob("**/*") - [ 
                                Dir.glob("carray-*.gem"), 
