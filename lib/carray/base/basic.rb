@@ -429,6 +429,50 @@ class CArray
     end
   end
 
+  def nlargest (n)
+    obj = self.to_ca
+    list = []
+    n.times do |i|
+      k = obj.max_addr
+      list << obj[k]
+      obj[k] = UNDEF
+    end
+    list.to_ca.to_type(data_type)
+  end
+
+  def nlargest_addr (n)
+    obj = self.to_ca
+    list = []
+    n.times do |i|
+      k = obj.max_addr
+      list << k
+      obj[k] = UNDEF
+    end
+    CA_INT64(list)
+  end
+
+  def nsmallest (n)
+    obj = self.to_ca
+    list = []
+    n.times do |i|
+      k = obj.min_addr
+      list << obj[k]
+      obj[k] = UNDEF
+    end
+    list.to_ca.to_type(data_type)
+  end
+
+  def nsmallest_addr (n)
+    obj = self.to_ca
+    list = []
+    n.times do |i|
+      k = obj.min_addr
+      list << k
+      obj[k] = UNDEF
+    end
+    CA_INT64(list)
+  end
+
   # Returns (1,n) array from 1-dimensional array 
   def to_row 
     if rank != 1
@@ -696,7 +740,7 @@ class CArray
     return CArray.int32(*dim).seq!
   end
 
-  def index (n)
+  def index (n = 0)
     unless n.is_a?(Integer)
       raise ArgumentError, "argument should be an integer"
     end
@@ -741,6 +785,18 @@ class CArray
   #
   def true ()
     return template(:boolean) { 1 }
+  end
+
+  def contains (*list)
+    result = self.false()
+    list.each do |item|
+      result = result | self.eq(item)
+    end
+    return result 
+  end
+
+  def between (a, b)
+    return (self >= a) & (self <= b)
   end
 
   # Returns map

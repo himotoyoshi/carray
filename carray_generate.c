@@ -562,7 +562,7 @@ rb_ca_swap_bytes (VALUE self)
 
 /* ----------------------------------------------------------------- */
 
-#define proc_trim_bang(type, from)                                 \
+#define proc_trim_bang2(type, from)                                 \
   {                                                                \
     type *ptr = (type *) ca->ptr;                                  \
     boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
@@ -599,6 +599,72 @@ rb_ca_swap_bytes (VALUE self)
         }                                                          \
       }                                                            \
     }                                                              \
+  }
+
+#define proc_trim_bang(type, from)                                 \
+  {                                                                \
+    type *ptr = (type *) ca->ptr;                                  \
+    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
+    if ( ! NIL_P(rmin) ) {                                          \
+      type min  = (type) from(rmin);                                 \
+      ca_size_t i;                                                     \
+      if ( m && rfval == CA_UNDEF) {                                 \
+        for (i=ca->elements; i; i--, ptr++, m++) {                   \
+          if ( ! *m ) {                                              \
+            if ( *ptr < min )                                        \
+              *m = 1;                                                \
+          }                                                          \
+        }                                                            \
+      }                                                              \
+      else {                                                         \
+        int  has_fill = ! ( NIL_P(rfval) );                          \
+        type fill = (has_fill) ? (type) from(rfval) : (type) 0;      \
+        if ( m ) {                                                   \
+          for (i=ca->elements; i; i--, ptr++) {                      \
+            if ( ! *m++ ) {                                          \
+              if ( *ptr < min )                                 \
+                *ptr = (has_fill) ? fill : min;                      \
+            }                                                        \
+          }                                                          \
+        }                                                            \
+        else {                                                       \
+          for (i=ca->elements; i; i--, ptr++) {                      \
+            if ( *ptr < min )                                   \
+              *ptr = (has_fill) ? fill : min;                        \
+          }                                                          \
+        }                                                            \
+      }                                                              \
+    }                                                              \
+    if ( ! NIL_P(rmax) ) {                                          \
+      type max  = (type) from(rmax);                                 \
+      ca_size_t i;                                                     \
+      if ( m && rfval == CA_UNDEF) {                                 \
+        for (i=ca->elements; i; i--, ptr++, m++) {                   \
+          if ( ! *m ) {                                              \
+            if ( *ptr >= max )                         \
+              *m = 1;                                                \
+          }                                                          \
+        }                                                            \
+      }                                                              \
+      else {                                                         \
+        int  has_fill = ! ( NIL_P(rfval) );                          \
+        type fill = (has_fill) ? (type) from(rfval) : (type) 0;             \
+        if ( m ) {                                                   \
+          for (i=ca->elements; i; i--, ptr++) {                      \
+            if ( ! *m++ ) {                                          \
+              if ( *ptr >= max )                                     \
+                *ptr = (has_fill) ? fill : max;                      \
+            }                                                        \
+          }                                                          \
+        }                                                            \
+        else {                                                       \
+          for (i=ca->elements; i; i--, ptr++) {                      \
+            if ( *ptr >= max )                                       \
+              *ptr = (has_fill) ? fill : max;                        \
+          }                                                          \
+        }                                                            \
+      }                                                              \
+    }                                                              \    
   }
 
 /* rdoc:

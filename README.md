@@ -10,14 +10,7 @@ Requirements
 * C compiler 
   + IEEE754 floating point number
   + C99 complex number
-* Optionally required gems
-  + narray
-  + narray_miss
-  + axlsx
-  + spreadsheet
-  + sqlite3
 * Optional command
-  + Gnuplot
   + ImageMagick (stream, convert, display, identify)
 
 Directories
