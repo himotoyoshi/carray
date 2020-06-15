@@ -17,7 +17,3 @@ end
 class Rational < Numeric
   include FloatFunction
 end
-
-module CA
-  autoload :NumPy, "carray/base/numpysh.rb"
-end
