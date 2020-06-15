@@ -1,1 +1,0 @@
-require "carray/math/narray"
