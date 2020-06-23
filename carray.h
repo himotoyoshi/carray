@@ -198,7 +198,8 @@ typedef int8_t boolean8_t;
 /* -------------------------------------------------------------------- */
 
 #define CA_OBJ_TYPE_MAX  256
-#define CA_RANK_MAX      16
+#define CA_DIM_MAX       16
+#define CA_RANK_MAX      CA_DIM_MAX
 #define CA_ATTACH_MAX    0x80000000
 
 #define CA_FLAG_SCALAR           1
@@ -931,6 +932,9 @@ void    ca_check_same_shape (void *ap1, void *ap2);
 void    ca_check_index (void *ap, ca_size_t *idx);
 void    ca_check_data_class (VALUE rtype);
 int     ca_is_valid_index (void *ap, ca_size_t *idx);
+
+#define ca_ndim(ca) ((ca)->rank)
+#define ca_shape(ca) ((ca)->dim)
 
 /* API : allocate, attach, update, sync, detach */
 

@@ -202,7 +202,8 @@ class CArray
 
   def marshal_dump ()
     if self.class != CArray and self.class != CScalar
-      raise TypeError, "can't dump a virtual or wrapped array."
+      return CArray.dump(self.to_ca)
+#      raise TypeError, "can't dump a virtual or wrapped array."
     end
     return CArray.dump(self)
   end
