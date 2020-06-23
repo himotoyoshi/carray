@@ -18,6 +18,13 @@ def have_carray
   rescue LoadError
     abort "Ruby/CArray is not installed"
   end
+  $LOAD_PATH.each do |path|
+    if File.exist? File.join(path, 'carray.h')
+      dir_config("carray", path, path)      
+      break
+    end
+  end
+=begin  
   dir_config("carray", $sitearchdir, $sitearchdir)
   if defined? Gem
     if Gem::VERSION >= "1.7.0"
@@ -34,6 +41,7 @@ def have_carray
       end
     end
   end
+=end
   status = true
   status &= have_header("carray.h")
   if /cygwin|mingw/ =~ RUBY_PLATFORM
