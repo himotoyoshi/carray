@@ -871,6 +871,10 @@ Init_carray_attribute ()
   rb_define_method(rb_cCArray, "rank", rb_ca_rank, 0); 
   rb_define_method(rb_cCArray, "ndim", rb_ca_rank, 0); /* after carray-1.3.0 */
   rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0); /* after carray-1.3.0 */
+  rb_define_method(rb_cCArray, "shape0", rb_ca_dim0, 0);
+  rb_define_method(rb_cCArray, "shape1", rb_ca_dim1, 0);
+  rb_define_method(rb_cCArray, "shape2", rb_ca_dim2, 0);
+  rb_define_method(rb_cCArray, "shape3", rb_ca_dim3, 0);
   rb_define_method(rb_cCArray, "dim", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim0", rb_ca_dim0, 0);
   rb_define_method(rb_cCArray, "dim1", rb_ca_dim1, 0);
