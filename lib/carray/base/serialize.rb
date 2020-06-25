@@ -61,6 +61,19 @@ class CArray::Serializer   # :nodoc:
     int32     :has_attr
   }
 
+  Header_Legacy = CA.struct(:pack=>1, :size=>256) {
+    char_p    :magic_string,   :bytes=>8
+    char_p    :data_type_name, :bytes=>8
+    char_p    :endian,         :bytes=>4
+    int32     :data_type
+    int32     :bytes
+    int32     :rank
+    int32     :elements
+    int32     :has_mask
+    array     :dim,            :type => CArray.int32(CA_RANK_MAX)
+    int32     :has_attr
+  }
+
   def initialize (io)
     case io
     when String
@@ -114,8 +127,12 @@ class CArray::Serializer   # :nodoc:
     return ca
   end
   
-  def load (opt = {})
-    header = Header.decode(@io.read(256))
+  def load (opt = {}, legacy: false)
+    if legacy
+      header = Header_Legacy.decode(@io.read(256))
+    else
+      header = Header.decode(@io.read(256))
+    end
     if header[:magic_string] != "_CARRAY_"
       raise "not a CArray binary data"      
     end
