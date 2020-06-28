@@ -759,13 +759,18 @@ rb_ca_s_fixlen (int argc, VALUE *argv, VALUE klass)
   return rb_class_new_instance(3, args, klass);       
 }
 
-#define rb_ca_s_type(type, code)                      \
-rb_ca_s_## type (int argc, VALUE *argv, VALUE klass)  \
-{                                                     \
-  volatile VALUE ropt = rb_pop_options(&argc, &argv); \
-  volatile VALUE rdim = rb_ary_new4(argc, argv);      \
-  VALUE args[3] = { INT2NUM(code), rdim, ropt };      \
-  return rb_class_new_instance(3, args, klass);       \
+#define rb_ca_s_type(type, code)                        \
+rb_ca_s_## type (int argc, VALUE *argv, VALUE klass)    \
+{                                                       \
+  if ( argc == 0 ) {                                    \
+    return ca_data_type_class(code);                    \
+  }                                                     \
+  else {                                                \
+    volatile VALUE ropt = rb_pop_options(&argc, &argv); \
+    volatile VALUE rdim = rb_ary_new4(argc, argv);      \
+    VALUE args[3] = { INT2NUM(code), rdim, ropt };      \
+    return rb_class_new_instance(3, args, klass);       \
+  }                                                     \
 }
 
 /*

@@ -24,6 +24,7 @@ void Init_numeric_float_function ();
 void Init_carray_core ();
 void Init_carray_undef ();
 void Init_carray_class ();
+void Init_carray_data_type ();
 void Init_carray_test ();
 void Init_carray_attribute ();
 void Init_carray_loop ();
@@ -193,6 +194,7 @@ Init_carray_ext ()
   Init_numeric_float_function();
 
   Init_carray_class();
+  Init_carray_data_type();
   Init_carray_test();
   Init_carray_attribute();
   Init_carray_undef();
@@ -240,5 +242,7 @@ Init_carray_ext ()
   Init_ca_iter_dimension();
   Init_ca_iter_block();
   Init_ca_iter_window();
+
+
 }
 

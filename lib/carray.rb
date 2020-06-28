@@ -19,19 +19,21 @@ if ruby_version_code < 190
 end
 
 require 'carray_ext'
-require 'carray/base/basic'
-require 'carray/base/math'
-require 'carray/base/iterator'
-require 'carray/base/struct'
-require 'carray/base/inspect'
-require 'carray/base/obsolete'
-require 'carray/base/string'
+
+require 'carray/basic'
+require 'carray/data_type'
+require 'carray/math'
+require 'carray/iterator'
+require 'carray/struct'
+require 'carray/inspect'
+require 'carray/obsolete'
+require 'carray/string'
 
 require "carray/carray_mathfunc"
 require "carray/carray_calculus"
 require "carray/math/calculus"
 
-require 'carray/base/autoload'
+require 'carray/autoload'
 require 'carray/autoload/autoload_base'
 require 'carray/autoload/autoload_io_imagemagick'
 require 'carray/autoload/autoload_io_table'
@@ -51,9 +53,6 @@ require 'carray/autoload/autoload_gem_rmagick'
 require 'carray/autoload/autoload_gem_cairo'
 require 'carray/autoload/autoload_gem_opencv'
 require 'carray/autoload/autoload_gem_ffi'
-
-#require 'carray/autoload/autoload_gem_io_pg'
-#require 'carray/autoload/autoload_gem_zimg'
 
 undef autoload_method
 
