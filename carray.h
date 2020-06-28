@@ -574,6 +574,23 @@ extern VALUE rb_mCA;
 extern VALUE rb_mCAMath;
 extern VALUE rb_eCADataTypeError;
 
+extern VALUE rb_cCArrayBoolean;
+extern VALUE rb_cCArrayUInt8;
+extern VALUE rb_cCArrayUInt16;
+extern VALUE rb_cCArrayUInt32;
+extern VALUE rb_cCArrayUInt64;
+extern VALUE rb_cCArrayInt8;
+extern VALUE rb_cCArrayInt16;
+extern VALUE rb_cCArrayInt32;
+extern VALUE rb_cCArrayInt64;
+extern VALUE rb_cCArrayFloat32;
+extern VALUE rb_cCArrayFloat64;
+extern VALUE rb_cCArrayFloat128;
+extern VALUE rb_cCArrayCmplx64;
+extern VALUE rb_cCArrayCmplx128;
+extern VALUE rb_cCArrayCmplx256;
+extern VALUE rb_cCArrayObject;
+
 /* -------------------------------------------------------------------- */
 
 extern const int ca_endian;
@@ -889,6 +906,7 @@ VALUE   rb_dim_iter_new (VALUE vca, CAIndexInfo *info);
 void * malloc_with_check(size_t size);
 
 int     ca_install_obj_type (VALUE klass, ca_operation_function_t func);
+VALUE   ca_data_type_class (int8_t data_type);
 
 void    ca_mark (void *ap);
 void    ca_free (void *ap);

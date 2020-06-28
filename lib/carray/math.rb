@@ -285,27 +285,23 @@ class CArray
     end
     out = []
     begin
-    pers.each do |per|
-      if per == 100
-        out << ca[n-1]
-      elsif per >= 0 and per < 100
-        if n > 1
-          f = (n-1)*per/100.0
-          k = f.floor
-          r = f - k
-          out << (1-r)*ca[k] + r*ca[k+1]
+      pers.each do |per|
+        if per == 100
+          out << ca[n-1]
+        elsif per >= 0 and per < 100
+          if n > 1
+            f = (n-1)*per/100.0
+            k = f.floor
+            r = f - k
+            out << (1-r)*ca[k] + r*ca[k+1]
+          else
+            out << ca[0]
+          end
         else
-          out << ca[0]
+          out << CA_NAN
         end
-      else
-        out << CA_NAN
       end
     end
-  rescue
-    p self[:is_not_masked]
-    p n
-    raise
-  end
     return out
   end
   
