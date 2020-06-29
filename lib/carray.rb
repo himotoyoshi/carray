@@ -22,6 +22,12 @@ require 'carray_ext'
 
 require 'carray/basic'
 require 'carray/data_type'
+require 'carray/mask'
+require 'carray/ordering'
+require 'carray/composition'
+require 'carray/transformation'
+require 'carray/testing'
+
 require 'carray/math'
 require 'carray/iterator'
 require 'carray/struct'

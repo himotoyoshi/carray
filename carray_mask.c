@@ -874,6 +874,17 @@ rb_ca_count_not_masked (VALUE self)
   return SIZE2NUM(ca_count_not_masked(ca));
 }
 
+/* rdoc:
+  class CArray  
+    # Unmask all elements of the object.
+    # If the optional argument <code>fill_value</code> is given,
+    # the masked elements are filled by <code>fill_value</code>.
+    # The returned array doesn't have the mask array.
+    def unmask (fill_value=nil)
+    end
+  end
+*/
+
 static VALUE
 rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
 {
