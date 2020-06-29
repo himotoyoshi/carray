@@ -24,7 +24,7 @@ end
 require 'carray_ext'
 
 require 'carray/basic'
-require 'carray/constructor'
+require 'carray/construct'
 require 'carray/mask'
 require 'carray/ordering'
 require 'carray/composition'

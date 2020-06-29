@@ -52,25 +52,5 @@ class CArray
     end
   end
 
-  # Returns the array eliminated all the duplicated elements.
-  def duplicated_values
-    if uniq.size == size
-      return []
-    else
-      hash = {}
-      list = []
-      each_with_addr do |v, addr|
-        if v == UNDEF
-          next
-        elsif hash[v]
-          list << [v, addr, hash[v]]
-          hash[v] += 1
-        else
-          hash[v] = 0
-        end
-      end
-      return list
-    end
-  end
 
 end

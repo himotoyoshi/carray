@@ -369,31 +369,5 @@ class CArray
 
 end
 
-class CArray
-
-  def self.summation (*dim)
-    out = nil
-    first = true
-    CArray.each_index(*dim) { |*idx|
-      if first
-        out = yield(*idx)
-        first = false
-      else  
-        out += yield(*idx)
-      end
-    }
-    return out
-  end
-  
-  def by (other)
-    case other
-    when CArray
-      return (self[nil][nil,:*]*other[nil][:*,nil]).reshape(*(dim+other.dim))
-    else
-      return self * other
-    end
-  end
-  
-end
 
 

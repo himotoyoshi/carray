@@ -22,7 +22,7 @@
 # The implementation of other properties (cf. initialization, instance,
 # methods ...) are left free.
 #
-# CA::Struct and CA::Union are examples of such data class.
+# CAStruct and CAUnion are examples of such data class.
 #
 # option = {
 #   :pack => 1,   # nil for alignment, int for pack(n)
@@ -90,7 +90,7 @@ class CArray
 
 end
 
-class CA::Struct
+class CAStruct
 
   include Enumerable
 
@@ -264,7 +264,7 @@ class CA::Struct
 
 end
 
-class CA::Union < CA::Struct
+class CAUnion < CAStruct
   class << self
     def inspect
       return name.nil? ? "AnonUnion" : name
@@ -290,7 +290,7 @@ end
 #
 # ---------------------------------------------------------------------
 
-class CA::Struct::Builder  # :nodoc:
+class CAStruct::Builder  # :nodoc:
 
   class Member # :nodoc:
 
@@ -358,9 +358,9 @@ class CA::Struct::Builder  # :nodoc:
     # ---
     case @type
     when :struct
-      klass = Class.new(CA::Struct)
+      klass = Class.new(CAStruct)
     when :union
-      klass = Class.new(CA::Union)
+      klass = Class.new(CAUnion)
     end
     # ---
     if @align.nil?
@@ -477,7 +477,7 @@ class CA::Struct::Builder  # :nodoc:
     if block
       opt = {:pack => @align}.update(opt)
       st = self.class.new(:struct, opt).define(&block)
-    elsif opt[:type] and opt[:type] <= CA::Struct
+    elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
       raise "type is not given for struct member of struct"
@@ -494,7 +494,7 @@ class CA::Struct::Builder  # :nodoc:
     if block
       opt = {:pack => @align}.update(opt)
       st = self.class.new(:union, opt).define(&block)
-    elsif opt[:type] and opt[:type] <= CA::Struct
+    elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
       raise "type is not given for union member of struct"
@@ -556,14 +556,14 @@ end
 
 
 
-class CA::Struct
+class CAStruct
 
   def self.spec
     output = ""
     table  = self::MEMBER_TABLE
     stlist = []
     if self.name.nil?
-      if self <= CA::Union
+      if self <= CAUnion
         prefix = "union"
       else
         prefix = "struct"
@@ -573,7 +573,7 @@ class CA::Struct
     else
       output << sprintf("%s = ", self.name)
     end
-    if self < CA::Union
+    if self < CAUnion
       output << sprintf("CA.union(:size=>%i) {\n", self::DATA_SIZE)
     else
       output << sprintf("CA.struct(:size=>%i) {\n", self::DATA_SIZE)
@@ -582,10 +582,10 @@ class CA::Struct
       offset, type, option = *table[member]
       case type
       when Class
-        if type < CA::Struct
+        if type < CAStruct
           stlist << type
           if type.name.nil?
-            if type <= CA::Union
+            if type <= CAUnion
               prefix = "union"
             else
               prefix = "struct"
