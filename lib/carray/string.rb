@@ -1,10 +1,18 @@
+# ----------------------------------------------------------------------------
+#
+#  carray/string.rb
+#
+#  This file is part of Ruby/CArray extension library.
+#  You can redistribute it and/or modify it under the terms of
+#  the Ruby Licence.
+#
+#  Copyright (C) 2005 Hiroki Motoyoshi
+#
+# ----------------------------------------------------------------------------
+
 require "date"
 
 class CArray
-
-  def test (&block)
-    return convert(:boolean) {|v| yield(v) ? true : false }
-  end
 
   def str_len ()
     return convert(:int, &:length)
@@ -178,65 +186,5 @@ class CArray
     return convert {|s| regexp.match(s) {|m| m[0].sub(regexp, replace) } || "" }
   end
     
-  def str_to_datetime (template = nil)
-    if template
-      return convert() {|v| DateTime.strptime(v, template) }
-    else
-      return convert() {|v| DateTime.parse(v) }
-    end
-  end
-
-  def str_to_time (template = nil)
-    if template
-      return str_strptime(template)
-    else
-      return convert() {|v| Time.parse(v) }
-    end
-  end
-
-  def time_format (template = nil)
-    if template
-      return str_strftime(template)
-    else
-      return convert(&:to_s)
-    end    
-  end
-
-  def time_year
-    return convert(:int, &:year)
-  end
-
-  def time_month
-    return convert(:int, &:month)
-  end
-
-  def time_day
-    return convert(:int, &:day)
-  end
-
-  def time_hour 
-    return convert(:int, &:hour)
-  end
-
-  def time_minute
-    return convert(:int, &:minute)
-  end
-
-  def time_second
-    return convert(:double) {|d| d.second + d.second_fraction }
-  end
-
-  def time_jd
-    return convert(:int, &:jd)
-  end
-
-  def time_ajd
-    return convert(:double, &:ajd)
-  end
-
-  def time_is_leap
-    return test(&:leap?)
-  end
-
 end
 

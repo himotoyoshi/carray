@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
 #
-#  carray/base/base.rb
+#  carray/basic.rb
 #
 #  This file is part of Ruby/CArray extension library.
 #  You can redistribute it and/or modify it under the terms of
@@ -13,6 +13,10 @@
 module CAMath
   include Math
 end
+
+#
+# monkey patch
+#
 
 def nan
   0.0/0.0
@@ -34,6 +38,28 @@ class Range                          # :nodoc:
   def to_ca
     return CA_OBJECT(self)
   end
+end
+
+class Numeric
+  
+  def eq (other)
+    case other
+    when CArray
+      return other.eq(self)
+    else
+      return send(:eq, *other.coerce(self))
+    end
+  end
+
+  def ne (other)
+    case other
+    when CArray
+      return other.ne(self)
+    else
+      return send(:ne, *other.coerce(self))
+    end
+  end
+  
 end
 
 # Create new CArray object from the return value of the block
@@ -192,71 +218,6 @@ class CArray
     self[-1]
   end
 
-  def range
-    return (self.min)..(self.max)
-  end
-
-  def asign (*idx)
-    self[*idx] = yield
-    return self
-  end
-
-  # mask
-  
-  #
-  # Returns the number of masked elements.
-  #
-
-  def count_masked (*argv)
-    if has_mask?
-      return mask.int32.accumulate(*argv)
-    else
-      return 0
-    end
-  end
-
-  #
-  # Returns the number of not-masked elements.
-  #
-  def count_not_masked (*argv)
-    if has_mask?
-      return mask.not.int32.accumulate(*argv)
-    else
-      return elements
-    end
-  end
-
-  def maskout! (*argv)
-    if argv.size == 1
-      val = argv.first
-      case val
-      when CArray, Symbol
-        self[val] = UNDEF
-      else
-        self[:eq, val] = UNDEF
-      end
-    else
-      self[*argv] = UNDEF          
-    end
-    return self
-  end
-
-  def maskout (*argv)
-    obj = self.to_ca
-    if argv.size == 1
-      val = argv.first
-      case val
-      when CArray, Symbol
-        obj[val] = UNDEF
-      else
-        obj[:eq, val] = UNDEF
-      end
-    else
-      obj[*argv] = UNDEF      
-    end
-    return obj
-  end
-
   # matchup
 
   def matchup (ref)
@@ -266,57 +227,20 @@ class CArray
     return ri.project(si)
   end
 
-  def matchup_nearest (ref)
+  def matchup_nearest (ref, direction: "round")
     ri = ref.sort_addr
     rs = ref[ri].to_ca
-    si = rs.section(self).round.int32
+    si = rs.section(self).send(direction.intern).int64
     si.trim!(0,si.size)
     return ri[si].to_ca
   end
 
-  # replace
+  # replace_value
   #
   #
-  def replace (from, to)
+  def replace_value (from, to)
     self[:eq, from] = to
     return self
-  end
-
-  # reshape
-
-  def reshape (*newdim)
-    ifalse = nil
-    i = 0
-    0.upto(newdim.size-1) do |i|
-      if newdim[i].nil?
-        newdim[i] = dim[i]
-      elsif newdim[i] == false 
-        ifalse = i
-        break
-      end
-    end
-    k = 0
-    (newdim.size-1).downto(i+1) do |j|
-      if newdim[j].nil?
-        newdim[j] = dim[rank-1-k]
-      end
-      k += 1
-    end
-    if ifalse
-      newdim[ifalse] = 
-          elements/newdim.select{|x| x!=false}.inject(1){|s,x| s*x}
-    end
-    return refer(data_type, newdim, :bytes=>bytes)
-  end
-
-  # flatten
-
-  def flattened
-    return reshape(elements)
-  end
-
-  def flatten
-    return reshape(elements).to_ca
   end
 
   # pulled
@@ -329,337 +253,6 @@ class CArray
   def pull (*args)
     idx = args.map{|s| s.nil? ? :% : s}
     return self[*idx].to_ca
-  end
-
-  # reversed
-
-  def reversed
-    return self[*([-1..0]*rank)]
-  end
-
-  # roll / shift
-
-  def shift! (*argv, &block)
-    self[] = self.shifted(*argv, &block)
-    return self
-  end
-
-  def shift (*argv, &block)
-    return self.shifted(*argv, &block).to_ca
-  end
-
-  def rolled (*argv)
-    argv.push({:roll => Array.new(rank){1} })
-    return shifted(*argv)
-  end
-
-  def roll! (*argv)
-    self[] = self.rolled(*argv)
-    return self
-  end
-
-  def roll (*argv)
-    return self.rolled(*argv).to_ca
-  end
-
-  def transpose! (*argv)
-    self[] = self.transposed(*argv)
-    return self
-  end
-
-  def transpose (*argv)
-    return self.transposed(*argv).to_ca
-  end
-
-  # Reutrns the reference which rank is reduced 
-  # by eliminating the dimensions which size == 1 
-  def compacted
-    if rank == 1
-      return self[]
-    else
-      newdim = dim.reject{|x| x == 1 }
-      return ( rank != newdim.size ) ? reshape(*newdim) : self[]
-    end
-  end
-
-  # Returns the array which rank is reduced 
-  # by eliminating the dimensions which size == 1 
-  def compact
-    if rank == 1
-      return self.to_ca
-    else
-      newdim = dim.reject{|x| x == 1 }
-      return ( rank != newdim.size ) ? reshape(*newdim).to_ca : self.to_ca
-    end
-  end
-
-  # Returns the reference which elements are sorted by the comparison method
-  # given as block
-  def sorted_by (type=nil, opt={}, &block)
-    type, bytes =
-      CArray.guess_type_and_bytes(type||data_type, opt[:bytes]||bytes)
-    cmpary = convert(type, :bytes=>bytes, &block)
-    return self[cmpary.sort_addr]
-  end
-
-  # Returns the array which elements are sorted by the comparison method
-  # given as block
-  def sort_by (type=nil, opt={}, &block)
-    type, bytes =
-      CArray.guess_type_and_bytes(type||data_type, opt[:bytes]||bytes)
-    cmpary = convert(type, :bytes=>bytes, &block)
-    return self[cmpary.sort_addr].to_ca
-  end
-
-  def max_by (&block)
-    if empty?
-      return UNDEF
-    else
-      addr = convert(:object, &block).max_addr
-      return self[addr]
-    end
-  end
-
-  def min_by (&block)
-    if empty?
-      return UNDEF
-    else
-      addr = convert(:object, &block).min_addr
-      return self[addr]
-    end
-  end
-
-  def nlargest (n)
-    obj = self.to_ca
-    list = []
-    n.times do |i|
-      k = obj.max_addr
-      list << obj[k]
-      obj[k] = UNDEF
-    end
-    list.to_ca.to_type(data_type)
-  end
-
-  def nlargest_addr (n)
-    obj = self.to_ca
-    list = []
-    n.times do |i|
-      k = obj.max_addr
-      list << k
-      obj[k] = UNDEF
-    end
-    CA_INT64(list)
-  end
-
-  def nsmallest (n)
-    obj = self.to_ca
-    list = []
-    n.times do |i|
-      k = obj.min_addr
-      list << obj[k]
-      obj[k] = UNDEF
-    end
-    list.to_ca.to_type(data_type)
-  end
-
-  def nsmallest_addr (n)
-    obj = self.to_ca
-    list = []
-    n.times do |i|
-      k = obj.min_addr
-      list << k
-      obj[k] = UNDEF
-    end
-    CA_INT64(list)
-  end
-
-  # Returns (1,n) array from 1-dimensional array 
-  def to_row 
-    if rank != 1
-      raise "rank should be 1"
-    end
-    return self[1,:%]
-  end
-  
-  # Returns (n,1) array from 1-dimensional array 
-  def to_column
-    if rank != 1
-      raise "rank should be 1"
-    end
-    return self[:%,1]
-  end
-
-  # Returns the array resized to the dimension given as `newdim`.
-  # The new area is filled by the value returned by the block.
-  def resize (*newdim, &block)
-    if newdim.size != rank
-      raise "rank mismatch"
-    end
-    offset = Array.new(rank){0}
-    rank.times do |i|
-      d = newdim[i]
-      case d
-      when nil
-        newdim[i] = dim[i]
-      when Integer
-        if d < 0
-          newdim[i] *= -1
-          offset[i] = newdim[i] - dim[i]
-        end
-      else
-        raise "invalid dimension size"
-      end
-    end
-    out = CArray.new(data_type, newdim, &block)
-    if out.has_mask?
-      out.mask.paste(offset, self.false)
-    end
-    out.paste(offset, self)
-    return out
-  end
-
-  # insert
-  def insert_block (offset, bsize, &block)
-    if offset.size != rank or
-        bsize.size != rank
-      raise "rank mismatch"
-    end
-    newdim = dim
-    grids = dim.map{|d| CArray.int32(d) }
-    rank.times do |i|
-      if offset[i] < 0
-        offset[i] += dim[i]
-      end
-      if offset[i] < 0 or offset[i] >= dim[i] or bsize[i] < 0
-        raise "invalid offset or size"
-      end
-      if bsize[i] > 0
-        newdim[i] += bsize[i]
-      end
-      grids[i][0...offset[i]].seq!
-      grids[i][offset[i]..-1].seq!(offset[i]+bsize[i])
-    end
-    out = CArray.new(data_type, newdim)
-    if block_given?
-      sel = out.true
-      sel[*grids] = 0
-      out[sel] = block.call
-    end
-    out[*grids] = self
-    return out
-  end
-
-  def delete_block (offset, bsize)
-    if offset.size != rank or
-      bsize.size != rank
-      raise "rank mismatch"
-    end
-    newdim = dim
-    grids  = []
-    rank.times do |i|
-      if offset[i] < 0
-        offset[i] += dim[i]
-      end
-      if bsize[i] >= 0
-        if offset[i] < 0 or offset[i] >= dim[i]
-          raise "invalid offset or size"
-        end
-        newdim[i] -= bsize[i]
-      else
-        if offset[i] + bsize[i] + 1 < 0 or offset[i] + bsize[i] > dim[i]
-          raise "invalid offset or size"
-        end
-        newdim[i] += bsize[i]
-      end
-      grids[i] = CArray.int32(newdim[i])
-      if bsize[i] >= 0
-        if offset[i] > 0
-          grids[i][0...offset[i]].seq!
-        end
-        if offset[i] + bsize[i] < dim[i]
-          grids[i][offset[i]..-1].seq!(offset[i]+bsize[i])
-        end
-      else
-        if offset[i]+bsize[i] > 0
-          grids[i][0..offset[i]+bsize[i]].seq!
-        end
-        if offset[i]+bsize[i]+1 < dim[i]-1
-          grids[i][offset[i]+bsize[i]+1..-1].seq!(offset[i]+1)
-        end
-      end
-    end
-    return self[*grids].to_ca
-  end
-
-  def where_range
-    w = where
-    x = (w - w.shifted(1){-2}).sub!(1).where
-    y = (w - w.shifted(-1){-2}).add!(1).where
-    list = []
-    x.each_addr do |i|
-      list.push(w[x[i]]..w[y[i]])
-    end
-    return list
-  end
-  
-  def order (dir = 1)
-    if dir >= 0   ### ascending order
-      if has_mask?
-        obj = template(:int32) { UNDEF }
-        sel = is_not_masked
-        obj[sel][self[sel].sort_addr].seq!
-        return obj
-      else
-        obj = template(:int32)
-        obj[sort_addr].seq!
-        return obj
-      end
-    else           ### descending order
-      if has_mask?
-        obj = template(:int32) { UNDEF}
-        sel = is_not_masked
-        obj[sel][self[sel].sort_addr.reversed].seq!
-        return obj
-      else  
-        obj = template(:int32)
-        obj[sort_addr.reversed].seq!
-        return obj
-      end
-    end
-  end
-
-  # Returns the array eliminated all the duplicated elements.
-  def uniq
-    ary = to_a.uniq
-    if has_mask?
-      ary.delete(UNDEF)
-    end
-    if has_data_class?
-      return CArray.new(data_class, [ary.length]) { ary }
-    else
-      return CArray.new(data_type, [ary.length], :bytes=>bytes) { ary }
-    end
-  end
-
-  # Returns the array eliminated all the duplicated elements.
-  def duplicated_values
-    if uniq.size == size
-      return []
-    else
-      hash = {}
-      list = []
-      each_with_addr do |v, addr|
-        if v == UNDEF
-          next
-        elsif hash[v]
-          list << [v, addr, hash[v]]
-          hash[v] += 1
-        else
-          hash[v] = 0
-        end
-      end
-      return list
-    end
   end
 
   #
@@ -787,18 +380,6 @@ class CArray
     return template(:boolean) { 1 }
   end
 
-  def contains (*list)
-    result = self.false()
-    list.each do |item|
-      result = result | self.eq(item)
-    end
-    return result 
-  end
-
-  def between (a, b)
-    return (self >= a) & (self <= b)
-  end
-
   # Returns map
   def map (&block)
     return self.convert(CA_OBJECT, &block).to_a
@@ -858,7 +439,6 @@ class CArray
     return obj
   end
 
-
 end
 
 class CArray
@@ -895,180 +475,6 @@ class CArray
     return out
   end
 
-  def self.combine (data_type, tdim, list, at = 0)
-    has_fill_value = false
-    if block_given?
-      fill_value = yield
-      has_fill_value = true
-    end
-    if not tdim.is_a?(Array) or tdim.size == 0
-      raise "invalid binding dimension"
-    end
-    if not list.is_a?(Array) or list.size == 0
-      raise "invalid list"
-    end
-    list = list.map{|x| CArray.wrap_readonly(x, data_type) }
-    ref  = list.detect{|x| x.is_a?(CArray) or not x.scalar? }
-    unless ref
-      raise "at least one element in list should be a carray"
-    end
-    dim   = ref.dim
-    rank  = ref.rank
-    trank = tdim.size
-    if at < 0
-      at += rank - trank + 1
-    end
-    unless at.between?(0, rank - trank)
-      raise "concatnating position out of range"
-    end
-    list.map! do |x|
-      if x.scalar?
-        rdim = dim.clone
-        rdim[at] = :%
-        x = x[*rdim]        # convert CScalar to CARepeat
-      end
-      x
-    end
-    block = CArray.object(*tdim){ list }
-    edim = tdim.clone
-    idx = Array.new(tdim)
-    offset = Array.new(tdim.size) { [] }
-    tdim.each_with_index do |td, i|
-      edim[i] = 0
-      idx.map!{0}
-      idx[i] = nil
-      block[*idx].each do |e|
-        offset[i] << edim[i]
-        edim[i] += e.dim[at+i]  # extended dimension size
-      end
-    end
-    newdim = dim.clone
-    newdim[at,trank] = edim     # extended dimension size
-    if has_fill_value
-      obj = CArray.new(data_type, newdim) { fill_value }
-    else      
-      obj = CArray.new(data_type, newdim)
-    end
-    idx = newdim.map{0}
-    block.each_with_index do |item, tidx|
-      (at...at+trank).each_with_index do |d,i|
-        idx[d] = offset[i][tidx[i]]
-      end
-      obj.paste(idx, item)
-    end
-    obj
-  end
-
-  def self.bind (data_type, list, at = 0)
-    return CArray.combine(data_type, [list.size], list, at)
-  end
-
-  def self.composite (data_type, tdim, list, at = 0)
-    if not tdim.is_a?(Array) or tdim.size == 0
-      raise "invalid tiling dimension"
-    end
-    if not list.is_a?(Array) or list.size == 0
-      raise "invalid carray list"
-    end
-    list = list.map{|x| CArray.wrap_readonly(x, data_type) }
-    ref  = list.detect{|x| x.is_a?(CArray) or not x.scalar? }
-    unless ref
-      raise "at least one element in list should be a carray"
-    end
-    dim   = ref.dim
-    rank  = ref.rank
-    if at < 0
-      at += rank + 1 #  "+ 1" is needed here
-    end
-    unless at.between?(0,rank)
-      raise "tiling position is out of range"
-    end
-    trank = tdim.size
-    list.map! do |x|
-      if x.scalar?
-        rdim = dim.clone
-        rdim[at] = :%
-        x = x[*rdim]     # convert CScalar to CARepeat
-      end
-      x
-    end
-    newdim = dim.clone
-    newdim[at,0] = tdim
-    obj = CArray.new(data_type, newdim)
-    idx = Array.new(rank+trank) { nil }
-    CArray.each_index(*tdim) do |*tidx|
-      idx[at,trank] = tidx
-      obj[*idx] = list.shift
-    end
-    obj
-  end
-
-  def self.merge (data_type, list, at = -1)
-    return CArray.composite(data_type, [list.size], list, at)
-  end
-  
-  def self.join (*argv)
-    # get options
-    case argv.first
-    when Integer, Symbol, String
-      type, = *CArray.guess_type_and_bytes(argv.shift, 0)
-    else
-      type = argv.flatten.first.data_type
-    end
-    # process
-    conc = argv.map do |list|
-      case list
-      when CArray
-        if list.rank == 1
-          list[:%,1]
-        else
-          list
-        end
-      when Array
-        x0 = list.first
-        if list.size == 1 and
-            x0.is_a?(CArray) and
-            x0.rank == 1
-          list = [x0[:%,1]]
-        else
-        list = list.map { |x|
-          case x
-          when CArray
-            if x.rank == 1
-              x[:%,1]
-            else
-              x
-            end
-          when Array
-            y = x.first
-            if x.size == 1 and
-                y.is_a?(CArray) and
-                y.rank == 1
-              y[1,:%]
-            else
-              CArray.join(*x)
-            end
-          else
-            x
-          end
-        }
-        end
-        if block_given?
-          CArray.bind(type, list, 1, &block)
-        else
-          CArray.bind(type, list, 1)
-        end 
-      else
-        list
-      end
-    end
-    if conc.size > 1
-      return CArray.bind(type, conc)
-    else
-      return conc.first
-    end
-  end
-  
   # Returns object carray has elements of splitted carray at dimensions 
   #      which is given by arguments
   #
@@ -1106,27 +512,6 @@ class CAUnboundRepeat
 
 end
 
-class Numeric
-  
-  def eq (other)
-    case other
-    when CArray
-      return other.eq(self)
-    else
-      return send(:eq, *other.coerce(self))
-    end
-  end
-
-  def ne (other)
-    case other
-    when CArray
-      return other.ne(self)
-    else
-      return send(:ne, *other.coerce(self))
-    end
-  end
-  
-end
 
 module CA
   

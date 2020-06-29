@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
 #
-#  carray/base/serialize.rb
+#  carray/serialize.rb
 #
 #  This file is part of Ruby/CArray extension library.
 #  You can redistribute it and/or modify it under the terms of

@@ -607,7 +607,9 @@ Init_carray_iterator ()
   rb_cCAIterator = rb_define_class("CAIterator", rb_cObject);
 
   rb_define_method(rb_cCAIterator, "rank",      rb_ca_iter_rank,      0);
+  rb_define_method(rb_cCAIterator, "ndim",      rb_ca_iter_rank,      0);
   rb_define_method(rb_cCAIterator, "dim",       rb_ca_iter_dim,       0);
+  rb_define_method(rb_cCAIterator, "shape",     rb_ca_iter_dim,       0);
   rb_define_method(rb_cCAIterator, "elements",  rb_ca_iter_elements,  0);
   rb_define_method(rb_cCAIterator, "reference", rb_ca_iter_reference, 0);
 
