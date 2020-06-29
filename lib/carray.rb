@@ -14,14 +14,17 @@ major = RbConfig::CONFIG['MAJOR'].to_i
 minor = RbConfig::CONFIG['MINOR'].to_i
 teeny = RbConfig::CONFIG['TEENY'].to_i
 ruby_version_code = major * 100 + minor * 10 + teeny
+
 if ruby_version_code < 190
   require 'complex'
 end
 
+# main 
+
 require 'carray_ext'
 
 require 'carray/basic'
-require 'carray/data_type'
+require 'carray/constructor'
 require 'carray/mask'
 require 'carray/ordering'
 require 'carray/composition'
@@ -32,12 +35,17 @@ require 'carray/math'
 require 'carray/iterator'
 require 'carray/struct'
 require 'carray/inspect'
-require 'carray/obsolete'
 require 'carray/string'
 
 require "carray/carray_mathfunc"
 require "carray/carray_calculus"
 require "carray/math/calculus"
+
+# obsolete methods
+
+require 'carray/obsolete'
+
+# autoload
 
 require 'carray/autoload'
 require 'carray/autoload/autoload_base'
