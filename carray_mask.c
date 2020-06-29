@@ -1179,9 +1179,9 @@ Init_carray_mask ()
   rb_define_method(rb_cCArray, "inherit_mask_replace", 
                                        rb_ca_inherit_mask_replace_method, -1);
 
-/*  These methods go to lib/carray/base.rb. */
-/*  rb_define_method(rb_cCArray, "count_masked",  rb_ca_count_masked, 0); */
-/*  rb_define_method(rb_cCArray, "count_not_masked", rb_ca_count_not_masked, 0); */
+/*  These methods go to lib/carray/mask.rb. */
+/*  def count_masked (*axis); end */
+/*  def count_not_masked (*axis); end */
 
 }
 
