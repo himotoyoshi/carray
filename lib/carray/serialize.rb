@@ -231,48 +231,5 @@ class CArray
     initialize_copy(ca)
   end
 
-  ### obsolete methods
-
-  def save_binary (filename, opt={})    # :nodoc: 
-    warn "CArray#save_binary will be obsolete, use CArray.save"
-    open(filename, "w") { |io|
-      return Serializer.new(io).save(self, opt)
-    }
-  end
-
-  def self.load_binary (filename, opt={})     # :nodoc: 
-    warn "CArray.load_binary will be obsolete, use CArray.load"
-    open(filename) { |io|
-      return Serializer.new(io).load(opt)
-    }
-  end
-
-  def save_binary_io (io, opt={})        # :nodoc:
-    warn "CArray#save_binary_io will be obsolete, use CArray.save"
-    return Serializer.new(io).save(self, opt) 
-  end
-
-  def self.load_binary_io (io, opt={})   # :nodoc:
-    warn "CArray#load_binary_io will be obsolete, use CArray.load"
-    return Serializer.new(io).load(opt)   
-  end 
-
-  def to_binary (io="", opt={})          # :nodoc:
-    warn "CArray#to_binary will be obsolete, use CArray.dump"
-    Serializer.new(io).save(self, opt) 
-    return io
-  end
-
-  def self.from_binary (io, opt={})      # :nodoc:
-    warn "CArray.from_binary will be obsolete, use CArray.load"
-    return Serializer.new(io).load(opt)   
-  end 
-
-  # depleted methods
-
-  def self.load_from_file (filename, data_type, dim, opt={}) # :nodoc:
-    raise "Sorry, CArray.load_from_file is depleted"
-  end
-
 end
 

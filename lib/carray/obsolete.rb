@@ -12,6 +12,116 @@
 
 class CArray
   
+  ### obsolete methods
+
+  # pulled
+
+  def pulled (*args)
+    warn "CArray#pulled will be obsolete"
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx]
+  end
+  
+  def pull (*args)
+    warn "CArray#pull will be obsolete"
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx].to_ca
+  end
+
+  # Returns the array eliminated all the duplicated elements.
+  def duplicated_values
+    warn "CArray#duplicated_values will be obsolete"
+    if uniq.size == size
+      return []
+    else
+      hash = {}
+      list = []
+      each_with_addr do |v, addr|
+        if v == UNDEF
+          next
+        elsif hash[v]
+          list << [v, addr, hash[v]]
+          hash[v] += 1
+        else
+          hash[v] = 0
+        end
+      end
+      return list
+    end
+  end
+
+  def self.summation (*dim)
+    warn "CArray.summation will be obsolete"
+    out = nil
+    first = true
+    CArray.each_index(*dim) { |*idx|
+      if first
+        out = yield(*idx)
+        first = false
+      else
+        out += yield(*idx)
+      end
+    }
+    return out
+  end
+  
+  def by (other)
+    warn "CArray#by will be obsolete"
+    case other
+    when CArray
+      return (self[nil][nil,:*]*other[nil][:*,nil]).reshape(*(dim+other.dim))
+    else
+      return self * other
+    end
+  end
+
+  def save_binary (filename, opt={})    # :nodoc: 
+    warn "CArray#save_binary will be obsolete, use CArray.save"
+    open(filename, "w") { |io|
+      return Serializer.new(io).save(self, opt)
+    }
+  end
+
+  def self.load_binary (filename, opt={})     # :nodoc: 
+    warn "CArray.load_binary will be obsolete, use CArray.load"
+    open(filename) { |io|
+      return Serializer.new(io).load(opt)
+    }
+  end
+
+  def save_binary_io (io, opt={})        # :nodoc:
+    warn "CArray#save_binary_io will be obsolete, use CArray.save"
+    return Serializer.new(io).save(self, opt) 
+  end
+
+  def self.load_binary_io (io, opt={})   # :nodoc:
+    warn "CArray#load_binary_io will be obsolete, use CArray.load"
+    return Serializer.new(io).load(opt)   
+  end 
+
+  def to_binary (io="", opt={})          # :nodoc:
+    warn "CArray#to_binary will be obsolete, use CArray.dump"
+    Serializer.new(io).save(self, opt) 
+    return io
+  end
+
+  def self.from_binary (io, opt={})      # :nodoc:
+    warn "CArray.from_binary will be obsolete, use CArray.load"
+    return Serializer.new(io).load(opt)   
+  end 
+
+  # depleted methods
+
+  def self.load_from_file (filename, data_type, dim, opt={}) # :nodoc:
+    raise "Sorry, CArray.load_from_file is depleted"
+  end
+
+  def replace_value (from, to)
+    warn "CArray#replace_value will be obsolete"
+    self[:eq, from] = to
+    return self
+  end
+  
   def asign (*idx)
     warn "CArray#asign will be obsolete"
     self[*idx] = yield

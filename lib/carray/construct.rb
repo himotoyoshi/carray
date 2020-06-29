@@ -10,77 +10,154 @@
 #
 # ----------------------------------------------------------------------------
 
+class CArray
+  
+  #
+  # CArray.span(data_type, range[, step])
+  # CArray.span(range[, step]) -> data_type guessed by range.first type
+  #
 
-# Create new CArray object from the return value of the block
-# with data type +type+. The dimensional size and the initialization value
-# are guessed from the return value of the block.
-# The block should return one of the following objects.
-#
-# * Numeric
-# * Array
-# * CArray
-# * an object that has either method +to_ca+ or +to_a+ or +map+
-#
-# When the return value of the block is a Numeric or CScalar object,
-# CScalar object is returned.
-#
-def CArray.__new__ (type, *args) # :nodoc:
-  case v = args.first
-  when CArray
-    return ( v.data_type == type ) ? v.to_ca : v.to_type(type)
-  when Array
-    return CArray.new(type, CArray.guess_array_shape(v)) { v }
-  when Range
-    return CArray.span(type, *args)
-  when String
-    if type == CA_OBJECT
-      return CScalar.new(CA_OBJECT) { v }
-    elsif type == CA_BOOLEAN
-        v = v.dup
-        v.tr!('^01',"1")
-        v.tr!('01',"\x0\x1")
-        return CArray.boolean(v.length).load_binary(v)
+  def self.span (*argv)
+    if argv.first.is_a?(Range)
+      type = nil
     else
-      case v
-      when /;/
-        v = v.strip.split(/\s*;\s*/).
-                         map{|s| s.split(/\s+|\s*,\s*/).map{|x| x=='_' ? UNDEF : x} }
+      type, = *CArray.guess_type_and_bytes(argv.shift, nil)
+    end
+    range, step = argv[0], argv[1]
+    start, stop = range.begin, range.end
+    if step == 0
+      raise "step should not be 0"
+    end
+    if not type
+      case start
+      when Integer
+        type = CA_INT32
+      when Float
+        type = CA_FLOAT64
       else
-        v = v.strip.split(/\s+|\s*,\s*/).map{|x| x=='_' ? UNDEF : x}
+        type = CA_OBJECT
       end
-      return CArray.new(type, CArray.guess_array_shape(v)) { v }
     end
-  when NilClass
-    return CArray.new(type, [0])
-  else
-    if v.respond_to?(:to_ca)
-      ca = v.to_ca
-      return ( ca.data_type == type ) ? ca : ca.to_type(type)
+    if type == CA_OBJECT and not step
+      return CA_OBJECT(range.to_a)
     else
-      return CScalar.new(type) { v }
+      step ||= 1
+      if range.exclude_end?
+        n = ((stop - start).abs/step).floor
+      else
+        n = ((stop - start).abs/step).floor + 1
+      end
+      if start <= stop
+        return CArray.new(type, [n]).seq(start, step)
+      else
+        return CArray.new(type, [n]).seq(start, -step.abs)
+      end
     end
   end
-end
 
-def CArray.__new_fixlen__ (bytes, v) # :nodoc:
-  case v
-  when CArray
-    return ( v.data_type == :fixlen ) ? v.to_ca : v.to_type(:fixlen, :bytes=>bytes)
-  when Array
-    unless bytes
-      bytes = v.map{|s| s.length}.max
-    end
-    return CArray.new(:fixlen, CArray.guess_array_shape(v), :bytes=>bytes) { v }
-  when NilClass
-    return CArray.new(type, [0])
-  else
-    if v.respond_to?(:to_ca)
-      ca = v.to_ca
-      return ( ca.data_type == :fixlen ) ? ca : ca.to_type(:fixlen, :bytes=>bytes)
+  def span! (range)
+    first = range.begin.to_r
+    last  = range.end.to_r
+    if range.exclude_end?
+      seq!(first, (last-first)/elements)
     else
-      return CScalar.new(:fixlen, :bytes=>bytes) { v }
+      seq!(first, (last-first)/(elements-1))
+    end
+    return self
+  end
+
+  def span (range)
+    return template.span!(range)
+  end
+
+  #
+  #
+  #
+
+  def scale! (xa, xb)
+    xa = xa.to_f
+    xb = xb.to_f
+    seq!(xa, (xb-xa)/(elements-1))
+  end
+
+  def scale (xa, xb)
+    template.scale!(xa, xb)
+  end
+  
+  # @private 
+  # Create new CArray object from the return value of the block
+  # with data type +type+. The dimensional size and the initialization value
+  # are guessed from the return value of the block.
+  # The block should return one of the following objects.
+  #
+  # * Numeric
+  # * Array
+  # * CArray
+  # * an object that has either method +to_ca+ or +to_a+ or +map+
+  #
+  # When the return value of the block is a Numeric or CScalar object,
+  # CScalar object is returned.
+  #
+  def self.__new__ (type, *args) # :nodoc:
+    case v = args.first
+    when CArray
+      return ( v.data_type == type ) ? v.to_ca : v.to_type(type)
+    when Array
+      return CArray.new(type, CArray.guess_array_shape(v)) { v }
+    when Range
+      return CArray.span(type, *args)
+    when String
+      if type == CA_OBJECT
+        return CScalar.new(CA_OBJECT) { v }
+      elsif type == CA_BOOLEAN
+          v = v.dup
+          v.tr!('^01',"1")
+          v.tr!('01',"\x0\x1")
+          return CArray.boolean(v.length).load_binary(v)
+      else
+        case v
+        when /;/
+          v = v.strip.split(/\s*;\s*/).
+                           map{|s| s.split(/\s+|\s*,\s*/).map{|x| x=='_' ? UNDEF : x} }
+        else
+          v = v.strip.split(/\s+|\s*,\s*/).map{|x| x=='_' ? UNDEF : x}
+        end
+        return CArray.new(type, CArray.guess_array_shape(v)) { v }
+      end
+    when NilClass
+      return CArray.new(type, [0])
+    else
+      if v.respond_to?(:to_ca)
+        ca = v.to_ca
+        return ( ca.data_type == type ) ? ca : ca.to_type(type)
+      else
+        return CScalar.new(type) { v }
+      end
     end
   end
+
+  # @private 
+  def self.__new_fixlen__ (bytes, v) # :nodoc:
+    case v
+    when CArray
+      return ( v.data_type == :fixlen ) ? v.to_ca : v.to_type(:fixlen, :bytes=>bytes)
+    when Array
+      unless bytes
+        bytes = v.map{|s| s.length}.max
+      end
+      return CArray.new(:fixlen, CArray.guess_array_shape(v), :bytes=>bytes) { v }
+    when NilClass
+      return CArray.new(type, [0])
+    else
+      if v.respond_to?(:to_ca)
+        ca = v.to_ca
+        return ( ca.data_type == :fixlen ) ? ca : ca.to_type(:fixlen, :bytes=>bytes)
+      else
+        return CScalar.new(:fixlen, :bytes=>bytes) { v }
+      end
+    end
+  end
+
 end
 
 #
@@ -136,7 +213,6 @@ end
 def CA_FIXLEN (val, options = {})
   CArray.__new_fixlen__(options[:bytes], val)
 end
-
 
 class CArray
   
@@ -323,6 +399,21 @@ class CArray
       CArray.new(data_type, shape).fill(fill_value)
     end
   
+  end
+  
+end
+
+class CArray
+  
+  def self.meshgrid (*args)
+    dim = args.map(&:size)
+    out = []
+    args.each_with_index do |arg, i|
+      newdim = dim.dup
+      newdim[i] = :%
+      out[i] = arg[*newdim].to_ca
+    end
+    return *out
   end
   
 end
