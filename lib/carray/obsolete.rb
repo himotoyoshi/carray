@@ -110,12 +110,6 @@ class CArray
     return Serializer.new(io).load(opt)   
   end 
 
-  # depleted methods
-
-  def self.load_from_file (filename, data_type, dim, opt={}) # :nodoc:
-    raise "Sorry, CArray.load_from_file is depleted"
-  end
-
   def replace_value (from, to)
     warn "CArray#replace_value will be obsolete"
     self[:eq, from] = to
@@ -199,26 +193,10 @@ class CArray
   end
 
 
-=begin
-  def histogram (klass)
-    c = CArray.int32(klass.elements-1)
-    f = CArray.boolean(*dim) { 1 }
-    attach {
-      k = 0
-      r = f.and(self < klass[0])
-      f[r] = 0
-      (klass.elements-1).times do |i|
-        r = f.and(self < klass[i+1])
-        c[k] = r.count_true
-        f[r] = 0
-        k+=1
-      end
-    }
-    return c
-  end
-=end
 
 end
+
+=begin
 
 class Numeric
   
@@ -256,3 +234,28 @@ class Numeric
   end
 
 end
+
+class CArray
+  def histogram (klass)
+    c = CArray.int32(klass.elements-1)
+    f = CArray.boolean(*dim) { 1 }
+    attach {
+      k = 0
+      r = f.and(self < klass[0])
+      f[r] = 0
+      (klass.elements-1).times do |i|
+        r = f.and(self < klass[i+1])
+        c[k] = r.count_true
+        f[r] = 0
+        k+=1
+      end
+    }
+    return c
+  end
+
+  def self.load_from_file (filename, data_type, dim, opt={}) # :nodoc:
+    raise "Sorry, CArray.load_from_file is depleted"
+  end
+
+end
+=end
