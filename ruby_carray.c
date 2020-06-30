@@ -71,6 +71,9 @@ void Init_ca_iter_dimension ();
 void Init_ca_iter_block ();
 void Init_ca_iter_window ();
 
+void Init_carray_mathfunc ();
+
+
 void
 Init_carray_ext ()
 {
@@ -242,6 +245,8 @@ Init_carray_ext ()
   Init_ca_iter_dimension();
   Init_ca_iter_block();
   Init_ca_iter_window();
+
+  Init_carray_mathfunc();
 
 
 }
