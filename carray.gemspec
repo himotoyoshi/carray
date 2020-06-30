@@ -24,8 +24,7 @@ Gem::Specification::new do |s|
   s.email       = ""
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
-  s.extensions  = [ "extconf.rb" ] + 
-                     Dir["ext/*/extconf.rb"].select{|f| File.exist?(f) }
+  s.extensions  = [ "extconf.rb" ] 
   s.rdoc_options = [
 		"-m rdoc_main.rb", 
 		"rdoc_main.rb", 
