@@ -23,6 +23,7 @@ end
 
 require 'carray_ext'
 
+require 'carray/inspect'
 require 'carray/basic'
 require 'carray/construct'
 require 'carray/mask'
@@ -35,7 +36,7 @@ require 'carray/ordering'
 require 'carray/math'
 require 'carray/iterator'
 require 'carray/struct'
-require 'carray/inspect'
+require 'carray/table'
 require 'carray/string'
 
 # obsolete methods
@@ -48,7 +49,6 @@ unless $CARRAY_NO_AUTOLOAD
   require 'carray/autoload'
   require 'carray/autoload/autoload_base'
   require 'carray/autoload/autoload_io_imagemagick'
-  require 'carray/autoload/autoload_io_table'
   require 'carray/autoload/autoload_math_histogram'
   require 'carray/autoload/autoload_math_recurrence'
   require 'carray/autoload/autoload_object_iterator'

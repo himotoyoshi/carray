@@ -10,9 +10,20 @@
 #
 # ----------------------------------------------------------------------------
 
+module CA
+  TableMethods = CArray::TableMethods
+end
+
 class CArray
   
   ### obsolete methods
+
+  def extend_as_table (column_names)
+    warn "CArray#extend_as_table will be obsolete"
+    self.extend CArray::TableMethods
+    self.column_names = column_names
+    self
+  end
 
   # pulled
 
