@@ -38,10 +38,6 @@ require 'carray/struct'
 require 'carray/inspect'
 require 'carray/string'
 
-require "carray/carray_mathfunc"
-require "carray/carray_calculus"
-require "carray/math/calculus"
-
 # obsolete methods
 
 require 'carray/obsolete'
@@ -54,7 +50,6 @@ unless $CARRAY_NO_AUTOLOAD
   require 'carray/autoload/autoload_io_imagemagick'
   require 'carray/autoload/autoload_io_table'
   require 'carray/autoload/autoload_math_histogram'
-  require 'carray/autoload/autoload_math_interp'
   require 'carray/autoload/autoload_math_recurrence'
   require 'carray/autoload/autoload_object_iterator'
   require 'carray/autoload/autoload_object_link'
