@@ -25,14 +25,6 @@ Gem::Specification::new do |s|
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
   s.extensions  = [ "extconf.rb" ] 
-  s.rdoc_options = [
-		"-m rdoc_main.rb", 
-		"rdoc_main.rb", 
-		"rdoc_ext.rb",
-		"rdoc_math.rb", 
-		"rdoc_stat.rb", 
-		Dir.glob("lib/carray/**/*.rb"),
-	].flatten
   s.required_ruby_version = ">= 1.8.1"
 end
 

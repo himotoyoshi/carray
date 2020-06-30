@@ -189,11 +189,6 @@ if ( not File.exist?("carray_stat_proc.c") ) or
   system("ruby carray_stat_proc.rb > carray_stat_proc.c")
 end
 
-puts "creating rdoc_ext.rb"
-system %{
-  ruby utils/extract_rdoc.rb > rdoc_ext.rb
-}
-
 # --- create Makefile
 
 create_makefile("carray_ext")
