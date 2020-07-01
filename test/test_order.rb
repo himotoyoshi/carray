@@ -81,13 +81,13 @@ class TestCArrayOrder < Test::Unit::TestCase
                            [0,1,2]]), a.order(-1))
   end
 
-  def test_uniq
-    a = CArray.int(100).random!(10)
-
-    # ---
-    assert_equal(a.to_a.uniq, a.uniq.to_a)
-
-  end
+#  def test_uniq
+#    a = CArray.int(100).random!(10)
+#
+#    # ---
+#    assert_equal(a.to_a.uniq, a.uniq.to_a)
+#
+#  end
 
   def test_search
     # ---
