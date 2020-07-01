@@ -149,7 +149,6 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
   case T_FILE: {
     volatile VALUE str;
     rb_io_t *iop;
-    rb_secure(4);
     GetOpenFile(io, iop);
     rb_io_check_writable(iop);
     ca_attach(ca);
@@ -162,7 +161,6 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
   case T_FILE: {
     OpenFile *iop;
     size_t total;
-    rb_secure(4);
     GetOpenFile(io, iop);
     rb_io_check_writable(iop);
     ca_attach(ca);
