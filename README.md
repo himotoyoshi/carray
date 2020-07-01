@@ -3,34 +3,38 @@ Ruby/CArray
 
 Ruby/CArray is an extension library for the multi-dimensional array class.
 
+Features
+--------
+
+* Multidimensional array for storing uniform data
+* Various ways to access data elements
+* Masks for each element to handle missing values
+* Element-wise operations and mathematical functions
+* Statistical functions for the elements
+* Indirect data manipulation for original array by virtual array 
+* Special iterators (dimension, block, window, categorical)
+* User-defined array
+* Storing fixed length data with data_class
+* Memory sharing with other objects (Experimental)
+
 Requirements
 ------------
 
-* Ruby 2.2.0 or later
+* Ruby 2.4.0 or later
 * C compiler 
   + IEEE754 floating point number
   + C99 complex number
-* Optional command
-  + ImageMagick (stream, convert, display, identify)
 
 Directories
 -----------
 
     .         - Ruby/CArray extension source codes
     lib       - Ruby/CArray standard library in Ruby
-    ext       - optional extension libraries for Ruby/CArray
-    examples  - some examples
     test      - some unit tests (incomplete)
     spec      - some rspec (incomplete)
     utils     - support tools for development.
 
-Author
-------
+Licenses
+--------
 
-Hiroki Motoyoshi 
-
-Copying
--------
-
-You can redistribute this library package and/or modify it under the terms of
-the Ruby Licence. See the file 'COPYING' in this directory.
+MIT (after version 1.5.0)
