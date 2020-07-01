@@ -58,7 +58,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_rank, cx->rep_dim);
+    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -197,13 +197,13 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_rank, cx->rep_dim);
+    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
   }
 
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca2->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca2;
-    out = rb_ca_ubrep_new(out, cx->rep_rank, cx->rep_dim);
+    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -287,7 +287,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
     out = rb_cscalar_new(CA_BOOLEAN, 0, NULL);
   }
   else {
-    out = rb_carray_new(CA_BOOLEAN, ca1->rank, ca1->dim, 0, NULL);
+    out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
   }
 
   Data_Get_Struct(out, CArray, ca2);
@@ -302,7 +302,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_rank, cx->rep_dim);
+    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -353,7 +353,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
                            ca3->ptr, ca3->bytes, 0);
     }
     else {                                          /* scalar vs array */
-      out = rb_carray_new(CA_BOOLEAN, ca2->rank, ca2->dim, 0, NULL);
+      out = rb_carray_new(CA_BOOLEAN, ca2->ndim, ca2->dim, 0, NULL);
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
@@ -365,7 +365,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   }
   else {
     if ( rb_obj_is_cscalar(other) ) {  /* array vs scalar */
-      out = rb_carray_new(CA_BOOLEAN, ca1->rank, ca1->dim, 0, NULL);
+      out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
@@ -379,7 +379,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
         rb_raise(rb_eRuntimeError, "elements mismatch in bincmp (%lld <-> %lld)",
                                  (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
-      out = rb_carray_new(CA_BOOLEAN, ca1->rank, ca1->dim, 0, NULL);
+      out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
@@ -395,7 +395,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_rank, cx->rep_dim);
+    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
   }
 
   return out;

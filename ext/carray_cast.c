@@ -240,7 +240,7 @@ rb_ca_data_class_to_object (VALUE self)
     obj = rb_cscalar_new(CA_OBJECT, 0, ca->mask);
   }
   else {
-    obj = rb_carray_new(CA_OBJECT, ca->rank, ca->dim, 0, ca->mask);
+    obj = rb_carray_new(CA_OBJECT, ca->ndim, ca->dim, 0, ca->mask);
   }
 
   for (i=0; i<ca->elements; i++) {
@@ -264,7 +264,7 @@ rb_ca_object_to_data_class (VALUE self, VALUE rtype, ca_size_t bytes)
     obj = rb_cscalar_new(CA_FIXLEN, bytes, ca->mask);
   }
   else {
-    obj = rb_carray_new(CA_FIXLEN, ca->rank, ca->dim, bytes, ca->mask);
+    obj = rb_carray_new(CA_FIXLEN, ca->ndim, ca->dim, bytes, ca->mask);
   }
   rb_ca_data_type_import(obj, rtype);
 
@@ -312,7 +312,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
     obj = rb_cscalar_new(data_type, bytes, ca->mask);
   }
   else {
-    obj = rb_carray_new(data_type, ca->rank, ca->dim, bytes, ca->mask);
+    obj = rb_carray_new(data_type, ca->ndim, ca->dim, bytes, ca->mask);
   }
 
   rb_ca_data_type_import(obj, rtype);

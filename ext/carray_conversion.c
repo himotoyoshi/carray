@@ -27,7 +27,7 @@ rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
 
   Data_Get_Struct(self, CArray, ca);
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       idx[level] = i;
       rb_ary_store(ary, i, rb_ca_fetch_index(self, idx));
@@ -46,7 +46,7 @@ rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
 /* rdoc:
   class CArray
     # Converts the array to Ruby's array. For higher dimension, 
-    # the array is nested rank-1 times.
+    # the array is nested ndim-1 times.
     def to_a
     end
   end
@@ -280,14 +280,14 @@ ca_to_cptr (void *ap)
     rb_raise(rb_eRuntimeError, "[BUG] ca_to_cptr called for detached array");
   }
   
-  if ( ca->rank == 1 ) {
-    rb_raise(rb_eRuntimeError, "[BUG] ca_to_cptr called for rank-1 array");
+  if ( ca->ndim == 1 ) {
+    rb_raise(rb_eRuntimeError, "[BUG] ca_to_cptr called for ndim-1 array");
   }
 
   offset[0] = 0;  
   count[0]  = ca->dim[0];
   ptr_num   = count[0];
-  for (i=1; i<ca->rank-1; i++) {
+  for (i=1; i<ca->ndim-1; i++) {
     offset[i] = ptr_num;
     count[i]  = count[i-1] * ca->dim[i];
     ptr_num  += count[i];
@@ -295,15 +295,15 @@ ca_to_cptr (void *ap)
 
   ptr = malloc(sizeof(void*)*ptr_num);
 
-  i = ca->rank-2;
+  i = ca->ndim-2;
   p = ptr + offset[i];
   q = (char *)ca->ptr;
   for (j=0; j<count[i]; j++) {
     *p = (void*)q;
-    p++; q += ca->dim[ca->rank-1] * ca->bytes;
+    p++; q += ca->dim[ca->ndim-1] * ca->bytes;
   }
 
-  for (i=ca->rank-3; i>=0; i--) {
+  for (i=ca->ndim-3; i>=0; i--) {
     p = ptr + offset[i];
     r = ptr + offset[i+1];
     for (j=0; j<count[i]; j++) {

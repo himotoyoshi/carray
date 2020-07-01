@@ -216,64 +216,77 @@ end
 
 class CArray
   
+  module DataTypeNewConstructor
+  end
+  
   module DataTypeExtension
   end
 
   class Boolean
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :boolean
     DataType   = CA_BOOLEAN
   end
 
   class UInt8
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :uint8
     DataType   = CA_UINT8
   end
 
   class UInt16
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :uint16
     DataType   = CA_UINT16
   end
 
   class UInt32
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :uint32
     DataType   = CA_UINT32
   end
 
   class UInt64
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :uint64
     DataType   = CA_UINT64
   end
 
   class Int8
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :int8
     DataType   = CA_INT8
   end
 
   class Int16
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :int16
     DataType   = CA_INT16
   end
 
   class Int32
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :int32
     DataType   = CA_INT32
   end
 
   class Int64
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :int64
     DataType   = CA_INT64
   end
 
   class Float32
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :float32
     DataType   = CA_FLOAT32
@@ -282,6 +295,7 @@ class CArray
   SFloat = Float32
 
   class Float64
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :float64
     DataType   = CA_FLOAT64
@@ -290,6 +304,7 @@ class CArray
   DFloat = Float64
 
   class Complex64
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :complex64
     DataType   = CA_CMPLX64
@@ -298,6 +313,7 @@ class CArray
   SComplex = Complex64
 
   class Complex128
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :complex128
     DataType   = CA_CMPLX128
@@ -306,6 +322,7 @@ class CArray
   DComplex = Complex128
 
   class Object
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :object
     DataType   = CA_OBJECT
@@ -314,6 +331,7 @@ class CArray
   RObject = Object
 
   class Fixlen
+    extend DataTypeNewConstructor
     extend DataTypeExtension
     TypeSymbol = :fixlen
     DataType   = CA_FIXLEN
@@ -328,6 +346,14 @@ class CArray
 end
 
 class CArray
+  
+  module DataTypeNewConstructor
+    
+    def new (*shape)
+      CArray.new(self::DataType, shape)
+    end
+    
+  end
   
   module DataTypeExtension
 
@@ -346,10 +372,6 @@ class CArray
     end
     
     private :guess_data_type_from_values
-
-    def new (*shape)
-      CArray.new(self::DataType, shape)
-    end
 
     def zeros (*shape)
       CArray.new(self::DataType || CA_FLOAT64, shape).zero

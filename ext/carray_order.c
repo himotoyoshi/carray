@@ -132,7 +132,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 
   ca_attach_n(2, ca, ci); /* ATTACH */
 
-  co = carray_new(ca->data_type, ci->rank, ci->dim, ca->bytes, NULL);
+  co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
 
   ca_detach_n(2, ca, ci); /* DETACH */
@@ -572,7 +572,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
     if ( ca->data_type != cv->data_type ) {
       cv = ca_wrap_readonly(rval, ca->data_type);
     }
-    co = carray_new(CA_SIZE, cv->rank, cv->dim, 0, NULL);
+    co = carray_new(CA_SIZE, cv->ndim, cv->dim, 0, NULL);
     out = ca_wrap_struct(co);
     ca_attach(cv);
     if ( ca_is_fixlen_type(ca) ) {

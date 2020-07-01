@@ -13,7 +13,7 @@
 #include "carray.h"
 
 typedef struct {
-  int8_t  rank;
+  int8_t  ndim;
   ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
   CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
@@ -59,7 +59,7 @@ ca_vi_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
 
   ca_update_mask(kernel);
 
-  for (i=0; i<kernel->rank; i++) {
+  for (i=0; i<kernel->ndim; i++) {
     j = idx[i];
     CA_CHECK_INDEX(j, vit->dim[i]);
     kernel->start[i] = j - vit->offset[i];
@@ -78,7 +78,7 @@ ca_vi_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = vit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=vit->rank-1; i>=0; i--) {
+  for (i=vit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -97,7 +97,7 @@ ca_vi_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 
   ca_update_mask(kernel);
 
-  for (i=0; i<kernel->rank; i++) {
+  for (i=0; i<kernel->ndim; i++) {
     j = idx[i];
     CA_CHECK_INDEX(j, dim[i]);
     kernel->start[i] = j - offset[i];
@@ -116,7 +116,7 @@ ca_vi_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = vit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=vit->rank-1; i>=0; i--) {
+  for (i=vit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -136,12 +136,12 @@ ca_vi_setup (VALUE self, VALUE rref, VALUE rker)
   Data_Get_Struct(rref, CArray, ref);
   Data_Get_Struct(rker, CArray, ker);
 
-  if ( ref->rank != ker->rank ) {
-    rb_raise(rb_eRuntimeError, "rank mismatch between reference and kernel");
+  if ( ref->ndim != ker->ndim ) {
+    rb_raise(rb_eRuntimeError, "ndim mismatch between reference and kernel");
   }
 
-  it->rank      = ref->rank;
-  memcpy(it->dim, ref->dim, it->rank * sizeof(ca_size_t));
+  it->ndim      = ref->ndim;
+  memcpy(it->dim, ref->dim, it->ndim * sizeof(ca_size_t));
   it->reference = ref;
   it->kernel    = ker;
   it->kernel_at_addr  = ca_vi_kernel_at_addr;
@@ -149,7 +149,7 @@ ca_vi_setup (VALUE self, VALUE rref, VALUE rker)
   it->kernel_move_to_addr  = ca_vi_kernel_move_to_addr;
   it->kernel_move_to_index = ca_vi_kernel_move_to_index;
 
-  for (i=0; i<it->rank; i++) {
+  for (i=0; i<it->ndim; i++) {
     it->offset[i] = -(((CAWindow*)ker)->start[i]);
   }
 

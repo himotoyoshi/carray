@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -44,7 +44,7 @@ int
 ca_field_setup (CAField *ca, CArray *parent,
                 ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
-  int8_t rank;
+  int8_t ndim;
   ca_size_t elements;
 
   /* check arguments */
@@ -64,25 +64,25 @@ ca_field_setup (CAField *ca, CArray *parent,
     rb_raise(rb_eRuntimeError, "offset or bytes out of range");
   }
 
-  rank     = parent->rank;
+  ndim     = parent->ndim;
   elements = parent->elements;
 
   ca->obj_type  = CA_OBJ_FIELD;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->offset    = offset;
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -149,9 +149,9 @@ ca_field_func_ptr_at_index (void *ap, ca_size_t *idx)
     ca_size_t *dim    = ca->dim;
     int8_t i;
     ca_size_t n;
-    n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[rank-1] */
-    for (i=1; i<ca->rank; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[rank-1] */
-      n = dim[i]*n+idx[i];       /*    ... + idx[rank-2]*dim[1] + idx[rank-1] */
+    n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[ndim-1] */
+    for (i=1; i<ca->ndim; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[ndim-1] */
+      n = dim[i]*n+idx[i];       /*    ... + idx[ndim-2]*dim[1] + idx[ndim-1] */
     }
 
     if ( ca->parent->ptr == NULL ) {
@@ -285,7 +285,7 @@ ca_field_func_create_mask (void *ap)
   }
   ca->mask =
     (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->rank, ca->dim, 0, 0);
+                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
 ca_operation_function_t ca_field_func = {
@@ -583,21 +583,21 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
   if ( rb_obj_is_carray(rtype) ) {
     CArray *ct;
     ca_size_t dim[CA_RANK_MAX];
-    int8_t rank;
+    int8_t ndim;
     int8_t i, j;
     Data_Get_Struct(rtype, CArray, ct);
     data_type = CA_FIXLEN;
     bytes     = ct->bytes * ct->elements;
     obj = rb_ca_field_new(self, offset, data_type, bytes);
     rb_ca_data_type_inherit(obj, rtype);
-    rank = ca->rank + ct->rank;
-    for (i=0; i<ca->rank; i++) {
+    ndim = ca->ndim + ct->ndim;
+    for (i=0; i<ca->ndim; i++) {
       dim[i] = ca->dim[i];
     }
-    for (j=0; j<ct->rank; j++, i++) {
+    for (j=0; j<ct->ndim; j++, i++) {
       dim[i] = ct->dim[j];
     }
-    obj = rb_ca_refer_new(obj, ct->data_type, rank, dim, ct->bytes, 0);
+    obj = rb_ca_refer_new(obj, ct->data_type, ndim, dim, ct->bytes, 0);
   }
   else {
     rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);

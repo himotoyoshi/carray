@@ -25,7 +25,7 @@ ca_copy (void *ap)
     co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
   }
   else {                                /* create array without mask */
-    co = carray_new(ca->data_type, ca->rank, ca->dim, ca->bytes, 0);
+    co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
   }
 
   if ( ca_is_attached(ca) ) {
@@ -72,7 +72,7 @@ ca_template (void *ap)
     return (CArray*) cscalar_new(ca->data_type, ca->bytes, NULL);
   }
   else {                       /* create array without mask */
-    return carray_new(ca->data_type, ca->rank, ca->dim, ca->bytes, NULL);
+    return carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, NULL);
   }
 }
 
@@ -84,7 +84,7 @@ ca_template_safe (void *ap)
     return (CArray*) cscalar_new(ca->data_type, ca->bytes, NULL);
   }
   else {                       /* create array filled with 0, without mask */
-    return carray_new_safe(ca->data_type, ca->rank, ca->dim, ca->bytes, NULL);
+    return carray_new_safe(ca->data_type, ca->ndim, ca->dim, ca->bytes, NULL);
   }
 }
 
@@ -97,7 +97,7 @@ ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
     return (CArray*) cscalar_new(data_type, bytes, NULL);
   }
   else {                   /* create array filled with 0, without mask */
-    return carray_new_safe(data_type, ca->rank, ca->dim, bytes, NULL);
+    return carray_new_safe(data_type, ca->ndim, ca->dim, bytes, NULL);
   }
 }
 
@@ -209,7 +209,7 @@ ca_paste_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
                int32_t level, ca_size_t *idx, ca_size_t *idx0)
 {
   ca_size_t i;
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = offset[level];
     idx0[level] = offset0[level];
     memcpy(ca_ptr_at_index(ca, idx), ca_ptr_at_index(cs, idx0), size[level]*ca->bytes);
@@ -240,9 +240,9 @@ ca_paste (void *ap, ca_size_t *offset, void *sp)
   int8_t i;
 
   ca_check_same_data_type(ca, cs);
-  ca_check_same_rank(ca, cs);
+  ca_check_same_ndim(ca, cs);
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( offset[i] >= 0 ) {
       if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
         size[i] = ca->dim[i] - offset[i];
@@ -264,7 +264,7 @@ ca_paste (void *ap, ca_size_t *offset, void *sp)
     }
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     CA_CHECK_INDEX(offset[i], ca->dim[i]);
   }
 
@@ -287,7 +287,7 @@ ca_paste (void *ap, ca_size_t *offset, void *sp)
 /* rdoc:
   class CArray
     # pastes `ary` to `self` at the index `idx`.
-    # `idx` should be Array object with the length same as `self.rank`.
+    # `idx` should be Array object with the length same as `self.ndim`.
     # `ary` should have same shape with `self`.
     def paste (idx, ary)
     end
@@ -307,12 +307,12 @@ rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
 
   Check_Type(roffset, T_ARRAY);
 
-  if ( RARRAY_LEN(roffset) != ca->rank ) {
+  if ( RARRAY_LEN(roffset) != ca->ndim ) {
     rb_raise(rb_eArgError,
-             "# of arguments should equal to the rank");
+             "# of arguments should equal to the ndim");
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     offset[i] = NUM2SIZE(rb_ary_entry(roffset,i));
   }
 
@@ -330,7 +330,7 @@ ca_clip_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
                int32_t level, ca_size_t *idx, ca_size_t *idx0)
 {
   ca_size_t i;
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = offset[level];
     idx0[level] = offset0[level];
     memcpy(ca_ptr_at_index(cs, idx0), ca_ptr_at_index(ca, idx), size[level]*ca->bytes);
@@ -358,9 +358,9 @@ ca_clip (void *ap, ca_size_t *offset, void *sp)
   int i;
 
   ca_check_same_data_type(ca, cs);
-  ca_check_same_rank(ca, cs);
+  ca_check_same_ndim(ca, cs);
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( offset[i] >= 0 ) {
       if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
         size[i] = ca->dim[i] - offset[i];
@@ -382,7 +382,7 @@ ca_clip (void *ap, ca_size_t *offset, void *sp)
     }
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     CA_CHECK_INDEX(offset[i], ca->dim[i]);
   }
 
@@ -421,12 +421,12 @@ rb_ca_clip (VALUE self, VALUE roffset, VALUE rsrc)
 
   Check_Type(roffset, T_ARRAY);
 
-  if ( RARRAY_LEN(roffset) != ca->rank ) {
+  if ( RARRAY_LEN(roffset) != ca->ndim ) {
     rb_raise(rb_eArgError,
-             "# of arguments should equal to the rank");
+             "# of arguments should equal to the ndim");
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     offset[i] = NUM2SIZE(rb_ary_entry(roffset, i));
   }
 

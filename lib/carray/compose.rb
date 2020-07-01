@@ -15,11 +15,11 @@ class CArray
   # Returns the array resized to the dimension given as `newdim`.
   # The new area is filled by the value returned by the block.
   def resize (*newdim, &block)
-    if newdim.size != rank
-      raise "rank mismatch"
+    if newdim.size != ndim
+      raise "ndim mismatch"
     end
-    offset = Array.new(rank){0}
-    rank.times do |i|
+    offset = Array.new(ndim){0}
+    ndim.times do |i|
       d = newdim[i]
       case d
       when nil
@@ -43,13 +43,13 @@ class CArray
 
   # insert
   def insert_block (offset, bsize, &block)
-    if offset.size != rank or
-        bsize.size != rank
-      raise "rank mismatch"
+    if offset.size != ndim or
+        bsize.size != ndim
+      raise "ndim mismatch"
     end
     newdim = dim
     grids = dim.map{|d| CArray.int32(d) }
-    rank.times do |i|
+    ndim.times do |i|
       if offset[i] < 0
         offset[i] += dim[i]
       end
@@ -73,13 +73,13 @@ class CArray
   end
 
   def delete_block (offset, bsize)
-    if offset.size != rank or
-      bsize.size != rank
-      raise "rank mismatch"
+    if offset.size != ndim or
+      bsize.size != ndim
+      raise "ndim mismatch"
     end
     newdim = dim
     grids  = []
-    rank.times do |i|
+    ndim.times do |i|
       if offset[i] < 0
         offset[i] += dim[i]
       end
@@ -132,12 +132,12 @@ class CArray
       raise "at least one element in list should be a carray"
     end
     dim   = ref.dim
-    rank  = ref.rank
-    trank = tdim.size
+    ndim  = ref.ndim
+    tndim = tdim.size
     if at < 0
-      at += rank - trank + 1
+      at += ndim - tndim + 1
     end
-    unless at.between?(0, rank - trank)
+    unless at.between?(0, ndim - tndim)
       raise "concatnating position out of range"
     end
     list.map! do |x|
@@ -162,7 +162,7 @@ class CArray
       end
     end
     newdim = dim.clone
-    newdim[at,trank] = edim     # extended dimension size
+    newdim[at,tndim] = edim     # extended dimension size
     if has_fill_value
       obj = CArray.new(data_type, newdim) { fill_value }
     else      
@@ -170,7 +170,7 @@ class CArray
     end
     idx = newdim.map{0}
     block.each_with_index do |item, tidx|
-      (at...at+trank).each_with_index do |d,i|
+      (at...at+tndim).each_with_index do |d,i|
         idx[d] = offset[i][tidx[i]]
       end
       obj.paste(idx, item)
@@ -195,14 +195,14 @@ class CArray
       raise "at least one element in list should be a carray"
     end
     dim   = ref.dim
-    rank  = ref.rank
+    ndim  = ref.ndim
     if at < 0
-      at += rank + 1 #  "+ 1" is needed here
+      at += ndim + 1 #  "+ 1" is needed here
     end
-    unless at.between?(0,rank)
+    unless at.between?(0,ndim)
       raise "tiling position is out of range"
     end
-    trank = tdim.size
+    tndim = tdim.size
     list.map! do |x|
       if x.scalar?
         rdim = dim.clone
@@ -214,9 +214,9 @@ class CArray
     newdim = dim.clone
     newdim[at,0] = tdim
     obj = CArray.new(data_type, newdim)
-    idx = Array.new(rank+trank) { nil }
+    idx = Array.new(ndim+tndim) { nil }
     CArray.each_index(*tdim) do |*tidx|
-      idx[at,trank] = tidx
+      idx[at,tndim] = tidx
       obj[*idx] = list.shift
     end
     obj
@@ -238,7 +238,7 @@ class CArray
     conc = argv.map do |list|
       case list
       when CArray
-        if list.rank == 1
+        if list.ndim == 1
           list[:%,1]
         else
           list
@@ -247,13 +247,13 @@ class CArray
         x0 = list.first
         if list.size == 1 and
             x0.is_a?(CArray) and
-            x0.rank == 1
+            x0.ndim == 1
           list = [x0[:%,1]]
         else
         list = list.map { |x|
           case x
           when CArray
-            if x.rank == 1
+            if x.ndim == 1
               x[:%,1]
             else
               x
@@ -262,7 +262,7 @@ class CArray
             y = x.first
             if x.size == 1 and
                 y.is_a?(CArray) and
-                y.rank == 1
+                y.ndim == 1
               y[1,:%]
             else
               CArray.join(*x)

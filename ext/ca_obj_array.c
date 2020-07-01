@@ -117,7 +117,7 @@ rb_ca_reset_gc_interval (VALUE self)
 
 static int
 carray_setup_i (CArray *ca,
-                int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                 CArray *mask, int allocate, int use_calloc)
 {
   ca_size_t elements;
@@ -127,14 +127,14 @@ carray_setup_i (CArray *ca,
 
   /* check arguments */
   CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(rank);
-  CA_CHECK_DIM(rank, dim);
+  CA_CHECK_RANK(ndim);
+  CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
   /* calculate total number of elements */
   elements = 1;
   length = bytes;
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     elements *= dim[i];
     length *= dim[i];
   }
@@ -153,11 +153,11 @@ carray_setup_i (CArray *ca,
 
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
-  memcpy(ca->dim, dim, rank*sizeof(ca_size_t));
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
+  memcpy(ca->dim, dim, ndim*sizeof(ca_size_t));
 
   if ( allocate ) {                                      /* allocate == true */
 
@@ -201,26 +201,26 @@ carray_setup_i (CArray *ca,
 
 int
 carray_setup (CArray *ca,
-  int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask)
+  int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask)
 {
-  return carray_setup_i(ca, data_type, rank, dim, bytes, mask, 1, 0);
+  return carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 1, 0);
 }
 
 int
 carray_safe_setup (CArray *ca,
-  int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask)
+  int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask)
 {
-  return carray_setup_i(ca, data_type, rank, dim, bytes, mask, 1, 1);
+  return carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 1, 1);
 }
 
 int
 ca_wrap_setup (CArray *ca,
-               int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+               int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                CArray *mask, char *ptr)
 {
   int ret;
 
-  ret = carray_setup_i(ca, data_type, rank, dim, bytes, mask, 0, 0);
+  ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0);
   if ( (!ptr) && (ca->elements != 0) ) {
     rb_raise(rb_eRuntimeError, "wrapping NULL pointer with an non-empty array");
   }
@@ -230,49 +230,49 @@ ca_wrap_setup (CArray *ca,
 
 int
 ca_wrap_setup_null (CArray *ca,
-                    int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                    int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                     CArray *mask)
 {
   int ret;
 
-  ret = carray_setup_i(ca, data_type, rank, dim, bytes, mask, 0, 0);
+  ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0);
   ca->ptr = NULL;
   return ret;
 }
 
 CArray *
-carray_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca  = ALLOC(CArray);
-  carray_setup(ca, data_type, rank, dim, bytes, mask);
+  carray_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
 
 CArray *
-carray_new_safe (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca  = ALLOC(CArray);
-  carray_safe_setup(ca, data_type, rank, dim, bytes, mask);
+  carray_safe_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
 
 CAWrap *
-ca_wrap_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+ca_wrap_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask, char *ptr)
 {
   CAWrap *ca  = ALLOC(CAWrap);
-  ca_wrap_setup(ca, data_type, rank, dim, bytes, mask, ptr);
+  ca_wrap_setup(ca, data_type, ndim, dim, bytes, mask, ptr);
   return ca;
 }
 
 CAWrap *
-ca_wrap_new_null (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+ca_wrap_new_null (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                   CArray *mask)
 {
   CAWrap *ca  = ALLOC(CAWrap);
-  ca_wrap_setup_null(ca, data_type, rank, dim, bytes, mask);
+  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
 
@@ -313,7 +313,7 @@ cscalar_setup (CScalar *ca,
   ca->obj_type  = CA_OBJ_SCALAR;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = 1;
+  ca->ndim      = 1;
   ca->bytes     = bytes;
   ca->elements  = 1;
   ca->dim       = &(ca->_dim);
@@ -388,7 +388,7 @@ ca_array_func_clone (void *ap)
 {
   CArray *ca = (CArray *) ap;
   CArray *co;
-  co = carray_new(ca->data_type, ca->rank, ca->dim, ca->bytes, ca->mask);
+  co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, ca->mask);
   memcpy(co->ptr, ca->ptr, ca_length(ca));
   return co;
 }
@@ -407,9 +407,9 @@ ca_array_func_ptr_at_index (void *ap, ca_size_t *idx)
   ca_size_t *dim = ca->dim;
   int8_t     i;
   ca_size_t  n;
-  n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[rank-1] */
-  for (i=1; i<ca->rank; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[rank-1] */
-    n = dim[i]*n+idx[i];       /*    ... + idx[rank-2]*dim[1] + idx[rank-1] */
+  n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[ndim-1] */
+  for (i=1; i<ca->ndim; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[ndim-1] */
+    n = dim[i]*n+idx[i];       /*    ... + idx[ndim-2]*dim[1] + idx[ndim-1] */
   }
   return ca->ptr + ca->bytes * n;
 }
@@ -429,7 +429,7 @@ ca_array_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t     i;
   ca_size_t  n;
   n = idx[0];
-  for (i=1; i<ca->rank; i++) {
+  for (i=1; i<ca->ndim; i++) {
     n = dim[i]*n+idx[i];
   }
   memcpy(ptr, ca->ptr + ca->bytes * n, ca->bytes);
@@ -450,7 +450,7 @@ ca_array_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t     i;
   ca_size_t  n;
   n = idx[0];
-  for (i=1; i<ca->rank; i++) {
+  for (i=1; i<ca->ndim; i++) {
     n = dim[i]*n+idx[i];
   }
   memcpy(ca->ptr + ca->bytes * n, ptr, ca->bytes);
@@ -547,7 +547,7 @@ void
 ca_array_func_create_mask (void *ap)
 {
   CArray *ca = (CArray *) ap;
-  ca->mask = carray_new_safe(CA_BOOLEAN, ca->rank, ca->dim, 0, NULL);
+  ca->mask = carray_new_safe(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
 }
 
 ca_operation_function_t ca_array_func = {
@@ -654,18 +654,18 @@ ca_operation_function_t ca_scalar_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_carray_new (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+rb_carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                CArray *mask)
 {
-  CArray *ca = carray_new(data_type, rank, dim, bytes, mask);
+  CArray *ca = carray_new(data_type, ndim, dim, bytes, mask);
   return ca_wrap_struct(ca);
 }
 
 VALUE
-rb_carray_new_safe (int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+rb_carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                     CArray *mask)
 {
-  CArray *ca = carray_new_safe(data_type, rank, dim, bytes, mask);
+  CArray *ca = carray_new_safe(data_type, ndim, dim, bytes, mask);
   return ca_wrap_struct(ca);
 }
 
@@ -704,7 +704,7 @@ rb_ca_s_allocate (VALUE klass)
   #     CArray.new(data_type, dim, bytes=0) { ... }
   #
   #  Constructs a new CArray object of <i>data_type</i>, which has the
-  #  rank and the dimensions specified by an <code>Array</code> of
+  #  ndim and the dimensions specified by an <code>Array</code> of
   #  <code>Integer</code> or an argument list of <code>Integer</code>.
   #  The byte size of each element for the fixed length data type
   #  (<code>data_type == CA_FIXLEN</code>) is specified optional argument
@@ -720,7 +720,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rtype, rdim, ropt, rbytes = Qnil;
   CArray *ca;
-  int8_t data_type, rank;
+  int8_t data_type, ndim;
   ca_size_t dim[CA_RANK_MAX];
   ca_size_t bytes;
   int8_t i;
@@ -732,13 +732,13 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   rb_ca_data_type_import(self, rtype);
 
   Check_Type(rdim, T_ARRAY);
-  rank = RARRAY_LEN(rdim);
-  for (i=0; i<rank; i++) {
+  ndim = RARRAY_LEN(rdim);
+  for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
   Data_Get_Struct(self, CArray, ca);
-  carray_safe_setup(ca, data_type, rank, dim, bytes, NULL);
+  carray_safe_setup(ca, data_type, ndim, dim, bytes, NULL);
 
   if ( rb_block_given_p() ) {
     volatile VALUE rval = rb_yield(self);
@@ -825,7 +825,7 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   Data_Get_Struct(other, CArray, cs);
 
   ca_update_mask(cs);
-  carray_setup(ca, cs->data_type, cs->rank, cs->dim, cs->bytes, cs->mask);
+  carray_setup(ca, cs->data_type, cs->ndim, cs->dim, cs->bytes, cs->mask);
 
   memcpy(ca->ptr, cs->ptr, ca_length(cs));
 
@@ -842,7 +842,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, target, rtype, rdim, ropt, rbytes = Qnil;
   CArray *ca;
-  int8_t data_type, rank;
+  int8_t data_type, ndim;
   ca_size_t dim[CA_RANK_MAX];
   ca_size_t bytes;
   int8_t i;
@@ -853,15 +853,15 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
-  rank = RARRAY_LEN(rdim);
-  for (i=0; i<rank; i++) {
+  ndim = RARRAY_LEN(rdim);
+  for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
   target = rb_yield_values(0);
 
   obj = Data_Make_Struct(rb_cCAWrap, CAWrap, ca_mark, ca_free, ca);
-  ca_wrap_setup_null(ca, data_type, rank, dim, bytes, NULL);
+  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, NULL);
 
   rb_funcall(target, rb_intern("wrap_as_carray"), 1, obj);
   rb_ivar_set(obj, rb_intern("referred_object"), target);
@@ -870,13 +870,13 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
 }
 
 VALUE
-rb_carray_wrap_ptr (int8_t data_type, int8_t rank, ca_size_t *dim,
+rb_carray_wrap_ptr (int8_t data_type, int8_t ndim, ca_size_t *dim,
         ca_size_t bytes, CArray *mask, char *ptr, VALUE refer)
 {
   volatile VALUE obj;
   CArray *ca;
 
-  ca  = ca_wrap_new(data_type, rank, dim, bytes, mask, ptr);
+  ca  = ca_wrap_new(data_type, ndim, dim, bytes, mask, ptr);
   obj = ca_wrap_struct(ca);
 
   rb_ivar_set(obj, rb_intern("referred_object"), refer);

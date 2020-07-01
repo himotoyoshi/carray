@@ -33,7 +33,7 @@
 # offset 20 bytes
 #   data_type        : int32  : data type specifier
 #   bytes            : int32  : byte size of each data
-#   rank             : int32  : rank of array
+#   ndim             : int32  : ndim of array
 #   elements         : int32  : number of all elements
 #   has_mask         : int32  : 0 (not masked) or 1 (masked)
 # offset 40 bytes
@@ -54,7 +54,7 @@ class CArray::Serializer   # :nodoc:
     char_p    :endian,         :bytes=>4
     int32     :data_type
     int64     :bytes
-    int32     :rank
+    int32     :ndim
     int64     :elements
     int32     :has_mask
     array     :dim,            :type => CArray.int64(CA_RANK_MAX)
@@ -67,7 +67,7 @@ class CArray::Serializer   # :nodoc:
     char_p    :endian,         :bytes=>4
     int32     :data_type
     int32     :bytes
-    int32     :rank
+    int32     :ndim
     int32     :elements
     int32     :has_mask
     array     :dim,            :type => CArray.int32(CA_RANK_MAX)
@@ -92,10 +92,10 @@ class CArray::Serializer   # :nodoc:
     header[:endian]         = ( endian == CA_LITTLE_ENDIAN ) ? "_LE_" : "_BE_"
     header[:data_type]      = ca.data_type
     header[:bytes]          = ca.bytes
-    header[:rank]           = ca.rank
+    header[:ndim]           = ca.ndim
     header[:elements]       = ca.elements
     header[:has_mask]       = ca.has_mask? ? 1 : 0
-    header[:dim][[0,ca.rank]] = ca.dim
+    header[:dim][[0,ca.ndim]] = ca.dim
     attr = nil
     if ca.attribute
       attr = ca.attribute.clone
@@ -147,10 +147,10 @@ class CArray::Serializer   # :nodoc:
     end
     data_type = header[:data_type]
     bytes     = header[:bytes]
-    rank      = header[:rank]
+    ndim      = header[:ndim]
     elements  = header[:elements]
     has_mask  = header[:has_mask] != 0 ? true : false
-    dim       = header[:dim][[0, rank]].to_a
+    dim       = header[:dim][[0, ndim]].to_a
     has_attr  = header[:has_attr]
     if data_type == 255
       data_type = header[:data_type_name].strip.to_sym

@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -43,14 +43,14 @@ static VALUE rb_cCAFarray;
 int
 ca_farray_setup (CAFarray *ca, CArray *parent)
 {
-  int8_t rank, data_type;
+  int8_t ndim, data_type;
   ca_size_t *dim, elements, bytes;
   int i;
 
   /* check arguments */
 
   data_type = parent->data_type;
-  rank      = parent->rank;
+  ndim      = parent->ndim;
   dim       = parent->dim;
   bytes     = parent->bytes;
   elements  = parent->elements;
@@ -58,23 +58,23 @@ ca_farray_setup (CAFarray *ca, CArray *parent)
   ca->obj_type  = CA_OBJ_FARRAY;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  for (i=0; i<rank; i++) {
-    ca->dim[i] = dim[rank-1-i];
+  for (i=0; i<ndim; i++) {
+    ca->dim[i] = dim[ndim-1-i];
   }
 
   ca->step = 1;
-  for (i=1; i<rank; i++) {
+  for (i=1; i<ndim; i++) {
     ca->step *= dim[i];
   }
 
@@ -124,11 +124,11 @@ static void
 ca_farray_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFarray *ca = (CAFarray *) ap;
-  int8_t  rank = ca->rank;
+  int8_t  ndim = ca->ndim;
   ca_size_t idx0[CA_RANK_MAX];
   int i;
-  for (i=0; i<rank; i++) {
-    idx0[i] = idx[rank-1-i];
+  for (i=0; i<ndim; i++) {
+    idx0[i] = idx[ndim-1-i];
   }
   ca_fetch_index(ca->parent, idx0, ptr);
 }
@@ -137,11 +137,11 @@ static void
 ca_farray_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CAFarray *ca = (CAFarray *) ap;
-  int8_t  rank = ca->rank;
+  int8_t  ndim = ca->ndim;
   ca_size_t idx0[CA_RANK_MAX];
   int i;
-  for (i=0; i<rank; i++) {
-    idx0[i] = idx[rank-1-i];
+  for (i=0; i<ndim; i++) {
+    idx0[i] = idx[ndim-1-i];
   }
   ca_store_index(ca->parent, idx0, ptr);
 }
@@ -258,7 +258,7 @@ ca_fa_attach_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
   ca_size_t step = ca->step;
   ca_size_t dim = ca->dim[level];
   ca_size_t i;
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[0]    = 0;
     switch ( ca->bytes ) {
@@ -315,7 +315,7 @@ ca_fa_attach_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
     }
   }
   else {
-    int level0 = ca->rank - 1 - level;
+    int level0 = ca->ndim - 1 - level;
     for (i=0; i<dim; i++) {
       idx[level]  = i;
       idx0[level0] = i;
@@ -339,7 +339,7 @@ ca_fa_sync_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
   ca_size_t dim  = ca->dim[level];
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[0] = 0;
     switch ( ca->bytes ) {
@@ -398,7 +398,7 @@ ca_fa_sync_loop (CAFarray *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
   else {
     for (i=0; i<dim; i++) {
       idx[level]  = i;
-      idx0[ca->rank - 1 - level] = i;
+      idx0[ca->ndim - 1 - level] = i;
       ca_fa_sync_loop(ca, level+1, idx, idx0);
     }
   }

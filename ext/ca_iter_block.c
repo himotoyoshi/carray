@@ -23,7 +23,7 @@ VALUE rb_cCABlockIterator;
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -42,11 +42,11 @@ typedef struct {
   ca_size_t  *step;
   ca_size_t  *count;
   ca_size_t  *size0;
-} CABlock;                  // 68 + 20*(rank) (bytes) 
+} CABlock;                  // 68 + 20*(ndim) (bytes) 
 */
 
 typedef struct {
-  int8_t  rank;
+  int8_t  ndim;
   ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
   CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
@@ -73,14 +73,14 @@ ca_bi_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
   else {
     CABlock *ck = (CABlock *)bit->kernel;
     kernel = ca_block_new(ref,
-                          ck->rank, ck->size0,
+                          ck->ndim, ck->size0,
                           ck->start, ck->step, ck->count,
                           ck->offset);
   }
 
   ca_update_mask(kernel);
 
-  for (i=0; i<kernel->rank; i++) {
+  for (i=0; i<kernel->ndim; i++) {
     j = idx[i];
     CA_CHECK_INDEX(j, bit->dim[i]);
     kernel->start[i] += j * kernel->dim[i];
@@ -99,7 +99,7 @@ ca_bi_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = bit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=bit->rank-1; i>=0; i--) {
+  for (i=bit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -117,7 +117,7 @@ ca_bi_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 
   ca_update_mask(kernel);
 
-  for (i=0; i<kernel->rank; i++) {
+  for (i=0; i<kernel->ndim; i++) {
     j = idx[i];
     CA_CHECK_INDEX(j, bit->dim[i]);
     kernel->start[i] = j * kernel->dim[i];
@@ -136,7 +136,7 @@ ca_bi_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = bit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=bit->rank-1; i>=0; i--) {
+  for (i=bit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -158,11 +158,11 @@ ca_bi_setup (VALUE self, VALUE rref, VALUE rker)
   Data_Get_Struct(rref, CArray, ref);
   Data_Get_Struct(rker, CABlock, ker);
 
-  if ( ref->rank != ker->rank ) {
-    rb_raise(rb_eRuntimeError, "rank mismatch between reference and kernel");
+  if ( ref->ndim != ker->ndim ) {
+    rb_raise(rb_eRuntimeError, "ndim mismatch between reference and kernel");
   }
 
-  for (i=0; i<ref->rank; i++) {
+  for (i=0; i<ref->ndim; i++) {
     if ( ker->step[i] != 1 ) {
       rb_raise(rb_eRuntimeError, "block should be contiguous");
     }
@@ -174,8 +174,8 @@ ca_bi_setup (VALUE self, VALUE rref, VALUE rker)
     */
   }
 
-  it->rank      = ref->rank;
-  memcpy(it->dim, dim, it->rank * sizeof(ca_size_t));
+  it->ndim      = ref->ndim;
+  memcpy(it->dim, dim, it->ndim * sizeof(ca_size_t));
   it->reference = ref;
   it->kernel    = ker;
   it->kernel_at_addr  = ca_bi_kernel_at_addr;

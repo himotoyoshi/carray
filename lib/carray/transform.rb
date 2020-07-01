@@ -28,7 +28,7 @@ class CArray
     k = 0
     (newdim.size-1).downto(i+1) do |j|
       if newdim[j].nil?
-        newdim[j] = dim[rank-1-k]
+        newdim[j] = dim[ndim-1-k]
       end
       k += 1
     end
@@ -58,40 +58,40 @@ class CArray
     return self.transposed(*argv).to_ca
   end
 
-  # Reutrns the reference which rank is reduced 
+  # Reutrns the reference which ndim is reduced 
   # by eliminating the dimensions which size == 1 
   def compacted
-    if rank == 1
+    if ndim == 1
       return self[]
     else
       newdim = dim.reject{|x| x == 1 }
-      return ( rank != newdim.size ) ? reshape(*newdim) : self[]
+      return ( ndim != newdim.size ) ? reshape(*newdim) : self[]
     end
   end
 
-  # Returns the array which rank is reduced 
+  # Returns the array which ndim is reduced 
   # by eliminating the dimensions which size == 1 
   def compact
-    if rank == 1
+    if ndim == 1
       return self.to_ca
     else
       newdim = dim.reject{|x| x == 1 }
-      return ( rank != newdim.size ) ? reshape(*newdim).to_ca : self.to_ca
+      return ( ndim != newdim.size ) ? reshape(*newdim).to_ca : self.to_ca
     end
   end
 
   # Returns (1,n) array from 1-dimensional array 
   def to_row 
-    if rank != 1
-      raise "rank should be 1"
+    if ndim != 1
+      raise "ndim should be 1"
     end
     return self[1,:%]
   end
   
   # Returns (n,1) array from 1-dimensional array 
   def to_column
-    if rank != 1
-      raise "rank should be 1"
+    if ndim != 1
+      raise "ndim should be 1"
     end
     return self[:%,1]
   end

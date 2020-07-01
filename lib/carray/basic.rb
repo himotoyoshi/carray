@@ -120,11 +120,11 @@ class CArray
     unless n.is_a?(Integer)
       raise ArgumentError, "argument should be an integer"
     end
-    if n.between?(0, rank-1)
+    if n.between?(0, ndim-1)
       return CArray.int32(dim[n]).seq!
     else
       raise ArgumentError,
-            "invalid dimension specifier #{n} (0..#{self.rank-1})"
+            "invalid dimension specifier #{n} (0..#{self.ndim-1})"
     end
   end
 
@@ -133,7 +133,7 @@ class CArray
   #
 
   def indices
-    list = Array.new(rank) {|i|
+    list = Array.new(ndim) {|i|
       rpt = self.dim
       rpt[i] = :%
       index(i)[*rpt]
@@ -166,7 +166,7 @@ class CArray
   def split (*argv)
     odim = dim.values_at(*argv)
     out  = CArray.object(*odim)
-    idx  = [nil] * rank
+    idx  = [nil] * ndim
     attach {
       out.map_with_index! do |o, v|
         argv.each_with_index do |r, i|

@@ -21,7 +21,7 @@ VALUE rb_cCADimIterator;
 */
 
 typedef struct {
-  int8_t  rank;
+  int8_t  ndim;
   ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
   CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
@@ -50,14 +50,14 @@ ca_di_kernel_at_index (void *it, ca_size_t *idx, CArray *ref)
   else {
     CABlock *ck = (CABlock *)dit->kernel;
     kernel = ca_block_new(ref,
-                          ck->rank, ck->size0,
+                          ck->ndim, ck->size0,
                           ck->start, ck->step, ck->count,
                           ck->offset);
   }
 
   ca_update_mask(kernel);
 
-  for (i=0; i<dit->rank; i++) {
+  for (i=0; i<dit->ndim; i++) {
     val = idx[i];
     CA_CHECK_INDEX(val, dit->dim[i]);
     kernel->start[dit->symindex[i]] = val * kernel->step[dit->symindex[i]];
@@ -77,7 +77,7 @@ ca_di_kernel_at_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = dit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=dit->rank-1; i>=0; i--) {
+  for (i=dit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -94,7 +94,7 @@ ca_di_kernel_move_to_index (void *it, ca_size_t *idx, CArray *kern)
 
   ca_update_mask(kernel);
 
-  for (i=0; i<dit->rank; i++) {
+  for (i=0; i<dit->ndim; i++) {
     val = idx[i];
     CA_CHECK_INDEX(val, dit->dim[i]);
     kernel->start[dit->symindex[i]] = val * kernel->step[dit->symindex[i]];
@@ -114,7 +114,7 @@ ca_di_kernel_move_to_addr (void *it, ca_size_t addr, CArray *ref)
   ca_size_t *dim = dit->dim;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  for (i=dit->rank-1; i>=0; i--) {
+  for (i=dit->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -129,7 +129,7 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   volatile VALUE rindex, rker, rsymtbl;
   CADimIterator *it;
   CAIndexInfo blk_spec;
-  int8_t rank;
+  int8_t ndim;
   int i, j, k;
 
   Data_Get_Struct(self, CADimIterator, it);
@@ -142,7 +142,7 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
 
   blk_spec      = *info;
   blk_spec.type = CA_REG_BLOCK;
-  for (i=0; i<info->rank; i++) {
+  for (i=0; i<info->ndim; i++) {
     if ( info->index_type[i] == CA_IDX_SYMBOL ) {
       blk_spec.index_type[i] = CA_IDX_ALL;
       rb_hash_aset(rsymtbl, ID2SYM(blk_spec.index[i].symbol.id), INT2NUM(i));
@@ -151,13 +151,13 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
 
   rref = rb_ca_ref_block(rref, &blk_spec);
 
-  rindex = rb_ary_new2(info->rank);
-  rank = 0;
+  rindex = rb_ary_new2(info->ndim);
+  ndim = 0;
 
   j = 0;
   k = 0;
 
-  for (i=0; i<info->rank; i++) {
+  for (i=0; i<info->ndim; i++) {
     if ( info->index_type[i] == CA_IDX_SCALAR ) {
       rb_ary_store(rindex, i, SIZE2NUM(info->index[i].scalar));
       continue; /* escape from j++ */
@@ -165,8 +165,8 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
     else if ( info->index_type[i] == CA_IDX_SYMBOL ) {
       rb_ary_store(rindex, i, rb_ary_new3(1, SIZE2NUM(0)));
       it->symflag[j]       = 1;
-      it->symindex[rank] = j;
-      rank++;
+      it->symindex[ndim] = j;
+      ndim++;
     }
     else if ( info->index_type[i] == CA_IDX_ALL ) {
       rb_ary_store(rindex, i, Qnil);
@@ -184,7 +184,7 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
 
   rker = rb_apply(rref, rb_intern("[]"), rindex);
 
-  it->rank = rank;
+  it->ndim = ndim;
   Data_Get_Struct(rref, CArray, it->reference);
   Data_Get_Struct(rker, CArray, it->kernel);
   it->kernel_at_addr  = ca_di_kernel_at_addr;
@@ -192,7 +192,7 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   it->kernel_move_to_addr  = ca_di_kernel_move_to_addr;
   it->kernel_move_to_index = ca_di_kernel_move_to_index;
 
-  for (i=0; i<it->rank; i++) {
+  for (i=0; i<it->ndim; i++) {
     it->dim[i] = it->reference->dim[it->symindex[i]];
   }
 
@@ -239,7 +239,7 @@ rb_ca_dim_iterator (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_ca_scan_index(ca->rank, ca->dim, ca->elements, argc, argv, &info);
+  rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
   obj = rb_di_s_allocate(rb_cCADimIterator);
   ca_di_setup(obj, self, &info);

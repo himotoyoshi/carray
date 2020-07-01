@@ -22,7 +22,7 @@ static VALUE rb_cCAShift;
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -47,35 +47,35 @@ int
 ca_shift_setup (CAShift *ca, CArray *parent,
                ca_size_t *shift, char *fill, int8_t *roll)
 {
-  int8_t data_type, rank;
+  int8_t data_type, ndim;
   ca_size_t elements, bytes;
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
-  rank      = parent->rank;
+  ndim      = parent->ndim;
   elements  = parent->elements;
 
 
   ca->obj_type  = CA_OBJ_SHIFT;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
-  ca->shift     = ALLOC_N(ca_size_t, rank);
+  ca->shift     = ALLOC_N(ca_size_t, ndim);
   ca->fill      = ALLOC_N(char, ca->bytes);
-  ca->roll      = ALLOC_N(int8_t, rank);
+  ca->roll      = ALLOC_N(int8_t, ndim);
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
-  memcpy(ca->shift, shift, rank * sizeof(ca_size_t));
-  memcpy(ca->roll, roll, rank * sizeof(int8_t));
+  memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
+  memcpy(ca->shift, shift, ndim * sizeof(ca_size_t));
+  memcpy(ca->roll, roll, ndim * sizeof(int8_t));
 
   if ( fill ) {
     ca->fill_mask = 0;
@@ -194,7 +194,7 @@ ca_shift_func_ptr_at_index (void *ap, ca_size_t *idx)
     int8_t i;
     ca_size_t k, n;
     n = 0;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = idx[i];
       if ( roll[i] ) {
         k = ca_shift_rolled_index(ca, i, k);
@@ -230,7 +230,7 @@ ca_shift_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t  i;
   ca_size_t k, n;
   n = 0;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     k = idx[i];
     if ( roll[i] ) {
       k = ca_shift_rolled_index(ca, i, k);
@@ -257,7 +257,7 @@ ca_shift_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t i;
   ca_size_t k, n;
   n = 0;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     k = idx[i];
     if ( roll[i] ) {
       k = ca_shift_rolled_index(ca, i, k);
@@ -402,7 +402,7 @@ ca_shift_attach_loop (CAShift *ca, int16_t level, ca_size_t *idx, ca_size_t *idx
   int8_t roll = ca->roll[level];
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     if ( fill ) {
       for (i=0; i<ca->dim[level]; i++) {
         idx[level] = i;
@@ -561,7 +561,7 @@ ca_shift_sync_loop (CAShift *ca, int16_t level, ca_size_t *idx, ca_size_t *idx0)
   int8_t roll = ca->roll[level];
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     if ( ! shift ) {
       idx[level] = 0;
       idx0[level] = 0;
@@ -705,7 +705,7 @@ ca_shift_fill_loop (CAShift *ca, char *ptr,
   int8_t roll = ca->roll[level];
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     if ( ( ! shift ) || roll ) {
       for (i=0; i<dim; i++) {
         idx0[level] = i;
@@ -851,11 +851,11 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   ropt = rb_pop_options(&argc, &argv);
   rb_scan_options(ropt, "roll,fill_value", &rroll, &rfval);
 
-  if ( argc != ca->rank ) {
-    rb_raise(rb_eArgError, "# of arguments mismatch with rank");
+  if ( argc != ca->ndim ) {
+    rb_raise(rb_eArgError, "# of arguments mismatch with ndim");
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     shift[i] = NUM2SIZE(argv[i]);
   }
 
@@ -889,18 +889,18 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   }
 
   if ( NIL_P(rroll) ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       roll[i] = 0;
     }
   }
   else {
     Check_Type(rroll, T_ARRAY);
 
-    if ( RARRAY_LEN(rroll) != ca->rank ) {
-      rb_raise(rb_eArgError, "# of arguments mismatch with rank");
+    if ( RARRAY_LEN(rroll) != ca->ndim ) {
+      rb_raise(rb_eArgError, "# of arguments mismatch with ndim");
     }
 
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       roll[i] = NUM2INT(rb_ary_entry(rroll, i));
     }
   }

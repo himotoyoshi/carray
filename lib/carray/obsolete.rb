@@ -150,7 +150,7 @@ class CArray
 
   def rotated (*argv)                  # :nodoc:
     warn "CArray#rotated will be obsolete, use CArray#rolled"
-    argv.push({:roll => Array.new(rank){1} })
+    argv.push({:roll => Array.new(ndim){1} })
     return shifted(*argv)
   end
 

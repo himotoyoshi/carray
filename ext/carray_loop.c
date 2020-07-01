@@ -13,29 +13,29 @@
 #include "carray.h"
 
 static VALUE
-rb_ca_s_each_index_internal (int rank, VALUE *dim, uint8_t irank, VALUE ridx)
+rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
 {
   volatile VALUE ret = Qnil;
-  int32_t is_leaf = (irank == rank - 1);
+  int32_t is_leaf = (indim == ndim - 1);
   ca_size_t i;
 
-  if ( NIL_P(dim[irank]) ) {
-    rb_ary_store(ridx, irank, Qnil);
+  if ( NIL_P(dim[indim]) ) {
+    rb_ary_store(ridx, indim, Qnil);
     if ( is_leaf ) {
       ret = rb_yield_splat(rb_obj_clone(ridx));
     }
     else {
-      ret = rb_ca_s_each_index_internal(rank, dim, irank+1, ridx);
+      ret = rb_ca_s_each_index_internal(ndim, dim, indim+1, ridx);
     }
   }
   else {
-    for (i=0; i<NUM2SIZE(dim[irank]); i++) {
-      rb_ary_store(ridx, irank, SIZE2NUM(i));
+    for (i=0; i<NUM2SIZE(dim[indim]); i++) {
+      rb_ary_store(ridx, indim, SIZE2NUM(i));
       if ( is_leaf ) {
         ret = rb_yield_splat(rb_obj_clone(ridx));
       }
       else {
-        ret = rb_ca_s_each_index_internal(rank, dim, irank+1, ridx);
+        ret = rb_ca_s_each_index_internal(ndim, dim, indim+1, ridx);
       }
     }
   }
@@ -58,13 +58,13 @@ rb_ca_s_each_index_internal (int rank, VALUE *dim, uint8_t irank, VALUE ridx)
 */
 
 static VALUE
-rb_ca_s_each_index (int rank, VALUE *dim, VALUE self)
+rb_ca_s_each_index (int ndim, VALUE *dim, VALUE self)
 {
-  volatile VALUE ridx = rb_ary_new2(rank);
+  volatile VALUE ridx = rb_ary_new2(ndim);
 #if RUBY_VERSION_CODE >= 190
-  RETURN_ENUMERATOR(self, rank, dim);
+  RETURN_ENUMERATOR(self, ndim, dim);
 #endif
-  return rb_ca_s_each_index_internal(rank, dim, 0, ridx);
+  return rb_ca_s_each_index_internal(ndim, dim, 0, ridx);
 }
 
 /* ------------------------------------------------------------------- */
@@ -145,7 +145,7 @@ rb_ca_each_index_internal (VALUE self, int8_t level, VALUE ridx)
   CArray *ca;
   ca_size_t i;
   Data_Get_Struct(self, CArray, ca);
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       rb_ary_store(ridx, level, SIZE2NUM(i));
       ret = rb_yield_splat(rb_obj_clone(ridx));
@@ -179,8 +179,8 @@ static VALUE
 rb_ca_each_index (VALUE self)
 {
   volatile VALUE ridx;
-  int8_t rank = NUM2INT(rb_ca_rank(self));
-  ridx = rb_ary_new2(rank);
+  int8_t ndim = NUM2INT(rb_ca_ndim(self));
+  ridx = rb_ary_new2(ndim);
 #if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
@@ -225,7 +225,7 @@ rb_ca_each_with_index_internal (VALUE self,
   CArray *ca;
   ca_size_t i;
   Data_Get_Struct(self, CArray, ca);
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       idx[level] = i;
       rb_ary_store(ridx, level, SIZE2NUM(i));
@@ -256,12 +256,12 @@ rb_ca_each_with_index (VALUE self)
 {
   volatile VALUE ridx, ret;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  rank = NUM2INT(rb_ca_rank(self));
+  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
 #if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  ridx = rb_ary_new2(rank);
+  ridx = rb_ary_new2(ndim);
   ret  = rb_ca_each_with_index_internal(self, 0, idx, ridx);
   return ret;
 }
@@ -274,7 +274,7 @@ rb_ca_map_with_index_bang_internal (VALUE self,
   CArray *ca;
   ca_size_t i;
   Data_Get_Struct(self, CArray, ca);
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     volatile VALUE obj;
     for (i=0; i<ca->dim[level]; i++) {
       idx[level] = i;
@@ -307,14 +307,14 @@ rb_ca_map_with_index_bang (VALUE self)
   volatile VALUE ridx;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  rank = NUM2INT(rb_ca_rank(self));
+  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
 #if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
   Data_Get_Struct(self, CArray, ca);
   ca_attach(ca);
-  ridx = rb_ary_new2(rank);
+  ridx = rb_ary_new2(ndim);
   rb_ca_map_with_index_bang_internal(self, 0, idx, ridx);
   ca_sync(ca);
   ca_detach(ca);
@@ -329,7 +329,7 @@ rb_ca_map_index_bang_internal (VALUE self,
   CArray *ca;
   ca_size_t i;
   Data_Get_Struct(self, CArray, ca);
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     volatile VALUE obj;
     for (i=0; i<ca->dim[level]; i++) {
       idx[level] = i;
@@ -361,14 +361,14 @@ rb_ca_map_index_bang (VALUE self)
   volatile VALUE ridx;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  rank = NUM2INT(rb_ca_rank(self));
+  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
 #if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
   Data_Get_Struct(self, CArray, ca);
   ca_attach(ca);
-  ridx = rb_ary_new2(rank);
+  ridx = rb_ary_new2(ndim);
   rb_ca_map_index_bang_internal(self, 0, idx, ridx);
   ca_sync(ca);
   ca_detach(ca);

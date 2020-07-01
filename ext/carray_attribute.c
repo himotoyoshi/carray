@@ -51,20 +51,20 @@ rb_ca_data_type (VALUE self)
 /* rdoc
   class CArray
 		# use CArray#ndims instead of this methods after carray-1.3.0
-    def rank
+    def ndim
     end
-    # returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
+    # returns the ndim (e.g. 1 for 1D array, 3 for 3D array, ...).
     def ndims
     end
   end
 */
 
 VALUE
-rb_ca_rank (VALUE self)
+rb_ca_ndim (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return INT2NUM(ca->rank);
+  return INT2NUM(ca->ndim);
 }
 
 /* rdoc
@@ -147,8 +147,8 @@ rb_ca_dim (VALUE self)
   CArray *ca;
   int i;
   Data_Get_Struct(self, CArray, ca);
-  dim = rb_ary_new2(ca->rank);
-  for (i=0; i<ca->rank; i++) {
+  dim = rb_ary_new2(ca->ndim);
+  for (i=0; i<ca->ndim; i++) {
     rb_ary_store(dim, i, SIZE2NUM(ca->dim[i]));
   }
   return dim;
@@ -167,7 +167,7 @@ rb_ca_dim1 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 2 ) ? SIZE2NUM(ca->dim[1]) : Qnil;
+  return ( ca->ndim >= 2 ) ? SIZE2NUM(ca->dim[1]) : Qnil;
 }
 
 VALUE
@@ -175,7 +175,7 @@ rb_ca_dim2 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 3 ) ? SIZE2NUM(ca->dim[2]) : Qnil;
+  return ( ca->ndim >= 3 ) ? SIZE2NUM(ca->dim[2]) : Qnil;
 }
 
 VALUE
@@ -183,7 +183,7 @@ rb_ca_dim3 (VALUE self)
 {
   CArray *ca;
   Data_Get_Struct(self, CArray, ca);
-  return ( ca->rank >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
+  return ( ca->ndim >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
 }
 
 /* rdoc:
@@ -868,13 +868,9 @@ Init_carray_attribute ()
   rb_define_method(rb_cCArray, "obj_type", rb_ca_obj_type, 0);
   rb_define_method(rb_cCArray, "data_type", rb_ca_data_type, 0);
   rb_define_method(rb_cCArray, "bytes", rb_ca_bytes, 0);
-  rb_define_method(rb_cCArray, "rank", rb_ca_rank, 0); 
-  rb_define_method(rb_cCArray, "ndim", rb_ca_rank, 0); /* after carray-1.3.0 */
-  rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0); /* after carray-1.3.0 */
-  rb_define_method(rb_cCArray, "shape0", rb_ca_dim0, 0);
-  rb_define_method(rb_cCArray, "shape1", rb_ca_dim1, 0);
-  rb_define_method(rb_cCArray, "shape2", rb_ca_dim2, 0);
-  rb_define_method(rb_cCArray, "shape3", rb_ca_dim3, 0);
+  rb_define_method(rb_cCArray, "ndim", rb_ca_ndim, 0); 
+  rb_define_method(rb_cCArray, "rank", rb_ca_ndim, 0); /* after carray-1.5.0 */
+  rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0); /* after carray-1.5.0 */
   rb_define_method(rb_cCArray, "dim", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim0", rb_ca_dim0, 0);
   rb_define_method(rb_cCArray, "dim1", rb_ca_dim1, 0);

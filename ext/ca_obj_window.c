@@ -29,18 +29,18 @@ int
 ca_window_setup (CAWindow *ca, CArray *parent,
                ca_size_t *start, ca_size_t *count, int8_t bounds, char *fill)
 {
-  int8_t  data_type, rank;
+  int8_t  data_type, ndim;
   ca_size_t *dim;
   ca_size_t bytes, elements;
   int i;
 
   data_type = parent->data_type;
-  rank      = parent->rank;
+  ndim      = parent->ndim;
   bytes     = parent->bytes;
   dim       = parent->dim;
 
   elements = 1;
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     if ( count[i] <= 0 ) {
       rb_raise(rb_eIndexError,
                "invalid size for %i-th dimension (negative or zero)", i);
@@ -51,7 +51,7 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca->obj_type  = CA_OBJ_WINDOW;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
@@ -62,16 +62,16 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->bounds    = bounds;
-  ca->start     = ALLOC_N(ca_size_t, rank);
-  ca->count     = ALLOC_N(ca_size_t, rank);
-  ca->size0     = ALLOC_N(ca_size_t, rank);
+  ca->start     = ALLOC_N(ca_size_t, ndim);
+  ca->count     = ALLOC_N(ca_size_t, ndim);
+  ca->size0     = ALLOC_N(ca_size_t, ndim);
   ca->fill      = ALLOC_N(char, ca->bytes);
 
   ca->dim = ca->count;
 
-  memcpy(ca->start, start, rank * sizeof(ca_size_t));
-  memcpy(ca->count, count, rank * sizeof(ca_size_t));
-  memcpy(ca->size0,  dim,  rank * sizeof(ca_size_t));
+  memcpy(ca->start, start, ndim * sizeof(ca_size_t));
+  memcpy(ca->count, count, ndim * sizeof(ca_size_t));
+  memcpy(ca->size0,  dim,  ndim * sizeof(ca_size_t));
 
   if ( fill ) {
     memcpy(ca->fill, fill, ca->bytes);
@@ -157,7 +157,7 @@ ca_window_func_ptr_at_index (void *ap, ca_size_t *idx)
     int8_t  i;
     ca_size_t n;
     n = 0;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = start[i] + idx[i];
       k = ca_bounds_normalize_index(ca->bounds, size0[i], k);
       if ( k < 0 || k >= size0[i] ) {
@@ -187,7 +187,7 @@ ca_window_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t idx0[CA_RANK_MAX];
   int8_t  i;
   ca_size_t k;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     k = start[i] + idx[i];
     k = ca_bounds_normalize_index(ca->bounds, size0[i], k);
     if ( k < 0 || k >= size0[i] ) {
@@ -208,7 +208,7 @@ ca_window_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t idx0[CA_RANK_MAX];
   int8_t  i;
   ca_size_t k;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     k = start[i] + idx[i];
     k = ca_bounds_normalize_index(ca->bounds, size0[i], k);
     if ( k < 0 || k >= size0[i] ) {
@@ -397,7 +397,7 @@ ca_window_attach_loop (CAWindow *cb, int8_t level,
   ca_size_t count = cb->count[level];
   ca_size_t i, k;
 
-  if ( level == cb->rank - 1 ) {
+  if ( level == cb->ndim - 1 ) {
     switch ( cb->data_type ) {
     case CA_BOOLEAN:
     case CA_INT8:   proc_window_attach_get(int8_t); break;
@@ -525,7 +525,7 @@ ca_window_sync_loop (CAWindow *cb, int8_t level,
   ca_size_t size0 = cb->size0[level];
   ca_size_t i, k;
 
-  if ( level == cb->rank - 1 ) {
+  if ( level == cb->ndim - 1 ) {
     switch ( cb->data_type ) {
     case CA_BOOLEAN:
     case CA_INT8:   proc_window_sync_set(int8_t); break;
@@ -629,7 +629,7 @@ ca_window_fill_loop (CAWindow *cb, char *ptr,
   ca_size_t size0 = cb->size0[level];
   ca_size_t i, k;
 
-  if ( level == cb->rank - 1 ) {
+  if ( level == cb->ndim - 1 ) {
     switch ( cb->data_type ) {
     case CA_BOOLEAN:
     case CA_INT8:   proc_window_fill_set(int8_t); break;
@@ -728,8 +728,8 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
   ropt = rb_pop_options(&argc, &argv);
   rb_scan_options(ropt, "bounds,fill_value", &rbounds, &rfval);
 
-  if ( argc != ca->rank ) {
-    rb_raise(rb_eArgError, "rank mismatch");
+  if ( argc != ca->ndim ) {
+    rb_raise(rb_eArgError, "ndim mismatch");
   }
 
   for (i=0; i<argc; i++) {
@@ -854,13 +854,13 @@ rb_ca_window_idx2addr0 (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CAWindow, cw);
 
-  if ( argc != cw->rank ) {
+  if ( argc != cw->ndim ) {
     rb_raise(rb_eArgError,
-             "invalid # of arguments (should be <%i>)", cw->rank);
+             "invalid # of arguments (should be <%i>)", cw->ndim);
   }
 
   addr = 0;
-  for (i=0; i<cw->rank; i++) {
+  for (i=0; i<cw->ndim; i++) {
     idxi = NUM2SIZE(argv[i]);
     CA_CHECK_INDEX(idxi, cw->dim[i]);
     addr = cw->size0[i] * addr + cw->start[i] + idxi;
@@ -894,7 +894,7 @@ rb_ca_window_addr2addr0 (VALUE self, VALUE raddr)
   ca_addr2index((CArray*)cw, addr, idx);
 
   addr = 0;
-  for (i=0; i<cw->rank; i++) {
+  for (i=0; i<cw->ndim; i++) {
     addr *= cw->size0[i];
     addr += cw->start[i] + idx[i];
   }
@@ -912,12 +912,12 @@ rb_ca_window_move (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CAWindow, cw);
 
-  if ( argc != cw->rank ) {
+  if ( argc != cw->ndim ) {
     rb_raise(rb_eArgError, "invalid # of arguments");
   }
 
   ca_update_mask(cw);
-  for (i=0; i<cw->rank; i++) {
+  for (i=0; i<cw->ndim; i++) {
     start = NUM2SIZE(argv[i]);
     cw->start[i] = start;
     if ( cw->mask ) {
@@ -969,8 +969,8 @@ rb_ca_window_get_bounds (VALUE self)
     CAWindow *cw;                    \
     int8_t i;                              \
     Data_Get_Struct(self, CAWindow, cw);     \
-    ary = rb_ary_new2(cw->rank);            \
-    for (i=0; i<cw->rank; i++) {                    \
+    ary = rb_ary_new2(cw->ndim);            \
+    for (i=0; i<cw->ndim; i++) {                    \
       rb_ary_store(ary, i, SIZE2NUM(cw->name[i]));  \
     }                                               \
     return ary;                                     \

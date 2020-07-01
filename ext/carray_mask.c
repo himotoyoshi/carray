@@ -668,7 +668,7 @@ rb_ca_value_array (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  obj = rb_ca_refer_new(self, ca->data_type, ca->rank, ca->dim, ca->bytes, 0);
+  obj = rb_ca_refer_new(self, ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
   Data_Get_Struct(obj, CArray, co);
 
   ca_set_flag(co, CA_FLAG_VALUE_ARRAY);
@@ -777,7 +777,7 @@ rb_ca_is_masked (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  co = carray_new(CA_BOOLEAN, ca->rank, ca->dim, ca->bytes, NULL);
+  co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
@@ -820,7 +820,7 @@ rb_ca_is_not_masked (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  co = carray_new(CA_BOOLEAN, ca->rank, ca->dim, ca->bytes, NULL);
+  co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {

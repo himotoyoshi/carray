@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -43,20 +43,20 @@ int
 ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
                CArray **grid, int8_t *contig, int share)
 {
-  int8_t rank, data_type;
+  int8_t ndim, data_type;
   ca_size_t *dim0;
   ca_size_t elements, bytes;
   double  length;
   int i, j, k;
 
   data_type = parent->data_type;
-  rank      = parent->rank;
+  ndim      = parent->ndim;
   bytes     = parent->bytes;
   dim0      = parent->dim;
 
   elements = 1;
   length = bytes;
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     if ( dim[i] < 0 ) {
       rb_raise(rb_eRuntimeError, "negative size for %i-th dimension", i);
     }
@@ -71,12 +71,12 @@ ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
   ca->obj_type  = CA_OBJ_GRID;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -88,14 +88,14 @@ ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
     ca->contig = contig;
   }
   else {
-    ca->grid   = ALLOC_N(CArray *, rank);
-    ca->contig = ALLOC_N(int8_t, rank);
+    ca->grid   = ALLOC_N(CArray *, ndim);
+    ca->contig = ALLOC_N(int8_t, ndim);
   }
 
-  memcpy(ca->dim, dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, dim, ndim * sizeof(ca_size_t));
 
   if ( ! share ) {
-    for (i=0; i<rank; i++) {
+    for (i=0; i<ndim; i++) {
       if ( grid[i] ) {
         if ( ca_is_any_masked(grid[i]) ) {
           ca_size_t gsize = grid[i]->elements - ca_count_masked(grid[i]);
@@ -137,7 +137,7 @@ ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
     }
   }
 
-  if ( ca->rank == 1 && ca_is_scalar(grid[0]) ) {
+  if ( ca->ndim == 1 && ca_is_scalar(grid[0]) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
 
@@ -169,7 +169,7 @@ free_ca_grid (void *ap)
     ca_free(ca->mask);
     if ( ! (ca->flags & CA_FLAG_SHARE_INDEX)) {
       xfree(ca->contig);
-      for (i=0; i<ca->rank; i++) {
+      for (i=0; i<ca->ndim; i++) {
         ca_free(ca->grid[i]);
       }
       xfree(ca->grid);
@@ -217,7 +217,7 @@ ca_grid_func_ptr_at_index (void *ap, ca_size_t *idx)
     ca_size_t  n;
 
     n = 0;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       n = dim0[i]*n + *(ca_size_t*) ca_ptr_at_addr(grid[i], idx[i]);
     }
 
@@ -240,7 +240,7 @@ ca_grid_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   CArray **grid = ca->grid;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     ca_fetch_addr(grid[i], idx[i], &idx0[i]);
   }
   ca_fetch_index(ca->parent, idx0, ptr);
@@ -253,7 +253,7 @@ ca_grid_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   CArray **grid = ca->grid;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     ca_fetch_addr(grid[i], idx[i], &idx0[i]);
   }
   ca_store_index(ca->parent, idx0, ptr);
@@ -386,7 +386,7 @@ ca_grid_attach_loop (CAGrid *ca, int16_t level, ca_size_t *idx, ca_size_t *idx0)
   CArray **grid = ca->grid;
   ca_size_t i, k;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[level] = 0;
     if ( ca->contig[level] ) {
@@ -460,7 +460,7 @@ ca_grid_sync_loop (CAGrid *ca, int16_t level, ca_size_t *idx, ca_size_t *idx0)
   CArray **grid = ca->grid;
   ca_size_t i, k;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[level] = 0;
     if ( ca->contig[level] ) {
@@ -532,7 +532,7 @@ ca_grid_fill_loop (CAGrid *ca, char *ptr,
 {
   CArray **grid = ca->grid;
   ca_size_t i, k;
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx0[level] = 0;
     if ( ca->contig[level] ) {
       char *p = ca_ptr_at_index(ca->parent, idx0);
@@ -624,21 +624,21 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
 
   ridx = rb_ary_new4(argc, argv);
 
-  if ( RARRAY_LEN(ridx) > ca->rank ) {
-    rb_raise(rb_eArgError, "# of arguments doesn't equal to the rank");
+  if ( RARRAY_LEN(ridx) > ca->ndim ) {
+    rb_raise(rb_eArgError, "# of arguments doesn't equal to the ndim");
   }
-  else if ( RARRAY_LEN(ridx) < ca->rank ) {
+  else if ( RARRAY_LEN(ridx) < ca->ndim ) {
     volatile VALUE ref;
     CArray *cv;
     ca_size_t rdim[CA_RANK_MAX];
-    ca_size_t rrank = RARRAY_LEN(ridx);
+    ca_size_t rndim = RARRAY_LEN(ridx);
     ca_size_t j = 0, k;
-    for (i=0; i<rrank; i++) {
+    for (i=0; i<rndim; i++) {
       rval = rb_ary_entry(ridx, i);
       if ( rb_obj_is_carray(rval) ) {
         Data_Get_Struct(rval, CArray, cv);
         rdim[i] = 1;
-        for (k=0; k<cv->rank; k++) {
+        for (k=0; k<cv->ndim; k++) {
           rdim[i] *= ca->dim[j];
           j += 1;
         }
@@ -648,10 +648,10 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
         j += 1;
       }
     }
-    if ( j != ca->rank ) {
-      rb_raise(rb_eArgError, "invalid total rank of args");
+    if ( j != ca->ndim ) {
+      rb_raise(rb_eArgError, "invalid total ndim of args");
     }
-    ref = rb_ca_refer_new(self, ca->data_type, rrank, rdim, ca->bytes, 0);
+    ref = rb_ca_refer_new(self, ca->data_type, rndim, rdim, ca->bytes, 0);
     return rb_ca_grid(argc, argv, ref);
   }
 

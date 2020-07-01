@@ -293,10 +293,10 @@ rb_ca_cumprod (int argc, VALUE *argv, VALUE self)
   Data_Get_Struct(self, CArray, ca);
 
   if ( ca_is_complex_type(ca) ) {
-    co = carray_new(CA_CMPLX128, ca->rank, ca->dim, 0, NULL);
+    co = carray_new(CA_CMPLX128, ca->ndim, ca->dim, 0, NULL);
   }
   else {
-    co = carray_new(CA_FLOAT64, ca->rank, ca->dim, 0, NULL);
+    co = carray_new(CA_FLOAT64, ca->ndim, ca->dim, 0, NULL);
   }
 
   min_count = ( NIL_P(rmin_count) || ! ca_has_mask(ca) ) ?
@@ -504,10 +504,10 @@ rb_ca_cumwsum (int argc, VALUE *argv, VALUE self)
   }
 
   if ( ca_is_complex_type(ca) ) {
-    co = carray_new(CA_CMPLX128, ca->rank, ca->dim, 0, NULL);
+    co = carray_new(CA_CMPLX128, ca->ndim, ca->dim, 0, NULL);
   }
   else {
-    co = carray_new(CA_FLOAT64, ca->rank, ca->dim, 0, NULL);
+    co = carray_new(CA_FLOAT64, ca->ndim, ca->dim, 0, NULL);
   }
 
   min_count = ( NIL_P(rmin_count) || ( ! ca_has_mask(ca) ) ) ?
@@ -2029,7 +2029,7 @@ rb_ca_grade (int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eArgError, "bin number must be larger than 1");
   }
 
-  out = rb_carray_new_safe(CA_SIZE, ca->rank, ca->dim, 0, NULL);
+  out = rb_carray_new_safe(CA_SIZE, ca->ndim, ca->dim, 0, NULL);
   Data_Get_Struct(out, CArray, sa);
 
   ca_attach(ca);

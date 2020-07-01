@@ -382,7 +382,7 @@ ca_addr2index (void *ap, ca_size_t addr, ca_size_t *idx)
   CArray *ca = (CArray *) ap;
   ca_size_t *dim = ca->dim;
   int8_t i;
-  for (i=ca->rank-1; i>=0; i--) {
+  for (i=ca->ndim-1; i>=0; i--) {
     idx[i] = addr % dim[i];
     addr  /= dim[i];
   }
@@ -398,7 +398,7 @@ ca_index2addr (void *ap, ca_size_t *idx)
   int8_t   i;
   ca_size_t  n;
   n = idx[0];
-  for (i=1; i<ca->rank; i++) {
+  for (i=1; i<ca->ndim; i++) {
     n = dim[i]*n+idx[i];
   }
   return n;

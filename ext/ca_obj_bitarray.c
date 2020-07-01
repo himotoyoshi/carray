@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -55,7 +55,7 @@ static uint8_t bits[8] = {
 int
 ca_bitarray_setup (CABitarray *ca, CArray *parent)
 {
-  int8_t rank;
+  int8_t ndim;
   ca_size_t bitlen, elements;
 
   /* check arguments */
@@ -64,19 +64,19 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
     rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
   }
 
-  rank     = parent->rank + 1;
+  ndim     = parent->ndim + 1;
   bitlen   = 8 * parent->bytes;
   elements = bitlen * parent->elements;
 
   ca->obj_type  = CA_OBJ_BITARRAY;
   ca->data_type = CA_BOOLEAN;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = 1;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -85,8 +85,8 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   ca->bytelen   = parent->bytes;
   ca->bitlen    = bitlen;
 
-  memcpy(ca->dim, parent->dim, (rank-1) * sizeof(ca_size_t));
-  ca->dim[rank-1] = bitlen;
+  memcpy(ca->dim, parent->dim, (ndim-1) * sizeof(ca_size_t));
+  ca->dim[ndim-1] = bitlen;
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -158,7 +158,7 @@ ca_bitarray_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitarray *ca = (CABitarray *) ap;
   ca_size_t bytes  = ca->parent->bytes;
-  ca_size_t offset = idx[ca->rank-1];
+  ca_size_t offset = idx[ca->ndim-1];
   ca_size_t major, minor;
   
   if ( ca_endian == CA_BIG_ENDIAN &&
@@ -190,7 +190,7 @@ ca_bitarray_func_store_index (void *ap, ca_size_t *idx, void *ptr)
 {
   CABitarray *ca = (CABitarray *) ap;
   uint8_t test = *(uint8_t *) ptr;
-  ca_size_t offset = idx[ca->rank-1];
+  ca_size_t offset = idx[ca->ndim-1];
   ca_size_t bytes  = ca->parent->bytes;
   ca_size_t major, minor;
 
@@ -310,16 +310,16 @@ ca_bitarray_func_create_mask (void *ap)
   ca_size_t count[CA_RANK_MAX];
   int8_t i;
 
-  for (i=0; i<ca->rank-1; i++) {
+  for (i=0; i<ca->ndim-1; i++) {
     count[i] = 0;
   }
-  count[ca->rank-1] = ca->bitlen;
+  count[ca->ndim-1] = ca->bitlen;
 
   ca_update_mask(ca->parent);
   if ( ! ca->parent->mask ) {
     ca_create_mask(ca->parent);
   }
-  ca->mask = (CArray *) ca_repeat_new(ca->parent->mask, ca->rank, count);
+  ca->mask = (CArray *) ca_repeat_new(ca->parent->mask, ca->ndim, count);
 
   ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
 }

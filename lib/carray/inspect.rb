@@ -17,14 +17,14 @@ class CArray::Inspector  # :nodoc:
   end
 
   def inspect_string
-    if @carray.rank == 0
-      raise "can't inspect CArray of rank == 0"
+    if @carray.ndim == 0
+      raise "can't inspect CArray of ndim == 0"
     end
     formatter  = get_formatter()
     class_name = get_class_name()
     type_name  = get_type_name()
     shape      = get_shape()
-    data_spec  = get_data_spec(0, Array.new(@carray.rank){0}, formatter)
+    data_spec  = get_data_spec(0, Array.new(@carray.ndim){0}, formatter)
     info_list  = get_info_list()
     output = ["<",
               format("%s.%s(%s)", class_name, type_name, shape.join(",")),
@@ -152,9 +152,9 @@ class CArray::Inspector  # :nodoc:
 
   def get_data_spec (level, idx, formatter)
     io = "[ "
-    rank = @carray.rank
+    ndim = @carray.ndim
     dim  = @carray.dim
-    if level == rank - 1
+    if level == ndim - 1
       over = false
       dim[level].times do |i|
         idx[level] = i

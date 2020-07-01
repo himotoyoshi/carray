@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -211,7 +211,7 @@ int
 ca_bitfield_setup (CABitfield *ca, CArray *parent,
                    ca_size_t offset, ca_size_t bitlen)
 {
-  int8_t rank;
+  int8_t ndim;
   int8_t data_type;
   ca_size_t bytes = 0, elements;
   ca_size_t bitsize;
@@ -228,7 +228,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   }
   */
 
-  rank     = parent->rank;
+  ndim     = parent->ndim;
   bitsize  = parent->bytes * 8;
   elements = parent->elements;
 
@@ -293,12 +293,12 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->obj_type  = CA_OBJ_BITFIELD;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -308,7 +308,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->bit_offset  = bit_offset;
   ca->bit_mask    = bit_mask;
 
-  memcpy(ca->dim, parent->dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -484,7 +484,7 @@ ca_bitfield_func_create_mask (void *ap)
   }
 
   ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                     CA_BOOLEAN, ca->rank, ca->dim, 0, 0);
+                                     CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
 ca_operation_function_t ca_bitfield_func = {

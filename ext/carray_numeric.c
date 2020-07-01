@@ -168,7 +168,7 @@ rb_ca_arg (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  co = carray_new(CA_FLOAT64, ca->rank, ca->dim, 0, NULL);
+  co = carray_new(CA_FLOAT64, ca->ndim, ca->dim, 0, NULL);
   obj = ca_wrap_struct(co);
 
   if ( ca_has_mask(ca) ) {
