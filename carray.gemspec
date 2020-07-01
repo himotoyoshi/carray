@@ -1,6 +1,6 @@
 Gem::Specification::new do |s|
 
-  version = "1.4.0"
+  version = "1.5.0"
 
   files = Dir.glob("**/*") - [ 
                                Dir.glob("carray-*.gem"), 
@@ -22,6 +22,7 @@ Gem::Specification::new do |s|
   s.version     = version
   s.author      = "Hiroki Motoyoshi"
   s.email       = ""
+  s.licenses    = ['MIT']
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
   s.extensions  = [ "extconf.rb" ] 
