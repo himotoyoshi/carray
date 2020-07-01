@@ -42,7 +42,7 @@ double ca_mem_count = 0.0;
 
 /* Threshold for forced garbage collection and its default value */
 double ca_gc_interval; 
-const double ca_default_gc_interval = 40.0; /* 40MB */
+const double ca_default_gc_interval = 100.0; /* 100MB */
 
 #define MB (1024*1024)
 
