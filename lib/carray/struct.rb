@@ -275,11 +275,11 @@ end
 module CA
 
   def self.struct (opt={}, &block)
-    return Struct::Builder.new(:struct, opt).define(&block)
+    return CAStruct::Builder.new(:struct, opt).define(&block)
   end
 
   def self.union (opt={}, &block)
-    return Struct::Builder.new(:union, opt).define(&block)
+    return CAStruct::Builder.new(:union, opt).define(&block)
   end
 
 end

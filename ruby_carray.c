@@ -35,7 +35,6 @@ void Init_carray_iterator ();
 void Init_carray_operator ();
 void Init_carray_numeric ();
 void Init_carray_math ();
-void Init_carray_random ();
 void Init_carray_utils ();
 void Init_carray_order ();
 void Init_carray_sort_addr ();
@@ -208,7 +207,6 @@ Init_carray_ext ()
   Init_carray_operator();
   Init_carray_math();      /* order of math, numeric should not be changed */
   Init_carray_numeric();   /* order of math, numeric should not be changed */
-  Init_carray_random();
   Init_carray_order();
   Init_carray_sort_addr();  
   Init_carray_stat();
