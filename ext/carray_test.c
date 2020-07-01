@@ -571,9 +571,11 @@ rb_ca_modify (VALUE self)
   if ( OBJ_FROZEN(self) ) {
     rb_error_frozen("CArray object");
   }
+  /*
   if ( ( ! OBJ_TAINTED(self) ) && rb_safe_level() >= 4 ) {
     rb_raise(rb_eSecurityError, "Insecure: can't modify carray");
   }
+  */
 }
 
 VALUE
@@ -584,7 +586,6 @@ rb_ca_freeze (VALUE self)
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
   return rb_obj_freeze(self);
 }
-
 
 void
 Init_carray_test ()
