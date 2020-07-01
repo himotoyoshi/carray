@@ -1065,7 +1065,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
 */
 
 VALUE
-rb_ca_s_cast_other (VALUE klass, VALUE self, VALUE other)
+rb_ca_cast_with (VALUE self, VALUE other)
 {
   if ( rb_obj_is_carray(self) ) {
     rb_ca_cast_self_or_other(&self, &other);
@@ -1145,7 +1145,7 @@ Init_carray_cast ()
                              "cast", rb_ca_s_cast, 1);
   rb_define_singleton_method(rb_cCArray,
            "cast_self_or_other", rb_ca_s_cast_self_or_other, 2);
-  rb_define_singleton_method(rb_cCArray,
-           "cast_other", rb_ca_s_cast_other, 2);
+
+  rb_define_method(rb_cCArray, "cast_with", rb_ca_cast_with, 1);
 }
 
