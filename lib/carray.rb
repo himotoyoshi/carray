@@ -55,6 +55,7 @@ unless $CARRAY_NO_AUTOLOAD
   require 'carray/autoload/autoload_object_link'
   require 'carray/autoload/autoload_object_pack'
 
+  require 'carray/autoload/autoload_gem_random'
   require 'carray/autoload/autoload_gem_gnuplot'
   require 'carray/autoload/autoload_gem_narray'
   require 'carray/autoload/autoload_gem_numo_narray'
