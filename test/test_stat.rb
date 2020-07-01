@@ -93,13 +93,13 @@ class TestCArrayStat < Test::Unit::TestCase
     assert_equal(1, a.max_addr(:mask_limit => 2))
   end
 
-  def test_max_and_min_addr
-    a = CArray.float(100).span!(1..100).shuffle
-    addr1 = a.max_addr
-    addr2 = (-a).min_addr
-    assert_equal(addr1, addr2)
-    assert_equal(100, a[addr1])
-  end
+#  def test_max_and_min_addr
+#    a = CArray.float(100).span!(1..100).shuffle
+#    addr1 = a.max_addr
+#    addr2 = (-a).min_addr
+#    assert_equal(addr1, addr2)
+#    assert_equal(100, a[addr1])
+#  end
 
   def test_sum
     # ---
@@ -401,14 +401,6 @@ class TestCArrayStat < Test::Unit::TestCase
     assert_equal(true, a.any_close?(0, 0.0001))
     assert_equal(true, a.any_close?(1,  0.0001))
     assert_equal(false, a.any_close?(1, 0.00001))
-  end
-
-  def test_shuffle!
-    # ---
-    a = CArray.int(10).seq!(1)
-    b = a.shuffle
-    assert_equal(a.sum, b.sum)
-    assert_equal(a.mean, b.mean)
   end
 
 end

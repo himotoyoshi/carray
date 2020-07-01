@@ -1,5 +1,5 @@
 class CArray
-  serialize_rb = "carray/base/serialize"
+  serialize_rb = "carray/serialize"
   autoload :Serializer, serialize_rb
   autoload_method "self.save", serialize_rb
   autoload_method "self.load", serialize_rb

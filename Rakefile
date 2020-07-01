@@ -6,7 +6,7 @@ GEMSPEC = "carray.gemspec"
 
 task :install do
   spec = eval File.read(GEMSPEC)
-  version_h = `ruby version.rb`.chomp
+  version_h = `ruby ext/version.rb`.chomp
   if spec.version.to_s != version_h
     STDERR.puts "Mismatch in version between carray.gemspec and version.h"
     STDERR.puts "  carray.gemspec - #{spec.version.to_s }"

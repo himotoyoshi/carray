@@ -1,8 +1,10 @@
-#autoload :Numo, "carray-numo-narray"
-
 class CArray
   autoload_method :to_numo, "carray-numo-narray"
   autoload_method :numo, "carray-numo-narray"
+  autoload_method "self.as_numo", "carray-numo-narray"
+  autoload_method "self.as_numo!", "carray-numo-narray"
+  autoload_method :as_numo, "carray-numo-narray"
+  autoload_method :as_numo!, "carray-numo-narray"
 end
 
 module Numo
@@ -11,4 +13,3 @@ module Numo
     autoload_method :ca, "carray-numo-narray"
   end
 end
-

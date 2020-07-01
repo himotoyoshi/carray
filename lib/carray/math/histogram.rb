@@ -49,7 +49,7 @@ class CAHistogram < CArray
       raise "scales should be an array of scales"
     end
 
-    rank = scales.size
+    ndim = scales.size
     @scales = scales.clone
     @scales.map! { |s| CArray.wrap_readonly(s, CA_DOUBLE) }
     
@@ -60,10 +60,10 @@ class CAHistogram < CArray
         raise "invalid length of offset in option"
       end
     else
-      @offsets = Array.new(rank) { 0 }
+      @offsets = Array.new(ndim) { 0 }
     end
 
-    dim = Array.new(rank) { |i| 
+    dim = Array.new(ndim) { |i| 
       case @offsets[i]
       when 0
         @scales[i].size
@@ -76,12 +76,12 @@ class CAHistogram < CArray
     
     super(data_type, dim, &block)
 
-    @mid_points = Array.new(rank) { |i|
+    @mid_points = Array.new(ndim) { |i|
       x = (@scales[i] + @scales[i].shifted(-1))/2
       x[0..-2].to_ca
     }
 
-    @inner = self[*Array.new(rank) { |i| @offsets[i]..-2 }]
+    @inner = self[*Array.new(ndim) { |i| @offsets[i]..-2 }]
 
   end
 
@@ -91,7 +91,7 @@ class CAHistogram < CArray
   alias midpoints mid_points
 
   def increment (*values)
-    idx = Array.new(rank) {|i|
+    idx = Array.new(ndim) {|i|
       vi = CArray.wrap_readonly(values[i], CA_DOUBLE)
       @scales[i].bin(vi, @include_upper, @include_lowest, @offsets[i]).to_ca
     }
@@ -103,7 +103,7 @@ class CAHistogram < CArray
     val = CArray.wrap_readonly(values.pop, self.data_type)
     sel = val.ne(0)
     val = val[sel].to_ca
-    idx = Array.new(rank) {|i|
+    idx = Array.new(ndim) {|i|
       vi = CArray.wrap_readonly(values[i], CA_DOUBLE)[sel]
       @scales[i].bin(vi, @include_upper, @include_lowest, @offsets[i]).to_ca
     }
