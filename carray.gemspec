@@ -25,7 +25,7 @@ Gem::Specification::new do |s|
   s.licenses    = ['MIT']
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
-  s.extensions  = [ "extconf.rb" ] 
+  s.extensions  = [ "ext/extconf.rb" ] 
   s.required_ruby_version = ">= 2.4.0"
 end
 
