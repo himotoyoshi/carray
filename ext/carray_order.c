@@ -529,75 +529,6 @@ rb_ca_sorted_copy (VALUE self)
     }                                                                   \
   }
 
-void ca_check_rand_init ();
-
-/* rdoc:
-  class CArray
-    # shuffles the elements.
-    # If `self` has mask, the masked elements are also moved by shuffling.
-    def shuffle!
-    end
-  end
-*/
-
-static VALUE
-rb_ca_shuffle_bang (VALUE self)
-{
-  CArray *ca;
-
-  rb_ca_modify(self);
-
-  Data_Get_Struct(self, CArray, ca);
-
-  ca_check_rand_init();
-
-  ca_attach(ca);
-
-  switch ( ca->data_type ) {
-  case CA_BOOLEAN:
-  case CA_INT8:     proc_shuffle(int8_t);     break;
-  case CA_UINT8:    proc_shuffle(uint8_t);   break;
-  case CA_INT16:    proc_shuffle(int16_t);    break;
-  case CA_UINT16:   proc_shuffle(uint16_t);  break;
-  case CA_INT32:    proc_shuffle(int32_t);    break;
-  case CA_UINT32:   proc_shuffle(uint32_t);  break;
-  case CA_INT64:    proc_shuffle(int64_t);    break;
-  case CA_UINT64:   proc_shuffle(uint64_t);  break;
-  case CA_FLOAT32:  proc_shuffle(float32_t);  break;
-  case CA_FLOAT64:  proc_shuffle(float64_t);  break;
-  case CA_FLOAT128: proc_shuffle(float128_t); break;
-#ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64:  proc_shuffle(cmplx64_t);  break;
-  case CA_CMPLX128: proc_shuffle(cmplx128_t); break;
-  case CA_CMPLX256: proc_shuffle(cmplx256_t); break;
-#endif
-  case CA_FIXLEN: proc_shuffle_fixlen();  break;
-  case CA_OBJECT:   proc_shuffle(VALUE);      break;
-  default:
-    rb_raise(rb_eCADataTypeError, "[BUG] array has an unknown data type");
-  }
-
-  ca_sync(ca);
-  ca_detach(ca);
-
-  return self;
-}
-
-/* rdoc:
-  class CArray
-    def shuffle
-    end
-  end
-*/
-
-static VALUE
-rb_ca_shuffled_copy (VALUE self)
-{
-  volatile VALUE out = rb_ca_copy(self);
-  rb_ca_data_type_inherit(out, self);
-  return rb_ca_shuffle_bang(out);
-}
-
 /* --------------------------------------------------------------- */
 
 /* rdoc:
@@ -1023,9 +954,6 @@ Init_carray_order ()
 
   rb_define_method(rb_cCArray,  "sort!", rb_ca_sort_bang, 0);
   rb_define_method(rb_cCArray,  "sort", rb_ca_sorted_copy, 0);
-
-  rb_define_method(rb_cCArray,  "shuffle!", rb_ca_shuffle_bang, 0);
-  rb_define_method(rb_cCArray,  "shuffle", rb_ca_shuffled_copy, 0);
 
   rb_define_method(rb_cCArray,  "search", rb_ca_linear_search, -1);
   rb_define_method(rb_cCArray,  "search_index", rb_ca_linear_search_index, -1);
