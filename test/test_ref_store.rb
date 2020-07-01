@@ -87,19 +87,19 @@ class TestCArrayRefStore < Test::Unit::TestCase
     assert_equal(CA_INT([[1,1,1],[1,1,5],[6,7,8]]), a)
   end
 
-  def test_access_mapping
-    # ---
-    a = CArray.int(3,3).seq!;
-    m = a.shuffle
-    assert_equal(10*m, (10*a)[m])
+#  def test_access_mapping
+#    # ---
+#    a = CArray.int(3,3).seq!;
+#    m = a.shuffle
+#    assert_equal(10*m, (10*a)[m])
 
     # ---
-    a = CArray.int(3,3).seq!
-    b = 10*a
-    m = a.shuffle
-    a[m] = (10*m)
-    assert_equal(b, a)
-  end
+#    a = CArray.int(3,3).seq!
+#    b = 10*a
+#    m = a.shuffle
+#    a[m] = (10*m)
+#    assert_equal(b, a)
+#  end
 
   def test_access_grid
     # ---

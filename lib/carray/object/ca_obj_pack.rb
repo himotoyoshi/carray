@@ -22,9 +22,9 @@ class CAPack < CAObject # :nodoc:
 
   def initialize (list, options={})
     @list   = list
-    @rank   = options[:rank]
-    unless @rank
-      @rank = list.map{|m| m.rank}.min
+    @ndim   = options[:ndim]
+    unless @ndim
+      @ndim = list.map{|m| m.ndim}.min
     end
     @names  = options[:names] || [nil]*@list.size
     @dim    = guess_dim(list)
@@ -55,10 +55,10 @@ class CAPack < CAObject # :nodoc:
     list.each do |mem|
       case mem
       when CArray
-        if mem.rank < @rank
-          raise "mem.rank < @rank"
+        if mem.ndim < @ndim
+          raise "mem.ndim < @ndim"
         else
-          newdim = mem.dim[0, @rank]
+          newdim = mem.dim[0, @ndim]
         end
         if dim
           unless dim == newdim
@@ -78,10 +78,10 @@ class CAPack < CAObject # :nodoc:
         name = @names[i]
         case mem
         when CArray
-          if mem.rank == @rank
+          if mem.ndim == @ndim
             s.member mem.data_type, name, :bytes=>mem.bytes ### anonymous member
           else
-            dummy = Array.new(@rank){0} + [false]
+            dummy = Array.new(@ndim){0} + [false]
             s.member mem[*dummy].to_ca, name                ### anonymous member
           end
         else
