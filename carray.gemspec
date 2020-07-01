@@ -12,7 +12,7 @@ Gem::Specification::new do |s|
 
   s.platform    = Gem::Platform::RUBY
   s.name        = "carray"
-  s.summary     = "Multi-dimesional array class"
+  s.summary     = "Multi-dimesional array class for Ruby"
   s.description = <<-HERE
     CArray is a uniform multi-dimensional rectangular array class.
     It provides the various types of sub-arrays and references
@@ -25,6 +25,6 @@ Gem::Specification::new do |s|
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
   s.extensions  = [ "extconf.rb" ] 
-  s.required_ruby_version = ">= 1.8.1"
+  s.required_ruby_version = ">= 2.4.0"
 end
 
