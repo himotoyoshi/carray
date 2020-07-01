@@ -34,26 +34,26 @@ ca_check_type (void *ap, int8_t data_type)
 }
 
 void
-ca_check_rank (void *ap, int rank)
+ca_check_ndim (void *ap, int ndim)
 {
   CArray *ca = (CArray *) ap;
   if ( ! ca_is_scalar(ca) ) {
-    if ( ca->rank != rank ) {
-      rb_raise(rb_eRuntimeError, "rank mismatch");
+    if ( ca->ndim != ndim ) {
+      rb_raise(rb_eRuntimeError, "ndim mismatch");
     }
   }
 }
 
 void
-ca_check_shape (void *ap, int rank, ca_size_t *dim)
+ca_check_shape (void *ap, int ndim, ca_size_t *dim)
 {
   CArray *ca = (CArray *) ap;
   int i;
   if ( ! ca_is_scalar(ca) ) {
-    if ( ca->rank != rank ) {
+    if ( ca->ndim != ndim ) {
       rb_raise(rb_eRuntimeError, "shape mismatch");
     }
-    for (i=0; i<rank; i++) {
+    for (i=0; i<ndim; i++) {
       if ( ca->dim[i] != dim[i] ) {
         rb_raise(rb_eRuntimeError, "shape mismatch");
       }
@@ -72,12 +72,12 @@ ca_check_same_data_type (void *ap1, void *ap2)
 }
 
 void
-ca_check_same_rank (void *ap1, void *ap2)
+ca_check_same_ndim (void *ap1, void *ap2)
 {
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
-  if ( ca1->rank != ca2->rank ) {
-    rb_raise(rb_eRuntimeError, "rank mismatch");
+  if ( ca1->ndim != ca2->ndim ) {
+    rb_raise(rb_eRuntimeError, "ndim mismatch");
   }
 }
 
@@ -98,10 +98,10 @@ ca_check_same_shape (void *ap1, void *ap2)
   CArray *ca2 = (CArray *) ap2;
   int i;
   if ( ( ! ca_is_scalar(ca1) ) && ( ! ca_is_scalar(ca2) ) ) {
-    if ( ca1->rank != ca2->rank ) {
+    if ( ca1->ndim != ca2->ndim ) {
       rb_raise(rb_eRuntimeError, "shape mismatch");
     }
-    for (i=0; i<ca1->rank; i++) {
+    for (i=0; i<ca1->ndim; i++) {
       if ( ca1->dim[i] != ca2->dim[i] ) {
         rb_raise(rb_eRuntimeError, "shape mismatch");
       }
@@ -114,7 +114,7 @@ ca_check_index (void *ap, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
   int i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( idx[i] < 0 || idx[i] >= ca->dim[i] ) {
       rb_raise(rb_eRuntimeError, "invalid index");
     }
@@ -140,11 +140,11 @@ ca_has_same_shape (void *ap1, void *ap2)
   if ( ca_is_scalar(ca1) || ca_is_scalar(ca2) ) {
     return 1;
   }
-  else if ( ca1->rank != ca2->rank ) {
+  else if ( ca1->ndim != ca2->ndim ) {
     return 0;
   }
   else {
-    for (i=0; i<ca1->rank; i++) {
+    for (i=0; i<ca1->ndim; i++) {
       if ( ca1->dim[i] != ca2->dim[i] ) {
         return 0;
       }
@@ -158,7 +158,7 @@ ca_is_valid_index (void *ap, ca_size_t *idx)
 {
   CArray *ca = (CArray *) ap;
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( idx[i] < 0 || idx[i] >= ca->dim[i] ) {
       return 0;
     }
@@ -236,11 +236,11 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  if ( argc != ca->rank ) {
+  if ( argc != ca->ndim ) {
     rb_raise(rb_eArgError,
-             "invalid # of arguments (%i for %i)", argc, ca->rank);
+             "invalid # of arguments (%i for %i)", argc, ca->ndim);
   }
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx = NUM2SIZE(argv[i]);
     if ( idx < 0 ) {
       idx += ca->dim[i];
@@ -381,7 +381,7 @@ ca_equal (void *ap, void *bp)
     return 0;
   }
 
-  if ( ca->rank != cb->rank )  {          /* rank comparison */
+  if ( ca->ndim != cb->ndim )  {          /* ndim comparison */
     return 0;
   }
 
@@ -389,7 +389,7 @@ ca_equal (void *ap, void *bp)
     return 0;
   }
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( ca->dim[i] != cb->dim[i] ) {     /* dimensional shape comparison */
       return 0;
     }

@@ -15,19 +15,19 @@
 VALUE rb_cCAIterator;
 
 int8_t
-ca_iter_rank (VALUE self)
+ca_iter_ndim (VALUE self)
 {
-  int8_t rank;
+  int8_t ndim;
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     Data_Get_Struct(self, CAIterator, it);
-    rank = it->rank;
+    ndim = it->ndim;
   }
   else {
-    VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
-    rank = (int8_t) NUM2LONG(rrank);
+    VALUE rndim = rb_ivar_get(self, rb_intern("@ndim"));
+    ndim = (int8_t) NUM2LONG(rndim);
   }
-  return rank;
+  return ndim;
 }
 
 void
@@ -37,16 +37,16 @@ ca_iter_dim (VALUE self, ca_size_t *dim)
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     Data_Get_Struct(self, CAIterator, it);
-    for (i=0; i<it->rank; i++) {
+    for (i=0; i<it->ndim; i++) {
       dim[i] = it->dim[i];
     }
   }
   else {
-    VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
+    VALUE rndim = rb_ivar_get(self, rb_intern("@ndim"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
-    int8_t rank;
-    rank = (int8_t) NUM2INT(rrank);
-    for (i=0; i<rank; i++) {
+    int8_t ndim;
+    ndim = (int8_t) NUM2INT(rndim);
+    for (i=0; i<ndim; i++) {
       dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     }
   }
@@ -60,16 +60,16 @@ ca_iter_elements (VALUE self)
     CAIterator *it;
     Data_Get_Struct(self, CAIterator, it);
     elements = 1;
-    for (i=0; i<it->rank; i++) {
+    for (i=0; i<it->ndim; i++) {
       elements *= it->dim[i];
     }
   }
   else {
-    VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
+    VALUE rndim = rb_ivar_get(self, rb_intern("@ndim"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
-    int8_t rank = (int8_t) NUM2INT(rrank);
+    int8_t ndim = (int8_t) NUM2INT(rndim);
     elements = 1;
-    for (i=0; i<rank; i++) {
+    for (i=0; i<ndim; i++) {
       elements *= NUM2SIZE(rb_ary_entry(rdim, i));
     }
   }
@@ -119,10 +119,10 @@ ca_iter_kernel_at_index (VALUE self, ca_size_t *idx, VALUE rref)
   }
   else {
     VALUE vidx;
-    int8_t rank = ca_iter_rank(self);
+    int8_t ndim = ca_iter_ndim(self);
     int i;
-    vidx = rb_ary_new2(rank);
-    for (i=0; i<rank; i++) {
+    vidx = rb_ary_new2(ndim);
+    for (i=0; i<ndim; i++) {
       rb_ary_store(vidx, i, SIZE2NUM(idx[i]));
     }
     rker = rb_funcall(self, rb_intern("kernel_at_index"), 2,
@@ -161,10 +161,10 @@ ca_iter_kernel_move_to_index (VALUE self, ca_size_t *idx, VALUE rref)
   }
   else {
     VALUE vidx;
-    int8_t rank = ca_iter_rank(self);
+    int8_t ndim = ca_iter_ndim(self);
     int i;
-    vidx = rb_ary_new2(rank);
-    for (i=0; i<rank; i++) {
+    vidx = rb_ary_new2(ndim);
+    for (i=0; i<ndim; i++) {
       rb_ary_store(vidx, i, SIZE2NUM(idx[i]));
     }
     rker = rb_funcall(self, rb_intern("kernel_move_to_index"), 2,
@@ -188,17 +188,17 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     Data_Get_Struct(self, CAIterator, it);
-    co = carray_new_safe(data_type, it->rank, it->dim, bytes, NULL);
+    co = carray_new_safe(data_type, it->ndim, it->dim, bytes, NULL);
   }
   else {
-    VALUE rrank = rb_ivar_get(self, rb_intern("@rank"));
+    VALUE rndim = rb_ivar_get(self, rb_intern("@ndim"));
     VALUE rdim  = rb_ivar_get(self, rb_intern("@dim"));
-    int8_t rank = NUM2LONG(rrank);
+    int8_t ndim = NUM2LONG(rndim);
     ca_size_t dim[CA_RANK_MAX];
-    for (i=0; i<rank; i++) {
+    for (i=0; i<ndim; i++) {
       dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     }
-    co = carray_new_safe(data_type, rank, dim, bytes, NULL);
+    co = carray_new_safe(data_type, ndim, dim, bytes, NULL);
   }
 
   obj = ca_wrap_struct(co);
@@ -211,16 +211,16 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
 
 /* rdoc:
   class CAIterator
-    def rank
+    def ndim
     end
   end
 */
 
 
 VALUE
-rb_ca_iter_rank (VALUE self)
+rb_ca_iter_ndim (VALUE self)
 {
-  return LONG2NUM(ca_iter_rank(self));
+  return LONG2NUM(ca_iter_ndim(self));
 }
 
 /* rdoc:
@@ -235,11 +235,11 @@ rb_ca_iter_dim (VALUE self)
 {
   VALUE rdim;
   ca_size_t dim[CA_RANK_MAX];
-  int8_t rank = ca_iter_rank(self);
+  int8_t ndim = ca_iter_ndim(self);
   int i;
   ca_iter_dim(self, dim);
-  rdim = rb_ary_new2(rank);
-  for (i=0; i<rank; i++) {
+  rdim = rb_ary_new2(ndim);
+  for (i=0; i<ndim; i++) {
     rb_ary_store(rdim, i, SIZE2NUM(dim[i]));
   }
   return rdim;
@@ -301,7 +301,7 @@ rb_ca_iter_kernel_at_index (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rindex, rcarray;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  rank = ca_iter_rank(self);
+  int8_t  ndim = ca_iter_ndim(self);
   int i;
 
   rb_scan_args(argc, argv, "11", (VALUE *) &rindex, (VALUE *) &rcarray);
@@ -310,7 +310,7 @@ rb_ca_iter_kernel_at_index (int argc, VALUE *argv, VALUE self)
     rcarray = rb_ca_iter_reference(self);
   }
 
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     idx[i] = NUM2SIZE(rb_ary_entry(rindex, i));
   }
 
@@ -341,10 +341,10 @@ VALUE
 rb_ca_iter_kernel_move_to_index (VALUE self, VALUE rindex, VALUE rker)
 {
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  rank = ca_iter_rank(self);
+  int8_t  ndim = ca_iter_ndim(self);
   int i;
 
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     idx[i] = NUM2SIZE(rb_ary_entry(rindex, i));
   }
 
@@ -501,7 +501,7 @@ rb_ca_iter_filter (int argc, VALUE *argv, VALUE self)
   argc--;
   argv++;
 
-  co = carray_new(data_type, cr->rank, cr->dim, 0, NULL);
+  co = carray_new(data_type, cr->ndim, cr->dim, 0, NULL);
   routput = ca_wrap_struct(co);
 
   if ( NIL_P(argv[0]) ) {
@@ -606,10 +606,10 @@ Init_carray_iterator ()
 {
   rb_cCAIterator = rb_define_class("CAIterator", rb_cObject);
 
-  rb_define_method(rb_cCAIterator, "rank",      rb_ca_iter_rank,      0);
-  rb_define_method(rb_cCAIterator, "ndim",      rb_ca_iter_rank,      0);
+  rb_define_method(rb_cCAIterator, "ndim",      rb_ca_iter_ndim,      0);
+  rb_define_method(rb_cCAIterator, "rank",      rb_ca_iter_ndim,      0); /* alias */
   rb_define_method(rb_cCAIterator, "dim",       rb_ca_iter_dim,       0);
-  rb_define_method(rb_cCAIterator, "shape",     rb_ca_iter_dim,       0);
+  rb_define_method(rb_cCAIterator, "shape",     rb_ca_iter_dim,       0); /* alias */
   rb_define_method(rb_cCAIterator, "elements",  rb_ca_iter_elements,  0);
   rb_define_method(rb_cCAIterator, "reference", rb_ca_iter_reference, 0);
 

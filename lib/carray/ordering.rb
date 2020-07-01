@@ -15,7 +15,7 @@ class CArray
   # reversed
 
   def reversed
-    return self[*([-1..0]*rank)]
+    return self[*([-1..0]*ndim)]
   end
   
   # roll / shift
@@ -30,7 +30,7 @@ class CArray
   end
 
   def rolled (*argv)
-    argv.push({:roll => Array.new(rank){1} })
+    argv.push({:roll => Array.new(ndim){1} })
     return shifted(*argv)
   end
 

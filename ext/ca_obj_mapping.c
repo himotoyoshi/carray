@@ -21,7 +21,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -49,7 +49,7 @@ static VALUE rb_cCAMapping;
 int
 ca_mapping_setup (CAMapping *ca, CArray *parent, CArray *mapper, int share)
 {
-  int8_t rank, data_type;
+  int8_t ndim, data_type;
   ca_size_t elements, bytes;
   ca_size_t *p;
   ca_size_t i;
@@ -66,19 +66,19 @@ ca_mapping_setup (CAMapping *ca, CArray *parent, CArray *mapper, int share)
   ca->bytes     = bytes;
   ca->ptr       = NULL;
 
-  rank          = mapper->rank;
+  ndim          = mapper->ndim;
   elements      = mapper->elements;
 
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->elements  = elements;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  memcpy(ca->dim, mapper->dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, mapper->dim, ndim * sizeof(ca_size_t));
 
   if ( share ) {
     ca_set_flag(ca, CA_FLAG_SHARE_INDEX);
@@ -176,7 +176,7 @@ ca_mapping_func_ptr_at_index (void *ap, ca_size_t *idx)
     int8_t   i;
     ca_size_t  n;
     n = idx[0];
-    for (i=1; i<ca->rank; i++) {
+    for (i=1; i<ca->ndim; i++) {
       n = dim[i]*n+idx[i];
     }
     n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);
@@ -200,7 +200,7 @@ ca_mapping_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t   i;
   ca_size_t  n;
   n = idx[0];
-  for (i=1; i<ca->rank; i++) {
+  for (i=1; i<ca->ndim; i++) {
     n = dim[i]*n+idx[i];
   }
   n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);
@@ -215,7 +215,7 @@ ca_mapping_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   int8_t   i;
   ca_size_t  n;
   n = idx[0];
-  for (i=1; i<ca->rank; i++) {
+  for (i=1; i<ca->ndim; i++) {
     n = dim[i]*n+idx[i];
   }
   n = *(ca_size_t*) ca_ptr_at_addr(ca->mapper, n);

@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -44,7 +44,7 @@ static VALUE rb_cCATrans;
 int
 ca_trans_setup (CATrans *ca, CArray *parent, ca_size_t *imap)
 {
-  int8_t data_type, rank;
+  int8_t data_type, ndim;
   ca_size_t bytes, elements;
   ca_size_t *dim0;
   ca_size_t newdim[CA_RANK_MAX];
@@ -54,17 +54,17 @@ ca_trans_setup (CATrans *ca, CArray *parent, ca_size_t *imap)
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
-  rank      = parent->rank;
+  ndim      = parent->ndim;
   elements  = parent->elements;
   dim0      = parent->dim;
 
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     map[i] = -1;
   }
 
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     idim = imap[i];
-    if ( idim < 0 || idim >= rank ) {
+    if ( idim < 0 || idim >= ndim ) {
       rb_raise(rb_eRuntimeError,
                "specified %i-th dimension number out of range", i);
     }
@@ -78,28 +78,28 @@ ca_trans_setup (CATrans *ca, CArray *parent, ca_size_t *imap)
   }
 
   step = 1;
-  for (i=imap[rank-1]+1; i<rank; i++) {
+  for (i=imap[ndim-1]+1; i<ndim; i++) {
     step *= dim0[i];
   }
 
   ca->obj_type  = CA_OBJ_TRANSPOSE;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
-  ca->imap      = ALLOC_N(ca_size_t, rank);
+  ca->imap      = ALLOC_N(ca_size_t, ndim);
   ca->step      = step;
 
-  memcpy(ca->dim,  newdim, rank * sizeof(ca_size_t));
-  memcpy(ca->imap, imap,   rank * sizeof(ca_size_t));
+  memcpy(ca->dim,  newdim, ndim * sizeof(ca_size_t));
+  memcpy(ca->imap, imap,   ndim * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -167,7 +167,7 @@ ca_trans_func_ptr_at_index (void *ap, ca_size_t *idx)
     ca_size_t *imap = ca->imap;
     ca_size_t idx0[CA_RANK_MAX];
     int8_t i;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       idx0[imap[i]] = idx[i];
     }
     return ca_ptr_at_index(ca->parent, idx0);
@@ -181,7 +181,7 @@ ca_trans_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t *imap = ca->imap;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx0[imap[i]] = idx[i];
   }
   ca_fetch_index(ca->parent, idx0, ptr);
@@ -194,7 +194,7 @@ ca_trans_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t *imap = ca->imap;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx0[imap[i]] = idx[i];
   }
   ca_store_index(ca->parent, idx0, ptr);
@@ -311,7 +311,7 @@ ca_trans_attach_loop (CATrans *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0
   ca_size_t *imap = ca->imap;
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[imap[level]] = 0;
     switch ( ca->bytes ) {
@@ -392,7 +392,7 @@ ca_trans_sync_loop (CATrans *ca, int8_t level, ca_size_t *idx, ca_size_t *idx0)
   ca_size_t *imap = ca->imap;
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     idx[level] = 0;
     idx0[imap[level]] = 0;
     switch ( ca->bytes ) {
@@ -473,7 +473,7 @@ ca_trans_fill_loop (CATrans *ca, char *ptr,
   ca_size_t *imap = ca->imap;
   ca_size_t i;
 
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       idx0[imap[level]] = i;
       memcpy(ca_ptr_at_index(ca->parent, idx0), ptr, ca->bytes);
@@ -529,17 +529,17 @@ rb_ca_trans (int argc, VALUE *argv, VALUE self)
   Data_Get_Struct(self, CArray, ca);
 
   if ( argc == 0 ) {
-    for (i=0; i<ca->rank; i++) {
-      imap[i] = ca->rank - i - 1;
+    for (i=0; i<ca->ndim; i++) {
+      imap[i] = ca->ndim - i - 1;
     }
   }
-  else if ( argc == ca->rank ) {
-    for (i=0; i<ca->rank; i++) {
+  else if ( argc == ca->ndim ) {
+    for (i=0; i<ca->ndim; i++) {
       imap[i] = NUM2SIZE(argv[i]);
     }
   }
   else {
-    rb_raise(rb_eArgError, "# of arguments should be equal to rank");
+    rb_raise(rb_eArgError, "# of arguments should be equal to ndim");
   }
 
   obj = rb_ca_trans_new(self, imap);

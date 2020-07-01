@@ -697,7 +697,7 @@ rb_ca_ipower (VALUE self, VALUE other)
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca;
-    obj = rb_ca_ubrep_new(obj, cx->rep_rank, cx->rep_dim);
+    obj = rb_ca_ubrep_new(obj, cx->rep_ndim, cx->rep_dim);
   }
 
   return obj;
@@ -776,7 +776,7 @@ static VALUE rb_ca_pow (VALUE self, VALUE other)
     /* unresolved unbound repeat array generates unbound repeat array again */
     if ( ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
       CAUnboundRepeat *cx = (CAUnboundRepeat *) ca;
-      obj = rb_ca_ubrep_new(obj, cx->rep_rank, cx->rep_dim);
+      obj = rb_ca_ubrep_new(obj, cx->rep_ndim, cx->rep_dim);
     }
 
     return obj;

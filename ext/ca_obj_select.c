@@ -22,7 +22,7 @@ VALUE rb_cCASelect;
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -58,7 +58,7 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
   ca->obj_type  = CA_OBJ_SELECT;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = 1;
+  ca->ndim      = 1;
   ca->bytes     = bytes;
 
   if ( share && ca_is_entity(select) ) {

@@ -20,16 +20,16 @@ VALUE rb_cCARepeat;
 */
 
 int
-ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t rank, ca_size_t *count)
+ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t ndim, ca_size_t *count)
 {
   int8_t data_type;
   ca_size_t elements, bytes, nrpt, repeat_level, repeat_num,
-                     contig_level, contig_num, data_rank;
+                     contig_level, contig_num, data_ndim;
   int i, j;
 
   nrpt = 1;
-  data_rank  = 0;
-  for (i=0; i<rank; i++) {
+  data_ndim  = 0;
+  for (i=0; i<ndim; i++) {
     if ( count[i] < 0 ) {
       rb_raise(rb_eRuntimeError,
                "negative size for %i-th dimension specified", i);
@@ -39,27 +39,27 @@ ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t rank, ca_size_t *count)
       nrpt *= count[i];
     }
     else {
-      data_rank += 1;
+      data_ndim += 1;
     }
   }
 
   repeat_level = 0;
   repeat_num   = 1;
-  for (i=0; i<rank && count[i]; i++) {
+  for (i=0; i<ndim && count[i]; i++) {
     repeat_level = i+1;
     repeat_num  *= count[i];
   }
 
-  contig_level = rank-1;
+  contig_level = ndim-1;
   contig_num   = 1;
-  for (i=rank-1; i >= 0 && count[i]; i--) {
+  for (i=ndim-1; i >= 0 && count[i]; i--) {
     contig_level = i;
     contig_num  *= count[i];
   }
   
-  if ( data_rank != parent->rank ) {
+  if ( data_ndim != parent->ndim ) {
     rb_raise(rb_eRuntimeError,
-             "mismatch in rank between original array and determined by # of dummies");
+             "mismatch in ndim between original array and determined by # of dummies");
   }
 
   if ( ((double) parent->elements) * nrpt > CA_LENGTH_MAX ) {
@@ -73,24 +73,24 @@ ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t rank, ca_size_t *count)
   ca->obj_type  = CA_OBJ_REPEAT;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
-  ca->count     = ALLOC_N(ca_size_t, rank);
+  ca->count     = ALLOC_N(ca_size_t, ndim);
   ca->repeat_level = repeat_level;
   ca->repeat_num   = repeat_num;
   ca->contig_level = contig_level;
   ca->contig_num   = contig_num;
 
   j = 0;
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     if ( count[i] ) {
       ca->dim[i] = count[i];
     }
@@ -99,7 +99,7 @@ ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t rank, ca_size_t *count)
     }
   }
 
-  memcpy(ca->count, count, rank * sizeof(ca_size_t));
+  memcpy(ca->count, count, ndim * sizeof(ca_size_t));
 
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
 
@@ -112,10 +112,10 @@ ca_repeat_setup (CARepeat *ca, CArray *parent, int8_t rank, ca_size_t *count)
 
 
 CARepeat *
-ca_repeat_new (CArray *parent, int8_t rank, ca_size_t *count)
+ca_repeat_new (CArray *parent, int8_t ndim, ca_size_t *count)
 {
   CARepeat *ca = ALLOC(CARepeat);
-  ca_repeat_setup(ca, parent, rank, count);
+  ca_repeat_setup(ca, parent, ndim, count);
   return ca;
 }
 
@@ -141,7 +141,7 @@ static void *
 ca_repeat_func_clone (void *ap)
 {
   CARepeat *ca = (CARepeat *) ap;
-  return ca_repeat_new(ca->parent, ca->rank, ca->count);
+  return ca_repeat_new(ca->parent, ca->ndim, ca->count);
 }
 
 static char *
@@ -173,7 +173,7 @@ ca_repeat_func_ptr_at_index (void *ap, ca_size_t *idx)
 
     j = 0;
     n = 0;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       if ( ! count[i] ) {
         n = dim0[j]*n + idx[i];
         j++;
@@ -199,7 +199,7 @@ ca_repeat_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t  n, j;
   j = 0;
   n = 0;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
     }
@@ -217,7 +217,7 @@ ca_repeat_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t  n, j;
   j = 0;
   n = 0;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
     }
@@ -305,7 +305,7 @@ ca_repeat_func_create_mask (void *ap)
     ca_create_mask(ca->parent);
   }
   ca->mask =
-    (CArray *) ca_repeat_new(ca->parent->mask, ca->rank, ca->count);
+    (CArray *) ca_repeat_new(ca->parent->mask, ca->ndim, ca->count);
 }
 
 ca_operation_function_t ca_repeat_func = {
@@ -410,7 +410,7 @@ ca_repeat_attach (CARepeat *ca)
   ca_size_t i;
   char *dp, *sp;
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx[i] = 0;
     idx0[i] = 0;
   }
@@ -459,7 +459,7 @@ ca_repeat_sync (CARepeat *ca)
   ca_size_t idx[CA_RANK_MAX];
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx[i] = 0;
     idx0[i] = 0;
   }
@@ -475,14 +475,14 @@ ca_repeat_fill (CARepeat *ca, char *ptr)
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_repeat_new (VALUE cary, int8_t rank, ca_size_t *count)
+rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count)
 {
   volatile VALUE obj;
   CArray *parent;
   CARepeat *ca;
   rb_check_carray_object(cary);
   Data_Get_Struct(cary, CArray, parent);
-  ca = ca_repeat_new(parent, rank, count);
+  ca = ca_repeat_new(parent, ndim, count);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
   rb_ca_data_type_inherit(obj, cary);
@@ -507,7 +507,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
        ) ) {
     volatile VALUE args;
     CArray *ct;
-    ca_size_t rank, dim[CA_RANK_MAX];
+    ca_size_t ndim, dim[CA_RANK_MAX];
     int k;
     if ( argv[0] == ID2SYM(rb_intern("%") ) ) {
       Data_Get_Struct(argv[1], CArray, ct);
@@ -515,34 +515,34 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
     else {
       Data_Get_Struct(argv[0], CArray, ct);
     }
-    if ( ct->rank < ca->rank ) {
-      rb_raise(rb_eRuntimeError, "invalid rank to template");
+    if ( ct->ndim < ca->ndim ) {
+      rb_raise(rb_eRuntimeError, "invalid ndim to template");
     }
     args = rb_ary_new();
-    rank = 0;
+    ndim = 0;
     if ( argv[0] == ID2SYM(rb_intern("%") ) ) {
       k = 0;
-      for (i=0; i<ct->rank; i++) {
+      for (i=0; i<ct->ndim; i++) {
         if ( ca->dim[k] == 1 ) {
           rb_ary_push(args, SIZE2NUM(ct->dim[i]));
           k++;
         }
         else if ( ct->dim[i] == ca->dim[k] ) {
           rb_ary_push(args, ID2SYM(rb_intern("%")));
-          dim[rank] = ca->dim[k];
-          k++; rank++;
+          dim[ndim] = ca->dim[k];
+          k++; ndim++;
         }
         else {
           rb_ary_push(args, SIZE2NUM(ct->dim[i]));
         }
       }
-      if ( rank != ca->rank ) {
-        self = rb_ca_refer_new(self, ca->data_type, rank, dim, ca->bytes, 0);
+      if ( ndim != ca->ndim ) {
+        self = rb_ca_refer_new(self, ca->data_type, ndim, dim, ca->bytes, 0);
       }
     }
     else {
-      k = ca->rank - 1;
-      for (i=ct->rank-1; i>=0; i--) {
+      k = ca->ndim - 1;
+      for (i=ct->ndim-1; i>=0; i--) {
         if ( ca->dim[k] == 1 ) {
           rb_ary_unshift(args, SIZE2NUM(ct->dim[i]));
           k--;
@@ -556,14 +556,14 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
         }
       }
       if ( k != 0 ) {
-        rank = 0;
-        for (i=0; i<ca->rank; i++) {
+        ndim = 0;
+        for (i=0; i<ca->ndim; i++) {
           if ( ca->dim[i] != 1 ) {
-            dim[rank] = ca->dim[i];
-            rank++;
+            dim[ndim] = ca->dim[i];
+            ndim++;
           }
         }
-        self = rb_ca_refer_new(self, ca->data_type, rank, dim, ca->bytes, 0);
+        self = rb_ca_refer_new(self, ca->data_type, ndim, dim, ca->bytes, 0);
       }
     }
     return rb_ca_repeat((int)RARRAY_LEN(args), RARRAY_PTR(args), self);
@@ -625,7 +625,7 @@ rb_ca_repeat_initialize_copy (VALUE self, VALUE other)
   Data_Get_Struct(self,  CARepeat, ca);
   Data_Get_Struct(other, CARepeat, cs);
 
-  ca_repeat_setup(ca, cs->parent, cs->rank, cs->count);
+  ca_repeat_setup(ca, cs->parent, cs->ndim, cs->count);
 
   return self;
 }

@@ -121,7 +121,7 @@ class CArray
 
   def magick_guess_image_type
     image_type = nil
-    case rank
+    case ndim
     when 2
       if fixlen?
         case bytes

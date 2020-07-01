@@ -40,7 +40,7 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
   ca->obj_type  = CA_OBJ_REDUCE;
   ca->data_type = CA_BOOLEAN;     /* data type is fixed to boolean */
   ca->flags     = 0;
-  ca->rank      = 1;
+  ca->ndim      = 1;
   ca->bytes     = ca_sizeof[CA_BOOLEAN];
   ca->elements  = elements;
   ca->ptr       = NULL;

@@ -1383,7 +1383,7 @@ ca_stat_nd_contig_loop (CArray *ca, CArray *co, ca_size_t mc,
   void *p;
   boolean8_t *m;
   ca_size_t i, n;
-  if ( level == co->rank ) {
+  if ( level == co->ndim ) {
     CAStatIterator it;
     n = ca->elements/co->elements;
     idx[level] = 0;
@@ -1421,8 +1421,8 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
              ca_type_name[ca->data_type]);
   }
 
-  ndim = ca->rank - RARRAY_LEN(vaxis);
-  if ( ndim <= 0 || ndim > ca->rank ) {
+  ndim = ca->ndim - RARRAY_LEN(vaxis);
+  if ( ndim <= 0 || ndim > ca->ndim ) {
     rb_raise(rb_eRuntimeError, "invalid dimension specified");
   }
 
@@ -1449,7 +1449,7 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
     char *op;
     boolean8_t *om;
     int8_t i;
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       idx[i] = 0;
     }
     ca_attach_n(2, ca, co);
@@ -1474,7 +1474,7 @@ ca_stat_get_offset_loop (CArray *ca, ca_size_t *dm,
                         CArray *offset)
 {
   ca_size_t i;
-  if ( level == ca->rank - 1 ) {
+  if ( level == ca->ndim - 1 ) {
     if ( dm[level] == 0 ) {
       idx[level] = 0;
       *(ca_size_t *)ca_ptr_at_index(offset, idx1) = ca_index2addr(ca, idx);
@@ -1513,13 +1513,13 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   ca_size_t loop_dim[CA_RANK_MAX];
   ca_size_t dm[CA_RANK_MAX], dn[CA_RANK_MAX];
   CArray *ca, *co, *first, *offset;
-  ca_size_t out_rank, loop_rank;
+  ca_size_t out_ndim, loop_ndim;
   ca_size_t mc;
   ca_size_t i, k;
 
   Data_Get_Struct(self, CArray, ca);
 
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     dm[i] = 0;
     dn[i] = 1;
   }
@@ -1530,26 +1530,26 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
     dn[k] = 0;
   }
 
-  out_rank  = 0;
-  loop_rank = 0;
-  for (i=0; i<ca->rank; i++) {
+  out_ndim  = 0;
+  loop_ndim = 0;
+  for (i=0; i<ca->ndim; i++) {
     if ( dm[i] ) {
-      loop_dim[loop_rank] = ca->dim[i];
-      loop_rank += 1;
+      loop_dim[loop_ndim] = ca->dim[i];
+      loop_ndim += 1;
     }
     else {
-      out_dim[out_rank] = ca->dim[i];
-      out_rank += 1;
+      out_dim[out_ndim] = ca->dim[i];
+      out_ndim += 1;
     }
   }
 
-  out    = rb_carray_new(data_type, out_rank, out_dim, 0, NULL);
+  out    = rb_carray_new(data_type, out_ndim, out_dim, 0, NULL);
   Data_Get_Struct(out, CArray, co);
   
-  first  = carray_new(CA_SIZE, out_rank, out_dim, 0, NULL);
+  first  = carray_new(CA_SIZE, out_ndim, out_dim, 0, NULL);
   first->ptr = realloc(first->ptr, first->bytes*(first->elements+1));
 
-  offset = carray_new(CA_SIZE, loop_rank, loop_dim, 0, NULL);
+  offset = carray_new(CA_SIZE, loop_ndim, loop_dim, 0, NULL);
   offset->ptr = realloc(offset->ptr, offset->bytes*(offset->elements+1));
 
   ca_stat_get_offset_loop(ca, dn, 0, idx, 0, idx1, first);
@@ -1673,14 +1673,14 @@ rb_ca_stat_general (int argc, VALUE *argv, VALUE self,
 
     for (i=0; i<RARRAY_LEN(vaxis); i++) {
       k = NUM2SIZE(rb_ary_entry(vaxis, RARRAY_LEN(vaxis)-1-i));
-      CA_CHECK_INDEX(k, ca->rank);
-      if ( k != ca->rank-1-i ) {
+      CA_CHECK_INDEX(k, ca->ndim);
+      if ( k != ca->ndim-1-i ) {
         is_contig = 0;
       }
     }
 
     if ( is_contig ) {
-      if ( RARRAY_LEN(vaxis) == ca->rank ) {
+      if ( RARRAY_LEN(vaxis) == ca->ndim ) {
         return rb_ca_stat_1d(self, rmc, vfval, ca_proc);
       }
       else {
@@ -1841,7 +1841,7 @@ ca_dimstat_type2_loop (CArray *ca, CArray *co, ca_size_t mc,
   void *p;
   boolean8_t *m;
   ca_size_t i, n;
-  if ( level == co->rank ) {
+  if ( level == co->ndim ) {
     CAStatIterator it;
     n = ca->elements/co->elements;
     idx[level] = 0;
@@ -1871,7 +1871,7 @@ ca_dimstat_type2 (CArray *ca, CArray *co, ca_size_t mc, ca_stat_proc_t *ca_proc)
   char *op;
   boolean8_t *om;
   int8_t i;
-  for (i=0; i<ca->rank; i++) {
+  for (i=0; i<ca->ndim; i++) {
     idx[i] = 0;
   }
   ca_attach_n(2, ca, co);
@@ -1904,7 +1904,7 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
   }
 
   ndim = NUM2SIZE(rndim);
-  if ( ndim <= 0 || ndim > ca->rank ) {
+  if ( ndim <= 0 || ndim > ca->ndim ) {
     rb_raise(rb_eRuntimeError, "invalid dimension specified");
   }
 

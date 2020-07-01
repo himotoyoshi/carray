@@ -338,21 +338,21 @@ typedef struct _CArray CArray;
 struct _CArray {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
   ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
-};                         /* 28 + 4*rank (bytes) */
+};                         /* 28 + 4*ndim (bytes) */
 
 typedef CArray CAWrap;
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -365,7 +365,7 @@ typedef struct {
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -375,12 +375,12 @@ typedef struct {
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
-} CAVirtual;               /* 40 + 4*(rank) (bytes) */
+} CAVirtual;               /* 40 + 4*(ndim) (bytes) */
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -398,12 +398,12 @@ typedef struct {
   ca_size_t   ratio;
   ca_size_t   offset;
   CArray   *mask0;
-} CARefer;                 /* 52 + 4*(rank) (bytes) */
+} CARefer;                 /* 52 + 4*(ndim) (bytes) */
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -422,12 +422,12 @@ typedef struct {
   ca_size_t  *step;
   ca_size_t  *count;
   ca_size_t  *size0;
-} CABlock;                 /* 68 + 20*(rank) (bytes) */
+} CABlock;                 /* 68 + 20*(ndim) (bytes) */
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -443,12 +443,12 @@ typedef struct {
   ca_size_t  *count;
   ca_size_t  *size0;
   char     *fill;
-} CAWindow;                /* 56 + 16*(rank) + 1*(bytes) (bytes) */
+} CAWindow;                /* 56 + 16*(ndim) + 1*(bytes) (bytes) */
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -461,7 +461,7 @@ typedef struct {
   /* -------------*/
   CArray   *data;
   VALUE     self;
-} CAObject;                /* 48 + 4*(rank) (bytes) */
+} CAObject;                /* 48 + 4*(ndim) (bytes) */
 
 /* 
   CAObjectMask is an internal class 
@@ -471,7 +471,7 @@ typedef struct {
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -485,7 +485,7 @@ typedef struct {
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -501,12 +501,12 @@ typedef struct {
   ca_size_t   repeat_num;
   ca_size_t   contig_level;
   ca_size_t   contig_num;
-} CARepeat;                /* 60 + 8*(rank) (bytes) */
+} CARepeat;                /* 60 + 8*(ndim) (bytes) */
 
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -517,9 +517,9 @@ typedef struct {
   uint32_t  attach;
   uint8_t   nosync;
   /* -------------*/
-  int8_t    rep_rank;
+  int8_t    rep_ndim;
   ca_size_t  *rep_dim;
-} CAUnboundRepeat;         /* 44 + 8*(rank) (bytes) */
+} CAUnboundRepeat;         /* 44 + 8*(ndim) (bytes) */
 
 /* 
    CAReduce is an internal class 
@@ -529,7 +529,7 @@ typedef struct {
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -547,7 +547,7 @@ typedef struct {
 /* -------------------------------------------------------------------- */
 
 typedef struct {
-  int8_t  rank;
+  int8_t  ndim;
   ca_size_t dim[CA_RANK_MAX];
   CArray *reference;
   CArray * (*kernel_at_addr)(void *, ca_size_t, CArray *);
@@ -625,15 +625,15 @@ extern int ca_obj_num;
     rb_raise(rb_eRuntimeError, "invalid numeric data type"); \
   }
 
-#define CA_CHECK_RANK(rank) \
-  if ( rank <= 0 || rank > CA_RANK_MAX ) { \
-    rb_raise(rb_eRuntimeError, "invalid rank"); \
+#define CA_CHECK_RANK(ndim) \
+  if ( ndim <= 0 || ndim > CA_RANK_MAX ) { \
+    rb_raise(rb_eRuntimeError, "invalid ndim"); \
   }
 
-#define CA_CHECK_DIM(rank, dim)     \
+#define CA_CHECK_DIM(ndim, dim)     \
   { \
     int8_t i_; \
-    for (i_=0; i_<rank; i_++) { \
+    for (i_=0; i_<ndim; i_++) { \
       if ( dim[i_] < 0 ) { \
         rb_raise(rb_eRuntimeError, "negative size dimension at %i-dim", i_);  \
       } \
@@ -664,7 +664,7 @@ extern int ca_obj_num;
 #define CA_CHECK_BOUND(ca, idx) \
   { \
     int8_t i; \
-    for (i=0; i<ca->rank; i++) { \
+    for (i=0; i<ca->ndim; i++) { \
       if ( idx[i] < 0 || idx[i] >= ca->dim[i] )  { \
         rb_raise(rb_eRuntimeError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
       } \
@@ -754,7 +754,7 @@ typedef union {
 
 typedef struct {
   int16_t  type;
-  int16_t  rank;
+  int16_t  ndim;
   int32_t  index_type[CA_RANK_MAX];
   CAIndex  index[CA_RANK_MAX];
   CArray  *select;
@@ -796,35 +796,35 @@ VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 /* --- ca_obj_array.c --- */
 
 int  carray_setup (CArray *ca,
-                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   int8_t data_type, int8_t ndim, ca_size_t *dim, 
                    ca_size_t bytes, CArray *mask);
 
 int  carray_safe_setup (CArray *ca,
-                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   int8_t data_type, int8_t ndim, ca_size_t *dim, 
                    ca_size_t bytes, CArray *mask);
 
 int  ca_wrap_setup_null (CArray *ca,
-                   int8_t data_type, int8_t rank, ca_size_t *dim, 
+                   int8_t data_type, int8_t ndim, ca_size_t *dim, 
                    ca_size_t bytes, CArray *mask);
 
 void free_carray (void *ap);
 void free_ca_wrap (void *ap);
 
 CArray  *carray_new (int8_t data_type,
-                     int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *ma);
+                     int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *ma);
 CArray  *carray_new_safe (int8_t data_type,
-                          int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
+                          int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 VALUE    rb_carray_new (int8_t data_type,
-                        int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
+                        int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 VALUE    rb_carray_new_safe (int8_t data_type,
-                             int8_t rank, ca_size_t *dim, ca_size_t bytes, CArray *mask);
+                             int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 
 CAWrap  *ca_wrap_new (int8_t data_type,
-                      int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                      int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                       CArray *mask, char *ptr);
 
 CAWrap  *ca_wrap_new_null (int8_t data_type,
-                          int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                          int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                           CArray *mask);
 
 CScalar *cscalar_new (int8_t data_type, ca_size_t bytes, CArray *ma);
@@ -835,10 +835,10 @@ VALUE    rb_cscalar_new_with_value (int8_t data_type, ca_size_t bytes, VALUE rva
 /* --- ca_obj_refer.c --- */
 
 CARefer *ca_refer_new (CArray *ca,
-                       int8_t data_type, int8_t rank, ca_size_t *dim,
+                       int8_t data_type, int8_t ndim, ca_size_t *dim,
                        ca_size_t bytes, ca_size_t offset);
 VALUE    rb_ca_refer_new (VALUE self,
-                       int8_t data_type, int8_t rank, ca_size_t *dim,
+                       int8_t data_type, int8_t ndim, ca_size_t *dim,
                        ca_size_t bytes, ca_size_t offset);
 
 /* --- ca_obj_farray.c --- */
@@ -848,10 +848,10 @@ VALUE    rb_ca_farray (VALUE self);
 /* --- ca_obj_block.c --- */
 
 CABlock *ca_block_new (CArray *carray,
-                       int8_t rank, ca_size_t *dim,
+                       int8_t ndim, ca_size_t *dim,
                        ca_size_t *start, ca_size_t *step, ca_size_t *count,
                        ca_size_t offset);
-VALUE    rb_ca_block_new (VALUE cary, int8_t rank, ca_size_t *dim,
+VALUE    rb_ca_block_new (VALUE cary, int8_t ndim, ca_size_t *dim,
                        ca_size_t *start, ca_size_t *step, ca_size_t *count,
                        ca_size_t offset);
 
@@ -883,12 +883,12 @@ VALUE   rb_ca_fake_type (VALUE self, VALUE rtype, VALUE rbytes);
 
 /* --- ca_obj_repeat.c --- */
 
-CARepeat *ca_repeat_new (CArray *carray, int8_t rank, ca_size_t *count);
+CARepeat *ca_repeat_new (CArray *carray, int8_t ndim, ca_size_t *count);
 
-VALUE   rb_ca_repeat_new (VALUE cary, int8_t rank, ca_size_t *count);
+VALUE   rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count);
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
-VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_rank, ca_size_t *rep_dim);
+VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
 VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
 /* --- ca_obj_reduce.c --- */
@@ -941,17 +941,17 @@ int     ca_is_object_type (void *ap);
 
 void    ca_check_type (void *ap, int8_t data_type);
 #define ca_check_data_type(ap, data_type) ca_check_type(ap, data_type)
-void    ca_check_rank (void *ap, int rank);
-void    ca_check_shape (void *ap, int rank, ca_size_t *dim);
+void    ca_check_ndim (void *ap, int ndim);
+void    ca_check_shape (void *ap, int ndim, ca_size_t *dim);
 void    ca_check_same_data_type (void *ap1, void *ap2);
-void    ca_check_same_rank (void *ap1, void *ap2);
+void    ca_check_same_ndim (void *ap1, void *ap2);
 void    ca_check_same_elements (void *ap1, void *ap2);
 void    ca_check_same_shape (void *ap1, void *ap2);
 void    ca_check_index (void *ap, ca_size_t *idx);
 void    ca_check_data_class (VALUE rtype);
 int     ca_is_valid_index (void *ap, ca_size_t *idx);
 
-#define ca_ndim(ca) ((ca)->rank)
+#define ca_ndim(ca) ((ca)->ndim)
 #define ca_shape(ca) ((ca)->dim)
 
 /* API : allocate, attach, update, sync, detach */
@@ -1044,7 +1044,7 @@ void    ca_block_from_carray(CArray *cs,
   (obj = rb_ca_wrap_readonly(obj, INT2NUM(data_type)), (CArray*) DATA_PTR(obj))
 
 VALUE   rb_carray_wrap_ptr (int8_t data_type,
-                            int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                            int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                             CArray *mask, char *ptr, VALUE refer);
 
 void * ca_to_cptr (void *ap);
@@ -1090,7 +1090,7 @@ void    rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
 int     rb_ca_is_type (VALUE arg, int type);
 
 /* scan index */ 
-void    rb_ca_scan_index (int ca_rank, ca_size_t *ca_dim, ca_size_t elements,
+void    rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t elements,
                           long argc, VALUE *argv, CAIndexInfo *info);
 
 
@@ -1117,7 +1117,7 @@ void    rb_ca_modify (VALUE self);
 /* attributes */
 VALUE   rb_ca_obj_type (VALUE self);
 VALUE   rb_ca_data_type (VALUE self);
-VALUE   rb_ca_rank (VALUE self);
+VALUE   rb_ca_ndim (VALUE self);
 VALUE   rb_ca_bytes (VALUE self);
 VALUE   rb_ca_elements (VALUE self);
 VALUE   rb_ca_dim (VALUE self);

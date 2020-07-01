@@ -21,7 +21,7 @@ VALUE rb_cCARefer;
 
 static int
 ca_refer_setup (CARefer *ca, CArray *parent,
-                int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                 ca_size_t offset)
 {
   ca_size_t elements, ratio;
@@ -29,8 +29,8 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   int     is_deformed;
 
   CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(rank);
-  CA_CHECK_DIM(rank, dim);
+  CA_CHECK_RANK(ndim);
+  CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
   if ( ca_is_object_type(parent) && data_type != CA_OBJECT ) {
@@ -42,10 +42,10 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   }
 
   /* calc datanum and check deformation */
-  is_deformed = ( rank == parent->rank ) ? 0 : 1;
+  is_deformed = ( ndim == parent->ndim ) ? 0 : 1;
   ratio = 1;
   elements = 1;
-  for (i=0; i<rank; i++) {
+  for (i=0; i<ndim; i++) {
     elements *= dim[i];
     if ( dim[i] != parent->dim[i] ) {
       is_deformed |= 1;
@@ -79,10 +79,10 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   ca->obj_type  = CA_OBJ_REFER;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
   ca->ptr       = NULL;
   ca->mask      = NULL;
   ca->mask0     = NULL;
@@ -99,7 +99,7 @@ ca_refer_setup (CARefer *ca, CArray *parent,
     ca->is_deformed = 1;
   }
 
-  memcpy(ca->dim, dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, dim, ndim * sizeof(ca_size_t));
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -110,11 +110,11 @@ ca_refer_setup (CARefer *ca, CArray *parent,
 
 CARefer *
 ca_refer_new (CArray *parent,
-              int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+              int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
               ca_size_t offset)
 {
   CARefer *ca = ALLOC(CARefer);
-  ca_refer_setup(ca, parent, data_type, rank, dim, bytes, offset);
+  ca_refer_setup(ca, parent, data_type, ndim, dim, bytes, offset);
   return ca;
 }
 
@@ -137,7 +137,7 @@ ca_refer_func_clone (void *ap)
 {
   CARefer *ca = (CARefer *) ap;
   return ca_refer_new(ca->parent,
-                      ca->data_type, ca->rank, ca->dim, ca->bytes, ca->offset);
+                      ca->data_type, ca->ndim, ca->dim, ca->bytes, ca->offset);
 }
 
 static char *
@@ -167,9 +167,9 @@ ca_refer_func_ptr_at_index (void *ap, ca_size_t *idx)
   ca_size_t *dim = ca->dim;
   int8_t   i;
   ca_size_t  n;
-  n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[rank-1] */
-  for (i=1; i<ca->rank; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[rank-1] */
-    n = dim[i]*n+idx[i];       /*    ... + idx[rank-2]*dim[1] + idx[rank-1] */
+  n = idx[0];                  /* n = idx[0]*dim[1]*dim[2]*...*dim[ndim-1] */
+  for (i=1; i<ca->ndim; i++) { /*    + idx[1]*dim[1]*dim[2]*...*dim[ndim-1] */
+    n = dim[i]*n+idx[i];       /*    ... + idx[ndim-2]*dim[1] + idx[ndim-1] */
   }
   return ca->ptr + ca->bytes * n;
 }
@@ -222,7 +222,7 @@ ca_refer_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
     int8_t   i;
     ca_size_t  n;
     n = idx[0];
-    for (i=1; i<ca->rank; i++) {
+    for (i=1; i<ca->ndim; i++) {
       n = dim[i]*n+idx[i];
     }
     ca_refer_func_fetch_addr(ca, n, ptr);
@@ -283,7 +283,7 @@ ca_refer_func_store_index (void *ap, ca_size_t *idx, void *ptr)
     int8_t   i;
     ca_size_t  n;
     n = idx[0];
-    for (i=1; i<ca->rank; i++) {
+    for (i=1; i<ca->ndim; i++) {
       n = dim[i]*n+idx[i];
     }
     ca_refer_func_store_addr(ca, n, ptr);
@@ -421,29 +421,29 @@ ca_refer_func_create_mask (void *ap)
   if ( ca->bytes == ca->parent->bytes ) {
     ca->mask =
       (CArray *) ca_refer_new(ca->parent->mask,
-                              CA_BOOLEAN, ca->rank, ca->dim, 0, ca->offset);
+                              CA_BOOLEAN, ca->ndim, ca->dim, 0, ca->offset);
   }
   else if ( ca->is_deformed == -2 ) {
     ca_size_t count[CA_RANK_MAX];
     int i;
-    for (i=0; i<ca->parent->rank; i++) {
+    for (i=0; i<ca->parent->ndim; i++) {
       count[i] = 0;
     }
-    count[ca->parent->rank] = ca->ratio;
+    count[ca->parent->ndim] = ca->ratio;
     ca->mask0 = 
-      (CArray *) ca_repeat_new(ca->parent->mask, ca->parent->rank+1, count);
+      (CArray *) ca_repeat_new(ca->parent->mask, ca->parent->ndim+1, count);
     ca_unset_flag(ca->mask0, CA_FLAG_READ_ONLY);
 
     ca->mask  = 
       (CArray *) ca_refer_new(ca->mask0, 
-                              CA_BOOLEAN, ca->rank, ca->dim, 0, ca->offset);
+                              CA_BOOLEAN, ca->ndim, ca->dim, 0, ca->offset);
   }
   else if ( ca->is_deformed == 2 ) {
     /* TODO */
     ca->mask0 = 
       (CArray *) ca_reduce_new(ca->parent->mask, ca->ratio, ca->offset);
     ca->mask  = 
-      (CArray *) ca_refer_new(ca->mask0, CA_BOOLEAN, ca->rank, ca->dim, 0, 0);
+      (CArray *) ca_refer_new(ca->mask0, CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
   }
 }
 
@@ -485,7 +485,7 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
   Data_Get_Struct(self,  CARefer, ca);
   Data_Get_Struct(other, CARefer, cs);
 
-  ca_refer_setup(ca, cs->parent, cs->data_type, cs->rank, cs->dim,
+  ca_refer_setup(ca, cs->parent, cs->data_type, cs->ndim, cs->dim,
                              cs->bytes, cs->offset);
 
   return self;
@@ -514,7 +514,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
   CArray *ca;
   CARefer *cr;
   int8_t  data_type;
-  int8_t  rank;
+  int8_t  ndim;
   ca_size_t dim[CA_RANK_MAX];
   ca_size_t bytes, offset = 0;
   int8_t i;
@@ -524,11 +524,11 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
   if ( argc == 0 ) {                 /* CArray#refer() */
     data_type = ca->data_type;
     bytes     = ca->bytes;
-    rank      = ca->rank;
-    for (i=0; i<rank; i++) {
+    ndim      = ca->ndim;
+    for (i=0; i<ndim; i++) {
       dim[i] = ca->dim[i];
     }
-    cr = ca_refer_new((CArray*)ca, data_type, rank, dim, bytes, offset);
+    cr = ca_refer_new((CArray*)ca, data_type, ndim, dim, bytes, offset);
     obj = ca_wrap_struct(cr);
     rb_ca_set_parent(obj, self);
     rb_ca_data_type_inherit(obj, self);
@@ -558,10 +558,10 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     }
 
     Check_Type(rdim, T_ARRAY);
-    rank = RARRAY_LEN(rdim);
+    ndim = RARRAY_LEN(rdim);
 
     elements = 1;
-    for (i=0; i<rank; i++) {
+    for (i=0; i<ndim; i++) {
       dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
       elements *= dim[i];
     }
@@ -570,7 +570,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
       offset = NUM2SIZE(roffset);
     }
 
-    cr = ca_refer_new((CArray*)ca, data_type, rank, dim, bytes, offset);
+    cr = ca_refer_new((CArray*)ca, data_type, ndim, dim, bytes, offset);
     obj = ca_wrap_struct(cr);
     rb_ca_set_parent(obj, self);
     rb_ca_data_type_import(obj, rtype);
@@ -584,7 +584,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
 
 VALUE
 rb_ca_refer_new (VALUE self,
-                 int8_t data_type, int8_t rank, ca_size_t *dim, ca_size_t bytes,
+                 int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                  ca_size_t offset)
 {
   volatile VALUE list, rdim, ropt;
@@ -593,8 +593,8 @@ rb_ca_refer_new (VALUE self,
 
   Data_Get_Struct(self, CArray, ca);
 
-  rdim = rb_ary_new2(rank);
-  for (i=0; i<rank; i++) {
+  rdim = rb_ary_new2(ndim);
+  for (i=0; i<ndim; i++) {
     rb_ary_store(rdim, i, SIZE2NUM(dim[i]));
   }
 

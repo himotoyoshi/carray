@@ -226,7 +226,7 @@ class CArray
 
   def anomaly (*argv)
     opt = argv.last.is_a?(Hash) ? argv.pop : {}
-    idxs = Array.new(self.rank) { |i| argv.include?(i) ? :* : nil }
+    idxs = Array.new(self.ndim) { |i| argv.include?(i) ? :* : nil }
     if mn = opt[:mean]
       return self - mn[*idxs]
     else
@@ -260,7 +260,7 @@ class CArray
         return (c[(n-1)/2] + c[n/2])/2.0
       end
     else
-      raise "CArray#median is not implemented for multiple ranks"
+      raise "CArray#median is not implemented for multiple ndims"
     end
 
   end

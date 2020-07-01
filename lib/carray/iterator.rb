@@ -318,7 +318,7 @@ class CAClassIterator < CAIterator # :nodoc:
     @classifier = classifier || @reference.uniq.sort
     @null = CArray.new(@reference.data_type,[0])
     @table = {}
-    @rank = 1
+    @ndim = 1
     @dim  = [0]
     if @classifier.all_masked? or @classifier.size == 0
       @dim  = [0]
@@ -343,7 +343,7 @@ class CAClassIterator < CAIterator # :nodoc:
     return self
   end
   
-  def ranking (&block)
+  def ndiming (&block)
     block ||= lambda {|a| a.size }
     values = self.to_a.map{|v| block[v] }.to_ca
     addrs  = values.sort_addr.reverse

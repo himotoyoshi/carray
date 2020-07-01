@@ -15,7 +15,7 @@
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
-  int8_t    rank;
+  int8_t    ndim;
   int32_t   flags;
   ca_size_t   bytes;
   ca_size_t   elements;
@@ -41,7 +41,7 @@ static VALUE rb_cCAFake;
 int
 ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 {
-  int8_t rank;
+  int8_t ndim;
   ca_size_t *dim, elements;
 
   /* check arguments */
@@ -49,25 +49,25 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
   CA_CHECK_DATA_TYPE(data_type);
   CA_CHECK_BYTES(data_type, bytes);
 
-  rank     = parent->rank;
+  ndim     = parent->ndim;
   dim      = parent->dim;
   elements = parent->elements;
 
   ca->obj_type  = CA_OBJ_FAKE;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->rank      = rank;
+  ca->ndim      = ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, rank);
+  ca->dim       = ALLOC_N(ca_size_t, ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  memcpy(ca->dim, dim, rank * sizeof(ca_size_t));
+  memcpy(ca->dim, dim, ndim * sizeof(ca_size_t));
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -288,7 +288,7 @@ ca_fake_func_create_mask (void *ap)
   }
   ca->mask =
     (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->rank, ca->dim, 0, 0);
+                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
 ca_operation_function_t ca_fake_func = {

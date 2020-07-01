@@ -48,7 +48,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   }
 
   if ( TYPE(ridx1) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
@@ -71,7 +71,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   }
 
   if ( TYPE(ridx2) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx2, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx2[i] = k;
@@ -159,7 +159,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   }
 
   if ( TYPE(ridx1) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
@@ -180,7 +180,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   }
 
   if ( TYPE(ridx2) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx2, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx2[i] = k;
@@ -228,7 +228,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
   Data_Get_Struct(self, CArray, ca);
 
   if ( TYPE(ridx) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx[i] = k;
@@ -264,7 +264,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
   Data_Get_Struct(self, CArray, ca);
 
   if ( TYPE(ridx) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx[i] = k;
@@ -314,7 +314,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
   has_mask = ( ca->mask ) ? 1 : 0;
 
   if ( TYPE(ridx1) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
@@ -401,7 +401,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
   has_mask = ( ca->mask ) ? 1 : 0;
 
   if ( TYPE(ridx1) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
@@ -475,7 +475,7 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
   ca_update_mask(ca);
 
   if ( TYPE(ridx1) == T_ARRAY ) {
-    for (i=0; i<ca->rank; i++) {
+    for (i=0; i<ca->ndim; i++) {
       k = NUM2SIZE(rb_ary_entry(ridx1, i));
       CA_CHECK_INDEX(k, ca->dim[i]);
       idx1[i] = k;
