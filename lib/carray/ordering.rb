@@ -61,6 +61,16 @@ class CArray
     cmpary = convert(type, :bytes=>bytes, &block)
     return self[cmpary.sort_addr].to_ca
   end
+  
+  def sorted_with (*others)
+    addr = sort_addr
+    ([self] + others).map { |x| x[addr] }
+  end
+
+  def sort_with (*others)
+    addr = sort_addr
+    ([self] + others).map { |x| x[addr].to_ca }
+  end
 
   def max_by (&block)
     if empty?
@@ -71,12 +81,30 @@ class CArray
     end
   end
 
+  def max_with (*others)
+    if empty?
+      return ([self] + others).map { |x| UNDEF }
+    else
+      addr = max_addr
+      return ([self] + others).map { |x| x[addr] }
+    end
+  end
+
   def min_by (&block)
     if empty?
       return UNDEF
     else
       addr = convert(:object, &block).min_addr
       return self[addr]
+    end
+  end
+
+  def min_with (*others)
+    if empty?
+      return ([self] + others).map { |x| UNDEF }
+    else
+      addr = min_addr
+      return ([self] + others).map { |x| x[addr] }
     end
   end
 
