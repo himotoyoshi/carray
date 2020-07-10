@@ -13,7 +13,6 @@
 class CArray
   
   # reversed
-
   def reversed
     return self[*([-1..0]*ndim)]
   end
@@ -42,7 +41,6 @@ class CArray
   def roll (*argv)
     return self.rolled(*argv).to_ca
   end
-
     
   # Returns the reference which elements are sorted by the comparison method
   # given as block
