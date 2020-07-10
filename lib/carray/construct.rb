@@ -410,7 +410,11 @@ class CArray
   
     def linspace (x1, x2, n = 100)
       data_type = self::DataType
-      data_type ||= guess_data_type_from_values(x1, x2)
+      unless data_type
+        guess = guess_data_type_from_values(x1, x2)
+        guess = CA_FLOAT64 if guess == CA_INT64
+        data_type = guess
+      end
       CArray.new(data_type, [n]).span(x1..x2)
     end
   

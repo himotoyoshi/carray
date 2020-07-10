@@ -46,6 +46,7 @@ require 'carray/obsolete'
 # autoload
 
 unless $CARRAY_NO_AUTOLOAD 
+  
   require 'carray/autoload'
   require 'carray/autoload/autoload_base'
   require 'carray/autoload/autoload_io_imagemagick'
