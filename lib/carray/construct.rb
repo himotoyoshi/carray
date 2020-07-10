@@ -58,10 +58,23 @@ class CArray
   def span! (range)
     first = range.begin.to_r
     last  = range.end.to_r
-    if range.exclude_end?
-      seq!(first, (last-first)/elements)
+    if integer?
+      if range.exclude_end?
+        step = ((last-1)-first+1)/elements
+      else
+        step = (last-first+1)/elements
+      end      
     else
-      seq!(first, (last-first)/(elements-1))
+      if range.exclude_end?
+        step = (last-first)/elements
+      else
+        step = (last-first)/(elements-1)
+      end
+    end
+    if integer? && step.denominator != 1
+      self[] = (first + seq * step).floor
+    else
+      seq!(first, step)
     end
     return self
   end
