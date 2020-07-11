@@ -28,10 +28,10 @@ Requirements
 Directories
 -----------
 
-    ext       - Ruby/CArray extension source codes
-    lib       - Ruby/CArray standard library in Ruby
+    lib       - Ruby sorce codes
+    ext       - C extension source codes
     utils     - support tools for development
-    spec      - rspec files 
+    spec      - rspec files
     misc      - misc files
 
 Licenses
