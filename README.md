@@ -28,11 +28,11 @@ Requirements
 Directories
 -----------
 
-    .         - Ruby/CArray extension source codes
+    ext       - Ruby/CArray extension source codes
     lib       - Ruby/CArray standard library in Ruby
-    test      - some unit tests (incomplete)
-    spec      - some rspec (incomplete)
-    utils     - support tools for development.
+    utils     - support tools for development
+    spec      - rspec files 
+    misc      - misc files
 
 Licenses
 --------
