@@ -1,4 +1,5 @@
 require "carray"
+require "rspec-power_assert"
 
 describe CArray do
 
@@ -11,13 +12,13 @@ describe CArray do
       @it = CArray.load("test.ca")
     end
 
-    it "should equal to original" do
-      ( @it ).should == @original
-      ( @it.has_mask? ).should == true
+    example "should equal to original" do
+      is_asserted_by { @it == @original }
+      is_asserted_by { @it.has_mask? == true }
     end
 
-    it "should dump string of same contents with file from which it was loaded" do 
-      ( CArray.dump(@it) ).should == File.read("test.ca")
+    example "should dump string of same contents with file from which it was loaded" do 
+      is_asserted_by { CArray.dump(@it) == File.read("test.ca") }
     end
 
     after do
@@ -35,9 +36,9 @@ describe CArray do
       @it = CArray.load("test.ca")
     end
 
-    it "should equal to original" do
-      ( @it ).should == @original
-      ( @it.has_mask? ).should == true
+    example "should equal to original" do
+      is_asserted_by { @it == @original }
+      is_asserted_by { @it.has_mask? == true }
     end
 
     after do
@@ -55,9 +56,9 @@ describe CArray do
       @it = open("test.ca") { |io| Marshal.load(io) }
     end
 
-    it "should equal to original" do
-      ( @it ).should == @original
-      ( @it.has_mask? ).should == true
+    example "should equal to original" do
+      is_asserted_by { @it == @original }
+      is_asserted_by { @it.has_mask? == true }
     end
 
     after do
@@ -75,9 +76,9 @@ describe CArray do
       @it = open("test.ca") { |io| Marshal.load(io) }
     end
 
-    it "should equal to original" do
-      ( @it ).should == @original
-      ( @it.has_mask? ).should == true
+    example "should equal to original" do
+      is_asserted_by { @it == @original }
+      is_asserted_by { @it.has_mask? == true }
     end
 
     after do
