@@ -1,13 +1,18 @@
 ChangeLog of Ruby/CArray
 ========================
 
-1.5.0 -> 1.5.1
+1.5.1 -> 1.5.2
 --------------
 
 * [New] Add new method 'CArray#sorted_with'
 * [New] Add new method 'CArray#sort_with'
 * [New] Add new method 'CArray#max_with'
 * [New] Add new method 'CArray#min_with'
+* [Fix] Modify 'CArray#linspace' to return float64 array for integer arguments
+
+1.5.0 -> 1.5.1
+--------------
+
 * [New] Add data type classes like 'Float64' ... to provide the methods like 'CArray::Float64.linspace'
 * [Mod] Modify 'CArray.float64' ... without aruguments to return the corresponding data type class 
 * [Fix] Move C extension files into 'ext/'
@@ -15,7 +20,6 @@ ChangeLog of Ruby/CArray
 * [Fix] Remove 'CArray#shuffle' (gone to 'carray-random' gem)
 * [Fix] Remove dependencies on 'rb_secure()' and 'rb_safe_level()'
 * [Fix] Modify 'CArray#span' to handle fractional step for integer array
-* [Fix] Modify 'CArray#linspace' to return float64 array for integer arguments
 * [Obsolete] Set obsolete flag to 'CAIterator#sort_with'
 
 1.4.0 -> 1.5.0
