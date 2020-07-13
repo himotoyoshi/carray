@@ -59,39 +59,39 @@ describe "TestMath " do
 
     # ---
     is_asserted_by { CA_INT32([[8,7,6],
-                           [5,4,5],
-                           [6,7,8]]) == a.pmax(b) }
+                               [5,4,5],
+                               [6,7,8]]) == a.pmax(b) }
     is_asserted_by { CA_INT32([[0,1,2],
-                           [3,4,3],
-                           [2,1,0]]) == a.pmin(b) }
+                               [3,4,3],
+                               [2,1,0]]) == a.pmin(b) }
     # ---
     is_asserted_by { CA_INT32([[0,0,0],
-                           [0,0,0],
-                           [0,0,0]]) == a.pmin(0) }
+                               [0,0,0],
+                               [0,0,0]]) == a.pmin(0) }
     is_asserted_by { CA_INT32([[8,8,8],
-                           [8,8,8],
-                           [8,8,8]]) == a.pmax(8) }
+                               [8,8,8],
+                               [8,8,8]]) == a.pmax(8) }
     # ---
     is_asserted_by { CA_INT32([[0,0,0],
-                           [0,0,0],
-                           [0,0,0]]) == CA_INT32(0).pmin(a) }
+                               [0,0,0],
+                               [0,0,0]]) == CA_INT32(0).pmin(a) }
     is_asserted_by { CA_INT32([[8,8,8],
-                           [8,8,8],
-                           [8,8,8]]) == CA_INT32(8).pmax(a) }
+                               [8,8,8],
+                               [8,8,8]]) == CA_INT32(8).pmax(a) }
     # ---
     is_asserted_by { CA_INT32([[8,7,6],
-                           [5,4,5],
-                           [6,7,8]]) == CAMath.max(a, b) }
+                               [5,4,5],
+                               [6,7,8]]) == CAMath.max(a, b) }
     is_asserted_by { CA_INT32([[0,1,2],
-                           [3,4,3],
-                           [2,1,0]]) == CAMath.min(a, b) }
+                               [3,4,3],
+                               [2,1,0]]) == CAMath.min(a, b) }
     # ---
     is_asserted_by { CA_INT32([[0,0,0],
-                           [0,0,0],
-                           [0,0,0]]) == CAMath.min(0,a,b,8) }
+                               [0,0,0],
+                               [0,0,0]]) == CAMath.min(0,a,b,8) }
     is_asserted_by { CA_INT32([[8,8,8],
-                           [8,8,8],
-                           [8,8,8]]) == CAMath.max(0,a,b,8) }
+                               [8,8,8],
+                               [8,8,8]]) == CAMath.max(0,a,b,8) }
   end
 
 end

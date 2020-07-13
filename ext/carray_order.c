@@ -154,7 +154,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
 
-  rb_scan_args(argc, argv, "12", (VALUE *) &rindex, (VALUE *) &vlfval, (VALUE *) &vufval);
+  rb_scan_args(argc, argv, "12", &rindex, &vlfval, &vufval);
 
   Data_Get_Struct(self, CArray, ca);
 

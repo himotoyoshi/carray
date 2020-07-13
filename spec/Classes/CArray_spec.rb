@@ -74,17 +74,6 @@ describe "TestCArray " do
     is_asserted_by { a == b }
   end
 
-  example "seq" do
-    a = CArray.int32(3, 3)
-    a.seq!
-    assert_carray(a, CA_INT32, [3,3], [
-        [0, 1, 2],
-        [3, 4, 5],
-        [6, 7, 8]
-      ])
-    is_asserted_by { a.seq == a }
-  end
-
   example "set_value" do
     a = CArray.int32(3, 3)
     b = CArray.int32(3, 3)
@@ -154,38 +143,6 @@ describe "TestCArray " do
 
     a[3..5] = [1,2,3]
     is_asserted_by { a[1, 1] == 2 }
-  end
-
-  example "dump_io ()" do
-    a = CArray.int32(3, 3).seq!
-    b = CArray.int32(3, 3)
-    open("bintest", "w") { |io| a.dump_binary(io) }
-    open("bintest")      { |io| b.load_binary(io) }
-    is_asserted_by { a == b }
-
-    a = CArray.int32(3, 3).seq!
-    b = CArray.int32(3, 3).seq!
-    open("bintest", "w") { |io| a[0..1, 0..1].dump_binary(io) }
-    open("bintest")      { |io| b[0..1, 0..1].load_binary(io) }
-    is_asserted_by { a == b }
-  ensure
-    File.unlink("bintest")
-  end
-
-  example "dump_str ()" do
-    a = CArray.int32(3, 3).seq!
-    b = CArray.int32(3, 3)
-    s = ""
-    a.dump_binary(s)
-    b.load_binary(s)
-    is_asserted_by { a == b }
-
-    a = CArray.int32(3, 3).seq!
-    b = CArray.int32(3, 3).seq!
-    s = ""
-    a[0..1, 0..1].dump_binary(s)
-    b[0..1, 0..1].load_binary(s)
-    is_asserted_by { a == b }
   end
 
   example "reverse" do
