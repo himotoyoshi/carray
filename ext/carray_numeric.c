@@ -220,6 +220,15 @@ Init_carray_numeric ()
   rb_define_alias(rb_cFalseClass, "__and__", "&");
   rb_define_alias(rb_cFalseClass, "__xor__", "^");
 
+#if RUBY_VERSION_CODE >= 240
+
+  rb_define_alias(rb_cInteger, "__or__", "|");
+  rb_define_alias(rb_cInteger, "__and__", "&");
+  rb_define_alias(rb_cInteger, "__xor__", "^");
+  rb_define_alias(rb_cInteger, "__lshift__", "<<");
+  rb_define_alias(rb_cInteger, "__rshift__", ">>");
+
+#else
   rb_define_alias(rb_cFixnum, "__or__", "|");
   rb_define_alias(rb_cFixnum, "__and__", "&");
   rb_define_alias(rb_cFixnum, "__xor__", "^");
@@ -231,6 +240,7 @@ Init_carray_numeric ()
   rb_define_alias(rb_cBignum, "__xor__", "^");
   rb_define_alias(rb_cBignum, "__lshift__", "<<");
   rb_define_alias(rb_cBignum, "__rshift__", ">>");
+#endif
 
   rb_define_method(rb_cTrueClass, "|", rb_hack_or, 1);
   rb_define_method(rb_cTrueClass, "&", rb_hack_and, 1);
@@ -242,6 +252,13 @@ Init_carray_numeric ()
   rb_define_method(rb_cFalseClass, "^", rb_hack_xor, 1);
   rb_define_method(rb_cFalseClass, "*", rb_hack_star, 1);
 
+#if RUBY_VERSION_CODE >= 240
+  rb_define_method(rb_cInteger, "|", rb_hack_or, 1);
+  rb_define_method(rb_cInteger, "&", rb_hack_and, 1);
+  rb_define_method(rb_cInteger, "^", rb_hack_xor, 1);
+  rb_define_method(rb_cInteger, "<<", rb_hack_lshift, 1);
+  rb_define_method(rb_cInteger, ">>", rb_hack_rshift, 1);
+#else
   rb_define_method(rb_cFixnum, "|", rb_hack_or, 1);
   rb_define_method(rb_cFixnum, "&", rb_hack_and, 1);
   rb_define_method(rb_cFixnum, "^", rb_hack_xor, 1);
@@ -253,6 +270,7 @@ Init_carray_numeric ()
   rb_define_method(rb_cBignum, "^", rb_hack_xor, 1);
   rb_define_method(rb_cBignum, "<<", rb_hack_lshift, 1);
   rb_define_method(rb_cBignum, ">>", rb_hack_rshift, 1);
+#endif
 
 #ifdef HAVE_COMPLEX_H
   rb_define_method(rb_cCArray, "arg", rb_ca_arg, 0);
