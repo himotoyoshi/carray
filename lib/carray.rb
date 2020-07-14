@@ -32,6 +32,7 @@ require 'carray/transform'
 require 'carray/convert'
 require 'carray/testing'
 require 'carray/ordering'
+require 'carray/broadcast'
 
 require 'carray/math'
 require 'carray/iterator'
