@@ -8,7 +8,10 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray#sort_with'
 * [New] Add new method 'CArray#max_with'
 * [New] Add new method 'CArray#min_with'
+* [New] Add new method 'CArray.broadcast'
+* [New] Add new method 'CArray#broadcast_to', 'CScalar#broadcast_to'
 * [Fix] Modify 'CArray#linspace' to return float64 array for integer arguments
+* [Fix] Add support for Integer (same as for Fixnum, Bignum)
 
 1.5.0 -> 1.5.1
 --------------
