@@ -70,4 +70,31 @@ describe "CArray.broadcast" do
     is_asserted_by { cc == c } 
   end
   
+  example "include numeric" do 
+    a = CArray.int(1,3).seq
+    b = 1.0
+    c = CArray.int(3,1).seq
+    
+    aa, bb, cc = CArray.broadcast(a,b,c)
+   
+    is_asserted_by { aa == CA_INT([[0,1,2],
+                                   [0,1,2],
+                                   [0,1,2]]) }
+    is_asserted_by { bb == 1.0 }                                   
+    is_asserted_by { cc == CA_INT([[0,0,0],
+                                   [1,1,1],
+                                   [2,2,2]]) }
+
+  end
+
+  example "all numeric" do 
+    a = 1.0
+    b = 2.0
+    c = 3.0
+    aa, bb, cc = CArray.broadcast(a,b,c)
+    is_asserted_by { aa == a }
+    is_asserted_by { bb == b }                                   
+    is_asserted_by { cc == c }
+  end
+  
 end
