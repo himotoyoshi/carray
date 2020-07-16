@@ -260,6 +260,10 @@ rb_ca_ubrep_shave (VALUE self, VALUE other)
   Data_Get_Struct(self, CAUnboundRepeat, ca);
   Data_Get_Struct(other, CArray, co);
 
+  if ( ca->elements != co->elements ) {
+    rb_raise(rb_eRuntimeError, "mismatch in # of elements");
+  }
+
   ndim = 0;
   for (i=0; i<ca->ndim; i++) {
     if ( ca->rep_dim[i] ) {
