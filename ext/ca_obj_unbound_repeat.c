@@ -247,6 +247,32 @@ ca_operation_function_t ca_ubrep_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
+rb_ca_ubrep_shave (VALUE self, VALUE other)
+{
+  CAUnboundRepeat *ca;
+  CArray *co;
+  int8_t ndim, i;
+  ca_size_t dim[CA_RANK_MAX];
+
+  rb_check_carray_object(self);
+  rb_check_carray_object(other);
+
+  Data_Get_Struct(self, CAUnboundRepeat, ca);
+  Data_Get_Struct(other, CArray, co);
+
+  ndim = 0;
+  for (i=0; i<ca->ndim; i++) {
+    if ( ca->rep_dim[i] ) {
+      dim[ndim] = ca->rep_dim[i];
+      ndim += 1;
+    }
+  }
+
+  return rb_ca_refer_new(other, co->data_type, ndim, dim, co->bytes, 0);
+}
+
+
+VALUE
 rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim)
 {
   volatile VALUE obj;
@@ -298,21 +324,12 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  if ( ndim != ca->ndim ) {
-    rb_raise(rb_eArgError, "invalid number of nil's (%i for %i)", ndim, ca->ndim);
-  }
-
   if ( elements != ca->elements ) {
     rb_raise(rb_eArgError, "mismatch in entity elements (%i for %i)", elements, ca->elements);
   }
 
   if ( ndim != ca->ndim ) {
-    volatile VALUE par, obj;
-    par = rb_ca_refer_new(self, ca->data_type, ndim, dim, ca->bytes, 0);
-    obj = rb_ca_ubrep_new(par, rep_ndim, rep_dim);
-    rb_ivar_set(obj, rb_intern("__real_parent__"), par);
-    rb_ca_set_parent(obj, self);
-    return obj;
+    rb_raise(rb_eArgError, "invalid number of nil's (%i for %i)", ndim, ca->ndim);
   }
   else {
     return rb_ca_ubrep_new(self, rep_ndim, rep_dim);
