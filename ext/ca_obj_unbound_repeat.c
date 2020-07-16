@@ -25,6 +25,7 @@ ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
 {
   int8_t data_type, ndim;
   ca_size_t bytes, elements;
+  int8_t i;
 
   /* check arguments */
 
@@ -32,18 +33,17 @@ ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
-  ndim      = parent->ndim;
   elements  = parent->elements;
 
   ca->obj_type  = CA_OBJ_UNBOUND_REPEAT;
   ca->data_type = data_type;
   ca->flags     = 0;
-  ca->ndim      = ndim;
+  ca->ndim      = rep_ndim;
   ca->bytes     = bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, ndim);
+  ca->dim       = ALLOC_N(ca_size_t, rep_ndim);
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -52,8 +52,16 @@ ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
   ca->rep_ndim  = rep_ndim;
   ca->rep_dim   = ALLOC_N(ca_size_t, rep_ndim);
 
-  memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
   memcpy(ca->rep_dim, rep_dim, rep_ndim * sizeof(ca_size_t));
+
+  for (i=0; i<ca->ndim; i++) {
+    if ( ca->rep_dim[i] ) {
+      ca->dim[i] = ca->rep_dim[i];      
+    }
+    else {
+      ca->dim[i] = 1;
+    }
+  }
 
   if ( ca_has_mask(parent) ) {
     ca_create_mask(ca);
@@ -260,77 +268,20 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
   ca_size_t ndim, dim[CA_RANK_MAX];
   int32_t rep_ndim;
   ca_size_t rep_dim[CA_RANK_MAX];
-  ca_size_t count, i;
+  ca_size_t elements, count, i;
 
   Data_Get_Struct(self, CArray, ca);
-
-  if ( argc == 1 && argv[0] == ID2SYM(rb_intern("*")) ) {
-    CAUnboundRepeat *cr = (CAUnboundRepeat *) ca;
-    volatile VALUE args;
-    int repeatable = 0;
-    args = rb_ary_new();
-    if ( rb_obj_is_kind_of(self, rb_cCAUnboundRepeat) ) {
-      repeatable = 1;
-      for (i=0; i<cr->rep_ndim; i++) {
-        if ( cr->rep_dim[i] == 1 ) {
-          rb_ary_push(args, ID2SYM(rb_intern("*")));
-          repeatable = 1;
-        }
-        else if ( cr->rep_dim[i] > 1 ) {
-          rb_ary_push(args, Qnil);
-        }
-        else {
-          rb_ary_push(args, ID2SYM(rb_intern("*")));
-        }
-      }
-    }
-    else {
-      for (i=0; i<ca->ndim; i++) {
-        if ( ca->dim[i] == 1 ) {
-          rb_ary_push(args, ID2SYM(rb_intern("*")));
-          repeatable = 1;
-        }
-        else {
-          rb_ary_push(args, Qnil);
-        }
-      }
-    }
-    if ( ! repeatable ) {
-      return self;
-    }
-    else {
-      return rb_ca_unbound_repeat((int)RARRAY_LEN(args), RARRAY_PTR(args), self);
-    }
-  }
-  else if ( argc == 2 && 
-            argv[0] == ID2SYM(rb_intern("*")) && 
-            rb_obj_is_carray(argv[1]) ) {
-    volatile VALUE args, obj;
-    args = ID2SYM(rb_intern("*"));
-    obj  = rb_ca_unbound_repeat(1, (VALUE*)&args, self);
-    return ca_ubrep_bind_with(obj, argv[1]);
-  } 
-  else if ( argc == 2 && 
-            argv[1] == ID2SYM(rb_intern("*")) && 
-            rb_obj_is_carray(argv[0]) ) {
-    volatile VALUE args, obj;
-    args = ID2SYM(rb_intern("*"));
-    obj  = rb_ca_unbound_repeat(1, (VALUE*)&args, self);
-    return ca_ubrep_bind_with(obj, argv[0]);
-  }
 
   rep_ndim = argc;
 
   count = 0;
   ndim = 0;
 
+  elements = 1;
   for (i=0; i<rep_ndim; i++) {
     if ( rb_obj_is_kind_of(argv[i], rb_cSymbol) ) {
       if ( argv[i] == ID2SYM(rb_intern("*")) ) {
         rep_dim[i] = 0;
-        if ( ca->dim[count] == 1 ) {
-          count++;
-        }
       }
       else {
         rb_raise(rb_eArgError, "unknown symbol (!= ':*') in arguments");
@@ -342,12 +293,17 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
       }
       rep_dim[i] = ca->dim[count];
       dim[ndim] = ca->dim[count];
+      elements *= ca->dim[count];
       count++; ndim++;
     }
   }
 
-  if ( count != ca->ndim ) {
-    rb_raise(rb_eRuntimeError, "too small # of nil");
+  if ( ndim != ca->ndim ) {
+    rb_raise(rb_eArgError, "invalid number of nil's (%i for %i)", ndim, ca->ndim);
+  }
+
+  if ( elements != ca->elements ) {
+    rb_raise(rb_eArgError, "mismatch in entity elements (%i for %i)", elements, ca->elements);
   }
 
   if ( ndim != ca->ndim ) {
@@ -450,7 +406,7 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
     return rb_ca_ubrep_new(rep, new_ndim, upr_spec);
   }
   else {
-    return rb_ca_repeat_new(self, new_ndim, rep_spec);
+    return rb_ca_repeat_new(rb_ca_parent(self), new_ndim, rep_spec);
   }
 }
 
@@ -503,6 +459,7 @@ rb_ca_ubrep_bind (int argc, VALUE *argv, VALUE self)
   if ( ca->rep_ndim != argc ) {
     rb_raise(rb_eArgError, "invalid new_ndim");
   }
+  
   for (i=0; i<argc; i++) {
     if ( ca->rep_dim[i] == 0 ) {
       rep_spec[i] = NUM2SIZE(argv[i]);
@@ -512,7 +469,7 @@ rb_ca_ubrep_bind (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  return rb_ca_repeat_new(self, argc, rep_spec);
+  return rb_ca_repeat_new(rb_ca_parent(self), argc, rep_spec);
 }
 
 static VALUE
