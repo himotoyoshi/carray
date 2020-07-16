@@ -58,7 +58,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -197,13 +197,13 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca2->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca2;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(other, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -302,7 +302,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -395,7 +395,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;

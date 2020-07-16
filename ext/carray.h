@@ -889,6 +889,9 @@ CARepeat *ca_repeat_new (CArray *carray, int8_t ndim, ca_size_t *count);
 VALUE   rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count);
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
+/* --- ca_obj_unbound_repeat.c --- */
+
+VALUE   rb_ca_ubrep_shave (VALUE self, VALUE other);
 VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
 VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
