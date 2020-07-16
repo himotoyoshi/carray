@@ -150,16 +150,16 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 VALUE
 rb_ca_project (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, rindex, vlfval, vufval;
+  volatile VALUE obj, ridx, vlfval, vufval;
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
 
-  rb_scan_args(argc, argv, "12", &rindex, &vlfval, &vufval);
+  rb_scan_args(argc, argv, "12", (VALUE *)&ridx, (VALUE *) &vlfval, (VALUE *) &vufval);
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_check_carray_object(rindex);
-  ci = ca_wrap_readonly(rindex, CA_SIZE);
+  rb_check_carray_object(ridx);
+  ci = ca_wrap_readonly(ridx, CA_SIZE);
 
   lfval = malloc_with_check(ca->bytes);
   ufval = malloc_with_check(ca->bytes);
@@ -630,6 +630,33 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
     }                                                        \
   }
 
+#define proc_find_value_float128(type, defeps)                  \
+  {                                                          \
+    type *ptr = (type *) ca->ptr;                            \
+    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
+    type val  = (type) NUM2DBL(value);                       \
+    float128_t eps  = (NIL_P(veps)) ? defeps*fabsl(val) : NUM2DBL(veps); \
+    ca_size_t i;                                               \
+    if ( m ) {                                               \
+      for (i=0; i<ca->elements; i++, ptr++) {                \
+        if ( ! *m++ ) {                                      \
+          if ( fabsl(*ptr - val) <= eps ) {                   \
+            addr = i;                                        \
+            break;                                           \
+          }                                                  \
+        }                                                    \
+      }                                                      \
+    }                                                        \
+    else {                                                   \
+      for (i=0; i<ca->elements; i++, ptr++) {                \
+        if ( fabsl(*ptr - val) <= eps ) {                     \
+          addr = i;                                          \
+          break;                                             \
+        }                                                    \
+      }                                                      \
+    }                                                        \
+  }
+
 #define proc_find_value_cmplx(type, defeps)                  \
   {                                                          \
     type *ptr = (type *) ca->ptr;                            \
@@ -717,7 +744,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
   case CA_UINT64:   proc_find_value(uint64_t); break;
   case CA_FLOAT32:  proc_find_value_float(float32_t, FLT_EPSILON); break;
   case CA_FLOAT64:  proc_find_value_float(float64_t, DBL_EPSILON); break;
-  case CA_FLOAT128: proc_find_value_float(float128_t, DBL_EPSILON); break;
+  case CA_FLOAT128: proc_find_value_float128(float128_t, DBL_EPSILON); break;
 #ifdef HAVE_COMPLEX_H
   case CA_CMPLX64:  proc_find_value_cmplx(cmplx64_t, FLT_EPSILON); break;
   case CA_CMPLX128: proc_find_value_cmplx(cmplx128_t, DBL_EPSILON); break;

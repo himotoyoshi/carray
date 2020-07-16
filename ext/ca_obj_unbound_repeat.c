@@ -23,7 +23,7 @@ int
 ca_ubrep_setup (CAUnboundRepeat *ca, CArray *parent,
                 int32_t rep_ndim, ca_size_t *rep_dim)
 {
-  int8_t data_type, ndim;
+  int8_t data_type;
   ca_size_t bytes, elements;
   int8_t i;
 
@@ -295,7 +295,8 @@ VALUE
 rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  ca_size_t ndim, dim[CA_RANK_MAX];
+  int8_t ndim;
+  ca_size_t dim[CA_RANK_MAX];
   int32_t rep_ndim;
   ca_size_t rep_dim[CA_RANK_MAX];
   ca_size_t elements, count, i;
@@ -329,7 +330,7 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
   }
 
   if ( elements != ca->elements ) {
-    rb_raise(rb_eArgError, "mismatch in entity elements (%i for %i)", elements, ca->elements);
+    rb_raise(rb_eArgError, "mismatch in entity elements (%lli for %lli)", elements, ca->elements);
   }
 
   if ( ndim != ca->ndim ) {
