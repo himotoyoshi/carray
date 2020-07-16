@@ -760,6 +760,7 @@ typedef struct {
   CArray  *select;
   VALUE    block;
   VALUE    symbol;
+  int8_t   range_check;
 } CAIndexInfo;
 
 /* -------------------------------------------------------------------- */

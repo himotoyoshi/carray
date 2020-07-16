@@ -239,6 +239,7 @@ rb_ca_dim_iterator (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
+  info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
   obj = rb_di_s_allocate(rb_cCADimIterator);
