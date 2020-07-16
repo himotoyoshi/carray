@@ -46,8 +46,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
   int8_t ndim, data_type;
   ca_size_t *dim0;
   ca_size_t elements, bytes;
+  ca_size_t j, k;
   double  length;
-  int i, j, k;
+  int8_t i;
 
   data_type = parent->data_type;
   ndim      = parent->ndim;

@@ -155,7 +155,7 @@ ca_field_func_ptr_at_index (void *ap, ca_size_t *idx)
     }
 
     if ( ca->parent->ptr == NULL ) {
-      return ca_ptr_at_addr(ca->parent, n) + ca->offset;
+      return (void *)((char *) ca_ptr_at_addr(ca->parent, n) + ca->offset);
     }
     else {
       return ca->parent->ptr + ca->parent->bytes * n + ca->offset;
@@ -324,7 +324,7 @@ ca_field_attach (CAField *ca)
   case CA_UINT8:
     {
       char *p = ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *p = *q;
         p += 1; q += pbytes;
@@ -335,7 +335,7 @@ ca_field_attach (CAField *ca)
   case CA_UINT16:
     {
       int16_t *p = (int16_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *p = *(int16_t*) q;
         p += 1; q += pbytes;
@@ -347,7 +347,7 @@ ca_field_attach (CAField *ca)
   case CA_FLOAT32:
     {
       int32_t *p = (int32_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *p = *(int32_t*) q;
         p += 1; q += pbytes;
@@ -359,7 +359,7 @@ ca_field_attach (CAField *ca)
   case CA_FLOAT64:
     {
       float64_t *p = (float64_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *p = *(float64_t*) q;
         p += 1; q += pbytes;
@@ -369,7 +369,7 @@ ca_field_attach (CAField *ca)
   default:
     {
       char *p = ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         memcpy(p, q, ca->bytes);
         p += bytes; q += pbytes;
@@ -391,7 +391,7 @@ ca_field_sync (CAField *ca)
   case CA_UINT8:
     {
       char *p = ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *q = *p;
         p += 1; q += pbytes;
@@ -402,7 +402,7 @@ ca_field_sync (CAField *ca)
   case CA_UINT16:
     {
       int16_t *p = (int16_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *(int16_t*) q = *p;
         p += 1; q += pbytes;
@@ -414,7 +414,7 @@ ca_field_sync (CAField *ca)
   case CA_FLOAT32:
     {
       int32_t *p = (int32_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *(int32_t*) q = *p;
         p += 1; q += pbytes;
@@ -426,7 +426,7 @@ ca_field_sync (CAField *ca)
   case CA_FLOAT64:
     {
       float64_t *p = (float64_t*) ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         *(float64_t*) q = *p;
         p += 1; q += pbytes;
@@ -436,7 +436,7 @@ ca_field_sync (CAField *ca)
   default:
     {
       char *p = ca_ptr_at_addr(ca, 0);
-      char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+      char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
       while ( n-- ) {
         memcpy(q, p, ca->bytes);
         p += bytes; q += pbytes;
@@ -450,7 +450,7 @@ ca_field_fill (CAField *ca, char *ptr)
 {
   ca_size_t pbytes = ca->parent->bytes;
   ca_size_t n = ca->elements;
-  char *q = ca_ptr_at_addr(ca->parent, 0) + ca->offset;
+  char *q = (char *) ca_ptr_at_addr(ca->parent, 0) + ca->offset;
 
   switch ( ca->data_type ) {
   case CA_BOOLEAN:

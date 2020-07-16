@@ -664,7 +664,7 @@ rb_ca_swap_bytes (VALUE self)
           }                                                          \
         }                                                            \
       }                                                              \
-    }                                                              \    
+    }                                                                \
   }
 
 /* rdoc:

@@ -786,10 +786,10 @@ VALUE rb_ca_call_binop (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[]);
 VALUE rb_ca_call_bincmp (VALUE self, VALUE other, ca_bincmp_func_t func[]);
-void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2);
-void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
-void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2);
-void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
+void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
+void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
+void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
+void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
 VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 
 /* -------------------------------------------------------------------- */
@@ -1068,7 +1068,7 @@ void    ca_parse_range_without_check (VALUE arg, ca_size_t size,
                         ca_size_t *offset, ca_size_t *count, ca_size_t *step);
 
 int     ca_equal (void *ap, void *bp);
-void    ca_zerodiv(void);
+void    ca_zerodiv(void)  __attribute__((noreturn));
 int32_t ca_rand (double rmax);
 ca_size_t ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k);
 
