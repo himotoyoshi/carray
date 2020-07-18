@@ -3,10 +3,8 @@
   carray_conversion.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -43,7 +41,7 @@ rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Converts the array to Ruby's array. For higher dimension, 
     # the array is nested ndim-1 times.
@@ -66,7 +64,7 @@ rb_ca_to_a (VALUE self)
   return ary;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Convert the 
     def convert (data_type=nil, dim=nil)
@@ -106,7 +104,7 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # dumps the value array to the given IO stream
     def dump_binary(io)
@@ -194,7 +192,7 @@ rb_ca_dump (int argc, VALUE *argv, VALUE self)
   return rb_ca_dump_binary(argc, argv, self);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # dumps the value array to a string.
     def to_s
@@ -208,7 +206,7 @@ rb_ca_to_s (VALUE self)
   return rb_ca_dump_binary(0, NULL, self);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # loads the value array from the given IO stream
     def load_binary (io)
@@ -314,7 +312,7 @@ ca_to_cptr (void *ap)
 }
 
 
-/* rdoc:
+/* yard:
   class CArray
     # Convert the 
     def convert (data_type=nil, dim=nil)

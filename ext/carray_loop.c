@@ -3,10 +3,8 @@
   carray_loop.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -43,7 +41,7 @@ rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
   return ret;
 }
 
-/* rdoc:
+/* yard:
   #  Iterates with the multi-dimensional indeces for the given
   #  dimension numbers.
   #
@@ -69,7 +67,7 @@ rb_ca_s_each_index (int ndim, VALUE *dim, VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def each # :yields: v
@@ -92,7 +90,7 @@ rb_ca_each (VALUE self)
   return ret;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def each_with_addr # :yields: v, addr
@@ -115,7 +113,7 @@ rb_ca_each_with_addr (VALUE self)
   return ret;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def each_addr() # :yields: addr
@@ -160,7 +158,7 @@ rb_ca_each_index_internal (VALUE self, int8_t level, VALUE ridx)
   return ret;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Iterates with the multi-dimensional indeces for the dimension of <i>ca</i>.
     #
@@ -187,7 +185,7 @@ rb_ca_each_index (VALUE self)
   return rb_ca_each_index_internal(self, 0, ridx);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def map! # :yields: v
@@ -243,7 +241,7 @@ rb_ca_each_with_index_internal (VALUE self,
   return ret;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # 
     def each_with_index # :yields: v, idx 
@@ -293,7 +291,7 @@ rb_ca_map_with_index_bang_internal (VALUE self,
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def map_with_index! # :yields: v, idx
@@ -347,7 +345,7 @@ rb_ca_map_index_bang_internal (VALUE self,
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def map_index! # :yields: i0, i1, ...
@@ -375,7 +373,7 @@ rb_ca_map_index_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def map_with_addr! # :yields: v, addr
@@ -406,7 +404,7 @@ rb_ca_map_with_addr_bang (VALUE self)
 }
 
 
-/* rdoc:
+/* yard:
   class CArray
     #
     def map_addr! # :yields: addr

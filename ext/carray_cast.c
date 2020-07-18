@@ -3,10 +3,8 @@
   carray_cast.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -380,7 +378,7 @@ VALUE rb_ca_to_type_method(cmplx128, CA_CMPLX128);
 VALUE rb_ca_to_type_method(cmplx256, CA_CMPLX256);
 VALUE rb_ca_to_type_method(VALUE,    CA_OBJECT);
 
-/* rdoc:
+/* yard:
   class CArray
     # call-seq:
     #     ca.boolean
@@ -494,7 +492,7 @@ VALUE rb_ca_as_type_method(cmplx256, CA_CMPLX256);
 VALUE rb_ca_as_type_method(VALUE,    CA_OBJECT);
 
 
-/* rdoc:
+/* yard:
   class CArray
     # call-seq:
     #     ca.as_int8     
@@ -643,7 +641,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   def CArray.wrap_writable
   end
 */
@@ -761,7 +759,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   def CArray.wrap_readonly
   end
 */

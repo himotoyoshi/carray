@@ -34,11 +34,12 @@ class CAUnboundRepeat
 end
 
 def CArray.broadcast (*argv)
-  sel = argv.map {|arg| arg.is_a?(CArray) ? arg : CA_OBJECT([arg]) }
+  sel = argv.select {|arg| arg.is_a?(CArray) }
+  return argv if sel.empty?
   dim = []
   ndim = sel.map(&:ndim).max
   ndim.times do |k|
     dim[k] = sel.map{|arg| arg.dim[k] || 1 }.max
   end
-  return argv.map{|arg| arg.broadcast_to(*dim) }
+  return argv.map{|arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
 end

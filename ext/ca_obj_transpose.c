@@ -3,10 +3,8 @@
   ca_obj_transpose.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -34,7 +32,7 @@ static int8_t CA_OBJ_TRANSPOSE;
 
 static VALUE rb_cCATrans;
 
-/* rdoc:
+/* yard:
   class CATranspose < CAVirtual # :nodoc:
   end
 */
@@ -511,7 +509,7 @@ rb_ca_trans_new (VALUE cary, ca_size_t *imap)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def transposed
     end

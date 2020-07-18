@@ -3,10 +3,8 @@
   carray_generate.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -15,7 +13,7 @@
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # Sets true at the given index for the boolean array and returns self.
     # It accept the arguments same as for CArray#[].
@@ -54,7 +52,7 @@ rb_ca_boolean_unset (int argc, VALUE *argv, VALUE self)
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns the 1d index array for non-zero elements of self
     def where
@@ -245,7 +243,7 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # call-seq:
     #   seq (init_val=0, step=1)
@@ -456,7 +454,7 @@ ca_swap_bytes (char *ptr, ca_size_t bytes, ca_size_t elements)
 
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Swaps the byte order of each element.
     def swap_bytes
@@ -667,7 +665,7 @@ rb_ca_swap_bytes (VALUE self)
     }                                                                \
   }
 
-/* rdoc:
+/* yard:
   class CArray
     # trims the data into the range between min and max. If `fill_value`
     # is given, the element out of the range between min and max is filled

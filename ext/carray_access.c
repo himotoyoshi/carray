@@ -3,10 +3,8 @@
   carray_access.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -208,7 +206,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def fill
     end
@@ -293,7 +291,7 @@ ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
   }
 }
 
-/* rdoc:
+/* yard:
   def CArray.guess_array_shape (arg)
   end
 */  
@@ -1263,7 +1261,7 @@ rb_ca_refer_new_flatten (VALUE self)
   return rb_ca_refer_new(self, ca->data_type, 1, &dim0, ca->bytes, 0);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def [] (*spec)
     end
@@ -1430,7 +1428,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def []= (*spec)
     end
@@ -1578,7 +1576,7 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
   return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
 }
 
-/* rdoc:
+/* yard:
   def CArray.scan_index(dim, idx)
   end
 */
@@ -1688,7 +1686,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   return rb_struct_new(S_CAInfo, rtype, rindex);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def normalize_index (idx)
     end
@@ -1761,7 +1759,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # converts addr to index
     def addr2index (addr)
@@ -1796,7 +1794,7 @@ rb_ca_addr2index (VALUE self, VALUE raddr)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def index2addr (*index)
     end

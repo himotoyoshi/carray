@@ -3,16 +3,14 @@
   carray_class.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 
-/* rdoc: 
+/* yard: 
   # returns the machine endianness.
   #     CArray.endian #=> 0 (CA_LITTLE_ENDIAN)
   #     CArray.endian #=> 1 (CA_BIG_ENDIAN)
@@ -27,7 +25,7 @@ rb_ca_s_endian (VALUE klass)
   return INT2NUM(ca_endian);
 }
 
-/* rdoc:
+/* yard:
   # returns true if the byte order of the architecture is
   # big endian.
 
@@ -41,7 +39,7 @@ rb_ca_s_big_endian_p (VALUE klass)
   return ( ca_endian == CA_BIG_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* rdoc: 
+/* yard: 
   # returns true if the byte order of the architecture is
   # little endian.
 
@@ -55,7 +53,7 @@ rb_ca_s_little_endian_p (VALUE klass)
   return ( ca_endian == CA_LITTLE_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* rdoc:
+/* yard:
   #  Returns the byte length of an element of the given data type.
   #  Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
   #     CArray.sizeof(CA_INT32)  #=> 4
@@ -76,7 +74,7 @@ rb_ca_s_sizeof (VALUE klass, VALUE rtype)
 }
 
 
-/* rdoc:
+/* yard:
   #  Returns true if the given data_type indicate the valid data_type.
 
   def CArray.data_type?(data_type)
@@ -94,7 +92,7 @@ rb_ca_s_data_type (VALUE klass, VALUE rtype)
   return ca_valid[data_type] == 1 ? Qtrue : Qfalse;
 }
 
-/* rdoc:
+/* yard:
   #  Returns string representaion of the data_type specifier.
 
   def CArray.data_type_name(data_type)

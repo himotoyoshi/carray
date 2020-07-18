@@ -3,10 +3,8 @@
   ca_obj_field.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -33,7 +31,7 @@ static int8_t CA_OBJ_FIELD;
 
 static VALUE rb_cCAField;
 
-/* rdoc:
+/* yard:
   class CAField < CAVirtual # :nodoc:
   end
 */
@@ -545,7 +543,7 @@ rb_ca_field_initialize_copy (VALUE self, VALUE other)
 
 /* ----------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # call-seq:
     #    CArray#field(offset, data_type[, :bytes=>bytes]) 

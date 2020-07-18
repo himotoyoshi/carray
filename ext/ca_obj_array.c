@@ -3,10 +3,8 @@
   ca_obj_array.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -19,7 +17,7 @@
 
 VALUE rb_cCArray, rb_cCAWrap, rb_cCScalar, rb_cCAVirtual;
 
-/* rdoc:
+/* yard:
   class CArray
   end
   class CAWrap < CArray   # :nodoc:
@@ -60,7 +58,7 @@ ca_check_mem_count()
   }
 }
 
-/* rdoc:
+/* yard:
   # returns the threshold of incremented memory (MB) used by carray object 
   # until start GC.
   def CArray.gc_interval ()
@@ -699,20 +697,17 @@ rb_ca_s_allocate (VALUE klass)
   return Data_Make_Struct(klass, CArray, ca_mark, ca_free, ca);
 }
 
-/* rdoc:
-  #  call-seq:
-  #     CArray.new(data_type, dim, bytes=0) { ... }
-  #
-  #  Constructs a new CArray object of <i>data_type</i>, which has the
-  #  ndim and the dimensions specified by an <code>Array</code> of
-  #  <code>Integer</code> or an argument list of <code>Integer</code>.
-  #  The byte size of each element for the fixed length data type
-  #  (<code>data_type == CA_FIXLEN</code>) is specified optional argument
-  #  <i>bytes</i>. Otherwise, this optional argument has no
-  #  effect. If the block is given, the new CArray
-  #  object will be initialized by the value returned from the block.
-  def CArray.new(data_type, dim, bytes=0)
-  end
+/* 
+Constructs a new CArray object of <i>data_type</i>, which has the
+ndim and the dimensions specified by an <code>Array</code> of
+<code>Integer</code> or an argument list of <code>Integer</code>.
+The byte size of each element for the fixed length data type
+(<code>data_type == CA_FIXLEN</code>) is specified optional argument
+<i>bytes</i>. Otherwise, this optional argument has no
+effect. If the block is given, the new CArray
+object will be initialized by the value returned from the block.
+
+@overload  initialize(data_type, dim, bytes=0) { ... }
 */
 
 static VALUE
@@ -832,7 +827,7 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* rdoc:
+/* yard:
    def CArray.wrap (data_type, dim, bytes=0) # { wrapped_object }
    end
 */
@@ -893,16 +888,16 @@ rb_cs_s_allocate (VALUE klass)
   return Data_Make_Struct(klass, CScalar, ca_mark, ca_free, ca);
 }
 
-/* rdoc:
-  #  call-seq:
-  #     CScalar.new(data_type, bytes=0) { ... }
-  #
-  #  Constructs a new CScalar object of <i>data_type</i>.
-  #  The byte size of each element for the fixed length data type
-  #  (<code>data_type == CA_FIXLEN</code>) is specified optional argument
-  #  <i>bytes</i>. Otherwise, this optional argument has no
-  #  effect. If the block is given, the new CScalar
-  #  object will be initialized by the value returned from the block.
+/* 
+ call-seq:
+     CScalar.new(data_type, bytes=0) { ... }
+
+  Constructs a new CScalar object of <i>data_type</i>.
+  The byte size of each element for the fixed length data type
+  (<code>data_type == CA_FIXLEN</code>) is specified optional argument
+  <i>bytes</i>. Otherwise, this optional argument has no
+  effect. If the block is given, the new CScalar
+  object will be initialized by the value returned from the block.
   def CScalar.new(data_type,bytes=0)
   end
 */
@@ -1135,7 +1130,7 @@ Init_ca_obj_array ()
 }
 
 
-/* rdoc:
+/* yard:
   # call-seq:
   #    CArray.boolean(...) { init_value }
   #    CArray.int8(...) { init_value }

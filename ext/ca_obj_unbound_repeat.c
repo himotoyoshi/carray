@@ -3,10 +3,8 @@
   ca_obj_unbound_repeat.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -14,7 +12,7 @@
 
 VALUE rb_cCAUnboundRepeat;
 
-/* rdoc:
+/* yard:
   class CAUnboundRepeat < CArray 
   end
 */
@@ -432,7 +430,7 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
   }
 }
 
-/* rdoc:
+/* yard:
   class CAUnboundRepeat
     def bind_with(other)
     end
@@ -462,7 +460,7 @@ ca_ubrep_bind_with (VALUE self, VALUE other)
   }
 }
 
-/* rdoc:
+/* yard:
   class CAUnboundRepeat
     def bind(*index)
     end

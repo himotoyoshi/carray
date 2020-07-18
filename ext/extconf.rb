@@ -219,7 +219,7 @@ carray_stat_proc.c: carray_stat_proc.rb
 carray_math.c: carray_math.rb
 	${RUBY} carray_math.rb
 
-rdoc:
+yard:
 	sh utils/create_rdoc.sh
 
 clean-generated:

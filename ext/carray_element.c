@@ -3,10 +3,8 @@
   carray_element.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -15,7 +13,7 @@
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_swap
     end
@@ -127,7 +125,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_copy
     end
@@ -207,7 +205,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_store
     end
@@ -245,7 +243,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_fetch
     end
@@ -279,7 +277,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_incr
     end
@@ -366,7 +364,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_decr
     end
@@ -453,7 +451,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def elem_masked?
     end
@@ -498,7 +496,7 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # used in CAHistogram.
     def incr_addr

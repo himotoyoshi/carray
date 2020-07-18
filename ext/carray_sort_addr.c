@@ -3,10 +3,8 @@
   carray_sort_addr.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -151,7 +149,7 @@ qcmp_func (struct cmp_data *a, struct cmp_data *b)
   return ( ia > ib ) ? 1 : -1; /* for stable sort */
 }
 
-/* rdoc:
+/* yard:
   # returns index table for index sort
   #
   #   idx = CA.sort_addr(a, b, c)  ### priority a > b > c
@@ -234,7 +232,7 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # returns index table for index sort
     # This method same as,
