@@ -3,10 +3,8 @@
   carray_operator.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -470,7 +468,7 @@ ca_math_call (VALUE mod, VALUE arg, ID id)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def coerce (other)
     end

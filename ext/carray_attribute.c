@@ -3,10 +3,8 @@
   carray_attribute.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -14,14 +12,12 @@
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc
-  class CArray
-    # returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
-    # Since the object type can be known from the class of the object,
-    # this attribute method is rarely used.
-    def obj_type
-    end
-  end
+/* 
+@overload obj_type
+
+(Attribute) Returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
+Since the object type can be known from the class of the object,
+this attribute method is rarely used.
 */
 
 VALUE
@@ -32,12 +28,10 @@ rb_ca_obj_type (VALUE self)
   return INT2NUM(ca->obj_type);
 }
 
-/* rdoc
-  class CArray
-    # returns the data type of each element (e.g. CA_INT32, CA_FLOAT64, ...).
-    def data_type
-    end
-  end
+/* 
+@overload data_type
+
+(Attribute) Returns the data type of each element (e.g. CA_INT32, CA_FLOAT64, ...).
 */
 
 VALUE
@@ -48,15 +42,10 @@ rb_ca_data_type (VALUE self)
   return INT2NUM(ca->data_type);
 }
 
-/* rdoc
-  class CArray
-		# use CArray#ndims instead of this methods after carray-1.3.0
-    def ndim
-    end
-    # returns the ndim (e.g. 1 for 1D array, 3 for 3D array, ...).
-    def ndims
-    end
-  end
+/* 
+@overload ndim
+
+(Attribute) Returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
 */
 
 VALUE
@@ -67,16 +56,14 @@ rb_ca_ndim (VALUE self)
   return INT2NUM(ca->ndim);
 }
 
-/* rdoc
-  class CArray
-    # returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
-    # The byte size can be known using CArray.sizeof(data_type)
-    # for the numerical data types, but
-    # the byte size of fixed-length data type can be known 
-    # only by this method.
-    def bytes
-    end
-  end
+/* 
+@overload bytes
+
+(Attribute) Returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
+The byte size can be known using CArray.sizeof(data_type)
+for the numerical data types, but
+the byte size of fixed-length data type can be known 
+only by this method.
 */
 
 VALUE
@@ -87,18 +74,10 @@ rb_ca_bytes (VALUE self)
   return SIZE2NUM(ca->bytes);
 }
 
-/* rdoc:
-  class CArray
-    # returns the number of elements
-    def elements
-    end
+/* 
+@overload elements
 
-    # alias of `CArray#elements`
-    alias length elements
-
-    # alias of `CArray#elements`
-    alias size elements
-  end
+(Attribute) Returns the number of elements
 */
 
 VALUE
@@ -109,35 +88,11 @@ rb_ca_elements (VALUE self)
   return SIZE2NUM(ca->elements);
 }
 
-/* rdoc:
-  class CArray
-    # use CArray#shape instead of this method after carray-1.3.0
-    # returns the Array object contains the dimensional shape of array
-    # (e.g. [2,3] for 2D 2x3 array, ...).
-    def dim
-    end
+/* 
+@overload dim
 
-    # returns the Array object contains the dimensional shape of array
-    # (e.g. [2,3] for 2D 2x3 array, ...).
-    def shape
-    end
-
-    # short-hand for dim[0]
-    def dim0
-    end
-    
-    # short-hand for dim[1]
-    def dim1
-    end
-    
-    # short-hand for dim[2]
-    def dim2
-    end
-    
-    # short-hand for dim[3]
-    def dim3
-    end
-  end
+(Attribute) Returns the Array object contains the dimensional shape of array
+(e.g. [2,3] for 2D 2x3 array, ...).
 */
 
 VALUE
@@ -154,6 +109,12 @@ rb_ca_dim (VALUE self)
   return dim;
 }
 
+/*
+@overload dim0
+
+(Attribute) Short-hand for "dim[0]"
+*/  
+
 VALUE
 rb_ca_dim0 (VALUE self)
 {
@@ -161,6 +122,12 @@ rb_ca_dim0 (VALUE self)
   Data_Get_Struct(self, CArray, ca);
   return SIZE2NUM(ca->dim[0]);
 }
+
+/*
+@overload dim1
+
+(Attribute) Short-hand for "dim[1]"
+*/  
 
 VALUE
 rb_ca_dim1 (VALUE self)
@@ -170,6 +137,12 @@ rb_ca_dim1 (VALUE self)
   return ( ca->ndim >= 2 ) ? SIZE2NUM(ca->dim[1]) : Qnil;
 }
 
+/*
+@overload dim2
+
+(Attribute) Short-hand for 'dim[2]'
+*/  
+
 VALUE
 rb_ca_dim2 (VALUE self)
 {
@@ -177,6 +150,12 @@ rb_ca_dim2 (VALUE self)
   Data_Get_Struct(self, CArray, ca);
   return ( ca->ndim >= 3 ) ? SIZE2NUM(ca->dim[2]) : Qnil;
 }
+
+/*
+@overload dim3
+
+(Attribute) Short-hand for "dim[3]"
+*/  
 
 VALUE
 rb_ca_dim3 (VALUE self)
@@ -186,12 +165,10 @@ rb_ca_dim3 (VALUE self)
   return ( ca->ndim >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
 }
 
-/* rdoc:
-   class CArray
-     # returns the string representaion of the data_type (e.g. "int32", "fixlen")
-     def data_type_name
-     end
-   end
+/* 
+@overload data_type_name
+
+(Attribute) Returns the string representaion of the data_type (e.g. "int32", "fixlen")
 */
 
 VALUE
@@ -211,12 +188,10 @@ ca_is_scalar (void *ap)
   return ca_test_flag(ca, CA_FLAG_SCALAR);
 }
 
-/* rdoc:
-   class CArray
-     # returns true if `self` is a CScalar object
-     def scalar?
-     end
-   end
+/* 
+@overload scalar?
+
+(Inquiry) Returns true if the object is a CScalar
 */
 
 VALUE
@@ -249,16 +224,10 @@ ca_is_virtual (void *ap)
   return ( ca_func[ca->obj_type].entity_type == CA_VIRTUAL_ARRAY ) ? 1 : 0;
 }
 
-/* rdoc:
-  class CArray
-    # returns true if `self` is an entity array (not a virtual array).
-    def entity?
-    end
+/* 
+@overload entity?
 
-    # returns true if `self` is a virtural array (not an entity array).
-    def virtual?
-    end
-  end
+(Inquiry) Returns true if `self` is an entity array (not a virtual array).
 */
 
 VALUE
@@ -268,6 +237,12 @@ rb_ca_is_entity (VALUE self)
   Data_Get_Struct(self, CArray, ca);
   return ( ca_is_virtual(ca) ) ? Qfalse : Qtrue;
 }
+
+/*
+@overload virtual?
+
+(Inquiry) Returns true if `self` is a virtural array (not an entity array).
+*/
 
 VALUE
 rb_ca_is_virtual (VALUE self)
@@ -279,12 +254,10 @@ rb_ca_is_virtual (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc
-   class CArray
-     # returns true if `self` is attached.
-     def attached?
-     end
-   end
+/* 
+@overload attached?
+
+(Inquiry) Returns true if the object is attached.
 */
 
 VALUE
@@ -297,12 +270,10 @@ rb_ca_is_attached (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc
-   class CArray
-     # returns true if `self` is empty.
-     def empty?
-     end
-   end
+/* 
+@overload empty?
+
+(Inquiry) Returns true if the object is empty.
 */
 
 VALUE
@@ -333,12 +304,10 @@ ca_is_readonly (void *ap)
   }
 }
 
-/* rdoc
-   class CArray
-     # returns true if `self` is read-only carray
-     def read_only?
-     end
-   end
+/* 
+@overload read_only?
+
+(Inquiry) Returns true if the object is read-only
 */
 
 VALUE
@@ -369,12 +338,10 @@ ca_is_mask_array (void *ap)
   }
 }
 
-/* rdoc
-   class CArray
-     # returns true if `self` is mask array (don't confuse with "masked array")
-     def mask_array?
-     end
-   end
+/* 
+@overload mask_array?
+
+(Inquiry) Returns true if `self` is mask array (don't confuse with "masked array")
 */
 
 VALUE
@@ -405,12 +372,10 @@ ca_is_value_array (void *ap)
   }
 }
 
-/* rdoc
-   class CArray
-     # returns true if `self` is a value array
-     def value_array?
-     end
-   end
+/* 
+@overload value_array?
+
+(Inquiry) Returns true if `self` is a value array
 */
 
 VALUE
@@ -430,12 +395,10 @@ ca_is_fixlen_type (void *ap)
   return ( ca->data_type == CA_FIXLEN );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is fixed-length type array
-    def filxen?
-    end
-  end
+/* 
+@overload fixlen?
+
+(Inquiry) Returns true if `self` is fixed-length type array
 */
 
 VALUE
@@ -455,12 +418,10 @@ ca_is_boolean_type (void *ap)
   return ( ca->data_type == CA_BOOLEAN );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is boolean type array  
-    def boolean?
-    end
-  end
+/* 
+@overload boolean?
+
+(Inquiry) Return true if `self` is boolean type array  
 */
 
 VALUE
@@ -481,12 +442,10 @@ ca_is_numeric_type (void *ap)
            ( ca->data_type <= CA_CMPLX256 ) );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is numeric type array  
-    def numeric?
-    end
-  end
+/* 
+@overload numeric?
+
+(Inquiry) Returns true if `self` is numeric type array  
 */
 
 VALUE
@@ -507,12 +466,10 @@ ca_is_integer_type (void *ap)
            ( ca->data_type <= CA_UINT64 ) );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is integer type array  
-    def integer?
-    end
-  end
+/* 
+@overload integer?
+
+(Inquiry) Returns true if `self` is integer type array  
 */
 
 VALUE
@@ -540,12 +497,10 @@ ca_is_unsigned_type (void *ap)
   }
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is unsigned integer type array  
-    def unsigned?
-    end
-  end
+/* 
+@overload unsigned?
+
+(Inquiry) Return true if `self` is unsigned integer type array  
 */
 
 VALUE
@@ -566,12 +521,10 @@ ca_is_float_type (void *ap)
            ( ca->data_type <= CA_FLOAT128 ) );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is float type array  
-    def float?
-    end
-  end
+/* 
+@overload float?
+
+(Inquiry) Returns true if `self` is float type array  
 */
 
 VALUE
@@ -592,12 +545,10 @@ ca_is_complex_type (void *ap)
            ( ca->data_type <= CA_CMPLX256 ) );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is complex type array  
-    def complex?
-    end
-  end
+/* 
+@overload complex?
+
+(Inquiry) Returns true if `self` is complex type array  
 */
 
 VALUE
@@ -617,12 +568,10 @@ ca_is_object_type (void *ap)
   return ( ca->data_type == CA_OBJECT );
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is object type array
-    def object?
-    end
-  end
+/* 
+@overload object?
+
+(Inquiry) Returns true if `self` is object type array
 */
 
 VALUE
@@ -637,13 +586,11 @@ rb_ca_is_object_type (VALUE self)
 
 static ID id_parent;
 
-/* rdoc
-  class CArray
-    # returns the parent carray if `self` has parent,
-    # or returns nil if `self` has no parent.
-    def parent
-    end
-  end
+/* 
+@overload parent
+
+(Attribute) Returns the parent carray if `self` has parent,
+or returns nil if `self` has no parent.
 */
 
 VALUE
@@ -668,12 +615,10 @@ rb_ca_set_parent (VALUE self, VALUE obj)
 static ID id_data_class;
 
 /* rdoc
-  class CArray
-    # returns data_class if `self` is fixed-length type and it 
-    # has the data class.
-    def data_class
-    end
-  end
+@overload data_class
+
+(Attribute) Returns data_class if `self` is fixed-length type and it 
+has the data class.
 */
 
 VALUE
@@ -727,12 +672,10 @@ rb_ca_data_class (VALUE self)
   }
 }
 
-/* rdoc
-  class CArray
-    # return true if `self` is fixed-length type and has the data class.
-    def has_data_class?
-    end
-  end
+/* 
+@overload has_data_class?
+
+(Inquiry) Returns true if `self` is fixed-length type and has the data class.
 */
 
 VALUE
@@ -800,7 +743,11 @@ ca_root_array (void *ap)
   }
 }
 
-/* CArray#root_array */
+/* 
+@overload root_array
+
+(Attribute) Returns the object at the root of chain of reference.
+*/
 
 static VALUE
 rb_ca_root_array (VALUE self)
@@ -845,7 +792,11 @@ rb_ca_ancestors_loop (VALUE self, VALUE list)
   }
 }
 
-/* CArray#ancesters */
+/* 
+@overload ancestors
+
+(Attribute) Returns the list of objects in the chain of reference.
+*/
 
 static VALUE
 rb_ca_ancestors (VALUE self)

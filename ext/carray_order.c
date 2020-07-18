@@ -3,10 +3,8 @@
   carray_order.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -140,7 +138,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   return co;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def project (idx,lval=nil,uval=nil)
     end
@@ -227,7 +225,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     free(v);                                            \
   }
 
-/* rdoc:
+/* yard:
   class CArray
     # Reverses the elements of +ca+ in place.
     def reverse!
@@ -279,7 +277,7 @@ rb_ca_reverse_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns a new CArray object containing <i>ca</i>'s elements in
     # reverse order.
@@ -384,7 +382,7 @@ ca_qsort_cmp[CA_NTYPE] = {
   qcmp_VALUE,
 };
 
-/* rdoc:
+/* yard:
   class CArray
     # Sorts <i>ca</i>'s elements in place.
     def sort!
@@ -433,7 +431,7 @@ rb_ca_sort_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns a new CArray object containing <i>ca</i>'s elements sorted.
     def sort
@@ -452,7 +450,7 @@ rb_ca_sorted_copy (VALUE self)
 
 /* --------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     def bsearch
     end
@@ -561,7 +559,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def bsearch_index
     end
@@ -710,7 +708,7 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
   }
 
 
-/* rdoc:
+/* yard:
   class CArray
     def search
     end
@@ -760,7 +758,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
   return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def search_index
     end
@@ -838,7 +836,7 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
     }                                                   \
   }
 
-/* rdoc:
+/* yard:
   class CArray
     def search_nearest
     end

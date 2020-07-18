@@ -11,7 +11,7 @@ end
 Dir["*.c"].each do |file|
   open(file) { |io|
     while line = io.gets
-      if line =~ /\A\s*\/\*\s*rdoc:/
+      if line =~ /\A\s*\/\*\s*yard:/
         while line = io.gets
           case line
           when /\A\s*\*\//

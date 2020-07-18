@@ -3,10 +3,8 @@
   carray_core.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -998,7 +996,7 @@ rb_ca_s_ensure_detach (VALUE list)
   return Qnil;
 }
 
-/* rdoc:
+/* yard:
   def CArray.attach(*argv) # :nodoc:
     yield
   end
@@ -1035,7 +1033,7 @@ rb_ca_s_ensure_sync_detach (VALUE list)
   return Qnil;
 }
 
-/* rdoc:
+/* yard:
   def CArray.attach!(*argv) # :nodoc:
     yield
   end
@@ -1065,7 +1063,7 @@ rb_ca_ensure_detach (VALUE self)
   return Qnil;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def attach () # :nodoc:
       yield
@@ -1088,7 +1086,7 @@ rb_ca_ensure_sync_detach (VALUE self)
   return Qnil;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def attach! () # :nodoc:
       yield
@@ -1162,7 +1160,7 @@ rb_ca_data_class_encode (VALUE self, VALUE obj)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns data class member names
     def members
@@ -1228,7 +1226,7 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns an array of data class members (fields)
     def fields
@@ -1254,7 +1252,7 @@ rb_ca_fields (VALUE self)
   return list;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns an array of data class members (fields) with names specified 
     def fields_at (*names)

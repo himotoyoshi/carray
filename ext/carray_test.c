@@ -3,10 +3,8 @@
   carray_test.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
   This file includes the modified routine (ca_mem_hash) from 
 
@@ -220,7 +218,7 @@ rb_obj_is_data_class (VALUE rtype)
 
 /* ------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     def valid_index? (*index)
     end
@@ -253,7 +251,7 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   return Qtrue;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def valid_addr? (addr)
     end
@@ -279,7 +277,7 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def has_same_shape? (other)
     end
@@ -453,7 +451,7 @@ ca_equal (void *ap, void *bp)
   return flag;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def == (other)
     end
@@ -545,7 +543,7 @@ ca_hash (CArray *ca)
   return hash;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def hash
     end

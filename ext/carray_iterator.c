@@ -3,10 +3,8 @@
   carray_iterator.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -209,7 +207,7 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
 
 /* -------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CAIterator
     def ndim
     end
@@ -223,7 +221,7 @@ rb_ca_iter_ndim (VALUE self)
   return LONG2NUM(ca_iter_ndim(self));
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def dim
     end
@@ -245,7 +243,7 @@ rb_ca_iter_dim (VALUE self)
   return rdim;
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def elements
     end
@@ -258,7 +256,7 @@ rb_ca_iter_elements (VALUE self)
   return SIZE2NUM(ca_iter_elements(self));
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def reference
     end
@@ -271,7 +269,7 @@ rb_ca_iter_reference (VALUE self)
   return ca_iter_reference(self);
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def kernel_at_addr
     end
@@ -289,7 +287,7 @@ rb_ca_iter_kernel_at_addr (int argc, VALUE *argv, VALUE self)
   return ca_iter_kernel_at_addr(self, NUM2SIZE(raddr), rcarray);
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def kernel_at_index
     end
@@ -317,7 +315,7 @@ rb_ca_iter_kernel_at_index (int argc, VALUE *argv, VALUE self)
   return ca_iter_kernel_at_index(self, idx, rcarray);
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def kernel_move_to_addr
     end
@@ -330,7 +328,7 @@ rb_ca_iter_kernel_move_to_addr (VALUE self, VALUE raddr, VALUE rker)
   return ca_iter_kernel_move_to_addr(self, NUM2SIZE(raddr), rker);
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def kernel_move_to_index
     end
@@ -351,7 +349,7 @@ rb_ca_iter_kernel_move_to_index (VALUE self, VALUE rindex, VALUE rker)
   return ca_iter_kernel_move_to_index(self, idx, rker);
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def prepare_output
     end
@@ -371,7 +369,7 @@ rb_ca_iter_prepare_output (int argc, VALUE *argv, VALUE self)
 
 /* -------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CAIterator
     def calculate
     end
@@ -470,7 +468,7 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
   return routput;
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def filter
     end
@@ -547,7 +545,7 @@ rb_ca_iter_filter (int argc, VALUE *argv, VALUE self)
   return routput;
 }
 
-/* rdoc:
+/* yard:
   class CAIterator
     def evaluate
     end

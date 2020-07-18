@@ -3,10 +3,8 @@
   carray_copy.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -43,7 +41,7 @@ ca_copy (void *ap)
   return co;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # create CArray object from `self` with same contents includes mask state.
     def to_ca
@@ -101,7 +99,7 @@ ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # returns CArray object with same dimension with `self`
     # The data type of the new carray object can be specified by `data_type`.
@@ -284,7 +282,7 @@ ca_paste (void *ap, ca_size_t *offset, void *sp)
   ca_detach_n(2, ca, cs);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # pastes `ary` to `self` at the index `idx`.
     # `idx` should be Array object with the length same as `self.ndim`.
@@ -402,7 +400,7 @@ ca_clip (void *ap, ca_size_t *offset, void *sp)
   ca_detach_n(2, ca, cs);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # clips the data at `idx` from `self` to `ary`.
     def clip (idx, ary)

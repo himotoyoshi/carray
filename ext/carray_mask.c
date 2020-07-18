@@ -3,10 +3,8 @@
   carray_mask.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -565,7 +563,7 @@ ca_allocate_mask_iterator (int n, ...)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray 
     # Returns true if self has the mask array.
     def has_mask?() 
@@ -581,7 +579,7 @@ rb_ca_has_mask (VALUE self)
   return ( ca_has_mask(ca) ) ? Qtrue : Qfalse;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns true if self has at least one masked element.
     def any_masked?
@@ -597,7 +595,7 @@ rb_ca_is_any_masked (VALUE self)
   return ( ca_is_any_masked(ca) ) ? Qtrue : Qfalse;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns true if all elements of self are masked.
     def all_masked?
@@ -613,7 +611,7 @@ rb_ca_is_all_masked (VALUE self)
   return ( ca_is_all_masked(ca) ) ? Qtrue : Qfalse;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     private
     def create_mask
@@ -631,7 +629,7 @@ rb_ca_create_mask (VALUE self)
   return Qnil;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     private
     def update_mask
@@ -650,7 +648,7 @@ rb_ca_update_mask (VALUE self)
 }
 */
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns new array which refers the data of <code>self</code>.
     # The data of masked elements of <code>self</code> can be accessed
@@ -676,7 +674,7 @@ rb_ca_value_array (VALUE self)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns new array which refers the mask state of <code>self</code>.
     # The mask array can't be set mask.
@@ -707,7 +705,7 @@ rb_ca_mask_array (VALUE self)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Asigns <code>new_mask</code> to the mask array of <code>self</code>.
     # If <code>self</code> doesn't have a mask array, it will be created
@@ -756,7 +754,7 @@ rb_ca_set_mask (VALUE self, VALUE rval)
   }
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns new boolean type array of same shape with <code>self</code>.
     # The returned array has 1 for the masked elements and
@@ -799,7 +797,7 @@ rb_ca_is_masked (VALUE self)
   return ca_wrap_struct(co);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns new boolean type array of same shape with <code>self</code>.
     # The returned array has 0 for the masked elements and
@@ -842,7 +840,7 @@ rb_ca_is_not_masked (VALUE self)
   return ca_wrap_struct(co);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns the number of masked elements.
     def count_masked ()
@@ -858,7 +856,7 @@ rb_ca_count_masked (VALUE self)
   return SIZE2NUM(ca_count_masked(ca));
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Returns the number of not-masked elements.
     def count_not_masked ()
@@ -874,7 +872,7 @@ rb_ca_count_not_masked (VALUE self)
   return SIZE2NUM(ca_count_not_masked(ca));
 }
 
-/* rdoc:
+/* yard:
   class CArray  
     # Unmask all elements of the object.
     # If the optional argument <code>fill_value</code> is given,
@@ -928,7 +926,7 @@ rb_ca_mask_fill (VALUE self, VALUE fval)
   return rb_ca_unmask_method(1, &fval, self);
 }
 
-/* rdoc:
+/* yard:
   class CArray  
     # Returns new unmasked array.
     # If the optional argument <code>fill_value</code> is given,
@@ -992,7 +990,7 @@ rb_ca_invert_mask (VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Sets the mask array of <code>self</code> by the logical sum of
     # the mask states of <code>self</code> and arrays given in arguments.
@@ -1073,7 +1071,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
   return self;
 }
 
-/* rdoc: 
+/* yard: 
   class CArray
     # Sets the mask array of <code>self</code> by the logical sum of
     # the mask states of arrays given in arguments.
