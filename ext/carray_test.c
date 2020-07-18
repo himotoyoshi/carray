@@ -218,11 +218,9 @@ rb_obj_is_data_class (VALUE rtype)
 
 /* ------------------------------------------------------------- */
 
-/* yard:
-  class CArray
-    def valid_index? (*index)
-    end
-  end
+/* @overload valid_index? (*idx)
+
+(Inquiry) Returns true if the given number list is valid as array index for the object
 */
 
 static VALUE
@@ -251,11 +249,9 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   return Qtrue;
 }
 
-/* yard:
-  class CArray
-    def valid_addr? (addr)
-    end
-  end
+/* @overload valid_addr? (*addr)
+
+(Inquiry) Returns true if the given number is valid as array address for the object
 */
 
 static VALUE
@@ -277,11 +273,9 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
   }
 }
 
-/* yard:
-  class CArray
-    def has_same_shape? (other)
-    end
-  end
+/* @overload has_same_shape?
+
+(Inquiry) Returns true if the object has the same shape with the given array.
 */
 
 static VALUE
@@ -451,12 +445,9 @@ ca_equal (void *ap, void *bp)
   return flag;
 }
 
-/* yard:
-  class CArray
-    def == (other)
-    end
-    alias eql? ==
-  end
+/* @overload == (other)
+
+(Inquiry) Returns true if the object equals the given array.
 */
 
 static VALUE
@@ -543,11 +534,9 @@ ca_hash (CArray *ca)
   return hash;
 }
 
-/* yard:
-  class CArray
-    def hash
-    end
-  end
+/* @overload hash
+
+(Attribute) Returns the hash value of the object.
 */
 
 VALUE
@@ -596,6 +585,6 @@ Init_carray_test ()
   rb_define_method(rb_cCArray, "freeze",  rb_ca_freeze, 0);
 
   rb_define_method(rb_cCArray, "==", rb_ca_equal, 1);
-  rb_define_method(rb_cCArray, "eql?", rb_ca_equal, 1);
+  rb_define_alias(rb_cCArray, "eql?", "==");
   rb_define_method(rb_cCArray, "hash", rb_ca_hash, 0);
 }
