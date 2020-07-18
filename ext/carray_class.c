@@ -10,13 +10,10 @@
 
 #include "carray.h"
 
-/* yard: 
-  # returns the machine endianness.
-  #     CArray.endian #=> 0 (CA_LITTLE_ENDIAN)
-  #     CArray.endian #=> 1 (CA_BIG_ENDIAN)
-
-  def CArray.endian 
-  end
+/* @overload CArray.endian 
+(Inquiry) Returns the machine endianness.
+   0 (CA_LITTLE_ENDIAN)
+   1 (CA_BIG_ENDIAN)
 */
 
 static VALUE
@@ -25,12 +22,9 @@ rb_ca_s_endian (VALUE klass)
   return INT2NUM(ca_endian);
 }
 
-/* yard:
-  # returns true if the byte order of the architecture is
-  # big endian.
-
-  def CArray.big_endian?
-  end
+/* @overload CArray.big_endian?
+  
+(Inquiry) Returns true if the byte order of the architecture is big endian.
 */
 
 static VALUE
@@ -39,12 +33,9 @@ rb_ca_s_big_endian_p (VALUE klass)
   return ( ca_endian == CA_BIG_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* yard: 
-  # returns true if the byte order of the architecture is
-  # little endian.
-
-  def CArray.little_endian?
-  end
+/* @overload CArray.little_endian?
+(Inquiry) Returns true if the byte order of the architecture is
+little endian.
 */
 
 static VALUE
@@ -53,15 +44,13 @@ rb_ca_s_little_endian_p (VALUE klass)
   return ( ca_endian == CA_LITTLE_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* yard:
-  #  Returns the byte length of an element of the given data type.
-  #  Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
-  #     CArray.sizeof(CA_INT32)  #=> 4
-  #     CArray.sizeof(CA_DOUBLE) #=> 8
-  #     CArray.sizeof(CA_FIXLEN)   #=> 0
+/* @overload CArray.sizeof (data_type)
+(Inquiry) Returns the byte length of an element of the given data type.
+Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
+     CArray.sizeof(CA_INT32)  #=> 4
+     CArray.sizeof(CA_DOUBLE) #=> 8
+     CArray.sizeof(CA_FIXLEN)   #=> 0
 
-  def CArray.sizeof (data_type)
-  end
 */
 
 static VALUE
@@ -74,11 +63,9 @@ rb_ca_s_sizeof (VALUE klass, VALUE rtype)
 }
 
 
-/* yard:
-  #  Returns true if the given data_type indicate the valid data_type.
+/* @overload CArray.data_type?(data_type)
 
-  def CArray.data_type?(data_type)
-  end
+(Inquiry) Returns true if the given data_type indicate the valid data_type.
 */
 
 static VALUE
@@ -92,11 +79,9 @@ rb_ca_s_data_type (VALUE klass, VALUE rtype)
   return ca_valid[data_type] == 1 ? Qtrue : Qfalse;
 }
 
-/* yard:
-  #  Returns string representaion of the data_type specifier.
+/* @overload CArray.data_type_name(data_type)
 
-  def CArray.data_type_name(data_type)
-  end
+(Inquiry) Returns string representaion of the data_type specifier.
 */
 
 
