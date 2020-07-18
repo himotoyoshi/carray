@@ -58,27 +58,22 @@ ca_check_mem_count()
   }
 }
 
-/* yard:
-  # returns the threshold of incremented memory (MB) used by carray object 
-  # until start GC.
-  def CArray.gc_interval ()
-  end
-  # set the threshold of incremented memory (MB) used by carray object
-  # until start GC.
-  def CArray.gc_interval= (val)
-  end
-  # reset the counter for the GC start when the incremented memory 
-  # get larger than `CArray.gc_interval`.
-  def CArray.reset_gc_interval ()
-  end
-*/
+/* @private gc_interval
 
+Returns the threshold of incremented memory (MB) used by carray object 
+until start GC.
+*/
 static VALUE
 rb_ca_get_gc_interval (VALUE self)
 {
   return rb_float_new(ca_gc_interval);
 }
 
+/* @private gc_interval= (val)
+
+Sets the threshold of incremented memory (MB) used by carray object
+until start GC.
+*/
 static VALUE
 rb_ca_set_gc_interval (VALUE self, VALUE rth)
 {
@@ -90,6 +85,11 @@ rb_ca_set_gc_interval (VALUE self, VALUE rth)
   return rb_float_new(ca_gc_interval);
 }
 
+/* @private reset_gc_inverval
+
+Reset the counter for the GC start when the incremented memory 
+get larger than `CArray.gc_interval`.
+*/
 static VALUE
 rb_ca_reset_gc_interval (VALUE self)
 {
@@ -697,7 +697,8 @@ rb_ca_s_allocate (VALUE klass)
   return Data_Make_Struct(klass, CArray, ca_mark, ca_free, ca);
 }
 
-/* 
+/* @overload  initialize(data_type, dim, bytes=0) { ... }
+
 Constructs a new CArray object of <i>data_type</i>, which has the
 ndim and the dimensions specified by an <code>Array</code> of
 <code>Integer</code> or an argument list of <code>Integer</code>.
@@ -706,8 +707,6 @@ The byte size of each element for the fixed length data type
 <i>bytes</i>. Otherwise, this optional argument has no
 effect. If the block is given, the new CArray
 object will be initialized by the value returned from the block.
-
-@overload  initialize(data_type, dim, bytes=0) { ... }
 */
 
 static VALUE
@@ -745,6 +744,12 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   return Qnil;
 }
 
+/* @overload  fixlen(*dim, bytes: ) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:fixlen, dim, bytes: ) { ... }`
+*/
+
 static VALUE
 rb_ca_s_fixlen (int argc, VALUE *argv, VALUE klass)  
 {                                                     
@@ -754,8 +759,7 @@ rb_ca_s_fixlen (int argc, VALUE *argv, VALUE klass)
   return rb_class_new_instance(3, args, klass);       
 }
 
-#define rb_ca_s_type(type, code)                        \
-rb_ca_s_## type (int argc, VALUE *argv, VALUE klass)    \
+#define rb_ca_s_body(code)                              \
 {                                                       \
   if ( argc == 0 ) {                                    \
     return ca_data_type_class(code);                    \
@@ -768,47 +772,171 @@ rb_ca_s_## type (int argc, VALUE *argv, VALUE klass)    \
   }                                                     \
 }
 
-/*
- *  call-seq:
- *     CArray.int8(dim0, dim1, ...) { ... }     -> CArray
- *     CArray.uint8(dim0, dim1, ...) { ... }    -> CArray
- *     CArray.int16(dim0, dim1, ...) { ... }    -> CArray
- *     CArray.uint16(dim0, dim1, ...) { ... }   -> CArray
- *     CArray.int32(dim0, dim1, ...) { ... }    -> CArray
- *     CArray.uint32(dim0, dim1, ...) { ... }   -> CArray
- *     CArray.int64(dim0, dim1, ...) { ... }    -> CArray
- *     CArray.uint64(dim0, dim1, ...) { ... }   -> CArray
- *     CArray.float32(dim0, dim1, ...) { ... }  -> CArray
- *     CArray.float64(dim0, dim1, ...) { ... }  -> CArray
- *     CArray.float128(dim0, dim1, ...) { ... } -> CArray
- *     CArray.cmplx64(dim0, dim1, ...) { ... }  -> CArray
- *     CArray.cmplx128(dim0, dim1, ...) { ... } -> CArray
- *     CArray.cmplx256(dim0, dim1, ...) { ... } -> CArray
- *     CArray.object(dim0, dim1, ...) { ... }   -> CArray
- *
- */
+/* @overload  boolean(*dim) { ... } 
 
-static VALUE rb_ca_s_VALUE();
+(Construction)
+Short-Hand of `CArray.new(:boolean, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_boolean (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_BOOLEAN);
+}
 
-static VALUE rb_ca_s_type(boolean,  CA_BOOLEAN);
-static VALUE rb_ca_s_type(int8,     CA_INT8);
-static VALUE rb_ca_s_type(uint8,    CA_UINT8);
-static VALUE rb_ca_s_type(int16,    CA_INT16);
-static VALUE rb_ca_s_type(uint16,   CA_UINT16);
-static VALUE rb_ca_s_type(int32,    CA_INT32);
-static VALUE rb_ca_s_type(uint32,   CA_UINT32);
-static VALUE rb_ca_s_type(int64,    CA_INT64);
-static VALUE rb_ca_s_type(uint64,   CA_UINT64);
-static VALUE rb_ca_s_type(float32,  CA_FLOAT32);
-static VALUE rb_ca_s_type(float64,  CA_FLOAT64);
-static VALUE rb_ca_s_type(float128, CA_FLOAT128);
+/* @overload  int8(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:int8, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_int8 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_INT8);
+}
+
+/* @overload  uint8(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:uint8, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_uint8 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_UINT8);
+}
+
+/* @overload  int16(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:int16, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_int16 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_INT16);
+}
+
+/* @overload  uint16(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:uint16, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_uint16 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_UINT16);
+}
+
+/* @overload  int32(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:int32, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_int32 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_INT32);
+}
+
+/* @overload  uint32(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:uint32, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_uint32 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_UINT32);
+}
+
+/* @overload  int64(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:int64, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_int64 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_INT64);
+}
+
+/* @overload  uint64(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:uint64, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_uint64 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_UINT64);
+}
+
+/* @overload  float32(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:float32, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_float32 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_FLOAT32);
+}
+
+/* @overload  float64(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:float64, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_float64 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_FLOAT64);
+}
+
+/* @overload  float128(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:float128, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_float128 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_FLOAT128);
+}
+
 #ifdef HAVE_COMPLEX_H
-static VALUE rb_ca_s_type(cmplx64,  CA_CMPLX64);
-static VALUE rb_ca_s_type(cmplx128, CA_CMPLX128);
-static VALUE rb_ca_s_type(cmplx256, CA_CMPLX256);
-#endif
-static VALUE rb_ca_s_type(VALUE,    CA_OBJECT);
+/* @overload  cmplx64(*dim) { ... } 
 
+(Construction)
+Short-Hand of `CArray.new(:cmplx64, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_cmplx64 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_CMPLX64);
+}
+
+/* @overload  cmplx128(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:cmplx128, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_cmplx128 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_CMPLX128);
+}
+
+/* @overload  cmplx256(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:cmplx256, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_cmplx256 (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_CMPLX256);
+}
+#endif
+
+/* @overload  object(*dim) { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:object, dim, bytes: bytes) { ... }`
+*/
+static VALUE rb_ca_s_VALUE (int argc, VALUE *argv, VALUE klass)
+{
+  rb_ca_s_body(CA_OBJECT);
+}
+
+/* @overload  initialize_copy(other)
+
+*/
 static VALUE
 rb_ca_initialize_copy (VALUE self, VALUE other)
 {
@@ -827,9 +955,10 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* yard:
-   def CArray.wrap (data_type, dim, bytes=0) # { wrapped_object }
-   end
+/* @overload wrap (data_type, dim, bytes=0) { target }
+
+[TBD] (Construction)
+target should have method "wrap_as_carray(obj)"
 */
 
 static VALUE
@@ -929,6 +1058,12 @@ rb_cs_initialize (int argc, VALUE *argv, VALUE self)
   return Qnil;
 }
 
+/* @overload  fixlen(*dim, bytes: ) { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:fixlen, bytes: ) { ... }`
+*/
+
 static VALUE
 rb_cs_s_fixlen (int argc, VALUE *argv, VALUE klass)  
 {                                                     
@@ -940,8 +1075,7 @@ rb_cs_s_fixlen (int argc, VALUE *argv, VALUE klass)
   return rb_class_new_instance(2, args, klass);       
 }
 
-#define rb_cs_s_type(type, code)                      \
-rb_cs_s_## type (int argc, VALUE *argv, VALUE klass)  \
+#define rb_cs_s_body(code)                      \
 {                                                     \
   volatile VALUE ropt = rb_pop_options(&argc, &argv); \
   VALUE args[2] = { INT2NUM(code), ropt };            \
@@ -951,47 +1085,172 @@ rb_cs_s_## type (int argc, VALUE *argv, VALUE klass)  \
   return rb_class_new_instance(2, args, klass);       \
 }
 
-static VALUE rb_cs_s_type(boolean,  CA_BOOLEAN);
-static VALUE rb_cs_s_type(int8,     CA_INT8);
-static VALUE rb_cs_s_type(uint8,    CA_UINT8);
-static VALUE rb_cs_s_type(int16,    CA_INT16);
-static VALUE rb_cs_s_type(uint16,   CA_UINT16);
-static VALUE rb_cs_s_type(int32,    CA_INT32);
-static VALUE rb_cs_s_type(uint32,   CA_UINT32);
-static VALUE rb_cs_s_type(int64,    CA_INT64);
-static VALUE rb_cs_s_type(uint64,   CA_UINT64);
-static VALUE rb_cs_s_type(float32,  CA_FLOAT32);
-static VALUE rb_cs_s_type(float64,  CA_FLOAT64);
-static VALUE rb_cs_s_type(float128, CA_FLOAT128);
+/* @overload  boolean() { ... } 
+
+(Construction)
+Short-Hand of `CArray.new(:boolean) { ... }`
+*/
+static VALUE 
+rb_cs_s_boolean (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_BOOLEAN);
+}
+
+/* @overload  int8() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:int8) { ... }`
+*/
+static VALUE 
+rb_cs_s_int8 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_INT8);
+}
+
+/* @overload uint8() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:uint8) { ... }`
+*/
+static VALUE 
+rb_cs_s_uint8 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_UINT8);
+}
+
+
+/* @overload int16() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:int16) { ... }`
+*/
+static VALUE 
+rb_cs_s_int16 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_INT16);
+}
+
+/* @overload uint16() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:uint16) { ... }`
+*/
+static VALUE 
+rb_cs_s_uint16 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_UINT16);
+}
+
+/* @overload int32() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:int32) { ... }`
+*/
+static VALUE 
+rb_cs_s_int32 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_INT32);
+}
+
+/* @overload uint32() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:uint32) { ... }`
+*/
+static VALUE 
+rb_cs_s_uint32 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_UINT32);
+}
+
+/* @overload int64() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:int64) { ... }`
+*/
+static VALUE 
+rb_cs_s_int64 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_INT64);
+}
+
+/* @overload uint64() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:uint64) { ... }`
+*/
+static VALUE 
+rb_cs_s_uint64 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_UINT64);
+}
+
+/* @overload float32() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:float32) { ... }`
+*/
+static VALUE 
+rb_cs_s_float32 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_FLOAT32);
+}
+
+/* @overload float64() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:float64) { ... }`
+*/
+static VALUE 
+rb_cs_s_float64 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_FLOAT64);
+}
+
+/* @overload float128() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:float128) { ... }`
+*/
+static VALUE 
+rb_cs_s_float128 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_FLOAT128);
+}
+
 #ifdef HAVE_COMPLEX_H
-static VALUE rb_cs_s_type(cmplx64,  CA_CMPLX64);
-static VALUE rb_cs_s_type(cmplx128, CA_CMPLX128);
-static VALUE rb_cs_s_type(cmplx256, CA_CMPLX256);
+/* @overload cmplx64() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:cmplx64) { ... }`
+*/
+static VALUE 
+rb_cs_s_cmplx64 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_CMPLX64);
+}
+
+/* @overload cmplx128() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:cmplx128) { ... }`
+*/
+static VALUE 
+rb_cs_s_cmplx128 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_CMPLX128);
+}
+
+/* @overload cmplx256() { ... } 
+
+(Construction)
+Short-Hand of `CScalar.new(:cmplx256) { ... }`
+*/
+static VALUE 
+rb_cs_s_cmplx256 (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_CMPLX256);
+}
 #endif
-static VALUE rb_cs_s_type(VALUE,    CA_OBJECT);
 
-/*
- *  call-seq:
- *     CScalar.int8() { ... }     -> CScalar
- *     CScalar.uint8() { ... }    -> CScalar
- *     CScalar.int16() { ... }    -> CScalar
- *     CScalar.uint16() { ... }   -> CScalar
- *     CScalar.int32() { ... }    -> CScalar
- *     CScalar.uint32() { ... }   -> CScalar
- *     CScalar.int64() { ... }    -> CScalar
- *     CScalar.uint64() { ... }   -> CScalar
- *     CScalar.float32() { ... }  -> CScalar
- *     CScalar.float64() { ... }  -> CScalar
- *     CScalar.float128() { ... } -> CScalar
- *     CScalar.cmplx64() { ... }  -> CScalar
- *     CScalar.cmplx128() { ... } -> CScalar
- *     CScalar.cmplx256() { ... } -> CScalar
- *     CScalar.object() { ... }   -> CScalar
- *
- */
+/* @overload object() { ... } 
 
-static VALUE
-rb_cs_s_VALUE();
+(Construction)
+Short-Hand of `CScalar.new(:object) { ... }`
+*/
+static VALUE 
+rb_cs_s_VALUE (int argc, VALUE *argv, VALUE klass) {
+  rb_cs_s_body(CA_OBJECT);
+}
+
+/* @overload  initialize_copy(other)
+
+*/
 
 static VALUE
 rb_cs_initialize_copy (VALUE self, VALUE other)
@@ -1026,6 +1285,10 @@ rb_cs_coerce (VALUE self, VALUE other)
 }
 */
 
+/* @private
+@overload mem_usage
+*/
+
 static VALUE
 rb_ca_mem_usage (VALUE self)
 {
@@ -1041,7 +1304,10 @@ Init_ca_obj_array ()
 
   /* ------------------------------------------------------------------- */
   ca_gc_interval = ca_default_gc_interval;
+
+  /* @private */
   rb_define_const(rb_cCArray, "DEFAULT_GC_INTERVAL", rb_float_new(ca_default_gc_interval));
+
   rb_define_singleton_method(rb_cCArray, "gc_interval", rb_ca_get_gc_interval, 0);
   rb_define_singleton_method(rb_cCArray, "gc_interval=", rb_ca_set_gc_interval, 1);
   rb_define_singleton_method(rb_cCArray, "reset_gc_interval", rb_ca_reset_gc_interval, 0);
