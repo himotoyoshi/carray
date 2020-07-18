@@ -14,7 +14,8 @@
 
 /* @overload obj_type
 
-(Attribute) Returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
+(Attribute) 
+Returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
 Since the object type can be known from the class of the object,
 this attribute method is rarely used.
 */
@@ -29,7 +30,8 @@ rb_ca_obj_type (VALUE self)
 
 /* @overload data_type
 
-(Attribute) Returns the data type of each element (e.g. CA_INT32, CA_FLOAT64, ...).
+(Attribute) 
+Returns the data type of each element (e.g. CA_INT32, CA_FLOAT64, ...).
 */
 
 VALUE
@@ -42,7 +44,8 @@ rb_ca_data_type (VALUE self)
 
 /* @overload ndim
 
-(Attribute) Returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
+(Attribute) 
+Returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
 */
 
 VALUE
@@ -55,7 +58,8 @@ rb_ca_ndim (VALUE self)
 
 /* @overload bytes
 
-(Attribute) Returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
+(Attribute) 
+Returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
 The byte size can be known using CArray.sizeof(data_type)
 for the numerical data types, but
 the byte size of fixed-length data type can be known 
@@ -72,7 +76,8 @@ rb_ca_bytes (VALUE self)
 
 /* @overload elements
 
-(Attribute) Returns the number of elements
+(Attribute) 
+Returns the number of elements
 */
 
 VALUE
@@ -85,7 +90,8 @@ rb_ca_elements (VALUE self)
 
 /* @overload dim
 
-(Attribute) Returns the Array object contains the dimensional shape of array
+(Attribute) 
+Returns the Array object contains the dimensional shape of array
 (e.g. [2,3] for 2D 2x3 array, ...).
 */
 
@@ -106,7 +112,8 @@ rb_ca_dim (VALUE self)
 /*
 @overload dim0
 
-(Attribute) Short-hand for "dim[0]"
+(Attribute) 
+Short-hand for "dim[0]"
 */  
 
 VALUE
@@ -120,7 +127,8 @@ rb_ca_dim0 (VALUE self)
 /*
 @overload dim1
 
-(Attribute) Short-hand for "dim[1]"
+(Attribute) 
+Short-hand for "dim[1]"
 */  
 
 VALUE
@@ -134,7 +142,8 @@ rb_ca_dim1 (VALUE self)
 /*
 @overload dim2
 
-(Attribute) Short-hand for 'dim[2]'
+(Attribute) 
+Short-hand for 'dim[2]'
 */  
 
 VALUE
@@ -148,7 +157,8 @@ rb_ca_dim2 (VALUE self)
 /*
 @overload dim3
 
-(Attribute) Short-hand for "dim[3]"
+(Attribute) 
+Short-hand for "dim[3]"
 */  
 
 VALUE
@@ -161,7 +171,8 @@ rb_ca_dim3 (VALUE self)
 
 /* @overload data_type_name
 
-(Attribute) Returns the string representaion of the data_type (e.g. "int32", "fixlen")
+(Attribute) 
+Returns the string representaion of the data_type (e.g. "int32", "fixlen")
 */
 
 VALUE
@@ -566,7 +577,8 @@ static ID id_parent;
 
 /* @overload parent
 
-(Attribute) Returns the parent carray if `self` has parent,
+(Attribute) 
+Returns the parent carray if `self` has parent,
 or returns nil if `self` has no parent.
 */
 
@@ -593,7 +605,8 @@ static ID id_data_class;
 
 /* @overload data_class
 
-(Attribute) Returns data_class if `self` is fixed-length type and it 
+(Attribute) 
+Returns data_class if `self` is fixed-length type and it 
 has the data class.
 */
 
@@ -720,7 +733,8 @@ ca_root_array (void *ap)
 
 /* @overload root_array
 
-(Attribute) Returns the object at the root of chain of reference.
+(Attribute) 
+Returns the object at the root of chain of reference.
 */
 
 static VALUE
@@ -768,7 +782,8 @@ rb_ca_ancestors_loop (VALUE self, VALUE list)
 
 /* @overload ancestors
 
-(Attribute) Returns the list of objects in the chain of reference.
+(Attribute) 
+Returns the list of objects in the chain of reference.
 */
 
 static VALUE

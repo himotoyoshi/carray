@@ -12,6 +12,8 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray#broadcast_to', 'CScalar#broadcast_to'
 * [Mod] Modify 'CArray#linspace' to return float64 array for integer arguments
 * [Mod] Modify CAUnboundRepeat to have `ndim` same as the bounded array (before `ndim` same as parent array)
+* [Mod] Depreted the obsolete mothod 'CArray#dump'.
+* [Mod] Depreted the obsolete mothod 'CArray#load'.
 * [Fix] Add support for Integer (same as for Fixnum, Bignum)
 
 1.5.0 -> 1.5.1
