@@ -138,11 +138,9 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   return co;
 }
 
-/* yard:
-  class CArray
-    def project (idx,lval=nil,uval=nil)
-    end
-  end
+/* @overload project (idx, lval=nil, uval=nil)
+
+TBD. Creates new array the element of the object as address.
 */
 
 VALUE
@@ -225,12 +223,9 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     free(v);                                            \
   }
 
-/* yard:
-  class CArray
-    # Reverses the elements of +ca+ in place.
-    def reverse!
-    end
-  end
+/* @overload reverse!
+
+Reverses the elements of +ca+ in place.
 */
 
 static VALUE
@@ -277,13 +272,10 @@ rb_ca_reverse_bang (VALUE self)
   return self;
 }
 
-/* yard:
-  class CArray
-    # Returns a new CArray object containing <i>ca</i>'s elements in
-    # reverse order.
-    def reverse
-    end
-  end
+/* @overload reverse
+
+Returns a new CArray object containing <i>ca</i>'s elements in
+reverse order.
 */
 
 static VALUE
@@ -382,12 +374,9 @@ ca_qsort_cmp[CA_NTYPE] = {
   qcmp_VALUE,
 };
 
-/* yard:
-  class CArray
-    # Sorts <i>ca</i>'s elements in place.
-    def sort!
-    end
-  end
+/* @overload sort!
+
+Sorts <i>ca</i>'s elements in place.
 */
 
 static VALUE
@@ -431,12 +420,9 @@ rb_ca_sort_bang (VALUE self)
   return self;
 }
 
-/* yard:
-  class CArray
-    # Returns a new CArray object containing <i>ca</i>'s elements sorted.
-    def sort
-    end
-  end
+/* @overload sort
+
+Returns a new CArray object containing <i>ca</i>'s elements sorted.
 */
 
 static VALUE
@@ -450,11 +436,9 @@ rb_ca_sorted_copy (VALUE self)
 
 /* --------------------------------------------------------------- */
 
-/* yard:
-  class CArray
-    def bsearch
-    end
-  end
+/* @overload bsearch
+
+Returns a new CArray object containing <i>ca</i>'s elements sorted.
 */
 
 static VALUE
@@ -559,11 +543,9 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
   return out;
 }
 
-/* yard:
-  class CArray
-    def bsearch_index
-    end
-  end
+/* @overload bsearch_index
+
+TBD. 
 */
 
 static VALUE
@@ -708,11 +690,9 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
   }
 
 
-/* yard:
-  class CArray
-    def search
-    end
-  end
+/* @overload search
+
+TBD. 
 */
 
 static VALUE
@@ -758,11 +738,9 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
   return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
-/* yard:
-  class CArray
-    def search_index
-    end
-  end
+/* @overload search_index
+
+TBD. 
 */
 
 static VALUE
@@ -836,11 +814,9 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
     }                                                   \
   }
 
-/* yard:
-  class CArray
-    def search_nearest
-    end
-  end
+/* @overload search_nearest
+
+TBD. 
 */
 
 static VALUE
@@ -881,6 +857,11 @@ rb_ca_linear_search_nearest (VALUE self, VALUE value)
   return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
+/* @overload search_nearest_index
+
+TBD. 
+*/
+
 static VALUE
 rb_ca_linear_search_nearest_index (VALUE self, VALUE value)
 {
@@ -901,6 +882,9 @@ Init_carray_order ()
   rb_define_method(rb_cCArray,  "sort!", rb_ca_sort_bang, 0);
   rb_define_method(rb_cCArray,  "sort", rb_ca_sorted_copy, 0);
 
+  rb_define_method(rb_cCArray,  "bsearch", rb_ca_binary_search, 1);
+  rb_define_method(rb_cCArray,  "bsearch_index", rb_ca_binary_search_index, 1);
+
   rb_define_method(rb_cCArray,  "search", rb_ca_linear_search, -1);
   rb_define_method(rb_cCArray,  "search_index", rb_ca_linear_search_index, -1);
 
@@ -909,6 +893,4 @@ Init_carray_order ()
   rb_define_method(rb_cCArray,  "search_nearest_index",
                                 rb_ca_linear_search_nearest_index, 1);
 
-  rb_define_method(rb_cCArray,  "bsearch", rb_ca_binary_search, 1);
-  rb_define_method(rb_cCArray,  "bsearch_index", rb_ca_binary_search_index, 1);
 }

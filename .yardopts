@@ -1,1 +1,17 @@
---no-private --exclude lib/carray/autoload.rb --exclude 'lib/carray/autoload/' --exclude lib/carray/obsolete.rb lib ext README.md NEWS.md TODO.md
+--markup markdown
+--markup-provider kramdown
+--no-private
+--exclude lib/carray/autoload.rb
+--exclude 'lib/carray/autoload/'
+--exclude lib/carray/obsolete.rb
+README.md
+NEWS.md
+TODO.md 
+lib/carray.rb 
+ext/ruby_carray.c 
+ext/ca_obj_array.c 
+ext/carray_attribute.c 
+ext/carray_class.c 
+ext/carray_conversion.c 
+ext/carray_test.c 
+ext/carray_order.c 

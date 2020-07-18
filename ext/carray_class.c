@@ -10,8 +10,10 @@
 
 #include "carray.h"
 
-/* @overload CArray.endian 
-(Inquiry) Returns the machine endianness.
+/* @overload endian 
+
+(Inquiry) 
+Returns the machine endianness.
    0 (CA_LITTLE_ENDIAN)
    1 (CA_BIG_ENDIAN)
 */
@@ -22,9 +24,10 @@ rb_ca_s_endian (VALUE klass)
   return INT2NUM(ca_endian);
 }
 
-/* @overload CArray.big_endian?
+/* @overload big_endian?
   
-(Inquiry) Returns true if the byte order of the architecture is big endian.
+(Inquiry) 
+Returns true if the byte order of the architecture is big endian.
 */
 
 static VALUE
@@ -33,8 +36,10 @@ rb_ca_s_big_endian_p (VALUE klass)
   return ( ca_endian == CA_BIG_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* @overload CArray.little_endian?
-(Inquiry) Returns true if the byte order of the architecture is
+/* @overload little_endian?
+
+(Inquiry) 
+Returns true if the byte order of the architecture is
 little endian.
 */
 
@@ -44,8 +49,10 @@ rb_ca_s_little_endian_p (VALUE klass)
   return ( ca_endian == CA_LITTLE_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* @overload CArray.sizeof (data_type)
-(Inquiry) Returns the byte length of an element of the given data type.
+/* @overload sizeof (data_type)
+
+(Inquiry) 
+Returns the byte length of an element of the given data type.
 Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
      CArray.sizeof(CA_INT32)  #=> 4
      CArray.sizeof(CA_DOUBLE) #=> 8
@@ -63,9 +70,10 @@ rb_ca_s_sizeof (VALUE klass, VALUE rtype)
 }
 
 
-/* @overload CArray.data_type?(data_type)
+/* @overload data_type?(data_type)
 
-(Inquiry) Returns true if the given data_type indicate the valid data_type.
+(Inquiry) 
+Returns true if the given data_type indicate the valid data_type.
 */
 
 static VALUE
@@ -79,9 +87,10 @@ rb_ca_s_data_type (VALUE klass, VALUE rtype)
   return ca_valid[data_type] == 1 ? Qtrue : Qfalse;
 }
 
-/* @overload CArray.data_type_name(data_type)
+/* @overload data_type_name(data_type)
 
-(Inquiry) Returns string representaion of the data_type specifier.
+(Inquiry) 
+Returns string representaion of the data_type specifier.
 */
 
 

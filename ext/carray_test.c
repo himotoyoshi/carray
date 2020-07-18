@@ -220,7 +220,8 @@ rb_obj_is_data_class (VALUE rtype)
 
 /* @overload valid_index? (*idx)
 
-(Inquiry) Returns true if the given number list is valid as array index for the object
+(Inquiry) 
+Returns true if the given number list is valid as array index for the object
 */
 
 static VALUE
@@ -251,7 +252,8 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 
 /* @overload valid_addr? (*addr)
 
-(Inquiry) Returns true if the given number is valid as array address for the object
+(Inquiry) 
+Returns true if the given number is valid as array address for the object
 */
 
 static VALUE
@@ -275,7 +277,8 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 
 /* @overload has_same_shape?
 
-(Inquiry) Returns true if the object has the same shape with the given array.
+(Inquiry) 
+Returns true if the object has the same shape with the given array.
 */
 
 static VALUE
@@ -447,7 +450,8 @@ ca_equal (void *ap, void *bp)
 
 /* @overload == (other)
 
-(Inquiry) Returns true if the object equals the given array.
+(Inquiry) 
+Returns true if the object equals the given array.
 */
 
 static VALUE
@@ -536,7 +540,8 @@ ca_hash (CArray *ca)
 
 /* @overload hash
 
-(Attribute) Returns the hash value of the object.
+(Inquiry) 
+Returns the hash value of the object.
 */
 
 VALUE
@@ -564,6 +569,12 @@ rb_ca_modify (VALUE self)
   }
   */
 }
+
+/* @overload freeze
+
+Freeze the object.
+
+*/
 
 VALUE
 rb_ca_freeze (VALUE self)
