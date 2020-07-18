@@ -41,13 +41,12 @@ rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
   }
 }
 
-/* yard:
-  class CArray
-    # Converts the array to Ruby's array. For higher dimension, 
-    # the array is nested ndim-1 times.
-    def to_a
-    end
-  end
+/* 
+@overload to_a
+
+(Conversion)
+Converts the array to Ruby's array. For higher dimension, 
+the array is nested ndim-1 times.
 */
 
 VALUE
@@ -64,13 +63,12 @@ rb_ca_to_a (VALUE self)
   return ary;
 }
 
-/* yard:
-  class CArray
-    # Convert the 
-    def convert (data_type=nil, dim=nil)
-      yield
-    end
-  end
+/* @overload convert (data_type=nil, dim=nil) { |elem| ... }
+
+(Conversion) 
+Returns new array which elements are caluculated 
+in the iteration block. The output array is internally created 
+using `CArray#template` to which the arguments is passed.
 */
 
 static VALUE
@@ -104,12 +102,10 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
-/* yard:
-  class CArray
-    # dumps the value array to the given IO stream
-    def dump_binary(io)
-    end
-  end
+/* @overload dump_binary
+
+(IO) 
+Dumps the value array to the given IO stream
 */
 
 static VALUE
@@ -185,19 +181,10 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
   return io;
 }
 
-static VALUE
-rb_ca_dump (int argc, VALUE *argv, VALUE self)
-{
-  rb_warn("CArray#dump will be obsolete, use CArray#dump_binary");
-  return rb_ca_dump_binary(argc, argv, self);
-}
+/* @overload to_s
 
-/* yard:
-  class CArray
-    # dumps the value array to a string.
-    def to_s
-    end
-  end
+(Conversion) 
+Dumps the value array to a string.
 */
 
 static VALUE
@@ -206,12 +193,10 @@ rb_ca_to_s (VALUE self)
   return rb_ca_dump_binary(0, NULL, self);
 }
 
-/* yard:
-  class CArray
-    # loads the value array from the given IO stream
-    def load_binary (io)
-    end
-  end
+/* @overload load_binary (io)
+
+(IO) 
+Loads the value array from the given IO stream
 */
 
 static VALUE
@@ -252,13 +237,6 @@ rb_ca_load_binary (VALUE self, VALUE io)
   ca_detach(ca);
 
   return self;
-}
-
-static VALUE
-rb_ca_load (VALUE self, VALUE io)
-{
-  rb_warn("CArray#load will be obsolete, use CArray#load_binary");
-  return rb_ca_load_binary(self, io);
 }
 
 void *
@@ -312,13 +290,11 @@ ca_to_cptr (void *ap)
 }
 
 
-/* yard:
-  class CArray
-    # Convert the 
-    def convert (data_type=nil, dim=nil)
-      yield
-    end
-  end
+/* @overload str_format (*fmts)
+
+(Conversion) 
+Creates object type array consist of string using the "::format" method.
+The Multiple format strings are given, they are applied cyclic in turn.
 */
 
 
@@ -364,9 +340,15 @@ rb_ca_format (int argc, VALUE *argv, VALUE self)
 }
 
 
-
 #include <time.h>
 
+/* @overload str_strptime (fmt)
+
+(Conversion) 
+Creates object type array consist of Time objects 
+which are created by 'Time.strptime' applied to the elements of the object.
+This method assumes all the elements of the objetct to be String.
+*/
 
 static VALUE
 rb_ca_strptime (VALUE self, VALUE rfmt)
@@ -383,6 +365,7 @@ rb_ca_strptime (VALUE self, VALUE rfmt)
     rb_raise(rb_eRuntimeError, "strptime can be applied only to object type.");
   }
 
+  Check_Type(rfmt, T_STRING);
   fmt = (char *) StringValuePtr(rfmt);
 
   obj = rb_ca_template(self);
@@ -421,6 +404,13 @@ rb_ca_strptime (VALUE self, VALUE rfmt)
   return obj;
 }
 
+/* @overload time_strptime (fmt)
+
+(Conversion) 
+Creates object type array consist of strings
+which are created by 'Time#strftime' applied to the elements of the object.
+This method assumes all the elements of the objetct to be Time or DateTime.
+*/
 
 static VALUE
 rb_ca_strftime (VALUE self, VALUE rfmt)
@@ -461,6 +451,10 @@ rb_ca_strftime (VALUE self, VALUE rfmt)
   return obj;
 }
 
+/* @private
+
+*/
+
 static VALUE 
 rb_test_ca_to_cptr (VALUE self)
 {
@@ -495,10 +489,8 @@ Init_carray_conversion ()
   rb_define_method(rb_cCArray, "to_a", rb_ca_to_a, 0);
   rb_define_method(rb_cCArray, "convert", rb_ca_convert, -1);
 
-  rb_define_method(rb_cCArray, "dump", rb_ca_dump, -1);
   rb_define_method(rb_cCArray, "dump_binary", rb_ca_dump_binary, -1);
   rb_define_method(rb_cCArray, "to_s", rb_ca_to_s, 0);
-  rb_define_method(rb_cCArray, "load", rb_ca_load, 1);
   rb_define_method(rb_cCArray, "load_binary", rb_ca_load_binary, 1);
 
   /* DO NOT define CArray#to_ary, it makes trouble with various situations */
@@ -507,7 +499,7 @@ Init_carray_conversion ()
   rb_define_method(rb_cCArray, "str_format", rb_ca_format, -1); 
 
   rb_define_method(rb_cCArray, "str_strptime", rb_ca_strptime, 1);
-  rb_define_method(rb_cCArray, "str_strftime", rb_ca_strftime, 1);
+  rb_define_method(rb_cCArray, "time_strftime", rb_ca_strftime, 1);
 
   rb_define_method(rb_cCArray, "test_ca_to_cptr", rb_test_ca_to_cptr, 0);
 
