@@ -1,1 +1,1 @@
---no-private --exclude lib/carray/autoload.rb --exclude 'lib/carray/autoload/' --exclude lib/carray/obsolete.rb lib ext
+--no-private --exclude lib/carray/autoload.rb --exclude 'lib/carray/autoload/' --exclude lib/carray/obsolete.rb lib ext README.md NEWS.md TODO.md

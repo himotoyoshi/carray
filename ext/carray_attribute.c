@@ -12,8 +12,7 @@
 
 /* ------------------------------------------------------------------- */
 
-/* 
-@overload obj_type
+/* @overload obj_type
 
 (Attribute) Returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
 Since the object type can be known from the class of the object,
@@ -28,8 +27,7 @@ rb_ca_obj_type (VALUE self)
   return INT2NUM(ca->obj_type);
 }
 
-/* 
-@overload data_type
+/* @overload data_type
 
 (Attribute) Returns the data type of each element (e.g. CA_INT32, CA_FLOAT64, ...).
 */
@@ -42,8 +40,7 @@ rb_ca_data_type (VALUE self)
   return INT2NUM(ca->data_type);
 }
 
-/* 
-@overload ndim
+/* @overload ndim
 
 (Attribute) Returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
 */
@@ -56,8 +53,7 @@ rb_ca_ndim (VALUE self)
   return INT2NUM(ca->ndim);
 }
 
-/* 
-@overload bytes
+/* @overload bytes
 
 (Attribute) Returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
 The byte size can be known using CArray.sizeof(data_type)
@@ -74,8 +70,7 @@ rb_ca_bytes (VALUE self)
   return SIZE2NUM(ca->bytes);
 }
 
-/* 
-@overload elements
+/* @overload elements
 
 (Attribute) Returns the number of elements
 */
@@ -88,8 +83,7 @@ rb_ca_elements (VALUE self)
   return SIZE2NUM(ca->elements);
 }
 
-/* 
-@overload dim
+/* @overload dim
 
 (Attribute) Returns the Array object contains the dimensional shape of array
 (e.g. [2,3] for 2D 2x3 array, ...).
@@ -165,8 +159,7 @@ rb_ca_dim3 (VALUE self)
   return ( ca->ndim >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
 }
 
-/* 
-@overload data_type_name
+/* @overload data_type_name
 
 (Attribute) Returns the string representaion of the data_type (e.g. "int32", "fixlen")
 */
@@ -188,8 +181,7 @@ ca_is_scalar (void *ap)
   return ca_test_flag(ca, CA_FLAG_SCALAR);
 }
 
-/* 
-@overload scalar?
+/* @overload scalar?
 
 (Inquiry) Returns true if the object is a CScalar
 */
@@ -224,8 +216,7 @@ ca_is_virtual (void *ap)
   return ( ca_func[ca->obj_type].entity_type == CA_VIRTUAL_ARRAY ) ? 1 : 0;
 }
 
-/* 
-@overload entity?
+/* @overload entity?
 
 (Inquiry) Returns true if `self` is an entity array (not a virtual array).
 */
@@ -254,8 +245,7 @@ rb_ca_is_virtual (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* 
-@overload attached?
+/* @overload attached?
 
 (Inquiry) Returns true if the object is attached.
 */
@@ -270,8 +260,7 @@ rb_ca_is_attached (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* 
-@overload empty?
+/* @overload empty?
 
 (Inquiry) Returns true if the object is empty.
 */
@@ -304,8 +293,7 @@ ca_is_readonly (void *ap)
   }
 }
 
-/* 
-@overload read_only?
+/* @overload read_only?
 
 (Inquiry) Returns true if the object is read-only
 */
@@ -338,8 +326,7 @@ ca_is_mask_array (void *ap)
   }
 }
 
-/* 
-@overload mask_array?
+/* @overload mask_array?
 
 (Inquiry) Returns true if `self` is mask array (don't confuse with "masked array")
 */
@@ -372,8 +359,7 @@ ca_is_value_array (void *ap)
   }
 }
 
-/* 
-@overload value_array?
+/* @overload value_array?
 
 (Inquiry) Returns true if `self` is a value array
 */
@@ -395,8 +381,7 @@ ca_is_fixlen_type (void *ap)
   return ( ca->data_type == CA_FIXLEN );
 }
 
-/* 
-@overload fixlen?
+/* @overload fixlen?
 
 (Inquiry) Returns true if `self` is fixed-length type array
 */
@@ -418,8 +403,7 @@ ca_is_boolean_type (void *ap)
   return ( ca->data_type == CA_BOOLEAN );
 }
 
-/* 
-@overload boolean?
+/* @overload boolean?
 
 (Inquiry) Return true if `self` is boolean type array  
 */
@@ -442,8 +426,7 @@ ca_is_numeric_type (void *ap)
            ( ca->data_type <= CA_CMPLX256 ) );
 }
 
-/* 
-@overload numeric?
+/* @overload numeric?
 
 (Inquiry) Returns true if `self` is numeric type array  
 */
@@ -466,8 +449,7 @@ ca_is_integer_type (void *ap)
            ( ca->data_type <= CA_UINT64 ) );
 }
 
-/* 
-@overload integer?
+/* @overload integer?
 
 (Inquiry) Returns true if `self` is integer type array  
 */
@@ -497,8 +479,7 @@ ca_is_unsigned_type (void *ap)
   }
 }
 
-/* 
-@overload unsigned?
+/* @overload unsigned?
 
 (Inquiry) Return true if `self` is unsigned integer type array  
 */
@@ -521,8 +502,7 @@ ca_is_float_type (void *ap)
            ( ca->data_type <= CA_FLOAT128 ) );
 }
 
-/* 
-@overload float?
+/* @overload float?
 
 (Inquiry) Returns true if `self` is float type array  
 */
@@ -545,8 +525,7 @@ ca_is_complex_type (void *ap)
            ( ca->data_type <= CA_CMPLX256 ) );
 }
 
-/* 
-@overload complex?
+/* @overload complex?
 
 (Inquiry) Returns true if `self` is complex type array  
 */
@@ -568,8 +547,7 @@ ca_is_object_type (void *ap)
   return ( ca->data_type == CA_OBJECT );
 }
 
-/* 
-@overload object?
+/* @overload object?
 
 (Inquiry) Returns true if `self` is object type array
 */
@@ -586,8 +564,7 @@ rb_ca_is_object_type (VALUE self)
 
 static ID id_parent;
 
-/* 
-@overload parent
+/* @overload parent
 
 (Attribute) Returns the parent carray if `self` has parent,
 or returns nil if `self` has no parent.
@@ -614,8 +591,7 @@ rb_ca_set_parent (VALUE self, VALUE obj)
 
 static ID id_data_class;
 
-/* rdoc
-@overload data_class
+/* @overload data_class
 
 (Attribute) Returns data_class if `self` is fixed-length type and it 
 has the data class.
@@ -672,8 +648,7 @@ rb_ca_data_class (VALUE self)
   }
 }
 
-/* 
-@overload has_data_class?
+/* @overload has_data_class?
 
 (Inquiry) Returns true if `self` is fixed-length type and has the data class.
 */
@@ -743,8 +718,7 @@ ca_root_array (void *ap)
   }
 }
 
-/* 
-@overload root_array
+/* @overload root_array
 
 (Attribute) Returns the object at the root of chain of reference.
 */
@@ -792,8 +766,7 @@ rb_ca_ancestors_loop (VALUE self, VALUE list)
   }
 }
 
-/* 
-@overload ancestors
+/* @overload ancestors
 
 (Attribute) Returns the list of objects in the chain of reference.
 */
