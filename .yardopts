@@ -1,12 +1,11 @@
 --markup markdown
 --markup-provider kramdown
 --no-private
+--exclude lib/carray/obsolete.rb
 --exclude lib/carray/autoload.rb
 --exclude 'lib/carray/autoload/'
---exclude lib/carray/obsolete.rb
-README.md
-NEWS.md
-TODO.md 
+--readme README.md
+--files NEWS.md,TODO.md 
 lib/carray.rb 
 ext/ruby_carray.c 
 ext/ca_obj_array.c 
@@ -14,8 +13,10 @@ ext/carray_attribute.c
 ext/carray_cast.c 
 ext/carray_class.c 
 ext/carray_conversion.c 
+ext/carray_copy.c 
 ext/carray_element.c 
 ext/carray_generate.c 
+ext/carray_loop.c
 ext/carray_mask.c 
 ext/carray_order.c 
 ext/carray_sort_addr.c 
