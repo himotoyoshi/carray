@@ -279,7 +279,11 @@ rb_ca_object_to_data_class (VALUE self, VALUE rtype, ca_size_t bytes)
   return obj;
 }
 
-/* CArray#to_type */
+/* @overload to_type (data_type, bytes: nil) 
+
+(Conversion) Returns an array of elements that are converted 
+to the given data type from the object.
+*/
 
 static VALUE
 rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
@@ -339,15 +343,15 @@ rb_ca_to_type (VALUE self, VALUE rtype, VALUE rbytes)
   return rb_ca_to_type_internal(2, args, self);
 }
 
-#define rb_ca_to_type_method(type, code) \
-rb_ca_to_## type (VALUE self) \
+#define rb_ca_to_type_method_body(code) \
 { \
   VALUE rcode = INT2NUM(code); \
   return rb_ca_to_type_internal(1, &rcode, self); \
 }
 
-/*
-  CArray#fixlen([:bytes=>bytes]])
+/* @overload fixlen (bytes:)
+
+(Conversion) Short-Hand of "CArray#to_type(:fixlen, bytes:)"
  */
 
 VALUE
@@ -361,57 +365,149 @@ rb_ca_to_fixlen (int argc, VALUE *argv, VALUE self)
   return rb_ca_to_type_internal(2, list, self);
 }
 
-VALUE rb_ca_to_type_method(boolean,  CA_BOOLEAN);
-VALUE rb_ca_to_type_method(int8,     CA_INT8);
-VALUE rb_ca_to_type_method(uint8,    CA_UINT8);
-VALUE rb_ca_to_type_method(int16,    CA_INT16);
-VALUE rb_ca_to_type_method(uint16,   CA_UINT16);
-VALUE rb_ca_to_type_method(int32,    CA_INT32);
-VALUE rb_ca_to_type_method(uint32,   CA_UINT32);
-VALUE rb_ca_to_type_method(int64,    CA_INT64);
-VALUE rb_ca_to_type_method(uint64,   CA_UINT64);
-VALUE rb_ca_to_type_method(float32,  CA_FLOAT32);
-VALUE rb_ca_to_type_method(float64,  CA_FLOAT64);
-VALUE rb_ca_to_type_method(float128, CA_FLOAT128);
-VALUE rb_ca_to_type_method(cmplx64,  CA_CMPLX64);
-VALUE rb_ca_to_type_method(cmplx128, CA_CMPLX128);
-VALUE rb_ca_to_type_method(cmplx256, CA_CMPLX256);
-VALUE rb_ca_to_type_method(VALUE,    CA_OBJECT);
+/* @overload fixlen (bytes:)
 
-/* yard:
-  class CArray
-    # call-seq:
-    #     ca.boolean
-    #     ca.int8     
-    #     ca.uint8    
-    #     ca.int16    
-    #     ca.uint16   
-    #     ca.int32    
-    #     ca.uint32   
-    #     ca.int64    
-    #     ca.uint64   
-    #     ca.float32  
-    #     ca.float64  
-    #     ca.float128 
-    #     ca.cmplx64  
-    #     ca.cmplx128 
-    #     ca.cmplx256 
-    #     ca.object   
-    #     ca.fixlen
-    #     ca.byte
-    #     ca.short
-    #     ca.int
-    #     ca.float
-    #     ca.double
-    #     ca.complex
-    #     ca.dcomplex
-    #
-    # Convert to given data_type with copying values
-    def to_type
-    end
-  end
+(Conversion) Short-Hand of "CArray#to_type(:boolean)"
+ */
+VALUE rb_ca_to_boolean (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_BOOLEAN);
+}
+
+/* @overload int8 
+
+(Conversion) Short-Hand of "CArray#to_type(:int8)"
 */
+VALUE rb_ca_to_int8 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_INT8);
+}
 
+/* @overload uint8 
+
+(Conversion) Short-Hand of "CArray#to_type(:uint8)"
+*/
+VALUE rb_ca_to_uint8 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_UINT8);
+}
+
+/* @overload int16 
+
+(Conversion) Short-Hand of "CArray#to_type(:int16)"
+*/
+VALUE rb_ca_to_int16 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_INT16);
+}
+
+/* @overload uint16
+
+(Conversion) Short-Hand of "CArray#to_type(:uint16)"
+*/
+VALUE rb_ca_to_uint16 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_UINT16);
+}
+
+/* @overload int32 
+
+(Conversion) Short-Hand of "CArray#to_type(:int32)"
+*/
+VALUE rb_ca_to_int32 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_INT32);
+}
+
+/* @overload uint32
+
+(Conversion) Short-Hand of "CArray#to_type(:uint32)"
+*/
+VALUE rb_ca_to_uint32 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_UINT32);
+}
+
+/* @overload int64 
+
+(Conversion) Short-Hand of "CArray#to_type(:int64)"
+*/
+VALUE rb_ca_to_int64 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_INT64);
+}
+
+/* @overload uint64 
+
+(Conversion) Short-Hand of "CArray#to_type(:uint64)"
+*/
+VALUE rb_ca_to_uint64 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_UINT64);
+}
+
+/* @overload float32 
+
+(Conversion) Short-Hand of "CArray#to_type(:float32)"
+*/
+VALUE rb_ca_to_float32 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_FLOAT32);
+}
+
+/* @overload float64
+
+(Conversion) Short-Hand of "CArray#to_type(:float64)"
+*/
+VALUE rb_ca_to_float64 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_FLOAT64);
+}
+
+/* @overload float128
+
+(Conversion) Short-Hand of "CArray#to_type(:float128)"
+*/
+VALUE rb_ca_to_float128 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_FLOAT128);
+}
+
+/* @overload cmplx64
+
+(Conversion) Short-Hand of "CArray#to_type(:cmplx64)"
+*/
+VALUE rb_ca_to_cmplx64 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_CMPLX64);
+}
+
+/* @overload cmplx128
+
+(Conversion) Short-Hand of "CArray#to_type(:cmplx128)"
+*/
+VALUE rb_ca_to_cmplx128 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_CMPLX128);
+}
+
+/* @overload cmplx256
+
+(Conversion) Short-Hand of "CArray#to_type(:cmplx256)"
+*/
+VALUE rb_ca_to_cmplx256 (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_CMPLX256);
+}
+
+/* @overload object
+
+(Conversion) Short-Hand of "CArray#to_type(:object)"
+*/
+VALUE rb_ca_to_VALUE (VALUE self)
+{
+  rb_ca_to_type_method_body(CA_OBJECT);
+}
 
 /* ------------------------------------------------------------------------*/
 
@@ -443,6 +539,11 @@ rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
+/* @overload as_type (data_type, bytes: nil)
+
+(Reference) Creates CAFake object of the given data type refers to the object.
+*/
+
 VALUE
 rb_ca_as_type (VALUE self, VALUE rtype, VALUE rbytes)
 {
@@ -452,17 +553,16 @@ rb_ca_as_type (VALUE self, VALUE rtype, VALUE rbytes)
   return rb_ca_as_type_internal(2, args, self);
 }
 
-#define rb_ca_as_type_method(type, code) \
-rb_ca_as_## type (VALUE self) \
+#define rb_ca_as_type_method_body(code) \
 { \
   VALUE rcode = INT2NUM(code); \
   return rb_ca_as_type_internal(1, &rcode, self); \
 }
 
-/*
-  CArray#as_fixlen([:bytes=>bytes]])
- */
+/* @overload as_fixlen (bytes: nil)
 
+(Reference) Short-Hand of `CArray#as_type(:fixlen, bytes: nil)`
+ */
 VALUE
 rb_ca_as_fixlen (int argc, VALUE *argv, VALUE self)
 {
@@ -474,56 +574,149 @@ rb_ca_as_fixlen (int argc, VALUE *argv, VALUE self)
   return rb_ca_as_type_internal(2, list, self);
 }
 
-VALUE rb_ca_as_type_method(boolean,  CA_BOOLEAN);
-VALUE rb_ca_as_type_method(int8,     CA_INT8);
-VALUE rb_ca_as_type_method(uint8,    CA_UINT8);
-VALUE rb_ca_as_type_method(int16,    CA_INT16);
-VALUE rb_ca_as_type_method(uint16,   CA_UINT16);
-VALUE rb_ca_as_type_method(int32,    CA_INT32);
-VALUE rb_ca_as_type_method(uint32,   CA_UINT32);
-VALUE rb_ca_as_type_method(int64,    CA_INT64);
-VALUE rb_ca_as_type_method(uint64,   CA_UINT64);
-VALUE rb_ca_as_type_method(float32,  CA_FLOAT32);
-VALUE rb_ca_as_type_method(float64,  CA_FLOAT64);
-VALUE rb_ca_as_type_method(float128, CA_FLOAT128);
-VALUE rb_ca_as_type_method(cmplx64,  CA_CMPLX64);
-VALUE rb_ca_as_type_method(cmplx128, CA_CMPLX128);
-VALUE rb_ca_as_type_method(cmplx256, CA_CMPLX256);
-VALUE rb_ca_as_type_method(VALUE,    CA_OBJECT);
+/* @overload as_boolean
 
-
-/* yard:
-  class CArray
-    # call-seq:
-    #     ca.as_int8     
-    #     ca.as_uint8    
-    #     ca.as_int16    
-    #     ca.as_uint16   
-    #     ca.as_int32    
-    #     ca.as_uint32   
-    #     ca.as_int64    
-    #     ca.as_uint64   
-    #     ca.as_float32  
-    #     ca.as_float64  
-    #     ca.as_float128 
-    #     ca.as_cmplx64  
-    #     ca.as_cmplx128 
-    #     ca.as_cmplx256 
-    #     ca.as_object   
-    #     ca.as_byte
-    #     ca.as_short
-    #     ca.as_int
-    #     ca.as_float
-    #     ca.as_double
-    #     ca.as_complex
-    #     ca.as_dcomplex
-    #
-    # Fakes data_type
-    def as_type
-    end
-  end
+(Reference) Short-Hand of `CArray#as_type(:boolean)`
 */
+VALUE rb_ca_as_boolean (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_BOOLEAN);
+}
 
+/* @overload as_int8
+
+(Reference) Short-Hand of `CArray#as_type(:int8)`
+*/
+VALUE rb_ca_as_int8 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_INT8);
+}
+
+/* @overload as_uint8
+
+(Reference) Short-Hand of `CArray#as_type(:uint8)`
+*/
+VALUE rb_ca_as_uint8 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_UINT8);
+}
+
+/* @overload as_int16
+
+(Reference) Short-Hand of `CArray#as_type(:int16)`
+*/
+VALUE rb_ca_as_int16 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_INT16);
+}
+
+/* @overload as_uint16
+
+(Reference) Short-Hand of `CArray#as_type(:uint16)`
+*/
+VALUE rb_ca_as_uint16 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_UINT16);
+}
+
+/* @overload as_int32
+
+(Reference) Short-Hand of `CArray#as_type(:int32)`
+*/
+VALUE rb_ca_as_int32 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_INT32);
+}
+
+/* @overload as_uint32
+
+(Reference) Short-Hand of `CArray#as_type(:uint32)`
+*/
+VALUE rb_ca_as_uint32 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_UINT32);
+}
+
+/* @overload as_int64
+
+(Reference) Short-Hand of `CArray#as_type(:int64)`
+*/
+VALUE rb_ca_as_int64 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_INT64);
+}
+
+/* @overload as_uint64
+
+(Reference) Short-Hand of `CArray#as_type(:uint64)`
+*/
+VALUE rb_ca_as_uint64 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_UINT64);
+}
+
+/* @overload as_float32
+
+(Reference) Short-Hand of `CArray#as_type(:float32)`
+*/
+VALUE rb_ca_as_float32 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_FLOAT32);
+}
+
+/* @overload as_float64
+
+(Reference) Short-Hand of `CArray#as_type(:float64)`
+*/
+VALUE rb_ca_as_float64 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_FLOAT64);
+}
+
+/* @overload as_float128
+
+(Reference) Short-Hand of `CArray#as_type(:float128)`
+*/
+VALUE rb_ca_as_float128 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_FLOAT128);
+}
+
+/* @overload as_cmplx64
+
+(Reference) Short-Hand of `CArray#as_type(:cmplx64)`
+*/
+VALUE rb_ca_as_cmplx64 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_CMPLX64);
+}
+
+/* @overload as_cmplx128
+
+(Reference) Short-Hand of `CArray#as_type(:cmplx128)`
+*/
+VALUE rb_ca_as_cmplx128 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_CMPLX128);
+}
+
+/* @overload as_cmplx256
+
+(Reference) Short-Hand of `CArray#as_type(:cmplx256)`
+*/
+VALUE rb_ca_as_cmplx256 (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_CMPLX256);
+}
+
+/* @overload as_object
+
+(Reference) Short-Hand of `CArray#as_type(:object)`
+*/
+VALUE rb_ca_as_VALUE (VALUE self)
+{
+  rb_ca_as_type_method_body(CA_OBJECT);
+}
 
 /* ------------------------------------------------------------------------*/
 
@@ -641,9 +834,9 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   return obj;
 }
 
-/* yard:
-  def CArray.wrap_writable
-  end
+/* @overload wrap_writable (other, date_type = nil)
+
+[TBD]
 */
 
 static VALUE
@@ -759,9 +952,9 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   return obj;
 }
 
-/* yard:
-  def CArray.wrap_readonly
-  end
+/* @overload wrap_readonly (other, date_type = nil)
+
+[TBD]
 */
 
 static VALUE
@@ -810,6 +1003,11 @@ rb_ca_cast (volatile VALUE self)
   return obj;
 }
 
+/* @overload cast (value)
+
+[TBD]
+*/
+
 static VALUE
 rb_ca_s_cast (VALUE klass, VALUE val)
 {
@@ -850,12 +1048,12 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
         *self = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *self);
         break;
       default:
-  #ifdef HAVE_COMPLEX_H
+#ifdef HAVE_COMPLEX_H
         if ( rb_obj_is_kind_of(*self, rb_cCComplex) ) {
           *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
           break;
         }
-  #endif
+#endif
         *self = rb_cscalar_new_with_value(CA_OBJECT, 0, *self);
         break;
       }
@@ -965,9 +1163,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
            ca_type_name[cb->data_type]);
 }
 
-/* rdoc
-  def CArray.cast_self_or_other
-  end
+/* @overload cast_self_or_other (other)
+
+[TBD]
 */
 
 VALUE
@@ -1013,12 +1211,12 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
         *other = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *other);
         break;
       default:
-  #ifdef HAVE_COMPLEX_H
+#ifdef HAVE_COMPLEX_H
         if ( rb_obj_is_kind_of(*other, rb_cCComplex) ) {
           *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
           break;
         }
-  #endif
+#endif
         *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
         break;
       }
@@ -1057,9 +1255,9 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
            ca_type_name[cb->data_type]);
 }
 
-/* rdoc
-  def CArray.cast_other
-  end
+/* @overload cast_with (other)
+
+[TBD]
 */
 
 VALUE
@@ -1099,13 +1297,13 @@ Init_carray_cast ()
   rb_define_method(rb_cCArray, "cmplx256", rb_ca_to_cmplx256, 0);
   rb_define_method(rb_cCArray, "object", rb_ca_to_VALUE, 0);
 
-  rb_define_method(rb_cCArray, "byte", rb_ca_to_uint8, 0);
-  rb_define_method(rb_cCArray, "short", rb_ca_to_int16, 0);
-  rb_define_method(rb_cCArray, "int", rb_ca_to_int32, 0);
-  rb_define_method(rb_cCArray, "float", rb_ca_to_float32, 0);
-  rb_define_method(rb_cCArray, "double", rb_ca_to_float64, 0);
-  rb_define_method(rb_cCArray, "complex", rb_ca_to_cmplx64, 0);
-  rb_define_method(rb_cCArray, "dcomplex", rb_ca_to_cmplx128, 0);
+  rb_define_alias(rb_cCArray, "byte", "uint8");
+  rb_define_alias(rb_cCArray, "short", "int16");
+  rb_define_alias(rb_cCArray, "int", "int32");
+  rb_define_alias(rb_cCArray, "float", "float32");
+  rb_define_alias(rb_cCArray, "double", "float64");
+  rb_define_alias(rb_cCArray, "complex", "cmplx64");
+  rb_define_alias(rb_cCArray, "dcomplex", "complx128");
 
   rb_define_method(rb_cCArray, "as_type", rb_ca_as_type_internal, -1);
 
@@ -1127,13 +1325,13 @@ Init_carray_cast ()
   rb_define_method(rb_cCArray, "as_cmplx256", rb_ca_as_cmplx256, 0);
   rb_define_method(rb_cCArray, "as_object", rb_ca_as_VALUE, 0);
 
-  rb_define_method(rb_cCArray, "as_byte", rb_ca_as_uint8, 0);
-  rb_define_method(rb_cCArray, "as_short", rb_ca_as_int16, 0);
-  rb_define_method(rb_cCArray, "as_int", rb_ca_as_int32, 0);
-  rb_define_method(rb_cCArray, "as_float", rb_ca_as_float32, 0);
-  rb_define_method(rb_cCArray, "as_double", rb_ca_as_float64, 0);
-  rb_define_method(rb_cCArray, "as_complex", rb_ca_as_cmplx64, 0);
-  rb_define_method(rb_cCArray, "as_dcomplex", rb_ca_as_cmplx128, 0);
+  rb_define_alias(rb_cCArray, "as_byte", "as_uint8");
+  rb_define_alias(rb_cCArray, "as_short", "as_int16");
+  rb_define_alias(rb_cCArray, "as_int", "as_int32");
+  rb_define_alias(rb_cCArray, "as_float", "as_float32");
+  rb_define_alias(rb_cCArray, "as_double", "as_float64");
+  rb_define_alias(rb_cCArray, "as_complex", "as_cmplx64");
+  rb_define_alias(rb_cCArray, "as_dcomplex", "as_cmplx128");
 
   rb_define_singleton_method(rb_cCArray,
            "wrap_writable", rb_ca_s_wrap_writable, -1);

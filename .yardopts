@@ -15,3 +15,5 @@ ext/carray_class.c
 ext/carray_conversion.c 
 ext/carray_test.c 
 ext/carray_order.c 
+ext/carray_generate.c 
+ext/carray_cast.c 
