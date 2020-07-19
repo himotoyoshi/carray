@@ -149,16 +149,14 @@ qcmp_func (struct cmp_data *a, struct cmp_data *b)
   return ( ia > ib ) ? 1 : -1; /* for stable sort */
 }
 
-/* yard:
-  # returns index table for index sort
-  #
-  #   idx = CA.sort_addr(a, b, c)  ### priority a > b > c
-  #   a[idx]
-  #   b[idx]
-  #   c[idx]
+/* @overload sort_addr (*args)
 
-  def CA.sort_addr (*args)
-  end
+(Sort) Returns index table for index sort
+
+     idx = CA.sort_addr(a, b, c)  ### priority a > b > c
+     a[idx]
+     b[idx]
+     c[idx]
 */
 
 static VALUE
@@ -232,15 +230,12 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   return out;
 }
 
-/* yard:
-  class CArray
-    # returns index table for index sort
-    # This method same as,
-    #
-    #   idx = CA.sort_addr(self, *args) 
-    def sort_addr (*args)
-    end
-  end
+/* @overload sort_addr (*args)
+
+(Sort) Returns index table for index sort
+ This method same as,
+
+     idx = CA.sort_addr(self, *args) 
 */
 
 static VALUE
