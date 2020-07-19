@@ -41,12 +41,9 @@ ca_copy (void *ap)
   return co;
 }
 
-/* yard:
-  class CArray
-    # create CArray object from `self` with same contents includes mask state.
-    def to_ca
-    end
-  end
+/* @overload to_ca
+
+(Copy) Creates CArray object from `self` with same contents includes mask state.
 */
 
 VALUE
@@ -99,15 +96,12 @@ ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
   }
 }
 
-/* yard:
-  class CArray
-    # returns CArray object with same dimension with `self`
-    # The data type of the new carray object can be specified by `data_type`.
-    # For fixlen data type, the option `:bytes` is used to specified the
-    # data length.
-    def template(data_type=self.data_type, options={:bytes=>0})
-    end
-  end
+/* @overload template(data_type=self.data_type, bytes: 0)
+
+(Copy) Returns CArray object with same dimension with `self`
+The data type of the new carray object can be specified by `data_type`.
+For fixlen data type, the option `:bytes` is used to specified the
+data length.
 */
 
 static VALUE
@@ -282,14 +276,10 @@ ca_paste (void *ap, ca_size_t *offset, void *sp)
   ca_detach_n(2, ca, cs);
 }
 
-/* yard:
-  class CArray
-    # pastes `ary` to `self` at the index `idx`.
-    # `idx` should be Array object with the length same as `self.ndim`.
-    # `ary` should have same shape with `self`.
-    def paste (idx, ary)
-    end
-  end
+/* @overload paste (idx, ary)
+(Copy) Pastes `ary` to `self` at the index `idx`.
+`idx` should be Array object with the length same as `self.ndim`.
+`ary` should have same shape with `self`.
 */
 
 static VALUE
@@ -400,12 +390,8 @@ ca_clip (void *ap, ca_size_t *offset, void *sp)
   ca_detach_n(2, ca, cs);
 }
 
-/* yard:
-  class CArray
-    # clips the data at `idx` from `self` to `ary`.
-    def clip (idx, ary)
-    end
-  end
+/* @overload clip (idx, ary)
+(copy) Clips the data at `idx` from `self` to `ary`.
 */
 
 static VALUE
