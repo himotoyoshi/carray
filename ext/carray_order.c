@@ -140,7 +140,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 
 /* @overload project (idx, lval=nil, uval=nil)
 
-TBD. Creates new array the element of the object as address.
+[TBD]. Creates new array the element of the object as address.
 */
 
 VALUE
@@ -545,7 +545,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
 
 /* @overload bsearch_index
 
-TBD. 
+[TBD]. 
 */
 
 static VALUE
@@ -692,7 +692,7 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
 
 /* @overload search
 
-TBD. 
+[TBD]. 
 */
 
 static VALUE
@@ -740,7 +740,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
 
 /* @overload search_index
 
-TBD. 
+[TBD]. 
 */
 
 static VALUE
@@ -816,7 +816,7 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
 
 /* @overload search_nearest
 
-TBD. 
+[TBD]. 
 */
 
 static VALUE
@@ -859,7 +859,7 @@ rb_ca_linear_search_nearest (VALUE self, VALUE value)
 
 /* @overload search_nearest_index
 
-TBD. 
+[TBD]. 
 */
 
 static VALUE
