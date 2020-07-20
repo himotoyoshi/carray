@@ -750,7 +750,7 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
 
 }
 
-binop("**", "power",
+binop("power", "power",
       INT_TYPES   => "(#3) = op_powi_<type>((#1), (#2));",
       FLOAT_TYPES => "(#3) = pow((#1), (#2));",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = cpow((#1), (#2));" : nil,
@@ -801,7 +801,7 @@ METHODS << %{
   rb_define_method(rb_cCArray, "pow!", rb_ca_pow_bang, 1);
 }
 
-alias_op("pow", "**")
+alias_op("**", "pow")
 
 METHODS << %{
   id_equal = rb_intern("==");
