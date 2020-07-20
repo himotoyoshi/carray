@@ -468,11 +468,9 @@ ca_math_call (VALUE mod, VALUE arg, ID id)
   }
 }
 
-/* yard:
-  class CArray
-    def coerce (other)
-    end
-  end
+/* @overload coerece (other)
+
+[TBD]
 */
 
 static VALUE
@@ -533,6 +531,11 @@ rb_ca_coerce (VALUE self, VALUE other)
       out = to(sum); \
     } \
   }
+
+/* @overload mul_add (weight, min_count=nil, fill_value=nil)
+
+[TBD]
+*/
 
 static VALUE
 rb_ca_mul_add (int argc, VALUE *argv, volatile VALUE self)

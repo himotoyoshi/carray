@@ -996,10 +996,13 @@ rb_ca_s_ensure_detach (VALUE list)
   return Qnil;
 }
 
-/* yard:
-  def CArray.attach(*argv) # :nodoc:
-    yield
-  end
+/* @overload attach (*arrays)
+
+(Internal) Guarantees that the reference memory block is attached.
+The memory block is detached at the end of the block evaluation.
+It is not ensured the syncing the memory block at the end of the block evaluation.
+
+@yield
 */
 
 static VALUE
@@ -1033,10 +1036,13 @@ rb_ca_s_ensure_sync_detach (VALUE list)
   return Qnil;
 }
 
-/* yard:
-  def CArray.attach!(*argv) # :nodoc:
-    yield
-  end
+/* @overload attach! (*arrays)
+
+(Internal) Guarantees that the reference memory block is attached.
+The memory block is detached at the end of the block evaluation.
+It is ensured the syncing the memory block at the end of the block evaluation.
+
+@yield
 */
 
 static VALUE
@@ -1063,12 +1069,13 @@ rb_ca_ensure_detach (VALUE self)
   return Qnil;
 }
 
-/* yard:
-  class CArray
-    def attach () # :nodoc:
-      yield
-    end
-  end
+/* @overload attach 
+
+(Internal) Guarantees that the reference memory block is attached.
+The memory block is detached at the end of the block evaluation.
+It is ensured the syncing the memory block at the end of the block evaluation.
+
+@yield
 */
 
 static VALUE
@@ -1086,12 +1093,13 @@ rb_ca_ensure_sync_detach (VALUE self)
   return Qnil;
 }
 
-/* yard:
-  class CArray
-    def attach! () # :nodoc:
-      yield
-    end
-  end
+/* @overload attach! 
+
+(Internal) Guarantees that the reference memory block is attached.
+The memory block is detached at the end of the block evaluation.
+It is ensured the syncing the memory block at the end of the block evaluation.
+
+@yield
 */
 
 static VALUE
@@ -1102,7 +1110,11 @@ rb_ca_attach_bang (VALUE self)
   return rb_ensure(rb_yield, self, rb_ca_ensure_sync_detach, self);
 }
 
-/* CArray#__attach__ */
+/* @overload __attach__ 
+
+(Internal, DevelopperOnly) Attaches the reference memory block.
+User must call "CArray#__detach__" appropreate timing.
+*/
 
 static VALUE
 rb_ca__attach__ (VALUE self)
@@ -1111,7 +1123,10 @@ rb_ca__attach__ (VALUE self)
   return self;
 }
 
-/* CArray#__sync__ */
+/* @overload __detach__ 
+
+(Internal, DevelopperOnly) Syncs the reference memory block to the parent array.
+*/
 
 static VALUE
 rb_ca__sync__ (VALUE self)
@@ -1121,7 +1136,10 @@ rb_ca__sync__ (VALUE self)
   return self;
 }
 
-/* CArray#__detach__ */
+/* @overload __detach__ 
+
+(Internal, DevelopperOnly) Detaches the reference memory block.
+*/
 
 static VALUE
 rb_ca__detach__ (VALUE self)
@@ -1160,12 +1178,9 @@ rb_ca_data_class_encode (VALUE self, VALUE obj)
 
 /* ------------------------------------------------------------------- */
 
-/* yard:
-  class CArray
-    # Returns data class member names
-    def members
-    end
-  end
+/* @overload members
+
+(Inquiry) Returns data class member names
 */
 
 VALUE
@@ -1226,12 +1241,9 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
   }
 }
 
-/* yard:
-  class CArray
-    # Returns an array of data class members (fields)
-    def fields
-    end
-  end
+/* @overload fields
+
+(Reference) Returns an array of data class members (fields)
 */
 
 VALUE
@@ -1252,12 +1264,9 @@ rb_ca_fields (VALUE self)
   return list;
 }
 
-/* yard:
-  class CArray
-    # Returns an array of data class members (fields) with names specified 
-    def fields_at (*names)
-    end
-  end
+/* @overload fields_at (*names)
+
+Returns an array of data class members (fields) with names specified 
 */
 
 VALUE
