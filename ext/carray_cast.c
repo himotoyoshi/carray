@@ -1303,7 +1303,7 @@ Init_carray_cast ()
   rb_define_alias(rb_cCArray, "float", "float32");
   rb_define_alias(rb_cCArray, "double", "float64");
   rb_define_alias(rb_cCArray, "complex", "cmplx64");
-  rb_define_alias(rb_cCArray, "dcomplex", "complx128");
+  rb_define_alias(rb_cCArray, "dcomplex", "cmplx128");
 
   rb_define_method(rb_cCArray, "as_type", rb_ca_as_type_internal, -1);
 
