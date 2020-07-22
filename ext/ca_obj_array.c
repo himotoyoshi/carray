@@ -667,6 +667,15 @@ rb_carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t byt
   return ca_wrap_struct(ca);
 }
 
+
+VALUE
+rb_ca_wrap_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
+               CArray *mask, char *ptr)
+{
+  CAWrap *ca = ca_wrap_new(data_type, ndim, dim, bytes, mask, ptr);
+  return ca_wrap_struct(ca);
+}
+
 VALUE
 rb_cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
