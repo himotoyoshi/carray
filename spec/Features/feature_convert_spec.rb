@@ -11,18 +11,6 @@ describe "TestCArray " do
     expect { CA_INT32([1,[1,2]]) }.to raise_error(TypeError)
   end
 
-  example "s_span" do
-    a = CArray.span(CA_FLOAT32, 0..2, 0.5)
-    is_asserted_by { a == CA_FLOAT32([0, 0.5, 1, 1.5, 2]) }
-    a = CArray.span(CA_FLOAT32, 0...2, 0.5)
-    is_asserted_by { a == CA_FLOAT32([0, 0.5, 1, 1.5]) }
-  end
-
-  example "wrap_readonly" do
-    a = CArray.wrap_readonly([[1,2,3],[4,5,6],[7,8,9]], CA_INT32)
-    is_asserted_by { CA_INT32([[1, 2, 3], [4, 5, 6], [7, 8, 9]]) == a }
-  end
-
   example "compact" do
     a = CArray.int(4,1,3,1,2,1).seq!
     b = CArray.int(4,3,2).seq!
@@ -53,26 +41,6 @@ describe "TestCArray " do
     end 
     is_asserted_by { CA_OBJECT(["a", "b", "c"]) == b }
   end 
-
-  example "map" do
-    # ---
-    a = CArray.int(3).seq!
-    if RUBY_VERSION >="1.9.0"
-      b = a.map {|x| (x+"a".ord).chr }
-    else
-      b = a.map {|x| (x+?a).chr }
-    end
-    is_asserted_by { ["a", "b", "c"] == b }
-
-    # ---
-    a = CArray.int(3,3).seq!
-    if RUBY_VERSION >= "1.9.0"
-      b = a.map {|x| (x+"a".ord).chr }
-    else
-      b = a.map {|x| (x+?a).chr }
-    end
-    is_asserted_by { [["a", "b", "c"], ["d", "e", "f"], ["g", "h", "i"]] == b }
-  end
 
   
 end
