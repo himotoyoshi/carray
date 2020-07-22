@@ -899,9 +899,14 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
       obj = rb_cscalar_new_with_value(data_type, 0, obj);
     }
     else {
-      rb_raise(rb_eCADataTypeError,
-               "can't convert string to %s array",
-               ca_type_name[data_type]);
+      volatile VALUE ref = obj;
+      if ( ! RB_OBJ_FROZEN(ref) ) {
+        ref = rb_obj_dup(ref);
+        rb_obj_freeze(ref);
+      }
+      ca_size_t dim = RSTRING_LEN(ref)/ca_sizeof[data_type];
+      obj = rb_ca_wrap_new(data_type, 1, &dim, ca_sizeof[data_type], NULL, RSTRING_PTR(ref));
+      rb_ivar_set(obj, rb_intern("referred_object"), ref);
     }
   }
   else if ( NIL_P(obj) ) {                            /* nil */
