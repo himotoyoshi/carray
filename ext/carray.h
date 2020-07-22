@@ -818,6 +818,9 @@ VALUE    rb_carray_new (int8_t data_type,
 VALUE    rb_carray_new_safe (int8_t data_type,
                              int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 
+VALUE    rb_ca_wrap_new (int8_t data_type,
+                         int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask, char *ptr);
+
 CAWrap  *ca_wrap_new (int8_t data_type,
                       int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                       CArray *mask, char *ptr);
