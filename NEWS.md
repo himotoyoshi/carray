@@ -10,10 +10,12 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray#min_with'
 * [New] Add new method 'CArray.broadcast'
 * [New] Add new method 'CArray#broadcast_to', 'CScalar#broadcast_to'
+* [New] Add new API function `rb_ca_wrap_new`
 * [Mod] Modify 'CArray#linspace' to return float64 array for integer arguments
 * [Mod] Modify CAUnboundRepeat to have `ndim` same as the bounded array (before `ndim` same as parent array)
-* [Mod] Depreted the obsolete mothod 'CArray#dump'.
-* [Mod] Depreted the obsolete mothod 'CArray#load'.
+* [Mod] Depret the obsolete mothod 'CArray#dump'.
+* [Mod] Depret the obsolete mothod 'CArray#load'.
+* [Mod] Modify CArray.wrap_readonly to wrap string as array.
 * [Fix] Add support for Integer (same as for Fixnum, Bignum)
 
 1.5.0 -> 1.5.1
@@ -31,7 +33,7 @@ ChangeLog of Ruby/CArray
 1.4.0 -> 1.5.0
 --------------
 
-* [Mod] Remove 'Carray#random!' (gon..x/e to 'carray-random' gem)
+* [Mod] Remove 'Carray#random!' (gone to 'carray-random' gem)
 * [Mod] Relocate file 'lib/carray/io/table.rb' to 'lib/carray/table.rb'
 * [Mod] Rename class 'CA::TableMethods' to 'CArray::TableMethods'
 * [Mod] Rename method 'CArray#cast_other' to 'CArray#cast_with'
