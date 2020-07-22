@@ -3,10 +3,8 @@
   carray_element.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -15,11 +13,9 @@
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    def elem_swap
-    end
-  end
+/* @overload elem_swap (idx1, idx2)
+
+(Element) Swaps the values at the elements which are specified by arguments.
 */
 
 VALUE
@@ -127,11 +123,9 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   return self;
 }
 
-/* rdoc:
-  class CArray
-    def elem_copy
-    end
-  end
+/* @overload elem_copy (idx1, idx2)
+
+(Element) Copies the value of the element of idx1 to the element of idx2
 */
 
 VALUE
@@ -207,11 +201,9 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   return self;
 }
 
-/* rdoc:
-  class CArray
-    def elem_store
-    end
-  end
+/* @overload elem_store (idx, obj)
+
+(Element) Stores the object value in the element of idx.
 */
 
 VALUE
@@ -245,11 +237,9 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
   return obj;
 }
 
-/* rdoc:
-  class CArray
-    def elem_fetch
-    end
-  end
+/* @overload elem_fetch (idx)
+
+(Element) Fetches the object value at the element of idx.
 */
 
 VALUE
@@ -279,11 +269,9 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
   }
 }
 
-/* rdoc:
-  class CArray
-    def elem_incr
-    end
-  end
+/* @overload elem_incr (idx)
+
+(Element) Increments the value by 1 at the element of idx.
 */
 
 VALUE
@@ -366,11 +354,9 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
   return out;
 }
 
-/* rdoc:
-  class CArray
-    def elem_decr
-    end
-  end
+/* @overload elem_decr (idx)
+
+(Element) Decrements the value by 1 at the element of idx.
 */
 
 VALUE
@@ -453,11 +439,9 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
   return out;
 }
 
-/* rdoc:
-  class CArray
-    def elem_masked?
-    end
-  end
+/* @overload elem_masked? (idx)
+
+(Masking, Element) Returns true if the element at given idx is masked.
 */
 
 VALUE
@@ -498,12 +482,9 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    # used in CAHistogram.
-    def incr_addr
-    end
-  end
+/* @overload incr_addr (addr)
+
+(Element) Increment the value at the element of addr.
 */
 
 static VALUE

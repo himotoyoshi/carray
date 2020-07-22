@@ -3,10 +3,8 @@
   ca_iter_dimension.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -15,7 +13,7 @@
 
 VALUE rb_cCADimIterator;
 
-/* rdoc: 
+/* yard: 
   class CADimensionIterator < CAIterator # :nodoc:
   end
 */
@@ -239,6 +237,7 @@ rb_ca_dim_iterator (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
+  info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
   obj = rb_di_s_allocate(rb_cCADimIterator);
@@ -258,7 +257,7 @@ rb_dim_iter_new (VALUE rref, CAIndexInfo *info)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CADimensionIterator
     def sym2dim (sym)
     end

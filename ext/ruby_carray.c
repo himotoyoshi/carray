@@ -3,10 +3,8 @@
   ruby_carray.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -97,7 +95,7 @@ Init_carray_ext ()
   rb_eCADataTypeError =
     rb_define_class_under(rb_cCArray, "DataTypeError", rb_eStandardError);
 
-  /* rdoc:
+  /* yard:
      class CArray::DataTypeError # :nodoc:
      end
   */
@@ -111,7 +109,7 @@ Init_carray_ext ()
 
   /* -- version -- */
 
-  /* rdoc: 
+  /* yard: 
     class CArray
       VERSION = nil         # :nodoc:
       VERSION_CODE = nil    # :nodoc:
@@ -122,11 +120,17 @@ Init_carray_ext ()
     end
   */
   
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION", rb_str_new2(CA_VERSION));
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION_CODE", INT2NUM(CA_VERSION_CODE));
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION_MAJOR", INT2NUM(CA_VERSION_MAJOR));
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION_MINOR", INT2NUM(CA_VERSION_MINOR));
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION_TEENY", INT2NUM(CA_VERSION_TEENY));
+  /* @private */
   rb_define_const(rb_cCArray, "VERSION_DATE", rb_str_new2(CA_VERSION_DATE));
 
   /* -- system -- */
@@ -135,8 +139,10 @@ Init_carray_ext ()
   rb_define_const(rb_cObject, "CA_NIL", CA_NIL);
 
 #ifdef HAVE_COMPLEX_H
+  /* @private */
   rb_define_const(rb_cCArray, "HAVE_COMPLEX", Qtrue);
 #else
+  /* @private */
   rb_define_const(rb_cCArray, "HAVE_COMPLEX", Qfalse);
 #endif
 
@@ -168,7 +174,6 @@ Init_carray_ext ()
   rb_define_const(rb_cObject, "CA_COMPLEX",     INT2NUM(CA_COMPLEX));
   rb_define_const(rb_cObject, "CA_DCOMPLEX",    INT2NUM(CA_DCOMPLEX));
   rb_define_const(rb_cObject, "CA_SIZE",        INT2NUM(CA_SIZE));
-
 
   rb_define_const(rb_cObject, "CA_ALIGN_VOIDP",    INT2NUM(CA_ALIGN_VOIDP));
   rb_define_const(rb_cObject, "CA_ALIGN_FIXLEN",   INT2NUM(CA_ALIGN_INT8));

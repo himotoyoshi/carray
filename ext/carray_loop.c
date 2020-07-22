@@ -3,10 +3,8 @@
   carray_loop.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -43,18 +41,14 @@ rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
   return ret;
 }
 
-/* rdoc:
-  #  Iterates with the multi-dimensional indeces for the given
-  #  dimension numbers.
-  #
-  #     CArray.each_index(3,2){|i,j| print "(#{i} #{j}) " }
-  #
-  #  produces:
-  #
-  #     (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
-  #
-  def CArray.each_index(*argv) # :yields: i0, i1, ...
-  end
+/* @overload each_index (*shape)
+
+(Iterator) Iterates with the multi-dimensional indeces for the given
+dimension numbers.
+
+      CArray.each_index(3,2){|i,j| print "(#{i} #{j}) " }
+      produces:
+      (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
 */
 
 static VALUE
@@ -69,12 +63,10 @@ rb_ca_s_each_index (int ndim, VALUE *dim, VALUE self)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    #
-    def each # :yields: v
-    end
-  end
+/* @overload each () {|elem| ... }
+
+(Iterator) Iterates all the elements of the object.
+
 */
 
 static VALUE
@@ -92,12 +84,10 @@ rb_ca_each (VALUE self)
   return ret;
 }
 
-/* rdoc:
-  class CArray
-    #
-    def each_with_addr # :yields: v, addr
-    end
-  end
+/* @overload each_with_addr () {|elem, addr| ... }
+
+(Iterator) Iterates all the elements of the object.
+
 */
 
 static VALUE
@@ -115,12 +105,9 @@ rb_ca_each_with_addr (VALUE self)
   return ret;
 }
 
-/* rdoc:
-  class CArray
-    #
-    def each_addr() # :yields: addr
-    end
-  end
+/* @overload each_addr () {|addr| ... }
+
+(Iterator) Iterates all address of the object.
 */
 
 static VALUE
@@ -160,19 +147,16 @@ rb_ca_each_index_internal (VALUE self, int8_t level, VALUE ridx)
   return ret;
 }
 
-/* rdoc:
-  class CArray
-    # Iterates with the multi-dimensional indeces for the dimension of <i>ca</i>.
-    #
-    #    CArray.int(3,2).each_index(){|i,j| print "(#{i} #{j}) " }
-    #
-    #  <em>produces:</em>
-    #
-    #     (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
-    #
-    def each_index # :yields: i0, i1, ...
-    end
-  end
+/* @overload each_index () {|idx| ... }
+
+(Iterator) Iterates all index of the object.
+    
+        CArray.int(3,2).each_index(){|i,j| print "(#{i} #{j}) " }
+    
+      <em>produces:</em>
+    
+         (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
+    
 */
 
 static VALUE
@@ -187,12 +171,9 @@ rb_ca_each_index (VALUE self)
   return rb_ca_each_index_internal(self, 0, ridx);
 }
 
-/* rdoc:
-  class CArray
-    #
-    def map! # :yields: v
-    end
-  end
+/* @overload map! () {|elem| ... }
+
+(Iterator, Destructive) Iterates all elements of the object and stores the return from the block to the element.
 */
 
 static VALUE
@@ -243,12 +224,10 @@ rb_ca_each_with_index_internal (VALUE self,
   return ret;
 }
 
-/* rdoc:
-  class CArray
-    # 
-    def each_with_index # :yields: v, idx 
-    end
-  end
+/* @overload each_with_index () {|elem, idx| ... }
+
+[TBD]
+
 */
 
 static VALUE
@@ -293,12 +272,10 @@ rb_ca_map_with_index_bang_internal (VALUE self,
   }
 }
 
-/* rdoc:
-  class CArray
-    #
-    def map_with_index! # :yields: v, idx
-    end
-  end
+/* @overload map_with_index () {|elem, idx| ... }
+
+[TBD]
+
 */
 
 static VALUE
@@ -347,12 +324,10 @@ rb_ca_map_index_bang_internal (VALUE self,
   }
 }
 
-/* rdoc:
-  class CArray
-    #
-    def map_index! # :yields: i0, i1, ...
-    end
-  end
+/* @overload map_index! () {|idx| ... }
+
+[TBD]
+
 */
 
 static VALUE
@@ -375,12 +350,10 @@ rb_ca_map_index_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
-  class CArray
-    #
-    def map_with_addr! # :yields: v, addr
-    end
-  end
+/* @overload map_with_addr! () {|elem, addr| ... }
+
+[TBD]
+
 */
 
 static VALUE
@@ -406,12 +379,10 @@ rb_ca_map_with_addr_bang (VALUE self)
 }
 
 
-/* rdoc:
-  class CArray
-    #
-    def map_addr! # :yields: addr
-    end
-  end
+/* @overload map_addr! () {|addr| ... }
+
+[TBD]
+
 */
 
 static VALUE

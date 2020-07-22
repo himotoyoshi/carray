@@ -3,10 +3,8 @@
   carray_test.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
   This file includes the modified routine (ca_mem_hash) from 
 
@@ -220,11 +218,10 @@ rb_obj_is_data_class (VALUE rtype)
 
 /* ------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    def valid_index? (*index)
-    end
-  end
+/* @overload valid_index? (*idx)
+
+(Inquiry) 
+Returns true if the given number list is valid as array index for the object
 */
 
 static VALUE
@@ -253,11 +250,10 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   return Qtrue;
 }
 
-/* rdoc:
-  class CArray
-    def valid_addr? (addr)
-    end
-  end
+/* @overload valid_addr? (*addr)
+
+(Inquiry) 
+Returns true if the given number is valid as array address for the object
 */
 
 static VALUE
@@ -279,11 +275,10 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
   }
 }
 
-/* rdoc:
-  class CArray
-    def has_same_shape? (other)
-    end
-  end
+/* @overload has_same_shape?
+
+(Inquiry) 
+Returns true if the object has the same shape with the given array.
 */
 
 static VALUE
@@ -453,12 +448,10 @@ ca_equal (void *ap, void *bp)
   return flag;
 }
 
-/* rdoc:
-  class CArray
-    def == (other)
-    end
-    alias eql? ==
-  end
+/* @overload == (other)
+
+(Inquiry) 
+Returns true if the object equals the given array.
 */
 
 static VALUE
@@ -545,11 +538,10 @@ ca_hash (CArray *ca)
   return hash;
 }
 
-/* rdoc:
-  class CArray
-    def hash
-    end
-  end
+/* @overload hash
+
+(Inquiry) 
+Returns the hash value of the object.
 */
 
 VALUE
@@ -578,6 +570,12 @@ rb_ca_modify (VALUE self)
   */
 }
 
+/* @overload freeze
+
+Freeze the object.
+
+*/
+
 VALUE
 rb_ca_freeze (VALUE self)
 {
@@ -598,6 +596,6 @@ Init_carray_test ()
   rb_define_method(rb_cCArray, "freeze",  rb_ca_freeze, 0);
 
   rb_define_method(rb_cCArray, "==", rb_ca_equal, 1);
-  rb_define_method(rb_cCArray, "eql?", rb_ca_equal, 1);
+  rb_define_alias(rb_cCArray, "eql?", "==");
   rb_define_method(rb_cCArray, "hash", rb_ca_hash, 0);
 }

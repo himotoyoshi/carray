@@ -3,10 +3,8 @@
   ca_obj_grid.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -32,7 +30,7 @@ typedef struct {
 
 static VALUE rb_cCAGrid;
 
-/* rdoc:
+/* yard:
   class CAGrid < CAVirtual # :nodoc:
   end
 */
@@ -46,8 +44,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, ca_size_t *dim,
   int8_t ndim, data_type;
   ca_size_t *dim0;
   ca_size_t elements, bytes;
+  ca_size_t j, k;
   double  length;
-  int i, j, k;
+  int8_t i;
 
   data_type = parent->data_type;
   ndim      = parent->ndim;
@@ -602,7 +601,7 @@ rb_ca_grid_new (VALUE cary, ca_size_t *dim, CArray **grid)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def grid
     end

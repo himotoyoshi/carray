@@ -3,10 +3,8 @@
   ca_obj_window.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -17,7 +15,7 @@
 VALUE rb_cCAWindow; 
 int8_t CA_OBJ_WINDOW;
 
-/* rdoc:
+/* yard:
   class CAWindow < CAVirtual # :nodoc:
   end
 */
@@ -703,7 +701,7 @@ rb_ca_window_new (VALUE cary,
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def window (*argv)
     end
@@ -837,7 +835,7 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CAWindow
     def index2addr0 (idx)
     end
@@ -874,7 +872,7 @@ rb_ca_window_idx2addr0 (int argc, VALUE *argv, VALUE self)
   }
 }
 
-/* rdoc:
+/* yard:
   class CAWindow
     def addr2addr0 (addr)
     end
@@ -928,7 +926,7 @@ rb_ca_window_move (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CAWindow
     def fill_value
     end
@@ -976,7 +974,7 @@ rb_ca_window_get_bounds (VALUE self)
     return ary;                                     \
 }
 
-/* rdoc:
+/* yard:
   class CAWindow
     def size0
     end

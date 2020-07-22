@@ -3,16 +3,14 @@
   ca_iter_block.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 
-/* rdoc:
+/* yard:
   class CABlockIterator < CAIterator # :nodoc: 
   end
 */
@@ -202,7 +200,7 @@ rb_bi_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # Create block iterator.
     def blocks (*args)

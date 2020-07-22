@@ -3,10 +3,8 @@
   carray_generate.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -15,17 +13,11 @@
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    # Sets true at the given index for the boolean array and returns self.
-    # It accept the arguments same as for CArray#[].
-    def set (*argv)
-    end
-    # Sets false at the given index for the boolean array and returns self.
-    # It accept the arguments same as for CArray#[].
-    def unset (*argv)
-    end
-  end
+/* @overload set (*idx)
+
+(Boolean, Modification)
+Sets true at the given index for the boolean array and returns self.
+It accept the arguments same as for CArray#[].
 */
 
 static VALUE
@@ -39,6 +31,13 @@ rb_ca_boolean_set (int argc, VALUE *argv, VALUE self)
   rb_ca_store2(self, argc, argv, one);
   return self;
 }
+
+/* @overload unset (*idx)
+
+(Boolean, Modification)
+Sets false at the given index for the boolean array and returns self.
+It accept the arguments same as for CArray#[].
+*/
 
 static VALUE
 rb_ca_boolean_unset (int argc, VALUE *argv, VALUE self)
@@ -54,12 +53,10 @@ rb_ca_boolean_unset (int argc, VALUE *argv, VALUE self)
 
 /* ----------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    # Returns the 1d index array for non-zero elements of self
-    def where
-    end
-  end
+/* @overload where
+
+(Conversion)
+Returns the 1d index array for non-zero elements of self
 */
 
 VALUE
@@ -245,8 +242,13 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* rdoc:
-  class CArray
+/* @overload seq! (init_val=0, step=1) {|elem| ... }
+
+(Conversion, Destructive)
+Generates sequential data with initial value `init_val` 
+and step value `step`. For object array, if the second argument
+is Symbol object, it will be interpreted as stepping method and 
+it is called for the last element in each step.
     # call-seq:
     #   seq (init_val=0, step=1)
     #   seq (init_val=0, step=1) {|x| ... }
@@ -258,12 +260,6 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
     # is Symbol object, it will be interpreted as stepping method and 
     # it is called for the last element in each step.
     #
-    def seq (init_val=0, step=1)
-    end
-    # 
-    def seq! (init_val=0, step=1)
-    end
-  end
 */
 
 static VALUE
@@ -338,6 +334,26 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
 
   return self;
 }
+
+/* @overload seq (init_val=0, step=1) {|elem| ... }
+
+(Conversion)
+Generates sequential data with initial value `init_val` 
+and step value `step`. For object array, if the second argument
+is Symbol object, it will be interpreted as stepping method and 
+it is called for the last element in each step.
+    # call-seq:
+    #   seq (init_val=0, step=1)
+    #   seq (init_val=0, step=1) {|x| ... }
+    #   seq (init_val=0, step=A_symbol)            ### for object array
+    #   seq (init_val=0, step=A_symbol) {|x| ...}  ### for object array
+    #
+    # Generates sequential data with initial value `init_val` 
+    # and step value `step`. For object array, if the second argument
+    # is Symbol object, it will be interpreted as stepping method and 
+    # it is called for the last element in each step.
+    #
+*/
 
 static VALUE
 rb_ca_seq_method (int argc, VALUE *argv, VALUE self)
@@ -456,15 +472,10 @@ ca_swap_bytes (char *ptr, ca_size_t bytes, ca_size_t elements)
 
 }
 
-/* rdoc:
-  class CArray
-    # Swaps the byte order of each element.
-    def swap_bytes
-    end
-    # 
-    def swap_bytes!
-    end
-  end
+/* @overload swap_bytes!
+
+(Conversion, Destructive)
+Swaps the byte order of each element.
 */
 
 VALUE
@@ -552,6 +563,12 @@ rb_ca_swap_bytes_bang (VALUE self)
 
   return self;
 }
+
+/* @overload swap_bytes
+
+(Conversion)
+Swaps the byte order of each element.
+*/
 
 VALUE
 rb_ca_swap_bytes (VALUE self)
@@ -664,20 +681,17 @@ rb_ca_swap_bytes (VALUE self)
           }                                                          \
         }                                                            \
       }                                                              \
-    }                                                              \    
+    }                                                                \
   }
 
-/* rdoc:
-  class CArray
-    # trims the data into the range between min and max. If `fill_value`
-    # is given, the element out of the range between min and max is filled
-    # by `fill_value`
-    def trim (min, max, fill_value=nil)
-    end
-    #
-    def trim! (min, max, fill_value=nil)
-    end
-  end
+
+
+/* @overload trim! (min, max, fill_value=nil)
+
+(Conversion)
+Trims the data into the range between min and max. If `fill_value`
+is given, the element out of the range between min and max is filled
+by `fill_value`
 */
 
 static VALUE
@@ -720,13 +734,20 @@ rb_ca_trim_bang (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
+/* @overload trim (min, max, fill_value=nil)
+
+(Conversion)
+Trims the data into the range between min and max. If `fill_value`
+is given, the element out of the range between min and max is filled
+by `fill_value`
+*/
+
 static VALUE
 rb_ca_trim (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out = rb_ca_copy(self);
   return rb_ca_trim_bang(argc, argv, out);
 }
-
 
 void
 Init_carray_generate ()
