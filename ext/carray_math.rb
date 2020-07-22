@@ -247,7 +247,7 @@ binop("/", "div",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#3) = (#1) / (#2);" : nil,
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_slash, 1, (#2));')
 
-binop("quo_i", nil,
+binop("quo_i", "quo_i",
       OBJ_TYPES => '(#3) = rb_funcall((#1), rb_intern("quo"), 1, (#2));')
 
 binop("rcp_mul", "rcp_mul",

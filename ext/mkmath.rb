@@ -305,7 +305,7 @@ static VALUE rb_ca_#{name}_bang (VALUE self, VALUE other)
 }
   end
   METHODS     << %{
-  rb_define_method(rb_cCArray, "#{op}!", rb_ca_#{name}_bang, 1);
+  rb_define_method(rb_cCArray, "#{name}!", rb_ca_#{name}_bang, 1);
 }
 
 end
