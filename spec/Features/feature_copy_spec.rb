@@ -119,22 +119,5 @@ describe "Feature: Copying" do
                    [ 6, 7, 8 ] ] == b }
   end
 
-  example "map" do
-    #
-    a = CArray.int32(3,3).seq
-    b = a.map{|x| x.to_s }
-    b.to_a
-    is_asserted_by { [ [ "0", "1", "2" ],
-                   [ "3", "4", "5" ],
-                   [ "6", "7", "8" ] ] == b }
-
-    # mask does not be templated
-    a = CArray.int32(3,3).seq
-    a[1,1] = UNDEF
-    b = a.map{|x| x.to_s }
-    is_asserted_by { [ [ "0", "1", "2" ],
-                   [ "3", UNDEF, "5" ],
-                   [ "6", "7", "8" ] ] == b }
-  end
 
 end
