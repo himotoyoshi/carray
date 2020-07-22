@@ -1,6 +1,6 @@
 Gem::Specification::new do |s|
 
-  version = "1.5.1"
+  version = "1.5.2"
 
   files = Dir.glob("**/*") - [ 
                                Dir.glob("carray-*.gem"), 
@@ -14,10 +14,14 @@ Gem::Specification::new do |s|
   s.name        = "carray"
   s.summary     = "Multi-dimesional array class for Ruby"
   s.description = <<-HERE
-    CArray is a uniform multi-dimensional rectangular array class.
-    It provides the various types of sub-arrays and references
-    pointing the data elements of original array (slice, grid, selection ...).
-    Element-wise masking and mathematical operations are natively supported.
+    Ruby/CArray is an extension library for the multi-dimensional array class.
+    CArray can store integers and floating point numbers to perform calculations
+    efficiently. Therefore, Ruby/CArray is suitable for numerical computation and data
+    analysis. Ruby/CArray has different features from other multidimensional array
+    libraries (narray, numo-narray, nmatrix), such as element-specific masks, 
+    creation of reference arrays that can reflect changes to the referent, 
+    the ability to access memory pointers of other objects, user-defined arrays,
+    and so on.
   HERE
   s.version     = version
   s.author      = "Hiroki Motoyoshi"
