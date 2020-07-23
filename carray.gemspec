@@ -2,7 +2,8 @@ Gem::Specification::new do |s|
 
   version = "1.5.2"
 
-  files = Dir.glob("**/*") - [ 
+  files = Dir.glob("**/*") + [".yardopts"] -
+                             [ 
                                Dir.glob("carray-*.gem"), 
                                Dir.glob("ext/**/{Makefile,mkmf.log}"),
                                Dir.glob("**/*.{o,so,bundle}"),
