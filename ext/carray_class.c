@@ -3,22 +3,19 @@
   carray_class.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 
-/* rdoc: 
-  # returns the machine endianness.
-  #     CArray.endian #=> 0 (CA_LITTLE_ENDIAN)
-  #     CArray.endian #=> 1 (CA_BIG_ENDIAN)
+/* @overload endian 
 
-  def CArray.endian 
-  end
+(Inquiry) 
+Returns the machine endianness.
+   0 (CA_LITTLE_ENDIAN)
+   1 (CA_BIG_ENDIAN)
 */
 
 static VALUE
@@ -27,12 +24,10 @@ rb_ca_s_endian (VALUE klass)
   return INT2NUM(ca_endian);
 }
 
-/* rdoc:
-  # returns true if the byte order of the architecture is
-  # big endian.
-
-  def CArray.big_endian?
-  end
+/* @overload big_endian?
+  
+(Inquiry) 
+Returns true if the byte order of the architecture is big endian.
 */
 
 static VALUE
@@ -41,12 +36,11 @@ rb_ca_s_big_endian_p (VALUE klass)
   return ( ca_endian == CA_BIG_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* rdoc: 
-  # returns true if the byte order of the architecture is
-  # little endian.
+/* @overload little_endian?
 
-  def CArray.little_endian?
-  end
+(Inquiry) 
+Returns true if the byte order of the architecture is
+little endian.
 */
 
 static VALUE
@@ -55,15 +49,15 @@ rb_ca_s_little_endian_p (VALUE klass)
   return ( ca_endian == CA_LITTLE_ENDIAN ) ? Qtrue : Qfalse;
 }
 
-/* rdoc:
-  #  Returns the byte length of an element of the given data type.
-  #  Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
-  #     CArray.sizeof(CA_INT32)  #=> 4
-  #     CArray.sizeof(CA_DOUBLE) #=> 8
-  #     CArray.sizeof(CA_FIXLEN)   #=> 0
+/* @overload sizeof (data_type)
 
-  def CArray.sizeof (data_type)
-  end
+(Inquiry) 
+Returns the byte length of an element of the given data type.
+Retruns <code>0</code> if data_type is equal to CA_FIXLEN.
+     CArray.sizeof(CA_INT32)  #=> 4
+     CArray.sizeof(CA_DOUBLE) #=> 8
+     CArray.sizeof(CA_FIXLEN)   #=> 0
+
 */
 
 static VALUE
@@ -76,11 +70,10 @@ rb_ca_s_sizeof (VALUE klass, VALUE rtype)
 }
 
 
-/* rdoc:
-  #  Returns true if the given data_type indicate the valid data_type.
+/* @overload data_type?(data_type)
 
-  def CArray.data_type?(data_type)
-  end
+(Inquiry) 
+Returns true if the given data_type indicate the valid data_type.
 */
 
 static VALUE
@@ -94,11 +87,10 @@ rb_ca_s_data_type (VALUE klass, VALUE rtype)
   return ca_valid[data_type] == 1 ? Qtrue : Qfalse;
 }
 
-/* rdoc:
-  #  Returns string representaion of the data_type specifier.
+/* @overload data_type_name(data_type)
 
-  def CArray.data_type_name(data_type)
-  end
+(Inquiry) 
+Returns string representaion of the data_type specifier.
 */
 
 

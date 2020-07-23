@@ -3,10 +3,8 @@
   carray_access.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -208,7 +206,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def fill
     end
@@ -293,7 +291,7 @@ ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
   }
 }
 
-/* rdoc:
+/* yard:
   def CArray.guess_array_shape (arg)
   end
 */  
@@ -533,7 +531,9 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
         info->type = CA_REG_ADDRESS;
         info->ndim = 1;
         addr = NUM2SIZE(arg);
-        CA_CHECK_INDEX(addr, ca_elements);
+        if ( info->range_check ) {
+          CA_CHECK_INDEX(addr, ca_elements);
+        }
         info->index[0].scalar = addr;
         return;
       }
@@ -594,7 +594,9 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
         ca_size_t scalar;
         index_type[i] = CA_IDX_SCALAR;
         scalar = NUM2SIZE(arg);
-        CA_CHECK_INDEX_AT(scalar, ca_dim[i], i);
+        if ( info->range_check ) {
+          CA_CHECK_INDEX_AT(scalar, ca_dim[i], i);
+        }
         index[i].scalar = scalar;
       }
       else if ( NIL_P(arg) ) { /* ca[--,nil,--] */
@@ -631,7 +633,10 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
           last  = NUM2SIZE(iv_end);          
         }
         excl  = RTEST(iv_excl);
-        CA_CHECK_INDEX_AT(first, ca_dim[i], i);
+
+        if ( info->range_check ) {
+          CA_CHECK_INDEX_AT(first, ca_dim[i], i);
+        }
 
         if ( last < 0 ) { /* don't use CA_CHECK_INDEX for excl */
           last += ca_dim[i];
@@ -645,10 +650,12 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
           if ( excl ) {
             last += ( (last>=first) ? -1 : 1 );
           }
-          if ( last < 0 || last >= ca_dim[i] ) {
-            rb_raise(rb_eIndexError,
-                     "index %lld is out of range (0..%lld) at %i-dim",
-                     (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
+          if ( info->range_check ) {
+            if ( last < 0 || last >= ca_dim[i] ) {
+              rb_raise(rb_eIndexError,
+                       "index %lld is out of range (0..%lld) at %i-dim",
+                       (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
+            }
           }
           index[i].block.start = first;
           index[i].block.count = count = llabs(last - first) + 1;
@@ -1254,7 +1261,7 @@ rb_ca_refer_new_flatten (VALUE self)
   return rb_ca_refer_new(self, ca->data_type, 1, &dim0, ca->bytes, 0);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def [] (*spec)
     end
@@ -1271,6 +1278,8 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
  retry:
 
   Data_Get_Struct(self, CArray, ca);
+
+  info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
   switch ( info.type ) {
@@ -1340,7 +1349,86 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
-/* rdoc:
+static VALUE
+rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE obj = Qnil;
+  CArray *ca;
+  CAIndexInfo info;
+
+  Data_Get_Struct(self, CArray, ca);
+
+  info.range_check = 0;
+  rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
+
+  switch ( info.type ) {
+  case CA_REG_ADDRESS_COMPLEX:
+    obj = rb_ca_fetch_addr(self, 0);
+    break;
+  case CA_REG_ADDRESS:
+    obj = rb_ca_fetch_addr(self, 0);
+    break;
+  case CA_REG_FLATTEN:
+    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
+    break;
+  case CA_REG_POINT:
+    obj = rb_ca_fetch_addr(self, 0);
+    break;
+  case CA_REG_ALL:
+    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
+    break;
+  case CA_REG_BLOCK:
+    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
+    break;
+  case CA_REG_SELECT:
+    obj = rb_ca_select_new(self, argv[0]);
+    break;
+  case CA_REG_ITERATOR:
+    obj = rb_dim_iter_new(self, &info);
+    break;
+  case CA_REG_REPEAT:
+    obj = rb_ca_repeat(argc, argv, self);
+    break;
+  case CA_REG_UNBOUND_REPEAT:
+    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
+    break;
+  case CA_REG_MAPPING:
+    obj = rb_ca_mapping(argc, argv, self);
+    break;
+  case CA_REG_GRID:
+    obj = rb_ca_grid(argc, argv, self);
+    break;
+  case CA_REG_METHOD_CALL: {
+    volatile VALUE idx;
+    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    obj = rb_ca_fetch(self, idx);
+    break;
+  }
+  case CA_REG_MEMBER: {
+    volatile VALUE data_class = rb_ca_data_class(self);
+    if ( ! NIL_P(data_class) ) {
+      obj = rb_ca_field_as_member(self, info.symbol);
+      break;
+    }
+    else {
+      rb_raise(rb_eIndexError, 
+               "can't refer member of carray doesn't have data_class");
+    }
+    break;
+  }
+  case CA_REG_ATTRIBUTE: {
+    obj = rb_funcall(self, rb_intern("attribute"), 0);
+    obj = rb_hash_aref(obj, info.symbol);
+    break;
+  }
+  default:
+    rb_raise(rb_eIndexError, "invalid index specified");
+  }
+
+  return obj;
+}
+
+/* yard:
   class CArray
     def []= (*spec)
     end
@@ -1363,6 +1451,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
+  info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
   switch ( info.type ) {
@@ -1487,7 +1576,7 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
   return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
 }
 
-/* rdoc:
+/* yard:
   def CArray.scan_index(dim, idx)
   end
 */
@@ -1515,6 +1604,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   CA_CHECK_RANK(ndim);
   CA_CHECK_DIM(ndim, dim);
 
+  info.range_check = 1;
   rb_ca_scan_index(ndim, dim, elements,
                    RARRAY_LEN(ridx), RARRAY_PTR(ridx), &info);
 
@@ -1596,7 +1686,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   return rb_struct_new(S_CAInfo, rtype, rindex);
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def normalize_index (idx)
     end
@@ -1614,6 +1704,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
   Data_Get_Struct(self, CArray, ca);
   Check_Type(ridx, T_ARRAY);
 
+  info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements,
                    RARRAY_LEN(ridx), RARRAY_PTR(ridx), &info);
 
@@ -1668,7 +1759,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
 
 /* ------------------------------------------------------------------- */
 
-/* rdoc:
+/* yard:
   class CArray
     # converts addr to index
     def addr2index (addr)
@@ -1703,7 +1794,7 @@ rb_ca_addr2index (VALUE self, VALUE raddr)
   return out;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def index2addr (*index)
     end
@@ -1837,6 +1928,8 @@ Init_carray_access ()
 
   rb_define_method(rb_cCArray, "[]", rb_ca_fetch_method, -1);
   rb_define_method(rb_cCArray, "[]=", rb_ca_store_method, -1);
+
+  rb_define_method(rb_cCScalar, "[]", rb_cs_fetch_method, -1);
 
   rb_define_method(rb_cCArray, "fill", rb_ca_fill, 1);
   rb_define_method(rb_cCArray, "fill_copy", rb_ca_fill_copy, 1);

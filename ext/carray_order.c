@@ -3,10 +3,8 @@
   carray_order.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -140,26 +138,24 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   return co;
 }
 
-/* rdoc:
-  class CArray
-    def project (idx,lval=nil,uval=nil)
-    end
-  end
+/* @overload project (idx, lval=nil, uval=nil)
+
+[TBD]. Creates new array the element of the object as address.
 */
 
 VALUE
 rb_ca_project (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, rindex, vlfval, vufval;
+  volatile VALUE obj, ridx, vlfval, vufval;
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
 
-  rb_scan_args(argc, argv, "12", (VALUE *) &rindex, (VALUE *) &vlfval, (VALUE *) &vufval);
+  rb_scan_args(argc, argv, "12", (VALUE *)&ridx, (VALUE *) &vlfval, (VALUE *) &vufval);
 
   Data_Get_Struct(self, CArray, ca);
 
-  rb_check_carray_object(rindex);
-  ci = ca_wrap_readonly(rindex, CA_SIZE);
+  rb_check_carray_object(ridx);
+  ci = ca_wrap_readonly(ridx, CA_SIZE);
 
   lfval = malloc_with_check(ca->bytes);
   ufval = malloc_with_check(ca->bytes);
@@ -227,12 +223,9 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     free(v);                                            \
   }
 
-/* rdoc:
-  class CArray
-    # Reverses the elements of +ca+ in place.
-    def reverse!
-    end
-  end
+/* @overload reverse!
+
+Reverses the elements of +ca+ in place.
 */
 
 static VALUE
@@ -279,13 +272,10 @@ rb_ca_reverse_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
-  class CArray
-    # Returns a new CArray object containing <i>ca</i>'s elements in
-    # reverse order.
-    def reverse
-    end
-  end
+/* @overload reverse
+
+Returns a new CArray object containing <i>ca</i>'s elements in
+reverse order.
 */
 
 static VALUE
@@ -384,12 +374,9 @@ ca_qsort_cmp[CA_NTYPE] = {
   qcmp_VALUE,
 };
 
-/* rdoc:
-  class CArray
-    # Sorts <i>ca</i>'s elements in place.
-    def sort!
-    end
-  end
+/* @overload sort!
+
+Sorts <i>ca</i>'s elements in place.
 */
 
 static VALUE
@@ -433,12 +420,9 @@ rb_ca_sort_bang (VALUE self)
   return self;
 }
 
-/* rdoc:
-  class CArray
-    # Returns a new CArray object containing <i>ca</i>'s elements sorted.
-    def sort
-    end
-  end
+/* @overload sort
+
+Returns a new CArray object containing <i>ca</i>'s elements sorted.
 */
 
 static VALUE
@@ -452,11 +436,9 @@ rb_ca_sorted_copy (VALUE self)
 
 /* --------------------------------------------------------------- */
 
-/* rdoc:
-  class CArray
-    def bsearch
-    end
-  end
+/* @overload bsearch
+
+Returns a new CArray object containing <i>ca</i>'s elements sorted.
 */
 
 static VALUE
@@ -561,11 +543,9 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
   return out;
 }
 
-/* rdoc:
-  class CArray
-    def bsearch_index
-    end
-  end
+/* @overload bsearch_index
+
+[TBD]. 
 */
 
 static VALUE
@@ -630,6 +610,33 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
     }                                                        \
   }
 
+#define proc_find_value_float128(type, defeps)                  \
+  {                                                          \
+    type *ptr = (type *) ca->ptr;                            \
+    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
+    type val  = (type) NUM2DBL(value);                       \
+    float128_t eps  = (NIL_P(veps)) ? defeps*fabsl(val) : NUM2DBL(veps); \
+    ca_size_t i;                                               \
+    if ( m ) {                                               \
+      for (i=0; i<ca->elements; i++, ptr++) {                \
+        if ( ! *m++ ) {                                      \
+          if ( fabsl(*ptr - val) <= eps ) {                   \
+            addr = i;                                        \
+            break;                                           \
+          }                                                  \
+        }                                                    \
+      }                                                      \
+    }                                                        \
+    else {                                                   \
+      for (i=0; i<ca->elements; i++, ptr++) {                \
+        if ( fabsl(*ptr - val) <= eps ) {                     \
+          addr = i;                                          \
+          break;                                             \
+        }                                                    \
+      }                                                      \
+    }                                                        \
+  }
+
 #define proc_find_value_cmplx(type, defeps)                  \
   {                                                          \
     type *ptr = (type *) ca->ptr;                            \
@@ -683,11 +690,9 @@ rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
   }
 
 
-/* rdoc:
-  class CArray
-    def search
-    end
-  end
+/* @overload search
+
+[TBD]. 
 */
 
 static VALUE
@@ -717,7 +722,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
   case CA_UINT64:   proc_find_value(uint64_t); break;
   case CA_FLOAT32:  proc_find_value_float(float32_t, FLT_EPSILON); break;
   case CA_FLOAT64:  proc_find_value_float(float64_t, DBL_EPSILON); break;
-  case CA_FLOAT128: proc_find_value_float(float128_t, DBL_EPSILON); break;
+  case CA_FLOAT128: proc_find_value_float128(float128_t, DBL_EPSILON); break;
 #ifdef HAVE_COMPLEX_H
   case CA_CMPLX64:  proc_find_value_cmplx(cmplx64_t, FLT_EPSILON); break;
   case CA_CMPLX128: proc_find_value_cmplx(cmplx128_t, DBL_EPSILON); break;
@@ -733,11 +738,9 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
   return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
-/* rdoc:
-  class CArray
-    def search_index
-    end
-  end
+/* @overload search_index
+
+[TBD]. 
 */
 
 static VALUE
@@ -811,11 +814,9 @@ rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
     }                                                   \
   }
 
-/* rdoc:
-  class CArray
-    def search_nearest
-    end
-  end
+/* @overload search_nearest
+
+[TBD]. 
 */
 
 static VALUE
@@ -856,6 +857,11 @@ rb_ca_linear_search_nearest (VALUE self, VALUE value)
   return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
 }
 
+/* @overload search_nearest_index
+
+[TBD]. 
+*/
+
 static VALUE
 rb_ca_linear_search_nearest_index (VALUE self, VALUE value)
 {
@@ -876,6 +882,9 @@ Init_carray_order ()
   rb_define_method(rb_cCArray,  "sort!", rb_ca_sort_bang, 0);
   rb_define_method(rb_cCArray,  "sort", rb_ca_sorted_copy, 0);
 
+  rb_define_method(rb_cCArray,  "bsearch", rb_ca_binary_search, 1);
+  rb_define_method(rb_cCArray,  "bsearch_index", rb_ca_binary_search_index, 1);
+
   rb_define_method(rb_cCArray,  "search", rb_ca_linear_search, -1);
   rb_define_method(rb_cCArray,  "search_index", rb_ca_linear_search_index, -1);
 
@@ -884,6 +893,4 @@ Init_carray_order ()
   rb_define_method(rb_cCArray,  "search_nearest_index",
                                 rb_ca_linear_search_nearest_index, 1);
 
-  rb_define_method(rb_cCArray,  "bsearch", rb_ca_binary_search, 1);
-  rb_define_method(rb_cCArray,  "bsearch_index", rb_ca_binary_search_index, 1);
 }

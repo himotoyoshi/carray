@@ -3,10 +3,8 @@
   carray.h
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -760,6 +758,7 @@ typedef struct {
   CArray  *select;
   VALUE    block;
   VALUE    symbol;
+  int8_t   range_check;
 } CAIndexInfo;
 
 /* -------------------------------------------------------------------- */
@@ -785,10 +784,10 @@ VALUE rb_ca_call_binop (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[]);
 VALUE rb_ca_call_bincmp (VALUE self, VALUE other, ca_bincmp_func_t func[]);
-void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2);
-void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
-void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2);
-void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3);
+void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
+void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
+void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
+void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
 VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 
 /* -------------------------------------------------------------------- */
@@ -818,6 +817,9 @@ VALUE    rb_carray_new (int8_t data_type,
                         int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
 VALUE    rb_carray_new_safe (int8_t data_type,
                              int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask);
+
+VALUE    rb_ca_wrap_new (int8_t data_type,
+                         int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask, char *ptr);
 
 CAWrap  *ca_wrap_new (int8_t data_type,
                       int8_t ndim, ca_size_t *dim, ca_size_t bytes,
@@ -888,6 +890,9 @@ CARepeat *ca_repeat_new (CArray *carray, int8_t ndim, ca_size_t *count);
 VALUE   rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count);
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
+/* --- ca_obj_unbound_repeat.c --- */
+
+VALUE   rb_ca_ubrep_shave (VALUE self, VALUE other);
 VALUE   rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
 VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
@@ -1064,7 +1069,7 @@ void    ca_parse_range_without_check (VALUE arg, ca_size_t size,
                         ca_size_t *offset, ca_size_t *count, ca_size_t *step);
 
 int     ca_equal (void *ap, void *bp);
-void    ca_zerodiv(void);
+void    ca_zerodiv(void)  __attribute__((noreturn));
 int32_t ca_rand (double rmax);
 ca_size_t ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k);
 

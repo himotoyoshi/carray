@@ -3,10 +3,8 @@
   carray_utils.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -422,6 +420,11 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
   }
 }
 
+/* @private
+@overload scan_float (str, fill_value=nil)
+
+*/
+
 static VALUE
 rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
 {
@@ -446,6 +449,11 @@ rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
     return ( NIL_P(rfval) ) ? rb_float_new(0.0/0.0) : rfval;
   }
 }
+
+/* @private
+@overload scan_int (str, fill_value=nil)
+
+*/
 
 static VALUE
 rb_ca_s_scan_int (int argc, VALUE *argv, VALUE self)
@@ -564,7 +572,7 @@ rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
   }
 }
 
-/* rdoc:
+/* @private
   def CArray.guess_type_and_bytes (type, bytes=0)
   end
 */

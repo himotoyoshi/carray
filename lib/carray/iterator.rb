@@ -280,6 +280,7 @@ class CAIterator
   end
 
   def sort_with (&block)
+    warn "CAIterator#sort_with will be obsolete"
     out = reference.template
     idx = CA.sort_addr(*yield(self))
     ca[idx].each_with_addr do |blk, i|

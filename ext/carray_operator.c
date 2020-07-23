@@ -3,10 +3,8 @@
   carray_operator.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -27,7 +25,6 @@ ca_zerodiv ()
   #endif
   rb_raise(rb_eZeroDivError, "divided by 0");
 }
-
 
 VALUE
 rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
@@ -50,7 +47,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   ca_attach(ca1);
   ca_copy_mask_overlay(ca2, ca2->elements, 1, ca1);
   func[ca1->data_type](ca1->elements,
-                       ( ca2->mask ) ? ca2->mask->ptr : NULL,
+                       ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL,
                        ca1->ptr, 1,
                        ca2->ptr, 1);
   ca_detach(ca1);
@@ -58,7 +55,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -75,7 +72,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
 
   ca_attach(ca1);
   func[ca1->data_type](ca1->elements,
-                       ( ca1->mask ) ? ca1->mask->ptr : NULL,
+                       ( ca1->mask ) ? (boolean8_t *)ca1->mask->ptr : NULL,
                        ca1->ptr, 1,
                        ca1->ptr, 1);
   ca_sync(ca1);
@@ -134,7 +131,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       out = ca_wrap_struct(ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, 0,
                            ca2->ptr, 0,
                            ca3->ptr, 0);
@@ -149,7 +147,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       out = ca_wrap_struct(ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca2->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca2->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, 0,
                            ca2->ptr, 1,
                            ca3->ptr, 1);
@@ -166,7 +165,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       out = ca_wrap_struct(ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, 1,
                            ca2->ptr, 0,
                            ca3->ptr, 1);
@@ -185,7 +185,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       out = ca_wrap_struct(ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, 1,
                            ca2->ptr, 1,
                            ca3->ptr, 1);
@@ -197,13 +198,13 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca2->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca2;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(other, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -228,7 +229,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   if ( rb_obj_is_cscalar(self) ) {
     if ( rb_obj_is_cscalar(other) ) { /* scalar vs scalar */
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca1->mask ) ? ca1->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
                            ca1->ptr, 0,
                            ca2->ptr, 0,
                            ca1->ptr, 0);
@@ -240,7 +242,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
       }
 
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca1->mask ) ? ca1->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
                            ca1->ptr, 0,
                            ca2->ptr, 0,
                            ca1->ptr, 0);
@@ -249,7 +252,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   else {
     if ( rb_obj_is_cscalar(other) ) { /* array vs scalar */
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca1->mask ) ? ca1->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
                            ca1->ptr, 1,
                            ca2->ptr, 0,
                            ca1->ptr, 1);
@@ -261,7 +265,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
       }
 
       ca_copy_mask_overlay(ca1, ca1->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca1->mask ) ? ca1->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
                            ca1->ptr, 1,
                            ca2->ptr, 1,
                            ca1->ptr, 1);
@@ -294,15 +299,16 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   ca_attach(ca1);
   ca_copy_mask_overlay(ca2, ca2->elements, 1, ca1);
-  func[ca1->data_type](ca1->elements, ( ca2->mask ) ? ca2->mask->ptr : NULL,
+  func[ca1->data_type](ca1->elements, 
+                       ( ca2->mask ) ? (boolean8_t *) ca2->mask->ptr : NULL,
                        ca1->ptr, 1,
-                       ca2->ptr, 1);
+                       (boolean8_t *) ca2->ptr, 1);
   ca_detach(ca1);
 
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -321,10 +327,10 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
 
   /* check for comparison with CA_UNDEF */
   if ( other == CA_UNDEF ) {
-    if ( func == ca_bincmp_eq ) {      /* a.eq(UNDEF) -> a.is_masked */
+    if ( (ca_bincmp_func_t) func == (ca_bincmp_func_t) ca_bincmp_eq ) {  /* a.eq(UNDEF) -> a.is_masked */
       return rb_ca_is_masked(self);
     }
-    else if ( func == ca_bincmp_ne ) { /* a.ne(UNDEF) -> a.is_not_masked */
+    else if ( (ca_bincmp_func_t) func == (ca_bincmp_func_t) ca_bincmp_ne ) { /* a.ne(UNDEF) -> a.is_not_masked */
       return rb_ca_is_not_masked(self);
     }
     else {
@@ -347,7 +353,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, ca1->bytes, 0,
                            ca2->ptr, ca2->bytes, 0,
                            ca3->ptr, ca3->bytes, 0);
@@ -357,7 +364,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca2->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca2->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, ca1->bytes, 0,
                            ca2->ptr, ca2->bytes, 1,
                            ca3->ptr, ca3->bytes, 1);
@@ -369,7 +377,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, ca1->bytes, 1,
                            ca2->ptr, ca2->bytes, 0,
                            ca3->ptr, ca3->bytes, 1);
@@ -383,7 +392,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       Data_Get_Struct(out, CArray, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
-      func[ca1->data_type](ca1->elements, ( ca3->mask ) ? ca3->mask->ptr : NULL,
+      func[ca1->data_type](ca1->elements, 
+                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
                            ca1->ptr, ca1->bytes, 1,
                            ca2->ptr, ca2->bytes, 1,
                            ca3->ptr, ca3->bytes, 1);
@@ -395,7 +405,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   /* unresolved unbound repeat array generates unbound repeat array again */
   if ( ca1->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     CAUnboundRepeat *cx = (CAUnboundRepeat *) ca1;
-    out = rb_ca_ubrep_new(out, cx->rep_ndim, cx->rep_dim);
+    out = rb_ca_ubrep_new(rb_ca_ubrep_shave(self, out), cx->rep_ndim, cx->rep_dim);
   }
 
   return out;
@@ -458,11 +468,9 @@ ca_math_call (VALUE mod, VALUE arg, ID id)
   }
 }
 
-/* rdoc:
-  class CArray
-    def coerce (other)
-    end
-  end
+/* @overload coerece (other)
+
+[TBD]
 */
 
 static VALUE
@@ -523,6 +531,11 @@ rb_ca_coerce (VALUE self, VALUE other)
       out = to(sum); \
     } \
   }
+
+/* @overload mul_add (weight, min_count=nil, fill_value=nil)
+
+[TBD]
+*/
 
 static VALUE
 rb_ca_mul_add (int argc, VALUE *argv, volatile VALUE self)

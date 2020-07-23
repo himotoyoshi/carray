@@ -3,10 +3,8 @@
   ca_obj_fake.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -31,7 +29,7 @@ static int8_t CA_OBJ_FAKE;
 
 static VALUE rb_cCAFake;
 
-/* rdoc: 
+/* yard: 
   class CAFake < CAVirtual # :nodoc:
   end
 */
@@ -328,7 +326,7 @@ rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def fake (data_type, options={:bytes=>0})
     end

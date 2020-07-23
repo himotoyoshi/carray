@@ -3,10 +3,8 @@
   ca_obj_farray.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -33,7 +31,7 @@ static int8_t CA_OBJ_FARRAY;
 
 static VALUE rb_cCAFarray;
 
-/* rdoc:
+/* yard:
   class CAFArray < CAVirtual # :nodoc:
   end
 */
@@ -429,7 +427,7 @@ rb_ca_farray_new (VALUE cary)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # create the virtual transposed array which dimension order is reversed.
     def t

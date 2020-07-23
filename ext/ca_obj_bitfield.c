@@ -3,10 +3,8 @@
   ca_obj_bitfield.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -35,7 +33,7 @@ static int8_t CA_OBJ_BITFIELD;
 
 static VALUE rb_cCABitfield;
 
-/* rdoc:
+/* yard:
   class CABitField < CAVirtual # :nodoc:
   end
 */
@@ -559,7 +557,7 @@ rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
   return obj;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     def bitfield (range, type)
     end

@@ -3,10 +3,8 @@
   ca_obj_block.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -14,7 +12,7 @@
 
 VALUE rb_cCABlock;
 
-/* rdoc:
+/* yard:
   class CABlock < CAVirtual # :nodoc:
   end
 */
@@ -735,7 +733,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
     return ary;                                     \
 }
 
-/* rdoc:
+/* yard:
   class CABlock
     def size0
     end
@@ -763,7 +761,7 @@ rb_cb_offset (VALUE self)
   return SIZE2NUM(cb->offset);
 }
 
-/* rdoc:
+/* yard:
   class CABlock
     def idx2addr0 (idx)
     end
@@ -795,7 +793,7 @@ rb_cb_idx2addr0 (int argc, VALUE *argv, VALUE self)
   return SIZE2NUM(addr + cb->offset);
 }
 
-/* rdoc:
+/* yard:
   class CABlock
     def addr2addr0 (addr)
     end
@@ -824,7 +822,7 @@ rb_cb_addr2addr0 (VALUE self, VALUE raddr)
 }
 
 
-/* rdoc:
+/* yard:
   class CABlock
     def move (*index)
     end

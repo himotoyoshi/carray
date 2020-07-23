@@ -3,10 +3,8 @@
   ca_obj_refer.c
 
   This file is part of Ruby/CArray extension library.
-  You can redistribute it and/or modify it under the terms of
-  the Ruby Licence.
 
-  Copyright (C) 2005 Hiroki Motoyoshi
+  Copyright (C) 2005-2020 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
@@ -14,7 +12,7 @@
 
 VALUE rb_cCARefer;
 
-/* rdoc:
+/* yard:
   class CARefer < CAVirtual # :nodoc:
   end
 */
@@ -206,7 +204,7 @@ ca_refer_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
     for (i=0; i<ca->ratio; i++) {
       ca_fetch_addr(ca->parent,
                        addr * ca->ratio + i + ca->offset,
-                       ptr + i * ca->parent->bytes);
+                       (char *) ptr + i * ca->parent->bytes);
     }
     break;
   }
@@ -267,7 +265,7 @@ ca_refer_func_store_addr (void *ap, ca_size_t addr, void *ptr)
     for (i=0; i<ca->ratio; i++) {
       ca_store_addr(ca->parent,
                        addr * ca->ratio + i + ca->offset,
-                       ptr + i * ca->parent->bytes);
+                       (char *) ptr + i * ca->parent->bytes);
     }
     break;
   }
@@ -491,7 +489,7 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* rdoc:
+/* yard:
   class CArray
     # call-seq: 
     #    CArray.refer()
