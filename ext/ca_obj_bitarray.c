@@ -462,12 +462,9 @@ rb_ca_bitarray_new (VALUE cary)
   return obj;
 }
 
-/* yard:
-  class CArray
-    def bits
-    end
-    alias bitarray bits
-  end
+/* @overload bitarray
+
+[TBD]
 */
 
 VALUE
@@ -511,8 +508,8 @@ Init_ca_obj_bitarray ()
   CA_OBJ_BITARRAY = ca_install_obj_type(rb_cCABitarray, ca_bitarray_func);
   rb_define_const(rb_cObject, "CA_OBJ_BITARRAY", INT2NUM(CA_OBJ_BITARRAY));
 
-  rb_define_method(rb_cCArray, "bits", rb_ca_bitarray, 0);
   rb_define_method(rb_cCArray, "bitarray", rb_ca_bitarray, 0);
+  rb_define_alias(rb_cCArray, "bits", "bitarray");
 
   rb_define_alloc_func(rb_cCABitarray, rb_ca_bitarray_s_allocate);
   rb_define_method(rb_cCABitarray, "initialize_copy",

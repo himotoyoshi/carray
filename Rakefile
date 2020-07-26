@@ -15,7 +15,7 @@ task :install do
     exit(1)
   end
   system %{
-    gem build #{GEMSPEC}; gem install #{spec.full_name}.gem
+    gem build #{GEMSPEC}; gem install #{spec.full_name}.gem --no-document
   }
 end
 

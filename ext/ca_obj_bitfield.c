@@ -557,11 +557,9 @@ rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
   return obj;
 }
 
-/* yard:
-  class CArray
-    def bitfield (range, type)
-    end
-  end
+/* @overload bitfield (range, type)
+
+[TBD]
 */
 
 VALUE

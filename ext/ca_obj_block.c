@@ -12,11 +12,6 @@
 
 VALUE rb_cCABlock;
 
-/* yard:
-  class CABlock < CAVirtual # :nodoc:
-  end
-*/
-
 static int
 ca_block_setup (CABlock *ca, CArray *parent, int8_t ndim, ca_size_t *dim,
                ca_size_t *start, ca_size_t *step, ca_size_t *count, ca_size_t offset)
@@ -733,7 +728,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
     return ary;                                     \
 }
 
-/* yard:
+/* @overload size0:
   class CABlock
     def size0
     end
