@@ -19,7 +19,7 @@ Gem::Specification::new do |s|
     CArray can store integers and floating point numbers to perform calculations
     efficiently. Therefore, Ruby/CArray is suitable for numerical computation and data
     analysis. Ruby/CArray has different features from other multidimensional array
-    libraries (narray, numo-narray, nmatrix), such as element-specific masks, 
+    libraries (narray, numo-narray, nmatrix), such as element-wise masks, 
     creation of reference arrays that can reflect changes to the referent, 
     the ability to access memory pointers of other objects, user-defined arrays,
     and so on.
@@ -27,7 +27,7 @@ Gem::Specification::new do |s|
   s.version     = version
   s.author      = "Hiroki Motoyoshi"
   s.email       = ""
-  s.licenses    = ['MIT']
+  s.license     = 'MIT'
   s.homepage    = 'https://github.com/himotoyoshi/carray'
   s.files       = files
   s.extensions  = [ "ext/extconf.rb" ] 
