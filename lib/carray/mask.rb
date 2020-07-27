@@ -12,6 +12,11 @@
 
 class CArray
   
+  def self.guard_undef (value, &block)
+    return value if value == UNDEF
+    return block.(value) 
+  end
+
   # mask
   
   #

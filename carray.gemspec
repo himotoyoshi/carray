@@ -9,6 +9,7 @@ Gem::Specification::new do |s|
                                Dir.glob("**/*.{o,so,bundle}"),
                                Dir.glob("**/*~"),
                                Dir.glob("doc/**/*"),
+                               Dir.glob("test/**/*"),
                              ].flatten
 
   s.platform    = Gem::Platform::RUBY
