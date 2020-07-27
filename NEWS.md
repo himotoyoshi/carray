@@ -2,15 +2,15 @@ ChangeLog of Ruby/CArray
 ========================
 
 1.5.2 -> 1.5.3
+--------------
 
 * [New] Add new method 'CArray#exp2'
 * [New] Add new method 'CArray#log2'
 * [New] Add new method 'CArray#logb'
 * [New] Add new method 'CArray#remainder'
+* [New] Add new method 'CArray.guard_undef'
 * [Mod] Modify 'CArray#pmax' to use 'fmax' for float type
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
-
-
 
 1.5.1 -> 1.5.2
 --------------
@@ -24,8 +24,8 @@ ChangeLog of Ruby/CArray
 * [New] Add new API function `rb_ca_wrap_new`
 * [Mod] Modify 'CArray#linspace' to return float64 array for integer arguments
 * [Mod] Modify CAUnboundRepeat to have `ndim` same as the bounded array (before `ndim` same as parent array)
-* [Mod] Depret the obsolete mothod 'CArray#dump'.
-* [Mod] Depret the obsolete mothod 'CArray#load'.
+* [Mod] Remove the obsolete mothod 'CArray#dump'.
+* [Mod] Remove the obsolete mothod 'CArray#load'.
 * [Mod] Modify CArray.wrap_readonly to wrap string as array.
 * [Fix] Add support for Integer (same as for Fixnum, Bignum)
 
