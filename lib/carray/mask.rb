@@ -11,18 +11,20 @@
 # ----------------------------------------------------------------------------
 
 class CArray
-  
-  def self.guard_undef (value, &block)
-    return value if value == UNDEF
-    return block.(value) 
+
+  # Guard processing value from UNDEF
+  # 
+  # 
+  def self.guard_undef (value, fill_value = UNDEF, &block)
+    return fill_value if value == UNDEF
+    return block.(value) if block
+    return value
   end
 
   # mask
-  
-  #
+  # 
   # Returns the number of masked elements.
-  #
-
+  # 
   def count_masked (*axis)
     if has_mask?  
       return mask.int64.accumulate(*axis)
