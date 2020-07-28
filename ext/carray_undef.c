@@ -41,12 +41,6 @@ static VALUE rb_ud_equal (VALUE self, VALUE other)
   return ( self == other ) ? Qtrue : Qfalse;
 }
 
-
-static VALUE rb_obj_is_undef (VALUE self)
-{
-  return ( self == CA_UNDEF ) ? Qtrue : Qfalse;
-}
-
 void
 Init_carray_undef ()
 {
@@ -61,7 +55,5 @@ Init_carray_undef ()
   CA_UNDEF  = rb_funcall(rb_cUNDEF, rb_intern("new"), 0);
   rb_undef_method(CLASS_OF(rb_cUNDEF), "new");
   rb_const_set(rb_cObject, rb_intern("UNDEF"), CA_UNDEF);
-
-  rb_define_method(rb_cObject, "undef?", rb_obj_is_undef, 0);
 }
 
