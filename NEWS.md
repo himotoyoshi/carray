@@ -11,6 +11,7 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray.guard_undef'
 * [Mod] Modify 'CArray#pmax' to use 'fmax' for float type
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
+* [Mod] Remove method 'Object#undef?'.
 
 1.5.1 -> 1.5.2
 --------------
@@ -34,12 +35,12 @@ ChangeLog of Ruby/CArray
 
 * [New] Add data type classes like 'Float64' ... to provide the methods like 'CArray::Float64.linspace'
 * [Mod] Modify 'CArray.float64' ... without aruguments to return the corresponding data type class 
+* [Mod] Set obsolete flag to 'CAIterator#sort_with'
 * [Fix] Move C extension files into 'ext/'
 * [Fix] Rename member 'rank' to 'ndim' in struct CArray in C extension
 * [Fix] Remove 'CArray#shuffle' (gone to 'carray-random' gem)
 * [Fix] Remove dependencies on 'rb_secure()' and 'rb_safe_level()'
 * [Fix] Modify 'CArray#span' to handle fractional step for integer array
-* [Obsolete] Set obsolete flag to 'CAIterator#sort_with'
 
 1.4.0 -> 1.5.0
 --------------
