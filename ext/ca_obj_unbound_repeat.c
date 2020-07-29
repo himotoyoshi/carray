@@ -98,13 +98,6 @@ ca_ubrep_func_ptr_at_addr (void *ap, ca_size_t addr)
   return ca_ptr_at_addr(ca->parent, addr);
 }
 
-static char *
-ca_ubrep_func_ptr_at_index (void *ap, ca_size_t *idx)
-{
-  CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
-  return ca_ptr_at_index(ca->parent, idx);
-}
-
 static void
 ca_ubrep_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 {
@@ -113,24 +106,10 @@ ca_ubrep_func_fetch_addr (void *ap, ca_size_t addr, void *ptr)
 }
 
 static void
-ca_ubrep_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
-{
-  CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
-  ca_fetch_index(ca->parent, idx, ptr);
-}
-
-static void
 ca_ubrep_func_store_addr (void *ap, ca_size_t addr, void *ptr)
 {
   CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
   ca_store_addr(ca->parent, addr, ptr);
-}
-
-static void
-ca_ubrep_func_store_index (void *ap, ca_size_t *idx, void *ptr)
-{
-  CAUnboundRepeat *ca = (CAUnboundRepeat *) ap;
-  ca_store_index(ca->parent, idx, ptr);
 }
 
 static void
@@ -221,11 +200,11 @@ ca_operation_function_t ca_ubrep_func = {
   free_ca_ubrep,
   ca_ubrep_func_clone,
   ca_ubrep_func_ptr_at_addr,
-  NULL, //ca_ubrep_func_ptr_at_index,
+  NULL, 
   ca_ubrep_func_fetch_addr,
-  NULL, //ca_ubrep_func_fetch_index,
+  NULL, 
   ca_ubrep_func_store_addr,
-  NULL, //ca_ubrep_func_store_index,
+  NULL, 
   ca_ubrep_func_allocate,
   ca_ubrep_func_attach,
   ca_ubrep_func_sync,
