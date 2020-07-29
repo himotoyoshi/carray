@@ -12,9 +12,16 @@
 
 class CArray
 
-  # Guard processing value from UNDEF
+  # Guard methods for handling variables that can be UNDEF values.
+  # Provide different processing depending on whether 
+  # the given value is UNDEF or not.
+  #
+  # @param value [Object] target object
+  # @param fill_value [Object] alternative value if the given value is UNDEF
   # 
-  # 
+  # @return fill_value if the given value is UNDEF, block return value if block
+  #         is given, or value itself
+  #
   def self.guard_undef (value, fill_value = UNDEF, &block)
     return fill_value if value == UNDEF
     return block.(value) if block

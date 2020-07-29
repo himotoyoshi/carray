@@ -159,7 +159,7 @@ class CArray::Inspector  # :nodoc:
       dim[level].times do |i|
         idx[level] = i
         v = @carray[*idx]
-        if v.undef?
+        if v == UNDEF
           io << '_'
         else
           io << formatter[v]
@@ -178,7 +178,7 @@ class CArray::Inspector  # :nodoc:
       if over
         idx[level] = dim[level] - 1
         v = @carray[*idx]
-        if v.undef?
+        if v == UNDEF
           io << ", _"
         else
           io << ", " + formatter[v]
