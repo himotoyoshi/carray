@@ -24,18 +24,6 @@ static ID id___xor__;
 static ID id___rshift__;
 static ID id___lshift__;
 
-VALUE
-rb_num_nan (VALUE self)
-{
-  return CA_NAN;
-}
-
-VALUE
-rb_num_inf (VALUE self)
-{
-  return CA_INF;
-}
-
 static VALUE
 rb_hack_or(VALUE x, VALUE y)
 {
@@ -207,8 +195,6 @@ Init_carray_numeric ()
   CA_INF = rb_float_new(1.0/0.0);
   rb_define_const(rb_cObject, "CA_NAN", CA_NAN);
   rb_define_const(rb_cObject, "CA_INF", CA_INF);
-  rb_define_global_function("nan", rb_num_nan, 0);
-  rb_define_global_function("inf", rb_num_inf, 0);
 
   rb_define_alias(rb_cTrueClass, "__or__", "|");
   rb_define_alias(rb_cTrueClass, "__and__", "&");
