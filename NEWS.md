@@ -11,7 +11,8 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray.guard_undef'
 * [Mod] Modify 'CArray#pmax' to use 'fmax' for float type
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
-* [Mod] Remove method 'Object#undef?'.
+* [Mod] Remove method 'Object#undef?'
+* [Mod] Remove method '::nan', '::inf'
 
 1.5.1 -> 1.5.2
 --------------
