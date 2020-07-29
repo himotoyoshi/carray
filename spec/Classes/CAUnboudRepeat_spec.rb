@@ -89,4 +89,14 @@ describe "CAUnboundRepeat" do
     is_asserted_by { a[:*,nil][:*,nil,nil].shape == [1,1,3] }
   end
   
+  example "extra * in arithmetic operation" do
+    a = CA_INT(1..3)
+    b = CA_INT(1..3)
+    aa = a[:*,:*,nil]
+    bb = b[:*,nil,:*]
+    is_asserted_by { aa.bind_with(bb) == a[3,:%][:*,nil,nil] }
+    is_asserted_by { aa + bb == (a[3,:%]+b[:%,3])[:*,nil,nil] }
+  end
+  
+  
 end

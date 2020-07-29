@@ -231,9 +231,6 @@ rb_ca_ubrep_shave (VALUE self, VALUE other)
   Data_Get_Struct(self, CAUnboundRepeat, ca);
   Data_Get_Struct(other, CArray, co);
 
-  rb_p(self);
-  rb_p(other);
-
   if ( ca->elements != co->elements ) {
     rb_raise(rb_eRuntimeError, "mismatch in # of elements");
   }
@@ -362,6 +359,7 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
   ca_size_t upr_spec[CA_RANK_MAX];
   ca_size_t srp_spec[CA_RANK_MAX];
   int uprep = 0, srp_ndim;
+  int ndim_real;
   int i;
 
   Data_Get_Struct(self, CAUnboundRepeat, ca);
@@ -372,6 +370,7 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
   }
 
   srp_ndim = 0;
+  ndim_real = 0;
   for (i=0; i<new_ndim; i++) {
     if ( ca->rep_dim[i] == 0 ) {
       if ( new_dim[i] == 0 ) {
@@ -384,14 +383,16 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
       upr_spec[i] = new_dim[i];
     }
     else {
+      ndim_real++;
       rep_spec[i] = 0;
       srp_spec[srp_ndim++] = 0;
       upr_spec[i] = ca->rep_dim[i];
     }
   }
+  
   if ( uprep ) {
     volatile VALUE rep;
-    if ( srp_ndim >= ca->ndim ) {
+    if ( srp_ndim >= ndim_real ) {
       rep = rb_ca_repeat_new(rb_ca_parent(self), srp_ndim, srp_spec);
     }
     else {
@@ -404,11 +405,8 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
   }
 }
 
-/* yard:
-  class CAUnboundRepeat
-    def bind_with(other)
-    end
-  end
+/* @overload bind_with (other)
+
 */
 
 VALUE
@@ -434,11 +432,8 @@ ca_ubrep_bind_with (VALUE self, VALUE other)
   }
 }
 
-/* yard:
-  class CAUnboundRepeat
-    def bind(*index)
-    end
-  end
+/* @overload bind (*index)
+
 */
 
 static VALUE
