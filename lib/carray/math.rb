@@ -318,7 +318,7 @@ class CArray
       count = x.count_not_masked
       xm = x.mean(:min_count => min_count)
       ym = y.mean(:min_count => min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         return (x-xm).wsum(y-ym)/count
@@ -337,7 +337,7 @@ class CArray
       count = x.count_not_masked
       xm = x.mean(:min_count=>min_count)
       ym = y.mean(:min_count=>min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         return (x-xm).wsum(y-ym)/(count-1)
@@ -355,7 +355,7 @@ class CArray
       y.inherit_mask(x)
       xm = x.mean(:min_count=>min_count)
       ym = y.mean(:min_count=>min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         xd, yd = x-xm, y-ym
