@@ -22,10 +22,9 @@ class CArray
   # @return fill_value if the given value is UNDEF, block return value if block
   #         is given, or value itself
   #
-  def self.guard_undef (value, fill_value = UNDEF, &block)
-    return fill_value if value == UNDEF
-    return block.(value) if block
-    return value
+  def self.guard_undef (*values, fill_value: UNDEF, &block)
+    return fill_value if values.any?{|v| v == UNDEF }
+    return block.(*values)
   end
 
   # mask
