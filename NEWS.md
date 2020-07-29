@@ -13,6 +13,7 @@ ChangeLog of Ruby/CArray
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
 * [Mod] Remove method 'Object#undef?'
 * [Mod] Remove method '::nan', '::inf'
+* [Mod] Remove method 'TrueClass#*', 'FalseClass#*' (unknown origin)
 
 1.5.1 -> 1.5.2
 --------------
