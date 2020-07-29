@@ -14,6 +14,7 @@ ChangeLog of Ruby/CArray
 * [Mod] Remove method 'Object#undef?'
 * [Mod] Remove method '::nan', '::inf'
 * [Mod] Remove method 'TrueClass#*', 'FalseClass#*' (unknown origin)
+* [Fix] Fix invalid access for CAUnboundRepeat using index
 
 1.5.1 -> 1.5.2
 --------------

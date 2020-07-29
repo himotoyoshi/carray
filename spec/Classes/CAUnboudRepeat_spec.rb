@@ -19,6 +19,20 @@ describe "CAUnboundRepeat" do
 
   end
   
+  example "ref" do 
+    a = CA_INT(0..2)[:*,nil]
+    is_asserted_by { a[0] == 0 }
+    is_asserted_by { a[1] == 1 }
+    is_asserted_by { a[2] == 2 }
+    is_asserted_by { a.bind(3,3) == CA_INT([[0,1,2],
+                                            [0,1,2],
+                                            [0,1,2]]) }
+    is_asserted_by { a[0,0] == 0 }
+    is_asserted_by { a[0,1] == 1 }
+    is_asserted_by { a[0,2] == 2 }
+    is_asserted_by { a.to_a == [[0,1,2]] }
+  end
+  
   example "bind" do 
   
     a = CA_INT([1,2,3])
