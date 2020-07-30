@@ -16,6 +16,7 @@ ChangeLog of Ruby/CArray
 * [Mod] Remove method 'TrueClass#*', 'FalseClass#*' (unknown origin)
 * [Fix] Fix invalid access for CAUnboundRepeat using index
 * [Fix] Fix treatment of extra :* in operation between CAUnboundRepeat objects
+* [Fix] Fix to accept Symbol for the name of data_class member
 
 1.5.1 -> 1.5.2
 --------------
