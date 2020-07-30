@@ -39,7 +39,7 @@ class CArray
   
   # Returns the array eliminated all the duplicated elements.
   def uniq
-    ary = to_a.uniq
+    ary = flatten.to_a.uniq
     if has_mask?
       ary.delete(UNDEF)
     end

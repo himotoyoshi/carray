@@ -17,6 +17,7 @@ ChangeLog of Ruby/CArray
 * [Fix] Fix invalid access for CAUnboundRepeat using index
 * [Fix] Fix treatment of extra :* in operation between CAUnboundRepeat objects
 * [Fix] Fix to accept Symbol for the name of data_class member
+* [Fix] Fix 'CArray#uniq' to accept the array with the dimension more than 2.
 
 1.5.1 -> 1.5.2
 --------------
