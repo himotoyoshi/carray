@@ -16,7 +16,7 @@ Gem::Specification::new do |s|
   s.name        = "carray"
   s.summary     = "Multi-dimesional array class for Ruby"
   s.description = <<-HERE
-    Ruby/CArray is an extension library for the multi-dimensional array class.
+    Ruby/CArray is an extension library for the multi-dimensional numerical array class.
     CArray can store integers and floating point numbers to perform calculations
     efficiently. Therefore, Ruby/CArray is suitable for numerical computation and data
     analysis. Ruby/CArray has different features from other multidimensional array
