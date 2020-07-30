@@ -1215,14 +1215,16 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
   }
 
   if ( TYPE(sym) == T_SYMBOL ) {
-    sym = rb_funcall(sym, rb_intern("to_s"), 0);
+    obj = rb_hash_aref(member, sym);
+    if ( NIL_P(obj) ) {
+      obj = rb_hash_aref(member, rb_funcall(sym, rb_intern("to_s"), 0));      
+    }
   }
   else if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
     VALUE member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
     sym = rb_ary_entry(member_names, NUM2SIZE(sym));
+    obj = rb_hash_aref(member, sym);
   }
-
-  obj = rb_hash_aref(member, sym);
 
   if ( rb_obj_is_carray(obj) ) {
     return obj;
