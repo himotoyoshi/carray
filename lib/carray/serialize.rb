@@ -105,7 +105,7 @@ class CArray::Serializer   # :nodoc:
     if opt[:attribute]
       (attributes ||= {}).update(opt[:attribute])
     end
-    header[:has_attr]       = attr.empty? ? 0 : 1
+    header[:has_attr]       = attributes.empty? ? 0 : 1
     unless CArray.endian == endian
       header.swap_bytes!
     end
@@ -124,9 +124,9 @@ class CArray::Serializer   # :nodoc:
       ca.mask.dump_binary(@io)
     end
     if attributes
-      Marshal.dump(attr, @io)
+      Marshal.dump(attributes, @io)
     end
-    if ca.has_data_class
+    if ca.has_data_class?
       Marshal.dump(ca.data_class.to_s, @io)
     end
     return ca

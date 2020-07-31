@@ -32,6 +32,7 @@ class CArray
       end
     end
     out = CArray.new(data_type, newdim, &block)
+    out.data_class = data_class if has_data_class?
     if out.has_mask?
       out.mask.paste(offset, self.false)
     end
@@ -61,6 +62,7 @@ class CArray
       grids[i][offset[i]..-1].seq!(offset[i]+bsize[i])
     end
     out = CArray.new(data_type, newdim)
+    out.data_class = data_class if has_data_class?
     if block_given?
       sel = out.true
       sel[*grids] = 0
@@ -112,7 +114,14 @@ class CArray
     return self[*grids].to_ca
   end
   
-  def self.combine (data_type, tdim, list, at = 0)
+  def self.combine (data_type, tdim, list, at = 0, bytes: nil)
+    if CArray.data_class?(data_type)
+      data_class = data_type
+      data_type  = :fixlen
+      bytes = data_class::DATA_SIZE
+    else
+      data_class = nil
+    end
     has_fill_value = false
     if block_given?
       fill_value = yield
@@ -166,6 +175,7 @@ class CArray
     else      
       obj = CArray.new(data_type, newdim)
     end
+    out.data_class = data_class if data_class
     idx = newdim.map{0}
     block.each_with_index do |item, tidx|
       (at...at+tndim).each_with_index do |d,i|
@@ -176,11 +186,18 @@ class CArray
     obj
   end
 
-  def self.bind (data_type, list, at = 0)
-    return CArray.combine(data_type, [list.size], list, at)
+  def self.bind (data_type, list, at = 0, bytes: nil)
+    return CArray.combine(data_type, [list.size], list, at, bytes: bytes)
   end
 
-  def self.composite (data_type, tdim, list, at = 0)
+  def self.composite (data_type, tdim, list, at = 0, bytes: nil)
+    if CArray.data_class?(data_type)
+      data_class = data_type
+      data_type  = :fixlen
+      bytes = data_class::DATA_SIZE
+    else
+      data_class = nil
+    end
     if not tdim.is_a?(Array) or tdim.size == 0
       raise "invalid tiling dimension"
     end
@@ -211,7 +228,8 @@ class CArray
     end
     newdim = dim.clone
     newdim[at,0] = tdim
-    obj = CArray.new(data_type, newdim)
+    obj = CArray.new(data_type, newdim, bytes: bytes)
+    out.data_class = data_class if data_class
     idx = Array.new(ndim+tndim) { nil }
     CArray.each_index(*tdim) do |*tidx|
       idx[at,tndim] = tidx
@@ -220,13 +238,21 @@ class CArray
     obj
   end
 
-  def self.merge (data_type, list, at = -1)
-    return CArray.composite(data_type, [list.size], list, at)
+  def self.merge (data_type, list, at = -1, bytes: bytes)
+    return CArray.composite(data_type, [list.size], list, at, bytes: bytes)
   end
   
   def self.join (*argv)
     # get options
     case argv.first
+    when Class
+      if CArray.data_class?(argv.first)
+        data_class = argv.shift
+        data_type = "fixlen"
+        bytes = data_class::DATA_SIZE
+      else
+        raise "#{argv.first} can not to be a data_class for CArray"
+      end
     when Integer, Symbol, String
       type, = *CArray.guess_type_and_bytes(argv.shift, 0)
     else
