@@ -67,7 +67,7 @@ class CAUnboundRepeat
 
 end
 
-def CArray.broadcast (*argv)
+def CArray.broadcast (*argv, &block)
   sel = argv.select { |arg| arg.is_a?(CArray) }
   return argv if sel.empty?
   
@@ -77,6 +77,9 @@ def CArray.broadcast (*argv)
     dim[k] = sel.map { |arg| arg.dim[k] || 1 }.max
   end
 
-  argv.map { |arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
+  list = argv.map { |arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
+
+  return block.call(*list) if block
+  return list
 end
 
