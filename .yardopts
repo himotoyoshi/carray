@@ -9,6 +9,9 @@
 lib/carray.rb 
 ext/ruby_carray.c 
 ext/ca_obj_array.c 
+ext/ca_obj_bitarray.c 
+ext/ca_obj_bitfield.c 
+ext/ca_obj_block.c 
 ext/carray_attribute.c 
 ext/carray_call_cfunc.c 
 ext/carray_cast.c 

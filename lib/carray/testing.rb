@@ -3,10 +3,8 @@
 #  carray/test.rb
 #
 #  This file is part of Ruby/CArray extension library.
-#  You can redistribute it and/or modify it under the terms of
-#  the Ruby Licence.
 #
-#  Copyright (C) 2005 Hiroki Motoyoshi
+#  Copyright (C) 2005-2020 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 
@@ -41,16 +39,13 @@ class CArray
   
   # Returns the array eliminated all the duplicated elements.
   def uniq
-    ary = to_a.uniq
+    ary = flatten.to_a.uniq
     if has_mask?
       ary.delete(UNDEF)
     end
-    if has_data_class?
-      return CArray.new(data_class, [ary.length]) { ary }
-    else
-      return CArray.new(data_type, [ary.length], :bytes=>bytes) { ary }
-    end
+    out = CArray.new(data_type, [ary.length], :bytes=>bytes) { ary }
+    out.data_class = data_class if has_data_class?
+    return out
   end
-
 
 end

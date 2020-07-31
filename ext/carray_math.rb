@@ -155,6 +155,10 @@ monfunc("exp", "exp",
       FLOAT_TYPES => "(#2) = exp(#1);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = cexp(#1);" : nil,
       OBJ_TYPES   => '(#2) = rb_funcall((#1), rb_intern("exp"), 0);')
+monfunc("exp2", "exp2",
+      FLOAT_TYPES => "(#2) = exp2(#1);",
+      CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = cpow(2, (#1));" : nil,
+      OBJ_TYPES   => '(#2) = rb_funcall((#1), rb_intern("exp2"), 0);')
 monfunc("exp10", "exp10",
       FLOAT_TYPES => "(#2) = pow(10, (#1));",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = cpow(10, (#1));" : nil,
@@ -166,6 +170,12 @@ monfunc("log", "log",
 monfunc("log10", "log10",
       FLOAT_TYPES => "(#2) = log10(#1);",
       OBJ_TYPES   => '(#2) = rb_funcall((#1), rb_intern("log10"), 0);')
+monfunc("log2", "log2",
+      FLOAT_TYPES => "(#2) = log2(#1);",
+      OBJ_TYPES   => '(#2) = rb_funcall((#1), rb_intern("log2"), 0);')
+monfunc("logb", "logb",
+      FLOAT_TYPES => "(#2) = logb(#1);",
+      OBJ_TYPES   => '(#2) = rb_funcall((#1), rb_intern("logb"), 0);')
 monfunc("sin", "sin",
       FLOAT_TYPES => "(#2) = sin(#1);",
       CMPLX_TYPES => HAVE_COMPLEX ? "(#2) = csin(#1);" : nil,
@@ -217,12 +227,14 @@ monfunc("atanh", "atanh",
 
 
 binop("pmax", "pmax",
-      ALL_TYPES =>"(#3) = (#1) > (#2) ? (#1) : (#2);",
+      INT_TYPES =>"(#3) = (#1) > (#2) ? (#1) : (#2);",
+      FLOAT_TYPES =>"(#3) = fmax(#1, #2);",
       CMPLX_TYPES => nil,
       OBJ_TYPES =>'(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);')
 
 binop("pmin", "pmin",
-      ALL_TYPES =>"(#3) = (#1) < (#2) ? (#1) : (#2);",
+      INT_TYPES =>"(#3) = (#1) < (#2) ? (#1) : (#2);",
+      FLOAT_TYPES =>"(#3) = fmin(#1, #2);",
       CMPLX_TYPES => nil,
       OBJ_TYPES =>'(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);')
 
@@ -258,6 +270,12 @@ binop("rcp_mul", "rcp_mul",
 
 binop("%", "mod",
       INT_TYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+      FLOAT_TYPES => "(#3) = fmod(#1, #2);",
+      OBJ_TYPES => '(#3) = rb_funcall((#1), id_percent, 1, (#2));')
+
+binop("reminder", "reminder",
+      INT_TYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+      FLOAT_TYPES => "(#3) = remainder(#1, #2);",
       OBJ_TYPES => '(#3) = rb_funcall((#1), id_percent, 1, (#2));')
 
 binop("&", "bit_and_i",

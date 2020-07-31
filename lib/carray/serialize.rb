@@ -3,10 +3,8 @@
 #  carray/serialize.rb
 #
 #  This file is part of Ruby/CArray extension library.
-#  You can redistribute it and/or modify it under the terms of
-#  the Ruby Licence.
 #
-#  Copyright (C) 2005 Hiroki Motoyoshi
+#  Copyright (C) 2005-2020 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 #
@@ -41,8 +39,10 @@
 #   has_attribute    : int32  
 #
 # offset 256 bytes
-#   data           : bytes*elements : value data
-#   mask           : int8*elements  : mask data if has_mask == 1
+#   data             : bytes*elements : value data
+#   mask             : int8*elements  : mask data if has_mask == 1
+#   attribute        : object marshal : attribute
+#   data_class_name  : string marshal : data_class_name
 
 require "stringio"
 
@@ -59,6 +59,7 @@ class CArray::Serializer   # :nodoc:
     int32     :has_mask
     array     :dim,            :type => CArray.int64(CA_RANK_MAX)
     int32     :has_attr
+    int32     :has_data_class
   }
 
   Header_Legacy = CA.struct(:pack=>1, :size=>256) {
@@ -95,15 +96,16 @@ class CArray::Serializer   # :nodoc:
     header[:ndim]           = ca.ndim
     header[:elements]       = ca.elements
     header[:has_mask]       = ca.has_mask? ? 1 : 0
+    header[:has_data_class] = ca.has_data_class? ? 1 : 0
     header[:dim][[0,ca.ndim]] = ca.dim
-    attr = nil
+    attributes = nil
     if ca.attribute
-      attr = ca.attribute.clone
+      attributes = ca.attribute.clone
     end
     if opt[:attribute]
-      (attr ||= {}).update(opt[:attribute])
+      (attributes ||= {}).update(opt[:attribute])
     end
-    header[:has_attr]       = attr.empty? ? 0 : 1
+    header[:has_attr]       = attributes.empty? ? 0 : 1
     unless CArray.endian == endian
       header.swap_bytes!
     end
@@ -121,8 +123,11 @@ class CArray::Serializer   # :nodoc:
     if ca.has_mask?
       ca.mask.dump_binary(@io)
     end
-    if attr
-      Marshal.dump(attr, @io)
+    if attributes
+      Marshal.dump(attributes, @io)
+    end
+    if ca.has_data_class?
+      Marshal.dump(ca.data_class.to_s, @io)
     end
     return ca
   end
@@ -151,7 +156,8 @@ class CArray::Serializer   # :nodoc:
     elements  = header[:elements]
     has_mask  = header[:has_mask] != 0 ? true : false
     dim       = header[:dim][[0, ndim]].to_a
-    has_attr  = header[:has_attr]
+    has_attr  = header[:has_attr] != 0 ? true : false
+    has_data_class = header[:has_data_class] != 0 ? true : false
     if data_type == 255
       data_type = header[:data_type_name].strip.to_sym
     end
@@ -172,8 +178,11 @@ class CArray::Serializer   # :nodoc:
       ca.mask = 0
       ca.mask.load_binary(@io)
     end
-    if has_attr == 1
+    if has_attr
       ca.attribute = Marshal.load(@io)
+    end
+    if has_data_class 
+      ca.data_class = Kernel.const_get(Marshal.load(@io))
     end
     return ca
   end

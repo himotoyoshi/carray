@@ -11,11 +11,6 @@
 #include "ruby.h"
 #include "carray.h"
 
-#if RUBY_VERSION_CODE >= 240
-# define rb_cFixnum rb_cInteger
-# define rb_cBignum rb_cInteger
-#endif
-
 VALUE CA_NAN, CA_INF;
 
 static ID id___or__;
@@ -24,24 +19,18 @@ static ID id___xor__;
 static ID id___rshift__;
 static ID id___lshift__;
 
-VALUE
-rb_num_nan (VALUE self)
-{
-  return CA_NAN;
-}
-
-VALUE
-rb_num_inf (VALUE self)
-{
-  return CA_INF;
-}
+static ID id_bit_or;
+static ID id_bit_and;
+static ID id_bit_xor;
+static ID id_lshift;
+static ID id_rshift;
 
 static VALUE
 rb_hack_or(VALUE x, VALUE y)
 {
   if ( rb_obj_is_carray(y) ) {
     if ( rb_ca_is_boolean_type(y) ) {
-      return rb_funcall(y, rb_intern("bit_or"), 1, x);
+      return rb_funcall(y, id_bit_or, 1, x);
     }
     else {
 #if RUBY_VERSION_CODE >= 190
@@ -61,7 +50,7 @@ rb_hack_and (VALUE x, VALUE y)
 {
   if ( rb_obj_is_carray(y) ) {
     if ( rb_ca_is_boolean_type(y) ) {
-      return rb_funcall(y, rb_intern("bit_and"), 1, x);
+      return rb_funcall(y, id_bit_and, 1, x);
     }
     else {
 #if RUBY_VERSION_CODE >= 190
@@ -81,7 +70,7 @@ rb_hack_xor (VALUE x, VALUE y)
 {
   if ( rb_obj_is_carray(y) ) {
     if ( rb_ca_is_boolean_type(y) ) {
-      return rb_funcall(y, rb_intern("bit_xor"), 1, x);
+      return rb_funcall(y, id_bit_xor, 1, x);
     }
     else {
 #if RUBY_VERSION_CODE >= 190
@@ -101,7 +90,7 @@ rb_hack_lshift (VALUE x, VALUE y)
 {
   if ( rb_obj_is_carray(y) ) {
 #if RUBY_VERSION_CODE >= 190
-      return rb_num_coerce_bin(x, y, rb_intern("<<"));
+      return rb_num_coerce_bin(x, y, id_lshift);
 #else
       return rb_num_coerce_bin(x, y);
 #endif
@@ -116,7 +105,7 @@ rb_hack_rshift (VALUE x, VALUE y)
 {
   if ( rb_obj_is_carray(y) ) {
 #if RUBY_VERSION_CODE >= 190
-      return rb_num_coerce_bin(x, y, rb_intern(">>"));
+      return rb_num_coerce_bin(x, y, id_rshift);
 #else
       return rb_num_coerce_bin(x, y);
 #endif
@@ -124,12 +113,6 @@ rb_hack_rshift (VALUE x, VALUE y)
   else {
     return rb_funcall(x, id___rshift__, 1, y);
   }
-}
-
-static VALUE
-rb_hack_star (VALUE x, VALUE y)
-{
-  return rb_funcall(y, rb_intern("*"), 1, x);
 }
 
 /* ------------------------------------------------------------------- */
@@ -197,35 +180,51 @@ Init_carray_numeric ()
 {
   /* hack Fixnum and Bignum's "|", "&", "^", "<<", ">>" */
 
-  id___or__ = rb_intern("__or__");
-  id___and__ = rb_intern("__and__");
-  id___xor__ = rb_intern("__xor__");
+  id___or__     = rb_intern("__or__");
+  id___and__    = rb_intern("__and__");
+  id___xor__    = rb_intern("__xor__");
   id___rshift__ = rb_intern("__rshift__");
   id___lshift__ = rb_intern("__lshift__");
+
+  id_bit_or     = rb_intern("bit_or");
+  id_bit_and    = rb_intern("bit_and");
+  id_bit_xor    = rb_intern("bit_xor");
+  id_lshift     = rb_intern("<<");
+  id_rshift     = rb_intern(">>");
 
   CA_NAN = rb_float_new(0.0/0.0);
   CA_INF = rb_float_new(1.0/0.0);
   rb_define_const(rb_cObject, "CA_NAN", CA_NAN);
   rb_define_const(rb_cObject, "CA_INF", CA_INF);
-  rb_define_global_function("nan", rb_num_nan, 0);
-  rb_define_global_function("inf", rb_num_inf, 0);
 
   rb_define_alias(rb_cTrueClass, "__or__", "|");
   rb_define_alias(rb_cTrueClass, "__and__", "&");
   rb_define_alias(rb_cTrueClass, "__xor__", "^");
 
+  rb_define_method(rb_cTrueClass, "|", rb_hack_or, 1);
+  rb_define_method(rb_cTrueClass, "&", rb_hack_and, 1);
+  rb_define_method(rb_cTrueClass, "^", rb_hack_xor, 1);
+
   rb_define_alias(rb_cFalseClass, "__or__", "|");
   rb_define_alias(rb_cFalseClass, "__and__", "&");
   rb_define_alias(rb_cFalseClass, "__xor__", "^");
 
-#if RUBY_VERSION_CODE >= 240
+  rb_define_method(rb_cFalseClass, "|", rb_hack_or, 1);
+  rb_define_method(rb_cFalseClass, "&", rb_hack_and, 1);
+  rb_define_method(rb_cFalseClass, "^", rb_hack_xor, 1);
 
+#if RUBY_VERSION_CODE >= 240
   rb_define_alias(rb_cInteger, "__or__", "|");
   rb_define_alias(rb_cInteger, "__and__", "&");
   rb_define_alias(rb_cInteger, "__xor__", "^");
   rb_define_alias(rb_cInteger, "__lshift__", "<<");
   rb_define_alias(rb_cInteger, "__rshift__", ">>");
 
+  rb_define_method(rb_cInteger, "|", rb_hack_or, 1);
+  rb_define_method(rb_cInteger, "&", rb_hack_and, 1);
+  rb_define_method(rb_cInteger, "^", rb_hack_xor, 1);
+  rb_define_method(rb_cInteger, "<<", rb_hack_lshift, 1);
+  rb_define_method(rb_cInteger, ">>", rb_hack_rshift, 1);
 #else
   rb_define_alias(rb_cFixnum, "__or__", "|");
   rb_define_alias(rb_cFixnum, "__and__", "&");
@@ -238,25 +237,7 @@ Init_carray_numeric ()
   rb_define_alias(rb_cBignum, "__xor__", "^");
   rb_define_alias(rb_cBignum, "__lshift__", "<<");
   rb_define_alias(rb_cBignum, "__rshift__", ">>");
-#endif
 
-  rb_define_method(rb_cTrueClass, "|", rb_hack_or, 1);
-  rb_define_method(rb_cTrueClass, "&", rb_hack_and, 1);
-  rb_define_method(rb_cTrueClass, "^", rb_hack_xor, 1);
-  rb_define_method(rb_cTrueClass, "*", rb_hack_star, 1);
-
-  rb_define_method(rb_cFalseClass, "|", rb_hack_or, 1);
-  rb_define_method(rb_cFalseClass, "&", rb_hack_and, 1);
-  rb_define_method(rb_cFalseClass, "^", rb_hack_xor, 1);
-  rb_define_method(rb_cFalseClass, "*", rb_hack_star, 1);
-
-#if RUBY_VERSION_CODE >= 240
-  rb_define_method(rb_cInteger, "|", rb_hack_or, 1);
-  rb_define_method(rb_cInteger, "&", rb_hack_and, 1);
-  rb_define_method(rb_cInteger, "^", rb_hack_xor, 1);
-  rb_define_method(rb_cInteger, "<<", rb_hack_lshift, 1);
-  rb_define_method(rb_cInteger, ">>", rb_hack_rshift, 1);
-#else
   rb_define_method(rb_cFixnum, "|", rb_hack_or, 1);
   rb_define_method(rb_cFixnum, "&", rb_hack_and, 1);
   rb_define_method(rb_cFixnum, "^", rb_hack_xor, 1);

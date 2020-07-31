@@ -19,6 +19,20 @@ describe "CAUnboundRepeat" do
 
   end
   
+  example "ref" do 
+    a = CA_INT(0..2)[:*,nil]
+    is_asserted_by { a[0] == 0 }
+    is_asserted_by { a[1] == 1 }
+    is_asserted_by { a[2] == 2 }
+    is_asserted_by { a.bind(3,3) == CA_INT([[0,1,2],
+                                            [0,1,2],
+                                            [0,1,2]]) }
+    is_asserted_by { a[0,0] == 0 }
+    is_asserted_by { a[0,1] == 1 }
+    is_asserted_by { a[0,2] == 2 }
+    is_asserted_by { a.to_a == [[0,1,2]] }
+  end
+  
   example "bind" do 
   
     a = CA_INT([1,2,3])
@@ -74,5 +88,15 @@ describe "CAUnboundRepeat" do
     is_asserted_by { a[:*,nil][nil,:*,nil].shape == [1,1,3] }
     is_asserted_by { a[:*,nil][:*,nil,nil].shape == [1,1,3] }
   end
+  
+  example "extra * in arithmetic operation" do
+    a = CA_INT(1..3)
+    b = CA_INT(1..3)
+    aa = a[:*,:*,nil]
+    bb = b[:*,nil,:*]
+    is_asserted_by { aa.bind_with(bb) == a[3,:%][:*,nil,nil] }
+    is_asserted_by { aa + bb == (a[3,:%]+b[:%,3])[:*,nil,nil] }
+  end
+  
   
 end

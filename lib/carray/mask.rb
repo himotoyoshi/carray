@@ -3,21 +3,32 @@
 #  carray/mask.rb
 #
 #  This file is part of Ruby/CArray extension library.
-#  You can redistribute it and/or modify it under the terms of
-#  the Ruby Licence.
 #
-#  Copyright (C) 2005 Hiroki Motoyoshi
+#  Copyright (C) 2005-2020 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 
 class CArray
-  
-  # mask
-  
-  #
-  # Returns the number of masked elements.
-  #
 
+  # Guard methods for handling variables that can be UNDEF values.
+  # Provide different processing depending on whether 
+  # the given value is UNDEF or not.
+  #
+  # @param value [Object] target object
+  # @param fill_value [Object] alternative value if the given value is UNDEF
+  # 
+  # @return fill_value if the given value is UNDEF, block return value if block
+  #         is given, or value itself
+  #
+  def self.guard_undef (*values, fill_value: UNDEF, &block)
+    return fill_value if values.any?{|v| v == UNDEF }
+    return block.(*values)
+  end
+
+  # mask
+  # 
+  # Returns the number of masked elements.
+  # 
   def count_masked (*axis)
     if has_mask?  
       return mask.int64.accumulate(*axis)

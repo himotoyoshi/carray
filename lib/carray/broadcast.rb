@@ -1,45 +1,82 @@
+# ----------------------------------------------------------------------------
+#
+#  carray/broadcast.rb
+#
+#  This file is part of Ruby/CArray extension library.
+#
+#  Copyright (C) 2005-2020 Hiroki Motoyoshi
+#
+# ----------------------------------------------------------------------------
 
 class CArray
-  def broadcast_to (*new_dim)
-    if new_dim.size < ndim
-      raise "can't broadcast to #{new_dim.inspect} because of mismatch in rank"
+
+  def broadcast_to (*newdim)
+    
+    if newdim.size < ndim
+      raise "(Broadcasting) can't broadcast to #{newdim.inspect} because too small rank is specified"
     end
-    flag_unbound_repeat = false
-    sdim = []
-    ([1]*(new_dim.size-ndim) + dim).each_with_index do |d, k|
-      if new_dim[k] == 1
-        sdim << 1
-      elsif d == 1
-        flag_unbound_repeat = true
-        sdim << :*
-      elsif d != new_dim[k]
-        raise "can't broadcast to #{new_dim.inspect} because of mismatch in #{d} for #{new_dim[k]} in #{k}th dim"
+
+    #
+    # Try to build unbound repeat index (includes :*)
+    #                     with broadcasting rule in Numpy.
+    #
+    repdim = []
+    shape  = []
+
+    srcdim = dim.dup 
+    dstdim = newdim.dup
+    sd = srcdim.pop
+    dd = dstdim.pop
+    while dd
+      if sd == dd
+        repdim.unshift nil
+        shape.unshift(dd)
+        sd = srcdim.pop
+      elsif dd == 1
+        repdim.unshift :*
+      elsif sd == 1 
+        repdim.unshift :*
+        sd = srcdim.pop
       else
-        sdim << nil
+        raise "(Broadcasting) can't broadcast to #{newdim.inspect} " 
       end
+      dd = dstdim.pop
     end
-    return self[*sdim].bind(*new_dim) if flag_unbound_repeat
-    return self
+
+    #
+    # Call Unbound repeat's bind
+    #
+    return self.reshape(*shape)[*repdim].bind(*newdim) if repdim.include?(:*)
+    
+    self
   end
+
 end
 
 class CScalar
-  def broadcast_to (*new_dim)
-    return self
+  
+  def broadcast_to (*newdim)
+    self
   end
+
 end
 
 class CAUnboundRepeat
+
   alias broadcast_to bind
+
 end
 
 def CArray.broadcast (*argv)
-  sel = argv.select {|arg| arg.is_a?(CArray) }
+  sel = argv.select { |arg| arg.is_a?(CArray) }
   return argv if sel.empty?
+  
   dim = []
   ndim = sel.map(&:ndim).max
   ndim.times do |k|
-    dim[k] = sel.map{|arg| arg.dim[k] || 1 }.max
+    dim[k] = sel.map { |arg| arg.dim[k] || 1 }.max
   end
-  return argv.map{|arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
+
+  argv.map { |arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
 end
+

@@ -3,10 +3,8 @@
 #  carray/math.rb
 #
 #  This file is part of Ruby/CArray extension library.
-#  You can redistribute it and/or modify it under the terms of
-#  the Ruby Licence.
 #
-#  Copyright (C) 2005 Hiroki Motoyoshi
+#  Copyright (C) 2005-2020 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 
@@ -318,7 +316,7 @@ class CArray
       count = x.count_not_masked
       xm = x.mean(:min_count => min_count)
       ym = y.mean(:min_count => min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         return (x-xm).wsum(y-ym)/count
@@ -337,7 +335,7 @@ class CArray
       count = x.count_not_masked
       xm = x.mean(:min_count=>min_count)
       ym = y.mean(:min_count=>min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         return (x-xm).wsum(y-ym)/(count-1)
@@ -355,7 +353,7 @@ class CArray
       y.inherit_mask(x)
       xm = x.mean(:min_count=>min_count)
       ym = y.mean(:min_count=>min_count)
-      if ( xm.undef? or ym.undef? )
+      if ( xm == UNDEF or ym == UNDEF )
         return fill_value || UNDEF
       else
         xd, yd = x-xm, y-ym
