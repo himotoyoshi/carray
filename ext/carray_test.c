@@ -216,6 +216,12 @@ rb_obj_is_data_class (VALUE rtype)
   return Qfalse;
 }
 
+static VALUE
+rb_ca_s_is_data_class (VALUE self, VALUE rklass)
+{
+  return rb_obj_is_data_class(rklass);
+}
+
 /* ------------------------------------------------------------- */
 
 /* @overload valid_index? (*idx)
@@ -598,4 +604,7 @@ Init_carray_test ()
   rb_define_method(rb_cCArray, "==", rb_ca_equal, 1);
   rb_define_alias(rb_cCArray, "eql?", "==");
   rb_define_method(rb_cCArray, "hash", rb_ca_hash, 0);
+
+  rb_define_singleton_method(rb_cCArray, "data_class?", rb_ca_s_is_data_class, 1);
+
 }
