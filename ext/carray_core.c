@@ -1186,7 +1186,7 @@ rb_ca_data_class_encode (VALUE self, VALUE obj)
 VALUE
 rb_ca_members (VALUE self)
 {
-  VALUE data_class = rb_ca_data_class(self);
+  volatile VALUE data_class = rb_ca_data_class(self);
   if ( NIL_P(data_class) ) {
     rb_raise(rb_eRuntimeError, "carray doesn't have data class");
   }
@@ -1198,9 +1198,9 @@ rb_ca_members (VALUE self)
 VALUE
 rb_ca_field_as_member (VALUE self, VALUE sym)
 {
-  VALUE data_class = rb_ca_data_class(self);
-  VALUE member;
-  VALUE obj;
+  volatile VALUE data_class = rb_ca_data_class(self);
+  volatile VALUE member;
+  volatile VALUE obj;
 
   if ( NIL_P(data_class) ) {
     rb_raise(rb_eRuntimeError, "carray doesn't have data class");
@@ -1214,23 +1214,29 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
              "for data_class array");
   }
 
-  if ( TYPE(sym) == T_SYMBOL ) {
-    sym = rb_funcall(sym, rb_intern("to_s"), 0);
+  if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
+      volatile VALUE member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
+      sym = rb_ary_entry(member_names, NUM2SIZE(sym));
+      obj = rb_hash_aref(member, sym);
+    }
+  else {
+    obj = rb_hash_aref(member, sym);
+    if ( NIL_P(obj) ) {
+      sym = rb_funcall(sym, rb_intern("to_s"), 0);
+      obj = rb_hash_aref(member, sym);      
+    }
   }
-  else if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
-    VALUE member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
-    sym = rb_ary_entry(member_names, NUM2SIZE(sym));
-  }
-
-  obj = rb_hash_aref(member, sym);
 
   if ( rb_obj_is_carray(obj) ) {
     return obj;
   }
   else {
-    VALUE MEMBER_TABLE = rb_const_get(data_class, rb_intern("MEMBER_TABLE"));
-    VALUE info = rb_hash_aref(MEMBER_TABLE, sym);
+    volatile VALUE MEMBER_TABLE = rb_const_get(data_class, rb_intern("MEMBER_TABLE"));
+    volatile VALUE info = rb_hash_aref(MEMBER_TABLE, sym);
     if ( NIL_P(info) ) {
+      if ( TYPE(sym) != T_STRING ) {
+        sym = rb_funcall(sym, rb_intern("to_s"), 0);
+      }
       rb_raise(rb_eRuntimeError,
                "can't find data_member named <%s>", StringValuePtr(sym));
     }
@@ -1249,7 +1255,7 @@ rb_ca_field_as_member (VALUE self, VALUE sym)
 VALUE
 rb_ca_fields (VALUE self)
 {
-  VALUE data_class = rb_ca_data_class(self);
+  volatile VALUE data_class = rb_ca_data_class(self);
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {
@@ -1272,7 +1278,7 @@ Returns an array of data class members (fields) with names specified
 VALUE
 rb_ca_fields_at (int argc, VALUE *argv, VALUE self)
 {
-  VALUE data_class = rb_ca_data_class(self);
+  volatile VALUE data_class = rb_ca_data_class(self);
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {

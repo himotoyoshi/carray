@@ -199,6 +199,12 @@ describe "Feature: Masking" do
   example "count_not_masked" do
     # test_basic_featrues
   end
+  
+  example "compare with UNDEF" do
+    a = CA_INT([1,UNDEF,2])
+    is_asserted_by { a.eq(UNDEF) == a.is_masked }
+    is_asserted_by { a.ne(UNDEF) == a.is_not_masked }
+  end
 
   example "unmask" do
     # ---

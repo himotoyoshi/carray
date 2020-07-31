@@ -17,7 +17,7 @@
 (Attribute) 
 Returns the object type (e.g. CA_OBJ_ARRAY, CA_OBJ_BLOCK, ...).
 Since the object type can be known from the class of the object,
-this attribute method is rarely used.
+this attribute methods is rarely used.
 */
 
 VALUE
@@ -711,6 +711,20 @@ rb_ca_data_type_import (VALUE self, VALUE data_type)
   return Qnil;
 }
 
+static VALUE
+rb_ca_set_data_class (VALUE self, VALUE klass)
+{
+  if ( RTEST(rb_ca_is_fixlen_type(self)) &&
+       rb_obj_is_data_class(klass) ) {
+    rb_ivar_set(self, rb_intern("member"), rb_hash_new());
+    return rb_ivar_set(self, id_data_class, klass);
+  }
+  else {
+    rb_raise(rb_eTypeError, "invalid data_class or self is not fixlen array.");
+  }
+  return Qnil;
+}
+
 /* ------------------------------------------------------------------- */
 
 CArray *
@@ -824,6 +838,7 @@ Init_carray_attribute ()
   rb_define_method(rb_cCArray, "parent", rb_ca_parent, 0);
 
   rb_define_method(rb_cCArray, "data_class", rb_ca_data_class, 0);
+  rb_define_method(rb_cCArray, "data_class=", rb_ca_set_data_class, 1);
 
   rb_define_method(rb_cCArray, "scalar?", rb_ca_is_scalar, 0);
 
