@@ -10,6 +10,7 @@ ToDo
  * Create spec
    - str_format (cyclic format)
    - CA_SIZE
+   - serialization of carray which has data_class
 
 Done
 -------
