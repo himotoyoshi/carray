@@ -9,6 +9,7 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray#logb'
 * [New] Add new method 'CArray#remainder'
 * [New] Add new method 'CArray.guard_undef'
+* [New] Add new method 'CArray#data_class='
 * [Mod] Modify 'CArray#pmax' to use 'fmax' for float type
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
 * [Mod] Remove method 'Object#undef?'
@@ -18,6 +19,7 @@ ChangeLog of Ruby/CArray
 * [Fix] Fix treatment of extra :* in operation between CAUnboundRepeat objects
 * [Fix] Fix to accept Symbol for the name of data_class member
 * [Fix] Fix 'CArray#uniq' to accept the array with the dimension more than 2.
+* [Fix] Fix for CArray serialization to include data_class
 
 1.5.1 -> 1.5.2
 --------------
