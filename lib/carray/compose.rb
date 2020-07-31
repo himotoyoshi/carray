@@ -238,7 +238,7 @@ class CArray
     obj
   end
 
-  def self.merge (data_type, list, at = -1, bytes: bytes)
+  def self.merge (data_type, list, at = -1, bytes: nil)
     return CArray.composite(data_type, [list.size], list, at, bytes: bytes)
   end
   
