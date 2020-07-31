@@ -97,4 +97,20 @@ describe "CArray.broadcast" do
     is_asserted_by { cc == c }
   end
   
+  example "extension of dimension" do
+    a = CA_INT([[1,2,3],[4,5,6]])
+    
+    is_asserted_by { a.broadcast_to(1,2,1,3) == CA_INT([[[[ 1, 2, 3 ]],
+                                                         [[ 4, 5, 6 ]]]]) }
+
+    is_asserted_by { a.reshape(2,1,3).broadcast_to(1,2,1,3) == CA_INT([[[[ 1, 2, 3 ]],
+                                                                        [[ 4, 5, 6 ]]]]) }
+      
+    is_asserted_by { a.reshape(1,2,3).broadcast_to(1,2,1,3) == CA_INT([[[[ 1, 2, 3 ]],
+                                                                        [[ 4, 5, 6 ]]]]) }
+      
+      
+  end
+  
+  
 end
