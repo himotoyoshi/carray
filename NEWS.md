@@ -21,6 +21,8 @@ ChangeLog of Ruby/CArray
 * [Fix] Fix to accept Symbol for the name of data_class member
 * [Fix] Fix 'CArray#uniq' to accept the array with the dimension more than 2.
 * [Fix] Fix for CArray serialization to include data_class
+* [Fix] Fix data_class inheritance in some methods in which new CArray is created.
+* [Fix] Fix 'CArray#broadcast_to' to accept the case of dimension extension.
 
 1.5.1 -> 1.5.2
 --------------
