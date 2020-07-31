@@ -9,7 +9,7 @@
 # ----------------------------------------------------------------------------
 
 class CArray
-  
+
   def broadcast_to (*newdim)
     
     if newdim.size < ndim
@@ -21,6 +21,7 @@ class CArray
     #                     with broadcasting rule in Numpy.
     #
     repdim = []
+    shape  = []
 
     srcdim = dim.dup 
     dstdim = newdim.dup
@@ -29,16 +30,15 @@ class CArray
     while dd
       if sd == dd
         repdim.unshift nil
+        shape.unshift(dd)
+        sd = srcdim.pop
+      elsif dd == 1
+        repdim.unshift :*
+      elsif sd == 1 
+        repdim.unshift :*
         sd = srcdim.pop
       else
-        if dd == 1
-          repdim.unshift :*
-        elsif sd == 1 
-          repdim.unshift :*
-          sd = srcdim.pop
-        else
-          raise "(Broadcasting) can't broadcast to #{newdim.inspect} " 
-        end
+        raise "(Broadcasting) can't broadcast to #{newdim.inspect} " 
       end
       dd = dstdim.pop
     end
@@ -46,11 +46,11 @@ class CArray
     #
     # Call Unbound repeat's bind
     #
-    return self[*repdim].bind(*newdim) if repdim.include?(:*)
+    return self.reshape(*shape)[*repdim].bind(*newdim) if repdim.include?(:*)
     
     self
   end
-  
+
 end
 
 class CScalar
