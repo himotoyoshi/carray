@@ -10,6 +10,7 @@ ChangeLog of Ruby/CArray
 * [New] Add new method 'CArray#remainder'
 * [New] Add new method 'CArray.guard_undef'
 * [New] Add new method 'CArray#data_class='
+* [New] Add new method 'CArray.data_class?'
 * [Mod] Modify 'CArray#pmax' to use 'fmax' for float type
 * [Mod] Modify 'CArray#pmin' to use 'fmin' for float type
 * [Mod] Remove method 'Object#undef?'
