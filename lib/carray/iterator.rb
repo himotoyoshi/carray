@@ -316,6 +316,7 @@ class CAClassIterator < CAIterator # :nodoc:
     @reference = reference
     @classifier = classifier || @reference.uniq.sort
     @null = CArray.new(@reference.data_type,[0])
+    @null.data_class = @reference.data_class if @reference.has_data_class?
     @table = {}
     @ndim = 1
     @dim  = [0]

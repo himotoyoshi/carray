@@ -43,12 +43,9 @@ class CArray
     if has_mask?
       ary.delete(UNDEF)
     end
-    if has_data_class?
-      return CArray.new(data_class, [ary.length]) { ary }
-    else
-      return CArray.new(data_type, [ary.length], :bytes=>bytes) { ary }
-    end
+    out = CArray.new(data_type, [ary.length], :bytes=>bytes) { ary }
+    out.data_class = data_class if has_data_class?
+    return out
   end
-
 
 end
