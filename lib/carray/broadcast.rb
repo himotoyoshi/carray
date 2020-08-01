@@ -68,6 +68,7 @@ class CAUnboundRepeat
 end
 
 def CArray.broadcast (*argv, &block)
+  
   sel = argv.select { |arg| arg.is_a?(CArray) }
   return argv if sel.empty?
   

@@ -4,6 +4,7 @@ ChangeLog of Ruby/CArray
 1.5.3 -> 1.5.4
 --------------
 
+* [Mod] Modified the method 'CArray.broadcast' to accept block.
 
 1.5.2 -> 1.5.3
 --------------
