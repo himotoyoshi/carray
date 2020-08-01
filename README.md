@@ -42,9 +42,13 @@ CArray supports the collective calculation for the element-wise arithmetic opera
 
 CArray provides various methods for referencing data, such as addressing, slicing, selection by condition, address mapping, grid reference, transposing, shifting, rolling, data type conversion, reshaping, and so on. These data referencing are realized by the creation of virtual arrays, so-called 'view'. The virtual array doesn't have its data and retrieves the data from the referent only on-demand, including dereferencing, copying, or calculation. Since virtual array classes are sub-class of CArray, it has the same interfaces to access data as CArray. The changes in a virtual array by storing data are also reflected in the referent (if not a read_only array). Multiple heterogeneous chains of reference are also allowed, although the trade-offs with performance must be carefully considered.
 
-#### Built-in Element-wise Mask Handling ####
+#### Built-in element-wise mask handling ####
 
 CArray possesses masked states about each element (so-called "element-wise mask"). By referring the element-wise mask, CArray can perform mathematical and statistical calculations on the data with missing values by appropriate handling of masked elements. , which include the propagation of mask state to result in element-wise arithmetics and ignoring the masked elements in a statistical calculation, and so on.
+
+#### User-defined array ####
+
+User can define new virtual array class in Ruby level or C-extension level with TemplateMethod pattern. They are defined as subclass of CAObject in Ruby level and as subclass of CAVirtual in C-extension level. In particular, at the Ruby level, you can easily define a CArray-like class by implementing just a few template methods.
 
 License
 -------
