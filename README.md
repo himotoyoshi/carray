@@ -46,6 +46,7 @@ CArray provides various method for referencing data, such as adressing, slicing,
 
 CArray has its own masked state for each element (so-called element-wise mask).
 By referring the element-wise mask, CArray can perform appropriate mathematical and statistical calculations on the data with missing values, as well as propagation of the mask state in operations.
+
 Licenses
 --------
 
