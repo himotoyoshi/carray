@@ -28,7 +28,7 @@ Requirements
 What is Ruby/CArray 
 ------------------
 
-Ruby/CArray is an extension library for the multi-dimensional numerical array class. The name "CArray" comes from the meaning of a wrapper to a numerical array handled by the C language. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
+Ruby/CArray is an extension library for the multi-dimensional numerical array class. The name "CArray" comes from a wrapper's meaning to a numerical array handled by the C language. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
 
 #### Multi-dimensional uniform array ####
 
@@ -36,7 +36,7 @@ CArray is a collection class that can store the array of values with a uniform d
 
 #### Collective mathematical operations ####
 
-CArray supports the collective calculation for the element-wise arithmetic operations and mathematical elementary functions. Additionally, some basic statistical summarization along specific dimensions are also provided.
+CArray supports the collective calculation for the element-wise arithmetic operations and elementary mathematical functions. Additionally, some basic statistical summarization along specific dimensions are also provided.
 
 #### Referencing data and virtual arrays ####
 
@@ -48,7 +48,7 @@ CArray possesses masked states about each element (so-called "element-wise mask"
 
 #### User-defined array ####
 
-User can define new virtual array class in Ruby level or C-extension level with TemplateMethod pattern. They are defined as subclass of CAObject in Ruby level and as subclass of CAVirtual in C-extension level. In particular, at the Ruby level, you can easily define a CArray-like class by implementing just a few template methods.
+Users can define a new virtual array class in Ruby level or C-extension level with TemplateMethod pattern. They are defined as a subclass of CAObject in Ruby level and as a subclass of CAVirtual in C-extension level. In particular, at the Ruby level, you can easily define a CArray-like class by implementing just a few template methods.
 
 License
 -------
