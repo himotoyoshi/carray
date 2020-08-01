@@ -6,16 +6,16 @@ Ruby/CArray is an extension library for the multi-dimensional array class.
 Features
 --------
 
-* Multidimensional array for storing uniform data
-* Various ways to access data elements
-* Masks for each element to handle missing values
-* Element-wise operations and mathematical functions
-* Statistical functions for the elements
-* Indirect data manipulation for original array by virtual array 
+* Collection class for multidimensional array storing the value with uniform data type
+* Element-wise mathematical operations and functions
+* Statistical operation for the elements
+* Various methods for referencing data elements
+* Internally included element-wise mask to handle missing values
+* Indirect data manipulation to referent by virtual array 
 * Special iterators (dimension, block, window, categorical)
-* User-defined array
-* Storing fixed length data with data_class
-* Memory sharing with other objects (Experimental)
+* User-defined array class with same multi-dimensional interfaces as CArray
+* Accessing the partial data in fixed length data via data_class interface
+* Wrapping the memory block owned by the other object (such as NArray).
 
 Requirements
 ------------
