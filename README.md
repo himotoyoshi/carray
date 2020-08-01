@@ -28,11 +28,11 @@ Requirements
 What is Ruby/CArray 
 ------------------
 
-Ruby/CArray is an extension library for the multi-dimensional numerical array class. CArray stores integers or floating point numbers in memory block and treats them collectively to ensure the effecient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. Ruby/CArray has different features from other multidimensional array libraries (narray, numo-narray, nmatrix) for Ruby, such as element-wise masks, creation of reference arrays that can reflect changes to the referent, the ability to access memory block that the other object has, user-defined arrays, and so on.
+Ruby/CArray is an extension library for the multi-dimensional numerical array class. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
 
 #### Multi-dimensional uniform array ####
 
-CArray is a collection class which can stores the array of values with uniform  data type of one of fixed width integer (8,16,32,64bits), floating point number (32,64bits), complex number (64,128bits), fixed-length string, ruby object. These values are stored in memory block as binary data. CArray has multi-dimensional array interface to access their values. The multi-dimensional array has the attributes of the dimension size (1,2,3,...) and the shape of dimension ([dim0], [dim0,dim1], [dim0,dim1,dim2],...) which define the size of array. 
+CArray is a collection class that can store the array of values with a uniform data type of one of fixed-width integer (8,16,32,64bits), floating-point number (32,64bits), complex number (64,128bits), fixed-length string, ruby object. These values are stored in memory block as binary data. CArray has multi-dimensional interfaces for the array to access their values. The multi-dimensional array has the attributes of the dimension size (1,2,3,...) and the shape of dimension ([dim0], [dim0,dim1], [dim0,dim1,dim2],...) which define the size of array. 
 
 #### Collective mathematical operations ####
 
@@ -40,14 +40,13 @@ CArray supports the collective calculation for the element-wise arithmetic opera
 
 #### Referencing data and virtual arrays ####
 
-CArray provides various method for referencing data, such as adressing, slicing, conditional selection, adrress mapping, grid reference, transposing, shifting, rolling, data type conversion, reshaping, and so on. These data referencing are realized by creation of virtual arrays, so-called 'view'. The virtual array doesn’t have its own data and retrieves the data from the referent only on demand including dereferencing, copying or caluculation. Since a virtual array classes is a sub-class of CArray, it has the same interfaces to access data as CArray. The changes in the virtual array by storing data are refleted to the referent if permitted (if not a read_only array). Multiple heterogeneous chains of reference are also allowed, although the trade-offs with performance must be carefully considered.
+CArray provides various methods for referencing data, such as addressing, slicing, selection by condition, address mapping, grid reference, transposing, shifting, rolling, data type conversion, reshaping, and so on. These data referencing are realized by the creation of virtual arrays, so-called 'view'. The virtual array doesn't have its data and retrieves the data from the referent only on-demand, including dereferencing, copying, or calculation. Since virtual array classes are sub-class of CArray, it has the same interfaces to access data as CArray. The changes in a virtual array by storing data are also reflected in the referent (if not a read_only array). Multiple heterogeneous chains of reference are also allowed, although the trade-offs with performance must be carefully considered.
 
 #### Built-in Element-wise Mask Handling ####
 
-CArray has its own masked state for each element (so-called element-wise mask).
-By referring the element-wise mask, CArray can perform appropriate mathematical and statistical calculations on the data with missing values, as well as propagation of the mask state in operations.
+CArray possesses masked states about each element (so-called "element-wise mask"). By referring the element-wise mask, CArray can perform mathematical and statistical calculations on the data with missing values by appropriate handling of masked elements. , which include the propagation of mask state to result in element-wise arithmetics and ignoring the masked elements in a statistical calculation, and so on.
 
-Licenses
---------
+License
+-------
 
 MIT (after version 1.5.0)
