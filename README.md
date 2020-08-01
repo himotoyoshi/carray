@@ -28,7 +28,7 @@ Requirements
 What is Ruby/CArray 
 ------------------
 
-Ruby/CArray is an extension library for the multi-dimensional numerical array class. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
+Ruby/CArray is an extension library for the multi-dimensional numerical array class. The name "CArray" comes from the meaning of a wrapper to a numerical array handled by the C language. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
 
 #### Multi-dimensional uniform array ####
 
@@ -36,7 +36,7 @@ CArray is a collection class that can store the array of values with a uniform d
 
 #### Collective mathematical operations ####
 
-CArray supports the collective calculation for the element-wise arithmetic operations and elemental mathematical functions. Additionally, some basic statistical summarization along specific dimensions are also provided.
+CArray supports the collective calculation for the element-wise arithmetic operations and mathematical elementary functions. Additionally, some basic statistical summarization along specific dimensions are also provided.
 
 #### Referencing data and virtual arrays ####
 
