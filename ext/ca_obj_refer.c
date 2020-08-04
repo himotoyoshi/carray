@@ -32,11 +32,11 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   CA_CHECK_BYTES(data_type, bytes);
 
   if ( ca_is_object_type(parent) && data_type != CA_OBJECT ) {
-    rb_raise(rb_eRuntimeError, "object carray can't be referred by other type");
+    rb_raise(rb_eRuntimeError, "object array can't be referred by other data type");
   }
 
   if ( parent->elements && bytes > parent->bytes * parent->elements ) {
-    rb_raise(rb_eRuntimeError, "byte size mismatch");
+    rb_raise(rb_eRuntimeError, "bytes exceeds the data size of referent");
   }
 
   /* calc datanum and check deformation */
@@ -51,27 +51,25 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   }
   if ( bytes < parent->bytes ) {
     if ( parent->bytes % bytes != 0 ) {
-      rb_raise(rb_eArgError, "invalid bytes");
+      rb_raise(rb_eRuntimeError, "bytes of reference array must be a multiple of that of referent");
     }
     is_deformed = -2;
     ratio = parent->bytes / bytes;
   }
   else if ( bytes > parent->bytes ) {
     if ( bytes % parent->bytes != 0 ) {
-      rb_raise(rb_eArgError, "invalid bytes");
+      rb_raise(rb_eRuntimeError, "bytes of reference array must be a multiple of that of referent");
     }
     is_deformed = 2;
     ratio = bytes / parent->bytes;
   }
-
   if ( offset < 0 ) {
-    rb_raise(rb_eRuntimeError, 
-             "negative offset for CARefer");
+    rb_raise(rb_eRuntimeError, "negative offset is not permitted for CARefer");
   }
 
   if ( ( bytes * elements + parent->bytes * offset ) >
                                      ( parent->bytes * parent->elements ) ) {
-    rb_raise(rb_eRuntimeError, "data size too large for CARefer");
+    rb_raise(rb_eRuntimeError, "data size of reference array must not exceed that of referent");
   }
 
   ca->obj_type  = CA_OBJ_REFER;
