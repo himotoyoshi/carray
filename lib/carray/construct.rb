@@ -395,7 +395,7 @@ class CArray
     def eye (n, m = nil, k = 0)
       m ||= n
       mat = CArray.new(self::DataType || CA_FLOAT64, [n, m])
-      start = k > 0 ? k : m - k - 1
+      start = ( k == 0 ) ? k : ( k > 0 ? k : m - k - 1 )
       mat[[start..-1,m+1]] = 1
       mat
     end
@@ -430,7 +430,7 @@ class CArray
       end
       data_type = self::DataType
       data_type ||= guess_data_type_from_values(start, stop, step)
-      CArray.__new__(data_type, start..stop, step)
+      CArray.__new__(data_type, start..stop-step, step)
     end
   
     def full (shape, fill_value)
@@ -446,15 +446,17 @@ end
 
 class CArray
   
-  def self.meshgrid (*args)
-    dim = args.map(&:size)
-    out = []
-    args.each_with_index do |arg, i|
-      newdim = dim.dup
-      newdim[i] = :%
-      out[i] = arg[*newdim].to_ca
+  def self.meshgrid (*axes, copy: false)
+    dim = axes.map(&:size)
+    axes.map.with_index do |axis, k|
+      dim_repeat = dim.dup
+      dim_repeat[k] = :%
+      if copy
+        axis[*dim_repeat].to_ca
+      else
+        axis[*dim_repeat]        
+      end
     end
-    return *out
   end
   
 end
