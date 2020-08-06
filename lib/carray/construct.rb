@@ -446,15 +446,34 @@ end
 
 class CArray
   
-  def self.meshgrid (*axes, copy: false)
-    dim = axes.map(&:size)
-    axes.map.with_index do |axis, k|
-      dim_repeat = dim.dup
-      dim_repeat[k] = :%
-      if copy
-        axis[*dim_repeat].to_ca
-      else
-        axis[*dim_repeat]        
+  def self.meshgrid (*axes, indexing: "xy", copy: true, sparse: false)
+    case indexing 
+    when "xy"
+      ### no operation
+    when "ij"
+      axes = axes.map{|axis| axis.seq }
+    else
+      raise ArgumentError, %{indexing option should be one of "xy" and "ij"}
+    end
+    shape = axes.map(&:size)
+    if sparse                           ### => CAUnboundRepeat
+      axes.map.with_index do |axis, k|
+        extended_shape = Array.new(shape.size) { |i| ( i == k ) ? nil : :* }
+        if copy
+          axis[*extended_shape].to_ca
+        else
+          axis[*extended_shape]
+        end
+      end
+    else                                ### => CARepeat
+      axes.map.with_index do |axis, k|
+        extended_shape = shape.dup
+        extended_shape[k] = :%
+        if copy
+          axis[*extended_shape].to_ca
+        else
+          axis[*extended_shape]
+        end
       end
     end
   end
