@@ -1,42 +1,6 @@
 Note for developper
 ===================
 
-Make targets
-------------
-
-### create Makefile
-
-    ruby extconf.rb
-
-### build extensions
-
-    make all
-    
-### install via RubyGems
-
-    make build-gem
-    make install-gem
-    make uninstall-gem  ### for uninstall this version
-
-### install via extconf.rb
-
-    ruby extconf.rb
-    make all
-    make install
-
-### cleaning temporary files
-
-    make clean
-    make distclean
-
-### create gem package
-
-    make package        ### -> rake package
-    
-### run test
-
-    make test           ### -> rake test
-
 Utility scripts
 ---------------
 
@@ -74,3 +38,14 @@ OpenMP
 ------
 
   * '--with-cc="gcc -fopenmp"' ... and so on.
+
+Range
+-----
+
+ int rb_arithmetic_sequence_extract(VALUE, VALUE *, VALUE *, VALUE *, int *);
+
+ /* range.c */
+ #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
+ #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
+ #define RANGE_EXCL(r) (RSTRUCT(r)->as.ary[2])
+ 
