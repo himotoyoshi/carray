@@ -4,7 +4,9 @@ ChangeLog of Ruby/CArray
 1.5.3 -> 1.5.4
 --------------
 
+* [New] Import method 'CArray#section' from gem 'carray-calculus'
 * [Mod] Modified the method 'CArray.broadcast' to accept block.
+* [Fix] Fix the order of the repetitive dimensions in 'CArray#meshgrid'
 
 1.5.2 -> 1.5.3
 --------------

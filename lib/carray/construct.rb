@@ -456,9 +456,10 @@ class CArray
       raise ArgumentError, %{indexing option should be one of "xy" and "ij"}
     end
     shape = axes.map(&:size)
+    naxes = shape.size
     if sparse                           ### => CAUnboundRepeat
       axes.map.with_index do |axis, k|
-        extended_shape = Array.new(shape.size) { |i| ( i == k ) ? nil : :* }
+        extended_shape = Array.new(shape.size) { |i| ( i == naxes - k - 1) ? nil : :* }
         if copy
           axis[*extended_shape].to_ca
         else
@@ -466,9 +467,9 @@ class CArray
         end
       end
     else                                ### => CARepeat
-      axes.map.with_index do |axis, k|
+      axes.map.reverse.with_index do |axis, k|
         extended_shape = shape.dup
-        extended_shape[k] = :%
+        extended_shape[naxes - k - 1] = :%
         if copy
           axis[*extended_shape].to_ca
         else
