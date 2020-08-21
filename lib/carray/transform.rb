@@ -94,5 +94,16 @@ class CArray
     return self[:%,1]
   end
 
+  # pulled
+
+  def pulled (*args)
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx]
+  end
   
+  def pull (*args)
+    idx = args.map{|s| s.nil? ? :% : s}
+    return self[*idx].to_ca
+  end
+
 end

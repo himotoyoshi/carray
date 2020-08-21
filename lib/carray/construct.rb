@@ -445,7 +445,7 @@ class CArray
 end
 
 class CArray
-  
+
   def self.meshgrid (*axes, indexing: "xy", copy: true, sparse: false)
     case indexing 
     when "xy"
@@ -455,11 +455,10 @@ class CArray
     else
       raise ArgumentError, %{indexing option should be one of "xy" and "ij"}
     end
-    shape = axes.map(&:size)
-    naxes = shape.size
+    shape = axes.map(&:size).reverse
     if sparse                           ### => CAUnboundRepeat
       axes.map.with_index do |axis, k|
-        extended_shape = Array.new(shape.size) { |i| ( i == naxes - k - 1) ? nil : :* }
+        extended_shape = (shape.size-1).downto(0).map { |i| ( i == k ) ? nil : :* }
         if copy
           axis[*extended_shape].to_ca
         else
@@ -467,7 +466,8 @@ class CArray
         end
       end
     else                                ### => CARepeat
-      axes.map.reverse.with_index do |axis, k|
+      naxes = shape.size
+      axes.map.with_index do |axis, k|
         extended_shape = shape.dup
         extended_shape[naxes - k - 1] = :%
         if copy
