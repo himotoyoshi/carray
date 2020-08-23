@@ -56,7 +56,9 @@ end
 class CScalar
   
   def broadcast_to (*newdim)
-    self
+    out = CArray.new(data_type, newdim, bytes: bytes)
+    out[] = self
+    out
   end
 
 end
@@ -67,7 +69,7 @@ class CAUnboundRepeat
 
 end
 
-def CArray.broadcast (*argv, &block)
+def CArray.broadcast (*argv, keep_scalar: true, &block)
   
   sel = argv.select { |arg| arg.is_a?(CArray) }
   return argv if sel.empty?

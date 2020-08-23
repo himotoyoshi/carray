@@ -7,6 +7,8 @@ ChangeLog of Ruby/CArray
 * [New] Import method 'CArray#section' from gem 'carray-calculus'
 * [New] Add new method 'CArray#pull', 'CArray#pulled'
 * [Mod] Modify the method 'CArray.broadcast' to accept block.
+* [Mod] Modify 'CScalar#is_masked' and 'CScalar#is_masked' to return CScalar
+* [Mod] Modify 'CScalar#broadcast_to' to return CArray
 * [Fix] Fix the order of the repetitive dimensions in 'CArray#meshgrid'
 
 1.5.2 -> 1.5.3
