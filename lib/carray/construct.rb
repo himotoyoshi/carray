@@ -446,7 +446,7 @@ end
 
 class CArray
 
-  def self.meshgrid (*axes, indexing: "xy", copy: true, sparse: false)
+  def self.meshgrid (*axes, indexing: "xy", copy: true, sparse: false, &block)
     case indexing 
     when "xy"
       ### no operation
@@ -457,7 +457,7 @@ class CArray
     end
     shape = axes.map(&:size).reverse
     if sparse                           ### => CAUnboundRepeat
-      axes.map.with_index do |axis, k|
+      list = axes.map.with_index do |axis, k|
         extended_shape = (shape.size-1).downto(0).map { |i| ( i == k ) ? nil : :* }
         if copy
           axis[*extended_shape].to_ca
@@ -467,7 +467,7 @@ class CArray
       end
     else                                ### => CARepeat
       naxes = shape.size
-      axes.map.with_index do |axis, k|
+      list = axes.map.with_index do |axis, k|
         extended_shape = shape.dup
         extended_shape[naxes - k - 1] = :%
         if copy
@@ -477,6 +477,8 @@ class CArray
         end
       end
     end
+    return block.call(*list) if block
+    return list
   end
   
 end
