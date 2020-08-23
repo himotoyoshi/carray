@@ -80,8 +80,21 @@ def CArray.broadcast (*argv, keep_scalar: true, &block)
     dim[k] = sel.map { |arg| arg.dim[k] || 1 }.max
   end
 
-  list = argv.map { |arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
-
+  if keep_scalar
+    list = argv.map { |arg| 
+      case arg
+      when CScalar
+        arg
+      when CArray
+        arg.broadcast_to(*dim)
+      else
+        arg
+      end
+    }
+  else
+    list = argv.map { |arg| arg.is_a?(CArray) ? arg.broadcast_to(*dim) : arg }
+  end
+  
   return block.call(*list) if block
   return list
 end
