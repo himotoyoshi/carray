@@ -138,7 +138,7 @@ have_header("tgmath.h")
 
 # --- check mergesort routine
 
-have_func("mergesort", "stdlib.h")
+have_func("mergesort2", "stdlib.h")
 
 # --- setup install files
 
@@ -153,7 +153,7 @@ $INSTALLFILES << ['carray_config.h', '$(archdir)']
 #
 
 if /cygwin|mingw/ =~ RUBY_PLATFORM
-  sitearchdir = Config::CONFIG["sitearchdir"]
+  sitearchdir = RBConfig::CONFIG["sitearchdir"]
   $DLDFLAGS << " -L#{sitearchdir} -Wl,--out-implib=libcarray.a "
   unless File.exist? "libcarray.a"
     $TOUCHED_LIBCARRAY_A = true
