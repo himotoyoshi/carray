@@ -69,7 +69,7 @@ class CAUnboundRepeat
 
 end
 
-def CArray.broadcast (*argv, keep_scalar: true, &block)
+def CArray.broadcast (*argv, expand_scalar: false, &block)
   
   sel = argv.select { |arg| arg.is_a?(CArray) }
   return argv if sel.empty?
@@ -80,7 +80,7 @@ def CArray.broadcast (*argv, keep_scalar: true, &block)
     dim[k] = sel.map { |arg| arg.dim[k] || 1 }.max
   end
 
-  if keep_scalar
+  if not expand_scalar
     list = argv.map { |arg| 
       case arg
       when CScalar
