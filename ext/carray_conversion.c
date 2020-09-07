@@ -342,6 +342,8 @@ rb_ca_format (int argc, VALUE *argv, VALUE self)
 
 #include <time.h>
 
+#ifdef HAVE_STRPTIME
+
 /* @overload str_strptime (fmt)
 
 (Conversion) 
@@ -404,7 +406,9 @@ rb_ca_strptime (VALUE self, VALUE rfmt)
   return obj;
 }
 
-/* @overload time_strptime (fmt)
+#endif
+
+/* @overload time_strftime (fmt)
 
 (Conversion) 
 Creates object type array consist of strings
@@ -498,7 +502,10 @@ Init_carray_conversion ()
 
   rb_define_method(rb_cCArray, "str_format", rb_ca_format, -1); 
 
+#ifdef HAVE_STRPTIME
   rb_define_method(rb_cCArray, "str_strptime", rb_ca_strptime, 1);
+#endif
+  
   rb_define_method(rb_cCArray, "time_strftime", rb_ca_strftime, 1);
 
   rb_define_method(rb_cCArray, "test_ca_to_cptr", rb_test_ca_to_cptr, 0);
