@@ -23,20 +23,6 @@ class CArray
     self
   end
 
-  # pulled
-
-  def pulled (*args)
-    warn "CArray#pulled will be obsolete"
-    idx = args.map{|s| s.nil? ? :% : s}
-    return self[*idx]
-  end
-  
-  def pull (*args)
-    warn "CArray#pull will be obsolete"
-    idx = args.map{|s| s.nil? ? :% : s}
-    return self[*idx].to_ca
-  end
-
   # Returns the array eliminated all the duplicated elements.
   def duplicated_values
     warn "CArray#duplicated_values will be obsolete"

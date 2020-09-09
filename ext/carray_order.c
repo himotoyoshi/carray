@@ -869,6 +869,162 @@ rb_ca_linear_search_nearest_index (VALUE self, VALUE value)
   return ( NIL_P(raddr) ) ? Qnil : rb_ca_addr2index(self, raddr);
 }
 
+/* ----------------------------------------------------------------- */
+
+static ca_size_t
+linear_index (ca_size_t n, double *y, double yy, double *idx)
+{
+  ca_size_t a, b, c, x1;
+  double ya, yb, yc;
+  double y1, y2;
+  double rest;
+
+  if ( yy <= y[0] ) {
+    x1 = 0;
+    goto found;
+  }
+
+  if ( yy >= y[n-1] ) {
+    x1 = n-2;
+    goto found;
+  }
+
+  /* check for equally spaced scale */
+
+  a = (ca_size_t)((yy-y[0])/(y[n-1]-y[0])*(n-1));
+
+  if ( a >= 0 && a < n-1 ) {
+    if ( (y[a] - yy) * (y[a+1] - yy) <= 0 ) { /* lucky case */
+      x1 = a;
+      goto found; 
+    }
+  }
+
+  /* binary section method */
+
+  a = 0;
+  b = n-1;
+
+  ya = y[a];
+  yb = y[b];
+
+  if ( ya > yb ) {
+    return -1; /* input scale array should have accending order */
+  }
+
+  while ( (b - a) >= 1 ) {
+
+    c  = (a + b)/2;
+    yc = y[c];
+    if ( a == c ) {
+      break;
+    }
+
+    if ( yc == yy ) {
+      a = c;
+      break;
+    }
+    else if ( (ya - yy) * (yc - yy) <= 0 ) {
+      b = c;
+      yb = yc;
+    }
+    else {
+      a = c;
+      ya = yc;
+    }
+
+    if ( ya > yb ) {
+      return -1; /* input scale array should have accending order */
+    }
+  }
+
+  x1 = a;
+
+ found:
+
+  y1 = y[x1];
+  y2 = y[x1+1];
+  rest = (yy-y1)/(y2-y1);
+
+  if ( fabs(y2-yy)/fabs(y2) < DBL_EPSILON*100 ) {
+    *idx = (double) (x1 + 1);
+  }
+  else if ( fabs(y1-yy)/fabs(y1) < DBL_EPSILON*100 ) {
+    *idx = (double) x1;
+  }
+  else {
+    *idx = rest + (double) x1;
+  }
+
+  return 0;
+}
+
+static VALUE
+rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
+{
+  volatile VALUE out, out0;
+  CArray *ca, *sc, *cx, *co0, *co;
+  ca_size_t n;
+  double *x;
+  double *px;
+  double *po;
+  ca_size_t i;
+
+  Data_Get_Struct(self, CArray, ca);
+
+  if ( rb_ca_is_any_masked(self) ) {
+    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
+  }
+
+  sc = ca_wrap_readonly(self, CA_FLOAT64);
+  cx = ca_wrap_readonly(vx, CA_FLOAT64);
+
+  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
+  out = out0 = ca_wrap_struct(co0);
+  co = ca_wrap_writable(out, CA_FLOAT64);
+
+  ca_attach_n(3, sc, cx, co);
+
+  n = sc->elements;
+  x  = (double*) sc->ptr;
+  px = (double*) cx->ptr;
+  po = (double*) co->ptr;
+
+  ca_update_mask(cx);
+  if ( cx->mask ) {
+    boolean8_t *mx, *mo;
+    ca_create_mask(co);
+    mx = (boolean8_t *) cx->mask->ptr;
+    mo = (boolean8_t *) co->mask->ptr;
+    for (i=0; i<cx->elements; i++) {
+      if ( ! *mx ) {
+        linear_index(n, x, *px, po);
+      }
+      else {
+        *mo = 1;
+      }
+      mx++; mo++; px++, po++;
+    }
+  }
+  else {
+    for (i=0; i<cx->elements; i++) {
+      linear_index(n, x, *px, po);
+      px++, po++;
+    }
+  }
+
+  ca_sync(co);
+  ca_detach_n(3, sc, cx, co);
+
+  if ( rb_ca_is_scalar(vx) ) {
+    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
+  }
+  else {
+    return out0;
+  }
+}
+
+
 void
 Init_carray_order ()
 {
@@ -892,5 +1048,8 @@ Init_carray_order ()
                                 rb_ca_linear_search_nearest, 1);
   rb_define_method(rb_cCArray,  "search_nearest_index",
                                 rb_ca_linear_search_nearest_index, 1);
+
+  rb_define_method(rb_cCArray,  "section",
+                                rb_ca_binary_search_linear_index, 1);
 
 }

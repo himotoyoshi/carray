@@ -757,7 +757,12 @@ rb_ca_is_masked (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
+  if ( ca_is_scalar(ca) ) {
+    co = cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+  }
+  else {
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+  }
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
@@ -798,7 +803,12 @@ rb_ca_is_not_masked (VALUE self)
 
   Data_Get_Struct(self, CArray, ca);
 
-  co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
+  if ( ca_is_scalar(ca) ) {
+    co = cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+  }
+  else {
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+  }
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {

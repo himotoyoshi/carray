@@ -460,7 +460,7 @@ Init_ccomplex ()
   rb_define_method(rb_cCComplex, "coerce", rb_cc_coerce, 1);
 
   rb_define_method(rb_cCComplex, "==", rb_cc_equal, 1);
-  rb_define_method(rb_cCComplex, "-@", rb_cc_uminus, 1);
+  rb_define_method(rb_cCComplex, "-@", rb_cc_uminus, 0);
   rb_define_method(rb_cCComplex, "+", rb_cc_plus, 1);
   rb_define_method(rb_cCComplex, "-", rb_cc_minus, 1);
   rb_define_method(rb_cCComplex, "*", rb_cc_asterisk, 1);
