@@ -1,42 +1,6 @@
 Note for developper
 ===================
 
-Make targets
-------------
-
-### create Makefile
-
-    ruby extconf.rb
-
-### build extensions
-
-    make all
-    
-### install via RubyGems
-
-    make build-gem
-    make install-gem
-    make uninstall-gem  ### for uninstall this version
-
-### install via extconf.rb
-
-    ruby extconf.rb
-    make all
-    make install
-
-### cleaning temporary files
-
-    make clean
-    make distclean
-
-### create gem package
-
-    make package        ### -> rake package
-    
-### run test
-
-    make test           ### -> rake test
-
 Utility scripts
 ---------------
 
@@ -53,8 +17,11 @@ Check Points for Debug
 
   * 'elements' should be checked with double float number
 
-  * ca_update_mask/ca_attach/ca_create_mask/ca_has_mask should be called 
-    before ca->mask refered
+  * One of the following methods should be called before ca->mask refered
+    + ca_attach
+    + ca_has_mask 
+    + ca_update_mask
+    + ca_create_mask
 
   * Avoid the exposition of raw VALUE data in object array
 
@@ -71,3 +38,14 @@ OpenMP
 ------
 
   * '--with-cc="gcc -fopenmp"' ... and so on.
+
+Range
+-----
+
+ int rb_arithmetic_sequence_extract(VALUE, VALUE *, VALUE *, VALUE *, int *);
+
+ /* range.c */
+ #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
+ #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
+ #define RANGE_EXCL(r) (RSTRUCT(r)->as.ary[2])
+ 

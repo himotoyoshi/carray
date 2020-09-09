@@ -385,7 +385,7 @@ ca_moncmp_#{name}_#{type} (ca_size_t n, boolean8_t *m, char *ptr1, ca_size_t i1,
   io.puts "};"
   io.puts
   io.print %{
-static VALUE rb_ca_#{name} (VALUE self, VALUE other)
+static VALUE rb_ca_#{name} (VALUE self)
 { return rb_ca_call_moncmp(self, ca_moncmp_#{name}); }
   }
   DEFINITIONS << io.string
