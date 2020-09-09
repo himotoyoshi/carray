@@ -8,9 +8,9 @@
 
 ---------------------------------------------------------------------------- */
 
-#define CA_VERSION "1.5.3"
-#define CA_VERSION_CODE 153
+#define CA_VERSION "1.5.4"
+#define CA_VERSION_CODE 154
 #define CA_VERSION_MAJOR 1
 #define CA_VERSION_MINOR 5
-#define CA_VERSION_TEENY 3
-#define CA_VERSION_DATE "2020/07/31"
+#define CA_VERSION_TEENY 4
+#define CA_VERSION_DATE "2020/09/06"
