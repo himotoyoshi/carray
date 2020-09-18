@@ -4,6 +4,7 @@ ChangeLog of Ruby/CArray
 1.5.4 -> 1.5.5
 
 * [Fix] Fix recognition of "atan2", ... in "math.h"
+* [Fix] Fix serialize.rb of keyword parameters for Ruby2.7
 
 1.5.3 -> 1.5.4
 --------------
