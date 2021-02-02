@@ -66,7 +66,7 @@ OBJ2DBL (VALUE val)
     else if ( ! strncasecmp("-infinity", str, 9) ) {
       return -1.0/0.0;
     }
-    return NUM2DBL(rb_Float(val));
+    return rb_cstr_to_dbl(str, 0);
   }
   default:
     return NUM2DBL(rb_Float(val));
