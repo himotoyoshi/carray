@@ -135,6 +135,10 @@ end
 # --- check tgmath.h
 
 have_header("tgmath.h")
+have_func("atan2",  "math.h")
+have_func("hypot",  "math.h")
+have_func("lgamma", "math.h")
+have_func("expm1",  "math.h")
 
 # --- check mergesort routine
 

@@ -84,7 +84,7 @@ class CArray::Serializer   # :nodoc:
     end
   end
 
-  def save (ca, opt = {})
+  def save (ca, **opt)
     endian = opt[:endian] || CArray.endian
     # ---
     header = Header.new()
@@ -132,8 +132,8 @@ class CArray::Serializer   # :nodoc:
     return ca
   end
   
-  def load (opt = {}, legacy: false)
-    if legacy
+  def load (**opt)
+    if opt[:legacy]
       header = Header_Legacy.decode(@io.read(256))
     else
       header = Header.decode(@io.read(256))
@@ -191,36 +191,36 @@ end
 
 class CArray
 
-  def self.save(ca, output, opt={})
+  def self.save(ca, output, **opt)
     case output
     when String
       open(output, "wb:ASCII-8BIT") { |io|
-        return Serializer.new(io).save(ca, opt)
+        return Serializer.new(io).save(ca, **opt)
       }
     else
-      return Serializer.new(output).save(ca, opt) 
+      return Serializer.new(output).save(ca, **opt) 
     end
   end
 
-  def self.load (input, opt={})
+  def self.load (input, **opt)
     case input
     when String
       if input.length >= 256 and input =~ /\A_CARRAY_.{8}_(LE|BE)_/
         io = StringIO.new(input)
-        return Serializer.new(io).load(opt)
+        return Serializer.new(io).load(**opt)
       else
         open(input, "rb:ASCII-8BIT") { |io|
-          return Serializer.new(io).load(opt)
+          return Serializer.new(io).load(**opt)
         }
       end
     else
-      return Serializer.new(input).load(opt)   
+      return Serializer.new(input).load(**opt)   
     end
   end
 
-  def self.dump (ca, opt={})
+  def self.dump (ca, **opt)
     io = StringIO.new("")
-    Serializer.new(io).save(ca, opt) 
+    Serializer.new(io).save(ca, **opt) 
     return io.string
   end
 
