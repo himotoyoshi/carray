@@ -13,6 +13,10 @@
 
 #include "ruby.h"
 
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+extern VALUE rb_cArithSeq;
+#endif
+
 /* -------------------------------------------------------------------- */
 
 #include "carray_config.h"
