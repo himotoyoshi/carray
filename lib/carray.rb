@@ -59,12 +59,12 @@ unless $CARRAY_NO_AUTOLOAD
   require 'carray/autoload/autoload_gem_gnuplot'
   require 'carray/autoload/autoload_gem_narray'
   require 'carray/autoload/autoload_gem_numo_narray'
-  require 'carray/autoload/autoload_gem_io_csv'
+#  require 'carray/autoload/autoload_gem_io_csv'
 #  require 'carray/autoload/autoload_gem_io_sqlite3'
-  require 'carray/autoload/autoload_gem_rmagick'
-  require 'carray/autoload/autoload_gem_cairo'
-  require 'carray/autoload/autoload_gem_opencv'
-  require 'carray/autoload/autoload_gem_ffi'
+#  require 'carray/autoload/autoload_gem_rmagick'
+#  require 'carray/autoload/autoload_gem_cairo'
+#  require 'carray/autoload/autoload_gem_opencv'
+#  require 'carray/autoload/autoload_gem_ffi'
 
   undef autoload_method
 end
