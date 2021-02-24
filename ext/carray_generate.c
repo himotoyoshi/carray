@@ -62,15 +62,15 @@ Returns the 1d index array for non-zero elements of self
 VALUE
 rb_ca_where (VALUE self)
 {
-  volatile VALUE bool, obj;
+  volatile VALUE bool0, obj;
   CArray *ca, *co;
   boolean8_t *p, *m;
   ca_size_t *q;
   ca_size_t i, count;
 
-  bool = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
+  bool0 = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
 
-  Data_Get_Struct(bool, CArray, ca);
+  Data_Get_Struct(bool0, CArray, ca);
 
   ca_attach(ca);
 

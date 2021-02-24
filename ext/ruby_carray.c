@@ -11,6 +11,8 @@
 #include "carray.h"
 #include "version.h"
 
+VALUE rb_cArithSeq;
+  
 VALUE rb_eCADataTypeError;
 VALUE rb_mCA;
 
@@ -70,12 +72,13 @@ void Init_ca_iter_window ();
 
 void Init_carray_mathfunc ();
 
-
 void
 Init_carray_ext ()
 {
 
   /* Classes and Modules */
+
+  rb_cArithSeq   = rb_const_get(rb_cEnumerator, rb_intern("ArithmeticSequence"));
 
   /* -- CArray class -- */
 

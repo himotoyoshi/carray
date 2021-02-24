@@ -148,6 +148,10 @@ have_func("mergesort", "stdlib.h")
 
 have_func("strptime", "time.h")
 
+# --- check raneg object
+
+have_func("rb_arithmetic_sequence_extract")
+
 # --- setup install files
 
 $INSTALLFILES = []
