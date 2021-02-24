@@ -10,35 +10,10 @@
 
 #include "carray.h"
 
-#if RUBY_VERSION_CODE >= 240
-#define RSTRUCT_EMBED_LEN_MAX RSTRUCT_EMBED_LEN_MAX
-enum {
-  RSTRUCT_EMBED_LEN_MAX = 3,
-  RSTRUCT_ENUM_END
-};
-struct RStruct {
-    struct RBasic basic;
-    union {
-        struct {
-            long len;
-            const VALUE *ptr;
-        } heap;
-        const VALUE ary[RSTRUCT_EMBED_LEN_MAX];
-    } as;
-};
-#define RSTRUCT(obj) (R_CAST(RStruct)(obj))
-#endif
-
-#if RUBY_VERSION_CODE >= 190
-#define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
-#define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
-#define RANGE_EXCL(r) (RSTRUCT(r)->as.ary[2])
-#else
-static ID id_beg, id_end, id_excl;
-#define RANGE_BEG(r) (rb_ivar_get(r, id_beg))
-#define RANGE_END(r) (rb_ivar_get(r, id_end))
-#define RANGE_EXCL(r) (rb_ivar_get(r, id_excl))
-#endif
+static ID id_begin, id_end, id_excl_end;
+#define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
+#define RANGE_END(r)  (rb_funcall(r, id_end, 0))
+#define RANGE_EXCL(r) (rb_funcall(r, id_excl_end, 0))
 
 static ID id_ca, id_to_ca;
 static VALUE sym_star, sym_perc;
@@ -614,17 +589,17 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
         info->ndim = ca_ndim;
       }
       else if ( rb_obj_is_kind_of(arg, rb_cRange) ) { /* ca[--,i..j,--] */
-        ca_size_t first, last, excl, count, step;
+        ca_size_t start, last, excl, count, step;
         volatile VALUE iv_beg, iv_end, iv_excl;
         iv_beg  = RANGE_BEG(arg);
         iv_end  = RANGE_END(arg);
         iv_excl = RANGE_EXCL(arg);
         index_type[i] = CA_IDX_BLOCK; /* convert to block */
         if ( NIL_P(iv_beg) ) {
-          first = 0;                    
+          start = 0;                    
         }
         else {
-          first = NUM2SIZE(iv_beg);          
+          start = NUM2SIZE(iv_beg);          
         }
         if ( NIL_P(iv_end) ) {
           last  = -1;
@@ -635,20 +610,20 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
         excl  = RTEST(iv_excl);
 
         if ( info->range_check ) {
-          CA_CHECK_INDEX_AT(first, ca_dim[i], i);
+          CA_CHECK_INDEX_AT(start, ca_dim[i], i);
         }
 
         if ( last < 0 ) { /* don't use CA_CHECK_INDEX for excl */
           last += ca_dim[i];
         }
-        if ( excl && ( first == last ) ) {
-          index[i].block.start = first;
+        if ( excl && ( start == last ) ) {
+          index[i].block.start = start;
           index[i].block.count = 0;
           index[i].block.step  = 1;
         }
         else {
           if ( excl ) {
-            last += ( (last>=first) ? -1 : 1 );
+            last += ( (last>=start) ? -1 : 1 );
           }
           if ( info->range_check ) {
             if ( last < 0 || last >= ca_dim[i] ) {
@@ -657,11 +632,71 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
                        (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
             }
           }
-          index[i].block.start = first;
-          index[i].block.count = count = llabs(last - first) + 1;
-          index[i].block.step  = step  = ( last >= first ) ? 1 : -1;
+          index[i].block.start = start;
+          index[i].block.count = count = llabs(last - start) + 1;
+          index[i].block.step  = step  = ( last >= start ) ? 1 : -1;
         }
       }
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+      else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
+        ca_size_t start, last, excl, count, step, bound;
+        volatile VALUE iv_beg, iv_end, iv_excl;
+        rb_arithmetic_sequence_components_t x;
+        rb_arithmetic_sequence_extract(arg, &x);
+        iv_beg  = x.begin;
+        iv_end  = x.end;
+        iv_excl = x.exclude_end;
+        step    = NUM2SIZE(x.step);
+        if ( NIL_P(iv_beg) ) {
+          start = 0;                    
+        }
+        else {
+          start = NUM2SIZE(iv_beg);          
+        }
+        if ( NIL_P(iv_end) ) {
+          last  = -1;
+        }
+        else {
+          last  = NUM2SIZE(iv_end);          
+        }
+        excl  = RTEST(iv_excl);
+        if ( step == 0 ) {
+          rb_raise(rb_eRuntimeError, 
+                   "step in index equals to 0 in block reference");
+        }
+        index_type[i] = CA_IDX_BLOCK;
+        CA_CHECK_INDEX_AT(start, ca_dim[i], i);
+        if ( last < 0 ) {
+          last += ca_dim[i];
+        }
+        if ( excl && ( start == last ) ) {
+          index[i].block.start = start;
+          index[i].block.count = 0;
+          index[i].block.step  = 1;
+        }
+        else {
+          if ( excl ) {
+            last += ( (last>=start) ? -1 : 1 );
+          }
+          if ( last < 0 || last >= ca_dim[i] ) {
+            rb_raise(rb_eIndexError,
+                     "index %lld is out of range (0..%lld) at %i-dim",
+                     (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
+          }
+          if ( (last - start) * step < 0 ) {
+            count = 1;
+          }
+          else {
+            count = llabs(last - start)/llabs(step) + 1;
+          }
+          bound = start + (count - 1)*step;
+          CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
+          index[i].block.start = start;
+          index[i].block.count = count;
+          index[i].block.step  = step;
+        }
+      }
+#endif
       else if ( TYPE(arg) == T_ARRAY ) { /* ca[--,[array],--] */
         if ( RARRAY_LEN(arg) == 1 ) {
           VALUE arg0 = rb_ary_entry(arg, 0);
@@ -1914,12 +1949,9 @@ void
 Init_carray_access ()
 {
 
-#if RUBY_VERSION_CODE >= 190
-#else
-  id_beg   = rb_intern("begin");
-  id_end   = rb_intern("end");
-  id_excl  = rb_intern("excl");
-#endif
+  id_begin    = rb_intern("begin");
+  id_end      = rb_intern("end");
+  id_excl_end = rb_intern("exclude_end?");
 
   id_ca    = rb_intern("ca");
   id_to_ca = rb_intern("to_ca");

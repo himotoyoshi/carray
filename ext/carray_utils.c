@@ -18,36 +18,10 @@
 #include "st.h"
 #endif
 
-#if RUBY_VERSION_CODE >= 240
-#define RSTRUCT_EMBED_LEN_MAX RSTRUCT_EMBED_LEN_MAX
-enum {
-  RSTRUCT_EMBED_LEN_MAX = 3,
-  RSTRUCT_ENUM_END
-};
-struct RStruct {
-    struct RBasic basic;
-    union {
-        struct {
-            long len;
-            const VALUE *ptr;
-        } heap;
-        const VALUE ary[RSTRUCT_EMBED_LEN_MAX];
-    } as;
-};
-#define RSTRUCT(obj) (R_CAST(RStruct)(obj))
-#endif
-
-#if RUBY_VERSION_CODE >= 190
-#define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
-#define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
-#define RANGE_EXCL(r) (RSTRUCT(r)->as.ary[2])
-#else
-static ID id_beg, id_end, id_excl;
-#define RANGE_BEG(r) (rb_ivar_get(r, id_beg))
-#define RANGE_END(r) (rb_ivar_get(r, id_end))
-#define RANGE_EXCL(r) (rb_ivar_get(r, id_excl))
-#endif
-
+static ID id_begin, id_end, id_excl_end;
+#define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
+#define RANGE_END(r)  (rb_funcall(r, id_end, 0))
+#define RANGE_EXCL(r) (rb_funcall(r, id_excl_end, 0))
 
 /* ------------------------------------------------------------------- */
 
@@ -163,7 +137,7 @@ void
 ca_parse_range (VALUE arg, ca_size_t size, 
                 ca_size_t *poffset, ca_size_t *pcount, ca_size_t *pstep)
 {
-  ca_size_t first, start, last, count, step, bound, excl;
+  ca_size_t start, last, count, step, bound, excl;
 
  retry:
 
@@ -182,24 +156,59 @@ ca_parse_range (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    first = NUM2SIZE(RANGE_BEG(arg));
+    start = NUM2SIZE(RANGE_BEG(arg));
     last  = NUM2SIZE(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
-    CA_CHECK_INDEX(first, size);
+    CA_CHECK_INDEX(start, size);
     if ( last < 0 ) {
       last += size;
     }
     if ( excl ) {
-      last += ( (last>=first) ? -1 : 1 );
+      last += ( (last>=start) ? -1 : 1 );
     }
     if ( last < 0 || last >= size ) {
       rb_raise(rb_eIndexError,
                "invalid index range");
     }
-    *poffset = first;
-    *pcount  = llabs(last - first) + 1;
+    *poffset = start;
+    *pcount  = llabs(last - start) + 1;
     *pstep   = 1;
   }
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+  else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
+    rb_arithmetic_sequence_components_t x;
+    rb_arithmetic_sequence_extract(arg, &x);
+
+    start = NUM2SIZE(x.begin);
+    last  = NUM2SIZE(x.end);
+    excl  = RTEST(x.exclude_end);
+    step  = NUM2SIZE(x.step);
+    if ( step == 0 ) {
+      rb_raise(rb_eRuntimeError, "step should not be 0");
+    }
+    if ( last < 0 ) {
+      last += size;
+    }
+    if ( excl ) {
+      last += ( (last>=start) ? -1 : 1 );
+    }
+    if ( last < 0 || last >= size ) {
+      rb_raise(rb_eIndexError, "index out of range");
+    }
+    CA_CHECK_INDEX(start, size);
+    if ( (last - start) * step < 0 ) {
+      count = 1;
+    }
+    else {
+      count = llabs(last - start)/llabs(step) + 1;
+    }
+    bound = start + (count - 1)*step;
+    CA_CHECK_INDEX(bound, size);
+    *poffset = start;
+    *pcount  = count;
+    *pstep   = step;
+  }
+#endif
   else if ( TYPE(arg) == T_ARRAY ) {
     if ( RARRAY_LEN(arg) == 1 ) {     /* [nil] or [i..j] or [i] */
       arg = rb_ary_entry(arg, 0);
@@ -252,6 +261,41 @@ ca_parse_range (VALUE arg, ca_size_t size,
         *pcount  = count;
         *pstep   = step;
       }
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+      else if ( rb_obj_is_kind_of(arg0, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
+        rb_arithmetic_sequence_components_t x;
+        rb_arithmetic_sequence_extract(arg0, &x);
+
+        start = NUM2SIZE(x.begin);
+        last  = NUM2SIZE(x.end);
+        excl  = RTEST(x.exclude_end);
+        step  = NUM2SIZE(x.step);
+        if ( step == 0 ) {
+          rb_raise(rb_eRuntimeError, "step should not be 0");
+        }
+        if ( last < 0 ) {
+          last += size;
+        }
+        if ( excl ) {
+          last += ( (last>=start) ? -1 : 1 );
+        }
+        if ( last < 0 || last >= size ) {
+          rb_raise(rb_eIndexError, "index out of range");
+        }
+        CA_CHECK_INDEX(start, size);
+        if ( (last - start) * step < 0 ) {
+          count = 1;
+        }
+        else {
+          count = llabs(last - start)/llabs(step) + 1;
+        }
+        bound = start + (count - 1)*step;
+        CA_CHECK_INDEX(bound, size);
+        *poffset = start;
+        *pcount  = count;
+        *pstep   = step;
+      }
+#endif      
       else {                            /* [i,n] */
         start = NUM2SIZE(arg0);
         count = NUM2SIZE(arg1);
@@ -290,7 +334,7 @@ void
 ca_parse_range_without_check (VALUE arg, ca_size_t size,
                               ca_size_t *poffset, ca_size_t *pcount, ca_size_t *pstep)
 {
-  ca_size_t first, start, last, count, step, bound, excl;
+  ca_size_t start, last, count, step, bound, excl;
 
  retry:
 
@@ -308,16 +352,35 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    first = NUM2SIZE(RANGE_BEG(arg));
+    start = NUM2SIZE(RANGE_BEG(arg));
     last  = NUM2SIZE(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     if ( excl ) {
-      last += ( (last>=first) ? -1 : 1 );
+      last += ( (last>=start) ? -1 : 1 );
     }
-    *poffset = first;
-    *pcount  = last - first + 1;
+    *poffset = start;
+    *pcount  = last - start + 1;
     *pstep   = 1;
   }
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+  else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
+    rb_arithmetic_sequence_components_t x;
+    rb_arithmetic_sequence_extract(arg, &x);
+
+    start = NUM2SIZE(x.begin);
+    last  = NUM2SIZE(x.end);
+    excl  = RTEST(x.exclude_end);
+    step  = NUM2SIZE(x.step);
+    if ( excl ) {
+      last += ( (last>=start) ? -1 : 1 );
+    }
+    count = (last - start)/llabs(step) + 1;
+    bound = start + (count - 1)*step;
+    *poffset = start;
+    *pcount  = count;
+    *pstep   = step;
+  }
+#endif
   else if ( TYPE(arg) == T_ARRAY ) {
     if ( RARRAY_LEN(arg) == 1 ) {   /* [nil] or [i..j] or [i] */
       arg = rb_ary_entry(arg, 0);
@@ -349,6 +412,25 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         *pcount  = count;
         *pstep   = step;
       }
+#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
+      else if ( rb_obj_is_kind_of(arg0, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
+        rb_arithmetic_sequence_components_t x;
+        rb_arithmetic_sequence_extract(arg0, &x);
+
+        start = NUM2SIZE(x.begin);
+        last  = NUM2SIZE(x.end);
+        excl  = RTEST(x.exclude_end);
+        step  = NUM2SIZE(x.step);
+        if ( excl ) {
+          last += ( (last>=start) ? -1 : 1 );
+        }
+        count = (last - start)/llabs(step) + 1;
+        bound = start + (count - 1)*step;
+        *poffset = start;
+        *pcount  = count;
+        *pstep   = step;
+      }
+#endif
       else {                            /* [i,n] */
         start = NUM2SIZE(arg0);
         count = NUM2SIZE(arg1);
@@ -750,12 +832,9 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 void
 Init_carray_utils ()
 {
-#if RUBY_VERSION_CODE >= 190
-#else
-  id_beg   = rb_intern("begin");
-  id_end   = rb_intern("end");
-  id_excl  = rb_intern("excl");
-#endif
+  id_begin    = rb_intern("begin");
+  id_end      = rb_intern("end");
+  id_excl_end = rb_intern("exclude_end?");
 
   rb_define_singleton_method(rb_cCArray, "_scan_float",
            rb_ca_s_scan_float, -1);
