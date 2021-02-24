@@ -1,6 +1,6 @@
 Gem::Specification::new do |s|
 
-  version = "1.5.5"
+  version = "1.5.6"
 
   files = Dir.glob("**/*") + [".yardopts"] -
                              [ 
