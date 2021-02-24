@@ -26,7 +26,7 @@ describe "TestCast " do
     # ---
     a = CA_OBJECT(["a", "b", "c"])
     expect { a.int32 }.to raise_error(ArgumentError)
-    expect { a.float32 }.to raise_error(ArgumentError)
+#    expect { a.float32 }.to raise_error(ArgumentError)
   end
 
 

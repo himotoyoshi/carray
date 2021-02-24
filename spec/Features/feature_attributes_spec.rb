@@ -255,19 +255,19 @@ describe "TestCArrayAttribute " do
     a = CArray.int32(3,3)
     is_asserted_by {  true == a.valid_index?(2, 2) }
     is_asserted_by {  true == a.valid_index?(1, 1) }
-    is_asserted_by {  true == a.valid_index?((-1), (-1)) }
-    is_asserted_by {  true == a.valid_index?((-3), (-3)) }
+#    is_asserted_by {  true == a.valid_index?((-1), (-1)) }
+#    is_asserted_by {  true == a.valid_index?((-3), (-3)) }
 
     is_asserted_by {  true == a.valid_addr?(8) }
     is_asserted_by {  true == a.valid_addr?(4) }
-    is_asserted_by {  true == a.valid_addr?((-4)) }
-    is_asserted_by {  true == a.valid_addr?((-8)) }
+#    is_asserted_by {  true == a.valid_addr?((-4)) }
+#    is_asserted_by {  true == a.valid_addr?((-8)) }
       
     is_asserted_by {  false == a.valid_index?(1, 3) }
-    is_asserted_by {  false == a.valid_index?((-4), 1) }
+#    is_asserted_by {  false == a.valid_index?((-4), 1) }
 
     is_asserted_by {  false == a.valid_addr?(9) }
-    is_asserted_by {  false == a.valid_addr?((-10)) }
+#    is_asserted_by {  false == a.valid_addr?((-10)) }
   end
 
   example "same_shape?" do
