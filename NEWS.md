@@ -1,6 +1,18 @@
 ChangeLog of Ruby/CArray
 ========================
 
+1.5.6 -> 1.5.7
+
+* [Mod] Modify the methods 'CArray#first' and 'CArray#last' to return nil when the number of elements is zero
+* [Fix] Added check of having ArithmeticSeuqence in ruby_carray.c
+
+1.5.5 -> 1.5.6
+
+* [Mod] Modify CArray access methods to accept Enumerator::ArithmeticSequence for index, address
+* [Mod] Remove some gem autoloading (io_csv, io_sqlite3, rmagick, cairo, opencv, ffi)
+* [Mod] Modify 'CArray#valid_index?' and 'CArray#valid_addr?' to accept negative integers
+* [Mod] Modify the methods 'CArray#double' etc not to raise error for invalid string in conversion into float
+
 1.5.4 -> 1.5.5
 
 * [Fix] Fix recognition of "atan2", ... in "math.h"

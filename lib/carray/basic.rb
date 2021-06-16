@@ -83,11 +83,11 @@ class CArray
   end
   
   def first
-    self[0]
+    ( self.elements == 0 ) ? nil : self[0]
   end
   
   def last
-    self[-1]
+    ( self.elements == 0 ) ? nil :self[-1]
   end
 
   # matchup
