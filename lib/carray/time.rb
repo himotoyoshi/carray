@@ -30,7 +30,7 @@ class CArray
 
   def time_format (template = nil)
     if template
-      return str_strftime(template)
+      return time_strftime(template)
     else
       return convert(&:to_s)
     end    
