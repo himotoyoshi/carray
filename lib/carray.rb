@@ -36,7 +36,9 @@ require 'carray/math'
 require 'carray/iterator'
 require 'carray/struct'
 require 'carray/table'
+require 'carray/array'
 require 'carray/string'
+require 'carray/time'
 
 # obsolete methods
 
