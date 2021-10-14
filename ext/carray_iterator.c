@@ -371,7 +371,7 @@ rb_ca_iter_prepare_output (int argc, VALUE *argv, VALUE self)
 
 /* yard:
   class CAIterator
-    def calculate
+    def calculate (data_type=nil, )
     end
   end
 */
