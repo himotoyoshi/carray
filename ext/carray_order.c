@@ -1046,28 +1046,32 @@ rb_ca_binary_search_linear_index_vectorized (volatile VALUE self, volatile VALUE
   sc = ca_wrap_readonly(self, CA_FLOAT64);
   cx = ca_wrap_readonly(vx, CA_FLOAT64);
 
-  if ( sc->ndim != 2 ) {
-    rb_raise(rb_eRuntimeError, "self should be 2-d array");
+  if ( sc->ndim < 2 ) {
+    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
   }
-
-  nseri = sc->dim[0];
-  nlist = 1;
-  for (i=1; i<sc->ndim; i++) {
-		nlist *= sc->dim[i];
-	}
 
   if ( cx->ndim > CA_DIM_MAX ) {
      rb_raise(rb_eRuntimeError, "2nd argument carray has too large dimension");  	
   }
 
+  nseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		nseri *= sc->dim[i];
+	}
+	nlist = sc->dim[sc->ndim-1];
+
   if ( rb_ca_is_scalar(vx) ) {
-    odim[0] = nseri;
-    co0 = carray_new(ca->data_type, 1, odim, 0, NULL);
+	  for (i=0; i<sc->ndim-1; i++) {
+	    odim[i] = sc->dim[i];
+		}
+    co0 = carray_new(ca->data_type, sc->ndim-1, odim, 0, NULL);
 	}
 	else {
-    odim[0] = nseri;
-    memcpy(&odim[1], cx->dim, cx->ndim*sizeof(ca_size_t));
-    co0 = carray_new(ca->data_type, cx->ndim + 1, odim, 0, NULL);
+	  for (i=0; i<sc->ndim-1; i++) {
+	    odim[i] = sc->dim[i];
+		}
+    memcpy(&odim[sc->ndim], cx->dim, cx->ndim*sizeof(ca_size_t));
+    co0 = carray_new(ca->data_type, sc->ndim-1 + cx->ndim, odim, 0, NULL);
 	}
 	
   out = out0 = ca_wrap_struct(co0);
@@ -1146,8 +1150,8 @@ rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
   double *x;
   double *px;
   double *po;
-  ca_size_t nseri, nlist, nreq;
-  ca_size_t i, k;
+  ca_size_t nlist, nreq;
+  ca_size_t i;
   boolean8_t *mx, *mo;
 
   Data_Get_Struct(self, CArray, ca);
@@ -1158,6 +1162,12 @@ rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
 
   sc = ca_wrap_readonly(self, CA_FLOAT64);
   cx = ca_wrap_readonly(vx, CA_FLOAT64);
+
+  if ( sc->ndim != 1 ) {
+    rb_raise(rb_eRuntimeError, "ndim of self should be 1");
+  }
+	
+	nlist = sc->dim[0];
 
   nreq = 1;
   for (i=1; i<cx->ndim; i++) {
@@ -1213,6 +1223,21 @@ rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
   }
 }
 
+
+/*
+
+
+  self: ndim >= 2
+        0...ndim :  prev dimensions are vectorized elements
+        -1:         last dimension is used for fetch_addr (as self)
+
+  vx: ndim >= 2
+        0...ndim :  prev dimensions are vectorized elements should be equal to self's
+        -1:        last dimension is used for fetch_addr (as addr)
+
+*/
+
+
 static VALUE
 rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
 {
@@ -1221,7 +1246,7 @@ rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
   double *x;
   double *px;
   double *po;
-  ca_size_t nseri, nlist, nreq;
+  ca_size_t nseri, nlist, nreq, xnseri;
   ca_size_t i, k;
   boolean8_t *mx, *mo;
 
@@ -1238,23 +1263,30 @@ rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
     rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
   }
 
-  nseri = sc->dim[0];
-  nlist = 1;
-  for (i=1; i<sc->ndim; i++) {
-		nlist *= sc->dim[i];
+  nseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		nseri *= sc->dim[i];
 	}
+	nlist = sc->dim[sc->ndim-1];
 
-  if ( cx->ndim > CA_DIM_MAX ) {
-    rb_raise(rb_eRuntimeError, "2nd argument carray has too large dimension");  	
+  if ( cx->ndim < sc->ndim - 1 ) {
+    rb_raise(rb_eRuntimeError, "ndim of first argument should be larger than (ndim - 1) of self");  	
   }
 
-	if ( cx->dim[0] != nseri ) {
+	xnseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		xnseri *= cx->dim[i];
+	}
+	
+	if ( xnseri != nseri ) {
     rb_raise(rb_eRuntimeError, "1st dimension should be same between self and 1st argument");  			
 	}
 
-  nreq = 1;
-  for (i=1; i<cx->ndim; i++) {
-		nreq *= cx->dim[i];
+	if ( cx->ndim == sc->ndim - 1 ) {
+		nreq = 1;
+	}
+	else {
+	  nreq = cx->dim[cx->ndim-1];
 	}
 
   co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
