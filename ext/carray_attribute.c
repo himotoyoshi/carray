@@ -45,7 +45,7 @@ rb_ca_data_type (VALUE self)
 /* @overload ndim
 
 (Attribute) 
-Returns the rank (e.g. 1 for 1D array, 3 for 3D array, ...).
+Returns the number of dimensions (e.g. 1 for 1D array, 3 for 3D array, ...).
 */
 
 VALUE
@@ -60,7 +60,7 @@ rb_ca_ndim (VALUE self)
 
 (Attribute) 
 Returns the byte size of each element (e.g. 4 for CA_INT32, 8 for CA_FLOAT64).
-The byte size can be known using CArray.sizeof(data_type)
+The byte size can be obtained using CArray.sizeof(data_type)
 for the numerical data types, but
 the byte size of fixed-length data type can be known 
 only by this method.

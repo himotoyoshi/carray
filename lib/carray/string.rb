@@ -12,6 +12,11 @@ require "date"
 
 class CArray
 
+  def self.format (fmt, *argv)
+    raise "no parameters given" if argv.empty?
+    return argv.shift.zip(*argv).map { |params| Kernel::format(fmt, *params) }.to_ca
+  end
+
   def str_len ()
     return convert(:int, &:length)
   end
