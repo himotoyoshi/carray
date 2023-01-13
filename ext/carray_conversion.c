@@ -168,7 +168,7 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
 #endif
   default:
     if ( rb_respond_to(io, rb_intern("write") ) ) {
-      VALUE buf = rb_str_new(NULL, ca_length(ca));
+      volatile VALUE buf = rb_str_new(NULL, ca_length(ca));
       ca_copy_data(ca, StringValuePtr(buf));
       OBJ_INFECT(buf, self);
       rb_funcall(io, rb_intern("write"), 1, buf);
@@ -210,8 +210,6 @@ rb_ca_load_binary (VALUE self, VALUE io)
     rb_raise(rb_eCADataTypeError, "don't load object array");
   }
 
-  ca_allocate(ca);
-
   switch ( TYPE(io) ) {
   case T_STRING:
     if ( ca_length(ca) > RSTRING_LEN(io) ) {
@@ -219,22 +217,22 @@ rb_ca_load_binary (VALUE self, VALUE io)
                "data size mismatch (%lld for %lld)",
                (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
+    ca_allocate(ca);
     memcpy(ca->ptr, StringValuePtr(io), ca_length(ca));
+    ca_sync(ca);
+    ca_detach(ca);
     OBJ_INFECT(self, io);
+    return self;
     break;
   default:
     if ( rb_respond_to(io, rb_intern("read") ) ) {
-      VALUE buf = rb_funcall(io, rb_intern("read"), 1, SIZE2NUM(ca_length(ca)));
-      memcpy(ca->ptr, StringValuePtr(buf), ca_length(ca));
-      OBJ_INFECT(self, io);
+      volatile VALUE buf = rb_funcall(io, rb_intern("read"), 1, SIZE2NUM(ca_length(ca)));
+      return rb_ca_load_binary(self, buf);
     }
     else {
       rb_raise(rb_eRuntimeError, "IO like object should have 'read' method");
     }
   }
-
-  ca_sync(ca);
-  ca_detach(ca);
 
   return self;
 }

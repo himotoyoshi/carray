@@ -78,6 +78,10 @@ void
 Init_carray_ext ()
 {
 
+#ifdef HAVE_RB_EXT_RACTOR_SAFE
+    rb_ext_ractor_safe(true);
+#endif
+		
   /* Classes and Modules */
 
 #ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
