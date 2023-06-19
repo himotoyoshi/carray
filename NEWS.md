@@ -1,6 +1,12 @@
 ChangeLog of Ruby/CArray
 ========================
 
+1.5.8 -> 1.5.9
+--------------
+
+* [New] Add new method 'CArray#vectorized_find_linear_addr'
+* [Fix] Fixed invalid return value type in CArray##stddev 
+
 1.5.7 -> 1.5.8
 --------------
 
@@ -14,7 +20,7 @@ ChangeLog of Ruby/CArray
 --------------
 
 * [Mod] Modify the methods 'CArray#first' and 'CArray#last' to return nil when the number of elements is zero
-* [Fix] Added check of having ArithmeticSeuqence in ruby_carray.c
+* [Fix] Add check of having ArithmeticSeuqence in ruby_carray.c
 
 1.5.5 -> 1.5.6
 --------------
