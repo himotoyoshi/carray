@@ -745,7 +745,7 @@ static void
 ca_proc_stddev_<type> (ca_size_t elements, ca_size_t min_count,
                      boolean8_t *m, void *ptr, CAStatIterator *it,
                      int return_object, VALUE *retobj,
-                     boolean8_t *retmask, <atype> *retval)
+                     boolean8_t *retmask, float64_t *retval)
 {
   volatile <atype> sum = <azero>, sum2 = <azero>, ave, var, diff;
   <type> *p = (<type> *) ptr;
@@ -802,7 +802,7 @@ ca_proc_stddev_<type> (ca_size_t elements, ca_size_t min_count,
     if ( retmask ) {
       *retmask = ( count > min_count ) ? 1 : 0;
     }
-    *retval  = sqrt_<op_type>(var);
+    *retval  = <type2dbl>(sqrt_<op_type>(var));
   }
 }
 

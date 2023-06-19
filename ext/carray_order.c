@@ -1239,6 +1239,108 @@ rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
 
 
 static VALUE
+rb_ca_find_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
+{
+  volatile VALUE out, out0;
+  CArray *ca, *sc, *cx, *co0, *co;
+  double *x;
+  double *px;
+  double *po;
+  ca_size_t nseri, nlist, nreq, xnseri;
+  ca_size_t i, k;
+  boolean8_t *mx, *mo;
+
+  Data_Get_Struct(self, CArray, ca);
+
+  if ( rb_ca_is_any_masked(self) ) {
+    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
+  }
+
+  sc = ca_wrap_readonly(self, CA_FLOAT64);
+  cx = ca_wrap_readonly(vx, CA_FLOAT64);
+
+  if ( sc->ndim < 2 ) {
+    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
+  }
+
+  nseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		nseri *= sc->dim[i];
+	}
+	nlist = sc->dim[sc->ndim-1];
+
+  if ( cx->ndim < sc->ndim - 1 ) {
+    rb_raise(rb_eRuntimeError, "ndim of first argument should be larger than (ndim - 1) of self");  	
+  }
+
+	xnseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		xnseri *= cx->dim[i];
+	}
+	
+	if ( xnseri != nseri ) {
+    rb_raise(rb_eRuntimeError, "1st dimension should be same between self and 1st argument");  			
+	}
+
+	if ( cx->ndim == sc->ndim - 1 ) {
+		nreq = 1;
+	}
+	else {
+	  nreq = cx->dim[cx->ndim-1];
+	}
+
+  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
+  out = out0 = ca_wrap_struct(co0);
+  co = ca_wrap_writable(out, CA_FLOAT64);
+
+  ca_attach_n(3, sc, cx, co);
+
+  x  = (double*) sc->ptr;
+  px = (double*) cx->ptr;
+  po = (double*) co->ptr;
+
+  ca_create_mask(co);
+  ca_update_mask(cx);
+
+  if ( cx->mask ) {
+    mx = (boolean8_t *) cx->mask->ptr;
+    mo = (boolean8_t *) co->mask->ptr;
+		for (k=0; k<nseri; k++) {
+	    for (i=0; i<nreq; i++) {
+	      if ( ! *mx ) {
+		      if ( linear_index(nlist, x, *px, po) ) {
+	        	*mo = 1;
+	        }
+	      }
+	      else {
+	        *mo = 1;
+	      }
+	      mx++; mo++; px++, po++;
+	    }
+			x += nlist;
+    }		
+  }
+  else {
+    mo = (boolean8_t *) co->mask->ptr;
+		for (k=0; k<nseri; k++) {
+	    for (i=0; i<nreq; i++) {
+	      if ( linear_index(nlist, x, *px, po) ) {
+        	*mo = 1;
+        }
+	      mo++; px++; po++; 
+	    }
+			x += nlist;
+		}
+  }
+
+  ca_sync(co);
+  ca_detach_n(3, sc, cx, co);
+
+  return out0;		
+}
+
+
+static VALUE
 rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
 {
   volatile VALUE out, out0;
@@ -1371,6 +1473,9 @@ Init_carray_order ()
 
   rb_define_method(rb_cCArray,  "fetch_linear_addr",
                                 rb_ca_fetch_linear_addr, 1);
+
+  rb_define_method(rb_cCArray,  "vectorized_find_linear_addr",
+                                rb_ca_find_linear_addr_vectorized, 1);
 
   rb_define_method(rb_cCArray,  "vectorized_fetch_linear_addr",
                                 rb_ca_fetch_linear_addr_vectorized, 1);
