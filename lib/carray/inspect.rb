@@ -32,9 +32,6 @@ class CArray::Inspector  # :nodoc:
               data_spec,
               ">"
              ].join
-    if @carray.tainted?
-      output.taint
-    end
     return output
   end
   
