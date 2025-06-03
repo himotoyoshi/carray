@@ -10,8 +10,6 @@
 
 #include "carray.h"
 
-VALUE rb_cCASelect;
-
 /* yard:
   class CASelect < CAVirtual # :nodoc:
   end
@@ -34,6 +32,34 @@ typedef struct {
   CArray   *select;
   ca_size_t  _dim;
 } CASelect;
+
+const rb_data_type_t caselect_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CASelect",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t caselect_mask_data_type = {
+    .parent = &caselect_data_type,
+    .wrap_struct_name = "CASelectMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+VALUE rb_cCASelect;
+VALUE rb_cCASelectMask;
+
 
 /* ------------------------------------------------------------------- */
 
@@ -365,8 +391,8 @@ rb_ca_select_new (VALUE cary, VALUE select)
   CASelect *ca;
   rb_check_carray_object(cary);
   rb_check_carray_object(select);
-  Data_Get_Struct(cary, CArray, parent);
-  Data_Get_Struct(select, CArray, cselect);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
+  TypedData_Get_Struct(select, CArray, &carray_data_type, cselect);
   ca = (CASelect *) ca_select_new(parent, cselect);
   if ( ! ca ) {
     return Qnil;
@@ -385,8 +411,8 @@ rb_ca_select_new_share (VALUE cary, VALUE select)
   CASelect *ca;
   rb_check_carray_object(cary);
   rb_check_carray_object(select);
-  Data_Get_Struct(cary, CArray, parent);
-  Data_Get_Struct(select, CArray, cselect);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
+  TypedData_Get_Struct(select, CArray, &carray_data_type, cselect);
   ca = (CASelect *) ca_select_new_share(parent, cselect);
   if ( ! ca ) {
     return Qnil;
@@ -527,7 +553,7 @@ static VALUE
 rb_cm_s_allocate (VALUE klass)
 {
   CASelect *ca;
-  return Data_Make_Struct(klass, CASelect, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CASelect, &caselect_data_type, ca);
 }
 
 static VALUE
@@ -535,8 +561,8 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
 {
   CASelect *ca, *cs;
 
-  Data_Get_Struct(self,  CASelect, ca);
-  Data_Get_Struct(other, CASelect, cs);
+  TypedData_Get_Struct(self,  CASelect, &caselect_data_type, ca);
+  TypedData_Get_Struct(other, CASelect, &caselect_data_type, cs);
 
   /* share select info */
   ca_select_setup(ca, cs->parent, cs->select, 1);

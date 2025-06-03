@@ -26,7 +26,7 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
   boolean8_t zero = 0, one = 1;
 
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
     return rval;
@@ -69,7 +69,7 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
 {
   volatile VALUE out;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
     return Qnil;
@@ -108,7 +108,7 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
   boolean8_t zero = 0, one = 1;
 
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
     return rval;
@@ -149,7 +149,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
 {
   volatile VALUE out;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
     return Qnil;
@@ -196,7 +196,7 @@ rb_ca_fill (VALUE self, VALUE rval)
   CArray *ca;
 
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
     return rval;
@@ -451,7 +451,7 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
 
     if ( rb_obj_is_carray(arg) ) {
       CArray *cs;
-      Data_Get_Struct(arg, CArray, cs);
+      TypedData_Get_Struct(arg, CArray, &carray_data_type, cs);
       if ( ca_is_integer_type(cs) ) { 
         #if 0
         if ( ca_ndim == 1 && cs->ndim == 1 ) { /* ca[g] -> CA_REG_GRID (1d) */
@@ -849,7 +849,7 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
       }
       else if ( rb_obj_is_carray(arg) ) {              /* ca[--,ca,--] */
         CArray *ci;
-        Data_Get_Struct(arg, CArray, ci);
+        TypedData_Get_Struct(arg, CArray, &carray_data_type, ci);
         if ( ca_is_boolean_type(ci) || ca_is_integer_type(ci) ) {
           is_grid = 1;
           goto loop_exit;
@@ -944,7 +944,7 @@ rb_ca_ref_address (VALUE self, CAIndexInfo *info)
 {
   CArray *ca;
   ca_size_t addr;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = info->index[0].scalar;
   return rb_ca_fetch_addr(self, addr);
 }
@@ -954,7 +954,7 @@ rb_ca_store_address (VALUE self, CAIndexInfo *info, volatile VALUE rval)
 {
   CArray *ca;
   ca_size_t addr;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = info->index[0].scalar;
   if ( rb_obj_is_cscalar(rval) ) {
     rval = rb_ca_fetch_addr(rval, 0);
@@ -969,7 +969,7 @@ rb_ca_ref_point (VALUE self, CAIndexInfo *info)
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   for (i=0; i<ca->ndim; i++) {
     idx[i] = info->index[i].scalar;
   }
@@ -982,7 +982,7 @@ rb_ca_store_point (VALUE self, CAIndexInfo *info, volatile VALUE val)
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   for (i=0; i<ca->ndim; i++) {
     idx[i] = info->index[i].scalar;
   }
@@ -1014,17 +1014,17 @@ rb_ca_store_all (VALUE self, VALUE rval)
     rval = rb_ca_fetch_addr(rval, 0);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
  retry:
 
   if ( rb_obj_is_carray(rval) ) {
     CArray *cv;
-    Data_Get_Struct(rval, CArray, cv);
+    TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
     if ( cv->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
       rval = ca_ubrep_bind_with(rval, self);
-      Data_Get_Struct(rval, CArray, cv);
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
     }
 
     if ( ca->elements != cv->elements ) {
@@ -1217,29 +1217,14 @@ rb_ca_ref_block (VALUE self, CAIndexInfo *info)
   int16_t ndim = 0;
   ca_size_t offset = 0;
   ca_size_t flag = 0;
-  ca_size_t elements;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ndim = info->ndim;
 
-  elements = 1;
   for (i=0; i<info->ndim; i++) {
     dim[i] = ca->dim[i];
-    switch ( info->index_type[i] ) {
-    case CA_IDX_SCALAR:
-      elements *= 1;
-      break;
-    case CA_IDX_ALL:
-      elements *= ca->dim[i];
-      break;
-    case CA_IDX_BLOCK:
-      elements *= info->index[i].block.count;
-      break;
-    default:
-      rb_raise(rb_eIndexError, "invalid index for block reference");
-    }
   }
 
   for (i=0; i<info->ndim; i++) {
@@ -1291,7 +1276,7 @@ rb_ca_refer_new_flatten (VALUE self)
   CArray *ca;
   ca_size_t dim0;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   dim0 = ca->elements;
   return rb_ca_refer_new(self, ca->data_type, 1, &dim0, ca->bytes, 0);
 }
@@ -1312,7 +1297,7 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
 
  retry:
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
@@ -1380,7 +1365,6 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   default:
     rb_raise(rb_eIndexError, "invalid index specified");
   }
-
   return obj;
 }
 
@@ -1391,7 +1375,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   CArray *ca;
   CAIndexInfo info;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   info.range_check = 0;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
@@ -1484,7 +1468,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
 
  retry:
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
@@ -1543,7 +1527,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   }
   case CA_REG_METHOD_CALL: {
     volatile VALUE idx;
-    Data_Get_Struct(self, CArray, ca);
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     ca_attach(ca);
     idx = rb_funcall2(self, SYM2ID(info.symbol), (int)(argc-1), argv+1);
     obj = rb_ca_store(self, idx, rval);
@@ -1619,7 +1603,7 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 static VALUE
 rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
 {
-  volatile VALUE rtype, rndim, rindex;
+  volatile VALUE rtype, rindex;
   CAIndexInfo info;
   int     ndim;
   ca_size_t dim[CA_RANK_MAX];
@@ -1644,7 +1628,6 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
                    RARRAY_LEN(ridx), RARRAY_PTR(ridx), &info);
 
   rtype  = INT2NUM(info.type);
-  rndim  = INT2NUM(info.ndim);
   rindex = rb_ary_new2(info.ndim);
 
   switch ( info.type ) {
@@ -1736,7 +1719,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
   CAIndexInfo info;
   int i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   Check_Type(ridx, T_ARRAY);
 
   info.range_check = 1;
@@ -1811,7 +1794,7 @@ rb_ca_addr2index (VALUE self, VALUE raddr)
   ca_size_t addr;
   int i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   addr = NUM2SIZE(raddr);
   if ( addr < 0 || addr >= ca->elements ) {
@@ -1849,7 +1832,7 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
   boolean8_t *m;
   int     all_number = 1;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( argc != ca->ndim ) {
     rb_raise(rb_eRuntimeError, "invalid ndim of index");
@@ -1892,7 +1875,7 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
   }
 
   obj = rb_carray_new(CA_SIZE, 1, &elements, 0, NULL);
-  Data_Get_Struct(obj, CArray, co);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   q = (ca_size_t *) co->ptr;
 

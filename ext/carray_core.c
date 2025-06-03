@@ -22,6 +22,9 @@ const int ca_endian = CA_LITTLE_ENDIAN;
 /* definition of variables for ca_func mechanism */
 
 VALUE ca_class[CA_OBJ_TYPE_MAX];
+const rb_data_type_t *ca_typeddata[CA_OBJ_TYPE_MAX];
+VALUE ca_mask_class[CA_OBJ_TYPE_MAX];
+const rb_data_type_t *ca_mask_typeddata[CA_OBJ_TYPE_MAX];
 ca_operation_function_t ca_func[CA_OBJ_TYPE_MAX];
 int ca_obj_num = 0;
 
@@ -254,38 +257,65 @@ ca_init_obj_type ()
   /* CArray */
   ca_func[CA_OBJ_ARRAY]       = ca_array_func;
   ca_class[CA_OBJ_ARRAY]      = rb_cCArray;
+  ca_typeddata[CA_OBJ_ARRAY]  = &carray_data_type;
+  ca_mask_class[CA_OBJ_ARRAY]     = rb_cCArrayMask;
+  ca_mask_typeddata[CA_OBJ_ARRAY] = &carray_mask_data_type;
 
   /* CAWrap */
   ca_func[CA_OBJ_ARRAY_WRAP]  = ca_wrap_func;
   ca_class[CA_OBJ_ARRAY_WRAP] = rb_cCAWrap;
+  ca_typeddata[CA_OBJ_ARRAY_WRAP] = &cawrap_data_type;
+  ca_mask_class[CA_OBJ_ARRAY_WRAP] = rb_cCArrayMask;
+  ca_mask_typeddata[CA_OBJ_ARRAY_WRAP] = &carray_mask_data_type;
 
   /* CAScalar */
   ca_func[CA_OBJ_SCALAR]      = ca_scalar_func;
   ca_class[CA_OBJ_SCALAR]     = rb_cCScalar;
+  ca_typeddata[CA_OBJ_SCALAR] = &cscalar_data_type;
+  ca_mask_class[CA_OBJ_SCALAR] = rb_cCArrayMask;
+  ca_mask_typeddata[CA_OBJ_SCALAR] = &carray_mask_data_type;
 
   /* CARefer */
   ca_func[CA_OBJ_REFER]       = ca_refer_func;
   ca_class[CA_OBJ_REFER]      = rb_cCARefer;
+  ca_typeddata[CA_OBJ_REFER]  = &carefer_data_type;
+  ca_mask_class[CA_OBJ_REFER] = rb_cCAReferMask;
+  ca_mask_typeddata[CA_OBJ_REFER] = &carefer_mask_data_type;
 
   /* CABlock */
   ca_func[CA_OBJ_BLOCK]       = ca_block_func;
   ca_class[CA_OBJ_BLOCK]      = rb_cCABlock;
+  ca_typeddata[CA_OBJ_BLOCK]  = &cablock_data_type;
+  ca_mask_class[CA_OBJ_BLOCK] = rb_cCABlockMask;
+  ca_mask_typeddata[CA_OBJ_BLOCK] = &cablock_mask_data_type;
 
   /* CASelect */
   ca_func[CA_OBJ_SELECT]      = ca_select_func;
   ca_class[CA_OBJ_SELECT]     = rb_cCASelect;
+  ca_typeddata[CA_OBJ_SELECT] = &caselect_data_type;
+  ca_mask_class[CA_OBJ_SELECT] = rb_cCASelectMask;
+  ca_mask_typeddata[CA_OBJ_SELECT] = &caselect_mask_data_type;
 
   /* CAObject */
   ca_func[CA_OBJ_OBJECT]      = ca_object_func;
   ca_class[CA_OBJ_OBJECT]     = rb_cCAObject;
+  ca_typeddata[CA_OBJ_OBJECT] = &caobject_data_type;
+  ca_mask_class[CA_OBJ_OBJECT] = rb_cCArrayMask;
+  ca_mask_typeddata[CA_OBJ_OBJECT] = &carray_mask_data_type;
 
   /* CARepeat */
   ca_func[CA_OBJ_REPEAT]      = ca_repeat_func;
   ca_class[CA_OBJ_REPEAT]     = rb_cCARepeat;
+  ca_typeddata[CA_OBJ_REPEAT] = &carepeat_data_type;
+  ca_mask_class[CA_OBJ_REPEAT] = rb_cCARepeatMask;
+  ca_mask_typeddata[CA_OBJ_REPEAT] = &carepeat_mask_data_type;
 
   /* CAUnboundRepeat */
   ca_func[CA_OBJ_UNBOUND_REPEAT]  = ca_ubrep_func;
   ca_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeat;
+  ca_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_data_type;
+  ca_mask_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeatMask;
+  ca_mask_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_mask_data_type;
 
   ca_obj_num = 9;
 }
@@ -295,7 +325,11 @@ ca_init_obj_type ()
 */
 
 int
-ca_install_obj_type (VALUE klass, ca_operation_function_t func)
+ca_install_obj_type (VALUE klass, 
+                     const rb_data_type_t *typeddata, 
+		     VALUE mask_klass, 
+                     const rb_data_type_t *mask_typeddata, 
+		     ca_operation_function_t func)
 {
   int obj_type  = ca_obj_num++;
 
@@ -309,6 +343,9 @@ ca_install_obj_type (VALUE klass, ca_operation_function_t func)
 
   ca_class[obj_type] = klass;
   ca_func[obj_type]  = func;
+  ca_typeddata[obj_type]  = typeddata;
+  ca_mask_class[obj_type] = mask_klass;
+  ca_mask_typeddata[obj_type]  = mask_typeddata;
 
   return obj_type;
 }
@@ -344,7 +381,7 @@ ca_free (void *ap)
 {
   if ( ap ) {
     CArray *ca = (CArray *) ap;
-    ca_func[ca->obj_type].free_object(ap); /* delegate */
+    ca_func[ca->obj_type].free_object(ca); /* delegate */
   }
 }
 
@@ -367,7 +404,7 @@ VALUE
 ca_wrap_struct (void *ap)
 {
   CArray *ca = (CArray *) ap;
-  return Data_Wrap_Struct(ca_class[ca->obj_type], ca_mark, ca_free, ca);
+  return TypedData_Wrap_Struct(ca_class[ca->obj_type], ca_typeddata[ca->obj_type], ca);
 }
 
 /* ------------------------------------------------------------------- */
@@ -443,7 +480,7 @@ ca_test_cyclic_check(void *ap, void *ptr)
     VALUE rval = *(VALUE*) ptr;
     if ( rb_obj_is_carray(rval) ) {
       CArray *cv;
-      Data_Get_Struct(rval, CArray, cv);
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
       if ( ca_test_flag(cv, CA_FLAG_CYCLE_CHECK) ) {
         rb_raise(rb_eRuntimeError, "cyclic reference is not allowed in CArray");
       }
@@ -936,7 +973,7 @@ rb_ca_attach_i (VALUE self)
 {
   CArray *ca;
   if ( rb_obj_is_carray(self) ) {
-    Data_Get_Struct(self, CArray, ca);
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     ca_attach(ca);
     if ( ca_is_virtual(ca) ) {
       CAVIRTUAL(ca)->nosync += 1;
@@ -952,7 +989,7 @@ rb_ca_sync_i (VALUE self)
 {
   CArray *ca;
   if ( rb_obj_is_carray(self) ) {
-    Data_Get_Struct(self, CArray, ca);
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_virtual(ca) ) {
       CAVIRTUAL(ca)->nosync -= 1;
       ca_sync(ca);
@@ -969,7 +1006,7 @@ rb_ca_detach_i (VALUE self)
 {
   CArray *ca;
   if ( rb_obj_is_carray(self) ) {
-    Data_Get_Struct(self, CArray, ca);
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_virtual(ca) ) {   /* virtual array */
       CAVIRTUAL(ca)->nosync -= 1;
       ca_detach(ca);

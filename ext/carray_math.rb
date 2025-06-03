@@ -83,7 +83,7 @@ rb_ca_abs (VALUE self)
 {
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_is_complex_type(ca) ) {
     VALUE ret = rb_ca_abs_i(self);
     return rb_ca_copy(rb_funcall(ret, rb_intern("real"), 0));
@@ -98,7 +98,7 @@ rb_ca_abs_bang (VALUE self)
 {
   CArray *ca;
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_is_complex_type(ca) ) {
     VALUE ret = rb_ca_abs_i(self);
     return rb_funcall(self, rb_intern("[]="), 1, ret);
@@ -672,7 +672,7 @@ rb_ca_ipower (VALUE self, VALUE other)
 
   ipow = NUM2INT(other);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   co = ca_template(ca);
   obj = ca_wrap_struct(co);
@@ -728,7 +728,7 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
 
   ipow = NUM2INT(other);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -781,7 +781,7 @@ static VALUE rb_ca_pow (VALUE self, VALUE other)
   volatile VALUE obj;
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ( ca_is_float_type(ca) || ca_is_complex_type(ca) ) &&
        rb_obj_is_kind_of(other, rb_cInteger) ) {
     return rb_ca_ipower(self, other);
@@ -802,7 +802,7 @@ static VALUE rb_ca_pow (VALUE self, VALUE other)
 static VALUE rb_ca_pow_bang (VALUE self, VALUE other)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ( ca_is_float_type(ca) || ca_is_complex_type(ca) ) &&
        rb_obj_is_kind_of(other, rb_cInteger) ) {
     return rb_ca_ipower_bang(self, other);

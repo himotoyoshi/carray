@@ -112,6 +112,7 @@ def possible_prefix (*postfixes)
     File.expand_path("~/local"), ### user's home / local
     File.expand_path("~"),       ### user's home
     "/opt/local",                ### MacPorts
+    "/opt/homebrew",             ### Homebrew
     "/opt",                      ### UNIX 
     "/sw/local",                 ### Mac Fink
     "/sw/",                      ### Mac Fink

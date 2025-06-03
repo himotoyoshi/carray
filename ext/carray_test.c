@@ -173,7 +173,7 @@ rb_ca_is_type (VALUE arg, int type)
   if ( ! rb_obj_is_carray(arg) ) {
     rb_raise(rb_eRuntimeError, "CArray required");
   }
-  Data_Get_Struct(arg, CArray, ca);
+  TypedData_Get_Struct(arg, CArray, &carray_data_type, ca);
   return ca->data_type == type;
 }
 
@@ -237,7 +237,7 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   ca_size_t idx;
   int i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( argc != ca->ndim ) {
     rb_raise(rb_eArgError,
@@ -270,7 +270,7 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
   CArray *ca;
   ca_size_t addr;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = NUM2SIZE(raddr);
 	/*
   if ( addr < 0 ) {
@@ -295,7 +295,7 @@ static VALUE
 rb_ca_has_same_shape (VALUE self, VALUE other)
 {
   CArray *ca, *cb;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   cb = ca_wrap_readonly(other, ca->data_type);
   return ca_has_same_shape(ca, cb) ? Qtrue : Qfalse;
 }
@@ -486,8 +486,8 @@ rb_ca_equal (VALUE self, VALUE other)
     }
   }
 
-  Data_Get_Struct(self, CArray, ca);
-  Data_Get_Struct(other, CArray, cb);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
 
   return ( ca_equal(ca, cb) ) ? Qtrue : Qfalse;
 }
@@ -560,7 +560,7 @@ rb_ca_hash (VALUE self)
   CArray *ca;
   int32_t hash;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   hash = ca_hash(ca);
   return ULONG2NUM(hash);
 }
@@ -590,7 +590,7 @@ VALUE
 rb_ca_freeze (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
   return rb_obj_freeze(self);
 }

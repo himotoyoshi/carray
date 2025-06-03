@@ -10,6 +10,17 @@
 
 #include "carray.h"
 
+const rb_data_type_t caiterator_data_type = {
+    .wrap_struct_name = "CAIterator",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCAIterator;
 
 int8_t
@@ -18,7 +29,7 @@ ca_iter_ndim (VALUE self)
   int8_t ndim;
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
-    Data_Get_Struct(self, CAIterator, it);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
     ndim = it->ndim;
   }
   else {
@@ -34,7 +45,7 @@ ca_iter_dim (VALUE self, ca_size_t *dim)
   int i;
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
-    Data_Get_Struct(self, CAIterator, it);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
     for (i=0; i<it->ndim; i++) {
       dim[i] = it->dim[i];
     }
@@ -56,7 +67,7 @@ ca_iter_elements (VALUE self)
   int i, elements;
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
-    Data_Get_Struct(self, CAIterator, it);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
     elements = 1;
     for (i=0; i<it->ndim; i++) {
       elements *= it->dim[i];
@@ -87,8 +98,8 @@ ca_iter_kernel_at_addr (VALUE self, ca_size_t addr, VALUE rref)
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     CArray *ref, *ker;
-    Data_Get_Struct(self, CAIterator, it);
-    Data_Get_Struct(rref, CArray, ref);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
+    TypedData_Get_Struct(rref, CArray, &carray_data_type, ref);
     ker = it->kernel_at_addr(it, addr, ref);
     rker = ca_wrap_struct(ker);
     rb_ca_data_type_inherit(rker, rref);
@@ -108,8 +119,8 @@ ca_iter_kernel_at_index (VALUE self, ca_size_t *idx, VALUE rref)
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     CArray *ref, *ker;
-    Data_Get_Struct(self, CAIterator, it);
-    Data_Get_Struct(rref, CArray, ref);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
+    TypedData_Get_Struct(rref, CArray, &carray_data_type, ref);
     ker = it->kernel_at_index(it, idx, ref);
     rker = ca_wrap_struct(ker);
     rb_ca_data_type_inherit(rker, rref);
@@ -135,8 +146,8 @@ ca_iter_kernel_move_to_addr (VALUE self, ca_size_t addr, VALUE rref)
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     CArray *ker;
-    Data_Get_Struct(self, CAIterator, it);
-    Data_Get_Struct(rref, CArray, ker);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
+    TypedData_Get_Struct(rref, CArray, &carray_data_type, ker);
     it->kernel_move_to_addr(it, addr, ker);
   }
   else {
@@ -149,12 +160,11 @@ ca_iter_kernel_move_to_addr (VALUE self, ca_size_t addr, VALUE rref)
 VALUE
 ca_iter_kernel_move_to_index (VALUE self, ca_size_t *idx, VALUE rref)
 {
-  VALUE rker;
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
     CArray *ker;
-    Data_Get_Struct(self, CAIterator, it);
-    Data_Get_Struct(rref, CArray, ker);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
+    TypedData_Get_Struct(rref, CArray, &carray_data_type, ker);
     it->kernel_move_to_index(it, idx, ker);
   }
   else {
@@ -165,8 +175,8 @@ ca_iter_kernel_move_to_index (VALUE self, ca_size_t *idx, VALUE rref)
     for (i=0; i<ndim; i++) {
       rb_ary_store(vidx, i, SIZE2NUM(idx[i]));
     }
-    rker = rb_funcall(self, rb_intern("kernel_move_to_index"), 2,
-                      vidx, rref);
+    rb_funcall(self, rb_intern("kernel_move_to_index"), 2,
+               vidx, rref);
   }
   return rref;
 }
@@ -185,7 +195,7 @@ ca_iter_prepare_output (VALUE self, VALUE rtype, VALUE rbytes)
 
   if ( TYPE(self) == T_DATA ) {
     CAIterator *it;
-    Data_Get_Struct(self, CAIterator, it);
+    TypedData_Get_Struct(self, CAIterator, &caiterator_data_type, it);
     co = carray_new_safe(data_type, it->ndim, it->dim, bytes, NULL);
   }
   else {
@@ -393,7 +403,7 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
   elements = ca_iter_elements(self);
 
   rref     = ca_iter_reference(self);
-  Data_Get_Struct(rref, CArray, cr);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, cr);
   
   if ( NIL_P(argv[0]) ) {
     rtype = INT2NUM(cr->data_type);
@@ -408,7 +418,7 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
   argv++;
 
   routput = ca_iter_prepare_output(self, rtype, rbytes);
-  Data_Get_Struct(routput, CArray, co);
+  TypedData_Get_Struct(routput, CArray, &carray_data_type, co);
 
   ca_attach(cr);
 
@@ -416,7 +426,7 @@ rb_ca_iter_calculate (int argc, VALUE *argv, VALUE self)
 
     rker = ca_iter_kernel_at_addr(self, 0, rref);
 
-    Data_Get_Struct(rker, CArray, ck);
+    TypedData_Get_Struct(rker, CArray, &carray_data_type, ck);
     ca_attach(ck);
 
     if ( rb_block_given_p() ) {
@@ -491,7 +501,7 @@ rb_ca_iter_filter (int argc, VALUE *argv, VALUE self)
   elements = ca_iter_elements(self);
   rref = ca_iter_reference(self);
 
-  Data_Get_Struct(rref, CArray, cr);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, cr);
 
   /* FIXME: check data_type validity */
 
@@ -511,11 +521,11 @@ rb_ca_iter_filter (int argc, VALUE *argv, VALUE self)
   if ( rb_const_get(CLASS_OF(self), rb_intern("UNIFORM_KERNEL")) ) {
 
     rker = ca_iter_kernel_at_addr(self, 0, rref);
-    Data_Get_Struct(rker, CArray, ck);
+    TypedData_Get_Struct(rker, CArray, &carray_data_type, ck);
     ca_allocate(ck);
 
     rout = ca_iter_kernel_at_addr(self, 0, routput);
-    Data_Get_Struct(rker, CArray, cq);
+    TypedData_Get_Struct(rker, CArray, &carray_data_type, cq);
     ca_allocate(cq);
 
     for (i=0; i<elements; i++) {
@@ -563,7 +573,7 @@ rb_ca_iter_evaluate (int argc, VALUE *argv, VALUE self)
   elements = ca_iter_elements(self);
   rref  = ca_iter_reference(self);
 
-  Data_Get_Struct(rref, CArray, cr);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, cr);
 
   ca_attach(cr);
 
@@ -571,7 +581,7 @@ rb_ca_iter_evaluate (int argc, VALUE *argv, VALUE self)
 
     rker = ca_iter_kernel_at_addr(self, 0, rref);
 
-    Data_Get_Struct(rker, CArray, ck);
+    TypedData_Get_Struct(rker, CArray, &carray_data_type, ck);
 
     ca_attach(ck);
 

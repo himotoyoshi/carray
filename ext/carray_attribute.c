@@ -24,7 +24,7 @@ VALUE
 rb_ca_obj_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return INT2NUM(ca->obj_type);
 }
 
@@ -38,7 +38,7 @@ VALUE
 rb_ca_data_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return INT2NUM(ca->data_type);
 }
 
@@ -52,7 +52,7 @@ VALUE
 rb_ca_ndim (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return INT2NUM(ca->ndim);
 }
 
@@ -70,7 +70,7 @@ VALUE
 rb_ca_bytes (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return SIZE2NUM(ca->bytes);
 }
 
@@ -84,7 +84,7 @@ VALUE
 rb_ca_elements (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return SIZE2NUM(ca->elements);
 }
 
@@ -101,7 +101,7 @@ rb_ca_dim (VALUE self)
   volatile VALUE dim;
   CArray *ca;
   int i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   dim = rb_ary_new2(ca->ndim);
   for (i=0; i<ca->ndim; i++) {
     rb_ary_store(dim, i, SIZE2NUM(ca->dim[i]));
@@ -120,7 +120,7 @@ VALUE
 rb_ca_dim0 (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return SIZE2NUM(ca->dim[0]);
 }
 
@@ -135,7 +135,7 @@ VALUE
 rb_ca_dim1 (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca->ndim >= 2 ) ? SIZE2NUM(ca->dim[1]) : Qnil;
 }
 
@@ -150,7 +150,7 @@ VALUE
 rb_ca_dim2 (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca->ndim >= 3 ) ? SIZE2NUM(ca->dim[2]) : Qnil;
 }
 
@@ -165,7 +165,7 @@ VALUE
 rb_ca_dim3 (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca->ndim >= 4 ) ? SIZE2NUM(ca->dim[3]) : Qnil;
 }
 
@@ -179,7 +179,7 @@ VALUE
 rb_ca_data_type_name (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return rb_str_new2(ca_type_name[ca->data_type]);
 }
 
@@ -201,7 +201,7 @@ VALUE
 rb_ca_is_scalar (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_scalar(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -212,7 +212,7 @@ rb_obj_is_cscalar (VALUE obj)
 {
   CArray *ca;
   if ( rb_obj_is_carray(obj) ) {
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     return ( ca_is_scalar(ca) ) ? Qtrue : Qfalse;
   }
   return Qfalse;
@@ -236,7 +236,7 @@ VALUE
 rb_ca_is_entity (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_virtual(ca) ) ? Qfalse : Qtrue;
 }
 
@@ -250,7 +250,7 @@ VALUE
 rb_ca_is_virtual (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_virtual(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -265,7 +265,7 @@ VALUE
 rb_ca_is_attached (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_attached(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -280,7 +280,7 @@ VALUE
 rb_ca_is_empty (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca->elements == 0 ) ? Qtrue : Qfalse;
 }
 
@@ -313,7 +313,7 @@ VALUE
 rb_ca_is_read_only (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_readonly(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -346,7 +346,7 @@ VALUE
 rb_ca_is_mask_array (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_mask_array(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -379,7 +379,7 @@ VALUE
 rb_ca_is_value_array (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_value_array(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -401,7 +401,8 @@ VALUE
 rb_ca_is_fixlen_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_fixlen_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -423,7 +424,7 @@ VALUE
 rb_ca_is_boolean_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_boolean_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -446,7 +447,7 @@ VALUE
 rb_ca_is_numeric_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_numeric_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -469,7 +470,7 @@ VALUE
 rb_ca_is_integer_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_integer_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -499,7 +500,7 @@ VALUE
 rb_ca_is_unsigned_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_unsigned_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -522,7 +523,7 @@ VALUE
 rb_ca_is_float_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_float_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -545,7 +546,7 @@ VALUE
 rb_ca_is_complex_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_complex_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -567,7 +568,7 @@ VALUE
 rb_ca_is_object_type (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_object_type(ca) ? Qtrue : Qfalse;
 }
 
@@ -591,7 +592,6 @@ rb_ca_parent (VALUE self)
 VALUE
 rb_ca_set_parent (VALUE self, VALUE obj)
 {
-  OBJ_INFECT(self, obj);
   rb_ivar_set(self, id_parent, obj);
   if ( OBJ_FROZEN(obj) ) {
     rb_ca_freeze(self);
@@ -615,7 +615,7 @@ rb_ca_data_class (VALUE self)
 {
   volatile VALUE parent, data_class;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_test_flag(ca, CA_FLAG_NOT_DATA_CLASS) ) {
     return Qnil;
   }
@@ -641,7 +641,7 @@ rb_ca_data_class (VALUE self)
       }
       else {
         CArray *cr;
-        Data_Get_Struct(parent, CArray, cr);
+        TypedData_Get_Struct(parent, CArray, &carray_data_type, cr);
         if ( cr->bytes != ca->bytes ) {  /* byte size mismatch */
           ca_set_flag(ca, CA_FLAG_NOT_DATA_CLASS);
           return Qnil;
@@ -670,7 +670,7 @@ VALUE
 rb_ca_has_data_class (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_test_flag(ca, CA_FLAG_NOT_DATA_CLASS) ) {
     return Qfalse;
   }
@@ -756,7 +756,7 @@ rb_ca_root_array (VALUE self)
 {
   volatile VALUE refary;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_is_entity(ca) ) {
     return self;
   }
@@ -778,7 +778,7 @@ rb_ca_ancestors_loop (VALUE self, VALUE list)
 {
   volatile VALUE refary;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   rb_ary_unshift(list, self);
   if ( ca_is_entity(ca) ) {
     return list;
@@ -805,7 +805,7 @@ rb_ca_ancestors (VALUE self)
 {
   volatile VALUE list;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   list = rb_ary_new();
   return rb_ca_ancestors_loop(self, list);
 }

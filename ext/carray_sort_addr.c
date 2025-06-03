@@ -191,7 +191,7 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
 
   for (j=0; j<argc; j++) {
     CArray *ca;
-    Data_Get_Struct(argv[j], CArray, ca);
+    TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca);
     base->ca[j] = ca;
     ca_attach(ca);
   }
@@ -211,7 +211,7 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
 #endif
 
   out = rb_ca_template_with_type(argv[0], INT2NUM(CA_SIZE), INT2NUM(0));
-  Data_Get_Struct(out, CArray, co);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
   q = (ca_size_t *) co->ptr;
   
   for (i=0; i<elements; i++) {

@@ -1343,7 +1343,7 @@ rb_ca_stat_1d (VALUE self, VALUE rmc, VALUE vfval,
   boolean8_t *m;
   ca_size_t mc;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_proc[ca->data_type] ) {
     rb_raise(rb_eCADataTypeError,
@@ -1411,7 +1411,7 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   CArray *ca, *co;
   ca_size_t mc, ndim;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_proc[ca->data_type] ) {
     rb_raise(rb_eCADataTypeError,
@@ -1425,7 +1425,7 @@ rb_ca_stat_nd_contig (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   }
 
   out = rb_carray_new(data_type, ndim, ca->dim, 0, NULL);
-  Data_Get_Struct(out, CArray, co);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
 
 	if ( ca_has_mask(ca) ) {
 		ca_create_mask(co);
@@ -1515,7 +1515,7 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   ca_size_t mc;
   ca_size_t i, k;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   for (i=0; i<ca->ndim; i++) {
     dm[i] = 0;
@@ -1542,7 +1542,7 @@ rb_ca_stat_nd_discrete (VALUE self, VALUE vaxis, VALUE rmc, VALUE vfval,
   }
 
   out    = rb_carray_new(data_type, out_ndim, out_dim, 0, NULL);
-  Data_Get_Struct(out, CArray, co);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
   
   first  = carray_new(CA_SIZE, out_ndim, out_dim, 0, NULL);
   first->ptr = realloc(first->ptr, first->bytes*(first->elements+1));
@@ -1619,7 +1619,7 @@ rb_ca_stat_general (int argc, VALUE *argv, VALUE self,
                  vfval = CA_NIL, vaxis;
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ropt = rb_pop_options(&argc, &argv);
   rb_scan_options(ropt,
@@ -1746,7 +1746,7 @@ static VALUE
 rb_ca_min (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return rb_ca_stat_general(argc, argv, self, ca->data_type, ca_proc_min);
 }
 
@@ -1760,7 +1760,7 @@ static VALUE
 rb_ca_max (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return rb_ca_stat_general(argc, argv, self, ca->data_type, ca_proc_max);
 }
 
@@ -1774,7 +1774,7 @@ static VALUE
 rb_ca_accum (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return rb_ca_stat_general(argc, argv, self, ca->data_type, ca_proc_accum);
 }
 
@@ -1788,7 +1788,7 @@ rb_ca_stat_type2 (int argc, VALUE *argv, VALUE self,
 
   rb_scan_args(argc, argv, "02", (VALUE *) &rmc, (VALUE *) &rfval);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_proc[ca->data_type] ) {
     rb_raise(rb_eCADataTypeError,
@@ -1797,7 +1797,7 @@ rb_ca_stat_type2 (int argc, VALUE *argv, VALUE self,
   }
 
   out = rb_carray_new(data_type, 1, &ca->elements, 0, NULL);
-  Data_Get_Struct(out, CArray, co);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
 
   if ( ca->elements == 0 ) {
     ;
@@ -1893,7 +1893,7 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
 
   rb_scan_args(argc, argv, "12", (VALUE *) &rndim, (VALUE *) &rmc, (VALUE *) &rfval);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_proc[ca->data_type] ) {
     rb_raise(rb_eCADataTypeError,
@@ -1914,7 +1914,7 @@ rb_ca_dimstat_type2 (int argc, VALUE *argv, VALUE self,
   odim[ndim] = ca->elements/n;
 
   out = rb_carray_new(data_type, ndim+1, odim, 0, NULL);
-  Data_Get_Struct(out, CArray, co);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
 
 	if ( ca_has_mask(ca) ) {
 		ca_create_mask(co);

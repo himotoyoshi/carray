@@ -13,9 +13,72 @@
 #include "rubysig.h"
 #endif
 
+/* -------------------------------------------------------------------- */
+
+const rb_data_type_t carray_data_type = {
+    .parent = NULL,
+    .wrap_struct_name = "CArray",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+const rb_data_type_t cawrap_data_type = {
+    .parent = &carray_data_type,
+    .wrap_struct_name = "CAWrap",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cscalar_data_type = {
+    .parent = &carray_data_type,
+    .wrap_struct_name = "CScalar",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cavirtual_data_type = {
+    .parent = &carray_data_type,
+    .wrap_struct_name = "CAVirtual",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t carray_mask_data_type = {
+    .parent = &carray_data_type,
+    .wrap_struct_name = "CArrayMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
 /* ------------------------------------------------------------------- */
 
 VALUE rb_cCArray, rb_cCAWrap, rb_cCScalar, rb_cCAVirtual;
+VALUE rb_cCArrayMask;
 
 /* yard:
   class CArray
@@ -703,7 +766,7 @@ rb_ca_s_allocate (VALUE klass)
 {
   CArray *ca;
   ca_check_mem_count();  
-  return Data_Make_Struct(klass, CArray, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CArray, &carray_data_type, ca);
 }
 
 /* @overload  initialize(data_type, dim, bytes=0) { ... }
@@ -740,7 +803,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   carray_safe_setup(ca, data_type, ndim, dim, bytes, NULL);
 
   if ( rb_block_given_p() ) {
@@ -953,8 +1016,8 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
 
   rb_call_super(1, &other);
 
-  Data_Get_Struct(self,  CArray, ca);
-  Data_Get_Struct(other, CArray, cs);
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
 
   ca_update_mask(cs);
   carray_setup(ca, cs->data_type, cs->ndim, cs->dim, cs->bytes, cs->mask);
@@ -993,7 +1056,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
 
   target = rb_yield_values(0);
 
-  obj = Data_Make_Struct(rb_cCAWrap, CAWrap, ca_mark, ca_free, ca);
+  obj = TypedData_Make_Struct(rb_cCAWrap, CAWrap, &cawrap_data_type, ca);
   ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, NULL);
 
   rb_funcall(target, rb_intern("wrap_as_carray"), 1, obj);
@@ -1023,7 +1086,7 @@ static VALUE
 rb_cs_s_allocate (VALUE klass)
 {
   CScalar *ca;
-  return Data_Make_Struct(klass, CScalar, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CScalar, &cscalar_data_type, ca);
 }
 
 /* 
@@ -1054,7 +1117,7 @@ rb_cs_initialize (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
   rb_ca_data_type_import(self, rtype);
 
-  Data_Get_Struct(self, CScalar, ca);
+  TypedData_Get_Struct(self, CScalar, &cscalar_data_type, ca);
   cscalar_setup(ca, data_type, bytes, NULL);
 
   if ( rb_block_given_p() ) {
@@ -1266,8 +1329,8 @@ rb_cs_initialize_copy (VALUE self, VALUE other)
 {
   CScalar *ca, *cs;
 
-  Data_Get_Struct(self,  CScalar, ca);
-  Data_Get_Struct(other, CScalar, cs);
+  TypedData_Get_Struct(self,  CScalar, &cscalar_data_type, ca);
+  TypedData_Get_Struct(other, CScalar, &cscalar_data_type, cs);
 
   cscalar_setup(ca, cs->data_type, cs->bytes, NULL);
   memcpy(ca->ptr, cs->ptr, ca->bytes);
@@ -1288,7 +1351,7 @@ static VALUE
 rb_cs_coerce (VALUE self, VALUE other)
 {
   CScalar *ca;
-  Data_Get_Struct(self, CScalar, ca);
+  TypedData_Get_Struct(self, CScalar, &cscalar_data_type, ca);
   return rb_assoc_new(rb_cscalar_new_with_value(ca->data_type, ca->bytes, other), 
                       self);
 }

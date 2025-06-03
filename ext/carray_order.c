@@ -152,7 +152,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "12", (VALUE *)&ridx, (VALUE *) &vlfval, (VALUE *) &vufval);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rb_check_carray_object(ridx);
   ci = ca_wrap_readonly(ridx, CA_SIZE);
@@ -235,7 +235,7 @@ rb_ca_reverse_bang (VALUE self)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
 
   switch ( ca->data_type ) {
@@ -391,7 +391,7 @@ rb_ca_sort_bang (VALUE self)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
 
   if ( ca_is_fixlen_type(ca) ) {
@@ -447,7 +447,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
   volatile VALUE out;
   CArray *ca;
   char *val;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* FIXME : treat mask */
   /*
@@ -471,7 +471,7 @@ rb_ca_binary_search (VALUE self, volatile VALUE rval)
     CArray *cv, *co;
     char *ptr, *val;
     ca_size_t i, idx;
-    Data_Get_Struct(rval, CArray, cv);
+    TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
     if ( ca->data_type != cv->data_type ) {
       cv = ca_wrap_readonly(rval, ca->data_type);
     }
@@ -704,7 +704,7 @@ rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "11", (VALUE *) &value, (VALUE *) &veps);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -825,7 +825,7 @@ rb_ca_linear_search_nearest (VALUE self, VALUE value)
   CArray *ca;
   ca_size_t addr;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -959,6 +959,9 @@ linear_index (ca_size_t n, double *y, double yy, double *idx)
   return 0;
 }
 
+
+/* ----------------------------------------------------------------- */
+
 static VALUE
 rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
 {
@@ -970,7 +973,7 @@ rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
   double *po;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_ca_is_any_masked(self) ) {
     rb_raise(rb_eRuntimeError, "self should not have any masked elements");
@@ -1037,7 +1040,7 @@ rb_ca_binary_search_linear_index_vectorized (volatile VALUE self, volatile VALUE
   ca_size_t odim[CA_DIM_MAX];
   ca_size_t i, k;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_ca_is_any_masked(self) ) {
     rb_raise(rb_eRuntimeError, "self should not have any masked elements");
@@ -1121,6 +1124,200 @@ rb_ca_binary_search_linear_index_vectorized (volatile VALUE self, volatile VALUE
 
 /* ----------------------------------------------------------------- */
 
+static ca_size_t
+linear_index_linear (ca_size_t n, double *y, double yy, double *idx)
+{
+  ca_size_t a, b, c, x1;
+  double ya, yb, yc;
+  double y1, y2;
+  double rest;
+	int k;
+
+  /* linear search method */
+
+	for (k=0; k<n-1; k++) {
+		if ( (yy - y[k])*(yy - y[k+1]) <= 0 ) {
+			x1 = k;
+			goto found;
+		}
+	}
+
+	*idx = -1;
+	return -1;
+
+ found:
+
+  y1 = y[x1];
+  y2 = y[x1+1];
+  rest = (yy-y1)/(y2-y1);
+
+  *idx = rest + (double) x1;
+  return 0;
+}
+
+static VALUE
+rb_ca_linear_search_linear_index (volatile VALUE self, volatile VALUE vx)
+{
+  volatile VALUE out, out0;
+  CArray *ca, *sc, *cx, *co0, *co;
+  ca_size_t n;
+  double *x;
+  double *px;
+  double *po;
+  ca_size_t i;
+
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  if ( rb_ca_is_any_masked(self) ) {
+    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
+  }
+
+  sc = ca_wrap_readonly(self, CA_FLOAT64);
+  cx = ca_wrap_readonly(vx, CA_FLOAT64);
+
+  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
+  out = out0 = ca_wrap_struct(co0);
+  co = ca_wrap_writable(out, CA_FLOAT64);
+
+  ca_attach_n(3, sc, cx, co);
+
+  n = sc->elements;
+  x  = (double*) sc->ptr;
+  px = (double*) cx->ptr;
+  po = (double*) co->ptr;
+
+  ca_update_mask(cx);
+  if ( cx->mask ) {
+    boolean8_t *mx, *mo;
+    ca_create_mask(co);
+    mx = (boolean8_t *) cx->mask->ptr;
+    mo = (boolean8_t *) co->mask->ptr;
+    for (i=0; i<cx->elements; i++) {
+      if ( ! *mx ) {
+        if ( linear_index_linear(n, x, *px, po) < 0 ) 
+					*mo = 1;
+      }
+      else {
+        *mo = 1;
+      }
+      mx++; mo++; px++, po++;
+    }
+  }
+  else {
+    for (i=0; i<cx->elements; i++) {
+      linear_index_linear(n, x, *px, po);
+      px++; po++;
+    }
+  }
+
+  ca_sync(co);
+  ca_detach_n(3, sc, cx, co);
+
+  if ( rb_ca_is_scalar(vx) ) {
+    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
+  }
+  else {
+    return out0;
+  }
+}
+
+static VALUE
+rb_ca_linear_search_linear_index_vectorized (volatile VALUE self, volatile VALUE vx)
+{
+  volatile VALUE out, out0;
+  CArray *ca, *sc, *cx, *co0, *co;
+  double *x;
+  double *px;
+  double *po;
+  ca_size_t nseri, nlist;
+  ca_size_t odim[CA_DIM_MAX];
+  ca_size_t i, k;
+
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  if ( rb_ca_is_any_masked(self) ) {
+    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
+  }
+
+  sc = ca_wrap_readonly(self, CA_FLOAT64);
+  cx = ca_wrap_readonly(vx, CA_FLOAT64);
+
+  if ( sc->ndim < 2 ) {
+    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
+  }
+
+  if ( cx->ndim > CA_DIM_MAX ) {
+     rb_raise(rb_eRuntimeError, "2nd argument carray has too large dimension");  	
+  }
+
+  nseri = 1;
+  for (i=0; i<sc->ndim-1; i++) {
+		nseri *= sc->dim[i];
+	}
+	nlist = sc->dim[sc->ndim-1];
+
+  if ( rb_ca_is_scalar(vx) ) {
+	  for (i=0; i<sc->ndim-1; i++) {
+	    odim[i] = sc->dim[i];
+		}
+    co0 = carray_new(ca->data_type, sc->ndim-1, odim, 0, NULL);
+	}
+	else {
+	  for (i=0; i<sc->ndim-1; i++) {
+	    odim[i] = sc->dim[i];
+		}
+    memcpy(&odim[sc->ndim], cx->dim, cx->ndim*sizeof(ca_size_t));
+    co0 = carray_new(ca->data_type, sc->ndim-1 + cx->ndim, odim, 0, NULL);
+	}
+	
+  out = out0 = ca_wrap_struct(co0);
+  co = ca_wrap_writable(out, CA_FLOAT64);
+
+  ca_attach_n(3, sc, cx, co);
+
+  x  = (double*) sc->ptr;
+  po = (double*) co->ptr;
+
+  ca_update_mask(cx);
+  if ( cx->mask ) {
+    boolean8_t *mx, *mo;
+    ca_create_mask(co);
+    mx = (boolean8_t *) cx->mask->ptr;
+    mo = (boolean8_t *) co->mask->ptr;
+		for (k=0; k<nseri; k++) {
+		  px = (double*) cx->ptr;
+	    for (i=0; i<cx->elements; i++) {
+	      if ( ! *mx ) {
+	        if ( linear_index_linear(nlist, x, *px, po) < 0)
+						*mo = 1;
+	      }
+	      else {
+	        *mo = 1;
+	      }
+	      mx++; mo++; px++, po++;
+	    }
+			x += nlist;
+    }		
+  }
+  else {
+		for (k=0; k<nseri; k++) {
+		  px = (double*) cx->ptr;
+	    for (i=0; i<cx->elements; i++) {
+	      linear_index_linear(nlist, x, *px, po);
+	      px++; po++;
+	    }
+			x += nlist;
+		}
+  }
+
+  ca_sync(co);
+  ca_detach_n(3, sc, cx, co);
+
+  return out0;
+}
+
+/* ----------------------------------------------------------------- */
+
 static int
 fetch_linear_addr (ca_size_t n, double *y, double idx, double *val)
 {
@@ -1128,6 +1325,7 @@ fetch_linear_addr (ca_size_t n, double *y, double idx, double *val)
 	double w;
 
 	if ( idx < 0 || idx > n - 1 ) {
+		*val = 0.0/0.0;
 		return -1;
 	}
 	
@@ -1154,7 +1352,7 @@ rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
   ca_size_t i;
   boolean8_t *mx, *mo;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_ca_is_any_masked(self) ) {
     rb_raise(rb_eRuntimeError, "self should not have any masked elements");
@@ -1250,7 +1448,7 @@ rb_ca_find_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
   ca_size_t i, k;
   boolean8_t *mx, *mo;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_ca_is_any_masked(self) ) {
     rb_raise(rb_eRuntimeError, "self should not have any masked elements");
@@ -1352,7 +1550,7 @@ rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
   ca_size_t i, k;
   boolean8_t *mx, *mo;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_ca_is_any_masked(self) ) {
     rb_raise(rb_eRuntimeError, "self should not have any masked elements");
@@ -1470,6 +1668,12 @@ Init_carray_order ()
 
   rb_define_method(rb_cCArray,  "vectorized_section",
                                 rb_ca_binary_search_linear_index_vectorized, 1);
+
+  rb_define_method(rb_cCArray,  "section_linear",
+                                rb_ca_linear_search_linear_index, 1);
+
+  rb_define_method(rb_cCArray,  "vectorized_section_linear",
+                                rb_ca_linear_search_linear_index_vectorized, 1);
 
   rb_define_method(rb_cCArray,  "fetch_linear_addr",
                                 rb_ca_fetch_linear_addr, 1);

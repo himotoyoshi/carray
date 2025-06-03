@@ -12,8 +12,35 @@
 
 /* should not be static variable as used by CAIteratorWindow */
 
-VALUE rb_cCAWindow; 
+const rb_data_type_t cawindow_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAWindow",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cawindow_mask_data_type = {
+    .parent = &cawindow_data_type,
+    .wrap_struct_name = "CAWindowMask",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 int8_t CA_OBJ_WINDOW;
+
+VALUE rb_cCAWindow; 
+VALUE rb_cCAWindowMask; 
+
 
 /* yard:
   class CAWindow < CAVirtual # :nodoc:
@@ -693,7 +720,7 @@ rb_ca_window_new (VALUE cary,
   CArray *parent;
   CAWindow *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_window_new(parent, start, count, bounds, fill);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -721,7 +748,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
   char *cbounds;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ropt = rb_pop_options(&argc, &argv);
   rb_scan_options(ropt, "bounds,fill_value", &rbounds, &rfval);
@@ -760,7 +787,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
   }
   else {
     rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
-    Data_Get_Struct(rcs, CScalar, cs);
+    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
   }
 
@@ -819,7 +846,7 @@ static VALUE
 rb_ca_window_s_allocate (VALUE klass)
 {
   CAWindow *ca;
-  return Data_Make_Struct(klass, CAWindow, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAWindow, &cawindow_data_type, ca);
 }
 
 static VALUE
@@ -827,8 +854,8 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
 {
   CAWindow *ca, *cs;
 
-  Data_Get_Struct(self,  CAWindow, ca);
-  Data_Get_Struct(other, CAWindow, cs);
+  TypedData_Get_Struct(self,  CAWindow, &cawindow_data_type, ca);
+  TypedData_Get_Struct(other, CAWindow, &cawindow_data_type, cs);
 
   ca_window_setup(ca, cs->parent, cs->start, cs->count, cs->bounds, cs->fill);
 
@@ -850,7 +877,7 @@ rb_ca_window_idx2addr0 (int argc, VALUE *argv, VALUE self)
   int8_t i;
   ca_size_t idxi;
 
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
 
   if ( argc != cw->ndim ) {
     rb_raise(rb_eArgError,
@@ -887,7 +914,7 @@ rb_ca_window_addr2addr0 (VALUE self, VALUE raddr)
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
 
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
 
   ca_addr2index((CArray*)cw, addr, idx);
 
@@ -908,7 +935,7 @@ rb_ca_window_move (int argc, VALUE *argv, VALUE self)
   ca_size_t start;
   int8_t i;
 
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
 
   if ( argc != cw->ndim ) {
     rb_raise(rb_eArgError, "invalid # of arguments");
@@ -939,7 +966,7 @@ static VALUE
 rb_ca_window_set_fill_value (VALUE self, VALUE rfval)
 {
   CAWindow *cw;
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
   rb_ca_obj2ptr(self, rfval, cw->fill);
   return Qnil;
 }
@@ -948,7 +975,7 @@ static VALUE
 rb_ca_window_get_fill_value (VALUE self)
 {
   CAWindow *cw;
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
   return rb_ca_ptr2obj(self, cw->fill);
 }
 
@@ -956,7 +983,7 @@ static VALUE
 rb_ca_window_get_bounds (VALUE self)
 {
   CAWindow *cw;
-  Data_Get_Struct(self, CAWindow, cw);
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
   return SIZE2NUM(cw->bounds);
 }
 
@@ -966,7 +993,7 @@ rb_ca_window_get_bounds (VALUE self)
     volatile VALUE ary;             \
     CAWindow *cw;                    \
     int8_t i;                              \
-    Data_Get_Struct(self, CAWindow, cw);     \
+    TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);     \
     ary = rb_ary_new2(cw->ndim);            \
     for (i=0; i<cw->ndim; i++) {                    \
       rb_ary_store(ary, i, SIZE2NUM(cw->name[i]));  \
@@ -998,8 +1025,12 @@ Init_ca_obj_window ()
 {    
 
   rb_cCAWindow = rb_define_class("CAWindow", rb_cCAVirtual);
+  rb_cCAWindowMask = rb_define_class("CAWindowMask", rb_cCAWindow);
 
-  CA_OBJ_WINDOW = ca_install_obj_type(rb_cCAWindow, ca_window_func);
+  CA_OBJ_WINDOW = ca_install_obj_type(rb_cCAWindow, 
+  		                      &cawindow_data_type, 
+				      rb_cCAWindowMask,
+				      &cawindow_mask_data_type, ca_window_func);
   rb_define_const(rb_cObject, "CA_OBJ_WINDOW", INT2NUM(CA_OBJ_WINDOW));
 
   rb_define_method(rb_cCArray, "window", rb_ca_window, -1);

@@ -147,7 +147,7 @@ rb_ca_arg (VALUE self)
   volatile VALUE obj;
   CArray *ca, *co;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   co = carray_new(CA_FLOAT64, ca->ndim, ca->dim, 0, NULL);
   obj = ca_wrap_struct(co);

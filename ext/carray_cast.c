@@ -232,7 +232,7 @@ rb_ca_data_class_to_object (VALUE self)
   CArray *ca;
   int i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
     obj = rb_cscalar_new(CA_OBJECT, 0, ca->mask);
@@ -256,7 +256,7 @@ rb_ca_object_to_data_class (VALUE self, VALUE rtype, ca_size_t bytes)
   int i;
   ID id_encode = rb_intern("encode");
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
     obj = rb_cscalar_new(CA_FIXLEN, bytes, ca->mask);
@@ -293,7 +293,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
   int8_t data_type;
   ca_size_t bytes;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
@@ -319,7 +319,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
 
   rb_ca_data_type_import(obj, rtype);
 
-  Data_Get_Struct(obj, CArray, cb);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, cb);
 
   ca_attach(ca);
   if ( ca_has_mask(ca) ) {
@@ -526,7 +526,7 @@ rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca->data_type == data_type ) {
     if ( ! ca_is_fixlen_type(ca) ) {
       return self;
@@ -725,8 +725,8 @@ rb_ca_cast_block (ca_size_t n, VALUE ra1, void *ptr1,
                   VALUE ra2, void *ptr2)
 {
   CArray *ca1, *ca2;
-  Data_Get_Struct(ra1, CArray, ca1);
-  Data_Get_Struct(ra2, CArray, ca2);
+  TypedData_Get_Struct(ra1, CArray, &carray_data_type, ca1);
+  TypedData_Get_Struct(ra2, CArray, &carray_data_type, ca2);
   if ( n < 0 ) {
     rb_raise(rb_eRuntimeError, "[BUG] in rb_ca_cast_block: negative count");
   }
@@ -738,8 +738,8 @@ VALUE
 rb_ca_ptr2ptr (VALUE ra1, void *ptr1, VALUE ra2, void *ptr2)
 {
   CArray *ca1, *ca2;
-  Data_Get_Struct(ra1, CArray, ca1);
-  Data_Get_Struct(ra2, CArray, ca2);
+  TypedData_Get_Struct(ra1, CArray, &carray_data_type, ca1);
+  TypedData_Get_Struct(ra2, CArray, &carray_data_type, ca2);
   ca_cast_func_table[ca1->data_type][ca2->data_type](1, ca1, ptr1, ca2, ptr2, NULL);
   return Qnil;
 }
@@ -751,11 +751,10 @@ rb_ca_ptr2obj (VALUE self, void *ptr)
   volatile VALUE obj;
   static CArray dummy;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   dummy.data_type = CA_OBJECT;
   ca_cast_func_table[ca->data_type][CA_OBJECT](1, ca, ptr, &dummy, (void*)&obj, NULL);
   if ( ca_is_fixlen_type(ca) ) {
-    OBJ_TAINT(obj);
     return rb_ca_data_class_decode(self, obj);
   }
   else {
@@ -768,7 +767,7 @@ rb_ca_obj2ptr (VALUE self, VALUE obj, void *ptr)
 {
   static CArray dummy;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( obj == CA_UNDEF ) {
     memset(ptr, 0, ca->bytes);
   }
@@ -788,7 +787,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   int8_t data_type;
 
   if ( rb_obj_is_carray(obj) ) {                    /* obj == carray */
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
       rb_raise(rb_eRuntimeError, "can't modify read-only carray");
     }
@@ -813,7 +812,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   }
   else if ( rb_respond_to(obj, rb_intern("ca")) ) { /* respond_to obj.ca */
     obj = rb_funcall(obj, rb_intern("ca"), 0);
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -855,7 +854,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   int8_t data_type;
 
   if ( rb_obj_is_carray(obj) ) {                     /* carray */
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -877,7 +876,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   }
   else if ( TYPE(obj) == T_ARRAY ) {                 /* array */
     obj = rb_funcall(obj, rb_intern("to_ca"), 0);
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = CA_OBJECT;
     }
@@ -920,7 +919,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   }
   else if ( rb_respond_to(obj, rb_intern("ca")) ) {
     obj = rb_funcall(obj, rb_intern("ca"), 0);
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -933,7 +932,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
   }
   else if ( rb_respond_to(obj, rb_intern("to_ca")) ) {
     obj = rb_funcall(obj, rb_intern("to_ca"), 0);
-    Data_Get_Struct(obj, CArray, ca);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -1105,17 +1104,17 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     }
   }
 
-  Data_Get_Struct(*self, CArray, ca);
-  Data_Get_Struct(*other, CArray, cb);
+  TypedData_Get_Struct(*self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
 
   if ( ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     *self = ca_ubrep_bind_with(*self, *other);
-    Data_Get_Struct(*self, CArray, ca);
+    TypedData_Get_Struct(*self, CArray, &carray_data_type, ca);
   }
 
   if ( cb->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     *other = ca_ubrep_bind_with(*other, *self);
-    Data_Get_Struct(*other, CArray, cb);
+    TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
   }
 
   if ( ca_is_scalar(ca) ^ ca_is_scalar(cb) || 
@@ -1187,7 +1186,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   CScalar *cs;
   int test0, test1;
 
-  Data_Get_Struct(*self, CArray, ca);
+  TypedData_Get_Struct(*self, CArray, &carray_data_type, ca);
 
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {
@@ -1227,7 +1226,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
       }
     }
     
-    Data_Get_Struct(*other, CScalar, cs);
+    TypedData_Get_Struct(*other, CScalar, &cscalar_data_type, cs);
 
     test0 = ca_cast_table2[cs->data_type][ca->data_type];
 
@@ -1237,11 +1236,11 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
 
   }
 
-  Data_Get_Struct(*other, CArray, cb);
+  TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
 
   if ( cb->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
     *other = ca_ubrep_bind_with(*other, *self);
-    Data_Get_Struct(*other, CArray, cb);
+    TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
   }
 
   test1 = ca_cast_table[cb->data_type][ca->data_type];

@@ -51,7 +51,7 @@ rb_ca_copy (VALUE self)
 {
   volatile VALUE obj;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   obj = ca_wrap_struct(ca_copy(ca));
   rb_ca_data_type_inherit(obj, self);
   return obj;
@@ -116,7 +116,7 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
   rb_scan_args(argc, argv, "01", (VALUE *) &rtype);
   rb_scan_options(ropt, "bytes", &rbytes);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( NIL_P(rtype) ) {                  /* data_type not given */
     co  = ca_template_safe(ca);
@@ -170,7 +170,7 @@ rb_ca_template_n (int n, ...)
     if ( ! rb_obj_is_carray(varg) ) {
       rb_raise(rb_eRuntimeError, "[BUG] not-carray object given to rb_ca_template_n");
     }
-    Data_Get_Struct(varg, CArray, ca);
+    TypedData_Get_Struct(varg, CArray, &carray_data_type, ca);
     if ( i == 0 ) {
       obj = varg;
       elements = ca->elements;
@@ -291,7 +291,7 @@ rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   Check_Type(roffset, T_ARRAY);
 
@@ -401,7 +401,7 @@ rb_ca_clip (VALUE self, VALUE roffset, VALUE rsrc)
   ca_size_t offset[CA_RANK_MAX];
   int i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   Check_Type(roffset, T_ARRAY);
 

@@ -33,7 +33,7 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_update_mask(ca);
   has_mask = ( ca->mask ) ? 1 : 0;
@@ -143,7 +143,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_update_mask(ca);
   has_mask = ( ca->mask ) ? 1 : 0;
@@ -217,7 +217,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( TYPE(ridx) == T_ARRAY ) {
     for (i=0; i<ca->ndim; i++) {
@@ -251,7 +251,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
   int8_t  i;
   ca_size_t k;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( TYPE(ridx) == T_ARRAY ) {
     for (i=0; i<ca->ndim; i++) {
@@ -291,7 +291,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_is_integer_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
@@ -376,7 +376,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_is_integer_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
@@ -454,7 +454,7 @@ rb_ca_elem_test_masked (VALUE self, VALUE ridx1)
   ca_size_t k;
   boolean8_t m = 0;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_update_mask(ca);
 
@@ -501,8 +501,8 @@ rb_ca_incr_addr (volatile VALUE self, volatile VALUE raddr)
   self = rb_ca_wrap_writable(self, INT2NUM(CA_INT64));
   raddr = rb_ca_wrap_readonly(raddr, INT2NUM(CA_INT64));
   
-  Data_Get_Struct(self, CArray, ca);
-  Data_Get_Struct(raddr, CArray, ci);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(raddr, CArray, &carray_data_type, ci);
 
   ca_attach_n(2, ca, ci);
 

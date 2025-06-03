@@ -70,7 +70,7 @@ rb_ca_where (VALUE self)
 
   bool0 = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
 
-  Data_Get_Struct(bool0, CArray, ca);
+  TypedData_Get_Struct(bool0, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -93,7 +93,7 @@ rb_ca_where (VALUE self)
 
   /* create output array */
   obj = rb_carray_new(CA_SIZE, 1, &count, 0, NULL);
-  Data_Get_Struct(obj, CArray, co);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   /* store address which elements is true to output array */
   p = (boolean8_t *) ca->ptr;
@@ -179,7 +179,7 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
   VALUE *p;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rb_scan_args((argc>2) ? 2 : argc, argv, "02", (VALUE *) &roffset, (VALUE *) &rstep);
 
@@ -269,7 +269,7 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
   CArray *ca;
 
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* delegate to rb_ca_seq_bang_object if data_type is object */
   if ( ca_is_object_type(ca) ) {
@@ -500,7 +500,7 @@ rb_ca_swap_bytes_bang (VALUE self)
       }
     }
     else {
-      Data_Get_Struct(self, CArray, ca);
+      TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
       ca_attach(ca);
       ca_swap_bytes(ca->ptr, ca->bytes, ca->elements);
       ca_sync(ca);
@@ -509,7 +509,7 @@ rb_ca_swap_bytes_bang (VALUE self)
     return self;
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   switch ( ca->data_type ) {
   case CA_INT16:
@@ -702,7 +702,7 @@ rb_ca_trim_bang (int argc, VALUE *argv, VALUE self)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rb_scan_args(argc, argv, "21", (VALUE *) &rmin, (VALUE *) &rmax, (VALUE *) &rfval);
 

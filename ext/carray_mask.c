@@ -422,7 +422,7 @@ ca_unmask_copy (void *ap, char *fill_value)
 {
   CArray *ca = (CArray *) ap;
   CArray *co;
-  char *p, *q;
+  char *q;
   boolean8_t *m;
   ca_size_t i;
 
@@ -431,14 +431,13 @@ ca_unmask_copy (void *ap, char *fill_value)
 
   if ( fill_value && ca_has_mask(ca) ) {
     ca_attach(ca);
-    p = ca->ptr;
     q = co->ptr;
     m = (boolean8_t *) ca->mask->ptr;
     for (i=0; i<ca->elements; i++) {
       if ( *m ) {
         memcpy(q, fill_value, ca->bytes);
       }
-      m++; p+=ca->bytes; q+=co->bytes;
+      m++; q+=co->bytes;
     }
     ca_detach(ca);
   }
@@ -573,7 +572,7 @@ VALUE
 rb_ca_has_mask (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_has_mask(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -587,7 +586,7 @@ VALUE
 rb_ca_is_any_masked (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_any_masked(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -601,7 +600,7 @@ VALUE
 rb_ca_is_all_masked (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ( ca_is_all_masked(ca) ) ? Qtrue : Qfalse;
 }
 
@@ -616,7 +615,7 @@ rb_ca_create_mask (VALUE self)
 {
   CArray *ca;
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_create_mask(ca);
   return Qnil;
 }
@@ -632,7 +631,7 @@ static VALUE
 rb_ca_update_mask (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_update_mask(ca);
   return Qnil;
 }
@@ -652,10 +651,10 @@ rb_ca_value_array (VALUE self)
   VALUE obj;
   CArray *ca, *co;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   obj = rb_ca_refer_new(self, ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
-  Data_Get_Struct(obj, CArray, co);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   ca_set_flag(co, CA_FLAG_VALUE_ARRAY);
 
@@ -674,12 +673,13 @@ rb_ca_mask_array (VALUE self)
 {
   VALUE obj;
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_update_mask(ca);
   if ( ca->mask ) {
-    obj = Data_Wrap_Struct(ca_class[ca->mask->obj_type],
-            ca_mark, ca_free_nop, ca->mask);
+    obj = TypedData_Wrap_Struct(ca_mask_class[ca->obj_type],
+                                ca_mask_typeddata[ca->obj_type], ca->mask);	
     rb_ivar_set(obj, rb_intern("masked_array"), self);
     if ( OBJ_FROZEN(self) ) {
       rb_ca_freeze(obj);
@@ -707,7 +707,7 @@ rb_ca_set_mask (VALUE self, VALUE rval)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_value_array(ca) ) {
     rb_raise(rb_eRuntimeError,
@@ -725,7 +725,7 @@ rb_ca_set_mask (VALUE self, VALUE rval)
   }
 
   if ( rb_obj_is_carray(rmask) ) {
-    Data_Get_Struct(rmask, CArray, cv);
+    TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
     if ( ! ca_is_boolean_type(cv) ) {
       cv = ca_wrap_readonly(rval, CA_BOOLEAN);
     }
@@ -755,10 +755,10 @@ rb_ca_is_masked (VALUE self)
   boolean8_t *m, *p;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
   }
   else {
     co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
@@ -770,7 +770,7 @@ rb_ca_is_masked (VALUE self)
   }
   else {
     mask = rb_ca_mask_array(self);
-    Data_Get_Struct(mask, CArray, cm);
+    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
     ca_attach(cm);
     m = (boolean8_t *) cm->ptr;
     p = (boolean8_t *) co->ptr;
@@ -801,10 +801,10 @@ rb_ca_is_not_masked (VALUE self)
   boolean8_t *m, *p;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *) cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
   }
   else {
     co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
@@ -816,7 +816,7 @@ rb_ca_is_not_masked (VALUE self)
   }
   else {
     mask = rb_ca_mask_array(self);
-    Data_Get_Struct(mask, CArray, cm);
+    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
     ca_attach(cm);
     m = (boolean8_t *) cm->ptr;
     p = (boolean8_t *) co->ptr;
@@ -840,7 +840,9 @@ VALUE
 rb_ca_count_masked (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  printf("hello\n");
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  printf("world\n");
   return SIZE2NUM(ca_count_masked(ca));
 }
 
@@ -854,7 +856,7 @@ VALUE
 rb_ca_count_not_masked (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return SIZE2NUM(ca_count_not_masked(ca));
 }
 
@@ -881,11 +883,11 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
     rfval = argv[0];
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_NIL ) {
     rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
-    Data_Get_Struct(rcs, CScalar, cv);
+    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
   }
 
@@ -931,11 +933,11 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
     rfval = argv[0];
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_NIL ) {
     rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
-    Data_Get_Struct(rcs, CScalar, cv);
+    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
   }
 
@@ -971,7 +973,7 @@ VALUE
 rb_ca_invert_mask (VALUE self)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_invert_mask(ca);
   return self;
 }
@@ -992,12 +994,12 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   slist = malloc_with_check(sizeof(CArray *)*argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
-      Data_Get_Struct(argv[i], CArray, cs);
+      TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
       slist[i] = cs;
     }
     else {
@@ -1032,14 +1034,14 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
   slist = malloc_with_check(sizeof(CArray *)*n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
-      Data_Get_Struct(other, CArray, cs);
+      TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
       slist[i] = cs;
     }
     else {
@@ -1071,12 +1073,12 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   slist = malloc_with_check(sizeof(CArray *)*argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
-      Data_Get_Struct(argv[i], CArray, cs);
+      TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
       slist[i] = cs;
     }
     else {
@@ -1111,14 +1113,14 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
   slist = malloc_with_check(sizeof(CArray *)*n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
-      Data_Get_Struct(other, CArray, cs);
+      TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
       slist[i] = cs;
     }
     else {

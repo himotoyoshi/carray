@@ -89,7 +89,7 @@ rb_ca_cummin (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   co = ca_template(ca);
   obj = ca_wrap_struct(co);
@@ -196,7 +196,7 @@ rb_ca_cummax (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   co = ca_template(ca);
   obj = ca_wrap_struct(co);
@@ -288,7 +288,7 @@ rb_ca_cumprod (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_complex_type(ca) ) {
     co = carray_new(CA_CMPLX128, ca->ndim, ca->dim, 0, NULL);
@@ -381,7 +381,7 @@ rb_ca_wsum (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   cw = ca_wrap_readonly(weight, ca->data_type);
 
   ca_check_same_elements(ca, cw);
@@ -490,7 +490,7 @@ rb_ca_cumwsum (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *)  &rmin_count, (VALUE *)  &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   cw = ca_wrap_readonly(weight, ca->data_type);
 
   ca_check_same_elements(ca, cw);
@@ -595,7 +595,7 @@ rb_ca_wmean (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "12", (VALUE *) &weight, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   cw = ca_wrap_readonly(weight, ca->data_type);
 
   ca_check_same_elements(ca, cw);
@@ -712,7 +712,7 @@ rb_ca_variancep (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca->elements == 0 ) {
     return ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
@@ -815,7 +815,7 @@ rb_ca_variance (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca->elements == 0 ) {
     return ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
@@ -863,7 +863,7 @@ rb_ca_count_true (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_is_boolean_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
@@ -932,7 +932,7 @@ rb_ca_count_false (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "02", (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ! ca_is_boolean_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
@@ -1109,7 +1109,7 @@ rb_ca_count_equal (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "12", (VALUE *) &value, (VALUE *) &rmin_count, (VALUE *) &rfval);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca->elements == 0 ) {
     return ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
@@ -1204,7 +1204,7 @@ rb_ca_count_equiv (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "22", (VALUE *) &value, (VALUE *) &reps, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca->elements == 0 ) {
     return ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
@@ -1295,7 +1295,7 @@ rb_ca_count_close (int argc, VALUE *argv, VALUE self)
     rb_scan_args(argc, argv, "22", (VALUE *) &value, (VALUE *) &aeps, (VALUE *) &rmin_count, (VALUE *) &rfval);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca->elements == 0 ) {
     return ( NIL_P(rfval) ) ? CA_UNDEF : rfval;
@@ -1420,7 +1420,7 @@ rb_ca_all_equal_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "1", (VALUE *) &value);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1493,7 +1493,7 @@ rb_ca_all_equiv_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &reps);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1561,7 +1561,7 @@ rb_ca_all_close_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &aeps);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1673,7 +1673,7 @@ rb_ca_any_equal_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "1", (VALUE *) &value);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1746,7 +1746,7 @@ rb_ca_any_equiv_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &reps);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1814,7 +1814,7 @@ rb_ca_any_close_p (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "2", (VALUE *) &value, (VALUE *) &aeps);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ca_attach(ca);
 
@@ -1902,7 +1902,7 @@ rb_ca_histogram (int argc, VALUE *argv, VALUE self)
 
   rb_scan_args(argc, argv, "3", &vnum, &vmin, &vmax);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   icls = NUM2SIZE(vnum);
 
@@ -2019,7 +2019,7 @@ rb_ca_grade (int argc, VALUE *argv, VALUE self)
     vmax = rb_funcall(self, rb_intern("max"), 0);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   icls = NUM2LONG(vnum);
 
@@ -2028,7 +2028,7 @@ rb_ca_grade (int argc, VALUE *argv, VALUE self)
   }
 
   out = rb_carray_new_safe(CA_SIZE, ca->ndim, ca->dim, 0, NULL);
-  Data_Get_Struct(out, CArray, sa);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, sa);
 
   ca_attach(ca);
 
