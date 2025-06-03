@@ -19,6 +19,20 @@
 static VALUE rb_cComplex;
 #endif
 
+extern const rb_data_type_t ccomplex_data_type;
+
+const rb_data_type_t ccomplex_data_type = {
+    .parent = NULL,
+    .wrap_struct_name = "CComplex",
+    .function = {
+        .dmark = NULL,
+        .dfree = xfree,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
 VALUE rb_cCComplex;
 
 VALUE rb_ccomplex_new2 (double re, double im);
@@ -69,7 +83,7 @@ rb_num2cc(VALUE num)
 {
   if ( rb_obj_is_kind_of(num, rb_cCComplex) ) {
     double complex *cp;
-    Data_Get_Struct(num, double complex, cp);
+    TypedData_Get_Struct(num, double complex, &ccomplex_data_type, cp);
     return *cp;
   }
   switch ( TYPE(num) ) {
@@ -101,7 +115,7 @@ rb_num_to_cc (VALUE num)
   if ( rb_obj_is_kind_of(num, rb_cCComplex) ) {
     double complex cc = 0.0, *cp;
     cp = &cc;
-    Data_Get_Struct(num, double complex, cp);
+    TypedData_Get_Struct(num, double complex, &ccomplex_data_type, cp);
     return rb_ccomplex_new(cc);
   }
   switch ( TYPE(num) ) {
@@ -129,7 +143,7 @@ rb_ccomplex_new (double complex c)
 {
   VALUE obj;
   double complex *cp;
-  obj = Data_Make_Struct(rb_cCComplex, double complex, 0, xfree, cp);
+  obj = TypedData_Make_Struct(rb_cCComplex, double complex, &ccomplex_data_type, cp);
   *cp = c;
   return obj;
 }
@@ -171,7 +185,7 @@ rb_cc_initialize (int argc, VALUE *argv, VALUE self)
   volatile VALUE rre, rim;
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   rb_scan_args(argc, argv, "11", (VALUE *)&rre, (VALUE *)&rim);
 
@@ -189,7 +203,7 @@ static VALUE
 rb_cc_to_c (VALUE self)
 {
   double complex *cp;
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
   return rb_Complex(rb_float_new(creal(*cp)), rb_float_new(cimag(*cp)));
 }
 
@@ -210,7 +224,7 @@ rb_cc_real(VALUE self)
 {
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   return rb_float_new(creal(*cp));
 }
@@ -220,7 +234,7 @@ rb_cc_imag(VALUE self)
 {
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   return rb_float_new(cimag(*cp));
 }
@@ -232,7 +246,7 @@ rb_cc_inspect (VALUE self)
   double complex *cp;
   double re, im;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   re = creal(*cp);
   im = cimag(*cp);
@@ -256,7 +270,7 @@ rb_cc_conj(VALUE self)
 {
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   return CC2NUM(conj(*cp));
 }
@@ -266,7 +280,7 @@ rb_cc_arg(VALUE self)
 {
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   return rb_float_new(carg(*cp));
 }
@@ -276,7 +290,7 @@ rb_cc_abs(VALUE self)
 {
   double complex *cp;
 
-  Data_Get_Struct(self, double complex, cp);
+  TypedData_Get_Struct(self, double complex, &ccomplex_data_type, cp);
 
   return rb_float_new(cabs(*cp));
 }
