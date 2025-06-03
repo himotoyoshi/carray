@@ -165,13 +165,12 @@ static char *
 ca_refer_func_ptr_at_addr (void *ap, ca_size_t addr)
 {
   CARefer *ca = (CARefer *) ap;
-  ca_size_t major, minor;
+  ca_size_t minor;
   switch ( ca->is_deformed ) {
   case 0:
   case 1:
     return ca->ptr + ca->bytes * addr;
   case -2:
-    major = (addr * ca->bytes) / ca->parent->bytes;
     minor = (addr * ca->bytes) % ca->parent->bytes;
     return ca->ptr + ca->bytes * addr + minor;
   case 2:
@@ -556,7 +555,6 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
   }
   else {
     volatile VALUE rtype, rdim, ropt, rbytes = Qnil, roffset = Qnil;
-    ca_size_t elements;
 
     ropt = rb_pop_options(&argc, &argv);
     rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &rdim);
@@ -581,10 +579,8 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     Check_Type(rdim, T_ARRAY);
     ndim = RARRAY_LEN(rdim);
 
-    elements = 1;
     for (i=0; i<ndim; i++) {
       dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
-      elements *= dim[i];
     }
 
     if ( ! NIL_P(roffset) ) {

@@ -250,14 +250,13 @@ FIXLEN.each do |type1|
          bytes = a1->bytes;
          if ( m ) {
            while ( n-- ) {
-             if ( !*m ) { *p2 = rb_str_new(p1, bytes); OBJ_TAINT(*p2); }
+             if ( !*m ) { *p2 = rb_str_new(p1, bytes); }
              p1+=bytes; p2++; m++;
            }
          }
          else {
            while ( n-- ) {
              *p2 = rb_str_new(p1, bytes); 
-             OBJ_TAINT(*p2); 
              p1+=bytes; p2++;
            }
          }

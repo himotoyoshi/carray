@@ -218,10 +218,9 @@ ca_repeat_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   CARepeat *ca = (CARepeat *) ap;
   ca_size_t *count = ca->count;
   ca_size_t idx0[CA_RANK_MAX];
-  int8_t   i;
-  ca_size_t  n, j;
+  int8_t    i;
+  ca_size_t j;
   j = 0;
-  n = 0;
   for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
@@ -237,9 +236,8 @@ ca_repeat_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t *count = ca->count;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t   i;
-  ca_size_t  n, j;
+  ca_size_t  j;
   j = 0;
-  n = 0;
   for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
