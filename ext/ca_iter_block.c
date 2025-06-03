@@ -10,10 +10,25 @@
 
 #include "carray.h"
 
+extern const rb_data_type_t cablockiterator_data_type;
+
+const rb_data_type_t cablockiterator_data_type = {
+    .parent = &caiterator_data_type,
+    .wrap_struct_name = "CABlockIterator",
+    .function = {
+        .dmark = NULL,
+        .dfree = free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 /* yard:
   class CABlockIterator < CAIterator # :nodoc: 
   end
 */
+
 
 VALUE rb_cCABlockIterator;
 
@@ -152,9 +167,9 @@ ca_bi_setup (VALUE self, VALUE rref, VALUE rker)
 
   rker = rb_obj_clone(rker);
 
-  Data_Get_Struct(self, CABlockIterator, it);
-  Data_Get_Struct(rref, CArray, ref);
-  Data_Get_Struct(rker, CABlock, ker);
+  TypedData_Get_Struct(self, CABlockIterator, &cablockiterator_data_type, it);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, ref);
+  TypedData_Get_Struct(rker, CABlock, &cablock_data_type, ker);
 
   if ( ref->ndim != ker->ndim ) {
     rb_raise(rb_eRuntimeError, "ndim mismatch between reference and kernel");
@@ -189,7 +204,7 @@ static VALUE
 rb_bi_s_allocate (VALUE klass)
 {
   CABlockIterator *it;
-  return Data_Make_Struct(klass, CABlockIterator, 0, free, it);
+  return TypedData_Make_Struct(klass, CABlockIterator, &cablockiterator_data_type, it);
 }
 
 static VALUE
@@ -217,7 +232,7 @@ rb_ca_block_iterator (int argc, VALUE *argv, VALUE self)
   rker = rb_ca_fetch2(self, argc, argv);
 
   rb_check_carray_object(rker);
-  Data_Get_Struct(rker, CArray, ker);
+  TypedData_Get_Struct(rker, CArray, &carray_data_type, ker);
 
   if ( ker->obj_type != CA_OBJ_BLOCK ) {
     rb_raise(rb_eRuntimeError, "kernel must be CABlock object");

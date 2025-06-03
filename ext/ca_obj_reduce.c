@@ -10,9 +10,34 @@
 
 #include "carray.h"
 
+const rb_data_type_t careduce_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAReduce",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t careduce_mask_data_type = {
+    .parent = &careduce_data_type,
+    .wrap_struct_name = "CAReduceMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_REDUCE;
 
-static VALUE rb_cCAReduce;
+VALUE rb_cCAReduce;
+VALUE rb_cCAReduceMask;
 
 /* yard:
   class CAReduce < CAVirtual # :nodoc:
@@ -265,7 +290,7 @@ static VALUE
 rb_ca_reduce_s_allocate (VALUE klass)
 {
   CAReduce *ca;
-  return Data_Make_Struct(klass, CAReduce, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAReduce, &careduce_data_type, ca);
 }
 
 static VALUE
@@ -273,8 +298,8 @@ rb_ca_reduce_initialize_copy (VALUE self, VALUE other)
 {
   CAReduce *ca, *cs;
 
-  Data_Get_Struct(self,  CAReduce, ca);
-  Data_Get_Struct(other, CAReduce, cs);
+  TypedData_Get_Struct(self,  CAReduce, &careduce_data_type, ca);
+  TypedData_Get_Struct(other, CAReduce, &careduce_data_type, cs);
 
   ca_reduce_setup(ca, cs->parent, cs->count, cs->offset);
 
@@ -285,8 +310,12 @@ void
 Init_ca_obj_reduce ()
 {
   rb_cCAReduce = rb_define_class("CAReduce", rb_cCAVirtual);
+  rb_cCAReduceMask = rb_define_class("CAReduceMask", rb_cCAReduce);
 
-  CA_OBJ_REDUCE = ca_install_obj_type(rb_cCAReduce, ca_reduce_func);
+  CA_OBJ_REDUCE = ca_install_obj_type(rb_cCAReduce, 
+                                      &careduce_data_type, 
+				      rb_cCAReduceMask,
+				      &careduce_mask_data_type, ca_reduce_func);
   rb_define_const(rb_cObject, "CA_OBJ_REDUCE", INT2NUM(CA_OBJ_REDUCE));
 
   rb_define_alloc_func(rb_cCAReduce, rb_ca_reduce_s_allocate);

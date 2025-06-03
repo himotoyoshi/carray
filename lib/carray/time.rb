@@ -53,7 +53,7 @@ class CArray
   end
 
   def time_minute
-    return convert(:int, &:minute)
+    return convert(:int, &:min)
   end
 
   def time_second

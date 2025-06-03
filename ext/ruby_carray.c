@@ -101,6 +101,13 @@ Init_carray_ext ()
   rb_cCARepeat   = rb_define_class("CARepeat",  rb_cCAVirtual);
   rb_cCAUnboundRepeat  = rb_define_class("CAUnboundRepeat",  rb_cCAVirtual);
 
+  rb_cCArrayMask     = rb_define_class("CArrayMask",    rb_cCArray);
+  rb_cCAReferMask    = rb_define_class("CAReferMask",   rb_cCARefer);
+  rb_cCABlockMask    = rb_define_class("CABlockMask",   rb_cCABlock);
+  rb_cCASelectMask   = rb_define_class("CASelectMask",  rb_cCASelect);
+  rb_cCARepeatMask   = rb_define_class("CARepeatMask",  rb_cCARepeat);
+  rb_cCAUnboundRepeatMask  = rb_define_class("CAUnboundRepeatMask",  rb_cCAUnboundRepeat);
+
   /* -- Exception class -- */
 
   rb_eCADataTypeError =

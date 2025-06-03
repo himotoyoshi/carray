@@ -87,19 +87,18 @@ class CArray
                    else
                      raise "invalid data_type"
                    end
-    tempfile = "CA_Magick_#{$$}_#{@@magick_tempfile_count}.dat"
-    @@magick_tempfile_count += 1
+#    tempfile = "CA_Magick_#{$$}_#{@@magick_tempfile_count}.dat"
+#    @@magick_tempfile_count += 1
     stream_command = [
                       "stream",
                       "-storage-type #{storage_type}",
                       "-map #{imap}",
                       filename,
-                      tempfile,
+                      "-",
                       "2>/dev/null"
                      ].join(" ")
     begin
-      system stream_command
-      return open(tempfile) { |io|
+      return IO.popen(stream_command) { |io|
         if imap.size == 1
           CArray.new(data_type, [height, width]).load_binary(io)
         else
@@ -109,9 +108,9 @@ class CArray
     rescue
       raise "ImageMagick's stream command failed to read image file '#{filename}'"
     ensure
-      if File.exist?(tempfile)
-        File.unlink(tempfile)
-      end
+#      if File.exist?(tempfile)
+#        File.unlink(tempfile)
+#      end
     end
   end
 
@@ -171,7 +170,7 @@ class CArray
       depth = "-depth 8"
     end
     convert_command = [
-                       "convert",
+                       "magick convert",
                        depth,
                        "-size " + [dim1, dim0].join("x"),
                        quantum_format,
