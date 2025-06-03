@@ -15,8 +15,6 @@
   end
 */
 
-static VALUE rb_cCAShift;
-
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
@@ -37,7 +35,34 @@ typedef struct {
   int       fill_mask;
 } CAShift;
 
+const rb_data_type_t cashift_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAShift",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cashift_mask_data_type = {
+    .parent = &cashift_data_type,
+    .wrap_struct_name = "CAShift",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_SHIFT;
+
+VALUE rb_cCAShift;
+VALUE rb_cCAShiftMask;
 
 /* ------------------------------------------------------------------- */
 
@@ -797,7 +822,7 @@ rb_ca_shift_set_fill_value (VALUE self, VALUE rfval)
   CAShift *ca;
   CArray *cs;
 
-  Data_Get_Struct(self, CAShift, ca);
+  TypedData_Get_Struct(self, CAShift, &cashift_data_type, ca);
 
   if ( NIL_P(rfval) ) {
     memset(ca->fill, 0, ca->bytes);
@@ -818,7 +843,7 @@ rb_ca_shift_new (VALUE cary, ca_size_t *shift, char *fill, int8_t *roll)
   CArray *parent;
   CAShift *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_shift_new(parent, shift, fill, roll);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -844,7 +869,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   char *fill = NULL;
   int8_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   ropt = rb_pop_options(&argc, &argv);
   rb_scan_options(ropt, "roll,fill_value", &rroll, &rfval);
@@ -868,7 +893,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
 
   if ( rfval == CA_NIL ) {
     rcs = rb_cscalar_new(ca->data_type, ca->bytes, NULL);
-    Data_Get_Struct(rcs, CScalar, cs);
+    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
     if ( ca_is_object_type(ca) ) {
       *(VALUE *)fill = INT2NUM(0);
@@ -882,7 +907,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   }
   else {
     rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
-    Data_Get_Struct(rcs, CScalar, cs);
+    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
   }
 
@@ -907,7 +932,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
 
   if ( rfval == CA_UNDEF ) {
     CArray *co;
-    Data_Get_Struct(obj, CArray, co);
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
     ca_create_mask(co);
   }
 
@@ -920,7 +945,7 @@ static VALUE
 rb_ca_shift_s_allocate (VALUE klass)
 {
   CAShift *ca;
-  return Data_Make_Struct(klass, CAShift, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAShift, &cashift_data_type, ca);
 }
 
 static VALUE
@@ -928,8 +953,8 @@ rb_ca_shift_initialize_copy (VALUE self, VALUE other)
 {
   CAShift *ca, *cs;
 
-  Data_Get_Struct(self,  CAShift, ca);
-  Data_Get_Struct(other, CAShift, cs);
+  TypedData_Get_Struct(self,  CAShift, &cashift_data_type, ca);
+  TypedData_Get_Struct(other, CAShift, &cashift_data_type, cs);
 
   ca_shift_setup(ca, cs->parent, cs->shift, cs->fill, cs->roll);
 
@@ -940,8 +965,12 @@ void
 Init_ca_obj_shift ()
 {
   rb_cCAShift = rb_define_class("CAShift", rb_cCAVirtual);
+  rb_cCAShiftMask = rb_define_class("CAShiftMask", rb_cCAShift);
 
-  CA_OBJ_SHIFT = ca_install_obj_type(rb_cCAShift, ca_shift_func);
+  CA_OBJ_SHIFT = ca_install_obj_type(rb_cCAShift, 
+  	                             &cashift_data_type, 
+				     rb_cCAShiftMask,
+				     &cashift_mask_data_type, ca_shift_func);
   rb_define_const(rb_cObject, "CA_OBJ_SHIFT", INT2NUM(CA_OBJ_SHIFT));
 
   rb_define_method(rb_cCArray, "shifted", rb_ca_shift, -1);

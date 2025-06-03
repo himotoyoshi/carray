@@ -27,6 +27,19 @@ typedef struct {
   ca_size_t   offset;
 } CAField;
 
+
+const rb_data_type_t cafield_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAField",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_FIELD;
 
 static VALUE rb_cCAField;
@@ -514,7 +527,7 @@ rb_ca_field_new (VALUE cary, ca_size_t offset, int8_t data_type, ca_size_t bytes
   CArray *parent;
   CAField *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_field_new(parent, offset, data_type, bytes);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -525,7 +538,7 @@ static VALUE
 rb_ca_field_s_allocate (VALUE klass)
 {
   CAField *ca;
-  return Data_Make_Struct(klass, CAField, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAField, &cafield_data_type, ca);
 }
 
 static VALUE
@@ -533,8 +546,8 @@ rb_ca_field_initialize_copy (VALUE self, VALUE other)
 {
   CAField *ca, *cs;
 
-  Data_Get_Struct(self,  CAField, ca);
-  Data_Get_Struct(other, CAField, cs);
+  TypedData_Get_Struct(self,  CAField, &cafield_data_type, ca);
+  TypedData_Get_Struct(other, CAField, &cafield_data_type, cs);
 
   ca_field_setup(ca, cs->parent, cs->offset, cs->data_type, cs->bytes);
 
@@ -567,7 +580,7 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
     return rb_ca_field_as_member(self, argv[0]);
   }
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* CArray#field(offset, data_type[, :bytes=>bytes]) */
   /* CArray#field(offset, data_class) */
@@ -583,7 +596,7 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
     ca_size_t dim[CA_RANK_MAX];
     int8_t ndim;
     int8_t i, j;
-    Data_Get_Struct(rtype, CArray, ct);
+    TypedData_Get_Struct(rtype, CArray, &carray_data_type, ct);
     data_type = CA_FIXLEN;
     bytes     = ct->bytes * ct->elements;
     obj = rb_ca_field_new(self, offset, data_type, bytes);
@@ -612,7 +625,10 @@ Init_ca_obj_field ()
 {
   rb_cCAField = rb_define_class("CAField", rb_cCAVirtual);
 
-  CA_OBJ_FIELD = ca_install_obj_type(rb_cCAField, ca_field_func);
+  CA_OBJ_FIELD = ca_install_obj_type(rb_cCAField, 
+                                     &cafield_data_type, 
+				     rb_cCArrayMask,
+				     &carray_mask_data_type, ca_field_func);
   rb_define_const(rb_cObject, "CA_OBJ_FIELD", INT2NUM(CA_OBJ_FIELD));
 
   rb_define_method(rb_cCArray, "field", rb_ca_field, -1);

@@ -28,7 +28,32 @@ typedef struct {
   int8_t   *contig;
 } CAGrid;
 
+const rb_data_type_t cagrid_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAGrid",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cagrid_mask_data_type = {
+    .parent = &cagrid_data_type,
+    .wrap_struct_name = "CAGridMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static VALUE rb_cCAGrid;
+static VALUE rb_cCAGridMask;
 
 /* yard:
   class CAGrid < CAVirtual # :nodoc:
@@ -593,7 +618,7 @@ rb_ca_grid_new (VALUE cary, ca_size_t *dim, CArray **grid)
   CArray *parent;
   CAGrid *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_grid_new(parent, dim, grid);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -619,7 +644,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
   CArray *grid[CA_RANK_MAX];
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type,ca);
 
   ridx = rb_ary_new4(argc, argv);
 
@@ -635,7 +660,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
     for (i=0; i<rndim; i++) {
       rval = rb_ary_entry(ridx, i);
       if ( rb_obj_is_carray(rval) ) {
-        Data_Get_Struct(rval, CArray, cv);
+        TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
         rdim[i] = 1;
         for (k=0; k<cv->ndim; k++) {
           rdim[i] *= ca->dim[j];
@@ -702,7 +727,7 @@ static VALUE
 rb_ca_grid_s_allocate (VALUE klass)
 {
   CAGrid *ca;
-  return Data_Make_Struct(klass, CAGrid, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAGrid, &cagrid_data_type, ca);
 }
 
 static VALUE
@@ -710,8 +735,8 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
 {
   CAGrid *ca, *cs;
 
-  Data_Get_Struct(self,  CAGrid, ca);
-  Data_Get_Struct(other, CAGrid, cs);
+  TypedData_Get_Struct(self,  CAGrid, &cagrid_data_type, ca);
+  TypedData_Get_Struct(other, CAGrid, &cagrid_data_type, cs);
 
   /* share grid info */
   ca_grid_setup(ca, cs->parent, cs->dim, cs->grid, cs->contig, 1);
@@ -725,8 +750,12 @@ void
 Init_ca_obj_grid ()
 {
   rb_cCAGrid = rb_define_class("CAGrid", rb_cCAVirtual);
+  rb_cCAGridMask = rb_define_class("CAGridMask", rb_cCAGrid);
 
-  CA_OBJ_GRID = ca_install_obj_type(rb_cCAGrid, ca_grid_func);
+  CA_OBJ_GRID = ca_install_obj_type(rb_cCAGrid, 
+                                    &cagrid_data_type, 
+				    rb_cCAGridMask,
+				    &cagrid_mask_data_type, ca_grid_func);
   rb_define_const(rb_cObject, "CA_OBJ_GRID", INT2NUM(CA_OBJ_GRID));
 
   rb_define_method(rb_cCArray, "grid", rb_ca_grid, -1);

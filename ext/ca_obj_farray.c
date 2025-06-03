@@ -27,9 +27,34 @@ typedef struct {
   ca_size_t   step;
 } CAFarray;
 
+const rb_data_type_t cafarray_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAFarray",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cafarray_mask_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAFarrayMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_FARRAY;
 
 static VALUE rb_cCAFarray;
+static VALUE rb_cCAFarrayMask;
 
 /* yard:
   class CAFArray < CAVirtual # :nodoc:
@@ -419,7 +444,7 @@ rb_ca_farray_new (VALUE cary)
   CArray *parent;
   CAFarray *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca  = ca_farray_new(parent);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -445,7 +470,7 @@ static VALUE
 rb_ca_farray_s_allocate (VALUE klass)
 {
   CAFarray *ca;
-  return Data_Make_Struct(klass, CAFarray, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAFarray, &cafarray_data_type, ca);
 }
 
 static VALUE
@@ -453,8 +478,8 @@ rb_ca_farray_initialize_copy (VALUE self, VALUE other)
 {
   CAFarray *ca, *cs;
 
-  Data_Get_Struct(self,  CAFarray, ca);
-  Data_Get_Struct(other, CAFarray, cs);
+  TypedData_Get_Struct(self,  CAFarray, &cafarray_data_type, ca);
+  TypedData_Get_Struct(other, CAFarray, &cafarray_data_type, cs);
 
   ca_farray_setup(ca, cs->parent);
 
@@ -465,8 +490,12 @@ void
 Init_ca_obj_farray ()
 {
   rb_cCAFarray = rb_define_class("CAFarray", rb_cCAVirtual);
+  rb_cCAFarrayMask = rb_define_class("CAFarrayMask", rb_cCAFarray);
 
-  CA_OBJ_FARRAY = ca_install_obj_type(rb_cCAFarray, ca_farray_func);
+  CA_OBJ_FARRAY = ca_install_obj_type(rb_cCAFarray, 
+                                      &cafarray_data_type, 
+				      rb_cCAFarrayMask,
+				      &cafarray_mask_data_type, ca_farray_func);
   rb_define_const(rb_cObject, "CA_OBJ_FARRAY", INT2NUM(CA_OBJ_FARRAY));
 
   rb_define_method(rb_cCArray, "farray", rb_ca_farray, 0);

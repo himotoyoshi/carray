@@ -114,7 +114,7 @@ typedef int8_t boolean8_t;
 #endif
 
 #ifndef HAVE_TYPE_INT64_T
-#  if HAVE_LONG_LONG == 1 && SIZEOF_LONG_LONG == 8
+#  if HAVE_LONG_LONG && SIZEOF_LONG_LONG == 8
 #    define HAVE_TYPE_INT64_T 1
      typedef long long int64_t;
 #  else
@@ -123,7 +123,7 @@ typedef int8_t boolean8_t;
 #endif
 
 #ifndef HAVE_TYPE_UINT64_T
-#  if HAVE_LONG_LONG == 1 && SIZEOF_LONG_LONG == 8
+#  if HAVE_LONG_LONG && SIZEOF_LONG_LONG == 8
 #    define HAVE_TYPE_UINT64_T 1
      typedef unsigned long long uint64_t;
 #  else
@@ -131,14 +131,14 @@ typedef int8_t boolean8_t;
 #  endif
 #endif
 
-#if HAVE_TYPE_FLOAT == 1 && SIZEOF_FLOAT == 4
+#if HAVE_TYPE_FLOAT && SIZEOF_FLOAT == 4
 #  define HAVE_TYPE_FLOAT32_T 1
    typedef float float32_t;
 #else
    typedef dummy_t float32_t;
 #endif
 
-#if HAVE_TYPE_DOUBLE == 1 && SIZEOF_DOUBLE == 8
+#if HAVE_TYPE_DOUBLE && SIZEOF_DOUBLE == 8
 #  define HAVE_TYPE_FLOAT64_T 1
    typedef double float64_t;
 #else
@@ -147,7 +147,7 @@ typedef int8_t boolean8_t;
 
 /* float128_t is currently disabled in extconf.rb */
 
-#if HAVE_TYPE_LONG_DOUBLE == 1 && SIZEOF_LONG_DOUBLE == 16
+#if HAVE_TYPE_LONG_DOUBLE && SIZEOF_LONG_DOUBLE == 16
 #  define HAVE_TYPE_FLOAT128_T 1
    typedef long double float128_t;
 #else
@@ -174,7 +174,7 @@ typedef int8_t boolean8_t;
 
 /* cmplx256_t is currently disabled in extconf.rb */
 
-#if HAVE_TYPE_LONG_DOUBLE_COMPLEX == 1 && SIZEOF_LONG_DOUBLE_COMPLEX == 32
+#if defined(HAVE_TYPE_LONG_DOUBLE_COMPLEX) && SIZEOF_LONG_DOUBLE_COMPLEX == 32
 #  define HAVE_TYPE_CMPLX256_T 1
    typedef long double complex cmplx256_t;
 #else
@@ -290,7 +290,6 @@ enum {
 #endif
 
 /* -------------------------------------------------------------------- */
-
 
 typedef struct {
   int32_t obj_type;
@@ -560,6 +559,67 @@ typedef struct {
 
 /* -------------------------------------------------------------------- */
 
+extern const int ca_endian;
+extern const int32_t ca_valid[CA_NTYPE];
+extern const int32_t ca_sizeof[CA_NTYPE];
+extern const char *  ca_type_name[CA_NTYPE];
+extern const int ca_cast_table[CA_NTYPE][CA_NTYPE];
+extern const int ca_cast_table2[CA_NTYPE][CA_NTYPE];
+
+extern VALUE ca_class[CA_OBJ_TYPE_MAX];
+extern const rb_data_type_t *ca_typeddata[CA_OBJ_TYPE_MAX];
+extern VALUE ca_mask_class[CA_OBJ_TYPE_MAX];
+extern const rb_data_type_t *ca_mask_typeddata[CA_OBJ_TYPE_MAX];
+extern ca_operation_function_t ca_func[CA_OBJ_TYPE_MAX];
+extern int ca_obj_num;
+
+#define CAVIRTUAL(x) ((CAVirtual *)(x))
+
+#define ca_set_flag(ca, flag)   ( ca->flags |= flag )
+#define ca_unset_flag(ca, flag) ( ca->flags &= ~flag )
+#define ca_test_flag(ca, flag) (( ca->flags & flag ) ? 1 : 0)
+
+/* -------------------------------------------------------------------- */
+
+extern const rb_data_type_t caiterator_data_type;
+
+extern const rb_data_type_t carray_data_type;
+extern const rb_data_type_t cawrap_data_type;
+extern const rb_data_type_t cscalar_data_type;
+extern const rb_data_type_t cavirtual_data_type;
+
+extern const rb_data_type_t cabitarray_data_type;
+extern const rb_data_type_t cabitfield_data_type;
+extern const rb_data_type_t cablock_data_type;
+extern const rb_data_type_t cafake_data_type;
+extern const rb_data_type_t cafield_data_type;
+extern const rb_data_type_t cagrid_data_type;
+extern const rb_data_type_t camapping_data_type;
+extern const rb_data_type_t caobject_data_type;
+extern const rb_data_type_t careduce_data_type;
+extern const rb_data_type_t carefer_data_type;
+extern const rb_data_type_t carepeat_data_type;
+extern const rb_data_type_t caselect_data_type;
+extern const rb_data_type_t cashift_data_type;
+extern const rb_data_type_t catrans_data_type;
+extern const rb_data_type_t caunboundrepeat_data_type;
+extern const rb_data_type_t cawindow_data_type;
+
+extern const rb_data_type_t carray_mask_data_type;
+extern const rb_data_type_t cablock_mask_data_type;
+extern const rb_data_type_t cagrid_mask_data_type;
+extern const rb_data_type_t camapping_mask_data_type;
+extern const rb_data_type_t careduce_mask_data_type;
+extern const rb_data_type_t carefer_mask_data_type;
+extern const rb_data_type_t carepeat_mask_data_type;
+extern const rb_data_type_t caselect_mask_data_type;
+extern const rb_data_type_t cashift_mask_data_type;
+extern const rb_data_type_t catrans_mask_data_type;
+extern const rb_data_type_t caunboundrepeat_mask_data_type;
+extern const rb_data_type_t cawindow_mask_data_type;
+
+/* -------------------------------------------------------------------- */
+
 extern VALUE rb_cCArray;
 extern VALUE rb_cCAVirtual;
 extern VALUE rb_cCScalar;
@@ -571,6 +631,14 @@ extern VALUE rb_cCAObject;
 extern VALUE rb_cCARepeat;
 extern VALUE rb_cCAUnboundRepeat;
 extern VALUE rb_cCAIterator;
+
+extern VALUE rb_cCArrayMask;
+extern VALUE rb_cCAReferMask;
+extern VALUE rb_cCABlockMask;
+extern VALUE rb_cCASelectMask;
+extern VALUE rb_cCAObjectMask;
+extern VALUE rb_cCARepeatMask;
+extern VALUE rb_cCAUnboundRepeatMask;
 
 extern VALUE rb_mCA;
 extern VALUE rb_mCAMath;
@@ -592,25 +660,6 @@ extern VALUE rb_cCArrayCmplx64;
 extern VALUE rb_cCArrayCmplx128;
 extern VALUE rb_cCArrayCmplx256;
 extern VALUE rb_cCArrayObject;
-
-/* -------------------------------------------------------------------- */
-
-extern const int ca_endian;
-extern const int32_t ca_valid[CA_NTYPE];
-extern const int32_t ca_sizeof[CA_NTYPE];
-extern const char *  ca_type_name[CA_NTYPE];
-extern const int ca_cast_table[CA_NTYPE][CA_NTYPE];
-extern const int ca_cast_table2[CA_NTYPE][CA_NTYPE];
-
-extern VALUE ca_class[CA_OBJ_TYPE_MAX];
-extern ca_operation_function_t ca_func[CA_OBJ_TYPE_MAX];
-extern int ca_obj_num;
-
-#define CAVIRTUAL(x) ((CAVirtual *)(x))
-
-#define ca_set_flag(ca, flag)   ( ca->flags |= flag )
-#define ca_unset_flag(ca, flag) ( ca->flags &= ~flag )
-#define ca_test_flag(ca, flag) (( ca->flags & flag ) ? 1 : 0)
 
 /* -------------------------------------------------------------------- */
 
@@ -788,10 +837,20 @@ VALUE rb_ca_call_binop (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[]);
 VALUE rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[]);
 VALUE rb_ca_call_bincmp (VALUE self, VALUE other, ca_bincmp_func_t func[]);
-void  ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
-void  ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
-void  ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2) __attribute__((noreturn));
-void  ca_bincmp_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3) __attribute__((noreturn));
+void  ca_monop_not_implement(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2) __attribute__((noreturn));
+void  ca_binop_not_implement(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2, 
+                                char *ptr3, ca_size_t i3) __attribute__((noreturn));
+void  ca_moncmp_not_implement(ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t i1, 
+                                 boolean8_t *ptr2, ca_size_t i2) __attribute__((noreturn));
+void  ca_bincmp_not_implement(ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t b1, ca_size_t i1, 
+                                 char *ptr2, ca_size_t b2, ca_size_t i2, 
+                                 char *ptr3, ca_size_t b3, ca_size_t i3) __attribute__((noreturn));
 VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 
 /* -------------------------------------------------------------------- */
@@ -914,7 +973,14 @@ VALUE   rb_dim_iter_new (VALUE vca, CAIndexInfo *info);
 
 void * malloc_with_check(size_t size);
 
-int     ca_install_obj_type (VALUE klass, ca_operation_function_t func);
+int
+ca_install_obj_type (VALUE klass, 
+                     const rb_data_type_t *typeddata, 
+		     VALUE mask_klass, 
+                     const rb_data_type_t *mask_typeddata, 
+		     ca_operation_function_t func);
+
+
 VALUE   ca_data_type_class (int8_t data_type);
 
 void    ca_mark (void *ap);

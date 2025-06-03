@@ -36,6 +36,18 @@
 
 #include "carray.h"
 
+const rb_data_type_t caobject_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAObject",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCAObject;
 
 
@@ -47,8 +59,19 @@ VALUE rb_cCAObject;
 
 /* ---------------------------------------------------------------------- */
 
+const rb_data_type_t caobjectmask_data_type = {
+    .wrap_struct_name = "CAObjectMask",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_OBJECT_MASK;
-static VALUE rb_cCAObjectMask;
+VALUE rb_cCAObjectMask;
 
 /* yard:
   class CAObjectMask < CAVirtual # :nodoc:
@@ -277,7 +300,7 @@ static VALUE
 rb_ca_objmask_s_allocate (VALUE klass)
 {
   CAObjectMask *ca;
-  return Data_Make_Struct(klass, CAObjectMask, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAObjectMask, &caobject_data_type, ca);
 }
 
 static VALUE
@@ -285,8 +308,8 @@ rb_ca_objmask_initialize_copy (VALUE self, VALUE other)
 {
   CAObjectMask *ca, *cs;
 
-  Data_Get_Struct(self,  CAObjectMask, ca);
-  Data_Get_Struct(other, CAObjectMask, cs);
+  TypedData_Get_Struct(self,  CAObjectMask, &caobjectmask_data_type, ca);
+  TypedData_Get_Struct(other, CAObjectMask, &caobjectmask_data_type, cs);
 
   carray_setup((CArray *)ca, CA_BOOLEAN, cs->ndim, cs->dim, 0, NULL);
   ca->obj_type = CA_OBJ_OBJECT_MASK;
@@ -674,8 +697,8 @@ rb_ca_object_initialize_copy (VALUE self, VALUE other)
   volatile VALUE data;
   CAObject *ca, *cs;
 
-  Data_Get_Struct(self,  CAObject, ca);
-  Data_Get_Struct(other, CAObject, cs);
+  TypedData_Get_Struct(self,  CAObject, &caobject_data_type, ca);
+  TypedData_Get_Struct(other, CAObject, &caobject_data_type, cs);
 
   ca_object_setup(ca, cs->data_type, cs->ndim, cs->dim, cs->bytes);
   ca->self = self;
@@ -724,7 +747,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
 
-  Data_Get_Struct(self, CAObject, ca);
+  TypedData_Get_Struct(self, CAObject, &caobject_data_type, ca);
   ca_object_setup(ca, data_type, ndim, dim, bytes);
   ca->self = self;
 
@@ -739,7 +762,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
 
   if ( ! NIL_P(rparent) ) {
     CArray *cp;
-    Data_Get_Struct(rparent, CArray, cp);
+    TypedData_Get_Struct(rparent, CArray, &carray_data_type, cp);
     ca->parent = cp;
     rb_ca_set_parent(self, rparent);
   }
@@ -754,7 +777,10 @@ Init_ca_obj_object ()
 {
   rb_cCAObjectMask = rb_define_class("CAObjectMask", rb_cCArray);
 
-  CA_OBJ_OBJECT_MASK = ca_install_obj_type(rb_cCAObjectMask, ca_objmask_func);
+  CA_OBJ_OBJECT_MASK = ca_install_obj_type(rb_cCAObjectMask, 
+  					   &caobjectmask_data_type, 
+					   rb_cCArrayMask,
+                                           &carray_data_type, ca_objmask_func);
   rb_define_const(rb_cObject, "CA_OBJ_OBJECT_MASK", INT2NUM(CA_OBJ_OBJECT_MASK));
 
   rb_define_alloc_func(rb_cCAObjectMask, rb_ca_objmask_s_allocate);

@@ -4,7 +4,7 @@
 #
 #  This file is part of Ruby/CArray extension library.
 #
-#  Copyright (C) 2005-2020 Hiroki Motoyoshi
+#  Copyright (C) 2005-2025 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 
@@ -53,7 +53,7 @@ class CArray
   end
 
   def time_minute
-    return convert(:int, &:minute)
+    return convert(:int, &:min)
   end
 
   def time_second

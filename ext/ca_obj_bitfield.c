@@ -29,6 +29,18 @@ typedef struct {
   uint64_t  bit_mask;
 } CABitfield;
 
+const rb_data_type_t cabitfield_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CABitfield",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_BITFIELD;
 
 static VALUE rb_cCABitfield;
@@ -550,7 +562,7 @@ rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
   CArray *parent;
   CABitfield *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_bitfield_new(parent, offset, bitlen);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -568,12 +580,11 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
   volatile VALUE rrange, rtype;
   CArray *ca;
   ca_size_t offset, bitlen, step;
-  int data_type = CA_NONE;
   ca_size_t bitsize;
 
   rb_scan_args(argc, argv, "11", (VALUE *) &rrange, (VALUE *) &rtype);
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( TYPE(rrange) == T_FIXNUM ) {
     offset = NUM2INT(rrange);
@@ -587,10 +598,6 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  if ( ! NIL_P(rtype) ) {
-    data_type = rb_ca_guess_type(rtype);
-  }
-
   return rb_ca_bitfield_new(self, offset, bitlen);
 }
 
@@ -598,7 +605,7 @@ static VALUE
 rb_ca_bitfield_s_allocate (VALUE klass)
 {
   CABitfield *ca;
-  return Data_Make_Struct(klass, CABitfield, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CABitfield, &cabitfield_data_type, ca);
 }
 
 static VALUE
@@ -606,8 +613,8 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
 {
   CABitfield *ca, *cs;
 
-  Data_Get_Struct(self,  CABitfield, ca);
-  Data_Get_Struct(other, CABitfield, cs);
+  TypedData_Get_Struct(self,  CABitfield, &cabitfield_data_type, ca);
+  TypedData_Get_Struct(other, CABitfield, &cabitfield_data_type, cs);
 
   ca_bitfield_setup(ca, cs->parent, 
                     8 * cs->byte_offset + cs->bit_offset, 
@@ -621,7 +628,10 @@ Init_ca_obj_bitfield ()
 {
   rb_cCABitfield = rb_define_class("CABitfield", rb_cCAVirtual);
 
-  CA_OBJ_BITFIELD = ca_install_obj_type(rb_cCABitfield, ca_bitfield_func);
+  CA_OBJ_BITFIELD = ca_install_obj_type(rb_cCABitfield, 
+  	                                &cabitfield_data_type, 
+					rb_cCArrayMask,
+					&carray_data_type, ca_bitfield_func);
   rb_define_const(rb_cObject, "CA_OBJ_BITFIELD", INT2NUM(CA_OBJ_BITFIELD));
 
   rb_define_method(rb_cCArray, "bitfield", rb_ca_bitfield, -1);

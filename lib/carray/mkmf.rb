@@ -4,7 +4,7 @@
 #
 #  This file is part of Ruby/CArray extension library.
 #
-#  Copyright (C) 2005-2020 Hiroki Motoyoshi
+#  Copyright (C) 2005-2025 Hiroki Motoyoshi
 #
 # ----------------------------------------------------------------------------
 
@@ -112,6 +112,7 @@ def possible_prefix (*postfixes)
     File.expand_path("~/local"), ### user's home / local
     File.expand_path("~"),       ### user's home
     "/opt/local",                ### MacPorts
+    "/opt/homebrew",             ### Homebrew
     "/opt",                      ### UNIX 
     "/sw/local",                 ### Mac Fink
     "/sw/",                      ### Mac Fink

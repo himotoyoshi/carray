@@ -4,13 +4,38 @@
 
   This file is part of Ruby/CArray extension library.
 
-  Copyright (C) 2005-2020 Hiroki Motoyoshi
+  Copyright (C) 2005-2025 Hiroki Motoyoshi
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 
+const rb_data_type_t carepeat_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CARepeat",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t carepeat_mask_data_type = {
+    .parent = &carepeat_data_type,
+    .wrap_struct_name = "CARepeatMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCARepeat;
+VALUE rb_cCARepeatMask;
 
 /* yard:
   class CARepeat < CAVirtual # :nodoc:
@@ -193,10 +218,9 @@ ca_repeat_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
   CARepeat *ca = (CARepeat *) ap;
   ca_size_t *count = ca->count;
   ca_size_t idx0[CA_RANK_MAX];
-  int8_t   i;
-  ca_size_t  n, j;
+  int8_t    i;
+  ca_size_t j;
   j = 0;
-  n = 0;
   for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
@@ -212,9 +236,8 @@ ca_repeat_func_store_index (void *ap, ca_size_t *idx, void *ptr)
   ca_size_t *count = ca->count;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t   i;
-  ca_size_t  n, j;
+  ca_size_t  j;
   j = 0;
-  n = 0;
   for (i=0; i<ca->ndim; i++) {
     if ( ! count[i] ) {
       idx0[j++] = idx[i];
@@ -479,7 +502,7 @@ rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count)
   CArray *parent;
   CARepeat *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_repeat_new(parent, ndim, count);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -496,7 +519,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
   ca_size_t repeat;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( argc == 2 && 
        (
@@ -508,10 +531,10 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
     ca_size_t ndim, dim[CA_RANK_MAX];
     int k;
     if ( argv[0] == ID2SYM(rb_intern("%") ) ) {
-      Data_Get_Struct(argv[1], CArray, ct);
+      TypedData_Get_Struct(argv[1], CArray, &carray_data_type, ct);
     }
     else {
-      Data_Get_Struct(argv[0], CArray, ct);
+      TypedData_Get_Struct(argv[0], CArray, &carray_data_type, ct);
     }
     if ( ct->ndim < ca->ndim ) {
       rb_raise(rb_eRuntimeError, "invalid ndim to template");
@@ -612,7 +635,7 @@ static VALUE
 rb_ca_repeat_s_allocate (VALUE klass)
 {
   CARepeat *ca;
-  return Data_Make_Struct(klass, CARepeat, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CARepeat, &carepeat_data_type, ca);
 }
 
 static VALUE
@@ -620,8 +643,8 @@ rb_ca_repeat_initialize_copy (VALUE self, VALUE other)
 {
   CARepeat *ca, *cs;
 
-  Data_Get_Struct(self,  CARepeat, ca);
-  Data_Get_Struct(other, CARepeat, cs);
+  TypedData_Get_Struct(self,  CARepeat, &carepeat_data_type, ca);
+  TypedData_Get_Struct(other, CARepeat, &carepeat_data_type, cs);
 
   ca_repeat_setup(ca, cs->parent, cs->ndim, cs->count);
 
