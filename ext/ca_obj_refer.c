@@ -10,7 +10,32 @@
 
 #include "carray.h"
 
+const rb_data_type_t carefer_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CARefer",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t carefer_mask_data_type = {
+    .parent = &carefer_data_type,
+    .wrap_struct_name = "CAReferMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCARefer;
+VALUE rb_cCAReferMask;
 
 /* yard:
   class CARefer < CAVirtual # :nodoc:
@@ -470,7 +495,7 @@ static VALUE
 rb_ca_refer_s_allocate (VALUE klass)
 {
   CARefer *ca;
-  return Data_Make_Struct(klass, CARefer, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CARefer, &carefer_data_type, ca);
 }
 
 static VALUE
@@ -478,8 +503,8 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
 {
   CARefer *ca, *cs;
 
-  Data_Get_Struct(self,  CARefer, ca);
-  Data_Get_Struct(other, CARefer, cs);
+  TypedData_Get_Struct(self,  CARefer, &carefer_data_type, ca);
+  TypedData_Get_Struct(other, CARefer, &carefer_data_type, cs);
 
   ca_refer_setup(ca, cs->parent, cs->data_type, cs->ndim, cs->dim,
                              cs->bytes, cs->offset);
@@ -515,7 +540,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
   ca_size_t bytes, offset = 0;
   int8_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( argc == 0 ) {                 /* CArray#refer() */
     data_type = ca->data_type;
@@ -587,7 +612,7 @@ rb_ca_refer_new (VALUE self,
   CArray *ca;
   int8_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rdim = rb_ary_new2(ndim);
   for (i=0; i<ndim; i++) {

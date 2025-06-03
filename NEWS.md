@@ -1,6 +1,16 @@
 ChangeLog of Ruby/CArray
 ========================
 
+1.6.0 -> 2.0.0
+--------------
+
+*  Data -> TypedData
+
+1.5.9 -> 1.6.0
+--------------
+
+* Remove taint check in CArray#inspect
+
 1.5.8 -> 1.5.9
 --------------
 

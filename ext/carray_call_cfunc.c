@@ -22,7 +22,7 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
 
   ca_attach(cx0);
 
@@ -62,8 +62,8 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
 
   ca_attach_n(2, cx0, cx1);
 
@@ -134,9 +134,9 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
-  Data_Get_Struct(rcx2, CArray, cx2);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx2);
 
   ca_attach_n(3, cx0, cx1, cx2);
 
@@ -214,10 +214,10 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
-  Data_Get_Struct(rcx2, CArray, cx2);
-  Data_Get_Struct(rcx3, CArray, cx3);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx2);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx3);
 
   ca_attach_n(4, cx0, cx1, cx2, cx3);
 
@@ -303,11 +303,11 @@ ca_call_cfunc_5 (void (*func)(void*,void*,void*,void*,void*), const char *fsync,
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
-  Data_Get_Struct(rcx2, CArray, cx2);
-  Data_Get_Struct(rcx3, CArray, cx3);
-  Data_Get_Struct(rcx4, CArray, cx4);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx2);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx3);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx4);
 
   ca_attach_n(5, cx0, cx1, cx2, cx3, cx4);
 
@@ -400,12 +400,12 @@ ca_call_cfunc_6 (void (*func)(void*,void*,void*,void*,void*,void*), const char *
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
-  Data_Get_Struct(rcx2, CArray, cx2);
-  Data_Get_Struct(rcx3, CArray, cx3);
-  Data_Get_Struct(rcx4, CArray, cx4);
-  Data_Get_Struct(rcx5, CArray, cx5);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx2);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx3);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx4);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx5);
 
   ca_attach_n(6, cx0, cx1, cx2, cx3, cx4, cx5);
 
@@ -505,13 +505,13 @@ ca_call_cfunc_7 (void (*func)(void*,void*,void*,void*,void*,void*,void*), const 
              "[BUG] invalid length of fsync arg in rb_ca_call_mathfunc");
   }
 
-  Data_Get_Struct(rcx0, CArray, cx0);
-  Data_Get_Struct(rcx1, CArray, cx1);
-  Data_Get_Struct(rcx2, CArray, cx2);
-  Data_Get_Struct(rcx3, CArray, cx3);
-  Data_Get_Struct(rcx4, CArray, cx4);
-  Data_Get_Struct(rcx5, CArray, cx5);
-  Data_Get_Struct(rcx6, CArray, cx6);
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx0);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx1);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx2);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx3);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx4);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx5);
+  TypedData_Get_Struct(rcx6, CArray, &carray_data_type, cx6);
 
   ca_attach_n(7, cx0, cx1, cx2, cx3, cx4, cx5, cx6);
 

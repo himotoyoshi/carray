@@ -25,6 +25,18 @@ typedef struct {
   uint8_t   nosync;
 } CAFake;
 
+const rb_data_type_t cafake_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAFake",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static int8_t CA_OBJ_FAKE;
 
 static VALUE rb_cCAFake;
@@ -319,7 +331,7 @@ rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes)
   CArray *parent;
   CAFake *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca  = ca_fake_new(parent, data_type, bytes);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -341,7 +353,7 @@ rb_ca_fake (int argc, VALUE *argv, VALUE self)
   int8_t  data_type;
   ca_size_t bytes;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
@@ -369,7 +381,7 @@ static VALUE
 rb_ca_fake_s_allocate (VALUE klass)
 {
   CAFake *ca;
-  return Data_Make_Struct(klass, CAFake, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAFake, &cafake_data_type, ca);
 }
 
 static VALUE
@@ -377,8 +389,8 @@ rb_ca_fake_initialize_copy (VALUE self, VALUE other)
 {
   CAFake *ca, *cs;
 
-  Data_Get_Struct(self,  CAFake, ca);
-  Data_Get_Struct(other, CAFake, cs);
+  TypedData_Get_Struct(self,  CAFake, &cafake_data_type, ca);
+  TypedData_Get_Struct(other, CAFake, &cafake_data_type, cs);
 
   ca_fake_setup(ca, cs->parent, cs->data_type, cs->bytes);
 
@@ -390,7 +402,10 @@ Init_ca_obj_fake ()
 {
   rb_cCAFake = rb_define_class("CAFake", rb_cCAVirtual);
 
-  CA_OBJ_FAKE = ca_install_obj_type(rb_cCAFake, ca_fake_func);
+  CA_OBJ_FAKE = ca_install_obj_type(rb_cCAFake, 
+                                    &cafake_data_type, 
+				    rb_cCArrayMask,
+				    &carray_data_type, ca_fake_func);
   rb_define_const(rb_cObject, "CA_OBJ_FAKE", INT2NUM(CA_OBJ_FAKE));
 
   rb_define_method(rb_cCArray, "fake", rb_ca_fake, -1);

@@ -32,6 +32,18 @@ typedef struct {
   int8_t   symindex[CA_RANK_MAX];
 } CADimIterator;
 
+const rb_data_type_t cadimiterator_data_type = {
+    .parent = &caiterator_data_type,
+    .wrap_struct_name = "CADimIterator",
+    .function = {
+        .dmark = NULL,
+        .dfree = free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 /* -------------------------------------------------------------------- */
 
 static CArray *
@@ -128,9 +140,9 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   CADimIterator *it;
   CAIndexInfo blk_spec;
   int8_t ndim;
-  int i, j, k;
+  int i, j;
 
-  Data_Get_Struct(self, CADimIterator, it);
+  TypedData_Get_Struct(self, CADimIterator, &cadimiterator_data_type, it);
 
   if ( info->type != CA_REG_ITERATOR ) {
     rb_raise(rb_eRuntimeError, "given spec is not for dim iteratror");
@@ -153,7 +165,6 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   ndim = 0;
 
   j = 0;
-  k = 0;
 
   for (i=0; i<info->ndim; i++) {
     if ( info->index_type[i] == CA_IDX_SCALAR ) {
@@ -183,8 +194,8 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   rker = rb_apply(rref, rb_intern("[]"), rindex);
 
   it->ndim = ndim;
-  Data_Get_Struct(rref, CArray, it->reference);
-  Data_Get_Struct(rker, CArray, it->kernel);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, it->reference);
+  TypedData_Get_Struct(rker, CArray, &carray_data_type, it->kernel);
   it->kernel_at_addr  = ca_di_kernel_at_addr;
   it->kernel_at_index = ca_di_kernel_at_index;
   it->kernel_move_to_addr  = ca_di_kernel_move_to_addr;
@@ -203,7 +214,7 @@ static VALUE
 rb_di_s_allocate (VALUE klass)
 {
   CADimIterator *it;
-  return Data_Make_Struct(klass, CADimIterator, 0, free, it);
+  return TypedData_Make_Struct(klass, CADimIterator, &cadimiterator_data_type, it);
 }
 
 static VALUE
@@ -212,15 +223,15 @@ rb_di_initialize_copy (VALUE self, VALUE other)
   volatile VALUE rref, rker;
   CADimIterator *is, *io;
 
-  Data_Get_Struct(self, CADimIterator, is);
-  Data_Get_Struct(other, CADimIterator, io);
+  TypedData_Get_Struct(self, CADimIterator, &cadimiterator_data_type, is);
+  TypedData_Get_Struct(other, CADimIterator, &cadimiterator_data_type, io);
 
   rref = rb_ivar_get(self, rb_intern("@reference"));
   rker = rb_obj_clone(rb_ivar_get(self, rb_intern("@kernel")));
 
   *io = *is;
 
-  Data_Get_Struct(rker, CArray, io->kernel);
+  TypedData_Get_Struct(rker, CArray, &carray_data_type, io->kernel);
 
   rb_ivar_set(self, rb_intern("@reference"), rref); /* required ivar */
   rb_ivar_set(self, rb_intern("@kernel"), rker);
@@ -235,7 +246,7 @@ rb_ca_dim_iterator (int argc, VALUE *argv, VALUE self)
   CAIndexInfo info;
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);

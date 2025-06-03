@@ -10,7 +10,32 @@
 
 #include "carray.h"
 
+const rb_data_type_t cablock_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CABlock",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t cablock_mask_data_type = {
+    .parent = &cablock_data_type,
+    .wrap_struct_name = "CABlockMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCABlock;
+VALUE rb_cCABlockMask;
 
 static int
 ca_block_setup (CABlock *ca, CArray *parent, int8_t ndim, ca_size_t *dim,
@@ -321,8 +346,7 @@ rb_ca_block_new (VALUE cary, int8_t ndim, ca_size_t *dim,
   CABlock *ca;
 
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
-
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_block_new(parent, ndim, dim, start, step, count, offset);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -687,7 +711,7 @@ static VALUE
 rb_cb_s_allocate (VALUE klass)
 {
   CABlock *ca;
-  return Data_Make_Struct(klass, CABlock, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CABlock, &cablock_data_type, ca);
 }
 
 static VALUE
@@ -697,8 +721,8 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
   ca_size_t shrink[CA_RANK_MAX];
   int8_t i;
 
-  Data_Get_Struct(self,  CABlock, ca);
-  Data_Get_Struct(other, CABlock, cs);
+  TypedData_Get_Struct(self,  CABlock, &cablock_data_type, ca);
+  TypedData_Get_Struct(other, CABlock, &cablock_data_type, cs);
 
   for (i=0; i<cs->ndim; i++) {
     shrink[i] = 0;
@@ -720,7 +744,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
     volatile VALUE ary;             \
     CABlock *cb;                    \
     int8_t i;                              \
-    Data_Get_Struct(self, CABlock, cb);     \
+    TypedData_Get_Struct(self, CABlock, &cablock_data_type, cb);     \
     ary = rb_ary_new2(cb->ndim);            \
     for (i=0; i<cb->ndim; i++) {                    \
       rb_ary_store(ary, i, LONG2NUM(cb->name[i]));  \
@@ -752,7 +776,7 @@ static VALUE
 rb_cb_offset (VALUE self)
 {
   CABlock *cb;
-  Data_Get_Struct(self, CABlock, cb);
+  TypedData_Get_Struct(self, CABlock, &cablock_data_type, cb);
   return SIZE2NUM(cb->offset);
 }
 
@@ -771,7 +795,7 @@ rb_cb_idx2addr0 (int argc, VALUE *argv, VALUE self)
   int8_t i;
   ca_size_t idxi;
 
-  Data_Get_Struct(self, CABlock, cb);
+  TypedData_Get_Struct(self, CABlock, &cablock_data_type, cb);
 
   if ( argc != cb->ndim ) {
     rb_raise(rb_eArgError,
@@ -803,7 +827,7 @@ rb_cb_addr2addr0 (VALUE self, VALUE raddr)
   ca_size_t idx[CA_RANK_MAX];
   int8_t i;
 
-  Data_Get_Struct(self, CABlock, cb);
+  TypedData_Get_Struct(self, CABlock, &cablock_data_type, cb);
 
   ca_addr2index((CArray*)cb, addr, idx);
 
@@ -831,7 +855,7 @@ rb_cb_move (int argc, VALUE *argv, VALUE self)
   ca_size_t start;
   int8_t i;
 
-  Data_Get_Struct(self, CABlock, cb);
+  TypedData_Get_Struct(self, CABlock, &cablock_data_type, cb);
 
   if ( argc != cb->ndim ) {
     rb_raise(rb_eArgError, "invalid # of arguments");

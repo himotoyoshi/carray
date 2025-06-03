@@ -23,6 +23,18 @@ typedef struct {
   ca_size_t offset[CA_RANK_MAX];
 } CAWindowIterator;
 
+const rb_data_type_t cawindowiterator_data_type = {
+    .parent = &caiterator_data_type,
+    .wrap_struct_name = "CAWindowIterator",
+    .function = {
+        .dmark = NULL,
+        .dfree = free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCAWindowIterator;
 
 /* yard:
@@ -130,9 +142,9 @@ ca_vi_setup (VALUE self, VALUE rref, VALUE rker)
 
   rker = rb_obj_clone(rker);
 
-  Data_Get_Struct(self, CAWindowIterator, it);
-  Data_Get_Struct(rref, CArray, ref);
-  Data_Get_Struct(rker, CArray, ker);
+  TypedData_Get_Struct(self, CAWindowIterator, &cawindowiterator_data_type, it);
+  TypedData_Get_Struct(rref, CArray, &carray_data_type, ref);
+  TypedData_Get_Struct(rker, CArray, &carray_data_type, ker);
 
   if ( ref->ndim != ker->ndim ) {
     rb_raise(rb_eRuntimeError, "ndim mismatch between reference and kernel");
@@ -161,7 +173,7 @@ static VALUE
 rb_vi_s_allocate (VALUE klass)
 {
   CAWindowIterator *it;
-  return Data_Make_Struct(klass, CAWindowIterator, 0, free, it);
+  return TypedData_Make_Struct(klass, CAWindowIterator, &cawindowiterator_data_type, it);
 }
 
 static VALUE
@@ -170,7 +182,7 @@ rb_vi_initialize (VALUE self, VALUE rker)
   CArray *ker;
   
   rb_check_carray_object(rker);
-  Data_Get_Struct(rker, CArray, ker);
+  TypedData_Get_Struct(rker, CArray, &carray_data_type, ker);
   if ( ker->obj_type != CA_OBJ_WINDOW ) {
     rb_raise(rb_eRuntimeError, "kernel must be CAWindow object");
   }

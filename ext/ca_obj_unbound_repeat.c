@@ -10,7 +10,32 @@
 
 #include "carray.h"
 
+const rb_data_type_t caunboundrepeat_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAUnboundRepeat",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+const rb_data_type_t caunboundrepeat_mask_data_type = {
+    .parent = &cavirtual_data_type,
+    .wrap_struct_name = "CAUnboundRepeatMask",
+    .function = {
+        .dmark = NULL,
+        .dfree = ca_free_nop,
+        .dsize = NULL,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 VALUE rb_cCAUnboundRepeat;
+VALUE rb_cCAUnboundRepeatMask;
 
 /* yard:
   class CAUnboundRepeat < CArray 
@@ -228,8 +253,8 @@ rb_ca_ubrep_shave (VALUE self, VALUE other)
   rb_check_carray_object(self);
   rb_check_carray_object(other);
 
-  Data_Get_Struct(self, CAUnboundRepeat, ca);
-  Data_Get_Struct(other, CArray, co);
+  TypedData_Get_Struct(self, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, co);
 
   if ( ca->elements != co->elements ) {
     rb_raise(rb_eRuntimeError, "mismatch in # of elements");
@@ -254,7 +279,7 @@ rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim)
   CArray *parent;
   CAUnboundRepeat *ca;
   rb_check_carray_object(cary);
-  Data_Get_Struct(cary, CArray, parent);
+  TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
   ca = ca_ubrep_new(parent, rep_ndim, rep_dim);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
@@ -272,7 +297,7 @@ rb_ca_unbound_repeat (int argc, VALUE *argv, VALUE self)
   ca_size_t rep_dim[CA_RANK_MAX];
   ca_size_t elements, count, i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   rep_ndim = argc;
 
@@ -314,7 +339,7 @@ static VALUE
 rb_ca_ubrep_s_allocate (VALUE klass)
 {
   CAUnboundRepeat *ca;
-  return Data_Make_Struct(klass, CAUnboundRepeat, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
 }
 
 static VALUE
@@ -322,8 +347,8 @@ rb_ca_ubrep_initialize_copy (VALUE self, VALUE other)
 {
   CAUnboundRepeat *ca, *cs;
 
-  Data_Get_Struct(self,  CAUnboundRepeat, ca);
-  Data_Get_Struct(other, CAUnboundRepeat, cs);
+  TypedData_Get_Struct(self,  CAUnboundRepeat, &caunboundrepeat_data_type, ca);
+  TypedData_Get_Struct(other, CAUnboundRepeat, &caunboundrepeat_data_type, cs);
 
   ca_ubrep_setup(ca, cs->parent, cs->rep_ndim, cs->rep_dim);
 
@@ -362,7 +387,7 @@ ca_ubrep_bind2 (VALUE self, int32_t new_ndim, ca_size_t *new_dim)
   int ndim_real;
   int i;
 
-  Data_Get_Struct(self, CAUnboundRepeat, ca);
+  TypedData_Get_Struct(self, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
 
   if ( ca->rep_ndim != new_ndim ) {
     rb_raise(rb_eArgError, "invalid new_ndim (%i <-> %i)",
@@ -417,11 +442,11 @@ ca_ubrep_bind_with (VALUE self, VALUE other)
 
   rb_check_carray_object(other);
 
-  Data_Get_Struct(self, CAUnboundRepeat, ca);
-  Data_Get_Struct(other, CArray, co);
+  TypedData_Get_Struct(self, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, co);
 
   if ( co->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-    Data_Get_Struct(other, CAUnboundRepeat, cup);
+    TypedData_Get_Struct(other, CAUnboundRepeat, &caunboundrepeat_data_type, cup);
     return ca_ubrep_bind2(self, cup->rep_ndim, cup->rep_dim);
   }
   else if ( ca_is_scalar(co) ) {
@@ -443,7 +468,7 @@ rb_ca_ubrep_bind (int argc, VALUE *argv, VALUE self)
   ca_size_t rep_spec[CA_RANK_MAX];
   int i;
 
-  Data_Get_Struct(self, CAUnboundRepeat, ca);
+  TypedData_Get_Struct(self, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
 
   if ( ca->rep_ndim != argc ) {
     rb_raise(rb_eArgError, "invalid new_ndim");
@@ -468,7 +493,7 @@ rb_ca_ubrep_spec (VALUE self)
   CAUnboundRepeat *ca;
   int i;
 
-  Data_Get_Struct(self, CAUnboundRepeat, ca);
+  TypedData_Get_Struct(self, CAUnboundRepeat, &caunboundrepeat_data_type, ca);
 
   spec = rb_ary_new2(ca->rep_ndim);
   for (i=0; i<ca->rep_ndim; i++) {
@@ -486,7 +511,7 @@ rb_ca_ubrep_spec (VALUE self)
 void
 Init_ca_obj_unbound_repeat ()
 {
-  /* rb_cCAUnboudRepeat, CA_OBJ_UNBOUND_REPEAT are defined in rb_carray.c */
+  /* rb_cCAUnboundRepeat, CA_OBJ_UNBOUND_REPEAT are defined in rb_carray.c */
 
   rb_define_const(rb_cObject, "CA_OBJ_UNBOUND_REPEAT", INT2NUM(CA_OBJ_UNBOUND_REPEAT));
 

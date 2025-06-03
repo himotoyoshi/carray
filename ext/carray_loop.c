@@ -131,7 +131,7 @@ rb_ca_each_index_internal (VALUE self, int8_t level, VALUE ridx)
   volatile VALUE ret = Qnil;
   CArray *ca;
   ca_size_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       rb_ary_store(ridx, level, SIZE2NUM(i));
@@ -187,7 +187,7 @@ rb_ca_map_bang (VALUE self)
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   for (i=0; i<elements; i++) {
     obj = rb_yield(rb_ca_fetch_addr(self, i));
@@ -205,7 +205,7 @@ rb_ca_each_with_index_internal (VALUE self,
   volatile VALUE ret = Qnil;
   CArray *ca;
   ca_size_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
       idx[level] = i;
@@ -252,7 +252,7 @@ rb_ca_map_with_index_bang_internal (VALUE self,
 {
   CArray *ca;
   ca_size_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( level == ca->ndim - 1 ) {
     volatile VALUE obj;
     for (i=0; i<ca->dim[level]; i++) {
@@ -289,7 +289,7 @@ rb_ca_map_with_index_bang (VALUE self)
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   ridx = rb_ary_new2(ndim);
   rb_ca_map_with_index_bang_internal(self, 0, idx, ridx);
@@ -305,7 +305,7 @@ rb_ca_map_index_bang_internal (VALUE self,
 {
   CArray *ca;
   ca_size_t i;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( level == ca->ndim - 1 ) {
     volatile VALUE obj;
     for (i=0; i<ca->dim[level]; i++) {
@@ -341,7 +341,7 @@ rb_ca_map_index_bang (VALUE self)
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   ridx = rb_ary_new2(ndim);
   rb_ca_map_index_bang_internal(self, 0, idx, ridx);
@@ -367,7 +367,7 @@ rb_ca_map_with_addr_bang (VALUE self)
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   for (i=0; i<elements; i++) {
     obj = rb_yield_values(2, rb_ca_fetch_addr(self, i), SIZE2NUM(i));
@@ -396,7 +396,7 @@ rb_ca_map_addr_bang (VALUE self)
   RETURN_ENUMERATOR(self, 0, 0);
 #endif
   rb_ca_modify(self);
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   for (i=0; i<elements; i++) {
     obj = rb_yield(SIZE2NUM(i));

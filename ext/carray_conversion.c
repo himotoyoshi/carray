@@ -23,7 +23,7 @@ rb_ca_to_a_loop (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
   CArray *ca;
   ca_size_t i;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
@@ -55,7 +55,7 @@ rb_ca_to_a (VALUE self)
   volatile VALUE ary;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ary = rb_ary_new2(ca->dim[0]);
   ca_attach(ca);
   rb_ca_to_a_loop(self, 0, idx, ary);
@@ -80,7 +80,7 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
 
   obj = rb_apply(self, rb_intern("template"), rb_ary_new4(argc, argv));
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   if ( ca_has_mask(ca) ) {
     for (i=0; i<ca->elements; i++) {
@@ -114,7 +114,7 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
   volatile VALUE io;
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_object_type(ca) ) {
     rb_raise(rb_eCADataTypeError, "don't dump object array");
@@ -137,7 +137,6 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     }
     ca_copy_data(ca, StringValuePtr(io));
     StringValuePtr(io)[ca_length(ca)] = '\0';
-    OBJ_TAINT(io);
     break;
 #if RUBY_VERSION_CODE >= 190
   case T_FILE: {
@@ -170,7 +169,6 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     if ( rb_respond_to(io, rb_intern("write") ) ) {
       volatile VALUE buf = rb_str_new(NULL, ca_length(ca));
       ca_copy_data(ca, StringValuePtr(buf));
-      OBJ_INFECT(buf, self);
       rb_funcall(io, rb_intern("write"), 1, buf);
     }
     else {
@@ -204,7 +202,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
 {
   CArray *ca;
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_object_type(ca) ) {
     rb_raise(rb_eCADataTypeError, "don't load object array");
@@ -221,7 +219,6 @@ rb_ca_load_binary (VALUE self, VALUE io)
     memcpy(ca->ptr, StringValuePtr(io), ca_length(ca));
     ca_sync(ca);
     ca_detach(ca);
-    OBJ_INFECT(self, io);
     return self;
     break;
   default:
@@ -304,7 +301,7 @@ rb_ca_format (int argc, VALUE *argv, VALUE self)
   ca_size_t i, j;
   ID id_format = rb_intern("format");
 
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   obj = rb_ca_template_with_type(self, INT2NUM(CA_OBJECT), INT2NUM(0));
 
@@ -464,7 +461,7 @@ rb_test_ca_to_cptr (VALUE self)
   double ****a;
   int i, j, k, l;
   
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   
   ca_attach(ca);
 

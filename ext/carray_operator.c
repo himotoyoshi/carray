@@ -32,7 +32,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   volatile VALUE out;
   CArray *ca1, *ca2;   /* ca2 = ca1.op */
 
-  Data_Get_Struct(self, CArray, ca1);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
 
   if ( ca_has_mask(ca1) ) {
     ca2 = ca_template_safe(ca1);              
@@ -68,7 +68,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
 
   rb_ca_modify(self);
 
-  Data_Get_Struct(self, CArray, ca1);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
 
   ca_attach(ca1);
   func[ca1->data_type](ca1->elements,
@@ -114,8 +114,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   /* do implicit casting and resolving unbound repeat array */
   rb_ca_cast_self_or_other(&self, &other);
 
-  Data_Get_Struct(self, CArray, ca1);
-  Data_Get_Struct(other, CArray, ca2);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
 
   ca_attach_n(2, ca1, ca2);
 
@@ -220,8 +220,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   /* do implicit casting and resolving unbound repeat array */
   rb_ca_cast_other(&self, &other);
 
-  Data_Get_Struct(self, CArray, ca1);
-  Data_Get_Struct(other, CArray, ca2);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
 
   ca_attach_n(2, ca1, ca2);
 
@@ -286,7 +286,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
   volatile VALUE out;
   CArray *ca1, *ca2;    /* ca2 = ca1.op */
 
-  Data_Get_Struct(self, CArray, ca1);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
 
   if ( ca_is_scalar(ca1) ) {
     out = rb_cscalar_new(CA_BOOLEAN, 0, NULL);
@@ -295,7 +295,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
     out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
   }
 
-  Data_Get_Struct(out, CArray, ca2);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, ca2);
 
   ca_attach(ca1);
   ca_copy_mask_overlay(ca2, ca2->elements, 1, ca1);
@@ -341,8 +341,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   /* do implicit casting and resolving unbound repeat array */
   rb_ca_cast_self_or_other(&self, &other);
 
-  Data_Get_Struct(self, CArray, ca1);
-  Data_Get_Struct(other, CArray, ca2);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
 
   ca_attach_n(2, ca1, ca2);
 
@@ -350,7 +350,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   if ( rb_obj_is_cscalar(self) ) {
     if ( rb_obj_is_cscalar(other) ) { /* scalar vs scalar */
       out = rb_cscalar_new(CA_BOOLEAN, 0, NULL);
-      Data_Get_Struct(out, CArray, ca3);
+      TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
       func[ca1->data_type](ca1->elements, 
@@ -361,7 +361,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
     }
     else {                                          /* scalar vs array */
       out = rb_carray_new(CA_BOOLEAN, ca2->ndim, ca2->dim, 0, NULL);
-      Data_Get_Struct(out, CArray, ca3);
+      TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
       func[ca1->data_type](ca2->elements, 
@@ -374,7 +374,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   else {
     if ( rb_obj_is_cscalar(other) ) {  /* array vs scalar */
       out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
-      Data_Get_Struct(out, CArray, ca3);
+      TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
       func[ca1->data_type](ca1->elements, 
@@ -389,7 +389,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
                                  (ca_size_t) ca1->elements, (ca_size_t) ca2->elements);
       }
       out = rb_carray_new(CA_BOOLEAN, ca1->ndim, ca1->dim, 0, NULL);
-      Data_Get_Struct(out, CArray, ca3);
+      TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
       ca_copy_mask_overlay(ca3, ca3->elements, 2, ca1, ca2);
       func[ca1->data_type](ca1->elements, 
@@ -412,28 +412,38 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
 }
 
 void
-ca_monop_not_implement(ca_size_t n, char *ptr1, char *ptr2)
+ca_monop_not_implement(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data type for monop (not implemented)");
 }
 
 void
-ca_binop_not_implement(ca_size_t n, char *ptr1, char *ptr2, char *ptr3)
+ca_binop_not_implement(ca_size_t n, boolean8_t *m, 
+                                char *ptr1, ca_size_t i1, 
+                                char *ptr2, ca_size_t i2, 
+                                char *ptr3, ca_size_t i3)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data_type for binop (not implemented)");
 }
 
 void
-ca_moncmp_not_implement(ca_size_t n, char *ptr1, char *ptr2)
+ca_moncmp_not_implement(ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t i1, 
+                                 boolean8_t *ptr2, ca_size_t i2)
 {
   rb_raise(rb_eCADataTypeError,
            "invalid data_type for moncmp (not implemented)");
 }
 
 void
-ca_bincmp_not_implement (ca_size_t n, char *ptr1, char *ptr2, char *ptr3)
+ca_bincmp_not_implement (ca_size_t n, boolean8_t *m, 
+                                 char *ptr1, ca_size_t b1, ca_size_t i1, 
+                                 char *ptr2, ca_size_t b2, ca_size_t i2, 
+                                 char *ptr3, ca_size_t b3, ca_size_t i3)
 {
   rb_raise(rb_eTypeError, "invalid data_type for bincmp (not implemented)");
 }
@@ -477,7 +487,7 @@ static VALUE
 rb_ca_coerce (VALUE self, VALUE other)
 {
   CArray *ca;
-  Data_Get_Struct(self, CArray, ca);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rb_obj_is_carray(other) ) {
     return Qnil;
@@ -554,8 +564,8 @@ rb_ca_mul_add (int argc, VALUE *argv, volatile VALUE self)
   /* do implicit casting and resolving unbound repeat array */
   rb_ca_cast_self_or_other(&self, &weight);
 
-  Data_Get_Struct(self, CArray, ca);
-  Data_Get_Struct(weight, CArray, cw);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(weight, CArray, &carray_data_type, cw);
 
   /* checking elements and data_type */
   ca_check_same_elements(ca, cw);
