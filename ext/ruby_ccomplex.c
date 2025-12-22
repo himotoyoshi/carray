@@ -153,7 +153,7 @@ rb_ccomplex_new2 (double re, double im)
 {
   VALUE obj;
   double complex *cp;
-  obj = Data_Make_Struct(rb_cCComplex, double complex, 0, xfree, cp);
+  obj = TypedData_Make_Struct(rb_cCComplex, double complex, &ccomplex_data_type, cp);
   *cp = re + I * im;
   return obj;
 }
@@ -176,7 +176,7 @@ static VALUE
 rb_cc_s_allocate (VALUE klass)
 {
   double complex *cp;
-  return Data_Make_Struct(klass, double complex, 0, xfree, cp);
+  return TypedData_Make_Struct(klass, double complex, &ccomplex_data_type, cp);
 }
 
 static VALUE
