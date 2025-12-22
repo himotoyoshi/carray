@@ -401,7 +401,6 @@ VALUE
 rb_ca_is_fixlen_type (VALUE self)
 {
   CArray *ca;
-  
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   return ca_is_fixlen_type(ca) ? Qtrue : Qfalse;
 }

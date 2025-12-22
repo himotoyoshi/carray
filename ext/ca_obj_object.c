@@ -60,6 +60,7 @@ VALUE rb_cCAObject;
 /* ---------------------------------------------------------------------- */
 
 const rb_data_type_t caobjectmask_data_type = {
+    .parent = &carray_data_type, 
     .wrap_struct_name = "CAObjectMask",
     .function = {
         .dmark = ca_mark,
@@ -688,7 +689,7 @@ static VALUE
 rb_ca_object_s_allocate (VALUE klass)
 {
   CAObject *ca;
-  return Data_Make_Struct(klass, CAObject, ca_mark, ca_free, ca);
+  return TypedData_Make_Struct(klass, CAObject, &caobject_data_type, ca);
 }
 
 static VALUE
@@ -766,7 +767,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
     ca->parent = cp;
     rb_ca_set_parent(self, rparent);
   }
-  
+
   ca_update_mask(ca);
 
   return Qnil;

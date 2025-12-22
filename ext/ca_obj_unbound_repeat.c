@@ -23,7 +23,7 @@ const rb_data_type_t caunboundrepeat_data_type = {
 };
 
 const rb_data_type_t caunboundrepeat_mask_data_type = {
-    .parent = &cavirtual_data_type,
+    .parent = &caunboundrepeat_data_type,
     .wrap_struct_name = "CAUnboundRepeatMask",
     .function = {
         .dmark = NULL,

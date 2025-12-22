@@ -327,19 +327,19 @@ ca_init_obj_type ()
 int
 ca_install_obj_type (VALUE klass, 
                      const rb_data_type_t *typeddata, 
-		     VALUE mask_klass, 
+                     VALUE mask_klass, 
                      const rb_data_type_t *mask_typeddata, 
-		     ca_operation_function_t func)
+                     ca_operation_function_t func)
 {
   int obj_type  = ca_obj_num++;
 
   if ( ca_obj_num >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eRuntimeError,
-             "too many CArray object types installed <CA_OBJ_TYPE_MAX = %i>",
+             "internal: too many CArray object types installed <CA_OBJ_TYPE_MAX = %i>",
              CA_OBJ_TYPE_MAX);
   }
 
-  func.obj_type      = obj_type;
+  func.obj_type = obj_type;
 
   ca_class[obj_type] = klass;
   ca_func[obj_type]  = func;

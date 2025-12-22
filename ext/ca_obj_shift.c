@@ -49,7 +49,7 @@ const rb_data_type_t cashift_data_type = {
 
 const rb_data_type_t cashift_mask_data_type = {
     .parent = &cashift_data_type,
-    .wrap_struct_name = "CAShift",
+    .wrap_struct_name = "CAShiftMask",
     .function = {
         .dmark = ca_mark,
         .dfree = ca_free,
