@@ -3,7 +3,6 @@ ToDo List
 
 ToDo
 -------
- * Data -> TypedData
  * Implement CArray.broadcast in C
  * Implement Integer#{|,&,^,<<,>>} with Refinement (remove monkey patch)
  * Remove RSTRUCT hack in carray_access.c for handling of Range object.
@@ -15,4 +14,5 @@ ToDo
 
 Done
 -------
+ * Data -> TypedData
 

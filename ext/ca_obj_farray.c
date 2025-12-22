@@ -40,7 +40,7 @@ const rb_data_type_t cafarray_data_type = {
 };
 
 const rb_data_type_t cafarray_mask_data_type = {
-    .parent = &cavirtual_data_type,
+    .parent = &cafarray_data_type,
     .wrap_struct_name = "CAFarrayMask",
     .function = {
         .dmark = NULL,
