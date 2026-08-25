@@ -1,112 +1,76 @@
 require "carray"
 require "rspec-power_assert"
 
+# CABlockIterator 3.0 (lib/carray/block_iterator.rb): a non-overlapping tile
+# reduction dispatcher built on block_view decomposition.  The 2.0 surface
+# (indexed CABlock access via [], pick / put, kernel_at_addr) was retired with
+# its C engine; the family surface is each / reduce plus named reductions.
+
 describe CABlockIterator do
 
-  describe "each method" do
+  describe "#each" do
 
     before do
-      @original = CArray.object(4,4).seq!
-      @it = @original.blocks(0..1, 0..1)
+      @original = CArray.object(4, 4).seq!
+      @it = @original.blocks(2, 2)          # 2x2 tiles, exact -> 2x2 grid
     end
 
-    example "should call 4-times its block" do
+    example "yields one tile per grid cell" do
       count = 0
-      @it.each do |blk|
-        count += 1
-      end
+      @it.each { |tile| count += 1 }
       is_asserted_by { count == 4 }
     end
 
-    example "should have the block parameter of 2x2 CABlock object" do
-      @it.each do |blk|
-        is_asserted_by { blk.class == CABlock }
-        is_asserted_by { blk.data_type == CA_OBJECT }
-        is_asserted_by { blk.dim == [2,2] }
-      end
+    example "yields each tile in row-major grid order" do
+      tiles = @it.each.map(&:to_a)
+      is_asserted_by { tiles[0] == [[0, 1], [4, 5]] }
+      is_asserted_by { tiles[1] == [[2, 3], [6, 7]] }
+      is_asserted_by { tiles[2] == [[8, 9], [12, 13]] }
+      is_asserted_by { tiles[3] == [[10, 11], [14, 15]] }
+    end
+
+    example "without a block returns an Enumerator" do
+      is_asserted_by { @it.each.is_a?(Enumerator) }
     end
 
   end
 
-  describe "reference method []" do
+  describe "named reductions" do
 
     before do
-      @original = CArray.object(4,4).seq!
-      @it = @original.blocks(0..1, 0..1)
+      @a = CArray.int32(4, 4).seq
     end
 
-    example "should return a 2x2 CABlock object" do
-      blk = @it[0]
-      is_asserted_by { blk.class == CABlock }
-      is_asserted_by { blk.data_type == CA_OBJECT }
-      is_asserted_by { blk == CA_OBJECT([[0,1],[4,5]]) }
-      blk = @it[1,0]
-      is_asserted_by { blk.class == CABlock }
-      is_asserted_by { blk.data_type == CA_OBJECT }
-      is_asserted_by { blk == CA_OBJECT([[8,9],[12,13]]) }
+    example "mean is per-tile, shaped like the tile grid" do
+      m = @a.blocks(2, 2).mean
+      is_asserted_by { m.shape == [2, 2] }
+      # tile (0,0) = [0,1,4,5] -> mean 2.5
+      is_asserted_by { m[0, 0] == 2.5 }
     end
 
-    example "should return a 2x2 CABlock object" do
-      is_asserted_by { @it[0] == @it.kernel_at_addr(0, @it.reference) }
-      is_asserted_by { @it[1,0] == @it.kernel_at_index([1,0], @it.reference) }
+    example "max pools each tile" do
+      is_asserted_by { @a.blocks(2, 2).max == CA_INT32([[5, 7], [13, 15]]) }
     end
 
   end
 
-  describe "store method []=" do
+  describe "remainder coverage" do
 
-    before do
-      @original = CArray.object(4,4).seq!
-      @it = @original.blocks(0..1, 0..1)
-    end
-
-    example "should return a 2x2 CABlock object" do
-      @it[0] = 1
-      @it[1,0] = 2
-      is_asserted_by { @it.reference == CA_OBJECT( [ [ 1, 1, 2, 3 ],
-                                               [ 1, 1, 6, 7 ],
-                                               [ 2, 2, 10, 11 ],
-                                               [ 2, 2, 14, 15 ] ] ) }
+    example "a partial edge tile is present-only (ceil grid)" do
+      a = CArray.int32(5).seq          # tiles [0,1,2], [3,4]
+      it = a.blocks(3)
+      is_asserted_by { it.sum.to_a == [3, 7] }        # 0+1+2, 3+4
+      is_asserted_by { it.each.to_a.last.to_a == [3, 4, UNDEF] }  # OOB masked
     end
 
   end
 
-  describe "pick method" do
+  describe "#reduce" do
 
-    before do
-      @original = CArray.object(4,4).seq!
-      @it = @original.blocks(0..1, 0..1)
-    end
-
-    example "should return a 2x2 CABlock object" do
-      blk = @it.pick(0)
-      is_asserted_by { blk.class == CArray }
-      is_asserted_by { blk.data_type == CA_OBJECT }
-      is_asserted_by { blk == CA_OBJECT([[0,2],[8,10]]) }
-      blk = @it.pick(1,0)
-      is_asserted_by { blk.class == CArray }
-      is_asserted_by { blk.data_type == CA_OBJECT }
-      is_asserted_by { blk == CA_OBJECT([[4,6],[12,14]]) }
-    end
-
-  end
-
-  describe "put method" do
-
-    before do
-      @original = CArray.object(4,4).seq!
-      @it = @original.blocks(0..1, 0..1)
-    end
-
-    example "should store value via 2x2 CBlock object" do
-      @it.put(0,1)
-      @it.put(0,1,2)
-      is_asserted_by { @it.pick(0) == CA_OBJECT([[1,1],[1,1]]) }
-      is_asserted_by { @it.pick(0,1) == CA_OBJECT([[2,2],[2,2]]) }
-      is_asserted_by { @it.reference == CA_OBJECT([[ 1, 2, 1, 2 ],
-                                             [ 4, 5, 6, 7 ],
-                                             [ 1, 2, 1, 2 ],
-                                             [ 12, 13, 14, 15 ]]) }
+    example "folds each tile with a custom block" do
+      a = CArray.int32(6).seq          # tiles [0,1], [2,3], [4,5]
+      out = a.blocks(2).reduce { |tile| tile.max }
+      is_asserted_by { out.to_a == [1, 3, 5] }
     end
 
   end

@@ -3,3 +3,83 @@ Gemfile
 Gemfile.lock
 *.o
 .DS_Store
+
+# Generated C files (built from *.rb generator scripts)
+# P.5b.5: ext/carray_math.c is now hand-written (carray_math.rb / mkmath.rb
+# retired).  carray_cast_func.c and carray_kernels.c are still generated
+# (by carray_cast_func.rb and mkkernel.rb respectively).  extconf.rb runs
+# the generators via mtime-based hooks (see ext/extconf.rb:163-171).
+ext/carray_cast_func.c
+ext/carray_stat_proc.c
+ext/carray_kernels.c
+ext/carray_kernels_*.c
+ext/carray_kernels.stamp
+
+# Build artifacts
+ext/Makefile
+ext/.dev_build_mode
+ext/*.bundle
+ext/*.bundle.dSYM/
+ext/carray_config.h
+ext/mkmf.log
+
+# Yard generated documentation (`rake yard` output).  Source-of-truth
+# user documentation lives in docs/ (= hand-written .md files, tracked).
+.yardoc/
+doc/
+
+# spec_ai borrower extension build artifacts
+spec/spec_ai/ext_memory_view_test/Makefile
+spec/spec_ai/ext_memory_view_test/*.bundle
+spec/spec_ai/ext_memory_view_test/*.bundle.dSYM/
+spec/spec_ai/ext_memory_view_test/*.o
+spec/spec_ai/ext_memory_view_test/mkmf.log
+spec/spec_ai/ext_eager_no_attach_test/Makefile
+spec/spec_ai/ext_eager_no_attach_test/*.bundle
+spec/spec_ai/ext_eager_no_attach_test/*.bundle.dSYM/
+spec/spec_ai/ext_eager_no_attach_test/*.o
+spec/spec_ai/ext_eager_no_attach_test/mkmf.log
+
+# spec_ai author-surface smoke fixtures (mirrors of samples/c-extensions/*)
+spec/spec_ai/ext_cfunc_r_smoke/Makefile
+spec/spec_ai/ext_cfunc_r_smoke/*.bundle
+spec/spec_ai/ext_cfunc_r_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_cfunc_r_smoke/*.o
+spec/spec_ai/ext_cfunc_r_smoke/mkmf.log
+spec/spec_ai/ext_per_element_smoke/Makefile
+spec/spec_ai/ext_per_element_smoke/*.bundle
+spec/spec_ai/ext_per_element_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_per_element_smoke/*.o
+spec/spec_ai/ext_per_element_smoke/mkmf.log
+spec/spec_ai/ext_with_buffer_smoke/Makefile
+spec/spec_ai/ext_with_buffer_smoke/*.bundle
+spec/spec_ai/ext_with_buffer_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_with_buffer_smoke/*.o
+spec/spec_ai/ext_with_buffer_smoke/mkmf.log
+spec/spec_ai/ext_source_smoke/Makefile
+spec/spec_ai/ext_source_smoke/*.bundle
+spec/spec_ai/ext_source_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_source_smoke/*.o
+spec/spec_ai/ext_source_smoke/mkmf.log
+spec/spec_ai/ext_iter_source_kind/Makefile
+spec/spec_ai/ext_iter_source_kind/*.bundle
+spec/spec_ai/ext_iter_source_kind/*.bundle.dSYM/
+spec/spec_ai/ext_iter_source_kind/*.o
+spec/spec_ai/ext_iter_source_kind/mkmf.log
+
+# Stray extconf artifacts when extconf.rb is invoked from repo root
+# (root で `ruby extconf.rb && make` を走らせた事故 — 必ず ext/ 内で実行する)
+/Makefile
+/mkmf.log
+/carray_config.h
+/carray_core.c
+/carray_cast_func.c
+/carray_stat_proc.c
+/carray_kernels.c
+/carray_kernels_*.c
+/carray_kernels.stamp
+/*.bundle
+/*.bundle.dSYM/
+
+# Generated PDF bundles (rake pdf:*)
+guides/pdf/

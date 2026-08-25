@@ -3,28 +3,6 @@ require 'rspec-power_assert'
 
 describe "Feature: Element" do
 
-  example "set_unset" do
-    #
-    a = CArray.boolean(3,3) {0}
-    a.set(1,1)
-    is_asserted_by {  CA_BOOLEAN([[0, 0, 0], [0, 1, 0], [0, 0, 0]]) == a }
-
-    #
-    a = CArray.boolean(3,3) {0}
-    a.set(4)
-    is_asserted_by {  CA_BOOLEAN([[0, 0, 0], [0, 1, 0], [0, 0, 0]]) == a }
-
-    #
-    a = CArray.boolean(3,3) {1}
-    a.unset(1,1)
-    is_asserted_by {  CA_BOOLEAN([[1, 1, 1], [1, 0, 1], [1, 1, 1]]) == a }
-
-    #
-    a = CArray.boolean(3,3) {1}
-    a.unset(4)
-    is_asserted_by {  CA_BOOLEAN([[1, 1, 1], [1, 0, 1], [1, 1, 1]]) == a }
-  end
-
   example "elem_swap" do
     #
     a = CArray.int(3,3).seq!

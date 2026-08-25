@@ -26,24 +26,20 @@ describe "TestCArrayStat " do
     end
   end
 
-  example "min_addr" do
+  example "min_index" do
     # ---
     a = CA_INT32([8,7,6,5,4,5,6,7,8])
-    is_asserted_by {  4 == a.min_addr }
+    is_asserted_by {  4 == a.min_index }
 
     # ---
     a = CA_INT32([1,1,1,2,2,2,3,3,3])
-    is_asserted_by {  0 == a.min_addr }
-    is_asserted_by {  6 == a.reverse.min_addr }
+    is_asserted_by {  0 == a.min_index }
+    is_asserted_by {  6 == a.reverse.min_index }
 
     # ---
     _ = UNDEF
     a = CA_INT32([_,2,3])
-    is_asserted_by {  1 == a.min_addr }
-    is_asserted_by {  1 == a.min_addr(mask_limit: 0) }
-    is_asserted_by {  UNDEF == a.min_addr(mask_limit: 1) }
-    is_asserted_by {  (-9999) == a.min_addr(mask_limit: 1, fill_value: -9999) }
-    is_asserted_by {  1 == a.min_addr(mask_limit: 2) }
+    is_asserted_by {  1 == a.min_index }
   end
 
   example "max" do
@@ -68,24 +64,20 @@ describe "TestCArrayStat " do
     end
   end
 
-  example "max_addr" do
+  example "max_index" do
     # ---
     a = CA_INT32([0,1,2,3,4,3,2,1,0])
-    is_asserted_by {  4 == a.max_addr }
+    is_asserted_by {  4 == a.max_index }
 
     # ---
     a = CA_INT32([1,1,1,2,2,2,3,3,3])
-    is_asserted_by {  6 == a.max_addr }
-    is_asserted_by {  0 == a.reverse.max_addr }
+    is_asserted_by {  6 == a.max_index }
+    is_asserted_by {  0 == a.reverse.max_index }
 
     # ---
     _ = UNDEF
     a = CA_INT32([1,2,_])
-    is_asserted_by {  1 == a.max_addr }
-    is_asserted_by {  1 == a.max_addr(mask_limit: 0) }
-    is_asserted_by {  UNDEF == a.max_addr(mask_limit: 1) }
-    is_asserted_by {  (-9999) == a.max_addr(mask_limit: 1, fill_value: -9999) }
-    is_asserted_by {  1 == a.max_addr(mask_limit: 2) }
+    is_asserted_by {  1 == a.max_index }
   end
 
 #  example "max_and_min_addr" do
@@ -183,11 +175,16 @@ describe "TestCArrayStat " do
     is_asserted_by {  8.25 == s }
 
     # ---
+    # 3.0: complex variance is the standard E[|Z - mean|^2] (real-valued).
+    # Legacy raised DataTypeError; mkkernel-generated kernel computes the
+    # mathematically standard definition.
     if CArray::HAVE_COMPLEX
       a = CArray.cmplx128(10)
       a.real.seq!(1)     ### [1, 2, ..., 10]
       a.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
-      expect { a.variancep }.to raise_error(CArray::DataTypeError)
+      s = a.variancep
+      is_asserted_by { s.class == Float }
+      is_asserted_by { 16.5 == s }   ### 2 * real variance (symmetric)
     end
   end
 
@@ -205,11 +202,14 @@ describe "TestCArrayStat " do
     is_asserted_by {  true == ((9.1666667 - s).abs < 1.0e-05) }
 
     # ---
+    # 3.0: see variancep note above.
     if CArray::HAVE_COMPLEX
       a = CArray.cmplx128(10)
       a.real.seq!(1)     ### [1, 2, ..., 10]
       a.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
-      expect { s = a.variance }.to raise_error(CArray::DataTypeError)
+      s = a.variance
+      is_asserted_by { s.class == Float }
+      is_asserted_by { true == ((18.3333333 - s).abs < 1.0e-05) }
     end
   end
 
@@ -228,19 +228,23 @@ describe "TestCArrayStat " do
     is_asserted_by { s.class == Float }
     is_asserted_by {  385 == s }
 
+    # W.2 (2026-06-04): complex (CMPLX64/CMPLX128) wsum support dropped in
+    # the mkkernel migration (= ALL_NUMERIC + :raise fallback).  Re-add via
+    # demand-driven complex specialization (= mkkernel reduce_complex form
+    # or dedicated complex array_arg path).
     # ---
-    if CArray::HAVE_COMPLEX
-      a = CArray.cmplx128(10)
-      w = CArray.cmplx128(10)
-      a.real.seq!(1)     ### [1, 2, ..., 10]
-      a.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
-      w.real.seq!(1)     ### [1, 2, ..., 10]
-      w.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
-      s = a.wsum(w.conj)
-      is_asserted_by { s.class == CComplex }
-      is_asserted_by {  770 == s.real }
-      is_asserted_by {  0 == s.imag }
-    end
+    # if CArray::HAVE_COMPLEX
+    #   a = CArray.cmplx128(10)
+    #   w = CArray.cmplx128(10)
+    #   a.real.seq!(1)     ### [1, 2, ..., 10]
+    #   a.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
+    #   w.real.seq!(1)     ### [1, 2, ..., 10]
+    #   w.imag.seq!(-1,-1) ### [-1, -2, ..., -10]
+    #   s = a.wsum(w.conj)
+    #   is_asserted_by { s.class == Complex }
+    #   is_asserted_by {  770 == s.real }
+    #   is_asserted_by {  0 == s.imag }
+    # end
   end
 
   example "accumulate" do
@@ -269,11 +273,11 @@ describe "TestCArrayStat " do
     a[4..7] = 2
     a[8..9] = 3          ### [0,1,1,1,2,2,2,2,3,3]
 
-    is_asserted_by {  1 == a.count_equal(0) }
-    is_asserted_by {  3 == a.count_equal(1) }
-    is_asserted_by {  4 == a.count_equal(2) }
-    is_asserted_by {  2 == a.count_equal(3) }
-    is_asserted_by {  0 == a.count_equal(4) }
+    is_asserted_by {  1 == a.count(0) }
+    is_asserted_by {  3 == a.count(1) }
+    is_asserted_by {  4 == a.count(2) }
+    is_asserted_by {  2 == a.count(3) }
+    is_asserted_by {  0 == a.count(4) }
   end
 
   example "count_equiv" do
@@ -284,11 +288,11 @@ describe "TestCArrayStat " do
     a[4..7] = 2
     a[8..9] = 3          ### [0,1,1,1,2,2,2,2,3,3]
 
-    is_asserted_by {  1 == a.count_equiv(0, 0.001) }
-    is_asserted_by {  3 == a.count_equiv(1, 0.001) }
-    is_asserted_by {  4 == a.count_equiv(2, 0.001) }
-    is_asserted_by {  2 == a.count_equiv(3, 0.001) }
-    is_asserted_by {  0 == a.count_equiv(4, 0.001) }
+    is_asserted_by {  1 == a.is_equiv(0,  0.001).count(true) }
+    is_asserted_by {  3 == a.is_equiv(1,  0.001).count(true) }
+    is_asserted_by {  4 == a.is_equiv(2,  0.001).count(true) }
+    is_asserted_by {  2 == a.is_equiv(3,  0.001).count(true) }
+    is_asserted_by {  0 == a.is_equiv(4,  0.001).count(true) }
 
     # ---
     a = CArray.float64(10)
@@ -297,18 +301,18 @@ describe "TestCArrayStat " do
     a[4..7] = 2.0001
     a[8..9] = 3.00015          ### [0,1,1,1,2,2,2,2,3,3]
 
-    is_asserted_by {  0 == a.count_equiv(0, 1.0e-05) }
-    is_asserted_by {  0 == a.count_equiv(1, 1.0e-05) }
-    is_asserted_by {  0 == a.count_equiv(2, 1.0e-05) }
-    is_asserted_by {  0 == a.count_equiv(3, 1.0e-05) }
-    is_asserted_by {  0 == a.count_equiv(4, 1.0e-05) }
+    is_asserted_by {  0 == a.is_equiv(0,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_equiv(1,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_equiv(2,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_equiv(3,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_equiv(4,  1.0e-05).count(true) }
 
-    is_asserted_by {  0 == a.count_equiv(0, 0.0001) }
+    is_asserted_by {  0 == a.is_equiv(0,  0.0001).count(true) }
 
-    is_asserted_by {  3 == a.count_equiv(1, 0.0001) }
-    is_asserted_by {  4 == a.count_equiv(2, 0.0001) }
-    is_asserted_by {  2 == a.count_equiv(3, 0.0001) }
-    is_asserted_by {  0 == a.count_equiv(4, 0.0001) }
+    is_asserted_by {  3 == a.is_equiv(1,  0.0001).count(true) }
+    is_asserted_by {  4 == a.is_equiv(2,  0.0001).count(true) }
+    is_asserted_by {  2 == a.is_equiv(3,  0.0001).count(true) }
+    is_asserted_by {  0 == a.is_equiv(4,  0.0001).count(true) }
   end
 
   example "count_close" do
@@ -319,11 +323,11 @@ describe "TestCArrayStat " do
     a[4..7] = 2
     a[8..9] = 3          ### [0,1,1,1,2,2,2,2,3,3]
 
-    is_asserted_by {  1 == a.count_close(0, 0.001) }
-    is_asserted_by {  3 == a.count_close(1, 0.001) }
-    is_asserted_by {  4 == a.count_close(2, 0.001) }
-    is_asserted_by {  2 == a.count_close(3, 0.001) }
-    is_asserted_by {  0 == a.count_close(4, 0.001) }
+    is_asserted_by {  1 == a.is_close(0,  0.001).count(true) }
+    is_asserted_by {  3 == a.is_close(1,  0.001).count(true) }
+    is_asserted_by {  4 == a.is_close(2,  0.001).count(true) }
+    is_asserted_by {  2 == a.is_close(3,  0.001).count(true) }
+    is_asserted_by {  0 == a.is_close(4,  0.001).count(true) }
 
     # ---
     a = CArray.float64(10)
@@ -332,66 +336,17 @@ describe "TestCArrayStat " do
     a[4..7] = 2.00005
     a[8..9] = 3.00005          ### [0,1,1,1,2,2,2,2,3,3]
 
-    is_asserted_by {  0 == a.count_close(0, 1.0e-05) }
-    is_asserted_by {  0 == a.count_close(1, 1.0e-05) }
-    is_asserted_by {  0 == a.count_close(2, 1.0e-05) }
-    is_asserted_by {  0 == a.count_close(3, 1.0e-05) }
-    is_asserted_by {  0 == a.count_close(4, 1.0e-05) }
+    is_asserted_by {  0 == a.is_close(0,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_close(1,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_close(2,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_close(3,  1.0e-05).count(true) }
+    is_asserted_by {  0 == a.is_close(4,  1.0e-05).count(true) }
 
-    is_asserted_by {  1 == a.count_close(0, 0.0001) }
-    is_asserted_by {  3 == a.count_close(1, 0.0001) }
-    is_asserted_by {  4 == a.count_close(2, 0.0001) }
-    is_asserted_by {  2 == a.count_close(3, 0.0001) }
-    is_asserted_by {  0 == a.count_close(4, 0.0001) }
-  end
-
-  example "all_equal" do
-    #---
-    a = CArray.int32(3,3) {1}
-    is_asserted_by {  false == a.all_equal?(0) }
-    is_asserted_by {  true == a.all_equal?(1) }
-  end
-
-  example "all_equiv" do
-    #---
-    a = CArray.float64(3,3) {1.00005}
-    is_asserted_by {  false == a.all_equiv?(0, 0.0001) }
-    is_asserted_by {  true == a.all_equiv?(1, 0.0001) }
-    is_asserted_by {  false == a.all_equiv?(1, 1.0e-05) }
-  end
-
-  example "all_close" do
-    #---
-    a = CArray.float64(3,3) {1.0001}
-    is_asserted_by {  false == a.all_close?(0, 0.0001) }
-    is_asserted_by {  true == a.all_close?(1, 0.0001) }
-    is_asserted_by {  false == a.all_close?(1, 1.0e-05) }
-  end
-
-  example "any_equal" do
-    #---
-    a = CArray.int32(3,3)
-    a[1,1] = 1
-    is_asserted_by {  true == a.any_equal?(0) }
-    is_asserted_by {  true == a.any_equal?(1) }
-  end
-
-  example "any_equiv" do
-    #---
-    a = CArray.float64(3,3) { 0.00005 }
-    a[1,1] = 1.00005
-    is_asserted_by {  false == a.any_equiv?(0, 0.0001) }
-    is_asserted_by {  true == a.any_equiv?(1, 0.0001) }
-    is_asserted_by {  false == a.any_equiv?(1, 1.0e-05) }
-  end
-
-  example "any_close" do
-    #---
-    a = CArray.float64(3,3) { 0.0001 }
-    a[1,1] = 1.0001
-    is_asserted_by {  true == a.any_close?(0, 0.0001) }
-    is_asserted_by {  true == a.any_close?(1, 0.0001) }
-    is_asserted_by {  false == a.any_close?(1, 1.0e-05) }
+    is_asserted_by {  1 == a.is_close(0,  0.0001).count(true) }
+    is_asserted_by {  3 == a.is_close(1,  0.0001).count(true) }
+    is_asserted_by {  4 == a.is_close(2,  0.0001).count(true) }
+    is_asserted_by {  2 == a.is_close(3,  0.0001).count(true) }
+    is_asserted_by {  0 == a.is_close(4,  0.0001).count(true) }
   end
 
 end

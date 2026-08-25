@@ -23,9 +23,13 @@ describe "TestCArrayCARefer " do
                          [3,4,5]]) == r }
 
     # ---
-    # less data number
+    # 3.0: reshape is strict on element count.  The pre-3.0 "less data
+    # number" prefix-view (reshape to fewer elements -> view of the first
+    # N) is removed; a non-preserving shape now raises.  Migration: take
+    # an explicit prefix first, e.g. a.flatten[0..3].reshape(2, 2).
     a = CArray.int(3,2).seq!
-    r = a.reshape(2,2)
+    expect { a.reshape(2,2) }.to raise_error(RuntimeError)
+    r = a.flatten[0..3].reshape(2, 2)
     is_asserted_by { CA_INT([[0,1],
                          [2,3]]) == r }
 
@@ -68,11 +72,15 @@ describe "TestCArrayCARefer " do
 
     # ---
     is_asserted_by { b == a.flatten }
-    is_asserted_by { b == a.flattened }
+    is_asserted_by { b == a.flatten }
 
     # ---
-    c = a.reverse
-    a.flattened.reverse!
+    # 3.0: a.reverse returns a view, so we snapshot with .copy
+    # before mutating a through the flattened view.
+    # 3.0: reverse! removed, use `ca[] = ca.reverse` idiom.
+    c = a.reverse.copy
+    flat = a.flatten
+    flat[] = flat.reverse
     is_asserted_by { c == a }
   end
 

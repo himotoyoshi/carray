@@ -6,7 +6,7 @@ describe "TestCArrayCATranspose " do
 
   example "virtual_array" do
     a = CArray.int(3,3)
-    b = a.transposed
+    b = a.transpose
     r = b.parent
     is_asserted_by { b.class == CATranspose }
     is_asserted_by { true == b.virtual? }
@@ -16,17 +16,17 @@ describe "TestCArrayCATranspose " do
   example "basic_feature" do
     # ---
     a = CArray.int(3,3).seq!
-    t = a.transposed
+    t = a.transpose
     is_asserted_by { CA_INT([[0,3,6],
                          [1,4,7],
                          [2,5,8]]) == t }
 
     # ---
     a = CArray.int(2,2,2).seq!
-    t1 = a.transposed(0,1,2)
-    t2 = a.transposed(0,2,1) # 1 <-> 2
-    t3 = a.transposed(2,1,0) # 0 <-> 2
-    t4 = a.transposed(1,0,2) # 0 <-> 1
+    t1 = a.transpose(0,1,2)
+    t2 = a.transpose(0,2,1) # 1 <-> 2
+    t3 = a.transpose(2,1,0) # 0 <-> 2
+    t4 = a.transpose(1,0,2) # 0 <-> 1
     is_asserted_by { CA_INT([[[0,1],
                           [2,3]],
                          [[4,5],
@@ -47,12 +47,12 @@ describe "TestCArrayCATranspose " do
     # ---
     a = CArray.int(2,2,2).seq!
 
-    x1 = a.transposed(1,2,0) # 0 -> 2, 1 -> 0, 2 -> 1
-    y1 = a.transposed(2,1,0).transposed(1,0,2) # 1 <-> 2; 0 <-> 1
+    x1 = a.transpose(1,2,0) # 0 -> 2, 1 -> 0, 2 -> 1
+    y1 = a.transpose(2,1,0).transpose(1,0,2) # 1 <-> 2; 0 <-> 1
     is_asserted_by { y1 == x1 }
 
-    x2 = a.transposed(2,0,1) # 0 -> 1, 1 -> 2, 2 -> 0
-    y2 = a.transposed(2,1,0).transposed(0,2,1) # 0 <-> 2; 1 <-> 2
+    x2 = a.transpose(2,0,1) # 0 -> 1, 1 -> 2, 2 -> 0
+    y2 = a.transpose(2,1,0).transpose(0,2,1) # 0 <-> 2; 1 <-> 2
     is_asserted_by { y2 == x2 }
 
   end

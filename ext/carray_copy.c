@@ -1,28 +1,37 @@
 /* ---------------------------------------------------------------------------
 
-  carray_copy.c
-
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
+  Duplication and template allocation: `copy` (always-copy entity),
+  `to_ca` (entity self / view materialise sentinel), and `template`
+  (same-shape blank result, optionally retyped or block-initialised).
+  Sibling of carray_generate.c (factory builders) and carray_access.c
+  (`store_all` broadcast path used by the 0-arity template block).
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "ca_obj_face.h"   /* CA_FACE_LIFT_IF_FACE */
 #include <stdarg.h>
 
 /* ------------------------------------------------------------------- */
 
+/* Allocates a fresh entity (or scalar) of the same shape, data_type,
+ * and bytes as `ca`, copies the element payload, and reproduces the
+ * mask state.  Always copies even when `ca` is an entity; for view
+ * sources the data path goes through `ca_copy_data`, otherwise a flat
+ * memcpy of `ca_length(ca)` bytes.
+ *
+ * Backs `CArray#copy` and is also reachable as a C-level utility from
+ * other ext files that need an owned snapshot. */
 CArray *
 ca_copy (void *ap)
 {
   CArray *ca = (CArray *) ap;
   CArray *co;
 
-  if ( ca_is_scalar(ca) ) {             /* create scalar without mask */
+  if ( ca_is_scalar(ca) ) {
     co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
   }
-  else {                                /* create array without mask */
+  else {
     co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
   }
 
@@ -41,11 +50,9 @@ ca_copy (void *ap)
   return co;
 }
 
-/* @overload to_ca
-
-(Copy) Creates CArray object from `self` with same contents includes mask state.
-*/
-
+/* Ruby entry for `CArray#copy`.  Wraps `ca_copy` and, when `self` is a
+ * Face (e.g. CARecord), lifts the wrapped result so the derived class
+ * identity is preserved on the copy. */
 VALUE
 rb_ca_copy (VALUE self)
 {
@@ -53,57 +60,129 @@ rb_ca_copy (VALUE self)
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   obj = ca_wrap_struct(ca_copy(ca));
-  rb_ca_data_type_inherit(obj, self);
+  CA_FACE_LIFT_IF_FACE(obj, self, ca);
   return obj;
+}
+
+/* Reads the `writable:` keyword every `to_ca` implementation accepts.
+ * Returns non-zero when the caller demands a result whose writes reach
+ * the source, so a `to_ca` that can only hand back a copy must refuse
+ * instead of returning one silently.
+ *
+ * Exported for `to_ca` implementations written in C, in this tree and
+ * in ext gems; the Ruby-side equivalent is a `writable: false` keyword
+ * on the method definition. */
+int
+ca_to_ca_writable_arg (int argc, VALUE *argv)
+{
+  VALUE opts;
+  ID kw_ids[1];
+  VALUE kw_vals[1];
+
+  rb_scan_args(argc, argv, "0:", &opts);
+  if ( NIL_P(opts) ) {
+    return 0;
+  }
+  kw_ids[0] = rb_intern("writable");
+  rb_get_kwargs(opts, kw_ids, 0, 1, kw_vals);
+  return ( kw_vals[0] == Qundef ) ? 0 : RTEST(kw_vals[0]);
+}
+
+/* Refusal an implementation raises when `writable: true` was asked of a
+ * `to_ca` that only ever produces a detached copy. */
+void
+ca_to_ca_refuse_writable (VALUE self)
+{
+  volatile VALUE inspect = rb_inspect(CLASS_OF(self));
+  rb_raise(rb_eRuntimeError,
+           "%s#to_ca can only return a copy; it can't satisfy `writable: true'",
+           StringValuePtr(inspect));
+}
+
+/* Ruby entry for `CArray#to_ca`.  Returns `self` unchanged — for any
+ * CArray (entity or data view) the receiver is already a CArray.
+ *
+ * `writable: true` states that the caller is going to write through the
+ * result into the source.  `self` shares its storage by construction, so
+ * the only way to fail here is a read-only receiver.
+ *
+ * Other classes override `to_ca` for their own semantics: a Ruby
+ * `Array` builds a new CArray, and lazy views (CAMonOp / CABinOp /
+ * CAMonCmp / CABinCmp / CALazyMarker) force evaluation into a fresh
+ * entity; both are copies and so refuse `writable: true`.  When an
+ * independent owned copy is required, callers use `copy`. */
+VALUE
+rb_ca_to_ca (int argc, VALUE *argv, VALUE self)
+{
+  if ( ca_to_ca_writable_arg(argc, argv) ) {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_readonly(ca) ) {
+      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+    }
+  }
+  return self;
 }
 
 /* ------------------------------------------------------------------- */
 
+/* Allocates a fresh entity (or scalar) with the same shape,
+ * data_type, and bytes as `ca`, without a mask and with the payload
+ * left uninitialised.  Used by ext code that is about to overwrite
+ * every element (e.g. kernel outputs, casts, element-wise results). */
 CArray *
 ca_template (void *ap)
 {
   CArray *ca = (CArray *) ap;
-  if ( ca_is_scalar(ca) ) {    /* create scalar without mask */
+  if ( ca_is_scalar(ca) ) {
     return (CArray*) cscalar_new(ca->data_type, ca->bytes, NULL);
   }
-  else {                       /* create array without mask */
+  else {
     return carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, NULL);
   }
 }
 
+/* Variant of `ca_template` that zero-fills the payload (entity path
+ * uses `carray_new_safe`).  Used when the caller may leave some cells
+ * untouched and needs a defined initial value. */
 CArray *
 ca_template_safe (void *ap)
 {
   CArray *ca = (CArray *) ap;
-  if ( ca_is_scalar(ca) ) {   /* create scalar without mask */
+  if ( ca_is_scalar(ca) ) {
     return (CArray*) cscalar_new(ca->data_type, ca->bytes, NULL);
   }
-  else {                       /* create array filled with 0, without mask */
+  else {
     return carray_new_safe(ca->data_type, ca->ndim, ca->dim, ca->bytes, NULL);
   }
 }
 
+/* `ca_template_safe` with an explicit target `data_type` / `bytes`
+ * (i.e. shape is taken from `ca` but the element type is overridden).
+ * The `bytes` argument is required for fixlen, ignored for numeric
+ * data types. */
 CArray *
 ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
 {
   CArray *ca = (CArray *) ap;
   CA_CHECK_DATA_TYPE(data_type);
-  if ( ca_is_scalar(ca) ) { /* create scalar without mask */
+  if ( ca_is_scalar(ca) ) {
     return (CArray*) cscalar_new(data_type, bytes, NULL);
   }
-  else {                   /* create array filled with 0, without mask */
+  else {
     return carray_new_safe(data_type, ca->ndim, ca->dim, bytes, NULL);
   }
 }
 
-/* @overload template(data_type=self.data_type, bytes: 0)
-
-(Copy) Returns CArray object with same dimension with `self`
-The data type of the new carray object can be specified by `data_type`.
-For fixlen data type, the option `:bytes` is used to specified the
-data length.
-*/
-
+/* Ruby entry for `CArray#template`.  Allocates a same-shape blank
+ * result, retypes it when `data_type` is given, and optionally runs a
+ * block initialiser:
+ *   - block arity == 0: evaluate once, broadcast via `rb_ca_store_all`
+ *     (scalar-fill fast path, the dominant idiom)
+ *   - block arity != 0: per-cell walk yielding the multi-dimensional
+ *     subscript as individual integer arguments
+ * The arity dispatch matches `CArray.new` (ca_obj_array.c) so the two
+ * factories behave the same for block-driven initialisation. */
 static VALUE
 rb_ca_template_method (int argc, VALUE *argv, VALUE self)
 {
@@ -118,23 +197,51 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( NIL_P(rtype) ) {                  /* data_type not given */
+  if ( NIL_P(rtype) ) {
     co  = ca_template_safe(ca);
     obj = ca_wrap_struct(co);
-    rb_ca_data_type_inherit(obj, self);
   }
   else {
     rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
     co  = ca_template_safe2(ca, data_type, bytes);
     obj = ca_wrap_struct(co);
-    rb_ca_data_type_import(obj, rtype);
   }
 
-  if ( rb_block_given_p() ) {                   /* block given */
-    volatile VALUE rval = rb_yield_values(0);
-    if ( rval != self ) {
-      rb_ca_store_all(obj, rval);
+  if ( rb_block_given_p() ) {
+    if ( rb_proc_arity(rb_block_proc()) == 0 ) {
+      volatile VALUE rval = rb_yield_values2(0, NULL);
+      if ( rval != self ) {
+        rb_ca_store_all(obj, rval);
+      }
     }
+    else {
+      CArray *co;
+      TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+      if ( co->ndim > 0 ) {
+        ca_size_t idx[CA_RANK_MAX];
+        volatile VALUE ridx = rb_ary_new2(co->ndim);
+        ca_attach(co);
+        rb_ca_index_walk(obj, co, 0, idx, ridx, CA_LOOP_STORE);
+        ca_sync(co);
+        ca_detach(co);
+      }
+      else {
+        volatile VALUE rval = rb_yield_values2(0, NULL);
+        rb_ca_store_addr(obj, 0, rval);
+      }
+    }
+  }
+
+  /* Preserve the Face identity only for a same-type template (no explicit
+   * retype).  A retype (template(:boolean)) is a different-typed buffer and
+   * must not be re-wrapped as the Face.  A same-type template of a Face with
+   * a valid blank form (CARecord carries its data_class through the struct
+   * tail; identity Faces alias same-type storage) is lifted so the class is
+   * preserved.  A Face with no valid blank form (CAConstString's content-
+   * defined offset+buffer) overrides `template` in Ruby to return a plain
+   * array instead of a broken same-class shell. */
+  if ( NIL_P(rtype) ) {
+    CA_FACE_LIFT_IF_FACE(obj, self, ca);
   }
 
   return obj;
@@ -155,6 +262,10 @@ rb_ca_template_with_type (VALUE self, VALUE rtype, VALUE rbytes)
   return rb_ca_template_method(2, args, self);
 }
 
+/* Picks the largest-shape CArray among `n` variadic CArray arguments
+ * and returns `template(largest)`.  Used by `carray_call_cfunc.c` to
+ * size the output of vectorised scalar C-function calls, where the
+ * inputs may be a mix of scalars and arrays. */
 VALUE
 rb_ca_template_n (int n, ...)
 {
@@ -194,244 +305,21 @@ rb_ca_template_n (int n, ...)
 }
 
 /* ------------------------------------------------------------------- */
-
-static void
-ca_paste_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
-               ca_size_t *size, CArray *cs,
-               int32_t level, ca_size_t *idx, ca_size_t *idx0)
-{
-  ca_size_t i;
-  if ( level == ca->ndim - 1 ) {
-    idx[level] = offset[level];
-    idx0[level] = offset0[level];
-    memcpy(ca_ptr_at_index(ca, idx), ca_ptr_at_index(cs, idx0), size[level]*ca->bytes);
-    if ( ca->mask ) {
-      memset(ca_ptr_at_index(ca->mask, idx), 0, size[level]*sizeof(boolean8_t));
-    }
-  }
-  else {
-    for (i=0; i<size[level]; i++) {
-      idx[level] = offset[level] + i;
-      idx0[level] = offset0[level] + i;
-      ca_paste_loop(ca, offset, offset0, size, cs, level+1, idx, idx0);
-    }
-  }
-}
+/* [MOVED] sub-region copy `crop(offset, dst)` / `paste(offset, src)`
+ *         -> lib/extras/crop_paste.rb (Ruby wrappers over CAWindow,
+ *            opt-in via `require "extras/crop_paste"`, not autoloaded).
+ *
+ * The names `clip` / `clip!` now mean value clamp (clamp to a min/max
+ * range) and live in ext/carray_generate.c.  The old `clip` argument
+ * order was reversed in the sub-region API, so the moved entry is
+ * renamed to `crop`; `paste` keeps its name. */
 
 /* ------------------------------------------------------------------- */
 
 void
-ca_paste (void *ap, ca_size_t *offset, void *sp)
+Init_carray_copy (void)
 {
-  CArray *ca = (CArray *) ap;
-  CArray *cs = (CArray *) sp;
-  ca_size_t size[CA_RANK_MAX];
-  ca_size_t offset0[CA_RANK_MAX];
-  ca_size_t idx[CA_RANK_MAX];
-  ca_size_t idx0[CA_RANK_MAX];
-  int8_t i;
-
-  ca_check_same_data_type(ca, cs);
-  ca_check_same_ndim(ca, cs);
-
-  for (i=0; i<ca->ndim; i++) {
-    if ( offset[i] >= 0 ) {
-      if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
-        size[i] = ca->dim[i] - offset[i];
-      }
-      else {
-        size[i] = cs->dim[i];
-      }
-      offset0[i] = 0;
-    }
-    else {
-      if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
-        size[i] = ca->dim[i];
-      }
-      else {
-        size[i] = cs->dim[i] + offset[i];
-      }
-      offset0[i] = -offset[i];
-      offset[i] = 0;
-    }
-  }
-
-  for (i=0; i<ca->ndim; i++) {
-    CA_CHECK_INDEX(offset[i], ca->dim[i]);
-  }
-
-  if ( ca_has_mask(cs) ) {
-    ca_create_mask(ca);
-  }
-
-  ca_attach_n(2, ca, cs);
-
-  ca_paste_loop(ca, offset, offset0, size, cs, 0, idx, idx0);
-
-  if ( ca_has_mask(cs) ) {
-    ca_paste_loop(ca->mask, offset, offset0, size, cs->mask, 0, idx, idx0);
-  }
-
-  ca_sync(ca);
-  ca_detach_n(2, ca, cs);
-}
-
-/* @overload paste (idx, ary)
-(Copy) Pastes `ary` to `self` at the index `idx`.
-`idx` should be Array object with the length same as `self.ndim`.
-`ary` should have same shape with `self`.
-*/
-
-static VALUE
-rb_ca_paste (VALUE self, VALUE roffset, VALUE rsrc)
-{
-  CArray *ca, *cs;
-  ca_size_t offset[CA_RANK_MAX];
-  int i;
-
-  rb_ca_modify(self);
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  Check_Type(roffset, T_ARRAY);
-
-  if ( RARRAY_LEN(roffset) != ca->ndim ) {
-    rb_raise(rb_eArgError,
-             "# of arguments should equal to the ndim");
-  }
-
-  for (i=0; i<ca->ndim; i++) {
-    offset[i] = NUM2SIZE(rb_ary_entry(roffset,i));
-  }
-
-  cs = ca_wrap_readonly(rsrc, ca->data_type);
-
-  ca_paste(ca, offset, cs);
-
-  return self;
-}
-
-
-static void
-ca_clip_loop (CArray *ca, ca_size_t *offset, ca_size_t *offset0,
-               ca_size_t *size, CArray *cs,
-               int32_t level, ca_size_t *idx, ca_size_t *idx0)
-{
-  ca_size_t i;
-  if ( level == ca->ndim - 1 ) {
-    idx[level] = offset[level];
-    idx0[level] = offset0[level];
-    memcpy(ca_ptr_at_index(cs, idx0), ca_ptr_at_index(ca, idx), size[level]*ca->bytes);
-  }
-  else {
-    for (i=0; i<size[level]; i++) {
-      idx[level] = offset[level] + i;
-      idx0[level] = offset0[level] + i;
-      ca_clip_loop(ca, offset, offset0, size, cs, level+1, idx, idx0);
-    }
-  }
-}
-
-/* ------------------------------------------------------------------- */
-
-void
-ca_clip (void *ap, ca_size_t *offset, void *sp)
-{
-  CArray *ca = (CArray *) ap;
-  CArray *cs = (CArray *) sp;
-  ca_size_t size[CA_RANK_MAX];
-  ca_size_t offset0[CA_RANK_MAX];
-  ca_size_t idx[CA_RANK_MAX];
-  ca_size_t idx0[CA_RANK_MAX];
-  int i;
-
-  ca_check_same_data_type(ca, cs);
-  ca_check_same_ndim(ca, cs);
-
-  for (i=0; i<ca->ndim; i++) {
-    if ( offset[i] >= 0 ) {
-      if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
-        size[i] = ca->dim[i] - offset[i];
-      }
-      else {
-        size[i] = cs->dim[i];
-      }
-      offset0[i] = 0;
-    }
-    else {
-      if ( ca->dim[i] <= cs->dim[i] + offset[i] ) {
-        size[i] = ca->dim[i];
-      }
-      else {
-        size[i] = cs->dim[i] + offset[i];
-      }
-      offset0[i] = -offset[i];
-      offset[i] = 0;
-    }
-  }
-
-  for (i=0; i<ca->ndim; i++) {
-    CA_CHECK_INDEX(offset[i], ca->dim[i]);
-  }
-
-  if ( ca_has_mask(cs) ) {
-    ca_create_mask(ca);
-  }
-
-  ca_attach_n(2, ca, cs);
-
-  ca_clip_loop(ca, offset, offset0, size, cs, 0, idx, idx0);
-
-  if ( ca_has_mask(cs) ) {
-    ca_clip_loop(ca->mask, offset, offset0, size, cs->mask, 0, idx, idx0);
-  }
-
-  ca_sync(ca);
-  ca_detach_n(2, ca, cs);
-}
-
-/* @overload clip (idx, ary)
-(copy) Clips the data at `idx` from `self` to `ary`.
-*/
-
-static VALUE
-rb_ca_clip (VALUE self, VALUE roffset, VALUE rsrc)
-{
-  CArray *ca, *cs;
-  ca_size_t offset[CA_RANK_MAX];
-  int i;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  Check_Type(roffset, T_ARRAY);
-
-  if ( RARRAY_LEN(roffset) != ca->ndim ) {
-    rb_raise(rb_eArgError,
-             "# of arguments should equal to the ndim");
-  }
-
-  for (i=0; i<ca->ndim; i++) {
-    offset[i] = NUM2SIZE(rb_ary_entry(roffset, i));
-  }
-
-  cs = ca_wrap_writable(rsrc, ca->data_type);
-
-  ca_clip(ca, offset, cs);
-
-  return rsrc;
-}
-
-/* ------------------------------------------------------------------- */
-
-void
-Init_carray_copy ()
-{
-  /* CArray duplication, conversion */
-
-  rb_define_method(rb_cCArray, "to_ca", rb_ca_copy, 0);
+  rb_define_method(rb_cCArray, "to_ca", rb_ca_to_ca, -1);
+  rb_define_method(rb_cCArray, "copy", rb_ca_copy, 0);
   rb_define_method(rb_cCArray, "template", rb_ca_template_method, -1);
-
-  rb_define_method(rb_cCArray, "clip", rb_ca_clip, 2);
-  rb_define_method(rb_cCArray, "paste", rb_ca_paste, 2);
 }
-

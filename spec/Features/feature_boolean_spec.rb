@@ -2,6 +2,8 @@
 require 'carray'
 require "rspec-power_assert"
 
+using CArray::CoreExtensions
+
 describe "TestBooleanType " do
 
   example "boolean_bit_operations" do
@@ -90,7 +92,11 @@ describe "TestBooleanType " do
     a = CA_BOOLEAN([1,1,0,0])
     b = CA_INT(    [0,1,1,0])
 
-    expect { a + a }.to raise_error(CArray::DataTypeError)
+    # 3.0: boolean participates in arithmetic as its 0/1 numeric storage,
+    # promoting to int64 (signed, so `a - a` can reach negatives).
+    is_asserted_by { (a + a) == CA_INT64([2, 2, 0, 0]) }
+    is_asserted_by { (a + a).data_type == CA_INT64 }
+    is_asserted_by { (-a)    == CA_INT64([-1, -1, 0, 0]) }
 
     is_asserted_by { a + b == CA_INT([1, 2, 1, 0]) }
   end

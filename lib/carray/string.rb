@@ -1,193 +1,69 @@
 # ----------------------------------------------------------------------------
 #
-#  carray/string.rb
+#  CAString high-level construction surface.
 #
-#  This file is part of Ruby/CArray extension library.
-#
-#  Copyright (C) 2005-2025 Hiroki Motoyoshi
+#  CAString itself (the identity Face over CA_OBJECT storage) lives in
+#  ext/ca_obj_string.c.  This file provides the ergonomic builder that packs
+#  Ruby Strings into a CA_OBJECT entity and wraps it via CAString.wrap.
 #
 # ----------------------------------------------------------------------------
 
-require "date"
-
 class CArray
 
-  def self.format (fmt, *argv)
-    raise "no parameters given" if argv.empty?
-    return argv.shift.zip(*argv).map { |params| Kernel::format(fmt, *params) }.to_ca
-  end
+  # Build a CAString (mutable String array over object storage) from Ruby data.
+  #
+  #     CArray.string(["alpha", "", "gamma"])   # 1-D from Array
+  #     CArray.string(3) { |i| "item#{i}" }     # block form
+  #     CArray.string([a, nil, b])              # nil → masked element
+  #     CArray.string(other_ca)                 # from a String Face / object / raw fixlen
+  #
+  # `nil` entries become masked cells; "" (empty) is a valid distinct value.
+  # A CArray source is normalised through a String Face ({CArray.string_face_of}):
+  # a String Face converts, CA_OBJECT storage wraps, a raw CA_FIXLEN reads as
+  # NUL-stripped strings; a numeric / boolean array is rejected (stringify with
+  # {#format} / {CArray.format}).
+  # @overload string(values)
+  #   Returns a {CAString} wrapping a CA_OBJECT entity of the given values.
+  #   @param values [Array<String, nil>] source values.
+  #   @return [CAString]
+  # @overload string(ca)
+  #   Returns a {CAString} of the string-bearing CArray `ca`.
+  #   @param ca [CArray] a String Face, CA_OBJECT, or raw CA_FIXLEN array.
+  #   @return [CAString]
+  #   @raise [CArray::DataTypeError] if `ca` is numeric / boolean.
+  # @overload string(n) { |i| ... }
+  #   Returns an `n`-element {CAString} filled by the block, following the
+  #   arity-0 broadcast convention.
+  #   @param n [Integer] element count.
+  #   @yieldparam i [Integer] cell index.
+  #   @yieldreturn [String, nil] value for cell `i`.
+  #   @return [CAString]
+  def self.string (arg, &block)
+    return string_face_of(arg).to_string if arg.is_a?(CArray)
 
-  def str_len ()
-    return convert(:int, &:length)
-  end
-
-  def str_size ()
-    return convert(:int, &:size)
-  end
-
-  def str_bytesize ()
-    return convert(:int, &:bytesize)
-  end
-
-  def str_gsub (*args, &block)
-    return convert() {|s| s.gsub(*args, &block) }
-  end
-
-  def str_sub (*args, &block)
-    return convert() {|s| s.sub(*args, &block) }
-  end
-
-  def str_encode (*args)
-    return convert() {|s| s.encode(*args) }
-  end
-
-  def str_force_encoding (encoding)
-    return convert() {|s| s.force_encoding(encoding) }
-  end
-
-  def str_encoding ()
-    return convert(&:encoding)
-  end
-
-  def str_is_end_with (*args)
-    return test {|s| s.end_with?(*args) }
-  end
-
-  def str_is_start_with (*args)
-    return test {|s| s.start_with?(*args) }
-  end
-
-  def str_includes (substr)
-    return test {|s| s.include?(substr) }
-  end
-
-  alias str_contains str_includes
-
-  def str_index (*args)
-    return convert(:int) {|s| s.index(*args) }
-  end
-
-  def str_rindex (*args)
-    return convert(:int) {|s| s.rindex(*args) }
-  end
-
-  def str_intern ()
-    return convert(&:intern)
-  end
-
-  def str_scrub ()
-    return convert(&:scrub)
-  end
-
-  def str_downcase ()
-    return convert(&:downcase)
-  end
-
-  def str_upcase ()
-    return convert(&:upcase)
-  end
-
-  def str_capitalize ()
-    return convert(&:capitalize)
-  end
-
-  def str_swapcase ()
-    return convert(&:swapcase)
-  end
-
-  def str_chomp (*args)
-    return convert() {|s| s.chomp(*args) }
-  end
-
-  def str_chop ()
-    return convert(&:chop)
-  end
-
-  def str_chr ()
-    return convert(&:chr)
-  end
-
-  def str_clear ()
-    return convert(&:clear)
-  end
-
-  def str_count (*args)
-    return convert(:int) {|s| s.count(*args) }
-  end
-
-  def str_delete (*args)
-    return convert() {|s| s.delete(*args) }
-  end
-
-  def str_delete_prefix (prefix)
-    return convert() {|s| s.delete_prefix(prefix) }
-  end
-
-  def str_delete_suffix (suffix)
-    return convert() {|s| s.delete_suffix(suffix) }
-  end
-
-  def str_dump ()
-    return convert(&:dump)
-  end
-
-  def str_center (*args)
-    return convert() {|s| s.center(*args) }
-  end
-
-  def str_ljust (*args)
-    return convert() {|s| s.ljust(*args) }
-  end
-
-  def str_rjust (*args)
-    return convert() {|s| s.rjust(*args) }
-  end
-
-  def str_to_i ()
-    return convert(&:to_i)
-  end
-
-  def str_to_f ()
-    return convert(&:to_f)
-  end
-
-  def str_to_r ()
-    return convert(&:to_r)
-  end
-
-  def str_strip ()
-    return convert(&:strip)
-  end
-
-  def str_rstrip ()
-    return convert(&:rstrip)
-  end
-
-  def str_lstrip ()
-    return convert(&:lstrip)
-  end
-
-  def str_is_empty ()
-    return test(&:empty?)
-  end
-
-  def str_matches (*args)
-    if args.size == 1 && args.first.is_a?(Regexp)
-      regexp = args.first
-      return test {|v| v =~ regexp }
-    else
-      mask = template(:boolean) { false }
-      args.each do |str|
-        addr = search(str)
-        mask[addr] = true if addr
+    if block
+      n = Integer(arg)
+      if block.arity == 0
+        v = block.call
+        values = Array.new(n) { v }
+      else
+        values = Array.new(n) { |i| block.call(i) }
       end
-      return mask
+    else
+      values = arg.to_a
     end
+
+    entity = CArray.object(values.size)
+    values.each_with_index do |s, i|
+      entity[i] = s.nil? ? UNDEF : s
+    end
+    CAString.wrap(entity)
   end
-  
-  def str_extract (regexp, replace = '\0')
-    return convert {|s| regexp.match(s) {|m| m[0].sub(regexp, replace) } || "" }
-  end
-    
+
 end
 
+# Mutable object-backed String Face: L1 ops + in-place variants.
+class CAString
+  include CArray::StringOperationMixin
+  include CArray::StringOperationMixin::Mutable
+end

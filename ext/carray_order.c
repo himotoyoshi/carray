@@ -1,27 +1,17 @@
-/* ---------------------------------------------------------------------------
-
-  carray_order.c
-
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
-
----------------------------------------------------------------------------- */
-
 #include "ruby.h"
 #include "carray.h"
+#include "ca_kernel_iterator.h"
+#include "ca_obj_face.h"
 #include <math.h>
 #include <float.h>
+#include <stdlib.h>
 
-static ID id_equal;
-
-static VALUE
-rb_ca_value_not_masked (VALUE self)
-{
-  VALUE rval   = rb_ca_value_array(self);
-  VALUE select = rb_ca_is_not_masked(self);
-  return rb_ca_fetch(rval, select);
-}
+/* Interned IDs used by the dispatchers below.  rb_funcall is retained
+ * only where there is no clean C entry: `-` (operator dispatch in
+ * rb_ca_order handles Integer vs CArray uniformly via method dispatch)
+ * and Symbol tag comparison for `method:` kwarg. */
+static ID id_axis, id_sub,
+          id_sym_binary, id_sym_linear;
 
 /* ------------------------------------------------------------------- */
 
@@ -62,6 +52,8 @@ rb_ca_value_not_masked (VALUE self)
     }                                         \
   }
 
+/* Inner loop of ca_project: gather ca[ci[i]] into co with optional
+ * lfill/ufill for out-of-range indices.  Called only by ca_project. */
 static void
 ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
@@ -119,8 +111,8 @@ ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
     }
     break;
   }
-  free(mi);
-  free(ma);
+  xfree(mi);
+  xfree(ma);
 }
 
 CArray *
@@ -138,27 +130,36 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   return co;
 }
 
-/* @overload project (idx, lval=nil, uval=nil)
-
-[TBD]. Creates new array the element of the object as address.
-*/
-
+/* project(idx, lval=nil, uval=nil) — gather: for each element of `idx`,
+ * pick `self[idx[i]]`.  Returns an entity CArray shaped like `idx`.
+ *
+ * Out-of-range index handling: negative or >= self.elements indices
+ * produce `lval` (lower) / `uval` (upper) if provided, otherwise mask
+ * the output cell.  Masked inputs (`idx` mask or `self` mask) also
+ * propagate as masked output.
+ */
 VALUE
 rb_ca_project (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, ridx, vlfval, vufval;
+  volatile VALUE obj, ridx, vlfval, vufval, vstorage;
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
+  int self_is_face;
 
   rb_scan_args(argc, argv, "12", (VALUE *)&ridx, (VALUE *) &vlfval, (VALUE *) &vufval);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  self_is_face = ca_is_face(ca);
 
   rb_check_carray_object(ridx);
   ci = ca_wrap_readonly(ridx, CA_SIZE);
 
-  lfval = malloc_with_check(ca->bytes);
-  ufval = malloc_with_check(ca->bytes);
+  /* The fill args arrive as surface values.  rb_ca_obj2ptr owns the
+     surface->storage conversion: for a Face self it fires the scalar_to_storage
+     write hook (a datetime scalar / Time is reconciled to the Face's unit),
+     for a plain array it writes the storage bytes directly. */
+  lfval = xmalloc(ca->bytes);
+  ufval = xmalloc(ca->bytes);
 
   if ( ! NIL_P(vlfval) ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
@@ -169,1519 +170,788 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     rb_ca_obj2ptr(self, vufval, ufval);
   }
 
+  /* Strip Face -> gather on storage -> face-lift (the same tail sort/search
+     use, see docs/authoring/FaceOrderingSearch.md).  The gather runs on the raw
+     storage so length / miss->UNDEF / fill semantics are unchanged; the
+     result is then re-wrapped as the source Face, and copy_state carries the
+     subclass state (datetime/timedelta unit, categorical labels). */
+  vstorage = self;
+  if ( self_is_face ) {
+    vstorage = rb_ca_strip_face_value(self);
+    TypedData_Get_Struct(vstorage, CArray, &carray_data_type, ca);
+  }
+
   co = ca_project(ca, ci,
                  ( ! NIL_P(vlfval) ) ? lfval : NULL,
                  ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
 
-  free(lfval);
-  free(ufval);
+  xfree(lfval);
+  xfree(ufval);
 
   obj = ca_wrap_struct(co);
-  rb_ca_data_type_inherit(obj, self);
 
   if ( ! ca_is_any_masked(co) ) {
     obj = rb_ca_unmask_copy(obj);
   }
 
+  if ( self_is_face ) {
+    obj = ca_face_lift(obj, self);
+  }
+
   return obj;
 }
 
-/* ----------------------------------------------------------------- */
+/* ------------------------------------------------------------------------- */
 
-#define proc_reverse_bang_mask()                         \
-  {                                                     \
-    boolean8_t *p = (boolean8_t *)ca->mask->ptr;                          \
-    boolean8_t *q = (boolean8_t *)ca->mask->ptr + ca->elements - 1;       \
-    boolean8_t v;                                             \
-    for (; p<q; p++, q--) {                             \
-      v = *p; *p = *q; *q = v;                          \
-    }                                                   \
+/* ---- search family kwarg trampolines (dual API: index vs addr) ------
+ *
+ * Each trampoline parses the `axis:` kwarg and dispatches:
+ *   axis nil -> inline no-axis flat path: flatten self + flatten query
+ *               (if CArray) + call the _ki kernel at axis 0, then
+ *               reshape the result to the query's shape via
+ *               ca_reshape_search_result
+ *   axis k   -> per-axis kernel from carray_kernels.c.  The "index"
+ *               variants use the :fiber_local kernels (axis-local
+ *               position per fiber); the "addr" variants use the
+ *               :view_flat kernels (view-flat address per fiber).
+ *
+ * For the no-axis path both variant families route through the index
+ * kernel (_ki, not _addr_ki): the 1-D flattening makes addr == index,
+ * so the two names share the same implementation.
+ */
+
+extern VALUE rb_ca_bsearch_ki              (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_bsearch_addr_ki         (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_search_ki               (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_search_addr_ki          (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_search_nearest_ki       (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_search_nearest_addr_ki  (VALUE self, VALUE rval, VALUE raxis);
+
+/* Direct C function entries used by the dispatchers below.  Declared
+ * here when not already in carray.h / umbrella headers.
+ *
+ * The `_c` suffix marks "C-callable entry": a thin twin of the Ruby-
+ * binding function that skips rb_scan_args.  Ruby's `:` kwarg parsing
+ * reads the call-frame keyword-splat state, which is only set by full
+ * method dispatch -- calling the Ruby entry directly from C would
+ * segfault.  Pattern: Ruby entry parses argv via rb_scan_args and
+ * forwards to the `_c` twin.
+ */
+extern VALUE rb_ca_sort_addr_c               (VALUE self, VALUE axis, int stable, int masked_last);
+extern VALUE rb_ca_axis2addr_c               (VALUE self, VALUE vindices, VALUE vaxis);
+extern VALUE rb_ca_count_not_masked_c        (VALUE self, VALUE axis_val);
+extern VALUE rb_ca_flip_axis                 (VALUE self, long axis);
+extern VALUE rb_ca_argmin_addr_ki            (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_argmax_addr_ki            (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_minmax_ki                 (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_linear_section_binary_ki  (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_linear_section_linear_ki  (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_linear_fetch_ki           (VALUE self, VALUE rval, VALUE raxis);
+extern VALUE rb_ca_insert_axis               (int argc, VALUE *argv, VALUE self);
+extern VALUE rb_ca_reshape                   (int argc, VALUE *argv, VALUE self);
+
+/* mkkernel-emitted kernels marked `c_callable: true`: extern symbols
+ * in carray_kernels.c that allow direct C-level dispatch without going
+ * through rb_funcall + kwarg hash construction. */
+extern VALUE rb_ca_sort_index_ki_quick       (VALUE self, VALUE vaxis);
+extern VALUE rb_ca_partition_index_ki        (VALUE self, VALUE vaxis, VALUE vkth);
+extern VALUE rb_ca_rank_index_ki_quick_dense (VALUE self, VALUE vaxis, int dense);
+
+/* ---- no-axis (flat) search helper -----------------------------------
+ *
+ * Contract for the no-axis path (`axis: nil`):
+ *   non-CArray query -> scalar result (Integer / nil)
+ *   CArray query     -> query-shaped CArray result (UNDEF cells on no-match)
+ *
+ * Implementation: flatten self + flatten query, run the per-axis _ki
+ * kernel at axis 0, then reshape the raw 1-D result to query's shape
+ * via the helper below.
+ */
+
+/* Rebuild a query-shaped result from the kernel output.  Two paths:
+ *   (a) scalar collapse: _ki returns Integer / nil when query is a
+ *       single-element CArray.  Build a query-shaped entity directly
+ *       and store the value (CA_UNDEF for nil -> auto-mask).
+ *   (b) CArray result: reshape to query.shape (the helpers flatten the
+ *       query before calling _ki, so the raw result is 1-D).
+ *
+ * Called by the search family trampolines below (bsearch_kw /
+ * search_kw / search_nearest_kw and their _addr siblings) on the
+ * no-axis path. */
+static VALUE
+ca_reshape_search_result (VALUE query, VALUE rraw)
+{
+  CArray *cq;
+  GetCArray(query, cq);
+
+  if ( ! rb_obj_is_carray(rraw) ) {
+    VALUE vr = rb_carray_new(CA_SIZE, cq->ndim, cq->dim, 0, NULL);
+    rb_ca_store_addr(vr, 0, NIL_P(rraw) ? CA_UNDEF : rraw);
+    return vr;
   }
 
-
-#define proc_reverse_bang(type)                         \
-  {                                                     \
-    type *p = (type *)ca->ptr;                          \
-    type *q = (type *)ca->ptr + ca->elements - 1;       \
-    type v;                                             \
-    for (; p<q; p++, q--) {                             \
-      v = *p; *p = *q; *q = v;                          \
-    }                                                   \
+  VALUE shape_argv[CA_RANK_MAX];
+  for ( int8_t k = 0; k < cq->ndim; k++ ) {
+    shape_argv[k] = LONG2NUM((long) cq->dim[k]);
   }
-
-#define proc_reverse_bang_data()                        \
-  {                                                     \
-    ca_size_t bytes = ca->bytes;                          \
-    char *p = ca->ptr;                                  \
-    char *q = ca->ptr + bytes * (ca->elements - 1);     \
-    char *v = malloc_with_check(bytes);                     \
-    for (; p<q; p+=bytes, q-=bytes) {                   \
-      memcpy(v, p, bytes);                              \
-      memcpy(p, q, bytes);                              \
-      memcpy(q, v, bytes);                              \
-    }                                                   \
-    free(v);                                            \
-  }
-
-/* @overload reverse!
-
-Reverses the elements of +ca+ in place.
-*/
+  return rb_ca_reshape((int) cq->ndim, shape_argv, rraw);
+}
 
 static VALUE
-rb_ca_reverse_bang (VALUE self)
+rb_ca_bsearch_kw (int argc, VALUE *argv, VALUE self)
 {
-  CArray *ca;
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
 
-  rb_ca_modify(self);
+  if ( NIL_P(raxis) ) {
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r    = rb_ca_bsearch_ki(flat, q, INT2FIX(0));
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  return rb_ca_bsearch_ki(self, argv[0], raxis);
+}
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
+static VALUE
+rb_ca_bsearch_addr_kw (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
 
-  switch ( ca->data_type ) {
-  case CA_FIXLEN: proc_reverse_bang_data();  break;
-  case CA_BOOLEAN:
-  case CA_INT8:
-  case CA_UINT8:    proc_reverse_bang(int8_t);  break;
-  case CA_INT16:
-  case CA_UINT16:   proc_reverse_bang(int16_t); break;
-  case CA_INT32:
-  case CA_UINT32:
-  case CA_FLOAT32:  proc_reverse_bang(int32_t); break;
-  case CA_INT64:
-  case CA_UINT64:
-  case CA_FLOAT64:  proc_reverse_bang(float64_t);  break;
-  case CA_FLOAT128: proc_reverse_bang(float128_t);  break;
-#ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64:  proc_reverse_bang(float64_t);  break;
-  case CA_CMPLX128: proc_reverse_bang(cmplx128_t);  break;
-  case CA_CMPLX256: proc_reverse_bang(cmplx256_t);  break;
-#endif
-  case CA_OBJECT:   proc_reverse_bang(VALUE);  break;
-  default:
-    rb_raise(rb_eCADataTypeError, "[BUG] array has an unknown data type");
+  if ( NIL_P(raxis) ) {
+    /* 1-D self: view-flat addr == axis-local index, so the no-axis
+       path reuses _ki (not _addr_ki) -- both variants share output. */
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r    = rb_ca_bsearch_ki(flat, q, INT2FIX(0));
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  return rb_ca_bsearch_addr_ki(self, argv[0], raxis);
+}
+
+static VALUE
+rb_ca_search_kw (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 2);
+
+  if ( NIL_P(raxis) ) {
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r;
+    VALUE ki_argv[3] = { q, INT2FIX(0), argv[1] };
+    if ( argc >= 2 ) {
+      r = rb_ca_search_ki(3, ki_argv, flat);
+    }
+    else {
+      r = rb_ca_search_ki(2, ki_argv, flat);
+    }
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  /* search_ki(val, axis, eps) -- argc=2 (val,axis) or 3 (val,axis,eps) */
+  VALUE ki_argv[3] = { argv[0], raxis, argv[1] };
+  if ( argc >= 2 ) {
+    return rb_ca_search_ki(3, ki_argv, self);
+  }
+  return rb_ca_search_ki(2, ki_argv, self);
+}
+
+static VALUE
+rb_ca_search_addr_kw (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 2);
+
+  if ( NIL_P(raxis) ) {
+    /* 1-D self: addr == index reuses _ki (not _addr_ki). */
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r;
+    VALUE ki_argv[3] = { q, INT2FIX(0), argv[1] };
+    if ( argc >= 2 ) {
+      r = rb_ca_search_ki(3, ki_argv, flat);
+    }
+    else {
+      r = rb_ca_search_ki(2, ki_argv, flat);
+    }
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  VALUE ki_argv[3] = { argv[0], raxis, argv[1] };
+  if ( argc >= 2 ) {
+    return rb_ca_search_addr_ki(3, ki_argv, self);
+  }
+  return rb_ca_search_addr_ki(2, ki_argv, self);
+}
+
+static VALUE
+rb_ca_search_nearest_kw (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+
+  if ( NIL_P(raxis) ) {
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r    = rb_ca_search_nearest_ki(flat, q, INT2FIX(0));
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  return rb_ca_search_nearest_ki(self, argv[0], raxis);
+}
+
+static VALUE
+rb_ca_search_nearest_addr_kw (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+
+  if ( NIL_P(raxis) ) {
+    /* 1-D self: addr == index reuses _ki (not _addr_ki) -- same as bsearch_addr. */
+    VALUE flat = rb_ca_flatten(self);
+    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE r    = rb_ca_search_nearest_ki(flat, q, INT2FIX(0));
+    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+  }
+  return rb_ca_search_nearest_addr_ki(self, argv[0], raxis);
+}
+
+
+/* ===========================================================================
+ * Ordering surface (C-side implementations of CArray ordering methods).
+ *
+ * Call sites use direct C function calls wherever possible; rb_funcall
+ * is retained only where there is no clean C entry: the `-` operator
+ * (Ruby method dispatch handles both `Integer - Integer` and
+ * `CArray - Integer` / `Integer - CArray` uniformly) and Symbol tag
+ * comparison for `method:` kwarg.
+ * =========================================================================== */
+
+/* ---- sort_by_key family ---------------------------------------------- */
+
+/* sort_by_key(key, axis: 0) -- gather self at key.sort_addr(axis:). */
+static VALUE
+rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
+{
+  VALUE rkey, rkw = Qnil, raxis = Qnil;
+  rb_scan_args(argc, argv, "1:", &rkey, &rkw);
+  rb_scan_options(rkw, "axis", &raxis);
+  if ( NIL_P(raxis) ) {
+    raxis = INT2FIX(0);
+  }
+  VALUE addrs = rb_ca_sort_addr_c(rkey, raxis, 0, 1);  /* masked_last=1 (:last), unchanged default */
+  return rb_ca_fetch(self, addrs);
+}
+
+/* max_by_key(key, axis: nil) -- self[key.max_addr(axis:)] (or UNDEF if empty). */
+static VALUE
+rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
+{
+  VALUE rkey, rkw = Qnil, raxis = Qnil;
+  rb_scan_args(argc, argv, "1:", &rkey, &rkw);
+  rb_scan_options(rkw, "axis", &raxis);
+  if ( RTEST(rb_ca_is_empty(self)) ) {
+    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
   }
 
-  if ( ca_has_mask(ca) ) {
-    proc_reverse_bang_mask();
+  VALUE addrs;
+
+  if ( NIL_P(raxis) ) {
+    VALUE ki_argv[1] = { Qnil };   /* non-NULL for safety, unused at argc=0 */
+    addrs = rb_ca_argmax_addr_ki(0, ki_argv, rkey);
+  }
+  else {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(id_axis), raxis);
+    addrs = rb_ca_argmax_addr_ki(1, &kw, rkey);
+  }
+  return rb_ca_fetch(self, addrs);
+}
+
+/* min_by_key(key, axis: nil) -- self[key.min_addr(axis:)] (or UNDEF if empty). */
+static VALUE
+rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
+{
+  VALUE rkey, rkw = Qnil, raxis = Qnil;
+  rb_scan_args(argc, argv, "1:", &rkey, &rkw);
+  rb_scan_options(rkw, "axis", &raxis);
+  if ( RTEST(rb_ca_is_empty(self)) ) {
+    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
   }
 
-  ca_sync(ca);
-  ca_detach(ca);
+  VALUE addrs;
 
+  if ( NIL_P(raxis) ) {
+    VALUE ki_argv[1] = { Qnil };
+    addrs = rb_ca_argmin_addr_ki(0, ki_argv, rkey);
+  }
+  else {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(id_axis), raxis);
+    addrs = rb_ca_argmin_addr_ki(1, &kw, rkey);
+  }
+  return rb_ca_fetch(self, addrs);
+}
+
+/* ---- take_along_axis / put_along_axis -------------------------------- */
+
+/* C-callable positional twin: skip rb_scan_args / kwarg hash machinery
+   so internal C consumers (e.g. nlargest / nsmallest family) can call
+   directly without a kwarg trampoline.  The Ruby binding forwards here. */
+static VALUE
+rb_ca_take_along_axis_c (VALUE self, VALUE indices, VALUE raxis)
+{
+  if ( NIL_P(raxis) ) {
+    raxis = INT2FIX(0);
+  }
+  VALUE addrs = rb_ca_axis2addr_c(self, indices, raxis);
+  return rb_ca_fetch(self, addrs);
+}
+
+static VALUE
+rb_ca_take_along_axis (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  return rb_ca_take_along_axis_c(self, argv[0], raxis);
+}
+
+static VALUE
+rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 2, 2);
+  if ( NIL_P(raxis) ) {
+    raxis = INT2FIX(0);
+  }
+  VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
+  rb_ca_store(self, addrs, argv[1]);
   return self;
 }
 
-/* @overload reverse
-
-Returns a new CArray object containing <i>ca</i>'s elements in
-reverse order.
-*/
+/* ---- range -- (min..max) via fused minmax ----------------------------- */
 
 static VALUE
-rb_ca_reversed_copy (VALUE self)
+rb_ca_range_method (VALUE self)
 {
-  volatile VALUE out = rb_ca_copy(self);
-  rb_ca_data_type_inherit(out, self);
-  return rb_ca_reverse_bang(out);
+  VALUE mm_argv[1] = { Qnil };
+  VALUE pair = rb_ca_minmax_ki(0, mm_argv, self);
+  VALUE lo = rb_ary_entry(pair, 0);
+  VALUE hi = rb_ary_entry(pair, 1);
+  return rb_range_new(lo, hi, 0);
 }
 
-/* ------------------------------------------------------------------------- */
+/* ---- nlargest / nsmallest family ------------------------------------- */
 
-typedef struct {
-  ca_size_t bytes;
-  char   *ptr;
-} cmp_data;
-
-typedef int (*ca_qsort_cmp_func)();
-
-#define qcmp_type(type)         \
-static int                      \
-qcmp_## type (type *a, type *b) \
-{                               \
-  if ( *a > *b ) return 1;      \
-  if ( *a < *b ) return -1;     \
-  return 0;                     \
-}
-
-#define qcmp_f_type(type)       \
-static int                      \
-qcmp_## type (type *a, type *b) \
-{                               \
-  if ( isnan(*a) && ( ! isnan(*b) ) ) return 1;    \
-  if ( isnan(*b) && ( ! isnan(*a) ) ) return -1;   \
-  if ( *a > *b ) return 1;      \
-  if ( *a < *b ) return -1;     \
-  return 0;                     \
-}
-
-static int
-qcmp_VALUE (VALUE *a, VALUE *b)
-{
-  int cmp;
-  cmp = NUM2INT(rb_funcall(*a, rb_intern("<=>"), 1, *b));
-  if ( cmp != 0 ) return cmp;
-  return 0;
-}
-
-static int
-qcmp_data (cmp_data *a, cmp_data *b)
-{
-  int cmp;
-  cmp = memcmp(a->ptr, b->ptr, a->bytes);
-  if ( cmp != 0 ) return cmp;
-  return 0;
-}
-
-qcmp_type(boolean8_t)
-qcmp_type(int8_t)
-qcmp_type(uint8_t)
-qcmp_type(int16_t)
-qcmp_type(uint16_t)
-qcmp_type(int32_t)
-qcmp_type(uint32_t)
-qcmp_type(int64_t)
-qcmp_type(uint64_t)
-qcmp_f_type(float32_t)
-qcmp_f_type(float64_t)
-qcmp_f_type(float128_t)
-
-static int
-qcmp_not_implement (void *a, void *b)
-{
-  rb_raise(rb_eNotImpError,
-           "compare function is not implemented for the data type");
-}
-
-ca_qsort_cmp_func
-ca_qsort_cmp[CA_NTYPE] = {
-  qcmp_data,
-  qcmp_boolean8_t,
-  qcmp_int8_t,
-  qcmp_uint8_t,
-  qcmp_int16_t,
-  qcmp_uint16_t,
-  qcmp_int32_t,
-  qcmp_uint32_t,
-  qcmp_int64_t,
-  qcmp_uint64_t,
-  qcmp_float32_t,
-  qcmp_float64_t,
-  qcmp_float128_t,
-  qcmp_not_implement,
-  qcmp_not_implement,
-  qcmp_not_implement,
-  qcmp_VALUE,
-};
-
-/* @overload sort!
-
-Sorts <i>ca</i>'s elements in place.
-*/
-
+/* Per-axis top-k positions (cap clamped, axis normalized).
+ * Called by rb_ca_topk_index below. */
 static VALUE
-rb_ca_sort_bang (VALUE self)
+rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
 {
   CArray *ca;
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_ca_sort_bang(rb_ca_value_not_masked(self));
-    return self;
-  }
-
-  rb_ca_modify(self);
-
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
+  long dim_axis = (long) ca->dim[axis_norm];
+  VALUE raxis_norm = LONG2NUM(axis_norm);
 
-  if ( ca_is_fixlen_type(ca) ) {
-    cmp_data *cmp_ptr, *p;
-    char *ca_ptr, *q;
-    ca_size_t i;
-    cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
-    ca_ptr  = malloc_with_check(ca_length(ca));
-    for (i=0, p=cmp_ptr, q=ca->ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
-      p->bytes = ca->bytes;
-      p->ptr   = q;
+  if ( cap >= dim_axis ) {
+    VALUE full = rb_ca_sort_index_ki_quick(self, raxis_norm);
+    if ( desc ) {
+      full = rb_ca_flip_axis(full, NUM2LONG(raxis_norm));
     }
-    qsort(cmp_ptr, ca->elements, sizeof(cmp_data), ca_qsort_cmp[CA_FIXLEN]);
-    for (i=0, p=cmp_ptr, q=ca_ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
-      memcpy(q, p->ptr, ca->bytes);
-    }
-    free(ca->ptr);
-    ca->ptr = ca_ptr;
-    free(cmp_ptr);
+    return rb_ca_copy(full);
   }
-  else {
-    qsort(ca->ptr, ca->elements, ca->bytes, ca_qsort_cmp[ca->data_type]);
+
+  long pivot = desc ? (dim_axis - cap) : (cap - 1);
+  VALUE rpivot = LONG2NUM(pivot);
+
+  /* Build a Ruby indexer spec: nil on every axis except `axis_norm`,
+     where we take the top-k (or bottom-k) range after partitioning. */
+  int ndim = (int) ca->ndim;
+  VALUE spec[CA_RANK_MAX];
+  for ( int k = 0; k < ndim; k++ ) {
+    spec[k] = Qnil;
   }
-  ca_sync(ca);
-  ca_detach(ca);
-  return self;
+  spec[axis_norm] = desc
+    ? rb_range_new(rpivot, LONG2NUM(dim_axis - 1), 0)   /* (pivot..dim-1) */
+    : rb_range_new(INT2FIX(0), LONG2NUM(cap), 1);       /* (0...cap) */
+
+  /* partidx_full[*spec] |> take_along_axis(...) |> sort_index(...) |>
+     flip(if desc) |> take_along_axis(...) |> copy. */
+  VALUE partidx_full = rb_ca_partition_index_ki(self, raxis_norm, rpivot);
+  VALUE partidx_top  = rb_ca_fetch2(partidx_full, ndim, spec);
+  VALUE vals_top     = rb_ca_take_along_axis_c(self, partidx_top, raxis_norm);
+  VALUE order        = rb_ca_sort_index_ki_quick(vals_top, raxis_norm);
+  if ( desc ) {
+    order = rb_ca_flip_axis(order, NUM2LONG(raxis_norm));
+  }
+  VALUE picked = rb_ca_take_along_axis_c(partidx_top, order, raxis_norm);
+  return rb_ca_copy(picked);
 }
 
-/* @overload sort
-
-Returns a new CArray object containing <i>ca</i>'s elements sorted.
-*/
-
+/* Dispatcher: normalize axis, clamp cap, empty-cap corner.
+ * Called by rb_ca_nlargest_index / rb_ca_nsmallest_index (index
+ * variants) and indirectly by rb_ca_topk_values below. */
 static VALUE
-rb_ca_sorted_copy (VALUE self)
+rb_ca_topk_index (VALUE self, VALUE rn, VALUE raxis, int desc, const char *name)
 {
-  volatile VALUE out = rb_ca_copy(self);
-  rb_ca_data_type_inherit(out, self);
-  return rb_ca_sort_bang(out);
-}
-
-
-/* --------------------------------------------------------------- */
-
-/* @overload bsearch
-
-Returns a new CArray object containing <i>ca</i>'s elements sorted.
-*/
-
-static VALUE
-rb_ca_binary_search (VALUE self, volatile VALUE rval)
-{
-  volatile VALUE out;
   CArray *ca;
-  char *val;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  /* FIXME : treat mask */
-  /*
-  if ( ca_has_mask(ca) && ca_is_any_masked(self) ) {
-    VALUE val  = rb_funcall(self, rb_intern("value"), 0);
-    VALUE select = rb_ca_is_not_masked(self);
-    VALUE obj    = rb_funcall(val, rb_intern("[]"), 1, select);
-    return rb_ca_binary_search(obj, rval);
+  long a = rb_ca_normalize_axis_value(self, raxis, name);
+  long n_val = NUM2LONG(rn);
+  long dim_a = (long) ca->dim[a];
+  long cap = (n_val < dim_a) ? n_val : dim_a;
+  if ( cap < 0 ) {
+    cap = 0;
   }
-  */
-
-  if ( ca_is_any_masked(ca) ) {
-    rb_raise(rb_eRuntimeError, 
-             "CArray#bsearch can't be applied to carray with masked element.");
+  if ( cap == 0 ) {
+    /* Return zero-along-axis int64 array via the C carray constructor. */
+    ca_size_t out_dim[CA_RANK_MAX];
+    for ( int k = 0; k < (int) ca->ndim; k++ ) {
+      out_dim[k] = (k == a) ? 0 : ca->dim[k];
+    }
+    return rb_carray_new(CA_INT64, ca->ndim, out_dim, 0, NULL);
   }
+  return rb_ca_topk_positions(self, cap, a, desc);
+}
 
-  ca_attach(ca);
+static VALUE
+rb_ca_nlargest_index (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  if ( NIL_P(raxis) ) {
+    rb_raise(rb_eArgError, "nlargest_index: axis: kwarg is required");
+  }
+  return rb_ca_topk_index(self, argv[0], raxis, 1, "nlargest_index");
+}
 
-  if ( rb_obj_is_carray(rval) ) {
-    volatile VALUE vidx;
-    CArray *cv, *co;
-    char *ptr, *val;
-    ca_size_t i, idx;
-    TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
-    if ( ca->data_type != cv->data_type ) {
-      cv = ca_wrap_readonly(rval, ca->data_type);
-    }
-    co = carray_new(CA_SIZE, cv->ndim, cv->dim, 0, NULL);
-    out = ca_wrap_struct(co);
-    ca_attach(cv);
-    if ( ca_is_fixlen_type(ca) ) {
-      cmp_data *cmp_ptr, *p, *ptr, cmp_val;
-      char *q;
-      ca_size_t i;
-      cmp_val.bytes = ca->bytes;
-      cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
-      for (i=0, p=cmp_ptr, q=ca->ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
-        p->bytes = ca->bytes;
-        p->ptr   = q;
-      }
-      for (i=0; i<cv->elements; i++) {
-        cmp_val.ptr = ca_ptr_at_addr(cv, i);
-        ptr = bsearch(&cmp_val, cmp_ptr, ca->elements, sizeof(cmp_data),
-                      ca_qsort_cmp[CA_FIXLEN]);
-        vidx = ( ! ptr ) ? CA_UNDEF : SIZE2NUM(ptr - cmp_ptr);      
-        rb_ca_store_addr(out, i, vidx);
-      }
-      free(cmp_ptr);
-    }
+static VALUE
+rb_ca_nsmallest_index (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  if ( NIL_P(raxis) ) {
+    rb_raise(rb_eArgError, "nsmallest_index: axis: kwarg is required");
+  }
+  return rb_ca_topk_index(self, argv[0], raxis, 0, "nsmallest_index");
+}
+
+/* Shared body for nlargest / nsmallest (desc=1 vs desc=0).
+ * Called by rb_ca_nlargest and rb_ca_nsmallest below. */
+static VALUE
+rb_ca_topk_values (VALUE self, VALUE rn, VALUE raxis, int desc, const char *name)
+{
+  if ( NIL_P(raxis) ) {
+    /* No-axis path: flatten + axis-0 topk + fetch. */
+    VALUE flat = rb_ca_flatten(self);
+    VALUE idx  = rb_ca_topk_index(flat, rn, INT2FIX(0), desc, name);
+    return rb_ca_take_along_axis_c(flat, idx, INT2FIX(0));
+  }
+  long a = rb_ca_normalize_axis_value(self, raxis, name);
+  VALUE idx = rb_ca_topk_index(self, rn, LONG2NUM(a), desc, name);
+  return rb_ca_take_along_axis_c(self, idx, LONG2NUM(a));
+}
+
+static VALUE
+rb_ca_nlargest (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  return rb_ca_topk_values(self, argv[0], raxis, 1, "nlargest");
+}
+
+static VALUE
+rb_ca_nsmallest (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  return rb_ca_topk_values(self, argv[0], raxis, 0, "nsmallest");
+}
+
+/* ---- order(axis:, descending:, method:) -------------------------------
+ *
+ * method: :ordinal (default) assigns every cell a distinct rank (ties
+ * broken by stable original position, scipy.stats.rankdata 'ordinal'
+ * style).  method: :dense assigns tied values the same rank (no gaps),
+ * the standard "dense rank" -- lets order(descending:) compose as a
+ * sort_addr priority key without silently dropping a lower-priority
+ * key on ties: ordinal ranks are already a total order (no two cells
+ * ever compare equal), so a later sort_addr key never gets consulted;
+ * dense ranks preserve ties, so it does.
+ *
+ * descending: still works under method: :dense via the same
+ * (n-1)-ascending transform below: n is fixed per-fiber, so within a
+ * tied group ascending values are equal and (n-1)-ascending stays
+ * equal too -- ties survive the transform, and the group-to-group
+ * order still reverses correctly. */
+
+static VALUE
+rb_ca_order (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil, rdesc = Qfalse, rmethod = Qnil;
+  rb_scan_options(ropt, "axis,descending,method", &raxis, &rdesc, &rmethod);
+  rb_check_arity(argc, 0, 0);
+
+  int dense = 0;   /* default method: :ordinal */
+  if ( ! NIL_P(rmethod) ) {
+    static ID sym_ordinal = 0, sym_dense = 0;
+    if ( ! sym_ordinal ) sym_ordinal = rb_intern("ordinal");
+    if ( ! sym_dense )   sym_dense   = rb_intern("dense");
+    ID method_id = SYM2ID(rmethod);
+    if      ( method_id == sym_ordinal ) dense = 0;
+    else if ( method_id == sym_dense )   dense = 1;
     else {
-      for (i=0; i<cv->elements; i++) {
-        val = ca_ptr_at_addr(cv, i);
-        ptr = bsearch(val, ca->ptr, ca->elements, ca->bytes,
-                      ca_qsort_cmp[ca->data_type]);
-        if ( ! ptr ) {
-          rb_ca_store_addr(out, i, CA_UNDEF);
-        }
-        else {
-          idx = (ptr - ca->ptr)/ca->bytes;      
-          ca_store_addr(co, i, &idx);
-        }
-      }
-    }
-    ca_detach(cv);
-  }
-  else {
-    val = ALLOCA_N(char, ca->bytes);
-    rb_ca_obj2ptr(self, rval, val);
-    if ( ca_is_fixlen_type(ca) ) {
-      cmp_data *cmp_ptr, *p, *ptr, cmp_val;
-      char *q;
-      ca_size_t i;
-      cmp_val.bytes = ca->bytes;
-      cmp_val.ptr   = val;
-      cmp_ptr = malloc_with_check(sizeof(cmp_data)*ca->elements);
-      for (i=0, p=cmp_ptr, q=ca->ptr; i<ca->elements; i++, p++, q+=ca->bytes) {
-        p->bytes = ca->bytes;
-        p->ptr   = q;
-      }
-      ptr = bsearch(&cmp_val, cmp_ptr, ca->elements, sizeof(cmp_data),
-                    ca_qsort_cmp[CA_FIXLEN]);
-      out = ( ! ptr ) ? Qnil : SIZE2NUM((ptr - cmp_ptr));
-      free(cmp_ptr);
-    }
-    else {
-      char *ptr;
-      ptr = bsearch(val, ca->ptr, ca->elements, ca->bytes,
-                    ca_qsort_cmp[ca->data_type]);
-      out = ( ! ptr ) ? Qnil : SIZE2NUM((ptr - ca->ptr)/ca->bytes);
+      rb_raise(rb_eArgError, "order: unknown method %s (expected :ordinal or :dense)",
+               rb_id2name(method_id));
     }
   }
-  ca_detach(ca);
-  return out;
+
+  VALUE asc, n;
+  if ( NIL_P(raxis) ) {
+    VALUE flat = rb_ca_flatten(self);
+    /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
+    VALUE ranked = rb_ca_rank_index_ki_quick_dense(flat, INT2FIX(0), dense);
+    /* reshape(*shape) */
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    VALUE shape_argv[CA_RANK_MAX];
+    for ( long k = 0; k < (long) ca->ndim; k++ ) {
+      shape_argv[k] = LONG2NUM((long) ca->dim[k]);
+    }
+    asc = rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
+    n = RTEST(rb_ca_has_mask(self))
+      ? SIZE2NUM(ca_count_not_masked(ca))   /* = elements - count_masked */
+      : rb_ca_elements(self);
+  } else {
+    long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
+    VALUE raxis_norm = LONG2NUM(axis_norm);
+    asc = rb_ca_rank_index_ki_quick_dense(self, raxis_norm, dense);
+    if ( RTEST(rb_ca_has_mask(self)) ) {
+      n = rb_ca_count_not_masked_c(self, raxis_norm);
+    } else {
+      CArray *ca;
+      TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+      n = LONG2NUM((long) ca->dim[axis_norm]);
+    }
+    if ( RTEST(rb_obj_is_kind_of(n, rb_cCArray)) ) {
+      VALUE ia_argv[1] = { raxis_norm };
+      n = rb_ca_insert_axis(1, ia_argv, n);
+    }
+  }
+
+  VALUE diff;
+  if ( RTEST(rdesc) ) {
+    /* `-` via rb_funcall handles both Integer-Integer and
+       CArray/Integer mixed receivers uniformly via Ruby's operator
+       dispatch.  No single C entry covers both. */
+    VALUE n_minus_1 = rb_funcall(n, id_sub, 1, INT2FIX(1));
+    diff = rb_funcall(n_minus_1, id_sub, 1, asc);
+  } else {
+    diff = asc;
+  }
+  /* Output data_type: CA_SIZE (= ca_size_t, int64 on 64-bit builds),
+     matching the rest of the *_index family (sort_index / partition_index
+     / rank_index) that order is built on.  No explicit cast needed here:
+     asc (rank_index_ki's output) is already CA_SIZE, and Integer - CArray
+     promotion in the descending branch preserves it. */
+  return diff;
 }
 
-/* @overload bsearch_index
+/* ---- linear_section / linear_fetch ----------------------------------- */
 
-[TBD]. 
-*/
-
+/* Coerce self to CA_FLOAT64 (no-copy when already f64 via
+ * rb_ca_to_float64), then optionally flatten when axis is nil.
+ * Called by rb_ca_linear_section_m and rb_ca_linear_fetch_m. */
 static VALUE
-rb_ca_binary_search_index (VALUE self, volatile VALUE rval)
-{
-  VALUE raddr = rb_ca_binary_search(self, rval);
-  return ( NIL_P(raddr) ) ? Qnil : rb_ca_addr2index(self, raddr);
-}
-
-/* ------------------------------------------------------------------------- */
-
-#define proc_find_value(type)                                \
-  {                                                          \
-    type *ptr = (type *) ca->ptr;                            \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) NUM2LL(value);                      \
-    ca_size_t i;                                               \
-    if ( m ) {                                               \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( ! *m++ ) {                                      \
-          if ( *ptr == val ) {                               \
-            addr = i;                                        \
-            break;                                           \
-          }                                                  \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-    else {                                                   \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( *ptr == val ) {                                 \
-          addr = i;                                          \
-          break;                                             \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-  }
-
-#define proc_find_value_float(type, defeps)                  \
-  {                                                          \
-    type *ptr = (type *) ca->ptr;                            \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) NUM2DBL(value);                       \
-    double eps  = (NIL_P(veps)) ? defeps*fabs(val) : NUM2DBL(veps); \
-    ca_size_t i;                                               \
-    if ( m ) {                                               \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( ! *m++ ) {                                      \
-          if ( fabs(*ptr - val) <= eps ) {                   \
-            addr = i;                                        \
-            break;                                           \
-          }                                                  \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-    else {                                                   \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( fabs(*ptr - val) <= eps ) {                     \
-          addr = i;                                          \
-          break;                                             \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-  }
-
-#define proc_find_value_float128(type, defeps)                  \
-  {                                                          \
-    type *ptr = (type *) ca->ptr;                            \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) NUM2DBL(value);                       \
-    float128_t eps  = (NIL_P(veps)) ? defeps*fabsl(val) : NUM2DBL(veps); \
-    ca_size_t i;                                               \
-    if ( m ) {                                               \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( ! *m++ ) {                                      \
-          if ( fabsl(*ptr - val) <= eps ) {                   \
-            addr = i;                                        \
-            break;                                           \
-          }                                                  \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-    else {                                                   \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( fabsl(*ptr - val) <= eps ) {                     \
-          addr = i;                                          \
-          break;                                             \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-  }
-
-#define proc_find_value_cmplx(type, defeps)                  \
-  {                                                          \
-    type *ptr = (type *) ca->ptr;                            \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) NUM2CC(value);                        \
-    double eps  = (NIL_P(veps)) ? defeps*cabs(val) : NUM2DBL(veps); \
-    ca_size_t i;                                               \
-    if ( m ) {                                               \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( ! *m++ ) {                                      \
-          if ( cabs(*ptr - val) <= eps ) {                   \
-            addr = i;                                        \
-            break;                                           \
-          }                                                  \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-    else {                                                   \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( cabs(*ptr - val) <= eps ) {                     \
-          addr = i;                                          \
-          break;                                             \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-  }
-
-#define proc_find_value_object()                             \
-  {                                                          \
-    VALUE *ptr = (VALUE *) ca->ptr;                          \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    ca_size_t i;                                               \
-    if ( m ) {                                               \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( ! *m++ ) {                                      \
-          if ( rb_funcall(value, id_equal, 1, *ptr) ) {      \
-            addr = i;                                        \
-            break;                                           \
-          }                                                  \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-    else {                                                   \
-      for (i=0; i<ca->elements; i++, ptr++) {                \
-        if ( rb_funcall(value, id_equal, 1, *ptr) ) {        \
-          addr = i;                                          \
-          break;                                             \
-        }                                                    \
-      }                                                      \
-    }                                                        \
-  }
-
-
-/* @overload search
-
-[TBD]. 
-*/
-
-static VALUE
-rb_ca_linear_search (int argc, VALUE *argv, VALUE self)
-{
-  volatile VALUE value, veps;
-  CArray *ca;
-  ca_size_t addr;
-
-  rb_scan_args(argc, argv, "11", (VALUE *) &value, (VALUE *) &veps);
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  ca_attach(ca);
-
-  addr = -1;
-
-  switch ( ca->data_type ) {
-  case CA_BOOLEAN:
-  case CA_INT8:
-  case CA_UINT8:    proc_find_value(int8_t);    break;
-  case CA_INT16:
-  case CA_UINT16:   proc_find_value(int16_t);   break;
-  case CA_INT32:    proc_find_value(int32_t);   break;
-  case CA_UINT32:   proc_find_value(uint32_t); break;
-  case CA_INT64:    proc_find_value(int64_t);   break;
-  case CA_UINT64:   proc_find_value(uint64_t); break;
-  case CA_FLOAT32:  proc_find_value_float(float32_t, FLT_EPSILON); break;
-  case CA_FLOAT64:  proc_find_value_float(float64_t, DBL_EPSILON); break;
-  case CA_FLOAT128: proc_find_value_float128(float128_t, DBL_EPSILON); break;
-#ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64:  proc_find_value_cmplx(cmplx64_t, FLT_EPSILON); break;
-  case CA_CMPLX128: proc_find_value_cmplx(cmplx128_t, DBL_EPSILON); break;
-  case CA_CMPLX256: proc_find_value_cmplx(cmplx256_t, DBL_EPSILON); break;
-#endif
-  case CA_OBJECT:   proc_find_value_object(); break;
-  default:
-    rb_raise(rb_eCADataTypeError, "invalid data type");
-  }
-
-  ca_detach(ca);
-
-  return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
-}
-
-/* @overload search_index
-
-[TBD]. 
-*/
-
-static VALUE
-rb_ca_linear_search_index (int argc, VALUE *argv, VALUE self)
-{
-  VALUE raddr = rb_ca_linear_search(argc, argv, self);
-  return ( NIL_P(raddr) ) ? Qnil : rb_ca_addr2index(self, raddr);
-}
-
-/* ----------------------------------------------------------------- */
-
-#define proc_nearest_addr(type, from, ABS)              \
-  {                                                     \
-    type *ptr = (type *) ca->ptr;                       \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type val  = (type) from(value);                     \
-    double trial;                                       \
-    double diff = 1.0/0.0;                              \
-    ca_size_t i;                                          \
-    addr = -1;                                           \
-    if ( m ) {                                          \
-      for (i=0; i<ca->elements; i++, ptr++) {           \
-        if ( ! *m++ ) {                                 \
-          trial = ABS(val - *ptr);                      \
-          if ( trial < diff ) {                         \
-            addr = i;                                   \
-            diff = trial;                               \
-          }                                             \
-        }                                               \
-      }                                                 \
-    }                                                   \
-    else {                                              \
-      for (i=0; i<ca->elements; i++, ptr++) {           \
-        trial = ABS(val - *ptr);                        \
-        if ( trial < diff ) {                           \
-          addr = i;                                     \
-          diff = trial;                                 \
-        }                                               \
-      }                                                 \
-    }                                                   \
-  }
-
-#define proc_nearest_addr_VALUE()              \
-  {                                                     \
-    VALUE *ptr = (VALUE *) ca->ptr;                       \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    VALUE val  = value;                     \
-    VALUE trial;                                       \
-    VALUE diff = rb_float_new(1.0/0.0);                              \
-    ca_size_t i;                                          \
-    addr = -1;                                           \
-    if ( m ) {                                          \
-      for (i=0; i<ca->elements; i++, ptr++) {           \
-        if ( ! *m++ ) {                                 \
-          trial = rb_funcall(val, rb_intern("distance"), 1, *ptr);                      \
-          if ( rb_funcall(trial, rb_intern("<"), 1, diff) ) {                         \
-            addr = i;                                   \
-            diff = trial;                               \
-          }                                             \
-        }                                               \
-      }                                                 \
-    }                                                   \
-    else {                                              \
-      for (i=0; i<ca->elements; i++, ptr++) {           \
-        trial = rb_funcall(val, rb_intern("distance"), 1, *ptr);                      \
-        if ( rb_funcall(trial, rb_intern("<"), 1, diff) ) {                         \
-          addr = i;                                     \
-          diff = trial;                                 \
-        }                                               \
-      }                                                 \
-    }                                                   \
-  }
-
-/* @overload search_nearest
-
-[TBD]. 
-*/
-
-static VALUE
-rb_ca_linear_search_nearest (VALUE self, VALUE value)
+ca_linear_prep (VALUE self, VALUE raxis, const char *name, long *axis_out)
 {
   CArray *ca;
-  ca_size_t addr;
-
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  ca_attach(ca);
-
-  switch ( ca->data_type ) {
-  case CA_BOOLEAN:
-  case CA_INT8:    proc_nearest_addr(int8_t,      NUM2LONG,   fabs); break;
-  case CA_UINT8:   proc_nearest_addr(uint8_t,    NUM2ULONG,  fabs); break;
-  case CA_INT16:   proc_nearest_addr(int16_t,     NUM2LONG,   fabs); break;
-  case CA_UINT16:  proc_nearest_addr(uint16_t,   NUM2ULONG,  fabs); break;
-  case CA_INT32:   proc_nearest_addr(int32_t,     NUM2LONG,   fabs); break;
-  case CA_UINT32:  proc_nearest_addr(uint32_t,   NUM2ULONG,  fabs); break;
-  case CA_INT64:   proc_nearest_addr(int64_t,     NUM2LL,     fabs); break;
-  case CA_UINT64:  proc_nearest_addr(uint64_t,   rb_num2ull, fabs); break;
-  case CA_FLOAT32: proc_nearest_addr(float32_t,   NUM2DBL,    fabs); break;
-  case CA_FLOAT64: proc_nearest_addr(float64_t,   NUM2DBL,    fabs); break;
-  case CA_FLOAT128: proc_nearest_addr(float128_t, NUM2DBL,    fabs); break;
-#ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64:  proc_nearest_addr(cmplx64_t,  NUM2CC, cabs); break;
-  case CA_CMPLX128: proc_nearest_addr(cmplx128_t, NUM2CC, cabs); break;
-  case CA_CMPLX256: proc_nearest_addr(cmplx256_t, NUM2CC, cabs); break;
-#endif
-  case CA_OBJECT:  proc_nearest_addr_VALUE(); break;
-  default:
-    rb_raise(rb_eCADataTypeError, "invalid data type for nearest_addr()");
+  /* Face gate: linear_section / linear_fetch treat the axis as a continuous
+     numeric coordinate (fractional index by interpolating the stored values).
+     An ORDERABLE Face (storage order == surface order) is descended to its
+     storage here; the fraction is defined in storage space, which for a
+     numeric-relabel Face (datetime int64, etc.) is exactly the coordinate.
+     Non-orderable Faces raise.  Non-numeric storage (e.g. a fixlen-string
+     Face) is caught by the rb_ca_to_float64 cast below, so no separate
+     float-numeric flag is needed. */
+  if ( ca_is_face(ca) ) {
+    if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+      rb_raise(rb_eArgError,
+               "%s: Face-typed input (%s) is not orderable by storage; "
+               "use ca.parent to descend to storage",
+               name, rb_obj_classname(self));
+    }
+    self = rb_ca_strip_face_value(self);
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   }
-
-  ca_detach(ca);
-
-  return ( addr == -1 ) ? Qnil : SIZE2NUM(addr);
+  VALUE sc = (ca->data_type == CA_FLOAT64) ? self : rb_ca_to_float64(self);
+  if ( NIL_P(raxis) ) {
+    CArray *sca;
+    TypedData_Get_Struct(sc, CArray, &carray_data_type, sca);
+    if ( sca->ndim > 1 ) {
+      sc = rb_ca_flatten(sc);
+    }
+    *axis_out = 0;
+  } else {
+    *axis_out = rb_ca_normalize_axis_value(sc, raxis, name);
+  }
+  return sc;
 }
-
-/* @overload search_nearest_index
-
-[TBD]. 
-*/
 
 static VALUE
-rb_ca_linear_search_nearest_index (VALUE self, VALUE value)
+rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
 {
-  VALUE raddr = rb_ca_linear_search_nearest(self, value);
-  return ( NIL_P(raddr) ) ? Qnil : rb_ca_addr2index(self, raddr);
-}
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil, rmethod = ID2SYM(id_sym_binary);
+  rb_scan_options(ropt, "axis,method", &raxis, &rmethod);
+  rb_check_arity(argc, 1, 1);
+  VALUE val = argv[0];
 
-/* ----------------------------------------------------------------- */
-
-static ca_size_t
-linear_index (ca_size_t n, double *y, double yy, double *idx)
-{
-  ca_size_t a, b, c, x1;
-  double ya, yb, yc;
-  double y1, y2;
-  double rest;
-
-  if ( yy <= y[0] ) {
-    x1 = 0;
-    goto found;
-  }
-
-  if ( yy >= y[n-1] ) {
-    x1 = n-2;
-    goto found;
-  }
-
-  /* check for equally spaced scale */
-
-  a = (ca_size_t)((yy-y[0])/(y[n-1]-y[0])*(n-1));
-
-  if ( a >= 0 && a < n-1 ) {
-    if ( (y[a] - yy) * (y[a+1] - yy) <= 0 ) { /* lucky case */
-      x1 = a;
-      goto found; 
+  /* Query gate (generic, mirror search + reference flip
+     PROPOSAL_TO_COMPARABLE_RECEIVER_FLIP): the reference axis Face reconciles
+     the query into its own space.  A COMPARABLE axis is directly comparable
+     -> strip a Face query, take a plain query as-is.  A non-COMPARABLE Face
+     axis calls its own to_comparable(query) for ANY query type (Face CArray,
+     our Scalar, a Ruby Time / DateTime, ...), then strips; it raises if it
+     cannot reconcile the query.  `self` is still the pre-strip axis Face
+     here, so it carries the unit for to_comparable and its COMPARABLE flag. */
+  {
+    int val_is_face = 0, self_is_face = 0, self_comparable = 0;
+    CArray *sca;
+    if ( rb_obj_is_kind_of(val, rb_cCArray) ) {
+      CArray *vca;
+      TypedData_Get_Struct(val, CArray, &carray_data_type, vca);
+      val_is_face = ca_is_face(vca);
     }
-  }
-
-  /* binary section method */
-
-  a = 0;
-  b = n-1;
-
-  ya = y[a];
-  yb = y[b];
-
-  if ( ya > yb ) {
-    return -1; /* input scale array should have accending order */
-  }
-
-  while ( (b - a) >= 1 ) {
-
-    c  = (a + b)/2;
-    yc = y[c];
-    if ( a == c ) {
-      break;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, sca);
+    if ( ca_is_face(sca) ) {
+      self_is_face = 1;
+      self_comparable = ca_test_flag(sca, CA_FLAG_FACE_COMPARABLE_STORAGE);
     }
-
-    if ( yc == yy ) {
-      a = c;
-      break;
+    if ( self_comparable ) {
+      if ( val_is_face ) {
+        val = rb_ca_strip_face_value(val);
+      }
     }
-    else if ( (ya - yy) * (yc - yy) <= 0 ) {
-      b = c;
-      yb = yc;
-    }
-    else {
-      a = c;
-      ya = yc;
-    }
-
-    if ( ya > yb ) {
-      return -1; /* input scale array should have accending order */
-    }
-  }
-
-  x1 = a;
-
- found:
-
-  y1 = y[x1];
-  y2 = y[x1+1];
-  rest = (yy-y1)/(y2-y1);
-
-  if ( fabs(y2-yy)/fabs(y2) < DBL_EPSILON*100 ) {
-    *idx = (double) (x1 + 1);
-  }
-  else if ( fabs(y1-yy)/fabs(y1) < DBL_EPSILON*100 ) {
-    *idx = (double) x1;
-  }
-  else {
-    *idx = rest + (double) x1;
-  }
-
-  return 0;
-}
-
-
-/* ----------------------------------------------------------------- */
-
-static VALUE
-rb_ca_binary_search_linear_index (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  ca_size_t n;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t i;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  n = sc->elements;
-  x  = (double*) sc->ptr;
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
-
-  ca_update_mask(cx);
-  if ( cx->mask ) {
-    boolean8_t *mx, *mo;
-    ca_create_mask(co);
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-    for (i=0; i<cx->elements; i++) {
-      if ( ! *mx ) {
-        linear_index(n, x, *px, po);
+    else if ( self_is_face ) {
+      if ( rb_respond_to(self, rb_intern("to_comparable")) ) {
+        val = rb_funcall(self, rb_intern("to_comparable"), 1, val);
+        val = rb_ca_strip_face_value(val);
       }
       else {
-        *mo = 1;
+        rb_raise(rb_eArgError,
+                 "linear_section: non-comparable Face axis (%s) has no "
+                 "to_comparable to reconcile the query; use ca.parent to "
+                 "search the hidden storage explicitly",
+                 rb_obj_classname(self));
       }
-      mx++; mo++; px++, po++;
-    }
-  }
-  else {
-    for (i=0; i<cx->elements; i++) {
-      linear_index(n, x, *px, po);
-      px++; po++;
     }
   }
 
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
+  long axis_norm = 0;
+  VALUE sc = ca_linear_prep(self, raxis, "linear_section", &axis_norm);
+  VALUE raxis_norm = LONG2NUM(axis_norm);
 
-  if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
-  }
-  else {
-    return out0;
-  }
-}
-
-
-static VALUE
-rb_ca_binary_search_linear_index_vectorized (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t nseri, nlist;
-  ca_size_t odim[CA_DIM_MAX];
-  ca_size_t i, k;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  if ( sc->ndim < 2 ) {
-    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
-  }
-
-  if ( cx->ndim > CA_DIM_MAX ) {
-     rb_raise(rb_eRuntimeError, "2nd argument carray has too large dimension");  	
-  }
-
-  nseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		nseri *= sc->dim[i];
-	}
-	nlist = sc->dim[sc->ndim-1];
-
-  if ( rb_ca_is_scalar(vx) ) {
-	  for (i=0; i<sc->ndim-1; i++) {
-	    odim[i] = sc->dim[i];
-		}
-    co0 = carray_new(ca->data_type, sc->ndim-1, odim, 0, NULL);
-	}
-	else {
-	  for (i=0; i<sc->ndim-1; i++) {
-	    odim[i] = sc->dim[i];
-		}
-    memcpy(&odim[sc->ndim], cx->dim, cx->ndim*sizeof(ca_size_t));
-    co0 = carray_new(ca->data_type, sc->ndim-1 + cx->ndim, odim, 0, NULL);
-	}
-	
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  x  = (double*) sc->ptr;
-  po = (double*) co->ptr;
-
-  ca_update_mask(cx);
-  if ( cx->mask ) {
-    boolean8_t *mx, *mo;
-    ca_create_mask(co);
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-		  px = (double*) cx->ptr;
-	    for (i=0; i<cx->elements; i++) {
-	      if ( ! *mx ) {
-	        linear_index(nlist, x, *px, po);
-	      }
-	      else {
-	        *mo = 1;
-	      }
-	      mx++; mo++; px++, po++;
-	    }
-			x += nlist;
-    }		
-  }
-  else {
-		for (k=0; k<nseri; k++) {
-		  px = (double*) cx->ptr;
-	    for (i=0; i<cx->elements; i++) {
-	      linear_index(nlist, x, *px, po);
-	      px++; po++;
-	    }
-			x += nlist;
-		}
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  return out0;
-}
-
-/* ----------------------------------------------------------------- */
-
-static ca_size_t
-linear_index_linear (ca_size_t n, double *y, double yy, double *idx)
-{
-  ca_size_t a, b, c, x1;
-  double ya, yb, yc;
-  double y1, y2;
-  double rest;
-	int k;
-
-  /* linear search method */
-
-	for (k=0; k<n-1; k++) {
-		if ( (yy - y[k])*(yy - y[k+1]) <= 0 ) {
-			x1 = k;
-			goto found;
-		}
-	}
-
-	*idx = -1;
-	return -1;
-
- found:
-
-  y1 = y[x1];
-  y2 = y[x1+1];
-  rest = (yy-y1)/(y2-y1);
-
-  *idx = rest + (double) x1;
-  return 0;
-}
-
-static VALUE
-rb_ca_linear_search_linear_index (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  ca_size_t n;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t i;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  n = sc->elements;
-  x  = (double*) sc->ptr;
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
-
-  ca_update_mask(cx);
-  if ( cx->mask ) {
-    boolean8_t *mx, *mo;
-    ca_create_mask(co);
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-    for (i=0; i<cx->elements; i++) {
-      if ( ! *mx ) {
-        if ( linear_index_linear(n, x, *px, po) < 0 ) 
-					*mo = 1;
-      }
-      else {
-        *mo = 1;
-      }
-      mx++; mo++; px++, po++;
-    }
-  }
-  else {
-    for (i=0; i<cx->elements; i++) {
-      linear_index_linear(n, x, *px, po);
-      px++; po++;
-    }
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
-  }
-  else {
-    return out0;
+  if ( rmethod == ID2SYM(id_sym_binary) ) {
+    return rb_ca_linear_section_binary_ki(sc, val, raxis_norm);
+  } else if ( rmethod == ID2SYM(id_sym_linear) ) {
+    return rb_ca_linear_section_linear_ki(sc, val, raxis_norm);
+  } else {
+    rb_raise(rb_eArgError,
+             "linear_section: unknown method %"PRIsVALUE
+             " (expected :binary or :linear)",
+             rb_inspect(rmethod));
   }
 }
 
 static VALUE
-rb_ca_linear_search_linear_index_vectorized (volatile VALUE self, volatile VALUE vx)
+rb_ca_linear_fetch_m (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t nseri, nlist;
-  ca_size_t odim[CA_DIM_MAX];
-  ca_size_t i, k;
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  VALUE raxis = Qnil;
+  rb_scan_options(ropt, "axis", &raxis);
+  rb_check_arity(argc, 1, 1);
+  VALUE addr = argv[0];
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  if ( sc->ndim < 2 ) {
-    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
-  }
-
-  if ( cx->ndim > CA_DIM_MAX ) {
-     rb_raise(rb_eRuntimeError, "2nd argument carray has too large dimension");  	
-  }
-
-  nseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		nseri *= sc->dim[i];
-	}
-	nlist = sc->dim[sc->ndim-1];
-
-  if ( rb_ca_is_scalar(vx) ) {
-	  for (i=0; i<sc->ndim-1; i++) {
-	    odim[i] = sc->dim[i];
-		}
-    co0 = carray_new(ca->data_type, sc->ndim-1, odim, 0, NULL);
-	}
-	else {
-	  for (i=0; i<sc->ndim-1; i++) {
-	    odim[i] = sc->dim[i];
-		}
-    memcpy(&odim[sc->ndim], cx->dim, cx->ndim*sizeof(ca_size_t));
-    co0 = carray_new(ca->data_type, sc->ndim-1 + cx->ndim, odim, 0, NULL);
-	}
-	
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  x  = (double*) sc->ptr;
-  po = (double*) co->ptr;
-
-  ca_update_mask(cx);
-  if ( cx->mask ) {
-    boolean8_t *mx, *mo;
-    ca_create_mask(co);
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-		  px = (double*) cx->ptr;
-	    for (i=0; i<cx->elements; i++) {
-	      if ( ! *mx ) {
-	        if ( linear_index_linear(nlist, x, *px, po) < 0)
-						*mo = 1;
-	      }
-	      else {
-	        *mo = 1;
-	      }
-	      mx++; mo++; px++, po++;
-	    }
-			x += nlist;
-    }		
-  }
-  else {
-		for (k=0; k<nseri; k++) {
-		  px = (double*) cx->ptr;
-	    for (i=0; i<cx->elements; i++) {
-	      linear_index_linear(nlist, x, *px, po);
-	      px++; po++;
-	    }
-			x += nlist;
-		}
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  return out0;
+  long axis_norm = 0;
+  VALUE sc = ca_linear_prep(self, raxis, "linear_fetch", &axis_norm);
+  return rb_ca_linear_fetch_ki(sc, addr, LONG2NUM(axis_norm));
 }
 
-/* ----------------------------------------------------------------- */
+/* [MOVED] locate_addr / locate_nearest_addr (formerly matchup /
+ * matchup_nearest) -> lib/carray/methods/locate_addr.rb (thin
+ * compositions of sort_addr + fetch + bsearch (or linear_section +
+ * mask_invalid + round/floor/ceil + int64) + project, all of which have
+ * Ruby surfaces). */
 
-static int
-fetch_linear_addr (ca_size_t n, double *y, double idx, double *val)
-{
-  ca_size_t il, iu;
-	double w;
+/* [MOVED] median / percentile / quantile -> ext/carray_median_percentile.c
+ * (kth-fetch + 5-method picker + partition-vs-sort dispatch).  That
+ * file calls rb_ca_partition_copy_c (non-static in carray_partition.c)
+ * for the numeric path; CA_OBJECT routes through the CA_OBJECT branches
+ * of partition_copy / sort. */
 
-	if ( idx < 0 || idx > n - 1 ) {
-		*val = 0.0/0.0;
-		return -1;
-	}
-	
-	il = (ca_size_t) floor(idx);
-	iu = (ca_size_t) ceil(idx);
-	w  = idx - floor(idx);
-
-	*val = y[iu]*w + y[il]*(1.0-w);
-
-	/* printf("%g %i %i %g %g\n", idx, il, iu, w, *val);  */
-
-  return 0;
-}
-
-static VALUE
-rb_ca_fetch_linear_addr (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t nlist, nreq;
-  ca_size_t i;
-  boolean8_t *mx, *mo;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  if ( sc->ndim != 1 ) {
-    rb_raise(rb_eRuntimeError, "ndim of self should be 1");
-  }
-	
-	nlist = sc->dim[0];
-
-  nreq = 1;
-  for (i=1; i<cx->ndim; i++) {
-		nreq *= cx->dim[i];
-	}
-
-  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  x  = (double*) sc->ptr;
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
-
-  ca_create_mask(co);
-  ca_update_mask(cx);
-
-  if ( cx->mask ) {
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-    for (i=0; i<nreq; i++) {
-      if ( ! *mx ) {
-        if ( fetch_linear_addr(nlist, x, *px, po) ) {
-        	*mo = 1;
-        }
-      }
-      else {
-        *mo = 1;
-      }
-      mx++; mo++; px++, po++;
-    }
-  }
-  else {
-    mo = (boolean8_t *) co->mask->ptr;
-    for (i=0; i<nreq; i++) {
-      if ( fetch_linear_addr(nlist, x, *px, po) ) {
-      	*mo = 1;
-      }
-      mo++; px++; po++; 
-    }
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  if ( rb_ca_is_scalar(vx) ) {
-    return rb_funcall(out0, rb_intern("[]"), 1, INT2NUM(0));
-  }
-  else {
-    return out0;
-  }
-}
-
-
-/*
-
-
-  self: ndim >= 2
-        0...ndim :  prev dimensions are vectorized elements
-        -1:         last dimension is used for fetch_addr (as self)
-
-  vx: ndim >= 2
-        0...ndim :  prev dimensions are vectorized elements should be equal to self's
-        -1:        last dimension is used for fetch_addr (as addr)
-
-*/
-
-
-static VALUE
-rb_ca_find_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t nseri, nlist, nreq, xnseri;
-  ca_size_t i, k;
-  boolean8_t *mx, *mo;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  if ( sc->ndim < 2 ) {
-    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
-  }
-
-  nseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		nseri *= sc->dim[i];
-	}
-	nlist = sc->dim[sc->ndim-1];
-
-  if ( cx->ndim < sc->ndim - 1 ) {
-    rb_raise(rb_eRuntimeError, "ndim of first argument should be larger than (ndim - 1) of self");  	
-  }
-
-	xnseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		xnseri *= cx->dim[i];
-	}
-	
-	if ( xnseri != nseri ) {
-    rb_raise(rb_eRuntimeError, "1st dimension should be same between self and 1st argument");  			
-	}
-
-	if ( cx->ndim == sc->ndim - 1 ) {
-		nreq = 1;
-	}
-	else {
-	  nreq = cx->dim[cx->ndim-1];
-	}
-
-  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  x  = (double*) sc->ptr;
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
-
-  ca_create_mask(co);
-  ca_update_mask(cx);
-
-  if ( cx->mask ) {
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-	    for (i=0; i<nreq; i++) {
-	      if ( ! *mx ) {
-		      if ( linear_index(nlist, x, *px, po) ) {
-	        	*mo = 1;
-	        }
-	      }
-	      else {
-	        *mo = 1;
-	      }
-	      mx++; mo++; px++, po++;
-	    }
-			x += nlist;
-    }		
-  }
-  else {
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-	    for (i=0; i<nreq; i++) {
-	      if ( linear_index(nlist, x, *px, po) ) {
-        	*mo = 1;
-        }
-	      mo++; px++; po++; 
-	    }
-			x += nlist;
-		}
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  return out0;		
-}
-
-
-static VALUE
-rb_ca_fetch_linear_addr_vectorized (volatile VALUE self, volatile VALUE vx)
-{
-  volatile VALUE out, out0;
-  CArray *ca, *sc, *cx, *co0, *co;
-  double *x;
-  double *px;
-  double *po;
-  ca_size_t nseri, nlist, nreq, xnseri;
-  ca_size_t i, k;
-  boolean8_t *mx, *mo;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( rb_ca_is_any_masked(self) ) {
-    rb_raise(rb_eRuntimeError, "self should not have any masked elements");
-  }
-
-  sc = ca_wrap_readonly(self, CA_FLOAT64);
-  cx = ca_wrap_readonly(vx, CA_FLOAT64);
-
-  if ( sc->ndim < 2 ) {
-    rb_raise(rb_eRuntimeError, "ndim of self should be larger than 2");
-  }
-
-  nseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		nseri *= sc->dim[i];
-	}
-	nlist = sc->dim[sc->ndim-1];
-
-  if ( cx->ndim < sc->ndim - 1 ) {
-    rb_raise(rb_eRuntimeError, "ndim of first argument should be larger than (ndim - 1) of self");  	
-  }
-
-	xnseri = 1;
-  for (i=0; i<sc->ndim-1; i++) {
-		xnseri *= cx->dim[i];
-	}
-	
-	if ( xnseri != nseri ) {
-    rb_raise(rb_eRuntimeError, "1st dimension should be same between self and 1st argument");  			
-	}
-
-	if ( cx->ndim == sc->ndim - 1 ) {
-		nreq = 1;
-	}
-	else {
-	  nreq = cx->dim[cx->ndim-1];
-	}
-
-  co0 = carray_new(ca->data_type, cx->ndim, cx->dim, 0, NULL);
-  out = out0 = ca_wrap_struct(co0);
-  co = ca_wrap_writable(out, CA_FLOAT64);
-
-  ca_attach_n(3, sc, cx, co);
-
-  x  = (double*) sc->ptr;
-  px = (double*) cx->ptr;
-  po = (double*) co->ptr;
-
-  ca_create_mask(co);
-  ca_update_mask(cx);
-
-  if ( cx->mask ) {
-    mx = (boolean8_t *) cx->mask->ptr;
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-	    for (i=0; i<nreq; i++) {
-	      if ( ! *mx ) {
-	        if ( fetch_linear_addr(nlist, x, *px, po) ) {
-	        	*mo = 1;
-	        }
-	      }
-	      else {
-	        *mo = 1;
-	      }
-	      mx++; mo++; px++, po++;
-	    }
-			x += nlist;
-    }		
-  }
-  else {
-    mo = (boolean8_t *) co->mask->ptr;
-		for (k=0; k<nseri; k++) {
-	    for (i=0; i<nreq; i++) {
-        if ( fetch_linear_addr(nlist, x, *px, po) ) {
-        	*mo = 1;
-        }
-	      mo++; px++; po++; 
-	    }
-			x += nlist;
-		}
-  }
-
-  ca_sync(co);
-  ca_detach_n(3, sc, cx, co);
-
-  return out0;		
-}
+extern VALUE rb_ca_value_array (VALUE self);  /* carray_mask.c */
 
 void
-Init_carray_order ()
+Init_carray_order (void)
 {
-  id_equal = rb_intern("==");
-  
+  id_axis         = rb_intern("axis");
+  id_sub          = rb_intern("-");
+  id_sym_binary   = rb_intern("binary");
+  id_sym_linear   = rb_intern("linear");
+
   rb_define_method(rb_cCArray,  "project", rb_ca_project, -1);
 
-  rb_define_method(rb_cCArray,  "reverse!", rb_ca_reverse_bang, 0);
-  rb_define_method(rb_cCArray,  "reverse", rb_ca_reversed_copy, 0);
+  /* Search family (dual API: index / addr) -- see the trampoline
+     comment block above for the axis: kwarg dispatch contract. */
+  rb_define_method(rb_cCArray,  "bsearch",             rb_ca_bsearch_kw,             -1);
+  rb_define_method(rb_cCArray,  "search",              rb_ca_search_kw,              -1);
+  rb_define_method(rb_cCArray,  "search_nearest",      rb_ca_search_nearest_kw,      -1);
+  rb_define_method(rb_cCArray,  "bsearch_addr",        rb_ca_bsearch_addr_kw,        -1);
+  rb_define_method(rb_cCArray,  "search_addr",         rb_ca_search_addr_kw,         -1);
+  rb_define_method(rb_cCArray,  "search_nearest_addr", rb_ca_search_nearest_addr_kw, -1);
 
-  rb_define_method(rb_cCArray,  "sort!", rb_ca_sort_bang, 0);
-  rb_define_method(rb_cCArray,  "sort", rb_ca_sorted_copy, 0);
+  rb_define_method(rb_cCArray, "sort_by_key",      rb_ca_sort_by_key,      -1);
+  rb_define_method(rb_cCArray, "max_by_key",       rb_ca_max_by_key,       -1);
+  rb_define_method(rb_cCArray, "min_by_key",       rb_ca_min_by_key,       -1);
+  rb_define_method(rb_cCArray, "take_along_axis",  rb_ca_take_along_axis,  -1);
+  rb_define_method(rb_cCArray, "put_along_axis",   rb_ca_put_along_axis,   -1);
+  rb_define_method(rb_cCArray, "range",            rb_ca_range_method,      0);
+  rb_define_method(rb_cCArray, "nlargest",         rb_ca_nlargest,         -1);
+  rb_define_method(rb_cCArray, "nsmallest",        rb_ca_nsmallest,        -1);
+  rb_define_method(rb_cCArray, "nlargest_index",   rb_ca_nlargest_index,   -1);
+  rb_define_method(rb_cCArray, "nsmallest_index",  rb_ca_nsmallest_index,  -1);
+  rb_define_method(rb_cCArray, "order",            rb_ca_order,            -1);
+  rb_define_method(rb_cCArray, "linear_section",   rb_ca_linear_section_m, -1);
+  rb_define_method(rb_cCArray, "linear_fetch",     rb_ca_linear_fetch_m,   -1);
 
-  rb_define_method(rb_cCArray,  "bsearch", rb_ca_binary_search, 1);
-  rb_define_method(rb_cCArray,  "bsearch_index", rb_ca_binary_search_index, 1);
-
-  rb_define_method(rb_cCArray,  "search", rb_ca_linear_search, -1);
-  rb_define_method(rb_cCArray,  "search_index", rb_ca_linear_search_index, -1);
-
-  rb_define_method(rb_cCArray,  "search_nearest",
-                                rb_ca_linear_search_nearest, 1);
-  rb_define_method(rb_cCArray,  "search_nearest_index",
-                                rb_ca_linear_search_nearest_index, 1);
-
-  rb_define_method(rb_cCArray,  "section",
-                                rb_ca_binary_search_linear_index, 1);
-
-  rb_define_method(rb_cCArray,  "vectorized_section",
-                                rb_ca_binary_search_linear_index_vectorized, 1);
-
-  rb_define_method(rb_cCArray,  "section_linear",
-                                rb_ca_linear_search_linear_index, 1);
-
-  rb_define_method(rb_cCArray,  "vectorized_section_linear",
-                                rb_ca_linear_search_linear_index_vectorized, 1);
-
-  rb_define_method(rb_cCArray,  "fetch_linear_addr",
-                                rb_ca_fetch_linear_addr, 1);
-
-  rb_define_method(rb_cCArray,  "vectorized_find_linear_addr",
-                                rb_ca_find_linear_addr_vectorized, 1);
-
-  rb_define_method(rb_cCArray,  "vectorized_fetch_linear_addr",
-                                rb_ca_fetch_linear_addr_vectorized, 1);
-
+  /* [MOVED] bindings for the following live elsewhere:
+       sort / sort_copy            -> carray_sort.c
+       partition / partition_copy  -> carray_partition.c
+       median / percentile / quantile -> carray_median_percentile.c
+                                      (bound by Init_carray_median_percentile) */
 }

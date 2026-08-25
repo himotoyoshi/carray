@@ -1,10 +1,13 @@
 /* ---------------------------------------------------------------------------
 
-  carray_utils.c
+  Utility helpers shared across the `ext/` C files: iterator setup / loop count
+  variadic helpers, Range parsing (`ca_parse_range` family), axis
+  normalization primitives (`ca_normalize_axis*` + Ruby-facing
+  `normalize_axis` / `normalize_axes`), and text-scan helpers
+  (`_scan_float` / `_scan_int`) for the text I/O layer.
 
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
+  YARD signatures live in yard-stubs/carray_utils.rb; this file
+  carries implementation-only prose.
 
 ---------------------------------------------------------------------------- */
 
@@ -12,11 +15,7 @@
 #include "ruby.h"
 #include "carray.h"
 
-#if RUBY_VERSION_CODE >= 190
 #include "ruby/st.h"
-#else
-#include "st.h"
-#endif
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
@@ -25,21 +24,8 @@ static ID id_begin, id_end, id_excl_end;
 
 /* ------------------------------------------------------------------- */
 
-void *
-malloc_with_check (size_t size)
-{
-  void *ptr;
-  ptr = xmalloc(size);
-  if ( !ptr ) {
-    rb_memerror();
-  }
-  return ptr;
-}
-
-/* ------------------------------------------------------------------- */
-
 void
-ca_debug () {}
+ca_debug (void) {}
 
 /* ------------------------------------------------------------------- */
 
@@ -334,7 +320,7 @@ void
 ca_parse_range_without_check (VALUE arg, ca_size_t size,
                               ca_size_t *poffset, ca_size_t *pcount, ca_size_t *pstep)
 {
-  ca_size_t start, last, count, step, bound, excl;
+  ca_size_t start, last, count, step, excl;
 
  retry:
 
@@ -375,7 +361,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       last += ( (last>=start) ? -1 : 1 );
     }
     count = (last - start)/llabs(step) + 1;
-    bound = start + (count - 1)*step;
     *poffset = start;
     *pcount  = count;
     *pstep   = step;
@@ -393,7 +378,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         start = 0;
         step  = NUM2SIZE(arg1);
         count = (size-1)/llabs(step) + 1;
-        bound = start + (count - 1)*step;
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -407,7 +391,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
           last += ( (last>=start) ? -1 : 1 );
         }
         count = (last - start)/llabs(step) + 1;
-        bound = start + (count - 1)*step;
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -425,7 +408,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
           last += ( (last>=start) ? -1 : 1 );
         }
         count = (last - start)/llabs(step) + 1;
-        bound = start + (count - 1)*step;
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -434,7 +416,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       else {                            /* [i,n] */
         start = NUM2SIZE(arg0);
         count = NUM2SIZE(arg1);
-        bound = start + (count - 1);
         *poffset = start;
         *pcount  = count;
         *pstep    = 1;
@@ -444,7 +425,6 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       start = NUM2SIZE(rb_ary_entry(arg, 0));
       count = NUM2SIZE(rb_ary_entry(arg, 1));
       step  = NUM2SIZE(rb_ary_entry(arg, 2));
-      bound = start + (count - 1)*step;
       *poffset = start;
       *pcount  = count;
       *pstep   = step;
@@ -502,10 +482,113 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
   }
 }
 
-/* @private
-@overload scan_float (str, fill_value=nil)
+/* Self-independent kernel: normalize `raw` against `ndim`, returning a
+   canonical non-negative axis in [0, ndim) as int.  Accepts negative
+   values (Python/Ruby convention: -1 => ndim-1).  Raises ArgumentError
+   if out of range.  `name` is used in the error message (e.g.
+   "mask_duplicates", "sum", "merge"); pass NULL to default to "axis".
 
-*/
+   For an insertion position (= valid range [0, old_ndim] inclusive),
+   pass `old_ndim + 1` as `ndim` so the half-open [0, ndim) check
+   matches the inclusive [0, old_ndim] semantics. */
+int
+rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
+{
+  long axis = (raw < 0) ? raw + ndim : raw;
+  if ( axis < 0 || axis >= ndim ) {
+    rb_raise(rb_eArgError,
+             "%s: axis %ld out of range for ndim %d",
+             name ? name : "axis", raw, ndim);
+  }
+  return (int) axis;
+}
+
+/* Self-bound wrapper: delegate to the kernel using self.ndim.  Kept
+   for backward compatibility with the existing instance method
+   `CArray#normalize_axis`. */
+int
+rb_ca_normalize_axis_value (VALUE self, VALUE raxis, const char *name)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  return rb_ca_normalize_axis_for_ndim(NUM2LONG(raxis), (int) ca->ndim, name);
+}
+
+/* Ruby-facing `CArray#normalize_axis(axis, name=nil)` — returns the
+ * canonical non-negative axis index in [0, ndim) for `self`. Accepts
+ * negative `axis` interpreted as (ndim + axis). Raises ArgumentError
+ * on out-of-range input; `name` (if given) is embedded in the
+ * message. */
+static VALUE
+rb_ca_normalize_axis (int argc, VALUE *argv, VALUE self)
+{
+  VALUE raxis, rname;
+  const char *name;
+  int k;
+  rb_scan_args(argc, argv, "11", &raxis, &rname);
+  name = NIL_P(rname) ? NULL : StringValueCStr(rname);
+  k = rb_ca_normalize_axis_value(self, raxis, name);
+  return INT2NUM(k);
+}
+
+/* Class-method form `CArray.normalize_axis(axis, ndim, name=nil)` —
+ * normalizes `axis` against an explicit `ndim` (range [0, ndim))
+ * without needing a CArray instance. For an insertion position
+ * (valid range [0, old_ndim] inclusive), pass `old_ndim + 1` as
+ * `ndim`. Called from class-method contexts (e.g. `CArray.stack`
+ * normalizing before `list[0]` is available) and from
+ * lib/carray/compose.rb merge / composite paths. */
+static VALUE
+rb_ca_s_normalize_axis (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE raxis, rndim, rname;
+  const char *name;
+  int k;
+  rb_scan_args(argc, argv, "21", &raxis, &rndim, &rname);
+  name = NIL_P(rname) ? NULL : StringValueCStr(rname);
+  k = rb_ca_normalize_axis_for_ndim(NUM2LONG(raxis), NUM2INT(rndim), name);
+  return INT2NUM(k);
+}
+
+/* Ruby-facing `CArray#normalize_axes(axes, name=nil)` — normalizes a
+ * multi-axis specifier to an Array<Integer> of canonical axes in
+ * [0, ndim), preserving input order. Accepts nil (returns the full
+ * axis list [0..ndim-1]), a single Integer (returns [k] after
+ * normalization), or an Array<Integer> (each element normalized).
+ * Raises on out-of-range or duplicate axes. */
+static VALUE
+rb_ca_normalize_axes (int argc, VALUE *argv, VALUE self)
+{
+  VALUE raxes, rname, out;
+  CArray *ca;
+  int8_t axes_buf[CA_RANK_MAX];
+  int8_t naxes, i;
+  const char *name;
+
+  rb_scan_args(argc, argv, "11", &raxes, &rname);
+  name = NIL_P(rname) ? "axes" : StringValueCStr(rname);
+  GetCArray(self, ca);
+
+  if ( NIL_P(raxes) ) {
+    out = rb_ary_new_capa(ca->ndim);
+    for ( i = 0; i < ca->ndim; i++ ) {
+      rb_ary_push(out, INT2NUM(i));
+    }
+    return out;
+  }
+
+  naxes = rb_ca_parse_reduce_axes_kw_ctx(raxes, ca, axes_buf, name);
+  out = rb_ary_new_capa(naxes);
+  for ( i = 0; i < naxes; i++ ) {
+    rb_ary_push(out, INT2NUM(axes_buf[i]));
+  }
+  return out;
+}
+
+/* `CArray._scan_float(str, fill_value=nil)` — parses `str` as a
+ * single double via `sscanf("%lf")`. Returns `fill_value` (or NaN
+ * when `fill_value` is nil) if `str` is nil or unparseable. Internal
+ * helper for text-format I/O readers. */
 
 static VALUE
 rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
@@ -532,10 +615,11 @@ rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
   }
 }
 
-/* @private
-@overload scan_int (str, fill_value=nil)
-
-*/
+/* `CArray._scan_int(str, fill_value=nil)` — parses `str` as a single
+ * integer via `sscanf("%li")` (accepts `0x`, `0`, and decimal
+ * prefixes). Returns `fill_value` (or 0 when `fill_value` is nil) if
+ * `str` is nil or unparseable. Internal helper for text-format I/O
+ * readers. */
 
 static VALUE
 rb_ca_s_scan_int (int argc, VALUE *argv, VALUE self)
@@ -578,10 +662,10 @@ static const struct {
   { "uint64", CA_UINT64 },
   { "float32", CA_FLOAT32 },
   { "float64", CA_FLOAT64 },
-  { "float128", CA_FLOAT128 },
+  { "float128", CA_FLOAT128 }, /* reserved (retired in 3.0); ca_valid[12]=0 */
   { "cmplx64", CA_CMPLX64 },
   { "cmplx128", CA_CMPLX128 },
-  { "cmplx256", CA_CMPLX256 },
+  { "cmplx256", CA_CMPLX256 }, /* reserved (retired in 3.0); ca_valid[15]=0 */
   { "object", CA_OBJECT },
   { "byte", CA_UINT8 },
   { "short", CA_INT16 },
@@ -710,7 +794,6 @@ strsep1(char **sp, const char sep)
   return p0;
 }
 
-#if RUBY_VERSION_CODE >= 220
 static VALUE
 rb_hash_has_key(VALUE hash, VALUE key)
 {
@@ -722,30 +805,6 @@ rb_hash_has_key(VALUE hash, VALUE key)
   }
   return Qfalse;
 }
-#else
-#if RUBY_VERSION_CODE >= 190
-static VALUE
-rb_hash_has_key(VALUE hash, VALUE key)
-{
-  if (!RHASH(hash)->ntbl) {
-    return Qfalse;
-  }
-  if (st_lookup(RHASH(hash)->ntbl, key, 0)) {
-    return Qtrue;
-  }
-  return Qfalse;
-}
-#else
-static VALUE
-rb_hash_has_key (VALUE hash, VALUE key)
-{
-  if (st_lookup(RHASH(hash)->tbl, key, 0) ) {
-    return Qtrue;
-  }
-  return Qfalse;
-}
-#endif
-#endif
 
 void
 rb_scan_options (VALUE ropt, const char *spec_in, ...)
@@ -775,23 +834,60 @@ rb_scan_options (VALUE ropt, const char *spec_in, ...)
       if ( rb_hash_has_key(ropt, key) ) {
         *vp = rb_hash_aref(ropt, key);
       }
-      else {
-        if ( *vp != CA_NIL ) {
-          *vp = Qnil;
-        }
-      }
+      /* key absent: leave *vp unchanged (caller's pre-initialized default) */
     }
-    else {
-      if ( *vp != CA_NIL ) {
-        *vp = Qnil;
-      }
-    }
+    /* opts == Qnil: leave all *vp unchanged */
     tok = strsep1(&sp, ',');
   }
   va_end(vals);
   free(spec);
 
+  /* Strict: reject any key not named in spec, matching Ruby's native
+     keyword-argument behaviour ("unknown keyword: :foo").  Every call
+     site scans all of a method's accepted keys in a single call, so a
+     leftover key is genuinely unrecognised. */
+  if ( has_option && ! RHASH_EMPTY_P(ropt) ) {
+    VALUE keys = rb_funcall(ropt, rb_intern("keys"), 0);
+    long i, n = RARRAY_LEN(keys);
+    for ( i = 0; i < n; i++ ) {
+      VALUE key = rb_ary_entry(keys, i);
+      VALUE kname = SYMBOL_P(key) ? rb_sym2str(key) : rb_obj_as_string(key);
+      const char *kn = StringValueCStr(kname);
+      char *sp2, *tok2, *spec2;
+      int found = 0;
+      sp2 = spec2 = strdup(spec_in);
+      tok2 = strsep1(&sp2, ',');
+      while ( tok2 != NULL ) {
+        if ( strcmp(tok2, kn) == 0 ) { found = 1; break; }
+        tok2 = strsep1(&sp2, ',');
+      }
+      free(spec2);
+      if ( ! found ) {
+        rb_raise(rb_eArgError, "unknown keyword: %"PRIsVALUE, rb_inspect(key));
+      }
+    }
+  }
+
   return;
+}
+
+/* For methods that take no keyword arguments at all.  ropt is the trailing
+   Hash from rb_pop_options / rb_scan_args "*:", or Qnil when there is none.
+   Raises the same message Ruby raises for an unrecognised keyword
+   ("unknown keyword: :axis"), so a keyword passed to a positional-only
+   method does not surface as a TypeError from NUM2SIZE or as an
+   argument-count mismatch. */
+void
+rb_reject_options (VALUE ropt)
+{
+  /* Table of accepted keys, empty.  rb_get_kwargs declares it non-null and
+     reads required + optional (= 0) entries, so a one-slot dummy is enough. */
+  static const ID accepts_none[1] = { 0 };
+
+  if ( NIL_P(ropt) ) {
+    return;
+  }
+  rb_get_kwargs(ropt, accepts_none, 0, 0, NULL);
 }
 
 void
@@ -830,7 +926,7 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 
 
 void
-Init_carray_utils ()
+Init_carray_utils (void)
 {
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
@@ -843,6 +939,11 @@ Init_carray_utils ()
 
   rb_define_singleton_method(rb_cCArray, "guess_type_and_bytes",
                              rb_ca_s_guess_type_and_bytes, -1);
+
+  rb_define_method(rb_cCArray, "normalize_axis", rb_ca_normalize_axis, -1);
+  rb_define_method(rb_cCArray, "normalize_axes", rb_ca_normalize_axes, -1);
+  rb_define_singleton_method(rb_cCArray, "normalize_axis",
+                             rb_ca_s_normalize_axis, -1);
 
 }
 

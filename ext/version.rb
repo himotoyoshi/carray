@@ -1,15 +1,3 @@
-# ----------------------------------------------------------------------------
-#
-#  version.rb
-#
-#  This file is part of Ruby/CArray extension library.
-#  You can redistribute it and/or modify it under the terms of
-#  the Ruby Licence.
-#
-#  Copyright (C) 2005 Hiroki Motoyoshi
-#
-# ----------------------------------------------------------------------------
-
 def carray_version
 
   io = open(File.join(File.dirname(__FILE__), "version.h"))
@@ -36,7 +24,11 @@ def carray_version
   ca_version_code2 = 
             100 * ca_version_major + 10*ca_version_minor + ca_version_teeny
 
-  if ca_version != ca_version2 or ca_version_code != ca_version_code2
+  # Allow pre-release suffix like "3.0.0.dev" / "3.0.0.alpha1" while still
+  # validating the numeric MAJOR.MINOR.TEENY prefix.
+  ca_version_numeric = ca_version.split(".")[0, 3].join(".")
+
+  if ca_version_numeric != ca_version2 or ca_version_code != ca_version_code2
     raise "invalid version.h"
   end
   

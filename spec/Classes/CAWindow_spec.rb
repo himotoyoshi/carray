@@ -24,7 +24,7 @@ describe "TestCArrayCAWindow " do
 
     # ---
     a = CArray.int(3,3).seq!
-    b = a.window(-1..1, -1..1) { UNDEF}
+    b = a.window(-1..1, -1..1, fill_value: UNDEF)
     _ = UNDEF
     is_asserted_by { CA_INT([[_,_,_],
                          [_,0,1],

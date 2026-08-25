@@ -1,6 +1,9 @@
 ChangeLog of Ruby/CArray
 ========================
 
+Releases from 3.0.0 onward are in [CHANGELOG.md](CHANGELOG.md).
+What follows is the history up to 2.0.1.
+
 1.6.0 -> 2.0.0
 --------------
 

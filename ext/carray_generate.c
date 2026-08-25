@@ -1,10 +1,9 @@
 /* ---------------------------------------------------------------------------
 
-  carray_generate.c
-
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
+  Population helpers that fill a CArray in place: #where (collect flat
+  addresses of non-zero / true cells) and the #seq / #seq! family
+  (arithmetic / object-method progressions).  User-facing docs live in
+  yard-stubs/carray_generate.rb.
 
 ---------------------------------------------------------------------------- */
 
@@ -13,52 +12,13 @@
 
 /* ----------------------------------------------------------------- */
 
-/* @overload set (*idx)
+/* CArray#where -- collect the flat addresses of all non-zero (or
+   true) cells in self into a fresh 1-D CA_SIZE array.  Non-boolean
+   inputs are first coerced to boolean via rb_ca_to_boolean.  Masked
+   cells are excluded.
 
-(Boolean, Modification)
-Sets true at the given index for the boolean array and returns self.
-It accept the arguments same as for CArray#[].
-*/
-
-static VALUE
-rb_ca_boolean_set (int argc, VALUE *argv, VALUE self)
-{
-  VALUE one = INT2NUM(1);
-  rb_ca_modify(self);
-  if ( ! rb_ca_is_boolean_type(self) ) {
-    rb_raise(rb_eCADataTypeError, "reciever should be a boolean array");
-  }
-  rb_ca_store2(self, argc, argv, one);
-  return self;
-}
-
-/* @overload unset (*idx)
-
-(Boolean, Modification)
-Sets false at the given index for the boolean array and returns self.
-It accept the arguments same as for CArray#[].
-*/
-
-static VALUE
-rb_ca_boolean_unset (int argc, VALUE *argv, VALUE self)
-{
-  VALUE zero = INT2NUM(0);
-  rb_ca_modify(self);
-  if ( ! rb_ca_is_boolean_type(self) ) {
-    rb_raise(rb_eCADataTypeError, "reciever should be a boolean array");
-  }
-  rb_ca_store2(self, argc, argv, zero);
-  return self;
-}
-
-/* ----------------------------------------------------------------- */
-
-/* @overload where
-
-(Conversion)
-Returns the 1d index array for non-zero elements of self
-*/
-
+   Also used internally by ext/ca_obj_grid.c when it needs to extract
+   the addresses of true cells from a boolean axis selector. */
 VALUE
 rb_ca_where (VALUE self)
 {
@@ -119,6 +79,7 @@ rb_ca_where (VALUE self)
 
 /* ----------------------------------------------------------------- */
 
+/* Fill the whole array in row-major order with `step*i + offset`. */
 #define proc_seq_bang(type, from, to)       \
   {                                         \
     type *p = (type *)ca->ptr;              \
@@ -145,43 +106,117 @@ rb_ca_where (VALUE self)
     }                                     \
   }
 
-#define proc_seq_bang_with_block(type, from, to)       \
-  {                                                    \
-    type *p = (type *)ca->ptr;                         \
-    ca_size_t i;                                         \
-    if ( NIL_P(roffset) && NIL_P(rstep) ) {            \
-      for (i=0; i<ca->elements; i++) {                 \
-        *p++ = (type) from(rb_yield(SIZE2NUM(i)));             \
-      }                                                \
-    }                                                             \
-    else if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||              \
-              rb_obj_is_kind_of(roffset, rb_cFloat)) {            \
-      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
-      double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);          \
-      for (i=0; i<ca->elements; i++) {                            \
-        *p++ = (type) from(rb_yield(rb_float_new(step*i+offset)));       \
-      }                                                           \
-    }                                                             \
-    else {                                                        \
-      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
-      type step   = (NIL_P(rstep)) ? (type) 1 : (type) from(rstep);      \
-      for (i=0; i<ca->elements; i++) {                            \
-        *p++ = (type) from(rb_yield(SIZE2NUM(step*i+offset)));            \
-      }                                                           \
-    }                                                             \
+/* Per-axis fill: the value depends only on the coordinate along the seq
+   axis, so it is constant over the `inner_size` cells inside that axis
+   and repeats for each of the `outer_size` blocks outside it.  Writing
+   these as contiguous constant runs keeps the sweep fully streaming
+   (memset-class); when the seq axis is innermost, inner_size collapses
+   to 1 and this degenerates to a ramp.  `len`, `inner_size`,
+   `outer_size` come from the enclosing scope (ca_seq_geometry). */
+#define proc_seq_bang_axis(type, from, to)                              \
+  {                                                                     \
+    type *p = (type *)ca->ptr;                                          \
+    ca_size_t o, k, in;                                                 \
+    if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||                         \
+         rb_obj_is_kind_of(roffset, rb_cFloat) ) {                      \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset); \
+      double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);                \
+      for (o=0; o<outer_size; o++) {                                    \
+        for (k=0; k<len; k++) {                                         \
+          type v = (type) to(step*k+offset);                           \
+          for (in=0; in<inner_size; in++) { *p++ = v; }                 \
+        }                                                               \
+      }                                                                 \
+    }                                                                   \
+    else {                                                              \
+      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset); \
+      type step   = (NIL_P(rstep)) ? (type) 1 : (type) from(rstep);     \
+      for (o=0; o<outer_size; o++) {                                    \
+        for (k=0; k<len; k++) {                                         \
+          type v = (type) to(step*k+offset);                           \
+          for (in=0; in<inner_size; in++) { *p++ = v; }                 \
+        }                                                               \
+      }                                                                 \
+    }                                                                   \
   }
 
-static VALUE
-rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
+#ifdef HAVE_COMPLEX_H
+#define seq_complex_cases(PROC)                                    \
+  case CA_CMPLX64:  PROC(cmplx64_t, (cmplx64_t) NUM2CC, ); break;  \
+  case CA_CMPLX128: PROC(cmplx128_t, NUM2CC, );           break;
+#else
+#define seq_complex_cases(PROC)
+#endif
+
+/* Dispatch `PROC` (proc_seq_bang or proc_seq_bang_axis) over the numeric
+   data types. */
+#define seq_bang_switch(PROC)                                           \
+  switch ( ca->data_type ) {                                            \
+  case CA_INT8:     PROC(int8_t,     NUM2LONG, );   break;              \
+  case CA_UINT8:    PROC(uint8_t,   NUM2ULONG, );  break;               \
+  case CA_INT16:    PROC(int16_t,    NUM2LONG, );   break;              \
+  case CA_UINT16:   PROC(uint16_t,  NUM2ULONG, );  break;               \
+  case CA_INT32:    PROC(int32_t,    NUM2LONG, );   break;              \
+  case CA_UINT32:   PROC(uint32_t,  NUM2ULONG, );  break;               \
+  case CA_INT64:    PROC(int64_t,    NUM2LL, );     break;              \
+  case CA_UINT64:   PROC(uint64_t,  rb_num2ull, ); break;               \
+  case CA_FLOAT32:  PROC(float32_t,  NUM2DBL, );    break;              \
+  case CA_FLOAT64:  PROC(float64_t,  NUM2DBL, );    break;              \
+  seq_complex_cases(PROC)                                               \
+  default: rb_raise(rb_eCADataTypeError,                                \
+                    "invalid data type of receiver");                   \
+  }
+
+/* Resolve the `axis:` kwarg to a concrete axis, or -1 for a flat fill.
+   Rejects a non-integer (e.g. an Array: multi-axis seq is not
+   supported) and an out-of-range axis; normalizes a negative axis. */
+static int
+ca_seq_resolve_axis (CArray *ca, VALUE raxis)
 {
-  volatile VALUE roffset, rstep, rval, rmethod = Qnil;
+  int axis;
+  if ( NIL_P(raxis) ) {
+    return -1;
+  }
+  if ( TYPE(raxis) == T_ARRAY ) {
+    rb_raise(rb_eArgError,
+             "seq axis must be a single integer (multi-axis seq is not supported)");
+  }
+  axis = NUM2INT(raxis);
+  if ( axis < 0 ) {
+    axis += ca->ndim;
+  }
+  if ( axis < 0 || axis >= ca->ndim ) {
+    rb_raise(rb_eArgError,
+             "axis out of range for seq (0...%d)", ca->ndim);
+  }
+  return axis;
+}
+
+/* Row-major geometry of a per-axis fill: `len` = length of the seq
+   axis, `inner` = product of the trailing dims (contiguous run held
+   constant), `outer` = product of the leading dims. */
+static void
+ca_seq_geometry (CArray *ca, int axis,
+                 ca_size_t *len, ca_size_t *inner, ca_size_t *outer)
+{
+  int i;
+  ca_size_t in = 1, out = 1;
+  for (i=axis+1; i<ca->ndim; i++) { in  *= ca->dim[i]; }
+  for (i=0;      i<axis;    i++) { out *= ca->dim[i]; }
+  *len   = ca->dim[axis];
+  *inner = in;
+  *outer = out;
+}
+
+static VALUE
+rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
+{
+  volatile VALUE rval, rmethod = Qnil;
   CArray *ca;
   VALUE *p;
   ca_size_t i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  rb_scan_args((argc>2) ? 2 : argc, argv, "02", (VALUE *) &roffset, (VALUE *) &rstep);
 
   if ( TYPE(rstep) == T_SYMBOL ) {                /* e.g. a.seq("a", :succ) */
     rmethod = rstep;
@@ -194,45 +229,92 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
     ca_clear_mask(ca);                            /* clear all mask */
   }
 
-  p = (VALUE *)ca->ptr;
-  if ( rb_obj_is_kind_of(roffset, rb_cFloat) ||
-       rb_obj_is_kind_of(rstep, rb_cFloat) ) {  /* a.seq(0.0, 1.0) */
-    double offset = ( NIL_P(roffset) ) ? 0 : NUM2DBL(roffset);
-    double step = ( NIL_P(rstep) ) ? 1 : NUM2DBL(rstep);
-    for (i=0; i<ca->elements; i++) {
-      *p++ = rb_float_new(step*i+offset);
-    }
-  }
-  else if ( NIL_P(roffset) ) {
-    if ( ! NIL_P(rstep) ) {                     /* a.seq(nil, 1) */
-      rb_raise(rb_eArgError,
-               "nil is invalid as offset for seq([offset[,step])");
-    }
-    for (i=0; i<ca->elements; i++) {            /* a.seq() */
-      *p++ = INT2NUM(i);
-    }
-  }
-  else if ( ! NIL_P(rmethod) ) {                /* a.seq(obj, :method) */
-    ID id_method = SYM2ID(rmethod);
-    *p++ = rval = roffset;
-    for (i=1; i<ca->elements; i++) {
-      *p++ = rval = rb_funcall2(rval, id_method, argc-2, argv+2);
-    }
-  }
-  else {                                        /* a.seq(obj, step) */
-    ID id_plus = rb_intern("+");
-    rstep   = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
-    *p++ = rval = roffset;
-    for (i=1; i<ca->elements; i++) {
-      *p++ = rval = rb_funcall(rval, id_plus, 1, rstep);
-    }
-  }
-
-  if ( rb_block_given_p() ) {
+  if ( axis < 0 ) {                               /* flat fill */
     p = (VALUE *)ca->ptr;
-    for(i=0; i<ca->elements; i++) {
-      *p = rb_yield(*p);
-      p++;
+    if ( rb_obj_is_kind_of(roffset, rb_cFloat) ||
+         rb_obj_is_kind_of(rstep, rb_cFloat) ) {  /* a.seq(0.0, 1.0) */
+      double offset = ( NIL_P(roffset) ) ? 0 : NUM2DBL(roffset);
+      double step = ( NIL_P(rstep) ) ? 1 : NUM2DBL(rstep);
+      for (i=0; i<ca->elements; i++) {
+        *p++ = rb_float_new(step*i+offset);
+      }
+    }
+    else if ( NIL_P(roffset) ) {
+      if ( ! NIL_P(rstep) ) {                     /* a.seq(nil, 1) */
+        rb_raise(rb_eArgError,
+                 "nil is invalid as offset for seq([offset[,step])");
+      }
+      for (i=0; i<ca->elements; i++) {            /* a.seq() */
+        *p++ = LL2NUM(i);
+      }
+    }
+    else if ( ! NIL_P(rmethod) ) {                /* a.seq(obj, :method) */
+      ID id_method = SYM2ID(rmethod);
+      *p++ = rval = roffset;
+      for (i=1; i<ca->elements; i++) {
+        *p++ = rval = rb_funcall(rval, id_method, 0);
+      }
+    }
+    else {                                        /* a.seq(obj, step) */
+      ID id_plus = rb_intern("+");
+      rstep   = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
+      *p++ = rval = roffset;
+      for (i=1; i<ca->elements; i++) {
+        *p++ = rval = rb_funcall(rval, id_plus, 1, rstep);
+      }
+    }
+  }
+  else {                                          /* per-axis fill */
+    /* Build the length-`len` progression first, then broadcast it over
+       the outer/inner dims.  The generated VALUEs are held in a Ruby
+       Array so the GC keeps them live across the progression's method
+       calls (rb_funcall may trigger a collection). */
+    ca_size_t len, inner_size, outer_size, o, k, in;
+    volatile VALUE vtbl;
+    ca_seq_geometry(ca, axis, &len, &inner_size, &outer_size);
+    vtbl = rb_ary_new_capa(len);
+    if ( rb_obj_is_kind_of(roffset, rb_cFloat) ||
+         rb_obj_is_kind_of(rstep, rb_cFloat) ) {
+      double offset = ( NIL_P(roffset) ) ? 0 : NUM2DBL(roffset);
+      double step = ( NIL_P(rstep) ) ? 1 : NUM2DBL(rstep);
+      for (k=0; k<len; k++) {
+        rb_ary_push(vtbl, rb_float_new(step*k+offset));
+      }
+    }
+    else if ( NIL_P(roffset) ) {
+      if ( ! NIL_P(rstep) ) {
+        rb_raise(rb_eArgError,
+                 "nil is invalid as offset for seq([offset[,step])");
+      }
+      for (k=0; k<len; k++) {
+        rb_ary_push(vtbl, LL2NUM(k));
+      }
+    }
+    else if ( ! NIL_P(rmethod) ) {
+      ID id_method = SYM2ID(rmethod);
+      rval = roffset;
+      rb_ary_push(vtbl, rval);
+      for (k=1; k<len; k++) {
+        rval = rb_funcall(rval, id_method, 0);
+        rb_ary_push(vtbl, rval);
+      }
+    }
+    else {
+      ID id_plus = rb_intern("+");
+      rstep = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
+      rval = roffset;
+      rb_ary_push(vtbl, rval);
+      for (k=1; k<len; k++) {
+        rval = rb_funcall(rval, id_plus, 1, rstep);
+        rb_ary_push(vtbl, rval);
+      }
+    }
+    p = (VALUE *)ca->ptr;
+    for (o=0; o<outer_size; o++) {
+      for (k=0; k<len; k++) {
+        VALUE v = RARRAY_AREF(vtbl, k);
+        for (in=0; in<inner_size; in++) { *p++ = v; }
+      }
     }
   }
 
@@ -242,41 +324,34 @@ rb_ca_seq_bang_object (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* @overload seq! (init_val=0, step=1) {|elem| ... }
-
-(Conversion, Destructive)
-Generates sequential data with initial value `init_val` 
-and step value `step`. For object array, if the second argument
-is Symbol object, it will be interpreted as stepping method and 
-it is called for the last element in each step.
-    # call-seq:
-    #   seq (init_val=0, step=1)
-    #   seq (init_val=0, step=1) {|x| ... }
-    #   seq (init_val=0, step=A_symbol)            ### for object array
-    #   seq (init_val=0, step=A_symbol) {|x| ...}  ### for object array
-    #
-    # Generates sequential data with initial value `init_val` 
-    # and step value `step`. For object array, if the second argument
-    # is Symbol object, it will be interpreted as stepping method and 
-    # it is called for the last element in each step.
-    #
-*/
-
+/* CArray#seq!(init_val=0, step=1, axis: nil) -- arithmetic-progression
+   fill, in place.  Without `axis:` the fill runs in row-major order
+   over the whole array; with `axis: k` the progression runs along axis
+   k and repeats across the other axes.  Numeric arrays use the typed
+   proc_seq_bang / proc_seq_bang_axis macros; object arrays delegate to
+   rb_ca_seq_bang_object (which also accepts a Symbol `step` to drive
+   per-element method calls like `:succ`).  Mutates self and clears any
+   existing mask. */
 static VALUE
 rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE roffset, rstep;
+  volatile VALUE roffset = Qnil, rstep = Qnil, rkw = Qnil, raxis = Qnil;
   CArray *ca;
+  int axis;
 
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
+  rb_scan_args(argc, argv, "02:", (VALUE *) &roffset, (VALUE *) &rstep,
+               (VALUE *) &rkw);
+  rb_scan_options(rkw, "axis", (VALUE *) &raxis);
+
+  axis = ca_seq_resolve_axis(ca, raxis);          /* -1 = flat; validates */
+
   /* delegate to rb_ca_seq_bang_object if data_type is object */
   if ( ca_is_object_type(ca) ) {
-    return rb_ca_seq_bang_object(argc, argv, self);
+    return rb_ca_seq_bang_object(self, roffset, rstep, axis);
   }
-
-  rb_scan_args(argc, argv, "02", (VALUE *) &roffset, (VALUE *) &rstep);
 
   ca_allocate(ca);
 
@@ -284,49 +359,13 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
     ca_clear_mask(ca);              /* clear all mask */
   }
 
-  if ( rb_block_given_p() ) {       /* with block */
-    switch ( ca->data_type ) {
-    case CA_INT8:     proc_seq_bang_with_block(int8_t,     NUM2LONG, );   break;
-    case CA_UINT8:    proc_seq_bang_with_block(uint8_t,   NUM2ULONG, );  break;
-    case CA_INT16:    proc_seq_bang_with_block(int16_t,    NUM2LONG, ) ;  break;
-    case CA_UINT16:   proc_seq_bang_with_block(uint16_t,  NUM2ULONG, );  break;
-    case CA_INT32:    proc_seq_bang_with_block(int32_t,    NUM2LONG, );   break;
-    case CA_UINT32:   proc_seq_bang_with_block(uint32_t,  NUM2ULONG, );  break;
-    case CA_INT64:    proc_seq_bang_with_block(int64_t,    NUM2LL, );     break;
-    case CA_UINT64:   proc_seq_bang_with_block(uint64_t,  rb_num2ull, ); break;
-    case CA_FLOAT32:  proc_seq_bang_with_block(float32_t,  NUM2DBL, );    break;
-    case CA_FLOAT64:  proc_seq_bang_with_block(float64_t,  NUM2DBL, );    break;
-    case CA_FLOAT128: proc_seq_bang_with_block(float128_t, NUM2DBL, );    break;
-#ifdef HAVE_COMPLEX_H
-    case CA_CMPLX64:  proc_seq_bang_with_block(cmplx64_t, (cmplx64_t) NUM2CC,); break;
-    case CA_CMPLX128: proc_seq_bang_with_block(cmplx128_t, NUM2CC, );     break;
-    case CA_CMPLX256: proc_seq_bang_with_block(cmplx256_t, (cmplx256_t) NUM2CC, ); break;
-#endif
-    default: rb_raise(rb_eCADataTypeError,
-                      "invalid data type of receiver");
-    }
+  if ( axis < 0 ) {
+    seq_bang_switch(proc_seq_bang);
   }
-  else {                            /* without block */
-    switch ( ca->data_type ) {
-    case CA_INT8:     proc_seq_bang(int8_t,     NUM2LONG, );   break;
-    case CA_UINT8:    proc_seq_bang(uint8_t,   NUM2ULONG, );  break;
-    case CA_INT16:    proc_seq_bang(int16_t,    NUM2LONG, ) ;  break;
-    case CA_UINT16:   proc_seq_bang(uint16_t,  NUM2ULONG, );  break;
-    case CA_INT32:    proc_seq_bang(int32_t,    NUM2LONG, );   break;
-    case CA_UINT32:   proc_seq_bang(uint32_t,  NUM2ULONG, );  break;
-    case CA_INT64:    proc_seq_bang(int64_t,    NUM2LL, );     break;
-    case CA_UINT64:   proc_seq_bang(uint64_t,  rb_num2ull, ); break;
-    case CA_FLOAT32:  proc_seq_bang(float32_t,  NUM2DBL, );    break;
-    case CA_FLOAT64:  proc_seq_bang(float64_t,  NUM2DBL, );    break;
-    case CA_FLOAT128: proc_seq_bang(float128_t, NUM2DBL, );    break;
-#ifdef HAVE_COMPLEX_H
-    case CA_CMPLX64:  proc_seq_bang(cmplx64_t, (cmplx64_t) NUM2CC, );   break;
-    case CA_CMPLX128: proc_seq_bang(cmplx128_t, NUM2CC, );              break;
-    case CA_CMPLX256: proc_seq_bang(cmplx256_t, (cmplx256_t) NUM2CC, ); break;
-#endif
-    default: rb_raise(rb_eCADataTypeError,
-                      "invalid data type of reciever");
-    }
+  else {
+    ca_size_t len, inner_size, outer_size;
+    ca_seq_geometry(ca, axis, &len, &inner_size, &outer_size);
+    seq_bang_switch(proc_seq_bang_axis);
   }
 
   ca_sync(ca);
@@ -335,26 +374,9 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* @overload seq (init_val=0, step=1) {|elem| ... }
-
-(Conversion)
-Generates sequential data with initial value `init_val` 
-and step value `step`. For object array, if the second argument
-is Symbol object, it will be interpreted as stepping method and 
-it is called for the last element in each step.
-    # call-seq:
-    #   seq (init_val=0, step=1)
-    #   seq (init_val=0, step=1) {|x| ... }
-    #   seq (init_val=0, step=A_symbol)            ### for object array
-    #   seq (init_val=0, step=A_symbol) {|x| ...}  ### for object array
-    #
-    # Generates sequential data with initial value `init_val` 
-    # and step value `step`. For object array, if the second argument
-    # is Symbol object, it will be interpreted as stepping method and 
-    # it is called for the last element in each step.
-    #
-*/
-
+/* CArray#seq(init_val=0, step=1, axis: nil) -- non-destructive variant:
+   allocate a fresh template like self and fill it via
+   rb_ca_seq_bang_method. */
 static VALUE
 rb_ca_seq_method (int argc, VALUE *argv, VALUE self)
 {
@@ -362,6 +384,9 @@ rb_ca_seq_method (int argc, VALUE *argv, VALUE self)
   return rb_ca_seq_bang_method(argc, argv, out);
 }
 
+/* C-call shims: pack the (offset, step) args and route through the
+   Ruby-method entries above.  Called by ext/carray_cast.c (= the
+   Range / ArithmeticSequence to-CArray path uses rb_ca_seq). */
 VALUE
 rb_ca_seq_bang (VALUE self, VALUE offset, VALUE step)
 {
@@ -390,378 +415,24 @@ rb_ca_seq2 (VALUE self, int n, VALUE *args)
 
 /* ----------------------------------------------------------------- */
 
-
-void
-ca_swap_bytes (char *ptr, ca_size_t bytes, ca_size_t elements)
-{
-  char *p;
-  char val;
-  ca_size_t i;
-
-#define SWAP_BYTE(a, b) (val = (a), (a) = (b), (b) = val)
-
-  switch ( bytes ) {
-  case 1:
-    break;
-  case 2:
-    #ifdef _OPENMP
-    #pragma omp parallel for private(p)
-    #endif
-    for (i=0; i<elements; i++) {
-      p = ptr + 2*i;
-      SWAP_BYTE(p[0], p[1]);
-    }
-    break;
-  case 4:
-    #ifdef _OPENMP
-    #pragma omp parallel for private(p)
-    #endif
-    for (i=0; i<elements; i++) {
-      p = ptr + 4*i;
-      SWAP_BYTE(p[0], p[3]);
-      SWAP_BYTE(p[1], p[2]);
-    }
-    break;
-  case 8:
-    #ifdef _OPENMP
-    #pragma omp parallel for private(p)
-    #endif
-    for (i=0; i<elements; i++) {
-      p = ptr + 8*i;
-      SWAP_BYTE(p[0], p[7]);
-      SWAP_BYTE(p[1], p[6]);
-      SWAP_BYTE(p[2], p[5]);
-      SWAP_BYTE(p[3], p[4]);
-    }
-    break;
-  case 16:
-    #ifdef _OPENMP
-    #pragma omp parallel for private(p)
-    #endif
-    for (i=0; i<elements; i++) {
-      p = ptr + 16*i;
-      SWAP_BYTE(p[0], p[15]);
-      SWAP_BYTE(p[1], p[14]);
-      SWAP_BYTE(p[2], p[13]);
-      SWAP_BYTE(p[3], p[12]);
-      SWAP_BYTE(p[4], p[11]);
-      SWAP_BYTE(p[5], p[10]);
-      SWAP_BYTE(p[6], p[9]);
-      SWAP_BYTE(p[7], p[8]);
-    }
-    break;
-  default: {
-    char *p1, *p2;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(p,p1,p2)
-    #endif
-    for (i=0; i<elements; i++) {
-      p = ptr + i*bytes;
-      p1 = p;
-      p2 = p+bytes-1;
-      while (p1<p2) {
-        SWAP_BYTE(*p1, *p2);
-        p1++; p2--;
-      }
-    }
-    break;
-  }
-  }
-
-#undef SWAP_BYTE
-
-}
-
-/* @overload swap_bytes!
-
-(Conversion, Destructive)
-Swaps the byte order of each element.
-*/
-
-VALUE
-rb_ca_swap_bytes_bang (VALUE self)
-{
-  CArray *ca;
-  int i;
-
-  rb_ca_modify(self);
-
-  if ( rb_ca_is_object_type(self) ) {
-    rb_raise(rb_eCADataTypeError, "object array can't swap bytes");
-  }
-
-  if ( rb_ca_is_fixlen_type(self) ) {
-    if ( rb_ca_has_data_class(self) ) {
-      volatile VALUE members = rb_ca_fields(self);
-      Check_Type(members, T_ARRAY);
-      for (i=0; i<RARRAY_LEN(members); i++) {
-        volatile VALUE obj = rb_ary_entry(members, i);
-        rb_ca_swap_bytes_bang(obj);
-      }
-    }
-    else {
-      TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-      ca_attach(ca);
-      ca_swap_bytes(ca->ptr, ca->bytes, ca->elements);
-      ca_sync(ca);
-      ca_detach(ca);
-    }
-    return self;
-  }
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  switch ( ca->data_type ) {
-  case CA_INT16:
-  case CA_UINT16:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 2, ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_INT32:
-  case CA_UINT32:
-  case CA_FLOAT32:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 4, ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_INT64:
-  case CA_UINT64:
-  case CA_FLOAT64:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 8, ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_FLOAT128:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 16, ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_CMPLX64:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 4, 2 * ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_CMPLX128:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 8, 2 * ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  case CA_CMPLX256:
-    ca_attach(ca);
-    ca_swap_bytes(ca->ptr, 16, 2 * ca->elements);
-    ca_sync(ca);
-    ca_detach(ca);
-    break;
-  }
-
-  return self;
-}
-
-/* @overload swap_bytes
-
-(Conversion)
-Swaps the byte order of each element.
-*/
-
-VALUE
-rb_ca_swap_bytes (VALUE self)
-{
-  volatile VALUE out = rb_ca_copy(self);
-  return rb_ca_swap_bytes_bang(out);
-}
+/* CArray#swap_bytes lives in ext/ca_obj_byte_swap.c (returns a lazy
+   CAByteSwap view).  Use `arr.swap_bytes.to_ca` when an eager copy is
+   wanted. */
 
 /* ----------------------------------------------------------------- */
 
-#define proc_trim_bang2(type, from)                                 \
-  {                                                                \
-    type *ptr = (type *) ca->ptr;                                  \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    type min  = (type) from(rmin);                                 \
-    type max  = (type) from(rmax);                                 \
-    ca_size_t i;                                                     \
-    if ( m && rfval == CA_UNDEF) {                                 \
-      for (i=ca->elements; i; i--, ptr++, m++) {                   \
-        if ( ! *m ) {                                              \
-          if ( *ptr < min || *ptr >= max )                         \
-            *m = 1;                                                \
-        }                                                          \
-      }                                                            \
-    }                                                              \
-    else {                                                         \
-      int  has_fill = ! ( NIL_P(rfval) );                          \
-      type fill = (has_fill) ? (type) from(rfval) : (type) 0;             \
-      if ( m ) {                                                   \
-        for (i=ca->elements; i; i--, ptr++) {                      \
-          if ( ! *m++ ) {                                          \
-            if ( *ptr >= max )                                     \
-              *ptr = (has_fill) ? fill : max;                      \
-            else if ( *ptr < min )                                 \
-              *ptr = (has_fill) ? fill : min;                      \
-          }                                                        \
-        }                                                          \
-      }                                                            \
-      else {                                                       \
-        for (i=ca->elements; i; i--, ptr++) {                      \
-          if ( *ptr >= max )                                       \
-            *ptr = (has_fill) ? fill : max;                        \
-          else if ( *ptr < min )                                   \
-            *ptr = (has_fill) ? fill : min;                        \
-        }                                                          \
-      }                                                            \
-    }                                                              \
-  }
-
-#define proc_trim_bang(type, from)                                 \
-  {                                                                \
-    type *ptr = (type *) ca->ptr;                                  \
-    boolean8_t *m = (ca->mask) ? (boolean8_t*) ca->mask->ptr : NULL; \
-    if ( ! NIL_P(rmin) ) {                                          \
-      type min  = (type) from(rmin);                                 \
-      ca_size_t i;                                                     \
-      if ( m && rfval == CA_UNDEF) {                                 \
-        for (i=ca->elements; i; i--, ptr++, m++) {                   \
-          if ( ! *m ) {                                              \
-            if ( *ptr < min )                                        \
-              *m = 1;                                                \
-          }                                                          \
-        }                                                            \
-      }                                                              \
-      else {                                                         \
-        int  has_fill = ! ( NIL_P(rfval) );                          \
-        type fill = (has_fill) ? (type) from(rfval) : (type) 0;      \
-        if ( m ) {                                                   \
-          for (i=ca->elements; i; i--, ptr++) {                      \
-            if ( ! *m++ ) {                                          \
-              if ( *ptr < min )                                 \
-                *ptr = (has_fill) ? fill : min;                      \
-            }                                                        \
-          }                                                          \
-        }                                                            \
-        else {                                                       \
-          for (i=ca->elements; i; i--, ptr++) {                      \
-            if ( *ptr < min )                                   \
-              *ptr = (has_fill) ? fill : min;                        \
-          }                                                          \
-        }                                                            \
-      }                                                              \
-    }                                                              \
-    if ( ! NIL_P(rmax) ) {                                          \
-      type max  = (type) from(rmax);                                 \
-      ca_size_t i;                                                     \
-      if ( m && rfval == CA_UNDEF) {                                 \
-        for (i=ca->elements; i; i--, ptr++, m++) {                   \
-          if ( ! *m ) {                                              \
-            if ( *ptr >= max )                         \
-              *m = 1;                                                \
-          }                                                          \
-        }                                                            \
-      }                                                              \
-      else {                                                         \
-        int  has_fill = ! ( NIL_P(rfval) );                          \
-        type fill = (has_fill) ? (type) from(rfval) : (type) 0;             \
-        if ( m ) {                                                   \
-          for (i=ca->elements; i; i--, ptr++) {                      \
-            if ( ! *m++ ) {                                          \
-              if ( *ptr >= max )                                     \
-                *ptr = (has_fill) ? fill : max;                      \
-            }                                                        \
-          }                                                          \
-        }                                                            \
-        else {                                                       \
-          for (i=ca->elements; i; i--, ptr++) {                      \
-            if ( *ptr >= max )                                       \
-              *ptr = (has_fill) ? fill : max;                        \
-          }                                                          \
-        }                                                            \
-      }                                                              \
-    }                                                                \
-  }
-
-
-
-/* @overload trim! (min, max, fill_value=nil)
-
-(Conversion)
-Trims the data into the range between min and max. If `fill_value`
-is given, the element out of the range between min and max is filled
-by `fill_value`
-*/
-
-static VALUE
-rb_ca_trim_bang (int argc, VALUE *argv, VALUE self)
-{
-  volatile VALUE rmin, rmax, rfval;
-  CArray *ca;
-
-  rb_ca_modify(self);
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  rb_scan_args(argc, argv, "21", (VALUE *) &rmin, (VALUE *) &rmax, (VALUE *) &rfval);
-
-  if ( rfval == CA_UNDEF ) {
-    ca_create_mask(ca);
-  }
-
-  ca_attach(ca);
-
-  switch ( ca->data_type ) {
-  case CA_INT8:     proc_trim_bang(int8_t,    NUM2INT);  break;
-  case CA_UINT8:    proc_trim_bang(uint8_t,   NUM2UINT); break;
-  case CA_INT16:    proc_trim_bang(int16_t,    NUM2INT);  break;
-  case CA_UINT16:   proc_trim_bang(uint16_t,  NUM2INT);  break;
-  case CA_INT32:    proc_trim_bang(int32_t,    NUM2LONG);  break;
-  case CA_UINT32:   proc_trim_bang(uint32_t,  NUM2LONG);  break;
-  case CA_INT64:    proc_trim_bang(int64_t,    NUM2LONG);  break;
-  case CA_UINT64:   proc_trim_bang(uint64_t,  NUM2LONG);  break;
-  case CA_FLOAT32:  proc_trim_bang(float32_t,  NUM2DBL);   break;
-  case CA_FLOAT64:  proc_trim_bang(float64_t,  NUM2DBL);   break;
-  case CA_FLOAT128: proc_trim_bang(float128_t, NUM2DBL);   break;
-  default:
-    rb_raise(rb_eCADataTypeError,
-             "can not trim for non-numeric or complex data type");
-  }
-
-  ca_detach(ca);
-
-  return self;
-}
-
-/* @overload trim (min, max, fill_value=nil)
-
-(Conversion)
-Trims the data into the range between min and max. If `fill_value`
-is given, the element out of the range between min and max is filled
-by `fill_value`
-*/
-
-static VALUE
-rb_ca_trim (int argc, VALUE *argv, VALUE self)
-{
-  volatile VALUE out = rb_ca_copy(self);
-  return rb_ca_trim_bang(argc, argv, out);
-}
 
 void
-Init_carray_generate ()
+Init_carray_generate (void)
 {
-  rb_define_method(rb_cCArray, "set",   rb_ca_boolean_set, -1);
-  rb_define_method(rb_cCArray, "unset", rb_ca_boolean_unset, -1);
-
   rb_define_method(rb_cCArray, "where", rb_ca_where, 0);
   rb_define_method(rb_cCArray, "seq!", rb_ca_seq_bang_method, -1);
   rb_define_method(rb_cCArray, "seq", rb_ca_seq_method, -1);
-  rb_define_method(rb_cCArray, "swap_bytes!", rb_ca_swap_bytes_bang, 0);
-  rb_define_method(rb_cCArray, "swap_bytes", rb_ca_swap_bytes, 0);
-  rb_define_method(rb_cCArray, "trim!", rb_ca_trim_bang, -1);
-  rb_define_method(rb_cCArray, "trim", rb_ca_trim, -1);
+  /* swap_bytes / swap_bytes! (and the ca_swap_bytes kernel) live in
+     ext/ca_obj_byte_swap.c; registered by Init_ca_obj_byte_swap.
+     clip / clip! are mkkernel-generated as a triop with signature
+     (lo, hi); see ext/mkkernel.rb (MkKernel.triop :clip), registered
+     by Init_carray_kernels. */
 }
 
 

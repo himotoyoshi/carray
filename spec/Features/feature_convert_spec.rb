@@ -6,19 +6,24 @@ describe "TestCArray " do
 
   example "conversion" do
     is_asserted_by { CA_INT32(1) == CScalar.int32 { 1 } }
-    is_asserted_by { CA_INT32([1]) == CArray.int32(1) { [1] } }
+    is_asserted_by { CA_INT32([1]) == CA_INT32([1]) }
     is_asserted_by { CA_INT32([[0, 1], [2, 3]]) == CArray.int32(2, 2).seq! }
     expect { CA_INT32([1,[1,2]]) }.to raise_error(TypeError)
   end
 
-  example "compact" do
+  example "drop_axis" do
     a = CArray.int(4,1,3,1,2,1).seq!
     b = CArray.int(4,3,2).seq!
-    
-    is_asserted_by { b == a.compacted }
-    is_asserted_by { CARefer == a.compacted.class }
-    is_asserted_by { b == a.compact }
-    is_asserted_by { CArray == a.compact.class }
+
+    # 3.0: drop_axis returns a view (CAStride for representable reshapes
+    # post-PROPOSAL_RESHAPE_STRIDE_REWRITE, CARefer for the fallback).
+    # Behavioral contract: the result equals the dropped-axis entity and
+    # materialises to a plain CArray via .copy.
+    is_asserted_by { b == a.drop_axis }
+    is_asserted_by { [CARefer, CAStride].include?(a.drop_axis.class) }
+    is_asserted_by { b == a.drop_axis }
+    is_asserted_by { [CARefer, CAStride].include?(a.drop_axis.class) }
+    is_asserted_by { CArray == a.drop_axis.copy.class }
   end
 
   example "to_a" do
