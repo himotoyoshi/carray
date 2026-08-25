@@ -5,7 +5,7 @@ require "rspec-power_assert"
 describe "TestCArray " do
 
   def assert_carray (ca, type, dim, ary)
-    is_asserted_by { ca == CArray.new(type, dim) { ary } }
+    is_asserted_by { ca == CArray.new(type, dim).tap { |a| a[] = ary } }
   end
 
   example "s_new" do
@@ -147,8 +147,10 @@ describe "TestCArray " do
 
   example "reverse" do
     a = CArray.uint8(100).seq!
-    b = a[-1..0].to_ca
-    is_asserted_by { a.reverse! == b }
+    b = a[-1..0].copy   # snapshot the reversed view before mutating a
+    # 3.0: reverse! removed, use `ca[] = ca.reverse` idiom.
+    a[] = a.reverse
+    is_asserted_by { a == b }
   end
 
   example "stat" do

@@ -1,10 +1,12 @@
 /* ---------------------------------------------------------------------------
 
-  carray_loop.c
+  Block-based iteration entry points: each / each_addr / each_index /
+  each_with_addr / each_with_index and their map! / collect! siblings.
+  Pure per-cell Ruby callback paths (= no kernel_iterator); used when
+  the caller wants Ruby block semantics over flat addresses or
+  multi-dim indices.  Bound at the bottom by Init_carray_loop.
 
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
+  User-facing docs live in yard-stubs/carray_loop.rb.
 
 ---------------------------------------------------------------------------- */
 
@@ -41,141 +43,136 @@ rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
   return ret;
 }
 
-/* @overload each_index (*shape)
-
-(Iterator) Iterates with the multi-dimensional indeces for the given
-dimension numbers.
-
-      CArray.each_index(3,2){|i,j| print "(#{i} #{j}) " }
-      produces:
-      (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
-*/
-
+/* CArray.each_index(*shape) -- class method.  Walks the cartesian
+   product of `0...d` for each `d` in `shape` and yields the index
+   tuple via rb_yield_splat (= block receives |i, j, ...| individual
+   args).  Independent of any CArray instance. */
 static VALUE
 rb_ca_s_each_index (int ndim, VALUE *dim, VALUE self)
 {
   volatile VALUE ridx = rb_ary_new2(ndim);
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, ndim, dim);
-#endif
   return rb_ca_s_each_index_internal(ndim, dim, 0, ridx);
 }
 
 /* ------------------------------------------------------------------- */
 
-/* @overload each () {|elem| ... }
-
-(Iterator) Iterates all the elements of the object.
-
-*/
-
+/* CArray#each {|elem| ... } -- yield each cell value in flat-address
+   order via rb_ca_fetch_addr (per-cell Ruby callback). */
 static VALUE
 rb_ca_each (VALUE self)
 {
   volatile VALUE ret = Qnil;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   for (i=0; i<elements; i++) {
     ret = rb_yield(rb_ca_fetch_addr(self, i));
   }
   return ret;
 }
 
-/* @overload each_with_addr () {|elem, addr| ... }
-
-(Iterator) Iterates all the elements of the object.
-
-*/
-
+/* CArray#each_with_addr {|elem, addr| ... } -- yield (value, flat
+   address) pairs in flat-address order. */
 static VALUE
 rb_ca_each_with_addr (VALUE self)
 {
   volatile VALUE ret = Qnil;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   for (i=0; i<elements; i++) {
     ret = rb_yield_values(2, rb_ca_fetch_addr(self, i), SIZE2NUM(i));
   }
   return ret;
 }
 
-/* @overload each_addr () {|addr| ... }
-
-(Iterator) Iterates all address of the object.
-*/
-
+/* CArray#each_addr {|addr| ... } -- yield each flat address
+   `0...self.elements` in order; does not fetch the value. */
 static VALUE
 rb_ca_each_addr (VALUE self)
 {
   volatile VALUE ret = Qnil;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   for (i=0; i<elements; i++) {
     ret = rb_yield(SIZE2NUM(i));
   }
   return ret;
 }
 
-static VALUE
-rb_ca_each_index_internal (VALUE self, int8_t level, VALUE ridx)
+/* Unified recursive walk over all multi-dimensional indices.  mode
+   selects the per-cell action, so each_index / each_with_index /
+   map_index! / map_with_index! share this single recursion:
+     CA_LOOP_WITH_VALUE -- yield the element value alongside the index
+     CA_LOOP_STORE      -- store the block result back (map! family)
+   Construction-block sugar in rb_ca_initialize also reuses this walk
+   in CA_LOOP_STORE mode (= map_index! semantics).
+
+   Called by rb_ca_each_index / _each_with_index / _map_index_bang /
+   _map_with_index_bang here, and by rb_ca_initialize in
+   ext/ca_obj_array.c. */
+VALUE
+rb_ca_index_walk (VALUE self, CArray *ca, int8_t level,
+                  ca_size_t *idx, VALUE ridx, int mode)
 {
   volatile VALUE ret = Qnil;
-  CArray *ca;
   ca_size_t i;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( level == ca->ndim - 1 ) {
     for (i=0; i<ca->dim[level]; i++) {
+      volatile VALUE obj;
+      idx[level] = i;
       rb_ary_store(ridx, level, SIZE2NUM(i));
-      ret = rb_yield_splat(rb_obj_clone(ridx));
+      /* CAREFUL: the subscript is yielded as individual arguments
+         (rb_yield_values2), not as a single Array.  This lets |i, j|
+         work uniformly in 1-D and N-D; the single-Array form forced
+         1-D users to write |(i)| or |i,| and silently stored the
+         wrapping Array into integer cells when omitted.  Block forms
+         that want the whole subscript should write |*idx|. */
+      if ( mode & CA_LOOP_WITH_VALUE ) {
+        int argc = (int)ca->ndim + 1;
+        VALUE *argv = ALLOCA_N(VALUE, argc);
+        argv[0] = rb_ca_fetch_index(self, idx);
+        MEMCPY(argv + 1, RARRAY_CONST_PTR(ridx), VALUE, ca->ndim);
+        obj = rb_yield_values2(argc, argv);
+      }
+      else {
+        obj = rb_yield_values2((int)ca->ndim, RARRAY_CONST_PTR(ridx));
+      }
+      if ( mode & CA_LOOP_STORE ) {
+        rb_ca_store_index(self, idx, obj);
+      }
+      ret = obj;
     }
   }
   else {
     for (i=0; i<ca->dim[level]; i++) {
+      idx[level] = i;
       rb_ary_store(ridx, level, SIZE2NUM(i));
-      ret = rb_ca_each_index_internal(self, level+1, ridx);
+      ret = rb_ca_index_walk(self, ca, level+1, idx, ridx, mode);
     }
   }
   return ret;
 }
 
-/* @overload each_index () {|idx| ... }
-
-(Iterator) Iterates all index of the object.
-    
-        CArray.int(3,2).each_index(){|i,j| print "(#{i} #{j}) " }
-    
-      <em>produces:</em>
-    
-         (0 0) (0 1) (1 0) (1 1) (2 0) (2 1) (3 0) (3 1)
-    
-*/
-
+/* CArray#each_index {|i, j, ...| ... } -- yield each multi-dim index
+   of self in row-major order via rb_ca_index_walk. */
 static VALUE
 rb_ca_each_index (VALUE self)
 {
+  CArray *ca;
+  ca_size_t idx[CA_RANK_MAX];
   volatile VALUE ridx;
-  int8_t ndim = NUM2INT(rb_ca_ndim(self));
-  ridx = rb_ary_new2(ndim);
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
-  return rb_ca_each_index_internal(self, 0, ridx);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  ridx = rb_ary_new2(ca->ndim);
+  return rb_ca_index_walk(self, ca, 0, idx, ridx, 0);
 }
 
-/* @overload map! () {|elem| ... }
-
-(Iterator, Destructive) Iterates all elements of the object and stores the return from the block to the element.
-*/
-
+/* CArray#map! {|elem| ... } -- yield each cell value, store the
+   block's return back at the same flat address.  Mutates self;
+   attach / sync / detach around the loop for view-safety. */
 static VALUE
 rb_ca_map_bang (VALUE self)
 {
@@ -183,9 +180,7 @@ rb_ca_map_bang (VALUE self)
   CArray *ca;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
@@ -198,164 +193,65 @@ rb_ca_map_bang (VALUE self)
   return self;
 }
 
-static VALUE
-rb_ca_each_with_index_internal (VALUE self,
-                                int8_t level, ca_size_t *idx, VALUE ridx)
-{
-  volatile VALUE ret = Qnil;
-  CArray *ca;
-  ca_size_t i;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  if ( level == ca->ndim - 1 ) {
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      ret = rb_yield_values(2, rb_ca_fetch_index(self, idx),
-                               rb_obj_clone(ridx));
-    }
-  }
-  else {
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      ret = rb_ca_each_with_index_internal(self, level+1, idx, ridx);
-    }
-  }
-  return ret;
-}
-
-/* @overload each_with_index () {|elem, idx| ... }
-
-[TBD]
-
-*/
-
+/* CArray#each_with_index {|elem, i, j, ...| ... } -- yield each cell
+   value followed by its multi-dim index components (individual args;
+   see rb_ca_index_walk header). */
 static VALUE
 rb_ca_each_with_index (VALUE self)
 {
-  volatile VALUE ridx, ret;
-  ca_size_t idx[CA_RANK_MAX];
-  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
-#if RUBY_VERSION_CODE >= 190
-  RETURN_ENUMERATOR(self, 0, 0);
-#endif
-  rb_ca_modify(self);
-  ridx = rb_ary_new2(ndim);
-  ret  = rb_ca_each_with_index_internal(self, 0, idx, ridx);
-  return ret;
-}
-
-
-static void
-rb_ca_map_with_index_bang_internal (VALUE self,
-                                    int8_t level, ca_size_t *idx, VALUE ridx)
-{
   CArray *ca;
-  ca_size_t i;
+  ca_size_t idx[CA_RANK_MAX];
+  volatile VALUE ridx;
+  RETURN_ENUMERATOR(self, 0, 0);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  if ( level == ca->ndim - 1 ) {
-    volatile VALUE obj;
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      obj = rb_yield_values(2, rb_ca_fetch_index(self, idx),
-                               rb_obj_clone(ridx));
-      rb_ca_store_index(self, idx, obj);
-    }
-  }
-  else {
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      rb_ca_map_with_index_bang_internal(self, level+1, idx, ridx);
-    }
-  }
+  ridx = rb_ary_new2(ca->ndim);
+  return rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_WITH_VALUE);
 }
 
-/* @overload map_with_index () {|elem, idx| ... }
 
-[TBD]
-
-*/
-
+/* CArray#map_with_index! {|elem, i, j, ...| ... } -- yield each cell
+   value with its multi-dim index components, store the block's
+   return back.  Mutates self. */
 static VALUE
 rb_ca_map_with_index_bang (VALUE self)
 {
-  volatile VALUE ridx;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
-#if RUBY_VERSION_CODE >= 190
+  volatile VALUE ridx;
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
-  ridx = rb_ary_new2(ndim);
-  rb_ca_map_with_index_bang_internal(self, 0, idx, ridx);
+  ridx = rb_ary_new2(ca->ndim);
+  rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_WITH_VALUE | CA_LOOP_STORE);
   ca_sync(ca);
   ca_detach(ca);
   return self;
 }
 
 
-static void
-rb_ca_map_index_bang_internal (VALUE self,
-                               int8_t level, ca_size_t *idx, VALUE ridx)
-{
-  CArray *ca;
-  ca_size_t i;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  if ( level == ca->ndim - 1 ) {
-    volatile VALUE obj;
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      obj = rb_yield_splat(rb_obj_clone(ridx));
-      rb_ca_store_index(self, idx, obj);
-    }
-  }
-  else {
-    for (i=0; i<ca->dim[level]; i++) {
-      idx[level] = i;
-      rb_ary_store(ridx, level, SIZE2NUM(i));
-      rb_ca_map_index_bang_internal(self, level+1, idx, ridx);
-    }
-  }
-}
-
-/* @overload map_index! () {|idx| ... }
-
-[TBD]
-
-*/
-
+/* CArray#map_index! {|i, j, ...| ... } -- yield each multi-dim index
+   (no value), store the block's return back at that cell.  Used by
+   the construction-block sugar in CArray.new (rb_ca_initialize). */
 static VALUE
 rb_ca_map_index_bang (VALUE self)
 {
-  volatile VALUE ridx;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  int8_t  ndim = NUM2INT(rb_ca_ndim(self));
-#if RUBY_VERSION_CODE >= 190
+  volatile VALUE ridx;
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
-  ridx = rb_ary_new2(ndim);
-  rb_ca_map_index_bang_internal(self, 0, idx, ridx);
+  ridx = rb_ary_new2(ca->ndim);
+  rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
   ca_sync(ca);
   ca_detach(ca);
   return self;
 }
 
-/* @overload map_with_addr! () {|elem, addr| ... }
-
-[TBD]
-
-*/
-
+/* CArray#map_with_addr! {|elem, addr| ... } -- yield (value, flat
+   address), store the block's return at that address. */
 static VALUE
 rb_ca_map_with_addr_bang (VALUE self)
 {
@@ -363,9 +259,7 @@ rb_ca_map_with_addr_bang (VALUE self)
   CArray *ca;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
@@ -379,12 +273,8 @@ rb_ca_map_with_addr_bang (VALUE self)
 }
 
 
-/* @overload map_addr! () {|addr| ... }
-
-[TBD]
-
-*/
-
+/* CArray#map_addr! {|addr| ... } -- yield each flat address (no
+   value), store the block's return at that address. */
 static VALUE
 rb_ca_map_addr_bang (VALUE self)
 {
@@ -392,9 +282,7 @@ rb_ca_map_addr_bang (VALUE self)
   CArray *ca;
   ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
   ca_size_t i;
-#if RUBY_VERSION_CODE >= 190
   RETURN_ENUMERATOR(self, 0, 0);
-#endif
   rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
@@ -409,7 +297,7 @@ rb_ca_map_addr_bang (VALUE self)
 
 
 void
-Init_carray_loop ()
+Init_carray_loop (void)
 {
   rb_define_singleton_method(rb_cCArray, "each_index", rb_ca_s_each_index, -1);
 

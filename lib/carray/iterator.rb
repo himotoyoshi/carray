@@ -1,367 +1,75 @@
 # ----------------------------------------------------------------------------
 #
-#  carray/iterator.rb
+#  CAIterator -- the form-only base of the iterator family.  It carries no
+#  engine: each family member (CASlabIterator / CAWindowIterator /
+#  CABlockIterator / CACategoricalIterator / CAGroupIterator) implements its own
+#  fast engine.  The base declares two things: the shared form accessors over
+#  the @ndim / @shape ivars, and the common reduction surface every member must
+#  implement (surface uniformity is the value: "this is an iterator, so it must
+#  answer these").
 #
-#  This file is part of Ruby/CArray extension library.
+#  `shape` is canonical; `dim` is a legacy alias.  A member exposes what it
+#  actually holds (source / reference / labels) and adds its own methods
+#  (min_index / max_index / map / correlate / convolve / sort_addr / ...);
+#  those are NOT part of the common contract because some members legitimately
+#  omit them (a window has no map, a group has no within-piece min_index).
 #
-#  Copyright (C) 2005-2025 Hiroki Motoyoshi
+#  The retired 2.0 generic dispatch (calculate / filter / evaluate over a
+#  kernel_at_addr slot) is preserved at `samples/caiterator/iterator.{rb,c}`.
 #
 # ----------------------------------------------------------------------------
 
 class CAIterator
 
-  include Enumerable 
+  # No `include Enumerable`: the family surface is fully explicit per iterator,
+  # so Enumerable's reduction-like names (to_a / min / sum / count / ...) do not
+  # leak in and silently fold the pieces. A method outside the contract below
+  # that a member does not define is a clean NoMethodError, not a wrong answer.
 
-  def self.define_evaluate_method (name)
-    define_method(name) { |*args|
-      self.evaluate(name, *args) 
-    }
-  end
+  attr_reader :ndim, :shape
+  alias dim shape
 
+  # The required reduction surface, modelled on the two reference members
+  # CASlabIterator and CACategoricalIterator (the surface they both provide).
+  # Declared abstract so a later member
+  # (window / block / group) that leaves one unimplemented fails loudly here
+  # rather than reading as "no such method" -- that gap is the member's to close.
+  # A member that genuinely cannot provide one overrides it to raise with its
+  # own reason.
   [
-    :axes!,
-    :normalize!,
-    :random!,
-    :reverse!,
-    :roll!,
-    :scale!,
-    :seq!,
-    :shift!,
-    :shuffle!,
-    :sort!,
-    :span!,
-    :transpose!,
+    :sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,   # tier 1
+    :variancep, :stddevp, :minmax,                                    # tier 2
+    :min_index, :max_index, :min_addr, :max_addr,                     # position
+    :wsum, :wmean,                                                    # weighted
+    :median, :percentile, :quantile,                                 # tier 3
+    :count, :count_not_masked, :count_masked, :elements,             # count family
+    :each, :reduce,                                                   # generic iterate
   ].each do |name|
-    define_evaluate_method(name)
-  end
-
-  def self.define_filter_method (data_type, name)
-    define_method(name) { |*args|
-      _data_type = data_type || self.reference.data_type
-      self.filter(_data_type, name, *args) 
-    }
-  end
-
-  [
-    [:axes      ],
-    [:normalize ],
-    [:random    ],
-    [:reverse   ],
-    [:roll      ],
-    [:scale     ],
-    [:seq       ],
-    [:shift     ],
-    [:shuffle   ],
-    [:sort      ],
-    [:span      ],
-    [:transpose ],
-  ].each do |name, data_type|
-    define_filter_method(data_type, name)
-  end
-
-  def self.define_calculate_method (data_type, name)
-    define_method(name) { |*args|
-      _data_type = data_type || self.reference.data_type
-      self.calculate(_data_type, name, *args) 
-    }
-  end
-
-  [
-    [:count_masked,     CA_INT32],
-    [:count_not_masked, CA_INT32],
-    [:count_true,       CA_INT32],
-    [:count_false,      CA_INT32],
-    [:size,             CA_INT32],
-    [:min,              nil],
-    [:min_addr,         CA_INT32],
-    [:max,              nil],
-    [:max_addr,         CA_INT32],
-    [:prod,             CA_FLOAT64],
-    [:sum,              CA_FLOAT64],
-    [:wsum,             CA_FLOAT64],
-    [:mean,             CA_FLOAT64],
-    [:wmean,            CA_FLOAT64],
-    [:variancep,        CA_FLOAT64],
-    [:variance,         CA_FLOAT64],
-    [:stddevp,          CA_FLOAT64],
-    [:stddev,           CA_FLOAT64],
-    [:median,           CA_FLOAT64],
-    [:accumulate,       nil],
-    [:cummin,           nil],
-    [:cummax,           nil],
-    [:cumcount,         CA_FLOAT64],
-    [:cumprod,          CA_FLOAT64],
-    [:cumsum,           CA_FLOAT64],
-    [:cumwsum,          CA_FLOAT64],
-    [:count_equal,      CA_INT32],
-    [:count_equiv,      CA_INT32],
-    [:count_close,      CA_INT32],
-    [:all_equal?,       CA_BOOLEAN],
-    [:any_equal?,       CA_BOOLEAN],
-    [:none_equal?,      CA_BOOLEAN],
-    [:all_equiv?,       CA_BOOLEAN],
-    [:any_equiv?,       CA_BOOLEAN],
-    [:none_equiv?,      CA_BOOLEAN],
-    [:all_close?,       CA_BOOLEAN],
-    [:any_close?,       CA_BOOLEAN],
-    [:none_close?,      CA_BOOLEAN],
-    [:nearest_addr,     CA_INT32],
-    [:mul_add,          nil],
-  ].each do |name, data_type|
-    define_calculate_method(data_type, name)
-  end
-
-  # -----------------------------------------------------------
-
-  def ca
-    @iterary ||= CAIteratorArray.new(self)
-    return @iterary
-  end
-
-  def to_a
-    return ca.to_a
-  end
-
-  def pick (*idx)
-    out = prepare_output(reference.data_type, :bytes=>reference.bytes)
-    elements.times do |addr|
-      blk = kernel_at_addr(addr)
-      out[addr] = blk[*idx]
-    end
-    return out
-  end
-
-  def asign! (val)
-    each do |elem|
-      elem[] = val
-    end
-    return self
-  end
-
-  def [] (*idx)
-    if idx.any?{|x| x.is_a?(Symbol) }
-      return ca[*idx]
-    else
-      case idx.size
-      when 0
-        return clone
-      when 1
-        return kernel_at_addr(idx[0])
-      else
-        return kernel_at_index(idx)
-      end
+    define_method(name) do |*, **, &_blk|
+      raise NotImplementedError, "#{self.class} must implement ##{name}"
     end
   end
 
-  def []= (*idx)
-    val = idx.pop
-    if idx.any?{|x| x.is_a?(Symbol) }
-      ca[*idx] = [val]
-    else
-      case idx.size
-      when 0
-        asign!(val)
-      when 1
-        kernel_at_addr(idx[0])[] = val
-      else
-        kernel_at_index(idx)[] = val
-      end
+  # Recommended (should) surface -- template methods.  These are well-defined
+  # for some members and structurally impossible for others, so they are not
+  # required: `map` is a per-piece element-wise transform scattered back to the
+  # source, `sort_addr` is a per-piece sort returning source flat addresses, and
+  # the segment scans (cumsum / cumprod / cummax / cummin / cumcount) write a
+  # per-cell running statistic of each piece.  A member implements each when it
+  # is well-defined and overrides it to raise with a reason when it is not.  The
+  # scans belong here for the same reason as map: a running per-cell value is
+  # single-valued only when each cell belongs to exactly one piece, so the
+  # partition members (slab / block / categorical / group) provide them, while
+  # CAWindowIterator's overlapping padded windows put a cell in many windows --
+  # no single running value -- and it raises, exactly as it does for map /
+  # sort_addr.  Un-overridden each is simply unavailable, not a contract
+  # violation.  min_addr / max_addr stay required: a single winner address is
+  # well-defined even for an overlapping window.
+  [:map, :sort_addr,
+   :cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |name|
+    define_method(name) do |*, **, &_blk|
+      raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"
     end
-  end
-
-  def put (*idx)
-    val = idx.pop
-    elements.times do |addr|
-      blk = kernel_at_addr(addr)
-      blk[*idx] = val
-    end
-    return self
-  end
-
-  def convert (data_type, options={})
-    out = prepare_output(data_type, options)
-    out.map_addr!{ |addr|
-      blk = kernel_at_addr(addr)
-      yield(blk.clone)
-    }
-    return out
-  end
-
-  def each ()
-    retval = nil
-    if self.class::UNIFORM_KERNEL
-      reference.attach! {
-        blk = kernel_at_addr(0)
-        elements.times do |addr|
-          kernel_move_to_addr(addr, blk)
-          retval = yield(blk.clone)
-        end
-      }
-    else
-      elements.times do |addr|
-        retval = yield(kernel_at_addr(addr).clone)
-      end
-    end
-    return retval
-  end
-
-  def each_with_addr ()
-    retval = nil
-    if self.class::UNIFORM_KERNEL
-      reference.attach! {
-        elements.times do |addr|
-          blk = kernel_at_addr(addr)
-          retval = yield(blk.clone, addr)
-        end
-      }
-    else
-      elements.times do |addr|
-        retval = yield(kernel_at_addr(addr).clone, addr)
-      end
-    end
-    return retval
-  end
-
-  def each_with_index ()
-    retval = nil
-    if self.class::UNIFORM_KERNEL
-      reference.attach! {
-        CArray.each_index(*dim) do |*idx|
-          blk = kernel_at_index(idx)
-          retval = yield(blk.clone, idx)
-        end
-      }
-    else
-      CArray.each_index(*dim) do |*idx|
-        retval = yield(kernel_at_index(idx).clone, idx)
-      end
-    end
-    return retval
-  end
-
-  def inject (*argv)
-    case argv.size
-    when 0
-      memo = nil
-      each_with_addr do |val, addr|
-        if addr == 0
-          memo = val
-        else
-          memo = yield(memo, val)
-        end
-      end
-      return memo
-    when 1
-      memo = argv.first
-      each do |val|
-        memo = yield(memo, val)
-      end
-      return memo
-    else
-      raise "invalid number of arguments (#{argv.size} for 0 or 1)"
-    end
-  end
-
-  def sort_by! (&block)
-    ia = self.ca
-    ia[] = ia.to_a.sort_by(&block).map{|x| x.to_ca }
-    return reference
-  end
-
-  def sort_by (&block)
-    out = reference.template
-    idx = ca.convert(:object, &block).sort_addr
-    ca[idx].each_with_addr do |blk, i|
-      kernel_at_addr(i, out)[] = blk
-    end
-    return out
-  end
-
-  def sort_with (&block)
-    warn "CAIterator#sort_with will be obsolete"
-    out = reference.template
-    idx = CA.sort_addr(*yield(self))
-    ca[idx].each_with_addr do |blk, i|
-      kernel_at_addr(i, out)[] = blk
-    end
-    return out
   end
 
 end
-
-
-# -----------------------------------------------------------------
-
-class CArray
-  def windows (*args, &block)
-    return CAWindowIterator.new(self.window(*args, &block))
-  end
-end
-
-# -----------------------------------------------------------------
-
-class CArray
-  
-  def classes (classifier=nil, &block)
-    return CAClassIterator.new(self, classifier).__build__(&block)
-  end
-  
-end
-
-class CAClassIterator < CAIterator # :nodoc:
-  
-  UNIFORM_KERNEL = false
-  
-  def initialize (reference, classifier = nil)
-    @reference = reference
-    @classifier = classifier || @reference.uniq.sort
-    @null = CArray.new(@reference.data_type,[0])
-    @null.data_class = @reference.data_class if @reference.has_data_class?
-    @table = {}
-    @ndim = 1
-    @dim  = [0]
-    if @classifier.all_masked? or @classifier.size == 0
-      @dim  = [0]
-    else
-#      @dim  = [@classifier.max+1]
-      @dim  = [@classifier.size]
-    end
-  end
-  
-  attr_reader :classifier, :table
-  
-  def __build__ (&block)
-    if @block
-      @classifier.each_with_addr do |v, i|
-        @table[v] = block[v].where
-      end
-    else
-      @classifier.each_with_addr do |v, i|
-        @table[v] = @reference.eq(v).where
-      end
-    end
-    return self
-  end
-  
-  def ndiming (&block)
-    block ||= lambda {|a| a.size }
-    values = self.to_a.map{|v| block[v] }.to_ca
-    addrs  = values.sort_addr.reverse
-    return CArray.join([@classifier[addrs], values[addrs]])
-  end
-
-  def kernel_at_addr (addr, ref = nil)
-    ref ||= @reference
-    if @table[addr]
-      return ref[@table[addr]]
-    else
-      return @null
-    end
-  end
-
-  def kernel_at_index (idx, ref = nil)
-    kernel_at_addr(idx[0], ref)
-  end
-
-end
-

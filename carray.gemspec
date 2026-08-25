@@ -1,19 +1,8 @@
-Gem::Specification::new do |s|
-
-  version = "2.0.1"
-
-  files = Dir.glob("**/*") + [".yardopts"] -
-                             [ 
-                               Dir.glob("carray-*.gem"), 
-                               Dir.glob("ext/**/{Makefile,mkmf.log}"),
-                               Dir.glob("**/*.{o,so,bundle}"),
-                               Dir.glob("**/*~"),
-                               Dir.glob("doc/**/*"),
-                               Dir.glob("test/**/*"),
-                             ].flatten
-
-  s.platform    = Gem::Platform::RUBY
+Gem::Specification.new do |s|
   s.name        = "carray"
+  s.version     = "3.0.0"
+  s.authors      = ["himotoyoshi"]
+  s.email       = ["himotoyoshi@users.noreply.github.com"]
   s.summary     = "Multi-dimesional array class for Ruby"
   s.description = <<-HERE
     Ruby/CArray is an extension library for the multi-dimensional numerical array
@@ -22,13 +11,22 @@ Gem::Specification::new do |s|
     memory block and treats them collectively to ensure efficient performance.
     Therefore, Ruby/CArray is suitable for numerical computation and data analysis.
   HERE
-  s.version     = version
-  s.author      = "Hiroki Motoyoshi"
-  s.email       = ""
-  s.license     = 'MIT'
-  s.homepage    = 'https://github.com/himotoyoshi/carray'
-  s.files       = files
-  s.extensions  = [ "ext/extconf.rb" ] 
-  s.required_ruby_version = ">= 2.4.0"
+  s.homepage    = "https://github.com/himotoyoshi/carray"
+  s.license     = "MIT"
+  s.platform    = Gem::Platform::RUBY
+  s.required_ruby_version = ">= 3.0"
+  s.files       = [
+    *Dir.glob("lib/**/*.rb"),
+    *(Dir.glob("ext/*.c") - %w[ext/carray_kernels.c ext/carray_cast_func.c ext/carray_math.c]),
+    *Dir.glob("ext/*.h"),
+    *Dir.glob("ext/*.rb"),
+    "LICENSE",
+    "README.md",
+    "NEWS.md",
+    "CHANGELOG.md",
+    ".yardopts",
+    "carray.gemspec",
+  ].select { |f| File.file?(f) }
+  s.extensions  = ["ext/extconf.rb"]
+  s.require_paths = ["lib", "ext"]
 end
-

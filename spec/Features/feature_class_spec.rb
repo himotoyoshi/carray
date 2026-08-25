@@ -35,23 +35,10 @@ describe "TestCArrayClass " do
     # is_asserted_by { CArray.sizeof(CA_UINT64), 8)
     is_asserted_by {  CArray.sizeof(CA_FLOAT32) == 4 }
     is_asserted_by {  CArray.sizeof(CA_FLOAT64) == 8 }
-    # is_asserted_by { CArray.sizeof(CA_FLOAT128), 16)
     # is_asserted_by { CArray.sizeof(CA_CMPLX64), 8)
     # is_asserted_by { CArray.sizeof(CA_CMPLX128), 16)
-    # is_asserted_by { CArray.sizeof(CA_CMPLX256), 32)
     is_asserted_by {  CArray.sizeof(CA_FIXLEN) == 0 }
     # is_asserted_by { CArray.sizeof(CA_OBJECT), 0)
-  end
-
-  example "valid_type?" do
-    # can't test this method
-    expect { CArray.data_type?(-1) }.to raise_error(ArgumentError)
-    is_asserted_by {  CArray.data_type?(CA_FIXLEN) == true }
-    is_asserted_by {  CArray.data_type?(CA_INT8) == true }
-    is_asserted_by {  CArray.data_type?(CA_INT32) == true }
-    is_asserted_by {  CArray.data_type?(CA_FLOAT32) == true }
-    is_asserted_by {  CArray.data_type?(CA_OBJECT) == true }
-    expect { CArray.data_type?(CA_OBJECT+1) }.to raise_error(ArgumentError)
   end
 
   example "type_name" do
@@ -66,18 +53,12 @@ describe "TestCArrayClass " do
      [CA_UINT64, "uint64"],
      [CA_FLOAT32, "float32"],
      [CA_FLOAT64, "float64"],
-     [CA_FLOAT128, "float128"],
      [CA_CMPLX64, "cmplx64"],
      [CA_CMPLX128, "cmplx128"],
-     [CA_CMPLX256, "cmplx256"],
      [CA_FIXLEN, "fixlen"],
      [CA_OBJECT, "object"],
     ].each do |type, name|
-      if CArray.data_type?(type)
-        is_asserted_by {  CArray.data_type_name(type) == name }
-      else
-        expect { CArray.data_type_name(type) }.to raise_error(RuntimeError)
-      end
+      is_asserted_by {  CArray.data_type_name(type) == name }
     end
   end
 

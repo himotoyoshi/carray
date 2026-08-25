@@ -9,7 +9,10 @@ describe "CArray#wrap_readonly" do
            [4,5,6],
            [7,8,9]]
     a = CArray.wrap_readonly(ary, CA_INT32)
-    is_asserted_by { a.class == CAFake }
+    # Phase 6 P.6.2.e.1: wrap_readonly numeric dtype mismatch now
+    # returns CAMonOp(cast) (Q11 (E) fake narrow).  CAFake retained
+    # for CA_FIXLEN / data_class / CA_OBJECT cases.
+    is_asserted_by { a.class == CAMonOp }
     is_asserted_by { a.entity? == false }
     is_asserted_by { a.data_type == CA_INT32 }
     is_asserted_by { a.shape == [3,3] }

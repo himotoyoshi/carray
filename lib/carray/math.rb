@@ -1,169 +1,80 @@
-# ----------------------------------------------------------------------------
-#
-#  carray/math.rb
-#
-#  This file is part of Ruby/CArray extension library.
-#
-#  Copyright (C) 2005-2025 Hiroki Motoyoshi
-#
-# ----------------------------------------------------------------------------
-
-class CArray
-
-  # complex number
-
-  # Return the real part of +self+.
-  # If +self+ is a complex array, the resulted array is CAMember object
-  # refers the appropriate part of +self+.
-  # Otherwise, the resulted array is CARefer object refers +self+.
-  # If you change the resulted array, the original array is also changed.
-  #
-  def real
-    if not @__real__
-      if complex?
-        @__real__ = case data_type
-                    when CA_CMPLX64
-                      field(0, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(0, CA_FLOAT64)
-                    when CA_CMPLX128
-                      field(0, CA_FLOAT128)
-                    end
-      else
-        @__real__ = self[]
-      end
-    end
-    @__real__
-  end
-
-  def real= (val)
-    real[] = val
-  end
-
-  # Return the imaginary part of +self+.
-  # If +self+ is a complex array, the resulted array is CAMember object
-  # refers the appropriate part of +self+. In this case,
-  # you change the resulted array, the original array is also changed.
-  #
-  # Otherwise, the resulted array is a dummy CArray object filled with 0.
-  # In this case, the change in the resulted array does not affect
-  # the original array. For this purpose, you should explicitly convert
-  # the array to complex array.
-  #
-  def imag
-    if not @__imag__
-      if complex?
-        @__imag__ = case data_type
-                    when CA_CMPLX64
-                      field(4, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(8, CA_FLOAT64)
-                    when CA_CMPLX128
-                      field(16, CA_FLOAT128)
-                    end
-      else
-        @__imag__ = self.template { 0 }
-      end
-    end
-    return @__imag__
-  end
-
-  def imag= (val)
-    if complex?
-      imag[] = val
-    else
-      raise "not a complex array"
-    end
-  end
-
-  # comparison operators
-
-  def <=> (other)
-    lower = self < other
-    upper = self > other
-    out = CArray.new(CA_INT8, lower.dim)
-    out[lower] = -1
-    out[upper] = 1
-    return out
-  end
-
-  alias cmp <=>
-
-  def is_equiv (other, rtol)
-    exact_eq    = self.eq(other)
-    relative_eq = ((self - other).abs/CAMath.max(self.abs, other.abs) <= rtol)
-    return (exact_eq).or(relative_eq)
-  end
-
-  def is_close (other, atol)
-    return ((self - other).abs <= atol)
-  end
-
-  def is_divisible (n)
-    unless integer?
-      raise "data type of reciever of CArray#divisible? should be integer."
-    end
-    return (self % n).eq(0)
-  end
-
-  def is_not_divisible (n)
-    unless integer?
-      raise "data type of reciever of CArray#divisible? should be integer."
-    end
-    return (self % n).ne(0)
-  end
-
-  def real?
-    if complex?
-      imag.all_equal?(0)
-    elsif numeric?
-      true
-    else
-      nil
-    end
-  end
-
-  def is_real
-    if complex?
-      imag.eq(0)
-    elsif numeric?
-      self.true
-    else
-      nil
-    end
-  end
-
-  def sign
-    out = self.zero
-    out[self.lt(0)] = -1
-    out[self.gt(0)] = 1
-    if float?
-      out[self.is_nan] = 0.0/0.0
-    end
-    return out
-  end
-  
-  def quo (other)
-    case 
-    when integer?
-      return object.quo_i(other)
-    when object?
-      return quo_i(other)
-    else
-      return self/other
-    end
-  end
-  
-end
-
-
 module CAMath
 
   module_function
 
+  # Module-function front-ends for binop math methods registered on
+  # CArray by mkkernel. The first argument is auto-wrapped to CArray
+  # via `CArray.wrap_readonly`, so `CAMath.hypot(3, arr)` continues to
+  # work. Integer input is unsupported at the kernel layer -- the
+  # caller must cast to float64 explicitly (e.g.
+  # `arr.as_float64.hypot(...)`).
+
+  # @overload expm1(x)
+  #   Returns `exp(x) - 1` element-wise as float64.
+  #   @param x [CArray, Numeric] input value.
+  #   @return [CArray]
+  def expm1(x);  CArray.wrap_readonly(x, :float64).expm1;  end
+
+  # @overload log1p(x)
+  #   Returns `log(1 + x)` element-wise as float64.
+  #   @param x [CArray, Numeric] input value.
+  #   @return [CArray]
+  def log1p(x);  CArray.wrap_readonly(x, :float64).log1p;  end
+
+  # @overload atan2(y, x)
+  #   Returns the element-wise arc tangent of `y / x` with quadrant
+  #   selection.
+  #   @param y [CArray, Numeric] numerator.
+  #   @param x [CArray, Numeric] denominator.
+  #   @return [CArray]
+  def atan2(y, x);     CArray.wrap_readonly(y, :float64).atan2(x);     end
+
+  # @overload hypot(x, y)
+  #   Returns the element-wise Euclidean distance `sqrt(x^2 + y^2)`.
+  #   @param x [CArray, Numeric] first leg.
+  #   @param y [CArray, Numeric] second leg.
+  #   @return [CArray]
+  def hypot(x, y);     CArray.wrap_readonly(x, :float64).hypot(y);     end
+
+  # @overload copysign(x, y)
+  #   Returns `|x|` with the sign of `y`, element-wise.
+  #   @param x [CArray, Numeric] magnitude source.
+  #   @param y [CArray, Numeric] sign source.
+  #   @return [CArray]
+  def copysign(x, y);  CArray.wrap_readonly(x, :float64).copysign(y);  end
+
+  # @overload logaddexp(x, y)
+  #   Returns `log(exp(x) + exp(y))` computed to avoid overflow,
+  #   element-wise.
+  #   @param x [CArray, Numeric] first log-space value.
+  #   @param y [CArray, Numeric] second log-space value.
+  #   @return [CArray]
+  def logaddexp(x, y); CArray.wrap_readonly(x, :float64).logaddexp(y); end
+
+  # @overload nextafter(x, y)
+  #   Returns the next representable float from `x` toward `y`,
+  #   element-wise.
+  #   @param x [CArray, Numeric] starting value.
+  #   @param y [CArray, Numeric] direction target.
+  #   @return [CArray]
+  def nextafter(x, y); CArray.wrap_readonly(x, :float64).nextafter(y); end
+
+  # @overload fmod(x, y)
+  #   Returns the C-style `fmod(x, y)` element-wise (sign follows `x`).
+  #   @param x [CArray, Numeric] dividend.
+  #   @param y [CArray, Numeric] divisor.
+  #   @return [CArray]
+  def fmod(x, y);      CArray.wrap_readonly(x, :float64).fmod(y);      end
+
+  # @overload min(*argv)
+  #   Returns the element-wise minimum of the given CArray and other
+  #   arguments. At least one argument must be a CArray.
+  #   @param argv [Array<CArray, Numeric>] operands.
+  #   @return [CArray] fresh CArray holding the running min.
+  #   @raise [RuntimeError] when no CArray argument is present.
   def min (*argv)
     if ary = argv.find{|x| x.is_a?(CArray) }
-      out = ary.to_ca
+      out = ary.copy
       argv.delete(ary)
       argv.each do |x|
         out.pmin!(x)
@@ -174,9 +85,15 @@ module CAMath
     return out
   end
 
+  # @overload max(*argv)
+  #   Returns the element-wise maximum of the given CArray and other
+  #   arguments. At least one argument must be a CArray.
+  #   @param argv [Array<CArray, Numeric>] operands.
+  #   @return [CArray] fresh CArray holding the running max.
+  #   @raise [RuntimeError] when no CArray argument is present.
   def max (*argv)
     if ary = argv.find{|x| x.is_a?(CArray) }
-      out = ary.to_ca
+      out = ary.copy
       argv.delete(ary)
       argv.each do |x|
         out.pmax!(x)
@@ -188,184 +105,3 @@ module CAMath
   end
 
 end
-
-class CArray
-
-  #
-  # statistics
-  #
-
-  def random (*argv)
-    return template.random!(*argv)
-  end
-
-  def randomn!
-    if elements == 1
-      self[0] = CArray.new(data_type,[2]).randomn![0]
-      return self
-    end
-    x1 = CArray.new(data_type, [elements/2])
-    x2 = CArray.new(data_type, [elements/2])
-    fac = x1.random!.log!.mul!(-2.0).sqrt!    ### fac = sqrt(-2*log(rnd()))
-    x2.random!.mul!(2.0*Math::PI)             ### x2  = 2*PI*rnd()
-    x3 = x2.to_ca
-    self2 = reshape(2,elements/2)
-    self2[0,nil] = x2.cos!.mul!(fac)          ### self[even] = fac*cos(x2)
-    self2[1,nil] = x3.sin!.mul!(fac)          ### self[odd]  = fac*sin(x2)
-    if elements % 2 == 1
-      self[[-1]].randomn!
-    end
-    return self
-  end
-
-  def randomn
-    return template.randomn!
-  end
-
-  def anomaly (*argv)
-    opt = argv.last.is_a?(Hash) ? argv.pop : {}
-    idxs = Array.new(self.ndim) { |i| argv.include?(i) ? :* : nil }
-    if mn = opt[:mean]
-      return self - mn[*idxs]
-    else
-      return self - self.mean(*argv)[*idxs]
-    end
-  end
-
-  alias anom anomaly
-
-  def median (*argv)
-    opt = argv.last.is_a?(Hash) ? argv.pop : {}
-    min_count  = opt[:mask_limit]
-    if min_count and min_count < 0
-      min_count += elements
-    end
-    fill_value = opt[:fill_value]
-    if argv.empty?
-      if has_mask?
-        if min_count and count_masked() > min_count
-          return fill_value || UNDEF
-        end
-        c = self[:is_not_masked].sort
-        n = self.count_not_masked
-      else
-        c = self.sort
-        n = c.elements
-      end
-      if n == 0
-        return fill_value || UNDEF
-      else
-        return (c[(n-1)/2] + c[n/2])/2.0
-      end
-    else
-      raise "CArray#median is not implemented for multiple ndims"
-    end
-
-  end
-
-  def percentile (*argv)
-    opt = argv.last.is_a?(Hash) ? argv.pop : {}
-    pers = argv
-    min_count  = opt[:mask_limit]
-    if min_count and min_count < 0
-      min_count += elements
-    end
-    fill_value = opt[:fill_value]
-    if has_mask?
-      if min_count and count_masked() > min_count
-        return argv.map { fill_value || UNDEF }
-      end
-      ca = self[:is_not_masked].sort
-      n  = self.count_not_masked
-    else
-      ca = self.sort
-      n  = ca.elements
-    end
-    out = []
-    begin
-      pers.each do |per|
-        if per == 100
-          out << ca[n-1]
-        elsif per >= 0 and per < 100
-          if n > 1
-            f = (n-1)*per/100.0
-            k = f.floor
-            r = f - k
-            out << (1-r)*ca[k] + r*ca[k+1]
-          else
-            out << ca[0]
-          end
-        else
-          out << CA_NAN
-        end
-      end
-    end
-    return out
-  end
-  
-  def quantile 
-    return percentile(0, 25, 50, 75, 100)
-  end
-
-  def covariancep (y, min_count = nil, fill_value = nil)
-    x = self.double
-    y = y.double
-    if x.has_mask? or y.has_mask?
-      x.inherit_mask(y)
-      y.inherit_mask(x)
-      count = x.count_not_masked
-      xm = x.mean(:min_count => min_count)
-      ym = y.mean(:min_count => min_count)
-      if ( xm == UNDEF or ym == UNDEF )
-        return fill_value || UNDEF
-      else
-        return (x-xm).wsum(y-ym)/count
-      end
-    else
-      return (x-x.mean).wsum(y-y.mean)/elements
-    end
-  end
-
-  def covariance (y, min_count = nil, fill_value = nil)
-    x = self.double
-    y = y.double
-    if x.has_mask? or y.has_mask?
-      x.inherit_mask(y)
-      y.inherit_mask(x)
-      count = x.count_not_masked
-      xm = x.mean(:min_count=>min_count)
-      ym = y.mean(:min_count=>min_count)
-      if ( xm == UNDEF or ym == UNDEF )
-        return fill_value || UNDEF
-      else
-        return (x-xm).wsum(y-ym)/(count-1)
-      end
-    else
-      return (x-x.mean).wsum(y-y.mean)/(elements-1)
-    end
-  end
-
-  def correlation (y, min_count = nil, fill_value = nil)
-    x = self.double
-    y = y.double
-    if x.has_mask? or y.has_mask?
-      x.inherit_mask(y)
-      y.inherit_mask(x)
-      xm = x.mean(:min_count=>min_count)
-      ym = y.mean(:min_count=>min_count)
-      if ( xm == UNDEF or ym == UNDEF )
-        return fill_value || UNDEF
-      else
-        xd, yd = x-xm, y-ym
-        return xd.wsum(yd)/(xd.wsum(xd)*yd.wsum(yd)).sqrt
-      end
-    else
-      xd, yd = x-x.mean, y-y.mean
-      return xd.wsum(yd)/(xd.wsum(xd)*yd.wsum(yd)).sqrt
-    end
-  end
-
-end
-
-
-
