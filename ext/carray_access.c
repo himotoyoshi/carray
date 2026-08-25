@@ -1,22 +1,25 @@
 /* ---------------------------------------------------------------------------
 
-  carray_access.c
-
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
+  The indexer: CArray#[] and #[]= plus their helpers (fill, addr2index,
+  index2addr, normalize_index, scan_index).  Classifies an index spec via
+  rb_ca_scan_index (forwarded to ext/carray_index_classifier.c) and
+  dispatches each CA_REG_* case to the matching view constructor
+  (CABlock / CASelect / CAGrid / CARemap / CASlabIterator / ...).
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* per-obj_type view constructors */
+#include "ca_obj_face.h"
+#include "carray_index_classifier.h"  /* rb_ca_scan_index_v2 forward decl */
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
 #define RANGE_END(r)  (rb_funcall(r, id_end, 0))
 #define RANGE_EXCL(r) (rb_funcall(r, id_excl_end, 0))
 
-static ID id_ca, id_to_ca;
-static VALUE sym_star, sym_perc;
+static ID id_to_ca;
+static VALUE sym_star, sym_perc, sym_under, sym_gt, sym_tilde;
 static VALUE S_CAInfo;
 
 VALUE
@@ -54,10 +57,10 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
       ca_store_index(ca, idx, v);
     }
     else {
-      char *v = malloc_with_check(ca->bytes);
+      char *v = xmalloc(ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_index(ca, idx, v);
-      free(v);
+      xfree(v);
     }
   }
 
@@ -82,10 +85,10 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
     out = rb_ca_ptr2obj(self, v);
   }
   else {
-    char *v = malloc_with_check(ca->bytes);
+    char *v = xmalloc(ca->bytes);
     ca_fetch_index(ca, idx, v);
     out = rb_ca_ptr2obj(self, v);
-    free(v);
+    xfree(v);
   }
 
   /* check if the element is masked */
@@ -96,6 +99,19 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
     if ( mval ) {
       return CA_UNDEF; /* the element is masked */
     }
+  }
+
+  /* Face scalar decode (invoked if the subclass defines storage_to_scalar(raw)) */
+  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+
+  /* Boolean scalar access yields true/false, not Integer 0/1.  Bulk paths
+     (to_a / cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
+     INT2FIX(0/1) so a boolean-storage Face that decoded to its own object is
+     left untouched; note INT2FIX(0) is truthy in Ruby, so map by value, not
+     by RTEST. */
+  if ( ca->data_type == CA_BOOLEAN &&
+       ( out == INT2FIX(0) || out == INT2FIX(1) ) ) {
+    out = ( out == INT2FIX(1) ) ? Qtrue : Qfalse;
   }
 
   return out;
@@ -134,10 +150,10 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
       ca_store_addr(ca, addr, v);
     }
     else {
-      char *v = malloc_with_check(ca->bytes);
+      char *v = xmalloc(ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_addr(ca, addr, v);
-      free(v);
+      xfree(v);
     }
   }
 
@@ -162,10 +178,10 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
     out = rb_ca_ptr2obj(self, v);
   }
   else {
-    char *v = malloc_with_check(ca->bytes);
+    char *v = xmalloc(ca->bytes);
     ca_fetch_addr(ca, addr, v);
     out = rb_ca_ptr2obj(self, v);
-    free(v);
+    xfree(v);
   }
 
   /* check if the element is masked */
@@ -178,17 +194,17 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
     }
   }
 
+  /* Face scalar decode */
+  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+
+  /* Boolean scalar access yields true/false (see rb_ca_fetch_index). */
+  if ( ca->data_type == CA_BOOLEAN &&
+       ( out == INT2FIX(0) || out == INT2FIX(1) ) ) {
+    out = ( out == INT2FIX(1) ) ? Qtrue : Qfalse;
+  }
+
   return out;
 }
-
-/* yard:
-  class CArray
-    def fill
-    end
-    def fill_copy
-    end
-  end
-*/
 
 VALUE
 rb_ca_fill (VALUE self, VALUE rval)
@@ -199,7 +215,7 @@ rb_ca_fill (VALUE self, VALUE rval)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
-    return rval;
+    return self;                /* empty = no-op fill; return self for chaining */
   }
 
   if ( rval == CA_UNDEF ) {
@@ -211,14 +227,14 @@ rb_ca_fill (VALUE self, VALUE rval)
     ca_fill(ca->mask, &one);
   }
   else {
-    char *fval = malloc_with_check(ca->bytes);
+    char *fval = xmalloc(ca->bytes);
     boolean8_t zero = 0;
     rb_ca_obj2ptr(self, rval, fval);
     if ( ca_has_mask(ca) ) {
       ca_fill(ca->mask, &zero);
     }
     ca_fill(ca, fval);
-    free(fval);
+    xfree(fval);
   }
 
   return self;
@@ -265,11 +281,6 @@ ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
     }
   }
 }
-
-/* yard:
-  def CArray.guess_array_shape (arg)
-  end
-*/  
 
 static VALUE
 rb_ca_s_guess_array_shape (VALUE self, VALUE ary)
@@ -340,7 +351,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
       rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
     }
     else {
-      VALUE out = rb_ary_new2(0);
+      volatile VALUE out = rb_ary_new2(0);
       int len = 0;
       ary_flatten_upto_level(ary, max_level, 0, out, &len);
       if ( len != elements ) {
@@ -366,7 +377,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
     }
 
     if ( same_shape ) {
-      VALUE out = rb_ary_new2(0);
+      volatile VALUE out = rb_ary_new2(0);
       int len = 0;
       ary_flatten_upto_level(ary, ca->ndim-1, 0, out, &len);
 
@@ -388,7 +399,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
       }
 
       if ( level >= 0 ) {
-        VALUE out = rb_ary_new2(0);
+        volatile VALUE out = rb_ary_new2(0);
         int len = 0;
         ary_flatten_upto_level(ary, level, 0, out, &len);
         if ( len != elements ) {
@@ -411,7 +422,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
   }                                                                     \
   if ( index < 0 || index >= (dim) ) {                                  \
     rb_raise(rb_eIndexError,                                            \
-             "index out of range at %i-dim ( %lld <=> 0..%lld )",        \
+             "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",        \
              i, (ca_size_t) index, (ca_size_t) (dim-1));                                          \
   }
 
@@ -419,522 +430,8 @@ void
 rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
                   long argc, VALUE *argv, CAIndexInfo *info)
 {
-  int32_t i;
-
-  info->ndim   = 0;
-  info->select = NULL;
-
-  if ( argc == 0 ) { /* ca[] -> CA_REG_ALL */
-    info->type = CA_REG_ALL;
-    return;
-  }
-
-  /* ca[:method, ...] -> CA_REG_METHOD_CALL
-     ca[:i, ...]      -> CA_REG_ITERATOR     */
-  if ( TYPE(argv[0]) == T_SYMBOL ) {
-    const char *symstr = rb_id2name(SYM2ID(argv[0]));
-    if ( strlen(symstr) > 1 ) { /* ca[:method, ...] -> CA_REG_METHOD_CALL */
-      info->type   = CA_REG_METHOD_CALL;
-      info->symbol = argv[0];
-      return;
-    }
-  }
-
-  if ( argc == 1 ) {
-
-    volatile VALUE arg = argv[0];
-
-    if ( arg == Qfalse ) { /* ca[false] -> CA_REG_ALL */
-      info->type = CA_REG_ALL;
-      return;
-    }
-
-    if ( rb_obj_is_carray(arg) ) {
-      CArray *cs;
-      TypedData_Get_Struct(arg, CArray, &carray_data_type, cs);
-      if ( ca_is_integer_type(cs) ) { 
-        #if 0
-        if ( ca_ndim == 1 && cs->ndim == 1 ) { /* ca[g] -> CA_REG_GRID (1d) */
-          info->type = CA_REG_GRID;
-        }
-        else {                             /* ca[m] -> CA_REG_MAPPER (2d...) */
-          info->type = CA_REG_MAPPING;
-        }
-        #endif
-        info->type = CA_REG_MAPPING;
-        return;
-      }
-      else if ( ca_is_boolean_type(cs) ) {
-                                         /* ca[selector] -> CA_REG_SELECT */
-        if ( ca_elements != cs->elements ) {
-          rb_raise(rb_eRuntimeError,
-           "mismatch of # of elements ( %lld <=> %lld ) in reference by selection",
-                   (ca_size_t) cs->elements, (ca_size_t) ca_elements);
-        }
-        info->type   = CA_REG_SELECT;
-        info->select = cs;
-        return;
-      }
-      else {
-        rb_raise(rb_eIndexError,
-                 "data_type %s is invalid for reference by selection/mapping"  \
-                 "(should be boolean or integer)",
-                 ca_type_name[cs->data_type]);
-      }
-    }
-
-    if ( TYPE(arg) == T_STRING ) {  
-      if ( StringValuePtr(arg)[0] == '@' ) { /* ca["@name"] -> CA_REG_ATTRIBUTE */
-        info->type   = CA_REG_ATTRIBUTE;
-        info->symbol = rb_str_new2(StringValuePtr(arg)+1);
-      }
-      else {                                 /* ca["field"] -> CA_REG_MEMBER */
-        info->type   = CA_REG_MEMBER;
-        info->symbol = ID2SYM(rb_intern(StringValuePtr(arg)));
-      }
-      return;
-    }
-
-    if ( arg == sym_star ) {        /* ca[:*] -> CA_REG_UNBOUND_REPEAT */
-      info->type   = CA_REG_UNBOUND_REPEAT;
-      return;
-    }
-
-    if ( ca_ndim > 1 ) { /* ca.ndim > 1 */
-      if ( rb_obj_is_kind_of(arg, rb_cInteger) ) { /* ca[n] -> CA_REG_ADDRESS */
-        ca_size_t addr;
-        info->type = CA_REG_ADDRESS;
-        info->ndim = 1;
-        addr = NUM2SIZE(arg);
-        if ( info->range_check ) {
-          CA_CHECK_INDEX(addr, ca_elements);
-        }
-        info->index[0].scalar = addr;
-        return;
-      }
-      else if ( arg == Qnil ) {
-        info->type = CA_REG_FLATTEN;
-        return;	
-      }
-      else { /* ca[i..j] -> CA_REG_ADDRESS_COMPLEX */
-        info->type = CA_REG_ADDRESS_COMPLEX;
-        return;
-      }
-    }
-  }
-
-  /* continue to next section */
-
-  if ( argc >= 1 ) {
-    int8_t  is_point = 0, is_all = 0, is_iterator = 0, is_repeat=0, is_grid=0;
-    int8_t  has_rubber = 0;
-    int32_t *index_type = info->index_type;
-    CAIndex *index = info->index;
-
-    for (i=0; i<argc; i++) {
-      if ( argv[i] == sym_perc ) {
-        is_repeat = 1;
-        goto loop_exit; /* ca[--,:%,--] -> CA_REG_REPEAT */
-      }
-
-      if ( argv[i] == sym_star ) {
-        is_repeat = 2;
-        goto loop_exit; /* ca[--,:*,--] -> CA_REG_UNBOUND_REPEAT */
-      }
-
-      if ( argv[i] == Qfalse ) { /* ca[--,false,--] (rubber dimension) */
-        has_rubber = 1;
-        if ( argc > ca_ndim + 1 ) {
-          rb_raise(rb_eIndexError,
-                   "index specification exceeds the ndim of carray (%i)", 
-                   ca_ndim);
-        }
-      }
-    }
-
-    if ( ! has_rubber && ca_ndim != argc ) {
-      rb_raise(rb_eIndexError,
-               "number of indices exceeds the ndim of carray (%i > %i)",
-               (int) argc, ca_ndim);
-    }
-
-    info->ndim = argc;
-
-    for (i=0; i<argc; i++) {
-      volatile VALUE arg = argv[i];
-
-    retry:
-
-      if ( rb_obj_is_kind_of(arg, rb_cInteger) ) { /* ca[--,i,--] */
-        ca_size_t scalar;
-        index_type[i] = CA_IDX_SCALAR;
-        scalar = NUM2SIZE(arg);
-        if ( info->range_check ) {
-          CA_CHECK_INDEX_AT(scalar, ca_dim[i], i);
-        }
-        index[i].scalar = scalar;
-      }
-      else if ( NIL_P(arg) ) { /* ca[--,nil,--] */
-        index_type[i] = CA_IDX_ALL;
-      }
-      else if ( arg == Qfalse ) { /* ca[--,false,--] */
-        int8_t rndim = ca_ndim - argc + 1;
-        int8_t j;
-        for (j=0; j<rndim; j++) {
-          index_type[i+j] = CA_IDX_ALL;
-        }
-        i += rndim-1;
-        argv -= rndim-1;
-        argc  = ca_ndim;
-        info->ndim = ca_ndim;
-      }
-      else if ( rb_obj_is_kind_of(arg, rb_cRange) ) { /* ca[--,i..j,--] */
-        ca_size_t start, last, excl, count, step;
-        volatile VALUE iv_beg, iv_end, iv_excl;
-        iv_beg  = RANGE_BEG(arg);
-        iv_end  = RANGE_END(arg);
-        iv_excl = RANGE_EXCL(arg);
-        index_type[i] = CA_IDX_BLOCK; /* convert to block */
-        if ( NIL_P(iv_beg) ) {
-          start = 0;                    
-        }
-        else {
-          start = NUM2SIZE(iv_beg);          
-        }
-        if ( NIL_P(iv_end) ) {
-          last  = -1;
-        }
-        else {
-          last  = NUM2SIZE(iv_end);          
-        }
-        excl  = RTEST(iv_excl);
-
-        if ( info->range_check ) {
-          CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-        }
-
-        if ( last < 0 ) { /* don't use CA_CHECK_INDEX for excl */
-          last += ca_dim[i];
-        }
-        if ( excl && ( start == last ) ) {
-          index[i].block.start = start;
-          index[i].block.count = 0;
-          index[i].block.step  = 1;
-        }
-        else {
-          if ( excl ) {
-            last += ( (last>=start) ? -1 : 1 );
-          }
-          if ( info->range_check ) {
-            if ( last < 0 || last >= ca_dim[i] ) {
-              rb_raise(rb_eIndexError,
-                       "index %lld is out of range (0..%lld) at %i-dim",
-                       (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
-            }
-          }
-          index[i].block.start = start;
-          index[i].block.count = count = llabs(last - start) + 1;
-          index[i].block.step  = step  = ( last >= start ) ? 1 : -1;
-        }
-      }
-#ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
-      else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
-        ca_size_t start, last, excl, count, step, bound;
-        volatile VALUE iv_beg, iv_end, iv_excl;
-        rb_arithmetic_sequence_components_t x;
-        rb_arithmetic_sequence_extract(arg, &x);
-        iv_beg  = x.begin;
-        iv_end  = x.end;
-        iv_excl = x.exclude_end;
-        step    = NUM2SIZE(x.step);
-        if ( NIL_P(iv_beg) ) {
-          start = 0;                    
-        }
-        else {
-          start = NUM2SIZE(iv_beg);          
-        }
-        if ( NIL_P(iv_end) ) {
-          last  = -1;
-        }
-        else {
-          last  = NUM2SIZE(iv_end);          
-        }
-        excl  = RTEST(iv_excl);
-        if ( step == 0 ) {
-          rb_raise(rb_eRuntimeError, 
-                   "step in index equals to 0 in block reference");
-        }
-        index_type[i] = CA_IDX_BLOCK;
-        CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-        if ( last < 0 ) {
-          last += ca_dim[i];
-        }
-        if ( excl && ( start == last ) ) {
-          index[i].block.start = start;
-          index[i].block.count = 0;
-          index[i].block.step  = 1;
-        }
-        else {
-          if ( excl ) {
-            last += ( (last>=start) ? -1 : 1 );
-          }
-          if ( last < 0 || last >= ca_dim[i] ) {
-            rb_raise(rb_eIndexError,
-                     "index %lld is out of range (0..%lld) at %i-dim",
-                     (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
-          }
-          if ( (last - start) * step < 0 ) {
-            count = 1;
-          }
-          else {
-            count = llabs(last - start)/llabs(step) + 1;
-          }
-          bound = start + (count - 1)*step;
-          CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
-          index[i].block.start = start;
-          index[i].block.count = count;
-          index[i].block.step  = step;
-        }
-      }
-#endif
-      else if ( TYPE(arg) == T_ARRAY ) { /* ca[--,[array],--] */
-        if ( RARRAY_LEN(arg) == 1 ) {
-          VALUE arg0 = rb_ary_entry(arg, 0);
-          if ( NIL_P(arg0) ) {           /* ca[--,[nil],--]*/
-            index_type[i] = CA_IDX_ALL;
-          }
-          else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) {
-                                         /* ca[--,[i..j],--] */
-            arg = arg0;
-            goto retry;
-          }
-          else {                         /* ca[--,[i],--]*/
-            ca_size_t start;
-            start = NUM2SIZE(arg0);
-            CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-            index_type[i] = CA_IDX_BLOCK;
-            index[i].block.start = start;
-            index[i].block.count = 1;
-            index[i].block.step  = 1;
-          }
-        }
-        else if ( RARRAY_LEN(arg) == 2 ) {
-          VALUE arg0 = rb_ary_entry(arg, 0);
-          VALUE arg1 = rb_ary_entry(arg, 1);
-          if ( NIL_P(arg0) ) {              /* ca[--,[nil,k],--]*/
-            ca_size_t start, last, count, step, bound;
-            step  = NUM2SIZE(arg1);
-            if ( step == 0 ) {
-              rb_raise(rb_eRuntimeError, 
-                       "step in index equals to 0 in block reference");
-            }
-            start = 0;
-            last  = ca_dim[i]-1;
-            if ( step < 0 ) {
-              count = 1;
-            }
-            else {
-              count = last/step + 1;
-            }
-            bound = start + (count - 1)*step;
-            CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
-            index_type[i] = CA_IDX_BLOCK;
-            index[i].block.start = start;
-            index[i].block.count = count;
-            index[i].block.step  = step;
-          }
-          else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* ca[--,[i..j,k],--]*/
-            ca_size_t start, last, excl, count, step, bound;
-            volatile VALUE iv_beg, iv_end, iv_excl;
-            iv_beg  = RANGE_BEG(arg0);
-            iv_end  = RANGE_END(arg0);
-            iv_excl = RANGE_EXCL(arg0);
-            if ( NIL_P(iv_beg) ) {
-              start = 0;                    
-            }
-            else {
-              start = NUM2SIZE(iv_beg);          
-            }
-            if ( NIL_P(iv_end) ) {
-              last  = -1;
-            }
-            else {
-              last  = NUM2SIZE(iv_end);          
-            }
-            excl  = RTEST(iv_excl);
-            step  = NUM2SIZE(arg1);
-            if ( step == 0 ) {
-              rb_raise(rb_eRuntimeError, 
-                       "step in index equals to 0 in block reference");
-            }
-            index_type[i] = CA_IDX_BLOCK;
-            CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-            if ( last < 0 ) {
-              last += ca_dim[i];
-            }
-            if ( excl && ( start == last ) ) {
-              index[i].block.start = start;
-              index[i].block.count = 0;
-              index[i].block.step  = 1;
-            }
-            else {
-              if ( excl ) {
-                last += ( (last>=start) ? -1 : 1 );
-              }
-              if ( last < 0 || last >= ca_dim[i] ) {
-                rb_raise(rb_eIndexError,
-                         "index %lld is out of range (0..%lld) at %i-dim",
-                         (ca_size_t) last, (ca_size_t) (ca_dim[i]-1), i);
-              }
-              if ( (last - start) * step < 0 ) {
-                count = 1;
-              }
-              else {
-                count = llabs(last - start)/llabs(step) + 1;
-              }
-              bound = start + (count - 1)*step;
-              CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
-              index[i].block.start = start;
-              index[i].block.count = count;
-              index[i].block.step  = step;
-            }
-          }
-          else {                            /* ca[--,[i,j],--]*/
-            ca_size_t start, count, bound;
-            start = NUM2SIZE(arg0);
-            count = NUM2SIZE(arg1);
-            bound = start + (count - 1);
-            CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-            CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
-            index_type[i] = CA_IDX_BLOCK;
-            index[i].block.start = start;
-            index[i].block.count = count;
-            index[i].block.step  = 1;
-          }
-        }
-        else if ( RARRAY_LEN(arg) == 3 ) { /* ca[--,[i,j,k],--]*/
-          ca_size_t start, count, step, bound;
-          start = NUM2SIZE(rb_ary_entry(arg, 0));
-          count = NUM2SIZE(rb_ary_entry(arg, 1));
-          step  = NUM2SIZE(rb_ary_entry(arg, 2));
-          if ( step == 0 ) {
-            rb_raise(rb_eRuntimeError, 
-                     "step in index equals to 0 in block reference");
-          }
-          bound = start + (count - 1)*step;
-          CA_CHECK_INDEX_AT(start, ca_dim[i], i);
-          CA_CHECK_INDEX_AT(bound, ca_dim[i], i);
-          index_type[i] = CA_IDX_BLOCK;
-          index[i].block.start = start;
-          index[i].block.count = count;
-          index[i].block.step  = step;
-        }
-        else {
-          rb_raise(rb_eIndexError,
-                   "invalid form of index range at %i-dim "\
-                   "(should be [start[,count[,step]]], [range, step])",
-                   i);
-        }
-      }
-      else if ( rb_obj_is_kind_of(arg, rb_cSymbol) ) { /* ca[--,:i,--] */
-        if ( strlen(rb_id2name(SYM2ID(arg))) != 1 ) {
-          rb_raise(rb_eIndexError,
-                   "symbol :%s is invalid as the index for dimension iterator "\
-                   "(should be :a, :b, ... :z)",
-                   rb_id2name(SYM2ID(arg)));
-        }
-        index_type[i] = CA_IDX_SYMBOL;
-        index[i].symbol.id   = SYM2ID(arg);
-        index[i].symbol.spec = Qnil;
-      }
-      else if ( rb_obj_is_carray(arg) ) {              /* ca[--,ca,--] */
-        CArray *ci;
-        TypedData_Get_Struct(arg, CArray, &carray_data_type, ci);
-        if ( ca_is_boolean_type(ci) || ca_is_integer_type(ci) ) {
-          is_grid = 1;
-          goto loop_exit;
-        }
-        else {
-          rb_raise(rb_eIndexError,
-               "data_type %s is invalid for reference by gridding at %i-dim "\
-                   "(should be boolean or integer)",
-                   ca_type_name[ci->data_type], i);
-        }
-      }
-      else {
-        VALUE inspect = rb_inspect(arg);
-        rb_raise(rb_eIndexError,
-                 "object '%s' is invalid for the index for reference at %i-dim",
-                 StringValuePtr(inspect), i);
-      }
-    }
-
-    if ( ca_ndim != info->ndim ) {
-      rb_raise(rb_eIndexError,
-               "number of indices does not equal to the ndim (%i != %i)",
-               info->ndim, ca_ndim);
-    }
-
-    is_point     = 1;
-    is_all       = 1;
-    is_iterator  = 0;
-    is_grid      = 0;
-
-    for (i=0; i<info->ndim; i++) {
-      switch ( info->index_type[i] ) {
-      case CA_IDX_SCALAR:
-        is_all   = 0;
-        continue;
-      case CA_IDX_ALL:
-        is_point = 0;
-        continue;
-      case CA_IDX_SYMBOL:
-        is_iterator = 1;
-        goto loop_exit;
-      default:
-        is_point = 0;
-        is_all   = 0;
-      }
-    }
-
-   loop_exit:
-
-    if ( is_repeat == 1 ) {
-      info->type = CA_REG_REPEAT;
-    }
-    else if ( is_repeat == 2 ) {
-      info->type = CA_REG_UNBOUND_REPEAT;
-    }
-    else if ( is_grid ) {
-      info->type = CA_REG_GRID;
-    }
-    else if ( is_iterator ) {
-      info->type = CA_REG_ITERATOR;
-    }
-    else if ( is_point ) {
-      info->type = CA_REG_POINT;
-    }
-    else if ( is_all ) {
-      info->type = CA_REG_BLOCK;
-    }
-    else {
-      info->type = CA_REG_BLOCK;
-    }
-
-    if ( info->type == CA_REG_ITERATOR ) {
-      for (i=0; i<info->ndim; i++) {
-        if ( info->index_type[i] == CA_IDX_SCALAR ) {
-          ca_size_t start = info->index[i].scalar;
-          info->index_type[i] = CA_IDX_BLOCK;
-          info->index[i].block.start = start;
-          info->index[i].block.step  = 1;
-          info->index[i].block.count = 1;
-        }
-      }
-    }
-
-    return;
-  }
+  /* Forwards to the v2 classifier in ext/carray_index_classifier.c. */
+  rb_ca_scan_index_v2(ca_ndim, ca_dim, ca_elements, argc, argv, info);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -942,9 +439,7 @@ rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
 static VALUE
 rb_ca_ref_address (VALUE self, CAIndexInfo *info)
 {
-  CArray *ca;
   ca_size_t addr;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = info->index[0].scalar;
   return rb_ca_fetch_addr(self, addr);
 }
@@ -952,9 +447,7 @@ rb_ca_ref_address (VALUE self, CAIndexInfo *info)
 static VALUE
 rb_ca_store_address (VALUE self, CAIndexInfo *info, volatile VALUE rval)
 {
-  CArray *ca;
   ca_size_t addr;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = info->index[0].scalar;
   if ( rb_obj_is_cscalar(rval) ) {
     rval = rb_ca_fetch_addr(rval, 0);
@@ -1029,29 +522,47 @@ rb_ca_store_all (VALUE self, VALUE rval)
 
     if ( ca->elements != cv->elements ) {
       rb_raise(rb_eRuntimeError,
-               "mismatch in data size (%lld <-> %lld) for storing to carray", 
+               "mismatch in data size (%" PRId64 " <-> %" PRId64 ") for storing to carray", 
                (ca_size_t) ca->elements, (ca_size_t) cv->elements);
     }
 
-    ca_attach(cv);
-    if ( ca->data_type != cv->data_type ) {
-      ca_allocate(ca);
-      ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
-      if ( ca->mask ) {
-        ca_cast_block_with_mask(ca->elements, cv, cv->ptr, ca, ca->ptr, 
-                                (boolean8_t*)ca->mask->ptr);
+    /* Source delivery via ca_xfer_all into a local scratch instead of
+       ca_attach(cv).  This routes through ca_*_func_xfer_all's per-region
+       partial-materialise path, avoiding a ca_attach(root) silent
+       transitive attach.  When cv composes through a view root (CAFake /
+       CAByteSwap / CAGrid / etc.), attaching the root would materialise
+       the whole root (size = root->elements * root->bytes), producing a
+       catastrophic slowdown for size-gap cases like
+       big_virtual[100..200] = big_virtual[100..200].flip(0).  The scratch
+       here is sized for cv only (cv->elements * cv->bytes), so the cost
+       scales with the view, not the root.  (The dst-side ca_sync_data is
+       already an xfer_all PUT.) */
+    {
+      volatile VALUE scratch_holder;
+      ca_size_t      cv_bytes = cv->bytes * cv->elements;
+      char          *scratch  = ALLOCV_N(char, scratch_holder, cv_bytes);
+      ca_xfer_all(cv, scratch, CA_XFER_GET);
+
+      if ( ca->data_type != cv->data_type ) {
+        ca_allocate(ca);
+        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
+        if ( ca->mask ) {
+          ca_cast_block_with_mask(ca->elements, cv, scratch, ca, ca->ptr,
+                                  (boolean8_t*)ca->mask->ptr);
+        }
+        else {
+          ca_cast_block(ca->elements, cv, scratch, ca, ca->ptr);
+        }
+        ca_sync(ca);
+        ca_detach(ca);
       }
       else {
-        ca_cast_block(ca->elements, cv, cv->ptr, ca, ca->ptr);
+        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
+        ca_sync_data(ca, scratch);
       }
-      ca_sync(ca);
-      ca_detach(ca);
+
+      ALLOCV_END(scratch_holder);
     }
-    else {
-      ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
-      ca_sync_data(ca, cv->ptr);
-    }
-    ca_detach(cv);
   }
   else if ( TYPE(rval) == T_ARRAY ) {
     volatile VALUE list =
@@ -1064,6 +575,8 @@ rb_ca_store_all (VALUE self, VALUE rval)
     else {
       int has_mask = 0;
       CArray ico;
+      /* ca_cast_block reads ca_is_face(ca1), so flags must be 0-initialised. */
+      memset(&ico, 0, sizeof(CArray));
       ico.data_type = CA_OBJECT;
       ico.bytes     = ca_sizeof[CA_OBJECT];
       for (i=0; i<ca->elements; i++) {
@@ -1073,33 +586,55 @@ rb_ca_store_all (VALUE self, VALUE rval)
           break;
         }
       }
-      ca_allocate(ca);        
-      if ( has_mask ) {
-        boolean8_t *m;
-        m = (boolean8_t *)ca->mask->ptr;
-        for (i=0; i<ca->elements; i++) {
-          if ( rb_ary_entry(list,i) == CA_UNDEF ) {
-            *m = 1;
+      /* Use ca_allocate() instead of ca_attach() here because rb_ca_store_all()
+         overwrites ALL elements of the array from a Ruby Array. There is no need
+         to copy parent data (which ca_attach would do), since every element will
+         be replaced. Mask handling is also safe: ca_create_mask() above and
+         ca_copy_mask_overwrite() handle mask allocation and propagation internally,
+         so ca_allocate()'s simpler path (no parent data copy) is sufficient. */
+      ca_allocate(ca);
+      {
+        /* Face has surface != storage; the cast runs in the storage
+           data_type.  Passing ca directly makes the cast table see FIXLEN
+           and report non-implemented, so pass a shadow CArray (storage
+           data_type, ptr aliased to ca). */
+        CArray shadow;
+        CArray *cast_target = ca;
+        memset(&shadow, 0, sizeof(CArray));
+        if ( ca_is_face(ca) ) {
+          CArray *root = ca;
+          while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
+          if (root) {
+            shadow.data_type = root->data_type;
+            shadow.bytes     = ca->bytes;
+            shadow.elements  = ca->elements;
+            shadow.ptr       = ca->ptr;
+            cast_target = &shadow;
           }
-          else {
-            *m = 0;
-          }
-          m++;
         }
-        ca_cast_block_with_mask(ca->elements, &ico, RARRAY_PTR(list),
-                                ca, ca->ptr, 
-                                (boolean8_t*)ca->mask->ptr);
-      }
-      else {
-        ca_cast_block(ca->elements, &ico, RARRAY_PTR(list), ca, ca->ptr);
+        if ( has_mask ) {
+          boolean8_t *m;
+          m = (boolean8_t *)ca->mask->ptr;
+          for (i=0; i<ca->elements; i++) {
+            if ( rb_ary_entry(list,i) == CA_UNDEF ) {
+              *m = 1;
+            }
+            else {
+              *m = 0;
+            }
+            m++;
+          }
+          ca_cast_block_with_mask(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list),
+                                  cast_target, ca->ptr,
+                                  (boolean8_t*)ca->mask->ptr);
+        }
+        else {
+          ca_cast_block(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
+        }
       }
       ca_sync(ca);
       ca_detach(ca);
     }
-  }
-  else if ( rb_respond_to(rval, id_ca) ) {
-    rval = rb_funcall(rval, id_ca, 0);
-    goto retry;
   }
   else if ( rb_respond_to(rval, id_to_ca) ) {
     rval = rb_funcall(rval, id_to_ca, 0);
@@ -1267,7 +802,22 @@ rb_ca_ref_block (VALUE self, CAIndexInfo *info)
                               dim, start, step, count, &offset);
   }
 
-  return rb_ca_block_new(refer, ndim, dim, start, step, count, offset);
+  {
+    volatile VALUE blk;
+    blk = rb_ca_block_new(refer, ndim, dim, start, step, count, offset);
+    /* The block inherits the Face source's FIXLEN surface; rewrite its
+       data_type to the storage data_type (chain bottom) so the write path
+       casts in the storage type. */
+    if ( ca_is_face(ca) ) {
+      CArray *blk_ca, *root = ca;
+      TypedData_Get_Struct(blk, CArray, &carray_data_type, blk_ca);
+      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
+      if (root && root->data_type != blk_ca->data_type) {
+        blk_ca->data_type = root->data_type;
+      }
+    }
+    return blk;
+  }
 }
 
 static VALUE
@@ -1281,12 +831,120 @@ rb_ca_refer_new_flatten (VALUE self)
   return rb_ca_refer_new(self, ca->data_type, 1, &dim0, ca->bytes, 0);
 }
 
-/* yard:
-  class CArray
-    def [] (*spec)
-    end
-  end
-*/
+/* CARemap routing: when self and mapper have identical shape AND
+   mapper's data_type is CA_SIZE, take the same-shape per-element gather
+   fast path.  Defined in ca_obj_remap.c. */
+extern VALUE rb_ca_remap_new (VALUE cary, VALUE rmapper);
+
+/* a[mapper] is semantically equivalent to
+   a.flatten[mapper.flatten].reshape(*mapper.dim).
+
+   Two routes:
+     (a) Same-shape + CA_SIZE mapper -> CARemap view (fast path, avoids
+         building the flatten/gather/reshape chain).
+     (b) Otherwise -> normalize chain (a.flatten[mapper.flatten]
+         .reshape).  A 1-D mapper is already routed to CAGrid upstream.
+
+   Both routes raise on a masked mapper. */
+static VALUE
+rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
+{
+  CArray *ca, *cm;
+  volatile VALUE flat_self, flat_mapper, gridded, result;
+  VALUE grid_argv[1];
+  int i;
+
+  TypedData_Get_Struct(self,    CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(rmapper, CArray, &carray_data_type, cm);
+
+  if ( ca_is_any_masked(cm) ) {
+    rb_raise(rb_eArgError, "mapper in ca[mapper] should not be masked");
+  }
+
+  /* (a) same-shape fast path: ndim + per-axis dim + CA_SIZE data_type. */
+  if ( cm->data_type == CA_SIZE
+    && cm->ndim == ca->ndim
+    && memcmp(cm->dim, ca->dim, ca->ndim * sizeof(ca_size_t)) == 0 ) {
+    return rb_ca_remap_new(self, rmapper);
+  }
+
+  /* (b) Normalize chain fallback. */
+  flat_self    = rb_ca_refer_new_flatten(self);
+  flat_mapper  = (cm->ndim == 1) ? rmapper : rb_ca_flatten(rmapper);
+  grid_argv[0] = flat_mapper;
+  gridded      = rb_ca_grid(1, grid_argv, flat_self);
+
+  if ( cm->ndim == 1 ) {
+    result = gridded;
+  }
+  else {
+    VALUE *dim_argv = ALLOCA_N(VALUE, cm->ndim);
+    for (i = 0; i < cm->ndim; i++) {
+      dim_argv[i] = SIZE2NUM(cm->dim[i]);
+    }
+    result = rb_ca_reshape(cm->ndim, dim_argv, gridded);
+  }
+  return result;
+}
+
+/* The CAMapping class is gone; rb_ca_mapping_new and rb_ca_mapping build
+   the normalize chain via rb_ca_fancy_index_chain.  The public C API
+   signatures are preserved so external ext gems keep linking; the runtime
+   class of the returned VALUE is CARefer (chain outermost), not CAMapping. */
+
+VALUE
+rb_ca_mapping_new (VALUE cary, CArray *mapper)
+{
+  CArray *m_copy = ca_copy(mapper);
+  volatile VALUE rmapper = ca_wrap_struct(m_copy);
+  return rb_ca_fancy_index_chain(cary, rmapper);
+}
+
+VALUE
+rb_ca_mapping (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE rmapper;
+  rb_scan_args(argc, argv, "1", (VALUE *) &rmapper);
+  rb_check_carray_object(rmapper);
+  return rb_ca_fancy_index_chain(self, rmapper);
+}
+
+/* ------------------------------------------------------------------- */
+/* newaxis (:_) sugar.  `:_` inserts a size-1 axis at its position.
+   Strategy: strip `:_`, fetch the remaining per-axis indices into a base
+   view, then reshape the base inserting size-1 axes.  reshape inherits
+   the optimal view class (CAStride for stride bases, CARefer for fancy
+   bases). */
+
+static int
+ca_argv_has_newaxis (int argc, VALUE *argv)
+{
+  int i;
+  for (i = 0; i < argc; i++) {
+    if ( argv[i] == sym_under ) return 1;
+  }
+  return 0;
+}
+
+static int
+ca_argv_has_slab_sigil (int argc, VALUE *argv)
+{
+  int i;
+  for (i = 0; i < argc; i++) {
+    if ( argv[i] == sym_gt ) return 1;
+  }
+  return 0;
+}
+
+static VALUE rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self,
+                                  CArray *ca);
+static VALUE rb_ca_slab_iter_new (VALUE self, CAIndexInfo *info);
+static VALUE rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self);
+
+/* axis-group apply (ext/ca_group_iter.c): type gate that routes a
+   CACategorical/AxisGroup index to the group path. */
+int   ca_argv_has_group (int argc, VALUE *argv);
+VALUE rb_ca_fetch_group (int argc, VALUE *argv, VALUE self);
 
 static VALUE
 rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
@@ -1298,6 +956,29 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
  retry:
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  /* newaxis (:_) interception (cheap pointer scan; zero overhead beyond
+     the loop when no :_ is present). */
+  if ( ca_argv_has_newaxis(argc, argv) ) {
+    return rb_ca_fetch_newaxis(argc, argv, self, ca);
+  }
+
+  /* slab sigil (:>) interception.  Pre-strip :> -> nil and Integer ->
+     length-1 Range so mask / fancy outer slots route through the regular
+     dispatch (CA_REG_SELECT / CA_REG_GRID / CA_REG_MAPPING) before being
+     wrapped in CASlabIterator. */
+  if ( ca_argv_has_slab_sigil(argc, argv) ) {
+    return rb_ca_fetch_slab_sigil(argc, argv, self);
+  }
+
+  /* Axis-group type gate: a CACategorical/AxisGroup index routes to the
+     group apply path (CAGroupIterator); plain int-array indices fall
+     through to the regular selection dispatch below.  The scan short-circuits
+     when the surface classes have not been loaded, so a normal index pays
+     nothing. */
+  if ( ca_argv_has_group(argc, argv) ) {
+    return rb_ca_fetch_group(argc, argv, self);
+  }
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
@@ -1325,7 +1006,7 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_select_new(self, argv[0]);
     break;
   case CA_REG_ITERATOR:
-    obj = rb_dim_iter_new(self, &info);
+    obj = rb_ca_slab_iter_new(self, &info);
     break;
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
@@ -1334,7 +1015,7 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
     break;
   case CA_REG_MAPPING:
-    obj = rb_ca_mapping(argc, argv, self);
+    obj = rb_ca_fancy_index_chain(self, argv[0]);
     break;
   case CA_REG_GRID:
     obj = rb_ca_grid(argc, argv, self);
@@ -1348,11 +1029,14 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_MEMBER: {
     volatile VALUE data_class = rb_ca_data_class(self);
     if ( ! NIL_P(data_class) ) {
-      obj = rb_ca_field_as_member(self, info.symbol);
-      break;
+      /* Field projection strips Face and returns a CAField on the parent
+         (= a different data_type).  Do not re-wrap with Face (CARecord
+         wraps structs only; a field view like float64 is not a CARecord).
+         Early-return to bypass the trailing ca_face_lift. */
+      return rb_ca_face_field(self, info.symbol);
     }
     else {
-      rb_raise(rb_eIndexError, 
+      rb_raise(rb_eIndexError,
                "can't refer member of carray doesn't have data_class");
     }
     break;
@@ -1365,7 +1049,220 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   default:
     rb_raise(rb_eIndexError, "invalid index specified");
   }
+
+  /* Face lift at the read touch point: if `self` is a Face, re-wrap the
+     view result as a Face (ca_face_lift).  Guards: lift only when the result
+     is a CArray instance (excludes Hash / iterator / scalar), and only when
+     it is not ALREADY a Face -- some builders (select / repeat / ...) lift
+     their own result, so re-lifting here would double-wrap and leave `.parent`
+     pointing at a Face instead of the storage. */
+  if ( ca_is_face(ca) && rb_obj_is_kind_of(obj, rb_cCArray) ) {
+    CArray *obj_ca;
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, obj_ca);
+    if ( ! ca_is_face(obj_ca) ) {
+      obj = ca_face_lift(obj, self);
+    }
+  }
+
   return obj;
+}
+
+/* newaxis (:_) implementation (reshape).  See the forward decl + the
+   interception hook in rb_ca_fetch_method.  Pre-condition: argv contains
+   at least one sym_under. */
+static VALUE
+rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
+{
+  int i;
+  int nclean = 0;
+  VALUE clean[CA_RANK_MAX];
+  volatile VALUE base;
+  ca_size_t final_dims[CA_RANK_MAX];
+  int nfinal = 0;
+  int base_cursor;
+  CArray *cb;
+  VALUE dim_argv[CA_RANK_MAX];
+
+  /* Build clean argv (strip :_); reject disjoint sigils + rubber dim. */
+  for (i = 0; i < argc; i++) {
+    VALUE a = argv[i];
+    if ( a == sym_under ) continue;
+    if ( a == sym_gt || a == sym_star || a == sym_perc
+         || a == Qfalse || a == sym_tilde ) {
+      rb_raise(rb_eIndexError,
+               "newaxis (:_) cannot be combined with :>, :*, :%%, "
+               "or rubber dim (false / :~)");
+    }
+    if ( nclean >= CA_RANK_MAX ) {
+      rb_raise(rb_eIndexError, "too many indices");
+    }
+    clean[nclean++] = a;
+  }
+
+  /* newaxis requires full per-axis indexing (CArray uses flat addressing
+     for partial indices, which is incoherent with axis-position newaxis). */
+  if ( nclean != ca->ndim ) {
+    rb_raise(rb_eIndexError,
+             "newaxis (:_) requires full per-axis indexing "
+             "(got %d non-:_ indices for ndim %d)",
+             nclean, (int) ca->ndim);
+  }
+
+  base = rb_ca_fetch_method(nclean, clean, self);
+
+  /* Degenerate: all real axes scalar -> base is a scalar element, not a
+     CArray.  Out of scope (rare + degenerate); user indexes the element
+     and reshapes explicitly.  IndexError keeps it catchable + consistent
+     with the other newaxis rejects. */
+  if ( ! rb_obj_is_kind_of(base, rb_cCArray) ) {
+    rb_raise(rb_eIndexError,
+             "newaxis (:_) needs at least one non-scalar axis "
+             "(all-scalar indexing yields a single element)");
+  }
+
+  TypedData_Get_Struct(base, CArray, &carray_data_type, cb);
+
+  /* Reconstruct final shape: walk original argv.  :_ -> size-1, scalar
+     (Integer) -> dropped (skip), else -> base.dim[cursor]. */
+  base_cursor = 0;
+  for (i = 0; i < argc; i++) {
+    VALUE a = argv[i];
+    if ( a == sym_under ) {
+      final_dims[nfinal++] = 1;
+    }
+    else if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+      /* scalar index -> axis dropped in base; contributes no output axis */
+    }
+    else {
+      if ( base_cursor >= cb->ndim ) {
+        rb_raise(rb_eIndexError, "newaxis: base axis count mismatch");
+      }
+      final_dims[nfinal++] = cb->dim[base_cursor++];
+    }
+  }
+  if ( base_cursor != cb->ndim ) {
+    rb_raise(rb_eIndexError, "newaxis: base axis count mismatch");
+  }
+
+  for (i = 0; i < nfinal; i++) {
+    dim_argv[i] = SIZE2NUM(final_dims[i]);
+  }
+  return rb_ca_reshape(nfinal, dim_argv, base);
+}
+
+/* Build a CASlabIterator from a classified ITERATOR index.  The
+   `:>` axes (CA_IDX_SYMBOL) become the slab axes; they are converted to
+   CA_IDX_ALL so rb_ca_ref_block yields the sliced base view keeping all
+   axes (scalars are already length-1 BLOCKs via the finalize_reg post-
+   pass).  CASlabIterator delegates to each_slab / map_slab / reduce_slab. */
+static VALUE
+rb_ca_slab_iter_new (VALUE self, CAIndexInfo *info)
+{
+  volatile VALUE slab_axes = rb_ary_new();
+  volatile VALUE base;
+  volatile VALUE klass;
+  int i;
+
+  for (i = 0; i < info->ndim; i++) {
+    if ( info->index_type[i] == CA_IDX_SYMBOL ) {
+      rb_ary_push(slab_axes, INT2NUM(i));
+      info->index_type[i] = CA_IDX_ALL;   /* :> axis -> full range */
+    }
+  }
+
+  base  = rb_ca_ref_block(self, info);
+  klass = rb_const_get(rb_cObject, rb_intern("CASlabIterator"));
+  return rb_funcall(klass, rb_intern("new"), 2, base, slab_axes);
+}
+
+/* Slab sigil dispatcher that supports any outer-slot index type
+   (Integer / Range / nil / boolean mask / CArray / Symbol-method etc.).
+   Strategy: expand rubber dim (false / :~) if present so :> positions
+   align with the post-expansion ndim, replace :> with nil (full axis),
+   promote Integer to length-1 Range so the base view preserves ndim,
+   recurse through the regular indexer dispatch to build the base
+   reference (CABlock / CASelectAxis / CAGrid / CAMapping / ...), then
+   wrap in CASlabIterator with the recorded slab_axes positions. */
+static VALUE
+rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
+{
+  VALUE expanded[CA_RANK_MAX];
+  VALUE clean[CA_RANK_MAX];
+  volatile VALUE slab_axes = rb_ary_new();
+  volatile VALUE base;
+  volatile VALUE klass;
+  CArray *ca;
+  int i, j;
+  int eargc;
+  VALUE *eargv;
+  int rubber_pos = -1;
+
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  /* Rubber-dim expansion (mirrors ca_classifier_expand_rubber_dim).
+     Only the first rubber marker is honoured; later ones are left for
+     the regular classifier to reject downstream. */
+  for (i = 0; i < argc; i++) {
+    if ( argv[i] == Qfalse || argv[i] == sym_tilde ) {
+      rubber_pos = i;
+      break;
+    }
+  }
+  if ( rubber_pos < 0 ) {
+    eargc = argc;
+    eargv = argv;
+  }
+  else {
+    int rndim;
+    if ( argc > ca->ndim + 1 ) {
+      rb_raise(rb_eIndexError,
+               "index specification exceeds the ndim of carray (%i)",
+               ca->ndim);
+    }
+    rndim = ca->ndim - argc + 1;
+    if ( rndim < 0 ) rndim = 0;
+    j = 0;
+    for (i = 0; i < argc; i++) {
+      if ( i == rubber_pos ) {
+        int k;
+        for (k = 0; k < rndim; k++) expanded[j++] = Qnil;
+      }
+      else {
+        expanded[j++] = argv[i];
+      }
+    }
+    eargc = j;
+    eargv = expanded;
+  }
+
+  if ( eargc > CA_RANK_MAX ) {
+    rb_raise(rb_eIndexError, "too many indices");
+  }
+
+  for (i = 0; i < eargc; i++) {
+    VALUE a = eargv[i];
+    if ( a == sym_gt ) {
+      rb_ary_push(slab_axes, INT2NUM(i));
+      clean[i] = Qnil;
+    }
+    else if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+      /* Promote Integer to length-1 Range so the recursed view keeps
+         the axis (matches the existing :> dispatcher semantics where
+         scalars become length-1 BLOCKs via finalize_reg). */
+      clean[i] = rb_range_new(a, a, 0);
+    }
+    else {
+      clean[i] = a;
+    }
+  }
+
+  base = rb_ca_fetch_method(eargc, clean, self);
+  if ( ! rb_obj_is_kind_of(base, rb_cCArray) ) {
+    rb_raise(rb_eIndexError,
+             "slab sigil (:>) requires the base view to be a CArray");
+  }
+  klass = rb_const_get(rb_cObject, rb_intern("CASlabIterator"));
+  return rb_funcall(klass, rb_intern("new"), 2, base, slab_axes);
 }
 
 static VALUE
@@ -1403,7 +1300,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_select_new(self, argv[0]);
     break;
   case CA_REG_ITERATOR:
-    obj = rb_dim_iter_new(self, &info);
+    obj = rb_ca_slab_iter_new(self, &info);
     break;
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
@@ -1412,7 +1309,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
     break;
   case CA_REG_MAPPING:
-    obj = rb_ca_mapping(argc, argv, self);
+    obj = rb_ca_fancy_index_chain(self, argv[0]);
     break;
   case CA_REG_GRID:
     obj = rb_ca_grid(argc, argv, self);
@@ -1426,7 +1323,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_MEMBER: {
     volatile VALUE data_class = rb_ca_data_class(self);
     if ( ! NIL_P(data_class) ) {
-      obj = rb_ca_field_as_member(self, info.symbol);
+      obj = rb_ca_face_field(self, info.symbol);
       break;
     }
     else {
@@ -1447,12 +1344,67 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
-/* yard:
-  class CArray
-    def []= (*spec)
-    end
-  end
-*/
+/* Recursively convert a store rvalue's surface value objects into
+   storage-domain values for a Face `self`, applied at the Ruby `[]=` entry
+   before any store-side view (block / newaxis / grid / ...) is built.  The
+   store-side view is stripped to the storage data_type, so the Face is only
+   visible here at the top of the dispatch; converting now lets every view
+   path store a Face surface scalar correctly.
+
+   - a Face CArray rvalue is reconciled to self's storage via to_comparable
+     (unit-safe: cross-group / non-exact raises), so a same-Face bulk store
+     (t[0..1] = t[1..2]) becomes a storage int64 xfer.  A non-Face CArray
+     (e.g. datetime[0..1] = plain_int64_array) passes through unchanged --
+     the documented raw-storage escape -- but it has to be raw *storage*: an
+     integer-storage Face takes integer cells only.  The scalar path already
+     refuses a bare Float there (to_comparable does not recognise it) instead
+     of letting the storage cast truncate it, and the bulk path must not be
+     the looser door.
+   - an Array is mapped structure-preserving (leaves converted),
+   - a scalar goes through the write hook (ca_face_scalar_to_storage), which
+     leaves a bare Integer / String unchanged.
+
+   Idempotent: an already-converted Integer passes through, so re-running on
+   a `goto retry` iteration is harmless. */
+static VALUE
+ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
+{
+  if ( rb_obj_is_carray(val) ) {
+    CArray *cval;
+    GetCArray(val, cval);
+    /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
+       the scalar path (ca_face_scalar_to_storage) for a bulk CArray source.
+       Guarded on self having to_comparable so a Face without a reconcile
+       algebra (e.g. a fixlen-storage Face, whose same-storage store already
+       takes the storage xfer branch) is left to the existing store path. */
+    if ( ca_is_face(cval) && rb_respond_to(self, rb_intern("to_comparable")) ) {
+      volatile VALUE reconciled = rb_funcall(self, rb_intern("to_comparable"),
+                                             1, val);
+      return rb_funcall(reconciled, rb_intern("parent"), 0);
+    }
+    /* Bare storage escape, integer storage: integer cells only (see above). */
+    {
+      CArray *storage = ca_strip_face(ca);
+      if ( storage && ca_is_integer_type(storage) && ! ca_is_integer_type(cval) ) {
+        rb_raise(rb_eTypeError,
+                 "%s cannot store a bare %s array as raw storage "
+                 "(use ca.parent to write the %s storage directly)",
+                 rb_obj_classname(self), ca_type_name[cval->data_type],
+                 ca_type_name[storage->data_type]);
+      }
+    }
+    return val;
+  }
+  if ( TYPE(val) == T_ARRAY ) {
+    long i, n = RARRAY_LEN(val);
+    volatile VALUE out = rb_ary_new2(n);
+    for (i = 0; i < n; i++) {
+      rb_ary_push(out, ca_face_convert_store_rval(self, ca, rb_ary_entry(val, i)));
+    }
+    return out;
+  }
+  return ca_face_scalar_to_storage(self, ca, val);
+}
 
 static VALUE
 rb_ca_store_method (int argc, VALUE *argv, VALUE self)
@@ -1469,6 +1421,31 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
  retry:
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  /* Face store: bring a surface value object (Scalar / Time / DateTime) into
+     the storage domain while self is still the Face.  Store-side views strip
+     the Face to storage, so this is the only point that sees it. */
+  if ( ca_is_face(ca) ) {
+    rval = ca_face_convert_store_rval(self, ca, rval);
+  }
+
+  /* newaxis (:_) interception on store.  Build the newaxis view (a
+     writable reshape aliasing self), then assign rval into the whole view
+     (writes propagate to self). */
+  if ( ca_argv_has_newaxis(argc, argv) ) {
+    volatile VALUE view = rb_ca_fetch_newaxis(argc, argv, self, ca);
+    rb_ca_store_all(view, rval);
+    return rval;
+  }
+
+  /* slab sigil on store is rejected regardless of outer-slot type.  Catch
+     :> before scan_index so mask/fancy outer slots get the same "not
+     supported" message instead of a misleading TypeError. */
+  if ( ca_argv_has_slab_sigil(argc, argv) ) {
+    rb_raise(rb_eIndexError,
+             "assignment through a slab iterator (:>) is not supported "
+             "(use a block index, e.g. ca[range, nil] = val, or each_slab)");
+  }
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
@@ -1502,8 +1479,11 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_ITERATOR: {
-    obj = rb_dim_iter_new(self, &info);
-    obj = rb_funcall(obj, rb_intern("asign!"), 1, rval);
+    /* assignment through a slab iterator (:>) is not supported.
+       Use a block index (ca[range, nil] = val) or each_slab/map_slab. */
+    rb_raise(rb_eIndexError,
+             "assignment through a slab iterator (:>) is not supported "
+             "(use a block index, e.g. ca[range, nil] = val, or each_slab)");
     break;
   }
   case CA_REG_REPEAT: {
@@ -1516,7 +1496,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_store_all(obj, rval);
     break;
   case CA_REG_MAPPING: {
-    obj = rb_ca_mapping(argc, argv, self);
+    obj = rb_ca_fancy_index_chain(self, argv[0]);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
@@ -1537,7 +1517,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_MEMBER: {
     volatile VALUE data_class = rb_ca_data_class(self);
     if ( ! NIL_P(data_class) ) {
-      obj = rb_ca_field_as_member(self, info.symbol);
+      obj = rb_ca_face_field(self, info.symbol);
       obj = rb_ca_store_all(obj, rval);
     }
     else {
@@ -1552,6 +1532,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   }
+
   return obj;
 }
 
@@ -1560,7 +1541,7 @@ rb_ca_fetch (VALUE self, VALUE index)
 {
   switch ( TYPE(index) ) {
   case T_ARRAY:
-    return rb_ca_fetch_method((int) RARRAY_LEN(index), RARRAY_PTR(index), self);
+    return rb_ca_fetch_method((int) RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
   default:
     return rb_ca_fetch_method(1, &index, self);
   }
@@ -1579,7 +1560,7 @@ rb_ca_store (VALUE self, VALUE index, VALUE rval)
   case T_ARRAY:
     index = rb_obj_clone(index);
     rb_ary_push(index, rval);
-    return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
+    return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
   default: {
     VALUE rindex[2] = { index, rval };
     return rb_ca_store_method(2, rindex, self);
@@ -1590,15 +1571,10 @@ rb_ca_store (VALUE self, VALUE index, VALUE rval)
 VALUE
 rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 {
-  VALUE index = rb_ary_new4(n, rindex);
+  volatile VALUE index = rb_ary_new4(n, rindex);
   rb_ary_push(index, rval);
-  return rb_ca_store_method((int)RARRAY_LEN(index), RARRAY_PTR(index), self);
+  return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
 }
-
-/* yard:
-  def CArray.scan_index(dim, idx)
-  end
-*/
 
 static VALUE
 rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
@@ -1625,7 +1601,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
 
   info.range_check = 1;
   rb_ca_scan_index(ndim, dim, elements,
-                   RARRAY_LEN(ridx), RARRAY_PTR(ridx), &info);
+                   RARRAY_LEN(ridx), (VALUE *)RARRAY_CONST_PTR(ridx), &info);
 
   rtype  = INT2NUM(info.type);
   rindex = rb_ary_new2(info.ndim);
@@ -1704,13 +1680,6 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   return rb_struct_new(S_CAInfo, rtype, rindex);
 }
 
-/* yard:
-  class CArray
-    def normalize_index (idx)
-    end
-  end
-*/
-
 static VALUE
 rb_ca_normalize_index (VALUE self, VALUE ridx)
 {
@@ -1724,7 +1693,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements,
-                   RARRAY_LEN(ridx), RARRAY_PTR(ridx), &info);
+                   RARRAY_LEN(ridx), (VALUE *)RARRAY_CONST_PTR(ridx), &info);
 
   switch ( info.type ) {
   case CA_REG_ALL:
@@ -1777,78 +1746,153 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
 
 /* ------------------------------------------------------------------- */
 
-/* yard:
-  class CArray
-    # converts addr to index
-    def addr2index (addr)
-    end
-  end
-*/
+/* ------------------------------------------------------------------- */
+/* addr <-> index conversion primitives.
+ *
+ * Two dispatch axes:
+ *   (a) instance form (uses self.shape) vs class form (`shape:` kwarg)
+ *   (b) scalar input vs CArray input (per method)
+ *
+ * The four Ruby entry points (rb_ca_{addr2index,index2addr},
+ * rb_ca_s_{addr2index,index2addr}) all funnel into the two _do helpers
+ * below, which take an already-resolved (ndim, dim[], elements) triple.
+ */
 
-VALUE
-rb_ca_addr2index (VALUE self, VALUE raddr)
+static void
+parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
+                   ca_size_t *out_elements)
 {
-  volatile VALUE out;
-  CArray *ca;
-  ca_size_t *dim;
-  ca_size_t addr;
-  int i;
+  int i, ndim;
+  ca_size_t elements = 1;
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  addr = NUM2SIZE(raddr);
-  if ( addr < 0 || addr >= ca->elements ) {
-    rb_raise(rb_eArgError,
-             "address %lld is out of range (0..%lld)",
-             (ca_size_t) addr, (ca_size_t) (ca->elements-1));
+  Check_Type(rshape, T_ARRAY);
+  ndim = (int) RARRAY_LEN(rshape);
+  if ( ndim < 1 || ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "invalid shape ndim %d (must be 1..%d)",
+             ndim, CA_RANK_MAX);
   }
-  dim = ca->dim;
-  out = rb_ary_new2(ca->ndim);
-  for (i=ca->ndim-1; i>=0; i--) { /* in descending order */
-    rb_ary_store(out, i, SIZE2NUM(addr % dim[i]));
-    addr /= dim[i];
+  for (i = 0; i < ndim; i++) {
+    dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
+    if ( dim[i] < 0 ) {
+      rb_raise(rb_eArgError, "negative dim %" PRId64 " at axis %d",
+               (ca_size_t) dim[i], i);
+    }
+    elements *= dim[i];
   }
-
-  return out;
+  *out_ndim = ndim;
+  *out_elements = elements;
 }
 
-/* yard:
-  class CArray
-    def index2addr (*index)
-    end
-  end
-*/
-
-VALUE
-rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
+static VALUE
+addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
 {
-  volatile VALUE obj;
-  CArray  *ca, *co, *cidx[CA_RANK_MAX];
-  ca_size_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
-  ca_size_t *dim;
-  ca_size_t addr, elements = 0;
-  int8_t i;
-  ca_size_t k, n;
-  boolean8_t *m;
-  int     all_number = 1;
+  volatile VALUE out;
+  int i;
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( argc != ca->ndim ) {
-    rb_raise(rb_eRuntimeError, "invalid ndim of index");
+  /* Scalar path (Integer input): returns Ruby Array of N Integers.
+   * Preserves legacy shape for callers like `i, j = ca.addr2index(k)`. */
+  if ( rb_obj_is_kind_of(raddr, rb_cInteger) ) {
+    ca_size_t addr = NUM2SIZE(raddr);
+    if ( addr < 0 || addr >= elements ) {
+      rb_raise(rb_eArgError,
+               "address %" PRId64 " is out of range (0..%" PRId64 ")",
+               (ca_size_t) addr, (ca_size_t) (elements - 1));
+    }
+    out = rb_ary_new2(ndim);
+    for (i = ndim - 1; i >= 0; i--) {
+      rb_ary_store(out, i, SIZE2NUM(addr % dim[i]));
+      addr /= dim[i];
+    }
+    return out;
   }
 
-  for (i=0; i<ca->ndim; i++) {
+  /* Vector path (CArray input): returns Ruby Array of N CArrays,
+   * each with the same shape as the input; mask propagated. */
+  {
+    CArray *cin, *co[CA_RANK_MAX];
+    ca_size_t *p_out[CA_RANK_MAX];
+    boolean8_t *m;
+    ca_size_t j, n;
+    volatile VALUE objs[CA_RANK_MAX];
+
+    cin = ca_wrap_readonly(raddr, CA_SIZE);
+    ca_attach(cin);
+
+    out = rb_ary_new2(ndim);
+    for (i = 0; i < ndim; i++) {
+      objs[i] = rb_carray_new(CA_SIZE, cin->ndim, cin->dim, 0, NULL);
+      TypedData_Get_Struct(objs[i], CArray, &carray_data_type, co[i]);
+      p_out[i] = (ca_size_t *) co[i]->ptr;
+      rb_ary_store(out, i, objs[i]);
+    }
+
+    m = cin->mask ? (boolean8_t *) cin->mask->ptr : NULL;
+    if ( m ) {
+      for (i = 0; i < ndim; i++) {
+        ca_create_mask(co[i]);
+        memcpy(co[i]->mask->ptr, m, cin->elements);
+      }
+    }
+
+    n = cin->elements;
+    {
+      ca_size_t *src = (ca_size_t *) cin->ptr;
+      ca_size_t addr;
+      int k;
+      for (j = 0; j < n; j++) {
+        if ( m && m[j] ) {
+          for (k = 0; k < ndim; k++) { p_out[k][j] = 0; }
+          continue;
+        }
+        addr = src[j];
+        if ( addr < 0 || addr >= elements ) {
+          ca_detach(cin);
+          rb_raise(rb_eArgError,
+                   "address %" PRId64 " is out of range (0..%" PRId64 ")",
+                   (ca_size_t) addr, (ca_size_t) (elements - 1));
+        }
+        for (k = ndim - 1; k >= 0; k--) {
+          p_out[k][j] = addr % dim[k];
+          addr /= dim[k];
+        }
+      }
+    }
+
+    ca_detach(cin);
+    return out;
+  }
+}
+
+static VALUE
+index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
+{
+  volatile VALUE obj;
+  CArray *co, *cidx[CA_RANK_MAX];
+  ca_size_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
+  ca_size_t addr, k, n;
+  boolean8_t *m;
+  int i, all_number = 1;
+  int out_ndim = 1;
+  ca_size_t out_dim[CA_RANK_MAX];
+  ca_size_t out_elements = 1;
+  int shape_from = -1;
+
+  if ( argc != ndim ) {
+    rb_raise(rb_eArgError,
+             "wrong number of indices (%d for %d)", argc, ndim);
+  }
+
+  for (i = 0; i < ndim; i++) {
     if ( ! rb_obj_is_kind_of(argv[i], rb_cInteger) ) {
       all_number = 0;
       break;
     }
   }
 
+  /* All-scalar path: returns single Integer (unchanged). */
   if ( all_number ) {
-    dim = ca->dim;
     addr = 0;
-    for (i=0; i<ca->ndim; i++) {
+    for (i = 0; i < ndim; i++) {
       k = NUM2SIZE(argv[i]);
       CA_CHECK_INDEX(k, dim[i]);
       addr = dim[i] * addr + k;
@@ -1856,62 +1900,77 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
     return SIZE2NUM(addr);
   }
 
-  elements = 1;
-  for (i=0; i<ca->ndim; i++) {
+  /* Vector path: wrap each arg as CA_SIZE view.  Output shape follows
+   * the first non-scalar CArray input; other non-scalar inputs must
+   * match that shape. */
+  for (i = 0; i < ndim; i++) {
     cidx[i] = ca_wrap_readonly(argv[i], CA_SIZE);
     if ( ! ca_is_scalar(cidx[i]) ) {
-      if ( elements == 1 ) {
-        elements = cidx[i]->elements;
+      if ( shape_from < 0 ) {
+        shape_from = i;
+        out_ndim = cidx[i]->ndim;
+        memcpy(out_dim, cidx[i]->dim, sizeof(ca_size_t) * out_ndim);
+        out_elements = cidx[i]->elements;
       }
-      else if ( elements != cidx[i]->elements ) {
-        rb_raise(rb_eRuntimeError, "mismatch in # of elements");
+      else {
+        int j;
+        if ( cidx[i]->ndim != out_ndim
+             || cidx[i]->elements != out_elements ) {
+          rb_raise(rb_eArgError,
+                   "shape mismatch: axis %d has shape ndim=%d elements=%"
+                   PRId64 ", expected ndim=%d elements=%" PRId64,
+                   i, cidx[i]->ndim, (ca_size_t) cidx[i]->elements,
+                   out_ndim, (ca_size_t) out_elements);
+        }
+        for (j = 0; j < out_ndim; j++) {
+          if ( cidx[i]->dim[j] != out_dim[j] ) {
+            rb_raise(rb_eArgError,
+                     "shape mismatch at axis %d dim %d", i, j);
+          }
+        }
       }
     }
   }
 
-  for (i=0; i<ca->ndim; i++) {
+  for (i = 0; i < ndim; i++) {
     ca_attach(cidx[i]);
     ca_set_iterator(1, cidx[i], &p[i], &s[i]);
   }
 
-  obj = rb_carray_new(CA_SIZE, 1, &elements, 0, NULL);
+  obj = rb_carray_new(CA_SIZE, out_ndim, out_dim, 0, NULL);
   TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   q = (ca_size_t *) co->ptr;
 
-  ca_copy_mask_overwrite_n(co, elements, ca->ndim, cidx);
+  ca_copy_mask_overwrite_n(co, out_elements, ndim, cidx);
   m = ( co->mask ) ? (boolean8_t *) co->mask->ptr : NULL;
 
-  dim = ca->dim;
-
   if ( m ) {
-    n = elements;  
+    n = out_elements;
     while ( n-- ) {
-      if ( !*m ) {
+      if ( ! *m ) {
         addr = 0;
-        for (i=0; i<ca->ndim; i++) {
+        for (i = 0; i < ndim; i++) {
           k = *(p[i]);
-          p[i]+=s[i];
+          p[i] += s[i];
           CA_CHECK_INDEX(k, dim[i]);
           addr = dim[i] * addr + k;
         }
         *q = addr;
       }
       else {
-        for (i=0; i<ca->ndim; i++) {
-          p[i]+=s[i];
-        }
+        for (i = 0; i < ndim; i++) { p[i] += s[i]; }
       }
       m++; q++;
     }
   }
   else {
-    n = elements;  
+    n = out_elements;
     while ( n-- ) {
       addr = 0;
-      for (i=0; i<ca->ndim; i++) {
+      for (i = 0; i < ndim; i++) {
         k = *(p[i]);
-        p[i]+=s[i];
+        p[i] += s[i];
         CA_CHECK_INDEX(k, dim[i]);
         addr = dim[i] * addr + k;
       }
@@ -1920,26 +1979,84 @@ rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  for (i=0; i<ca->ndim; i++) {
-    ca_detach(cidx[i]);
-  }
+  for (i = 0; i < ndim; i++) { ca_detach(cidx[i]); }
 
   return obj;
 }
 
+VALUE
+rb_ca_addr2index (VALUE self, VALUE raddr)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  return addr2index_do(ca->ndim, ca->dim, ca->elements, raddr);
+}
+
+VALUE
+rb_ca_index2addr (int argc, VALUE *argv, VALUE self)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  return index2addr_do(ca->ndim, ca->dim, argc, argv);
+}
+
+/* CArray.addr2index(addr, shape: [...]) */
+static VALUE
+rb_ca_s_addr2index (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE raddr, opts;
+  ID kw_ids[1];
+  VALUE kw_vals[1];
+  int ndim;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t elements;
+
+  kw_ids[0] = rb_intern("shape");
+  rb_scan_args(argc, argv, "1:", &raddr, &opts);
+  if ( NIL_P(opts) ) {
+    rb_raise(rb_eArgError, "missing keyword: shape");
+  }
+  rb_get_kwargs(opts, kw_ids, 1, 0, kw_vals);
+  parse_shape_kwarg(kw_vals[0], &ndim, dim, &elements);
+  return addr2index_do(ndim, dim, elements, raddr);
+}
+
+/* CArray.index2addr(*index, shape: [...]) */
+static VALUE
+rb_ca_s_index2addr (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE rest, opts;
+  ID kw_ids[1];
+  VALUE kw_vals[1];
+  int ndim;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t elements;
+
+  kw_ids[0] = rb_intern("shape");
+  rb_scan_args(argc, argv, "*:", &rest, &opts);
+  if ( NIL_P(opts) ) {
+    rb_raise(rb_eArgError, "missing keyword: shape");
+  }
+  rb_get_kwargs(opts, kw_ids, 1, 0, kw_vals);
+  parse_shape_kwarg(kw_vals[0], &ndim, dim, &elements);
+  return index2addr_do(ndim, dim, (int) RARRAY_LEN(rest), RARRAY_PTR(rest));
+}
+
 
 void
-Init_carray_access ()
+Init_carray_access (void)
 {
 
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");
 
-  id_ca    = rb_intern("ca");
   id_to_ca = rb_intern("to_ca");
-  sym_star = ID2SYM(rb_intern("*"));
-  sym_perc = ID2SYM(rb_intern("%"));
+  sym_star  = ID2SYM(rb_intern("*"));
+  sym_perc  = ID2SYM(rb_intern("%"));
+  sym_under = ID2SYM(rb_intern("_"));
+  sym_gt    = ID2SYM(rb_intern(">"));
+  sym_tilde = ID2SYM(rb_intern("~"));
 
   rb_define_method(rb_cCArray, "[]", rb_ca_fetch_method, -1);
   rb_define_method(rb_cCArray, "[]=", rb_ca_store_method, -1);
@@ -1958,6 +2075,9 @@ Init_carray_access ()
 
   rb_define_method(rb_cCArray, "index2addr", rb_ca_index2addr, -1);
   rb_define_method(rb_cCArray, "addr2index", rb_ca_addr2index, 1);
+
+  rb_define_singleton_method(rb_cCArray, "addr2index", rb_ca_s_addr2index, -1);
+  rb_define_singleton_method(rb_cCArray, "index2addr", rb_ca_s_index2addr, -1);
 
   rb_define_const(rb_cObject, "CA_REG_NONE",     INT2NUM(CA_REG_NONE));
   rb_define_const(rb_cObject, "CA_REG_ALL",      INT2NUM(CA_REG_ALL));

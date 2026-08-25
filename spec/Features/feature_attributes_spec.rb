@@ -32,15 +32,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).fixlen? == false }
     is_asserted_by {  CArray.float32(1).fixlen? == false }
     is_asserted_by {  CArray.float64(1).fixlen? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).fixlen? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).fixlen? == false }
       is_asserted_by {  CArray.cmplx128(1).fixlen? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).fixlen? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).fixlen? == false }
   end
@@ -58,15 +52,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).boolean? == false }
     is_asserted_by {  CArray.float32(1).boolean? == false }
     is_asserted_by {  CArray.float64(1).boolean? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).boolean? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).boolean? == false }
       is_asserted_by {  CArray.cmplx128(1).boolean? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).boolean? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).boolean? == false }
   end
@@ -84,15 +72,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).integer? == true }
     is_asserted_by {  CArray.float32(1).integer? == false }
     is_asserted_by {  CArray.float64(1).integer? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).integer? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).integer? == false }
       is_asserted_by {  CArray.cmplx128(1).integer? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).integer? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).integer? == false }
   end
@@ -110,43 +92,11 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).integer? == true }
     is_asserted_by {  CArray.float32(1).integer? == false }
     is_asserted_by {  CArray.float64(1).integer? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).integer? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).integer? == false }
       is_asserted_by {  CArray.cmplx128(1).integer? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).integer? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).integer? == false }
-  end
-
-  example "unsigned?" do
-    is_asserted_by {  CArray.new(CA_FIXLEN, [1], bytes: 1).unsigned? == false }
-    is_asserted_by {  CArray.boolean(1).unsigned? == false }
-    is_asserted_by {  CArray.int8(1).unsigned? == false }
-    is_asserted_by {  CArray.uint8(1).unsigned? == true }
-    is_asserted_by {  CArray.int16(1).unsigned? == false }
-    is_asserted_by {  CArray.uint16(1).unsigned? == true }
-    is_asserted_by {  CArray.int32(1).unsigned? == false }
-    is_asserted_by {  CArray.uint32(1).unsigned? == true }
-    is_asserted_by {  CArray.int64(1).unsigned? == false }
-    is_asserted_by {  CArray.uint64(1).unsigned? == true }
-    is_asserted_by {  CArray.float32(1).unsigned? == false }
-    is_asserted_by {  CArray.float64(1).unsigned? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).unsigned? == false }
-    end
-    if CArray::HAVE_COMPLEX
-      is_asserted_by {  CArray.cmplx64(1).unsigned? == false }
-      is_asserted_by {  CArray.cmplx128(1).unsigned? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).unsigned? == false }
-      end
-    end
-    is_asserted_by {  CArray.object(1).unsigned? == false }
   end
 
   example "float?" do
@@ -162,15 +112,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).float? == false }
     is_asserted_by {  CArray.float32(1).float? == true }
     is_asserted_by {  CArray.float64(1).float? == true }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).float? == true }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).float? == false }
       is_asserted_by {  CArray.cmplx128(1).float? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).float? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).float? == false }
   end
@@ -188,15 +132,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).complex? == false }
     is_asserted_by {  CArray.float32(1).complex? == false }
     is_asserted_by {  CArray.float64(1).complex? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).complex? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).complex? == true }
       is_asserted_by {  CArray.cmplx128(1).complex? == true }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).complex? == true }
-      end
     end
     is_asserted_by {  CArray.object(1).complex? == false }
   end
@@ -214,15 +152,9 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  CArray.uint64(1).object? == false }
     is_asserted_by {  CArray.float32(1).object? == false }
     is_asserted_by {  CArray.float64(1).object? == false }
-    if CArray.data_type?(:float128)
-      is_asserted_by {  CArray.float128(1).object? == false }
-    end
     if CArray::HAVE_COMPLEX
       is_asserted_by {  CArray.cmplx64(1).object? == false }
       is_asserted_by {  CArray.cmplx128(1).object? == false }
-      if CArray.data_type?(:cmplx256)
-        is_asserted_by {  CArray.cmplx256(1).object? == false }
-      end
     end
     is_asserted_by {  CArray.object(1).object? == true }
   end
@@ -274,7 +206,7 @@ describe "TestCArrayAttribute " do
     a = CArray.int32(4,3,2,1)
     b = CArray.int8(1,2,3,4)
     is_asserted_by {  false == a.same_shape?(b) }
-    is_asserted_by {  true == a.transposed.same_shape?(b) }
+    is_asserted_by {  true == a.transpose.same_shape?(b) }
   end
 
 end

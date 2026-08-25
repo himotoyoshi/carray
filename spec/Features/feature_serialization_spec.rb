@@ -53,7 +53,7 @@ describe CArray do
     end
 
     example "should dump string of same contents with file from which it was loaded" do 
-      is_asserted_by { CArray.dump(@it) == File.read("test.ca") }
+      is_asserted_by { CArray.dump(@it) == File.binread("test.ca") }
     end
 
     after do
@@ -62,18 +62,34 @@ describe CArray do
 
   end
 
-  describe "loaded from binary format (object type)" do
+  describe "object type is refused by the portable format" do
+
+    # 3.0: the _CARRAY3 portable format never serialises CA_OBJECT
+    # (arbitrary Ruby objects have no fixed-offset raw representation).
+    # Object arrays persist through the Ruby-only Marshal path instead.
+    example "CArray.save raises on an object array" do
+      original = CArray.object(10,10) { 3.times { Time.now } }
+      expect { CArray.save(original, "test.ca") }.to raise_error(ArgumentError)
+    end
+
+  end
+
+  describe "loaded from binary format (attributes)" do
 
     before do
-      @original = CArray.object(10,10) { 3.times { Time.now } }
-      @original[5,5] = UNDEF
+      @original = CArray.float64(4).seq
+      @original.set_attr(:units, "m/s")
+      @original.set_attr(:fillvalue, Float::INFINITY)
+      @original.set_attr(:valid_range, [0.0, -Float::INFINITY])
       CArray.save(@original, "test.ca")
       @it = CArray.load("test.ca")
     end
 
-    example "should equal to original" do
+    example "round-trips attributes including non-finite Floats" do
       is_asserted_by { @it == @original }
-      is_asserted_by { @it.has_mask? == true }
+      is_asserted_by { @it.attr("units") == "m/s" }
+      is_asserted_by { @it.attr("fillvalue") == Float::INFINITY }
+      is_asserted_by { @it.attr("valid_range") == [0.0, -Float::INFINITY] }
     end
 
     after do

@@ -103,11 +103,11 @@ describe "TestCArrayRefStore " do
     # ---
     a = CArray.int(3,3).seq!;
     is_asserted_by {  CA_INT([[1, 2], [4, 5]]) == a[CA_INT([0, 1]), 1..2] }
-    is_asserted_by {  CA_INT([[0, 2], [6, 8]]) == a[+[0, 2], +[0, 2]] }
+    is_asserted_by {  CA_INT([[0, 2], [6, 8]]) == a[CA_SIZE([0, 2]), CA_SIZE([0, 2])] }
 
     # ---
     a = CArray.int(3,3).seq!
-    a[+[0,2],+[0,2]] = 9
+    a[CA_SIZE([0,2]), CA_SIZE([0,2])] = 9
     is_asserted_by {  CA_INT([[9, 1, 9], [3, 4, 5], [9, 7, 9]]) == a }
   end
 
@@ -198,11 +198,11 @@ describe "TestCArrayRefStore " do
   example "access_address_grid" do
     # ---
     a = CArray.int(3,3).seq!;
-    is_asserted_by {  CA_INT([0, 2, 4, 6, 8]) == a[+[0, 2, 4, 6, 8]] }
+    is_asserted_by {  CA_INT([0, 2, 4, 6, 8]) == a[CA_SIZE([0, 2, 4, 6, 8])] }
 
     # ---
     a = CArray.int(3,3).seq!
-    a[+[0,2,4,6,8]] = 9
+    a[CA_SIZE([0,2,4,6,8])] = 9
     is_asserted_by {  CA_INT([[9, 1, 9], [3, 9, 5], [9, 7, 9]]) == a }
   end
 

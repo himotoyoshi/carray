@@ -21,13 +21,13 @@ describe "CArray.new" do
   example "should return a carray filled by 0 when data_type == CA_INT" do
     ca = CArray.new(CA_INT, [2,3,4])
     is_asserted_by { ca[0] == 0 }
-    is_asserted_by { ca.all_equal?(0) == true }
+    is_asserted_by { ca.eq(0).all == true }
   end
 
   example "should return a carray filled by string filled by 0 when data_type == CA_FIXLEN" do
     ca = CArray.new(CA_FIXLEN, [2,3,4], :bytes=>3)
     is_asserted_by { ca[0] == "\0\0\0" }
-    is_asserted_by { ca.all_equal?("\0\0\0") == true }
+    is_asserted_by { ca.eq("\0\0\0").all == true }
   end
 
 end

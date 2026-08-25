@@ -1,10 +1,13 @@
 /* ---------------------------------------------------------------------------
 
-  ca_obj_bitfield.c
+  CABitfield view: extract a contiguous bit field from each parent
+  cell, exposing it as an unsigned-integer (or boolean, when
+  bitlen == 1) CArray of the same shape as the parent.
 
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2020 Hiroki Motoyoshi
+  Byte-straddling fields are handled by loading up to 8 bytes from
+  the parent starting at `byte_offset`, masking with `bit_mask`, and
+  shifting by `bit_offset`.  Big-endian hosts adjust byte_offset /
+  bit_offset so the field selection is invariant to host byte order.
 
 ---------------------------------------------------------------------------- */
 
@@ -20,6 +23,7 @@ typedef struct {
   ca_size_t  *dim;
   char     *ptr;
   CArray   *mask;
+  char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path). */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -27,15 +31,39 @@ typedef struct {
   ca_size_t   byte_offset;
   ca_size_t   bit_offset;
   uint64_t  bit_mask;
+  ca_size_t   bit_start;  /* original offset before endian adjustment */
 } CABitfield;
 
+static size_t
+ca_bitfield_dsize (const void *ap)
+{
+  const CABitfield *ca = (const CABitfield *) ap;
+  return sizeof(CABitfield) + ca->ndim * sizeof(ca_size_t);
+}
+
+/* Pool framework hooks: single ndim-sized tail (dim) in the _pool
+   buffer.  See ca_array_pool.c for the shared alloc/free discipline. */
+static size_t
+ca_bitfield_pool_bytes (int8_t ndim)
+{
+  ca_size_t n = (ndim > 0) ? ndim : 1;
+  return (size_t) n * sizeof(ca_size_t);
+}
+
+static void
+ca_bitfield_pool_init (void *ap, int8_t ndim)
+{
+  CABitfield *ca = (CABitfield *) ap;
+  ca->dim = (ca_size_t *) ca->_pool;
+}
+
 const rb_data_type_t cabitfield_data_type = {
-    .parent = &cavirtual_data_type,
+    .parent = &caview_data_type,
     .wrap_struct_name = "CABitfield",
     .function = {
         .dmark = ca_mark,
         .dfree = ca_free,
-        .dsize = NULL,
+        .dsize = ca_bitfield_dsize,
         .dcompact = NULL
     },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
@@ -44,11 +72,6 @@ const rb_data_type_t cabitfield_data_type = {
 static int8_t CA_OBJ_BITFIELD;
 
 static VALUE rb_cCABitfield;
-
-/* yard:
-  class CABitField < CAVirtual # :nodoc:
-  end
-*/
 
 static ca_size_t
 bitfield_bitlen (uint64_t bit_mask, ca_size_t bytes)
@@ -64,153 +87,55 @@ bitfield_bitlen (uint64_t bit_mask, ca_size_t bytes)
   return count;
 }
 
+/* Generic per-cell fetch: load up to 8 bytes from src starting at
+   byte_offset, mask with bit_mask, shift down by bit_offset, and
+   write the low `dwrite` bytes of the result to dst.
+ *
+ * CAREFUL: the read goes through a uint64 with dynamic `span` /
+ * `dwrite` deliberately, so that a byte-straddling field (e.g. an
+ * 8-bit field starting at bit 4 of a 2-byte parent) sees the full
+ * bit_mask.  A dbytes-typed cast would silently truncate bit_mask
+ * to `1 << (dbytes * 8)`, dropping the upper bits of the field. */
 static void
-bitfield_fetch(char *dst, ca_size_t dbytes, 
+bitfield_fetch(char *dst, ca_size_t dbytes,
                    char *src, ca_size_t sbytes,
                    ca_size_t byte_offset, ca_size_t bit_offset, uint64_t bit_mask,
                    ca_size_t elements)
 {
   ca_size_t k;
-  switch ( dbytes ) {
-  case 1: {
-    char   *p;
-    uint8_t *q, *r;
-    uint8_t mask = (uint8_t) bit_mask;
-    p = src + byte_offset;
-    q = (uint8_t *) dst;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r = (uint8_t *) (p+k*sbytes);
-      *(q+k) = (( *r & mask ) >> bit_offset);
-    }
-    break;
-  }
-  case 2: {
-    char   *p;
-    uint16_t *q, *r;
-    uint16_t mask = (uint16_t) bit_mask;
-    p = src + byte_offset;
-    q = (uint16_t *) dst;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r = (uint16_t *) (p+k*sbytes);
-      *(q+k) = (( *r & mask ) >> bit_offset);
-    }
-    break;
-  }
-  case 4: {
-    char   *p;
-    uint32_t *q, *r;
-    uint32_t mask = (uint32_t) bit_mask;
-    p = src + byte_offset;
-    q = (uint32_t *) dst;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = (uint32_t *) (p+k*sbytes);
-      *(q+k) = (( *r & mask ) >> bit_offset);
-    }
-    break;
-  }
-  case 8: {
-    char   *p;
-    uint64_t *q, *r;
-    uint64_t mask = (uint64_t) bit_mask;
-    p = src + byte_offset;
-    q = (uint64_t *) dst;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = (uint64_t *) (p+k*sbytes);
-      *(q+k) = (( *r & mask ) >> bit_offset);
-    }
-    break;
-  }
-  default: 
-    rb_raise(rb_eRuntimeError, "[BUG]");
+  ca_size_t span = sbytes - byte_offset;
+  if (span > 8) span = 8;
+  ca_size_t dwrite = (dbytes > 8) ? 8 : dbytes;
+  for (k = 0; k < elements; k++) {
+    uint64_t tmp = 0;
+    memcpy(&tmp, src + k * sbytes + byte_offset, (size_t) span);
+    uint64_t result = (tmp & bit_mask) >> bit_offset;
+    memcpy(dst + k * dbytes, &result, (size_t) dwrite);
   }
 }
 
 static void
 bitfield_store(char *src, ca_size_t sbytes,
-                   char *dst, ca_size_t dbytes, 
+                   char *dst, ca_size_t dbytes,
                    ca_size_t byte_offset, ca_size_t bit_offset, uint64_t bit_mask,
                    ca_size_t elements)
 {
+  /* Mirror of bitfield_fetch with scatter direction: reads sbytes
+     from src, reads dbytes of dst starting at byte_offset, masks
+     the field bits in, writes back.  The uint64 read/write span
+     preserves bit_mask for byte-straddling fields (see
+     bitfield_fetch CAREFUL). */
   ca_size_t k;
-  switch ( dbytes ) {
-  case 1: {
-    char   *q;
-    uint8_t *p, *r;
-    uint8_t mask = (uint8_t) bit_mask;
-    p = (uint8_t *) src;
-    q = dst + byte_offset;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = p + k;
-      *(uint8_t*)(q+k*dbytes) = 
-        ( ((*(uint8_t*)(q+k*dbytes)) & ~mask) | ((*r << bit_offset) & mask) );
-    }
-    break;
-  }
-  case 2: {
-    char   *q;
-    uint16_t *p, *r;
-    uint16_t mask = (uint16_t) bit_mask;
-    p = (uint16_t *) src;
-    q = dst + byte_offset;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = p + k;
-      *(uint16_t*)(q+k*dbytes) = 
-        ( ((*(uint16_t*)(q+k*dbytes)) & ~mask) | ((*r << bit_offset) & mask) );
-    }
-    break;
-  }
-  case 4: {
-    char   *q;
-    uint32_t *p, *r;
-    uint32_t mask = (uint32_t) bit_mask;
-    p = (uint32_t *) src;
-    q = dst + byte_offset;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = p + k;
-      *(uint32_t*)(q+k*dbytes) = 
-        ( ((*(uint32_t*)(q+k*dbytes)) & ~mask) | ((*r << bit_offset) & mask) );
-    }
-    break;
-  }
-  case 8: {
-    char   *q;
-    uint64_t *p, *r;
-    uint64_t mask = (uint64_t) bit_mask;
-    p = (uint64_t *) src;
-    q = dst + byte_offset;
-    #ifdef _OPENMP
-    #pragma omp parallel for private(r)
-    #endif
-    for (k=0; k<elements; k++) {
-      r  = p + k;
-      *(uint64_t*)(q+k*dbytes) = 
-        ( ((*(uint64_t*)(q+k*dbytes)) & ~mask) | ((*r << bit_offset) & mask) );
-    }
-    break;
-  }
-  default:
-    rb_raise(rb_eRuntimeError, "[BUG]");
+  ca_size_t span = dbytes - byte_offset;
+  if (span > 8) span = 8;
+  ca_size_t sread = (sbytes > 8) ? 8 : sbytes;
+  for (k = 0; k < elements; k++) {
+    uint64_t srcv = 0;
+    memcpy(&srcv, src + k * sbytes, (size_t) sread);
+    uint64_t tmp = 0;
+    memcpy(&tmp, dst + k * dbytes + byte_offset, (size_t) span);
+    tmp = (tmp & ~bit_mask) | ((srcv << bit_offset) & bit_mask);
+    memcpy(dst + k * dbytes + byte_offset, &tmp, (size_t) span);
   }
 }
 
@@ -229,14 +154,6 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca_size_t  bit_offset;
   uint64_t bit_mask;
   ca_size_t i;
-
-  /* check arguments */
-
-  /*
-  if ( ! ca_is_integer_type(parent) && ! ca_is_float_type(ca) ) {
-    rb_raise(rb_eCADataTypeError, "invalid data_type for bitfield");
-  }
-  */
 
   ndim     = parent->ndim;
   bitsize  = parent->bytes * 8;
@@ -281,7 +198,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
     bit_offset  = offset % 8;
     bit_mask    = 0;
     for (i=0; i<bitlen; i++) {
-      bit_mask += 1 << ( bit_offset + i );
+      bit_mask += 1ULL << ( bit_offset + i );
     }
     if ( byte_offset < 0 ) {
       for (i=0; i<-byte_offset; i++) {
@@ -296,7 +213,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
     bit_offset  = offset % 8;
     bit_mask    = 0;
     for (i=0; i<bitlen; i++) {
-      bit_mask += 1 << ( bit_offset + i );
+      bit_mask += 1ULL << ( bit_offset + i );
     }
   }
 
@@ -308,7 +225,9 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, ndim);
+  if ( ! ca->_pool ) {
+    ca->dim     = ALLOC_N(ca_size_t, ndim);
+  }
 
   ca->parent    = parent;
   ca->attach    = 0;
@@ -317,6 +236,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->byte_offset = byte_offset;
   ca->bit_offset  = bit_offset;
   ca->bit_mask    = bit_mask;
+  ca->bit_start   = offset;  /* preserve original offset for clone/copy */
 
   memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
 
@@ -330,7 +250,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 CABitfield *
 ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen)
 {
-  CABitfield *ca = ALLOC(CABitfield);
+  CABitfield *ca = (CABitfield *) ca_array_alloc(CA_OBJ_BITFIELD, parent->ndim);
   ca_bitfield_setup(ca, parent, offset, bitlen);
   return ca;
 }
@@ -341,8 +261,13 @@ free_ca_bitfield (void *ap)
   CABitfield *ca = (CABitfield *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
-    xfree(ca->dim);
-    xfree(ca);
+    if ( ca->_pool ) {
+      ca_array_free(ca);          /* dim lives in _pool */
+    }
+    else {
+      xfree(ca->dim);
+      xfree(ca);
+    }
   }
 }
 
@@ -356,59 +281,130 @@ static void *
 ca_bitfield_func_clone (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
-  return ca_bitfield_new(ca->parent, 
-                         8 * ca->byte_offset + ca->bit_offset, 
+  return ca_bitfield_new(ca->parent,
+                         ca->bit_start,
                          bitfield_bitlen(ca->bit_mask, ca->bytes));
 }
 
-static char *
-ca_bitfield_func_ptr_at_addr (void *ap, ca_size_t addr)
-{
-  CABitfield *ca = (CABitfield *) ap;
-  if ( ! ca->ptr ) {
-    rb_raise(rb_eRuntimeError, "[BUG]");
-    return NULL;
-  }
-  else {
-    return ca->ptr + ca->bytes * addr;
-  }
-}
-
-static char *
-ca_bitfield_func_ptr_at_index (void *ap, ca_size_t *idx)
-{
-  CABitfield *ca = (CABitfield *) ap;
-  if ( ! ca->ptr ) {
-    rb_raise(rb_eRuntimeError, "[BUG]");
-    return NULL;
-  }
-  else {
-    return ca_func[CA_OBJ_ARRAY].ptr_at_index(ca, idx);
-  }
-}
-
+/* Per-cell get/put: fetch the parent cell into a scratch buffer,
+   then extract or splice the bit field with bitfield_fetch /
+   bitfield_store on a single element. */
 static void
-ca_bitfield_func_fetch_index (void *ap, ca_size_t *idx, void *ptr)
+ca_bitfield_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CABitfield *ca = (CABitfield *) ap;
   char *v = xmalloc(ca->parent->bytes);
   ca_fetch_index(ca->parent, idx, v);
-  memset(ptr, 0, ca->bytes);
-  bitfield_fetch(ptr, ca->bytes, v, ca->parent->bytes,
-                 ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+  if ( dir == CA_XFER_GET ) {
+    memset(data, 0, ca->bytes);
+    bitfield_fetch(data, ca->bytes, v, ca->parent->bytes,
+                   ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+  }
+  else {
+    bitfield_store(data, ca->bytes, v, ca->parent->bytes,
+                   ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+    ca_store_index(ca->parent, idx, v);
+  }
   xfree(v);
 }
 
+/* Batched gather / scatter.  CABitfield is a 1:1 view (each parent
+   cell carries exactly one field position) so the incoming view
+   addresses are also parent addresses.  GET gathers parent cells in
+   one call then extracts bits; PUT reads, splices field bits, then
+   writes back.  Each cell touches its own bits, so there is no
+   shared-cell hazard between concurrent scatters.
+
+   Fast path: when `addrs` covers the whole view sequentially and
+   the effective attached parent (via identity compose-fold) is
+   live, drive bitfield_fetch / bitfield_store directly against
+   parent->ptr — no scratch, no double xfer_addrs round-trip. */
 static void
-ca_bitfield_func_store_index (void *ap, ca_size_t *idx, void *ptr)
+ca_bitfield_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                             void *data, int dir)
 {
   CABitfield *ca = (CABitfield *) ap;
-  char *v = xmalloc(ca->parent->bytes);
-  ca_fetch_index(ca->parent, idx, v);
-  bitfield_store(ptr, ca->bytes, v, ca->parent->bytes,
-                 ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
-  ca_store_index(ca->parent, idx, v);
-  xfree(v);
+  CArray    *parent = ca->parent;
+  char      *d = (char *) data;
+  ca_size_t  pbytes = parent->bytes;
+  ca_size_t  i, base;
+  char      *v;
+  volatile VALUE holder;
+
+  if ( n == ca->elements
+       && ca_xfer_addrs_is_sequential_run(n, addrs, &base) && base == 0 ) {
+    CArray *eff_parent = ca_resolve_attached_root_via_identity(parent);
+    if ( eff_parent->ptr
+         && eff_parent->elements == parent->elements
+         && eff_parent->bytes    == parent->bytes ) {
+      if ( dir == CA_XFER_GET ) {
+        /* Zero the output buffer, then bulk-extract n field values
+           directly from the attached parent. */
+        memset(d, 0, n * ca->bytes);
+        bitfield_fetch(d, ca->bytes, eff_parent->ptr, pbytes,
+                       ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+      } else {
+        /* Bulk RMW directly against parent memory (bitfield_store
+           preserves non-field bits). */
+        bitfield_store(d, ca->bytes, eff_parent->ptr, pbytes,
+                       ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+      }
+      return;
+    }
+  }
+
+  v = ALLOCV_N(char, holder, n * pbytes);
+  if ( dir == CA_XFER_GET ) {
+    ca_xfer_addrs(parent, n, addrs, v, CA_XFER_GET);
+    for (i = 0; i < n; i++) {
+      memset(d + i * ca->bytes, 0, ca->bytes);
+      bitfield_fetch(d + i * ca->bytes, ca->bytes, v + i * pbytes, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+    }
+  }
+  else {
+    ca_xfer_addrs(parent, n, addrs, v, CA_XFER_GET);   /* RMW: read first */
+    for (i = 0; i < n; i++) {
+      bitfield_store(d + i * ca->bytes, ca->bytes, v + i * pbytes, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+    }
+    ca_xfer_addrs(parent, n, addrs, v, CA_XFER_PUT);
+  }
+  ALLOCV_END(holder);
+}
+
+/* CABitfield is a per-cell bit transform with no axis structure to
+   preserve, so the incoming region reduces to a flat address list
+   over the view.  We materialise that list from starts / counts /
+   strides and delegate to the view's own xfer_addrs, which handles
+   the gather + bit RMW + batched parent delivery. */
+static void
+ca_bitfield_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                              ca_size_t *strides, void *data, int dir)
+{
+  CABitfield *ca = (CABitfield *) ap;
+  int8_t     ndim = ca->ndim;
+  ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];
+  ca_size_t *vaddrs;
+  ca_size_t  base = 0, n = 1, i, s;
+  int8_t     k;
+  volatile VALUE holder;
+
+  s = ca->bytes;
+  for (k = ndim - 1; k >= 0; k--) { native[k] = s; s *= ca->dim[k]; }
+  for (k = 0; k < ndim; k++) { base += starts[k] * native[k]; n *= counts[k]; }
+
+  vaddrs = ALLOCV_N(ca_size_t, holder, n);
+  for (k = 0; k < ndim; k++) idx[k] = 0;
+  for (i = 0; i < n; i++) {
+    ca_size_t off = base;
+    for (k = 0; k < ndim; k++) off += idx[k] * strides[k];
+    vaddrs[i] = off / ca->bytes;
+    k = ndim - 1;
+    while (k >= 0) { if (++idx[k] < counts[k]) break; idx[k] = 0; k--; }
+  }
+  ca_xfer_addrs(ca, n, vaddrs, data, dir);
+  ALLOCV_END(holder);
 }
 
 static void
@@ -416,18 +412,15 @@ ca_bitfield_func_allocate (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
   ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->ptr = malloc_with_check(ca_length(ca));  
+  ca->ptr = xmalloc(ca_length(ca));
 }
 
 static void
 ca_bitfield_func_attach (void *ap)
 {
-  void ca_bitfield_attach (CABitfield *cb);
   CABitfield *ca = (CABitfield *) ap;
   ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->ptr = malloc_with_check(ca_length(ca));  
+  ca->ptr = xmalloc(ca_length(ca));
   ca_bitfield_attach(ca);
 }
 
@@ -443,34 +436,72 @@ static void
 ca_bitfield_func_detach (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
-  free(ca->ptr);
+  xfree(ca->ptr);
   ca->ptr = NULL;
   ca_detach(ca->parent);
 }
 
-static void
-ca_bitfield_func_copy_data (void *ap, void *ptr)
-{
-  CABitfield *ca = (CABitfield *) ap;
-  char *ptr0 = ca->ptr;
-  ca_attach(ca->parent);
-  ca->ptr = ptr;
-  ca_bitfield_attach(ca);
-  ca->ptr = ptr0;
-  ca_detach(ca->parent);
-}
+/* Whole-view transfer.  Fast path: drive bitfield_fetch /
+   bitfield_store directly against the effective attached parent
+   (via identity compose-fold), bypassing the addrs[] allocation
+   and sequential-run scan that xfer_addrs would perform.
 
+   Cold parent falls back to a scratch 2-pass (gather parent into a
+   local buffer via xfer_stride, apply the bitfield primitive, and
+   for PUT scatter the buffer back).  Deliberately does not call
+   ca_attach(parent) — that would re-introduce the silent transitive
+   attach the fast path exists to avoid. */
 static void
-ca_bitfield_func_sync_data (void *ap, void *ptr)
+ca_bitfield_func_xfer_all (void *ap, void *data, int dir)
 {
   CABitfield *ca = (CABitfield *) ap;
-  char *ptr0 = ca->ptr;
-  ca_attach(ca->parent);
-  ca->ptr = ptr;
-  ca_bitfield_sync(ca);
-  ca->ptr = ptr0;
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  CArray     *parent = ca->parent;
+  ca_size_t   pbytes = parent->bytes;
+  ca_size_t   n = ca->elements;
+  char       *d = (char *) data;
+  CArray     *eff_parent = ca_resolve_attached_root_via_identity(parent);
+
+  if ( eff_parent->ptr
+       && eff_parent->elements == parent->elements
+       && eff_parent->bytes    == parent->bytes ) {
+    if ( dir == CA_XFER_GET ) {
+      memset(d, 0, n * ca->bytes);
+      bitfield_fetch(d, ca->bytes, eff_parent->ptr, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+    } else {
+      bitfield_store(d, ca->bytes, eff_parent->ptr, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+    }
+    return;
+  }
+
+  /* Cold-parent fallback: materialise into scratch via xfer_stride
+     (no ca_attach(parent)), apply the bitfield primitive, and for
+     PUT scatter back. */
+  {
+    volatile VALUE holder;
+    char     *scratch = ALLOCV_N(char, holder, parent->elements * pbytes);
+    ca_size_t pstarts[CA_RANK_MAX];
+    ca_size_t pnative[CA_RANK_MAX];
+    ca_size_t s = pbytes;
+    int8_t    k;
+    for ( k = parent->ndim - 1; k >= 0; k-- ) { pnative[k] = s; s *= parent->dim[k]; }
+    for ( k = 0; k < parent->ndim; k++ ) pstarts[k] = 0;
+    if ( dir == CA_XFER_GET ) {
+      ca_xfer_stride(parent, pstarts, parent->dim, pnative, scratch, CA_XFER_GET);
+      memset(d, 0, n * ca->bytes);
+      bitfield_fetch(d, ca->bytes, scratch, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+    } else {
+      /* CAREFUL: gather parent into scratch before splicing so the
+         non-field bits are preserved across the RMW. */
+      ca_xfer_stride(parent, pstarts, parent->dim, pnative, scratch, CA_XFER_GET);
+      bitfield_store(d, ca->bytes, scratch, pbytes,
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+      ca_xfer_stride(parent, pstarts, parent->dim, pnative, scratch, CA_XFER_PUT);
+    }
+    ALLOCV_END(holder);
+  }
 }
 
 static void
@@ -481,6 +512,34 @@ ca_bitfield_func_fill_data (void *ap, void *ptr)
   ca_bitfield_fill(ca, ptr);
   ca_sync(ca->parent);
   ca_detach(ca->parent);
+}
+
+
+/* A fill here is a read-modify-write: the cell also carries bits this view
+   does not own, so there is nothing to hand down as a region.  The batched
+   address slot already reads and writes a run in one call each; broadcasting
+   the value into it is all that is left, and it saves the descent that a
+   per-cell walk would pay for every cell. */
+static void
+ca_bitfield_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
+{
+  CABitfield *ca = (CABitfield *) ap;
+  volatile VALUE holder;
+  char     *buf = ALLOCV_N(char, holder, (size_t) n * ca->bytes);
+  ca_size_t i;
+
+  for ( i = 0; i < n; i++ ) {
+    memcpy(buf + i * ca->bytes, ptr, ca->bytes);
+  }
+  ca_bitfield_func_xfer_addrs(ca, n, addrs, buf, CA_XFER_PUT);
+  ALLOCV_END(holder);
+}
+
+static void
+ca_bitfield_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
+    ca_size_t *counts, ca_size_t *steps, void *ptr)
+{
+  ca_fill_stride_via_addrs(ap, base, ndim, counts, steps, ptr);
 }
 
 static void
@@ -499,23 +558,22 @@ ca_bitfield_func_create_mask (void *ap)
 
 ca_operation_function_t ca_bitfield_func = {
   -1, /* CA_OBJ_BITFIELD */
-  CA_VIRTUAL_ARRAY,
+  CA_VIEW_ARRAY,
   free_ca_bitfield,
   ca_bitfield_func_clone,
-  ca_bitfield_func_ptr_at_addr,
-  ca_bitfield_func_ptr_at_index,
-  NULL,
-  ca_bitfield_func_fetch_index,
-  NULL,
-  ca_bitfield_func_store_index,
   ca_bitfield_func_allocate,
   ca_bitfield_func_attach,
   ca_bitfield_func_sync,
   ca_bitfield_func_detach,
-  ca_bitfield_func_copy_data,
-  ca_bitfield_func_sync_data,
   ca_bitfield_func_fill_data,
   ca_bitfield_func_create_mask,
+  ca_bitfield_func_xfer_index,
+  ca_bitfield_func_xfer_addrs,
+  NULL,                       /* fold_stride: never fold — per-cell bit transform */
+  ca_bitfield_func_xfer_stride,
+  ca_bitfield_func_xfer_all,
+  .fill_addrs   = ca_bitfield_func_fill_addrs,
+  .fill_stride  = ca_bitfield_func_fill_stride,
 };
 
 /* ------------------------------------------------------------------- */
@@ -569,11 +627,6 @@ rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
   return obj;
 }
 
-/* @overload bitfield (range, type)
-
-[TBD]
-*/
-
 VALUE
 rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
 {
@@ -616,22 +669,29 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
   TypedData_Get_Struct(self,  CABitfield, &cabitfield_data_type, ca);
   TypedData_Get_Struct(other, CABitfield, &cabitfield_data_type, cs);
 
-  ca_bitfield_setup(ca, cs->parent, 
-                    8 * cs->byte_offset + cs->bit_offset, 
+  if ( ca_func[CA_OBJ_BITFIELD].pool_init ) {
+    ca_array_pool_alloc(ca, CA_OBJ_BITFIELD, cs->parent->ndim);
+  }
+  ca_bitfield_setup(ca, cs->parent,
+                    cs->bit_start,
                     bitfield_bitlen(cs->bit_mask, cs->bytes));
 
   return self;
 }
 
 void
-Init_ca_obj_bitfield ()
+Init_ca_obj_bitfield (void)
 {
-  rb_cCABitfield = rb_define_class("CABitfield", rb_cCAVirtual);
+  rb_cCABitfield = rb_define_class("CABitfield", rb_cCAView);
 
-  CA_OBJ_BITFIELD = ca_install_obj_type(rb_cCABitfield, 
-  	                                &cabitfield_data_type, 
+  ca_bitfield_func.struct_size = sizeof(CABitfield);
+  ca_bitfield_func.pool_bytes  = ca_bitfield_pool_bytes;
+  ca_bitfield_func.pool_init   = ca_bitfield_pool_init;
+
+  CA_OBJ_BITFIELD = ca_install_obj_type(rb_cCABitfield,
+  	                                &cabitfield_data_type,
 					rb_cCArrayMask,
-					&carray_data_type, ca_bitfield_func);
+					&carray_mask_data_type, &ca_bitfield_func, sizeof(ca_bitfield_func));
   rb_define_const(rb_cObject, "CA_OBJ_BITFIELD", INT2NUM(CA_OBJ_BITFIELD));
 
   rb_define_method(rb_cCArray, "bitfield", rb_ca_bitfield, -1);

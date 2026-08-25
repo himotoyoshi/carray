@@ -24,8 +24,8 @@ describe "TestCArrayGenerate " do
       c = CArray.int32(1) { 0x12345678 }
       x = c.refer(CA_FLOAT32, [1])[0]
       y = c.swap_bytes.refer(CA_FLOAT32, [1])[0]
-      a = CArray.complex(3,3) { x + y*CI }
-      b = CArray.complex(3,3) { y + x*CI }
+      a = CArray.complex(3,3) { x + y*Complex::I }
+      b = CArray.complex(3,3) { y + x*Complex::I }
       is_asserted_by {  b == a.swap_bytes }
       is_asserted_by {  a == b.swap_bytes }
       is_asserted_by {  a == a.swap_bytes.swap_bytes }
@@ -58,7 +58,7 @@ describe "TestCArrayGenerate " do
     is_asserted_by {  CA_OBJECT(["a", "b", "c"]) == a }
 
     # ---
-    a = CArray.object(3).seq!("a", :succ) { |x| "@" + x }
+    a = CArray.object(3).seq!("a", :succ).map! { |x| "@" + x }
     is_asserted_by {  CA_OBJECT(["@a", "@b", "@c"]) == a }
 
     # ---

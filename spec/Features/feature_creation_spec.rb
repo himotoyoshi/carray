@@ -58,7 +58,7 @@ describe "TestCArrayCreation " do
       CA_OBJECT
     ]
     data_type_list.each do |type|
-      ca = CArray.new(type, [3, 2, 1]) 
+      ca = CArray.new(type, [3, 2, 1])
       is_asserted_by { ca.class == CArray }
       is_asserted_by { type == ca.data_type }
     end    

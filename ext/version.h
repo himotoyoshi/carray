@@ -1,16 +1,6 @@
-/* ---------------------------------------------------------------------------
-
-  version.h
-
-  This file is part of Ruby/CArray extension library.
-
-  Copyright (C) 2005-2025 Hiroki Motoyoshi
-
----------------------------------------------------------------------------- */
-
-#define CA_VERSION "2.0.1"
-#define CA_VERSION_CODE 201
-#define CA_VERSION_MAJOR 2
+#define CA_VERSION "3.0.0"
+#define CA_VERSION_CODE 300
+#define CA_VERSION_MAJOR 3
 #define CA_VERSION_MINOR 0
-#define CA_VERSION_TEENY 1
-#define CA_VERSION_DATE "2025/12/22"
+#define CA_VERSION_TEENY 0
+#define CA_VERSION_DATE "2026/08/25"

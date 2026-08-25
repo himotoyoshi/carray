@@ -21,7 +21,6 @@ class_list.each do |klass|
   orig_s[klass] = klass.singleton_methods
 end
 
-$CARRAY_NO_AUTOLOAD = true
 require "carray"
 
 class_list.each do |klass|

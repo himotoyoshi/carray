@@ -2,6 +2,8 @@
 require 'carray'
 require "rspec-power_assert"
 
+using CArray::CoreExtensions
+
 describe "TestMath " do
 
   example "zerodiv" do

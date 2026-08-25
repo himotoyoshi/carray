@@ -42,7 +42,7 @@ describe "TestCABlock " do
     is_asserted_by { b.dim == [2, 2] }
     is_asserted_by { b.elements == 4 }
 
-    c = CArray.int32(2, 2){ [[5,6],[9,10]] }
+    c = CArray.int32(2, 2).tap { |x| x[] = [[5,6],[9,10]] }
     is_asserted_by { b == c }
 
     d = a.clone
@@ -75,20 +75,20 @@ describe "TestCABlock " do
     b = a[0..2, 0..2]
     c = b[0..1, 0..1]
 
-    is_asserted_by { b == CArray.int32(3, 3) {
+    is_asserted_by { b == CA_INT32(
        [
          [0, 1, 2],
          [4, 5, 6],
          [8, 9, 10],
        ]
-       } }
+       ) }
 
-    is_asserted_by { c == CArray.int32(2, 2) {
+    is_asserted_by { c == CA_INT32(
        [
          [0, 1],
          [4, 5],
        ]
-       } }
+       ) }
   end
 
   example "block_of_block_set_value" do
@@ -98,37 +98,37 @@ describe "TestCABlock " do
 
     a[0..1, 0..1] = 1
 
-    is_asserted_by { b == CArray.int32(3, 3) {
+    is_asserted_by { b == CA_INT32(
        [
          [1, 1, 2],
          [1, 1, 6],
          [8, 9, 10],
        ]
-       } }
+       ) }
 
-    is_asserted_by { c == CArray.int32(2, 2) {
+    is_asserted_by { c == CA_INT32(
        [
          [1, 1],
          [1, 1],
        ]
-       } }
+       ) }
 
     c[] = 2
 
-    is_asserted_by { b == CArray.int32(3, 3) {
+    is_asserted_by { b == CA_INT32(
        [
          [2, 2, 2],
          [2, 2, 6],
          [8, 9, 10],
        ]
-       } }
+       ) }
 
-    is_asserted_by { a[0..1, 0..1] == CArray.int32(2, 2) {
+    is_asserted_by { a[0..1, 0..1] == CA_INT32(
        [
          [2, 2],
          [2, 2],
        ]
-       } }
+       ) }
   end
 
   example "block_of_block_downrank" do
@@ -139,7 +139,7 @@ describe "TestCABlock " do
     b.seq!
 
     is_asserted_by { b == a[0..2, 0..2, 1] }
-    is_asserted_by { c == CArray.int32(2) { [1, 4] } }
+    is_asserted_by { c == CA_INT32([1, 4]) }
 
     c[] = 1
 
@@ -152,11 +152,11 @@ describe "TestCABlock " do
     c = b[1..0, 0..1]
 
     is_asserted_by { c[2] == 0 }
-    is_asserted_by { c[[2]] == CArray.int32(1) { [0] } }
-    is_asserted_by { c[nil] == CArray.int32(4) { [4, 5, 0, 1] } }
-    is_asserted_by { c[1..2] == CArray.int32(2) { [5, 0] } }
-    is_asserted_by { c[[nil, 2]] == CArray.int32(2) { [4, 0] } }
-    is_asserted_by { c[[(1..-1), 2]] == CArray.int32(2) { [5, 1] } }
+    is_asserted_by { c[[2]] == CA_INT32([0]) }
+    is_asserted_by { c[nil] == CA_INT32([4, 5, 0, 1]) }
+    is_asserted_by { c[1..2] == CA_INT32([5, 0]) }
+    is_asserted_by { c[[nil, 2]] == CA_INT32([4, 0]) }
+    is_asserted_by { c[[(1..-1), 2]] == CA_INT32([5, 1]) }
 
     c[nil] = 1
     is_asserted_by { a[0..1, 0..1] == CArray.int32(2, 2) { 1 } }
@@ -187,19 +187,4 @@ describe "TestCABlock " do
     b[0..1, 0..1] = a[0..1, 0..1]
   end
 
-  example "block_move" do
-    a = CArray.int(10, 10).seq!
-    b = a[0..2, 0..2]
-
-    is_asserted_by { b == CArray.int(3, 3) { [[0, 1, 2], [10, 11, 12], [20, 21, 22]] } }
-
-    b.move(1,1)
-    is_asserted_by { b == CArray.int(3, 3) { [[11, 12, 13], [21, 22, 23], [31, 32, 33]] } }
-
-    b.move(7,7)
-    is_asserted_by { b == CArray.int(3, 3) { [[77, 78, 79], [87, 88, 89], [97, 98, 99]] } }
-
-    expect { b.move(8,8) }.to raise_error(ArgumentError) 
-  end
-  
 end

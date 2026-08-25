@@ -1,12 +1,4 @@
-# ----------------------------------------------------------------------------
-#
-#  carray/inspect.rb
-#
-#  This file is part of Ruby/CArray extension library.
-#
-#  Copyright (C) 2005-2025 Hiroki Motoyoshi
-#
-# ----------------------------------------------------------------------------
+require "pp"  # CArray#source_code uses Array#pretty_inspect
 
 class CArray::Inspector  # :nodoc:
 
@@ -14,6 +6,7 @@ class CArray::Inspector  # :nodoc:
     @carray = carray
   end
 
+  # @!visibility private
   def inspect_string
     if @carray.ndim == 0
       raise "can't inspect CArray of ndim == 0"
@@ -46,7 +39,9 @@ class CArray::Inspector  # :nodoc:
     @carray.instance_exec {
       case data_type
       when CA_FIXLEN
-        return format("%s[%i]", type_name, bytes)
+        # Kernel.format explicitly: inside instance_exec self is the CArray,
+        # where a bare format() would resolve to the public CArray#format.
+        return Kernel.format("%s[%i]", type_name, bytes)
       else
         return type_name
       end
@@ -58,7 +53,7 @@ class CArray::Inspector  # :nodoc:
     when CA_OBJ_UNBOUND_REPEAT
       dim = @carray.spec
     else
-      dim = @carray.dim
+      dim = @carray.shape
     end
     return dim
   end
@@ -108,22 +103,34 @@ class CArray::Inspector  # :nodoc:
         list << "attached"
       end
       # ---
-      if has_attribute?
-        list << "attrs={" + attribute.keys.join(",") + "}"
+      if has_attr?
+        list << "attrs={" + attrs.keys.join(",") + "}"
       end
     }
     return list
   end
 
   def get_formatter
+    # A Face that defines storage_to_scalar decodes each cell into a surface
+    # value (CATime::Element, a String, a category label, ...) that has nothing
+    # to do with the storage data_type, so the formatter must follow the decoded
+    # value, not the storage.  Faces without the hook (CAString) hand back the
+    # stored value itself and fall through to the storage formatters below.
+    if @carray.face? and @carray.respond_to?(:storage_to_scalar)
+      return lambda { |x| x.inspect }
+    end
     case @carray.data_type
-    when CA_BOOLEAN, CA_INT8, CA_INT16, CA_INT32, CA_INT64
+    when CA_BOOLEAN
+      # Boolean cells fetch as true/false; show compact 1/0 (masked = _).
+      # The type name in the inspect header distinguishes this from an int array.
+      lambda{|x| x ? "1" : "0" }
+    when CA_INT8, CA_INT16, CA_INT32, CA_INT64
       lambda{|x| "%i" % x }
     when CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64
       lambda{|x| "%u" % x }
-    when CA_FLOAT32, CA_FLOAT64, CA_FLOAT128
+    when CA_FLOAT32, CA_FLOAT64
       lambda{|x| x.inspect }
-    when CA_CMPLX64, CA_CMPLX128, CA_CMPLX256
+    when CA_CMPLX64, CA_CMPLX128
       lambda{|x| format("%s%s%si",
                         x.real.inspect, (x.imag >= 0) ? "+" : "-", x.imag.abs.inspect) }
     when CA_FIXLEN
@@ -146,9 +153,9 @@ class CArray::Inspector  # :nodoc:
   end
 
   def get_data_spec (level, idx, formatter)
-    io = "[ "
+    io = +"[ "  # mutable buffer; `<<` below appends into it
     ndim = @carray.ndim
-    dim  = @carray.dim
+    dim  = @carray.shape
     if level == ndim - 1
       over = false
       dim[level].times do |i|
@@ -209,6 +216,11 @@ end
 
 class CArray
 
+  # @overload inspect
+  #   Returns a human-readable description of `self` including
+  #   class, `data_type`, shape, element and memory summaries, mask
+  #   count, and a truncated data preview.
+  #   @return [String]
   def inspect
     return CArray::Inspector.new(self).inspect_string
   end
@@ -216,7 +228,7 @@ class CArray
   private
 
   def desc  
-    output = ""
+    output = +""  # mutable buffer; `<<` below appends into it
     case data_type 
     when CA_FIXLEN
       output << sprintf("CArray.%s(%s, :bytes=>%i)", 
@@ -230,7 +242,12 @@ class CArray
   
   public
 
-  def code 
+  # @overload source_code
+  #   Returns a Ruby source-like string that would reconstruct
+  #   `self`, combining the type/shape descriptor with a pretty
+  #   printed value block. Useful for embedding fixtures in scripts.
+  #   @return [String]
+  def source_code
     text = [
       desc,
       " { ",

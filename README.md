@@ -1,56 +1,140 @@
-Ruby/CArray
-===========
+# Ruby/CArray
 
 Ruby/CArray is an extension library for the multi-dimensional array class.
 
-Features
---------
+## Features
 
-* Collection class for multidimensional array storing the value with uniform data type
-* Element-wise mathematical operations and functions
-* Statistical operation for the elements
-* Various methods for referencing data elements
-* Internally included element-wise mask to handle missing values
-* Indirect data manipulation to referent by virtual array 
-* Special iterators (dimension, block, window, categorical)
-* User-defined array class with same multi-dimensional interfaces as CArray
-* Accessing the partial data in fixed length data via data_class interface
-* Wrapping the memory block owned by the other object (such as NArray).
+* Multidimensional arrays holding values of a single, uniform data type
+* Indexing and slicing in many ways — by position, range, boolean mask, or
+  index/address arrays
+* Element-wise arithmetic, mathematical and transcendental functions
+* Reduction and statistics computed over the whole array or along any axis
+* Built-in per-element mask on every array to represent missing values, properly
+  accounted for in reductions and statistics
+* A rich family of views onto the original data — for indexing, reshaping, and
+  reinterpreting elements — without copying
+* Views compose into chains of any depth, and writing through them reaches all the
+  way back to the source data
+* Explicit broadcasting: operating on arrays of different shapes by stretching
+  size-1 axes to match, without ever adding axes implicitly
+* Fast reductions built on compiler auto-vectorization
+* Kernel-style iteration from Ruby: drive a Ruby block over each sub-array spanning
+  chosen axes
+* Faces: a mechanism for building extended data types on top of CArray (time,
+  categorical and variable-length string columns are such types)
+* Easily define record types that bind several data together as one element
+* User-defined array classes, written in Ruby, that share the full CArray interface
+  so your own type behaves like a CArray everywhere
+* A DataFrame (`CAFrame`) whose columns are plain CArrays — it adds names and row
+  operations (select, filter, sort, join, group-by, CSV I/O) and hands a column
+  back as the array itself, so masks, views and Faces keep working on it
+* Writing per-axis methods and functions in C extensions with ease — a single
+  kernel runs across every view type, with no per-view branching to write yourself
+* MemoryView protocol support — interoperate with other numerical libraries as both
+  producer and consumer
 
-Requirements
-------------
+## Install
 
-* Ruby 2.4.0 or later
-* C compiler 
-  + IEEE754 floating point number
-  + C99 complex number
+```
+gem install carray
+```
 
-What is Ruby/CArray 
-------------------
+Or add it to your `Gemfile`:
 
-Ruby/CArray is an extension library for the multi-dimensional numerical array class. The name "CArray" comes from a wrapper's meaning to a numerical array handled by the C language. CArray stores integers or floating-point numbers in memory block and treats them collectively to ensure efficient performance. Therefore, Ruby/CArray is suitable for numerical computation and data analysis. 
+```ruby
+gem "carray"
+```
 
-#### Multi-dimensional uniform array ####
+Requires Ruby 3.0 or later.
 
-CArray is a collection class that can store the array of values with a uniform data type of one of fixed-width integer (8,16,32,64bits), floating-point number (32,64bits), complex number (64,128bits), fixed-length string, ruby object. These values are stored in memory block as binary data. CArray has multi-dimensional interfaces for the array to access their values. The multi-dimensional array has the attributes of the dimension size (1,2,3,...) and the shape of dimension ([dim0], [dim0,dim1], [dim0,dim1,dim2],...) which define the size of array. 
+On a multi-core machine, parallel `make` cuts install time noticeably:
 
-#### Collective mathematical operations ####
+```
+MAKEFLAGS="-j$(nproc)" gem install carray                     # Linux
+MAKEFLAGS="-j$(sysctl -n hw.ncpu)" gem install carray         # macOS
+```
 
-CArray supports the collective calculation for the element-wise arithmetic operations and elementary mathematical functions. Additionally, some basic statistical summarization along specific dimensions are also provided.
+## Quick example
 
-#### Referencing data and virtual arrays ####
+```ruby
+require "carray"
 
-CArray provides various methods for referencing data, such as addressing, slicing, selection by condition, address mapping, grid reference, transposing, shifting, rolling, data type conversion, reshaping, and so on. These data referencing are realized by the creation of virtual arrays, so-called 'view'. The virtual array doesn't have its data and retrieves the data from the referent only on-demand, including dereferencing, copying, or calculation. Since virtual array classes are sub-class of CArray, it has the same interfaces to access data as CArray. The changes in a virtual array by storing data are also reflected in the referent (if not a read_only array). Multiple heterogeneous chains of reference are also allowed, although the trade-offs with performance must be carefully considered.
+# --- create a 2x3 array ---
+a = CArray.float64(2, 3) { |i, j| i * 3 + j }
+#  => [ [ 0, 1, 2 ],
+#       [ 3, 4, 5 ] ]
 
-#### Built-in element-wise mask handling ####
+# --- reductions over the whole array or along an axis ---
+a.sum                      #  => 15.0          over the whole array
+a.sum(axis: 0)             #  => [ 3, 5, 7 ]   sum down each column
+a.sum(axis: 1)             #  => [ 3, 12 ]     sum across each row
 
-CArray possesses masked states about each element (so-called "element-wise mask"). By referring the element-wise mask, CArray can perform mathematical and statistical calculations on the data with missing values by appropriate handling of masked elements. , which include the propagation of mask state to result in element-wise arithmetics and ignoring the masked elements in a statistical calculation, and so on.
+# --- element-wise operations and functions ---
+a + 1
+#  => [ [ 1, 2, 3 ],
+#       [ 4, 5, 6 ] ]
 
-#### User-defined array ####
+a.exp
+#  => [ [  1.000,   2.718,   7.389 ],
+#       [ 20.086,  54.598, 148.413 ] ]
 
-Users can define a new virtual array class in Ruby level or C-extension level with TemplateMethod pattern. They are defined as a subclass of CAObject in Ruby level and as a subclass of CAVirtual in C-extension level. In particular, at the Ruby level, you can easily define a CArray-like class by implementing just a few template methods.
+# --- select by condition ---
+a[(a % 2).eq(0)]           #  => [ 0, 2, 4 ]   the even elements
 
-License
--------
+# --- views share storage with the original ---
+a.reshape(3, 2)
+#  => [ [ 0, 1 ],
+#       [ 2, 3 ],
+#       [ 4, 5 ] ]
+
+a.transpose
+#  => [ [ 0, 3 ],
+#       [ 1, 4 ],
+#       [ 2, 5 ] ]
+
+a[0, nil]                  #  => [ 0, 1, 2 ]   the first row
+a[nil, 0]                  #  => [ 0, 3 ]      the first column
+
+a[nil, 1..2]               #  a block view of the last two columns
+#  => [ [ 1, 2 ],
+#       [ 4, 5 ] ]
+
+# --- writing through a view updates the original ---
+a[0, nil] = -1
+a
+#  => [ [ -1, -1, -1 ],
+#       [  3,  4,  5 ] ]
+
+# --- missing values ---
+b = CArray.float64(2, 3) { |i, j| i * 3 + j }
+b[0, 1] = UNDEF            #  mark some missing values
+b[1, 2] = UNDEF
+b
+#  => [ [ 0, _, 2 ],
+#       [ 3, 4, _ ] ]
+
+b.sum                      #  => 9            missing values are ignored
+b.sum(axis: 0)             #  => [ 3, 4, 2 ]  (column sums)
+b.sum(axis: 1)             #  => [ 2, 7 ]     (row sums)
+
+# the mask is not NaN: dropping it to NaN lets IEEE rules take over instead
+b.strip_mask(Float::NAN).sum(axis: 0)
+#  => [ 3, NaN, NaN ]      NaN propagates rather than being ignored
+```
+
+## Documentation
+
+* [What is Ruby/CArray](docs/WhatIsCArray.md)
+
+## Credits
+
+Up to version 2.0, CArray was authored by himotoyoshi.
+
+CArray 3.0 was designed and reviewed by a human developer; the implementation was
+produced in collaboration with AI coding tools.
+
+## License
 
 MIT (after version 1.5.0)
+
+Copyright (C) 2005-2026 himotoyoshi
