@@ -17,6 +17,7 @@ Gem::Specification.new do |s|
   s.required_ruby_version = ">= 3.0"
   s.files       = [
     *Dir.glob("lib/**/*.rb"),
+    *Dir.glob("yard-stubs/**/*.rb"),
     *(Dir.glob("ext/*.c") - %w[ext/carray_kernels.c ext/carray_cast_func.c ext/carray_math.c]),
     *Dir.glob("ext/*.h"),
     *Dir.glob("ext/*.rb"),
