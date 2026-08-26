@@ -3,6 +3,8 @@
 Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 (1.4.x through 2.0.1) see [NEWS.md](NEWS.md).
 
+## 3.0.1 (unreleased)
+
 ## 3.0.0 — 2026-08-25
 
 First public release. Earlier versions existed on RubyGems, but the library
