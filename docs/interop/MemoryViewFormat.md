@@ -5,11 +5,29 @@ Reference for the format strings CArray emits and accepts via Ruby's
 the user-facing MV API (`CArray.wrap_memory_view`, etc.); this
 document is CArray's format-string contract.
 
-CArray follows **PEP 3118 strict** for the top-level format-string
-table.  Consumers are Postel: synonyms commonly emitted by other
-producers (Ruby pack-template `c`/`C`/`s`/`S`/`l`/`L`, including
-red-arrow's emissions; LP64 platform-long `l`/`L` at item_size 8 as
-emitted by numpy) are accepted on input.
+CArray's top-level format strings follow **`ruby/memory_view.h`**,
+which documents `format` as a sequence of pack-derived specifiers and
+expects `item_size` to equal
+`rb_memory_view_item_size_from_format(format)`.  The two vocabularies
+agree from 32 bits up (`i`/`I`/`q`/`Q`/`f`/`d`) and disagree below it:
+what PEP 3118 spells `b`/`B`/`h`/`H`, Ruby spells `c`/`C`/`s`/`S`.
+CArray emits Ruby's, which is what lets a generic Ruby consumer —
+`Fiddle::MemoryView`, say — read elements out of a CArray at all.
+
+Three types have no Ruby spelling and keep their PEP 3118 form: `?`
+(bool) and `Zf`/`Zd` (complex).  Ruby's parser rejects those, so
+element access through a generic consumer fails on them; the
+alternatives (`C` for a bool, `dd` for a complex) would misdescribe
+the data rather than merely fail to describe it.  Two structural
+formats stay PEP 3118 as well: `T{...}` records and the `Ns`
+fixed-bytes form, neither of which Ruby's vocabulary has a notion of.
+
+Consumers are Postel: PEP 3118 spellings (`b`/`B`/`h`/`H`), the
+remaining pack-template synonyms (`l`/`L`, `s!`/`i!`/`l!`/`q!`), and
+LP64 platform-long `l`/`L` at `item_size` 8 as emitted by numpy are all
+accepted on input.  A view produced by any CArray release therefore
+still imports.
+
 
 ---
 
@@ -21,10 +39,10 @@ dtype:
 | dtype       | `format` | `item_size` |
 |-------------|----------|-------------|
 | bool        | `?`      | 1           |
-| int8        | `b`      | 1           |
-| uint8       | `B`      | 1           |
-| int16       | `h`      | 2           |
-| uint16      | `H`      | 2           |
+| int8        | `c`      | 1           |
+| uint8       | `C`      | 1           |
+| int16       | `s`      | 2           |
+| uint16      | `S`      | 2           |
 | int32       | `i`      | 4           |
 | uint32      | `I`      | 4           |
 | int64       | `q`      | 8           |
@@ -117,8 +135,10 @@ For CAStruct-typed data the producer emits
 T{<fmt1>:<name1>:<fmt2>:<name2>:...:}
 ```
 
-Inside the `T{...}` body the per-field codes use the same
-PEP 3118 strict spellings as the top-level table:
+`T{...}` is a PEP 3118 construct with no Ruby counterpart, so a record
+body stays in PEP 3118's vocabulary even though the top-level table
+does not.  A consumer reading the body reads it as PEP 3118, and a
+bridge that forwards the record whole keeps it intact:
 
 | field type | spec    |
 |------------|---------|

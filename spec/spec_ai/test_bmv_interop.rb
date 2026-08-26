@@ -102,11 +102,14 @@ class TestBMVInterop < Test::Unit::TestCase
 
   # --- Dtype matrix --------------------------------------------------------
 
+  # Outbound spellings follow ruby/memory_view.h, so the widths below 32 bits
+  # are Ruby's ('c' / 'C' / 's' / 'S'), not PEP 3118's ('b' / 'B' / 'h' / 'H').
+  # The two vocabularies agree from 32 bits up.
   DTYPES = {
-    int8:    [:int8,    "b"],
-    uint8:   [:uint8,   "B"],
-    int16:   [:int16,   "h"],
-    uint16:  [:uint16,  "H"],
+    int8:    [:int8,    "c"],
+    uint8:   [:uint8,   "C"],
+    int16:   [:int16,   "s"],
+    uint16:  [:uint16,  "S"],
     int32:   [:int32,   "i"],
     uint32:  [:uint32,  "I"],
     int64:   [:int64,   "q"],
