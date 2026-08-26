@@ -99,46 +99,70 @@ static ca_mv_runtime_type_t ca_mv_runtime_types[CA_MV_NUM_RUNTIME_OBJ_TYPES] = {
 
 /* ---------------- format / data_type mapping ----------------
    Bidirectional table.  Outbound table (ca_mv_format_for) picks the
-   canonical PEP 3118 specifier for each CArray data_type.  Inbound
-   table (ca_mv_data_type_from_format) is Postel: it accepts a wider
-   set of synonyms that other producers emit (they describe int32
-   differently). */
+   specifier each CArray data_type publishes at the top level of a
+   MemoryView.  Inbound table (ca_mv_data_type_from_format) is Postel:
+   it accepts a wider set of synonyms that other producers emit (they
+   describe int32 differently).
+
+   The outbound spellings follow ruby/memory_view.h, which documents
+   `format` as a sequence of pack-derived specifiers and expects
+   item_size to equal rb_memory_view_item_size_from_format(format).
+   PEP 3118 reuses several of those letters for other types, so the two
+   vocabularies agree on `i` / `I` / `q` / `Q` / `f` / `d` and disagree
+   below 32 bits: what PEP calls `b` / `B` / `h` / `H`, Ruby calls
+   `c` / `C` / `s` / `S`.  Emitting Ruby's spelling is what lets a
+   generic Ruby consumer -- Fiddle::MemoryView, say -- read elements out
+   of a CArray at all; PEP-speaking consumers are reached across the
+   language boundary, where pycall-memoryview translates.
+
+   Three types have no Ruby spelling at all: boolean and the two
+   complex widths.  They keep their PEP form, which Ruby's parser
+   rejects, because the alternative ("C" for a boolean, "dd" for a
+   complex) would misdescribe the data rather than merely fail to
+   describe it. */
 
 static const char *
 ca_mv_format_for (int8_t data_type)
 {
   switch (data_type) {
-  case CA_BOOLEAN: return "?";
-  case CA_INT8:    return "b";
-  case CA_UINT8:   return "B";
-  case CA_INT16:   return "h";
-  case CA_UINT16:  return "H";
+  case CA_BOOLEAN: return "?";   /* no Ruby spelling */
+  case CA_INT8:    return "c";
+  case CA_UINT8:   return "C";
+  case CA_INT16:   return "s";
+  case CA_UINT16:  return "S";
   case CA_INT32:   return "i";
   case CA_UINT32:  return "I";
   case CA_INT64:   return "q";
   case CA_UINT64:  return "Q";
   case CA_FLOAT32: return "f";
   case CA_FLOAT64: return "d";
-  case CA_CMPLX64:  return "Zf";
-  case CA_CMPLX128: return "Zd";
+  case CA_CMPLX64:  return "Zf";   /* no Ruby spelling */
+  case CA_CMPLX128: return "Zd";   /* no Ruby spelling */
   default:
     return NULL;
   }
 }
 
 /* PEP 3118 single-character specifier for a primitive data_type, for
-   use inside a `T{...}` struct format body.  Identical to the top-level
-   producer specifier: since the 2026-06-29 PEP 3118 strict flip both the
-   top-level and struct-body contexts emit the same chars, so this
-   delegates to ca_mv_format_for.  Kept as a distinct entry point so the
-   struct-body context can diverge again without touching call sites.
+   use inside a `T{...}` struct format body.  This is the context the
+   distinct entry point was kept for: `T{...}` is a PEP 3118 construct
+   with no Ruby counterpart, so a record body stays in PEP's vocabulary
+   even though the top level now publishes Ruby's.  A consumer reading
+   the body reads it as PEP, and a bridge that forwards the record
+   whole -- as pycall-memoryview does -- keeps it intact.
 
    Returns NULL for non-primitive (CA_FIXLEN / CA_OBJECT) or for the
    retired float128 / cmplx256 enum slots. */
 static const char *
 ca_mv_pep3118_char (int8_t data_type)
 {
-  return ca_mv_format_for(data_type);
+  switch (data_type) {
+  case CA_INT8:   return "b";
+  case CA_UINT8:  return "B";
+  case CA_INT16:  return "h";
+  case CA_UINT16: return "H";
+  default:        return ca_mv_format_for(data_type);
+  }
 }
 
 /* Build (or fetch from cache) the PEP 3118 struct format string for
@@ -1110,7 +1134,10 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
     if (c == '<' || c == '>' || c == '=' || c == '!' || c == '@') {
       c = mv->format[1];
     }
-    if (c != '?' && c != 'B' && c != 'b') {
+    /* One byte per element, under either vocabulary: PEP 3118 spells the
+       integer widths 'b' / 'B', Ruby's MemoryView spells them 'c' / 'C'.
+       '?' is PEP's boolean, which Ruby has no spelling for. */
+    if (c != '?' && c != 'B' && c != 'b' && c != 'C' && c != 'c') {
       char fmt_buf[64];
       snprintf(fmt_buf, sizeof(fmt_buf), "%s", mv->format);
       MV_MASK_CLEANUP_AND_RAISE("mask: format must be bool/uint8/int8 (got %s)",
