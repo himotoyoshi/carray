@@ -344,6 +344,24 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     assert_nothing_raised { a.timesteps(unit: "1 hour") }
   end
 
+  def test_overflow_guard_ignores_a_masked_extreme
+    # A masked cell carries no time, so it must not decide the range the
+    # guard checks: the same array raises unmasked.
+    a = CA_INT64([0, MAX64]).time(unit: :ns)
+    assert_raise(RangeError) { a.ceil(unit: "1 second") }
+    a.ticks.mask = CA_BOOLEAN([false, true])
+    assert_equal [0, UNDEF], a.ceil(unit: "1 second").ticks.to_a
+  end
+
+  def test_overflow_guard_on_an_all_masked_or_empty_array
+    # Nothing to bound, so nothing to guard -- and no Integer(UNDEF).
+    a = CA_INT64([7, 8]).time(unit: :ns)
+    a.ticks.mask = CA_BOOLEAN([true, true])
+    assert_equal [UNDEF, UNDEF], a.timesteps(unit: "1 second").to_a
+    assert_equal [UNDEF, UNDEF], a.floor(unit: "1 second").ticks.to_a
+    assert_equal [], CArray.int64(0).time(unit: :ns).floor(unit: "1 second").ticks.to_a
+  end
+
   # -- categorize composition (period buckets -> categorical) --------------
 
   def test_floor_categorize_composition
