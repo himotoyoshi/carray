@@ -36,7 +36,7 @@ each  reduce                                             # generic iteration
 ```
 
 Each reduction is the corresponding **core `CArray` reduction lifted to the
-piece**, so its dtype, mask handling, empty / all-masked contract (identity for
+piece**, so its data type, mask handling, empty / all-masked contract (identity for
 `sum` / `prod` / `count`, `UNDEF` for ratios and extrema), and ε-close numeric
 contract are the core's, unchanged — the iterator adds no new semantics. `all` /
 `any` require a boolean payload, as `CArray#all` / `#any` do.

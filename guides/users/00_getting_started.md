@@ -32,7 +32,7 @@ called once for each element, receiving the indices, and its return value become
 that element. Array creation is covered in detail in
 [Creating arrays](01_creating_arrays.md).
 
-## A few more dtypes
+## A few more data types
 
 The same shape-and-block pattern works for every data type:
 
@@ -81,7 +81,7 @@ a.data_type    #  => :float64  the element type
 
 `size` is an accepted alternative to `elements` (both return `6` here).
 
-## A quick peek at slicing
+## A quick slicing example
 
 Indexing uses `[]` with one argument per axis. An integer picks one element;
 `nil` means "every index along this axis"; a `Range` picks a contiguous run.

@@ -21,7 +21,7 @@ grp = values.group_by_category(cat)
 
 grp.labels        #  => ["b", "a", "c"]
 grp.elements      #  => [ 3, 2, 1 ]              cells per category
-grp.sum           #  => [ 100, 70, 40 ]          value dtype (int32)
+grp.sum           #  => [ 100, 70, 40 ]          value data type (int32)
 grp.mean          #  => [ 33.333…, 35.0, 40.0 ]  float64
 grp.median        #  => [ 30.0, 35.0, 40.0 ]
 ```
@@ -32,17 +32,17 @@ whose category is `labels[i]`. The category vocabulary is `#labels`.
 
 ## The reductions
 
-| method | result dtype | notes |
+| method | result data type | notes |
 |---|---|---|
 | `elements` | int64 | cells classified into the category (includes value-masked cells); alias `group_sizes` |
 | `count` | int64 | present (non-masked) cells; `count` with no argument is `count_not_masked` |
 | `count_not_masked` | int64 | present (non-masked) cells — the denominator the value reductions divide by |
 | `count_masked` | int64 | masked cells in the category; `count(UNDEF)` is the same |
 | `count(v)` | int64 | cells whose value equals `v` |
-| `sum` | value dtype | |
+| `sum` | value data type | |
 | `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight CArray in the source order (same elements as the value) |
 | `prod` | float64 | empty / all-masked category is `1.0` (identity) |
-| `min` / `max` | value dtype | |
+| `min` / `max` | value data type | |
 | `mean` | float64 | |
 | `variance` / `stddev` | float64 | sample (ddof = 1) |
 | `median` | float64 | = `percentile(50)` |
@@ -53,7 +53,7 @@ whose category is `labels[i]`. The category vocabulary is `#labels`.
 | `min_index` / `max_index` | int64 | group-local index (position within the category's members) |
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max (indexes back into the raveled source) |
 | `sort_addr` | int64 | length-`nvalid` flat source addresses that sort each group, group-major (see below) |
-| `all` / `any` | boolean | boolean value dtype only (as for `CArray#all` / `#any`) |
+| `all` / `any` | boolean | boolean value data type only (as for `CArray#all` / `#any`) |
 
 `prod`, `all`, `any`, and `count(v)` are currently per-group fallbacks (they
 delegate to the CArray reduction over each category's members); a fused kernel

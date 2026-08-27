@@ -241,7 +241,7 @@ differs slightly from the indexer path:
   indexer would raise; `elem_fetch` is the tolerant form.
 - **Object arrays** — `elem_fetch` / `elem_store` on `CA_OBJECT` handle
   arbitrary Ruby values, same as the indexer. `elem_incr` / `_decr`
-  / `_min` / `_max` require a numeric dtype (raise
+  / `_min` / `_max` require a numeric data type (raise
   `CArray::DataTypeError` on object / fixlen / boolean).
 - **Views** — `elem_*` works on any CArray including views (CABlock,
   CARefer, CAStride, …). Entity arrays get the direct-pointer fast

@@ -224,7 +224,7 @@ equivalent eager expression depends on three independent axes:
 Conway's Life rule (`(n==3) | (a & n==2)` over 8 neighbour shifts =
 9-source chain) across `uintN` widths, eager vs `CArray.fuse`:
 
-| dtype    | SIMD lane | eager ms/step | fuse ms/step | fuse/eager |
+| type     | SIMD lane | eager ms/step | fuse ms/step | fuse/eager |
 |----------|----------:|--------------:|-------------:|-----------:|
 | `uint8`  |        16 |          0.69 |         2.27 |      3.30x |
 | `uint16` |         8 |          0.99 |         2.44 |      2.46x |
@@ -246,13 +246,13 @@ a.roll(0,-1) - 4*a`, 5-source f64):
 ### Decision guide
 
 Reach for `fuse` when **any** of:
-- dtype is `float64` / `complex128` (= 2-lane SIMD)
+- the data type is `float64` / `complex128` (= 2-lane SIMD)
 - chain has heavy per-cell math (`exp`, `log`, `sqrt`, transcendentals)
 - intermediate buffers are large (= each binop spills L2, > a few MB)
 - source count is small (1–4)
 
 Stay with eager when **all** of:
-- dtype is narrow (`uint8` / `int16` / `float32`, 4+ lanes)
+- the data type is narrow (`uint8` / `int16` / `float32`, 4+ lanes)
 - per-cell op is light (add / cmp / bitwise / cast)
 - source count is high (5+)
 - intermediate buffers fit comfortably in L2
@@ -293,7 +293,7 @@ For scientific-data sizes (≥ ~64K cells) the win is robust across
 chain depths.  For tiny intermediate buffers (< L1), prefer eager
 even for deep chains.
 
-### Cast at the chain tail — `as_<dtype>`, not `.<dtype>`
+### Cast at the chain tail — `as_<type>`, not `.<type>`
 
 A common mistake when keeping a lazy chain alive across iterations:
 
@@ -302,11 +302,11 @@ expr = ((n.eq(3)) | (x & n.eq(2))).uint8        # WRONG
 expr = ((n.eq(3)) | (x & n.eq(2))).as_uint8     # right
 ```
 
-`ca.<dtype>` (e.g. `.uint8`, `.float64`) eagerly materialises a lazy
+`ca.<type>` (e.g. `.uint8`, `.float64`) eagerly materialises a lazy
 expression into an entity at the call site.  Subsequent `.to_ca` on
 the result returns the same snapshot — the chain is broken.
-`ca.as_<dtype>` builds a lazy cast node (`CAMonOp`) that re-evaluates
-on every `.to_ca`.  Use `as_<dtype>` whenever the cast is the tail
+`ca.as_<type>` builds a lazy cast node (`CAMonOp`) that re-evaluates
+on every `.to_ca`.  Use `as_<type>` whenever the cast is the tail
 of a chain you intend to materialise more than once.
 
 ---

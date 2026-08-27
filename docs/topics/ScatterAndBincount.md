@@ -71,7 +71,7 @@ buf.to_a                           # => [20, 30, 0]  (last write at 0 wins)
 
 ### 1.2 NaN / missing-value rule
 
-Only `scatter_min!` / `scatter_max!` on **float** dtypes use the fmin /
+Only `scatter_min!` / `scatter_max!` on **float** data types use the fmin /
 fmax rule (NaN is treated as missing): `min(NaN, v) → v`,
 `min(x, NaN) → x`. Every other variant follows plain C arithmetic —
 NaN propagates through `_add` / `_sub` / `_mul`, integer overflow wraps.
@@ -111,7 +111,7 @@ labels.bincount                    # => CA_UINT32([2, 3, 1])
 
 Rules:
 
-- `self` must be an integer dtype (any width). Labels are the *value*,
+- `self` must be an integer data type (any width). Labels are the *value*,
   not the position — `bincount` reads them as bin indices.
 - Output length is `max(length, self.max + 1)` where `length:` is an
   optional lower bound: use it when downstream code needs a fixed
@@ -121,8 +121,8 @@ Rules:
   labels.bincount(length: 5)       # => CA_UINT32([2, 3, 1, 0, 0])
   ```
 
-- Output dtype is `CA_UINT32` (or `CA_UINT64` when the length exceeds
-  2³²). It inherits the *weights* dtype in the weighted form.
+- The output data type is `CA_UINT32` (or `CA_UINT64` when the length exceeds
+  2³²). It inherits the *weights* data type in the weighted form.
 
 - Negative labels raise `ArgumentError`. Masked labels are silently
   skipped (not counted). Masked weights are skipped too — their label
@@ -138,7 +138,7 @@ weights = CA_DOUBLE([1, 2, 3, 4, 5, 6])
 labels.bincount(weights: weights)  # => CA_DOUBLE([6, 11, 4])
 ```
 
-The output has the *weights* dtype so the accumulator doesn't lose
+The output has the *weights* data type so the accumulator doesn't lose
 precision.
 
 ### 2.2 Relationship to `scatter_add!`

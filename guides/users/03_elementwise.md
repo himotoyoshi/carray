@@ -487,9 +487,9 @@ result back into the receiver and keeps its data type — for example
 | Operator      | Named form    | **!** | Notes                                              |
 |---------------|---------------|-------|----------------------------------------------------|
 | `-a`          | `a.neg`       | ✓     | Unary minus                                        |
-|               | `a.abs`       | ✓     | Absolute value (returns same dtype)                |
-|               | `a.abs_i`     | ✓     | Absolute value, keep dtype (for complex stays complex) |
-|               | `a.abs2`      | ✓ (real only) | Squared magnitude: `x*x` for real, `re²+im²` for complex (no sqrt). f64 for complex, dtype preserved for real |
+|               | `a.abs`       | ✓     | Absolute value (returns same data type)                |
+|               | `a.abs_i`     | ✓     | Absolute value, keep the data type (for complex stays complex) |
+|               | `a.abs2`      | ✓ (real only) | Squared magnitude: `x*x` for real, `re²+im²` for complex (no sqrt). f64 for complex, data type preserved for real |
 |               | `a.arg`       | ✓     | Phase angle (`carg`): for real → 0 or π, for complex → argument. Returns f64 in the eager form. |
 |               | `a.sign`      | ✓     | Sign: -1 / 0 / +1 for real (NaN-preserving on float), unit vector for complex, 0/1 for bool/uint |
 |               | `a.square`    | ✓     | `a * a` (equal to `abs2` for real inputs)          |
@@ -497,7 +497,7 @@ result back into the receiver and keeps its data type — for example
 |               | `a.rsqrt`     | ✓     | Reciprocal square root `1 / sqrt(a)`               |
 |               | `a.rcp_mul(b)`| ✓     | `b / a` — multiply by reciprocal                   |
 |               | `a.frac`      | ✓     | Fractional part (`a - trunc(a)`)                   |
-|               | `a.zero`      | ✓     | Set every element to 0 (same shape and dtype)      |
+|               | `a.zero`      | ✓     | Set every element to 0 (same shape and data type)      |
 |               | `a.one`       | ✓     | Set every element to 1                             |
 
 ### Rounding (float → float)

@@ -297,7 +297,7 @@ fftw_inplace_pass (VALUE self, VALUE r_in)
 - **Profile-driven chunk size tuning**: the chunk target is `4096`
   elements (~32 KB at f64) by default. Replace at the engine level
   (`ca_chunk_compute_n`) if you measure something better for a
-  specific dtype mix.
+  specific data type mix.
 
 ## See also
 

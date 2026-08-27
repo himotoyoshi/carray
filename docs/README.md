@@ -45,7 +45,7 @@ CArray can present.
 | [CAFace](topics/CAFace.md) | Overview + Guide | Semantic identity views (a date, an angle, a unit) over plain storage |
 | [FaceOrderingSearch](authoring/FaceOrderingSearch.md) | Reference | The `ORDERABLE` / `COMPARABLE` gate that governs sort/search on Faces |
 | [CATime](topics/CATime.md) | Guide | `CATime` / `CATimedelta` — dates and durations |
-| [CACategorical](objects/CACategorical.md) | Guide | Categorical dtype — dense codes plus a label vocabulary |
+| [CACategorical](objects/CACategorical.md) | Guide | Categorical data type — dense codes plus a label vocabulary |
 | [CAConstString](objects/CAConstString.md) | Guide | Read-only variable-length string columns |
 | [StringArrays](topics/StringArrays.md) | Guide | Fixed-length string arrays |
 | [CARecord](objects/CARecord.md) | Guide | Array of structs (fixlen record view) |
@@ -103,7 +103,7 @@ surface.
 |---|---|---|
 | [WritingCExtensions](authoring/WritingCExtensions.md) | C author | The whole picture: the struct, views, masks, boundary coercion, MemoryView, packaging |
 | [HOW_TO_WRITE_KERNEL](authoring/HOW_TO_WRITE_KERNEL.md) | C author | Writing a kernel on the `kernel_iterator` surface |
-| [MkKernelDSL](authoring/MkKernelDSL.md) | C author | The mkkernel DSL — generating standard-dtype kernel coverage |
+| [MkKernelDSL](authoring/MkKernelDSL.md) | C author | The mkkernel DSL — generating kernel coverage over the standard data types |
 | [CallCfunc](authoring/CallCfunc.md) | C author | The `call_cfunc` surface — vectorizing a scalar C function |
 | [Sweep_Author_Surface](authoring/Sweep_Author_Surface.md) | C author | Element-wise macros built on `xfer_all` |
 
@@ -113,7 +113,7 @@ surface.
 
 Topic docs are filed by kind:
 
-- [`objects/`](objects/) — individual view / dtype classes worth documenting.
+- [`objects/`](objects/) — individual view / data type classes worth documenting.
 - [`authoring/`](authoring/) — the C-extension author surface.
 - [`interop/`](interop/) — exchange with other array libraries and formats.
 - [`internal/`](internal/) — internal-structure references.

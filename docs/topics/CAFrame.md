@@ -341,7 +341,7 @@ df.sort_by_key("time")                             # by the index (axis name)
   (default `:asc`). A key must be a scalar (1-D) column (an N-D key raises).
 - **`masked_position:`** sends masked key rows to the `:last` (default) or
   `:first` end.
-- Descending works for **every dtype** (a descending key is internally its dense
+- Descending works for **every data type** (a descending key is internally its dense
   descending rank via `CArray#order` — reliable where negating a value is not,
   and tie-safe in a multi-key sort).
 
@@ -593,7 +593,7 @@ owned = df.to_ca.copy       # independent, owned matrix
 
 Only all-scalar (**1-D**) columns qualify; an N-D column has no single
 matrix form and raises — escape it per column with `df["name"]`. A mixed
-dtype set is promoted to a common type (`result_type`) through lazy cast
+data type set is promoted to a common type (`result_type`) through lazy cast
 lanes, so the promotion costs no buffer either.
 
 `to_ca(writable: true)` — the 3.0 "give me something my writes reach"
@@ -622,7 +622,7 @@ df.to_csv(sep: ";", header: false, index: false)
 `to_csv` is the text form of the same flat table `to_ca` needs: every column
 must be **1-D** (an N-D column has no flat CSV cell and raises — export it per
 column, or use `to_records` + JSON for the structured shape). Unlike `to_ca` it
-does **not** promote to a common dtype — each column is formatted to text on its
+does **not** promote to a common data type — each column is formatted to text on its
 own, so numbers, strings, and time / categorical columns sit side by side.
 
 The index (if any) is written as the first column under `axis_name` unless
@@ -921,7 +921,7 @@ CAFrame.concat([jan, feb, mar])   # an Array is accepted too
 
 - Columns are **matched by name** (output order follows the first frame); every
   frame must carry the same column-name set, or it raises.
-- Each output column is `CArray.concatenate` of that column, so **dtypes promote**
+- Each output column is `CArray.concatenate` of that column, so **data types promote**
   to a common type, **masks are preserved**, and an **N-D column** carries its
   trailing dimensions (which must agree across frames).
 - The **index** is concatenated when every frame has one (their `axis_name` must

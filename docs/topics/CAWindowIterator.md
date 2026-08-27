@@ -32,7 +32,7 @@ interior, the margins filled by the boundary policy), takes its
 every window), and runs one vectorized core reduction over the trailing window
 axes. So a named reduction is a single pass over a strided view — much faster
 than folding each window one at a time, and the reduction inherits the core
-`dtype` / mask / empty / epsilon contracts unchanged.
+data type / mask / empty / epsilon contracts unchanged.
 
 The practical consequence — which drives the [performance guidance](#performance-and-recommended-settings)
 below — is that the iterator itself adds essentially **no** overhead over

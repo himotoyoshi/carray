@@ -312,7 +312,7 @@ CArray.float64(4).random!(-0.5..0.5)    #  same shape, Range syntax
 ```
 
 (The numbers here are illustrative — each call draws fresh values.  For
-float dtype, `..` and `...` yield the same distribution: the endpoint
+float arrays, `..` and `...` yield the same distribution: the endpoint
 probability is ~2⁻⁵³, so the closed form is accepted syntactically but not
 enforced at the mantissa level — matching NumPy/SciPy convention.)
 
