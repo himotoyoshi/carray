@@ -401,8 +401,8 @@ class CAGroupIterator
   end
 
   # @overload cummax(axis: :group)
-  #   Per-group inclusive running maximum, source-shaped, in the source dtype
-  #   (extrema do not grow magnitude, so the dtype is preserved). The first
+  #   Per-group inclusive running maximum, source-shaped, in the source data type
+  #   (extrema do not grow magnitude, so the data type is preserved). The first
   #   member of a group emits its own value. Without :group delegates to value
   #   cummax.
   #   @return [CArray]
@@ -411,7 +411,7 @@ class CAGroupIterator
   end
 
   # @overload cummin(axis: :group)
-  #   Per-group inclusive running minimum, source-shaped, in the source dtype.
+  #   Per-group inclusive running minimum, source-shaped, in the source data type.
   #   Without :group delegates to value cummin.
   #   @return [CArray]
   def cummin (**kw)

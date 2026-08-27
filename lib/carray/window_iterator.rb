@@ -18,7 +18,7 @@
 #  margins filled by the boundary policy), take its `sliding_windows` view
 #  (a pure strided view over the padded buffer), and run a core reduction over
 #  the trailing window axes.  One vectorized pass; the named reductions
-#  delegate straight to the core reduction, so their dtype / mask / empty
+#  delegate straight to the core reduction, so their data type / mask / empty
 #  (ERI) / epsilon contracts are the core's, unchanged.  This replaces the 2.0
 #  per-anchor C engine (ext/ca_iter_window.c, retired).
 #
@@ -251,7 +251,7 @@ class CAWindowIterator < CAIterator
   #
   # A per-window fold to one value over the trailing window axes is exactly a
   # core per-axis reduction over those axes, so every reduction delegates to
-  # `sliding_view.<op>(axis: window_axes, ...)`.  This inherits the core dtype,
+  # `sliding_view.<op>(axis: window_axes, ...)`.  This inherits the core data type,
   # mask, empty / all-masked (identity vs UNDEF) and epsilon-close contracts
   # unchanged.  `min_count:` / `fill_value:` pass straight to the core (the
   # boundary strictness + result fill knobs).

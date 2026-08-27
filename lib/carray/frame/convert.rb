@@ -31,7 +31,7 @@ class CAFrame
   #
   # Only same-shape scalar (1-D) columns qualify. An N-D column has no single
   # matrix form and raises — escape it per column with +df["name"]+. A mixed
-  # dtype set is promoted to a common type (+result_type+, §12-F) through
+  # data type set is promoted to a common type (+result_type+, §12-F) through
   # lazy cast lanes, so the promotion costs no buffer either.
   #
   # +writable: true+ demands a result whose writes reach this frame's own

@@ -511,7 +511,7 @@ class CAFrame
   end
 
   # df[sel] = other : replace the selected contiguous span with other's rows
-  # (any length). Columns are concatenated head + other + tail, so dtypes
+  # (any length). Columns are concatenated head + other + tail, so data types
   # promote and the row count shifts by other.nrow - span.
   private def splice_rows(selector, other)
     lo, hi = contiguous_span(selector)
@@ -536,9 +536,9 @@ class CAFrame
         case pieces.size
         when 0 then col[CArray.int32(0), *tail]   # replaced every row with none
         when 1 then pieces.first
-        else CArray.meld(pieces, axis: 0)         # CAMeld view; dtype mismatch
+        else CArray.meld(pieces, axis: 0)         # CAMeld view; data type mismatch
         end                                        # across pieces raises.
-                                                   # For dtype conversion, cast
+                                                   # For data type conversion, cast
                                                    # the incoming +other+'s
                                                    # column beforehand — silent
                                                    # promotion in a splice would
@@ -566,7 +566,7 @@ class CAFrame
     case pieces.size
     when 0 then @index[CArray.int32(0)]
     when 1 then pieces.first
-    else CArray.meld(pieces, axis: 0)   # index dtype must match across frames
+    else CArray.meld(pieces, axis: 0)   # index data type must match across frames
     end
   end
 

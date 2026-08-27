@@ -13,7 +13,7 @@
 #
 # sort_addr is ascending, so a descending key is expressed by replacing it with
 # its dense descending rank (CArray#order(descending: true, method: :dense)):
-# this works for every dtype (unlike negation, which cannot reverse a string and
+# this works for every data type (unlike negation, which cannot reverse a string and
 # silently wraps an unsigned integer), and the *dense* rank keeps equal values
 # on one rank so ties fall through to later keys in a multi-key sort.
 # masked_position (CArray.sort_addr's kwarg) places masked key rows first or

@@ -90,7 +90,7 @@ class CASlabIterator < CAIterator
   # A per-slab reduction that folds each slab to one value is exactly the core
   # per-axis reduction over the slab axes, so every reduction is a direct
   # delegation to `reference.<op>(axis: slab_axes)`. This inherits the core
-  # dtype, mask, empty/all-masked (identity vs UNDEF) and epsilon-close
+  # data type, mask, empty/all-masked (identity vs UNDEF) and epsilon-close
   # contracts unchanged -- there is no separate slab reduction kernel. (Unlike
   # the map / reduce block surface, these are mask-aware: they route through the
   # core reduction, which handles masked sources.)
@@ -243,7 +243,7 @@ class CASlabIterator < CAIterator
   #
   # A per-slab running accumulation along the slab axis is exactly the core
   # per-axis cumulative over that axis, so every scan delegates to
-  # `reference.<op>(axis: slab_axis)`, inheriting the core dtype / mask (masked
+  # `reference.<op>(axis: slab_axis)`, inheriting the core data type / mask (masked
   # cells hold the running total, output unmasked) contracts unchanged. Each
   # cell is in exactly one slab (a partition), so the running value is
   # well-defined; the surface is uniform with the family even though it
@@ -258,10 +258,10 @@ class CASlabIterator < CAIterator
   #   Per-slab inclusive running product (float64), reference-shaped.
   #   @return [CArray]
   # @overload cummax
-  #   Per-slab inclusive running maximum (reference dtype), reference-shaped.
+  #   Per-slab inclusive running maximum (reference data type), reference-shaped.
   #   @return [CArray]
   # @overload cummin
-  #   Per-slab inclusive running minimum (reference dtype), reference-shaped.
+  #   Per-slab inclusive running minimum (reference data type), reference-shaped.
   #   @return [CArray]
   # @overload cumcount
   #   Per-slab running count of present cells (int64), reference-shaped.

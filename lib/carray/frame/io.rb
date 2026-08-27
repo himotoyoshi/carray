@@ -62,8 +62,8 @@ class CAFrame
   # is a view into it (§3.6).
   # Write the frame as CSV. CSV is a flat table of scalar cells, so this is the
   # text form of the same all-scalar subset +to_ca+ requires (§11.9): every
-  # column must be 1-D. Unlike +to_ca+ it does not promote to a common dtype --
-  # each column is formatted to text independently, so mixed dtypes (numbers,
+  # column must be 1-D. Unlike +to_ca+ it does not promote to a common data type --
+  # each column is formatted to text independently, so mixed data types (numbers,
   # strings, datetime / categorical Faces) sit side by side. An N-D column has
   # no flat CSV cell and raises; export it per column, or use +to_records+ +
   # JSON for the structured shape (memo §11.9, the N-D escape).

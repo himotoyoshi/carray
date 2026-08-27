@@ -33,7 +33,7 @@ class CArray
   #
   #   Value equality follows the value-hash discovery family (numeric `==` with
   #   NaN collapsed and `-0.0 == +0.0`; object `hash` / `eql?`; fixlen byte
-  #   equality). Arrays are coerced to the first array's dtype within the same
+  #   equality). Arrays are coerced to the first array's data type within the same
   #   family (cross-family raises). Masked cells do not enter `common`.
   #
   #   @param arrays [Array<CArray>] two or more arrays (Array / Range coerced

@@ -3,7 +3,7 @@ class CArray
   # @overload value_counts(sort: false)
   #   Returns `[values, counts]`, the distinct values of `self` paired
   #   with the number of times each occurs. `values` is a 1-D CArray of
-  #   `self`'s dtype; `counts` is a 1-D `CA_INT64` where `counts[i]` is
+  #   `self`'s data type; `counts` is a 1-D `CA_INT64` where `counts[i]` is
   #   the number of occurrences of `values[i]`. This is the frequency-
   #   table member of the value-hash discovery family ({#unique},
   #   {#mask_duplicates}, {#nunique}); like {#unique} it always
@@ -39,7 +39,7 @@ class CArray
       raise ArgumentError, "value_counts: sort must be false, :count, or :value"
     end
     # Single-pass frequency-table hash (C __value_counts_flat__), one lane per
-    # dtype family: integer widens to a 64-bit key; float uses the bitwise key
+    # data type family: integer widens to a 64-bit key; float uses the bitwise key
     # with all NaN collapsed and -0.0 / +0.0 normalized; object keys on rb_hash +
     # rb_eql and fixlen on a byte-hash + memcmp, both reproducing Ruby Hash
     # distinctness. Masked cells are skipped in the kernel.
