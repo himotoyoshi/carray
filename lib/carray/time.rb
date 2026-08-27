@@ -644,14 +644,17 @@ class CATimedelta
     end
 
     # @overload /(other)
-    #   By an Integer -> a scaled {CATimedelta::Element}; by another
+    #   By an Integer -> a scaled {CATimedelta::Element}, the quotient
+    #   truncated toward zero (a duration is a magnitude, so it shrinks
+    #   toward zero -- the same direction {CATimedelta#/} and #to_unit
+    #   take, not Ruby Integer division's floor); by another
     #   {CATimedelta::Element} -> their dimensionless ratio as a `Rational`
     #   (both brought to the finer unit; cross-group raises).
     #   @param other [Integer, CATimedelta::Element]
     #   @return [CATimedelta::Element, Rational]
     def /(other)
       case other
-      when Integer then Element.new(value / other, unit)
+      when Integer then Element.new(Rational(value, other).truncate, unit)
       when Element
         u = CATimeUnitAlgebra.finer(unit, other.unit)
         Rational(_scale_in(u), other.send(:_scale_in, u))
