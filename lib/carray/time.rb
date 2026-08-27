@@ -78,7 +78,10 @@ module CATimeUnitAlgebra
   # grid; cross-group -> the fixed-group resolution (a :M/:Y difference only
   # arises from two calendar operands), coarsened to `(1,:D)` when the fixed
   # side is a week (a week is not calendar-alignable, but both sides convert
-  # into days exactly).
+  # into days exactly).  :W is the only such coarsening: a fixed resolution
+  # whose tick does not tile a day (e.g. "7 hours") is returned as-is, and
+  # the calendar side then fails to convert into it, so the subtraction
+  # raises downstream rather than being silently coarsened.
   def diff_unit(u1, u2)
     a = res(u1); b = res(u2)
     return common(a, b) if same_group?(a, b)
