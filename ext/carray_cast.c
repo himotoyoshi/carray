@@ -1845,8 +1845,8 @@ rb_ca_cast_with (VALUE self, VALUE other)
 }
 
 /* -----------------------------------------------------------------------
-   clip_<dtype> family — clip into the target dtype's representable
-   range, then cast.  Sugar for `clip(lo, hi).as_<dtype>`.
+   clip_<type> family — clip into the target data type's representable
+   range, then cast.  Sugar for `clip(lo, hi).as_<type>`.
 ----------------------------------------------------------------------- */
 
 #define CLIP_CAST_FUNC(name, lo_expr, hi_expr, cast_func) \
@@ -1873,7 +1873,7 @@ CLIP_CAST_FUNC(clip_uint32, INT2NUM(0),                       UINT2NUM(429496729
    an overflowing float source (e.g. 1e20) to 2^64 and the subsequent cast to
    uint64 wraps around to 0.  For floating-point sources we take a saturating
    path: compare in float space against 2^64 (which IS representable) and
-   saturate to UINT64_MAX above it and 0 below zero.  Other source dtypes use
+   saturate to UINT64_MAX above it and 0 below zero.  Other source data types use
    the plain clip-then-cast path. */
 static VALUE
 rb_ca_clip_uint64 (VALUE self)

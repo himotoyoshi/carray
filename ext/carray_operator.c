@@ -543,7 +543,7 @@ kleene_gather_bool (CArray *ca, boolean8_t *vbuf, boolean8_t *mbuf, ca_size_t n)
    undetermined cells (U|U, U&U, U|F, U&T) keep the blind mask.  All other
    cells were already correct from the value kernel.
 
-   Gate: boolean dtype + output has a mask (else no-op -- the hot path is
+   Gate: boolean data type + output has a mask (else no-op -- the hot path is
    untouched, integer bitwise stays blind).  `out` is a fresh entity, so
    out->ptr / out->mask->ptr are writable without attach. */
 VALUE

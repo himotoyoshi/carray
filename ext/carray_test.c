@@ -4,7 +4,7 @@
     - internal check_* / has_same_* helpers used across ext/ sources
     - Ruby surface: valid_index? / valid_addr? / same_shape? / == /
       eql? / hash / freeze (docs in yard-stubs/carray_test.rb)
-    - per-dtype element-equality table `ca_eql[CA_NTYPE]`
+    - per-type element-equality table `ca_eql[CA_NTYPE]`
     - `ca_compare_common` shared body for `==` and `eql?`
 
 ---------------------------------------------------------------------------- */

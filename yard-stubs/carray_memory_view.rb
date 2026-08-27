@@ -66,7 +66,7 @@ class CArray
     #   @raise [ArgumentError] if `src` is not a MemoryView producer,
     #     if `data_type:` is missing for a typeless source, if
     #     `data_type:` conflicts with the producer's format, or if
-    #     the supplied `mask:` fails shape / dtype / contiguity
+    #     the supplied `mask:` fails shape / data type / contiguity
     #     validation.
     #   @example Copy from a strided source
     #     a = CArray.int32(4, 3).seq
@@ -135,7 +135,7 @@ class CArray
     #     if `data_type:` is missing for a typeless source, if
     #     `data_type:` conflicts with the producer's format, or if
     #     the supplied `mask:` fails validation (shape / ndim /
-    #     dtype / item_size / contiguity). Also raises when `mask:`
+    #     data type / item_size / contiguity). Also raises when `mask:`
     #     is combined with a strided data source — that combination
     #     is not supported in this release.
     #   @example Zero-copy write propagation

@@ -607,7 +607,7 @@ ca_count_not_masked (void *ap)
 /* Scalar-fill every masked cell with fill_value, then clear its mask bit.
    This depends only on the cell BYTE WIDTH, not the data type (the work is
    a width-sized copy), so a single width switch covers every numeric /
-   complex / object dtype; the default arm handles fixlen and any other
+   complex / object data type; the default arm handles fixlen and any other
    width via memcpy.  The typed arms let the compiler emit a plain store.  */
 #define proc_fill_bang_width(T)                 \
   {                                             \

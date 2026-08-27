@@ -3,11 +3,11 @@
   carray_bincount.c — dedicated bincount kernels (count-only + weighted)
 
   Tight per-element scatter into a pre-sized 1-D output buffer.  The
-  inner loop reads labels in their native integer dtype (no cast to
+  inner loop reads labels in their native integer data type (no cast to
   int64), skips per-iteration bounds checking (caller validates label
-  range), and emits the output dtype directly.
+  range), and emits the output data type directly.
 
-  Output dtype:
+  Output data type:
     - count-only:   UInt32 if length < 2^32, else UInt64.
     - weighted:     weights.data_type.
 
@@ -15,7 +15,7 @@
   weight is also skipped (its label contributes 0).
 
   Caller contract (= lib/carray/methods/bincount.rb's CArray#bincount):
-    - self is integer dtype.
+    - self is integer data type.
     - length is the output size, pre-sized to max(length, label_max+1)
       with label_min >= 0 already verified.
 
@@ -30,8 +30,8 @@
 
 #include "carray.h"
 
-/* Tight inner loop: 2 mask-aware variants × 8 label dtypes × 2 output
-   dtypes = 32 specializations.  Generated via macro expansion.
+/* Tight inner loop: 2 mask-aware variants × 8 label data types × 2 output
+   data types = 32 specializations.  Generated via macro expansion.
 
    Layout:
      COUNT_KERNEL(LABEL_T, OUT_T)
@@ -91,7 +91,7 @@ rb_ca_bincount_count_kernel (VALUE self, VALUE rlength)
     rb_raise(rb_eArgError, "bincount: length must be non-negative");
   }
 
-  /* Output dtype: UInt32 default; UInt64 if length doesn't fit. */
+  /* Output data type: UInt32 default; UInt64 if length doesn't fit. */
   out_type = (length > 0xFFFFFFFFLL) ? CA_UINT64 : CA_UINT32;
   shape_out[0] = length;
   vout = rb_carray_new(out_type, 1, shape_out, 0, NULL);
@@ -125,7 +125,7 @@ rb_ca_bincount_count_kernel (VALUE self, VALUE rlength)
 
 /* --------------------------------------------------------------- */
 
-/* Weighted variant: output dtype = weights dtype.
+/* Weighted variant: output data type = weights data type.
    Inner: out[label[i]] += weight[i].
    Mask: skip if label[i] masked OR weight[i] masked. */
 

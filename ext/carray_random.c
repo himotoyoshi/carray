@@ -9,7 +9,7 @@
   (rb_random_*).
 
   Dispatch:
-    random!       -> uniform fill (per-dtype branch below)
+    random!       -> uniform fill (per-type branch below)
     randomn!      -> standard normal via Box-Muller (float / complex only)
     shuffle!      -> Fisher-Yates over the flat buffer, or per-slice
                      when axis: is given (byte-chunk swap)
@@ -109,13 +109,13 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
   }
 
   /* Materialize (low, high) as the correct scalar type and validate.
-   * For integer dtypes, `..` closed adds 1 to high (turns into half-open
-   * for the sampler); for float dtypes, closed and half-open are
+   * For integer data types, `..` closed adds 1 to high (turns into half-open
+   * for the sampler); for float data types, closed and half-open are
    * equivalent so no adjustment. */
   if (!is_default) {
-    int is_integer_dtype = (ca->data_type >= CA_INT8
+    int is_integer_type = (ca->data_type >= CA_INT8
                             && ca->data_type <= CA_UINT64);
-    if (is_integer_dtype) {
+    if (is_integer_type) {
       low_long  = NUM2LONG(low_val);
       high_long = NUM2LONG(high_val);
       if (high_is_closed) high_long += 1;
@@ -290,7 +290,7 @@ box_muller_pair(VALUE rng, double *r1, double *r2)
 /* CArray#randomn!(rng:) — fill self with standard normal N(0, 1)
  * samples in-place via Box-Muller, returning self.
  *
- * Restricted to float / complex dtypes.  Complex fills real + imag as
+ * Restricted to float / complex data types.  Complex fills real + imag as
  * two independent normals per cell. */
 static VALUE
 rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
@@ -484,7 +484,7 @@ rb_ca_shuffle(int argc, VALUE *argv, VALUE self)
 /* ---- random (copy) ----------------------------------------------------- */
 
 /* CArray#random([low,] [high], rng:) — non-bang variant: return a
- * newly templated array filled uniformly.  Shape and dtype come from
+ * newly templated array filled uniformly.  Shape and data type come from
  * CArray#template, so the receiver is only consulted for those.
  * Accepts the same argument forms as {rb_ca_random_bang}. */
 static VALUE

@@ -254,10 +254,10 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
     from_array = 0;
   }
 
-  /* Super-hot path: entity + no mask + common numeric dtype + Numeric obj.
+  /* Super-hot path: entity + no mask + common numeric data type + Numeric obj.
      Bypasses rb_ca_store_index/addr -> ca_update_mask + rb_ca_obj2ptr ->
      cast_table dispatch.  Falls through to general path for: views,
-     existing mask, non-numeric dtype, UNDEF, or non-Numeric obj. */
+     existing mask, non-numeric data type, UNDEF, or non-Numeric obj. */
   if ( ca_is_entity(ca) && ! ca->mask && obj != CA_UNDEF ) {
     int8_t dt = ca->data_type;
     if ( dt == CA_FLOAT64 || dt == CA_FLOAT32 ||
@@ -269,7 +269,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
       /* Compute flat addr if T_ARRAY index path. */
       if ( from_array ) addr = elem_entity_addr(ca, idx);
       char *p = ca->ptr + ca->bytes * addr;
-      /* Convert obj to dtype + store.  Restrict to Fixnum / Float / true
+      /* Convert obj to data type + store.  Restrict to Fixnum / Float / true
          / false to avoid Bignum / Rational / Complex coercion that the
          cast_table handles in the general path. */
       switch ( dt ) {
@@ -311,7 +311,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
         if ( FIXNUM_P(obj) )             { *(uint8_t *)p = (FIX2LONG(obj) != 0); return obj; }
         break;
       }
-      /* Fall through: dtype matches but obj kind needs general coercion. */
+      /* Fall through: data type matches but obj kind needs general coercion. */
     }
   }
 
@@ -344,7 +344,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
     volatile VALUE out;
     elem_parse_idx_array(ca, ridx, idx);
 
-    /* Super-hot path: entity + common numeric dtype + no mask.
+    /* Super-hot path: entity + common numeric data type + no mask.
        Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj cast-table dispatch.
        Covers the bench's float64 / int64 / int32 cases. */
     if ( ca_is_entity(ca) && ! ca->mask ) {
@@ -454,7 +454,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
 
   has_mask = elem_probe_mask(ca);
 
-  /* Super-hot path: entity + no mask + integer dtype.
+  /* Super-hot path: entity + no mask + integer data type.
      Reads p directly, modifies in place — no separate fetch/store dispatch. */
   if ( ca_is_entity(ca) && ! has_mask ) {
     ca_size_t addr;
@@ -818,7 +818,7 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
              "elem_min requires a numeric array");
   }
 
-  /* Super-hot path: entity + numeric dtype + Fixnum/Float rval. */
+  /* Super-hot path: entity + numeric data type + Fixnum/Float rval. */
   ELEM_MINMAX_BODY(<);
 
   /* General path: view / Bignum-Rational-Complex rval / fall-through.

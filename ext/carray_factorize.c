@@ -59,7 +59,7 @@
       codes  : narrow unsigned CArray (uint8 / uint16 / uint32), the code
                storage; masked source cells store the type-max sentinel
                (from_codes derives the mask from it, matching categorize).
-      levels : integer CArray (source dtype) of the k distinct values in
+      levels : integer CArray (source data type) of the k distinct values in
                first-appearance order.
     self.__mask_duplicates__(axis) -> boolean CArray of self.shape, true at
       each cell that duplicates an earlier-seen one along axis (per-fiber
@@ -487,7 +487,7 @@ fz_levels_free (fz_levels *l)
      codes  = narrow unsigned CArray; masked source cells store the type-max
               sentinel (0xFF / 0xFFFF / 0xFFFFFFFF), so from_codes reconstructs
               the mask exactly as the mask_duplicates path does.
-     levels = CArray (source dtype) of the k distinct values, in first-appearance
+     levels = CArray (source data type) of the k distinct values, in first-appearance
               (row-major flatten) order.
 */
 static VALUE
@@ -508,7 +508,7 @@ rb_ca_factorize_appearance (VALUE self)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__factorize_appearance__: integer, float, object, or fixlen dtype required (got %d)", dt);
+             "__factorize_appearance__: integer, float, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__factorize_appearance__: need ndim >= 1");
@@ -535,8 +535,8 @@ rb_ca_factorize_appearance (VALUE self)
   boolean8_t *m;
   ca_size_t   n;
 
-  /* Fiber inner loop, monomorphised per dtype.  WIDEN sign- or zero-extends the
-     element to a 64-bit key; equality within one dtype is preserved. */
+  /* Fiber inner loop, monomorphised per data type.  WIDEN sign- or zero-extends the
+     element to a 64-bit key; equality within one data type is preserved. */
   #define FZ_LOOP(T, WIDEN)                                                  \
     do {                                                                     \
       const T  *ip = (const T *) p_in;                                       \
@@ -664,7 +664,7 @@ rb_ca_factorize_appearance (VALUE self)
     }
   }
 
-  /* Levels: the interned raw values, in source dtype.  CA_FIXLEN carries its
+  /* Levels: the interned raw values, in source data type.  CA_FIXLEN carries its
      element width; numeric / object use bytes = 0. */
   ca_size_t ldim[1];
   ldim[0] = k;
@@ -715,7 +715,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__mask_duplicates__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__mask_duplicates__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__mask_duplicates__: need ndim >= 1");
@@ -740,8 +740,8 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
   boolean8_t *m;
   ca_size_t   n;
 
-  /* Fiber inner loop, monomorphised per dtype.  WIDEN sign- or zero-extends the
-     element to a 64-bit key; equality within one dtype is preserved.  The hash
+  /* Fiber inner loop, monomorphised per data type.  WIDEN sign- or zero-extends the
+     element to a 64-bit key; equality within one data type is preserved.  The hash
      interns first appearances, so is_new == 0 flags a duplicate. */
   #define MD_LOOP(T, WIDEN)                                                   \
     do {                                                                      \
@@ -839,7 +839,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
 
    INTERNAL (CArray#unique). Collect the distinct values of self in
    first-appearance (row-major flatten) order, one linear pass, no sort. Returns
-   a 1-D CArray of source dtype. Masked cells do not participate.
+   a 1-D CArray of source data type. Masked cells do not participate.
 
    Numeric (integer / float): distinctness follows `==` except NaN collapses to a
    single distinct value (all NaN patterns map to one canonical hash key) and
@@ -876,7 +876,7 @@ rb_ca_unique_flat (VALUE self)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__unique_flat__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__unique_flat__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__unique_flat__: need ndim >= 1");
@@ -1098,8 +1098,8 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
    seen-set).  One pass to build the set from `values`, one pass to probe self;
    no sort, peak memory O(distinct values).
 
-   `values` must be a CArray of the same dtype as self (the Ruby surface coerces
-   Array / Range / other-dtype input first).  Masked cells of `values` do not
+   `values` must be a CArray of the same data type as self (the Ruby surface coerces
+   Array / Range / other-type input first).  Masked cells of `values` do not
    enter the set.  Masked cells of self stay masked in the output (membership is
    unknown), reproducing the mask propagation of the retired `contains`
    (self.eq(v)); their boolean payload is false.
@@ -1127,7 +1127,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__is_in__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__is_in__: need ndim >= 1");
@@ -1139,7 +1139,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   GetCArray(rvalues, cv);
   if ( cv->data_type != dt || (dt == CA_FIXLEN && cv->bytes != ca->bytes) ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: values dtype must match self (%d)", dt);
+             "__is_in__: values data type must match self (%d)", dt);
   }
   if ( cv->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__is_in__: values need ndim >= 1");
@@ -1256,7 +1256,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
    through the discovery-family lanes (NaN collapse, rb_hash + rb_eql, byte
    equality).
 
-   `ref` must be a CArray of the same dtype as self (the Ruby surface coerces
+   `ref` must be a CArray of the same data type as self (the Ruby surface coerces
    first).  Masked cells of `ref` do not enter the map but still occupy their
    flat address (position counts).  Masked cells of self, and cells whose value
    is absent from `ref`, are UNDEF in the output.  "First" occurrence is
@@ -1286,7 +1286,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__locate_addr__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__locate_addr__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__locate_addr__: need ndim >= 1");
@@ -1297,7 +1297,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
   GetCArray(rref, cr);
   if ( cr->data_type != dt || (dt == CA_FIXLEN && cr->bytes != ca->bytes) ) {
     rb_raise(rb_eCADataTypeError,
-             "__locate_addr__: ref dtype must match self (%d)", dt);
+             "__locate_addr__: ref data type must match self (%d)", dt);
   }
   if ( cr->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__locate_addr__: ref need ndim >= 1");
@@ -1521,7 +1521,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
 /* Shared body of __intersection__ (keep_when_hit = 1) and __difference__
    (keep_when_hit = 0): the distinct values of self that are (resp. are not)
    present in `other`, in self's first-appearance order, as a 1-D CArray of
-   self's dtype.  Two seen-sets: `hoth` built from `other` is the probe set;
+   self's data type.  Two seen-sets: `hoth` built from `other` is the probe set;
    `hself` dedups self so each distinct value is decided once.  Masked cells of
    either array do not participate.  Distinctness is the discovery family's per
    lane (numeric `==` + NaN collapse + -0.0 == +0.0, object hash/eql? + NaN
@@ -1545,7 +1545,7 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "set relation: numeric, object, or fixlen dtype required (got %d)", dt);
+             "set relation: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "set relation: need ndim >= 1");
@@ -1555,7 +1555,7 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
   }
   GetCArray(rother, co);
   if ( co->data_type != dt || (dt == CA_FIXLEN && co->bytes != ca->bytes) ) {
-    rb_raise(rb_eCADataTypeError, "set relation: other dtype must match self (%d)", dt);
+    rb_raise(rb_eCADataTypeError, "set relation: other data type must match self (%d)", dt);
   }
   if ( co->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "set relation: other need ndim >= 1");
@@ -1730,7 +1730,7 @@ rb_ca_set_union (VALUE self, VALUE rother)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__union__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__union__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__union__: need ndim >= 1");
@@ -1740,7 +1740,7 @@ rb_ca_set_union (VALUE self, VALUE rother)
   }
   GetCArray(rother, co);
   if ( co->data_type != dt || (dt == CA_FIXLEN && co->bytes != ca->bytes) ) {
-    rb_raise(rb_eCADataTypeError, "__union__: other dtype must match self (%d)", dt);
+    rb_raise(rb_eCADataTypeError, "__union__: other data type must match self (%d)", dt);
   }
   if ( co->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__union__: other need ndim >= 1");
@@ -1779,7 +1779,7 @@ rb_ca_set_union (VALUE self, VALUE rother)
    first-appearance (row-major flatten) order together with the number of times
    each occurs, one linear pass, no sort.
    Returns [levels, counts]:
-     levels = 1-D CArray of source dtype, the k distinct values in appearance
+     levels = 1-D CArray of source data type, the k distinct values in appearance
               order (identical to __unique_flat__).
      counts = 1-D CA_INT64 of length k, counts[i] = occurrences of levels[i].
    Masked cells do not participate (skipped, not counted). Numeric distinctness
@@ -1806,7 +1806,7 @@ rb_ca_value_counts_flat (VALUE self)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__value_counts_flat__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__value_counts_flat__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__value_counts_flat__: need ndim >= 1");
@@ -1979,7 +1979,7 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__nunique__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__nunique__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__nunique__: need ndim >= 1");
@@ -2126,7 +2126,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__is_mode__: numeric, object, or fixlen dtype required (got %d)", dt);
+             "__is_mode__: numeric, object, or fixlen data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__is_mode__: need ndim >= 1");
@@ -2344,7 +2344,7 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "__mode_axis__: numeric dtype required (got %d)", dt);
+             "__mode_axis__: numeric data type required (got %d)", dt);
   }
   if ( ca->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__mode_axis__: need ndim >= 1");

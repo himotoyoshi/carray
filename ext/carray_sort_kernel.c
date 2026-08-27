@@ -1,8 +1,8 @@
 /* ---------------------------------------------------------------------------
 
-   Portable textbook sort kernels: per-dtype quicksort + bottom-up
+   Portable textbook sort kernels: per-type quicksort + bottom-up
    mergesort with inline comparison (no function-pointer indirection
-   like libc qsort / mergesort).  All 10 numeric dtypes plus paired
+   like libc qsort / mergesort).  All 10 numeric data types plus paired
    forms for argsort.
 
    Internal C API only (no Ruby surface, no Init function).  Declared
@@ -12,13 +12,13 @@
 
    Algorithms:
 
-   * quicksort (ca_sort_quick_<dtype>)
+   * quicksort (ca_sort_quick_<type>)
        median-of-3 pivot, Hoare partition, strict `<`, insertion-sort
        base (threshold 16), smaller-side recursion / larger-side
        iterate (stack O(log n)).  Depth-limit escape to mergesort for
        worst-case O(n log n).
 
-   * mergesort (ca_sort_merge_<dtype>)
+   * mergesort (ca_sort_merge_<type>)
        Bottom-up, ping-pong (cur / next) per pass with no inter-pass
        memcpy.  Strict `<` (stable: equal -> take-left).  Insertion-
        sort pre-pass that converts the input into R=16-wide sorted
@@ -27,18 +27,18 @@
        skip the merge loop; no run-state machine, distinct from
        Timsort galloping).
 
-   * paired forms (ca_sort_quick_pair_<dtype> / ca_sort_merge_pair_<dtype>)
+   * paired forms (ca_sort_quick_pair_<type> / ca_sort_merge_pair_<type>)
        Same algorithms over (value, index) pairs for argsort
        (sort_index / sort_addr).  Stable tie-break by index is built
        into the comparison, so quicksort is effectively stable for
        argsort even though the algorithm itself is not.
 
-   * NaN partitioning (ca_partition_nan_<dtype> + _pair_<dtype>)
+   * NaN partitioning (ca_partition_nan_<type> + _pair_<type>)
        float32 / float64 only.  One-pass Hoare-style partition that
        separates `[finite | NaN]` regions so the downstream sort
        kernel can operate on the finite slice with plain `<`.
 
-   * value-level quickselect (ca_partition_quick_<dtype>)
+   * value-level quickselect (ca_partition_quick_<type>)
        median-of-3 + Hoare + insertion base + one-sided recursion
        into the side containing kth (quickselect property, expected
        O(n)).  Depth-limit escape to mergesort matches the sort
@@ -402,13 +402,13 @@ ca_sort_quick_pair_##SUFFIX (ca_pair_##SUFFIX *a, ca_size_t n)              \
 struct ca_sort_pair_##SUFFIX##_eat_semicolon
 
 
-/* ===== Per-dtype instantiations ===========================================
+/* ===== Per-type instantiations ===========================================
    `<` is well-defined and IEEE-stable for all numeric C types used
    here; NaN handling for f32 / f64 lives in the pre-partition pass
    below. */
 
 /* ---------------------------------------------------------------------------
-   NaN pre-partition (float dtypes only).
+   NaN pre-partition (float data types only).
 
    One-pass Hoare-style partition that separates `a[0..n)` into
    `[finite | NaN]` regions in place, returning the finite count k
@@ -447,7 +447,7 @@ struct ca_partition_nan_##SUFFIX##_eat_semicolon
 DEFINE_PARTITION_NAN(float32_t, f32);
 DEFINE_PARTITION_NAN(double,    f64);
 
-/* Pair variant for argsort: separates ca_pair_<dtype> by
+/* Pair variant for argsort: separates ca_pair_<type> by
    isnan(v.value).  Returns the finite count.
 
    Stable within both finite and NaN regions (original order

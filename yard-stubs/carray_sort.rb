@@ -44,7 +44,7 @@ class CArray
   #     pre-pass. Predictable worst case.
   #
   #   Masked cells are an incomparable sentinel (the same role NaN
-  #   plays for float dtypes): they are excluded from the value
+  #   plays for float data types): they are excluded from the value
   #   comparison and clustered at one end of each fiber.
   #   `masked_position:` picks which end (`:last`, default, or
   #   `:first`); relative order within the masked cluster is
