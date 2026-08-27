@@ -244,6 +244,30 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     assert_raise(ArgumentError) { dt.timesteps(unit: :h, origin: 100) }
   end
 
+  def test_a_calendar_element_origin_on_a_fixed_grid
+    # A calendar element names an instant -- the first midnight of its
+    # granule -- so it is a bucket head like any other, and the fixed path
+    # reads it the way the calendar path always did.  It used to be turned
+    # away as having "no exact seconds", which is true of a month-long
+    # duration but not of a month's head.
+    h = CArray.time(["2020-08-15T05:00:00Z"], unit: :h)
+    m = CArray.time("2000-01-01", unit: :M)[0]
+    y = CArray.time("2000-06-01", unit: :Y)[0]           # -> 2000-01-01
+    assert_equal h.timesteps(unit: "1 hour", origin: "2000-01-01").to_a,
+                 h.timesteps(unit: "1 hour", origin: m).to_a
+    assert_equal h.timesteps(unit: "6 hours", origin: "2000-01-01").to_a,
+                 h.timesteps(unit: "6 hours", origin: y).to_a
+    assert_equal ["2020-08-15T00:00:00Z"],
+                 h.floor(unit: "1 day", origin: m).strftime("%FT%TZ").to_a
+
+    # a month head is still not on a week grid, and a bare Integer is still
+    # ambiguous -- accepting the element changes neither
+    assert_raise(ArgumentError) do
+      CA_INT64([0]).time(unit: :W).timesteps(unit: "1 week", origin: m)
+    end
+    assert_raise(ArgumentError) { h.timesteps(unit: "1 hour", origin: 100) }
+  end
+
   # -- (bucket, storage) acceptance table ----------------------------------
 
   def test_finer_bucket_on_whole_multiple_storage

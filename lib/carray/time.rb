@@ -2388,22 +2388,16 @@ class CATime
     end
 
     # Exact Rational seconds since the Unix epoch for a fixed-storage origin.
-    # Time / String / DateTime go through the DateTime-independent parser.
+    # Everything but a bare Integer goes through the shared entry point, so
+    # an origin reads the same here as it does for a start literal.
     def _origin_seconds_exact(origin)
       case origin
-      when CATime::Element
-        unless CATimeUnitAlgebra::FIXED.key?(origin.unit.base)
-          raise ArgumentError,
-                "origin scalar in calendar unit #{origin.unit} has no exact " \
-                "seconds; use a fixed-unit scalar / Time / String"
-        end
-        Rational(origin.value) * origin.unit.tick_ratio
       when Integer
         raise ArgumentError,
               "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
               "Time / String / CATime scalar"
       else
-        CArray._epoch_seconds_exact(origin)                # Time / String / DateTime
+        CArray._epoch_seconds_exact(origin)   # Time / String / DateTime / Element
       end
     end
 
@@ -2412,14 +2406,10 @@ class CATime
     # bucket heads are month heads and nothing else; an origin anywhere in
     # between names a bucket that does not exist.
     def _origin_on_month_head?(origin)
-      secs =
-        case origin
-        when CATime::Element
-          return true if CATimeUnitAlgebra::CALENDAR.key?(origin.unit.base)
-          Rational(origin.value) * origin.unit.tick_ratio
-        else
-          CArray._epoch_seconds_exact(origin)
-        end
+      # A calendar element is a month head by construction, and the shared
+      # entry point says so by handing back that midnight -- no branch here
+      # has to know it.
+      secs = CArray._epoch_seconds_exact(origin)
       y, m = _origin_year_month(origin)
       head = _days_from_civil(CA_INT64([y]), CA_INT64([m]), CA_INT64([1]))[0]
       secs == head * 86400
