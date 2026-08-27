@@ -111,9 +111,9 @@ data[station, nil].cumsum(axis: :group)
 data[station].cumcount(axis: :group)
 ```
 
-Output dtype follows the reduce siblings: `cumsum` / `cumprod` are `float64` (the
+The output data type follows the reduce siblings: `cumsum` / `cumprod` are `float64` (the
 running value grows, so integer-preserving sums are a deliberate non-goal, as on
-the reduce side); `cummax` / `cummin` **preserve the source dtype** (extrema do
+the reduce side); `cummax` / `cummin` **preserve the source data type** (extrema do
 not grow magnitude — `int` stays `int`); `cumcount` is `int64`, 1-based (running
 count of present cells, inclusive). An `object` source produces an `object`
 result for `cumsum` / `cumprod` / `cummax` / `cummin` (`cumsum` / `cumprod` seed

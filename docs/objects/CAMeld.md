@@ -97,7 +97,7 @@ contract.  When you have pieces with mixed `data_type`:
   common type or an explicit `data_type:` kwarg).
 
 CAFrame mirrors this split: {CAFrame.meld} is the strict view frame
-(each column is a CAMeld view; same-dtype required per column) and
+(each column is a CAMeld view; same data type required per column) and
 {CAFrame.concatenate} is the eager auto-casting alternative (each
 column is a fresh entity from {CArray.concatenate}).
 
@@ -284,7 +284,7 @@ Measured on an M2.
 
 ## 8. Relationship to `meld`, `stack`, `concatenate`
 
-| Operation                     | View (same dtype)              | Eager (auto-cast)          |
+| Operation                     | View (same data type)          | Eager (auto-cast)          |
 |-------------------------------|--------------------------------|----------------------------|
 | Concat along existing axis    | `meld`  (CAMeld view)          | `concatenate` (owned copy) |
 | Add a new axis                | `stack` (CAStack view)         | (ragged impossible)        |
@@ -294,13 +294,13 @@ Measured on an M2.
   `data_type` across pieces (no `data_type:` kwarg).  Also available as
   an instance method (`a.meld(b, c, axis: 0)`).
 - {CArray.concatenate} — uniform-or-ragged, **eager materialised
-  copy**; auto-casts to the common dtype (or takes an explicit
+  copy**; auto-casts to the common data type (or takes an explicit
   `data_type:` kwarg).  For callers who want an owned entity or have
-  mixed-dtype pieces without wanting to cast them themselves.
+  mixed-type pieces without wanting to cast them themselves.
 
-`meld` and `concatenate` differ in materialisation and dtype policy.
+`meld` and `concatenate` differ in materialisation and data type policy.
 Reach for `meld` when downstream code can work with a view (most
-operations, especially reductions, do) and dtypes already agree; reach
+operations, especially reductions, do) and the data types already agree; reach
 for `concatenate` when you need an independent entity or want implicit
 promotion.
 
@@ -330,5 +330,5 @@ future work if it matters for a workload.
 - `lib/carray/frame/frame.rb` — CAFrame `df[sel] = df2` splice_rows,
   which routes each column through `CArray.meld`.
 - `lib/carray/frame/concat.rb` — `CAFrame.meld(*frames)` (view frame,
-  strict per-column dtype) and `CAFrame.concatenate(*frames)` (eager
+  strict per-column data type) and `CAFrame.concatenate(*frames)` (eager
   frame, per-column auto-cast).

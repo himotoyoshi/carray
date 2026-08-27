@@ -260,7 +260,7 @@ b.count(UNDEF)  # => number of masked cells
 ## 8. Order operations — sort, argmin, rank
 
 `false` sorts before `true` (`0 < 1`). Position-returning methods give indices;
-value-returning `sort` keeps the boolean dtype.
+value-returning `sort` keeps the boolean data type.
 
 ```ruby
 b = CA_BOOLEAN([1, 0, 1, 1, 0])

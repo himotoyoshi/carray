@@ -39,7 +39,7 @@ The source is split into regions and each region is reduced by a **`block_view`*
 
 Because tiles do **not** overlap, the interior never has to be materialized (a
 window iterator, whose windows overlap, must build a padded copy — a block
-iterator does not). A named reduction therefore inherits the core `dtype` / mask
+iterator does not). A named reduction therefore inherits the core data type / mask
 / empty / epsilon contracts unchanged, and runs at core-reduction speed
 regardless of how many tiles there are — see [performance](#performance).
 

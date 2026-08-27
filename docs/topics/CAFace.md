@@ -922,7 +922,7 @@ updated rather than quietly losing the coverage.
 It earns its keep immediately: its first run named `CAFixlenString#unique lost
 the Face (P1)`, which is how that gap got closed. Prevention is not available —
 the lift and gate points are per-site by construction (§6 says two dozen sites,
-and that is the price of not having a dtype descriptor) — so detection is where
+and that is the price of not having a data type descriptor) — so detection is where
 the effort belongs.
 
 ---

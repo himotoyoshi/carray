@@ -186,7 +186,7 @@ CArray.float64(N).seq(1)
 #  => [ 1.0, 2.0, 3.0, 4.0, 5.0 ]
 ```
 
-### Convert between dtypes with `CA_INT(a)` / `a.int32` / `a.float32`
+### Convert between data types with `CA_INT(a)` / `a.int32` / `a.float32`
 
 `CA_INT(a)`, `CA_DOUBLE(a)`, etc., cast an existing CArray to the named type.
 The method form `a.int32`, `a.float32`, … does the same.
@@ -325,14 +325,14 @@ labels.bincount               #  => [ 2, 3, 1 ]    label 0 appears 2 times, 1 ap
 labels.bincount(length: 5)    #  => [ 2, 3, 1, 0, 0 ]    pad with zeros
 ```
 
-The dtype is `uint32` (or `uint64` if the result is huge). Convert with
+The result's data type is `uint32` (or `uint64` if the result is huge). Convert with
 `.int64` or `.float64` if you need signed or floating-point arithmetic
 downstream.
 
 ### Weighted bincount — sum per group
 
 Pass `weights:` to sum a parallel array of weights into each label's bucket
-instead of counting. The output dtype follows `weights`.
+instead of counting. The output data type follows `weights`.
 
 ```ruby
 labels  = CA_INT32([0, 1, 1, 2, 0, 1])

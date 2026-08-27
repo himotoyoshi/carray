@@ -34,9 +34,9 @@ still imports.
 ## Producer table
 
 CArray's MV producer sets `view.format` and `view.item_size` per
-dtype:
+data type:
 
-| dtype       | `format` | `item_size` |
+| data type   | `format` | `item_size` |
 |-------------|----------|-------------|
 | bool        | `?`      | 1           |
 | int8        | `c`      | 1           |
@@ -71,7 +71,7 @@ The MV consumer dispatches on `(format, item_size)` tuples.
 Synonyms commonly used by other producers are accepted in addition
 to the canonical forms above.
 
-| `format`             | `item_size` | dtype       |
+| `format`             | `item_size` | data type   |
 |----------------------|-------------|-------------|
 | `?`                  | 1           | bool        |
 | `b`, `c`             | 1           | int8        |
@@ -108,7 +108,7 @@ sources are rejected.
 The `format` character carries the semantic type; `item_size`
 carries the byte width.  Consumers MUST cross-check.  The same
 character with different `item_size` can resolve to different
-dtypes — `(l, 4)` is int32, `(l, 8)` is int64.
+data types — `(l, 4)` is int32, `(l, 8)` is int64.
 
 ### Host byte order only
 
