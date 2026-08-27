@@ -965,6 +965,20 @@ CATime.from_timesteps(2, unit: "3 hours", origin: t0).to_s
 # => "2024-03-10T06:00:00Z"
 ```
 
+The result is stored on the `unit:` grid, with one exception: a **week
+bucket answers on `:D`**. A week grid counts from the epoch, a Thursday, so
+it cannot hold its own bucket head — the head is the ISO Monday, four days
+off every week tick. Days hold it exactly, so `unit: :W` names the bucket
+and the answer lands on the day grid, where it matches `floor` cell for
+cell:
+
+```ruby
+dt = CArray.time(%w[2024-06-10 2024-06-15 2024-06-17], unit: :D)   # Mon, Sat, Mon
+back = CATime.from_timesteps(dt.timesteps(unit: :W), unit: :W)
+back.unit                      # => #<CATime::Resolution 1 D>
+back.strftime("%F").to_a       # => ["2024-06-10", "2024-06-10", "2024-06-17"]  (== floor)
+```
+
 ### 11.6 Calendar steps — month and year
 
 Months and years are variable-length, but the step system handles them on

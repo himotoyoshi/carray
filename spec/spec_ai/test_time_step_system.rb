@@ -161,6 +161,40 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
                  heads.map { |t| t.strftime("%F") }
   end
 
+  def test_from_timesteps_answers_a_week_bucket_on_the_day_grid
+    # A week grid counts from the epoch Thursday, so it cannot hold its own
+    # bucket head (the ISO Monday, four days off every tick).  The answer
+    # lands on :D, where the head is exact and the round trip closes.
+    dt = CArray.time(%w[2024-06-10 2024-06-15 2024-06-17], unit: :D)  # Mon, Sat, Mon
+    back = CATime.from_timesteps(dt.timesteps(unit: :W), unit: :W)
+    assert_equal CATime::Resolution.new(1, :D), back.unit
+    assert_equal dt.floor(unit: :W).ticks.to_a, back.ticks.to_a
+    assert_equal %w[2024-06-10 2024-06-17],
+                 back.strftime("%F").to_a.uniq
+
+    head = CATime.from_timesteps(0, unit: :W)
+    assert_instance_of CATime::Element, head
+    assert_equal "1970-01-05", head.to_s                  # ISO Monday, not the epoch
+    assert_equal CATime::Resolution.new(1, :D), head.unit
+  end
+
+  def test_from_timesteps_week_bucket_accepts_a_day_aligned_origin
+    # The day grid can hold any midnight, so an explicit week origin is
+    # reachable now; on the week grid it could not be expressed at all.
+    assert_equal "2024-01-01", CATime.from_timesteps(0, unit: :W,
+                                                     origin: "2024-01-01").to_s
+    assert_equal "2024-01-15", CATime.from_timesteps(2, unit: :W,
+                                                     origin: "2024-01-01").to_s
+  end
+
+  def test_from_timesteps_keeps_the_bucket_grid_for_other_units
+    { :M => CATime::Resolution.new(1, :M),
+      :D => CATime::Resolution.new(1, :D),
+      :h => CATime::Resolution.new(1, :h) }.each do |u, res|
+      assert_equal res, CATime.from_timesteps(1, unit: u).unit, "unit #{u}"
+    end
+  end
+
   # -- origin discipline ---------------------------------------------------
 
   def test_lossy_origin_raises
@@ -423,7 +457,7 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
 
   def test_invariant_roundtrip_from_timesteps
     dt = _prop_dt(:h)
-    ["1 hour", "6 hours", "1 day", "1 month", "1 year"].each do |s|
+    ["1 hour", "6 hours", "1 day", "1 week", "2 weeks", "1 month", "1 year"].each do |s|
       k = dt.timesteps(unit: s)
       back = CATime.from_timesteps(k, unit: s)
       assert_equal dt.floor(unit: s).to_time.to_a, back.to_time.to_a, "roundtrip (#{s})"
