@@ -170,6 +170,41 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     end
   end
 
+  def test_calendar_origin_must_be_a_month_head
+    # a calendar grid is addressed by month ordinal, so a day-of-month or
+    # time-of-day phase names a bucket head that does not exist.  Dropping
+    # it silently is the failure the fixed-length side already refuses.
+    dt = CArray.time(["2020-03-05"], unit: :D)
+    assert_raise(ArgumentError) { dt.floor(unit: "3 months", origin: "2000-12-15") }
+    assert_raise(ArgumentError) { dt.timesteps(unit: "3 months", origin: "2000-12-15") }
+    assert_raise(ArgumentError) do
+      dt.floor(unit: "1 month", origin: Time.utc(2024, 5, 17, 13, 45))
+    end
+    assert_raise(ArgumentError) do
+      dt.floor(unit: "3 months", origin: "2000-12-01T00:00:00+09:00")   # 11-30 15:00Z
+    end
+    assert_equal "2020-03-01", dt.floor(unit: "3 months", origin: "2000-12-01")[0].to_s
+  end
+
+  def test_calendar_origin_accepts_a_month_head_scalar
+    dt = CArray.time(["2020-03-05"], unit: :D)
+    head = CArray.time(["2000-12-01"], unit: :M)[0]
+    assert_equal "2020-03-01", dt.floor(unit: "3 months", origin: head)[0].to_s
+    off = CArray.time(["2000-12-15"], unit: :D)[0]
+    assert_raise(ArgumentError) { dt.floor(unit: "3 months", origin: off) }
+  end
+
+  def test_year_storage_origin_must_start_in_january
+    # a :Y tick starts in January, so a July phase cannot be stored on it --
+    # the month used to be dropped as quietly as the day was.
+    y = CArray.time(["2020-03-05"], unit: :Y)
+    assert_raise(ArgumentError) { y.floor(unit: "1 year", origin: "2000-07-01") }
+    assert_equal "2020", y.floor(unit: "1 year", origin: "2000-01-01")[0].to_s
+    # a :D-stored array keeps the civil path, where a July phase is fine
+    d = CArray.time(["2024-03-01"], unit: :D)
+    assert_equal [-1], d.timesteps(unit: "1 year", origin: "2024-07-01").to_a
+  end
+
   def test_integer_origin_rejected
     dt = CA_INT64([0]).time(unit: :h)
     assert_raise(ArgumentError) { dt.timesteps(unit: :h, origin: 100) }

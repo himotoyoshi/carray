@@ -975,10 +975,12 @@ dt.timesteps(unit: "1 month")   # months since 1970-01
 # => [648, 649, 649, 647]
 ```
 
-For a calendar step the origin's **day and time are ignored** — only its year
-and month set the phase — so month buckets always start on the 1st. This makes
-**fiscal years / quarters** a one-liner: point the origin at the fiscal start
-month.
+A calendar grid is addressed by **month ordinal**, so its bucket heads are
+month heads and nothing else. The origin therefore has to be **the 1st at
+00:00**; anywhere else names a bucket that does not exist and raises, the same
+way a lossy origin does on a fixed-length grid (§11.11). Which month it is
+remains free, and that makes **fiscal years / quarters** a one-liner: point the
+origin at the fiscal start month.
 
 ```ruby
 fy = CArray.time(CA_OBJECT(["2024-03-01", "2024-08-01", "2025-01-01"]), unit: :D)
@@ -1104,12 +1106,14 @@ The step system converts "silently wrong" into a loud error:
   span would overflow the `int64` arithmetic, the op raises `RangeError` instead
   of silently wrapping. Coarse units (`:s` / `:h` / `:D` / `:M` …) cannot
   overflow for any realistic time, so they pay no check.
-- **Lossy origin.** An origin that does not land exactly on the grid the
-  buckets are counted on (e.g. an `:h` axis bucketed by the hour, with a
-  `00:30` origin) raises, rather than truncating the grid phase. A bare
-  `Integer` origin is rejected outright. When the bucket is finer than the
-  storage tick the grid is the *bucket* grid, so a `00:30` origin is fine
-  against a `"1 minute"` bucket — it is exactly 30 buckets.
+- **Lossy origin.** `origin` is the head of bucket 0, so it has to be a bucket
+  head. One that does not land on the grid the buckets are counted on (an `:h`
+  axis bucketed by the hour, with a `00:30` origin) raises, rather than
+  truncating the grid phase. A bare `Integer` origin is rejected outright.
+  When the bucket is finer than the storage tick the grid is the *bucket*
+  grid, so a `00:30` origin is fine against a `"1 minute"` bucket — it is
+  exactly 30 buckets. On a calendar grid the rule reads as “the 1st at
+  00:00” (§11.6), and a `:Y` tick additionally starts in January.
 
 ```ruby
 CA_INT64([0]).time(unit: :h).timesteps(unit: "1 hour", origin: "2024-01-01T00:30:00Z")
