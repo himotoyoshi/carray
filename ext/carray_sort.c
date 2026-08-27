@@ -46,7 +46,7 @@ struct sort_addr_key {
 /* Multi-key comparator for CArray.sort_addr: compares keys in priority
  * order, original index breaks ties (stable).  Masked cells are an
  * incomparable sentinel clustered at base->masked_last's end (same
- * role NaN plays for float dtypes, and the same masked_position:
+ * role NaN plays for float data types, and the same masked_position:
  * contract as the sort/partition family's :sentinel kernel mode --
  * see MASKED_POSITION rev1 in mkkernel.rb's MkKernel.sort doc).
  *
@@ -531,7 +531,7 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
  *                       worst case.
  *
  * Mask handling: masked cells are an incomparable sentinel, the same
- * role NaN plays for float dtypes.  They are excluded from the value
+ * role NaN plays for float data types.  They are excluded from the value
  * comparison and clustered at one end of each fiber; masked_position:
  * picks which end (:last, default, or :first).  Relative order within
  * the masked cluster is unspecified (same contract as the < / > regions
@@ -678,7 +678,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* CA_FIXLEN and masked input: the per-fiber path below covers
-     unmasked numeric dtypes only.  Delegate to {sort} (which handles
+     unmasked numeric data types only.  Delegate to {sort} (which handles
      both the fixlen dialect and the masked_position split) + copy to
      get the same shape/class contract as the fast path. */
   if ( ca_is_fixlen_type(ca) || ca_has_mask(ca) ) {

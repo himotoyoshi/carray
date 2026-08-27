@@ -21,14 +21,14 @@
   kernel_iterator macros do not model, so the flat inputs are materialised here:
   ca_attach aliases a contiguous entity (codes / a contiguous value) and gathers
   a view.  Codes dispatch on their native integer type (no coercion); the value
-  move is a bytes-wide memcpy (grouped shares the value dtype, so no value-dtype
+  move is a bytes-wide memcpy (grouped shares the value data type, so no value-type
   dispatch is needed).
 
   Surface (private): codes.__categorical_scatter__(value, cursor, grouped, k)
     self    = codes   (integer, carries the exclusion mask), read flat
-    value   = payload (any dtype, may carry a mask), read flat, same length
+    value   = payload (any data type, may carry a mask), read flat, same length
     cursor  = int64 length-k segment starts (mutated in place, consumed)
-    grouped = pre-allocated contiguous entity of the value dtype, length nvalid
+    grouped = pre-allocated contiguous entity of the value data type, length nvalid
     k       = number of categories
   Returns grouped.
 
@@ -79,7 +79,7 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
     rb_raise(rb_eArgError, "__categorical_scatter__: cursor must be int64[k]");
   }
   if ( grouped->bytes != bytes ) {
-    rb_raise(rb_eArgError, "__categorical_scatter__: grouped/value dtype mismatch");
+    rb_raise(rb_eArgError, "__categorical_scatter__: grouped/value data type mismatch");
   }
 
   ca_attach(codes);
@@ -127,12 +127,12 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
   (empty / all-masked -> sum 0 identity, count 0, min/max masked).
 
   Surface (private): grouped.__reduceat_moments__(offsets, counts, sums, mins, maxs)
-    self    = grouped  (numeric value dtype, may carry a mask), contiguous entity
+    self    = grouped  (numeric value data type, may carry a mask), contiguous entity
     offsets = int64[k] segment STARTS; segment c = [offsets[c], offsets[c+1]),
               the last ends at grouped.elements
     counts  = int64[k]   output: present (non-masked) cells per segment
     sums    = float64[k] output: sum per segment (0 for empty, unmasked)
-    mins/maxs = value-dtype[k] output: min / max per segment; the kernel masks
+    mins/maxs = value-type[k] output: min / max per segment; the kernel masks
               the empty/all-masked segments (no value to report)
   Derived on the Ruby side: mean = sum/count, count_masked = sizes - count, etc.
 
@@ -190,7 +190,7 @@ rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
   if ( counts->elements != k || sums->elements != k ||
        mins->elements != k || maxs->elements != k ||
        mins->data_type != grouped->data_type || maxs->data_type != grouped->data_type ) {
-    rb_raise(rb_eArgError, "__reduceat_moments__: output shape/dtype mismatch");
+    rb_raise(rb_eArgError, "__reduceat_moments__: output shape/data type mismatch");
   }
 
   offs   = (int64_t *) offsets->ptr;
@@ -235,7 +235,7 @@ rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
   (f = (m-1)*p/100, k = floor(f), lo + (f-k)*(hi-lo)).  No per-segment view.
 
   Surface (private): grouped.__reduceat_percentile__(offsets, p, out)
-    self    = grouped  (numeric value dtype, may carry a mask)
+    self    = grouped  (numeric value data type, may carry a mask)
     offsets = int64[k] segment STARTS (last ends at grouped.elements)
     p       = percentile in 0..100 (median = 50, quantile(q) = q*100)
     out     = float64[k] output; empty / all-masked segments are masked
@@ -354,7 +354,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
   SS / (count-1).
 
   Surface (private): grouped.__reduceat_variance__(offsets, means, counts, out)
-    self    = grouped  (numeric value dtype, may carry a mask)
+    self    = grouped  (numeric value data type, may carry a mask)
     offsets = int64[k] segment STARTS
     means   = float64[k] per-segment mean (ignored where count < 2)
     counts  = int64[k]   per-segment present count
@@ -577,7 +577,7 @@ rb_ca_reduceat_argminmax (VALUE self, VALUE roffsets, VALUE rminidx, VALUE rmaxi
 }
 
 /* __reduceat_all_any__(offsets, all_out, any_out) — per-segment boolean AND / OR
-   over present cells. Value dtype must be boolean. Empty segment: all -> true,
+   over present cells. Value data type must be boolean. Empty segment: all -> true,
    any -> false. */
 static VALUE
 rb_ca_reduceat_all_any (VALUE self, VALUE roffsets, VALUE rall, VALUE rany)
@@ -817,8 +817,8 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
       counts_out = int64,   shape [K, ...H.band]  (present cells per group)
       sums_out   = float64, shape [K, ...H.band]  (per-group sum, 0 for empty)
 
-  Sums as float64 mirrors __reduceat_moments__; Ruby side casts to h dtype in
-  #sum (matches existing empty→0 identity contract).  Mins/maxs are in h dtype
+  Sums as float64 mirrors __reduceat_moments__; Ruby side casts to h data type in
+  #sum (matches existing empty→0 identity contract).  Mins/maxs are in h data type
   (empty group cell → 0 + masked, matching __reduceat_moments__).
 --------------------------------------------------------------------------- */
 
@@ -921,7 +921,7 @@ rb_ca_fiber_scatter_moments (VALUE self, VALUE rcodes, VALUE raxis, VALUE rk,
   }
   if ( mins->data_type != h->data_type || maxs->data_type != h->data_type ) {
     rb_raise(rb_eArgError,
-             "__fiber_scatter_moments__: mins/maxs must match h dtype");
+             "__fiber_scatter_moments__: mins/maxs must match h data type");
   }
   if ( counts->ndim != h->ndim || sums->ndim != h->ndim ||
        mins->ndim != h->ndim   || maxs->ndim != h->ndim ||

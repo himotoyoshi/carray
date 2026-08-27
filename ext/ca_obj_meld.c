@@ -89,7 +89,7 @@ static ID id_parents;
 /* uniform check                                                        */
 /* ------------------------------------------------------------------- */
 
-/* Parents must share dtype, ndim, bytes, and all dims except meld_axis;
+/* Parents must share data type, ndim, bytes, and all dims except meld_axis;
    meld_axis lengths are the ragged dimension (may differ). */
 static void
 ca_meld_check_uniform (int32_t n_parents, CArray **parents, int8_t meld_axis)

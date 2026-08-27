@@ -386,7 +386,7 @@ ca_mv_data_type_from_format (const char *format, ssize_t item_size)
 }
 
 /* Derive the data_type a MemoryView producer would import as, by parsing its
-   format — without importing the data.  This is the canonical "what dtype is
+   format — without importing the data.  This is the canonical "what data type is
    this MV" question, decoupled from the import strategy (copy via
    from_memory_view vs zero-copy via wrap_memory_view).  Used by
    ca_arg_to_data_type so CArray.result_type / promote_list can treat an MV

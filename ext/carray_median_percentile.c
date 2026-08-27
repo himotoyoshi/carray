@@ -152,7 +152,7 @@ typedef enum { PCT_LOWER_ONLY, PCT_UPPER_ONLY, PCT_BOTH } pct_need_t;
 
 /* [shared] which of lower (sorted[k]) / upper (sorted[k+1]) the method
    needs.  Lets the caller skip the fetch it won't use.  Used by both
-   lanes (the need classification is dtype-independent). */
+   lanes (the need classification is data type-independent). */
 static pct_need_t
 pct_need (VALUE method, long k, double r, long n)
 {

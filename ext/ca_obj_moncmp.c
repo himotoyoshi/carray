@@ -2,7 +2,7 @@
 
   CAMonCmp — lazy monadic element-wise comparison view: is_nan /
   is_inf / is_finite / is_invalid / signbit.  Output data_type =
-  CA_BOOLEAN (1 byte); operand keeps its native data_type (per-dtype
+  CA_BOOLEAN (1 byte); operand keeps its native data_type (per-type
   kernels cover integer as well, so is_nan / is_inf on integer parents
   return const-false and is_finite const-true without a cast layer).
 
@@ -20,7 +20,7 @@
   Peak scratch: 1 operand-data_type slab.
 
   Mask propagation:
-    Per-dtype moncmp kernels write only at non-masked positions, so
+    Per-type moncmp kernels write only at non-masked positions, so
     the standard create_mask = parent.mask machinery carries mask bits
     to the caller-visible result.  No in-flight mask handling in
     xfer_stride.

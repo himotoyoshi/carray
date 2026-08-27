@@ -757,7 +757,7 @@ module MkKernel
   #                 output cell is UNDEF).
   #   :sentinel  -> masked cells are treated as an incomparable sentinel,
   #                 the same role NaN plays for :end nan_policy but runtime-
-  #                 selectable and dtype-agnostic.  Per fiber, unmasked
+  #                 selectable and type-agnostic.  Per fiber, unmasked
   #                 cells are compacted into a contiguous sub-range and only
   #                 that sub-range is sorted/quickselected; masked cells are
   #                 compacted into the complementary sub-range at the head
@@ -1208,7 +1208,7 @@ module MkKernel
   #
   # Ineligible:
   #   - suffix == ""  (:object src / no_simd_src override — reduce body
-  #     is Ruby callback or dtype-specific, single-accumulator required)
+  #     is Ruby callback or type-specific, single-accumulator required)
   #   - array_arg (weighted reductions use the ARRAY_T_EX macro family,
   #     which has its own emit path)
   def self.reduce_8way_eligible?(k, src, suffix)
@@ -3794,7 +3794,7 @@ module MkKernel
   # `masked_last` parameter.  Sets `sort_lo` / `sort_n` to the unmasked
   # sub-range so the downstream sort/quickselect call only ever compares
   # unmasked pairs -- masked cells are an incomparable sentinel, the same
-  # role NaN plays for nan_policy: :end, but dtype-agnostic and runtime-
+  # role NaN plays for nan_policy: :end, but type-agnostic and runtime-
   # selectable.  `payload_expr(k)` computes the `.i` payload (fiber-local
   # index for :fiber_local semantics, view-flat address for :view_flat)
   # given the Ruby string `k` naming the C loop variable.
@@ -4829,7 +4829,7 @@ module MkKernel
       {
         /* rev4 A1 via single-element CArray: convert CScalar / [1] 1-D /
            all dim==1 etc. to a Ruby Float and route it through the Case A
-           scalar path. The dtype matches ca (= rb_ca_obj2ptr coerces it
+           scalar path. The data type matches ca (= rb_ca_obj2ptr coerces it
            downstream). */
         if ( rb_obj_is_carray(rval) ) {
           CArray *cv_pre_;
@@ -6504,7 +6504,7 @@ MkKernel.reduce :stddev,
 # the body uses `if (v < lo) lo = v;` etc, NOT ternary `lo = (v < lo) ? v : lo;`.
 # DO NOT change to ternary — pragma-less ILP path depends on if-form.
 #
-# FM.1.0 scope: mask not yet propagated (FM.1.5).  Numeric dtypes only.
+# FM.1.0 scope: mask not yet propagated (FM.1.5).  Numeric data types only.
 
 MkKernel.reduce :minmax,
   state:           { lo: :load_type, hi: :load_type },
@@ -7015,7 +7015,7 @@ MkKernel.scan :cumcount,
 # acc_type: :load_type -> acc carries T_LOAD (= last seen input value).
 # STEP additionally sees `first` (int) marking the first live cell of
 # the fiber.  Output data_type = :bool.  No production consumer remains:
-# every dtype's mask_duplicates now uses the O(distinct) seen-set hash
+# every data type's mask_duplicates now uses the O(distinct) seen-set hash
 # lane (__mask_duplicates__, with boolean riding its uint8 lane), which
 # has no sort buffers.  The numeric widths are kept as a standalone scan
 # kernel (a sort-path reference oracle in the mask_duplicates tests).
@@ -8136,7 +8136,7 @@ MkKernel.monop :square,
 # with f64-forced input/output via ca_call_cfunc_1_1; the mkkernel form
 # preserves the same numeric behaviour but rides the lazy substrate +
 # kernel_iterator engine.  Widening monfunc: integer input auto-casts
-# to f64, float input preserves dtype.
+# to f64, float input preserves data type.
 
 # deg_360: fold into [0, 360).  Use double-typed local for the fold
 # computation regardless of input precision (matches legacy hand-written
@@ -8669,7 +8669,7 @@ MkKernel.moncmp :is_invalid,
 # -0.0).  Integer branch: sint = (#1) < 0, uint = always 0.  Float branch
 # uses C99 signbit (handles -0.0 / NaN sign correctly).  No complex
 # variant (signbit on a complex is ambiguous; rejected at this layer).
-# `:sint` / `:uint` aren't family aliases — use array-of-dtypes form.
+# `:sint` / `:uint` aren't family aliases — use the array-of-types form.
 MkKernel.moncmp :signbit,
   source: MkKernel::SINT_DTYPES + MkKernel::UINT_DTYPES +
           MkKernel::FLOAT_DTYPES + [:object],

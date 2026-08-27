@@ -14,9 +14,9 @@
   operands arrive at the common type.  Two ops break the uniform rule:
 
     QUO    -- only has a CA_OBJECT kernel; both operands promoted to
-              CA_OBJECT regardless of input dtypes
+              CA_OBJECT regardless of input data types
     IPOWER -- heterogeneous (left: float/cmplx preserved, right: int64);
-              output preserves left dtype.  See ca_op_ipower.c.
+              output preserves left data type.  See ca_op_ipower.c.
 
 ---------------------------------------------------------------------------- */
 

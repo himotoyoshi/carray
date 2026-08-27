@@ -5,7 +5,7 @@
   (see devel/PROPOSAL_UNMASK_FILL_METHOD.md).
 
   Hold copies a cell's bytes into masked cells with no arithmetic and no
-  per-dtype behavior, so a single ca->bytes-width memcpy walk covers every
+  per-type behavior, so a single ca->bytes-width memcpy walk covers every
   data_type -- numeric, complex, bool, object (VALUE-slot byte copy of an
   already-live value), fixlen, and Face storage.  This native does forward
   hold along one axis only and returns a fresh same-shape entity; the

@@ -9,7 +9,7 @@
   ca_bincmp_kernel_lookup from ca_bincmp_dispatch.h.
 
   Dispatch by data_type:
-    numeric (i8..f64, +complex) -> ca_bincmp_<op>_<dtype> kernel
+    numeric (i8..f64, +complex) -> ca_bincmp_<op>_<type> kernel
     boolean / fixlen / object   -> not implemented (raise)
 
   CAREFUL: the binop in-place trick (= pull left into the output

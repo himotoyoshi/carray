@@ -206,7 +206,7 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
   }
 
   /* chunk-size policy: inner = donor's product of dims[1..]; chunk_n_max
-   * = compute_n on donor->bytes (= dtype-dependent 32KB target). */
+   * = compute_n on donor->bytes (= type-dependent 32KB target). */
   if (shape_donor) {
     st->inner = ca_chunk_inner_size(shape_donor);
     st->chunk_n_max = ca_chunk_compute_n(st->n_kernel, st->inner,
