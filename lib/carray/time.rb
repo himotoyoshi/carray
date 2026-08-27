@@ -22,6 +22,50 @@
 # Within a group any pair is an exact integer ratio (coarse = fine * N), so a
 # coarse->fine cast is lossless (multiply), and a fine->coarse cast is lossless
 # only when every value is divisible by the divisor.
+# Civil-date arithmetic on int64 CArrays: the calendar kernel every time
+# grid is built on (Howard Hinnant's days<->civil algorithms, vectorized) plus
+# the floor-division primitive they need -- CArray `/` truncates toward zero,
+# and calendar math has to floor toward the past.  Internal to the time
+# surface: nothing here is part of the public API.
+module CATimeCivil
+  module_function
+
+  # Floored integer division of an int64 CArray by a positive Integer
+  # (toward -inf; CArray `/` truncates toward zero).
+  def floor_divide(a, b)
+    q = a / b
+    q - (a - q * b).lt(0)
+  end
+
+  # Vectorized Howard Hinnant civil-date algebra (proleptic Gregorian,
+  # negative days supported).  days since the Unix epoch -> [year, month,
+  # day] int64 CArrays.  Truncating division is what the algorithm assumes;
+  # the only negative operand (the 400-year era) is pre-adjusted so
+  # truncation behaves like floor.
+  def civil_from_days(z)
+    z   = z + 719468
+    era = (z - 146096 * z.lt(0)) / 146097
+    doe = z - era * 146097
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    y   = yoe + era * 400
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp  = (5 * doy + 2) / 153
+    d   = doy - (153 * mp + 2) / 5 + 1       # day of month, 1..31
+    m   = mp + (3 - 12 * mp.ge(10))          # mp<10 ? +3 : -9
+    [y + m.le(2), m, d]
+  end
+
+  # [year, month, day] int64 CArrays -> days since the Unix epoch.
+  def days_from_civil(y, m, d)
+    y   = y - m.le(2)
+    era = (y - 399 * y.lt(0)) / 400
+    yoe = y - era * 400
+    doy = (153 * (m + (9 - 12 * m.gt(2))) + 2) / 5 + (d - 1)  # m>2 ? -3 : +9
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+  end
+end
+
 module CATimeUnitAlgebra
   # seconds per base unit (Rational)
   FIXED = {
@@ -209,23 +253,23 @@ module CATimeUnitAlgebra
     return storage if a == b
     return convert_scale!(storage, a, b) if ratio(a, b)   # same group
     if CALENDAR.key?(a.base)
-      _instant_cal_to_fixed(storage, a, b)                # widen
+      convert_instant_calendar_to_fixed(storage, a, b)   # widen
     else
-      _instant_fixed_to_cal(storage, a, b)                # coarsen (exact-or-raise)
+      convert_instant_fixed_to_calendar(storage, a, b)   # coarsen (exact-or-raise)
     end
   end
 
   # calendar time (Resolution `from`) -> days since the epoch (int64
   # CArray).  Folds the resolution count (value = count-Y/M buckets).
-  def _cal_days(storage, from)
+  def calendar_days_since_epoch(storage, from)
     ones = CArray.int64(*storage.shape) { 1 }
     if from.base == :M
       abs = storage * from.count + 1970 * 12           # absolute month ordinal
-      y   = CATime.send(:_floordiv_i, abs, 12)
+      y   = CATimeCivil.floor_divide(abs, 12)
       m   = abs - y * 12 + 1
-      CATime.send(:_days_from_civil, y, m, ones)
+      CATimeCivil.days_from_civil(y, m, ones)
     else                                               # :Y
-      CATime.send(:_days_from_civil, storage * from.count + 1970, ones, ones)
+      CATimeCivil.days_from_civil(storage * from.count + 1970, ones, ones)
     end
   end
 
@@ -233,21 +277,21 @@ module CATimeUnitAlgebra
   # convert_instant!.  Goes through the day count, so the target grid has
   # to tile a day exactly (:W is rejected -- month starts are not
   # week-aligned).  Always exact once that holds.
-  def _instant_cal_to_fixed(storage, from, to)
+  def convert_instant_calendar_to_fixed(storage, from, to)
     r = ratio(CATime::Resolution.new(1, :D), to)   # ticks of `to` per day
     unless r.denominator == 1
       raise ArgumentError,
             "cannot convert calendar time #{from} to #{to} " \
             "(a day boundary is not aligned to the #{to} grid)"
     end
-    widen(_cal_days(storage, from), r.numerator)
+    widen(calendar_days_since_epoch(storage, from), r.numerator)
   end
 
   # fixed-length grid -> calendar time: the coarsening half of
   # convert_instant!, exact-or-raise.  Every instant must land on a day
   # boundary and then on the calendar boundary itself (the 1st, and
   # January too for :Y), since a mid-month instant has no :M value.
-  def _instant_fixed_to_cal(storage, from, to)
+  def convert_instant_fixed_to_calendar(storage, from, to)
     rd = ratio(CATime::Resolution.new(1, :D), from)  # `from` ticks per day
     days =
       if rd.denominator == 1
@@ -261,7 +305,7 @@ module CATimeUnitAlgebra
       else                                             # coarser than a day (:W)
         storage * (from.tick_ratio / 86400r).to_i
       end
-    y, m, d = CATime.send(:_civil_from_days, days)
+    y, m, d = CATimeCivil.civil_from_days(days)
     on_boundary = d.eq(1)
     on_boundary &= m.eq(1) if to.base == :Y
     unless on_boundary.all
@@ -276,7 +320,7 @@ module CATimeUnitAlgebra
               "cannot convert time #{from} to #{to} without loss " \
               "(instant is not on a #{to} boundary)"
       end
-      ord = CATime.send(:_floordiv_i, ord, to.count)
+      ord = CATimeCivil.floor_divide(ord, to.count)
     end
     ord
   end
@@ -296,28 +340,28 @@ module CATimeUnitAlgebra
     if r                                                # same group
       scaled = widen(storage, r.numerator)
       r.denominator == 1 ? scaled
-                         : CATime.send(:_floordiv_i, scaled, r.denominator)
+                         : CATimeCivil.floor_divide(scaled, r.denominator)
     elsif CALENDAR.key?(a.base)
-      _instant_cal_to_fixed(storage, a, b)              # widen, always exact
+      convert_instant_calendar_to_fixed(storage, a, b)   # widen, always exact
     else
-      _instant_fixed_to_cal_floor(storage, a, b)
+      convert_instant_fixed_to_calendar_floor(storage, a, b)
     end
   end
 
   # fixed-length grid -> calendar time, flooring: the instant's own year /
   # month, whatever day and time it carries.  The flooring counterpart of
-  # _instant_fixed_to_cal.
-  def _instant_fixed_to_cal_floor(storage, from, to)
+  # convert_instant_fixed_to_calendar.
+  def convert_instant_fixed_to_calendar_floor(storage, from, to)
     rd   = ratio(CATime::Resolution.new(1, :D), from)   # `from` ticks per day
     days =
       if rd.denominator == 1
-        CATime.send(:_floordiv_i, storage, rd.numerator)
+        CATimeCivil.floor_divide(storage, rd.numerator)
       else                                             # coarser than a day (:W)
         storage * (from.tick_ratio / 86400r).to_i
       end
-    y, m, = CATime.send(:_civil_from_days, days)
+    y, m, = CATimeCivil.civil_from_days(days)
     ord = to.base == :M ? (y * 12 + (m - 1) - 1970 * 12) : (y - 1970)
-    to.count > 1 ? CATime.send(:_floordiv_i, ord, to.count) : ord
+    to.count > 1 ? CATimeCivil.floor_divide(ord, to.count) : ord
   end
 end
 
@@ -377,8 +421,8 @@ class CATime
       require 'time'
       require 'date'
       case unit.base
-      when :Y then d = _epoch_date.next_year(value * unit.count);  Time.utc(d.year, d.month, d.day)
-      when :M then d = _epoch_date.next_month(value * unit.count); Time.utc(d.year, d.month, d.day)
+      when :Y then d = epoch_date.next_year(value * unit.count);  Time.utc(d.year, d.month, d.day)
+      when :M then d = epoch_date.next_month(value * unit.count); Time.utc(d.year, d.month, d.day)
       else
         Time.at(Rational(value) * unit.tick_ratio, in: 'UTC')  # exact seconds
       end
@@ -389,11 +433,11 @@ class CATime
     def to_date
       require 'date'
       case unit.base
-      when :Y then _epoch_date.next_year(value * unit.count)
-      when :M then _epoch_date.next_month(value * unit.count)
+      when :Y then epoch_date.next_year(value * unit.count)
+      when :M then epoch_date.next_month(value * unit.count)
       when :W then Date.jd(EPOCH_JD + value * unit.count * 7, Date::GREGORIAN)
       when :D then Date.jd(EPOCH_JD + value * unit.count, Date::GREGORIAN)
-      else         Date.jd(EPOCH_JD + _floor_days, Date::GREGORIAN)  # sub-day: floor to day
+      else         Date.jd(EPOCH_JD + floor_to_days_since_epoch, Date::GREGORIAN)  # sub-day: floor to day
       end
     end
 
@@ -411,7 +455,7 @@ class CATime
       when :Y      then format("%04d", to_date.year)
       when :M      then to_date.strftime("%Y-%m")
       when :W, :D  then to_date.strftime("%Y-%m-%d")
-      else              to_time.iso8601(_precision_digits)  # :h .. :as (time shown)
+      else              to_time.iso8601(fractional_second_digits)  # :h .. :as (time shown)
       end
     end
 
@@ -431,7 +475,7 @@ class CATime
       case other
       when Element
         u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
-        _instant_in(u) <=> other._instant_in(u)
+        instant_in(u) <=> other.instant_in(u)
       when Time
         to_time <=> other.getutc
       when (defined?(DateTime) ? DateTime : nil)
@@ -466,7 +510,7 @@ class CATime
     #   @return [CATime::Element]
     #   @raise [TypeError, ArgumentError] on a non-timedelta / cross-group operand.
     def +(td)
-      _combine(td, 1)
+      shifted_by_duration(td, 1)
     end
 
     # @overload -(other)
@@ -480,9 +524,9 @@ class CATime
       case other
       when Element
         u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
-        CATimedelta::Element.new(_instant_in(u) - other.send(:_instant_in, u), u)
+        CATimedelta::Element.new(instant_in(u) - other.instant_in(u), u)
       when CATimedelta::Element
-        _combine(other, -1)
+        shifted_by_duration(other, -1)
       else
         raise TypeError, "CATime::Element - #{other.class} is not allowed"
       end
@@ -492,7 +536,7 @@ class CATime
 
     # This instant's storage value expressed in `to` unit (exact; raises if the
     # instant does not land on `to`'s grid).
-    def _instant_in(to)
+    def instant_in(to)
       return value if to == unit
       CATimeUnitAlgebra.convert_instant!(CA_INT64([value]), unit, to)[0]
     end
@@ -502,7 +546,7 @@ class CATime
     # s +/- td: the time is the anchor, so the result keeps self's unit and
     # the duration is converted into it (truncated toward zero when finer; a
     # cross-group calendar duration raises).  Mirrors the array CATime +/-.
-    def _combine(td, sign)
+    def shifted_by_duration(td, sign)
       unless td.is_a?(CATimedelta::Element)
         raise TypeError,
               "CATime::Element #{sign > 0 ? '+' : '-'} #{td.class} is not " \
@@ -515,18 +559,18 @@ class CATime
     # Base epoch as a Date.  next_month / next_year clamp end-of-month
     # (Jan 31 -> Feb 28), but the base is day 1, so no clamping ever occurs --
     # do not move the base off the first of the month without revisiting.
-    def _epoch_date
+    def epoch_date
       require 'date'
       Date.new(1970, 1, 1, Date::GREGORIAN)  # proleptic Gregorian, matching to_time
     end
 
     # Days since the epoch for a fixed sub-day unit (floored toward the past).
-    def _floor_days
+    def floor_to_days_since_epoch
       sec = Rational(value) * unit.tick_ratio             # exact seconds
       (sec / 86400).floor
     end
 
-    def _precision_digits
+    def fractional_second_digits
       case unit.base
       when :ms                then 3
       when :us                then 6
@@ -608,7 +652,7 @@ class CATimedelta
       return nil unless other.is_a?(Element)
       return nil unless CATimeUnitAlgebra.same_group?(unit, other.unit)
       u = CATimeUnitAlgebra.finer(unit, other.unit)
-      _scale_in(u) <=> other._scale_in(u)
+      duration_in(u) <=> other.duration_in(u)
     rescue ArgumentError
       nil
     end
@@ -628,13 +672,13 @@ class CATimedelta
     #   raises.
     #   @param other [CATimedelta::Element]
     #   @return [CATimedelta::Element]
-    def +(other) = _combine(other, 1)
+    def +(other) = combined_with_duration(other, 1)
 
     # @overload -(other)
     #   Returns the difference of two durations (finer unit; cross-group raises).
     #   @param other [CATimedelta::Element]
     #   @return [CATimedelta::Element]
-    def -(other) = _combine(other, -1)
+    def -(other) = combined_with_duration(other, -1)
 
     # @overload *(n)
     #   Returns this duration scaled by an Integer.
@@ -659,7 +703,7 @@ class CATimedelta
       when Integer then Element.new(Rational(value, other).truncate, unit)
       when Element
         u = CATimeUnitAlgebra.finer(unit, other.unit)
-        Rational(_scale_in(u), other.send(:_scale_in, u))
+        Rational(duration_in(u), other.duration_in(u))
       else
         raise TypeError, "CATimedelta::Element / #{other.class} is not allowed"
       end
@@ -669,20 +713,20 @@ class CATimedelta
 
     # This duration's value expressed in `to` unit (exact scale; raises on a
     # cross-group or non-whole conversion).
-    def _scale_in(to)
+    def duration_in(to)
       return value if to == unit
       CATimeUnitAlgebra.convert_scale!(CA_INT64([value]), unit, to)[0]
     end
 
     private
 
-    def _combine(other, sign)
+    def combined_with_duration(other, sign)
       unless other.is_a?(Element)
         raise TypeError,
               "CATimedelta::Element #{sign > 0 ? '+' : '-'} #{other.class} is not allowed"
       end
       u = CATimeUnitAlgebra.finer(unit, other.unit)
-      Element.new(_scale_in(u) + sign * other.send(:_scale_in, u), u)
+      Element.new(duration_in(u) + sign * other.duration_in(u), u)
     end
   end
 end
@@ -815,17 +859,17 @@ class CATime
   #   @return [Array(Element, Element), Array(CATime, CATime)]
   def minmax(*args, **opts)
     lo, hi = parent.minmax(*args, **opts)
-    [_lift_extremum(lo), _lift_extremum(hi)]
+    [relift_extremum(lo), relift_extremum(hi)]
   end
 
-  def _lift_extremum(r)
+  def relift_extremum(r)
     case r
     when Integer then Element.new(r, unit)
     when CArray  then r.time(unit: unit)
     else r
     end
   end
-  private :_lift_extremum
+  private :relift_extremum
 
   # The centroid / spread / order reductions report on the array's own grid:
   # they run on the storage ticks and round the result back to the nearest
@@ -839,7 +883,7 @@ class CATime
   #   nearest tick.
   #   @return [Element, CATime]
   def mean(*args, **opts)
-    _reduce_dt(:mean, :time, args, opts)
+    reduce_on_own_grid(:mean, :time, args, opts)
   end
 
   # @overload median(axis: nil, **opts)
@@ -848,7 +892,7 @@ class CATime
   #   cases interpolate and round to the nearest tick.
   #   @return [Element, CATime]
   def median(*args, **opts)
-    _reduce_dt(:median, :time, args, opts)
+    reduce_on_own_grid(:median, :time, args, opts)
   end
 
   # @overload percentile(*p, axis: nil, **opts)
@@ -858,7 +902,7 @@ class CATime
   #   Array of those.
   #   @return [Element, CATime, Array<Element>, Array<CATime>]
   def percentile(*args, **opts)
-    _reduce_dt(:percentile, :time, args, opts)
+    reduce_on_own_grid(:percentile, :time, args, opts)
   end
 
   # @overload quantile(axis: nil, **opts)
@@ -866,7 +910,7 @@ class CATime
   #   `self`'s unit (shorthand for `percentile(0, 25, 50, 75, 100)`).
   #   @return [Array<Element>, Array<CATime>]
   def quantile(*args, **opts)
-    _reduce_dt(:quantile, :time, args, opts)
+    reduce_on_own_grid(:quantile, :time, args, opts)
   end
 
   # @overload stddev(axis: nil, **opts)
@@ -876,7 +920,7 @@ class CATime
   #   `t.to_unit(:h).stddev` when the precision matters (§8).
   #   @return [CATimedelta::Element, CATimedelta]
   def stddev(*args, **opts)
-    _reduce_dt(:stddev, :timedelta, args, opts)
+    reduce_on_own_grid(:stddev, :timedelta, args, opts)
   end
 
   # @overload stddevp(axis: nil, **opts)
@@ -884,7 +928,7 @@ class CATime
   #   as {#stddev}.
   #   @return [CATimedelta::Element, CATimedelta]
   def stddevp(*args, **opts)
-    _reduce_dt(:stddevp, :timedelta, args, opts)
+    reduce_on_own_grid(:stddevp, :timedelta, args, opts)
   end
 
   # @overload sum(*)
@@ -1050,7 +1094,7 @@ class CATime
       f = unit.tick_ratio                        # exact seconds / tick (Rational)
       parent.convert(:object) {|v| Time.at(v * f, in: 'UTC')}
     else                                         # calendar: exact granule midnight
-      (_field_days * 86400).convert(:object) {|v| Time.at(v, in: 'UTC')}
+      (days_since_epoch * 86400).convert(:object) {|v| Time.at(v, in: 'UTC')}
     end
   end
 
@@ -1062,7 +1106,7 @@ class CATime
   def to_date
     require 'date'
     # 2440588 = JD of 1970-01-01; proleptic Gregorian to match to_time and the field accessors.
-    _field_days.convert(:object) {|d| Date.jd(2440588 + d, Date::GREGORIAN)}
+    days_since_epoch.convert(:object) {|d| Date.jd(2440588 + d, Date::GREGORIAN)}
   end
 
   # @overload to_datetime
@@ -1085,8 +1129,8 @@ class CATime
   def year
     case unit.base
     when :Y then parent * unit.count + 1970
-    when :M then self.class.send(:_floordiv_i, parent * unit.count + 1970 * 12, 12)
-    else self.class.send(:_civil_from_days, _field_days)[0]
+    when :M then CATimeCivil.floor_divide(parent * unit.count + 1970 * 12, 12)
+    else CATimeCivil.civil_from_days(days_since_epoch)[0]
     end
   end
 
@@ -1098,8 +1142,8 @@ class CATime
     when :Y then parent * 0 + 1
     when :M
       mo = parent * unit.count + 1970 * 12
-      mo - self.class.send(:_floordiv_i, mo, 12) * 12 + 1
-    else self.class.send(:_civil_from_days, _field_days)[1]
+      mo - CATimeCivil.floor_divide(mo, 12) * 12 + 1
+    else CATimeCivil.civil_from_days(days_since_epoch)[1]
     end
   end
 
@@ -1109,35 +1153,35 @@ class CATime
   def day
     case unit.base
     when :Y, :M then parent * 0 + 1
-    else self.class.send(:_civil_from_days, _field_days)[2]
+    else CATimeCivil.civil_from_days(days_since_epoch)[2]
     end
   end
 
   # Hour of the day, 0..23; 0 when the storage unit is coarser than an hour.
   # @return [CArray] integer.
-  def hour;   _clock_field(:h); end
+  def hour;   clock_field(:h); end
   # Minute of the hour, 0..59; 0 when the storage unit is coarser than a minute.
   # @return [CArray] integer.
-  def minute; _clock_field(:m); end
+  def minute; clock_field(:m); end
   # Second of the minute, 0..59; 0 when the storage unit is coarser than a second.
   # @return [CArray] integer.
-  def second; _clock_field(:s); end
+  def second; clock_field(:s); end
 
   # Day of the week, Sunday = 0 .. Saturday = 6.
   # @return [CArray] integer.
   def weekday
     # 1970-01-01 is a Thursday (wday 4); Sun=0..Sat=6.
-    n = _field_days + 4
-    n - self.class.send(:_floordiv_i, n, 7) * 7          # floor-mod 7
+    n = days_since_epoch + 4
+    n - CATimeCivil.floor_divide(n, 7) * 7          # floor-mod 7
   end
 
   # Day of the year, 1..366.
   # @return [CArray] integer.
   def yday
-    d    = _field_days
-    y    = self.class.send(:_civil_from_days, d)[0]
+    d    = days_since_epoch
+    y    = CATimeCivil.civil_from_days(d)[0]
     ones = CArray.int64(*shape) { 1 }
-    d - self.class.send(:_days_from_civil, y, ones, ones) + 1
+    d - CATimeCivil.days_from_civil(y, ones, ones) + 1
   end
   # @!endgroup
 
@@ -1183,14 +1227,14 @@ class CATime
   # calendar unit that means the month / year ordinal, so a :M centroid is
   # the centroid of month numbers (a caller wanting the day-space answer
   # writes to_unit(:D) first) -- and the result is rounded back to a tick.
-  def _reduce_dt(op, kind, args, opts)
-    _lift_reduced(parent.send(op, *args, **opts), kind)
+  def reduce_on_own_grid(op, kind, args, opts)
+    round_and_relift(parent.send(op, *args, **opts), kind)
   end
 
   # Round-to-nearest onto the storage grid, then wear the Face again.  An
   # Array arrives from the multi-p percentile / quantile shapes; UNDEF and
   # nil (empty or all-masked) pass through untouched.
-  def _lift_reduced(r, kind)
+  def round_and_relift(r, kind)
     case r
     when Numeric
       v = r.round
@@ -1203,7 +1247,7 @@ class CATime
       iv = r.round.mask_invalid.int64
       kind == :timedelta ? iv.timedelta(unit: unit) : iv.time(unit: unit)
     when Array
-      r.map {|x| _lift_reduced(x, kind)}
+      r.map {|x| round_and_relift(x, kind)}
     else
       r    # UNDEF / nil passthrough (empty or all-masked reduction)
     end
@@ -1260,7 +1304,7 @@ class CATimedelta
   def +(other)
     case other
     when CATimedelta
-      u = _finer_duration(other.unit)
+      u = common_duration_unit(other.unit)
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       (a + b).timedelta(unit: u)
@@ -1280,7 +1324,7 @@ class CATimedelta
   def -(other)
     case other
     when CATimedelta
-      u = _finer_duration(other.unit)
+      u = common_duration_unit(other.unit)
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       (a - b).timedelta(unit: u)
@@ -1327,7 +1371,7 @@ class CATimedelta
     case other
     when Integer then (parent / other).timedelta(unit: unit)
     when CATimedelta
-      u = _finer_duration(other.unit)
+      u = common_duration_unit(other.unit)
       CATimeUnitAlgebra.convert_scale!(parent, unit, u) /
         CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
     else raise TypeError, "CATimedelta / #{other.class} is not allowed"
@@ -1346,14 +1390,14 @@ class CATimedelta
   #   or as a {CATimedelta} view for per-axis reduction.
   #   @return [Element, CATimedelta]
   def sum(*args, **opts)
-    _lift_reduced(parent.sum(*args, **opts))
+    round_and_relift(parent.sum(*args, **opts))
   end
 
   # @overload mean(axis: nil, **opts)
   #   Returns the mean duration rounded to the nearest unit count.
   #   @return [Element, CATimedelta]
   def mean(*args, **opts)
-    _lift_reduced(parent.mean(*args, **opts))
+    round_and_relift(parent.mean(*args, **opts))
   end
 
   # median / percentile / quantile / stddev / stddevp report on this array's
@@ -1365,7 +1409,7 @@ class CATimedelta
   #   Returns the median duration on `self`'s unit.
   #   @return [Element, CATimedelta]
   def median(*args, **opts)
-    _lift_reduced(parent.median(*args, **opts))
+    round_and_relift(parent.median(*args, **opts))
   end
 
   # @overload percentile(*p, axis: nil, **opts)
@@ -1374,7 +1418,7 @@ class CATimedelta
   #   two or more give an Array).
   #   @return [Element, CATimedelta, Array<Element>, Array<CATimedelta>]
   def percentile(*args, **opts)
-    _lift_reduced(parent.percentile(*args, **opts))
+    round_and_relift(parent.percentile(*args, **opts))
   end
 
   # @overload quantile(axis: nil, **opts)
@@ -1382,7 +1426,7 @@ class CATimedelta
   #   `self`'s unit.
   #   @return [Array<Element>, Array<CATimedelta>]
   def quantile(*args, **opts)
-    _lift_reduced(parent.quantile(*args, **opts))
+    round_and_relift(parent.quantile(*args, **opts))
   end
 
   # @overload stddev(axis: nil, **opts)
@@ -1391,7 +1435,7 @@ class CATimedelta
   #   the precision matters.
   #   @return [Element, CATimedelta]
   def stddev(*args, **opts)
-    _lift_reduced(parent.stddev(*args, **opts))
+    round_and_relift(parent.stddev(*args, **opts))
   end
 
   # @overload stddevp(axis: nil, **opts)
@@ -1399,18 +1443,18 @@ class CATimedelta
   #   {#stddev}.
   #   @return [Element, CATimedelta]
   def stddevp(*args, **opts)
-    _lift_reduced(parent.stddevp(*args, **opts))
+    round_and_relift(parent.stddevp(*args, **opts))
   end
 
-  def _lift_reduced(r)
+  def round_and_relift(r)
     case r
     when Numeric then Element.new(r.round, unit)
     when CArray  then r.round.mask_invalid.int64.timedelta(unit: unit)
-    when Array   then r.map {|x| _lift_reduced(x)}
+    when Array   then r.map {|x| round_and_relift(x)}
     else r
     end
   end
-  private :_lift_reduced
+  private :round_and_relift
 
   # @overload variance(*)
   #   Not supported: the variance of durations has squared-time units, which
@@ -1438,17 +1482,17 @@ class CATimedelta
   #   @return [Array(Element, Element), Array(CATimedelta, CATimedelta)]
   def minmax(*args, **opts)
     lo, hi = parent.minmax(*args, **opts)
-    [_lift_extremum(lo), _lift_extremum(hi)]
+    [relift_extremum(lo), relift_extremum(hi)]
   end
 
-  def _lift_extremum(r)
+  def relift_extremum(r)
     case r
     when Integer then Element.new(r, unit)
     when CArray  then r.timedelta(unit: unit)
     else r
     end
   end
-  private :_lift_extremum
+  private :relift_extremum
   # @!endgroup
 
   # sort / partition ride the core sort Face gate (ORDERABLE storage
@@ -1535,7 +1579,7 @@ class CATimedelta
   # The finer of `self`'s unit and `ou` for a duration + duration / ratio.  A
   # cross-group pair (a month vs a second) has no common duration grid, so it
   # raises rather than mixing calendar and fixed durations.
-  def _finer_duration(ou)
+  def common_duration_unit(ou)
     unless CATimeUnitAlgebra.same_group?(unit, ou)
       raise ArgumentError,
             "cannot combine a #{unit} duration with a #{ou} duration " \
@@ -1545,16 +1589,14 @@ class CATimedelta
   end
 end
 
-class CArray
-  # Time is stored as an int64 tick index on a grid whose resolution is
-  # `unit` (= a {CATime::Resolution}, tick = count * base).  The value
-  # is the k-th tick since the Unix epoch (1970-01-01 UTC): e.g. unit
-  # `"10 minutes"` value 3 = 1970-01-01T00:30:00Z.  All parsing is UTC (an
-  # explicit offset is honoured; otherwise UTC), DateTime-independent
-  # (Date._parse + civil kernel).
+# Reads a time literal (Time / DateTime / Integer unix-seconds / String) into
+# the pieces the CATime constructors need.  All parsing is UTC (an explicit
+# offset is honoured; otherwise UTC) and DateTime-independent (Date._parse +
+# a civil-date kernel).  Internal to the time surface: nothing here is part
+# of the public API.
+module CATimeLiteral
+  module_function
 
-  # Exact Rational seconds since the Unix epoch for a start literal (Time /
-  # DateTime / Integer unix-seconds / String).  UTC default.
   # Date fields of a String literal, UTC.  Ruby's Date._parse does not read
   # the calendar-grid forms CATime#to_s prints -- "2019-09" comes back as a
   # month of 20 with a zone, and a bare "2019" as a month and a day -- so
@@ -1565,7 +1607,7 @@ class CArray
   # "201909" is a valid YYMMDD to Ruby (2020-19-09, which landed on 2021-07),
   # and "2019-02-31" landed on 2019-03-03.  A missing finer field is not an
   # error -- a year or a year-month names the head of that period.
-  def self.parse_time_fields(spec, format)
+  def parse_date_fields(spec, format)
     h =
       if format                             then Date._strptime(spec, format)
       elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
@@ -1583,9 +1625,11 @@ class CArray
     end
     h
   end
-  private_class_method :parse_time_fields
+  private_class_method :parse_date_fields
 
-  def self._epoch_seconds_exact(spec, format = nil)
+  # Exact Rational seconds since the Unix epoch for a start literal (Time /
+  # DateTime / Integer unix-seconds / String).  UTC default.
+  def epoch_seconds(spec, format = nil)
     require 'date'
     require 'time'
     case spec
@@ -1600,13 +1644,12 @@ class CArray
       if CATimeUnitAlgebra::FIXED.key?(spec.unit.base)
         Rational(spec.value) * spec.unit.tick_ratio
       else
-        Rational(CATimeUnitAlgebra._cal_days(CA_INT64([spec.value]),
+        Rational(CATimeUnitAlgebra.calendar_days_since_epoch(CA_INT64([spec.value]),
                                              spec.unit)[0] * 86400)
       end
     when String
-      h = parse_time_fields(spec, format)
-      days = CATime.send(:_days_from_civil,
-                               CA_INT64([h[:year]]), CA_INT64([h[:mon] || 1]),
+      h = parse_date_fields(spec, format)
+      days = CATimeCivil.days_from_civil(CA_INT64([h[:year]]), CA_INT64([h[:mon] || 1]),
                                CA_INT64([h[:mday] || 1]))[0]
       sec  = Rational(days * 86400 + (h[:hour] || 0) * 3600 +
                       (h[:min] || 0) * 60 + (h[:sec] || 0))
@@ -1623,7 +1666,7 @@ class CArray
   end
 
   # [year, month] (UTC) of a start literal, for a calendar-resolution grid.
-  def self._epoch_year_month(spec, format = nil)
+  def year_month(spec, format = nil)
     require 'date'
     require 'time'
     case spec
@@ -1641,7 +1684,7 @@ class CArray
       else         t = spec.to_time.utc; [t.year, t.month]
       end
     when String
-      h = parse_time_fields(spec, format)
+      h = parse_date_fields(spec, format)
       [h[:year], h[:mon] || 1]
     else
       if defined?(DateTime) && spec.is_a?(DateTime)
@@ -1653,15 +1696,36 @@ class CArray
   end
 
   # Tick index of `spec`'s instant on the `res` grid (floor toward the past).
-  def self._epoch_tick_index(spec, res, format = nil)
+  def tick_index(spec, res, format = nil)
     if CATimeUnitAlgebra::FIXED.key?(res.base)
-      (_epoch_seconds_exact(spec, format) / res.tick_ratio).floor
+      (epoch_seconds(spec, format) / res.tick_ratio).floor
     else
-      y, m    = _epoch_year_month(spec, format)
+      y, m    = year_month(spec, format)
       months  = (y - 1970) * 12 + (m - 1)
       (Rational(months) / res.tick_ratio).floor
     end
   end
+
+  # Single-literal build for {.time}: a 1-element CATime, honouring
+  # the on_error policy (raise, or a masked cell).
+  def to_time_array(literal, res, format, on_error)
+    raw = CArray.int64(1)
+    begin
+      raw[0] = tick_index(literal, res, format)
+    rescue ArgumentError, TypeError
+      raise if on_error == :raise
+      raw[0] = UNDEF
+    end
+    raw.time(unit: res)
+  end
+end
+
+class CArray
+  # Time is stored as an int64 tick index on a grid whose resolution is
+  # `unit` (= a {CATime::Resolution}, tick = count * base).  The value
+  # is the k-th tick since the Unix epoch (1970-01-01 UTC): e.g. unit
+  # `"10 minutes"` value 3 = 1970-01-01T00:30:00Z.  Literals are read by
+  # {CATimeLiteral} (UTC).
 
   # @overload time_range(start, last, unit:, step: nil, format: nil)
   #   Returns a {CATime} from `start` to `last` inclusive on the `unit`
@@ -1688,8 +1752,8 @@ class CArray
     res    = CATime::Resolution.parse(unit)
     stride = step.nil? ? 1 :
                CATimeUnitAlgebra.multiple_factor(CATime::Resolution.parse(step), res)
-    s = _epoch_tick_index(start, res, format)
-    e = _epoch_tick_index(last,  res, format)
+    s = CATimeLiteral.tick_index(start, res, format)
+    e = CATimeLiteral.tick_index(last,  res, format)
     n = e < s ? 0 : (e - s) / stride + 1
     CArray.int64(n) {|i| s + i * stride }.time(unit: res)
   end
@@ -1715,7 +1779,7 @@ class CArray
     res    = CATime::Resolution.parse(unit)
     stride = step.nil? ? 1 :
                CATimeUnitAlgebra.multiple_factor(CATime::Resolution.parse(step), res)
-    s = _epoch_tick_index(start, res, format)
+    s = CATimeLiteral.tick_index(start, res, format)
     CArray.int64(count) {|i| s + i * stride }.time(unit: res)
   end
 
@@ -1749,7 +1813,7 @@ class CArray
     end
     x = CA_OBJECT(x) if x.is_a?(Array)   # Ruby Array of literals -> object CArray
     unless x.is_a?(CArray)
-      return _time_cell(x, res, format, on_error)
+      return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
     raw = CArray.int64(*x.shape)
     x.each_index do |*idx|
@@ -1759,24 +1823,11 @@ class CArray
         next
       end
       begin
-        raw[*idx] = _epoch_tick_index(s, res, format)
+        raw[*idx] = CATimeLiteral.tick_index(s, res, format)
       rescue ArgumentError, TypeError
         raise if on_error == :raise
         raw[*idx] = UNDEF        # opt-in parse-mask
       end
-    end
-    raw.time(unit: res)
-  end
-
-  # Single-literal build for {.time}: a 1-element CATime, honouring
-  # the on_error policy (raise, or a masked cell).
-  def self._time_cell(literal, res, format, on_error)
-    raw = CArray.int64(1)
-    begin
-      raw[0] = _epoch_tick_index(literal, res, format)
-    rescue ArgumentError, TypeError
-      raise if on_error == :raise
-      raw[0] = UNDEF
     end
     raw.time(unit: res)
   end
@@ -1796,11 +1847,11 @@ class CArray
   #     raises (cast it explicitly if the truncation is intended).
   def time(unit: :ns, origin: nil)
     res = CATime::Resolution.parse(unit)
-    src = _time_int64_storage
+    src = as_int64_time_storage
     if origin.nil?
       CATime.wrap(src, unit: res)
     else
-      o = CArray._epoch_tick_index(origin, res)
+      o = CATimeLiteral.tick_index(origin, res)
       (src + o).time(unit: res)
     end
   end
@@ -1813,13 +1864,13 @@ class CArray
   #   @note An `int64` receiver is wrapped zero-copy; a narrower integer type
   #     is widened to `int64` first (a copy); a `Float` / non-integer raises.
   def timedelta(unit: :ns)
-    CATimedelta.wrap(_time_int64_storage, unit: unit)
+    CATimedelta.wrap(as_int64_time_storage, unit: unit)
   end
 
   # Coerce the receiver to the int64 storage a time / timedelta Face needs:
   # int64 passes through (zero-copy), a narrower integer type widens losslessly
   # to int64 (a copy), and any non-integer (Float, boolean, object, ...) raises.
-  def _time_int64_storage
+  def as_int64_time_storage
     return self if data_type == CA_INT64
     unless integer?
       raise TypeError,
@@ -1829,7 +1880,7 @@ class CArray
     end
     int64
   end
-  private :_time_int64_storage
+  private :as_int64_time_storage
 end
 
 # ============================================================================
@@ -1847,6 +1898,196 @@ end
 # storage, via civil-date algebra) is P3 and currently raises.
 # See devel/PROPOSAL_DATETIME64_STEP_SYSTEM.md.
 # ============================================================================
+
+# Places a bucket grid on a storage resolution: resolves a timestep into whole
+# storage ticks, resolves an origin into a tick count (or a month ordinal on
+# the calendar path), and guards both against int64 overflow.  Internal to the
+# time surface: nothing here is part of the public API.
+module CATimeGrid
+  module_function
+
+  # Base units that are day-or-finer (a period head is representable exactly;
+  # the civil path targets these for a calendar bucket).
+  SU_LE_DAY = %i[D h m s ms us ns ps fs as].freeze
+
+  INT64_MIN = -(2**63)
+  INT64_MAX =  2**63 - 1
+
+  # Raise (rather than let an int64 CArray operand silently wrap) if a
+  # Ruby-domain quantity is out of int64 range.  Returns the value on success
+  # so it composes inline.
+  def check_int64_range(v, what)
+    if v < INT64_MIN || v > INT64_MAX
+      raise RangeError,
+            "time step: #{what} = #{v} overflows int64 " \
+            "(the storage unit is too fine for this step / origin / span; " \
+            "use a coarser unit)"
+    end
+    v
+  end
+
+  # Return [mul, step_ticks, origin_ticks] (all Integer) for the integer
+  # path -- step_ticks and origin_ticks in numerator ticks, the finer of
+  # the storage and step grids (see #resolve_timestep_grid).  The calendar path is
+  # handled by the caller.
+  def resolve_integer_grid(step_res, storage_res, origin)
+    mul, step_ticks = resolve_step_scale(step_res, storage_res)
+    [mul, step_ticks, resolve_origin_ticks(origin, step_res,
+                                            mul == 1 ? storage_res : step_res)]
+  end
+
+  # Storage ticks per day of `storage_res` (must be a whole number, else the
+  # storage grid does not tile a day -- a calendar bucket is unrepresentable).
+  def ticks_per_day(storage_res)
+    r = CATimeUnitAlgebra.ratio(CATime::Resolution.new(1, :D), storage_res)
+    unless r.denominator == 1
+      raise ArgumentError,
+            "cannot place a calendar bucket on storage resolution " \
+            "#{storage_res} (its tick does not tile a day)"
+    end
+    check_int64_range(r.numerator, "ticks per day for #{storage_res}")
+  end
+
+  # Storage ticks of the bucket head at timestep `k` (int64 CArray) for a
+  # calendar bucket: ym0 + k*count months -> day 1 of that month -> ticks.
+  def calendar_bucket_head_ticks(k, st, storage_res, origin)
+    tpd   = ticks_per_day(storage_res)
+    count = st.count * (st.base == :Y ? 12 : 1)
+    ym0   = origin_month_ordinal(origin)
+    ymk   = ym0 + k * count
+    yy    = CATimeCivil.floor_divide(ymk, 12)
+    mm    = ymk - yy * 12 + 1
+    CATimeCivil.days_from_civil(yy, mm, CArray.int64(*k.shape) { 1 }) * tpd
+  end
+
+  # Month ordinal (year*12 + month-1) of origin; day / time ignored.
+  # Default (nil) is the epoch month 1970-01.
+  def origin_month_ordinal(origin)
+    return 1970 * 12 if origin.nil?
+    y, m = check_calendar_origin(origin, nil)
+    y * 12 + (m - 1)
+  end
+
+  # [mul, step_ticks] for the integer path, or :civil (calendar bucket on
+  # day-or-finer storage), or raise.  Bucket arithmetic runs in the finer of
+  # the two grids, so exactly one of the pair is > 1:
+  #   - bucket at or coarser than the storage tick (a :h bucket on :s
+  #     storage) -> [1, N]: N storage ticks per bucket.
+  #   - bucket finer than the storage tick (a :h bucket on :D storage) ->
+  #     [N, 1]: one storage tick spans N buckets exactly, so a timestep is a
+  #     plain widening.  This needs the storage tick to be a *whole* multiple
+  #     of the bucket tick; a partial multiple ("90 minutes" storage against
+  #     an :h bucket) has no integer timestep and raises.
+  def resolve_step_scale(step_res, storage_res)
+    r = CATimeUnitAlgebra.ratio(step_res, storage_res)  # storage ticks / step tick
+    if r
+      what = "bucket #{step_res} in ticks of #{storage_res}"
+      return [1, check_int64_range(r.numerator, what)] if r.denominator == 1
+      return [check_int64_range(r.denominator, what), 1] if r.numerator == 1
+    end
+    if CATimeUnitAlgebra::CALENDAR.key?(step_res.base) && SU_LE_DAY.include?(storage_res.base)
+      return :civil
+    end
+    raise ArgumentError,
+          "cannot express bucket #{step_res} on storage resolution #{storage_res} " \
+          "(neither is a whole multiple of the other)"
+  end
+
+  # origin -> integer tick count in storage ticks.  Default (nil) is the
+  # epoch, except a week bucket defaults to ISO Monday (1970-01-05).  A lossy
+  # conversion (origin not landing exactly on the storage grid) raises; a
+  # bare Integer is rejected (epoch-dependent, ambiguous).
+  def resolve_origin_ticks(origin, step_res, storage_res)
+    if origin.nil?
+      if step_res.base == :W && SU_LE_DAY.include?(storage_res.base)
+        return check_int64_range(ticks_per_day(storage_res) * 4,
+                      "ISO-Monday week origin in ticks of #{storage_res}")
+      end
+      return 0
+    end
+    if CATimeUnitAlgebra::FIXED.key?(storage_res.base)
+      secs = origin_seconds_exact(origin)
+      tick = secs / storage_res.tick_ratio               # Rational
+      unless tick.denominator == 1
+        raise ArgumentError,
+              "origin #{origin.inspect} is not representable losslessly " \
+              "in storage resolution #{storage_res} (would truncate the grid phase)"
+      end
+      check_int64_range(tick.numerator, "origin #{origin.inspect} in ticks of #{storage_res}")
+    else                                                 # :Y / :M storage
+      y, m = check_calendar_origin(origin, storage_res)
+      ord  = storage_res.base == :Y ? (y - 1970) : (y * 12 + (m - 1) - 1970 * 12)
+      if storage_res.count > 1
+        unless (ord % storage_res.count).zero?
+          raise ArgumentError,
+                "origin #{origin.inspect} is not on the #{storage_res} grid"
+        end
+        ord /= storage_res.count
+      end
+      ord
+    end
+  end
+
+  # Exact Rational seconds since the Unix epoch for a fixed-storage origin.
+  # Everything but a bare Integer goes through the shared entry point, so
+  # an origin reads the same here as it does for a start literal.
+  def origin_seconds_exact(origin)
+    case origin
+    when Integer
+      raise ArgumentError,
+            "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
+            "Time / String / CATime scalar"
+    else
+      CATimeLiteral.epoch_seconds(origin)  # Time / String / DateTime / Element
+    end
+  end
+
+  # Whether `origin` sits exactly on the head of its month (the 1st at
+  # 00:00 UTC).  A calendar grid is addressed by month ordinal, so its
+  # bucket heads are month heads and nothing else; an origin anywhere in
+  # between names a bucket that does not exist.
+  def origin_on_month_head?(origin)
+    # A calendar element is a month head by construction, and the shared
+    # entry point says so by handing back that midnight -- no branch here
+    # has to know it.
+    secs = CATimeLiteral.epoch_seconds(origin)
+    y, m = origin_year_month(origin)
+    head = CATimeCivil.days_from_civil(CA_INT64([y]), CA_INT64([m]), CA_INT64([1]))[0]
+    secs == head * 86400
+  end
+
+  # Raise unless `origin` can be the head of bucket 0 on a calendar grid:
+  # it has to be a month head, and a :Y tick starts in January.  The day
+  # and time would otherwise be dropped silently -- the same loss a fixed
+  # unit already refuses (see resolve_origin_ticks).
+  def check_calendar_origin(origin, storage_res)
+    return if origin.nil?
+    y, m = origin_year_month(origin)
+    unless origin_on_month_head?(origin)
+      raise ArgumentError,
+            "origin #{origin.inspect} is not a month head: a calendar grid " \
+            "is addressed by month, so its origin must be the 1st at 00:00"
+    end
+    if storage_res && storage_res.base == :Y && m != 1
+      raise ArgumentError,
+            "origin #{origin.inspect} is not on the #{storage_res} grid " \
+            "(a #{storage_res} tick starts in January)"
+    end
+    [y, m]
+  end
+
+  # [year, month] of a calendar-storage origin (finer fields ignored).
+  def origin_year_month(origin)
+    case origin
+    when Integer
+      raise ArgumentError,
+            "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
+            "Time / String / CATime scalar"
+    else
+      CATimeLiteral.year_month(origin)  # Time / String / DateTime / Element
+    end
+  end
+end
 
 class CATime
   # A tick resolution: `count` ticks of a `base` unit.  The human surface is
@@ -1935,10 +2176,6 @@ class CATime
     def inspect = "#<CATime::Resolution #{count} #{base}>"
   end
 
-  # Base units that are day-or-finer (a period head is representable exactly;
-  # the civil path targets these for a calendar bucket).
-  SU_LE_DAY = %i[D h m s ms us ns ps fs as].freeze
-
   # @overload timesteps(unit: self.unit, origin: nil)
   #   Returns the integer timestep of every element: the k-th `unit`-wide
   #   bucket counted from `origin` (floor toward the past, so pre-`origin`
@@ -1959,11 +2196,11 @@ class CATime
   #   @raise [ArgumentError] on a sub-resolution / unrepresentable (unit,
   #     storage-resolution) pair or a lossy origin.
   def timesteps(unit: self.unit, origin: nil)
-    g = _step_grid(unit, origin)
-    return _civil(:index, g[1], origin) if g[0] == :civil
+    g = resolve_timestep_grid(unit, origin)
+    return calendar_bucket(:index, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    _guard_overflow(su, mul, o)
-    d = _num_ticks(mul) - o
+    raise_if_int64_overflow(su, mul, o)
+    d = storage_ticks_in_numerator_grid(mul) - o
     q = d / step_ticks
     q - (d - q * step_ticks).lt(0)      # floor-div correction (%-independent)
   end
@@ -1980,14 +2217,14 @@ class CATime
   #     00:00.
   #   @return [CATime]
   def floor(unit:, origin: nil)
-    g = _step_grid(unit, origin)
-    return _civil(:floor, g[1], origin) if g[0] == :civil
+    g = resolve_timestep_grid(unit, origin)
+    return calendar_bucket(:floor, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    _guard_overflow(su, mul, o, step_ticks, :floor)
-    d = _num_ticks(mul) - o
+    raise_if_int64_overflow(su, mul, o, step_ticks, :floor)
+    d = storage_ticks_in_numerator_grid(mul) - o
     q = d / step_ticks
     q = q - (d - q * step_ticks).lt(0)
-    _head_time(o + q * step_ticks, mul, su)
+    bucket_head_as_time(o + q * step_ticks, mul, su)
   end
 
   # @overload ceil(unit:, origin: nil)
@@ -1995,16 +2232,16 @@ class CATime
   #   element already on a boundary maps to itself), as a {CATime}.
   #   @return [CATime]
   def ceil(unit:, origin: nil)
-    g = _step_grid(unit, origin)
-    return _civil(:ceil, g[1], origin) if g[0] == :civil
+    g = resolve_timestep_grid(unit, origin)
+    return calendar_bucket(:ceil, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    _guard_overflow(su, mul, o, step_ticks, :ceil)
-    n  = _num_ticks(mul)
+    raise_if_int64_overflow(su, mul, o, step_ticks, :ceil)
+    n  = storage_ticks_in_numerator_grid(mul)
     d  = n - o
     q  = d / step_ticks
     q  = q - (d - q * step_ticks).lt(0)
     fl = o + q * step_ticks
-    _head_time(fl + step_ticks * n.ne(fl), mul, su)
+    bucket_head_as_time(fl + step_ticks * n.ne(fl), mul, su)
   end
 
   # @overload round(unit:, origin: nil)
@@ -2015,16 +2252,16 @@ class CATime
   #   future.
   #   @return [CATime]
   def round(unit:, origin: nil)
-    g = _step_grid(unit, origin)
-    return _civil(:round, g[1], origin) if g[0] == :civil
+    g = resolve_timestep_grid(unit, origin)
+    return calendar_bucket(:round, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    _guard_overflow(su, mul, o, step_ticks, :round)
-    d = _num_ticks(mul) - o
+    raise_if_int64_overflow(su, mul, o, step_ticks, :round)
+    d = storage_ticks_in_numerator_grid(mul) - o
     q = d / step_ticks
     q = q - (d - q * step_ticks).lt(0)            # floor bucket
     r = d - q * step_ticks                        # 0 <= r < step_ticks
     q = q + r.ge((step_ticks + 1) / 2)            # ties -> future; no 2*d / 2*r
-    _head_time(o + q * step_ticks, mul, su)
+    bucket_head_as_time(o + q * step_ticks, mul, su)
   end
 
   # @overload is_righttime(unit:, origin: nil)
@@ -2040,11 +2277,11 @@ class CATime
   #     00:00.
   #   @return [CArray] boolean.
   def is_righttime(unit:, origin: nil)
-    g = _step_grid(unit, origin)
-    return _civil(:on, g[1], origin) if g[0] == :civil
+    g = resolve_timestep_grid(unit, origin)
+    return calendar_bucket(:on, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    _guard_overflow(su, mul, o)
-    d = _num_ticks(mul) - o
+    raise_if_int64_overflow(su, mul, o)
+    d = storage_ticks_in_numerator_grid(mul) - o
     q = d / step_ticks
     (d - q * step_ticks).eq(0)
   end
@@ -2073,7 +2310,7 @@ class CATime
     res = Resolution.parse(unit)
     out = res.base == :W ? Resolution.new(1, :D) : res
     kk  = k.is_a?(CArray) ? k.int64 : CArray.int64(1) { Integer(k) }
-    _mul, step_ticks, o = _resolve_grid(res, out, origin)
+    _mul, step_ticks, o = CATimeGrid.resolve_integer_grid(res, out, origin)
     raw = o + kk * step_ticks
     k.is_a?(CArray) ? raw.time(unit: out) : Element.new(raw[0], out)
   end
@@ -2087,19 +2324,19 @@ class CATime
   # per numerator tick) is 1 for a bucket at or coarser than the storage
   # tick, and the widening factor for a finer bucket.  `origin_ticks` is
   # likewise in numerator ticks.
-  def _step_grid(step, origin)
+  def resolve_timestep_grid(step, origin)
     storage_res = unit
     step_res    = Resolution.parse(step)
-    scale = self.class.send(:_resolve_step_scale, step_res, storage_res)
+    scale = CATimeGrid.resolve_step_scale(step_res, storage_res)
     return [:civil, step_res] if scale == :civil
     mul, step_ticks = scale
     num_res = mul == 1 ? storage_res : step_res
-    o = self.class.send(:_resolve_origin_ticks, origin, step_res, num_res)
+    o = CATimeGrid.resolve_origin_ticks(origin, step_res, num_res)
     [storage_res, mul, step_ticks, o]
   end
 
-  # Storage ticks lifted into the numerator grid (see {#_step_grid}).
-  def _num_ticks(mul)
+  # Storage ticks lifted into the numerator grid (see {#resolve_timestep_grid}).
+  def storage_ticks_in_numerator_grid(mul)
     mul == 1 ? parent : CATimeUnitAlgebra.widen(parent, mul)
   end
 
@@ -2107,7 +2344,7 @@ class CATime
   # storage resolution.  The division is exact: a numerator grid finer than
   # the storage tick only arises when every element already sits on it, so
   # each head is a whole number of storage ticks.
-  def _head_time(head, mul, su)
+  def bucket_head_as_time(head, mul, su)
     (mul == 1 ? head : head / mul).time(unit: su)
   end
 
@@ -2132,20 +2369,20 @@ class CATime
   # min / max skip masked cells, so a masked cell does not decide the range
   # (it carries no time), and answer UNDEF when there is nothing to bound --
   # an empty array, or one whose every cell is masked.
-  def _guard_overflow(su, mul, o, step_ticks = nil, kind = nil)
+  def raise_if_int64_overflow(su, mul, o, step_ticks = nil, kind = nil)
     return unless mul > 1 or FINE_UNITS.include?(su.base)
     min = parent.min
     return if min == UNDEF
     lo  = Integer(min) * mul
     hi  = Integer(parent.max) * mul
-    chk = ->(v, w) { self.class.send(:_chk64, v, w) }
+    chk = ->(v, w) { CATimeGrid.check_int64_range(v, w) }
     chk.(lo, "ticks in bucket resolution")
     chk.(hi, "ticks in bucket resolution")
     chk.(lo - o, "parent - origin")
     chk.(hi - o, "parent - origin")
     if kind
-      chk.(_bucket_head(lo, o, step_ticks, kind), "bucket head")
-      chk.(_bucket_head(hi, o, step_ticks, kind), "bucket head")
+      chk.(bucket_head_ticks(lo, o, step_ticks, kind), "bucket head")
+      chk.(bucket_head_ticks(hi, o, step_ticks, kind), "bucket head")
     end
   end
 
@@ -2153,7 +2390,7 @@ class CATime
   # scalar mirror of the array floor / ceil / round, used only by the overflow
   # guard.  Ruby Integer `/` and `%` floor, so `(v - o) / s` is the floor
   # bucket directly.
-  def _bucket_head(v, o, s, kind)
+  def bucket_head_ticks(v, o, s, kind)
     fq = (v - o) / s
     case kind
     when :floor then o + fq * s
@@ -2165,27 +2402,27 @@ class CATime
   # Days since the Unix epoch of the date each element represents (mask
   # propagates).  Calendar units (:Y / :M) resolve to day 1 of their year /
   # month; a week is 7 days; day-or-finer units floor to the day.
-  def _field_days
+  def days_since_epoch
     res = unit
     case res.base
     when :Y
       ones = CArray.int64(*shape) { 1 }
-      self.class.send(:_days_from_civil, parent * res.count + 1970, ones, ones)
+      CATimeCivil.days_from_civil(parent * res.count + 1970, ones, ones)
     when :M
       mo = parent * res.count + 1970 * 12
-      y  = self.class.send(:_floordiv_i, mo, 12)
+      y  = CATimeCivil.floor_divide(mo, 12)
       m  = mo - y * 12 + 1
-      self.class.send(:_days_from_civil, y, m, CArray.int64(*shape) { 1 })
+      CATimeCivil.days_from_civil(y, m, CArray.int64(*shape) { 1 })
     when :W then parent * res.count * 7
     when :D then parent * res.count
     else                                                   # fixed sub-day storage
       day = CATime::Resolution.new(1, :D)
       r   = CATimeUnitAlgebra.ratio(day, res)          # storage ticks per day
       if r.denominator == 1
-        self.class.send(:_floordiv_i, parent, r.numerator)
+        CATimeCivil.floor_divide(parent, r.numerator)
       else                                                 # non-day-aligned tick
         tr = res.tick_ratio                                # seconds / tick
-        self.class.send(:_floordiv_i, parent * tr.numerator, 86400 * tr.denominator)
+        CATimeCivil.floor_divide(parent * tr.numerator, 86400 * tr.denominator)
       end
     end
   end
@@ -2196,13 +2433,13 @@ class CATime
   # coarser than `fu` both resolve exactly (a 10-minute grid gives minute 0 /
   # 10 / 20 / ...; a day grid collapses hour / minute / second to 0).  A
   # calendar-storage element has no intra-day field, so it collapses to 0.
-  def _clock_field(fu)
+  def clock_field(fu)
     r = CATimeUnitAlgebra.ratio(unit, CATime::Resolution.new(1, fu))  # fu ticks / storage tick
     return parent * 0 if r.nil?                            # calendar storage: no clock field
     fi = r.denominator == 1 ? parent * r.numerator         # epoch-relative fu index
-                            : self.class.send(:_floordiv_i, parent * r.numerator, r.denominator)
+                            : CATimeCivil.floor_divide(parent * r.numerator, r.denominator)
     cycle = fu == :h ? 24 : 60                             # hour 0..23; min/sec 0..59
-    fi - self.class.send(:_floordiv_i, fi, cycle) * cycle  # floor-mod (handles pre-epoch)
+    fi - CATimeCivil.floor_divide(fi, cycle) * cycle  # floor-mod (handles pre-epoch)
   end
 
   # Calendar path (Y/M step on day-or-finer storage) via civil-date integer
@@ -2210,19 +2447,19 @@ class CATime
   # min-max, O(N) branch-free, origin-absolute k (negative pre-origin).  The
   # origin's day / time is ignored (month ordinal only, per the design).
   # `kind`: :index / :floor / :ceil / :round / :on.
-  def _civil(kind, st, origin)
+  def calendar_bucket(kind, st, origin)
     su    = unit                                           # storage Resolution
     count = st.count * (st.base == :Y ? 12 : 1)            # bucket in months
-    ym0   = self.class.send(:_origin_month_ordinal, origin)
-    days  = _field_days                                    # count-folded day index
-    y, m  = self.class.send(:_civil_from_days, days)
+    ym0   = CATimeGrid.origin_month_ordinal(origin)
+    days  = days_since_epoch                               # count-folded day index
+    y, m  = CATimeCivil.civil_from_days(days)
     ym    = y * 12 + (m - 1)
-    k     = self.class.send(:_floordiv_i, ym - ym0, count)
+    k     = CATimeCivil.floor_divide(ym - ym0, count)
     return k if kind == :index
-    head = self.class.send(:_civil_head_ticks, k, st, su, origin)
+    head = CATimeGrid.calendar_bucket_head_ticks(k, st, su, origin)
     return head.time(unit: su) if kind == :floor
     return parent.eq(head)          if kind == :on
-    head_next = self.class.send(:_civil_head_ticks, k + 1, st, su, origin)
+    head_next = CATimeGrid.calendar_bucket_head_ticks(k + 1, st, su, origin)
     sel =                                # boolean 0/1: pick head_next?
       case kind
       when :ceil  then parent.ne(head)                 # on-boundary keeps head
@@ -2231,222 +2468,6 @@ class CATime
     (head + (head_next - head) * sel).time(unit: su)
   end
 
-  class << self
-    private
-
-    INT64_MIN = -(2**63)
-    INT64_MAX =  2**63 - 1
-
-    # Raise (rather than let an int64 CArray operand silently wrap) if a
-    # Ruby-domain quantity is out of int64 range.  Returns the value on success
-    # so it composes inline.
-    def _chk64(v, what)
-      if v < INT64_MIN || v > INT64_MAX
-        raise RangeError,
-              "time step: #{what} = #{v} overflows int64 " \
-              "(the storage unit is too fine for this step / origin / span; " \
-              "use a coarser unit)"
-      end
-      v
-    end
-
-    # Return [mul, step_ticks, origin_ticks] (all Integer) for the integer
-    # path -- step_ticks and origin_ticks in numerator ticks, the finer of
-    # the storage and step grids (see #_step_grid).  The calendar path is
-    # handled by the caller.
-    def _resolve_grid(step_res, storage_res, origin)
-      mul, step_ticks = _resolve_step_scale(step_res, storage_res)
-      [mul, step_ticks, _resolve_origin_ticks(origin, step_res,
-                                              mul == 1 ? storage_res : step_res)]
-    end
-
-    # Storage ticks per day of `storage_res` (must be a whole number, else the
-    # storage grid does not tile a day -- a calendar bucket is unrepresentable).
-    def _ticks_per_day(storage_res)
-      r = CATimeUnitAlgebra.ratio(Resolution.new(1, :D), storage_res)
-      unless r.denominator == 1
-        raise ArgumentError,
-              "cannot place a calendar bucket on storage resolution " \
-              "#{storage_res} (its tick does not tile a day)"
-      end
-      _chk64(r.numerator, "ticks per day for #{storage_res}")
-    end
-
-    # Storage ticks of the bucket head at timestep `k` (int64 CArray) for a
-    # calendar bucket: ym0 + k*count months -> day 1 of that month -> ticks.
-    def _civil_head_ticks(k, st, storage_res, origin)
-      tpd   = _ticks_per_day(storage_res)
-      count = st.count * (st.base == :Y ? 12 : 1)
-      ym0   = _origin_month_ordinal(origin)
-      ymk   = ym0 + k * count
-      yy    = _floordiv_i(ymk, 12)
-      mm    = ymk - yy * 12 + 1
-      _days_from_civil(yy, mm, CArray.int64(*k.shape) { 1 }) * tpd
-    end
-
-    # Month ordinal (year*12 + month-1) of origin; day / time ignored.
-    # Default (nil) is the epoch month 1970-01.
-    def _origin_month_ordinal(origin)
-      return 1970 * 12 if origin.nil?
-      y, m = _check_calendar_origin(origin, nil)
-      y * 12 + (m - 1)
-    end
-
-    # Floored integer division of an int64 CArray by a positive Integer
-    # (toward -inf; CArray `/` truncates toward zero).
-    def _floordiv_i(a, b)
-      q = a / b
-      q - (a - q * b).lt(0)
-    end
-
-    # Vectorized Howard Hinnant civil-date algebra (proleptic Gregorian,
-    # negative days supported).  days since the Unix epoch -> [year, month,
-    # day] int64 CArrays.  Truncating division is what the algorithm assumes;
-    # the only negative operand (the 400-year era) is pre-adjusted so
-    # truncation behaves like floor.
-    def _civil_from_days(z)
-      z   = z + 719468
-      era = (z - 146096 * z.lt(0)) / 146097
-      doe = z - era * 146097
-      yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-      y   = yoe + era * 400
-      doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-      mp  = (5 * doy + 2) / 153
-      d   = doy - (153 * mp + 2) / 5 + 1       # day of month, 1..31
-      m   = mp + (3 - 12 * mp.ge(10))          # mp<10 ? +3 : -9
-      [y + m.le(2), m, d]
-    end
-
-    # [year, month, day] int64 CArrays -> days since the Unix epoch.
-    def _days_from_civil(y, m, d)
-      y   = y - m.le(2)
-      era = (y - 399 * y.lt(0)) / 400
-      yoe = y - era * 400
-      doy = (153 * (m + (9 - 12 * m.gt(2))) + 2) / 5 + (d - 1)  # m>2 ? -3 : +9
-      doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
-      era * 146097 + doe - 719468
-    end
-
-    # [mul, step_ticks] for the integer path, or :civil (calendar bucket on
-    # day-or-finer storage), or raise.  Bucket arithmetic runs in the finer of
-    # the two grids, so exactly one of the pair is > 1:
-    #   - bucket at or coarser than the storage tick (a :h bucket on :s
-    #     storage) -> [1, N]: N storage ticks per bucket.
-    #   - bucket finer than the storage tick (a :h bucket on :D storage) ->
-    #     [N, 1]: one storage tick spans N buckets exactly, so a timestep is a
-    #     plain widening.  This needs the storage tick to be a *whole* multiple
-    #     of the bucket tick; a partial multiple ("90 minutes" storage against
-    #     an :h bucket) has no integer timestep and raises.
-    def _resolve_step_scale(step_res, storage_res)
-      r = CATimeUnitAlgebra.ratio(step_res, storage_res)  # storage ticks / step tick
-      if r
-        what = "bucket #{step_res} in ticks of #{storage_res}"
-        return [1, _chk64(r.numerator, what)] if r.denominator == 1
-        return [_chk64(r.denominator, what), 1] if r.numerator == 1
-      end
-      if CATimeUnitAlgebra::CALENDAR.key?(step_res.base) && SU_LE_DAY.include?(storage_res.base)
-        return :civil
-      end
-      raise ArgumentError,
-            "cannot express bucket #{step_res} on storage resolution #{storage_res} " \
-            "(neither is a whole multiple of the other)"
-    end
-
-    # origin -> integer tick count in storage ticks.  Default (nil) is the
-    # epoch, except a week bucket defaults to ISO Monday (1970-01-05).  A lossy
-    # conversion (origin not landing exactly on the storage grid) raises; a
-    # bare Integer is rejected (epoch-dependent, ambiguous).
-    def _resolve_origin_ticks(origin, step_res, storage_res)
-      if origin.nil?
-        if step_res.base == :W && SU_LE_DAY.include?(storage_res.base)
-          return _chk64(_ticks_per_day(storage_res) * 4,
-                        "ISO-Monday week origin in ticks of #{storage_res}")
-        end
-        return 0
-      end
-      if CATimeUnitAlgebra::FIXED.key?(storage_res.base)
-        secs = _origin_seconds_exact(origin)
-        tick = secs / storage_res.tick_ratio               # Rational
-        unless tick.denominator == 1
-          raise ArgumentError,
-                "origin #{origin.inspect} is not representable losslessly " \
-                "in storage resolution #{storage_res} (would truncate the grid phase)"
-        end
-        _chk64(tick.numerator, "origin #{origin.inspect} in ticks of #{storage_res}")
-      else                                                 # :Y / :M storage
-        y, m = _check_calendar_origin(origin, storage_res)
-        ord  = storage_res.base == :Y ? (y - 1970) : (y * 12 + (m - 1) - 1970 * 12)
-        if storage_res.count > 1
-          unless (ord % storage_res.count).zero?
-            raise ArgumentError,
-                  "origin #{origin.inspect} is not on the #{storage_res} grid"
-          end
-          ord /= storage_res.count
-        end
-        ord
-      end
-    end
-
-    # Exact Rational seconds since the Unix epoch for a fixed-storage origin.
-    # Everything but a bare Integer goes through the shared entry point, so
-    # an origin reads the same here as it does for a start literal.
-    def _origin_seconds_exact(origin)
-      case origin
-      when Integer
-        raise ArgumentError,
-              "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
-              "Time / String / CATime scalar"
-      else
-        CArray._epoch_seconds_exact(origin)   # Time / String / DateTime / Element
-      end
-    end
-
-    # Whether `origin` sits exactly on the head of its month (the 1st at
-    # 00:00 UTC).  A calendar grid is addressed by month ordinal, so its
-    # bucket heads are month heads and nothing else; an origin anywhere in
-    # between names a bucket that does not exist.
-    def _origin_on_month_head?(origin)
-      # A calendar element is a month head by construction, and the shared
-      # entry point says so by handing back that midnight -- no branch here
-      # has to know it.
-      secs = CArray._epoch_seconds_exact(origin)
-      y, m = _origin_year_month(origin)
-      head = _days_from_civil(CA_INT64([y]), CA_INT64([m]), CA_INT64([1]))[0]
-      secs == head * 86400
-    end
-
-    # Raise unless `origin` can be the head of bucket 0 on a calendar grid:
-    # it has to be a month head, and a :Y tick starts in January.  The day
-    # and time would otherwise be dropped silently -- the same loss a fixed
-    # unit already refuses (see _resolve_origin_ticks).
-    def _check_calendar_origin(origin, storage_res)
-      return if origin.nil?
-      y, m = _origin_year_month(origin)
-      unless _origin_on_month_head?(origin)
-        raise ArgumentError,
-              "origin #{origin.inspect} is not a month head: a calendar grid " \
-              "is addressed by month, so its origin must be the 1st at 00:00"
-      end
-      if storage_res && storage_res.base == :Y && m != 1
-        raise ArgumentError,
-              "origin #{origin.inspect} is not on the #{storage_res} grid " \
-              "(a #{storage_res} tick starts in January)"
-      end
-      [y, m]
-    end
-
-    # [year, month] of a calendar-storage origin (finer fields ignored).
-    def _origin_year_month(origin)
-      case origin
-      when Integer
-        raise ArgumentError,
-              "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
-              "Time / String / CATime scalar"
-      else
-        CArray._epoch_year_month(origin)   # Time / String / DateTime / Element
-      end
-    end
-  end
 end
 
 # The view-creating method lift hook lives in the C layer (= subclass-
