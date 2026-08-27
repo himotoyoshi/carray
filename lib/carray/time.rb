@@ -449,11 +449,14 @@ class CATime
     end
 
     # @overload +(td)
-    #   Returns this instant advanced by a {CATimedelta::Element}.  The unit
-    #   promotes to the finer of the two (numpy-style: :D + :h -> :h).  Only a
-    #   duration in the SAME group (both calendar or both fixed) is accepted --
-    #   a cross-group step (a :s time + a :M duration) is calendar
-    #   arithmetic; use `to_date` + `Date#next_month` / `#next_year` for that.
+    #   Returns this instant advanced by a {CATimedelta::Element}.  The time
+    #   is the anchor: the result keeps `self`'s unit and the duration is
+    #   converted into it, truncated toward zero when finer (a :D time + a
+    #   5 h duration is + 0 days; + 30 h is + 1 day) -- the same rule as the
+    #   array {CATime#+}.  Only a duration in the SAME group (both calendar
+    #   or both fixed) is accepted -- a cross-group step (a :s time + a :M
+    #   duration) is calendar arithmetic; use `to_date` +
+    #   `Date#next_month` / `#next_year` for that.
     #   @param td [CATimedelta::Element]
     #   @return [CATime::Element]
     #   @raise [TypeError, ArgumentError] on a non-timedelta / cross-group operand.
@@ -1391,13 +1394,6 @@ class CATimedelta
     _lift_reduced(parent.stddevp(*args, **opts))
   end
 
-  # variance / variancep are the one pair in this family that cannot carry a
-  # unit: their value is in squared ticks, and no Face represents squared
-  # time.  They are left as the inherited plain Float (unlike
-  # {CATime#variance}, which raises -- a squared instant is meaningless,
-  # while a squared duration is a real quantity, s^2).  Read the result as
-  # "in units of `self.unit` squared", or take {#stddev} for a typed answer.
-
   def _lift_reduced(r)
     case r
     when Numeric then Element.new(r.round, unit)
@@ -1408,9 +1404,6 @@ class CATimedelta
   end
   private :_lift_reduced
 
-  # min / max ride the core reduce Face gate (ORDERABLE storage descent +
-  # output re-lift, see ext/mkkernel.rb face_gate: :relift); the inherited
-  # CArray#min / #max return the Element / CATimedelta shapes directly.
   # @overload variance(*)
   #   Not supported: the variance of durations has squared-time units, which
   #   no type represents -- the same reason {CATime#variance} refuses.  Use
@@ -1427,6 +1420,9 @@ class CATimedelta
     raise TypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
   end
 
+  # min / max ride the core reduce Face gate (ORDERABLE storage descent +
+  # output re-lift, see ext/mkkernel.rb face_gate: :relift); the inherited
+  # CArray#min / #max return the Element / CATimedelta shapes directly.
   # minmax has no core gate, so re-lift both extremes here.
 
   # @overload minmax(*axes, **opts)
@@ -1551,6 +1547,36 @@ class CArray
 
   # Exact Rational seconds since the Unix epoch for a start literal (Time /
   # DateTime / Integer unix-seconds / String).  UTC default.
+  # Date fields of a String literal, UTC.  Ruby's Date._parse does not read
+  # the calendar-grid forms CATime#to_s prints -- "2019-09" comes back as a
+  # month of 20 with a zone, and a bare "2019" as a month and a day -- so
+  # those two are read here and everything else is left to Date._parse.
+  #
+  # What Date._parse returns is then checked, because an out-of-range field
+  # used to flow into the civil kernel and normalise into a different date:
+  # "201909" is a valid YYMMDD to Ruby (2020-19-09, which landed on 2021-07),
+  # and "2019-02-31" landed on 2019-03-03.  A missing finer field is not an
+  # error -- a year or a year-month names the head of that period.
+  def self.parse_time_fields(spec, format)
+    h =
+      if format                             then Date._strptime(spec, format)
+      elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
+      elsif spec =~ /\A(\d{4})\z/           then { year: $1.to_i }
+      else                                       Date._parse(spec)
+      end
+    unless h && h[:year]
+      raise ArgumentError, "cannot parse time #{spec.inspect}"
+    end
+    y, m, d = h[:year], h[:mon] || 1, h[:mday] || 1
+    unless (1..12).cover?(m) && Date.valid_date?(y, m, d, Date::GREGORIAN)
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: it reads as year #{y}, " \
+            "month #{m}, day #{d}, which is not a date"
+    end
+    h
+  end
+  private_class_method :parse_time_fields
+
   def self._epoch_seconds_exact(spec, format = nil)
     require 'date'
     require 'time'
@@ -1558,13 +1584,10 @@ class CArray
     when Time     then spec.to_r
     when Integer  then Rational(spec)
     when String
-      h = format ? Date._strptime(spec, format) : Date._parse(spec)
-      unless h && h[:year] && h[:mon] && h[:mday]
-        raise ArgumentError, "cannot parse time #{spec.inspect}"
-      end
+      h = parse_time_fields(spec, format)
       days = CATime.send(:_days_from_civil,
-                               CA_INT64([h[:year]]), CA_INT64([h[:mon]]),
-                               CA_INT64([h[:mday]]))[0]
+                               CA_INT64([h[:year]]), CA_INT64([h[:mon] || 1]),
+                               CA_INT64([h[:mday] || 1]))[0]
       sec  = Rational(days * 86400 + (h[:hour] || 0) * 3600 +
                       (h[:min] || 0) * 60 + (h[:sec] || 0))
       sec += h[:sec_fraction] if h[:sec_fraction]
@@ -1587,10 +1610,7 @@ class CArray
     when Time    then t = spec.utc; [t.year, t.month]
     when Integer then t = Time.at(spec, in: 'UTC'); [t.year, t.month]
     when String
-      h = format ? Date._strptime(spec, format) : Date._parse(spec)
-      unless h && h[:year]
-        raise ArgumentError, "cannot parse time #{spec.inspect}"
-      end
+      h = parse_time_fields(spec, format)
       [h[:year], h[:mon] || 1]
     else
       if defined?(DateTime) && spec.is_a?(DateTime)
@@ -1856,9 +1876,10 @@ class CATime
 
     def initialize(count, base)
       raise ArgumentError, "unit count must be >= 1 (got #{count})" if count < 1
-      # calendar (Y/M) bases are month-ordinal linear, so only integer
-      # multiples are well-defined; a fractional multiple has no meaning.
-      # (count is already Integer here; the guard documents the rule.)
+      # Only integer multiples are well-defined (calendar Y/M bases are
+      # month-ordinal linear, so a fractional multiple has no meaning).
+      # Resolution.parse always hands in an Integer; a fractional count via
+      # a direct `new` is not guarded here.
       @count = count
       @base  = base
       freeze
@@ -2176,8 +2197,10 @@ class CATime
       v
     end
 
-    # Return [step_ticks, origin_ticks] (both Integer, in storage ticks) for
-    # the integer path.  The calendar path is handled by the caller.
+    # Return [mul, step_ticks, origin_ticks] (all Integer) for the integer
+    # path -- step_ticks and origin_ticks in numerator ticks, the finer of
+    # the storage and step grids (see #_step_grid).  The calendar path is
+    # handled by the caller.
     def _resolve_grid(step_res, storage_res, origin)
       mul, step_ticks = _resolve_step_scale(step_res, storage_res)
       [mul, step_ticks, _resolve_origin_ticks(origin, step_res,

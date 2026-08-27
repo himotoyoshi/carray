@@ -120,6 +120,14 @@ Parsing uses Ruby's own date parser under the hood — the flexible
 matching when you pass `format:`. Use `format:` when the day/month order is
 ambiguous or the layout is not ISO.
 
+There are two departures from `Date._parse`. A year-month (`"2019-09"`) and
+a bare year (`"2019"`) are read as such, so the form a `:M` or `:Y` element
+prints comes back in; a missing finer field names the head of that period.
+And a field out of range raises instead of rolling over into another date —
+`"2019-02-31"` is refused rather than becoming 2019-03-03. Watch out for
+`"201909"`: to Ruby that is a valid YYMMDD (2020-19-09), so it is refused as
+well. Write `"2019-09"`, or name the layout with `format: "%Y%m"`.
+
 `CArray.time` is **strict by default**: an unparseable value raises. Pass
 `on_error: :mask` to turn parse failures into UNDEF cells instead. A masked
 or `nil` *input* cell is a missing value, not a parse failure, and always

@@ -136,6 +136,16 @@ Passing `format:` switches from the flexible heuristic to strict pattern
 matching against that `strftime`-style template (e.g. `"%d/%m/%Y"`) —
 what you want for an unambiguous day/month order or a non-ISO layout.
 
+Two departures from `Date._parse`. A **year-month** (`"2019-09"`) and a
+**bare year** (`"2019"`) are read as such — Ruby's parser reads neither as
+a date — so the form a `:M` / `:Y` element prints comes back in, and a
+missing finer field names the head of that period (`"2019-09"` on `:s` is
+`2019-09-01T00:00:00Z`). And a **field out of range raises** rather than
+rolling over into another date: `"2019-02-31"` is refused instead of
+becoming 2019-03-03. Note that `"201909"` is a valid **YYMMDD** to Ruby
+(2020-19-09), so it is refused too — name the layout with
+`format: "%Y%m"` for a compact year-month.
+
 ### 2.3 Rebasing relative indices (`origin:`)
 
 `CArray#time` takes an `origin:` for the common "index relative to a
