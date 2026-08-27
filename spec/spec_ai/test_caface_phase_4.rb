@@ -155,6 +155,43 @@ class TestCAFacePhase4 < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray.time(strs, unit: :D) }
   end
 
+  def test_parse_reads_the_calendar_grid_forms
+    # a :M / :Y element prints as "2019-09" / "2019", and Date._parse reads
+    # neither as a date (it finds a month of 20), so the printed form used
+    # not to come back in.
+    m = CArray.time(["2019-09-01"], unit: :M)
+    assert_equal "2019-09", m[0].to_s
+    assert_equal "2019-09", CArray.time([m[0].to_s], unit: :M)[0].to_s
+    y = CArray.time(["2019-01-01"], unit: :Y)
+    assert_equal "2019", y[0].to_s
+    assert_equal "2019", CArray.time([y[0].to_s], unit: :Y)[0].to_s
+    # a missing finer field names the head of that period
+    assert_equal "2019-09-01T00:00:00Z", CArray.time(["2019-09"], unit: :s)[0].to_s
+    assert_equal "2019-01-01", CArray.time(["2019"], unit: :D)[0].to_s
+    assert_equal ["2019-09", "2019-12", "2020-03"],
+                 CArray.time_range("2019-09", "2020-05", unit: :M,
+                                   step: "3 months").to_a.map(&:to_s)
+    # and it is a bucket head, so it is usable as an origin
+    assert_equal "2020-03-01",
+                 CArray.time(["2020-03-05"], unit: :D)
+                       .floor(unit: "3 months", origin: "2000-12")[0].to_s
+  end
+
+  def test_parse_rejects_a_field_out_of_range
+    # these used to reach the civil kernel and normalise into another date:
+    # "201909" is a valid YYMMDD to Ruby (2020-19-09) and landed on 2021-07,
+    # "2019-02-31" landed on 2019-03-03.
+    assert_raise(ArgumentError) { CArray.time(["201909"], unit: :M) }
+    assert_raise(ArgumentError) { CArray.time(["2019-02-31"], unit: :D) }
+    assert_raise(ArgumentError) { CArray.time(["2019-13-01"], unit: :D) }
+    # a compact year-month is reachable by naming the format
+    assert_equal "2019-09", CArray.time(["201909"], unit: :M, format: "%Y%m")[0].to_s
+    # Ruby's own YYMMDD reading is untouched
+    assert_equal "2019-09-01", CArray.time(["190901"], unit: :D)[0].to_s
+    # the calendar is proleptic Gregorian, so 1582-10-10 is a date here
+    assert_equal "1582-10-10", CArray.time(["1582-10-10"], unit: :D)[0].to_s
+  end
+
   # ---- date_range UTC fix (F.2.10 quirk 解消) ----
 
   def test_date_range_utc_no_timezone_drift
