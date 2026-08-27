@@ -5,6 +5,10 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: a calendar-grid `origin:` now has to be a month head (the 1st at
+  00:00); it used to drop the day and time silently. A `:Y` tick likewise has
+  to start in January. `from_timesteps` already refused an off-grid origin.
+
 - Change: `CATime#to_unit` floors to a coarser grid instead of raising, and
   crosses the calendar / fixed-length boundary (`:M` <-> `:D`) through
   civil-date algebra. `:Y` / `:M` -> `:W` still raises.

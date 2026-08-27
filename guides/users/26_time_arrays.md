@@ -757,10 +757,11 @@ d.timesteps(unit: "1 month")   # months since 1970-01
 # => [648, 649, 649, 647]
 ```
 
-For a calendar step the origin's day and time are ignored — only its year
-and month set the phase — so month buckets always start on the 1st. This
-makes **fiscal years and quarters** a one-liner: point the origin at the
-fiscal start month.
+A calendar grid is addressed by month, so its buckets start on the 1st and
+nowhere else. The origin has to be a month head — the 1st at 00:00 — and
+anything else raises rather than quietly dropping the day. Which month is
+up to you, and that makes **fiscal years and quarters** a one-liner: point
+the origin at the fiscal start month.
 
 ```ruby
 fy = CArray.time(CA_OBJECT(["2024-03-01", "2024-08-01", "2025-01-01"]), unit: :D)

@@ -1894,8 +1894,10 @@ class CATime
   #   {#ticks}, but a fresh array rather than the live storage).
   #   @param unit [String, Symbol, Resolution] bucket resolution
   #     (default: this array's own storage resolution).
-  #   @param origin [Time, String, CATime::Element, DateTime, nil] grid
-  #     phase (default: the Unix epoch, or ISO Monday for a week bucket).
+  #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     It has to be a bucket head itself: on a calendar grid, the 1st at
+  #     00:00.
   #   @return [CArray] int64 timesteps.
   #   @raise [ArgumentError] on a sub-resolution / unrepresentable (unit,
   #     storage-resolution) pair or a lossy origin.
@@ -1913,7 +1915,10 @@ class CATime
   #   Returns each element floored to its bucket head (toward the past), as a
   #   {CATime} in the same storage resolution.
   #   @param unit [String, Symbol, Resolution] bucket resolution.
-  #   @param origin [Time, String, CATime::Element, DateTime, nil] grid phase.
+  #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     It has to be a bucket head itself: on a calendar grid, the 1st at
+  #     00:00.
   #   @return [CATime]
   def floor(unit:, origin: nil)
     g = _step_grid(unit, origin)
@@ -1968,7 +1973,10 @@ class CATime
   #   head.  Use as an assertion before matching to catch off-grid series (a
   #   timesteps match is "same bucket", not "same instant").
   #   @param unit [String, Symbol, Resolution] bucket resolution.
-  #   @param origin [Time, String, CATime::Element, DateTime, nil] grid phase.
+  #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     It has to be a bucket head itself: on a calendar grid, the 1st at
+  #     00:00.
   #   @return [CArray] boolean.
   def is_righttime(unit:, origin: nil)
     g = _step_grid(unit, origin)
@@ -1987,7 +1995,10 @@ class CATime
   #   A scalar `k` returns a {Element}; a CArray `k` returns a {CATime}.
   #   @param k [Integer, CArray] timestep / timesteps.
   #   @param unit [String, Symbol, Resolution] grid resolution of the result.
-  #   @param origin [Time, String, CATime::Element, DateTime, nil] grid phase.
+  #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     It has to be a bucket head itself: on a calendar grid, the 1st at
+  #     00:00.
   #   @return [Element, CATime]
   def self.from_timesteps(k, unit:, origin: nil)
     res = Resolution.parse(unit)
@@ -2201,7 +2212,7 @@ class CATime
     # Default (nil) is the epoch month 1970-01.
     def _origin_month_ordinal(origin)
       return 1970 * 12 if origin.nil?
-      y, m = _origin_year_month(origin)
+      y, m = _check_calendar_origin(origin, nil)
       y * 12 + (m - 1)
     end
 
@@ -2287,7 +2298,7 @@ class CATime
         end
         _chk64(tick.numerator, "origin #{origin.inspect} in ticks of #{storage_res}")
       else                                                 # :Y / :M storage
-        y, m = _origin_year_month(origin)                  # day / time ignored
+        y, m = _check_calendar_origin(origin, storage_res)
         ord  = storage_res.base == :Y ? (y - 1970) : (y * 12 + (m - 1) - 1970 * 12)
         if storage_res.count > 1
           unless (ord % storage_res.count).zero?
@@ -2318,6 +2329,44 @@ class CATime
       else
         CArray._epoch_seconds_exact(origin)                # Time / String / DateTime
       end
+    end
+
+    # Whether `origin` sits exactly on the head of its month (the 1st at
+    # 00:00 UTC).  A calendar grid is addressed by month ordinal, so its
+    # bucket heads are month heads and nothing else; an origin anywhere in
+    # between names a bucket that does not exist.
+    def _origin_on_month_head?(origin)
+      secs =
+        case origin
+        when CATime::Element
+          return true if CATimeUnitAlgebra::CALENDAR.key?(origin.unit.base)
+          Rational(origin.value) * origin.unit.tick_ratio
+        else
+          CArray._epoch_seconds_exact(origin)
+        end
+      y, m = _origin_year_month(origin)
+      head = _days_from_civil(CA_INT64([y]), CA_INT64([m]), CA_INT64([1]))[0]
+      secs == head * 86400
+    end
+
+    # Raise unless `origin` can be the head of bucket 0 on a calendar grid:
+    # it has to be a month head, and a :Y tick starts in January.  The day
+    # and time would otherwise be dropped silently -- the same loss a fixed
+    # unit already refuses (see _resolve_origin_ticks).
+    def _check_calendar_origin(origin, storage_res)
+      return if origin.nil?
+      y, m = _origin_year_month(origin)
+      unless _origin_on_month_head?(origin)
+        raise ArgumentError,
+              "origin #{origin.inspect} is not a month head: a calendar grid " \
+              "is addressed by month, so its origin must be the 1st at 00:00"
+      end
+      if storage_res && storage_res.base == :Y && m != 1
+        raise ArgumentError,
+              "origin #{origin.inspect} is not on the #{storage_res} grid " \
+              "(a #{storage_res} tick starts in January)"
+      end
+      [y, m]
     end
 
     # [year, month] of a calendar-storage origin (finer fields ignored).
