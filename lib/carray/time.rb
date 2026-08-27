@@ -127,19 +127,21 @@ module CATimeUnitAlgebra
   # instant / duration.  Checks the extremes (they bound every element), then
   # multiplies.  Shared by every coarse->fine conversion (arithmetic,
   # comparison, search).
+  #
+  # min / max skip masked cells, so a masked cell does not decide the range:
+  # it carries no value to convert, and whatever bits sit under the mask are
+  # not a time.  They answer UNDEF when there is nothing to bound (empty, or
+  # every cell masked), and then there is nothing to guard either.
   def widen(storage, factor)
     return storage if factor == 1
-    if storage.elements > 0
-      raw = storage.has_mask? ? storage.value : storage
-      lo  = raw.min
-      unless lo == UNDEF
-        lim = 2**63 - 1
-        [lo, raw.max].each do |x|
-          next if (Integer(x) * factor).abs <= lim
-          raise RangeError,
-                "time unit conversion overflows int64: the time range is " \
-                "too wide to widen into this resolution (x#{factor})"
-        end
+    lo = storage.min
+    unless lo == UNDEF
+      lim = 2**63 - 1
+      [lo, storage.max].each do |x|
+        next if (Integer(x) * factor).abs <= lim
+        raise RangeError,
+              "time unit conversion overflows int64: the time range is " \
+              "too wide to widen into this resolution (x#{factor})"
       end
     end
     storage * factor
@@ -2085,12 +2087,16 @@ class CATime
   # widened (`mul` > 1) grid, where a coarse storage unit is lifted into a
   # much finer one; a pathological raw value wrapped in a coarse-unit Face is
   # not guarded (the gate is a value-range heuristic, not a proof).
+  #
+  # min / max skip masked cells, so a masked cell does not decide the range
+  # (it carries no time), and answer UNDEF when there is nothing to bound --
+  # an empty array, or one whose every cell is masked.
   def _guard_overflow(su, mul, o, step_ticks = nil, kind = nil)
     return unless mul > 1 or FINE_UNITS.include?(su.base)
-    return if parent.elements == 0
-    raw = parent.has_mask? ? parent.value : parent
-    lo  = Integer(raw.min) * mul
-    hi  = Integer(raw.max) * mul
+    min = parent.min
+    return if min == UNDEF
+    lo  = Integer(min) * mul
+    hi  = Integer(parent.max) * mul
     chk = ->(v, w) { self.class.send(:_chk64, v, w) }
     chk.(lo, "ticks in bucket resolution")
     chk.(hi, "ticks in bucket resolution")

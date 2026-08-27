@@ -115,6 +115,22 @@ class TestTimeUnitChange < Test::Unit::TestCase
     assert_raise(RangeError) { CA_INT64([10**15]).time(unit: :D).to_unit(:ns) }
   end
 
+  def test_to_unit_overflow_ignores_a_masked_extreme
+    # A masked cell carries no time, so the bits under the mask must not
+    # decide whether the range fits: the same array raises unmasked.
+    dt = CA_INT64([0, 10**15]).time(unit: :D)
+    assert_raise(RangeError) { dt.to_unit(:ns) }
+    dt.ticks.mask = CA_BOOLEAN([false, true])
+    assert_equal [0, UNDEF], dt.to_unit(:ns).ticks.to_a
+  end
+
+  def test_to_unit_of_an_all_masked_or_empty_array
+    all_masked = CA_INT64([5]).time(unit: :D)
+    all_masked.ticks.mask = CA_BOOLEAN([true])
+    assert_equal [UNDEF], all_masked.to_unit(:h).ticks.to_a
+    assert_equal [], CArray.int64(0).time(unit: :D).to_unit(:h).ticks.to_a
+  end
+
   # -- CATimedelta#to_unit -------------------------------------------------
 
   def test_timedelta_to_unit
