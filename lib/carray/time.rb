@@ -1924,7 +1924,9 @@ class CATime
   #   @param unit [String, Symbol, Resolution] bucket resolution
   #     (default: this array's own storage resolution).
   #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
-  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket
+  #     on day-or-finer storage -- a week grid counts from the epoch
+  #     Thursday and cannot hold a Monday, so it keeps its own ticks).
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [CArray] int64 timesteps.
@@ -1945,7 +1947,9 @@ class CATime
   #   {CATime} in the same storage resolution.
   #   @param unit [String, Symbol, Resolution] bucket resolution.
   #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
-  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket
+  #     on day-or-finer storage -- a week grid counts from the epoch
+  #     Thursday and cannot hold a Monday, so it keeps its own ticks).
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [CATime]
@@ -2003,7 +2007,9 @@ class CATime
   #   timesteps match is "same bucket", not "same instant").
   #   @param unit [String, Symbol, Resolution] bucket resolution.
   #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
-  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket
+  #     on day-or-finer storage -- a week grid counts from the epoch
+  #     Thursday and cannot hold a Monday, so it keeps its own ticks).
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [CArray] boolean.
@@ -2019,22 +2025,31 @@ class CATime
 
   # @overload from_timesteps(k, unit:, origin: nil)
   #   Inverse of {#timesteps}: returns the bucket-head time for timestep
-  #   `k`, stored on the `unit` grid.  Use to relabel a `group_by(timesteps)`
-  #   result, generate a regular grid, or as a timesteps round-trip oracle.
+  #   `k`.  Use to relabel a `group_by(timesteps)` result, generate a
+  #   regular grid, or as a timesteps round-trip oracle.
   #   A scalar `k` returns a {Element}; a CArray `k` returns a {CATime}.
+  #
+  #   The result is stored on the `unit` grid, except a week bucket, which
+  #   is stored on `:D`.  A week grid counts from the epoch (a Thursday) and
+  #   so cannot hold its own bucket head: the head is the ISO Monday, four
+  #   days off every week tick.  Days hold it exactly, so a `:W` bucket
+  #   answers on the day grid and the round trip against a day-or-finer
+  #   series is exact.  `unit:` names the bucket here, the way it does for
+  #   {#floor} / {#ceil} -- not the storage the answer lands on.
   #   @param k [Integer, CArray] timestep / timesteps.
-  #   @param unit [String, Symbol, Resolution] grid resolution of the result.
+  #   @param unit [String, Symbol, Resolution] bucket resolution.
   #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
   #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket).
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
-  #   @return [Element, CATime]
+  #   @return [Element, CATime] on the `unit` grid (`:D` for a week bucket).
   def self.from_timesteps(k, unit:, origin: nil)
     res = Resolution.parse(unit)
+    out = res.base == :W ? Resolution.new(1, :D) : res
     kk  = k.is_a?(CArray) ? k.int64 : CArray.int64(1) { Integer(k) }
-    _mul, step_ticks, o = _resolve_grid(res, res, origin)  # step_ticks = 1 (same res)
+    _mul, step_ticks, o = _resolve_grid(res, out, origin)
     raw = o + kk * step_ticks
-    k.is_a?(CArray) ? raw.time(unit: res) : Element.new(raw[0], res)
+    k.is_a?(CArray) ? raw.time(unit: out) : Element.new(raw[0], out)
   end
 
   private
