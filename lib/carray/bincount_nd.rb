@@ -68,16 +68,16 @@ class CArray
   # use `CArray#histogram`.
   class BincountND
 
-    # @overload initialize(lengths:, fiber_shape: [], weights_dtype: nil)
+    # @overload initialize(lengths:, fiber_shape: [], weights_data_type: nil)
     #   Allocates a new N-D discrete bincount accumulator.
     #   @param lengths [Array<Integer>] per-dimension label ranges;
     #     each must be `>= 1`.
     #   @param fiber_shape [Array<Integer>] shape of the leading
     #     axes.
-    #   @param weights_dtype [Symbol, nil] `data_type` for weighted
+    #   @param weights_data_type [Symbol, nil] `data_type` for weighted
     #     accumulators; `nil` for pure counts (int64).
     #   @return [BincountND]
-    def initialize (lengths:, fiber_shape: [], weights_dtype: nil)
+    def initialize (lengths:, fiber_shape: [], weights_data_type: nil)
       @lengths = lengths.map(&:to_i)
       raise ArgumentError, "lengths must be a non-empty list" if @lengths.empty?
       @lengths.each_with_index do |l, k|
@@ -85,11 +85,11 @@ class CArray
       end
       @m = @lengths.size
       @fiber_shape = fiber_shape.map(&:to_i).freeze
-      @weighted = !weights_dtype.nil?
-      @counts_dtype = @weighted ? weights_dtype : :int64
+      @weighted = !weights_data_type.nil?
+      @counts_data_type = @weighted ? weights_data_type : :int64
       ext_dims = @lengths.map { |l| l + 1 }       # +1: upper overflow cell
       ext_shape = @fiber_shape + ext_dims
-      @full_counts = CArray.public_send(@counts_dtype, *ext_shape).fill(0)
+      @full_counts = CArray.public_send(@counts_data_type, *ext_shape).fill(0)
       @sample_axis  = nil
       @channel_axis = nil
     end
@@ -209,7 +209,7 @@ class CArray
 
       if weights
         raise ArgumentError, "weights given but accumulator is unweighted" unless @weighted
-        weights = CArray.wrap_readonly(weights, @counts_dtype)
+        weights = CArray.wrap_readonly(weights, @counts_data_type)
         expected_w_shape = chunk.shape.dup
         expected_w_shape.delete_at(channel_ax)
         unless weights.shape == expected_w_shape
@@ -297,7 +297,7 @@ class CArray
       result = self.class.send(:new,
                                lengths: @lengths,
                                fiber_shape: @fiber_shape,
-                               weights_dtype: @weighted ? @counts_dtype : nil)
+                               weights_data_type: @weighted ? @counts_data_type : nil)
       rf = result.instance_variable_get(:@full_counts)
       rf[] = @full_counts + other.full_counts
       result.instance_variable_set(:@sample_axis, @sample_axis)
@@ -344,14 +344,14 @@ class CArray
     [sample_ax, channel_ax].sort.reverse.each { |p| fiber_shape.delete_at(p) }
 
     # Weighted counts are float64-only (the FLAT bincount coerces weights to the
-    # counts dtype and the FIBER kernel requires float64 weights/counts), so the
-    # dtype is fixed here rather than derived from the weights' own dtype.
-    weights_dtype = (:float64 if weights)
+    # counts data type and the FIBER kernel requires float64 weights/counts), so
+    # the type is fixed here rather than derived from the weights' own type.
+    weights_data_type = (:float64 if weights)
 
     h = BincountND.send(:new,
                         lengths: lengths,
                         fiber_shape: fiber_shape,
-                        weights_dtype: weights_dtype)
+                        weights_data_type: weights_data_type)
     h.add(self, axis: axis, weights: weights)
     h
   end

@@ -94,8 +94,8 @@
 #  Each sample contributes `w[i]` instead of 1 to its target cell.
 #
 #  * **weights.shape** = chunk.shape minus the channel axis (= fiber + (A,)).
-#  * **dtype** is locked at construction (= the entry method's `weights:` kwarg
-#    fixes weighted vs unweighted; subsequent adds must match).  Counts dtype:
+#  * **The data type** is locked at construction (= the entry method's `weights:` kwarg
+#    fixes weighted vs unweighted; subsequent adds must match).  Counts type:
 #    int64 unweighted, float64 weighted.  Weighted counts are always float64:
 #    the fused scatter kernel requires float64 weights, so integer weights are
 #    taken as float64 (= integer weighted counts are not supported).
@@ -118,7 +118,7 @@
 #  ### Composition
 #
 #  `h1 + h2` returns a new Histogram with cells summed elementwise.  Both
-#  operands must agree on edges / fiber_shape / include_max / weighted dtype
+#  operands must agree on edges / fiber_shape / include_max / weighted data type
 #  (= the structure-level semantic guard); cells themselves are just
 #  integer / float tallies.  See the `+` method.
 #
@@ -135,7 +135,7 @@ class CArray
   # {BincountND} instead.
   class Histogram
 
-    # @overload initialize(edges:, fiber_shape: [], include_max: false, weights_dtype: nil)
+    # @overload initialize(edges:, fiber_shape: [], include_max: false, weights_data_type: nil)
     #   Allocates a new histogram accumulator.
     #   @param edges [Array<CArray, Array<Numeric>>] one edges array
     #     per histogram dimension; each must be 1-D sorted ascending
@@ -145,11 +145,11 @@ class CArray
     #   @param include_max [Boolean, Array<Boolean>] whether values
     #     equal to the last edge fold into the last bin; a scalar
     #     broadcasts across dimensions.
-    #   @param weights_dtype [Symbol, nil] `data_type` of the
+    #   @param weights_data_type [Symbol, nil] `data_type` of the
     #     accumulator when weighted; `nil` for a count-only
     #     accumulator (int64 counts).
     #   @return [Histogram]
-    def initialize (edges:, fiber_shape: [], include_max: false, weights_dtype: nil)
+    def initialize (edges:, fiber_shape: [], include_max: false, weights_data_type: nil)
       @edges_list = edges.map { |e| CArray.wrap_readonly(e, :float64) }
       raise ArgumentError, "edges must be a non-empty list" if @edges_list.empty?
       @edges_list.each_with_index do |e, k|
@@ -166,11 +166,11 @@ class CArray
                      else
                        [!!include_max] * @m
                      end
-      @weighted = !weights_dtype.nil?
-      @counts_dtype = @weighted ? weights_dtype : :int64
+      @weighted = !weights_data_type.nil?
+      @counts_data_type = @weighted ? weights_data_type : :int64
       ext_dims = @n_list.map { |n| n + 2 }
       ext_shape = @fiber_shape + ext_dims
-      @full_counts = CArray.public_send(@counts_dtype, *ext_shape).fill(0)
+      @full_counts = CArray.public_send(@counts_data_type, *ext_shape).fill(0)
       @sample_axis  = nil
       @channel_axis = nil
     end
@@ -321,7 +321,7 @@ class CArray
 
       if weights
         raise ArgumentError, "weights given but accumulator is unweighted" unless @weighted
-        weights = CArray.wrap_readonly(weights, @counts_dtype)
+        weights = CArray.wrap_readonly(weights, @counts_data_type)
         expected_w_shape = chunk.shape.dup
         expected_w_shape.delete_at(channel_ax)
         unless weights.shape == expected_w_shape
@@ -379,7 +379,7 @@ class CArray
                                edges: @edges_list,
                                fiber_shape: @fiber_shape,
                                include_max: @include_max,
-                               weights_dtype: @weighted ? @counts_dtype : nil)
+                               weights_data_type: @weighted ? @counts_data_type : nil)
       rf = result.instance_variable_get(:@full_counts)
       rf[] = @full_counts + other.full_counts
       result.instance_variable_set(:@sample_axis, @sample_axis)
@@ -401,7 +401,7 @@ class CArray
     # arr.shape = fiber_shape + (last M bin axes).
     # Reduce along the last M axes, returns shape fiber_shape (or scalar).
     #
-    # `accumulate` preserves dtype (= int64 stays int64, float64 stays float64),
+    # `accumulate` preserves the data type (= int64 stays int64, float64 stays float64),
     # unlike `sum` which always lifts to float64.  Caveat: int64 overflows at
     # ~9.2e18 (silent wrap); weighted float64 loses precision past 2^53 but
     # does not overflow.  Realistic histograms do not hit these limits.
@@ -497,15 +497,15 @@ class CArray
     [sample_ax, channel_ax].sort.reverse.each { |p| fiber_shape.delete_at(p) }
 
     # Weighted counts are float64-only (the fused scatter kernel requires
-    # float64 weights and float64 counts), so the dtype is fixed here rather
-    # than derived from the weights' own dtype.
-    weights_dtype = (:float64 if weights)
+    # float64 weights and float64 counts), so the type is fixed here rather
+    # than derived from the weights' own type.
+    weights_data_type = (:float64 if weights)
 
     h = Histogram.send(:new,
                       edges: edges,
                       fiber_shape: fiber_shape,
                       include_max: include_max,
-                      weights_dtype: weights_dtype)
+                      weights_data_type: weights_data_type)
     h.add(arr, axis: axis, weights: weights)
     h
   end
