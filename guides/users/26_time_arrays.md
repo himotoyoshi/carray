@@ -228,9 +228,12 @@ and plural both fine), or a `Resolution` object.
 
 ### Changing the unit: `to_unit`
 
-`to_unit` re-expresses the same instants on a **finer** grid. A day is 24
-whole hours, so every element lands exactly where it already was — only the
-tick counting changes:
+`to_unit` moves the array to another grid. Changing the resolution is a
+**cast** — the same thing `CArray.time` does to its input — not a promise
+that the values happen to fit.
+
+Toward a **finer** grid it is exact. A day is 24 whole hours, so every element
+lands exactly where it already was and only the tick counting changes:
 
 ```ruby
 dt = CArray.time_series("2024-06-15", count: 3, unit: :D)
@@ -242,22 +245,45 @@ dt.to_unit("10 minutes")                            # 1 day = 144 ten-minute tic
 CArray.time("2024-01-01", unit: :Y).to_unit(:M)     # 1 year = 12 whole months
 ```
 
-It is accepted only when your tick is a whole multiple of the target's, and
-that is decided on the **units alone** — never on the values. The same call
-therefore either always works or always raises; it cannot quietly succeed
-for one array and round for the next:
+Toward a **coarser** grid each instant floors to the head of the tick it falls
+in — toward the past, the same direction `CArray.time` and `floor` use, so a
+date before 1970 rounds like any other:
 
 ```ruby
-CArray.time("2024-01-01", unit: :h).to_unit(:D)   # raises: coarser
-CArray.time("2024-01-01", unit: :D).to_unit(:M)   # raises: no fixed ratio
+CArray.time("2024-01-01 05:00", unit: :h).to_unit(:D)   # => 2024-01-01
+CArray.time("1969-03-05 12:00", unit: :h).to_unit(:D)   # => 1969-03-05
 ```
 
-Going the other way — to a **coarser** grid — means deciding what happens
-to the remainder, so there is no silent path for it. Use `floor` / `ceil` /
-`round` (later in this chapter), which name the rounding where you call
-them.
+Reach for `floor` / `ceil` / `round` (later in this chapter) when you want a
+different boundary; they move the values and leave the storage unit alone, so
+pair them with `to_unit` when the storage should change too.
 
-`CATimedelta#to_unit` is the same for durations.
+Months and years are not a whole number of days, but a `:M` **time** is still a
+real instant — the month's first midnight — so `to_unit` crosses that boundary
+as well:
+
+```ruby
+m = CArray.time("2024-03-01", unit: :M)
+m.to_unit(:D)                                     # => 2024-03-01
+CArray.time("2024-03-05", unit: :D).to_unit(:M)   # => 2024-03   (floors)
+```
+
+This is how you take a monthly or quarterly series into day-level work: walk
+the grid on `:M`, move the storage to `:D`, then add a day offset.
+
+```ruby
+q = CArray.time_range("2019-09-01", "2020-06-01", unit: :M, step: "3 months")
+q.to_unit(:D) + CATimedelta.wrap(CA_INT64([14]), unit: :D)
+# => 2019-09-15, 2019-12-15, 2020-03-15, 2020-06-15
+```
+
+Weeks are the exception: a month head is not week-aligned, so `:M` → `:W`
+raises rather than move the instant.
+
+`CATimedelta#to_unit` is the duration counterpart, and it differs in two ways.
+It truncates **toward zero** (`+30 h` → `+1 D`, `-30 h` → `-1 D`), because a
+duration is a magnitude rather than a point on an axis, and it will not cross
+the calendar boundary at all — a one-month duration has no length in days.
 
 ## Storage and `ticks`
 
