@@ -16,7 +16,7 @@ class CArray
   #   Masked cells do not participate and never appear in the result;
   #   an all-masked array yields an empty CArray.
   #
-  #   Distinctness follows `==` for numeric dtypes, with two float
+  #   Distinctness follows `==` for numeric data types, with two float
   #   special cases so the result matches value-based expectations:
   #   all NaN collapse to a single distinct value (rather than one per
   #   cell) and -0.0 / +0.0 are the same value. The value kept for
@@ -32,10 +32,10 @@ class CArray
   #   its own unit: the distinct values are values, so the array comes back
   #   as itself rather than as raw storage ticks.
   #
-  #   @return [CArray] 1-D CArray of the distinct values, same dtype
+  #   @return [CArray] 1-D CArray of the distinct values, same data type
   #     as `self`.
   def unique (sort: false)
-    # Single-pass seen-set hash (C __unique_flat__), one lane per dtype family:
+    # Single-pass seen-set hash (C __unique_flat__), one lane per data type family:
     # integer widens to a 64-bit key; float uses the bitwise key with all-NaN
     # collapsed and -0.0 / +0.0 normalized; object keys on rb_hash + rb_eql and
     # fixlen on a byte-hash + memcmp, both reproducing Ruby Hash distinctness.

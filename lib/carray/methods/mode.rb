@@ -33,7 +33,7 @@ class CArray
   #     the whole array.
   #   @return [CArray] boolean CArray of `self.shape`.
   def is_mode (axis: nil)
-    # Per-fiber two-pass frequency table (C __is_mode__), one lane per dtype
+    # Per-fiber two-pass frequency table (C __is_mode__), one lane per data type
     # family (numeric widen / NaN collapse, object rb_hash + rb_eql, fixlen
     # byte-hash + memcmp). Ties are all marked; masked cells stay false.
     if axis.nil?
@@ -112,7 +112,7 @@ class CArray
 
   private
 
-  # Flat mode: the distinct modal values ascending, 1-D CArray of self's dtype.
+  # Flat mode: the distinct modal values ascending, 1-D CArray of self's data type.
   # The single source of what counts as a mode (per-axis reuses it per fiber).
   # The distinct values with the maximum count, read from the frequency table
   # (value_counts, which covers numeric / object / fixlen), then sorted

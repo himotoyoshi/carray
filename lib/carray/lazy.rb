@@ -73,11 +73,11 @@ class CArray
     rad_2pi: CAMonOp::OP_RAD_2PI,
     rad_pi:  CAMonOp::OP_RAD_PI,
 
-    # Sign function (preserve dtype).  bool/uint → 0/1, sint → -1/0/1,
+    # Sign function (preserves the data type).  bool/uint → 0/1, sint → -1/0/1,
     # float → -1/0/1 NaN-preserving, complex → unit vector or 0.
     sign:    CAMonOp::OP_SIGN,
 
-    # imag_i: preserve-dtype primitive (0 for numeric, cimag for complex
+    # imag_i: type-preserving primitive (0 for numeric, cimag for complex
     # in the real slot).  Primarily consumed by the `imag` special case
     # below but also directly callable via `a.lazy.imag_i`; entry here
     # so the direct call fuses instead of falling to eager.
@@ -217,10 +217,10 @@ class CArray
 
   # ---------------------------------------------------------------------------
   # arg lazy fuse: eager `arg` always returns f64 regardless of input
-  # dtype (data_type-changing monop; see MkKernel.monop :arg output rule).
-  # CAMonOp's cast-before invariant requires input dtype == output dtype
+  # data type (data_type-changing monop; see MkKernel.monop :arg output rule).
+  # CAMonOp's cast-before invariant requires input data type == output data type
   # at each in-place step, so `arg` can't sit directly in the substrate.
-  # Chain compose via the preserve-dtype `arg_i` primitive:
+  # Chain compose via the type-preserving `arg_i` primitive:
   #
   #   integer / bool parent → cast_f64 ∘ arg_i (result f64)
   #   float parent         → arg_i             (result same float)

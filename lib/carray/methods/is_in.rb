@@ -10,12 +10,12 @@ class CArray
   #   argument is accepted; to test a few immediate values pass an
   #   Array (`a.is_in([0, -1])`).
   #
-  #   When `self` and `values` have different numeric dtypes they are
+  #   When `self` and `values` have different numeric data types they are
   #   promoted to a common type first (the same promotion binops use,
   #   {CArray.result_type}), so membership is value-correct across
-  #   dtypes (e.g. an int cell equals a float set element of the same
+  #   data types (e.g. an int cell equals a float set element of the same
   #   value, and a fractional set element never truncates onto an int
-  #   cell). Genuinely incompatible dtypes (e.g. numeric vs fixlen)
+  #   cell). Genuinely incompatible data types (e.g. numeric vs fixlen)
   #   raise.
   #
   #   Membership is value-based and shares the distinctness of the
@@ -32,7 +32,7 @@ class CArray
   #   reduction, compose with {#any}: `a.is_in(values).any(axis: k)`.
   #
   #   @param values [CArray, Array, Range] the set to test membership
-  #     against. Promoted with `self` to a common dtype.
+  #     against. Promoted with `self` to a common data type.
   #   Between two time arrays the question is about instants, not ticks:
   #   `values` is reconciled into `self`'s unit first, so a `:D` array and an
   #   `:h` array match on the instants they share.  The same holds for the set
@@ -49,7 +49,7 @@ class CArray
   #   `self` and `other`, in `self`'s first-appearance order.
   #
   #   Value-based, sharing the distinctness of the discovery family
-  #   (see {#is_in}); `self` and `other` are promoted to a common dtype.
+  #   (see {#is_in}); `self` and `other` are promoted to a common data type.
   #   Masked cells of either array do not participate. The result is
   #   always flat, like {#unique}, because the distinct values of a
   #   fiber vary in number.
@@ -97,18 +97,18 @@ class CArray
 
   # Reconcile a set-valued argument with self to a common data_type via
   # CArray.result_type (the single-source promotion rule the eager binop and
-  # lazy CABinOp share), returning [self', set']. Only dtypes are reconciled,
+  # lazy CABinOp share), returning [self', set']. Only data types are reconciled,
   # never shapes: unlike the binop coercion (cast_self_or_other) the set's
   # shape never broadcasts against self's, so a size-1 self keeps its shape.
-  # result_type raises for genuinely incompatible dtypes (numeric vs fixlen).
+  # result_type raises for genuinely incompatible data types (numeric vs fixlen).
   #
-  # A bare Array / Range has no intrinsic dtype, so the common type is inferred
+  # A bare Array / Range has no intrinsic data type, so the common type is inferred
   # from self and the individual elements (result_type classifies each scalar).
   # This keeps a fractional literal from truncating onto an int self, and an
   # int literal from boxing a float self into the object lane (where Float 2.0
-  # is not eql? Integer 2). A CArray argument uses its own dtype; any other
+  # is not eql? Integer 2). A CArray argument uses its own data type; any other
   # operand (Numo, a MemoryView producer, ...) comes in through wrap_readonly,
-  # the canonical type-coercion entry, so its format's dtype drives the promote.
+  # the canonical type-coercion entry, so its format's data type drives the promote.
   def promote_value_set (values)
     case values
     when Array then return promote_elements(values)
@@ -123,8 +123,8 @@ class CArray
   # Bare Array / Range against numeric self: infer the common numeric type
   # from self and the elements (each classified by result_type), so a
   # fractional literal promotes self to float instead of truncating. Against
-  # object / fixlen self the elements are values, not dtype specifiers (a
-  # String is a value, not a type name), so build the set in self's dtype.
+  # object / fixlen self the elements are values, not data type specifiers (a
+  # String is a value, not a type name), so build the set in self's data type.
   def promote_elements (elems)
     if data_type == CA_OBJECT || data_type == CA_FIXLEN
       [self, elems.to_ca.to_type(data_type)]

@@ -7,7 +7,7 @@ class CArray
   #   matching `CArray#round`; `:floor` snaps toward `-inf`, `:ceil`
   #   toward `+inf`).
   #
-  #   The output has the same dtype as `self` (integer input is coerced
+  #   The output has the same data type as `self` (integer input is coerced
   #   to float internally when `step` / `offset` are floats, following
   #   normal arithmetic promotion). NaN / Inf are preserved as a mask
   #   on the output; the rounding kernels map NaN to 0.0, which would

@@ -65,7 +65,7 @@ class CArray
         # M.1 (PyTorch alignment) scalar polymorphism additions.
         # `trunc` is left to Ruby's built-in semantics (Float#truncate
         # returns Integer when arg=0) — its CArray counterpart preserves
-        # dtype, so scalar-side use should call .to_f.trunc explicitly.
+        # data type, so scalar-side use should call .to_f.trunc explicitly.
         # Math.expm1 / Math.log1p don't exist in stdlib; hand-roll.
         def expm1
           Math.exp(self) - 1.0

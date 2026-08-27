@@ -30,7 +30,7 @@ class CArray
   #   @return [Integer, CArray] Integer for `axis: nil`, otherwise a
   #     reduced `CA_INT64` CArray.
   def nunique (axis: nil, keep_axis: false)
-    # Per-fiber single-pass seen-set hash (C __nunique__), one lane per dtype
+    # Per-fiber single-pass seen-set hash (C __nunique__), one lane per data type
     # family (numeric widen / NaN collapse, object rb_hash + rb_eql, fixlen
     # byte-hash + memcmp). Masked cells are skipped; the accumulator is a no-op
     # (the distinct count is the interned-key count).
