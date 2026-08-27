@@ -5,6 +5,10 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: the result-type override of `CArray#conditional` and
+  `CArray.select` is now `data_type:`, spelled the way the rest of the
+  library spells it. There is no alias: `dtype:` raises `unknown keyword`.
+
 - Fix: a field out of range no longer rolls over into another date.
   `"2019-02-31"` parsed to 2019-03-03, and `"201909"` -- a valid YYMMDD to
   Ruby, 2020-19-09 -- to 2021-07; both now raise.
