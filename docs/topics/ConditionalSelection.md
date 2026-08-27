@@ -117,7 +117,7 @@ Rules:
 - Each callable can return a CArray (matching the subset shape) or a
   scalar (broadcast to the subset).
 - Result `data_type` is `CArray.result_type(y_then, y_else)`, or the
-  explicit `dtype:` keyword when given.
+  explicit `data_type:` keyword when given.
 - Masked cells in `cond` propagate to `UNDEF` in the result.
 
 **When to reach for `conditional`:**
@@ -161,7 +161,7 @@ Rules:
 - Each `choicelist[k]` is either a same-shape CArray or a scalar
   broadcast to every cell.
 - Result `data_type` is the promotion of every choice plus `default`
-  via `CArray.result_type`, or the explicit `dtype:`.
+  via `CArray.result_type`, or the explicit `data_type:`.
 
 **When to reach for `CArray.select`:**
 
