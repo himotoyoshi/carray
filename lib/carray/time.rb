@@ -157,25 +157,24 @@ module CATimeUnitAlgebra
             "(:Y/:M) and fixed-length units (:W/:D/:h/:s/...) have no fixed " \
             "ratio (a month / year is calendar-variable)"
     end
-    if r.denominator == 1
-      widen(storage, r.numerator)           # coarse -> fine: lossless multiply
-    else
-      divisor = r.denominator               # fine -> coarse: exact only
-      unless (storage % divisor).eq(0).all
-        raise ArgumentError,
-              "cannot scale duration #{a} to #{b} without loss: " \
-              "some values are not a whole multiple of #{b} " \
-              "(finer resolution would be truncated)"
-      end
-      storage / divisor
+    scaled = widen(storage, r.numerator)    # coarse -> fine: lossless multiply
+    return scaled if r.denominator == 1
+    unless (scaled % r.denominator).eq(0).all
+      raise ArgumentError,
+            "cannot scale duration #{a} to #{b} without loss: " \
+            "some values are not a whole multiple of #{b} " \
+            "(finer resolution would be truncated)"
     end
+    scaled / r.denominator
   end
 
   # SCALE conversion with truncation: like convert_scale! but a fine->coarse
   # conversion drops the sub-`to` remainder (truncating toward zero) instead of
-  # raising.  Used for dt +/- td, where the result keeps the time's unit
-  # and a finer duration is truncated to it (a :D time + a 5 h duration is
-  # + 0 days; + 30 h is + 1 day).  Cross-group still raises (a calendar
+  # raising.  A duration is a magnitude, so it shrinks toward zero rather than
+  # flooring toward the past the way an instant does.  Used by
+  # CATimedelta#to_unit and by dt +/- td, where the result keeps the time's
+  # unit and a finer duration is truncated to it (a :D time + a 5 h duration
+  # is + 0 days; + 30 h is + 1 day).  Cross-group still raises (a calendar
   # duration has no fixed ratio to a fixed unit).
   def convert_scale_trunc(storage, from, to)
     a = res(from); b = res(to)
@@ -183,10 +182,12 @@ module CATimeUnitAlgebra
     r = ratio(a, b)
     if r.nil?
       raise ArgumentError,
-            "cannot combine a #{a} duration with a #{b} time across the " \
-            "calendar/fixed boundary (a calendar duration has no fixed ratio)"
+            "cannot scale duration #{a} to #{b}: calendar units " \
+            "(:Y/:M) and fixed-length units (:W/:D/:h/:s/...) have no fixed " \
+            "ratio (a month / year is calendar-variable)"
     end
-    r.denominator == 1 ? widen(storage, r.numerator) : storage / r.denominator
+    scaled = widen(storage, r.numerator)
+    r.denominator == 1 ? scaled : scaled / r.denominator   # toward zero
   end
 
   # INSTANT conversion (absolute datetimes): unlike a duration, a time :M
@@ -273,6 +274,45 @@ module CATimeUnitAlgebra
       ord = CATime.send(:_floordiv_i, ord, to.count)
     end
     ord
+  end
+
+  # INSTANT conversion that floors instead of raising: the storage-resolution
+  # change behind CATime#to_unit.  A coarser target keeps the bucket the
+  # instant falls in (floor toward the past, the direction construction and
+  # `floor` already use), so no element is rejected for sitting off the
+  # target grid -- a resolution change is a cast, not an assertion.  The
+  # widening half is untouched and stays exact, and :Y/:M -> :W still raises
+  # (a month head is not week-aligned, so widening there would move the
+  # instant).
+  def convert_instant_floor(storage, from, to)
+    a = res(from); b = res(to)
+    return storage if a == b
+    r = ratio(a, b)
+    if r                                                # same group
+      scaled = widen(storage, r.numerator)
+      r.denominator == 1 ? scaled
+                         : CATime.send(:_floordiv_i, scaled, r.denominator)
+    elsif CALENDAR.key?(a.base)
+      _instant_cal_to_fixed(storage, a, b)              # widen, always exact
+    else
+      _instant_fixed_to_cal_floor(storage, a, b)
+    end
+  end
+
+  # fixed-length grid -> calendar time, flooring: the instant's own year /
+  # month, whatever day and time it carries.  The flooring counterpart of
+  # _instant_fixed_to_cal.
+  def _instant_fixed_to_cal_floor(storage, from, to)
+    rd   = ratio(CATime::Resolution.new(1, :D), from)   # `from` ticks per day
+    days =
+      if rd.denominator == 1
+        CATime.send(:_floordiv_i, storage, rd.numerator)
+      else                                             # coarser than a day (:W)
+        storage * (from.tick_ratio / 86400r).to_i
+      end
+    y, m, = CATime.send(:_civil_from_days, days)
+    ord = to.base == :M ? (y * 12 + (m - 1) - 1970 * 12) : (y - 1970)
+    to.count > 1 ? CATime.send(:_floordiv_i, ord, to.count) : ord
   end
 end
 
@@ -665,23 +705,33 @@ class CATime
   end
 
   # @overload to_unit(unit)
-  #   Returns the same instants re-expressed on a finer grid: a new
-  #   {CATime} whose storage is `self`'s ticks widened into `unit`.
-  #   Accepted only when `self`'s tick is a whole multiple of `unit`'s, so
-  #   every element lands exactly on the new grid and no instant moves
-  #   (`:D` -> `:h`, `"1 hour"` -> `"10 minutes"`, `:Y` -> `:M`).  A coarser
-  #   or partially-overlapping target raises rather than rounding silently;
-  #   use {#floor} / {#ceil} / {#round} to move to a coarser grid explicitly.
+  #   Returns the same instants re-expressed on the `unit` grid: a new
+  #   {CATime} whose storage resolution is `unit`.  Changing the resolution
+  #   is a cast, not an assertion -- the same relation `CArray.time` has to
+  #   its input:
+  #
+  #   - **Finer target** (`:D` -> `:h`, `:Y` -> `:M`, `:M` -> `:s`): exact.
+  #     Every instant lands on the new grid unchanged.
+  #   - **Coarser target** (`:h` -> `:D`, `:D` -> `:M`): each instant floors
+  #     to the head of the `unit` tick it falls in -- toward the past, so a
+  #     pre-epoch instant floors the same way a post-epoch one does.  Use
+  #     {#ceil} / {#round} first to land on a different boundary.
+  #
+  #   The calendar / fixed-length boundary is crossed by civil-date algebra,
+  #   not by a ratio: a `:M` value is a real instant (the month's first
+  #   midnight), so `:M` -> `:D` widens exactly and `:D` -> `:M` floors to
+  #   the containing month.  `:Y` / `:M` -> `:W` is the one refusal, since a
+  #   month head is not week-aligned and widening would move the instant.
+  #
+  #   A *duration* has no such conversion ({CATimedelta#to_unit} truncates
+  #   toward zero and refuses to cross the boundary at all).
   #   @param unit [Resolution, Symbol, String] target resolution.
   #   @return [CATime]
-  #   @raise [ArgumentError] when `self`'s tick is not a whole multiple of
-  #     `unit`'s (including any calendar / fixed-length pair, where no fixed
-  #     ratio exists).
+  #   @raise [ArgumentError] on `:Y` / `:M` -> `:W`.
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
-    CATimeUnitAlgebra.widen(parent,
-                            CATimeUnitAlgebra.multiple_factor(self.unit, to)).time(unit: to)
+    CATimeUnitAlgebra.convert_instant_floor(parent, self.unit, to).time(unit: to)
   end
 
   # @overload +(other)
@@ -1168,21 +1218,25 @@ class CATimedelta
   end
 
   # @overload to_unit(unit)
-  #   Returns the same durations re-expressed on a finer grid: a new
-  #   {CATimedelta} whose storage is `self`'s ticks widened into `unit`.
-  #   Accepted only when `self`'s tick is a whole multiple of `unit`'s
-  #   (`:D` -> `:h`, `"1 hour"` -> `"10 minutes"`), so no duration changes.
-  #   A coarser target raises rather than truncating silently; a calendar /
-  #   fixed-length pair raises because a month has no fixed length.
+  #   Returns the same durations re-expressed on the `unit` grid: a new
+  #   {CATimedelta} whose storage resolution is `unit`.  A finer target is
+  #   exact (`:D` -> `:h`); a coarser one drops the sub-`unit` remainder
+  #   **toward zero** (`+30 h` -> `+1 D`, `-30 h` -> `-1 D`), the same
+  #   truncation `dt + td` already applies.
+  #
+  #   The direction differs from {CATime#to_unit} on purpose: a time is a
+  #   point on an axis, so it floors toward the past; a duration is a
+  #   magnitude, so it shrinks toward zero.
+  #
+  #   A calendar / fixed-length pair always raises -- unlike an instant, a
+  #   duration of one month has no length in days.
   #   @param unit [Resolution, Symbol, String] target resolution.
   #   @return [CATimedelta]
-  #   @raise [ArgumentError] when `self`'s tick is not a whole multiple of
-  #     `unit`'s.
+  #   @raise [ArgumentError] on a calendar / fixed-length pair.
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
-    CATimeUnitAlgebra.widen(parent,
-                            CATimeUnitAlgebra.multiple_factor(self.unit, to)).timedelta(unit: to)
+    CATimeUnitAlgebra.convert_scale_trunc(parent, self.unit, to).timedelta(unit: to)
   end
 
   # @overload +(other)

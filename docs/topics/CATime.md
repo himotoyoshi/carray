@@ -199,10 +199,12 @@ CATime::Resolution.new(3, :h)
 
 ### 3.2 Changing the unit — `to_unit`
 
-`to_unit(unit)` re-expresses the same instants on a **finer** grid, returning a
-new `CATime` (a `CATimedelta` for a duration). It is accepted only when the
-receiver's tick is a whole multiple of the target's, so every element lands
-exactly on the new grid and no instant moves:
+`to_unit(unit)` returns the same instants stored on the `unit` grid — a new
+`CATime` (a `CATimedelta` for a duration). Changing the resolution is a
+**cast**, the same relation `CArray.time` has to its input, not an assertion
+that the values happen to fit.
+
+A **finer** target is exact: every instant lands on the new grid unchanged.
 
 ```ruby
 dt = CArray.time_series("2024-06-15", count: 3, unit: :D)
@@ -213,21 +215,51 @@ dt.to_unit("10 minutes")    # 1 day = 144 whole ten-minute ticks
 CArray.time(["2024-01-01"], unit: :Y).to_unit(:M)   # 1 year = 12 whole months
 ```
 
-The decision is made on the **units alone**, never on the values, so the same
-call either always works or always raises — it cannot quietly succeed for one
-array and round for the next:
+A **coarser** target floors each instant to the head of the tick it falls in —
+**toward the past**, the direction `CArray.time` and `floor` already use, so a
+pre-epoch instant rounds the same way a later one does:
 
 ```ruby
-CArray.time(["2024-01-01"], unit: :h).to_unit(:D)   # ArgumentError (coarser)
-CArray.time(["2024-01-01"], unit: "90 minutes").to_unit(:h)
-                                                   # ArgumentError (not a whole multiple)
-CArray.time(["2024-01-01"], unit: :D).to_unit(:M)   # ArgumentError (no fixed ratio)
+CArray.time(["2024-01-01 05:00"], unit: :h).to_unit(:D)   # => 2024-01-01
+CArray.time(["1969-03-05 12:00"], unit: :h).to_unit(:D)   # => 1969-03-05
 ```
 
-To move to a **coarser** grid you have to say what happens to the remainder, so
-use `floor` / `ceil` / `round` (§11.3), which name the rounding at the call
-site. Widening a wide span into a very fine unit raises `RangeError` rather
-than wrapping `int64` (§11.11).
+Reach for `ceil` / `round` (§11.3) first when a different boundary is wanted;
+they move the values and keep the storage unit, so pair them with `to_unit`
+when the storage should change too.
+
+#### Crossing the calendar / fixed-length boundary
+
+`:Y` / `:M` and `:D`-or-finer have no fixed ratio (§11.7), but a `:M` **time**
+is a real instant — the month's first midnight — so the two grids are still
+connected, through civil-date algebra rather than a ratio:
+
+```ruby
+m = CArray.time(["2024-03-01"], unit: :M)
+m.to_unit(:D)                                       # => 2024-03-01
+m.to_unit(:s)                                       # => 2024-03-01T00:00:00Z
+CArray.time(["2024-03-05"], unit: :D).to_unit(:M)   # => 2024-03   (floors)
+```
+
+This is the route from a calendar series into day-level work: walk a quarterly
+grid on `:M`, move the storage to `:D`, then add a day offset.
+
+```ruby
+q = CArray.time_range("2019-09-01", "2020-06-01", unit: :M, step: "3 months")
+q.to_unit(:D) + CATimedelta.wrap(CA_INT64([14]), unit: :D)
+# => 2019-09-15, 2019-12-15, 2020-03-15, 2020-06-15
+```
+
+`:Y` / `:M` → `:W` is the one refusal: a month head is not week-aligned, so
+widening would move the instant.
+
+A **duration** behaves differently. `CATimedelta#to_unit` truncates **toward
+zero** (`+30 h` → `+1 D`, `-30 h` → `-1 D`), because a duration is a magnitude
+rather than a point on an axis, and it refuses to cross the calendar boundary
+at all — a one-month duration has no length in days.
+
+Widening a wide span into a very fine unit raises `RangeError` rather than
+wrapping `int64` (§11.11).
 
 ---
 
@@ -558,13 +590,12 @@ it reduces in — no drop into day space happens behind your back:
 m = CArray.time(%w[2024-01-01 2024-03-01], unit: :M)   # ticks 648, 650
 
 m.mean                                 # => 2024-02      (648 + 650) / 2 = 649
-CArray.time(m.to_time, unit: :D).mean  # => 2024-01-31   the day-space answer
+m.to_unit(:D).mean                     # => 2024-01-31   the day-space answer
 ```
 
 The two answers differ because months have different lengths; neither is
-more correct than the other, so the array's own unit decides. `to_unit`
-cannot make the move here (a calendar tick is not a whole number of days),
-so the day-space route rebuilds the array on the `:D` grid.
+more correct than the other, so the array's own unit decides. Declaring the
+day grid with `to_unit` (§3.2) is how a caller asks for the other one.
 
 ### CATimedelta
 
@@ -779,8 +810,8 @@ tf.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
 `linear_fetch` returns times, so it returns a `CATime` **on the same unit as
 the axis**. The array's unit is its grid, so an interpolated instant landing
 between two ticks is rounded to the nearest tick. Widen the grid first when
-the interpolation needs sub-tick precision — `to_unit` (§3.2) only ever moves
-to a finer grid, so it is exact:
+the interpolation needs sub-tick precision — `to_unit` (§3.2) is exact in that
+direction, so nothing moves:
 
 ```ruby
 t.linear_fetch(CA_FLOAT64([0.0, 0.25]))

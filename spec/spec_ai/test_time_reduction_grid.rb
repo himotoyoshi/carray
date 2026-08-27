@@ -173,12 +173,15 @@ class TestTimeReductionGrid < Test::Unit::TestCase
   end
 
   def test_day_space_is_reachable_by_declaring_the_day_grid
-    # to_unit cannot widen a calendar unit into a fixed one (no fixed ratio),
-    # so the day-space route rebuilds the array on the :D grid.
+    # the centroid depends on the grid the array is stored on: month ordinals
+    # average to a month head, days average to a day.  to_unit moves the
+    # storage to :D (a month head is a real instant), and the mean then lands
+    # in day space.
     m = CArray.time(%w[2024-01-01 2024-03-01], unit: :M)
-    assert_raise(ArgumentError) { m.to_unit(:D) }
-    d = CArray.time(m.to_time, unit: :D)
+    d = m.to_unit(:D)
+    assert_equal :D, d.unit.base
     assert_equal Time.utc(2024, 1, 31), d.mean.to_time
+    assert_equal Time.utc(2024, 1, 31), CArray.time(m.to_time, unit: :D).mean.to_time
   end
 
   # -- 6. the members that used to fall through ----------------------------

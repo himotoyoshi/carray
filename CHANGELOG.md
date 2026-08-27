@@ -5,6 +5,17 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: `CATime#to_unit` floors to a coarser grid instead of raising, and
+  crosses the calendar / fixed-length boundary (`:M` <-> `:D`) through
+  civil-date algebra. `:Y` / `:M` -> `:W` still raises.
+
+- Change: `CATimedelta#to_unit` truncates toward zero instead of raising on a
+  coarser target. Crossing the calendar boundary still raises.
+
+- Fix: converting between two resolutions where neither tick is a whole
+  multiple of the other (`"90 minutes"` and `:h`) dropped the ratio numerator
+  and gave a wrong value.
+
 - Fix: the MemoryView producer published format strings outside the
   vocabulary `ruby/memory_view.h` specifies. Below 32 bits CArray emitted
   PEP 3118's spelling (`b` / `B` / `h` / `H`), which Ruby's own parser has

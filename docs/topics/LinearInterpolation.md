@@ -291,7 +291,7 @@ plain fractional index, same as for a numeric axis. `linear_fetch` returns
 That last point is the one to plan for: the array's unit is its grid, so an
 interpolated instant that lands between two ticks is rounded to the nearest
 tick. Widen the grid first when the interpolation needs finer resolution —
-`to_unit` is exact (it only ever moves to a finer grid):
+`to_unit` is exact in that direction, so nothing moves:
 
 ```ruby
 t.linear_fetch(CA_FLOAT64([0.0, 0.25]))

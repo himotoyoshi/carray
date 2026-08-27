@@ -3,10 +3,11 @@
 # CATime / CATimedelta unit-change surface (#to_unit), the `step:` spacing of
 # CArray.time_series, and the fixlen inspect path they exercise.
 #
-# to_unit re-expresses values on a finer grid and is deliberately strict: it
-# decides on the units alone (source tick a whole multiple of the target
-# tick), so it never rounds and never depends on the values.  Coarsening is
-# floor / ceil / round, which say so at the call site.
+# to_unit changes the storage resolution: widening is exact, coarsening floors
+# toward the past (a time is a point on an axis), and the calendar /
+# fixed-length boundary is crossed by civil-date algebra rather than by a
+# ratio.  CATimedelta#to_unit is the duration counterpart and truncates toward
+# zero instead, because a duration is a magnitude.
 
 require "test/unit"
 require "carray"
@@ -61,19 +62,53 @@ class TestTimeUnitChange < Test::Unit::TestCase
     assert_equal [19723 * 24, UNDEF], h.ticks.to_a
   end
 
-  def test_to_unit_rejects_a_coarser_target
+  def test_to_unit_floors_a_coarser_target
     dt = CArray.time(["2024-01-01 05:00"], unit: :h)
-    assert_raise(ArgumentError) { dt.to_unit(:D) }
+    assert_equal ["2024-01-01"], dt.to_unit(:D).strftime("%Y-%m-%d").to_a
+    assert_equal CATime::Resolution.new(1, :D), dt.to_unit(:D).unit
   end
 
-  def test_to_unit_rejects_a_partial_multiple
+  def test_to_unit_floors_toward_the_past_before_the_epoch
+    # truncating toward zero would move a pre-epoch instant into the future;
+    # the direction has to match CArray.time and #floor, which floor.
+    dt = CArray.time(["1969-03-05 12:00"], unit: :h)
+    assert_equal ["1969-03-05"], dt.to_unit(:D).strftime("%Y-%m-%d").to_a
+    assert_equal ["1969-03"], CArray.time(["1969-03-05"], unit: :D).to_unit(:M).to_a.map(&:to_s)
+    assert_equal ["1969-04"], CArray.time(["1969-05-20"], unit: :s).to_unit("3 months").to_a.map(&:to_s)
+  end
+
+  def test_to_unit_handles_a_partial_multiple
+    # a "90 minutes" tick is 1.5 h: neither side is a whole multiple of the
+    # other, so the ratio numerator has to survive the conversion.
     dt = CArray.time(["2024-01-01"], unit: "90 minutes")
-    assert_raise(ArgumentError) { dt.to_unit(:h) }
+    assert_equal ["2024-01-01 00:00"], dt.to_unit(:h).strftime("%Y-%m-%d %H:%M").to_a
+    back = CArray.time(["2024-01-01 04:00"], unit: :h).to_unit("90 minutes")
+    assert_equal ["2024-01-01 03:00"], back.strftime("%Y-%m-%d %H:%M").to_a
   end
 
-  def test_to_unit_rejects_crossing_the_calendar_boundary
-    assert_raise(ArgumentError) { CArray.time(["2024-01-01"], unit: :D).to_unit(:M) }
-    assert_raise(ArgumentError) { CArray.time(["2024-01-01"], unit: :M).to_unit(:D) }
+  def test_to_unit_crosses_the_calendar_boundary
+    # a :M value is a real instant (the month's first midnight), so it widens
+    # exactly; the way back floors to the containing month.
+    m = CArray.time(["2024-03-01"], unit: :M)
+    assert_equal ["2024-03-01"], m.to_unit(:D).strftime("%Y-%m-%d").to_a
+    assert_equal ["2024-03-01T00:00:00Z"],
+                 m.to_unit(:s).strftime("%Y-%m-%dT%H:%M:%SZ").to_a
+    assert_equal ["2024-03"], m.to_unit(:D).to_unit(:M).to_a.map(&:to_s)
+    assert_equal ["2024-03"], CArray.time(["2024-03-05"], unit: :D).to_unit(:M).to_a.map(&:to_s)
+  end
+
+  def test_to_unit_refuses_a_week_target_across_the_boundary
+    # a month head is not week-aligned, so widening would move the instant.
+    assert_raise(ArgumentError) { CArray.time(["2024-03-01"], unit: :M).to_unit(:W) }
+  end
+
+  def test_to_unit_reaches_the_day_grid_of_a_calendar_series
+    # the plotmill case: walk a quarterly grid on :M, then move the storage to
+    # :D so a day-level offset can be added.
+    m   = CArray.time_range("2019-09-01", "2020-06-01", unit: :M, step: "3 months")
+    mid = m.to_unit(:D) + CATimedelta.wrap(CA_INT64([14]), unit: :D)
+    assert_equal ["2019-09-15", "2019-12-15", "2020-03-15", "2020-06-15"],
+                 mid.strftime("%Y-%m-%d").to_a
   end
 
   def test_to_unit_overflow_is_loud
@@ -89,8 +124,21 @@ class TestTimeUnitChange < Test::Unit::TestCase
     assert_equal CATime::Resolution.new(1, :h), td.to_unit(:h).unit
   end
 
-  def test_timedelta_to_unit_rejects_a_coarser_target
-    td = CArray.time(["2024-01-03"], unit: :h) - CArray.time(["2024-01-01"], unit: :h)
+  def test_timedelta_to_unit_truncates_toward_zero
+    # a duration is a magnitude, so it shrinks toward zero -- unlike a time,
+    # which floors toward the past.
+    td = CATimedelta.wrap(CA_INT64([30, -30]), unit: :h)
+    assert_equal [1, -1], td.to_unit(:D).ticks.to_a
+  end
+
+  def test_timedelta_to_unit_keeps_the_ratio_numerator
+    td = CATimedelta.wrap(CA_INT64([2, 3]), unit: "90 minutes")   # 3 h, 4.5 h
+    assert_equal [3, 4], td.to_unit(:h).ticks.to_a
+  end
+
+  def test_timedelta_to_unit_refuses_to_cross_the_calendar_boundary
+    # unlike an instant, a one-month duration has no length in days.
+    td = CATimedelta.wrap(CA_INT64([1]), unit: :M)
     assert_raise(ArgumentError) { td.to_unit(:D) }
   end
 
