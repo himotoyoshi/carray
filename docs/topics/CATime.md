@@ -112,6 +112,13 @@ CArray.time("2024-06-15", unit: :D)                  # 1-element
 CArray.time(%w[2024-01-15 2024-02-15 2024-03-15], unit: :D)   # Ruby Array
 CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)   # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
+
+# A time element is an instant already, so it needs no parsing: a `floor` /
+# `ceil` / `to_unit` answer feeds straight back in, as a start or an origin.
+q1 = CArray.time("2020-05-17T13:45:00Z", unit: :s).ceil(unit: "3 months",
+                                                        origin: "2000-01-01")
+CArray.time_range(q1[0], "2021-02-01", unit: :M, step: "3 months")
+# => 2020-07, 2020-10, 2021-01
 ```
 
 `CArray.time` is **strict by default**: an unparseable value raises.

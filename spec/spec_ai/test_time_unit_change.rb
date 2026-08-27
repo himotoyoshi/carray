@@ -244,4 +244,48 @@ class TestTimeUnitChange < Test::Unit::TestCase
     end
   end
 
+  # -- a time element as a start / origin literal --------------------------
+
+  def test_a_time_element_is_a_start_literal
+    # A ceil / floor answer feeds straight back in; going out through
+    # DateTime to get there used to be the only way, and gives the same
+    # series.
+    start = CArray.time("2020-05-17T13:45:00Z", unit: :s)
+                  .ceil(unit: "3 months", origin: "2000-01-01")[0]
+    tr = CArray.time_range(start, "2021-02-01", unit: :M, step: "3 months")
+    assert_equal %w[2020-07 2020-10 2021-01], tr.strftime("%Y-%m").to_a
+    assert_equal CArray.time_range(start.to_datetime, "2021-02-01",
+                                   unit: :M, step: "3 months").ticks.to_a,
+                 tr.ticks.to_a
+    assert_equal %w[2020-07 2020-10 2021-01],
+                 CArray.time_series(start, count: 3, unit: :M,
+                                    step: "3 months").strftime("%Y-%m").to_a
+    assert_equal ["2020-07-01"], CArray.time(start, unit: :D).strftime("%F").to_a
+  end
+
+  def test_a_time_element_start_is_exact_for_every_unit
+    # fixed unit: seconds read straight off the tick
+    e = CArray.time("2024-06-15T07:30:00Z", unit: :s)[0]
+    assert_equal ["2024-06-15T07:00:00Z", "2024-06-15T08:00:00Z"],
+                 CArray.time_series(e, count: 2, unit: :h).strftime("%FT%TZ").to_a
+    # calendar unit: the granule's first midnight, pre-epoch included
+    pe = CArray.time("1965-03-01", unit: :M)[0]
+    assert_equal %w[1965-03 1965-04 1965-05],
+                 CArray.time_range(pe, "1965-05-01", unit: :M).strftime("%Y-%m").to_a
+    assert_equal ["1965-03-01"], CArray.time(pe, unit: :D).strftime("%F").to_a
+    # :Y element resolves to January
+    y = CArray.time("2024-07-09", unit: :Y)[0]
+    assert_equal ["2024-01-01"], CArray.time(y, unit: :D).strftime("%F").to_a
+  end
+
+  def test_a_time_element_is_an_origin
+    start = CArray.time("2000-01-01", unit: :D)[0]
+    dt    = CArray.time(["2020-08-15"], unit: :D)
+    assert_equal dt.timesteps(unit: "1 month", origin: "2000-01-01").to_a,
+                 dt.timesteps(unit: "1 month", origin: start).to_a
+    # the month-head discipline still holds for an element origin
+    mid = CArray.time("2000-01-15", unit: :D)[0]
+    assert_raise(ArgumentError) { dt.timesteps(unit: "1 month", origin: mid) }
+  end
+
 end
