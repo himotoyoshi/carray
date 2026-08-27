@@ -81,7 +81,7 @@ class CArray
     result
   end
 
-  # @overload conditional(cond, then_fn, else_fn, dtype: nil)
+  # @overload conditional(cond, then_fn, else_fn, data_type: nil)
   #   Returns per-cell `then_fn.call(self[cond])` where `cond` is
   #   true and `else_fn.call(self[cond.not])` where it is false.
   #   The two callables are applied only to their own subset of
@@ -91,14 +91,14 @@ class CArray
   #   Scalar returns from a callable (e.g. `->(v) { 0 }`) broadcast
   #   to the subset shape. The result `data_type` is the promotion
   #   of the two subset results via `CArray.result_type`, or
-  #   `dtype` when given. Masked cells in `cond` propagate to
+  #   `data_type` when given. Masked cells in `cond` propagate to
   #   `UNDEF` in the result.
   #
   #   @param cond [CArray] boolean selector; same shape as `self`.
   #   @param then_fn [#call] callable applied to `self[cond]`.
   #   @param else_fn [#call] callable applied to `self[cond.not]`.
-  #   @param dtype [Symbol, Integer, nil] override for the result
-  #     `data_type`.
+  #   @param data_type [Symbol, Integer, nil] override for the result
+  #     data type.
   #   @return [CArray] new array with the same shape as `self`.
   #   @raise [ArgumentError] when `cond` is not a same-shape
   #     boolean CArray.
@@ -108,7 +108,7 @@ class CArray
   #                   ->(v) { v.log },        # domain-safe: only positive cells
   #                   ->(v) { -v })
   #     # => [2.0, 1.0, -0.0, 0.0, 0.6931..., 1.0986...]
-  def conditional (cond, then_fn, else_fn, dtype: nil)
+  def conditional (cond, then_fn, else_fn, data_type: nil)
     unless cond.is_a?(CArray) && cond.boolean? && cond.shape == self.shape
       raise ArgumentError,
             "conditional: cond must be a boolean CArray with same shape as self"
@@ -123,13 +123,13 @@ class CArray
     # to the subset shape; wrap it here so the scatter step below sees a
     # same-length CArray.
     unless y_then.is_a?(CArray)
-      y_then = CArray.new(dtype || CArray.result_type(y_then), x_then.shape).fill(y_then)
+      y_then = CArray.new(data_type || CArray.result_type(y_then), x_then.shape).fill(y_then)
     end
     unless y_else.is_a?(CArray)
-      y_else = CArray.new(dtype || CArray.result_type(y_else), x_else.shape).fill(y_else)
+      y_else = CArray.new(data_type || CArray.result_type(y_else), x_else.shape).fill(y_else)
     end
 
-    dt  = dtype || CArray.result_type(y_then, y_else)
+    dt  = data_type || CArray.result_type(y_then, y_else)
     out = CArray.new(dt, self.shape)
     out[cond]     = y_then
     out[cond.not] = y_else
@@ -141,7 +141,7 @@ class CArray
     out
   end
 
-  # @overload select(condlist, choicelist, default: 0, dtype: nil)
+  # @overload select(condlist, choicelist, default: 0, data_type: nil)
   #   Multi-way ternary select: for each cell, picks the value from
   #   the first `choicelist[k]` whose matching `condlist[k]` is true,
   #   falling back to `default` when no condition holds. When several
@@ -151,15 +151,15 @@ class CArray
   #   Each `choicelist[k]` is either a same-shape CArray or a scalar
   #   broadcast to every cell. The result `data_type` is the promotion
   #   of every choice plus `default` via `CArray.result_type`, or
-  #   `dtype` when given.
+  #   `data_type` when given.
   #
   #   @param condlist [Array<CArray>] boolean selectors.
   #   @param choicelist [Array<CArray, Numeric, Object>] values, one
   #     per condition (same length as `condlist`).
   #   @param default [CArray, Numeric, Object] value written where no
   #     condition holds.
-  #   @param dtype [Symbol, Integer, nil] override for the result
-  #     `data_type`.
+  #   @param data_type [Symbol, Integer, nil] override for the result
+  #     data type.
   #   @return [CArray] new array with the shape of `condlist[0]`.
   #   @raise [ArgumentError] on size mismatch, empty `condlist`, or a
   #     non-boolean / wrong-shape entry in `condlist`.
@@ -169,7 +169,7 @@ class CArray
   #                   [-x,    x * 10],
   #                   default: 999)
   #     # => [5.0, 3.0, -10.0, 0.0, 10.0, 999.0]
-  def self.select (condlist, choicelist, default: 0, dtype: nil)
+  def self.select (condlist, choicelist, default: 0, data_type: nil)
     unless condlist.is_a?(Array) && choicelist.is_a?(Array)
       raise ArgumentError, "select: condlist and choicelist must be Arrays"
     end
@@ -187,7 +187,7 @@ class CArray
     end
     shape = first.shape
 
-    dt = dtype || CArray.result_type(*choicelist, default)
+    dt = data_type || CArray.result_type(*choicelist, default)
     # `default` can be either a same-shape CArray (per-cell fallback) or a
     # scalar (broadcast to every cell).
     default_full = default.is_a?(CArray) && !default.scalar?
