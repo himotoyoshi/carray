@@ -1591,6 +1591,18 @@ class CArray
     case spec
     when Time     then spec.to_r
     when Integer  then Rational(spec)
+    when CATime::Element
+      # A time element is already an instant, so it needs no parsing: a
+      # fixed unit counts seconds directly, and a calendar one names the
+      # first midnight of its granule (the same instant convert_instant!
+      # gives it).  This is what lets floor / ceil / to_unit output feed
+      # straight back into time_range / time_series / .time.
+      if CATimeUnitAlgebra::FIXED.key?(spec.unit.base)
+        Rational(spec.value) * spec.unit.tick_ratio
+      else
+        Rational(CATimeUnitAlgebra._cal_days(CA_INT64([spec.value]),
+                                             spec.unit)[0] * 86400)
+      end
     when String
       h = parse_time_fields(spec, format)
       days = CATime.send(:_days_from_civil,
@@ -1617,6 +1629,17 @@ class CArray
     case spec
     when Time    then t = spec.utc; [t.year, t.month]
     when Integer then t = Time.at(spec, in: 'UTC'); [t.year, t.month]
+    when CATime::Element
+      # A calendar element is a month ordinal already, so read it as one
+      # rather than going out through Time (which a :Y / :M element would
+      # have to re-derive).  Integer / and % floor, so a pre-epoch value
+      # lands in the right month.
+      case spec.unit.base
+      when :M then mo = spec.value * spec.unit.count + 1970 * 12
+                   [mo / 12, mo % 12 + 1]
+      when :Y then [spec.value * spec.unit.count + 1970, 1]
+      else         t = spec.to_time.utc; [t.year, t.month]
+      end
     when String
       h = parse_time_fields(spec, format)
       [h[:year], h[:mon] || 1]
@@ -1649,8 +1672,10 @@ class CArray
   #   bucket head (toward the past); the phase is anchored at `start`, and
   #   `last` is a bound rather than a member -- the series stops at the last
   #   step at or before it.
-  #   @param start [Time, String, Integer, DateTime] first instant.
-  #   @param last [Time, String, Integer, DateTime] last instant (inclusive).
+  #   @param start [Time, String, Integer, DateTime, CATime::Element] first
+  #     instant.
+  #   @param last [Time, String, Integer, DateTime, CATime::Element] last
+  #     instant (inclusive).
   #   @param unit [Resolution, Symbol, String] grid resolution (tick).
   #   @param step [Resolution, Symbol, String, nil] spacing between elements
   #     (default: one `unit` tick).  Must be a whole multiple of `unit`.
@@ -1675,7 +1700,8 @@ class CArray
   #   is stored on and `step` is the spacing, so an hourly grid sampled once
   #   a day is `unit: :h, step: "1 day"`.  With no `step` the spacing is one
   #   `unit` tick (consecutive ticks, as before).
-  #   @param start [Time, String, Integer, DateTime] first instant.
+  #   @param start [Time, String, Integer, DateTime, CATime::Element] first
+  #     instant.
   #   @param count [Integer] number of elements.
   #   @param unit [Resolution, Symbol, String] grid resolution (tick).
   #   @param step [Resolution, Symbol, String, nil] spacing between elements
@@ -1704,7 +1730,7 @@ class CArray
   #   pass `on_error: :mask` to make it an UNDEF cell instead.  A masked /
   #   `nil` input cell is a *missing* value (not a parse failure) and always
   #   becomes UNDEF, regardless of `on_error`.
-  #   @param x [Time, String, Integer, DateTime, Array, CArray] a literal, a
+  #   @param x [Time, String, Integer, DateTime, CATime::Element, Array, CArray] a literal, a
   #     Ruby Array of literals, or a CArray of literals.
   #   @param unit [Resolution, Symbol, String] target grid resolution.
   #   @param format [String, nil] optional strptime format for String input.
@@ -1762,7 +1788,7 @@ class CArray
   #   indices are relative to `origin` and are rebased to the epoch (a new
   #   int64 array is built; the origin is not stored).
   #   @param unit [Resolution, Symbol, String] grid resolution.
-  #   @param origin [Time, String, Integer, DateTime, nil] base instant that
+  #   @param origin [Time, String, Integer, DateTime, CATime::Element, nil] base instant that
   #     `self`'s indices are counted from (default: the Unix epoch).
   #   @return [CATime]
   #   @note An `int64` receiver is wrapped zero-copy.  A narrower integer type
@@ -2422,18 +2448,12 @@ class CATime
     # [year, month] of a calendar-storage origin (finer fields ignored).
     def _origin_year_month(origin)
       case origin
-      when CATime::Element
-        case origin.unit.base
-        when :M then mo = origin.value * origin.unit.count + 1970 * 12; [mo / 12, mo % 12 + 1]
-        when :Y then [origin.value * origin.unit.count + 1970, 1]
-        else t = origin.to_time.utc; [t.year, t.month]
-        end
       when Integer
         raise ArgumentError,
               "origin: a bare Integer is ambiguous (epoch-dependent); pass a " \
               "Time / String / CATime scalar"
       else
-        CArray._epoch_year_month(origin)                   # Time / String / DateTime
+        CArray._epoch_year_month(origin)   # Time / String / DateTime / Element
       end
     end
   end
