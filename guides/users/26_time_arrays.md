@@ -674,6 +674,38 @@ A step is "N of a unit", written the same way as a resolution: a String
 shorthand (`:h`, `:M`). The compact `"3h"` (no space) is rejected, and
 unknown words raise.
 
+### The grid: a step and where it starts
+
+Every method below wants two things — how wide a bucket is, and where bucket
+0 starts. `CATime::Grid` is that pair given a name, so you build it once and
+pass it as one value:
+
+```ruby
+g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+six = g.range("2017-11-30 09:00", "2017-12-01 21:00")
+# => 11-30 09:00, 11-30 21:00, 12-01 09:00, 12-01 21:00
+
+six.timesteps(g)              # => [0, 1, 2, 3]
+#   instead of (unit: "12 hours", origin: "2017-11-30 09:00")
+six.snap(g, direction: :floor)
+g.at(CA_INT64([0, 1, 2]))     # and back
+g.on?(six)                    # => true   (every element on a bucket head?)
+```
+
+That is shorter, and it removes the chance of handing `floor` one origin and
+`timesteps` another. The keyword forms below all still work, and every one of
+them takes a grid instead — positionally, or as `unit:`.
+
+The `"<unit> since <instant>"` string is the form udunits and CF write into a
+`units` attribute, so a time axis read from a NetCDF file goes straight in.
+Reading also accepts udunits' other origin-shift operators (`after`, `from`,
+`ref`, `@`); `to_s` emits `since`, so a grid round-trips.
+
+A grid also works out the resolution it has to be stored on. `09:00` is not
+on the 12-hour grid counted from the epoch, so that grid answers on seconds
+and the round trip stays exact — where the bare `origin:` keyword would raise
+on the phase. `dt.grid` is the grid an array is already stored on.
+
 ### `timesteps` — the core primitive
 
 `timesteps(unit:, origin: nil)` returns an `int64` CArray: the index `k` of
@@ -702,7 +734,7 @@ origin that does not land exactly on the grid the buckets are counted on
 raises rather than silently shifting the phase, and a bare `Integer` origin
 is rejected.
 
-### `floor` / `ceil` / `round` — snap to a bucket head
+### `snap` / `floor` / `ceil` / `round` — snap to a bucket head
 
 These return a `CATime` (same unit) at the bucket boundary:
 
@@ -719,8 +751,17 @@ dt.round(unit: "3 hours", origin: t0).strftime("%H:%M").to_a
 
 `floor` is the period-bucket operation (toward the past). `round` picks the
 nearest head with ties toward the future, exactly even for odd step widths.
-These take keyword arguments, so they do not collide with the argument-less
-numeric `CArray#floor` / `#round`.
+These take arguments, so they do not collide with the argument-less numeric
+`CArray#floor` / `#round`.
+
+All three are `snap` with `direction:` fixed — the same shape `CArray#snap`
+(`step`, `offset:`, `direction:`) has for numbers, with a grid standing in
+for the step-and-offset pair:
+
+```ruby
+dt.snap(g, direction: :floor)   # same as dt.floor(g)
+dt.snap(g)                      # :round is the default, as in CArray#snap
+```
 
 ### `is_righttime` — the on-grid guard
 

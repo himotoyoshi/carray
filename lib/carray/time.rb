@@ -2176,6 +2176,171 @@ class CATime
     def inspect = "#<CATime::Resolution #{count} #{base}>"
   end
 
+  # A tick resolution *and where its ticks are anchored*: the `(unit:,
+  # origin:)` pair that {#timesteps}, {#snap} and {.from_timesteps} already
+  # take, given a name and a value.
+  #
+  # {Resolution} says how wide a tick is; Grid says that and where tick 0
+  # starts.  A CATime is stored as epoch-anchored int64 either way, so this
+  # reifies a calling convention -- it does not add a second time
+  # representation, and the reference-time epoch stays out of storage.
+  #
+  #   g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+  #   t.snap(g, direction: :floor)     # the pair, passed once
+  #   t.timesteps(g)                   # which tick each element falls in
+  #   g.at(CA_INT64([0, 1, 2]))        # and back
+  #
+  # Proleptic Gregorian, UTC.  There is no calendar seam here on purpose: a
+  # swappable calendar taxes every operation that touches a time, and the
+  # benefit does not follow.
+  class Grid
+
+    # udunits' origin-shift operators, all equivalent: the words `since`,
+    # `after`, `from`, `ref` (whitespace-separated) and the `@` sign, which
+    # needs none ("seconds@1970-01-01").  Generous on input because a
+    # `units` attribute is written by whoever wrote the file; {#to_s} only
+    # ever emits `since`, which is what CF-conforming files use.
+    ORIGIN_SHIFT = /\A(.+?)(?:\s+(?:since|after|from|ref)\s+|\s*@\s*)(.+)\z/i
+
+    # Plural unit words, the spelling {Resolution.parse} reads back.  (Bare
+    # Resolution#to_s does not round-trip: it prints "h" / "12 h", and
+    # Resolution.parse takes neither.)
+    WORD = { Y: "years", M: "months", W: "weeks", D: "days", h: "hours",
+             m: "minutes", s: "seconds", ms: "milliseconds",
+             us: "microseconds", ns: "nanoseconds", ps: "picoseconds",
+             fs: "femtoseconds", as: "attoseconds" }.freeze
+
+    # Storage resolutions to fall back on when the unit's own tick cannot
+    # hold the origin exactly (a day grid anchored at 12:00 needs seconds).
+    FALLBACK_BASES = %i[s ms us ns].freeze
+
+    # @param spec ["<unit> since <instant>", unit spec, Grid]
+    # @param origin [Time, String, DateTime, Element, nil] when `spec`
+    #   carries no origin-shift clause.
+    # @return [Grid]
+    def self.parse(spec, origin: nil)
+      return spec if spec.is_a?(Grid)
+      if spec.is_a?(String) and (fields = ORIGIN_SHIFT.match(spec))
+        new(fields[1], fields[2])
+      else
+        new(spec, origin)
+      end
+    end
+
+    # Normalizes the three ways a grid reaches a method -- positionally, as
+    # `unit:`, or as the loose `(unit:, origin:)` pair -- into that pair.
+    # One call at the head of a method is the whole Grid arm.
+    # @return [Array(Object, Object)] (unit, origin).
+    def self.resolve(grid, unit, origin)
+      return [grid.unit, grid.origin] if grid.is_a?(Grid)
+      return [unit.unit, unit.origin] if unit.is_a?(Grid)
+      unless grid.nil?
+        raise ArgumentError,
+              "the positional argument must be a CATime::Grid (got #{grid.class})"
+      end
+      [unit, origin]
+    end
+
+    def initialize(unit, origin = nil)
+      @unit    = Resolution.parse(unit)
+      @origin  = origin
+      @storage = resolve_storage
+      @origin  = CArray.time(origin, unit: @storage)[0] if origin
+      freeze
+    end
+
+    # @return [Resolution] the tick this grid counts in.
+    attr_reader :unit
+
+    # @return [Element, nil] the instant tick 0 starts at.  nil is the epoch,
+    #   which is what every `origin:` keyword already defaults to.
+    attr_reader :origin
+
+    # @return [Resolution] the resolution an array on this grid is stored on:
+    #   the unit itself, or finer when the origin's phase needs it.  Derived
+    #   from (unit, origin) and memoized here, so a grid's identity stays the
+    #   (count, unit, origin) triple.
+    attr_reader :storage
+
+    # @return [Boolean] whether the unit is a calendar one (:Y / :M), whose
+    #   ticks are month ordinals rather than a fixed number of seconds.
+    def calendar? = %i[Y M].include?(@unit.base)
+
+    # @return [Integer] storage ticks per unit tick.
+    def step_ticks = Integer(@unit.tick_ratio / @storage.tick_ratio)
+
+    # @return [Integer] storage ticks from the epoch to the origin.
+    def origin_ticks
+      @origin ? Integer(CATimeLiteral.epoch_seconds(@origin) / @storage.tick_ratio) : 0
+    end
+
+    # Tick indices -> instants: the {CATime.from_timesteps} direction, but
+    # answering on {#storage} so a phased origin survives.
+    # @param k [CArray, Integer]
+    # @return [CATime, Element]
+    def at(k)
+      return at(CArray.int64(1) { Integer(k) })[0] unless k.is_a?(CArray)
+      return CATime.from_timesteps(k.int64, unit: @unit, origin: @origin) if calendar?
+      (origin_ticks + k.int64 * step_ticks).time(unit: @storage)
+    end
+
+    # Instants -> tick indices: the {CATime#timesteps} direction.  Off-grid
+    # elements floor toward the past; ask {#on} when that would be a lie.
+    # @return [CArray] int64.
+    def index(time) = time.timesteps(self)
+
+    # @return [CArray] boolean, flagging elements that land on a tick.
+    def on(time) = time.is_righttime(self)
+
+    # @return [Boolean] whether every element lands on a tick.
+    def on?(time) = on(time).all
+
+    # A regular series on this grid.
+    def range(start, last) = CArray.time_range(start, last, unit: @storage, step: @unit)
+    def series(start, count:) = CArray.time_series(start, count: count, unit: @storage, step: @unit)
+
+    # @return [String] "12 hours since 2017-11-30 09:00:00", which {.parse}
+    #   reads back into an equal grid.
+    def to_s
+      word = WORD.fetch(@unit.base)
+      spec = @unit.count == 1 ? word : "#{@unit.count} #{word}"
+      @origin ? "#{spec} since #{@origin.to_time.strftime('%Y-%m-%d %H:%M:%S')}" : spec
+    end
+
+    def inspect = "#<CATime::Grid #{self}>"
+    def ==(other) = other.is_a?(Grid) && other.unit == @unit && other.to_s == to_s
+    alias eql? ==
+    def hash = [@unit, to_s].hash
+
+    private
+
+    # The coarsest storage holding both the unit's tick and the origin's
+    # phase without truncation.  A calendar grid is addressed by month, so
+    # its origin is already pinned to a month head and the unit serves.
+    def resolve_storage
+      return @unit if calendar?
+      candidates = [@unit, *FALLBACK_BASES.map {|base| Resolution.new(1, base) }]
+      candidates.each do |res|
+        next unless (@unit.tick_ratio / res.tick_ratio).denominator == 1
+        next unless @origin.nil? ||
+                    (CATimeLiteral.epoch_seconds(@origin) / res.tick_ratio).denominator == 1
+        return res
+      end
+      raise ArgumentError,
+            "origin #{@origin.inspect} cannot be held exactly on any storage " \
+            "resolution for unit #{@unit}"
+    end
+  end
+
+  # Rounding rules {#snap} accepts, the same three CArray#snap takes.
+  SNAP_DIRECTIONS = %i[round floor ceil].freeze
+
+  # The grid this array is stored on: its own tick, anchored at the epoch.
+  # `t.timesteps` is `t.timesteps(t.grid)`, which is what the `unit:` default
+  # has always meant.
+  # @return [Grid]
+  def grid = Grid.new(unit)
+
   # @overload timesteps(unit: self.unit, origin: nil)
   #   Returns the integer timestep of every element: the k-th `unit`-wide
   #   bucket counted from `origin` (floor toward the past, so pre-`origin`
@@ -2195,7 +2360,9 @@ class CATime
   #   @return [CArray] int64 timesteps.
   #   @raise [ArgumentError] on a sub-resolution / unrepresentable (unit,
   #     storage-resolution) pair or a lossy origin.
-  def timesteps(unit: self.unit, origin: nil)
+  def timesteps(grid = nil, unit: nil, origin: nil)
+    unit, origin = Grid.resolve(grid, unit, origin)
+    unit = self.unit if unit.nil?
     g = resolve_timestep_grid(unit, origin)
     return calendar_bucket(:index, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
@@ -2216,52 +2383,76 @@ class CATime
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [CATime]
-  def floor(unit:, origin: nil)
-    g = resolve_timestep_grid(unit, origin)
-    return calendar_bucket(:floor, g[1], origin) if g[0] == :civil
-    su, mul, step_ticks, o = g
-    raise_if_int64_overflow(su, mul, o, step_ticks, :floor)
-    d = storage_ticks_in_numerator_grid(mul) - o
-    q = d / step_ticks
-    q = q - (d - q * step_ticks).lt(0)
-    bucket_head_as_time(o + q * step_ticks, mul, su)
-  end
-
-  # @overload ceil(unit:, origin: nil)
-  #   Returns each element raised to its bucket head at or after it (an
-  #   element already on a boundary maps to itself), as a {CATime}.
+  # @overload snap(grid = nil, unit:, origin: nil, direction: :round)
+  #   Returns each element snapped to a point on the bucket grid, as a
+  #   {CATime} in the same storage resolution.  This is the time-domain twin
+  #   of {CArray#snap}: there, `(step, offset:, direction:)`; here a {Grid}
+  #   (= tick + origin), or the same pair spelled as `unit:` / `origin:`,
+  #   and the same three directions.
+  #
+  #   `:round` picks the nearest bucket head, ties toward the future;
+  #   `:floor` the head at or before; `:ceil` the head at or after.
+  #   {#floor}, {#ceil} and {#round} are this method with `direction:` fixed.
+  #   @param grid [Grid, nil] the bucket grid, passed as one value.
+  #   @param unit [String, Symbol, Resolution, Grid] bucket resolution.
+  #   @param origin [Time, String, CATime::Element, DateTime, nil] head of
+  #     bucket 0 (default: the Unix epoch, or ISO Monday for a week bucket
+  #     on day-or-finer storage -- a week grid counts from the epoch
+  #     Thursday and cannot hold a Monday, so it keeps its own ticks).
+  #     It has to be a bucket head itself: on a calendar grid, the 1st at
+  #     00:00.
+  #   @param direction [:round, :floor, :ceil] rounding rule.
   #   @return [CATime]
-  def ceil(unit:, origin: nil)
+  def snap(grid = nil, unit: nil, origin: nil, direction: :round)
+    unless SNAP_DIRECTIONS.include?(direction)
+      raise ArgumentError,
+            "snap: direction must be :round / :floor / :ceil " \
+            "(got #{direction.inspect})"
+    end
+    unit, origin = Grid.resolve(grid, unit, origin)
     g = resolve_timestep_grid(unit, origin)
-    return calendar_bucket(:ceil, g[1], origin) if g[0] == :civil
+    return calendar_bucket(direction, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
-    raise_if_int64_overflow(su, mul, o, step_ticks, :ceil)
-    n  = storage_ticks_in_numerator_grid(mul)
-    d  = n - o
-    q  = d / step_ticks
-    q  = q - (d - q * step_ticks).lt(0)
-    fl = o + q * step_ticks
-    bucket_head_as_time(fl + step_ticks * n.ne(fl), mul, su)
-  end
-
-  # @overload round(unit:, origin: nil)
-  #   Returns each element rounded to its nearest bucket head (ties toward
-  #   the future, matching `snap` :round), as a {CATime}.  Exact for
-  #   odd `step_ticks` (no half-tick loss).  For a calendar bucket the nearest
-  #   head is by absolute tick distance (month lengths vary), ties toward the
-  #   future.
-  #   @return [CATime]
-  def round(unit:, origin: nil)
-    g = resolve_timestep_grid(unit, origin)
-    return calendar_bucket(:round, g[1], origin) if g[0] == :civil
-    su, mul, step_ticks, o = g
-    raise_if_int64_overflow(su, mul, o, step_ticks, :round)
-    d = storage_ticks_in_numerator_grid(mul) - o
+    raise_if_int64_overflow(su, mul, o, step_ticks, direction)
+    n = storage_ticks_in_numerator_grid(mul)
+    d = n - o
     q = d / step_ticks
     q = q - (d - q * step_ticks).lt(0)            # floor bucket
-    r = d - q * step_ticks                        # 0 <= r < step_ticks
-    q = q + r.ge((step_ticks + 1) / 2)            # ties -> future; no 2*d / 2*r
+    case direction
+    when :ceil
+      fl = o + q * step_ticks
+      return bucket_head_as_time(fl + step_ticks * n.ne(fl), mul, su)
+    when :round
+      r = d - q * step_ticks                      # 0 <= r < step_ticks
+      q = q + r.ge((step_ticks + 1) / 2)          # ties -> future; no 2*d / 2*r
+    end
     bucket_head_as_time(o + q * step_ticks, mul, su)
+  end
+
+  # @overload floor(grid = nil, unit:, origin: nil)
+  #   {#snap} with `direction: :floor` -- each element at its bucket head
+  #   (toward the past), as a {CATime} in the same storage resolution.
+  #   @return [CATime]
+  def floor(grid = nil, unit: nil, origin: nil)
+    snap(grid, unit: unit, origin: origin, direction: :floor)
+  end
+
+  # @overload ceil(grid = nil, unit:, origin: nil)
+  #   {#snap} with `direction: :ceil` -- each element at the bucket head at
+  #   or after it (an element already on a boundary maps to itself).
+  #   @return [CATime]
+  def ceil(grid = nil, unit: nil, origin: nil)
+    snap(grid, unit: unit, origin: origin, direction: :ceil)
+  end
+
+  # @overload round(grid = nil, unit:, origin: nil)
+  #   {#snap} with `direction: :round` -- each element at its nearest bucket
+  #   head, ties toward the future.  Exact for odd `step_ticks` (no half-tick
+  #   loss).  For a calendar bucket the nearest head is by absolute tick
+  #   distance (month lengths vary), ties toward the future.
+  #   @return [CATime]
+  def round(grid = nil, unit: nil, origin: nil)
+    snap(grid, unit: unit, origin: origin, direction: :round)
   end
 
   # @overload is_righttime(unit:, origin: nil)
@@ -2276,7 +2467,8 @@ class CATime
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [CArray] boolean.
-  def is_righttime(unit:, origin: nil)
+  def is_righttime(grid = nil, unit: nil, origin: nil)
+    unit, origin = Grid.resolve(grid, unit, origin)
     g = resolve_timestep_grid(unit, origin)
     return calendar_bucket(:on, g[1], origin) if g[0] == :civil
     su, mul, step_ticks, o = g
@@ -2306,7 +2498,13 @@ class CATime
   #     It has to be a bucket head itself: on a calendar grid, the 1st at
   #     00:00.
   #   @return [Element, CATime] on the `unit` grid (`:D` for a week bucket).
-  def self.from_timesteps(k, unit:, origin: nil)
+  def self.from_timesteps(k, grid = nil, unit: nil, origin: nil)
+    grid = unit if unit.is_a?(Grid)
+    # A Grid answers on its own storage, so an origin off the unit grid
+    # ("12 hours since ... 09:00") survives; the keyword form keeps the
+    # narrower rule it always had, where the origin sits on the unit itself.
+    return grid.at(k) if grid.is_a?(Grid)
+    unit, origin = Grid.resolve(grid, unit, origin)
     res = Resolution.parse(unit)
     out = res.base == :W ? Resolution.new(1, :D) : res
     kk  = k.is_a?(CArray) ? k.int64 : CArray.int64(1) { Integer(k) }
