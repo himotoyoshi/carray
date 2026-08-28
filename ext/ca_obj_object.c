@@ -1001,6 +1001,93 @@ ca_object_func_fill_data (void *ap, void *ptr)
   ca_object_dispatch_fill((CAObject *) ap, ptr);
 }
 
+/* Partial fill.  fill_data carries no region and can only say "fill
+   everything I cover", so before these two slots existed the only way to
+   fill part of a CAObject was the per-cell default -- one store_addr per
+   cell.  The region arrives in the view's own address space.  With
+   `fill_block` defined (and the region an axis-aligned forward sub-box of
+   self) it becomes one call; with `fill_addrs` defined it becomes one call
+   per address window.  With neither defined the behaviour is exactly the
+   old default, so an existing subclass sees no change. */
+static void
+ca_object_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
+{
+  CAObject *ca = (CAObject *) ap;
+  ID        mid = rb_intern("fill_addrs");
+
+  if ( ca_is_face(ca) ) {
+    ca_face_fill_addrs(ap, n, addrs, ptr);
+    return;
+  }
+
+  if ( n > 0 && rb_obj_respond_to(ca->self, mid, Qtrue) ) {
+    volatile VALUE raddrs, rval;
+    ca_size_t dim1[1] = { n };
+    raddrs = ca_object_wrap_transient(CA_SIZE, sizeof(ca_size_t),
+                                      1, dim1, addrs, CA_XFER_PUT);
+    rval = rb_ca_ptr2obj(ca->self, ptr);
+    rb_funcall(ca->self, mid, 2, raddrs, rval);
+    return;
+  }
+
+  ca_fill_addrs_default(ap, n, addrs, ptr);
+}
+
+/* Gate: one region axis per view axis, forward, and a whole number of
+   elements per step.  native is strictly decreasing, so steps[k] =
+   m_k * native[k] with m_k >= 1 admits only the identity permutation --
+   transpose, negative and zero (broadcast) steps, sub-element steps and
+   dimension-dropping regions all fail it and take the addrs route.  The
+   bound check then confirms the decomposed box lies inside self. */
+static void
+ca_object_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
+                            ca_size_t *counts, ca_size_t *steps, void *ptr)
+{
+  CAObject  *ca = (CAObject *) ap;
+  ca_size_t  native[CA_RANK_MAX], istep[CA_RANK_MAX], start[CA_RANK_MAX];
+  ca_size_t  s;
+  int8_t     k;
+  ID         mid = rb_intern("fill_block");
+
+  if ( ca_is_face(ca) ) {
+    ca_face_fill_stride(ap, base, ndim, counts, steps, ptr);
+    return;
+  }
+
+  if ( ndim == ca->ndim && rb_obj_respond_to(ca->self, mid, Qtrue) ) {
+    int aligned = 1;
+    s = 1;
+    for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
+    for ( k = 0; k < ndim; k++ ) {
+      if ( steps[k] <= 0 || steps[k] % native[k] != 0 ) { aligned = 0; break; }
+      istep[k] = steps[k] / native[k];
+      start[k] = ( base / native[k] ) % ca->dim[k];
+      if ( start[k] + ( counts[k] - 1 ) * istep[k] >= ca->dim[k] ) {
+        aligned = 0;
+        break;
+      }
+    }
+    if ( aligned ) {
+      volatile VALUE rstarts, rcounts, rsteps, rval;
+      rstarts = rb_ary_new_capa(ndim);
+      rcounts = rb_ary_new_capa(ndim);
+      rsteps  = rb_ary_new_capa(ndim);
+      for ( k = 0; k < ndim; k++ ) {
+        rb_ary_push(rstarts, SIZE2NUM(start[k]));
+        rb_ary_push(rcounts, SIZE2NUM(counts[k]));
+        rb_ary_push(rsteps,  SIZE2NUM(istep[k]));
+      }
+      rval = rb_ca_ptr2obj(ca->self, ptr);
+      rb_funcall(ca->self, mid, 4, rstarts, rcounts, rsteps, rval);
+      return;
+    }
+  }
+
+  /* addrs route: address windows -> ca_fill_addrs -> `fill_addrs` when the
+     author defined it, else the per-cell default. */
+  ca_fill_stride_via_addrs(ap, base, ndim, counts, steps, ptr);
+}
+
 static void
 ca_object_func_create_mask (void *ap)
 {
@@ -1050,6 +1137,8 @@ ca_operation_function_t ca_object_func = {
   NULL,                       /* fold_stride: never-fold (callback boundary) */
   ca_object_func_xfer_stride,
   ca_object_func_xfer_all,
+  .fill_addrs  = ca_object_func_fill_addrs,
+  .fill_stride = ca_object_func_fill_stride,
 };
 
 /* ------------------------------------------------------------------- */

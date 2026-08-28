@@ -67,6 +67,21 @@ ca_face_fill_data (void *ap, void *ptr)
 }
 
 void
+ca_face_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
+{
+  CAView *cav = (CAView *) ap;
+  ca_fill_addrs(cav->parent, n, addrs, ptr);
+}
+
+void
+ca_face_fill_stride (void *ap, ca_size_t base, int8_t ndim,
+                            ca_size_t *counts, ca_size_t *steps, void *ptr)
+{
+  CAView *cav = (CAView *) ap;
+  ca_fill_stride(cav->parent, base, ndim, counts, steps, ptr);
+}
+
+void
 ca_face_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAView *cav = (CAView *) ap;
