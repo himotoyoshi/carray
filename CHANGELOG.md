@@ -11,6 +11,13 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `CAFrame#to_table` renders the frame as an aligned text table, and
+  `inspect` / `to_s` sit on it: `p df` is the summary line over the first 8 and
+  last 2 rows, `puts df` is the whole frame. Masked cells show as `_`, N-D
+  columns show each row's slice, column widths are counted in terminal cells so
+  CJK names stay square, and float cells are rounded for display (`precision:`,
+  default 6). `rows:` caps the printed rows and the elided middle is a `:` row.
+
 - New: `CAFrame#to_time` takes a `CATime::Grid`, positionally or as `unit:`,
   instead of the `unit:` / `epoch:` pair, so a netCDF `units` attribute goes
   in without being taken apart. The grid form also carries an epoch phase the

@@ -436,13 +436,6 @@ class CAFrame
     h
   end
 
-  # @return [String]
-  def inspect
-    parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
-    idx = @index ? " index=#{@axis_name.inspect}" : ""
-    "#<CAFrame nrow=#{@nrow} vars=[#{parts.join(', ')}]#{idx}>"
-  end
-
   private def rebuild(cols)
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end

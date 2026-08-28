@@ -633,6 +633,44 @@ containing the separator, a quote, or a newline are quoted with internal quotes
 doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
 `index` default to true.
 
+### Looking at a frame — `to_table`, `p`, `puts`
+
+```ruby
+p df                       # summary line + first 8 / last 2 rows
+puts df                    # the whole frame (to_s)
+puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
+```
+
+```
+#<CAFrame nrow=1286 vars=[name:object, lat:float64, temp:int32] index="id">
+  id  name              lat  temp
+----  ----------  ---------  ----
+   0  観測点0          45.0     0
+   1  観測点1     44.999667     1
+   :  :                   :     :
+1285  観測点1285  44.571667    25
+```
+
+`to_table` is the display counterpart of `to_csv` and shares none of its
+constraints — it is text to be looked at, not read back. Numeric columns are
+right-aligned and everything else left-aligned, a **masked cell shows as `_`**
+(the marker CArray's own inspect uses), and an **N-D column** — which `to_csv`
+rejects, having no flat cell — shows each row's slice as an Array literal.
+Column widths are counted in terminal cells, so a CJK name occupies two per
+character and the columns stay square.
+
+Float cells are rounded to `precision` decimal places **for display only**
+(default 6): full precision lets one value like `141.67833333333334` set the
+width of the whole column. `precision: nil` prints them as Ruby renders them.
+
+`rows` caps the printed rows (default 20) and the elided middle becomes a `:`
+row; `rows: nil` prints every row. When rows are elided, a footer states the
+full size. `index: false` drops the index column.
+
+`inspect` and `to_s` sit on the same renderer: **`p df` stays a screenful**
+(the summary line, then the first 8 and last 2 rows) while **`puts df` is the
+whole frame**.
+
 ### Index
 
 ```ruby
