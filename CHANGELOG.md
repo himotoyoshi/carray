@@ -5,6 +5,13 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: `arange` ended in a call to a method that does not exist, so every
+  form raised `NoMethodError` -- `CArray.arange(5)`, `CArray::Int32.arange(0,
+  10, 2)`, all of them. It builds the array now. Integer arguments count
+  exactly, so a step that divides the span evenly does not pick up an extra
+  element from float rounding; a zero step and a wrong argument count raise
+  `ArgumentError` rather than reaching the count arithmetic.
+
 - Change: the result-type override of `CArray#conditional` and
   `CArray.select` is now `data_type:`, spelled the way the rest of the
   library spells it. There is no alias: `dtype:` raises `unknown keyword`.
@@ -45,13 +52,6 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   [MemoryViewFormat.md](docs/interop/MemoryViewFormat.md).
 
 - Fix: the mask-format check rejected a uint8 mask published as `C`.
-
-- Fix: `arange` ended in a call to a method that does not exist, so every
-  form raised `NoMethodError` -- `CArray.arange(5)`, `CArray::Int32.arange(0,
-  10, 2)`, all of them. It builds the array now. Integer arguments count
-  exactly, so a step that divides the span evenly does not pick up an extra
-  element from float rounding; a zero step and a wrong argument count raise
-  `ArgumentError` rather than reaching the count arithmetic.
 
 ## 3.0.0 — 2026-08-25
 
