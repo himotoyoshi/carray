@@ -11,6 +11,24 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `CATime::Grid` names the `(unit:, origin:)` pair that `#timesteps`,
+  `#snap` and `.from_timesteps` already take -- a tick resolution and the
+  instant tick 0 starts at -- so it is built once and passed as one value:
+  `t.snap(g, direction: :floor)`, `t.timesteps(g)`, `g.at(k)`. Storage is
+  unchanged (epoch-anchored int64); the grid reifies a calling convention.
+  It reads and writes the `"<unit> since <instant>"` form -- udunits'
+  `since` / `after` / `from` / `ref` / `@` on input, `since` on output --
+  and resolves the storage resolution that holds a phased origin exactly,
+  so `"12 hours since 2017-11-30 09:00"` round-trips where the bare
+  keyword form cannot hold the phase. `CATime#grid` is the grid an array
+  is stored on, which is what the `unit:` default has always meant.
+
+- Change: `CATime#floor` / `#ceil` / `#round` are `CATime#snap` with
+  `direction:` fixed, the shape `CArray#snap` already had for numbers.
+  The three shared a prologue and differed in one expression; they are one
+  method now. Results are unchanged, and so are the keyword forms of all
+  six timestep methods.
+
 - Fix: `arange` ended in a call to a method that does not exist, so every
   form raised `NoMethodError` -- `CArray.arange(5)`, `CArray::Int32.arange(0,
   10, 2)`, all of them. It builds the array now. Integer arguments count

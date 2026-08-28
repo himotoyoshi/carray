@@ -890,16 +890,62 @@ A step is "N of a unit". Write it as a **String** (the human surface) or a bare
 
 Singular and plural are both accepted (`"1 day"` / `"3 days"`); the compact
 `"3h"` (no space) is rejected, and unknown words raise. Internally a spec
-becomes a frozen `CATime::Step` value object — value-equal and hashable,
+becomes a frozen `CATime::Resolution` value object — value-equal and hashable,
 so it can serve as a hash / group key.
 
 Note `:m` is **minute** and `:M` is **month** (the unit letters are
 case-sensitive). To avoid confusion, spell months out: `"1 month"`.
 
+A step spec says how wide a bucket is. Every method below also wants to know
+**where bucket 0 starts** — the `origin:` keyword. `CATime::Grid` is that pair
+given a name, so it can be built once and passed as one value:
+
+```ruby
+g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+g.unit                        # => 12 × :h
+g.origin                      # => 2017-11-30T09:00:00Z  (a CATime::Element)
+
+six = g.range("2017-11-30 09:00", "2017-12-01 21:00")
+# => 11-30 09:00, 11-30 21:00, 12-01 09:00, 12-01 21:00
+
+six.timesteps(g)              # => [0, 1, 2, 3]
+#   instead of (unit: "12 hours", origin: "2017-11-30 09:00")
+six.snap(g, direction: :floor)
+g.at(CA_INT64([0, 1, 2]))     # and back — the from_timesteps direction
+g.on?(six)                    # => true   (every element on a bucket head?)
+```
+
+Passing the pair as one value is not only shorter: it removes the chance of
+handing `floor` one origin and `timesteps` another. A grid is frozen,
+value-equal and hashable, like a resolution.
+
+The string form is the one udunits and CF write into a `units` attribute.
+Reading is generous — udunits' origin-shift operators `since`, `after`,
+`from`, `ref` and the `@` sign are all accepted — and `to_s` emits `since`,
+so a grid round-trips through `parse`. Storage stays epoch-anchored `int64`
+either way: a grid names a calling convention, it does not add a second time
+representation.
+
+```ruby
+CATime::Grid.parse("seconds@1970-01-01").to_s   # => "seconds since 1970-01-01 00:00:00"
+```
+
+`Grid#storage` is the resolution an array on that grid is stored on: the unit
+itself, or finer when the origin's phase needs it. This is what lets
+`"12 hours since ... 09:00"` work at all — 09:00 is not on the 12-hour grid
+counted from the epoch, so the grid answers on seconds, and `at` / `index`
+round-trip exactly (the bare `origin:` keyword raises on that phase, §11.11).
+
+`CATime#grid` is the grid an array is stored on — its own tick, anchored at
+the epoch — which is what the `unit:` default of `timesteps` has always meant.
+
 ### 11.2 `timesteps` — the core primitive
 
-`timesteps(unit:, origin: nil)` returns an `int64` CArray: the index `k` of the
-bucket each element falls in, counted from `origin` (default: the epoch).
+`timesteps(grid = nil, unit:, origin: nil)` returns an `int64` CArray: the
+index `k` of the bucket each element falls in, counted from `origin`
+(default: the epoch). The bucket can be given as a `CATime::Grid` — passed
+positionally or as `unit:` — or as the loose keyword pair, which is what the
+examples here spell out.
 With no `unit` the bucket is the storage resolution itself, so the result is a
 copy of the raw tick indices since the epoch (the values behind
 `ticks`, §16.2). Everything else in this section is a thin layer on
@@ -927,7 +973,7 @@ An origin that does not land exactly on the grid the buckets are counted on
 **raises** rather than silently shifting the phase (§11.11), and a bare
 `Integer` origin is rejected (it is epoch-dependent and ambiguous).
 
-### 11.3 `floor` / `ceil` / `round` — snap to a bucket head
+### 11.3 `snap` / `floor` / `ceil` / `round` — snap to a bucket head
 
 These return a `CATime` (same unit) at the bucket boundary:
 
@@ -946,6 +992,16 @@ dt.round(unit: "3 hours", origin: t0).strftime("%H:%M")
 nearest head with ties toward the future, and is exact even for odd step widths
 (no half-tick loss). These take an argument, so they do **not** collide with the
 argument-less numeric `CArray#floor` / `#round`.
+
+All three are `snap` with `direction:` fixed — the shape `CArray#snap`
+(`step`, `offset:`, `direction:`) already has for numbers, with a grid
+standing in for the step-and-offset pair:
+
+```ruby
+dt.snap(g, direction: :floor)     # same as dt.floor(g)
+dt.snap(g)                        # :round is the default, as in CArray#snap
+dt.snap(g, direction: :nearest)   # => ArgumentError
+```
 
 ### 11.4 `is_righttime` — the on-grid guard
 
