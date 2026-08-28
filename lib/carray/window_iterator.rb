@@ -264,12 +264,14 @@ class CAWindowIterator < CAIterator
   # min_index / max_index (index within the window axes).
   [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
-    define_method(op) do |min_count: nil, fill_value: nil|
-      kw = {}
-      kw[:min_count]  = min_count  unless min_count.nil?
-      kw[:fill_value] = fill_value unless fill_value.nil?
-      sliding_view.send(op, axis: @window_axes, **kw)
-    end
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (min_count: nil, fill_value: nil)
+        kw = {}
+        kw[:min_count]  = min_count  unless min_count.nil?
+        kw[:fill_value] = fill_value unless fill_value.nil?
+        sliding_view.#{op}(axis: @window_axes, **kw)
+      end
+    RUBY
   end
 
   # @overload min_addr
