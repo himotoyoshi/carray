@@ -3,6 +3,12 @@
 Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 (1.4.x through 2.0.1) see [NEWS.md](NEWS.md).
 
+<!-- Newest first, at both levels: a new release section goes above the
+     ones below it, and a new entry goes directly under its own release
+     heading -- not at the end of the section. The kind of change is
+     carried by the `- Fix:` / `- Change:` / `- New:` that opens the
+     entry; there are no per-kind subheadings. -->
+
 ## 3.0.1 (unreleased)
 
 - Fix: `arange` ended in a call to a method that does not exist, so every
