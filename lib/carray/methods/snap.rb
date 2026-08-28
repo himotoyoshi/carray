@@ -45,7 +45,12 @@ class CArray
     # Detect NaN / Inf before rounding (which maps NaN -> 0.0 silently).
     invalid_mask = scaled.float? ? scaled.is_invalid : nil
 
-    out = scaled.send(direction) * step + offset
+    snapped = case direction
+              when :round then scaled.round
+              when :floor then scaled.floor
+              when :ceil  then scaled.ceil
+              end
+    out = snapped * step + offset
 
     if invalid_mask && invalid_mask.count(true) > 0
       out.mask = out.has_mask? ? (out.mask | invalid_mask) : invalid_mask
