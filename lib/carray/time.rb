@@ -66,6 +66,10 @@ module CATimeCivil
   end
 end
 
+# Unit algebra for the time surface: how two units relate (same group, which
+# is finer, what a difference is measured in) and how a tick count moves
+# between them -- by scaling for a duration, on the calendar for an instant.
+# Internal to the time surface: nothing here is part of the public API.
 module CATimeUnitAlgebra
   # seconds per base unit (Rational)
   FIXED = {
@@ -1910,7 +1914,9 @@ module CATimeGrid
   # the civil path targets these for a calendar bucket).
   SU_LE_DAY = %i[D h m s ms us ns ps fs as].freeze
 
+  # Smallest value an int64 storage tick can hold.
   INT64_MIN = -(2**63)
+  # Largest value an int64 storage tick can hold.
   INT64_MAX =  2**63 - 1
 
   # Raise (rather than let an int64 CArray operand silently wrap) if a
@@ -2297,6 +2303,8 @@ class CATime
 
     # A regular series on this grid.
     def range(start, last) = CArray.time_range(start, last, unit: @storage, step: @unit)
+    # A regular series on this grid: +count+ elements from +start+, one per
+    # tick.
     def series(start, count:) = CArray.time_series(start, count: count, unit: @storage, step: @unit)
 
     # @return [String] "12 hours since 2017-11-30 09:00:00", which {.parse}
@@ -2307,9 +2315,17 @@ class CATime
       @origin ? "#{spec} since #{@origin.to_time.strftime('%Y-%m-%d %H:%M:%S')}" : spec
     end
 
+    # @return [String] the {#to_s} spec, wrapped for the console.
     def inspect = "#<CATime::Grid #{self}>"
+
+    # Two grids are equal when they place ticks in the same places: same
+    # timestep, same origin.
+    # @return [Boolean]
     def ==(other) = other.is_a?(Grid) && other.unit == @unit && other.to_s == to_s
     alias eql? ==
+
+    # Hashes with {#==}, so a grid works as a Hash key.
+    # @return [Integer]
     def hash = [@unit, to_s].hash
 
     private
