@@ -173,7 +173,7 @@ A nested `FixedSizeList(FixedSizeList(K), N)` just adds another trailing axis
 object, not a column) is the mirror of §9.1's Tensor export. Unlike
 the FixedSizeList column path, `Arrow::Tensor` does not implement the
 MemoryView protocol on the producer side (verified: `from_memory_view`
-rejects it — a red-arrow-side gap symmetric with §8 and §9.7). The
+rejects it — a red-arrow-side gap, the same one §9.7 hits on export). The
 recipe uses `load_binary` directly on the tensor's underlying byte
 buffer:
 
@@ -719,16 +719,41 @@ the intended idiom.
 
 ---
 
-## 8. Acquisition note (known gap)
+## 8. Acquisition note — the validity buffer stays in the byte domain
 
-The values buffer imports through MemoryView, but the **validity
-buffer does not**: red-arrow exposes it with the MemoryView format
-`b8`, which `CArray.wrap_memory_view` / `from_memory_view` currently
-reject. That is why the bitmap is fetched with `bitmap.data.to_s` +
-`load_binary` (two copies of `n/8` bytes, ~14 µs at `n` = 1M) instead
-of a zero-copy wrap. It is a small fraction of the total and does not
-affect correctness; teaching the MemoryView format parser to accept
-`b8` as a `uint8` reinterpret would remove it.
+The values buffer imports through MemoryView; the **validity buffer
+does not**, and that is a boundary rather than an omission.
+
+red-arrow declares the bitmap with the MemoryView format `b8` — a
+*bit*-addressed element. CArray does not represent sub-byte elements in
+MemoryView in either direction: it does not emit `bitarray` / `bitfield`
+as a MemoryView (see "Not emitted" in
+[MemoryViewFormat.md](MemoryViewFormat.md)), and it does not accept a bit
+format on input. `wrap_memory_view` / `from_memory_view` declining `b8`
+is that same contract read from the consumer side.
+
+Nor would accepting it fall under the consumer's Postel rule. The
+spellings that rule admits (`b`/`B`/`h`/`H`, `l`/`L`, `s!`/`i!`/`l!`/`q!`)
+all name the *same element at the same width* under a different name.
+`b8` names a different element: the buffer holds `n` bits in `n/8` bytes,
+so reading it as `uint8` reinterprets both the count and the width.
+That is overriding the producer's declaration, not being liberal about
+how it is spelled.
+
+So the bitmap arrives as bytes instead, through the on-ramp of §4.2:
+
+```ruby
+bytes = CArray.uint8(bitmap.size)
+bytes.load_binary(bitmap.data.to_s)
+```
+
+Two copies of `n/8` bytes, ~14 µs at `n` = 1M — a small fraction of the
+total (§7). And it is not a detour: `load_binary` + `bitarray` is CArray's
+general foreign-bitmap decoder (§4.2), the byte domain is where the
+inversion belongs anyway (§4.4), and packed bits held as `uint8` is how
+CArray carries its *own* packed bits. A zero-copy wrap of the bitmap
+would save a fraction of §7's floor while giving up the one thing the
+format contract is for — that a view means what it says it means.
 
 ---
 
@@ -956,15 +981,14 @@ the chunk structure without materialising the whole column first.
 `String` with `BINARY` encoding) or `GLib::Bytes`; it does not accept
 MemoryView producers. So the values buffer costs one `dump_binary`
 copy of `n` bytes on every export, even though CArray exports
-MemoryView. This is symmetric with §8 — the import side has the same
-gap for the *validity* buffer (Arrow's `b8` MemoryView format is
-rejected by `from_memory_view`); the export side inherits it for the
-*values* buffer.
+MemoryView. It is the same missing capability §3.1's Tensor note hits
+on import — red-arrow neither consumes nor produces MemoryView for its
+buffers — and it is unrelated to §8, which is a contract CArray holds
+deliberately rather than a capability anyone is missing.
 
 A red-arrow patch teaching `Arrow::Buffer.new` (or a companion
 `Arrow::Buffer.from_memory_view`) to accept an MV producer would close
-both directions. Until then, one `dump_binary` per column is the cost
-on export.
+it. Until then, one `dump_binary` per column is the cost on export.
 
 ---
 
