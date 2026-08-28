@@ -294,6 +294,37 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
                   "1990-01-03T00:00:00Z"], df["t"].to_a.map(&:to_s)
   end
 
+  def test_to_time_takes_a_grid
+    # the same netCDF axis, with the units attribute passed as one value
+    df = CAFrame.new("t" => CA_INT64([0, 24, 48]))
+    assert_same df, df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
+    assert_equal ["1990-01-01T00:00:00Z", "1990-01-02T00:00:00Z",
+                  "1990-01-03T00:00:00Z"], df["t"].to_a.map(&:to_s)
+    # `unit:` takes a grid too, for a call site that already spells the keyword
+    df = CAFrame.new("t" => CA_INT64([0, 1]))
+    df.to_time("t", unit: CATime::Grid.parse("12 hours since 2017-11-30 09:00"))
+    assert_equal ["2017-11-30T09:00:00Z", "2017-11-30T21:00:00Z"],
+                 df["t"].to_a.map(&:to_s)
+  end
+
+  def test_to_time_grid_keeps_an_epoch_phase_the_keyword_form_drops
+    values = CA_INT64([0, 1, 2])
+    grid   = CAFrame.new("t" => values.copy)
+    grid.to_time("t", CATime::Grid.parse("days since 1980-01-01 12:00"))
+    assert_equal ["1980-01-01 12:00", "1980-01-02 12:00", "1980-01-03 12:00"],
+                 grid["t"].strftime("%Y-%m-%d %H:%M").to_a
+    # the keyword epoch is read on the unit grid, so the time of day is lost
+    keyword = CAFrame.new("t" => values.copy)
+    keyword.to_time("t", unit: :D, epoch: "1980-01-01 12:00")
+    assert_equal ["1980-01-01 00:00", "1980-01-02 00:00", "1980-01-03 00:00"],
+                 keyword["t"].strftime("%Y-%m-%d %H:%M").to_a
+  end
+
+  def test_to_time_rejects_a_positional_argument_that_is_not_a_grid
+    df = CAFrame.new("t" => CA_INT64([0, 1]))
+    assert_raise(ArgumentError) { df.to_time("t", "days since 1990-01-01") }
+  end
+
   def test_to_time_whole_float_accepted
     df = CAFrame.new("t" => CA_FLOAT64([1.0, 2.0]))
     df.to_time("t", unit: :D, epoch: "1899-12-30") # Excel serial date
