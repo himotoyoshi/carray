@@ -748,3 +748,91 @@ class TestCAFrameJoinAsof < Test::Unit::TestCase
     assert_equal 60.0, j["dbz"][1]
   end
 end
+
+class TestCAFrameToTable < Test::Unit::TestCase
+  def setup
+    @df = CAFrame.new(
+      { "station" => CA_OBJECT(["tokyo", "osaka", "naha"]),
+        "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]) },
+      index: CA_INT32([10, 11, 12]), axis_name: "id"
+    )
+    @df["temp"][1] = UNDEF
+  end
+
+  def test_header_rule_and_alignment
+    lines = @df.to_table.split("\n")
+    assert_equal "id  station  temp", lines[0]
+    assert_equal "--  -------  ----", lines[1]
+    assert_equal "10  tokyo    22.1", lines[2] # numeric right, string left
+  end
+
+  def test_masked_cell_shows_underscore
+    assert_equal "11  osaka       _", @df.to_table.split("\n")[3]
+  end
+
+  def test_index_can_be_dropped
+    lines = @df.to_table(index: false).split("\n")
+    assert_equal "station  temp", lines[0]
+  end
+
+  def test_nd_column_shows_row_slice
+    df = CAFrame.new("wind" => CA_FLOAT64([[1.0, 2.0], [3.0, 4.0]]))
+    assert_equal "[1.0, 2.0]", df.to_table.split("\n")[2]
+  end
+
+  def test_long_frame_truncates_with_ellipsis_row
+    df = CAFrame.new("i" => CArray.int32(100) { |i| i })
+    lines = df.to_table(rows: 4).split("\n")
+    assert_equal ["i", "--", "0", "1", ":", "98", "99",
+                  "(100 rows, 1 variable)"],
+                 lines.map(&:strip)
+  end
+
+  def test_rows_nil_prints_every_row
+    df = CAFrame.new("i" => CArray.int32(50) { |i| i })
+    lines = df.to_table(rows: nil).split("\n")
+    assert_equal 52, lines.size # header + rule + 50 rows, no footer
+  end
+
+  def test_to_s_is_the_whole_frame
+    df = CAFrame.new("i" => CArray.int32(50) { |i| i })
+    assert_equal df.to_table(rows: nil), df.to_s
+    assert_equal 52, df.to_s.split("\n").size # every row, no ellipsis
+  end
+
+  def test_inspect_is_the_summary_line_over_a_middle_elided_table
+    df = CAFrame.new("i" => CArray.int32(50) { |i| i })
+    lines = df.inspect.split("\n")
+    assert_equal "#<CAFrame nrow=50 vars=[i:int32]>", lines[0]
+    assert_equal 14, lines.size          # summary + header + rule + 8 + ellipsis + 2
+    assert_equal ":", lines[11].strip    # elided middle
+    assert_equal "48", lines[12].strip   # tail is the last two rows
+    assert_equal "49", lines[13].strip
+    assert_nil lines.find { |l| l.include?("rows,") } # no footer, summary has it
+  end
+
+  def test_inspect_of_a_frame_with_no_variables_is_the_summary_alone
+    assert_equal "#<CAFrame nrow=0 vars=[]>", CAFrame.new({}).inspect
+  end
+
+  def test_wide_characters_count_two_cells
+    df = CAFrame.new("name" => CA_OBJECT(["\u5b97\u8c37\u5cac", "Naha"]))
+    lines = df.to_table.split("\n")
+    assert_equal "name", lines[0] # widest cell is 6 (three ideographs)
+    assert_equal "------", lines[1]
+    assert_equal "\u5b97\u8c37\u5cac", lines[2] # three ideographs = six cells, trailing pad stripped
+    assert_equal "Naha", lines[3]
+  end
+
+  def test_float_cells_are_rounded_for_display
+    df = CAFrame.new("lat" => CA_FLOAT64([24.466666666666665, 45.415]))
+    lines = df.to_table.split("\n")
+    assert_equal "24.466667", lines[2] # default precision 6
+    assert_equal "45.415",    lines[3].strip # no trailing zeros added
+    assert_equal "24.466666666666665", df.to_table(precision: nil).split("\n")[2]
+  end
+
+  def test_frame_with_no_variables_is_empty_string
+    assert_equal "", CAFrame.new({}).to_table
+  end
+end
