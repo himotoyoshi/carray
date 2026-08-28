@@ -724,21 +724,27 @@ the intended idiom.
 The values buffer imports through MemoryView; the **validity buffer
 does not**, and that is a boundary rather than an omission.
 
-red-arrow declares the bitmap with the MemoryView format `b8` — a
-*bit*-addressed element. CArray does not represent sub-byte elements in
-MemoryView in either direction: it does not emit `bitarray` / `bitfield`
-as a MemoryView (see "Not emitted" in
-[MemoryViewFormat.md](MemoryViewFormat.md)), and it does not accept a bit
-format on input. `wrap_memory_view` / `from_memory_view` declining `b8`
-is that same contract read from the consumer side.
+It is not that `b` is unknown to the consumer. CArray takes a bare `b`
+happily, as PEP 3118's signed char — `int8`, with `B` as `uint8` (the
+private `__memory_view_parse_format__` test hook shows this directly).
+What it declines is red-arrow's
+`b8` — pack's bit-string form, `b` carrying a *bit* count: an element of
+eight booleans in one byte. That is a sub-byte element, and CArray does
+not represent sub-byte elements in MemoryView in either direction; it
+does not emit `bitarray` / `bitfield` as a view either (see "Not emitted"
+in [MemoryViewFormat.md](MemoryViewFormat.md)). Declining `b8` is that
+same contract read from the consumer side.
 
-Nor would accepting it fall under the consumer's Postel rule. The
-spellings that rule admits (`b`/`B`/`h`/`H`, `l`/`L`, `s!`/`i!`/`l!`/`q!`)
-all name the *same element at the same width* under a different name.
-`b8` names a different element: the buffer holds `n` bits in `n/8` bytes,
-so reading it as `uint8` reinterprets both the count and the width.
-That is overriding the producer's declaration, not being liberal about
-how it is spelled.
+Nor is it a spelling the consumer's Postel rule can absorb. The synonyms
+that rule admits (`b`/`B`/`h`/`H`, `l`/`L`, `s!`/`i!`/`l!`/`q!`) all name
+the *same element* under a different name. `b8` names a different one.
+
+The bytes underneath do line up — eight bits LSB-first in one byte is,
+byte for byte, a `uint8`, which is exactly why the acquisition below is
+lossless and costs so little. But a coinciding layout is not a declared
+identity. Reading `b8` as `uint8` would have CArray assert an element the
+producer never claimed, in the one place whose whole job is to say what
+an element is.
 
 So the bitmap arrives as bytes instead, through the on-ramp of §4.2:
 
@@ -750,10 +756,9 @@ bytes.load_binary(bitmap.data.to_s)
 Two copies of `n/8` bytes, ~14 µs at `n` = 1M — a small fraction of the
 total (§7). And it is not a detour: `load_binary` + `bitarray` is CArray's
 general foreign-bitmap decoder (§4.2), the byte domain is where the
-inversion belongs anyway (§4.4), and packed bits held as `uint8` is how
-CArray carries its *own* packed bits. A zero-copy wrap of the bitmap
-would save a fraction of §7's floor while giving up the one thing the
-format contract is for — that a view means what it says it means.
+inversion belongs anyway (§4.4), and packed bits carried as `uint8` is
+what CArray does with its own. The unpacking that follows is the same
+work either way; a zero-copy wrap would save the 14 µs, not the §7 floor.
 
 ---
 
