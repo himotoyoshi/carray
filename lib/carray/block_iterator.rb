@@ -281,7 +281,11 @@ class CABlockIterator < CAIterator
   #   Per-tile position of the maximum (tile-local flat index).
   #   @return [CArray]
   [:min_index, :max_index].each do |op|
-    define_method(op) { assemble { |view, _| view.send(op, axis: @tile_axes) } }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        assemble { |view, _| view.#{op}(axis: @tile_axes) }
+      end
+    RUBY
   end
 
   # @overload min_addr
