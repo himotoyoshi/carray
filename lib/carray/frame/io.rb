@@ -152,6 +152,9 @@ class CAFrame
     to_table(rows: nil)
   end
 
+  # The summary line (nrow, variable data types, index) followed by the
+  # middle-elided table.
+  # @return [String]
   def inspect
     parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
     idx = @index ? " index=#{@axis_name.inspect}" : ""
