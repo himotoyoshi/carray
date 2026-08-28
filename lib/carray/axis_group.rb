@@ -612,7 +612,7 @@ class CAGroupIterator
       unless value.respond_to?(op)
         raise NotImplementedError, "axis_group scan: value has no ##{op}"
       end
-      return value.send(op)
+      return value.public_send(op)
     end
     unless fused.empty?
       raise ArgumentError,
@@ -630,7 +630,7 @@ class CAGroupIterator
   # operation, and remains a follow-up.
   def order_stat (op, args, kw)
     has_group, fused = AxisGroup.parse_axis(kw[:axis])
-    return value.send(op, *args) unless has_group
+    return value.public_send(op, *args) unless has_group
     unless fused.empty?
       raise NotImplementedError,
             "axis_group: folding a band into an order statistic (axis: [:group, k]) " \
@@ -651,13 +651,13 @@ class CAGroupIterator
     ccat, kdims, gslots, bslots, gaxes = composite_layout
     nout = (op == :quantile) ? 5 : 1
     if bslots.empty?
-      res = value.group_by_category(ccat).send(op, *args)
+      res = value.group_by_category(ccat).public_send(op, *args)
       return nout == 1 ? res.reshape(*kdims) : res.map { |r| r.reshape(*kdims) }
     end
     out_shape = spec.slot_meta.map { |m| m[:kind] == :group ? m[:k] : m[:len] }
     outs = Array.new(nout) { CArray.float64(*out_shape) }
     each_band_block(ccat, gslots, bslots, gaxes) do |_vi, out_idx, _co, gi|
-      result = gi.send(op, *args)
+      result = gi.public_send(op, *args)
       if nout == 1
         outs[0][*out_idx] = result.reshape(*kdims)
       else

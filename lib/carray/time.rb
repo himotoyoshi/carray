@@ -1228,7 +1228,7 @@ class CATime
   # the centroid of month numbers (a caller wanting the day-space answer
   # writes to_unit(:D) first) -- and the result is rounded back to a tick.
   def reduce_on_own_grid(op, kind, args, opts)
-    round_and_relift(parent.send(op, *args, **opts), kind)
+    round_and_relift(parent.public_send(op, *args, **opts), kind)
   end
 
   # Round-to-nearest onto the storage grid, then wear the Face again.  An

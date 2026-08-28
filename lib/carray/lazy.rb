@@ -533,7 +533,7 @@ class CArray
     if __lazy_view__?
       dt_name = data_type_name
       if CScalar.respond_to?(dt_name)
-        s = CScalar.send(dt_name)
+        s = CScalar.public_send(dt_name)
         s[0] = other
         [s, self]
       else

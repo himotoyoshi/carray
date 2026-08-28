@@ -190,7 +190,7 @@ class CAMeld
   # is unchanged.  (Reduced axis == meld_axis is handled by the callers'
   # meld_axis branch and never reaches here.)
   def non_meld_axis_decompose(op, axis)
-    parts = parents.map { |p| p.send(op, axis: axis) }
+    parts = parents.map { |p| p.public_send(op, axis: axis) }
     axis_norm = axis < 0 ? axis + ndim : axis
     new_meld_axis = axis_norm < meld_axis ? meld_axis - 1 : meld_axis
     CArray.meld(parts, axis: new_meld_axis).copy

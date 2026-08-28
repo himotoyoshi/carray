@@ -184,7 +184,7 @@ class CABlockIterator < CAIterator
 
   # Fold every region with a single core reduction `op` (the tier-1 shape).
   def fold (op, **kw)
-    assemble { |view, _tiles| view.send(op, axis: @tile_axes, **kw) }
+    assemble { |view, _tiles| view.public_send(op, axis: @tile_axes, **kw) }
   end
 
   public
@@ -313,7 +313,7 @@ class CABlockIterator < CAIterator
     each_region do |strip_ranges, tiles, out_ranges|
       vview = @source[*strip_ranges].block_view(*tiles)
       sview = saddr[*strip_ranges].block_view(*tiles)
-      mi    = vview.send(idx_op, axis: @tile_axes)         # tile-local flat index
+      mi    = vview.public_send(idx_op, axis: @tile_axes)  # tile-local flat index
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
       safe  = mi.copy
@@ -556,7 +556,7 @@ class CABlockIterator < CAIterator
     pgv  = nil
     CArray.each_index(*@shape) do |*g|
       tile    = tgv[*g, *nils]
-      scanned = tile.copy.reshape(tile.elements).send(op).reshape(*@sizes)
+      scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
       unless pout
         pout = CArray.new(scanned.data_type, padded_source.shape)
         pout[] = UNDEF

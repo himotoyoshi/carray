@@ -31,7 +31,7 @@ module AutoloadMethodExtension
   private
 
   def autoload_define (target, name, library, original_spec)
-    target.send(:define_method, name) do |*args, **kwargs, &block|
+    target.define_method(name) do |*args, **kwargs, &block|
       begin
         require library
       rescue LoadError
