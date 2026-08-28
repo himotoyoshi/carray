@@ -51,7 +51,11 @@ class CArray
     [Float, Integer, Rational].each do |klass|
       refine(klass) do
         MATH_METHODS.each do |m|
-          define_method(m) { Math.send(m, self) }
+          module_eval <<~RUBY, __FILE__, __LINE__ + 1
+            def #{m}
+              Math.#{m}(self)
+            end
+          RUBY
         end
         def rad
           self.to_f * Math::PI / 180.0

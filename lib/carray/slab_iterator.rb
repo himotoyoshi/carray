@@ -105,7 +105,11 @@ class CASlabIterator < CAIterator
   [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index,
    :min_addr, :max_addr].each do |op|
-    define_method(op) { @reference.send(op, axis: @slab_axes) }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        @reference.#{op}(axis: @slab_axes)
+      end
+    RUBY
   end
 
   # @overload count(v = <none>)
@@ -267,7 +271,11 @@ class CASlabIterator < CAIterator
   #   Per-slab running count of present cells (int64), reference-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { @reference.send(op, axis: single_scan_axis(op)) }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        @reference.#{op}(axis: single_scan_axis(:#{op}))
+      end
+    RUBY
   end
 
   private
