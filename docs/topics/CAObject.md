@@ -138,8 +138,10 @@ deep nested Ruby array).
 | `sync_block(starts, counts, steps, data)`    | Write `data` back to that same sub-region.                                 |
 | `copy_addrs(addrs, data)`                    | Gather an arbitrary flat-address list into `data` in one call.             |
 | `sync_addrs(addrs, data)`                    | Scatter `data` back to that address list.                                  |
+| `fill_block(starts, counts, steps, val)`     | Broadcast one value into that same sub-region.                             |
+| `fill_addrs(addrs, val)`                     | Broadcast one value to that address list.                                  |
 
-All four are **optional** — define only what your backing can speed up.
+All six are **optional** — define only what your backing can speed up.
 The engine dispatches as a fallback chain:
 
 1. **`copy_block` first.** If you define it and the request can be
@@ -191,6 +193,30 @@ them only if your array is writable (see *Writable arrays* below).
   user's `addrs.each_with_index { |a, i| backing[a] = data[i] }`).
 - **`data` is a 1-D CArray** of length `addrs.elements`, data_type = self.
 
+#### `fill_block` / `fill_addrs` user notes
+
+`fill_data` carries no region, so it can only say *fill everything I
+cover*. These two say *fill this part of me*, and they take the same two
+shapes as the readers: `fill_block` when the region is a forward per-axis
+sub-region of self, `fill_addrs` when it is not (transpose, descending
+range, a region that drops an axis).
+
+- **`val` is a single Ruby value**, as for `fill_data` — it does not
+  scale with the region, so nothing `counts`-shaped is handed over.
+- **`starts` / `counts` / `steps` mean what they mean in `copy_block`**,
+  and `addrs` what it means in `copy_addrs`.
+- The chain is the same: `fill_block`, then `fill_addrs`, then one
+  `store_addr` per cell. A partial fill **never** escalates to filling
+  the whole view, whichever rung it lands on — the per-cell floor already
+  touched only the cells the caller named. What these buy is the cost of
+  getting there.
+
+```ruby
+def fill_block (starts, counts, steps, val)
+  @buf[*starts.zip(counts, steps)] = val
+end
+```
+
 Define partial callbacks when your backing has *bulk granularity* that
 the per-cell loop cannot exploit — most often when the backing is a
 lazy data source where a single round-trip costs the same as fetching
@@ -216,9 +242,12 @@ The bulk write methods are optional opt-ins (same fallback story as
 |--------------------------|------------------------------------------------------------|
 | `sync_data(data)`        | Write a whole CArray buffer back (used by attach/sync).    |
 | `fill_data(value)`       | Broadcast a single value to every element.                 |
+| `fill_block(...)`        | Broadcast a single value into part of the array.           |
+| `fill_addrs(addrs, val)` | Broadcast a single value to an address list.               |
 
 When undefined, the engine loops the corresponding `store_addr` over
-every element. Override them only when you can do meaningfully faster
+every element the request names (see *partial-region fast paths* above
+for the region forms). Override them only when you can do meaningfully faster
 than a Ruby-callback-per-element loop.
 
 Pass `read_only: true` to `super` (see *Constructor options* below) to

@@ -11,6 +11,19 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: a CAObject can take a partial fill as a region. `fill_data` carries no
+  region and can only say "fill everything I cover", so writing one value into
+  part of a CAObject had nowhere to go but one `store_addr` per cell -- a
+  1000x1000 region meant a million Ruby calls. Two optional callbacks now take
+  the region instead: `fill_block(starts, counts, steps, val)` when it is a
+  forward per-axis sub-region of self, `fill_addrs(addrs, val)` when it is not.
+  Defining neither leaves the old behaviour unchanged. The same two slots are
+  delegated to the parent by every Face (CATime, CATimedelta, CAString,
+  CAConstString, CAFixlenString, CARecord), which had been falling to the
+  per-cell default as well even when the parent could take the whole region at
+  once. Measured on a 2000x2000 CAObject filling a 1000x1000 region: 116 ms to
+  0.6 ms.
+
 - Fix: a Face no longer hands back its storage bytes through the view side of
   the type casts. `as_type`, `fake` and `CArray.wrap_writable` raise instead of
   reinterpreting the storage a surface exists to hide, and `CArray.wrap_readonly`

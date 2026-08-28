@@ -34,7 +34,8 @@
                via parent)
      - detach: release ptr alias, parent detach
      - xfer_*: delegate to parent's xfer_* (= identical shape / index space)
-     - fill_data: delegate to parent's ca_fill (= identical storage bytes)
+     - fill_data / fill_*: delegate to parent (= identical storage bytes,
+       and the identity layout makes the parent's addresses ours)
 
    Subclasses may override as needed (= default policy, not an invariant;
    does not preclude a future transform Face). */
@@ -43,6 +44,9 @@ void ca_face_attach     (void *ap);
 void ca_face_sync       (void *ap);
 void ca_face_detach     (void *ap);
 void ca_face_fill_data  (void *ap, void *ptr);
+void ca_face_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr);
+void ca_face_fill_stride(void *ap, ca_size_t base, int8_t ndim,
+                                 ca_size_t *counts, ca_size_t *steps, void *ptr);
 void ca_face_xfer_index (void *ap, ca_size_t *idx,
                                  void *data, int dir);
 void ca_face_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,

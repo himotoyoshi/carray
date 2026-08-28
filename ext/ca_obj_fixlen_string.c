@@ -202,7 +202,9 @@ ca_operation_function_t ca_fixlen_string_func = {
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
   ca_face_xfer_stride,
-  ca_face_xfer_all
+  ca_face_xfer_all,
+  .fill_addrs  = ca_face_fill_addrs,
+  .fill_stride = ca_face_fill_stride,
 };
 
 /* ------------------------------------------------------------------- */
