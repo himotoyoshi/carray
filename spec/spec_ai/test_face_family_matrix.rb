@@ -359,13 +359,73 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
 
   # ---- 5. the matrix covers every Face in tree --------------------------
 
-  def test_every_face_in_tree_is_in_the_matrix
-    # docs/topics/CAFace.md §9 lists the Faces; CARecord is the one left out
-    # (its ordering / discovery wiring is still future work), so it is named
-    # here rather than silently missing.
+  # A Face left out of FACES is a hole the rest of this file cannot see, so the
+  # roster is read back out of the tree rather than kept by hand.  There are two
+  # ways to be a Face and only the first is visible from the class tree:
+  #
+  #   - inheriting CAFace                       -- structural, enumerable
+  #   - a CAObject subclass that opts in        -- CA_FLAG_IS_FACE is set per
+  #     instance at initialize time, so the class alone does not say
+  #
+  # So CAFace descendants are enumerated directly, and CAObject subclasses are
+  # enumerated as candidates that must each be either covered or declared not a
+  # Face.  Either way, adding a Face to the tree fails here until FACES grows.
+
+  # Faces in tree that the matrix does not exercise, with the reason.  Naming
+  # one here is a claim that has to be paid off, not a way to stay quiet.
+  DOCUMENTED_OMISSIONS = {
+    "CARecord" => "ordering / discovery wiring is still future work",
+  }
+
+  # CAObject subclasses that are not Faces (they never opt in).
+  NON_FACE_CAOBJECT_SUBCLASSES = [].freeze
+
+  # The whole of spec_ai is required into one process, and several files define
+  # CAObject subclasses as fixtures.  Those are not part of the tree, so a
+  # candidate is kept only when the constant was first defined under lib/ or in
+  # the extension itself -- which is exactly what "in tree" means here.
+  IN_TREE_ROOTS = %w[lib ext].map { |d| File.expand_path("../../#{d}", __dir__) }
+
+  def in_tree_subclasses_of (klass)
+    ObjectSpace.each_object(Class).select { |k|
+      next false unless k.name && k != klass && k < klass
+      loc = Object.const_source_location(k.name)
+      path = loc && loc[0]
+      path && IN_TREE_ROOTS.any? { |root| path.start_with?(root + File::SEPARATOR) }
+    }.map(&:name).sort
+  end
+
+  def test_every_caface_descendant_is_in_the_matrix
     covered = FACES.map { |f| f[:name] }
-    assert_equal %w[CATime CATimedelta CAString CAConstString CAFixlenString
-                    CACategorical], covered
-    assert_equal true, defined?(CARecord) ? true : true   # documented omission
+    accounted = covered + DOCUMENTED_OMISSIONS.keys
+    unaccounted = in_tree_subclasses_of(CAFace) - accounted
+    assert_equal [], unaccounted,
+                 "a CAFace descendant is neither in FACES nor a documented omission"
+  end
+
+  def test_every_caobject_subclass_is_accounted_for
+    covered = FACES.map { |f| f[:name] }
+    accounted = covered + DOCUMENTED_OMISSIONS.keys +
+                NON_FACE_CAOBJECT_SUBCLASSES
+    unaccounted = in_tree_subclasses_of(CAObject) - accounted
+    assert_equal [], unaccounted,
+                 "a CAObject subclass may opt in to being a Face: cover it in " \
+                 "FACES or declare it in NON_FACE_CAOBJECT_SUBCLASSES"
+  end
+
+  # The roster above is read from the class tree, which cannot tell an opted-in
+  # CAObject Face from a plain one.  What the flag actually says is checked on
+  # the instances the matrix builds.
+  def test_every_row_builds_something_that_is_a_face
+    each_face do |face, a|
+      assert_equal true, a.face?, "#{face[:name]} is in FACES but is not a Face"
+    end
+  end
+
+  def test_documented_omissions_are_still_in_tree
+    DOCUMENTED_OMISSIONS.each_key do |name|
+      assert_equal true, Object.const_defined?(name),
+                   "#{name} is named as a documented omission but is gone"
+    end
   end
 end
