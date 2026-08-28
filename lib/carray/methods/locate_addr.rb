@@ -35,7 +35,12 @@ class CArray
       fill[] = sec.nil? ? UNDEF : sec
       sec = fill
     end
-    si = sec.mask_invalid.send(direction).int64
+    masked = sec.mask_invalid
+    si = case direction
+         when :round then masked.round
+         when :floor then masked.floor
+         when :ceil  then masked.ceil
+         end.int64
     idx = ri.project(si)
     if tolerance
       dist = (ref.project(idx) - self).abs
