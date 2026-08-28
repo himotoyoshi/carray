@@ -781,6 +781,16 @@ back as Ruby values decodes through this hook, so it yields the surface:
   **surface values**: labels rather than codes, `CATime::Element` rather
   than serials, the string rather than the `(start, end)` descriptor. The
   same rule data_class arrays (`CARecord` / `CAStruct`) have always had.
+- `as_type` / `fake` / `CArray.wrap_readonly` / `CArray.wrap_writable` —
+  these reinterpret storage under another `data_type`, and no view
+  decodes a surface, so none of them may answer with the bytes. The one
+  that never promised a view answers with the conversion `to_type`
+  performs: `wrap_readonly` gives the surface values for `:object` and
+  `#to_numeric` for a numeric type, which is what makes a Face usable as
+  an operand of a plain array without silently arriving as bytes.
+  `as_type`, `fake` and `wrap_writable` raise, naming both ways down.
+  A Numeric Face asked for another numeric type is not affected — its
+  surface is its storage, so the ordinary adapting view is right.
 
 The storage stays reachable, deliberately and explicitly, through
 `.parent` — `td.parent.to_a` gives the serials, and it keeps the fast

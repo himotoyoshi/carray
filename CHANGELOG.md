@@ -11,6 +11,20 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: a Face no longer hands back its storage bytes through the view side of
+  the type casts. `as_type`, `fake` and `CArray.wrap_writable` raise instead of
+  reinterpreting the storage a surface exists to hide, and `CArray.wrap_readonly`
+  -- which already returns entities for its non-CArray inputs -- answers with
+  the conversion `to_type` performs: the surface values for `:object`, the
+  Face's own `#to_numeric` for a numeric type. The eager `to_type` had made
+  these judgements all along; only the view side was missing them, so
+  `t.fake(:object)` gave `"\vM\x00..."` where `t.to_type(:object)` gave
+  `CATime::Element`s. Because operand coercion goes through `wrap_readonly`,
+  the same comparison used to answer differently depending on which side the
+  Face was on -- `t.eq(o)` refused loudly while `o.eq(t)` silently compared
+  byte strings. The storage stays reachable, spelled out: `t.parent.fake(...)`.
+  A Numeric Face, whose surface is its storage, is unaffected.
+
 - New: `CAFrame#to_table` renders the frame as an aligned text table, and
   `inspect` / `to_s` sit on it: `p df` is the summary line over the first 8 and
   last 2 rows, `puts df` is the whole frame. Masked cells show as `_`, N-D

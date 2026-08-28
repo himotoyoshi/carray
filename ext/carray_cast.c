@@ -773,16 +773,62 @@ extern VALUE rb_ca_monop_build (VALUE cary, uint16_t op_id);
 /* Forward declaration: clip kernel (ext/carray_kernels.c, generated).  */
 extern VALUE rb_ca_clip (VALUE self, VALUE lo, VALUE hi);
 
+/* Which surface asked for a type-adapt view.  A Face's cells do not mean
+   their storage bytes and there is no view that decodes them, so each
+   caller says what it does instead of reinterpreting the storage.  */
+enum {
+  CA_ADAPT_VIEW,        /* as_type: the values are behind #to_type */
+  CA_ADAPT_READONLY,    /* wrap_readonly: the eager conversion is the answer */
+  CA_ADAPT_WRITABLE     /* wrap_writable: writes have nowhere to land */
+};
+
 /* Routes a type-adapt view request to CAMonOp(cast_<dt>) when the
    target is a plain numeric data_type (NOT CA_FIXLEN, NOT CA_OBJECT,
    and `rtype` is not a Class).  Falls back to CAFake
    (`rb_ca_fake_type`) for CA_FIXLEN sizing, CA_OBJECT, and class-rtype
    data_class overlay cases.
    Called by rb_ca_as_type_internal, rb_ca_wrap_readonly, and
-   rb_ca_wrap_writable in this file.  */
+   rb_ca_wrap_writable in this file.
+
+   A Face whose surface is not its storage reaches neither: reinterpreting
+   the storage would hand back the bytes the surface exists to hide (the
+   serial instead of the time, the descriptor instead of the string).
+   wrap_readonly, which already returns entities for its non-CArray inputs,
+   answers with the eager conversion #to_type performs -- the surface values,
+   or the Face's own #to_numeric for a numeric target.  as_type and
+   wrap_writable have no honest answer and say so.  */
 static VALUE
-ca_type_adapt_view (VALUE obj, VALUE rtype, int8_t data_type)
+ca_type_adapt_view (VALUE obj, VALUE rtype, int8_t data_type, int mode)
 {
+  CArray *ca;
+
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
+
+  /* Same split the eager cast makes: :object is the Face's surface for every
+     Face, and a NonNumeric Face (CA_FIXLEN surface) has no reading of its
+     storage as a number either.  A Numeric Face falls through, because there
+     its surface *is* its storage and the ordinary cast below is right.  */
+  if ( ca_is_face(ca) && ( data_type == CA_OBJECT
+                           || ca->data_type == CA_FIXLEN ) ) {
+    VALUE args[1];
+    switch ( mode ) {
+    case CA_ADAPT_READONLY:
+      args[0] = rtype;
+      return rb_ca_to_type_internal(1, args, obj);
+    case CA_ADAPT_WRITABLE:
+      rb_raise(rb_eTypeError,
+               "%s has no writable view in another data_type: the writes "
+               "would land on the storage its surface hides -- wrap "
+               "#parent to reach that storage",
+               rb_obj_classname(obj));
+    default:
+      rb_raise(rb_eTypeError,
+               "%s has no view of its values in another data_type: "
+               "#to_type gives the values, #parent the raw storage",
+               rb_obj_classname(obj));
+    }
+  }
+
   if ( data_type != CA_FIXLEN
        && data_type != CA_OBJECT
        && TYPE(rtype) != T_CLASS ) {
@@ -815,7 +861,7 @@ rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
   /* Natural-width cast: dispatch via helper (CAMonOp for numeric,
      CAFake for CA_FIXLEN sizing / CA_OBJECT / class-rtype). */
   if ( bytes == (ca_size_t) ca_sizeof[data_type] ) {
-    obj = ca_type_adapt_view(self, rtype, data_type);
+    obj = ca_type_adapt_view(self, rtype, data_type, CA_ADAPT_VIEW);
     return obj;
   }
 
@@ -1075,7 +1121,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, rtype, data_type);
+      obj = ca_type_adapt_view(obj, rtype, data_type, CA_ADAPT_WRITABLE);
     }
   }
   else if ( NIL_P(obj) ) {                          /* obj == nil */
@@ -1113,7 +1159,8 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type);
+      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type,
+                               CA_ADAPT_WRITABLE);
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
@@ -1130,7 +1177,8 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type);
+      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type,
+                               CA_ADAPT_WRITABLE);
     }
   }
   else {
@@ -1171,7 +1219,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, rtype, data_type);
+      obj = ca_type_adapt_view(obj, rtype, data_type, CA_ADAPT_READONLY);
     }
   }
   else if ( rb_obj_is_kind_of(obj, rb_cNumeric) ) {  /* number */
@@ -1193,7 +1241,8 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type);
+      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type,
+                               CA_ADAPT_READONLY);
     }
   }
   else if ( TYPE(obj) == T_STRING ) {                /* string */
@@ -1234,7 +1283,8 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type);
+      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type,
+                               CA_ADAPT_READONLY);
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
@@ -1247,7 +1297,8 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
       data_type = rb_ca_guess_type(rtype);
     }
     if ( ca->data_type != data_type ) {
-      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type);
+      obj = ca_type_adapt_view(obj, INT2NUM(data_type), data_type,
+                               CA_ADAPT_READONLY);
     }
   }
   else {                                           /* object */
