@@ -724,18 +724,29 @@ df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
 # serial -> time: reinterpret integer counts since an epoch
 df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
 df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
+
+# the same pair as one value — a units attribute goes straight in
+df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
 - **`parse_to_time(name, format = nil, unit: :s)`** parses a
   string-bearing column (an object `CArray` of Strings, or a `CAString` /
   `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
   `UNDEF` (parse-mask). A non-string column raises.
-- **`to_time(name, unit:, epoch: nil)`** reads an integer column as counts
-  of `unit` resolution since `epoch` (default the Unix epoch). `epoch` takes any
-  time literal (String / `Time` / Integer), so columns measured from another
-  origin convert directly. A float column is accepted only when every value is
-  whole; a fractional serial raises (use a finer `unit`). A non-numeric column
-  raises.
+- **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
+  as counts of `unit` resolution since `epoch` (default the Unix epoch).
+  `epoch` takes any time literal (String / `Time` / Integer), so columns
+  measured from another origin convert directly. A float column is accepted
+  only when every value is whole; a fractional serial raises (use a finer
+  `unit`). A non-numeric column raises.
+
+  A [`CATime::Grid`](CATime.md) carries that (unit, epoch)
+  pair as one value — passed positionally or as `unit:` — so a netCDF `units`
+  attribute needs no taking apart. It also carries a phase the keyword form
+  cannot: the keyword `epoch` is read on the `unit` grid, so
+  `unit: :D, epoch: "1980-01-01 12:00"` loses the time of day, while
+  `CATime::Grid.parse("days since 1980-01-01 12:00")` resolves the finer
+  storage that holds it.
 
 There is no bundled "convert and index" verb — compose the conversion with
 `set_index`, keeping each step explicit.

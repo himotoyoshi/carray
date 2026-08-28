@@ -143,11 +143,28 @@ class CAFrame
   # carry, so it raises rather than silently truncate. Make it the index with
   # +set_index+ afterward.
   #
+  # A +CATime::Grid+ carries the same (unit, epoch) pair as one value, so a
+  # netCDF +units+ attribute goes straight in. It also carries a phase the
+  # keyword form cannot: the keyword +epoch+ is read on the +unit+ grid, so
+  # an epoch off that grid ("days since 1980-01-01 12:00") loses its
+  # time-of-day, while a grid resolves the finer storage that holds it.
+  #
   #   df.to_time("time", unit: :h, epoch: "1990-01-01").set_index("time")
-  def to_time(name, unit: :s, epoch: nil)
+  #   df.to_time("time", CATime::Grid.parse("hours since 1990-01-01"))
+  #   df.to_time("time", CATime::Grid.parse("days since 1980-01-01 12:00"))
+  def to_time(name, grid = nil, unit: :s, epoch: nil)
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     raw = integer_serial_column(col, key)
+    grid = unit if unit.is_a?(CATime::Grid)
+    if grid.is_a?(CATime::Grid)
+      @columns[key] = grid.at(raw)
+      return self
+    end
+    unless grid.nil?
+      raise ArgumentError,
+            "the positional argument must be a CATime::Grid (got #{grid.class})"
+    end
     if epoch
       raw = raw + CArray.time(epoch, unit: unit).ticks[0]
     end

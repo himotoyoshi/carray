@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `CAFrame#to_time` takes a `CATime::Grid`, positionally or as `unit:`,
+  instead of the `unit:` / `epoch:` pair, so a netCDF `units` attribute goes
+  in without being taken apart. The grid form also carries an epoch phase the
+  keyword form cannot: `unit: :D, epoch: "1980-01-01 12:00"` reads the epoch
+  on the day grid and loses the time of day, while
+  `CATime::Grid.parse("days since 1980-01-01 12:00")` resolves the finer
+  storage that holds it. The keyword form is unchanged.
+
 - New: `CATime::Grid` names the `(unit:, origin:)` pair that `#timesteps`,
   `#snap` and `.from_timesteps` already take -- a tick resolution and the
   instant tick 0 starts at -- so it is built once and passed as one value:
