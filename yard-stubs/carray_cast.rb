@@ -187,10 +187,17 @@ class CArray
   #   target. Use {#to_type} instead for parse-with-mask (an unparseable
   #   cell becomes UNDEF). The `CA_<TYPE>(obj)` construction shorthands
   #   take this same non-masking path.
+  #   A Face refuses: reinterpreting its storage would hand back the
+  #   bytes its surface exists to hide (the serial instead of the time, the
+  #   descriptor instead of the string), and no view decodes a surface. Take
+  #   the values with {#to_type}, or the storage with `face.parent.as_type`.
+  #   A Numeric Face, whose surface *is* its storage, adapts as usual.
   #   @param data_type [Symbol, Integer, Class, String] target element type.
   #   @param bytes [Integer, nil] element width in bytes, required for
   #     `:fixlen`.
   #   @return [CAFake]
+  #   @raise [TypeError] when `self` is a Face and the request would read its
+  #     storage under another type.
   def as_type(data_type, bytes: nil); end
 
   # @overload as_boolean
@@ -361,7 +368,9 @@ class CArray
   #
   #   When `data_type` differs from the source element type the result is a
   #   type-adapting view over the same storage, and a write reverse-casts
-  #   through to the source.
+  #   through to the source. A Face is refused for that same reason the
+  #   other way round: the writes would land on the storage its surface
+  #   hides. Wrap `face.parent` when that is what you mean.
   #   @param other [CArray, nil, Object] source to wrap.
   #   @param data_type [Symbol, Integer, Class, nil] target element type;
   #     `nil` keeps the source type (or `:object` when `other` is `nil`).
@@ -372,6 +381,8 @@ class CArray
   #   @raise [TypeError] when `other#to_ca` returns something that is not a
   #     CArray.
   #   @raise [ArgumentError] when `other#to_ca` does not accept `writable:`.
+  #   @raise [TypeError] when `other` is a Face and `data_type` differs from
+  #     its surface type.
   def self.wrap_writable(other, data_type = nil); end
 
   # @overload wrap_readonly(other, data_type = nil)
@@ -398,12 +409,18 @@ class CArray
   #   `data_type` omitted, anything that is not already CArray-shaped lands on
   #   `:object` rather than a guessed numeric type, so pass `data_type`
   #   explicitly when the value is headed for a numeric kernel.
+  #   A Face answers with the same conversion {#to_type} performs, since
+  #   nothing here promises a view: its surface values for `:object`, and its
+  #   own `#to_numeric` for a numeric type. Reading its storage instead is
+  #   `face.parent`.
   #   @param other [CArray, Numeric, String, Array, nil, Object] source to
   #     wrap.
   #   @param data_type [Symbol, Integer, Class, nil] target element type;
   #     `nil` keeps the source type for a CArray-shaped source, and is
   #     `:object` otherwise.
   #   @return [CArray]
+  #   @raise [TypeError] when `other` is a Face asked for a numeric type and
+  #     it declares no `#to_numeric`.
   def self.wrap_readonly(other, data_type = nil); end
 
   # @overload cast(value)

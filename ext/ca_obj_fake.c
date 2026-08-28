@@ -462,6 +462,17 @@ rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes)
   CAFake *ca;
   rb_check_carray_object(cary);
   TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
+  if ( ca_is_face(parent) && ( data_type == CA_OBJECT
+                               || parent->data_type == CA_FIXLEN ) ) {
+    /* A Face's cells do not mean their storage bytes, so reading them
+       under another data_type hands back what the surface exists to hide.
+       Both ways down stay open and say which one they are.  A Numeric Face
+       is not one of these: its surface is its storage. */
+    rb_raise(rb_eTypeError,
+             "%s has no view of its values in another data_type: "
+             "#to_type gives the values, #parent.fake the raw storage",
+             rb_obj_classname(cary));
+  }
   ca  = ca_fake_new(parent, data_type, bytes);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);

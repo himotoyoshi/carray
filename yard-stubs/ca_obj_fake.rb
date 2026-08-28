@@ -16,9 +16,16 @@ class CArray
   #   `data_type` (and `bytes:` for `:fixlen`).  Reads and writes go
   #   through the cast table, so the returned view shares storage
   #   with `self` but exposes it under a different data_type.
+  #   A Face refuses: its cells do not mean their storage bytes, so
+  #   reading them under another type hands back what the surface exists to
+  #   hide. Use {CArray#to_type} for the values, or `face.parent.fake` to
+  #   reinterpret the storage on purpose. A Numeric Face, whose surface *is*
+  #   its storage, is unaffected.
   #   @param data_type [Symbol, Integer, Class, String]
   #   @param bytes [Integer] element byte size for `:fixlen`.
   #   @return [CAFake]
+  #   @raise [TypeError] when `self` is a Face and the request would read its
+  #     storage under another type.
   def fake(data_type, bytes: 0); end
   # @!endgroup
 end
