@@ -246,6 +246,29 @@ class CArray
 
   alias cmp <=>
 
+  # Returns `[quotient, remainder]` element-wise.
+  #
+  # The quotient is floored toward -inf, so `q * other + r == self` holds
+  # for every sign combination -- the pair Ruby's `Integer#divmod` and
+  # `Float#divmod` return.  For integers that is `self / other` unchanged;
+  # for floats `/` is true division, so the quotient is floored here.
+  #
+  # @param other [CArray, Numeric] divisor.
+  # @return [Array<CArray>] the floored quotient and the remainder.
+  # @raise [ArgumentError] for complex arrays, which have no ordering to
+  #   floor toward.
+  # @example
+  #   CA_INT32([-7]).divmod(3)     # => [-3, 2]
+  #   CA_DOUBLE([-7.0]).divmod(3.0) # => [-3.0, 2.0]
+  def divmod(other)
+    if complex?
+      raise ArgumentError, "divmod is not defined for complex arrays"
+    end
+    q = self / other
+    q = q.floor unless q.integer?
+    [q, self % other]
+  end
+
   # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
   #   Returns `self` with every element clamped to `[min, max]`.
   #

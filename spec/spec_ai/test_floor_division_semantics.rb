@@ -140,6 +140,42 @@ class TestFloorDivisionSemantics < Test::Unit::TestCase
     assert_equal([2, -1, 1], (a % b).to_a)
   end
 
+  def test_divmod_matches_ruby
+    SIGN_CASES.each do |a, b|
+      q, r = CA_INT32([a]).divmod(b)
+      assert_equal(a.divmod(b), [q[0], r[0]], "#{a}.divmod(#{b})")
+    end
+  end
+
+  def test_divmod_identity
+    a = CA_INT32([-7, -1, 7])
+    q, r = a.divmod(3)
+    assert_equal(a.to_a, (q * 3 + r).to_a)
+  end
+
+  # The quotient keeps the receiver's data type rather than dropping to an
+  # Integer the way Ruby's Float#divmod does.
+  def test_divmod_floors_the_float_quotient
+    q, r = CA_DOUBLE([-7.0]).divmod(3.0)
+    assert_equal([-3.0], q.to_a)
+    assert_equal([2.0], r.to_a)
+  end
+
+  def test_divmod_array_divisor
+    q, r = CA_INT32([-7, -1, 7]).divmod(CA_INT32([3, 3, -3]))
+    assert_equal([-3, -1, -3], q.to_a)
+    assert_equal([2, 2, -2], r.to_a)
+  end
+
+  def test_divmod_object_lane
+    q, r = CA_OBJECT([Rational(7, 2)]).divmod(3)
+    assert_equal(Rational(7, 2).divmod(3), [q[0], r[0]])
+  end
+
+  def test_divmod_refuses_complex
+    assert_raise(ArgumentError) { CA_CMPLX128([Complex(1, 1)]).divmod(2) }
+  end
+
   def test_bang_forms
     a = CA_INT32([-7, -1, 7])
     assert_equal([-3, -1, 2], a.copy.div!(3).to_a)
