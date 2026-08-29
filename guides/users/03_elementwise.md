@@ -43,6 +43,44 @@ a ** 2
 #       [ 9, 16, 25 ] ]
 ```
 
+### Signs in `/` and `%`
+
+Integer `/` floors toward negative infinity and `%` returns a remainder
+carrying the sign of the divisor, exactly as Ruby's `Integer#/` and `%` do.
+The pair holds together, so `(a / b) * b + a % b == a` for every combination
+of signs:
+
+```ruby
+CA_INT32([-7, -1, 7]) / 3      #  => [ -3, -1, 2 ]
+CA_INT32([-7, -1, 7]) % 3      #  => [  2,  2, 1 ]
+CA_INT32([-7]) % -3            #  => [ -1 ]        sign follows the divisor
+```
+
+Float `%` follows the same rule, while float `/` stays true division -- again
+as in Ruby, so the identity above is an integer one. `divmod` returns the
+matching pair for both:
+
+```ruby
+CA_DOUBLE([-0.4]) % 1.0        #  => [ 0.6 ]
+CA_DOUBLE([-7.0]).divmod(3.0)  #  => [ [ -3.0 ], [ 2.0 ] ]
+```
+
+C's convention -- truncate toward zero, remainder carrying the sign of the
+dividend -- is a separate method, `fmod`, over integers as well as floats:
+
+```ruby
+CA_INT32([-7, -1, 7]).fmod(3)  #  => [ -1, -1, 1 ]
+CA_DOUBLE([-0.4]).fmod(1.0)    #  => [ -0.4 ]
+```
+
+A common use for the floored `%` is folding a coordinate back into one period.
+Because the remainder never comes back negative for a positive period, this
+works on both sides of the origin:
+
+```ruby
+d = ((x - xc + 0.5) % 1.0) - 0.5    # wrap into [-0.5, 0.5)
+```
+
 For an integer array, `/` is integer division — the result is an integer array
 and any fractional part is discarded. To get a floating-point quotient, divide
 by a float (or convert the array first):
@@ -469,10 +507,10 @@ result back into the receiver and keeps its data type — for example
 | `a + b`       | `a.add(b)`        | ✓     | Addition                                           |
 | `a - b`       | `a.sub(b)`        | ✓     | Subtraction                                        |
 | `a * b`       | `a.mul(b)`        | ✓     | Multiplication                                     |
-| `a / b`       | `a.div(b)`        | ✓     | Division (integer / integer truncates)             |
-| `a % b`       | `a.mod(b)`        | ✓     | Modulo, C-style — the result has the sign of the dividend. Note this differs from Ruby's `Integer#%`, which carries the sign of the divisor |
-|               | `a.reminder(b)`   | ✓     | Same as `%`                                        |
-|               | `a.fmod(b)`       | ✓     | Same as `%`, named for `math.h`'s `fmod`           |
+| `a / b`       | `a.div(b)`        | ✓     | Division. Integer division floors toward -inf, as Ruby's `Integer#/` does; float division is true division |
+| `a % b`       | `a.mod(b)`        | ✓     | Modulo. The result carries the sign of the divisor, as Ruby's `%` does, and pairs with `/` above so that `(a / b) * b + a % b == a` for integers |
+|               | `a.fmod(b)`       | ✓     | Truncated remainder — the sign of the dividend, as C's `fmod` and `%` do. Integers and floats both |
+|               | `a.divmod(b)`     |       | `[quotient, remainder]`, the quotient floored. Returns a two-element Array, not a CArray |
 | `a ** b`      | `a.pow(b)` or `a.power(b)` | ✓ | Exponent                                       |
 |               | `a.copysign(b)`   | ✓     | Magnitude of `a` with sign of `b`                  |
 |               | `a.nextafter(b)`  | ✓     | Next representable float from `a` toward `b`       |

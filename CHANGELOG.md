@@ -11,6 +11,27 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: `/` and `%` follow Ruby. Integer division floors toward -inf and the
+  remainder carries the sign of the divisor, so `(a / b) * b + a % b == a` holds
+  for every combination of signs; float `%` floors as well, while float `/` stays
+  true division. Both had followed C instead -- truncate toward zero, remainder
+  signed like the dividend -- so `((x - xc + 0.5) % 1.0) - 0.5`, the usual way to
+  fold a coordinate into one period, quietly left the fold range wherever the
+  operand went negative. The data types had also disagreed among themselves:
+  object arrays delegate to Ruby and were already flooring, so the same `%` gave
+  two answers depending on the data type it ran on. C's pair remains available as
+  `fmod`, which now takes integer arrays as well as floats.
+
+- Change: `reminder` is removed. It was IEEE 754 remainder on floats but C `%` on
+  integers -- two different operations under one name -- and the spelling of the
+  name it aimed at, `remainder`, means the floored `%` in NumPy. Use `fmod` for a
+  truncated remainder. The IEEE form has no replacement: it was reachable on
+  floats only, and building it needs round-half-to-even, which `round` is not.
+
+- New: `divmod` returns `[quotient, remainder]` element-wise with the quotient
+  floored, the pair Ruby's `Integer#divmod` and `Float#divmod` return. The
+  quotient keeps the receiver's data type.
+
 - New: a CAObject can take a partial fill as a region. `fill_data` carries no
   region and can only say "fill everything I cover", so writing one value into
   part of a CAObject had nowhere to go but one `store_addr` per cell -- a
