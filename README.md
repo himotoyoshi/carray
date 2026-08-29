@@ -33,6 +33,11 @@ Ruby/CArray is an extension library for the multi-dimensional array class.
 * MemoryView protocol support — interoperate with other numerical libraries as both
   producer and consumer
 
+## Status
+
+3.0.x still moves: behavior can change between releases — see
+[CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on.
+
 ## Install
 
 ```
