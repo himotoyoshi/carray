@@ -42,9 +42,9 @@ class TestLazyBinopP22 < Test::Unit::TestCase
     # thin wrapper, see MEMO_GALAPAGOS_ESCAPE.md 2026-06-23) bringing the
     # total to 18.  pmax / pmin (NaN-skip) and maximum / minimum
     # (NaN-propagate) added via the M.2 pattern bring the total to 22.
-    # and / or / xor (bool word forms) + reminder (IEEE 754 remainder,
-    # distinct from mod) bring the total to 26.
-    assert_equal 26, CArray::LAZY_BINOP_OP_IDS.size
+    # and / or / xor (bool word forms) bring the total to 25; `reminder`
+    # (IEEE 754 remainder) was retired with the floored `%`.
+    assert_equal 25, CArray::LAZY_BINOP_OP_IDS.size
   end
 
   # --------------------------------------- arithmetic same-data_type f64 --

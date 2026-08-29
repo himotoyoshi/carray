@@ -866,7 +866,6 @@ Init_ca_obj_binop (void)
   rb_define_const(rb_cCABinOp, "OP_AND",        INT2NUM(CA_BINOP_AND));
   rb_define_const(rb_cCABinOp, "OP_OR",         INT2NUM(CA_BINOP_OR));
   rb_define_const(rb_cCABinOp, "OP_XOR",        INT2NUM(CA_BINOP_XOR));
-  rb_define_const(rb_cCABinOp, "OP_REMINDER",   INT2NUM(CA_BINOP_REMINDER));
 
   rb_define_alloc_func(rb_cCABinOp, rb_ca_binop_s_allocate);
   rb_define_method(rb_cCABinOp, "initialize_copy",

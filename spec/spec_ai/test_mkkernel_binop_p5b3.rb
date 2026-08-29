@@ -60,15 +60,6 @@ class TestMkKernelBinopP5b3 < Test::Unit::TestCase
     assert_raise(ZeroDivisionError) { @a % z }
   end
 
-  def test_reminder_float
-    a = CArray.float64(2); a[] = [10.0, 7.0]
-    b = CArray.float64(2); b[] = [3.0, 2.0]
-    result = a.reminder(b).to_a
-    # remainder(10, 3) = 1, remainder(7, 2) = -1 (IEEE 754 semantics)
-    assert_in_delta 1.0, result[0], 1e-12
-    assert_in_delta -1.0, result[1], 1e-12
-  end
-
   def test_rcp_mul
     # rcp_mul(a, b) = b / a (= "reciprocal multiply" = swap then divide)
     a = CArray.int32(3); a[] = [1, 2, 4]
@@ -215,7 +206,7 @@ class TestMkKernelBinopP5b3 < Test::Unit::TestCase
 
   def test_migrated_binop_symbols_in_kernels_c
     kernels_c = Dir[File.expand_path('../../../ext/carray_kernels_*.c', __FILE__)].map { |__f| File.read(__f, encoding: 'UTF-8') }.join("\n")
-    %w[pmax pmin add sub mul div quo_i rcp_mul mod reminder
+    %w[pmax pmin add sub mul div quo_i rcp_mul mod fmod
        bit_and_i bit_or_i bit_xor_i bit_lshift bit_rshift
        and or xor].each do |op|
       assert_match(/ca_binop_#{op}\[CA_NTYPE\]/, kernels_c,
