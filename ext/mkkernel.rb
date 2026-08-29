@@ -8331,11 +8331,27 @@ MkKernel.binop :minimum,
     }
 end
 
+# div: `/`.  Integer division floors toward -inf (= Ruby `Integer#/` and
+# NumPy `floor_divide`), so that `(a / b) * b + a % b == a` holds for
+# every sign combination.  C's `/` truncates toward zero, so the signed
+# lanes correct the quotient by one when the division is inexact and the
+# operands have opposite signs.  Unsigned operands can never disagree in
+# sign, so they keep the bare C form.  Float `/` is true division and is
+# unchanged (matching Ruby `Float#/`); the identity above therefore holds
+# for integers only, exactly as in Ruby.
 MkKernel.binop :div,
   op:     "/",
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
-    int:     "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
+    MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
+    int:     %{
+      if ((#2)==0) {ca_zerodiv();};
+      {
+        <type> _q = (#1) / (#2);
+        if ( (#1) % (#2) != 0 && (((#1) < 0) != ((#2) < 0)) ) { _q -= 1; }
+        (#3) = _q;
+      }
+    },
     float:   "(#3) = (#1) / (#2);",
     complex: "(#3) = (#1) / (#2);",
     object:  '(#3) = rb_funcall((#1), rb_intern("/"), 1, (#2));',
@@ -8361,12 +8377,37 @@ MkKernel.binop :rcp_mul,
     object:  '(#3) = rb_funcall((#2), rb_intern("/"), 1, (#1));',
   }
 
+# mod: `%`.  Floored modulo -- the result carries the sign of the divisor
+# (= Ruby `%` and NumPy `np.mod`), and pairs with the floored `/` above.
+# C's `%` and `fmod` carry the sign of the dividend instead, so the signed
+# lanes add the divisor back when the remainder is non-zero and disagrees
+# in sign with it.  A zero remainder is given the divisor's sign so the
+# rule holds without exception (float only; integers have no signed zero).
+# Unsigned operands already satisfy the rule.  The truncating form stays
+# available as `fmod`.
 MkKernel.binop :mod,
   op:     "%",
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
-    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
-    float:  "(#3) = fmod(#1, #2);",
+    MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+    int:    %{
+      if ((#2)==0) {ca_zerodiv();};
+      {
+        <type> _r = (#1) % (#2);
+        if ( _r != 0 && ((_r < 0) != ((#2) < 0)) ) { _r += (#2); }
+        (#3) = _r;
+      }
+    },
+    float:  %{
+      {
+        <type> _r = fmod((#1), (#2));
+        if ( _r != 0 ) {
+          if ( (_r < 0) != ((#2) < 0) ) { _r += (#2); }
+        }
+        else { _r = copysign((<type>) 0, (#2)); }
+        (#3) = _r;
+      }
+    },
     object: '(#3) = rb_funcall((#1), rb_intern("%"), 1, (#2));',
   }
 

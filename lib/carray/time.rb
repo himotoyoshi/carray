@@ -23,28 +23,19 @@
 # coarse->fine cast is lossless (multiply), and a fine->coarse cast is lossless
 # only when every value is divisible by the divisor.
 # Civil-date arithmetic on int64 CArrays: the calendar kernel every time
-# grid is built on (Howard Hinnant's days<->civil algorithms, vectorized) plus
-# the floor-division primitive they need -- CArray `/` truncates toward zero,
-# and calendar math has to floor toward the past.  Internal to the time
-# surface: nothing here is part of the public API.
+# grid is built on (Howard Hinnant's days<->civil algorithms, vectorized).
+# Internal to the time surface: nothing here is part of the public API.
 module CATimeCivil
   module_function
 
-  # Floored integer division of an int64 CArray by a positive Integer
-  # (toward -inf; CArray `/` truncates toward zero).
-  def floor_divide(a, b)
-    q = a / b
-    q - (a - q * b).lt(0)
-  end
-
   # Vectorized Howard Hinnant civil-date algebra (proleptic Gregorian,
   # negative days supported).  days since the Unix epoch -> [year, month,
-  # day] int64 CArrays.  Truncating division is what the algorithm assumes;
-  # the only negative operand (the 400-year era) is pre-adjusted so
-  # truncation behaves like floor.
+  # day] int64 CArrays.  The algorithm needs the era to floor toward the
+  # past, which CArray `/` does; Hinnant's published form pre-biases the
+  # negative operand instead because C truncates.
   def civil_from_days(z)
     z   = z + 719468
-    era = (z - 146096 * z.lt(0)) / 146097
+    era = z / 146097
     doe = z - era * 146097
     yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
     y   = yoe + era * 400
@@ -58,7 +49,7 @@ module CATimeCivil
   # [year, month, day] int64 CArrays -> days since the Unix epoch.
   def days_from_civil(y, m, d)
     y   = y - m.le(2)
-    era = (y - 399 * y.lt(0)) / 400
+    era = y / 400
     yoe = y - era * 400
     doy = (153 * (m + (9 - 12 * m.gt(2))) + 2) / 5 + (d - 1)  # m>2 ? -3 : +9
     doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
@@ -240,7 +231,15 @@ module CATimeUnitAlgebra
             "ratio (a month / year is calendar-variable)"
     end
     scaled = widen(storage, r.numerator)
-    r.denominator == 1 ? scaled : scaled / r.denominator   # toward zero
+    r.denominator == 1 ? scaled : trunc_divide(scaled, r.denominator)
+  end
+
+  # Truncating integer division of an int64 CArray (toward zero).  CArray
+  # `/` floors toward the past, which is what an instant wants; a duration
+  # is a magnitude and shrinks toward zero instead.
+  def trunc_divide(a, b)
+    q = a / b
+    q + (q.lt(0) & (a - q * b).ne(0))
   end
 
   # INSTANT conversion (absolute datetimes): unlike a duration, a time :M
@@ -269,7 +268,7 @@ module CATimeUnitAlgebra
     ones = CArray.int64(*storage.shape) { 1 }
     if from.base == :M
       abs = storage * from.count + 1970 * 12           # absolute month ordinal
-      y   = CATimeCivil.floor_divide(abs, 12)
+      y   = abs / 12
       m   = abs - y * 12 + 1
       CATimeCivil.days_from_civil(y, m, ones)
     else                                               # :Y
@@ -324,7 +323,7 @@ module CATimeUnitAlgebra
               "cannot convert time #{from} to #{to} without loss " \
               "(instant is not on a #{to} boundary)"
       end
-      ord = CATimeCivil.floor_divide(ord, to.count)
+      ord = ord / to.count
     end
     ord
   end
@@ -344,7 +343,7 @@ module CATimeUnitAlgebra
     if r                                                # same group
       scaled = widen(storage, r.numerator)
       r.denominator == 1 ? scaled
-                         : CATimeCivil.floor_divide(scaled, r.denominator)
+                         : scaled / r.denominator
     elsif CALENDAR.key?(a.base)
       convert_instant_calendar_to_fixed(storage, a, b)   # widen, always exact
     else
@@ -359,13 +358,13 @@ module CATimeUnitAlgebra
     rd   = ratio(CATime::Resolution.new(1, :D), from)   # `from` ticks per day
     days =
       if rd.denominator == 1
-        CATimeCivil.floor_divide(storage, rd.numerator)
+        storage / rd.numerator
       else                                             # coarser than a day (:W)
         storage * (from.tick_ratio / 86400r).to_i
       end
     y, m, = CATimeCivil.civil_from_days(days)
     ord = to.base == :M ? (y * 12 + (m - 1) - 1970 * 12) : (y - 1970)
-    to.count > 1 ? CATimeCivil.floor_divide(ord, to.count) : ord
+    to.count > 1 ? ord / to.count : ord
   end
 end
 
@@ -1133,7 +1132,7 @@ class CATime
   def year
     case unit.base
     when :Y then parent * unit.count + 1970
-    when :M then CATimeCivil.floor_divide(parent * unit.count + 1970 * 12, 12)
+    when :M then (parent * unit.count + 1970 * 12) / 12
     else CATimeCivil.civil_from_days(days_since_epoch)[0]
     end
   end
@@ -1146,7 +1145,7 @@ class CATime
     when :Y then parent * 0 + 1
     when :M
       mo = parent * unit.count + 1970 * 12
-      mo - CATimeCivil.floor_divide(mo, 12) * 12 + 1
+      mo % 12 + 1
     else CATimeCivil.civil_from_days(days_since_epoch)[1]
     end
   end
@@ -1176,7 +1175,7 @@ class CATime
   def weekday
     # 1970-01-01 is a Thursday (wday 4); Sun=0..Sat=6.
     n = days_since_epoch + 4
-    n - CATimeCivil.floor_divide(n, 7) * 7          # floor-mod 7
+    n % 7
   end
 
   # Day of the year, 1..366.
@@ -1373,11 +1372,13 @@ class CATimedelta
   #   @raise [TypeError] on incompatible operands.
   def /(other)
     case other
-    when Integer then (parent / other).timedelta(unit: unit)
+    when Integer
+      CATimeUnitAlgebra.trunc_divide(parent, other).timedelta(unit: unit)
     when CATimedelta
       u = common_duration_unit(other.unit)
-      CATimeUnitAlgebra.convert_scale!(parent, unit, u) /
-        CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
+      CATimeUnitAlgebra.trunc_divide(
+        CATimeUnitAlgebra.convert_scale!(parent, unit, u),
+        CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u))
     else raise TypeError, "CATimedelta / #{other.class} is not allowed"
     end
   end
@@ -1961,7 +1962,7 @@ module CATimeGrid
     count = st.count * (st.base == :Y ? 12 : 1)
     ym0   = origin_month_ordinal(origin)
     ymk   = ym0 + k * count
-    yy    = CATimeCivil.floor_divide(ymk, 12)
+    yy    = ymk / 12
     mm    = ymk - yy * 12 + 1
     CATimeCivil.days_from_civil(yy, mm, CArray.int64(*k.shape) { 1 }) * tpd
   end
@@ -2624,7 +2625,7 @@ class CATime
       CATimeCivil.days_from_civil(parent * res.count + 1970, ones, ones)
     when :M
       mo = parent * res.count + 1970 * 12
-      y  = CATimeCivil.floor_divide(mo, 12)
+      y  = mo / 12
       m  = mo - y * 12 + 1
       CATimeCivil.days_from_civil(y, m, CArray.int64(*shape) { 1 })
     when :W then parent * res.count * 7
@@ -2633,10 +2634,10 @@ class CATime
       day = CATime::Resolution.new(1, :D)
       r   = CATimeUnitAlgebra.ratio(day, res)          # storage ticks per day
       if r.denominator == 1
-        CATimeCivil.floor_divide(parent, r.numerator)
+        parent / r.numerator
       else                                                 # non-day-aligned tick
         tr = res.tick_ratio                                # seconds / tick
-        CATimeCivil.floor_divide(parent * tr.numerator, 86400 * tr.denominator)
+        parent * tr.numerator / (86400 * tr.denominator)
       end
     end
   end
@@ -2651,9 +2652,9 @@ class CATime
     r = CATimeUnitAlgebra.ratio(unit, CATime::Resolution.new(1, fu))  # fu ticks / storage tick
     return parent * 0 if r.nil?                            # calendar storage: no clock field
     fi = r.denominator == 1 ? parent * r.numerator         # epoch-relative fu index
-                            : CATimeCivil.floor_divide(parent * r.numerator, r.denominator)
+                            : parent * r.numerator / r.denominator
     cycle = fu == :h ? 24 : 60                             # hour 0..23; min/sec 0..59
-    fi - CATimeCivil.floor_divide(fi, cycle) * cycle  # floor-mod (handles pre-epoch)
+    fi % cycle
   end
 
   # Calendar path (Y/M step on day-or-finer storage) via civil-date integer
@@ -2668,7 +2669,7 @@ class CATime
     days  = days_since_epoch                               # count-folded day index
     y, m  = CATimeCivil.civil_from_days(days)
     ym    = y * 12 + (m - 1)
-    k     = CATimeCivil.floor_divide(ym - ym0, count)
+    k     = (ym - ym0) / count
     return k if kind == :index
     head = CATimeGrid.calendar_bucket_head_ticks(k, st, su, origin)
     return head.time(unit: su) if kind == :floor
