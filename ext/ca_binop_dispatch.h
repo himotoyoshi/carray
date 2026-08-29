@@ -80,12 +80,6 @@ enum {
   CA_BINOP_OR        = 25,
   CA_BINOP_XOR       = 26,
 
-  /* IEEE 754 remainder (round-half-to-even, distinct from MOD which
-     truncates toward zero via C99 fmod on the float branch).  Integer
-     branch is identical to MOD (`%`).  All numeric + object.  Traps on
-     integer zero divisor, like MOD.                                    */
-  CA_BINOP_REMINDER  = 27,
-
   CA_BINOP_COUNT
 };
 
@@ -127,7 +121,6 @@ extern ca_binop_func_t ca_binop_minimum    [CA_NTYPE];
 extern ca_binop_func_t ca_binop_and        [CA_NTYPE];
 extern ca_binop_func_t ca_binop_or         [CA_NTYPE];
 extern ca_binop_func_t ca_binop_xor        [CA_NTYPE];
-extern ca_binop_func_t ca_binop_reminder   [CA_NTYPE];
 
 /* ------------------------------------------------------------------- */
 /* Dispatch API                                                         */

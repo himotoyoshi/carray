@@ -307,7 +307,6 @@ class CArray
 
     # IEEE 754 remainder (distinct semantics from `%` / `mod`: float
     # branch uses C99 `remainder`, round-half-to-even).
-    :reminder  => CABinOp::OP_REMINDER,
   }.freeze
 
   LAZY_BINOP_OP_IDS.each do |method_name, op_id|

@@ -8425,15 +8425,6 @@ MkKernel.binop :fmod,
     object: '(#3) = rb_funcall((#1), rb_intern("remainder"), 1, (#2));',
   }
 
-MkKernel.binop :reminder,
-  op:     "reminder",
-  source: MkKernel::ALL_NUMERIC + [:object],
-  expr:   {
-    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
-    float:  "(#3) = remainder(#1, #2);",
-    object: '(#3) = rb_funcall((#1), rb_intern("%"), 1, (#2));',
-  }
-
 MkKernel.binop :bit_and_i,
   op:     "&",
   kleene: :and,

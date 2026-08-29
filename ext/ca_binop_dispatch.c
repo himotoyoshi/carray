@@ -58,7 +58,6 @@ ca_binop_kernel_lookup_vv (uint16_t op_id, int8_t common_dt)
     case CA_BINOP_AND:        return ca_binop_and        [common_dt];
     case CA_BINOP_OR:         return ca_binop_or         [common_dt];
     case CA_BINOP_XOR:        return ca_binop_xor        [common_dt];
-    case CA_BINOP_REMINDER:   return ca_binop_reminder   [common_dt];
     default:                  return NULL;
   }
 }
@@ -118,7 +117,6 @@ ca_binop_is_trapping (uint16_t op_id, int8_t common_dt)
     case CA_BINOP_MOD:
     case CA_BINOP_QUO:
     case CA_BINOP_FMOD:
-    case CA_BINOP_REMINDER:
       return 1;
     default:
       return 0;
