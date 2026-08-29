@@ -101,6 +101,19 @@ class TestFloorDivisionSemantics < Test::Unit::TestCase
     assert_raise(ZeroDivisionError) { CA_INT32([1]).fmod(0) }
   end
 
+  # A masked zero divisor must not trap: the integer fmod lane traps the
+  # same way `%` does, so it has to be classified trapping for the lazy
+  # path to skip masked cells.
+  def test_masked_zero_divisor_is_skipped
+    a = CA_INT32([1, 2])
+    b = CA_INT32([0, 3])
+    b[0] = UNDEF
+    assert_equal([UNDEF, 2], a.fmod(b).to_a)
+    assert_equal([UNDEF, 2], (a.lazy.fmod(b)).to_ca.to_a)
+    assert_equal([UNDEF, 2], (a.lazy % b).to_ca.to_a)
+    assert_equal([UNDEF, 0], (a.lazy / b).to_ca.to_a)
+  end
+
   # A zero remainder takes the divisor's sign, so "the sign follows the
   # divisor" holds without exception.  Ruby leaves fmod's dividend sign
   # here instead; the difference is only in the sign of zero.
