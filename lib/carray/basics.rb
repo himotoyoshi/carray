@@ -246,6 +246,8 @@ class CArray
 
   alias cmp <=>
 
+  # @!group Elementwise math
+
   # Returns `[quotient, remainder]` element-wise.
   #
   # The quotient is floored toward -inf, so `q * other + r == self` holds
@@ -268,6 +270,8 @@ class CArray
     q = q.floor unless q.integer?
     [q, self % other]
   end
+
+  # @!endgroup
 
   # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
   #   Returns `self` with every element clamped to `[min, max]`.
