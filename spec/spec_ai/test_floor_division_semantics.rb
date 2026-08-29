@@ -78,6 +78,29 @@ class TestFloorDivisionSemantics < Test::Unit::TestCase
     assert_equal([-0.4, 0.6], CA_DOUBLE([-0.4, 0.6]).fmod(1.0).to_a.map { |v| v.round(10) })
   end
 
+  def test_fmod_accepts_integers
+    assert_equal([-1, -1, 1, 2], CA_INT32([-7, -1, 7, 5]).fmod(3).to_a)
+    assert_equal([-1, 1],        CA_INT32([-7, 7]).fmod(-3).to_a)
+    assert_equal([1],            CA_UINT8([7]).fmod(3).to_a)
+  end
+
+  def test_fmod_matches_ruby_remainder
+    SIGN_CASES.each do |a, b|
+      assert_equal(a.remainder(b), CA_INT32([a]).fmod(b)[0], "#{a} fmod #{b}")
+    end
+  end
+
+  # The object lane delegates to Numeric#remainder, so an Integer element
+  # comes back an Integer rather than going out through a double.
+  def test_fmod_object_lane_keeps_the_element_class
+    assert_equal([-1, 1], CA_OBJECT([-7, 7]).fmod(3).to_a)
+    assert_equal((CA_INT32([-7, 7]).fmod(3)).to_a, CA_OBJECT([-7, 7]).fmod(3).to_a)
+  end
+
+  def test_fmod_by_zero_raises_for_integers
+    assert_raise(ZeroDivisionError) { CA_INT32([1]).fmod(0) }
+  end
+
   # A zero remainder takes the divisor's sign, so "the sign follows the
   # divisor" holds without exception.  Ruby leaves fmod's dividend sign
   # here instead; the difference is only in the sign of zero.

@@ -8411,6 +8411,20 @@ MkKernel.binop :mod,
     object: '(#3) = rb_funcall((#1), rb_intern("%"), 1, (#2));',
   }
 
+# fmod: the truncating counterpart of `%` -- the remainder carries the
+# sign of the dividend, as C's `fmod` and `%` do.  Defined over integers
+# too (`%` no longer reaches that form since it floors), where it is C's
+# `%` with the same zero-divisor guard.  Ruby's `Numeric#remainder` is
+# this same operation, so the object lane delegates to it and keeps the
+# element's class (an Integer stays an Integer).
+MkKernel.binop :fmod,
+  source: MkKernel::ALL_NUMERIC + [:object],
+  expr:   {
+    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+    float:  "(#3) = fmod((#1), (#2));",
+    object: '(#3) = rb_funcall((#1), rb_intern("remainder"), 1, (#2));',
+  }
+
 MkKernel.binop :reminder,
   op:     "reminder",
   source: MkKernel::ALL_NUMERIC + [:object],
@@ -8614,7 +8628,6 @@ MkKernel.binop :power,
   copysign:  ["copysign",  "copysign"],
   logaddexp: [nil,         nil],          # custom expr — see below
   nextafter: ["nextafter", "nextafter"],
-  fmod:      ["fmod",      "fmod"],
   atan2:     ["atan2",     "atan2"],
   hypot:     ["hypot",     "hypot"],
 }.each do |op_name, (c_fn, ruby_fb)|
