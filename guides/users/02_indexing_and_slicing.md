@@ -177,6 +177,27 @@ v[0, 1..2, 1..3]
 #       [ 9, 10, 11 ] ]            a sub-block of the first slab
 ```
 
+## Standing in for several axes with `:~`
+
+Writing out one `nil` per axis gets tedious as the number of axes grows. The
+sigil `:~` stands in for **as many `nil`s as are needed** to fill the remaining
+axes, so you only have to name the axes you actually care about.
+
+```ruby
+a[:~, 1]     #  => [ 1, 5, 9 ]        same as a[nil, 1]
+a[1, :~]     #  => [ 4, 5, 6, 7 ]     same as a[1, nil]
+
+v[0, :~]     #  the first 2-D slab    same as v[0, nil, nil]
+v[:~, 0]     #  column 0 of each slab same as v[nil, nil, 0]
+v[:~]        #  the whole array       same as v[nil, nil, nil]
+```
+
+`:~` may appear at most once in an index, and it may expand to zero axes — so
+`v[0, :~, 1, 2]` is fine and simply means `v[0, 1, 2]`.
+
+Older code and documentation may use `false` for this; it still works, but `:~`
+is the recommended spelling.
+
 ## By a boolean mask
 
 A comparison produces a boolean array of the same shape — true (`1`) where the
