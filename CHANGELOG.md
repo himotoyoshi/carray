@@ -111,10 +111,12 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   multiple of the other (`"90 minutes"` and `:h`) dropped the ratio numerator
   and gave a wrong value.
 
-- Fix: the MemoryView producer emits `c` / `C` / `s` / `S` below 32 bits rather
-  than PEP 3118's `b` / `B` / `h` / `H`, which Ruby's own parser cannot read --
-  `Fiddle::MemoryView.new(CArray.int16(3))[0]` raised. Views produced by 3.0.0
-  still import. Supersedes the table in
+- Change: the MemoryView producer emits the format vocabulary
+  `ruby/memory_view.h` specifies rather than PEP 3118's, so below 32 bits it
+  writes `c` / `C` / `s` / `S` in place of `b` / `B` / `h` / `H`. From 32 bits
+  up the two already agreed, and `?`, `Zf` / `Zd`, `T{...}` and `Ns` stay PEP
+  3118, which Ruby has no spelling for. The consumer side already accepted
+  both, so views produced by 3.0.0 still import. Supersedes the table in
   [MemoryViewFormat.md](docs/interop/MemoryViewFormat.md).
 
 - Fix: the mask-format check rejected a uint8 mask published as `C`.
