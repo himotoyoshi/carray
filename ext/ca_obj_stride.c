@@ -649,9 +649,43 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     }
   }
 
+  /* Cold root that answers regions: compose the request into its addresses
+     and hand it over whole, exactly as xfer_all does for the whole view.  A
+     root with no memory to lend (a lazy transform, a CAObject over a file)
+     has no ptr to walk, but it can still produce a region on request -- and
+     asking it once beats asking it once per cell, which is what the per-cell
+     descent below would do.  Chunked consumers (the binop / sweep drivers'
+     per-chunk gather) arrive here, so the difference is the whole cost of
+     the transfer, not a constant factor.
+
+     The gate is xfer_all's: the root must have the slot, share this view's
+     cell width (else the composed offsets are not whole root elements), and
+     carry the same ndim (else its index space cannot hold this request's
+     axes).  Anything narrower keeps the per-cell descent, which is correct
+     for all of them.  Direction is not part of the gate: a root that refuses
+     writes refuses them per cell as well. */
+  if (aligned && !root->ptr && ca_func[root->obj_type].xfer_stride
+       && ca->bytes == root->bytes && ndim == root->ndim) {
+    ca_size_t rbase = composed_base;
+    ca_size_t rstarts[CA_RANK_MAX];
+    for (k = 0; k < ndim; k++) {
+      root_stride[k] = (strides[k] / view_native[k]) * composed_strides[k];
+      rbase         += starts[k] * composed_strides[k];
+    }
+    if ( rbase % root->bytes == 0 ) {
+      ca_size_t raddr = rbase / root->bytes;
+      if ( raddr >= 0 && raddr < root->elements ) {
+        ca_addr2index(root, raddr, rstarts);
+        ca_xfer_stride(root, rstarts, counts, root_stride, d, dir);
+        return;
+      }
+    }
+  }
+
   /* Per-cell fallback (correct, no whole-view attach): byte-mismatch
      reinterpret (CAField), non-aligned access, or a cold non-entity root
-     (whose ndim may differ from the view's -- e.g. a reshape over a boundary).
+     the branch above could not hand a region to (its ndim differs from the
+     view's -- e.g. a reshape over a boundary -- or it has no region slot).
      ca_stride_func_xfer_index composes one hop and delegates to the parent. */
   if (!aligned || !root->ptr) {
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
