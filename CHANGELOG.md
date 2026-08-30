@@ -11,6 +11,13 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: an operation between two views of an array that computes its values --
+  a lazy expression such as `(a.lazy + b)`, or a `CAObject` over a file -- no
+  longer reads that source one cell at a time. `+`, `fma` and comparisons on
+  such a pair now run at the speed of copying each operand first, so the
+  `.copy` that worked around it is no longer needed. Single-operand
+  operations, copies, region transfers and reductions were already unaffected.
+
 - Fix: views built inside a `CArray.fuse` block stay part of the expression
   instead of dropping out of it, so a stencil written the natural way is fused.
   `[]`, `shift`, `roll`, `flip`/`reverse`, `transpose`/`T`, `reshape`,
