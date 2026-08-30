@@ -285,6 +285,83 @@ ca_face_lift (VALUE view, VALUE face_parent)
   return lifted;
 }
 
+/* ca_lazy_marker_lift(view, marker) — the CALazyMarker half of
+ * ca_wrapper_lift.  Same invariant as the Face lift (wrapper on top, view
+ * built against what the wrapper wraps) reached by a shorter route: a
+ * marker carries no subclass state, so there is nothing for
+ * rb_ca_face_template's struct copy to preserve, and building a fresh
+ * marker over the view gets data_type, bytes, shape, mask and flags right
+ * by construction.  That last part is load-bearing for `refer(type)`,
+ * where the view's data_type differs from the one the old marker copied
+ * off the entity.
+ *
+ * The one piece it shares with the Face lift is the one-level swap: the
+ * builder handed us a view whose parent is the marker, and leaving it
+ * there would stack a redundant marker in the middle. */
+static VALUE
+ca_lazy_marker_lift (VALUE view, VALUE marker)
+{
+  CArray *view_ca, *mp;
+  extern VALUE rb_ca_lazy_marker_new (VALUE cary);
+
+  TypedData_Get_Struct(view, CArray, &carray_data_type, view_ca);
+
+  /* Idempotent: a builder that wrapped internally already returned a
+     marker (mirrors the same guard in ca_face_lift). */
+  if ( ca_is_lazy_marker(view_ca) ) {
+    return view;
+  }
+
+  /* CAREFUL: an unbound view leaves an extent open until an operand binds
+     it, and a marker copies shape at construction — wrapping one erases
+     exactly the property the view exists to carry, and the expression
+     degenerates into a per-element broadcast against a size-1 axis (the
+     answer stays right, which is why nothing catches it; measured at 184x
+     on a 2000x2000 broadcast sum).  Two routes reach here, `a[:*, nil]`
+     and `unbound_repeat`, so the refusal lives here rather than at each
+     deployment site. */
+  if ( view_ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
+    return view;
+  }
+
+  TypedData_Get_Struct(marker, CArray, &carray_data_type, mp);
+
+  /* One-level swap (CAFace.md section 8.3, same reasoning): move the view
+     off the marker and onto what the marker wraps.  Guarded on pointer
+     equality so only a view built directly on this marker fires. */
+  if ( ca_is_view(view_ca)
+       && ((CAView *) view_ca)->parent == mp
+       && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
+    ((CAView *) view_ca)->parent = ((CAView *) mp)->parent;  /* C pointer */
+    rb_ca_set_parent(view, rb_ca_parent(marker));            /* @parent ivar */
+  }
+
+  return rb_ca_lazy_marker_new(view);
+}
+
+/* ca_wrapper_lift(view, wrapper, wrapper_ca) — dispatch for
+ * CA_WRAPPER_LIFT.  The macro has already established that wrapper_ca
+ * carries one of the two flags and that view is a CArray. */
+VALUE
+ca_wrapper_lift (VALUE view, VALUE wrapper, void *wrapper_ca)
+{
+  CArray *ca = (CArray *) wrapper_ca;
+
+  if ( ca_is_face(ca) ) {
+    CArray *view_ca;
+    TypedData_Get_Struct(view, CArray, &carray_data_type, view_ca);
+    /* Some builders (select / repeat / ...) lift their own result; a
+       second lift here would double-wrap.  Mirrors the guard the `[]`
+       call site used to carry inline. */
+    if ( ca_is_face(view_ca) ) {
+      return view;
+    }
+    return ca_face_lift(view, wrapper);
+  }
+
+  return ca_lazy_marker_lift(view, wrapper);
+}
+
 /* ca_strip_face(src) — walk down through Face parents to the storage
  * CArray.  Called at kernel_iterator entry and lazy chain endpoints
  * where downstream code needs to observe the storage layout, not the

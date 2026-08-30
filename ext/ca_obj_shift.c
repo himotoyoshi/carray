@@ -343,7 +343,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
 
   obj = rb_ca_shift_new(self, shift, fill, roll, fill_mask);
 
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 

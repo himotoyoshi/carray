@@ -546,7 +546,7 @@ rb_ca_tile (int argc, VALUE *argv, VALUE self)
 
   {
     VALUE obj = rb_ca_tile_new(self, reps);
-    CA_FACE_LIFT_IF_FACE(obj, self, ca);
+    CA_WRAPPER_LIFT(obj, self, ca);
     return obj;
   }
 }

@@ -1458,7 +1458,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
 
   obj = rb_ca_window_new(self, start, count, bounds, fill);
 
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 

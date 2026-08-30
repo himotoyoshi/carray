@@ -529,7 +529,7 @@ rb_ca_roll (int argc, VALUE *argv, VALUE self)
   }
   {
     VALUE obj = rb_ca_roll_new(self, shift);
-    CA_FACE_LIFT_IF_FACE(obj, self, ca);
+    CA_WRAPPER_LIFT(obj, self, ca);
     return obj;
   }
 }
