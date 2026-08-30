@@ -432,11 +432,22 @@ ca_attach_is_alias (void *ap)
 {
   CArray *ca = (CArray *) ap;
   extern ca_operation_function_t ca_stride_func;
+  extern ca_operation_function_t ca_lazy_marker_func;
   extern int ca_stride_is_contiguous (CAStride *ca);
   extern int ca_stride_attach_aliases_root (CAStride *ca);
 
   if ( ca == NULL ) return 0;
   if ( ca_is_entity(ca) )  return 1;
+
+  /* CALazyMarker's attach is literally `ca->ptr = ca->parent->ptr` after
+     attaching the parent — it adds no layout of its own — so it aliases
+     exactly when its parent does.  Without this a marker looks expensive
+     to every caller and views built on it fall onto materialising paths,
+     even though there is nothing between the marker and real memory. */
+  if ( ca_func[ca->obj_type].attach == ca_lazy_marker_func.attach ) {
+    return ca_attach_is_alias(((CAView *) ca)->parent);
+  }
+
   /* CAStride family share ca_stride_func.attach (= ca_stride_func_attach).
      The alias-attach fast path is taken iff composed strides are
      row-major contiguous.  ca_stride_is_contiguous checks the leaf
