@@ -374,12 +374,31 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     lo[k] = l; hi[k] = h;
   }
 
+  /* An unattached parent that ca_attach_is_alias accepts has memory to lend
+     and the attach neither allocates nor copies, so borrow it and re-enter
+     on the batched branch below.  The recursion runs at most once: the
+     second entry sees parent->ptr != NULL.  A parent with nothing to lend is
+     left alone — the per-row loop is the region protocol and must not be
+     traded for a whole-parent attach. */
+  if ( ! parent->ptr && ca_attach_is_alias(parent) ) {
+    ca_attach(parent);
+    if ( parent->ptr ) {
+      ca_window_func_xfer_stride(ap, starts, counts, strides, data, dir);
+      if ( dir == CA_XFER_PUT ) {
+        ca_sync(parent);
+      }
+      ca_detach(parent);
+      return;
+    }
+    ca_detach(parent);
+  }
+
   /* Fast path: when the parent is attached (ptr != NULL), drive
      ca_composite_region_* + fill_complement directly with the sub-region
      intersection geometry.  This collapses the outer per-row dispatch loop
      (one ca_xfer_stride per inner row) into a single batched routine.  An
-     unattached parent falls through to the per-row loop below, which is
-     equivalent but slower. */
+     unattached parent with nothing to lend falls through to the per-row loop
+     below, which is equivalent but slower. */
   if ( parent->ptr ) {
     ca_size_t any_empty = 0;
     ca_size_t alias_parent_start[CA_RANK_MAX];
@@ -1011,10 +1030,16 @@ ca_window_func_detach (void *ap)
    so the caller must have made it available.
 
    CAREFUL: neither this nor ca_window_func_xfer_all may call
-   ca_attach(parent).  A transfer slot that silently attaches its parent
-   materialises the whole parent behind the caller's back — the cold case
-   below instead materialises a parent-shaped scratch through ca_xfer_all,
-   which recurses under the same rule. */
+   ca_attach(parent) on a parent that would have to materialise to answer.
+   A transfer slot that silently does that duplicates the whole parent
+   behind the caller's back — the cold case below instead materialises a
+   parent-shaped scratch through ca_xfer_all, which recurses under the
+   same rule.
+
+   The exception is a parent that ca_attach_is_alias accepts: there the
+   attach hands back parent (or root) memory that already exists, so
+   nothing is allocated or copied and the rule has nothing to protect.
+   ca_window_func_fill_data draws the same line. */
 static void
 ca_window_func_run_fast_path (CAWindow *ca, char *data, int dir)
 {
@@ -1049,8 +1074,44 @@ ca_window_func_xfer_all (void *ap, void *data, int dir)
     ca_window_func_run_fast_path(ca, (char *) data, dir);
     return;
   }
-  /* Cold parent: materialise it into a scratch buffer via ca_xfer_all, then
-     run the normal fast path with the scratch standing in for parent->ptr. */
+  /* Cold parent that has memory to lend (entity, or a CAStride-family view
+     whose composed strides alias a ptr-bearing root): borrow it.  The attach
+     costs no allocation and no copy, and on the alias path ca->parent->ptr
+     points into the root, so a PUT lands where the scratch path would have
+     had to copy it back.  Without this the window duplicates the entire
+     parent on every transfer, which is what an ordinary `a[nil, nil]`,
+     `a.refer` or `a.transpose.transpose` parent used to pay. */
+  if ( ca_attach_is_alias(ca->parent) ) {
+    ca_attach(ca->parent);
+    ca_window_func_run_fast_path(ca, (char *) data, dir);
+    if ( dir == CA_XFER_PUT ) {
+      ca_sync(ca->parent);
+    }
+    ca_detach(ca->parent);
+    return;
+  }
+  /* Second chance: ca_attach_is_alias reads the leaf view's own strides, so
+     it declines a chain that is only contiguous once composed (a.transpose
+     .transpose is the plain case).  ca_resolve_attached_root_via_identity
+     folds the chain and answers the same question about the root, and when
+     it succeeds the parent's flat byte addressing IS the root's — so the
+     root ptr can stand in for the parent's exactly as the scratch does
+     below, with no copy in either direction.  ca_window_func_xfer_addrs
+     already resolves its parent this way. */
+  {
+    CArray *root = ca_resolve_attached_root_via_identity(ca->parent);
+    if ( root != ca->parent && root->ptr ) {
+      CArray *parent = ca->parent;
+      parent->ptr = root->ptr;
+      ca_window_func_run_fast_path(ca, (char *) data, dir);
+      parent->ptr = NULL;
+      return;
+    }
+  }
+
+  /* Cold parent with nothing to lend: materialise it into a scratch buffer
+     via ca_xfer_all, then run the normal fast path with the scratch standing
+     in for parent->ptr. */
   {
     volatile VALUE holder;
     CArray   *parent = ca->parent;
