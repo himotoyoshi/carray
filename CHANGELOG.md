@@ -75,9 +75,9 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   origin that the keyword pair cannot (`"12 hours since 2017-11-30 09:00"`).
   `CATime#grid` is the grid an array is stored on. Storage is unchanged.
 
-- Change: `CATime#floor` / `#ceil` / `#round` are `CATime#snap` with
-  `direction:` fixed, matching `CArray#snap` for numbers. Results and keyword
-  forms are unchanged.
+- New: `CATime#snap(grid, direction:)` rounds to a tick grid, the shape
+  `CArray#snap` has for numbers. `#floor` / `#ceil` / `#round` are its
+  fixed-direction forms; their results and keyword forms are unchanged.
 
 - Fix: `arange` raised `NoMethodError` in every form; it builds the array now.
   Integer arguments count exactly, so a step dividing the span evenly no longer
@@ -119,7 +119,9 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   both, so views produced by 3.0.0 still import. Supersedes the table in
   [MemoryViewFormat.md](docs/interop/MemoryViewFormat.md).
 
-- Fix: the mask-format check rejected a uint8 mask published as `C`.
+- Fix: a mask published in Ruby's format vocabulary (`C` / `c`) is accepted on
+  import. The check only knew PEP 3118's `B` / `b` / `?`, so it refused the
+  masks the producer above now writes.
 
 ## 3.0.0 — 2026-08-25
 
