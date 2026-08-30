@@ -2239,7 +2239,7 @@ rb_ca_flip_build_view (VALUE self, CArray *parent, const int8_t *flip)
 
   VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
                                ndim, outdim, outstrides, base_offset);
-  CA_FACE_LIFT_IF_FACE(obj, self, parent);
+  CA_WRAPPER_LIFT(obj, self, parent);
   return obj;
 }
 
@@ -2462,7 +2462,7 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
   {
     VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
                                  out_k, outdim, outstrides, base_offset);
-    CA_FACE_LIFT_IF_FACE(obj, self, parent);
+    CA_WRAPPER_LIFT(obj, self, parent);
     return obj;
   }
 }

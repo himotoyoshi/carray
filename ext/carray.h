@@ -940,9 +940,13 @@ extern int ca_obj_num;
 
 #define CAVIEW(x) ((CAView *)(x))
 
-#define ca_set_flag(ca, flag)   ( ca->flags |= flag )
-#define ca_unset_flag(ca, flag) ( ca->flags &= ~flag )
-#define ca_test_flag(ca, flag) (( ca->flags & flag ) ? 1 : 0)
+/* CAREFUL: `flag` is parenthesised.  Without it, ca_test_flag(ca, A | B)
+   expands to `ca->flags & A | B`, and since & binds tighter than | the
+   test is true for every array.  ca_unset_flag had the mirror hazard
+   through ~. */
+#define ca_set_flag(ca, flag)   ( (ca)->flags |= (flag) )
+#define ca_unset_flag(ca, flag) ( (ca)->flags &= ~(flag) )
+#define ca_test_flag(ca, flag) (( (ca)->flags & (flag) ) ? 1 : 0)
 
 /* -------------------------------------------------------------------- */
 

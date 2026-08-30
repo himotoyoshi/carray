@@ -133,33 +133,58 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
     assert_equal want.to_a, got.to_a
   end
 
-  # === structure (this is what the proposal is allowed to change) =========
+  # === structure ==========================================================
 
-  # Pins the CURRENT tree shape.  Under PROPOSAL_LAZY_MARKER_LIFT case A
-  # these become CALazyMarker at the top; update them together with the
-  # implementation, and keep every assertion above unchanged.
-  def test_current_tree_shape_marker_under_view
+  # A view built on a marker comes back with the marker on top and the
+  # view underneath it, against the entity -- the same shape spelling it
+  # the other way round produces.  That is the whole point: the two
+  # spellings stop differing.
+  def test_marker_stays_on_top_of_a_view
     v = @a.lazy.shift(1, 0)
-    assert_equal CAShift, v.class
-    assert_equal CALazyMarker, v.parent.class
-    # `to_ca` follows the class: a data view returns self, a lazy view
-    # forces.  Lifting the marker therefore also moves this method's
-    # meaning for marker-rooted views (see proposal section 6).
-    assert_same v, v.to_ca
-  end
-
-  def test_current_tree_shape_entity_rooted_is_already_marker_on_top
-    v = @a.shift(1, 0).lazy
     assert_equal CALazyMarker, v.class
     assert_equal CAShift, v.parent.class
+    assert_equal CArray, v.parent.parent.class
   end
 
-  # A marker-rooted view does not currently take part in lazy dispatch:
-  # `m.shift + m.shift` is an eager add, not a CABinOp.
-  def test_current_marker_rooted_view_is_not_a_lazy_operand
+  def test_both_spellings_produce_the_same_shape
+    from_marker = @a.lazy.shift(1, 0)
+    from_entity = @a.shift(1, 0).lazy
+    assert_equal from_entity.class,        from_marker.class
+    assert_equal from_entity.parent.class, from_marker.parent.class
+    assert_equal from_entity.to_a,         from_marker.to_a
+  end
+
+  # And it takes part in lazy dispatch, which is what keeps a fuse block's
+  # expression fused instead of falling out of the chain at the first view.
+  def test_marker_rooted_view_is_a_lazy_operand
     m = @a.lazy
-    assert_equal false, m.shift(1, 0).__lazy_view__?
-    assert_equal CArray, (m.shift(1, 0) + m.shift(-1, 0)).class
+    assert_equal true, m.shift(1, 0).__lazy_view__?
+    assert_equal CABinOp, (m.shift(1, 0) + m.shift(-1, 0)).class
+    assert_equal (@a.shift(1, 0) + @a.shift(-1, 0)).to_a,
+                 (m.shift(1, 0) + m.shift(-1, 0)).to_ca.to_a
+  end
+
+  # `to_ca` follows the class: a data view returns self, a lazy view
+  # forces.  Moving the marker therefore moves what to_ca means for a
+  # marker-rooted view -- it now hands back an independent entity.
+  def test_to_ca_of_a_marker_rooted_view_forces
+    v = @a.lazy.shift(1, 0)
+    t = v.to_ca
+    assert_not_same v, t
+    assert_equal CArray, t.class
+    assert_equal v.to_a, t.to_a
+  end
+
+  # An unbound view keeps its shape open until an operand binds it, so it
+  # is deliberately NOT lifted -- both routes to one.
+  def test_unbound_views_are_not_lifted
+    row = CArray.int32(4) { |i| i }
+    assert_equal CAUnboundRepeat, row.lazy.unbound_repeat(:*, nil).class
+    assert_equal CAUnboundRepeat, row.lazy[:*, nil].class
+    # and still bind correctly
+    b = CArray.int32(3, 4) { |j, i| j * 4 + i }
+    assert_equal (row.unbound_repeat(:*, nil) + b).to_a,
+                 (row.lazy.unbound_repeat(:*, nil) + b).to_ca.to_a
   end
 
   # === reductions over a bare marker ======================================

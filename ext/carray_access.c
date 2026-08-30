@@ -1050,19 +1050,19 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eIndexError, "invalid index specified");
   }
 
-  /* Face lift at the read touch point: if `self` is a Face, re-wrap the
-     view result as a Face (ca_face_lift).  Guards: lift only when the result
-     is a CArray instance (excludes Hash / iterator / scalar), and only when
-     it is not ALREADY a Face -- some builders (select / repeat / ...) lift
-     their own result, so re-lifting here would double-wrap and leave `.parent`
-     pointing at a Face instead of the storage. */
-  if ( ca_is_face(ca) && rb_obj_is_kind_of(obj, rb_cCArray) ) {
-    CArray *obj_ca;
-    TypedData_Get_Struct(obj, CArray, &carray_data_type, obj_ca);
-    if ( ! ca_is_face(obj_ca) ) {
-      obj = ca_face_lift(obj, self);
-    }
-  }
+  /* Wrapper lift at the read touch point: if `self` is a Face or a
+     CALazyMarker, re-wrap the view result so the wrapper stays on top.
+     Guarded to CArray results, which drops the scalar / CASlabIterator /
+     CAGroupIterator / Hash cases the switch above can produce.  The
+     already-a-Face case (some builders lift their own result) is handled
+     inside ca_wrapper_lift.
+
+     Every CA_REG_* branch converges here, so this one line covers all of
+     them -- but not every index form: `a[:*, nil]` builds a CAUnboundRepeat,
+     whose shape stays open until an operand binds it, and a marker copies
+     shape at construction.  ca_wrapper_lift refuses that one, in one place,
+     because `unbound_repeat` reaches it by a second route. */
+  CA_WRAPPER_LIFT(obj, self, ca);
 
   return obj;
 }

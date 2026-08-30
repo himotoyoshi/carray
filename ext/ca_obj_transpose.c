@@ -117,7 +117,7 @@ rb_ca_trans (int argc, VALUE *argv, VALUE self)
   }
 
   obj = rb_ca_trans_new(self, imap);
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 

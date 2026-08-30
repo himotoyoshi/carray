@@ -454,7 +454,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
       return obj;
     }
   }
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 
@@ -605,7 +605,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
                                    out_strides, out_base);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
-      CA_FACE_LIFT_IF_FACE(obj, self, ca);
+      CA_WRAPPER_LIFT(obj, self, ca);
       return obj;
     }
   }
@@ -614,7 +614,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
                     new_dim, ca->bytes, 0);
   obj = ca_wrap_struct(cr);
   rb_ca_set_parent(obj, self);
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 
@@ -642,7 +642,7 @@ rb_ca_flatten (VALUE self)
                                    1, dim, out_strides, out_base);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
-      CA_FACE_LIFT_IF_FACE(obj, self, ca);
+      CA_WRAPPER_LIFT(obj, self, ca);
       return obj;
     }
   }
@@ -650,7 +650,7 @@ rb_ca_flatten (VALUE self)
   cr = ca_refer_new(ca, ca->data_type, 1, dim, ca->bytes, 0);
   obj = ca_wrap_struct(cr);
   rb_ca_set_parent(obj, self);
-  CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
 }
 
