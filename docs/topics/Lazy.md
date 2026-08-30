@@ -166,7 +166,7 @@ through unchanged, so the same helper definition supports both
 | category | examples | effect on lazy view |
 |---|---|---|
 | element-wise op | `+ - * / **`, `sqrt sin exp`, `< == is_nan`, `& \| ^`, `fma / fms / clip` | builds new `CAMonOp` / `CABinOp` / `CATriOp` / `CAMonCmp` / `CABinCmp` node; no materialise |
-| affine view | `.shift`, `.transpose`, `.reverse`, block-slice, `.reshape` (when compatible) | propagates lazy tag through the affine view; no materialise |
+| positional view | `[]`, `.shift`, `.roll`, `.flip` / `.reverse`, `.transpose` / `.T`, `.reshape`, `.flatten`, `.window`, `.diagonal`, `.tile`, `.refer` | keeps the lazy wrapper on top of the view; no materialise. The rule is the category, not the list: a view method whose shape is fixed when it is built and which only moves positions keeps the chain. Two deliberate exceptions: `unbound_repeat` (and `[:*, ...]`), whose extent stays open until an operand binds it, and anything that owns its data (`copy`), reorders values (`sort`, `partition`) or changes what the mask means (`value`, `strip_mask`) |
 | cast | `.fake(:int32)`, data_type widening | adds cast node to tree; no materialise |
 | reduction | `sum`, `mean`, `min`, `max`, `variance`, `argmin`, ... | materialises and reduces in one pass |
 | Enumerable | `each`, `to_a`, `map`, `sort`, ... on the lazy view | materialises first, then delegates to entity |

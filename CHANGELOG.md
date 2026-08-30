@@ -11,6 +11,44 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: a view built inside a `CArray.fuse` block stays part of the expression.
+  The block hands you a lazy marker, and `v.shift(1, 0)` used to build the
+  shift on top of it, burying the marker -- so the shift was not a lazy
+  operand, everything after it evaluated eagerly, and the marker underneath
+  turned each transfer into a whole-array materialise. Writing the guide's own
+  finite-difference stencil the natural way was several times slower than
+  writing it eagerly, with no better spelling available inside the block. The
+  wrapper now stays on top, as it already did for Face: `[]`, `shift`, `roll`,
+  `flip`/`reverse`, `transpose`/`T`, `reshape`, `flatten`, `window`,
+  `diagonal`, `tile` and `refer` all keep the chain. `unbound_repeat` (and
+  `[:*, ...]`) deliberately does not -- its extent stays open until an operand
+  binds it, and a wrapper would fix the shape too early.
+
+- Change: `to_ca` on a view derived from a lazy marker now returns a new
+  entity rather than the view itself. This follows from the fix above -- a
+  data view returns self from `to_ca` while a lazy view evaluates -- and
+  applies wherever the marker came from, not only inside a `fuse` block:
+  `a.lazy.shift(1, 0).to_ca` is affected as much as the block form. Use `copy`
+  if you want a fresh entity either way.
+
+- Fix: a window or shift over an unattached parent no longer duplicates the
+  whole parent on every transfer. The transfer slots asked whether the parent
+  had a pointer at that moment rather than whether it had memory to lend, so
+  an ordinary `a[nil, nil].shift(1, 0)` copied the array once to read it and
+  twice to write it. Reads over a block, refer, transpose chain or lazy marker
+  are now at parity with an entity parent, and writes are several times faster.
+
+- Fix: reductions over a bare `.lazy` marker no longer raise. Per-axis forms
+  and anything over a masked array reported `kernel_iterator init failed
+  rc=1`, so `a.lazy.sum(axis: 0)` and `CArray.fuse(a) { |v| v.mean(axis: 0) }`
+  failed while `a.lazy.sum` worked. The kernel entry now sees through the
+  marker to the array underneath.
+
+- Fix: `ca_test_flag` did not parenthesise its argument, so testing two flags
+  at once was true for every array. No caller had passed a compound flag
+  before. `ca_set_flag` and `ca_unset_flag` had the same shape of bug.
+
+
 - Change: `/` and `%` follow Ruby. Integer division floors toward -inf and the
   remainder carries the sign of the divisor, so `(a / b) * b + a % b == a` holds
   for every combination of signs; float `%` floors as well, while float `/` stays
