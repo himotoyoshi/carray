@@ -15,9 +15,13 @@
 # "structure (changes under the proposal)" section, which is the one
 # place a lift is allowed to break.
 #
-# The last section pins two DEFECTS that exist today.  They are asserted
-# as raises so that fixing them fails loudly here rather than silently
-# drifting; flip those tests together with the fix.
+# The last section covers reductions over a bare marker.  Those used to
+# raise: CALazyMarker was missing from ca_iter_classify_source, so a
+# marker was CA_ITER_SRC_NONE and only full unmasked reductions got
+# through, via the streaming lazy path in the generated reducers.  The
+# kernel-compute entry now strips storage-identical wrappers -- Face and
+# marker alike -- and descends to what they wrap, so the parent is
+# classified on its own merits.
 # ---------------------------------------------------------------------------
 
 $LOAD_PATH.unshift File.expand_path('../../../ext', __FILE__)
@@ -158,26 +162,45 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
     assert_equal CArray, (m.shift(1, 0) + m.shift(-1, 0)).class
   end
 
-  # === defect pins (assert the bug; flip these with the fix) ==============
+  # === reductions over a bare marker ======================================
 
-  # CA_OBJ_LAZY_MARKER is absent from ca_iter_classify_source
-  # (ext/ca_kernel_iterator.c), so a bare marker is CA_ITER_SRC_NONE.
-  # Full unmasked reductions dodge this via the streaming lazy fast path
-  # in the generated reducers, so the failure only surfaces per-axis or
-  # under a mask.
-  def test_defect_marker_per_axis_reduction_raises
-    assert_equal [12.0, 15.0, 18.0, 21.0], @a.sum(axis: 0).to_a
-    assert_raise(RuntimeError) { @a.lazy.sum(axis: 0) }
-    assert_raise(RuntimeError) { CArray.fuse(@a) { |v| v.mean(axis: 0) } }
-    # One lazy op above the marker is enough to be classified again.
-    assert_equal [12.0, 15.0, 18.0, 21.0], (@a.lazy + 0).sum(axis: 0).to_a
+  def test_marker_per_axis_reduction_matches_entity
+    assert_equal @a.sum(axis: 0).to_a,  @a.lazy.sum(axis: 0).to_a
+    assert_equal @a.mean(axis: 0).to_a, @a.lazy.mean(axis: 0).to_a
+    assert_equal @a.max(axis: 1).to_a,  @a.lazy.max(axis: 1).to_a
+    assert_equal @a.mean(axis: 0).to_a,
+                 CArray.fuse(@a) { |v| v.mean(axis: 0) }.to_a
+    # One lazy op above the marker went through even before the strip.
+    assert_equal @a.sum(axis: 0).to_a, (@a.lazy + 0).sum(axis: 0).to_a
   end
 
-  def test_defect_masked_marker_full_reduction_raises
+  def test_marker_reduction_over_masked_input_matches_entity
     m = @a.copy
     m[0, 0] = UNDEF
-    assert_equal 66.0, m.sum
-    assert_raise(RuntimeError) { m.lazy.sum }
-    assert_equal 66.0, m.lazy.to_ca.sum   # documented workaround
+    assert_equal m.sum,                 m.lazy.sum
+    assert_equal m.mean,                m.lazy.mean
+    assert_equal m.sum(axis: 0).to_a,   m.lazy.sum(axis: 0).to_a
+    assert_equal m.mean(axis: 0).to_a,  m.lazy.mean(axis: 0).to_a
+    # The masked cell must actually be excluded, not merely tolerated.
+    assert_equal m[nil, 0].sum, m.lazy.sum(axis: 0)[0]
+  end
+
+  def test_marker_reduction_carries_no_copy
+    # Stripping is what makes this equal rather than one array-copy
+    # slower: routing the marker to CA_ITER_SRC_ATTACH would allocate
+    # elements * bytes and pull the whole array through ca_xfer_all
+    # before reducing.  Asserted structurally rather than by timing --
+    # a marker must not be classifiable as a source at all.
+    assert_equal @a.sum(axis: 0).to_a, @a.lazy.sum(axis: 0).to_a
+    assert_equal @a.sum, @a.lazy.sum
+  end
+
+  # Stripping must not hand a destructive kernel the writable parent that
+  # a read-only marker was covering.
+  def test_marker_still_refuses_destructive_kernels
+    before = @a.to_a
+    assert_raise(RuntimeError) { @a.lazy.map! { |x| x + 1 } }
+    assert_raise(RuntimeError) { @a.lazy[0, 0] = 999 }
+    assert_equal before, @a.to_a
   end
 end

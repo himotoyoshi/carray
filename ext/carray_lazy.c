@@ -93,6 +93,10 @@ ca_lazy_marker_setup (CALazyMarker *ca, CArray *parent)
      the parent and violate the shadow semantics. */
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
 
+  /* Storage-identical wrapper: the kernel_iterator entry strip and the
+     view-creation lift both ask for this. */
+  ca_set_flag(ca, CA_FLAG_IS_LAZY_MARKER);
+
   return 0;
 }
 

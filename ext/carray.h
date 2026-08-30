@@ -224,6 +224,14 @@ typedef int8_t boolean8_t;
    search / count / value-hash entries.  Whether COMPARABLE holds is likewise
    not a question of being numeric but of carrying a unit -- CATimedelta is
    int64 on both sides and still sets ORDERABLE only. */
+/* CALazyMarker.  A marker layers "read this as the leaf of a lazy chain"
+   over storage that is identical to its parent's — the same premise as
+   CA_FLAG_IS_FACE — so the two are asked about together wherever a
+   storage-identical wrapper has to be seen through.  Kept as its own bit
+   rather than folded into CA_FLAG_IS_FACE: ca_is_face is read in ~100
+   places that mean the Face mechanism specifically. */
+#define CA_FLAG_IS_LAZY_MARKER 1024
+
 #define CA_FLAG_FACE_ORDERABLE_STORAGE  256
 #define CA_FLAG_FACE_COMPARABLE_STORAGE 512
 /* NOTE: `flags` is int32_t, so there is plenty of bit space left. */
@@ -1440,6 +1448,7 @@ int     ca_is_readonly (void *ap);
 int     ca_is_value_array (void *ap);
 int     ca_is_mask_array (void *ap);
 #define ca_is_face(ca) ( ca_test_flag((ca), CA_FLAG_IS_FACE) )
+#define ca_is_lazy_marker(ca) ( ca_test_flag((ca), CA_FLAG_IS_LAZY_MARKER) )
 
 #define ca_is_attached(ca) ( (ca)->ptr != NULL )
 #define ca_is_empty(ca) ( (ca)->elements == 0 )
