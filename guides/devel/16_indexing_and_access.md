@@ -42,8 +42,8 @@ The classifier dispatches first on arity:
   `CA_IDX_REPEAT`), and the combination resolves to `CA_REG_POINT` (all scalar →
   a scalar access), `CA_REG_BLOCK`, `CA_REG_GRID`, or `CA_REG_ITERATOR`.
 
-Arity is validated against `ndim` unless a "rubber" axis (`false` / `:~`) is
-present to absorb the difference.
+Arity is validated against `ndim` unless a "rubber" axis (`:~`, or the
+legacy `false`) is present to absorb the difference.
 
 ## Stage 2: region type → view obj_type
 
