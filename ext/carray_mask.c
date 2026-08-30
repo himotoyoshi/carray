@@ -894,6 +894,7 @@ rb_ca_value_array (VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   obj = rb_ca_refer_new(self, ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
+
   TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   /* Value arrays ignore the mask by definition.  ca_stride_setup

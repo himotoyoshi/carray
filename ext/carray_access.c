@@ -985,7 +985,16 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
 
   switch ( info.type ) {
   case CA_REG_ADDRESS_COMPLEX:
+    /* Re-enter against a flattened view of self.  rb_ca_refer_new_flatten
+       is an internal builder and hands back a bare refer, so a marker
+       receiver would be dropped here and the result would never be lifted
+       at the tail.  Put it back on before the re-entry.  (A Face survives
+       on its own -- the internal builder still lifts those.) */
     self = rb_ca_refer_new_flatten(self);
+    if ( ca_is_lazy_marker(ca) ) {
+      extern VALUE rb_ca_lazy_marker_new (VALUE cary);
+      self = rb_ca_lazy_marker_new(self);
+    }
     goto retry;
   case CA_REG_ADDRESS:
     obj = rb_ca_ref_address(self, &info);

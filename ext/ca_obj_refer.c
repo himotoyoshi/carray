@@ -482,7 +482,31 @@ rb_ca_refer_new (VALUE self,
   rb_set_options(ropt, "bytes,offset", SIZE2NUM(bytes), SIZE2NUM(offset));
   rb_ary_store(list, 2, ropt);
 
-  return rb_ca_refer(3, (VALUE *) RARRAY_CONST_PTR(list), self);
+  {
+    volatile VALUE obj = rb_ca_refer(3, (VALUE *) RARRAY_CONST_PTR(list), self);
+    CArray *co;
+
+    /* CAREFUL: this is the internal builder -- some fifteen call sites want
+       the refer itself, not a wrapper on top of it.  The public `refer` it
+       delegates to lifts a CALazyMarker, so strip that here.
+
+       Two things go wrong otherwise.  rb_ca_value_array strips the mask off
+       what it gets back and marks the level it is handed; with a marker in
+       the way the refer underneath keeps its mask and never gets
+       CA_FLAG_VALUE_ARRAY, so the values read back as UNDEF.  And builders
+       that stack further views on the result -- fancy indexing goes refer,
+       grid, refer -- end up with a marker buried in the middle of the
+       chain, which is the redundant-middle-wrapper that CAFace.md section
+       8.3 exists to prevent.
+
+       Faces stay lifted: rb_ca_value_array depends on that and says so
+       where it marks the storage level. */
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+    if ( ca_is_lazy_marker(co) ) {
+      obj = rb_ca_parent(obj);
+    }
+    return obj;
+  }
 }
 
 /* CArray#reshape(*newdim) — returns a view of self with the new
