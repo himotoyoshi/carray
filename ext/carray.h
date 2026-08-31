@@ -457,8 +457,7 @@ struct _CArray {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
 };                         /* 28 + 4*ndim (bytes) */
 
 typedef CArray CAWrap;
@@ -476,8 +475,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   ca_size_t  _dim;
 } CScalar;                 /* 32 (bytes) */
 
@@ -494,8 +492,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -524,8 +521,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -559,8 +555,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -588,8 +583,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -611,8 +605,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -682,8 +675,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -719,8 +711,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;        /* = parents[0] (legacy CAView field) */
   uint32_t  attach;
   uint8_t   nosync;
@@ -793,8 +784,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -821,8 +811,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   /* -------------*/
   VALUE     array;
 } CAObjectMask;
@@ -848,8 +837,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -878,8 +866,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
