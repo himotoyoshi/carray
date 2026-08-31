@@ -2643,8 +2643,8 @@ module MkKernel
            write stride 1 (= contig output tail) both preserved -> SIMD
            tile reduce + write maintained.
 
-           Performance characteristic (deliver-via-view, per the CLAUDE.md
-           "deliver the materials" principle): bench (b2 pattern, M=200, K=5, eff_INNER
+           Performance characteristic (deliver-via-view -- the surface
+           prioritises delivering the cells over avoiding a copy): bench (b2 pattern, M=200, K=5, eff_INNER
            =360, INNER_pre_K=16) yields 3674 us vs eager-entity 1545 us
            = 2.38x slow.  Root cause is the multi-parent data layout
            (= 5 separate 9 MB regions instead of one contig 46 MB),
@@ -2800,8 +2800,8 @@ module MkKernel
   #     reductions consume the same slab)
   #   - no streaming / view_flat / array_arg / value_arg
   #   - reduction_kind: :none only
-  # The if-form discipline (CLAUDE.md "write multi-reduction fused kernels
-  # in if-form") is enforced by author, not by the generator.
+  # The if-form discipline for multi-reduction fused kernels (see
+  # emit_min_max below) is enforced by author, not by the generator.
   def self.emit_reduce_native_multi(io, k, src)
     si        = DTYPES[src]
     oi        = output_info(k, src)
@@ -6155,7 +6155,7 @@ module MkKernel
       # bench A/B comparison during Phase E (E.1-E.5); after E.7 they
       # are retired.  Maps and scans keep their `_ki` names because
       # they have no user-facing equivalent yet (cumsum etc. pending
-      # rewire per CLAUDE.md "methods awaiting reimplementation").
+      # rewire).
       #
       # SO.2 rev6 (2026-06-04): sort kernels can opt out of the _ki
       # binding via bind_ruby: false (= internal-only kernels consumed
@@ -6500,7 +6500,7 @@ MkKernel.reduce :stddev,
 # -fopenmp-simd).  The 2x f64 speedup survives SL.1.2's reduction(min/max:)
 # vectorizer reject because fminnm + fmaxnm dual-issue on M2's two FP pipes.
 #
-# if-form discipline (CLAUDE.md "write multi-reduction fused kernels in if-form"):
+# if-form discipline for multi-reduction fused kernels:
 # the body uses `if (v < lo) lo = v;` etc, NOT ternary `lo = (v < lo) ? v : lo;`.
 # DO NOT change to ternary — pragma-less ILP path depends on if-form.
 #
@@ -6541,9 +6541,9 @@ MkKernel.reduce :minmax,
 # actual name (`best_v` here) through to the macro -- the macro accepts
 # any identifier as its accumulator argument.
 #
-# Exposed as Ruby `min_index` / `max_index` (= naming convention
-# "methods returning a position use *_index", see CLAUDE.md "methods
-# awaiting reimplementation" table).  These
+# Exposed as Ruby `min_index` / `max_index` (= the naming rule that a
+# method returning a position uses the `_index` suffix; see the rules
+# table in guides/devel/00_glossary.md).  These
 # replace the legacy `min_addr` / `max_addr` retired in E.7 stat_proc
 # retire (commit f5c7ecd).  3.0 breaking: name change from `*_addr` to
 # `*_index` is intentional.
@@ -6595,10 +6595,10 @@ MkKernel.reduce :argmax,
 # axis-local-to-flat-addr round-trip).
 #
 # Paired with the sort family's sort_addr(axis:) (= already public)
-# and partition family's partition_addr_ki (= internal).  Per
-# CLAUDE.md "«`_addr` is OK to expose: a per-axis primitive that returns a real flat address»"
-# (= "dual API: _index for axis-local position, _addr for view-flat
-# address").
+# and partition family's partition_addr_ki (= internal).  `_addr`
+# is OK to expose for a per-axis primitive that returns a real flat
+# address: the dual API is `_index` for an axis-local position, `_addr`
+# for a view-flat one.
 #
 # Runtime constraints:
 #   - naxes == 1 (single-axis reduce): view-flat transform applied
@@ -6806,7 +6806,8 @@ MkKernel.reduce :count_equal,
 #     paths removed (= ALL_NUMERIC + :raise fallback).  Re-add via demand-
 #     driven complex specialization or CA_OBJECT bridge phase.
 #   - **per-axis support gained**: `a.wsum(w, 0)`, `a.wsum(w, 0, 1)`, etc.
-#     (= original "open per-axis" goal, CLAUDE.md per-axis-for-all principle).
+#     (= the original "open per-axis" goal: every reduction gains an
+#     axis form).
 #
 # public_method: true rebinds `wsum` from legacy rb_ca_wsum to
 # rb_ca_wsum_ki at Init time.
@@ -7392,8 +7393,8 @@ MkKernel.search :search_nearest,
 # (= axis-local position) is transformed to a view-flat (row-major) address
 # into self by the dispatcher.  Paired with the *_index family
 # (= bsearch / search / search_nearest already returning axis-local
-# positions per the dual `_index` / `_addr` API in CLAUDE.md "`_addr` is
-# OK to expose: a per-axis primitive that returns a real flat address").
+# positions per the dual `_index` / `_addr` API: `_index` for an
+# axis-local position, `_addr` for a view-flat one).
 #
 # Scope: scalar val path only (= case A).  CArray val + broadcast
 # path (case B/C) raises NotImpError until extended (= the per-element

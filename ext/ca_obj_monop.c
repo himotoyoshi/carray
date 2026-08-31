@@ -380,8 +380,8 @@ ca_size_t ca_monop_materialise_call_count = 0;
    but they are unobservable: the output mask is built separately via
    the attach lifecycle (ca_monop_func_create_mask + parent.mask
    CARefer), so reads of masked cells return UNDEF regardless of byte
-   contents.  This is the design license stated in CLAUDE.md
-   §"design premises" ("mask is not a protection mechanism").
+   contents.  The mask marks cells as undefined; it does not guard their
+   bytes, so writing garbage into a masked cell is licensed.
 
    A "partial mask slow path" (= a cell-wise branch to skip masked-cell
    compute) is a possible future micro-optimisation; it is not done

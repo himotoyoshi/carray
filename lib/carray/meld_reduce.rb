@@ -202,7 +202,7 @@ class CAMeld
     # Empty-parent / short-parent handling — Welford needs n >= 2 per parent
     # to recover m2 from p.variance for sample, n >= 1 for variancep (n=1
     # gives m2=0, fine).  Any parent below its threshold punts to super,
-    # which handles UNDEF / 0-count per CLAUDE.md contract.
+    # which handles the UNDEF / zero-count cases.
     min_n = sample ? 2 : 1
     if axis.nil?
       return yield if parents.any? { |p| p.elements < min_n }
