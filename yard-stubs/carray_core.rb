@@ -32,6 +32,7 @@ class CArray
   #   @return [Object] the block's return value.
   def attach!; end
 
+  # @private
   # @overload __attach__
   #   Raw attach: materializes the memory block of `self` and leaves
   #   it attached. Caller is responsible for the matching
@@ -43,6 +44,7 @@ class CArray
   #   @api private
   def __attach__; end
 
+  # @private
   # @overload __sync__
   #   Raw sync: writes any pending changes in `self.ptr` back to the
   #   parent. Requires `self` to be currently attached.
@@ -50,6 +52,7 @@ class CArray
   #   @api private
   def __sync__; end
 
+  # @private
   # @overload __detach__
   #   Raw detach: releases the memory block paired with `__attach__`.
   #   @return [self]

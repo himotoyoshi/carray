@@ -60,7 +60,7 @@ Use CArray's words — in code, in comments, and when discussing a change.
 ## Verifying a change
 
     rake build_ext
-    rake spec_ai
+    rake test
 
 Both must report no failures. See CONTRIBUTING.md for what is worth
 sending and in which form.

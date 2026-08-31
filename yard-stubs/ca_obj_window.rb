@@ -9,6 +9,7 @@ class CAWindow < CAView
 end
 
 # Mask companion of {CAWindow}.
+# @private
 class CAWindowMask < CAWindow
 end
 

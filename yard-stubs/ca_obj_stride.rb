@@ -11,6 +11,7 @@ class CAStride < CAView
 end
 
 # Mask companion of {CAStride}.
+# @private
 class CAStrideMask < CAStride
 end
 

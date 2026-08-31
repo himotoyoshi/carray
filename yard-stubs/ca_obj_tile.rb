@@ -9,6 +9,7 @@ class CATile < CAView
 end
 
 # Mask companion of {CATile}.
+# @private
 class CATileMask < CATile
 end
 
