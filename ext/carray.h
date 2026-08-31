@@ -1535,6 +1535,25 @@ int     ca_xfer_addrs_is_sequential_run (ca_size_t n, ca_size_t *addrs,
    parent->ptr gate through view CAStride layers (= chain pattern). */
 CArray *ca_resolve_attached_root_via_identity (CArray *cand);
 
+/* Shared gate for the xfer_stride slots' structural fast paths.
+
+   An xfer_stride request is given over the view's linear ADDRESSES (see the
+   slot comment above), so request axis k need not be view axis k: a caller
+   is free to hand over a transposed region -- counts/strides in one order,
+   the packed destination buffer in another -- and a degenerate axis makes
+   that indistinguishable from an axis-aligned request by divisibility alone
+   (an (n, 1) view has the same native step on both axes).  A structural path
+   that composes request axis k onto view axis k must therefore ask first:
+   does request axis k advance view axis k, and stay inside it for the whole
+   traversal?  Returns 1 when that holds for every axis (count <= 1 axes move
+   nothing and always pass), 0 when the request is not such a box -- the
+   caller then takes its per-cell fallback, which is address-correct for any
+   request.  ndim is the request's rank, which the slots' wiring keeps equal
+   to ca->ndim. */
+int     ca_xfer_stride_request_is_axis_box (void *ap, ca_size_t *starts,
+                                            ca_size_t *counts,
+                                            ca_size_t *strides);
+
 void    ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                         ca_size_t *strides, void *data, int dir);
 void    ca_xfer_all (void *ap, void *data, int dir);

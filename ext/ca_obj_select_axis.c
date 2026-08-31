@@ -571,9 +571,17 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   s = ca->bytes;
   for (k = ndim - 1; k >= 0; k--) { dstride[k] = s; s *= counts[k]; }
 
-  for (k = 0; k < ndim; k++) {
-    if (strides[k] % cnative[k] != 0) { aligned = 0; break; }
-    src_step[k] = strides[k] / cnative[k];
+  /* The request is over the view's addresses, so a transposed / flat request
+     is legal and must not be composed axis-by-axis; see
+     ca_xfer_stride_request_is_axis_box (carray.h). */
+  if ( ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
+    aligned = 0;
+  }
+  else {
+    for (k = 0; k < ndim; k++) {
+      if (strides[k] % cnative[k] != 0) { aligned = 0; break; }
+      src_step[k] = strides[k] / cnative[k];
+    }
   }
 
   if (!aligned) {

@@ -112,6 +112,13 @@ ca_xfer_stride_transform_fused (CArray   *view,
                               composed_strides, &composed_base);
     if ( !root->ptr ) return 0;
     if ( parent->bytes != root->bytes ) return 0;
+    /* Per-axis composition below is only meaningful for a request that walks
+       our own axes; a transposed / flat request over the view's addresses
+       (legal -- see ca_xfer_stride_request_is_axis_box in carray.h) declines
+       to the caller's per-cell path. */
+    if ( ! ca_xfer_stride_request_is_axis_box(view, starts, counts, strides) ) {
+      return 0;
+    }
 
     for ( k = 0; k < ndim; k++ ) {
       if ( view_native[k] == 0 ) return 0;

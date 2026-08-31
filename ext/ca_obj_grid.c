@@ -478,9 +478,17 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      transposed leaf breaks this (cross-axis / non-multiple strides); fall back
      to per-cell delivery (correct, still no whole-view attach).  The wiring
      guards ndim == grid->ndim, so counts/strides have ndim entries here. */
-  for (k = 0; k < ndim; k++) {
-    if (strides[k] % gnative[k] != 0) { aligned = 0; break; }
-    src_step[k] = strides[k] / gnative[k];
+  /* The request is over the view's addresses, so a transposed / flat request
+     is legal and must not be composed axis-by-axis; see
+     ca_xfer_stride_request_is_axis_box (carray.h). */
+  if ( ! ca_xfer_stride_request_is_axis_box(g, starts, counts, strides) ) {
+    aligned = 0;
+  }
+  else {
+    for (k = 0; k < ndim; k++) {
+      if (strides[k] % gnative[k] != 0) { aligned = 0; break; }
+      src_step[k] = strides[k] / gnative[k];
+    }
   }
 
   if (!aligned) {

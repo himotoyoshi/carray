@@ -352,8 +352,11 @@ ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( n == 0 ) return;
 
   if ( rb_obj_respond_to(ca->array, mid_block, Qtrue) ) {
-    int aligned = 1;
-    for ( k = 0; k < ndim; k++ ) {
+    /* The request is over the view's addresses, so a transposed / flat
+       request is legal; the per-axis copy_block dispatch below would
+       misread it.  See ca_xfer_stride_request_is_axis_box (carray.h). */
+    int aligned = ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides);
+    for ( k = 0; aligned && k < ndim; k++ ) {
       if ( strides[k] <= 0 || strides[k] % native[k] != 0 ) { aligned = 0; break; }
       steps[k] = strides[k] / native[k];
     }
@@ -937,8 +940,11 @@ ca_object_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
        before the % check
      - given %==0 + >0, strides/native >= 1 holds automatically */
   if ( rb_obj_respond_to(ca->self, mid_block, Qtrue) ) {
-    int aligned = 1;
-    for ( k = 0; k < ndim; k++ ) {
+    /* The request is over the view's addresses, so a transposed / flat
+       request is legal; the per-axis copy_block dispatch below would
+       misread it.  See ca_xfer_stride_request_is_axis_box (carray.h). */
+    int aligned = ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides);
+    for ( k = 0; aligned && k < ndim; k++ ) {
       if ( strides[k] <= 0 || strides[k] % native[k] != 0 ) { aligned = 0; break; }
       steps[k] = strides[k] / native[k];   /* >= 1 by construction */
     }
