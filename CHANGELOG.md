@@ -1,7 +1,7 @@
 # Changelog
 
 Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
-(1.4.x through 2.0.1) see [NEWS.md](NEWS.md).
+(1.4.x through 2.0.1) see [CHANGELOG.1.0-2.0.md](CHANGELOG.1.0-2.0.md).
 
 <!-- Newest first, at both levels: a new release section goes above the
      ones below it, and a new entry goes directly under its own release
