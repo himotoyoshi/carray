@@ -227,7 +227,17 @@ task :spec_ai => [:kernel_surface_check,
   sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/*.rb\"].sort.each{|f| require_relative f}'"
 end
 
-task :default => :spec
+desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"
+task :spec_unit => :build_ext do
+  # Carried over from 2.x, and test-unit rather than RSpec, so neither the
+  # :spec nor the :spec_ai glob picks these up.  Run them explicitly.
+  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/UnitTest/*.rb\"].sort.each{|f| require_relative f}'"
+end
+
+desc "Run every test suite and the stub drift check"
+task :test => [:spec_ai, :spec, :spec_unit, :stub_check]
+
+task :default => :test
 
 
 namespace :pdf do
