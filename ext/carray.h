@@ -206,7 +206,7 @@ typedef int8_t boolean8_t;
 #define CA_FLAG_MULTI_PARENTS   32
 #define CA_FLAG_CYCLE_CHECK     64
 #define CA_FLAG_IS_FACE        128
-/* Face opt-in ordering/search flags (PROPOSAL_FACE_ORDERING_GATE §Future work).
+/* Face opt-in ordering/search flags.
    A Face declares that its numeric storage may be descended to for kernel
    dispatch.  The two flags are on independent axes -- do not conflate:
      ORDERABLE_STORAGE: storage native order == surface <=> order (self-scope).
@@ -610,8 +610,8 @@ typedef struct {
   uint32_t  attach;
   uint8_t   nosync;
   /* ---------- */
-  uint8_t   *bounds;       /* [ndim] per-axis policy (PROPOSAL_CAWINDOW_UNIFICATION
-                              Tier 2.G; scalar uint8_t before).  Allows
+  uint8_t   *bounds;       /* [ndim] per-axis policy (a scalar uint8_t
+                              before).  Allows
                               CAShift (per-axis roll[]) to be expressed as
                               a CAWindow specialisation. */
   ca_size_t  *start;
@@ -621,8 +621,7 @@ typedef struct {
   /* COMPOSITE_FAMILY Phase 1 (E.2): embed descriptor model.  Computed by
      ca_compute_embed_descriptor at setup time, immutable for view lifetime.
      Used by attach/sync (E.3-E.4) to skip per-element bound checks via
-     "1 alias + 1 fill" decomposition.  Dormant in E.2 (no readers yet).
-     See devel/PROPOSAL_COMPOSITE_FAMILY.md §4.1. */
+     "1 alias + 1 fill" decomposition. */
   ca_size_t  *embed_parent_start;   /* [ndim] parent-side alias rectangle start */
   ca_size_t  *embed_count;          /* [ndim] alias rectangle size per axis */
   ca_size_t  *embed_output_offset;  /* [ndim] output-side alias rectangle start */
@@ -641,13 +640,12 @@ typedef struct {
                                        must be contig in parent storage. */
 } CAWindow;                /* 56 + 16*(ndim) + 1*(bytes) + 1*ndim + 24*ndim (bytes) */
 
-/* Tier 2.G.2 (PROPOSAL_CAWINDOW_UNIFICATION): CAShift is a pure typedef
-   of CAWindow.  CAShift construction maps (shift[], roll[], fill,
+/* CAShift is a pure typedef of CAWindow.  CAShift construction maps (shift[], roll[], fill,
    fill_mask) onto CAWindow's (start = -shift, count = parent->dim,
    bounds = roll ? PERIODIC : (fill_mask ? MASK : FILL), fill).  The
    two views share the operation table (ca_window_func); only obj_type
    differs (CA_OBJ_SHIFT vs CA_OBJ_WINDOW) to preserve user-facing class
-   distinction.  See devel/PROPOSAL_CAWINDOW_UNIFICATION.md. */
+   distinction. */
 typedef CAWindow CAShift;
 
 /* COMPOSITE_FAMILY Phase 2 (T.3, 2026-05-26): CATile = N-region
@@ -656,9 +654,8 @@ typedef CAWindow CAShift;
    is a full-parent alias at output offset
    (i_0 * parent.dim[0], i_1 * parent.dim[1], ...). Attach iterates
    total_tiles regions, calling ca_composite_region_gather for each.
-   See devel/PROPOSAL_CATILE.md §1.2 / §1.3.
 
-   CARoll = typedef CATile (same pattern as the Phase G
+   CARoll = typedef CATile (same pattern as the
    CAShift = CAWindow precedent); constructor parameters differ but the
    C struct layout is shared, and the attach/sync routine is identical
    (= dispatch the region list in order). */
@@ -689,10 +686,8 @@ typedef CATile CARoll;   /* T.4 will land CARoll-specific constructor +
                             obj_type CA_OBJ_ROLL.  Until then CARoll path
                             is just CATile (= typedef body identical). */
 
-/* CAStack (COMPOSITE_FAMILY Phase 3, PROPOSAL_CASTACK.md): outer-axis-only
-   stack view of K uniform-shape parents.  shape = (K, *parent_shape),
+/* CAStack: outer-axis-only stack view of K uniform-shape parents.  shape = (K, *parent_shape),
    axis 0 maps to parent index, axes 1..ndim-1 are per-parent contig.
-   See devel/MEMO_CASTACK_DESIGN.md for design rationale.
    - parents stored as Ruby Array @parents on the wrapper object (= GC
      anchor); C-side tail `parents[]` is alias pointer array.
    - CAView.parent points to parents[0] (= legacy compat for paths that
@@ -732,8 +727,7 @@ typedef struct {
    All other axes must match across parents (uniform check at constructor).
 
    v0.1 stub: external-axis (meld_axis == 0) structural xfer_stride path only.
-   Other paths raise NotImplementedError until fleshed out per staging plan
-   in devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md §4. */
+   Other paths raise NotImplementedError. */
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
@@ -891,10 +885,8 @@ extern const int ca_cast_table[CA_NTYPE][CA_NTYPE];
 extern const int ca_cast_table2[CA_NTYPE][CA_NTYPE];
 
 /* data_type promotion reducer — pure function over ca_cast_table.  Used by
-   CArray.result_type and (from PROPOSAL_LAZY_ELEMENTWISE_VIEW Phase 1)
-   the lazy view layer.  See ext/carray_cast.c definition + comment, and
-   devel/AUDIT_DTYPE_PROMOTION.md for the audit that confirmed single
-   source. */
+   CArray.result_type and by the lazy view layer.  See ext/carray_cast.c
+   for the definition; this is the single source of the promotion rule. */
 int8_t ca_promote_type (int8_t a, int8_t b);
 
 /* Infer a data_type code from a Ruby *value* (literal Numeric, true/false,
@@ -913,8 +905,7 @@ int8_t ca_mv_probe_data_type (VALUE obj);
 /* Symbol cache for data_type code → Symbol lookup.  Initialized in
    Init_carray_class.  Indexed by data_type code (0 = CA_FIXLEN ...
    CA_NTYPE-1 = CA_OBJECT).  Use rb_ca_data_type_to_sym for the public
-   conversion entry point (it validates the code first).
-   PROPOSAL_DTYPE_SYMBOL_FLIP rev3 Q5=(Y). */
+   conversion entry point (it validates the code first). */
 extern ID ca_data_type_sym[CA_NTYPE];
 VALUE rb_ca_data_type_to_sym (int8_t data_type);
 
@@ -1217,7 +1208,7 @@ typedef struct {
 /* The element-wise kernel typedefs (ca_monop_func_t / ca_binop_func_t /
    ca_triop_func_t / ca_moncmp_func_t / ca_bincmp_func_t), the rb_ca_call_*
    drivers, ca_math_call, and the per-data_type dispatch tables now live in
-   carray_math_kernel.h (PROPOSAL_CARRAY_H_REORG H.3), which this header
+   carray_math_kernel.h, which this header
    includes at the bottom (umbrella).  Declarations only moved — definitions
    and ABI are unchanged. */
 
@@ -1260,7 +1251,7 @@ CArray  *carray_new_adopt (int8_t data_type,
 VALUE    rb_carray_new_adopt (int8_t data_type,
                               int8_t ndim, ca_size_t *dim, ca_size_t bytes, char *ptr);
 
-/* Phase A capstone helper (PROPOSAL_CAPSTONE_PHASE_A.md A.3): allocate
+/* Capstone helper: allocate
    a reduction-output CArray for kernel_iterator authors.  Computes
    output shape = self.dim with slab axes removed (ascending order),
    collapses to shape [1] when fully reduced.  See
@@ -1272,7 +1263,7 @@ VALUE    rb_ca_new_reduced (VALUE self, int8_t *slab_axes,
 VALUE    rb_ca_new_reduced_bytes (VALUE self, int8_t *slab_axes, int8_t naxes,
                                   int32_t data_type, ca_size_t bytes, int keep_axis);
 
-/* Phase B capstone helper (PROPOSAL_CAPSTONE_PHASE_B.md B.3): parse
+/* Capstone helper: parse
    variadic axis argv into validated int8_t array.  Accepts Integer
    args or a single Array arg, normalises negative axes (Python-style),
    range / duplicate / overflow checks all raise ArgumentError.
@@ -1346,7 +1337,7 @@ int       ca_stride_compose_through (CAStride *leaf, CAStride *parent,
 
 /* --- ca_obj_grid.c --- */
 
-/* Tier 3 / C1 (PROPOSAL_CAGRID_REBUILD): rb_ca_grid_new signature
+/* rb_ca_grid_new signature
    changed to take a per-axis cag_axis_t proto array (private to
    ca_obj_grid.c).  No external callers exist so the declaration is
    removed from the public header. */
@@ -1454,13 +1445,11 @@ int     ca_is_mask_array (void *ap);
    attached), CAWrap, CScalar, and CAStride-family views whose composed
    strides are row-major contiguous (alias-attach path).  Used by
    kernel_iterator's L1 alias decision (ca_iter_can_alias level 1) and
-   by Tier A (PROPOSAL_DELEGATE_COPY_DATA) overlay-view dispatch.
-   Renamed 2026-05-25 (T1 step 9.4a): _is_cheap → _is_alias to express
-   the structural property (= aliasable without materialise) rather
-   than the perf characteristic. */
+   by overlay-view dispatch.  The name says the structural property
+   (= aliasable without materialise), not the perf characteristic. */
 int     ca_attach_is_alias (void *ap);
 
-/* C.3 (PROPOSAL_EAGER_SLOWPATH_CHUNKING_ARENA): OR operand masks into
+/* OR operand masks into
    ca_out->mask without ca_attach on operand masks (= gathers via
    ca_xfer_all into arena scratch then byte OR-folds).  ca_out must be
    a freshly templated entity.  For bang variant where ca_out IS one of
@@ -1533,10 +1522,10 @@ void    ca_store_index (void *ap, ca_size_t *idx, void *ptr);
 void    ca_store_addr (void *ap, ca_size_t addr, void *ptr);
 void    ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir);
 void    ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir);
-/* Y.1/Y.2 (PROPOSAL_XFER_ADDRS_PER_REGION_GAPS.md §4.1) shared predicate:
-   detect if addrs[] is a sequential run (addrs[i] == addrs[0]+i for all i).
-   Used by ca_xfer_addrs_dispatch (Y.2) and view xfer_addrs slots (Y.1) for
-   whole-view / sub-region run detection -> opportunistic engine dispatch. */
+/* Shared predicate: detect if addrs[] is a sequential run
+   (addrs[i] == addrs[0]+i for all i).  Used by ca_xfer_addrs_dispatch and
+   by view xfer_addrs slots for whole-view / sub-region run detection ->
+   opportunistic engine dispatch. */
 int     ca_xfer_addrs_is_sequential_run (ca_size_t n, ca_size_t *addrs,
                                          ca_size_t *base_out);
 /* Y.1.e: resolve cand through identity CAStride compose-fold to find an
@@ -1700,8 +1689,8 @@ VALUE   rb_ca_wrap_writable (VALUE obj, VALUE vtype);
 VALUE   rb_ca_wrap_readonly (VALUE obj, VALUE vtype);
 
 /* inheritance */
-/* rb_ca_data_type_inherit / rb_ca_data_type_import were removed in 3.0
-   (PROPOSAL_DEPRECATE_LEGACY_DATA_CLASS P.2/P.3). data_class lives on
+/* rb_ca_data_type_inherit / rb_ca_data_type_import were removed in 3.0.
+   data_class lives on
    Face (CARecord) tail; view ctors no longer carry data_class via
    @data_class ivar — Face dispatch (CA_FACE_LIFT_IF_FACE) handles it. */
 VALUE   rb_ca_set_parent (VALUE self, VALUE obj);
@@ -1748,8 +1737,7 @@ VALUE   rb_ca_is_scalar (VALUE self);
 VALUE   rb_obj_is_data_class (VALUE rtype);
 VALUE   rb_ca_has_data_class (VALUE self);
 VALUE   rb_ca_data_class (VALUE self);
-/* rb_ca_set_data_class was removed in 3.0
-   (PROPOSAL_DEPRECATE_LEGACY_DATA_CLASS P.5). The Ruby method
+/* rb_ca_set_data_class was removed in 3.0.  The Ruby method
    CArray#data_class= raises ArgumentError with migration message. */
 VALUE   rb_ca_data_class_decode (VALUE self, VALUE str);
 VALUE   rb_ca_data_class_encode (VALUE self, VALUE obj);
@@ -1878,16 +1866,15 @@ void ca_debug ();
 
 /* -------------------------------------------------------------------- */
 
-/* PROPOSAL_PORTABLE_TEXTBOOK_SORT — portable textbook sort kernels.
+/* Portable textbook sort kernels.
    These are layer ③ true-internal (ca_sort_kernels.h self-describes as
    "ext-internal, signatures may change across 3.x").  They are NOT pulled
-   into the carray.h umbrella and NOT installed (PROPOSAL_CARRAY_H_REORG
-   H.4.1): the internal consumers (carray_sort_kernel.c / carray_sort.c /
+   into the carray.h umbrella and NOT installed: the internal consumers (carray_sort_kernel.c / carray_sort.c /
    carray_partition.c / carray_kernels.c) include ca_sort_kernels.h
    directly. */
 
 /* -------------------------------------------------------------------- */
-/* Public umbrella (PROPOSAL_CARRAY_H_REORG H.3)                         */
+/* Public umbrella                                                       */
 /* -------------------------------------------------------------------- */
 
 /* Pull the ext-author / math-backend surface in under the carray.h
