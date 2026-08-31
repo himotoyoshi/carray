@@ -10,6 +10,7 @@ class CAShift < CAWindow
 end
 
 # Mask companion of {CAShift}.
+# @private
 class CAShiftMask < CAShift
 end
 

@@ -126,6 +126,7 @@ class CArray
   # + copy).  No new C kernel, no new op_id required.
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__abs_eager__, :abs
   __abs_eager_um__ = instance_method(:__abs_eager__)
   define_method(:abs) do
@@ -174,6 +175,7 @@ class CArray
   # mutability on the lazy path is not a regression.
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__real_eager__, :real
   __real_eager_um__ = instance_method(:__real_eager__)
   define_method(:real) do
@@ -236,6 +238,7 @@ class CArray
   # `.to_type(:float64)` before / after.
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__arg_eager__, :arg
   __arg_eager_um__ = instance_method(:__arg_eager__)
   define_method(:arg) do

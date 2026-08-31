@@ -10,6 +10,7 @@ class CATranspose < CAStride
 end
 
 # Mask companion of {CATranspose}.
+# @private
 class CATransposeMask < CATranspose
 end
 
