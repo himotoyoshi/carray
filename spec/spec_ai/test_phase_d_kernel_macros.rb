@@ -218,13 +218,13 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   # The `(void)v` cast in the DSL silences unused-variable warnings.
 
   def test_count_ki_unmasked_returns_elements
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(7).seq
     assert_equal(7, a.count_ki(0))
   end
 
   def test_count_ki_masked
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(8).seq
     a[1] = UNDEF
     a[3] = UNDEF
@@ -233,14 +233,14 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_count_ki_axis0_2d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int32(4, 5).seq
     assert_equal([4, 4, 4, 4, 4], a.count_ki(0).to_a)
     assert_equal(CA_INT64, a.count_ki(0).data_type)
   end
 
   def test_count_ki_full_returns_integer
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int32(3, 4).seq
     result = a.count_ki(0, 1)
     assert_kind_of(Integer, result)
@@ -248,7 +248,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_count_ki_int16_falls_through_to_wrap
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # count uses fallback: :wrap_to_f64 -> int16 still works (any
     # numeric data_type counts the same way).
     a = CArray.int16(8).seq
@@ -373,19 +373,19 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   # and the caller-initialised secondary is `best_i` (int64_t).
 
   def test_argmin_ki_entity_1d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CA_FLOAT64([3.0, 1.0, 5.0, 0.0, 4.0])
     assert_equal(3, a.argmin_ki(0))   # 0.0 at index 3
   end
 
   def test_argmax_ki_entity_1d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CA_FLOAT64([3.0, 1.0, 5.0, 0.0, 4.0])
     assert_equal(2, a.argmax_ki(0))   # 5.0 at index 2
   end
 
   def test_argmin_ki_axis0_2d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(3, 4).seq      # increasing along both axes
     # Each column's min is row 0
     assert_equal([0, 0, 0, 0], a.argmin_ki(0).to_a)
@@ -393,14 +393,14 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmax_ki_axis0_2d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(3, 4).seq
     # Each column's max is row 2
     assert_equal([2, 2, 2, 2], a.argmax_ki(0).to_a)
   end
 
   def test_argmin_ki_masked_preserves_absolute_position
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # When a masked cell would have been the minimum, the macro skips
     # the REDUCE call but still increments idx -- the returned index
     # is the absolute slab position of the visible minimum, not the
@@ -413,7 +413,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmax_ki_masked_preserves_absolute_position
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CA_FLOAT64([5.0, 1.0, 100.0, 2.0, -3.0])
     a[2] = UNDEF                # would have been the max
     # Visible cells: [5, 1, _, 2, -3]; max = 5 at idx 0
@@ -421,21 +421,21 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmin_ki_int32_source
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int32(5).seq    # [0, 1, 2, 3, 4]
     a[2] = -10
     assert_equal(2, a.argmin_ki(0))
   end
 
   def test_argmin_ki_int64_source
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int64(4).seq
     a[3] = -100
     assert_equal(3, a.argmin_ki(0))
   end
 
   def test_argmin_ki_full_returns_integer
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(8).seq + 0.5
     result = a.argmin_ki(0)
     assert_kind_of(Integer, result)
@@ -443,7 +443,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmax_ki_3d_axis1
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(2, 3, 4).seq
     # axis 1 = middle.  For each (i, k), the max is at j=2.
     result = a.argmax_ki(1)
@@ -457,7 +457,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmin_ki_view_chain
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Transpose view + argmin should produce sane indices in the
     # transposed coordinate space.
     a = CArray.float64(5, 6).seq
@@ -469,14 +469,14 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmin_ki_first_occurrence_on_ties
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Strictly-less comparison means the first occurrence wins.
     a = CA_FLOAT64([1.0, 1.0, 1.0, 1.0])
     assert_equal(0, a.argmin_ki(0))
   end
 
   def test_argmin_ki_raises_on_unsupported
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # argmin uses fallback: :raise.  Boolean source raises since it's
     # not in the source: list.  (int16 etc. are now natively covered.)
     # Phase E: data_type-reject now raises CArray::DataTypeError.
@@ -485,7 +485,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmax_ki_multi_axis_reduction
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # 3D array, reduce axes [0, 2] -> output shape [d1]; result is the
     # flat index within the (d0 * d2) slab where the max sits.
     a = CArray.float64(2, 3, 2).seq   # [[[0,1],[2,3],[4,5]], [[6,7],[8,9],[10,11]]]
@@ -505,13 +505,13 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   #   mean_safe_ki   - :all_masked  (only all-masked -> UNDEF)
 
   def test_sum_strict_no_mask_matches_sum
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(5).seq
     assert_in_delta(a.sum(axis: 0), a.sum_strict_ki(0), 1e-12)
   end
 
   def test_sum_strict_any_masked_returns_undef_scalar
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Full reduction with any masked input -> Object::UNDEF
     a = CArray.float64(5).seq
     a[2] = UNDEF
@@ -519,13 +519,13 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_sum_strict_clean_returns_float
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(5).seq
     assert_kind_of(Float, a.sum_strict_ki(0))
   end
 
   def test_sum_strict_partial_axis_2d_propagates_mask
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Some columns have masked cells, others don't.  Output mask should
     # be set only on affected columns.
     a = CArray.float64(3, 4).seq
@@ -543,14 +543,14 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_sum_strict_int_source
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int32(6).seq
     a[3] = UNDEF
     assert_equal(UNDEF, a.sum_strict_ki(0))
   end
 
   def test_sum_strict_fallback_int16_via_wrap
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Falls through wrap_to_f64 -> native f64 helper.  The CAFake view
     # inherits the parent's mask so propagation still works.
     a = CArray.int16(5).seq
@@ -559,13 +559,13 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_mean_safe_no_mask_matches_mean
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(8).seq
     assert_in_delta(a.mean(axis: 0), a.mean_safe_ki(0), 1e-12)
   end
 
   def test_mean_safe_partial_masked_still_returns_value
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # :all_masked policy means partial masking does NOT trigger UNDEF.
     a = CArray.float64(5).seq
     a[1] = UNDEF
@@ -576,14 +576,14 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_mean_safe_all_masked_returns_undef
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(4).seq
     a[0..3] = UNDEF
     assert_equal(UNDEF, a.mean_safe_ki(0))
   end
 
   def test_mean_safe_per_slab_mixed_policy
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     # Some slabs all-masked, others not.  Only the all-masked slab's
     # output cell should be UNDEF.
     a = CArray.float64(3, 4).seq
@@ -599,7 +599,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_mean_safe_3d_full_reduction
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(2, 3, 4).seq
     # No mask -> returns Float, matches mean_ki
     assert_in_delta(a.mean(axis: [0, 1, 2]), a.mean_safe_ki(0, 1, 2), 1e-9)
@@ -847,7 +847,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_cumcount_ki_data_type_is_int64
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(5).seq
     result = a.cumcount_ki(axis: 0)
     assert_equal(CA_INT64, result.data_type)
@@ -855,7 +855,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_cumcount_ki_2d
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.float64(3, 4).seq
     result = a.cumcount_ki(axis: 0)
     # Each column counts independently up to 3.
@@ -881,7 +881,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_cumcount_ki_masked
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CA_FLOAT64([10.0, 20.0, 30.0, 40.0, 50.0])
     a[2] = UNDEF
     # acc: 0, 1, 2 (skipped at idx 2), 3, 4; written: 1,2,sentinel(0),3,4
@@ -992,7 +992,7 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   end
 
   def test_argmin_ki_int16_native
-    omit "Removed in E.8 _ki retire; re-implement per CLAUDE.md"
+    omit "removed when the _ki kernel iterator was retired; awaiting reimplementation"
     a = CArray.int16(5)
     a[0] = 100; a[1] = -50; a[2] = 0; a[3] = -200; a[4] = 75
     assert_equal(3, a.argmin_ki(0))

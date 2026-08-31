@@ -381,7 +381,9 @@ rb_smoke_source_s_new (VALUE klass, VALUE rowner, VALUE rshape)
   rb_str_modify(rowner);   /* the source writes through to these bytes */
 
   ca = ALLOC(CASmokeSource);
-  ca->_pool = NULL;        /* legacy dim allocation; see CLAUDE.md */
+  /* ALLOC does not zero the struct and the pool framework keys on
+     _pool, so it must be NULL before the setup below runs. */
+  ca->_pool = NULL;
   /* ca_wrap_setup_null fills the CArray prefix without allocating a
      buffer.  It stamps obj_type = CA_OBJ_ARRAY_WRAP, so claim our own
      obj_type back afterwards. */
