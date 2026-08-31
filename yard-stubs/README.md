@@ -36,6 +36,6 @@ See `devel/PROPOSAL_DOCS_INFRASTRUCTURE.md` §12 for the full design.
 
 ## Drift detection
 
-`rake stub_check` (see `devel/check_stub_drift.rb`) compares the set
+`rake stub_check` (see `utils/check_stub_drift.rb`) compares the set
 of methods listed in stubs against `CArray.instance_methods(false)`
 on a freshly loaded library, and fails on mismatch.
