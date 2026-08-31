@@ -38,6 +38,17 @@ Ruby/CArray is an extension library for the multi-dimensional array class.
 3.0.x still moves: behavior can change between releases — see
 [CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on.
 
+## Contributing
+
+Bug reports and feature requests are welcome — please open an issue.
+
+**Before opening a pull request, read [CONTRIBUTING.md](CONTRIBUTING.md).**
+It is short, and it says which form a contribution is best sent in. A small,
+self-contained bug fix is fine as a pull request. Anything larger is better
+started as an issue: code here gets rewritten as a matter of course, so a
+patch for a larger change is likely to end up reimplemented rather than
+merged, and describing the problem gets you further than writing one.
+
 ## Install
 
 ```
