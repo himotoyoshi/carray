@@ -319,12 +319,13 @@ enum {
    preamble stays focused on basic types + struct definitions. */
 #include "ca_axis_descriptor.h"
 
-/* xfer protocol direction flags (PROPOSAL_XFER_PROTOCOL.md §3) */
+/* xfer protocol direction flags.  The protocol is walked through in
+   guides/devel/04_attach_lifecycle.md. */
 #define CA_XFER_GET 0   /* target -> data (gather) */
 #define CA_XFER_PUT 1   /* data -> target (scatter) */
 
-/* compose-fold state threaded through ca_stride_compose_to_root
-   (PROPOSAL_XFER_PROTOCOL.md §5.5).  strides / base / counts are expressed
+/* compose-fold state threaded through ca_stride_compose_to_root.
+   strides / base / counts are expressed
    in the *current parent*'s byte space; ndim is invariant through the walk.
    counts[] is the leaf's per-dim extent (== leaf->dim), used by
    ca_stride_compose_through's bounds check and by sometimes-fold
@@ -347,20 +348,20 @@ typedef struct {
   void   (*detach)       (void *ap);
   void   (*fill_data)    (void *ap, void *data);
   void   (*create_mask)  (void *ap);
-  /* xfer protocol (PROPOSAL_XFER_PROTOCOL.md). Added at struct end so existing
+  /* xfer protocol.  Added at struct end so existing
      positional initializers leave it NULL automatically.  dir = CA_XFER_GET /
      CA_XFER_PUT. */
   void   (*xfer_index)   (void *ap, ca_size_t *idx, void *data, int dir);
   void   (*xfer_addrs)   (void *ap, ca_size_t n, ca_size_t *addrs,
                           void *data, int dir);
-  /* fold_stride (PROPOSAL_XFER_PROTOCOL.md §5.2/§5.5): one compose-fold hop
+  /* fold_stride: one compose-fold hop
      for sometimes-fold participants (CAWindow now; CAGrid/CSA/CATile later).
      Compose *f into next_parent's byte space and return 1, or decline
      (leave *f / *next_parent untouched) and return 0 -> this view is the
      fold boundary.  CAStride family leaves this NULL (handled open-inline
      by ca_stride_compose_to_root). */
   int    (*fold_stride)  (void *ap, ca_fold_t *f, void **next_parent);
-  /* xfer_stride (PROPOSAL_XFER_PROTOCOL.md §3/§4.4): deliver a region of
+  /* xfer_stride: deliver a region of
      counts[k] cells per axis to/from a caller buffer.  Local materialise of
      the requested region only (never the whole view).
 
@@ -373,21 +374,20 @@ typedef struct {
      with strides[].  dir = CA_XFER_GET / CA_XFER_PUT. */
   void   (*xfer_stride)  (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir);
-  /* xfer_all (PROPOSAL_XFER_PROTOCOL.md §6 / §7 step 4): whole-view transfer,
-     direction-unified replacement of copy_data / sync_data.  Holds the view's
-     optimal whole-domain delivery (compose-fold, partial materialise, etc.);
-     copy_data / sync_data become thin forwarders (removed in step 5).
+  /* xfer_all: whole-view transfer, the direction-unified replacement of
+     copy_data / sync_data.  Holds the view's optimal whole-domain delivery
+     (compose-fold, partial materialise, etc.).
      dir = CA_XFER_GET (gather: view -> data) / CA_XFER_PUT (scatter). */
   void   (*xfer_all)     (void *ap, void *data, int dir);
-  /* Pool framework (PROPOSAL_CARRAY_POOL_STANDARDIZATION.md).  Optional;
+  /* Pool framework (guides/devel/03_memory_management.md).  Optional;
      unfilled slots leave the obj_type on the legacy ALLOC_N path.  When
      populated, framework primitives in ca_array_pool.c manage a single
      contiguous `_pool` buffer that holds dim/strides/<subclass tail>. */
   size_t struct_size;                              /* sizeof(<concrete struct>) */
   size_t (*pool_bytes)   (int8_t ndim);            /* required if struct_size != 0 */
   void   (*pool_init)    (void *ap, int8_t ndim);  /* required if struct_size != 0 */
-  /* fill_addrs / fill_stride (PROPOSAL_PARTIAL_FILL_WHOLE_ROOT_WRITEBACK.md
-     section 6.3): write one value into part of the view.  fill_data carries no
+  /* fill_addrs / fill_stride: write one value into part of the view.
+     fill_data carries no
      region and so can only say "fill everything I cover"; without a region the
      only way left to fill part of a view was to borrow a pointer, which
      materialises a non-foldable root and writes it all back.  `ptr` is a
@@ -421,7 +421,7 @@ void   ca_array_func_xfer_all     (void *ap, void *data, int dir);
 void   ca_array_func_fill_data    (void *ap, void *val);
 void   ca_array_func_create_mask  (void *ap);
 
-/* Pool framework primitives (PROPOSAL_CARRAY_POOL_STANDARDIZATION.md).
+/* Pool framework primitives (guides/devel/03_memory_management.md).
    - ca_array_alloc:       xmalloc(struct_size) + ca_array_pool_alloc().
                            For the C construction path (= replaces
                            TypedData_Make_Struct + per-field ALLOC_N).
