@@ -60,7 +60,7 @@ class CAIterator
     [:count_not_masked, CA_INT32],
     # count(v) replaces count_true / count_false / count_equal in CF.7.
     # iter.count(true) / iter.count(false) / iter.count(value) all route
-    # through the same CArray#count dispatcher (PROPOSAL_COUNT_FAMILY.md).
+    # through the same CArray#count dispatcher.
     [:count,            CA_INT32],
     [:size,             CA_INT32],
     [:min,              nil],

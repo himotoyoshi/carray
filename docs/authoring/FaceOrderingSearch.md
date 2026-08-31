@@ -198,8 +198,7 @@ value; it is an operand the time reference knows how to convert.
 
 **The write direction draws the line differently, on purpose.** Storing raw
 storage is a documented escape that predates the Face write hook, so `t[0] =
-477338` and `t[0..1] = int64_array` both stay raw
-(`PROPOSAL_FACE_WRITE_SCALAR.md` §7). The asymmetry follows from what the bare
+477338` and `t[0..1] = int64_array` both stay raw. The asymmetry follows from what the bare
 number *is* in each direction: reading, it is a question the Face has to
 interpret, and a silently wrong answer is unnoticeable; writing, it is data the
 caller supplies, already declared to be in storage terms. What the write side

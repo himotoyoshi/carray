@@ -20,8 +20,6 @@ docstrings into Ruby stubs gives:
 - file-level 1:1 mapping (`ext/foo.c` ↔ `yard-stubs/foo.rb`) checkable
   by tooling
 
-See `devel/PROPOSAL_DOCS_INFRASTRUCTURE.md` §12 for the full design.
-
 ## Discipline
 
 - **Never `require` a file under `yard-stubs/`**. Doing so would

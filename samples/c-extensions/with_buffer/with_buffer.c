@@ -2,7 +2,7 @@
  *
  *  with_buffer.c -- CA_WITH_BUFFER / rb_ca_call_with_buffer usage example
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE L0.2c.  Demonstrates the whole-view family:
+ *  Demonstrates the whole-view family:
  *
  *    CA_WITH_BUFFER            scoped read-only view (attach+sync+detach
  *                            handled by the macro for the scope body)

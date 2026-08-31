@@ -2,7 +2,7 @@
 
 Standalone, runnable examples that show how to write a Ruby C extension
 that uses CArray's public author surface (= the sweep author surface
-families introduced in `devel/PROPOSAL_L0_AUTHOR_SURFACE.md`).
+families; see `guides/devel/10_author_surface_overview.md`).
 
 Each subdirectory is a complete ext (= `extconf.rb` + `.c` + `example.rb`)
 that an external ext author can copy as a starting point.  They compile

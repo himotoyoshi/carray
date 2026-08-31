@@ -9,8 +9,7 @@ educational examples.
 index such as `ca[:_, nil]` (axis 0 walked, axis 1 the kernel) produced one,
 and `.each` yielded each sub-array.
 
-**It was retired from the gem in 3.0** (phase SI.4 of
-`devel/PROPOSAL_SIGIL_NEWAXIS_AND_SLAB_ITER.md`). Its capability is fully
+**It was retired from the gem in 3.0.** Its capability is fully
 subsumed by `CASlabIterator`, reached through the new `:>` slab-axis sigil:
 
 ```ruby
@@ -32,8 +31,8 @@ its embed descriptor (`ca_window_recompute_embed`), so `.each` yielded a
 boundary-aware window per cell.
 
 **It was retired from the gem in 3.0** and replaced by a Ruby
-`CAWindowIterator < CAIterator` (`lib/carray/window_iterator.rb`, see
-`devel/PROPOSAL_WINDOW_ITERATOR_3_0.md`). The per-anchor C walk was
+`CAWindowIterator < CAIterator` (`lib/carray/window_iterator.rb`). The
+per-anchor C walk was
 speed-non-critical; the 3.0 member instead builds a padded entity once and
 runs a single vectorized core reduction over a `sliding_windows` view, which
 is much faster for the rolling reductions / bounded convolution people
@@ -48,8 +47,8 @@ tile origin and resynced its prefix (`ca_block_sync_base_offset`), so `.each`
 yielded a tile per step.
 
 **It was retired from the gem in 3.0** and replaced by a Ruby
-`CABlockIterator < CAIterator` (`lib/carray/block_iterator.rb`, see
-`devel/PROPOSAL_BLOCK_ITERATOR_3_0.md`). The 3.0 member instead splits the
+`CABlockIterator < CAIterator` (`lib/carray/block_iterator.rb`). The 3.0
+member instead splits the
 source into an interior region plus boundary regions, takes a `block_view`
 (a zero-copy CAStride) of each, and runs a single core reduction over the
 trailing tile axes. `block.c` was the last C iterator on the 2.0 base

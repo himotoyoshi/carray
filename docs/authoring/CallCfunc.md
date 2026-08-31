@@ -190,7 +190,7 @@ The full runnable example is `samples/c-extensions/cfunc_r/cfunc_r.c`
 
 > **Note — there is no `_ex` variant.** A proposed `ca_call_cfunc_M_N_ex`
 > with declarative userdata / params / mask-policy slots was explored and
-> **rejected** (PROPOSAL_L0_AUTHOR_SURFACE rev6). The `_r` userdata
+> **rejected**. The `_r` userdata
 > passthrough covers the outer-state need; richer per-operand mask policy
 > belongs in the kernel_iterator surface, not here.
 

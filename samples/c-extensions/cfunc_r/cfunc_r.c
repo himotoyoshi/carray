@@ -2,7 +2,7 @@
  *
  *  cfunc_r.c -- ca_call_cfunc_*_r usage example
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE §6.2.  Demonstrates the reentrant cfunc
+ *  Demonstrates the reentrant cfunc
  *  variants (`ca_call_cfunc_M_N_r`) that thread a `void *userdata`
  *  pointer to every per-cell callback.  Idiomatic alternative to
  *  file-static / global state when porting kernels that carry outer

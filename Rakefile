@@ -37,7 +37,7 @@ task :install do
 end
 
 desc "Build C extension in-place (ext/extconf.rb -> Makefile -> make). " \
-     "Set CARRAY_DEV=1 to enable smoke surface (see PROPOSAL_SMOKE_DEV_BUILD_GATE.md)"
+     "Set CARRAY_DEV=1 to enable the smoke surface (dev builds only)"
 task :build_ext do
   dev  = ENV["CARRAY_DEV"] == "1"
   arch = ENV["CARRAY_MARCH_NATIVE"] != "0"   # default on (matches extconf.rb)
