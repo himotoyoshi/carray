@@ -125,7 +125,7 @@ class CACategoricalIterator < CAIterator
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
       # is unrecoverable (preserves the old strict check).  For higher-rank
       # value, defer validation to reduce time — check only that cat.ndim fits
-      # one of the 3 axis: cases (§2.2 of PROPOSAL_CATEGORICAL_REDUCE_AXIS);
+      # one of the 3 axis: cases;
       # any no-axis reduce called on this iterator will surface the mismatch
       # because @grouped stays undefined.
       if value.ndim == 1 ||
@@ -217,17 +217,16 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64, aligned to {#labels}
   # @overload count(axis:)
   #   No-arg + axis: = per-fiber per-category count_not_masked (shape [K, ...band]).
-  #   `count(v, axis:)` (value equality) and `count(UNDEF, axis:)` are deferred
-  #   to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS.
+  #   `count(v, axis:)` (value equality) and `count(UNDEF, axis:)` are not
+  #   implemented; use them without `axis:`.
   #   @param axis [Integer]
   #   @return [CArray]
   def count (*args, axis: nil)
     if axis
       return count_not_masked(axis: axis) if args.empty?
       raise NotImplementedError,
-            "CACategoricalIterator#count(v, axis:) not yet implemented — " \
-            "value-equality count with axis: deferred to Phase 3 of " \
-            "PROPOSAL_CATEGORICAL_REDUCE_AXIS."
+            "CACategoricalIterator#count(v, axis:) is not implemented — " \
+            "value-equality count is available without axis:."
     end
     return count_not_masked if args.empty?
     # Delegate per group to CArray#count (handles count(UNDEF) -> masked count and
@@ -244,16 +243,14 @@ class CACategoricalIterator < CAIterator
   #   Empty categories are `0`.
   #   @return [CArray]
   # @overload count_masked(axis:)
-  #   Deferred to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS (needs a separate
-  #   "assigned count" scatter that counts cells regardless of value mask).
+  #   Not implemented; call it without `axis:`.
   #   @param axis [Integer]
   #   @return [CArray]
   def count_masked(axis: nil)
     if axis
       raise NotImplementedError,
-            "CACategoricalIterator#count_masked(axis:) not yet implemented — " \
-            "deferred to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS " \
-            "(needs a separate value-mask-only scatter kernel)."
+            "CACategoricalIterator#count_masked(axis:) is not implemented — " \
+            "call it without axis:."
     end
     m = moments
     m ? @elements - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
@@ -269,8 +266,7 @@ class CACategoricalIterator < CAIterator
   #   Returns per-category sums per fiber along `axis`.  Cat may be 1-D (case
   #   A, broadcasts across band axes), same rank as source (case B, per-fiber
   #   independent classifier), or one rank less (band-only, constant along
-  #   reduce axis).  Output shape = `[K, ...source.shape without axis]`.  See
-  #   PROPOSAL_CATEGORICAL_REDUCE_AXIS.
+  #   reduce axis).  Output shape = `[K, ...source.shape without axis]`.
   #   @param axis [Integer] reduce axis of the source value.
   #   @return [CArray]
   def sum(axis: nil)
@@ -855,9 +851,8 @@ class CACategoricalIterator < CAIterator
   # Called from median / percentile / variance / stddev when axis: is given.
   def axis_order_stat_defer! (op)
     raise NotImplementedError,
-          "CACategoricalIterator##{op}(axis:) not yet implemented — order " \
-          "statistics deferred to Phase 4 of PROPOSAL_CATEGORICAL_REDUCE_AXIS " \
-          "(needs per-fiber counting-sort C kernel, tracked separately)."
+          "CACategoricalIterator##{op}(axis:) is not implemented — order " \
+          "statistics are available without axis:."
   end
 
   # Drive a segment scan through the axis-group scan kernel: the whole value as
