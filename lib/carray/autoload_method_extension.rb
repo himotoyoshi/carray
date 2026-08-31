@@ -15,6 +15,7 @@
 # monkey patching is avoided -- only classes that explicitly `extend
 # AutoloadMethodExtension` gain the method.
 
+# @private
 module AutoloadMethodExtension
   # @!visibility private
   def autoload_method (method, library)
