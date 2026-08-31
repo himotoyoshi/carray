@@ -281,8 +281,9 @@ rb_ca_lazy (VALUE self)
    programming error or a pathological chain rather than a graceful
    fallback.
 
-   CAREFUL: single-thread only (see CLAUDE.md "thread-safety is not a
-   goal").  The arena is process-global static state. */
+   CAREFUL: single-thread only -- thread-safety across concurrent access
+   is not a goal (see guides/devel/04_attach_lifecycle.md).  The arena is
+   process-global static state. */
 
 #define CA_LAZY_ARENA_SLOTS 32
 

@@ -1077,8 +1077,8 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
       }
       /* slab is all-STRIDE: fall through to B.1.5 / Phase B paths. */
       /* Phase B.1.5: outer SHIFT axis → materialise downgrade.  Alias
-         can't deliver OOB cells (= need fill_value), so per the
-         delivery principle (CLAUDE.md §"deliver" + D1.3 confirmed),
+         can't deliver OOB cells (= need fill_value), and the view-family
+         surface prioritises delivering the cells over avoiding a copy, so
          we materialise the entire view into a row-major scratch
          buffer via ca_axis_dispatch_attach (= same engine as the
          existing SRC_DESCRIPTOR L2 NONE path), then walk it with
@@ -1853,9 +1853,9 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     return CA_ITER_OK;
   }
 
-  /* Sub-step 5.3: L2 dispatch over descriptor sources.  Per the
-     delivery principle (CLAUDE.md "view-family surface prioritises delivery",
-     PROPOSAL_T1_STEP5_DESCRIPTOR.md §0): always materialise into a
+  /* Sub-step 5.3: L2 dispatch over descriptor sources.  The view-family
+     surface prioritises delivering the cells over avoiding a copy: always
+     materialise into a
      scratch buffer via ca_axis_dispatch_attach and yield a single
      strided slab (stride = bytes).  CASelect/CAMapping always reach
      here, CSA/CAGrid/CAWindow/CAShift when INDEX/SHIFT axes are

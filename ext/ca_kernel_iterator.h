@@ -1100,8 +1100,7 @@ void ca_iter_state_finish (ca_iter_state *st);
  *
  *   PoC (2026-06-12): N=1M f64 sum 906 us -> 116 us (= 7.8x, 68.8 GB/s).
  *   Parity: ε-close (relative error < 2e-16 for f64 sum), bit-exact
- *   not guaranteed (= reassoc license, documented in CLAUDE.md
- *   ε-close policy section, SL.1.5).
+ *   not guaranteed (= the SIMD license; see guides/devel/11_kernel_iterator.md).
  *
  *   Other state vars referenced inside REDUCE (induction counters
  *   like `cnt`, position counters like `idx`) are auto-vectorised
@@ -1217,7 +1216,7 @@ void ca_iter_state_finish (ca_iter_state *st);
  *   EXPR(x) is a function-like macro producing the per-element contribution
  *   (Pass 1: (double)(x); Pass 2: ((double)(x)-mean)*((double)(x)-mean)).
  *   Reassoc across the 8 lanes is the same ε-close license as _PLUS_EX
- *   (bit-exact not guaranteed; CLAUDE.md ε-close policy, SL.1.5).
+ *   (bit-exact not guaranteed; see guides/devel/11_kernel_iterator.md).
  *
  *   Only the no-mask + contig branch is 8-way; masked / non-contig
  *   branches stay single-accumulator (not the hot path).  Position
