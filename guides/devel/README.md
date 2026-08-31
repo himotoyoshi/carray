@@ -204,8 +204,8 @@ through the items below and update its status row.
   `carray_memory_view.c`'s explicit table: CAByteSwap, CASelectAxis, CARemap,
   CARoll, CATile, CAStack, and the Faces. (See the chapter footer.)
 - [ ] **ch19 — re-verify the baseline test counts.** The dev / release / rspec
-  counts in the table are a snapshot; re-run `rake spec_ai` / `rake spec` on the
-  current tree and update them.
+  counts in the table are a snapshot; re-run `rake test` on the current tree and
+  update them.
 - [ ] **Re-audit for user-guide drift** once content settles: no `# =>` REPL
   output, no Ruby-method catalogues (the C-internals convention above).
 - [ ] **Track the in-flight reorgs** so chapters don't go stale: the `carray.h`
