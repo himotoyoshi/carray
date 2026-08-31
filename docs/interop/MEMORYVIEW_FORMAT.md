@@ -250,11 +250,11 @@ Test files:
       tests for boolean, cmplx64, cmplx128 via
       `wrap_memory_view`, exercising producer → consumer through the
       v1.1 canonical symbols end-to-end.
-- [x] `MIGRATION_DROP_LONGDOUBLE.md` landed `c467709`: `CA_FLOAT128`
+- [x] Landed in `c467709`: `CA_FLOAT128`
       and `CA_CMPLX256` are now reserved-but-invalid enum values
       (`ca_valid[]=0`); the MV producer table never emitted them and
       remains unchanged for this concern.
-- [x] `MIGRATION_DROP_CCOMPLEX.md` landed `c467709`: `CComplex` Ruby
+- [x] Landed in `c467709`: `CComplex` Ruby
       surface removed, internal `NUM2CC` / `CC2NUM` routed through
       Ruby `Complex`. `CA_CMPLX64` / `CA_CMPLX128` storage layout
       (`float[2]` / `double[2]` contiguous) is unchanged, so MV
@@ -375,7 +375,7 @@ a Ruby-specific form" is fulfilled in v1.2.
 **Permanently out of scope.** Rationale:
 
 - CArray has decided to drop `CA_FLOAT128` and `CA_CMPLX256` in
-  3.0.0 (`MIGRATION_DROP_LONGDOUBLE.md`).
+  3.0.0.
 - numo-narray does not have these dtypes.
 - PEP 3118 has no portable specifier for quad-precision (`g` denotes
   C `long double`, whose bit-width is platform-dependent — 80 bits on

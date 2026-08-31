@@ -80,8 +80,7 @@ end
 # than per-cell.  Ruby entry: {CArray.meld} / {CArray#meld}
 # (`lib/carray/stack.rb`).
 #
-# See `docs/objects/CAMeld.md` for the user-facing overview and
-# `devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md` for design rationale.
+# See `docs/objects/CAMeld.md` for the user-facing overview.
 class CAMeld < CAView
   # Returns the number of parent arrays welded by `self`.
   # @return [Integer]

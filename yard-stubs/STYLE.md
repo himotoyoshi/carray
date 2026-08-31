@@ -212,6 +212,4 @@ Differences:
 
 `rake stub_check` validates structural drift (method set vs C
 extension). Style drift (vocabulary, tags) is reviewed at PR time
-against this document. There is no automated style linter yet — if
-this becomes painful, see §12.5 of
-`devel/PROPOSAL_DOCS_INFRASTRUCTURE.md` for tooling notes.
+against this document. There is no automated style linter yet.

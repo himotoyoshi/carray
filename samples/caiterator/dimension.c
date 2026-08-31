@@ -153,7 +153,7 @@ ca_di_setup (VALUE self, VALUE rref, CAIndexInfo *info)
   }
 
   /* Dim-iterator markers (:_) are positional only; their Symbol
-     identity carries no information.  See MIGRATION_DIM_ITERATOR_SIGIL. */
+     identity carries no information. */
   blk_spec      = *info;
   blk_spec.type = CA_REG_BLOCK;
   for (i=0; i<info->ndim; i++) {

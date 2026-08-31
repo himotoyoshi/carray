@@ -1380,8 +1380,7 @@ never executes).
 This is intentional. Without the check, the two iterators walk the
 prefix axes independently and `&&`-short-circuit on the shorter of
 the two fiber counts — leaking some output fibers and silently
-mis-pairing the remainder. (See `PROPOSAL_FIBER_DELIVERY.md` §2.3 +
-§9.6 for the silent-corruption seam this plugs.)
+mis-pairing the remainder — a silent corruption, not an error.
 
 Authors that need broadcasting / non-axis-dim variation must drop to
 the raw API or compose `_FIBER` with explicit shape handling.
@@ -1489,7 +1488,7 @@ internally.
 
 (Historical note: CAMapping previously appeared here as an explicit
 reject because its descriptor.ndim differed from view.ndim.  The class
-was removed in 3.0 (R.3, PROPOSAL_CAMAPPING_REMOVAL); `a[mapper]` now
+was removed in 3.0; `a[mapper]` now
 normalises to a CAGrid/CAStride chain whose layers each satisfy
 descriptor.ndim == view.ndim, so the reject is gone.)
 

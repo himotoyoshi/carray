@@ -9,7 +9,7 @@
  *
  *  per_element.c -- CA_FOR_EACH_ELEMENT macro family usage example
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE L0.2a.  Demonstrates the 5 forms of the
+ *  Demonstrates the 5 forms of the
  *  CA_FOR_EACH_ELEMENT macro family for per-cell iteration:
  *
  *    CA_FOR_EACH_ELEMENT                  read-only, no mask
