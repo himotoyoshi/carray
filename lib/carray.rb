@@ -32,11 +32,11 @@ require 'carray/math'
 # carray/clip_cast CIFY (2026-06-23): translated to ext/carray_cast.c
 require 'carray/complex' # real / imag accessors; MUST precede carray/lazy
                          # (lazy aliases real/imag at load time)
-require 'carray/lazy'   # PROPOSAL_LAZY_ELEMENTWISE_VIEW Phase 1 P.1.2
+require 'carray/lazy'   # the lazy elementwise view layer
 # carray/face.rb was deleted (the Phase 1 skeleton CArray::Face module
 # became dead weight, replaced by C-layer macro deploy +
 # copy_state/storage_to_scalar convention).
-require 'carray/time'  # CATime / CATimedelta (PROPOSAL_CAFACE_PHASE_2 F.2.4)
+require 'carray/time'  # CATime / CATimedelta
 # carray/methods/* (bincount / broadcast / gather_nd+put_nd) are small
 # single-feature method files, loaded lazily via autoload_carray.
 require 'carray/iterator'
@@ -44,9 +44,9 @@ require 'carray/iterator'
 # stubs). Nothing in the eager core references CAStruct/CAUnion, so programs
 # that only use numeric arrays never pay its load cost.
 require 'carray/string_operation_extension'  # shared StringOperationMixin (must precede the Faces)
-require 'carray/const_string'   # PROPOSAL_CATEXT.md T.2 — CAConstString construction surface
-require 'carray/string'         # PROPOSAL_STRING_FACE_TRIO.md P.1 — CAString construction surface
-require 'carray/fixlen_string'  # PROPOSAL_STRING_FACE_TRIO.md P.1 — CAFixlenString construction surface
+require 'carray/const_string'   # CAConstString construction surface
+require 'carray/string'         # CAString construction surface
+require 'carray/fixlen_string'  # CAFixlenString construction surface
 # CArray.format lives in carray/methods/string_format.rb, autoloaded on first call
 
 # carray/frame is loaded lazily via autoload_carray (CAFrame / GroupedFrame
