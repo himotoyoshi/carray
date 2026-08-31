@@ -130,9 +130,9 @@ laplacian.class
 
 Five operands, one pass. Written eagerly the same expression allocates four
 intermediate arrays and walks each of them twice more; fused, the shifts are
-read once and the result written once. On a 1024x1024 array that is about
-2.3 times faster, and the margin grows with the number of terms — a
-twelve-term sum is closer to four times.
+read once and the result written once. On a 2000x2000 float64 array that is
+about **2.2 times faster**, and the margin grows with the number of terms — a
+twelve-term sum is closer to **3.5 times**.
 
 Note where `.lazy` is *not* needed. Views built inside the block — `shift`
 here, but equally `[]`, `transpose`, `reshape`, `flip`, `roll`, `window`,
@@ -158,6 +158,131 @@ magnus(CA_DOUBLE([0.0, 15.0, 25.0, 35.0]))
 ```
 
 One formula, scalar or array, no type-checks needed at the call site.
+
+## Pass a repeated subexpression in as an argument
+
+Inside the block, a variable does not hold a result. It holds a calculation.
+
+```ruby
+CArray.fuse(a) { |x|
+  y = x * 2          # y is "multiply x by 2", not the doubled array
+  y + y              # so the multiply runs twice
+}
+```
+
+Naming it does not compute it, and using it twice does not reuse anything. This
+is the reverse of eager code, where assigning to a variable is exactly how you
+avoid repeating work.
+
+Arguments are different. Whatever you pass to `fuse` has already been
+calculated before the block starts, so using it several times just uses the
+value several times.
+
+The cost of getting this wrong is easy to measure. Here one expensive
+calculation is used `n` times inside the block (2000x2000 float64):
+
+| times used | eager | fused | ratio |
+|---|---|---|---|
+| 1 | 0.0024 | 0.0020 | 1.18 |
+| 2 | 0.0028 | 0.0040 | 0.70 |
+| 3 | 0.0036 | 0.0059 | 0.61 |
+| 4 | 0.0042 | 0.0078 | 0.54 |
+
+Eager is flat — it computes once and reuses. Fused grows in proportion to how
+often you write it. Past two uses, fusion is losing.
+
+### Example: Goff-Gratch
+
+The saturation vapour pressure formula uses `TS / T` three times:
+
+```ruby
+TS, ES = 373.16, 1013.246
+L = Math.log10(ES)
+
+# TS / t written inside the block: the division runs three times per cell
+CArray.fuse(T) { |t|
+  r = TS / t
+  (-7.90298 * (r - 1) + 5.02808 * r.log10 -
+    1.3816e-7 * ((11.344 * (1 - t / TS)).exp10 - 1) +
+    8.1328e-3 * ((-3.49149 * (r - 1)).exp10 - 1) + L).exp10
+}
+
+# computed first and passed in: one division per cell, and the rest still fuses
+r = TS / T
+CArray.fuse(T, r) { |t, rr|
+  (-7.90298 * (rr - 1) + 5.02808 * rr.log10 -
+    1.3816e-7 * ((11.344 * (1 - t / TS)).exp10 - 1) +
+    8.1328e-3 * ((-3.49149 * (rr - 1)).exp10 - 1) + L).exp10
+}
+```
+
+Measured on 1000x1000 float64, in units of one array copy:
+
+| | cost |
+|---|---|
+| eager, with intermediate variables | 47.3 |
+| everything inside `fuse` | 52.0 |
+| `TS / T` passed in, rest fused | **34.9** |
+
+The middle row is worth noticing: for this formula, fusing everything is
+*slower* than plain eager code. `exp10` and `log10` dominate the cost, so there
+is little memory traffic to save, and the repeated divisions cost more than the
+saving. Moving one line out of the block reverses the result.
+
+Do not overdo it. Passing `r - 1` in as well (also used twice, but only a
+subtraction) measured 35.8 — slightly worse. The question is not "is it
+repeated?" but:
+
+> **Is repeating this calculation cheaper than computing it once and reading
+> the values back?**
+
+A division, `exp` or `log` is worth computing first. An add or a multiply is
+not.
+
+### The same quantity, the opposite answer
+
+Saturation vapour pressure is often computed not from Goff-Gratch but from a
+polynomial fit. Same physical quantity, and fusion now helps a great deal.
+
+```ruby
+C = [6.11583699, 0.444606896, 0.143177157e-1, 0.264224321e-3,
+     0.299291081e-5, 0.203154182e-7, 0.702620698e-10, 0.379534310e-13,
+     -0.321582393e-15]
+
+CArray.fuse(T) { |t| C.reverse.inject { |acc, c| acc * t + c } }   # Horner
+```
+
+Measured on 2000x2000 float64, in units of one array copy:
+
+| | cost | vs eager |
+|---|---|---|
+| Horner, eager | 34.2 | — |
+| **Horner, fused** | **11.1** | **3.1x** |
+| naive powers (`t**k`), eager | 123.8 | — |
+| naive powers, fused | 37.7 | 3.3x |
+
+Everything lines up in fusion's favour here:
+
+- the arithmetic is one multiply and one add per term — cheap next to a memory
+  read, so the intermediates were most of the cost;
+- `t` is an argument, so using it eight times costs eight reads and no
+  recalculation;
+- Horner's rule builds a fresh `acc` each step, so nothing is repeated.
+
+The naive form is worth a glance too. Writing `t**k` for each term recomputes
+the powers, and fusion cannot fix that — but it still removes the intermediates,
+so it gains 3.3x anyway. Rewriting to Horner gains a further 3.4x on top.
+**Choosing the algorithm and fusing it are independent wins.**
+
+The pair is worth remembering:
+
+| | fusion |
+|---|---|
+| Goff-Gratch (`exp10`, `log10`, a repeated division) | 0.9x — a loss |
+| polynomial fit, Horner (multiply and add, nothing repeated) | 3.1x |
+
+Same answer to four decimal places, opposite conclusion about fusion. It is the
+shape of the arithmetic that decides, not the problem being solved.
 
 ## `CArray.lazy` — keep the tree
 
@@ -229,27 +354,81 @@ mask.sum
 A common pattern is to build a boolean expression lazily and reduce it
 directly — the intermediate boolean array is never allocated.
 
-## When to stay eager
+## When fusion pays
 
-Lazy is not always faster. Eager arithmetic is heavily optimised on
-contiguous arrays, and a single `a + b` over an ordinary array hits a
-vectorised path. Reach for lazy when:
+Fusion removes **memory traffic**, not arithmetic. Each cell is still visited
+once per node in the tree, and that walk is not free. So the win depends on how
+much of the eager cost was traffic in the first place.
 
-- the chain is long enough that intermediates start to matter (deep stencils,
-  multi-term polynomials, transcendental compositions);
+Chaining k operations over a 1000x1000 float64 array:
+
+| k | cheap ops (`+`, `*`) | `sqrt` | `exp10` |
+|---|---|---|---|
+| 2 | 1.48 | 1.64 | 1.24 |
+| 4 | 2.01 | 1.91 | 1.31 |
+| 8 | 2.26 | 2.21 | 1.33 |
+| 16 | 2.25 | 2.40 | — |
+
+Two readings:
+
+- **More terms, more gain.** Each extra term is one more intermediate that
+  eager has to allocate, fill and re-read.
+- **Cheaper arithmetic, more gain.** With `exp10` the per-cell work dwarfs the
+  traffic, so removing the traffic barely shows.
+
+That is the opposite of the intuition "heavy per-cell work is what fusion is
+for". Heavy work is what makes fusion *irrelevant*; it is cheap work over large
+arrays that fusion helps.
+
+Reach for fusion when:
+
+- the chain is several operations long;
+- the arithmetic is cheap (add, multiply, compare) relative to a memory read;
 - the arrays are large enough that intermediates spill out of cache;
-- the per-cell work is heavy (`exp`, `log`, `sqrt`, compound expressions);
+- no subexpression is used more than once (or the shared ones are passed in);
 - you want a single helper that works for both scalars and arrays.
 
-Stay with eager when:
+Stay eager when:
 
-- the chain is one or two operations on already-allocated arrays;
-- you want to keep the intermediate around for inspection or reuse;
-- you want to write into the result (eager results are normal entities,
-  mutable from the start).
+- the chain is one or two operations;
+- the expression is dominated by transcendental calls;
+- you want to keep an intermediate for inspection or reuse;
+- you want to write into the result (eager results are mutable entities).
 
-A simple test: if you find yourself reading the same large intermediate just
-once and throwing it away, that intermediate is a candidate for fusion.
+Finite-difference stencils sit squarely in the good case: the arithmetic is
+addition, the terms read different neighbours so nothing is shared, and the
+arrays are large. That is why the Laplacian above gains 2.2x while a
+thermodynamic formula gains nothing.
+
+### In a time-stepping loop
+
+The expression can be built once and reused. It refers to the array itself, not
+to a copy of its contents, so overwriting the array and evaluating again gives
+the new answer:
+
+```ruby
+c = alpha * dt / h**2
+expr = CArray.lazy(u) { |v|
+  v + c * (v.shift(1, 0) + v.shift(-1, 0) + v.shift(0, 1) + v.shift(0, -1) - 4 * v)
+}
+
+nstep.times do
+  new = expr.to_ca
+  u[1..-2, 1..-2] = new[1..-2, 1..-2]     # write back into the same buffer
+end
+```
+
+Rebuilding the expression inside the loop measures the same — putting the
+expression together costs nothing next to walking a million cells — so use
+whichever reads better. What matters is that `u` is overwritten **in place**:
+`u = ...` would rebind the name and leave the expression looking at the old
+array.
+
+Measured over 30 steps of a 1000x1000 diffusion problem, the fused loop runs
+**1.48 times** faster than the eager one. Note that the whole update has to be
+in the expression to get that: fusing only the Laplacian, then applying it with
+eager arithmetic, measured no gain at all — the remaining eager operations kept
+allocating the intermediates that fusion had just removed.
 
 ## Going back to eager
 
