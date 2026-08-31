@@ -21,8 +21,10 @@ or from the repo root:
 ```sh
 rake build_ext     # cd ext && ruby extconf.rb && make
 rake clean_ext     # cd ext && make distclean
-rake spec          # :build_ext + spec/
+rake test          # every suite below, plus stub_check; also the default task
+rake spec          # :build_ext + spec/*_spec.rb
 rake spec_ai       # :build_ext + spec_ai/
+rake spec_unit     # :build_ext + spec/UnitTest/
 ```
 
 `extconf.rb` requires `ruby/memory_view.h` (Ruby 3.0+), which the
@@ -104,14 +106,22 @@ update them in the `done` pass.)
 
 ## The test suites
 
-- **`spec/`** — the legacy `*_spec.rb` suite; `ruby spec/spec_all.rb` or
-  `rake spec`. Not exhaustive.
-- **`spec_ai/`** — the AI-generated `test/unit` suite, rich on MemoryView and
-  CAStride (`test_memory_view*.rb`, `test_ca_obj_stride*.rb`, `test_castride_family.rb`,
-  `ext_memory_view_test/` for the C-side MV borrower peer). `rake spec_ai`.
+There are three, in two frameworks, and `rake test` runs all of them.
 
-When you delete or change behaviour, run **both** `rake spec_ai` and `rake spec` —
-a unit pass alone has missed library-load failures and old-contract regressions
+- **`spec_ai/`** — the `test/unit` suite, and the one 3.0 grew. Rich on
+  MemoryView and CAStride (`test_memory_view*.rb`, `test_ca_obj_stride*.rb`,
+  `test_castride_family.rb`, `ext_memory_view_test/` for the C-side MV borrower
+  peer). `rake spec_ai`.
+- **`spec/*_spec.rb`** — the RSpec suite carried over from 2.x; `rake spec`, or
+  `ruby spec/spec_all.rb`. Not exhaustive, but it is the only thing pinning
+  parts of the 2.x surface: `rank` / `dim0`–`dim3` / `size0`, the type
+  predicates, the `elem_*` family, `inherit_mask`, `bind` / `bind_with`.
+  spec_ai does not call any of those.
+- **`spec/UnitTest/`** — one `test/unit` file, also from 2.x, applying the same
+  mixin to nine view classes. `rake spec_unit`.
+
+When you delete or change behaviour, run `rake test` rather than one suite — a
+unit pass alone has missed library-load failures and old-contract regressions
 before (memory: run-tests-after-deletion).
 
 ## The bench / smoke discipline
