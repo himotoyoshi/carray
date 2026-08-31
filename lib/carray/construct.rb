@@ -35,6 +35,7 @@ class CArray
   # CArray whose elements are `boolean`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Boolean.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Boolean
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -47,6 +48,7 @@ class CArray
   # CArray whose elements are `uint8`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::UInt8.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class UInt8
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -59,6 +61,7 @@ class CArray
   # CArray whose elements are `uint16`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::UInt16.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class UInt16
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -71,6 +74,7 @@ class CArray
   # CArray whose elements are `uint32`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::UInt32.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class UInt32
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -83,6 +87,7 @@ class CArray
   # CArray whose elements are `uint64`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::UInt64.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class UInt64
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -95,6 +100,7 @@ class CArray
   # CArray whose elements are `int8`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Int8.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Int8
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -107,6 +113,7 @@ class CArray
   # CArray whose elements are `int16`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Int16.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Int16
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -119,6 +126,7 @@ class CArray
   # CArray whose elements are `int32`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Int32.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Int32
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -131,6 +139,7 @@ class CArray
   # CArray whose elements are `int64`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Int64.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Int64
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -143,6 +152,7 @@ class CArray
   # CArray whose elements are `float32`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Float32.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Float32
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -153,11 +163,13 @@ class CArray
   end
 
   # Numo-compatible alias of {Float32}.
+  # @private
   SFloat = Float32
 
   # CArray whose elements are `float64`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Float64.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Float64
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -168,11 +180,13 @@ class CArray
   end
 
   # Numo-compatible alias of {Float64}.
+  # @private
   DFloat = Float64
 
   # CArray whose elements are `complex64`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Complex64.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Complex64
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -183,11 +197,13 @@ class CArray
   end
 
   # Numo-compatible alias of {Complex64}.
+  # @private
   SComplex = Complex64
 
   # CArray whose elements are `complex128`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Complex128.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Complex128
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -198,11 +214,13 @@ class CArray
   end
 
   # Numo-compatible alias of {Complex128}.
+  # @private
   DComplex = Complex128
 
   # CArray whose elements are `object`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Object.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Object
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -213,11 +231,13 @@ class CArray
   end
 
   # Numo-compatible alias of {Object}.
+  # @private
   RObject = Object
 
   # CArray whose elements are `fixlen`.  Naming the element type as a
   # class lets a constructor be spelled `CArray::Fixlen.new(...)`; see
   # {DataTypeNewConstructor} for what that form adds.
+  # @private
   class Fixlen
     extend DataTypeNewConstructor
     extend DataTypeExtension
@@ -232,6 +252,7 @@ end
 class CArray
   extend DataTypeExtension
   # @!visibility private
+  # @private
   TypeSymbol = nil
   # @!visibility private
   DataType   = nil
