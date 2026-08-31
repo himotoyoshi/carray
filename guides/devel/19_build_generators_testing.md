@@ -90,19 +90,22 @@ Run a release build (smoke excluded) deliberately with `CARRAY_DEV= rake build_e
 or `unset CARRAY_DEV`. `rake install` (gem build) always runs a release build, so
 smoke never reaches gem users. Daily dev runs smoke-in.
 
-### Baseline test counts
+### Telling a dev build from a release build
 
-These are the drift-detection reference (a future session should match them):
+The tests that need the smoke surface guard themselves on it:
 
-| Build | tests | assertions | failures | omissions |
-|-------|------:|-----------:|---------:|----------:|
-| dev (`CARRAY_DEV=1`) | 4213 | 86683 | 0 | 65 |
-| release (gem build) | 3574 | 75303 | 0 | 64 |
-| rspec (both) | 267 examples | — | 0 | 7 pending |
+```ruby
+omit "requires CARRAY_DEV_BUILD" unless CAGrid.method_defined?(:_describe_axes)
+```
 
-A dev build that reports the *release* counts means `CARRAY_DEV` is not set.
-(These numbers are themselves a snapshot — verify against the current tree and
-update them in the `done` pass.)
+So a release build does not fail them — it omits them, and the omission count
+is the signal. A dev run reports omissions in the dozens. Hundreds means the
+extension was built without `CARRAY_DEV`, whatever the environment says now:
+
+```sh
+echo $CARRAY_DEV                            # must print 1
+rake clean_ext && rake build_ext            # then rebuild with it exported
+```
 
 ## The test suites
 
