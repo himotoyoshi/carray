@@ -59,7 +59,10 @@ module TestCAViewMixin
 
   def test_sync_data
     unless @obj.read_only?
-      val = @ref.reverse
+      # copy, not the view itself: reverse returns a view of @ref, so the
+      # first assignment below would change what val reads back, and the
+      # second would store something else entirely.
+      val = @ref.reverse.copy
       @ref[] = val
       @obj[] = val
       assert_equal(@ref, @obj)
