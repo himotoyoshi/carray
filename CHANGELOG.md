@@ -11,6 +11,17 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: a region asked for in column-major order -- axes and steps reversed
+  against the view's own -- came back wrong from a view with a length-1 axis.
+  An `(n, 1)` view (`v[nil, :_]`, `v.reshape(n, 1)`, a one-column slice) has
+  the same step on both axes, so the reversed request looked axis-aligned and
+  was composed onto the length-1 axis, whose parent step is 0. `CAStride`,
+  `CABlock`, `CATranspose`, `CAWindow` and `CATile` delivered the first cell n
+  times with nothing raised; `CAGrid` read out of bounds and crashed; `CARoll`
+  spun; a `CAObject` was handed a region outside its own axes. Reached from a
+  Fortran-LAPACK backend gathering its operands -- `carray-linalg-accelerate`'s
+  `solve(a, b)` returned `b[0]` repeated for a single-column right-hand side.
+
 - Fix: an operation between two views of an array that computes its values --
   a lazy expression such as `(a.lazy + b)`, or a `CAObject` over a file -- no
   longer reads that source one cell at a time. `+`, `fma` and comparisons on

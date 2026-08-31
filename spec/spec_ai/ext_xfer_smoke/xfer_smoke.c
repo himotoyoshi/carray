@@ -265,6 +265,45 @@ rb_ca_bench_xfer_stride_subregion_get (VALUE self, VALUE rca, VALUE rstarts,
   return result;
 }
 
+/* Region GET with caller-supplied strides (given in CELLS, scaled to bytes
+   here).  The xfer_stride request is expressed over the view's linear
+   addresses, so a caller may hand over a region whose axes are not the
+   view's own -- a column-major (transposed) gather, say, which is what a
+   Fortran-LAPACK backend asks for.  This entry exists so specs can issue
+   exactly that request; the natural-stride entries above cannot. */
+static VALUE
+rb_ca_bench_xfer_stride_region_get (VALUE self, VALUE rca, VALUE rstarts,
+                                    VALUE rcounts, VALUE rstrides)
+{
+  CArray   *ca;
+  ca_size_t starts[CA_RANK_MAX], counts[CA_RANK_MAX], strides[CA_RANK_MAX];
+  ca_size_t n_cells = 1;
+  int8_t    k;
+  char     *buf;
+  VALUE     result;
+
+  (void) self;
+  GetCArray(rca, ca);
+  if ( RARRAY_LEN(rstarts)  != ca->ndim ||
+       RARRAY_LEN(rcounts)  != ca->ndim ||
+       RARRAY_LEN(rstrides) != ca->ndim ) {
+    rb_raise(rb_eArgError, "starts/counts/strides length must equal ca.ndim");
+  }
+  for ( k = 0; k < ca->ndim; k++ ) {
+    starts[k]  = NUM2SIZET(rb_ary_entry(rstarts, k));
+    counts[k]  = NUM2SIZET(rb_ary_entry(rcounts, k));
+    strides[k] = NUM2SIZET(rb_ary_entry(rstrides, k)) * ca->bytes;
+    n_cells   *= counts[k];
+  }
+  if ( n_cells == 0 ) return rb_str_new("", 0);
+
+  buf = ALLOC_N(char, n_cells * ca->bytes);
+  ca_xfer_stride(ca, starts, counts, strides, buf, CA_XFER_GET);
+  result = rb_str_new(buf, n_cells * ca->bytes);
+  xfree(buf);
+  return result;
+}
+
 /* Bench: ca_xfer_addrs(whole-view, GET) timing primitive. */
 static VALUE
 rb_ca_bench_xfer_addrs_get (VALUE self, VALUE rca, VALUE rn)
@@ -361,6 +400,8 @@ Init_xfer_smoke (void)
                              rb_ca_bench_xfer_stride_get, 2);
   rb_define_singleton_method(rb_cCArray, "bench_xfer_stride_subregion_get",
                              rb_ca_bench_xfer_stride_subregion_get, 4);
+  rb_define_singleton_method(rb_cCArray, "bench_xfer_stride_region_get",
+                             rb_ca_bench_xfer_stride_region_get, 4);
   rb_define_singleton_method(rb_cCArray, "bench_xfer_addrs_get",
                              rb_ca_bench_xfer_addrs_get, 2);
   rb_define_singleton_method(rb_cCArray, "bench_xfer_addrs_get_addrs",

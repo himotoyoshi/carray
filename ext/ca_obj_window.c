@@ -334,12 +334,20 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   for (k = ndim - 1; k >= 0; k--) { dstride[k] = s; s *= counts[k]; }
   for (k = 0; k < ndim; k++) n *= counts[k];
 
-  for (k = 0; k < ndim; k++) {
-    if ( (w->bounds[k] != CA_BOUNDS_FILL && w->bounds[k] != CA_BOUNDS_MASK)
-         || strides[k] % wnative[k] != 0
-         || strides[k] / wnative[k] != 1 ) {
-      structural = 0;
-      break;
+  /* The request is over the view's addresses, so a transposed / flat request
+     is legal and must not be composed axis-by-axis; see
+     ca_xfer_stride_request_is_axis_box (carray.h). */
+  if ( ! ca_xfer_stride_request_is_axis_box(w, starts, counts, strides) ) {
+    structural = 0;
+  }
+  else {
+    for (k = 0; k < ndim; k++) {
+      if ( (w->bounds[k] != CA_BOUNDS_FILL && w->bounds[k] != CA_BOUNDS_MASK)
+           || strides[k] % wnative[k] != 0
+           || strides[k] / wnative[k] != 1 ) {
+        structural = 0;
+        break;
+      }
     }
   }
 

@@ -616,9 +616,29 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
    hand the whole region to the root in a SINGLE ca_xfer_stride (entity -> ptr
    memcpy; boundary view -> one recursion).
 
-   Axis-aligned, byte-matching requests only; the byte-mismatch reinterpret
-   (CAField .real/.imag) and non-aligned access fall back to per-cell
-   xfer_index (which handles the sub-byte case). */
+   CAREFUL: the request is given over this view's linear ADDRESSES (carray.h
+   xfer_stride contract), so request axis k does NOT have to be view axis k.
+   A caller is free to hand over a transposed region -- counts/strides in one
+   order, the packed destination in another -- which is exactly what a
+   column-major backend (carray-linalg's Fortran-LAPACK gather) does.  Matching
+   request axis k to view axis k by dividing strides[k] by the axis-k native
+   step looks right and is wrong: an (n, 1) view has the same native step on
+   both axes, so a transposed request divides cleanly and then composes the
+   n-cell walk onto the length-1 axis, whose parent stride is 0 -- delivering
+   the first cell n times, with no error anywhere.  Ask ca_stride_region_axes
+   which view axis each request axis really moves (the same question
+   fill_stride asks), and fall back to the per-cell walk when the region is
+   not a box over our axes.
+
+   Byte-matching requests only; the byte-mismatch reinterpret (CAField
+   .real/.imag) and non-box access fall back to per-cell xfer_index (which
+   handles the sub-byte case). */
+
+static int ca_stride_region_axes (CAStride *ca, ca_size_t base, int8_t ndim,
+                                  ca_size_t *counts, ca_size_t *steps,
+                                  ca_size_t *base_idx, int8_t *axis_of,
+                                  ca_size_t *mult);
+
 static void
 ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
@@ -629,7 +649,12 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   ca_size_t composed_base;
   ca_size_t view_native[CA_RANK_MAX];
   ca_size_t root_stride[CA_RANK_MAX];
+  ca_size_t steps[CA_RANK_MAX];
+  ca_size_t base_idx[CA_RANK_MAX];
+  ca_size_t mult[CA_RANK_MAX];
+  int8_t    axis_of[CA_RANK_MAX];
   ca_size_t root_base;
+  ca_size_t base_addr = 0;
   ca_size_t s;
   int8_t    ndim = ca->ndim, k;
   int       aligned = 1;
@@ -639,13 +664,34 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   s = ca->bytes;
   for (k = ndim - 1; k >= 0; k--) { view_native[k] = s; s *= ca->dim[k]; }
+  for (k = 0; k < ndim; k++) base_addr += starts[k] * view_native[k];
 
   if (ca->bytes != root->bytes) {
     aligned = 0;
   }
   else {
     for (k = 0; k < ndim; k++) {
-      if (strides[k] % view_native[k] != 0) { aligned = 0; break; }
+      if ( strides[k] % ca->bytes != 0 ) { aligned = 0; break; }
+      steps[k] = strides[k] / ca->bytes;
+    }
+    if ( aligned ) {
+      aligned = ca_stride_region_axes(ca, base_addr / ca->bytes, ndim,
+                                      counts, steps, base_idx, axis_of, mult);
+    }
+  }
+
+  if ( aligned ) {
+    /* Each request axis now names the view axis it moves (axis_of) and by how
+       many of that axis' cells (mult); a count-1 axis moves nothing and gets
+       stride 0, which the walk never follows. */
+    root_base = composed_base;
+    for (k = 0; k < ca->ndim; k++) {
+      root_base += base_idx[k] * composed_strides[k];
+    }
+    for (k = 0; k < ndim; k++) {
+      root_stride[k] = ( axis_of[k] >= 0 )
+                     ? mult[k] * composed_strides[axis_of[k]]
+                     : 0;
     }
   }
 
@@ -666,14 +712,9 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      writes refuses them per cell as well. */
   if (aligned && !root->ptr && ca_func[root->obj_type].xfer_stride
        && ca->bytes == root->bytes && ndim == root->ndim) {
-    ca_size_t rbase = composed_base;
     ca_size_t rstarts[CA_RANK_MAX];
-    for (k = 0; k < ndim; k++) {
-      root_stride[k] = (strides[k] / view_native[k]) * composed_strides[k];
-      rbase         += starts[k] * composed_strides[k];
-    }
-    if ( rbase % root->bytes == 0 ) {
-      ca_size_t raddr = rbase / root->bytes;
+    if ( root_base % root->bytes == 0 ) {
+      ca_size_t raddr = root_base / root->bytes;
       if ( raddr >= 0 && raddr < root->elements ) {
         ca_addr2index(root, raddr, rstarts);
         ca_xfer_stride(root, rstarts, counts, root_stride, d, dir);
@@ -683,16 +724,17 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   /* Per-cell fallback (correct, no whole-view attach): byte-mismatch
-     reinterpret (CAField), non-aligned access, or a cold non-entity root
-     the branch above could not hand a region to (its ndim differs from the
-     view's -- e.g. a reshape over a boundary -- or it has no region slot).
-     ca_stride_func_xfer_index composes one hop and delegates to the parent. */
+     reinterpret (CAField), a region that is not a box over our axes (a
+     transposed request onto a degenerate axis, a flat index over several
+     axes), or a cold non-entity root the branch above could not hand a
+     region to (its ndim differs from the view's -- e.g. a reshape over a
+     boundary -- or it has no region slot).  ca_stride_func_xfer_index
+     composes one hop and delegates to the parent. */
   if (!aligned || !root->ptr) {
-    ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
-    for (k = 0; k < ndim; k++) base += starts[k] * view_native[k];
+    ca_size_t idx[CA_RANK_MAX], doff = 0;
     for (k = 0; k < ndim; k++) idx[k] = 0;
     while (1) {
-      ca_size_t off = base, vmidx[CA_RANK_MAX];
+      ca_size_t off = base_addr, vmidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) off += idx[k] * strides[k];
       ca_addr2index((CArray *) ca, off / ca->bytes, vmidx);
       ca_stride_func_xfer_index(ca, vmidx, d + doff, dir);
@@ -704,17 +746,11 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
-  /* Structural: root has a live ptr (entity / attached).  Translate the
-     request into root's BYTE space and do a strided memcpy in the VIEW's ndim
-     (byte offsets into root->ptr -- independent of root's own ndim, so a
-     reshape view over a 1-D entity works).  compose happened once. */
-  root_base = composed_base;
-  for (k = 0; k < ndim; k++) {
-    ca_size_t req_step = strides[k] / view_native[k];
-    root_base       += starts[k] * composed_strides[k];
-    root_stride[k]   = req_step * composed_strides[k];
-  }
-  /* Slab-merge, tile-block and the general driver all live in the shared
+  /* Structural: root has a live ptr (entity / attached).  The request is
+     already in root's BYTE space (root_base / root_stride above), so the walk
+     runs in the VIEW's ndim -- independent of root's own ndim, which is what
+     lets a reshape view over a 1-D entity through.  compose happened once.
+     Slab-merge, tile-block and the general driver all live in the shared
      walker, which the central dispatcher's structural path also uses. */
   ca_xfer_strided_walk(root->ptr + root_base, ca->bytes, ndim,
                        counts, root_stride, d, dir);

@@ -1410,6 +1410,30 @@ ca_xfer_strided_walk (char            *src_base,
   }
 }
 
+/* See the comment on the prototype in carray.h. */
+int
+ca_xfer_stride_request_is_axis_box (void *ap, ca_size_t *starts,
+                                    ca_size_t *counts, ca_size_t *strides)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t native[CA_RANK_MAX];
+  ca_size_t s = ca->bytes;
+  int8_t    ndim = ca->ndim, k;
+
+  for ( k = ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
+
+  for ( k = 0; k < ndim; k++ ) {
+    ca_size_t q;
+    if ( counts[k] <= 1 ) continue;          /* moves nothing */
+    if ( strides[k] <= 0 ) return 0;         /* zero / negative: not an axis walk */
+    if ( strides[k] % native[k] != 0 ) return 0;
+    q = strides[k] / native[k];
+    if ( q < 1 ) return 0;
+    if ( starts[k] + (counts[k] - 1) * q >= ca->dim[k] ) return 0;   /* runs off axis k */
+  }
+  return 1;
+}
+
 static void
 ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
                          ca_size_t *strides, void *data, int dir)
