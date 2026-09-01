@@ -11,6 +11,17 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `CArray::CoreExtensions` adds postfix math on `Complex`, so an
+  expression written for a complex array still reads for a single cell taken
+  out of it: `a[0].tanh` now works alongside `a.tanh`. Covers the fifteen
+  functions a complex array supports (`sqrt` `exp` `log` `sin` `cos` `tan`
+  `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh`) plus
+  `square` and `rsqrt`, and agrees with the array form exactly, branch cuts
+  and the sign of a zero included. `log10`, `expm1` and `log1p` are not
+  defined on `Complex`, matching the array form, which raises
+  `CArray::DataTypeError` for them. The refinement still has to be opted into
+  with `using CArray::CoreExtensions`.
+
 - Fix: `sinh`, `cosh`, `tanh`, `asinh`, `acosh` and `atanh` on a complex array
   gave the hyperbolic function of the real part alone. The kernel called the
   real-typed C function, which drops the imaginary part of its argument, so
