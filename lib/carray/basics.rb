@@ -30,27 +30,26 @@ class CArray
   #   shift as other axes are inserted (e.g. `insert_axis(0, 1, 2)`
   #   puts one axis before each of the first three source axes).
   #
-  #   Each inserted axis takes one of three forms, chosen by its
-  #   `repeat` value: `1` (or `nil`) for a plain size-1 axis, an
-  #   Integer `N > 1` for a read-only bound repeat view, or `:*` for
-  #   an unbound repeat that binds on assignment. `repeat` is either
-  #   a single value applied to every inserted axis, or an Array
-  #   giving one value per position.
+  #   Each inserted axis takes one of two forms, chosen by its
+  #   `repeat` value: `1` (or `nil`) for a plain size-1 axis, or an
+  #   Integer `N > 1` for a read-only bound repeat view. `repeat` is
+  #   either a single value applied to every inserted axis, or an
+  #   Array giving one value per position.
   #
-  #   The everyday way to add an axis is the `:_` / `:*` indexer
-  #   when the shape is known at the call site; `insert_axis` is for
-  #   library code that builds the axis list programmatically.
+  #   The everyday way to add an axis is the `:_` indexer when the
+  #   shape is known at the call site; `insert_axis` is for library
+  #   code that builds the axis list programmatically.
   #
   #   @param positions [Array<Integer>] source-frame positions of the
   #     new axes.
-  #   @param repeat [Integer, Symbol, Array, nil] repeat spec applied
-  #     to each inserted axis.
+  #   @param repeat [Integer, Array, nil] repeat spec applied to each
+  #     inserted axis.
   #   @return [CArray] view with the new axes inserted.
   #   @example
   #     a = CArray.int32(3, 4).seq
   #     a.insert_axis(0)                       # shape (1, 3, 4)
   #     a.insert_axis(1, repeat: 5)            # shape (3, 5, 4)
-  #     a.insert_axis(0, 1, repeat: [:*, 3])   # mixed unbound + bound
+  #     a.insert_axis(0, 1, repeat: [1, 3])    # size-1 then bound
   def insert_axis (*positions, repeat: nil)
     flat = positions.flatten
     if flat.empty?
@@ -81,57 +80,31 @@ class CArray
         Array.new(flat.length, repeat)
       end
 
-    # Validate each value.  A positive Integer or :* only; nil is not a
-    # valid per-axis repeat.
-    reps.each do |r|
-      case r
-      when Integer
-        raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
-      when :*
-        # ok
-      else
-        raise ArgumentError,
-          "insert_axis: repeat must be a positive Integer or :*, got #{r.inspect}"
-      end
+  # Validate each value.  A positive Integer only; nil is not a valid
+  # per-axis repeat.
+  reps.each do |r|
+    unless r.is_a?(Integer)
+      raise ArgumentError,
+        "insert_axis: repeat must be a positive Integer, got #{r.inspect}"
     end
-
-    # Final output layout: stable order by (gap, argument index) keeps
-    # same-gap axes in argument order; the k-th inserted axis lands at output
-    # position gap + k.  This output position is only used to drive the
-    # output-shaped view constructors (broadcast_to / unbound_repeat); the
-    # actual insertion always goes through the source-frame primitive below.
-    order = (0...flat.length).sort_by { |i| [gaps[i], i] }
-    final = {}
-    order.each_with_index { |i, k| final[i] = gaps[i] + k }
-
-    unbound_args  = order.select { |i| reps[i] == :* }
-    concrete_args = order.reject { |i| reps[i] == :* }   # in output order
-
-    # Stage 1: insert the concrete (size-1 / bound) axes by their source
-    # gaps, then grow the bound ones with broadcast_to.
-    inter = self
-    unless concrete_args.empty?
-      inter = __insert_axis_size1__(*concrete_args.map { |i| gaps[i] })
-      if concrete_args.any? { |i| reps[i].is_a?(Integer) && reps[i] > 1 }
-        shp = inter.shape
-        concrete_args.each do |i|
-          r = reps[i]
-          next unless r.is_a?(Integer) && r > 1
-          # intermediate position = final position minus unbound axes before it
-          shp[final[i] - unbound_args.count { |u| final[u] < final[i] }] = r
-        end
-        inter = inter.broadcast_to(*shp)
-      end
-    end
-
-    return inter if unbound_args.empty?
-
-    # Stage 2: add the unbound axes over the final ndim (`:*` at unbound
-    # positions, nil consumes one stage-1 axis in order).
-    pattern = Array.new(ndim + flat.length, nil)
-    unbound_args.each { |i| pattern[final[i]] = :* }
-    inter.unbound_repeat(*pattern)
+    raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
   end
+
+  # Final output layout: stable order by (gap, argument index) keeps
+  # same-gap axes in argument order; the k-th inserted axis lands at output
+  # position gap + k.  This output position only drives broadcast_to; the
+  # insertion itself always goes through the source-frame primitive.
+  order = (0...flat.length).sort_by { |i| [gaps[i], i] }
+  final = {}
+  order.each_with_index { |i, k| final[i] = gaps[i] + k }
+
+  inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
+  return inter unless order.any? { |i| reps[i] > 1 }
+
+  shp = inter.shape
+  order.each { |i| shp[final[i]] = reps[i] if reps[i] > 1 }
+  inter.broadcast_to(*shp)
+end
 
   # @overload drop_axis
   #   Returns a view of `self` with every size-1 axis dropped.

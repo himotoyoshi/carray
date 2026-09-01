@@ -4,8 +4,7 @@
 #
 #   repeat: 1 / nil / omitted  -> size-1 axis (CARefer; broadcasts on store)
 #   repeat: N (Integer > 1)    -> bound repeat (CARepeat; read-only)
-#   repeat: :*                 -> unbound repeat (CAUnboundRepeat; binds on store)
-#   mixed                      -> two-stage composition (bound then unbound)
+#   mixed                      -> one size-1 insertion, then broadcast_to
 
 require 'test/unit'
 $LOAD_PATH.unshift File.expand_path('../../ext', __dir__)
@@ -104,46 +103,22 @@ class TestInsertAxisRepeat < Test::Unit::TestCase
     assert_equal [2, 2, 3, 4], v.shape
   end
 
-  # ---------- unbound repeat (:*) ----------
+  # ---------- mixed size-1 + bound ----------
 
-  def test_unbound_class_and_shape
-    v = @a.insert_axis(0, repeat: :*)
-    assert_equal CAUnboundRepeat, v.class
-    assert_equal [1, 3, 4], v.shape    # unbound axis reads as size 1
-  end
-
-  def test_unbound_binds_on_assignment
-    v = @a.insert_axis(0, repeat: :*)
-    t = CArray.int32(6, 3, 4)
-    t[] = v
-    assert_equal @a.to_a, t[0, nil, nil].to_a
-    assert_equal @a.to_a, t[5, nil, nil].to_a
-  end
-
-  def test_unbound_multiple
-    v = @a.insert_axis(0, 1, repeat: :*)
-    assert_equal CAUnboundRepeat, v.class
-    assert_equal [1, 3, 1, 4], v.shape
-  end
-
-  # ---------- mixed bound + unbound ----------
-
-  def test_mixed_unbound_and_bound
-    # before axis 0: unbound; before axis 1: bound to 5
-    v = @a.insert_axis([0, 1], repeat: [:*, 5])
-    assert_equal CAUnboundRepeat, v.class
-    assert_equal [1, 3, 5, 4], v.shape    # unbound, orig0, bound5, orig1
+  def test_mixed_size1_and_bound
+    # before axis 0: size-1; before axis 1: bound to 5
+    v = @a.insert_axis([0, 1], repeat: [1, 5])
+    assert_equal [1, 3, 5, 4], v.shape
 
     t = CArray.int32(6, 3, 5, 4)
-    t[] = v
-    # bound axis is concrete (5); unbound axis (front) binds to 6
+    t[] = v                          # the size-1 axis stretches to 6
     assert_equal @a.to_a, t[0, nil, 0, nil].to_a
     assert_equal @a.to_a, t[5, nil, 4, nil].to_a
   end
 
-  def test_mixed_bound_unbound_size1
-    # before axis 0: bound 6; before axis 1: unbound; before end: size-1
-    v = @a.insert_axis([0, 1, 2], repeat: [6, :*, 1])
+  def test_mixed_bound_and_two_size1
+    # before axis 0: bound 6; before axis 1: size-1; before end: size-1
+    v = @a.insert_axis([0, 1, 2], repeat: [6, 1, 1])
     assert_equal [6, 3, 1, 4, 1], v.shape
   end
 
@@ -161,11 +136,15 @@ class TestInsertAxisRepeat < Test::Unit::TestCase
     assert_raise(ArgumentError) { @a.insert_axis(0, repeat: :foo) }
   end
 
+  def test_repeat_star_is_not_a_repeat_value
+    # the unbound repeat is gone; a size-1 axis stretches on store instead
+    assert_raise(ArgumentError) { @a.insert_axis(0, repeat: :*) }
+  end
+
   def test_duplicate_position_with_distinct_repeats
-    # two axes before source axis 0, in argument order: bound 2 then unbound
-    v = @a.insert_axis(0, 0, repeat: [2, :*])
-    assert_equal CAUnboundRepeat, v.class
-    assert_equal [2, 1, 3, 4], v.shape    # bound2, unbound, orig0, orig1
+    # two axes before source axis 0, in argument order: bound 2 then size-1
+    v = @a.insert_axis(0, 0, repeat: [2, 1])
+    assert_equal [2, 1, 3, 4], v.shape    # bound2, size1, orig0, orig1
     t = CArray.int32(2, 7, 3, 4)
     t[] = v
     assert_equal @a.to_a, t[0, 0, nil, nil].to_a

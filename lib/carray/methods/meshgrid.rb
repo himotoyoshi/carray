@@ -17,10 +17,9 @@ class CArray
   #   input order in both modes.
   #
   #   When `copy` is true (default) each output is a materialised
-  #   CArray; when false, view chains (CARepeat / CAUnboundRepeat)
-  #   are returned. When `sparse` is true the outputs are
-  #   CAUnboundRepeat views that broadcast on demand, saving memory
-  #   for large grids.
+  #   CArray; when false, a view is returned. When `sparse` is true
+  #   each output keeps a size-1 axis wherever the full grid would
+  #   repeat, and broadcasts on demand, saving memory for large grids.
   #
   #   If a block is given, yields the resulting arrays as splat
   #   arguments and returns the block's value.
@@ -77,7 +76,7 @@ class CArray
     list = axes.map.with_index do |axis, k|
       d = dest[k]
       idx = if sparse
-              Array.new(ndim) { |i| i == d ? nil : :* }
+              Array.new(ndim) { |i| i == d ? nil : :_ }
             else
               out_shape.dup.tap { |s| s[d] = :% }
             end
