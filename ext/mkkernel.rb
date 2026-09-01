@@ -8065,8 +8065,10 @@ MkKernel.monfunc :exp10,
     SNIPPET
   }
 
-# Hyperbolic family: complex variant uses the real-typed C function
-# (matches original mkmath emit, which doesn't prefix `c`).
+# Hyperbolic family: float uses the real-typed C function, complex uses
+# the C99 `c`-prefixed one.  Passing a `double _Complex` to `sinh(double)`
+# discards the imaginary part, so the complex branch must not share the
+# real-typed name.
 {
   sinh:  "sinh",
   cosh:  "cosh",
@@ -8079,7 +8081,7 @@ MkKernel.monfunc :exp10,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
       float:   "(#2) = #{c_fn}(#1);",
-      complex: "(#2) = #{c_fn}(#1);",
+      complex: "(#2) = c#{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
     }
 end
