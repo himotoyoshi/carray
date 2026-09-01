@@ -334,9 +334,18 @@ d[:gt, 2] = 0       #  => [ 0, 1, 2, 0, 0 ]
 d[:eq, 0] = -1      #  => [ -1, 1, 2, -1, -1 ]
 ```
 
-The full list — `:eq`, `:ne`, `:gt`, `:ge`, `:lt`, `:le`, `:is_invalid` —
-mirrors the comparison methods on CArray. See
-[Masks and missing values](05_masks.md) for the `[:eq, v] = UNDEF`
+The key is a method name, not an entry from a fixed table: the array is sent
+that message with the remaining arguments, and the answer does the selecting.
+So the comparisons (`:eq`, `:ne`, `:gt`, `:ge`, `:lt`, `:le`) work, and so do
+the predicates — `:is_invalid`, `:is_finite`, `:is_nan`, `:is_masked`,
+`:is_not_masked`, and `:is_empty` on a string array — along with any
+boolean-returning method you define yourself.
+
+Because the name is not checked against a list, a name that changes the array
+changes it: `a[:fill, 0]` runs `fill` and empties `a` before selecting.  Keep
+to questions.
+
+See [Masks and missing values](05_masks.md) for the `[:eq, v] = UNDEF`
 mask-by-condition pattern, and for the return-form counterparts
 (`mask_eq`, `mask_where`, `mask_invalid`).
 
