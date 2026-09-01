@@ -27,7 +27,7 @@ own data and needs nothing from outside.
 
 ## Learning the API
 
-### `basics/` — the essentials
+### `basics/` — the essentials ([README](basics/README.md))
 
 The core vocabulary. Everything else assumes it. Each script prints results
 next to the values you should see, and stands on its own.
