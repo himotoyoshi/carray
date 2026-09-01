@@ -216,15 +216,6 @@ list, an externally installed view that shares the table answers true
 as well. Guard every `ca_stride_compose_to_root` call with it —
 handing it a non-member reads the struct past its end.
 
-Membership says the address expression exists; it does not say
-`ca->dim[]` is the shape the caller means. A `CAUnboundRepeat` is a
-member and folds correctly, but each `:*` axis sits in the struct as a
-size-1 stride-0 entry until the view is bound, so code that compiles
-against the shape wants `ca->obj_type != CA_OBJ_UNBOUND_REPEAT` first.
-That single comparison is the whole of the question: unboundness lives
-only at the top of a chain — a view taken of a `CAUnboundRepeat` is an
-ordinary bound view — and no other `obj_type` carries it.
-
 ### Compose-fold
 
 ```c
@@ -314,7 +305,6 @@ view's parameters.
 | CATranspose | runtime | pure typedef | `a.transpose` |
 | CAFarray | runtime | pure typedef | column-major view |
 | CAField | runtime | pure typedef | fixlen field access (zero-copy) |
-| CAUnboundRepeat | `CA_OBJ_UNBOUND_REPEAT` (fixed = 8) | prefix + `rep_dim` tail | `:*` unbound axis (pre-broadcast) |
 
 `CARepeat` is technically `typedef CAStride CARepeat;` — the
 "repeat" semantics are entirely encoded by `strides[k] == 0` on the

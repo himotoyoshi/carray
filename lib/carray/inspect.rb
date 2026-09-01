@@ -49,13 +49,7 @@ class CArray::Inspector  # :nodoc:
   end
 
   def get_shape
-    case @carray.obj_type
-    when CA_OBJ_UNBOUND_REPEAT
-      dim = @carray.spec
-    else
-      dim = @carray.shape
-    end
-    return dim
+    return @carray.shape
   end
 
   def get_info_list

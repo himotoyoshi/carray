@@ -198,15 +198,9 @@ typedef enum {
 #define CA_ITER_ERR_READONLY    4    /* WRITE on readonly view (CARepeat etc.) */
 #define CA_ITER_ERR_MASK        5    /* masked source — step 4-5 only, lifted in step 6 */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source (step 7) */
-#define CA_ITER_ERR_UNBOUND_SHAPE 7  /* CAUnboundRepeat passed before bind() — reserved for
-                                        sub-step 9.3 (= used iff unbound CAUbrep smoke shows
-                                        unsafe behavior on the existing SRC_CASTRIDE path) */
-
 /* ---- source kind (step 5+, internal routing) ------------------------- */
 #define CA_ITER_SRC_NONE       0
-#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4).
-                                        CAUnboundRepeat is also classified
-                                        here via ca_ubrep_func = ca_stride_func. */
+#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
 #define CA_ITER_SRC_DESCRIPTOR 2     /* CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift (step 5+) */
 #define CA_ITER_SRC_ATTACH     3     /* CAFake / CAByteSwap / CABitfield /
                                         CABitarray / CAReduce — view's own

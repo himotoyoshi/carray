@@ -186,9 +186,7 @@ ca_iter_classify_source (CArray *src)
   if ( attach == ca_window_func.attach      ) return CA_ITER_SRC_DESCRIPTOR;  /* + CAShift */
 
   /* Step 9: SRC_ATTACH 5 view.  Each view-specific attach materialises
-     src->ptr via per-element transform; kernel sees a flat contig slab.
-     CAUnboundRepeat shares ca_stride_func.attach so it was already
-     classified as SRC_CASTRIDE above (prep doc §2.6). */
+     src->ptr via per-element transform; kernel sees a flat contig slab. */
   if ( attach == ca_fake_func.attach        ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_byte_swap_func.attach   ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bitfield_func.attach    ) return CA_ITER_SRC_ATTACH;
@@ -4365,6 +4363,5 @@ Init_ca_kernel_iterator (void)
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_CONTIG",    INT2NUM(CA_ITER_ALIAS_CONTIG));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_STRIDED",   INT2NUM(CA_ITER_ALIAS_STRIDED));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_ATTACH",    INT2NUM(CA_ITER_ALIAS_ATTACH));
-  rb_define_const(rb_cCArray, "T1_ITER_ERR_UNBOUND_SHAPE", INT2NUM(CA_ITER_ERR_UNBOUND_SHAPE));
 #endif /* CARRAY_DEV_BUILD */
 }

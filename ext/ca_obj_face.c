@@ -312,18 +312,6 @@ ca_lazy_marker_lift (VALUE view, VALUE marker)
     return view;
   }
 
-  /* CAREFUL: an unbound view leaves an extent open until an operand binds
-     it, and a marker copies shape at construction — wrapping one erases
-     exactly the property the view exists to carry, and the expression
-     degenerates into a per-element broadcast against a size-1 axis (the
-     answer stays right, which is why nothing catches it; measured at 184x
-     on a 2000x2000 broadcast sum).  Two routes reach here, `a[:*, nil]`
-     and `unbound_repeat`, so the refusal lives here rather than at each
-     deployment site. */
-  if ( view_ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-    return view;
-  }
-
   TypedData_Get_Struct(marker, CArray, &carray_data_type, mp);
 
   /* One-level swap (CAFace.md section 8.3, same reasoning): move the view

@@ -260,16 +260,6 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     assert_not_equal UNDEF, mat[1, 1]
   end
 
-  # Role 5b: CAUnboundRepeat uses rb_ca_refer_new (ca_obj_unbound_repeat.c:218)
-  # internally during construction.  Pin the construction site (without
-  # mask, since UnboundRepeat + mask is a separate latent issue).
-  def test_role5_unbound_repeat_path
-    a = CArray.float64(3).seq
-    ur = a.unbound_repeat(:*, nil)
-    assert_equal "CAUnboundRepeat", ur.class.name
-    assert_equal [1, 3], ur.dim
-  end
-
   # Role 5c: #value uses rb_ca_refer_new (carray_mask.c:654) to construct
   # the value-array view that strips the mask.
   def test_role5_value_array_path

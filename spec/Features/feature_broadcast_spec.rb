@@ -20,10 +20,10 @@ describe "CArray.broadcast" do
 
   end
 
-  example "with unboud repeat" do
+  example "with a newaxis built by the indexer" do
     a = CArray.int(3,3).seq
-    b = CArray.int(3).seq[:*,nil]
-    c = CArray.int(3).seq[nil,:*]
+    b = CArray.int(3).seq[:_,nil]
+    c = CArray.int(3).seq[nil,:_]
 
     aa, bb, cc = CArray.broadcast(a,b,c)
 

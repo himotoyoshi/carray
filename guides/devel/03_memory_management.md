@@ -85,7 +85,7 @@ safely within the same process and even the same type. The migration template fo
 a dim-only type is: add `pool_bytes`/`pool_init`, gate `setup` with
 `if (!ca->_pool)`, route `*_new` through `ca_array_alloc`, branch `free` on
 `_pool`, route `initialize_copy` through `ca_array_pool_alloc`, and register the
-three hooks in `Init`. CABlock-style prefix+tail types follow CAUnboundRepeat as
+three hooks in `Init`. CABlock-style prefix+tail types follow CABlock as
 the worked example.
 
 ### What the pool does *not* cover

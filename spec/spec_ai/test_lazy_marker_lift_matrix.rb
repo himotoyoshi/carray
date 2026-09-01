@@ -79,11 +79,10 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
 
   # === the index forms of `[]` ============================================
   #
-  # All fourteen CA_REG_* branches converge on one lift site, so this table
+  # All the CA_REG_* branches converge on one lift site, so this table
   # is what says so.  `treat` names what the form is expected to get:
   #   :lift    -> a CArray view, marker on top
   #   :scalar  -> not a CArray at all, handed back untouched
-  #   :unbound -> a view whose shape is still open, deliberately not lifted
   #   :other   -> not a CArray (an iterator), handed back untouched
   INDEX_FORMS = {
     "ADDRESS       [5]"          => [->(v) { v[5] },              :scalar],
@@ -97,7 +96,6 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
     "GRID          [ints, ints]" => [->(v) { v[I0, I1] },         :lift],
     "METHOD_CALL   [:eq, 3]"     => [->(v) { v[:eq, 3] },         :lift],
     "NEWAXIS       [:_,nil,nil]" => [->(v) { v[:_, nil, nil] },   :lift],
-    "UNBOUND_REP   [:*,nil,nil]" => [->(v) { v[:*, nil, nil] },   :unbound],
     "ITERATOR      [:>,nil]"     => [->(v) { v[:>, nil] },        :other],
   }.freeze
 
@@ -118,7 +116,6 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
     "sort_copy"      => ->(v) { v.sort_copy },     # reorders values
     "value"          => ->(v) { v.value },         # changes what the mask means
     "strip_mask"     => ->(v) { v.strip_mask(0) }, # changes what the mask means
-    "unbound_repeat" => ->(v) { v.unbound_repeat(:*, nil, nil) }, # shape stays open
   }.freeze
 
   # === lifted: shape ======================================================
@@ -208,8 +205,6 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
       when :scalar
         assert_equal false, got.is_a?(CArray), name
         assert_equal f.call(a), got, name
-      when :unbound
-        assert_equal CAUnboundRepeat, got.class, name
       when :other
         assert_equal false, got.is_a?(CArray), name
         assert_equal f.call(a).class, got.class, name
@@ -279,16 +274,5 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
     assert_equal a.value.to_a, a.lazy.value.to_a
     assert_equal false, a.lazy.value.has_mask?
     assert_equal a[1, 2].nil? ? nil : a.value[1, 2], a.lazy.value[1, 2]
-  end
-
-  # An unbound view keeps its extent open until an operand binds it, and a
-  # marker copies shape at construction -- lifting one erases exactly that.
-  # Both routes in are refused, and binding still works.
-  def test_unbound_views_bind_correctly_through_a_marker
-    row = CArray.int32(5) { |i| i }
-    b   = CArray.int32(4, 5) { |j, i| j * 5 + i }
-    want = row.unbound_repeat(:*, nil) + b
-    assert_equal want.to_a, (row.lazy.unbound_repeat(:*, nil) + b).to_ca.to_a
-    assert_equal want.to_a, (row.lazy[:*, nil] + b).to_ca.to_a
   end
 end

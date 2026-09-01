@@ -175,18 +175,6 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
     assert_equal v.to_a, t.to_a
   end
 
-  # An unbound view keeps its shape open until an operand binds it, so it
-  # is deliberately NOT lifted -- both routes to one.
-  def test_unbound_views_are_not_lifted
-    row = CArray.int32(4) { |i| i }
-    assert_equal CAUnboundRepeat, row.lazy.unbound_repeat(:*, nil).class
-    assert_equal CAUnboundRepeat, row.lazy[:*, nil].class
-    # and still bind correctly
-    b = CArray.int32(3, 4) { |j, i| j * 4 + i }
-    assert_equal (row.unbound_repeat(:*, nil) + b).to_a,
-                 (row.lazy.unbound_repeat(:*, nil) + b).to_ca.to_a
-  end
-
   # === reductions over a bare marker ======================================
 
   def test_marker_per_axis_reduction_matches_entity

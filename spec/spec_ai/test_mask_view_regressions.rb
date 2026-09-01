@@ -88,16 +88,4 @@ class TestMaskViewRegressions < Test::Unit::TestCase
 
   # --- CAUnboundRepeat construction over masked parent ------------------
 
-  def test_unbound_repeat_over_masked_parent
-    a = CArray.float64(3).seq
-    a.mask = 0
-    a[1] = UNDEF
-    ur = nil
-    assert_nothing_raised do
-      ur = a.unbound_repeat(:*, nil)
-    end
-    assert_equal "CAUnboundRepeat", ur.class.name
-    assert_true ur.has_mask?
-  end
-
 end

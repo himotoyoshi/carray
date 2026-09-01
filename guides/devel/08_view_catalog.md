@@ -89,12 +89,11 @@ Packing smaller than one byte. **MV: reject** (no byte-addressable layout).
 | CABitarray | `CA_OBJ_BITARRAY` | `ca_obj_bitarray.c` | 1-bit-per-element boolean packing |
 | CABitfield | `CA_OBJ_BITFIELD` | `ca_obj_bitfield.c` | bit-field extraction |
 
-## Reduce / repeat / unbound
+## Reduce / repeat
 
 | Kind | obj_type | File | MV | Represents |
 |------|----------|------|----|------------|
 | CAReduce | `CA_OBJ_REDUCE` | `ca_obj_reduce.c` | attach | dimension reduction |
-| CAUnboundRepeat | `CA_OBJ_UNBOUND_REPEAT` | `ca_obj_unbound_repeat.c` | reject | unbound-shape repeat (`:*`); shape not fixed |
 
 ## Composite views
 
@@ -190,11 +189,6 @@ count)` builds the view.
 without copy; `rb_ca_field_new(cary, offset, data_type, bytes)` builds
 a fixlen field view (this is zero-copy strided).
 
-**CAUnboundRepeat (`CA_OBJ_UNBOUND_REPEAT` = 8)** — CAStride with a
-`rep_dim[]` tail; `rep_dim[i] == 0` marks an unbound (`:*`) axis.
-`rb_ca_ubrep_new(cary, rep_ndim, rep_dim)`. Bound to a concrete shape
-via `ca_ubrep_bind_with(self, other)` / `rb_ca_rewrap_unbound_repeat`.
-
 ### Scatter views
 
 **CASelect (`CA_OBJ_SELECT` = 5)** — boolean / fancy indexing. Builds
@@ -269,17 +263,13 @@ optional multibyte byte-swap are parameters. MV strategy is **reject**
 parent integer array. Attach materialises into a fresh contig buffer
 of the chosen output integer width. MV reject.
 
-### Reduce / unbound
+### Reduce
 
 **CAReduce (`CA_OBJ_REDUCE`)** — internal class used only in
 `ca_obj_refer.c` for byte-reinterpret modes. Not a user-facing view;
 user-facing reductions go through the kernel iterator
 ([ch. 11](11_kernel_iterator.md)) and produce fresh entities, not
 CAReduce views.
-
-**CAUnboundRepeat (`CA_OBJ_UNBOUND_REPEAT`)** — already listed under
-the CAStride family. MV reject because shape is not fixed until
-bound.
 
 ### Composite (multi-parent) views
 
@@ -616,7 +606,7 @@ For the canonical strategies (the ones declared in
 | **direct** | contiguous, zero-copy | CArray, CAWrap, CScalar |
 | **strided** | strided, zero-copy | every CAStride descendant — CARefer (with `is_deformed ∈ {0,1}`), CABlock, CAFarray, CATranspose, CARepeat, CAStride, CAField |
 | **attach** | materialise into contig buffer first | CASelect, CAGrid, CAWindow, CAShift, CAFake, CAByteSwap, CABitfield, CAReduce, CARecord, CARemap, CARoll, CATile, CAStack (alias state allowing) |
-| **reject** | not expressible as bytes | CABitarray, CAObject, CAUnboundRepeat, CAConstString (per-parent buffer) |
+| **reject** | not expressible as bytes | CABitarray, CAObject, CAConstString (per-parent buffer) |
 
 The full `ca_mv_runtime_types[]` decision is in
 `ext/carray_memory_view.c`; [ch. 18](18_memory_view_protocol.md) walks

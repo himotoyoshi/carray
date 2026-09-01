@@ -115,30 +115,30 @@ a.insert_axis(0, 0)     #  => shape (1, 1, 5, 3) two before axis 0
 a.insert_axis(-1)       #  => shape (5, 3, 1)   at the end
 ```
 
-The `repeat:` keyword sizes the inserted axes. It mirrors the three ways an
+The `repeat:` keyword sizes the inserted axes. It mirrors the two ways an
 axis can be added:
 
 ```ruby
 # repeat: N (> 1) — a read-only view that repeats the data N times
 a.insert_axis(1, repeat: 4)        #  => shape (5, 4, 3), each slice == a
 
-# repeat: :* — an unbound axis, sized when you assign into it
+# repeat: 1 (or omitted) — a size-1 axis, stretched when you assign into it
 row = CArray.int32(3, 4).seq
 t   = CArray.int32(5, 3, 4)
-t[] = row.insert_axis(0, repeat: :*)   # row copied into every slab
+t[] = row.insert_axis(0)               # row copied into every slab
 
 # per-position array, one value per position
 a.insert_axis(0, 1, repeat: [2, 3])    #  => shape (2, 5, 3, 3)
 ```
 
 A scalar `repeat:` applies to every inserted axis; an array gives one value
-per position. Mixed bound and unbound axes are allowed — `insert_axis(0, 1,
-repeat: [:*, 3])` leaves the axis before axis 0 unbound and repeats the one
-before axis 1 three times.
+per position, so `insert_axis(0, 1, repeat: [1, 3])` leaves the axis before
+axis 0 at length 1 and repeats the one before axis 1 three times.
 
-This is the same machinery as the `:*` / `:_` indexers (see
-[Indexing and slicing](02_indexing_and_slicing.md) for the bind-on-store
-rule); `insert_axis` just lets you drive it from a computed list.
+This is the same machinery as the `:_` indexer (see
+[Indexing and slicing](02_indexing_and_slicing.md) for how a size-1 axis
+stretches on a store); `insert_axis` just lets you drive it from a computed
+list.
 
 ## Building arrays
 

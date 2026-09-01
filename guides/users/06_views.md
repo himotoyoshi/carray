@@ -435,10 +435,10 @@ v.roll(1).class           #  => CARoll
 ```
 
 There are a few more specialised view classes (`CAReduce`, `CAWindow`,
-`CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`,
-`CAUnboundRepeat`) which you may encounter when using advanced features such as
-window scans, fixed-size record fields, sub-byte storage, or unbound broadcast
-tools. These follow the same rule: they are views onto data they do not own, so
+`CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`)
+which you may encounter when using advanced features such as window scans,
+fixed-size record fields, or sub-byte storage. These follow the same rule:
+they are views onto data they do not own, so
 writing through them updates the source.
 
 An entity — a real, data-owning array — has class `CArray` (or, for a

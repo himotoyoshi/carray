@@ -56,8 +56,6 @@ describe "Feature: Indexing" do
     is_asserted_by { [info.type, info.index] == [CA_REG_GRID, []] }
     info = CArray.scan_index([3,3],[:%, :%, 2])
     is_asserted_by { [info.type, info.index] == [CA_REG_REPEAT, []] }
-    info = CArray.scan_index([3,3],[nil, nil, :*])
-    is_asserted_by { [info.type, info.index] == [CA_REG_UNBOUND_REPEAT, []] }
   end
 
   example "addr2index" do

@@ -91,8 +91,8 @@ assignments ([ch. 8](08_view_catalog.md) has the full catalog):
   `FIELD` → **strided** (zero-copy);
 - `CA_OBJ_SELECT` / `GRID` / `SHIFT` / `WINDOW` / `FAKE` / `REDUCE` / `RECORD` →
   **attach** (the access pattern isn't strides, so materialise);
-- `CA_OBJ_BITARRAY` / `BITFIELD` / `OBJECT` / `UNBOUND_REPEAT` → **reject**
-  (sub-byte packing, Ruby `VALUE`s, and unbound shape have no byte-addressable
+- `CA_OBJ_BITARRAY` / `BITFIELD` / `OBJECT` → **reject**
+  (sub-byte packing and Ruby `VALUE`s have no byte-addressable
   layout).
 
 The strided strategies are why a transposed or sliced CArray exports **zero-copy**:

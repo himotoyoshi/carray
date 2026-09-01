@@ -77,7 +77,6 @@ enum {
   CA_OBJ_SELECT,
   CA_OBJ_OBJECT,
   CA_OBJ_REPEAT,
-  CA_OBJ_UNBOUND_REPEAT,
 };
 ```
 
@@ -130,7 +129,7 @@ CArray (entity)
     ├── CAWindow / CAShift                              (bounds-fill)
     ├── CAFake / CAByteSwap                             (value reinterpret)
     ├── CABitarray / CABitfield                        (sub-byte)
-    ├── CAReduce / CAUnboundRepeat
+    ├── CAReduce
     ├── CAObject                                        (Ruby callback bridge)
     └── … (CAStack and friends, Faces)
 ```

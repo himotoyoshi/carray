@@ -324,8 +324,6 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     }
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self, out);
-
   return out;
 }
 
@@ -478,8 +476,6 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
       ALLOCV_END(h1);
     }
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
 
   return out;
 }
@@ -870,8 +866,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
           }
         }
 
-        out = rb_ca_rewrap_unbound_repeat(self, out);
-        out = rb_ca_rewrap_unbound_repeat(other, out);
         return out;
       }
       /* else fall through to the use_chunked / ALLOCV path */
@@ -907,8 +901,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       if ( a2 ) { ca_detach(ca2); } else { ALLOCV_END(h2); }
       if ( a1 ) { ca_detach(ca1); } else { ALLOCV_END(h1); }
 
-      out = rb_ca_rewrap_unbound_repeat(self, out);
-      out = rb_ca_rewrap_unbound_repeat(other, out);
       return out;
     }
 
@@ -1004,10 +996,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
 
     ca_lazy_arena_exit();
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
-
-  out = rb_ca_rewrap_unbound_repeat(other, out);
 
   return out;
 }
@@ -1367,10 +1355,6 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
     }
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self,   out);
-  out = rb_ca_rewrap_unbound_repeat(other2, out);
-  out = rb_ca_rewrap_unbound_repeat(other3, out);
-
   return out;
 }
 
@@ -1535,8 +1519,6 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
                          (boolean8_t *) ca2->ptr, 1);
     EAGER_RELEASE_INPUT(ca1, h1, attached1);
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
 
   return out;
 }
@@ -1708,8 +1690,6 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       }
     }
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
 
   return out;
 }
