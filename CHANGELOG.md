@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: `sinh`, `cosh`, `tanh`, `asinh`, `acosh` and `atanh` on a complex array
+  gave the hyperbolic function of the real part alone. The kernel called the
+  real-typed C function, which drops the imaginary part of its argument, so
+  `cmplx128` and `cmplx64` arrays came back with `tanh(Re z)` where `ctanh(z)`
+  was meant -- wrong in both parts, and `acosh` and `atanh` also returned 0 or
+  infinity where the true value is finite. They now agree with C99
+  `complex.h`. Real and object arrays were never affected.
+
 - Change: the `:*` unbound repeat is retired. `a[:*, nil]` raises `IndexError`;
   `CArray#unbound_repeat`, `CAUnboundRepeat` and `insert_axis(repeat: :*)` are
   gone. Use `:_`, which gives the same shape and now stretches on a store as
