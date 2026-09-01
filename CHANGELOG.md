@@ -11,35 +11,26 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
-- Change: the `:*` unbound repeat is retired. `a[:*, nil]` now raises
-  `IndexError`, and `CArray#unbound_repeat`, the `CAUnboundRepeat` class and
-  `insert_axis(repeat: :*)` are gone. Write `:_` instead: it produces the same
-  shape, and a size-1 axis now stretches on a store as well as in an operation,
-  which is what `:*` was for. `CArray#broadcast_to` is unaffected (the
-  `broadcast_to` that goes with `:*` was an alias on the retired class).
-  `CArray.meshgrid(sparse: true)` returns the same shapes as before.
+- Change: the `:*` unbound repeat is retired. `a[:*, nil]` raises `IndexError`;
+  `CArray#unbound_repeat`, `CAUnboundRepeat` and `insert_axis(repeat: :*)` are
+  gone. Use `:_`, which gives the same shape and now stretches on a store as
+  well as in an operation. `CArray#broadcast_to` and
+  `CArray.meshgrid(sparse: true)` are unaffected.
 
-- Change: a binary operation refuses operands it cannot bring to one shape.
-  `(3,2) + (2,3)` used to answer in the left operand's shape and `(6) + (3,2)`
-  in the right's, so the result depended on the order the operands were
-  written; both now raise `ArgumentError`. Shapes must agree, or differ only
-  in size-1 axes at equal ndim. To combine the values in the order they lie,
-  flatten both sides: `a.flatten + b.flatten`. Comparisons, `fma` and the lazy
-  forms follow the same rule. Scalars are unaffected. A one-element 1-D array
-  such as `CArray.int32(1)` states a shape and is no longer taken as a scalar
-  by the lazy path, which the eager path had already refused.
+- Change: a binary operation requires shapes to agree, or to differ only in
+  size-1 axes at equal ndim. `(3,2) + (2,3)` and `(3,2) + (6)` raise
+  `ArgumentError` where they used to answer in one operand's shape; flatten
+  both sides to combine the values in the order they lie. Comparisons, `fma`
+  and the lazy forms follow the same rule. Scalars are unaffected, but a
+  one-element 1-D array such as `CArray.int32(1)` counts as a shape.
 
-- Change: assignment matches shapes, and a size-1 axis now stretches.
-  `t[] = src` accepted any source of the same element count, so a `(2,3)`
-  source landed in a `(3,2)` destination silently reinterpreted; that now
-  raises `RuntimeError`. Use `src.flatten` to store the values in the order
-  they lie. In exchange a smaller source is repeated into the destination, so
-  `t[] = row[:_, nil, nil]` and `t[] = col` (shape `(n,1)`) now work where
-  they used to raise. Shapes differing only in size-1 axes are accepted, as
-  is a 1-D side, whether it is the source or the destination. Ruby Arrays and
-  scalars are unchanged: `a[] = [1, 2, 3, 4, 5, 6]` still fills by count. The
-  in-place operators (`add!` and its siblings) follow the assignment rule,
-  since they write into the receiver.
+- Change: assignment matches shapes as well. `t[] = src` with a differently
+  shaped source raises `RuntimeError`; use `src.flatten`. In exchange a
+  smaller source is repeated to fit, so `t[] = row[:_, nil, nil]` and
+  `t[] = col` (shape `(n,1)`) work where they used to raise; the destination
+  is never stretched. A 1-D side on either end still passes, as do shapes
+  differing only in size-1 axes. Ruby Arrays and scalars are unchanged. The
+  in-place operators (`add!` and its siblings) follow the assignment rule.
 
 - New: `ca_is_stride_family(ca)` in `carray.h`, for C extensions that want to
   fold a view into `root->ptr + base + sum(idx[k] * strides[k])` themselves.
