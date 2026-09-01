@@ -20,6 +20,12 @@
 #  file has no analysis to work it out with, and would otherwise run a
 #  downward kernel the wrong way round without saying so.
 #
+#  "cell" is the user's guide's word for an individual position in an array
+#  ("masked cells", "the per-cell block", "evaluates it per-cell"); "element"
+#  is its word for counting them and for element-wise operations.  This method
+#  computes one position at a time, and may read its neighbours, so it takes
+#  the former.
+#
 #  Autoloaded from carray/autoload_carray.rb, so nothing is paid for until a
 #  kernel is actually written.
 #
