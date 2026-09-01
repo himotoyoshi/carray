@@ -311,7 +311,7 @@ a[:method, arg]   # is exactly  a[a.method(arg)]
 ```
 
 So `:eq` turns the indexer into a **condition matcher**, the same as building
-a boolean mask first and using the form in §3.1 — just shorter.
+a boolean mask first and using the form in §3.1.
 
 ```ruby
 c = CArray.int32(5).seq    #  => [ 0, 1, 2, 3, 4 ]
@@ -339,6 +339,25 @@ d = CArray.int32(5).seq
 d[:gt, 2] = 0       #  => [ 0, 1, 2, 0, 0 ]
 d[:eq, 0] = -1      #  => [ -1, 1, 2, -1, -1 ]
 ```
+
+What it buys you is the middle of a chain. Selecting by a property of a value
+means naming that value twice, which a chain has no room for — so without the
+symbol key you have to break the chain, or reach for `then`:
+
+```ruby
+a = CA_DOUBLE([1.0, 0.0, -1.0, 4.0])
+b = CA_DOUBLE([2.0, 0.0, 4.0, 0.0])
+a / b                                  #  => [ 0.5, NaN, -0.25, Infinity ]
+
+(a / b)[:is_finite]                    #  => [ 0.5, -0.25 ]
+
+t = a / b; t[t.is_finite]              #  the same, having named it
+(a / b).then { |t| t[t.is_finite] }    #  the same again
+```
+
+The `[]=` forms above buy the same thing: `d[:gt, 2] = 0` says once what
+`d[d.gt(2)] = 0` says twice, and the condition is about the very array being
+written.
 
 There is no table of accepted keys — any method name works, because the form
 is the identity above. The ones worth knowing are the comparisons (`:eq`,
