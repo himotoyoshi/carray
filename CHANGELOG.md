@@ -11,6 +11,28 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: a binary operation refuses operands it cannot bring to one shape.
+  `(3,2) + (2,3)` used to answer in the left operand's shape and `(6) + (3,2)`
+  in the right's, so the result depended on the order the operands were
+  written; both now raise `ArgumentError`. Shapes must agree, or differ only
+  in size-1 axes at equal ndim. To combine the values in the order they lie,
+  flatten both sides: `a.flatten + b.flatten`. Comparisons, `fma` and the lazy
+  forms follow the same rule. Scalars are unaffected. A one-element 1-D array
+  such as `CArray.int32(1)` states a shape and is no longer taken as a scalar
+  by the lazy path, which the eager path had already refused.
+
+- Change: assignment matches shapes, and a size-1 axis now stretches.
+  `t[] = src` accepted any source of the same element count, so a `(2,3)`
+  source landed in a `(3,2)` destination silently reinterpreted; that now
+  raises `RuntimeError`. Use `src.flatten` to store the values in the order
+  they lie. In exchange a smaller source is repeated into the destination, so
+  `t[] = row[:_, nil, nil]` and `t[] = col` (shape `(n,1)`) now work where
+  they used to raise. Shapes differing only in size-1 axes are accepted, as
+  is a 1-D side, whether it is the source or the destination. Ruby Arrays and
+  scalars are unchanged: `a[] = [1, 2, 3, 4, 5, 6]` still fills by count. The
+  in-place operators (`add!` and its siblings) follow the assignment rule,
+  since they write into the receiver.
+
 - New: `ca_is_stride_family(ca)` in `carray.h`, for C extensions that want to
   fold a view into `root->ptr + base + sum(idx[k] * strides[k])` themselves.
   It is the guard `ca_stride_compose_to_root` needs: true for CAStride,
