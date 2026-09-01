@@ -172,6 +172,17 @@ end
 # (2) Single-feature method files under carray/methods/
 # ============================================================================
 
+# ---- per_cell --------------------------------------------------------------
+#
+# CArray.per_cell runs a per-cell computation over an index space -- the
+# surface an array algorithm is written on.  Nothing in the core calls it, so
+# the file loads only when user code does.  Installing carray-jit replaces the
+# method with one that compiles the block to C.
+
+class CArray
+  autoload_method "self.per_cell", "carray/methods/per_cell"
+end
+
 class CArray
   # composition family (eager ragged list -> one array)
   autoload_method "self.concatenate", "carray/methods/composition"
