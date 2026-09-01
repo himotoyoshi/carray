@@ -12,10 +12,12 @@
     ca_broadcast_pair (&self, &other)
         Two-sided expansion for binary ops (case A only: same ndim,
         size-1 axes broadcast pairwise).  Leaves both operands
-        unchanged when shapes are already equal or when they are
-        incompatible (the caller's existing elements-mismatch raise
-        path then handles the error).  Called by carray_cast.c's
-        coercion path and by the binop dispatcher.
+        unchanged when shapes are already equal, and raises when they
+        cannot be paired: both operands of a binary operation are
+        equally authoritative, so a shape conflict has no resolution.
+        Called by carray_cast.c's coercion path and by the binop,
+        bincmp and triop builders, which is every place two operands
+        are brought together.
 
     rb_ca_broadcast_to -- backs the public CArray#broadcast_to method
         (right-to-left axis pairing; see the docstring at the function).
@@ -28,6 +30,75 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+
+NORETURN(static void ca_broadcast_refuse_write (VALUE dst, VALUE src));
+
+/* Report a source that cannot be brought to the destination's shape. */
+static void
+ca_broadcast_refuse_write (VALUE dst, VALUE src)
+{
+  volatile VALUE dst_s = rb_inspect(rb_funcall(dst, rb_intern("shape"), 0));
+  volatile VALUE src_s = rb_inspect(rb_funcall(src, rb_intern("shape"), 0));
+  rb_raise(rb_eRuntimeError,
+           "shape mismatch writing to carray (%s <- %s); shapes must agree "
+           "once size-1 axes are dropped, or one side must be 1-D, or the "
+           "source must be smaller and broadcastable -- use .flatten to "
+           "write the values in the order they lie",
+           StringValueCStr(dst_s), StringValueCStr(src_s));
+}
+
+/* Bring `*src` to `dst`'s shape for a write into `dst` (assignment, and
+   the in-place operators, whose result shape is the destination's by
+   definition).  The destination owns the shape and the source only
+   supplies values, so what is allowed here is wider than what two
+   operands of a binary operation may do -- but only where nothing is
+   duplicated.  When the counts already agree the values land in the
+   order they lie and the shape is merely a reading of them: shapes that
+   both sides claim must agree once size-1 axes are dropped, since such
+   an axis moves no element, and a 1-D side claims no shape at all,
+   whether it is the flat source or the flat container.  When the source
+   is smaller it is repeated instead, and that is held to same-ndim
+   size-1 and is one-sided: the destination never grows.  Raises when
+   neither reading applies. */
+void
+ca_broadcast_to_destination (VALUE dst, volatile VALUE *src)
+{
+  CArray *cd, *cs;
+
+  TypedData_Get_Struct(dst,   CArray, &carray_data_type, cd);
+  TypedData_Get_Struct(*src,  CArray, &carray_data_type, cs);
+
+  if ( cs->elements == cd->elements ) {
+    ca_size_t dst_dim[CA_RANK_MAX], src_dim[CA_RANK_MAX];
+    int dst_ndim = 0, src_ndim = 0, i, agree;
+    if ( cd->ndim <= 1 || cs->ndim <= 1 ) return;
+    for ( i = 0; i < cd->ndim; i++ ) {
+      if ( cd->dim[i] != 1 ) dst_dim[dst_ndim++] = cd->dim[i];
+    }
+    for ( i = 0; i < cs->ndim; i++ ) {
+      if ( cs->dim[i] != 1 ) src_dim[src_ndim++] = cs->dim[i];
+    }
+    agree = ( dst_ndim == src_ndim );
+    for ( i = 0; agree && i < dst_ndim; i++ ) {
+      if ( dst_dim[i] != src_dim[i] ) agree = 0;
+    }
+    if ( ! agree ) ca_broadcast_refuse_write(dst, *src);
+    return;
+  }
+
+  if ( cs->elements < cd->elements && cs->ndim == cd->ndim ) {
+    int i;
+    for ( i = 0; i < cd->ndim; i++ ) {
+      if ( cs->dim[i] != cd->dim[i] && cs->dim[i] != 1 ) break;
+    }
+    if ( i == cd->ndim ) {
+      *src = ca_broadcast_view(*src, cd->ndim, cd->dim);
+      return;
+    }
+  }
+
+  ca_broadcast_refuse_write(dst, *src);
+}
 
 /* Build a CAStride view of `src` with shape `target_dim`.  For each
    axis where src.dim[i] == target_dim[i], inherit the row-major byte
@@ -99,6 +170,24 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
    pairwise equal, no-op.  If any axis pair is incompatible (neither
    side is 1 nor equal), no-op (caller's existing element-count check
    raises). */
+NORETURN(static void ca_broadcast_refuse (VALUE self, VALUE other));
+
+/* Report a pair that cannot be brought to a common shape.  Naming both
+   shapes is the point of the message: the caller wrote two arrays that
+   cannot be combined, and the only remedy is to say which two. */
+static void
+ca_broadcast_refuse (VALUE self, VALUE other)
+{
+  volatile VALUE self_s  = rb_inspect(rb_funcall(self,  rb_intern("shape"), 0));
+  volatile VALUE other_s = rb_inspect(rb_funcall(other, rb_intern("shape"), 0));
+  rb_raise(rb_eArgError,
+           "shape mismatch between operands (%s and %s); shapes must "
+           "agree, or differ only in size-1 axes with equal ndim -- use "
+           ".flatten on both sides to operate on the values in the order "
+           "they lie",
+           StringValueCStr(self_s), StringValueCStr(other_s));
+}
+
 void
 ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other)
 {
@@ -111,8 +200,11 @@ ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other)
   TypedData_Get_Struct(*self,  CArray, &carray_data_type, ca);
   TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
 
+  /* A scalar carries no shape and reaches every cell; leave the pair to
+     the caller's own scalar handling.  A one-element array is not a
+     scalar: it states a shape, and is held to it. */
   if (ca_is_scalar(ca) || ca_is_scalar(cb)) return;
-  if (ca->ndim != cb->ndim) return;
+  if (ca->ndim != cb->ndim) ca_broadcast_refuse(*self, *other);
   if (ca->ndim == 0) return;
 
   for (i = 0; i < ca->ndim; i++) {
@@ -133,7 +225,8 @@ ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other)
     }
   }
 
-  if (!can_broadcast || !needs_broadcast) return;
+  if (!can_broadcast) ca_broadcast_refuse(*self, *other);
+  if (!needs_broadcast) return;
 
   *self  = ca_broadcast_view(*self,  ca->ndim, target_dim);
   *other = ca_broadcast_view(*other, ca->ndim, target_dim);

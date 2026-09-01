@@ -1035,13 +1035,13 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   self_is_scalar  = RTEST(rb_obj_is_cscalar(self));
   other_is_scalar = RTEST(rb_obj_is_cscalar(other));
 
-  /* shape compat: non-scalar self vs non-scalar other → elements must match.
-     scalar self vs array other historically raises (mismatch). */
-  if ( !self_is_scalar && !other_is_scalar &&
-       ca1->elements != ca2->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in binop (%" PRId64 " <-> %" PRId64 ")",
-                               (ca_size_t) ca1->elements,
-                               (ca_size_t) ca2->elements);
+  /* self is the write target, so its shape is the result's by definition
+     and the destination rule applies (the same one assignment uses), not
+     the symmetric one a binary operation is held to. */
+  if ( !self_is_scalar && !other_is_scalar ) {
+    ca_broadcast_to_destination(self, &other);
+    TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
+    other_is_scalar = RTEST(rb_obj_is_cscalar(other));
   }
   if ( self_is_scalar && !other_is_scalar &&
        ca1->elements != ca2->elements ) {
@@ -1392,14 +1392,15 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
 
-  /* element-count check (self is the destination)                       */
-  if ( ! rb_obj_is_cscalar(other2) && ca2->elements != ca1->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in triop! (op2: %" PRId64 " != %" PRId64 ")",
-             (ca_size_t) ca2->elements, (ca_size_t) ca1->elements);
+  /* self is the write target, so the destination rule applies to each
+     input operand in turn (the same one assignment uses). */
+  if ( ! rb_obj_is_cscalar(other2) ) {
+    ca_broadcast_to_destination(self, &other2);
+    TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   }
-  if ( ! rb_obj_is_cscalar(other3) && ca3->elements != ca1->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in triop! (op3: %" PRId64 " != %" PRId64 ")",
-             (ca_size_t) ca3->elements, (ca_size_t) ca1->elements);
+  if ( ! rb_obj_is_cscalar(other3) ) {
+    ca_broadcast_to_destination(self, &other3);
+    TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
   }
 
   /* self IS the output (= write target; attach legit per refined invariant) */

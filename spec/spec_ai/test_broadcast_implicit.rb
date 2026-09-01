@@ -52,13 +52,13 @@ class TestBroadcastImplicit < Test::Unit::TestCase
   def test_axis0_mismatch_still_raises
     a = CArray.int32(3, 4).seq
     b = CArray.int32(2, 4).seq
-    assert_raise(RuntimeError) { a + b }
+    assert_raise(ArgumentError) { a + b }
   end
 
   def test_ndim_mismatch_still_raises
     a = CArray.int32(3).seq               # (3,)
     b = CArray.int32(3, 4).seq            # (3, 4)
-    assert_raise(RuntimeError) { a + b }
+    assert_raise(ArgumentError) { a + b }
     # explicit :* still works (a's axis 0 maps to b's axis 0, add
     # broadcast axis for b's axis 1):
     assert_equal [3, 4], (a[nil, :*] + b).dim
