@@ -134,30 +134,6 @@ regression fixture under `spec/spec_ai/`. See
 
 ---
 
-## Talking to the outside
-
-### `io/`
-
-- `imagemagick.rb` — `CArray.load_by_magick` / `#save_by_magick` /
-  `#display_by_magick`, reading and writing images through the ImageMagick CLI
-  (`identify`, `stream`, `magick convert`, `display`). It used to be
-  auto-wired; with `rmagick` available again it is opt-in, so pull it in with
-  `require_relative` if you want it. Arguments go through `Shellwords.escape`
-  and parsing through `YAML.safe_load`
-
----
-
-## Retired 2.0 sources
-
-### `caiterator/`
-
-The C engines behind the 2.0 `CAIterator` (dimension / block / window),
-retired in 3.0 and kept here for reference. `caobject/iterator_array.rb`
-belongs with them: it wrapped an iterator as a CArray through
-`CAIterator#ca`, which 3.0 no longer has, and does not run as written.
-
----
-
 ## What these are, and are not
 
 - **Not part of the library.** Nothing here is loaded from `lib/carray/`. Copy

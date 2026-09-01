@@ -559,8 +559,7 @@ about it is plain Ruby in `lib/carray/iterator.rb`. See
 The 2.0-era C struct (a `kernel_at_addr` / `kernel_at_index` dispatch
 slot, with C-defined `CADimensionIterator` / `CABlockIterator` engines
 that advanced by mutating the underlying view's tail in place) is
-retired; the sources are preserved at `examples/caiterator/`. The
-tail-mutation pattern it relied on is why the **prefix resync**
+retired. The tail-mutation pattern it relied on is why the **prefix resync**
 invariant in [ch. 6](06_view_algebra_and_castride.md) exists, and that
 invariant still binds any code that mutates a view's tail.
 
