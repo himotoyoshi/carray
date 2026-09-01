@@ -117,4 +117,7 @@ VALUE    rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
 /* ca_obj_reduce.c */
 CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 
+/* carray_broadcast.c */
+void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
+
 #endif /* CARRAY_INTERNAL_H */
