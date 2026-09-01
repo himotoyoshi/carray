@@ -67,6 +67,11 @@ Evaluated in order; the first match wins.
 | `argv[0]` is `String` starting with `@`                      | `ATTRIBUTE`     | `[]` (`info.symbol = :name`)       |
 | `argv[0]` is any other `String`                              | `MEMBER`        | `[]` (`info.symbol = :"field"`)    |
 
+`METHOD_CALL` is not a table of accepted keys: downstream it evaluates
+`a[:m, x]` as `a[a.m(x)]` — the symbol is sent to the receiver with the
+remaining arguments and the answer is re-entered as the index. The length
+test is the whole gate, so a single-character symbol never reaches it.
+
 ### 2.3 `argc == 1`, `ndim > 1`
 
 | condition                                  | region              | `info.index`                       |
