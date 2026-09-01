@@ -2,7 +2,7 @@
 #
 # Tests for CArray#insert_axis with the repeat: keyword.
 #
-#   repeat: 1 / nil / omitted  -> size-1 axis (CARefer; no assignment broadcast)
+#   repeat: 1 / nil / omitted  -> size-1 axis (CARefer; broadcasts on store)
 #   repeat: N (Integer > 1)    -> bound repeat (CARepeat; read-only)
 #   repeat: :*                 -> unbound repeat (CAUnboundRepeat; binds on store)
 #   mixed                      -> two-stage composition (bound then unbound)
@@ -48,11 +48,20 @@ class TestInsertAxisRepeat < Test::Unit::TestCase
     assert_equal @a.to_a, v[0, nil, nil].to_a
   end
 
-  def test_size1_does_not_broadcast_on_assignment
-    # size-1 is a plain reference; a 12-element source into a 12-cell target
-    # is a flat copy, but it must NOT stretch to a larger target.
+  def test_size1_broadcasts_on_assignment
+    # a size-1 axis stretches to the target on store, the same way it does
+    # in a binary operation.
     t = CArray.int32(5, 3, 4)
-    assert_raise(RuntimeError) { t[] = @a.insert_axis(0) }
+    t[] = @a.insert_axis(0)
+    assert_equal [5, 3, 4], t.shape
+    5.times { |i| assert_equal @a.to_a, t[i, nil, nil].to_a }
+  end
+
+  def test_assignment_never_stretches_the_target
+    # broadcast on store is one-sided: the source may be repeated, the
+    # container may not grow.
+    t = CArray.int32(1, 3, 4)
+    assert_raise(RuntimeError) { t[] = CArray.int32(5, 3, 4).seq }
   end
 
   def test_empty_positions_raises
