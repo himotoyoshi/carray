@@ -1424,6 +1424,31 @@ int     ca_is_entity (const void *ap);
 #endif
 
 int     ca_is_view (void *ap);
+
+/* True iff ca is a member of the CAStride family -- the views whose
+   addressing is a linear stride expression over a single parent, and
+   which ca_stride_compose_to_root therefore folds into
+   root->ptr + base + sum(idx[k] * strides[k]).  Currently CAStride,
+   CARefer, CABlock, CARepeat, CATranspose, CAFarray, CAField and
+   CAUnboundRepeat, plus the mask array of each.  Membership is decided
+   by the operation table an obj_type was installed with, so an
+   externally installed view that shares the table is recognised too.
+   Passing a non-member to ca_stride_compose_to_root reads the struct
+   past its end, so guard the call with this.  (Defined in
+   ca_obj_stride.c, out of line: it indexes ca_func[], and a function
+   keeps that stride out of separately built callers.)
+
+   Membership answers whether the address expression exists, not
+   whether ca->dim[] is the shape the caller means.  A CAUnboundRepeat
+   is a member and folds correctly, but each `:*` axis stands in the
+   struct as a size-1 stride-0 entry until the view is bound, so a
+   caller that compiles against the shape wants
+   ca->obj_type != CA_OBJ_UNBOUND_REPEAT first.  That is the whole of
+   the question: unboundness lives only at the top of a chain (a view
+   taken of a CAUnboundRepeat is an ordinary bound view), and no other
+   obj_type carries it. */
+int     ca_is_stride_family (const void *ap);
+
 int     ca_is_readonly (void *ap);
 int     ca_is_value_array (void *ap);
 int     ca_is_mask_array (void *ap);
