@@ -10,7 +10,7 @@ require "test/unit"
 require "carray"
 
 # Regression pin via the spec_ai-local fixture at ext_cfunc_r_smoke/ (a
-# byte-for-byte mirror of the user-facing example samples/c-extensions/
+# byte-for-byte mirror of the user-facing example examples/c-extensions/
 # cfunc_r/).  That code is the same an external ext author would write, so
 # this test exercises the public ca_call_cfunc_*_r API through the same
 # pathway real consumers use.

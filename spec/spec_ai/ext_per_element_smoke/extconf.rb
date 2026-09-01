@@ -1,7 +1,7 @@
 require "mkmf"
 
 # TEST FIXTURE for the CA_FOR_EACH_ELEMENT macro family (ca_for_each_element.h,
-# alongside carray.h).  Mirror of samples/c-extensions/per_element/.  Symbols
+# alongside carray.h).  Mirror of examples/c-extensions/per_element/.  Symbols
 # resolve at load time from the already-loaded carray_ext.bundle.
 $CFLAGS << " -I../../../ext"
 

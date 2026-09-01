@@ -4,7 +4,7 @@
 # CA_FOR_EACH_ELEMENT macro family (READ / MASKED / INOUT /
 # INOUT_MASKED / OUT).  Exercises the spec_ai-local fixture at
 # ext_per_element_smoke/ (a byte-for-byte mirror of the user-facing
-# example samples/c-extensions/per_element/ — the same code an external
+# example examples/c-extensions/per_element/ — the same code an external
 # ext author would write to use these macros).
 
 require "test/unit"

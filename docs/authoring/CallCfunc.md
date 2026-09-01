@@ -185,7 +185,7 @@ demo (VALUE self, VALUE r_a, VALUE r_b, VALUE r_scale, VALUE r_threshold)
 }
 ```
 
-The full runnable example is `samples/c-extensions/cfunc_r/cfunc_r.c`
+The full runnable example is `examples/c-extensions/cfunc_r/cfunc_r.c`
 (mirrored as the regression fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
 
 > **Note — there is no `_ex` variant.** A proposed `ca_call_cfunc_M_N_ex`
@@ -268,4 +268,4 @@ build_ext` picks up edits to `mk_call_cfunc.rb` automatically.
 - [`WritingCExtensions.md`](WritingCExtensions.md) — first-generation
   `ca_attach` / `ca_sync` C extension guide.
 - `ext/mk_call_cfunc.rb` — the generator (arity matrix + template).
-- `samples/c-extensions/cfunc_r/cfunc_r.c` — runnable `_r` example.
+- `examples/c-extensions/cfunc_r/cfunc_r.c` — runnable `_r` example.

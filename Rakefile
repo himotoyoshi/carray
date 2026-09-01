@@ -155,8 +155,8 @@ task :build_xfer_smoke do
 end
 
 # spec_ai-local smoke fixtures for the kernel-author surface.  These are
-# byte-for-byte mirrors of samples/c-extensions/* kept under spec/spec_ai/ so the
-# test suite owns its own build and never reaches into samples/ (samples/ is
+# byte-for-byte mirrors of examples/c-extensions/* kept under spec/spec_ai/ so the
+# test suite owns its own build and never reaches into examples/ (examples/ is
 # user-facing documentation, not a test dependency).
 def build_spec_ai_smoke (dirname, basename)
   dir = "spec/spec_ai/#{dirname}"
@@ -180,12 +180,12 @@ task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
 end
 
-# NOTE: the tasks below build the user-facing examples under samples/.  They
+# NOTE: the tasks below build the user-facing examples under examples/.  They
 # are intentionally NOT a spec_ai prerequisite (spec_ai uses its own fixtures
 # above); run `rake build_c_extension_examples` manually to verify the docs
 # examples still compile.
 def build_c_extension_example (subdir, basename)
-  dir = "samples/c-extensions/#{subdir}"
+  dir = "examples/c-extensions/#{subdir}"
   src = "#{dir}/#{basename}.c"
   bundle = Dir["#{dir}/#{basename}.{bundle,so}"].first
   if fixture_stale?(bundle, src)
@@ -197,16 +197,16 @@ def build_c_extension_example (subdir, basename)
   end
 end
 
-desc "Build samples/c-extensions/cfunc_r/cfunc_r (rebuild if source/header newer than bundle)"
+desc "Build examples/c-extensions/cfunc_r/cfunc_r (rebuild if source/header newer than bundle)"
 task(:build_cfunc_r_example)       { build_c_extension_example("cfunc_r",     "cfunc_r") }
 
-desc "Build samples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
+desc "Build examples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
 task(:build_per_element_example)   { build_c_extension_example("per_element", "per_element") }
 
-desc "Build samples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
+desc "Build examples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
 task(:build_with_buffer_example)     { build_c_extension_example("with_buffer",   "with_buffer") }
 
-desc "Build all samples/c-extensions/ examples"
+desc "Build all examples/c-extensions/ examples"
 task :build_c_extension_examples => [
   :build_cfunc_r_example,
   :build_per_element_example,

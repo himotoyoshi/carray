@@ -1,8 +1,8 @@
 /* spec_ai/ext_per_element_smoke/per_element.c
  *
- * TEST FIXTURE — byte-for-byte mirror of samples/c-extensions/per_element/per_element.c
+ * TEST FIXTURE — byte-for-byte mirror of examples/c-extensions/per_element/per_element.c
  * (the user-facing runnable example).  Kept here so the spec_ai suite owns
- * its own build and never reaches into samples/.  If you edit one, edit both
+ * its own build and never reaches into examples/.  If you edit one, edit both
  * (the samples copy is documentation; this copy is the regression fixture).
  */
 /* ---------------------------------------------------------------------------
