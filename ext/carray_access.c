@@ -520,11 +520,62 @@ rb_ca_store_all (VALUE self, VALUE rval)
       TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
     }
 
-    if ( ca->elements != cv->elements ) {
-      rb_raise(rb_eRuntimeError,
-               "mismatch in data size (%" PRId64 " <-> %" PRId64 ") for storing to carray", 
-               (ca_size_t) ca->elements, (ca_size_t) cv->elements);
+/* Shape reconciliation.  The destination owns the shape and the
+   source only supplies values, so the relaxations below are confined
+   to the case where the counts already agree: nothing is duplicated,
+   the values land in the same order, and the shape is merely a
+   reading of them.  A shape that both sides claim has to agree, but a
+   1-D side claims none -- a flat source carries only a length, and a
+   flat destination asks nothing of what is poured into it.  The one
+   branch that does duplicate values is held to same-ndim size-1. */
+if ( cv->elements == ca->elements ) {
+  if ( ca->ndim > 1 && cv->ndim > 1 ) {
+    ca_size_t dst_dim[CA_RANK_MAX], src_dim[CA_RANK_MAX];
+    int dst_ndim = 0, src_ndim = 0, i, agree;
+    /* A size-1 axis moves no element and changes no order, so its
+       presence is a difference in notation, not in shape. */
+    for ( i = 0; i < ca->ndim; i++ ) {
+      if ( ca->dim[i] != 1 ) dst_dim[dst_ndim++] = ca->dim[i];
     }
+    for ( i = 0; i < cv->ndim; i++ ) {
+      if ( cv->dim[i] != 1 ) src_dim[src_ndim++] = cv->dim[i];
+    }
+    agree = ( dst_ndim == src_ndim );
+    for ( i = 0; agree && i < dst_ndim; i++ ) {
+      if ( dst_dim[i] != src_dim[i] ) agree = 0;
+    }
+    if ( ! agree ) {
+      volatile VALUE dst_s = rb_inspect(rb_funcall(self, rb_intern("shape"), 0));
+      volatile VALUE src_s = rb_inspect(rb_funcall(rval, rb_intern("shape"), 0));
+      rb_raise(rb_eRuntimeError,
+               "shape mismatch for storing to carray (%s <- %s); "
+               "shapes must agree once size-1 axes are dropped, or one "
+               "side must be 1-D -- use .flatten to store the values "
+               "in the order they lie",
+               StringValueCStr(dst_s), StringValueCStr(src_s));
+    }
+  }
+}
+else if ( cv->elements < ca->elements && cv->ndim == ca->ndim ) {
+  /* Smaller source repeated into the destination.  Same-ndim size-1
+     only, and one-sided: the destination is never expanded. */
+  int i;
+  for ( i = 0; i < ca->ndim; i++ ) {
+    if ( cv->dim[i] != ca->dim[i] && cv->dim[i] != 1 ) break;
+  }
+  if ( i < ca->ndim ) {
+    rb_raise(rb_eRuntimeError,
+             "mismatch in data size (%" PRId64 " <-> %" PRId64 ") for storing to carray",
+             (ca_size_t) ca->elements, (ca_size_t) cv->elements);
+  }
+  rval = ca_broadcast_view(rval, ca->ndim, ca->dim);
+  TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+}
+else {
+  rb_raise(rb_eRuntimeError,
+           "mismatch in data size (%" PRId64 " <-> %" PRId64 ") for storing to carray",
+           (ca_size_t) ca->elements, (ca_size_t) cv->elements);
+}
 
     /* Source delivery via ca_xfer_all into a local scratch instead of
        ca_attach(cv).  This routes through ca_*_func_xfer_all's per-region
