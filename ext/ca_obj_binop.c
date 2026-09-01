@@ -682,8 +682,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 
   /* === Step 2: broadcast via ca_broadcast_pair (same-ndim size-1
      expansion).  No-op when shapes already match or either operand
-     is scalar; also a no-op for incompatible shapes, which the
-     final elements-mismatch check below catches. */
+     is scalar; refuses a pair that cannot be brought to one shape. */
   ca_broadcast_pair(&l_resolved, &r_resolved);
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
@@ -735,14 +734,12 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
       }
     }
     else {
-      /* Cross-ndim or otherwise incompatible shapes; see the
-         builder header comment for why CArray rejects implicit
-         cross-ndim promotion. */
+      /* Unreachable from Ruby: ca_broadcast_pair above refuses a pair
+         it cannot bring to one shape, and states the rule there.  Kept
+         so a caller reaching this builder by another route still finds
+         the kernel guarded. */
       rb_raise(rb_eArgError,
-               "CABinOp: shape mismatch (%lld vs %lld) — only same-"
-               "ndim size-1 broadcast is supported; cross-ndim "
-               "promotion is not adopted in CArray "
-               "(reshape explicitly)",
+               "CABinOp: element count mismatch (%lld vs %lld)",
                (long long) l->elements, (long long) r->elements);
     }
   }

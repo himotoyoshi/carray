@@ -644,10 +644,9 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
       TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
     }
     else {
+      /* Unreachable from Ruby; see the note in ca_obj_binop.c. */
       rb_raise(rb_eArgError,
-               "CABinCmp: shape mismatch (%lld vs %lld) — only same-"
-               "ndim size-1 broadcast is supported; cross-ndim "
-               "promotion is not adopted in CArray",
+               "CABinCmp: element count mismatch (%lld vs %lld)",
                (long long) l->elements, (long long) r->elements);
     }
   }
