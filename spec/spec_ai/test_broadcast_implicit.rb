@@ -59,9 +59,9 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(3).seq               # (3,)
     b = CArray.int32(3, 4).seq            # (3, 4)
     assert_raise(ArgumentError) { a + b }
-    # explicit :* still works (a's axis 0 maps to b's axis 0, add
-    # broadcast axis for b's axis 1):
-    assert_equal [3, 4], (a[nil, :*] + b).dim
+    # naming the axis explicitly still works (a's axis 0 maps to b's
+    # axis 0; the new size-1 axis broadcasts over b's axis 1):
+    assert_equal [3, 4], (a[nil, :_] + b).shape
   end
 
   def test_scalar_passthrough_unchanged
