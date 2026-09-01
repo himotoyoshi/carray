@@ -88,7 +88,7 @@ spec/spec_ai/ext_iter_source_kind/mkmf.log
 guides/pdf/
 
 # Private development notes (separate repository)
-devel/
+/devel/
 benchmark
 CLAUDE.md
 .claude/
