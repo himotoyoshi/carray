@@ -1,4 +1,5 @@
 --markup markdown
+--output-dir .yard-html
 --markup-provider redcarpet
 --no-private
 --exclude lib/carray/obsolete.rb

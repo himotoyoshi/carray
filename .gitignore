@@ -25,7 +25,10 @@ ext/mkmf.log
 
 # Yard generated documentation (`rake yard` output).  Source-of-truth
 # user documentation lives in docs/ (= hand-written .md files, tracked).
+# The HTML output goes to .yard-html/ rather than doc/, which sat one
+# letter away from docs/ at the top level.
 .yardoc/
+.yard-html/
 doc/
 
 # spec_ai borrower extension build artifacts
