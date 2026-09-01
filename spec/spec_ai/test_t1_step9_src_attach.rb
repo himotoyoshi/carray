@@ -293,22 +293,4 @@ class TestT1Step9SrcAttach < Test::Unit::TestCase
   end
 
   # ====================================================================
-  # CAUnboundRepeat — unbound state pin (already SRC_CASTRIDE)
-  # ====================================================================
-
-  def test_unbound_cubrep_routes_through_castride
-    # CAUnboundRepeat shares ca_stride_func.attach (ca_ubrep_func is a
-    # copy with only free/clone/create_mask overridden).  This pins:
-    # (a) unbound CAUbrep is accepted by kernel_iterator (no SEGV),
-    # (b) it goes through the CAStride alias path (alias_mode = CONTIG,
-    #     not ATTACH — confirms it doesn't accidentally route through
-    #     the step-9 SRC_ATTACH branch).
-    a = CArray.float64(4).seq(1.0, 1.0)
-    ubr = a.unbound_repeat(:*, nil)
-    assert_equal CAUnboundRepeat, ubr.class
-    r = CArray.t1_smoke(ubr)
-    assert_equal OK,                    r[:rc]
-    assert_equal ALIAS_CONTIG,          r[:alias_mode]
-    assert_equal ubr.to_ca.dump_binary, r[:data]
-  end
 end

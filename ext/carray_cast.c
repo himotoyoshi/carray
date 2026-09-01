@@ -1451,16 +1451,6 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
   TypedData_Get_Struct(*self, CArray, &carray_data_type, ca);
   TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
 
-  if ( ca->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-    *self = ca_ubrep_bind_with(*self, *other);
-    TypedData_Get_Struct(*self, CArray, &carray_data_type, ca);
-  }
-
-  if ( cb->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-    *other = ca_ubrep_bind_with(*other, *self);
-    TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
-  }
-
   /* Implicit size-1 broadcasting (case A only).  No-op if either side
      is scalar, ndim differs, or shapes are already equal.  If shapes
      are incompatible (neither side is 1 nor equal on some axis), also
@@ -1856,11 +1846,6 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   }
 
   TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
-
-  if ( cb->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-    *other = ca_ubrep_bind_with(*other, *self);
-    TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
-  }
 
   test1 = ca_cast_table[cb->data_type][ca->data_type];
 

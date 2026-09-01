@@ -388,7 +388,6 @@ Choose them based on what the kernel needs:
 #define CA_ITER_ERR_READONLY           4   /* WRITE on read-only view */
 #define CA_ITER_ERR_MASK               5   /* masked src on path that lacks it */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED   6   /* NO_MASK + masked src */
-#define CA_ITER_ERR_UNBOUND_SHAPE      7   /* unbound CAUbrep passed */
 ```
 
 On error the engine releases anything it claimed; `finish` is not

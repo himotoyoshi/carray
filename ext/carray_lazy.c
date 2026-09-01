@@ -495,8 +495,7 @@ rb_ca_lazy_arena_s_slot_capacities (VALUE klass)
  *                       just let the scalar choose)
  * numeric self      -> self_ca->data_type
  *
- * Callers broadcast against the array via stride 0 in xfer_stride
- * (or wrap the scalar in CAUnboundRepeat when the chain needs it). */
+ * Callers broadcast against the array via stride 0 in xfer_stride. */
 VALUE
 ca_lazy_wrap_scalar (VALUE other, CArray *self_ca)
 {

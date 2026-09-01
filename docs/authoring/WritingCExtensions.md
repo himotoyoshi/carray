@@ -377,7 +377,7 @@ CArray            (entity)
 ├── CASource     (extension-defined sources; §3.5)
 ├── CAView    (view base)
 │   ├── CAStride  ── CARefer, CABlock, CATranspose, CAFarray,
-│   │                CARepeat, CAField, CAUnboundRepeat
+│   │                CARepeat, CAField
 │   ├── CAWindow  ── CAShift
 │   ├── CASelectAxis, CAGrid                 (per-axis scatter family)
 │   ├── CASelect, CAMapping                  (flat-index family)
@@ -446,7 +446,7 @@ and friends are the public wrappers.
 
 A small number of `obj_type` values (`CA_OBJ_ARRAY`, `CA_OBJ_SCALAR`,
 `CA_OBJ_ARRAY_WRAP`, `CA_OBJ_REFER`, `CA_OBJ_BLOCK`, `CA_OBJ_SELECT`,
-`CA_OBJ_OBJECT`, `CA_OBJ_REPEAT`, `CA_OBJ_UNBOUND_REPEAT`) are fixed
+`CA_OBJ_OBJECT`, `CA_OBJ_REPEAT`) are fixed
 compile-time constants from an enum in `ext/carray.h`. The remaining
 kinds (`CAStride`, `CATranspose`, `CAFarray`, `CAGrid`, `CAWindow`,
 `CAShift`, `CAByteSwap`, …) are assigned numbers at load time by
@@ -1877,7 +1877,7 @@ how:
 | entities (`CA_OBJ_ARRAY`, `CA_OBJ_ARRAY_WRAP`, `CA_OBJ_SCALAR`) | direct | contiguous buffer exported as-is |
 | CAStride family (`REFER`, `BLOCK`, `FARRAY`, `TRANSPOSE`, `REPEAT`, `STRIDE`) | strided | zero-copy, exported with a stride vector |
 | scatter / bound / overlay / reduce views (`SELECT`, `MAPPING`, `GRID`, `SHIFT`, `WINDOW`, `FAKE`, `FIELD`, `REDUCE`) | attach | materialised to a contiguous buffer first |
-| `CA_OBJ_BITARRAY`, `CA_OBJ_BITFIELD`, `CA_OBJ_OBJECT`, `CA_OBJ_UNBOUND_REPEAT` | reject | no C-level layout to hand out |
+| `CA_OBJ_BITARRAY`, `CA_OBJ_BITFIELD`, `CA_OBJ_OBJECT` | reject | no C-level layout to hand out |
 
 Two consumer-driven wrinkles:
 

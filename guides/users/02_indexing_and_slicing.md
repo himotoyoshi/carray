@@ -349,10 +349,9 @@ a[] = CA_INT([[1, 2, 3, 4],      #  replace the contents from another array
 #       [ 9, 10, 11, 12 ] ]
 ```
 
-The right-hand side does not have to match the shape of `a` — it only needs
-to have the same number of elements. A 1-D source of length 12 fills a
-`[3, 4]` target in row-major order, and a `[3, 4]` source can be assigned
-into a `[2, 6]` target:
+The right-hand side does not have to match the shape of `a` if it claims no
+shape of its own. A 1-D source of length 12 fills a `[3, 4]` target in
+row-major order, and so does a Ruby Array:
 
 ```ruby
 a = CArray.int32(3, 4)
@@ -361,65 +360,71 @@ a[] = CArray.int32(12).seq        #  1-D source, 2-D target
 #       [ 4, 5,  6,  7 ],
 #       [ 8, 9, 10, 11 ] ]
 
+a[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]     #  same thing
+```
+
+A source that *does* claim a shape has to agree with the target's, and a
+`[3, 4]` source into a `[2, 6]` target does not:
+
+```ruby
 b = CArray.int32(2, 6)
-b[] = a                            #  [3, 4] source into [2, 6] target
+b[] = a                            #  => RuntimeError: shape mismatch
+b[] = a.flatten                    #  say it explicitly
 #  => [ [ 0, 1, 2,  3,  4,  5 ],
 #       [ 6, 7, 8,  9, 10, 11 ] ]
 ```
 
-This is convenient for reshaping in place without going through a
-temporary view.
+`#flatten` returns a view, so nothing is copied to say this. Axes of length 1
+do not count as a disagreement — `[2, 3, 1]` and `[2, 3]` are the same shape
+written two ways.
 
-> NumPy is stricter here: it requires the right-hand side to be the same
-> shape as the target (or broadcastable to it), so `a[...] = np.arange(12)`
-> into a `(3, 4)` array raises `ValueError`. CArray treats the assignment
-> as a flat element-by-element copy whenever the totals agree.
+> NumPy is stricter still: it requires the right-hand side to be the same
+> shape as the target or broadcastable to it, so `a[...] = np.arange(12)` into
+> a `(3, 4)` array raises `ValueError`. CArray accepts a flat source because a
+> 1-D array states only a length.
 
-### Repeating along a marked axis with `:*`
+### Repeating along a size-1 axis
 
 The flat copy above matches by *total* element count, not axis by axis. There
-is one case where an assignment does stretch a particular axis to fit: an
-**unbound-repeat** marker `:*` on the right-hand side. `src[:*, nil, nil]`
-leaves the marked axis unbound; on assignment that axis is sized to the
-target's matching axis and the value is repeated to fill it.
+is one case where an assignment does stretch a particular axis to fit: a
+**size-1 axis** on the right-hand side. `src[:_, nil, nil]` inserts an axis of
+length 1; on assignment that axis is sized to the target's matching axis and
+the value is repeated to fill it.
 
 ```ruby
 row    = CArray.int32(3, 4).seq          # one [3, 4] block, values 0..11
 target = CArray.int32(5, 3, 4)
 
-target[] = row[:*, nil, nil]             # repeat the block along axis 0
+target[] = row[:_, nil, nil]             # repeat the block along axis 0
 target[0, nil, nil].to_a == row.to_a     #  => true
 target[4, nil, nil].to_a == row.to_a     #  => true   every slab is a copy of row
 ```
 
-The marker may sit on any axis — not only the first — and it works through a
+The axis may sit anywhere — not only the first — and it works through a
 partial slice too:
 
 ```ruby
 mid = CArray.int32(5, 4).seq
 t   = CArray.int32(5, 3, 4)
-t[] = mid[nil, :*, nil]                   # stretch the middle axis to 3
+t[] = mid[nil, :_, nil]                   # stretch the middle axis to 3
 
 t2 = CArray.int32(5, 3, 4)
-t2[1..3, nil, nil] = row[:*, nil, nil]    # fill only slabs 1..3, leave 0 and 4
+t2[1..3, nil, nil] = row[:_, nil, nil]    # fill only slabs 1..3, leave 0 and 4
 ```
 
-Only the `:*` axes are flexible; every other axis must still match exactly, so
-a genuine shape conflict raises rather than guessing.
+Only size-1 axes are flexible; every other axis must still match exactly, so a
+genuine shape conflict raises rather than guessing. The source is never asked
+to shrink, either — a bigger source into a smaller target raises.
 
-This is deliberately *not* the same as a size-1 axis. A size-1 axis — whether
-written with `:_` or already present — does **not** broadcast on assignment;
-only a scalar, a total-count match, or an explicit `:*` axis does:
+This is the same size-1 broadcast an operation performs, so `:_` reads the same
+way on both sides:
 
 ```ruby
-target[] = row[:_, nil, nil]   # a [1, 3, 4] source: 12 elements into 60
-#  => RuntimeError: mismatch in data size (60 <-> 12) for storing to carray
+a + row[:_, nil, nil]     # broadcasts in the operation
+target[] = row[:_, nil, nil]   # broadcasts on the store
 ```
 
-The quirk to remember: in an *operation* `:*` and `:_` are interchangeable
-(`a + row[:*, nil, nil]` and `a + row[:_, nil, nil]` both broadcast), but only
-`:*` carries that broadcast into an *assignment*. See
-[Broadcasting](07_broadcasting.md) for the operation side.
+See [Broadcasting](07_broadcasting.md) for the operation side.
 
 These slices are *views* onto the original data, not copies — writing through
 them changes the original array. That property is the subject of

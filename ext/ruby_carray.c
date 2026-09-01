@@ -81,7 +81,6 @@ void Init_ca_obj_stack ();   /* multi-parent outer-axis stack */
 void Init_ca_obj_meld ();    /* multi-parent ragged concat along existing axis */
 void Init_ca_obj_transpose ();
 void Init_ca_obj_repeat ();
-void Init_ca_obj_unbound_repeat ();
 void Init_ca_obj_reduce ();
 void Init_ca_obj_field ();
 void Init_ca_obj_fake ();
@@ -142,7 +141,7 @@ Init_carray_ext (void)
   rb_cCScalar    = rb_define_class("CScalar",   rb_cCArray);
   rb_cCAView  = rb_define_class("CAView", rb_cCArray);
   /* CAREFUL: CAStride must exist before its subclasses (CARefer /
-     CABlock / CAField / CARepeat / CAUnboundRepeat / CATranspose /
+     CABlock / CAField / CARepeat / CATranspose /
      CAFarray) are defined or registered.  See devel/CAStride.md. */
   rb_cCAStride   = rb_define_class("CAStride",  rb_cCAView);
   rb_cCARefer    = rb_define_class("CARefer",   rb_cCAStride);
@@ -151,10 +150,6 @@ Init_carray_ext (void)
   rb_cCASelect   = rb_define_class("CASelect",  rb_cCAView);
   rb_cCAObject   = rb_define_class("CAObject",  rb_cCAView);
   rb_cCARepeat   = rb_define_class("CARepeat",  rb_cCAStride);
-  /* CAUnboundRepeat: a CAStride with stride-0 axes on each `*` position
-     and sized (matching parent) on each nil position. */
-  rb_cCAUnboundRepeat  = rb_define_class("CAUnboundRepeat",  rb_cCAStride);
-
   rb_cCArrayMask     = rb_define_class("CArrayMask",    rb_cCArray);
   rb_cCAStrideMask   = rb_define_class("CAStrideMask",  rb_cCAStride);
   rb_cCAReferMask    = rb_define_class("CAReferMask",   rb_cCARefer);
@@ -162,7 +157,6 @@ Init_carray_ext (void)
   rb_cCAFieldMask    = rb_define_class("CAFieldMask",   rb_cCAField);
   rb_cCASelectMask   = rb_define_class("CASelectMask",  rb_cCASelect);
   rb_cCARepeatMask   = rb_define_class("CARepeatMask",  rb_cCARepeat);
-  rb_cCAUnboundRepeatMask  = rb_define_class("CAUnboundRepeatMask",  rb_cCAUnboundRepeat);
 
   /* -- Exception class -- */
 
@@ -320,7 +314,6 @@ Init_carray_ext (void)
   Init_ca_obj_meld();
   Init_ca_obj_transpose();
   Init_ca_obj_repeat();
-  Init_ca_obj_unbound_repeat();
   Init_ca_obj_reduce();
   Init_ca_obj_field();
   Init_ca_obj_fake();

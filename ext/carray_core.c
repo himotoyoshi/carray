@@ -231,7 +231,6 @@ ca_cast_table2[CA_NTYPE][CA_NTYPE] = {
     * CASelect
     * CAObject
     * CARepeat
-    * CAUnboundRepeat
 */
 
 void
@@ -243,7 +242,6 @@ ca_init_obj_type (void)
   extern ca_operation_function_t ca_select_func;
   extern ca_operation_function_t ca_object_func;
   extern ca_operation_function_t ca_stride_func;
-  extern ca_operation_function_t ca_ubrep_func;
 
   /* CArray */
   ca_func[CA_OBJ_ARRAY]       = ca_array_func;
@@ -309,12 +307,6 @@ ca_init_obj_type (void)
   ca_mask_class[CA_OBJ_REPEAT] = rb_cCARepeatMask;
   ca_mask_typeddata[CA_OBJ_REPEAT] = &castride_mask_data_type;
 
-  /* CAUnboundRepeat */
-  ca_func[CA_OBJ_UNBOUND_REPEAT]  = ca_ubrep_func;
-  ca_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeat;
-  ca_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_data_type;
-  ca_mask_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeatMask;
-  ca_mask_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_mask_data_type;
 
   ca_obj_num = 9;
 }

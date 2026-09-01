@@ -233,8 +233,6 @@ rb_ca_ipower (VALUE self, VALUE other)
     ALLOCV_END(h1);
   }
 
-  obj = rb_ca_rewrap_unbound_repeat(self, obj);
-
   return obj;
 }
 
@@ -289,7 +287,6 @@ static VALUE rb_ca_pow (VALUE self, VALUE other)
   }
   else {
     obj = rb_ca_power(self, other);
-    obj = rb_ca_rewrap_unbound_repeat(self, obj);
     return obj;
   }
 }

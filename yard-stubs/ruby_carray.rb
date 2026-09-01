@@ -68,11 +68,6 @@ end
 class CARepeat < CAStride
 end
 
-# Unbound repeat view (`a[:*, nil, :*]`). Acquires concrete shape
-# when paired with a target view in an assignment.
-class CAUnboundRepeat < CAStride
-end
-
 # Ragged concatenation view (`CArray.meld(*arrays, axis:)`). Welds
 # K parents along one of their existing axes with (potentially) uneven
 # segment lengths. Prefix-sum table {#seg_offsets} keeps segment

@@ -57,7 +57,6 @@ Not emitted (no MV format):
 - `CA_FIXLEN` — variable-byte payload, CArray-specific
 - `CA_OBJECT` — VALUE column, protocol-level limit
 - bitarray / bitfield — sub-byte, MV protocol does not represent
-- `CAUnboundRepeat` — shape not yet bound
 
 For CAStruct-typed data CArray emits a PEP 3118 struct format
 `T{...}` — see [Struct format](#struct-format) below.  The body

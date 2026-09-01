@@ -255,7 +255,6 @@ enum {
   CA_OBJ_SELECT,
   CA_OBJ_OBJECT,
   CA_OBJ_REPEAT,
-  CA_OBJ_UNBOUND_REPEAT,
 };
 
 enum {
@@ -814,34 +813,6 @@ typedef struct {
    The "repeat" axes are encoded as strides[k] == 0. */
 typedef CAStride CARepeat;
 
-/* CAUnboundRepeat (Phase U.1: CAStride prefix + rep_dim tail).
-   `rep_dim[i] == 0` marks an unbound (`*`) axis (size 1, stride 0);
-   `rep_dim[i] != 0` marks a sized axis inheriting parent's stride.
-   `ndim` replaces the former `rep_ndim` field (they are equal). */
-typedef struct {
-  int16_t   obj_type;
-  int8_t    data_type;
-  int8_t    ndim;
-  int32_t   flags;
-  ca_size_t   bytes;
-  ca_size_t   elements;
-  ca_size_t  *dim;
-  char     *ptr;
-  CArray   *mask;
-  char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
-                              Reserved for framework use; ext authors must not read,
-                              write, or xfree this field directly.  See
-                              ext/ca_array_pool.c. */
-  CArray   *parent;
-  uint32_t  attach;
-  uint8_t   nosync;
-  /* --- CAStride prefix continues --- */
-  ca_size_t  *strides;
-  ca_size_t   base_offset;
-  /* --- CAUnboundRepeat tail --- */
-  ca_size_t  *rep_dim;
-} CAUnboundRepeat;
-
 /* 
    CAReduce is an internal class 
    used only in ca_obj_refer.c.
@@ -982,7 +953,6 @@ extern VALUE rb_cCAStrideMask;
 extern VALUE rb_cCASelect;
 extern VALUE rb_cCAObject;
 extern VALUE rb_cCARepeat;
-extern VALUE rb_cCAUnboundRepeat;
 extern VALUE rb_cCAIterator;
 
 extern VALUE rb_cCArrayMask;
@@ -992,7 +962,6 @@ extern VALUE rb_cCAFieldMask;
 extern VALUE rb_cCASelectMask;
 extern VALUE rb_cCAObjectMask;
 extern VALUE rb_cCARepeatMask;
-extern VALUE rb_cCAUnboundRepeatMask;
 
 extern VALUE rb_mCA;
 extern VALUE rb_mCAMath;
@@ -1165,7 +1134,6 @@ enum {
   CA_REG_GRID,
   CA_REG_MAPPING,
   CA_REG_METHOD_CALL,
-  CA_REG_UNBOUND_REPEAT,
   CA_REG_MEMBER,
   CA_REG_ATTRIBUTE,
 }; /* CA_REGION_TYPE */
@@ -1360,16 +1328,10 @@ VALUE   rb_ca_fake_type (VALUE self, VALUE rtype, VALUE rbytes);
 
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
-/* --- ca_obj_unbound_repeat.c --- */
-
-VALUE   rb_ca_ubrep_shave (VALUE self, VALUE other);
-VALUE   rb_ca_rewrap_unbound_repeat (VALUE src, VALUE out);
-
 /* --- carray_broadcast.c --- */
 
 VALUE   ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim);
 void    ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other);
-VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
 /* --- ca_iter_dimension retired: CADimensionIterator -> CASlabIterator --- */
 
@@ -1429,24 +1391,14 @@ int     ca_is_view (void *ap);
    addressing is a linear stride expression over a single parent, and
    which ca_stride_compose_to_root therefore folds into
    root->ptr + base + sum(idx[k] * strides[k]).  Currently CAStride,
-   CARefer, CABlock, CARepeat, CATranspose, CAFarray, CAField and
-   CAUnboundRepeat, plus the mask array of each.  Membership is decided
-   by the operation table an obj_type was installed with, so an
-   externally installed view that shares the table is recognised too.
-   Passing a non-member to ca_stride_compose_to_root reads the struct
-   past its end, so guard the call with this.  (Defined in
-   ca_obj_stride.c, out of line: it indexes ca_func[], and a function
-   keeps that stride out of separately built callers.)
-
-   Membership answers whether the address expression exists, not
-   whether ca->dim[] is the shape the caller means.  A CAUnboundRepeat
-   is a member and folds correctly, but each `:*` axis stands in the
-   struct as a size-1 stride-0 entry until the view is bound, so a
-   caller that compiles against the shape wants
-   ca->obj_type != CA_OBJ_UNBOUND_REPEAT first.  That is the whole of
-   the question: unboundness lives only at the top of a chain (a view
-   taken of a CAUnboundRepeat is an ordinary bound view), and no other
-   obj_type carries it. */
+   CARefer, CABlock, CARepeat, CATranspose, CAFarray and CAField, plus
+   the mask array of each.  Membership is decided by the operation table
+   an obj_type was installed with, so an externally installed view that
+   shares the table is recognised too.  Passing a non-member to
+   ca_stride_compose_to_root reads the struct past its end, so guard the
+   call with this.  (Defined in ca_obj_stride.c, out of line: it indexes
+   ca_func[], and a function keeps that stride out of separately built
+   callers.) */
 int     ca_is_stride_family (const void *ap);
 
 int     ca_is_readonly (void *ap);

@@ -345,12 +345,10 @@ mask-by-condition pattern, and for the return-form counterparts
 
 ---
 
-## 5. Repetition — `:%` and `:*`
+## 5. Repetition — `:%`
 
-Two sigils turn the indexer into a repetition operation rather than a
+This sigil turns the indexer into a repetition operation rather than a
 selection.
-
-### 5.1 `:%` — repeat into a new shape
 
 `:%` in the first position turns the array into a `CARepeat` view of the
 given target shape. The source is replicated to fill the new axes.
@@ -368,24 +366,6 @@ v[:%, 2, 3]
 ```
 
 * **Class back:** `CARepeat`.
-
-### 5.2 `:*` — unbound repeat
-
-`:*` introduces a size-undetermined axis. The resulting view is "unbound"
-until it meets another array in an operation that fixes its size; the
-arithmetic engine then stretches it to match.
-
-```ruby
-v = CA_INT([1, 2, 3])
-v[:*, nil].class   #  => CAUnboundRepeat
-#  the marked axis has no size yet; it is fixed when the view meets another
-#  array in an operation or an assignment.
-```
-
-`:*` is the lower-level mechanism that broadcasting is built on; in everyday
-code you usually want `:_` instead. See [Broadcasting](07_broadcasting.md).
-
-* **Class back:** `CAUnboundRepeat`.
 
 ---
 
@@ -494,7 +474,6 @@ See [Masks and missing values](05_masks.md) for the full story.
 | `a[int_carray]` (multi-d index, flat mapping)    | MAPPING         | `CARefer`            |
 | `a[int_carray, int_carray, ...]` (per-axis pick) | GRID            | `CAGrid`             |
 | `a[:%, shape...]`                                | REPEAT          | `CARepeat`           |
-| `a[..., :*, ...]`                                | UNBOUND_REPEAT  | `CAUnboundRepeat`    |
 | `a[..., :_, ...]`                                | (newaxis)       | `CAStride`           |
 | `a[:~, ...]` or `a[false]`                       | (rubber)        | depends on the rest  |
 

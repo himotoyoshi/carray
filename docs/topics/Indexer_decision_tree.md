@@ -31,8 +31,7 @@ info.index    # payload — shape depends on info.type (see §4)
 - `info.type` — one of:
   `CA_REG_ALL`, `_ADDRESS`, `_FLATTEN`, `_ADDRESS_COMPLEX`,
   `_POINT`, `_BLOCK`, `_SELECT`, `_ITERATOR`, `_REPEAT`,
-  `_GRID`, `_MAPPING`, `_METHOD_CALL`, `_UNBOUND_REPEAT`,
-  `_MEMBER`, `_ATTRIBUTE`.
+  `_GRID`, `_MAPPING`, `_METHOD_CALL`, `_MEMBER`, `_ATTRIBUTE`.
 - `info.index_type[i]` — when populated, one of `CA_IDX_SCALAR`,
   `_ALL`, `_BLOCK`, `_SYMBOL`, `_REPEAT`.
 - `CA_IDX_REPEAT` is not produced by the classifier directly: when
@@ -67,7 +66,6 @@ Evaluated in order; the first match wins.
 | `argv[0]` is CArray of any other data_type                   | raises `IndexError`   | —                            |
 | `argv[0]` is `String` starting with `@`                      | `ATTRIBUTE`     | `[]` (`info.symbol = :name`)       |
 | `argv[0]` is any other `String`                              | `MEMBER`        | `[]` (`info.symbol = :"field"`)    |
-| `argv[0] == :*`                                              | `UNBOUND_REPEAT`| `[]`                               |
 
 ### 2.3 `argc == 1`, `ndim > 1`
 
@@ -106,16 +104,14 @@ The full `argv` is scanned once for three symbols:
 ```
 for i in 0..argc-1:
   if argv[i] == :%    → is_repeat = 1; break
-  if argv[i] == :*    → is_repeat = 2; break
   if argv[i] == false or :~ → has_rubber = 1   # :~ = rubber sigil (RB.1)
     if argc > ndim + 1 → raise IndexError
 ```
 
-`:%` and `:*` may appear at any position; the first occurrence ends
-the scan and pins the region:
+`:%` may appear at any position; the first occurrence ends the scan
+and pins the region:
 
 - `:%` anywhere → `REPEAT`, `info.index = []`.
-- `:*` anywhere → `UNBOUND_REPEAT`, `info.index = []`.
 
 ### 3.2 Arity validation
 
@@ -217,7 +213,6 @@ for i in 0..ndim-1:
   end
 
 if is_repeat == 1: region = REPEAT
-elif is_repeat == 2: region = UNBOUND_REPEAT
 elif is_grid:        region = GRID
 elif is_iterator:    region = ITERATOR
 elif is_point:       region = POINT       # all axes SCALAR
@@ -250,7 +245,6 @@ classification according to the region:
 | `GRID`            | `[]`                                                                  |
 | `MAPPING`         | `[]`                                                                  |
 | `METHOD_CALL`     | `[]`                                                                  |
-| `UNBOUND_REPEAT`  | `[]`                                                                  |
 | `MEMBER`          | `[]`                                                                  |
 | `ATTRIBUTE`       | `[]`                                                                  |
 

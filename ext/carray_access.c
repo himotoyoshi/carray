@@ -515,11 +515,6 @@ rb_ca_store_all (VALUE self, VALUE rval)
     CArray *cv;
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
-    if ( cv->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-      rval = ca_ubrep_bind_with(rval, self);
-      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
-    }
-
     /* The destination owns the shape; see ca_broadcast_to_destination. */
     ca_broadcast_to_destination(self, &rval);
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
@@ -1018,9 +1013,6 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
     break;
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
-    break;
   case CA_REG_MAPPING:
     obj = rb_ca_fancy_index_chain(self, argv[0]);
     break;
@@ -1312,9 +1304,6 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
     break;
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
-    break;
   case CA_REG_MAPPING:
     obj = rb_ca_fancy_index_chain(self, argv[0]);
     break;
@@ -1498,10 +1487,6 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_store_all(obj, rval);
     break;
   }
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
-    obj = rb_ca_store_all(obj, rval);
-    break;
   case CA_REG_MAPPING: {
     obj = rb_ca_fancy_index_chain(self, argv[0]);
     obj = rb_ca_store_all(obj, rval);
@@ -1676,7 +1661,6 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_GRID:
   case CA_REG_MAPPING:
   case CA_REG_METHOD_CALL:
-  case CA_REG_UNBOUND_REPEAT:
   case CA_REG_MEMBER:  
   case CA_REG_ATTRIBUTE:  
     break;
@@ -2101,8 +2085,6 @@ Init_carray_access (void)
   rb_define_const(rb_cObject, "CA_REG_MAPPING",  INT2NUM(CA_REG_MAPPING));
   rb_define_const(rb_cObject, "CA_REG_METHOD_CALL",
                                                  INT2NUM(CA_REG_METHOD_CALL));
-  rb_define_const(rb_cObject, "CA_REG_UNBOUND_REPEAT",
-                                                 INT2NUM(CA_REG_UNBOUND_REPEAT));
   rb_define_const(rb_cObject, "CA_REG_MEMBER",   INT2NUM(CA_REG_MEMBER));
   rb_define_const(rb_cObject, "CA_REG_ATTRIBUTE",   INT2NUM(CA_REG_ATTRIBUTE));
 

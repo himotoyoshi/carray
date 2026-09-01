@@ -111,9 +111,6 @@ VALUE    rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes);
 CARepeat *ca_repeat_new (CArray *carray, int8_t ndim, ca_size_t *count);
 VALUE     rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count);
 
-/* ca_obj_unbound_repeat.c */
-VALUE    rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
-
 /* ca_obj_reduce.c */
 CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 

@@ -208,8 +208,8 @@ The strategy depends on the view class on CArray's side:
   strides over the parent buffer. CArray transparently *materialises* them
   into a contiguous staging buffer and exports that. The cost is one O(N)
   copy per export.
-* **Sub-byte and Ruby-object arrays** (`CABitarray`, `CABitfield`, `CA_OBJECT`,
-  `CAUnboundRepeat`) are **rejected** — they have no plain-bytes representation.
+* **Sub-byte and Ruby-object arrays** (`CABitarray`, `CABitfield`, `CA_OBJECT`)
+  are **rejected** — they have no plain-bytes representation.
 
 For the full export matrix (which obj_type uses which strategy, and the exact
 PEP 3118 format strings emitted), see

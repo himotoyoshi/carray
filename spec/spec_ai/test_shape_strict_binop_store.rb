@@ -111,12 +111,6 @@ class TestShapeStrictStore < Test::Unit::TestCase
     assert_equal [[7, 7], [7, 7], [7, 7]], t.to_a
   end
 
-  def test_unbound_repeat_is_untouched
-    t = CArray.int32(5, 3, 4)
-    row = CArray.int32(3, 4).seq
-    t[] = row[:*, nil, nil]
-    5.times { |i| assert_equal row.to_a, t[i, nil, nil].to_a }
-  end
 end
 
 class TestShapeStrictBinop < Test::Unit::TestCase
@@ -179,11 +173,6 @@ class TestShapeStrictBinop < Test::Unit::TestCase
     assert_equal [3, 2], (a + CScalar.int32.tap { |s| s[0] = 7 }).shape
   end
 
-  def test_unbound_repeat_is_untouched
-    base = CArray.int32(5, 3, 4).seq
-    row  = CArray.int32(3, 4).seq
-    assert_equal [5, 3, 4], (base + row[:*, nil, nil]).shape
-  end
 end
 
 class TestShapeStrictInPlace < Test::Unit::TestCase

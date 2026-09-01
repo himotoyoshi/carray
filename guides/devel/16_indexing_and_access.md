@@ -29,15 +29,15 @@ The classifier dispatches first on arity:
 - **`argc == 1`** has shape-independent special cases evaluated in order, first
   match wins: a long symbol → `METHOD_CALL`; an integer index array → a grid/scatter
   region; a boolean array of matching element count → `CA_REG_SELECT`; a `String`
-  → member/attribute access; `:*` → `CA_REG_UNBOUND_REPEAT`; and so on. A boolean
+  → member/attribute access; and so on. A boolean
   array whose count doesn't match, or a CArray of a non-index data_type, raises
   here.
 - **`argc == 1, ndim > 1`** → flat addressing: an `Integer` is `CA_REG_ADDRESS`,
   `nil` is `CA_REG_FLATTEN`, anything else (a range over the flattened array) is
   `CA_REG_ADDRESS_COMPLEX`, whose `[start, count, step]` triple is found by a
   recursive scan in flat address space (`CArray.scan_index`).
-- **`argc >= 1`, general** → the main loop: a pre-scan pins `:%` → `CA_REG_REPEAT`
-  or `:*` → `CA_REG_UNBOUND_REPEAT`; otherwise each axis argument is classified
+- **`argc >= 1`, general** → the main loop: a pre-scan pins `:%` → `CA_REG_REPEAT`;
+  otherwise each axis argument is classified
   (`CA_IDX_SCALAR` / `CA_IDX_ALL` / `CA_IDX_BLOCK` / `CA_IDX_SYMBOL` /
   `CA_IDX_REPEAT`), and the combination resolves to `CA_REG_POINT` (all scalar →
   a scalar access), `CA_REG_BLOCK`, `CA_REG_GRID`, or `CA_REG_ITERATOR`.
@@ -57,7 +57,7 @@ construction:
 | `CA_REG_BLOCK` | a `CABlock` slice view |
 | `CA_REG_SELECT` | a `CASelect` (boolean / fancy selection) |
 | `CA_REG_GRID` | a `CAGrid` ([ch. 7](07_axis_descriptor_framework.md)) |
-| `CA_REG_REPEAT` / `CA_REG_UNBOUND_REPEAT` | `CARepeat` / `CAUnboundRepeat` |
+| `CA_REG_REPEAT` | `CARepeat` |
 | `CA_REG_ADDRESS` / `CA_REG_ADDRESS_COMPLEX` | flat addressing into the buffer |
 
 > **Note.** Older reference material still names a `MAPPING` region for an
@@ -76,7 +76,7 @@ a CArray. This is why `a[1, 2]` is an `Integer` but `a[1, nil]` is a `CABlock` �
 the classifier took different branches, not the same branch with a different
 shape.
 
-## The newaxis / unbound sigils
+## The newaxis sigil
 
 Two symbol indices are handled specially because they change rank rather than
 select within it:
@@ -85,8 +85,6 @@ select within it:
   shapes for broadcasting — CArray never adds an axis implicitly
   ([ch. 6](06_view_algebra_and_castride.md)). An
   index array index, by contrast, now builds a `CAGrid`/`CAStride` chain.
-- **`:*`** (`CA_REG_UNBOUND_REPEAT`) marks an unbound-shape repeat whose extent is
-  resolved later by the operation it feeds.
 
 ## Writes: `[]=`
 

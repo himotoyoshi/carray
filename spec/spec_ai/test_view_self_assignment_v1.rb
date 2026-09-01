@@ -83,13 +83,6 @@ class TestViewSelfAssignmentV1 < Test::Unit::TestCase
     refute_equal orig, a.to_a, "write-through to entity through CAByteSwap failed"
   end
 
-  def test_unbound_repeat_assign
-    ubrep = CArray.int32(3).seq.unbound_repeat(:*, nil)
-    dst = CArray.int32(4, 3)
-    dst[] = ubrep
-    assert_equal [[0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2]], dst.to_a
-  end
-
   # --- (ii) absence of huge-root materialise for size-gap cases ---
 
   # The old ca_attach(cv) path called ca_stride_func_attach → ca_attach(root),

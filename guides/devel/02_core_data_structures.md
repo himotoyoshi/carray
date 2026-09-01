@@ -305,7 +305,6 @@ enum {
   CA_OBJ_SELECT,          /* 5  CASelect — boolean / fancy indexing  */
   CA_OBJ_OBJECT,          /* 6  CAObject — per-cell Ruby callback    */
   CA_OBJ_REPEAT,          /* 7  CARepeat — stride-0 axes (legacy)    */
-  CA_OBJ_UNBOUND_REPEAT,  /* 8  CAUnboundRepeat — `:*` axis          */
 };
 ```
 
@@ -524,7 +523,7 @@ The one view kind whose data path goes through `rb_funcall` per cell —
 the kernel iterator cannot transparently deliver it
 ([ch. 11](11_kernel_iterator.md)).
 
-### CAReduce / CAUnboundRepeat
+### CAReduce
 
 ```c
 typedef struct {
@@ -532,19 +531,11 @@ typedef struct {
   ca_size_t  count;          /* reduction size */
   ca_size_t  offset;         /* CAReduce — used only inside ca_obj_refer.c */
 } CAReduce;
-
-typedef struct {
-  /* … CAView prefix … */
-  ca_size_t  *strides;       /* CAStride prefix continues */
-  ca_size_t   base_offset;
-  ca_size_t  *rep_dim;       /* rep_dim[i] == 0 marks the unbound axis (`:*`) */
-} CAUnboundRepeat;
 ```
 
 CAReduce is an *internal* class used only inside `ca_obj_refer.c` for
 the byte-reinterpret modes; user-facing reductions go through the
-kernel iterator. CAUnboundRepeat is a CAStride subclass with a sized /
-unbound axis tag in `rep_dim[]`.
+kernel iterator.
 
 ## CAIterator — no C struct any more
 

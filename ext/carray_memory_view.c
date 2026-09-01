@@ -438,7 +438,6 @@ ca_mv_strategy_for (int16_t obj_type)
   if (obj_type == CA_OBJ_SELECT) return CA_MV_ATTACH;
   if (obj_type == CA_OBJ_REPEAT) return CA_MV_REPEAT;
   if (obj_type == CA_OBJ_OBJECT) return CA_MV_REJECT;
-  if (obj_type == CA_OBJ_UNBOUND_REPEAT) return CA_MV_REJECT;
   /* Plain CAStride (created via #as_strided, or wrap_memory_view from
      a strided producer).  Reuse the CA_MV_TRANS handler since it
      already reads strides[] / base_offset directly from the CAStride
@@ -534,7 +533,6 @@ ca_mv_reject_reason_for (CArray *ca)
   /* Compile-time obj_types we know about */
   if (ca->obj_type == CA_OBJ_SELECT)          return "boolean-mask selection (positions not expressible as strides)";
   if (ca->obj_type == CA_OBJ_OBJECT)          return "stores Ruby VALUEs, not raw bytes";
-  if (ca->obj_type == CA_OBJ_UNBOUND_REPEAT)  return "shape is not bound";
   /* Runtime-assigned obj_types: look up by name in the strategy table */
   for (int i = 0; i < CA_MV_NUM_RUNTIME_OBJ_TYPES; i++) {
     if (ca_mv_runtime_types[i].id == ca->obj_type) {

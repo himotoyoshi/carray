@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: the `:*` unbound repeat is retired. `a[:*, nil]` now raises
+  `IndexError`, and `CArray#unbound_repeat`, the `CAUnboundRepeat` class and
+  `insert_axis(repeat: :*)` are gone. Write `:_` instead: it produces the same
+  shape, and a size-1 axis now stretches on a store as well as in an operation,
+  which is what `:*` was for. `CArray#broadcast_to` is unaffected (the
+  `broadcast_to` that goes with `:*` was an alias on the retired class).
+  `CArray.meshgrid(sparse: true)` returns the same shapes as before.
+
 - Change: a binary operation refuses operands it cannot bring to one shape.
   `(3,2) + (2,3)` used to answer in the left operand's shape and `(6) + (3,2)`
   in the right's, so the result depended on the order the operands were
@@ -36,13 +44,10 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 - New: `ca_is_stride_family(ca)` in `carray.h`, for C extensions that want to
   fold a view into `root->ptr + base + sum(idx[k] * strides[k])` themselves.
   It is the guard `ca_stride_compose_to_root` needs: true for CAStride,
-  CARefer, CABlock, CARepeat, CATranspose, CAFarray, CAField and
-  CAUnboundRepeat, plus the mask array of each. Membership follows the
-  operation table an `obj_type` was installed with, so an externally
-  installed view sharing that table is recognised too. It reports that the
-  address expression exists, not that `dim[]` is final -- a CAUnboundRepeat
-  holds each `:*` axis as a size-1 stride-0 entry until bound, so check
-  `obj_type != CA_OBJ_UNBOUND_REPEAT` before compiling against the shape.
+  CARefer, CABlock, CARepeat, CATranspose, CAFarray and CAField, plus the
+  mask array of each. Membership follows the operation table an `obj_type`
+  was installed with, so an externally installed view sharing that table is
+  recognised too.
 
 - Fix: a region asked for in column-major order -- axes and steps reversed
   against the view's own -- came back wrong from a view with a length-1 axis.
