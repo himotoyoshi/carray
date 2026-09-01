@@ -15,7 +15,7 @@
 #  omit them (a window has no map, a group has no within-piece min_index).
 #
 #  The retired 2.0 generic dispatch (calculate / filter / evaluate over a
-#  kernel_at_addr slot) is preserved at `samples/caiterator/iterator.{rb,c}`.
+#  kernel_at_addr slot) is preserved at `examples/caiterator/iterator.{rb,c}`.
 #
 # ----------------------------------------------------------------------------
 

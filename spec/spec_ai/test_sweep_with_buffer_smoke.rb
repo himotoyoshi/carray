@@ -8,7 +8,7 @@ require "test/unit"
 require "carray"
 
 # Exercises the spec_ai-local fixture at ext_with_buffer_smoke/ (a byte-for-byte
-# mirror of the user-facing example samples/c-extensions/with_buffer/).
+# mirror of the user-facing example examples/c-extensions/with_buffer/).
 ext_dir = File.expand_path("ext_with_buffer_smoke", __dir__)
 $LOAD_PATH.unshift(ext_dir) unless $LOAD_PATH.include?(ext_dir)
 begin

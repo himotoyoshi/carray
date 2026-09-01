@@ -24,7 +24,7 @@ unless CArray.respond_to?(:t1_smoke)
   warn "skipping #{File.basename(__FILE__)}: requires CARRAY_DEV_BUILD"
   return
 end
-require_relative "../../samples/caobject/link"  # CALink subclass (moved to samples/ in 3.0)
+require_relative "../../examples/caobject/link"  # CALink subclass (moved to examples/ in 3.0)
 
 # Test fixture: writable CAObject with simple fetch/store/copy/sync
 class T11WritableObj < CAObject

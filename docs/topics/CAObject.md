@@ -494,7 +494,7 @@ A complete Face subclass therefore needs only `initialize`,
 optionally `copy_state`, optionally `storage_to_scalar` /
 `scalar_to_storage` (scalar read/write conversion), plus whatever
 domain methods you want — zero storage-callback boilerplate. See
-`samples/face/ca_circular.rb` and `samples/face/ca_fixed_point.rb`:
+`examples/face/ca_circular.rb` and `examples/face/ca_fixed_point.rb`:
 both define a fully functional Face without a single `fetch_*` /
 `store_*` / `copy_data` method.
 

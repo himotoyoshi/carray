@@ -43,7 +43,7 @@ spec/spec_ai/ext_eager_no_attach_test/*.bundle.dSYM/
 spec/spec_ai/ext_eager_no_attach_test/*.o
 spec/spec_ai/ext_eager_no_attach_test/mkmf.log
 
-# spec_ai author-surface smoke fixtures (mirrors of samples/c-extensions/*)
+# spec_ai author-surface smoke fixtures (mirrors of examples/c-extensions/*)
 spec/spec_ai/ext_cfunc_r_smoke/Makefile
 spec/spec_ai/ext_cfunc_r_smoke/*.bundle
 spec/spec_ai/ext_cfunc_r_smoke/*.bundle.dSYM/

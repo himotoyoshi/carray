@@ -93,7 +93,7 @@ CArray 2.x had a very different `CAIterator`: a C struct carrying
 kernels advanced by *mutating the underlying view's tail in place* (e.g.
 rewriting a CABlock's `start[]` and resyncing the prefix). That generic
 dispatch engine is **retired**; the sources are preserved at
-`samples/caiterator/` for reference. The 3.0 members reuse the 2.0 *names*
+`examples/caiterator/` for reference. The 3.0 members reuse the 2.0 *names*
 (`CAWindowIterator`, `CABlockIterator`) because the concepts — a window, a
 tile — are stable, but they are new implementations on new engines. When you
 read old material describing CAIterator as a C dispatch struct, that is the

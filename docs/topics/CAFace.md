@@ -117,7 +117,7 @@ A Face declares one of two surface choices at setup time:
 
 | | surface `data_type` | mkkernel numeric dispatch | example |
 |---|---|---|---|
-| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | an angle in radians (`samples/face/ca_circular.rb`): the surface value *is* the stored number |
+| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | an angle in radians (`examples/face/ca_circular.rb`): the surface value *is* the stored number |
 | **NonNumeric Face** | `CA_FIXLEN` | hits `ca_*_not_implement` stub → `rb_eCADataTypeError` | `CATime`, `CATimedelta` (`dt + dt`, `sqrt(dur)` are nonsense) |
 
 The NonNumeric variant leverages the fact that mkkernel emits

@@ -1,8 +1,8 @@
 /* spec_ai/ext_cfunc_r_smoke/cfunc_r.c
  *
- * TEST FIXTURE — byte-for-byte mirror of samples/c-extensions/cfunc_r/cfunc_r.c
+ * TEST FIXTURE — byte-for-byte mirror of examples/c-extensions/cfunc_r/cfunc_r.c
  * (the user-facing runnable example).  Kept here so the spec_ai suite owns
- * its own build and never reaches into samples/.  If you edit one, edit both
+ * its own build and never reaches into examples/.  If you edit one, edit both
  * (the samples copy is documentation; this copy is the regression fixture).
  */
 /* ---------------------------------------------------------------------------
