@@ -499,6 +499,30 @@ m.accumulate(axis: 0).data_type  #  => :int32
 m.accumulate(axis: 0)  #  => [ 5, 7, 9 ]
 ```
 
+### The sum wraps at the width of that type
+
+Keeping the type means the running total has nowhere to overflow into, so it
+wraps, exactly as adding into a register of that width would:
+
+```ruby
+a = CArray.int8(300) { 1 }   # three hundred 1s
+
+a.sum          #  => 300.0    widened, so the full total
+a.accumulate   #  => 44       300 wrapped at 256
+```
+
+Boolean is the same rule at its narrowest. Its values live in `0`/`1`, so the
+sum wraps at 2, and `accumulate` ends up reporting whether an *odd* number of
+elements were true:
+
+```ruby
+CA_BOOLEAN([1, 1, 1]).accumulate   #  => 1     three trues, odd
+CA_BOOLEAN([1, 1]).accumulate      #  => 0     two trues, wrapped
+```
+
+Reach for `sum` whenever the total matters more than the type. On booleans it
+widens to `uint64` and counts the trues.
+
 ## Method reference
 
 The reduction and statistics methods covered above, with their argument forms.
@@ -519,7 +543,7 @@ removed. Without `axis:`, the result is a single value over the whole array.
 | `stddev`              | `stddev(axis: k)`                    | Sample standard deviation as `float64`        |
 | `wsum`                | `wsum(weights, axis: k)`             | Weighted sum as `float64`; `weights` is a per-element weight the same shape as the array |
 | `wmean`               | `wmean(weights, axis: k)`            | Weighted mean `sum(v*w)/sum(w)` as `float64`  |
-| `accumulate`          | `accumulate(axis: k)`                | Sum that keeps the input data type            |
+| `accumulate`          | `accumulate(axis: k)`                | Sum that keeps the input data type; wraps at that type's width |
 | `median`              | `median(axis: k)`                    | Middle value as `float64`                     |
 | `percentile`          | `percentile(p, …, axis: k)`          | One or more percentile ranks in `0..100`; scalar for one rank, array for several |
 | `quantile`            | `quantile(axis: k)`                  | Five-number summary `[min, Q1, median, Q3, max]` |
