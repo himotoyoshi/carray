@@ -301,11 +301,17 @@ a[CA_INT([0, 2]), nil]
 
 ---
 
-## 4. Predicate keys — `:eq`, `:gt`, `:lt`, ...
+## 4. Symbol keys — `:eq`, `:gt`, `:lt`, ...
 
-A symbol such as `:eq` in the first argument position turns the indexer into
-a **condition matcher**, the same as building a boolean mask first and using
-the form in §3.1. This is just shorter.
+A symbol in the first argument position is sugar for asking the array a
+question about itself and indexing by the answer:
+
+```ruby
+a[:method, arg]   # is exactly  a[a.method(arg)]
+```
+
+So `:eq` turns the indexer into a **condition matcher**, the same as building
+a boolean mask first and using the form in §3.1 — just shorter.
 
 ```ruby
 c = CArray.int32(5).seq    #  => [ 0, 1, 2, 3, 4 ]
@@ -334,16 +340,14 @@ d[:gt, 2] = 0       #  => [ 0, 1, 2, 0, 0 ]
 d[:eq, 0] = -1      #  => [ -1, 1, 2, -1, -1 ]
 ```
 
-The key is a method name, not an entry from a fixed table: the array is sent
-that message with the remaining arguments, and the answer does the selecting.
-So the comparisons (`:eq`, `:ne`, `:gt`, `:ge`, `:lt`, `:le`) work, and so do
-the predicates — `:is_invalid`, `:is_finite`, `:is_nan`, `:is_masked`,
-`:is_not_masked`, and `:is_empty` on a string array — along with any
-boolean-returning method you define yourself.
+There is no table of accepted keys — any method name works, because the form
+is the identity above. The ones worth knowing are the comparisons (`:eq`,
+`:ne`, `:gt`, `:ge`, `:lt`, `:le`) and the predicates (`:is_invalid`,
+`:is_finite`, `:is_nan`, `:is_masked`, `:is_not_masked`, and `:is_empty` on a
+string array), plus any boolean-returning method you define yourself.
 
-Because the name is not checked against a list, a name that changes the array
-changes it: `a[:fill, 0]` runs `fill` and empties `a` before selecting.  Keep
-to questions.
+Read the identity both ways: `a[:fill, 0]` is `a[a.fill(0)]`, which empties
+`a` and then indexes it. Name a question, not a change.
 
 See [Masks and missing values](05_masks.md) for the `[:eq, v] = UNDEF`
 mask-by-condition pattern, and for the return-form counterparts
