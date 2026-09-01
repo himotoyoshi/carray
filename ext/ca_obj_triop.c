@@ -597,23 +597,17 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
   TypedData_Get_Struct(r3, CArray, &carray_data_type, op3);
 
-  /* Step 3: shape sanity — each of op2 / op3 must match op1's element
-     count OR be a 1-element CScalar (kernel walks with element_step
-     = 0 in that case). */
+  /* Step 3: each of op2 / op3 must match op1's element count OR be a
+     1-element CScalar (kernel walks with element_step = 0 in that case).
+     Unreachable from Ruby; see the note in ca_obj_binop.c. */
   if ( op2->elements != op1->elements && op2->elements != 1 ) {
     rb_raise(rb_eArgError,
-             "CATriOp: shape mismatch on op2 (%lld vs %lld) — only "
-             "same-ndim size-1 broadcast is supported; cross-ndim "
-             "promotion is not adopted in CArray "
-             "(reshape explicitly)",
+             "CATriOp: element count mismatch on op2 (%lld vs %lld)",
              (long long) op2->elements, (long long) op1->elements);
   }
   if ( op3->elements != op1->elements && op3->elements != 1 ) {
     rb_raise(rb_eArgError,
-             "CATriOp: shape mismatch on op3 (%lld vs %lld) — only "
-             "same-ndim size-1 broadcast is supported; cross-ndim "
-             "promotion is not adopted in CArray "
-             "(reshape explicitly)",
+             "CATriOp: element count mismatch on op3 (%lld vs %lld)",
              (long long) op3->elements, (long long) op1->elements);
   }
 
