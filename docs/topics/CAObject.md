@@ -344,40 +344,11 @@ pass `:bytes` explicitly when you mean a non-trivial fixlen element.
 
 ---
 
-## 3. Real examples (`lib/carray/object/`)
+## 3. Real examples (`examples/caobject/`)
 
-Three subclasses ship with CArray as canonical patterns. They are
-small enough to read in one sitting.
-
-### `CAIteratorArray` — wrap an iterator as a CArray
-
-```ruby
-class CAIteratorArray < CAObject
-  def initialize(it)
-    @it = it
-    super(CA_OBJECT, @it.dim)
-  end
-
-  private
-
-  def fetch_index(idx)
-    @it.kernel_at_index(idx)
-  end
-
-  def store_index(idx, val)
-    @it.kernel_at_index(idx)[] = val
-  end
-
-  def copy_data(data)
-    data.each_index { |*idx| data[*idx] = @it.kernel_at_index(idx) }
-  end
-
-  # sync_data / fill_data: see the source file
-end
-```
-
-Pattern: a single object (the iterator) provides per-index access; the
-class converts that into the full CArray protocol.
+Three subclasses live under `examples/caobject/` as canonical patterns.
+They are not part of the library; each is small enough to read in one
+sitting and meant to be copied.
 
 ### `CALink` — a derived array from a block
 
@@ -466,11 +437,10 @@ sq.read_only?           # => true   (inherited from frozen base)
 sq.frozen?              # => true   (inherited from frozen base)
 ```
 
-The `:parent` slot accepts **one** CArray. The three examples above
-(`CAIteratorArray`, `CALink`, `CAPack`) hold their sources in plain
-Ruby ivars instead — they are structurally multi-source (iterator,
-multiple block arguments, list of CArrays) and don't fit the single
-canonical-parent slot. Use `:parent` only when there is a clear
+The `:parent` slot accepts **one** CArray. `CALink` and `CAPack` above
+hold their sources in plain Ruby ivars instead — they are structurally
+multi-source (multiple block arguments, list of CArrays) and don't fit
+the single canonical-parent slot. Use `:parent` only when there is a clear
 single antecedent.
 
 ### 3.5 Face mode (`face: true` + optional `:storage`)
@@ -754,8 +724,8 @@ across calls, the cache will diverge from the function and bulk
 results will be wrong. As long as your callbacks are pure, the cache
 is a transparent memoisation layer.
 
-This family is rarely used in practice. The shipped examples in
-`lib/carray/object/` do not define any of these. Reach for them only
+This family is rarely used in practice. The examples under
+`examples/caobject/` do not define any of these. Reach for them only
 when:
 
 - the mask is genuinely *computed* (not stored), and
@@ -769,9 +739,8 @@ faster.
 
 ## 7. See also
 
-- `lib/carray/object/ca_obj_iterator.rb`, `ca_obj_link.rb`,
-  `ca_obj_nested.rb`, `ca_obj_pack.rb` — the canonical examples
-  (all under ~130 lines).
+- `examples/caobject/` — the canonical examples (`nested.rb`, `link.rb`,
+  `pack.rb`, `recurrence.rb`; all under ~130 lines).
 - `ext/ca_obj_object.c` — the C-side dispatcher; the comment header
   enumerates every template method the engine looks for.
 - `docs/Composition.md` — `bind` / `merge` / `combine` / `composite` /

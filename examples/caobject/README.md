@@ -53,7 +53,6 @@ actually defines:
 | `link.rb` | `fetch_addr`, `copy_data`, `create_mask` | no |
 | `pack.rb` | `fetch_index`, `copy_data` | no |
 | `recurrence.rb` | `fetch_addr`, `copy_data` | no |
-| `iterator_array.rb` | `fetch_index`, `store_index`, `copy_data`, `sync_data`, `fill_data` | legacy — does not run on 3.0 |
 
 ## The patterns
 

@@ -14,8 +14,8 @@
 #  those are NOT part of the common contract because some members legitimately
 #  omit them (a window has no map, a group has no within-piece min_index).
 #
-#  The retired 2.0 generic dispatch (calculate / filter / evaluate over a
-#  kernel_at_addr slot) is preserved at `examples/caiterator/iterator.{rb,c}`.
+#  The 2.0 generic dispatch (calculate / filter / evaluate over a
+#  kernel_at_addr slot) was retired in 3.0.
 #
 # ----------------------------------------------------------------------------
 

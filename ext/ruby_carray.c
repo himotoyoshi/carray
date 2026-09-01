@@ -107,7 +107,7 @@ void Init_ca_obj_moncmp ();  /* CAMonCmp + lazy elementwise predicate dispatch *
 
 /* Init_carray_iterator retired; CAIterator is a form-only base defined inline
    in Init_carray_ext (accessors in lib/carray/iterator.rb).  The 2.0 C engines
-   (dimension / window / block iterators) live at examples/caiterator/. */
+   (dimension / window / block iterators) were retired in 3.0. */
 
 void Init_carray_mathfunc ();
 
@@ -351,9 +351,7 @@ Init_carray_ext (void)
   /* CAIterator is the form-only base of the 3.0 iterator family; its shared
      accessors are plain Ruby attr_readers (lib/carray/iterator.rb).  The C
      reduction iterators subclass it and carray_access.c constructs
-     CASlabIterator by name, so the class object must exist here.  The retired
-     2.0 dispatch engines (dimension / window / block C iterators + the
-     kernel_at_addr base) are preserved at examples/caiterator/. */
+     CASlabIterator by name, so the class object must exist here. */
   rb_cCAIterator = rb_define_class("CAIterator", rb_cObject);
 
   Init_ca_group_iter();    /* devel/MEMO_AXIS_GROUP.md — axis-group [] surface

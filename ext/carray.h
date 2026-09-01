@@ -871,9 +871,8 @@ typedef struct {
 
 /* -------------------------------------------------------------------- */
 
-/* CAIterator is a form-only Ruby base (see ext/carray_iterator.c); the retired
-   2.0 C struct (a kernel_at_addr dispatch slot) lives at
-   examples/caiterator/iterator.c. */
+/* CAIterator is a form-only Ruby base (see ext/carray_iterator.c); the 2.0 C
+   struct (a kernel_at_addr dispatch slot) was retired in 3.0. */
 
 /* -------------------------------------------------------------------- */
 
@@ -1372,8 +1371,7 @@ VALUE   ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim);
 void    ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other);
 VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
-/* --- ca_iter_dimension retired (SI.4): CADimensionIterator -> CASlabIterator,
-   reference impl at examples/caiterator/dimension.c --- */
+/* --- ca_iter_dimension retired: CADimensionIterator -> CASlabIterator --- */
 
 /* -------------------------------------------------------------------- */
 

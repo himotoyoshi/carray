@@ -37,7 +37,7 @@ class TestDtypeIdiomTransparency < Test::Unit::TestCase
   ].freeze
 
   # --------------------------------------------------------------
-  # (1) `case when CA_*` idiom — math.rb / table.rb / imagemagick.rb
+  # (1) `case when CA_*` idiom — math.rb / table.rb
   # --------------------------------------------------------------
 
   def test_case_when_idiom_dispatches_correctly
@@ -75,7 +75,7 @@ class TestDtypeIdiomTransparency < Test::Unit::TestCase
   end
 
   def test_case_when_multi_constant_branch
-    # math.rb / imagemagick.rb idiom: multiple constants in one `when`.
+    # math.rb idiom: multiple constants in one `when`.
     [CA_INT8, CA_UINT8].each do |dt|
       ca = CArray.new(dt, [3])
       branch = case ca.data_type
@@ -111,7 +111,7 @@ class TestDtypeIdiomTransparency < Test::Unit::TestCase
   end
 
   def test_inequality_filters_correctly
-    # imagemagick.rb pattern: `if data_type != CA_FIXLEN and data_type != CA_OBJECT`
+    # Filter pattern: `if data_type != CA_FIXLEN and data_type != CA_OBJECT`
     ca = CArray.float64(3)
     assert_equal true, (ca.data_type != CA_FIXLEN && ca.data_type != CA_OBJECT)
     co = CArray.object(3)
