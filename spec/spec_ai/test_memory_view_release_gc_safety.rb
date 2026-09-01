@@ -12,7 +12,7 @@ require "carray"
 # so any regression that reintroduces attach + sync/detach in the release
 # path would surface as a crash or escaping exception.  The authoritative
 # field repro for the original crash is
-# `carray-pycall/examples/masked/sensor_dropouts.rb` (5/5 crash before the
+# `carray-pycall/samples/masked/sensor_dropouts.rb` (5/5 crash before the
 # alias-only refactor, 5/5 clean after).
 
 class TestMemoryViewReleaseGCSafety < Test::Unit::TestCase
@@ -85,7 +85,7 @@ class TestMemoryViewReleaseGCSafety < Test::Unit::TestCase
   # ca_detach recursion into ca->mask) can't be reproduced in pure Ruby:
   # the producer rejects has_mask sources up-front via ca_mv_available_p,
   # so the offending entry point is reached only through indirect paths
-  # in carray-pycall round trips (= examples/masked/sensor_dropouts.rb
+  # in carray-pycall round trips (= its samples/masked/sensor_dropouts.rb
   # exhibits 5/5 crash before the deepened pre-check).  Authoritative
   # sign-off for the masked-recursion branch of the fix is the field
   # repro going 5/5 clean post-rebuild.

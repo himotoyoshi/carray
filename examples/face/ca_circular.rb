@@ -1,4 +1,4 @@
-# examples/ca_circular.rb
+# examples/face/ca_circular.rb
 #
 # CACircular — angles as a semantic type, the reference implementation of a
 # Face written in Ruby.  A CAObject Face over float64 storage, holding a
@@ -11,7 +11,7 @@
 #
 # Usage:
 #   require 'carray'
-#   require_relative 'examples/ca_circular'
+#   require_relative 'examples/face/ca_circular'
 #
 #   angles = CArray.float64(5)
 #   [0.0, Math::PI/4, Math::PI/2, 3*Math::PI/4, Math::PI].each_with_index {|v, i|
