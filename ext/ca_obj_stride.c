@@ -192,6 +192,19 @@ void ca_xfer_stride_tiled_transpose_2d (char *src_base, ca_size_t bytes,
                                          ca_size_t *counts, ca_size_t *strides,
                                          char *data, int dir);
 
+/* Public form of the family test the fold walk below uses inline.  The
+   family is defined by the operation table, not by a class or an
+   obj_type list: every member was installed with a copy of
+   ca_stride_func, so an externally installed view that shares the
+   table answers true as well.  See carray.h for what membership does
+   and does not promise. */
+int
+ca_is_stride_family (const void *ap)
+{
+  const CArray *ca = (const CArray *) ap;
+  return ( ca_func[ca->obj_type].attach == ca_stride_func.attach );
+}
+
 /* Compose `leaf->strides` and `leaf->base_offset` (which live in `parent`'s
    own logical row-major contig byte space) into `out_strides` and
    `out_base` expressed in `parent->parent`'s byte space.

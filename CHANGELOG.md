@@ -11,6 +11,17 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `ca_is_stride_family(ca)` in `carray.h`, for C extensions that want to
+  fold a view into `root->ptr + base + sum(idx[k] * strides[k])` themselves.
+  It is the guard `ca_stride_compose_to_root` needs: true for CAStride,
+  CARefer, CABlock, CARepeat, CATranspose, CAFarray, CAField and
+  CAUnboundRepeat, plus the mask array of each. Membership follows the
+  operation table an `obj_type` was installed with, so an externally
+  installed view sharing that table is recognised too. It reports that the
+  address expression exists, not that `dim[]` is final -- a CAUnboundRepeat
+  holds each `:*` axis as a size-1 stride-0 entry until bound, so check
+  `obj_type != CA_OBJ_UNBOUND_REPEAT` before compiling against the shape.
+
 - Fix: a region asked for in column-major order -- axes and steps reversed
   against the view's own -- came back wrong from a view with a length-1 axis.
   An `(n, 1)` view (`v[nil, :_]`, `v.reshape(n, 1)`, a one-column slice) has
