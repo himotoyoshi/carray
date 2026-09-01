@@ -15,9 +15,13 @@
 #                      bool; CArray is consistent across all three).
 #   - search family  : bsearch / search / search_nearest (+ _addr) on a sorted
 #                      boolean array; false < true.
-#   - accumulate     : output: :preserve keeps boolean, so it is XOR-reduce
-#                      (parity, mod-2 overflow) = whether an odd number of
-#                      trues.  `sum` remains the widening count-of-trues (u64).
+#   - accumulate     : accumulate keeps the input data_type, so the running sum
+#                      wraps at that type's own width -- int8 wraps at 256, and
+#                      boolean, whose values are 0/1, wraps at 2.  The result is
+#                      therefore whether an odd number of trues were seen; the
+#                      `acc ^= v` lane is that mod-2 addition, not a separate
+#                      XOR operation.  `sum` remains the widening
+#                      count-of-trues (u64).
 
 require "test/unit"
 require "carray"
@@ -113,7 +117,7 @@ class TestBooleanNumericExt < Test::Unit::TestCase
     assert_equal 2, s.bsearch_addr(true)
   end
 
-  # ---- accumulate = parity (XOR-reduce) ----------------------------------
+  # ---- accumulate wraps at the type's width (boolean: mod 2) -------------
 
   def test_accumulate_parity
     assert_equal 1, CA_BOOLEAN([true]).accumulate
