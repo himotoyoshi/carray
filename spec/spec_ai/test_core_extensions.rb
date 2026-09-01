@@ -40,6 +40,13 @@ class TestCoreExtensionsAbsent < Test::Unit::TestCase
     refute Rational.method_defined?(:sin)
   end
 
+  def test_complex_math_not_defined_globally
+    refute Complex.method_defined?(:sqrt)
+    refute Complex.method_defined?(:exp)
+    refute Complex.method_defined?(:tanh)
+    refute Complex.method_defined?(:asin)
+  end
+
   def test_numeric_angle_and_comparison_not_defined_globally
     refute Numeric.method_defined?(:deg_360)
     refute Numeric.method_defined?(:deg_180)
@@ -104,6 +111,155 @@ class TestCoreExtensionsPresent < Test::Unit::TestCase
   def test_distance
     assert_in_delta 2.0, 5.0.distance(3.0), 1e-15
     assert_in_delta 2.0, 5.distance(3),     1e-15
+  end
+
+  # --- Postfix math on Complex -----------------------------------------
+  #
+  # CArray's complex kernels are the platform's C99 complex.h, so the
+  # scalar forms are pinned against a one-element cmplx128 array rather
+  # than against a formula.  The comparison is exact and includes the
+  # sign of a zero: on a branch cut that sign is the entire answer, and
+  # an assert_in_delta would not see it.
+
+  COMPLEX_MATH = %i[
+    sqrt exp log
+    sin cos tan sinh cosh tanh
+    asin acos atan asinh acosh atanh
+    square rsqrt
+  ].freeze
+
+  # Canonical text for a Float that distinguishes -0.0 from 0.0 and
+  # makes NaN comparable.
+  def float_key(v)
+    if v.nan?     then "NaN"
+    elsif v.zero? then (1 / v).negative? ? "-0.0" : "0.0"
+    else               v.to_s
+    end
+  end
+
+  def complex_key(z)
+    [float_key(z.real), float_key(z.imaginary)]
+  end
+
+  def assert_matches_kernel(m, z)
+    ref = CArray.cmplx128(1) { z }.send(m)[0]
+    assert_equal complex_key(ref), complex_key(z.send(m)),
+                 "Complex##{m}(#{z}) disagrees with the cmplx128 kernel"
+  end
+
+  def test_complex_postfix_math_matches_kernel
+    z = Complex(1.0, 2.0)
+    COMPLEX_MATH.each { |m| assert_matches_kernel(m, z) }
+  end
+
+  def test_complex_postfix_math_matches_kernel_negative_quadrant
+    z = Complex(-0.7, -1.3)
+    COMPLEX_MATH.each { |m| assert_matches_kernel(m, z) }
+  end
+
+  # Branch cuts.  sqrt and log are cut along the negative real axis;
+  # asin / acos along the real axis outside [-1, 1]; atanh likewise;
+  # acosh for real x < 1.  Each is approached from both sides by the
+  # sign of the zero imaginary part.
+  BRANCH_CUT_CASES = [
+    [:sqrt,  Complex(-1.0,  0.0)],
+    [:sqrt,  Complex(-1.0, -0.0)],
+    [:log,   Complex(-1.0,  0.0)],
+    [:log,   Complex(-1.0, -0.0)],
+    [:asin,  Complex( 2.0,  0.0)],
+    [:asin,  Complex( 2.0, -0.0)],
+    [:acos,  Complex( 2.0,  0.0)],
+    [:acos,  Complex( 2.0, -0.0)],
+    [:atanh, Complex( 2.0,  0.0)],
+    [:atanh, Complex( 2.0, -0.0)],
+    [:acosh, Complex( 0.5,  0.0)],
+    [:acosh, Complex( 0.5, -0.0)],
+  ].freeze
+
+  def test_complex_branch_cuts_match_kernel
+    BRANCH_CUT_CASES.each { |m, z| assert_matches_kernel(m, z) }
+  end
+
+  # The two sides of a cut must actually differ, otherwise the test
+  # above would pass on an implementation that ignores the sign of zero.
+  def test_complex_branch_cuts_are_two_sided
+    BRANCH_CUT_CASES.each_slice(2) do |(m, above), (_, below)|
+      refute_equal complex_key(above.send(m)), complex_key(below.send(m)),
+                   "Complex##{m} gives the same answer on both sides of its cut"
+    end
+  end
+
+  def test_complex_specials_match_kernel
+    [Complex(0.0, 0.0), Complex(-0.0, 0.0), Complex(0.0, -0.0),
+     Complex(Float::INFINITY, 1.0), Complex(1.0, Float::INFINITY),
+     Complex(Float::NAN, 1.0)].each do |z|
+      COMPLEX_MATH.each { |m| assert_matches_kernel(m, z) }
+    end
+  end
+
+  # Integer / Rational components are accepted the way the cmplx128
+  # constructor accepts them.
+  def test_complex_with_exact_components
+    assert_matches_kernel(:exp, Complex(1, 2))
+    assert_matches_kernel(:log, Complex(Rational(1, 2), Rational(3, 4)))
+  end
+
+  # cmplx64 is float32 storage, so it only agrees to single precision;
+  # the scalar form stays double and is checked against it loosely.
+  def test_complex_agrees_with_cmplx64_to_single_precision
+    z = Complex(1.0, 2.0)
+    COMPLEX_MATH.each do |m|
+      ref = CArray.cmplx64(1) { z }.send(m)[0]
+      got = z.send(m)
+      assert_in_delta ref.real, got.real, 1e-6 * [ref.abs, 1.0].max, "real of #{m}"
+      assert_in_delta ref.imaginary, got.imaginary, 1e-6 * [ref.abs, 1.0].max, "imag of #{m}"
+    end
+  end
+
+  # log10 / expm1 / log1p have no complex form in C99, and a complex
+  # CArray raises CArray::DataTypeError for them.  The scalar side is
+  # left undefined so it fails in the same place.
+  def test_complex_omits_methods_the_kernel_lacks
+    z = Complex(1.0, 2.0)
+    %i[log10 expm1 log1p].each do |m|
+      assert_raise(NoMethodError, "Complex##{m} should not be defined") { z.send(m) }
+      assert_raise(CArray::DataTypeError, "complex CArray##{m} should raise") do
+        CArray.cmplx128(1) { z }.send(m)
+      end
+    end
+  end
+
+  # rad / deg / distance / signbit go through #to_f, which Complex
+  # does not have, so they are not defined on it either.
+  def test_complex_omits_to_f_based_helpers
+    z = Complex(1.0, 2.0)
+    %i[rad deg signbit].each do |m|
+      assert_raise(NoMethodError) { z.send(m) }
+    end
+    assert_raise(NoMethodError) { z.distance(Complex(0.0, 0.0)) }
+  end
+
+  # Adding Complex must not disturb the classes that were already
+  # refined -- in particular log10, which Float keeps and Complex lacks.
+  def test_float_integer_rational_unaffected_by_complex_refinement
+    assert_in_delta Math.log10(1000.0), 1000.0.log10, 1e-15
+    assert_in_delta 1.0, 1.0.square, 1e-15
+    assert_in_delta Math.sqrt(2.0), 2.0.sqrt, 1e-15
+    assert_in_delta Math.log(8), 8.log, 1e-15
+    assert_in_delta 0.5, Rational(1, 4).sqrt, 1e-15
+    assert_equal true, (-1.0).signbit
+  end
+
+  # Complex is a Numeric, so the Numeric refinement reaches it.  #eq /
+  # #ne work; the angle helpers raise RangeError from #to_f.  Both are
+  # pre-existing behaviour, pinned here so a later change is deliberate.
+  def test_complex_inherits_numeric_refinement
+    ca = CA_CMPLX128([Complex(1, 2), Complex(0, 0)])
+    assert_equal [true, false], Complex(1, 2).eq(ca).to_a
+    assert_equal true, Complex(1, 2).eq(Complex(1, 2))
+    %i[deg_360 deg_180 rad_2pi rad_pi].each do |m|
+      assert_raise(RangeError) { Complex(1.0, 2.0).send(m) }
+    end
   end
 
   # --- Numeric angle normalisation -------------------------------------
