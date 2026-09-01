@@ -176,8 +176,12 @@ end
 #
 # CArray.per_cell runs a per-cell computation over an index space -- the
 # surface an array algorithm is written on.  Nothing in the core calls it, so
-# the file loads only when user code does.  Installing carray-jit replaces the
-# method with one that compiles the block to C.
+# the file loads only when user code does.
+#
+# carray/methods/per_cell.rb holds the interpreted form and is the stub the
+# carray-jit gem replaces: `require "carray/jit"` overwrites the method with
+# one that compiles the block to C.  Loading order takes care of itself, since
+# carray/jit requires carray first.
 
 class CArray
   autoload_method "self.per_cell", "carray/methods/per_cell"

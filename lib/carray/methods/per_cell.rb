@@ -1,3 +1,30 @@
+# ----------------------------------------------------------------------------
+#
+#  carray/methods/per_cell.rb
+#
+#  The interpreted form of CArray.per_cell, and the stub the carray-jit gem
+#  replaces.
+#
+#  per_cell is where an array algorithm is written -- a recurrence, a stencil,
+#  a reduction -- and the two halves of it live in different places on
+#  purpose:
+#
+#    - this file runs the block as an ordinary Ruby loop, so that a program
+#      written against per_cell runs wherever CArray does;
+#    - `require "carray/jit"` overwrites the method with one that parses the
+#      block, translates it to C, compiles it and calls the result.
+#
+#  Both walk the extents they were handed, in the order they were handed.
+#  That is why the direction of a loop is written at the call site --
+#  `(high - 1).step(low, -1)` -- rather than worked out from the body: this
+#  file has no analysis to work it out with, and would otherwise run a
+#  downward kernel the wrong way round without saying so.
+#
+#  Autoloaded from carray/autoload_carray.rb, so nothing is paid for until a
+#  kernel is actually written.
+#
+# ----------------------------------------------------------------------------
+
 class CArray
 
   # @overload per_cell(*extents) { |i, j, ...| ... }
