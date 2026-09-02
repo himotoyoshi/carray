@@ -172,19 +172,21 @@ end
 # (2) Single-feature method files under carray/methods/
 # ============================================================================
 
-# ---- per_cell --------------------------------------------------------------
+# ---- per_cell, per_element -------------------------------------------------
 #
-# CArray.per_cell runs a per-cell computation over an index space -- the
-# surface an array algorithm is written on.  Nothing in the core calls it, so
-# the file loads only when user code does.
+# CArray.per_cell and CArray.per_element are the surface an array algorithm is
+# written on -- the first over an index space, so that a cell may reach its
+# neighbours, the second over the cells at once.  Nothing in the core calls
+# either, so the file loads only when user code does.
 #
-# carray/methods/per_cell.rb holds the interpreted form and is the stub the
-# carray-jit gem replaces: `require "carray/jit"` overwrites the method with
-# one that compiles the block to C.  Loading order takes care of itself, since
+# carray/jit_fallback.rb holds the interpreted forms and is the stub the
+# carray-jit gem replaces: `require "carray/jit"` overwrites both methods with
+# ones that compile the block to C.  Loading order takes care of itself, since
 # carray/jit requires carray first.
 
 class CArray
-  autoload_method "self.per_cell", "carray/methods/per_cell"
+  autoload_method "self.per_cell",    "carray/jit_fallback"
+  autoload_method "self.per_element", "carray/jit_fallback"
 end
 
 class CArray
