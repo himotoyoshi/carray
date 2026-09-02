@@ -349,34 +349,39 @@ class CAWindowIterator < CAIterator
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
-    # A masked source needs the mask carried through the fold, which an
-    # elementwise accumulation does not do: it propagates the mask instead of
-    # skipping the cell.
-    return nil if @source.has_mask?
+    return nil if neutral_value(op).nil?
 
-    folded =
-      if op == :mean
-        accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) /
-          window_cell_counts
-      else
-        accumulate_offsets(op)
-      end
+    folded = op == :mean ? fold_mean : accumulate_offsets(op)
+    folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
     folded = apply_min_count(folded, min_count)
-    # A `fill_value:` on the call replaces a result that came out undefined,
-    # which here can only have come from `min_count:`.
+    # A `fill_value:` on the call replaces a result that came out undefined.
     folded = folded.strip_mask(fill_value) if !fill_value.nil? && folded.has_mask?
     folded
   end
 
+  # The mean is the sum over the same offsets, divided by the number of cells
+  # each window folded.  A window that folded nothing divides by one here and
+  # is masked out by {#mask_empty_windows} after.
+  def fold_mean
+    counts = window_cell_counts
+    divisor = counts
+    if counts.is_a?(CArray) && counts.min.zero?
+      divisor = counts.copy
+      divisor[counts.eq(0)] = 1
+    end
+    accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) / divisor
+  end
+
   # Walks the window offsets, accumulating each shifted plane into the result.
-  def accumulate_offsets (op)
-    kernel = OFFSET_FOLD.fetch(op)
-    base = offset_fold_base(op)
+  def accumulate_offsets (op, base = nil, kernel = nil, data_type = nil)
+    base      ||= offset_fold_base(op)
+    kernel    ||= OFFSET_FOLD.fetch(op)
+    data_type ||= offset_fold_data_type(op)
     accumulator = nil
     offset_grid.each do |offset|
       plane = base[*@ndim.times.map { |k| offset[k]...(offset[k] + @shape[k]) }]
       if accumulator.nil?
-        accumulator = CArray.new(offset_fold_data_type(op), @shape)
+        accumulator = CArray.new(data_type, @shape)
         accumulator[] = plane
       else
         accumulator.send(kernel, plane)
@@ -385,9 +390,31 @@ class CAWindowIterator < CAIterator
     accumulator
   end
 
+  # These have no value to give for a window that folded nothing; the ones not
+  # listed answer with their identity, which the accumulation already holds.
+  EMPTY_WINDOW_IS_UNDEFINED = [:min, :max, :mean].freeze
+
+  def mask_empty_windows (folded)
+    return folded unless windows_can_be_empty?
+    folded[window_cell_counts.eq(0)] = UNDEF
+    folded
+  end
+
+  # Whether any window can come out holding nothing at all.  A masked source
+  # can leave one empty anywhere.  Without one, it takes a window that reaches
+  # past the array and does not cover its own anchor -- `windows(1..2)` at the
+  # far edge -- and the count on an axis falls away towards its ends, so the
+  # two ends are the only places to look.
+  def windows_can_be_empty?
+    return true if @source.has_mask?
+    return false if window_cell_counts.is_a?(Integer)
+    @ndim.times.any? do |k|
+      along = axis_cell_counts(k)
+      along[0].zero? || along[@shape[k] - 1].zero?
+    end
+  end
+
   # `min_count` asks for a result only where the window held that many cells.
-  # With an unmasked source that is the window's in-bounds cell count, which
-  # {#window_cell_counts} already knows.
   def apply_min_count (folded, min_count)
     return folded if min_count.nil?
     counts = window_cell_counts
@@ -399,14 +426,70 @@ class CAWindowIterator < CAIterator
     folded
   end
 
-  # How many cells each window holds.  Every boundary policy but `:skip` fills
-  # its margins with real values, so the count is the whole window and one
-  # Integer says it; `:skip` folds only what is in bounds, and that count is
-  # separable -- the number of in-bounds offsets on one axis depends on that
-  # axis alone -- so the array is the product of one small vector per axis.
+  # What stands in for a cell the fold must not see: a margin the boundary
+  # policy does not fill, or a masked cell of the source.  For sum, prod, all
+  # and any that is the operation's identity.  For min and max it is any value
+  # that cannot win, and the array's own extreme is one -- so no table of
+  # per-type limits is needed.  Nil means there is none to be had (a source
+  # masked everywhere), and the caller delegates instead.
+  def neutral_value (op)
+    @neutral_value ||= {}
+    return @neutral_value[op] if @neutral_value.key?(op)
+    @neutral_value[op] =
+      case op
+      when :sum, :mean then 0
+      when :prod       then 1
+      when :all        then true
+      when :any        then false
+      when :min        then source_extreme(:max)
+      when :max        then source_extreme(:min)
+      end
+  end
+
+  def source_extreme (op)
+    value = @source.send(op)
+    value.equal?(UNDEF) ? nil : value
+  end
+
+  # The buffer the offsets are read from: the source with its margins filled
+  # per the boundary policy, and with any masked cell replaced by the neutral
+  # value -- an accumulation propagates a mask where the fold would skip it.
+  def offset_fold_base (op)
+    @offset_fold_base ||= {}
+    @offset_fold_base[op] ||=
+      if @source.has_mask?
+        pad_for(@source.strip_mask(neutral_value(op)), neutral_value(op))
+      elsif @bounds == :skip
+        pad_source(@source, @lefts, @rights, :constant, neutral_value(op))
+      else
+        padded_entity
+      end
+  end
+
+  # Pads `values` the way this window's boundary policy says, with `outside`
+  # standing in for the margin where the policy does not fill one.
+  def pad_for (values, outside)
+    case @bounds
+    when :truncate then values
+    when :nearest  then pad_source(values, @lefts, @rights, :edge, nil)
+    when :constant then pad_source(values, @lefts, @rights, :constant, @fill_value)
+    else                pad_source(values, @lefts, @rights, :constant, outside)
+    end
+  end
+
+  # How many cells each window holds.  With an unmasked source this follows
+  # from the geometry: every boundary policy but `:skip` fills its margins with
+  # real values, so the count is the whole window and one Integer says it;
+  # `:skip` counts the in-bounds offsets, which is separable -- the count on
+  # one axis depends on that axis alone.  A masked source has to be counted for
+  # real, by accumulating over the same offsets.
   def window_cell_counts
-    @window_cell_counts ||=
-      if @bounds != :skip
+    return @window_cell_counts unless @window_cell_counts.nil?
+    @window_cell_counts =
+      if @source.has_mask?
+        accumulate_offsets(:sum, pad_for(@source.is_not_masked.int64, 0),
+                           :add!, CA_INT64)
+      elsif @bounds != :skip
         @widths.inject(:*)
       else
         counts = CArray.int64(*@shape)
@@ -417,27 +500,6 @@ class CAWindowIterator < CAIterator
           counts.mul!(axis_cell_counts(k).reshape(*shape))
         end
         counts
-      end
-  end
-
-  # What the margins hold for this operation.  `:skip` means "fold only the
-  # cells that are there", which for an accumulation is the same as folding a
-  # margin that cannot change the answer: the operation's identity for sum,
-  # prod, all and any, and -- because a centred window always contains the edge
-  # cell its margin replicates -- the edge value for min and max.  The other
-  # boundary policies already hold real values, so their pad is used as it is.
-  def offset_fold_base (op)
-    return padded_entity unless @bounds == :skip
-    identity = case op
-               when :sum, :any  then 0
-               when :prod, :all then 1
-               end
-    @offset_fold_base ||= {}
-    @offset_fold_base[identity] ||=
-      if identity.nil?                        # min / max
-        pad_source(@source, @lefts, @rights, :edge, nil)
-      else
-        pad_source(@source, @lefts, @rights, :constant, identity)
       end
   end
 
