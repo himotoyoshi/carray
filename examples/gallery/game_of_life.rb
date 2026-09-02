@@ -20,11 +20,14 @@ world = CArray.boolean(h, w)
 # ------------------------------------------------------------
 # One generation
 # ------------------------------------------------------------
-# `windows(-1..1, -1..1).sum` sums the 3x3 neighbourhood at every cell,
-# with zero-fill outside the grid (open-boundary Life). Subtracting the
-# cell itself gives the count of neighbours only.
+# `windows(-1..1, -1..1).accumulate` sums the 3x3 neighbourhood at every
+# cell, with zero-fill outside the grid (open-boundary Life). Subtracting
+# the cell itself gives the count of neighbours only. `accumulate` is the
+# sum kept in the cell's own type: a neighbourhood holds at most nine
+# cells, so the count fits in the uint8 the grid already is, where `sum`
+# would answer in float64 and move eight times the bytes.
 def step(g)
-  n = g.uint8.windows(-1..1, -1..1).sum - g.uint8
+  n = g.uint8.windows(-1..1, -1..1).accumulate - g.uint8
   #  A live cell with 2 or 3 neighbours survives; a dead cell with
   #  exactly 3 neighbours is born.
   ( g & ( n.eq(2) | n.eq(3) ) ) | ( ~g & n.eq(3) )
