@@ -476,17 +476,27 @@ class CAWindowIterator < CAIterator
   end
 
   # The buffer the offsets are read from: the source with its margins filled
-  # per the boundary policy, and with any masked cell replaced by the neutral
-  # value -- an accumulation propagates a mask where the fold would skip it.
+  # per the boundary policy, with any masked cell replaced by the neutral value
+  # -- an accumulation propagates a mask where the fold would skip it -- and in
+  # the type the result is accumulated in.  Adding across two types runs a
+  # different kernel from adding within one, and how much slower that is
+  # depends on the pair, the working set and the compiler; converting once is
+  # one behaviour everywhere.  It costs a buffer in the wider type, which for
+  # a `sum` over bytes is the one case where it does not pay.
   def offset_fold_base (op)
     @offset_fold_base ||= {}
     @offset_fold_base[op] ||=
-      if @source.has_mask?
-        pad_for(@source.strip_mask(neutral_value(op)), neutral_value(op))
-      elsif @bounds == :skip
-        pad_source(@source, @lefts, @rights, :constant, neutral_value(op))
-      else
-        padded_entity
+      begin
+        padded =
+          if @source.has_mask?
+            pad_for(@source.strip_mask(neutral_value(op)), neutral_value(op))
+          elsif @bounds == :skip
+            pad_source(@source, @lefts, @rights, :constant, neutral_value(op))
+          else
+            padded_entity
+          end
+        wanted = offset_fold_data_type(op)
+        padded.data_type == wanted ? padded : padded.to_type(wanted)
       end
   end
 
