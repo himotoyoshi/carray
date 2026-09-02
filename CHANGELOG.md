@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: `CArray.per_cell` and `CArray.per_element`, the surface an array
+  algorithm is written on -- an index space for the first, so that a cell may
+  reach its neighbours, an element-wise expression for the second. Both run the
+  block as ordinary Ruby here, so code written against them runs wherever CArray
+  does; installing the carray-jit gem replaces both with versions that compile
+  the block to C. The subset a block has to stay inside to compile is documented
+  with the methods, in `carray/jit_fallback.rb`.
+
 - Change: `group_by_category` reductions now answer in the data type the core
   reduction promotes the value to, instead of choosing one per reduction. `sum`
   on an integer value answers in float64 (`accumulate` is the spelling that
