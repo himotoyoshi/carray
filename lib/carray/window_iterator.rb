@@ -301,10 +301,17 @@ class CAWindowIterator < CAIterator
   # @overload sum(min_count: nil, fill_value: nil)
   #   Rolling sum, delegating to `sliding_view.sum(axis: window_axes)`.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @overload accumulate(min_count: nil, fill_value: nil)
+  #   Rolling sum in the source's own data type, wrapping at its width, as the
+  #   core `accumulate` does.  `sum` answers in the type the core promotes to
+  #   (float64 for integers), which for a window over bytes moves eight times
+  #   the bytes; this is the spelling for staying in the type when the window
+  #   cannot overflow it.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any, fused minmax, and the window-local position
   # min_index / max_index (index within the window axes).
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
@@ -358,7 +365,8 @@ class CAWindowIterator < CAIterator
   # The in-place elementwise kernel that accumulates one offset, per operation.
   # An operation absent here has no identity to accumulate from and always
   # takes the delegating path.
-  OFFSET_FOLD = { :sum  => :add!,  :prod => :mul!,
+  OFFSET_FOLD = { :sum  => :add!,  :accumulate => :add!,
+                  :prod => :mul!,
                   :min  => :pmin!, :max  => :pmax!,
                   :all  => :and!,  :any  => :or! }.freeze
 
@@ -461,7 +469,7 @@ class CAWindowIterator < CAIterator
     return @neutral_value[op] if @neutral_value.key?(op)
     @neutral_value[op] =
       case op
-      when :sum, :mean then 0
+      when :sum, :accumulate, :mean then 0
       when :prod       then 1
       when :all        then true
       when :any        then false
