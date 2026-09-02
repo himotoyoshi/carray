@@ -17,10 +17,10 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   nine-cell window as for a large one; for windows up to five cells wide on
   every axis it now accumulates one window offset at a time across the whole
   array instead. `min_count:` and `fill_value:` come along, since the count a
-  window folded is known without folding it. The answers are unchanged for
-  `min`, `max` and `prod`; `sum` and `mean` may differ in the last bits, as
-  reductions always may. A masked source, a wider window, or any other
-  reduction takes the previous path unchanged.
+  window folded is known without folding it, and so does a masked source
+  (1.3-4x). The answers are unchanged for `min`, `max` and `prod`; `sum` and
+  `mean` may differ in the last bits, as reductions always may. A wider window,
+  or any other reduction, takes the previous path unchanged.
 
 - Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
   of a negative zero real part only when the imaginary part was also negative;

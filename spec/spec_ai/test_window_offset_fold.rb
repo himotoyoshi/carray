@@ -94,16 +94,63 @@ class TestWindowOffsetFold < Test::Unit::TestCase
 
   # ---- and the delegating path is still taken where it must be ----------
 
-  def test_masked_source_still_delegates
+  # ---- a masked source ---------------------------------------------------
+
+  data("1-D" => [400], "2-D" => [30, 40], "3-D" => [10, 11, 12])
+  def test_agrees_with_a_masked_source (shape)
     srand(16)
-    source = CArray.float64(30, 30) { rand }
-    source[3, 4] = UNDEF
-    source[10, 10] = UNDEF
+    source = CArray.float64(*shape) { rand * 10 }
+    (source.elements / 20).times { source[rand(source.elements)] = UNDEF }
+    [1, 2].each do |half|
+      ranges = Array.new(shape.size) { -half..half }
+      [:skip, :nearest, :truncate].each do |bounds|
+        iterator = source.windows(*ranges, bounds: bounds)
+        [:sum, :prod, :min, :max, :mean].each { |op| assert_agrees(iterator, op) }
+        [1, 3].each do |wanted|
+          assert_agrees(iterator, :sum, min_count: wanted)
+          assert_agrees(iterator, :mean, min_count: wanted)
+        end
+      end
+    end
+  end
+
+  def test_a_window_that_folds_nothing
+    source = CArray.float64(7).seq(1)
+    source[2] = UNDEF
+    source[3] = UNDEF
+    source[4] = UNDEF                        # the window at 3 holds nothing
+    iterator = source.windows(-1..1)
+    # sum and prod answer with their identity; min, max and mean have none.
+    assert_equal 0.0, iterator.sum[3]
+    assert_equal 1.0, iterator.prod[3]
+    assert_equal UNDEF, iterator.min[3]
+    assert_equal UNDEF, iterator.max[3]
+    assert_equal UNDEF, iterator.mean[3]
+    [:sum, :prod, :min, :max, :mean].each { |op| assert_agrees(iterator, op) }
+  end
+
+  def test_a_masked_boolean_source
+    srand(17)
+    source = CArray.boolean(30, 40)
+    400.times { source[rand(30), rand(40)] = true }
+    100.times { source[rand(30), rand(40)] = UNDEF }
+    [:skip, :nearest].each do |bounds|
+      iterator = source.windows(-1..1, -1..1, bounds: bounds)
+      [:all, :any, :sum].each { |op| assert_agrees(iterator, op) }
+    end
+  end
+
+  def test_a_source_masked_everywhere_delegates_for_min_and_max
+    source = CArray.float64(10, 10)
+    source[] = UNDEF
     iterator = source.windows(-1..1, -1..1)
-    [:sum, :min, :max].each do |op|
+    [:min, :max].each do |op|
       assert_nil iterator.send(:fold_by_offset, op, nil, nil)
       assert_agrees(iterator, op)
     end
+    # sum still has an identity to answer with.
+    assert_not_nil iterator.send(:fold_by_offset, :sum, nil, nil)
+    assert_agrees(iterator, :sum)
   end
 
   def test_min_count_is_answered_from_the_same_cell_count
