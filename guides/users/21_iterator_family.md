@@ -75,7 +75,8 @@ reference members — `CASlabIterator` and `CACategoricalIterator` — both carr
 the others are held to the same list.
 
 ```
-sum  prod  mean  min  max  variance  stddev  all  any     # tier 1
+sum  accumulate  prod  mean  min  max                     # tier 1
+variance  stddev  all  any
 variancep  stddevp  minmax                                # tier 2
 median  percentile  quantile                              # tier 3 (order statistics)
 wsum  wmean                                               # weighted
@@ -89,7 +90,8 @@ new implementation with its own rules; it is exactly the reduction from
 at a time. So the piece reduction inherits, unchanged:
 
 - **the same result data type** — `sum` on an integer source promotes to
-  `float64` in the family exactly as the core `sum` does;
+  `float64` in the family exactly as the core `sum` does, and `accumulate` is
+  the same fold kept in the source's own type, wrapping at its width;
 - **the same mask handling** — masked cells are skipped, and if the piece
   carries a mask the reduction is mask-aware;
 - **the same empty / all-masked contract** — a piece with no contributing cells

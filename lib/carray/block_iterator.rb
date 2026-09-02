@@ -199,9 +199,15 @@ class CABlockIterator < CAIterator
 
   # @overload sum(min_count: nil, fill_value: nil)
   #   Per-tile sum.  @return [CArray] tile-grid shaped
+  # @overload accumulate(min_count: nil, fill_value: nil)
+  #   Per-tile sum kept in the source's own data type, wrapping at its width,
+  #   as the core `accumulate` does -- `sum` answers in the type the core
+  #   promotes to (float64 for integers), so a tile count over `uint8` cells
+  #   stays one byte wide instead of eight.
+  #   @return [CArray] tile-grid shaped
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any.
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
       kw = {}

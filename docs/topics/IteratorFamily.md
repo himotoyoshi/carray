@@ -27,7 +27,8 @@ Every family member provides these (the surface `CASlabIterator` and
 `CACategoricalIterator`, the two reference members, both have):
 
 ```
-sum  prod  mean  min  max  variance  stddev  all  any     # tier 1
+sum  accumulate  prod  mean  min  max                     # tier 1
+variance  stddev  all  any
 variancep  stddevp  minmax                                # tier 2
 wsum  wmean                                               # weighted
 median  percentile  quantile                             # tier 3 (order statistics)
@@ -39,7 +40,9 @@ Each reduction is the corresponding **core `CArray` reduction lifted to the
 piece**, so its data type, mask handling, empty / all-masked contract (identity for
 `sum` / `prod` / `count`, `UNDEF` for ratios and extrema), and ε-close numeric
 contract are the core's, unchanged — the iterator adds no new semantics. `all` /
-`any` require a boolean payload, as `CArray#all` / `#any` do.
+`any` require a boolean payload, as `CArray#all` / `#any` do. `accumulate` is
+`sum` kept in the source's own data type, wrapping at its width, where `sum`
+answers in the type the core promotes to (float64 for an integer source).
 
 `each` / `reduce` are the escape hatch for a statistic not in the named list:
 `each { |piece| … }` yields each piece (an `Enumerator` with no block);

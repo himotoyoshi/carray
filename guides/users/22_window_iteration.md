@@ -68,7 +68,7 @@ now evaluated per window:
 
 | family | methods |
 |---|---|
-| arithmetic | `sum` · `prod` · `mean` |
+| arithmetic | `sum` · `accumulate` · `prod` · `mean` |
 | extrema | `min` · `max` · `minmax` |
 | spread | `variance` · `stddev` (sample) · `variancep` · `stddevp` (population) |
 | boolean | `all` · `any` |
