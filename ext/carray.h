@@ -1056,18 +1056,34 @@ extern VALUE rb_cCArrayObject;
 
 #ifdef HAVE_COMPLEX_H
 
+/* CMPLX(re, im) builds a complex from its two parts without going through
+   "re + I * im".  That expression evaluates I * im first, so an im of +0.0
+   yields (0.0 + 0.0i) and adding it to a re of -0.0 gives +0.0: the sign of
+   a negative zero real part is lost.  The sign matters -- branch cuts are
+   selected by the sign of a zero (log(-1+0i) = +pi*i, log(-1-0i) = -pi*i).
+   CMPLX is C11; provide it when the toolchain predates that. */
+#ifndef CMPLX
+#  if defined(__clang__) || (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 7)))
+#    define CMPLX(re, im) __builtin_complex((double)(re), (double)(im))
+#  else
+#    define CMPLX(re, im) \
+       (((union { double _parts[2]; double complex _value; }) \
+           { { (double)(re), (double)(im) } })._value)
+#  endif
+#endif
+
 static inline double complex
 rb_carray_num2cmplx (VALUE num)
 {
   if ( RB_TYPE_P(num, T_COMPLEX) ) {
-    return NUM2DBL(rb_complex_real(num)) + I * NUM2DBL(rb_complex_imag(num));
+    return CMPLX(NUM2DBL(rb_complex_real(num)), NUM2DBL(rb_complex_imag(num)));
   }
   if ( RB_FLOAT_TYPE_P(num) || RB_INTEGER_TYPE_P(num) ) {
     return (double complex) NUM2DBL(num);
   }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);
-    return NUM2DBL(rb_complex_real(c)) + I * NUM2DBL(rb_complex_imag(c));
+    return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
   }
   if ( rb_respond_to(num, rb_intern("to_f")) ) {
     return (double complex) NUM2DBL(rb_funcall(num, rb_intern("to_f"), 0));

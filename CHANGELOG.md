@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
+  of a negative zero real part only when the imaginary part was also negative;
+  `Complex(-0.0, 0.0)` came back as `0.0+0.0i`. The sign of a zero selects the
+  side of a branch cut (`log(-1+0i)` is `+pi*i`, `log(-1-0i)` is `-pi*i`), so a
+  value stored this way could be carried to the wrong branch. All four sign
+  combinations now round-trip, through element assignment and through
+  `to_type`.
+
 - New: `CArray::CoreExtensions` adds postfix math on `Complex`, so an
   expression written for a complex array still reads for a single cell taken
   out of it: `a[0].tanh` now works alongside `a.tanh`. Covers the fifteen
