@@ -27,8 +27,11 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   array instead. `min_count:` and `fill_value:` come along, since the count a
   window folded is known without folding it, and so does a masked source
   (1.3-4x). The answers are unchanged for `min`, `max` and `prod`; `sum` and
-  `mean` may differ in the last bits, as reductions always may. A wider window,
-  or any other reduction, takes the previous path unchanged.
+  `mean` may differ in the last bits, as reductions always may. It holds one
+  more buffer while it works -- the window's own, in the type the result is
+  accumulated in -- which for a `sum` over a large byte array is more than the
+  previous path held. A wider window, or any other reduction, takes the
+  previous path unchanged.
 
 - Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
   of a negative zero real part only when the imaginary part was also negative;

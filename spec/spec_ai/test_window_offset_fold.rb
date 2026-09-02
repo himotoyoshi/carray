@@ -202,6 +202,21 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     end
   end
 
+  def test_the_fold_reads_one_type_whatever_the_source_holds
+    # Adding across two types runs a different kernel from adding within one,
+    # and how much slower that is depends on the pair and the machine.  The
+    # buffer is converted once instead, so every source behaves the same.
+    [:uint8, :int32, :float32, :float64, :boolean].each do |type|
+      source = CArray.new(type, [20, 20])
+      iterator = source.windows(-1..1, -1..1)
+      [:sum, :min, :max].each do |op|
+        base = iterator.send(:offset_fold_base, op)
+        assert_equal iterator.send(:offset_fold_data_type, op), base.data_type,
+                     "#{type} #{op}"
+      end
+    end
+  end
+
   # ---- the answers themselves -------------------------------------------
 
   def test_rolling_sum_by_hand
