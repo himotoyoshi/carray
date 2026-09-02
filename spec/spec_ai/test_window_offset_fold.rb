@@ -232,6 +232,45 @@ class TestWindowOffsetFold < Test::Unit::TestCase
                  source.windows(-1..1).max.to_a
   end
 
+  # ---- accumulate: the same fold, kept in the source's type --------------
+
+  def test_accumulate_keeps_the_source_type_where_sum_promotes
+    source = CArray.uint8(6).seq(1)
+    assert_equal CA_UINT8,   source.windows(-1..1).accumulate.data_type
+    assert_equal CA_FLOAT64, source.windows(-1..1).sum.data_type
+    assert_equal source.windows(-1..1).sum.to_a,
+                 source.windows(-1..1).accumulate.to_a.map(&:to_f)
+  end
+
+  def test_accumulate_wraps_at_the_type_width_as_the_core_does
+    # 3 x 200 = 600, and 600 - 2 * 256 = 88.  The ends fold two cells: 400 - 256.
+    source = CArray.uint8(5) { 200 }
+    assert_equal [144, 88, 88, 88, 144], source.windows(-1..1).accumulate.to_a
+  end
+
+  def test_accumulate_by_offset_answers_as_the_delegating_fold_does
+    # Windows wider than the fold takes delegate to the core, so the two paths
+    # meet on every source shape the fast one accepts.
+    [:uint8, :int32, :float64].each do |type|
+      source = CArray.new(type, [8, 9]).seq!(0, 1) % 4
+      masked = source.copy
+      masked[0, 0] = UNDEF
+      masked[3, 4] = UNDEF
+      [source, masked].each do |array|
+        [:skip, :nearest, :truncate].each do |bounds|
+          iterator = array.windows(-1..1, -1..1, :bounds => bounds)
+          by_offset = iterator.accumulate
+          delegated = iterator.send(:sliding_view)
+                              .accumulate(:axis => iterator.instance_variable_get(:@window_axes))
+          assert_equal delegated.data_type, by_offset.data_type, "#{type} #{bounds}"
+          assert_equal delegated.to_a, by_offset.to_a, "#{type} #{bounds}"
+          assert_equal delegated.is_masked.to_a, by_offset.is_masked.to_a,
+                       "#{type} #{bounds} mask"
+        end
+      end
+    end
+  end
+
   def test_a_masked_result_is_never_produced_from_an_unmasked_source
     source = CArray.float64(10, 10).seq!
     assert_equal 0, source.windows(-1..1, -1..1).sum.count_masked
