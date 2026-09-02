@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: a rolling window that does not cover the cell it is centred on --
+  `windows(1..2)`, the two cells after this one -- was read as if it started at
+  the array's edge, so every answer came out shifted by the range's start, and
+  `bounds: :truncate` produced anchors whose window did not fit. `windows(1..2)`
+  on `[1..8]` now sums to `[5, 7, 9, 11, 13, 15, 8, 0]`, the last anchor having
+  nothing after it. A window that covers its anchor, which is every centred one,
+  is unaffected.
+
 - Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` over a
   small window is now 2-5x faster. `windows(-1..1, -1..1).sum` folded each
   window separately, once per output cell, and paid the same setup for a

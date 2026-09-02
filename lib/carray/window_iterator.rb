@@ -116,12 +116,21 @@ class CAWindowIterator < CAIterator
     # Trailing window axes of the sliding_windows view: [ndim .. 2*ndim-1].
     @window_axes = (@sndim...(2 * @sndim)).to_a
 
-    # Output iteration space (reference-shaped, except :truncate which shrinks).
+    # Output iteration space (reference-shaped, except :truncate, which keeps
+    # only the anchors whose window lies wholly inside the source), and where
+    # each axis's first window starts in the buffer the windows are read from.
+    # A window that does not cover its own anchor -- `windows(1..2)`, the two
+    # cells after this one -- starts further along than the margin allows for,
+    # which is what @origins carries.
     rshape = @source.shape
     if @bounds == :truncate
-      @shape = @sndim.times.map { |i| rshape[i] - @widths[i] + 1 }
+      first  = @ranges.map { |r| [0, -r.begin].max }
+      last   = @sndim.times.map { |i| [rshape[i] - 1, rshape[i] - 1 - @ranges[i].end].min }
+      @shape = @sndim.times.map { |i| [last[i] - first[i] + 1, 0].max }
+      @origins = @ranges.map { |r| [r.begin, 0].max }
     else
       @shape = rshape.dup
+      @origins = @sndim.times.map { |i| @lefts[i] + @ranges[i].begin }
     end
     @ndim = @shape.size
     self
@@ -149,10 +158,22 @@ class CAWindowIterator < CAIterator
   #   the padded entity.
   #   @return [CArray]
   def sliding_view
-    @sliding_view ||= padded_entity.sliding_windows(*@widths)
+    @sliding_view ||= anchored_buffer.sliding_windows(*@widths)
   end
 
   private
+
+  # The stretch of the padded buffer the windows are taken from: it begins at
+  # the first window and holds one window per anchor.  For a window that covers
+  # its own anchor and a boundary policy that pads, that is the whole buffer.
+  def anchored_buffer
+    buffer = padded_entity
+    wanted = @ndim.times.map { |k| @origins[k]...(@origins[k] + @shape[k] + @widths[k] - 1) }
+    return buffer if wanted.each_with_index.all? { |range, k|
+      range.begin.zero? && range.end == buffer.dim[k]
+    }
+    buffer[*wanted]
+  end
 
   # Build the padded entity (or, for :truncate, the source itself).  Memoised.
   def padded_entity
@@ -379,7 +400,10 @@ class CAWindowIterator < CAIterator
     data_type ||= offset_fold_data_type(op)
     accumulator = nil
     offset_grid.each do |offset|
-      plane = base[*@ndim.times.map { |k| offset[k]...(offset[k] + @shape[k]) }]
+      plane = base[*@ndim.times.map { |k|
+        start = @origins[k] + offset[k]
+        start...(start + @shape[k])
+      }]
       if accumulator.nil?
         accumulator = CArray.new(data_type, @shape)
         accumulator[] = plane
@@ -533,7 +557,7 @@ class CAWindowIterator < CAIterator
     (@sndim - 1).downto(0) { |i| wstride[i] = acc; acc *= @widths[i] }
     sstride = Array.new(@sndim); acc = 1
     (@sndim - 1).downto(0) { |i| sstride[i] = acc; acc *= n[i] }
-    lo = (@bounds == :truncate) ? Array.new(@sndim, 0) : @ranges.map(&:begin)
+    lo = (@bounds == :truncate) ? @origins : @ranges.map(&:begin)
     addr = CArray.int64(*@shape); addr[] = 0
     oob  = CArray.boolean(*@shape); oob[] = 0
     (0...@sndim).each do |i|
