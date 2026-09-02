@@ -266,6 +266,8 @@ class CAWindowIterator < CAIterator
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
+        folded = fold_by_offset(:#{op}, min_count)
+        return folded unless folded.nil?
         kw = {}
         kw[:min_count]  = min_count  unless min_count.nil?
         kw[:fill_value] = fill_value unless fill_value.nil?
@@ -291,6 +293,99 @@ class CAWindowIterator < CAIterator
   def max_addr; window_winner_addr(:max_index); end
 
   private
+
+  # ---- folding by offset instead of by anchor ---------------------------
+  #
+  # Delegating to `sliding_view.<op>(axis: window_axes)` folds the window axes,
+  # which are the innermost ones, so the core pays its per-fiber setup once per
+  # output cell -- about 10 ns, whatever the window holds.  For a 3x3 window
+  # that setup is nine tenths of the time.
+  #
+  # The same fold can be run the other way round: walk the window offsets, and
+  # for each one add the whole shifted plane into an accumulator.  Then the
+  # setup is paid once per offset rather than once per output cell, and every
+  # pass is a straight walk over contiguous memory.  It costs one pass per
+  # offset, so it only pays while the window is small; the crossover moves with
+  # rank and data type, but stays above width 5 on every axis in every
+  # combination measured (see devel/PROPOSAL_WINDOW_OFFSET_ACCUMULATION.md).
+  #
+  # What is decided here is the order of the fold and which pad it reads; the
+  # arithmetic is the core's elementwise kernel, and the result data type is
+  # the core's answer for the same reduction (asked below, so it cannot drift).
+
+  # The in-place elementwise kernel that accumulates one offset, per operation.
+  # An operation absent here has no identity to accumulate from and always
+  # takes the delegating path.
+  OFFSET_FOLD = { :sum  => :add!,  :prod => :mul!,
+                  :min  => :pmin!, :max  => :pmax!,
+                  :all  => :and!,  :any  => :or! }.freeze
+
+  # Widest window this path takes on any one axis.
+  OFFSET_FOLD_MAX_WIDTH = 5
+
+  # Runs the fold by offset, or returns nil when this window is not one it can
+  # answer for -- in which case the caller delegates as before.
+  def fold_by_offset (op, min_count)
+    kernel = OFFSET_FOLD[op]
+    return nil if kernel.nil?
+    return nil unless min_count.nil?
+    return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
+    # A masked source needs the mask carried through the fold, which an
+    # elementwise accumulation does not do: it propagates the mask instead of
+    # skipping the cell.
+    return nil if @source.has_mask?
+
+    base = offset_fold_base(op)
+    accumulator = nil
+    offset_grid.each do |offset|
+      plane = base[*@ndim.times.map { |k| offset[k]...(offset[k] + @shape[k]) }]
+      if accumulator.nil?
+        accumulator = CArray.new(offset_fold_data_type(op), @shape)
+        accumulator[] = plane
+      else
+        accumulator.send(kernel, plane)
+      end
+    end
+    accumulator
+  end
+
+  # What the margins hold for this operation.  `:skip` means "fold only the
+  # cells that are there", which for an accumulation is the same as folding a
+  # margin that cannot change the answer: the operation's identity for sum,
+  # prod, all and any, and -- because a centred window always contains the edge
+  # cell its margin replicates -- the edge value for min and max.  The other
+  # boundary policies already hold real values, so their pad is used as it is.
+  def offset_fold_base (op)
+    return padded_entity unless @bounds == :skip
+    identity = case op
+               when :sum, :any  then 0
+               when :prod, :all then 1
+               end
+    @offset_fold_base ||= {}
+    @offset_fold_base[identity] ||=
+      if identity.nil?                        # min / max
+        pad_source(@source, @lefts, @rights, :edge, nil)
+      else
+        pad_source(@source, @lefts, @rights, :constant, identity)
+      end
+  end
+
+  # The data type the delegating path would have produced, asked of the core
+  # itself so the two paths cannot disagree.
+  def offset_fold_data_type (op)
+    @offset_fold_data_type ||= {}
+    @offset_fold_data_type[op] ||=
+      CArray.new(@source.data_type, [1, 1]).send(op, axis: [1]).data_type
+  end
+
+  # Every offset within the window, as a list of per-axis positions into the
+  # padded buffer.
+  def offset_grid
+    @offset_grid ||=
+      @widths.map { |width| (0...width).to_a }
+             .inject { |grid, axis| grid.product(axis).map { |pair| Array(pair).flatten } }
+             .map { |offset| Array(offset) }
+  end
 
   # Source address of the per-anchor winner. The window-local flat index
   # (min_index / max_index) decomposes into per-axis window coordinates; the

@@ -11,6 +11,15 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: a rolling `sum`, `prod`, `min`, `max`, `all` or `any` over a small
+  window is now 3-5x faster. `windows(-1..1, -1..1).sum` folded each window
+  separately, once per output cell, and paid the same setup for a nine-cell
+  window as for a large one; for windows up to five cells wide on every axis it
+  now accumulates one window offset at a time across the whole array instead.
+  The answers are unchanged for `min`, `max` and `prod`; `sum` may differ in
+  the last bits, as reductions always may. A masked source, a `min_count:`, a
+  wider window, or any other reduction takes the previous path unchanged.
+
 - Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
   of a negative zero real part only when the imaginary part was also negative;
   `Complex(-0.0, 0.0)` came back as `0.0+0.0i`. The sign of a zero selects the
