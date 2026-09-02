@@ -237,6 +237,27 @@ class CAWindowIterator < CAIterator
     end
   end
 
+  # How many of one axis's window offsets fall inside the source, per anchor.
+  # A window away from the edges holds all of them, so the vector is the window
+  # width everywhere but the two ends, and only the ends -- at most one window
+  # width of cells each -- are counted out.
+  def axis_cell_counts (k)
+    length = @shape[k]
+    first  = @ranges[k].begin
+    last   = @ranges[k].end
+    counts = CArray.int64(length)
+    counts[] = @widths[k]
+    truncated_at_the_start = [[-first, 0].max, length].min
+    truncated_at_the_end   = [[length - last, 0].max, 0].max
+    indices = (0...truncated_at_the_start).to_a | (truncated_at_the_end...length).to_a
+    indices.each do |i|
+      low  = [first, -i].max
+      high = [last, length - 1 - i].min
+      counts[i] = [high - low + 1, 0].max
+    end
+    counts
+  end
+
   # An index list of length `nd` that is `nil` (full range) on every axis
   # except `ax`, which is pinned to `k`.
   def axis_selector (nd, ax, k)
@@ -266,7 +287,7 @@ class CAWindowIterator < CAIterator
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
-        folded = fold_by_offset(:#{op}, min_count)
+        folded = fold_by_offset(:#{op}, min_count, fill_value)
         return folded unless folded.nil?
         kw = {}
         kw[:min_count]  = min_count  unless min_count.nil?
@@ -325,16 +346,31 @@ class CAWindowIterator < CAIterator
 
   # Runs the fold by offset, or returns nil when this window is not one it can
   # answer for -- in which case the caller delegates as before.
-  def fold_by_offset (op, min_count)
-    kernel = OFFSET_FOLD[op]
-    return nil if kernel.nil?
-    return nil unless min_count.nil?
+  def fold_by_offset (op, min_count, fill_value = nil)
+    return nil unless op == :mean || OFFSET_FOLD.key?(op)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
     # A masked source needs the mask carried through the fold, which an
     # elementwise accumulation does not do: it propagates the mask instead of
     # skipping the cell.
     return nil if @source.has_mask?
 
+    folded =
+      if op == :mean
+        accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) /
+          window_cell_counts
+      else
+        accumulate_offsets(op)
+      end
+    folded = apply_min_count(folded, min_count)
+    # A `fill_value:` on the call replaces a result that came out undefined,
+    # which here can only have come from `min_count:`.
+    folded = folded.strip_mask(fill_value) if !fill_value.nil? && folded.has_mask?
+    folded
+  end
+
+  # Walks the window offsets, accumulating each shifted plane into the result.
+  def accumulate_offsets (op)
+    kernel = OFFSET_FOLD.fetch(op)
     base = offset_fold_base(op)
     accumulator = nil
     offset_grid.each do |offset|
@@ -347,6 +383,41 @@ class CAWindowIterator < CAIterator
       end
     end
     accumulator
+  end
+
+  # `min_count` asks for a result only where the window held that many cells.
+  # With an unmasked source that is the window's in-bounds cell count, which
+  # {#window_cell_counts} already knows.
+  def apply_min_count (folded, min_count)
+    return folded if min_count.nil?
+    counts = window_cell_counts
+    if counts.is_a?(Integer)
+      folded[] = UNDEF if counts < min_count
+    else
+      folded[counts.lt(min_count)] = UNDEF
+    end
+    folded
+  end
+
+  # How many cells each window holds.  Every boundary policy but `:skip` fills
+  # its margins with real values, so the count is the whole window and one
+  # Integer says it; `:skip` folds only what is in bounds, and that count is
+  # separable -- the number of in-bounds offsets on one axis depends on that
+  # axis alone -- so the array is the product of one small vector per axis.
+  def window_cell_counts
+    @window_cell_counts ||=
+      if @bounds != :skip
+        @widths.inject(:*)
+      else
+        counts = CArray.int64(*@shape)
+        counts[] = 1
+        @ndim.times do |k|
+          shape = Array.new(@ndim, 1)
+          shape[k] = @shape[k]
+          counts.mul!(axis_cell_counts(k).reshape(*shape))
+        end
+        counts
+      end
   end
 
   # What the margins hold for this operation.  `:skip` means "fold only the

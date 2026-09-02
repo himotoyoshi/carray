@@ -25,14 +25,18 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     want = delegated(iterator, op, **kw)
     assert_equal want.data_type, got.data_type
     assert_equal want.dim, got.dim
-    if want.float?
-      scale = want.abs.max
-      tolerance = (scale.zero? ? 1e-300 : scale * 1e-12)
-      assert_operator (got - want).abs.max, :<=, tolerance
-    else
-      assert_equal want.to_a, got.to_a
-    end
     assert_equal want.count_masked, got.count_masked
+    assert_equal want.is_masked.to_a, got.is_masked.to_a if want.has_mask?
+    # Compare the cells that have a value; a masked one carries no number.
+    got_values  = got.has_mask?  ? got.strip_mask(0)  : got
+    want_values = want.has_mask? ? want.strip_mask(0) : want
+    if want.float?
+      scale = want_values.abs.max
+      tolerance = (scale.zero? ? 1e-300 : scale * 1e-12)
+      assert_operator (got_values - want_values).abs.max, :<=, tolerance
+    else
+      assert_equal want_values.to_a, got_values.to_a
+    end
   end
 
   # ---- the two paths agree ----------------------------------------------
@@ -45,7 +49,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
       ranges = Array.new(shape.size) { -half..half }
       [:skip, :nearest, :truncate].each do |bounds|
         iterator = source.windows(*ranges, bounds: bounds)
-        [:sum, :prod, :min, :max].each { |op| assert_agrees(iterator, op) }
+        [:sum, :prod, :min, :max, :mean].each { |op| assert_agrees(iterator, op) }
       end
     end
   end
@@ -56,7 +60,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.send(type, 40, 50)
     source[] = CArray.float64(40, 50) { rand * 20 }.send(type)
     iterator = source.windows(-1..1, -1..1)
-    [:sum, :prod, :min, :max].each { |op| assert_agrees(iterator, op) }
+    [:sum, :prod, :min, :max, :mean].each { |op| assert_agrees(iterator, op) }
   end
 
   def test_agrees_for_boolean
@@ -97,31 +101,57 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source[10, 10] = UNDEF
     iterator = source.windows(-1..1, -1..1)
     [:sum, :min, :max].each do |op|
-      assert_nil iterator.send(:fold_by_offset, op, nil)
+      assert_nil iterator.send(:fold_by_offset, op, nil, nil)
       assert_agrees(iterator, op)
     end
   end
 
-  def test_min_count_still_delegates
+  def test_min_count_is_answered_from_the_same_cell_count
     source = CArray.float64(30, 30).seq!
-    iterator = source.windows(-1..1, -1..1)
-    assert_nil iterator.send(:fold_by_offset, :sum, 9)
-    assert_agrees(iterator, :sum, min_count: 9)
+    [:skip, :nearest].each do |bounds|
+      iterator = source.windows(-1..1, -1..1, bounds: bounds)
+      assert_not_nil iterator.send(:fold_by_offset, :sum, 9, nil)
+      [1, 4, 9, 10].each do |wanted|
+        [:sum, :mean, :min].each { |op| assert_agrees(iterator, op, min_count: wanted) }
+      end
+    end
+  end
+
+  def test_a_fill_value_replaces_what_min_count_left_undefined
+    source = CArray.float64(6).seq(1)
+    assert_equal [0.0, 6.0, 9.0, 12.0, 15.0, 0.0],
+                 source.windows(-1..1).sum(min_count: 3, fill_value: 0.0).to_a
+    iterator = source.windows(-1..1)
+    assert_agrees(iterator, :mean, min_count: 3, fill_value: -1.0)
+    assert_agrees(iterator, :sum,  min_count: 2, fill_value: 0.0)
+  end
+
+  def test_a_partly_covered_window_is_undefined_under_min_count
+    source = CArray.float64(6).seq(1)
+    # :skip folds 2 cells at either end, 3 in the middle.
+    assert_equal [UNDEF, 6.0, 9.0, 12.0, 15.0, UNDEF],
+                 source.windows(-1..1).sum(min_count: 3).to_a
+    # :nearest fills the margins, so every window holds the whole three.
+    assert_equal [4.0, 6.0, 9.0, 12.0, 15.0, 17.0],
+                 source.windows(-1..1, bounds: :nearest).sum(min_count: 3).to_a
+    assert_equal [UNDEF] * 6,
+                 source.windows(-1..1, bounds: :nearest).sum(min_count: 4).to_a
   end
 
   def test_a_wide_window_still_delegates
     source = CArray.float64(40, 40).seq!
-    assert_nil source.windows(-3..3, -3..3).send(:fold_by_offset, :sum, nil)
-    assert_nil source.windows(-1..1, -3..3).send(:fold_by_offset, :sum, nil)
-    assert_not_nil source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil)
+    assert_nil source.windows(-3..3, -3..3).send(:fold_by_offset, :sum, nil, nil)
+    assert_nil source.windows(-1..1, -3..3).send(:fold_by_offset, :sum, nil, nil)
+    assert_not_nil source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil, nil)
     assert_agrees(source.windows(-3..3, -3..3), :sum)
   end
 
   def test_operations_without_an_identity_still_delegate
     source = CArray.float64(20, 20).seq!
     iterator = source.windows(-1..1, -1..1)
-    [:mean, :variance, :stddev, :minmax, :min_index, :max_index].each do |op|
-      assert_nil iterator.send(:fold_by_offset, op, nil)
+    [:variance, :stddev, :variancep, :stddevp,
+     :minmax, :min_index, :max_index].each do |op|
+      assert_nil iterator.send(:fold_by_offset, op, nil, nil)
     end
   end
 
@@ -131,6 +161,9 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.float64(6).seq(1)          # [1..6]
     assert_equal [3.0, 6.0, 9.0, 12.0, 15.0, 11.0],
                  source.windows(-1..1).sum.to_a
+    # The ends fold two cells, so their mean divides by two, not three.
+    assert_equal [1.5, 2.0, 3.0, 4.0, 5.0, 5.5],
+                 source.windows(-1..1).mean.to_a
     assert_equal [1.0, 1.0, 2.0, 3.0, 4.0, 5.0],
                  source.windows(-1..1).min.to_a
     assert_equal [2.0, 3.0, 4.0, 5.0, 6.0, 6.0],
