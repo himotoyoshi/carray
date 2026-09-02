@@ -11,6 +11,16 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: `group_by_category` reductions now answer in the data type the core
+  reduction promotes the value to, instead of choosing one per reduction. `sum`
+  on an integer value answers in float64 (`accumulate` is the spelling that
+  stays in the value's type), and the rest follow the core for a boolean,
+  complex or object value -- among them `mean`, `variance` and `median` on an
+  object value, which stay exact instead of passing through float64, so a
+  payload of `Rational` keeps its denominators. This also fixes three payloads
+  that could not be reduced at all: `sum` on a boolean value, `prod` on a
+  complex one and `mean` on a complex one all raised.
+
 - New: every iterator now answers `accumulate` beside `sum` -- the same
   per-piece fold, kept in the source's own data type and wrapping at its width,
   where `sum` answers in the type the core promotes to (float64 for an integer

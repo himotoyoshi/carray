@@ -21,7 +21,8 @@ grp = values.group_by_category(cat)
 
 grp.labels        #  => ["b", "a", "c"]
 grp.elements      #  => [ 3, 2, 1 ]              cells per category
-grp.sum           #  => [ 100, 70, 40 ]          value data type (int32)
+grp.sum           #  => [ 100.0, 70.0, 40.0 ]    float64, as CArray#sum
+grp.accumulate    #  => [ 100, 70, 40 ]          int32, the fold kept in type
 grp.mean          #  => [ 33.333…, 35.0, 40.0 ]  float64
 grp.median        #  => [ 30.0, 35.0, 40.0 ]
 ```
@@ -32,6 +33,10 @@ whose category is `labels[i]`. The category vocabulary is `#labels`.
 
 ## The reductions
 
+Each one is the core `CArray` reduction lifted to the category, so the result
+data type is whatever `CArray#<op>` promotes the value to — asked of the core
+itself, not restated here.
+
 | method | result data type | notes |
 |---|---|---|
 | `elements` | int64 | cells classified into the category (includes value-masked cells); alias `group_sizes` |
@@ -39,18 +44,18 @@ whose category is `labels[i]`. The category vocabulary is `#labels`.
 | `count_not_masked` | int64 | present (non-masked) cells — the denominator the value reductions divide by |
 | `count_masked` | int64 | masked cells in the category; `count(UNDEF)` is the same |
 | `count(v)` | int64 | cells whose value equals `v` |
-| `sum` | value data type | folded in float64 and cast back, so a wide integer payload can lose its low bits — see `accumulate` |
+| `sum` | as `CArray#sum` | float64 for an integer value, cmplx128 for a complex one, object for an object one — see `accumulate` to stay in the value's type |
 | `accumulate` | value data type | the same fold kept in the value's own type, wrapping at its width (exact for a wide integer payload) |
 | `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight CArray in the source order (same elements as the value) |
-| `prod` | float64 | empty / all-masked category is `1.0` (identity) |
-| `min` / `max` | value data type | |
-| `mean` | float64 | |
-| `variance` / `stddev` | float64 | sample (ddof = 1) |
-| `median` | float64 | = `percentile(50)` |
-| `percentile(p)` | float64 | `p` in `0..100`; for a fraction `q` use `percentile(q * 100)` |
+| `prod` | as `CArray#prod` | float64 for an integer value; empty / all-masked category is the identity `1` |
+| `min` / `max` | as `CArray#min` / `#max` | the value's own type (a boolean value widens to uint64, as in the core) |
+| `mean` | as `CArray#mean` | float64 for an integer value, exact for an object one |
+| `variance` / `stddev` | as `CArray#variance` / `#stddev` | sample (ddof = 1) |
+| `median` | as `CArray#median` | = `percentile(50)` |
+| `percentile(p)` | as `CArray#percentile` | `p` in `0..100`; for a fraction `q` use `percentile(q * 100)` |
 | `quantile` | `Array<CArray>` | five-number summary `[min, Q1, median, Q3, max]` (no argument) |
 | `minmax` | `Array<CArray>` | `[min, max]` pair |
-| `variancep` / `stddevp` | float64 | population (ddof = 0) |
+| `variancep` / `stddevp` | as `CArray#variancep` / `#stddevp` | population (ddof = 0) |
 | `min_index` / `max_index` | int64 | group-local index (position within the category's members) |
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max (indexes back into the raveled source) |
 | `sort_addr` | int64 | length-`nvalid` flat source addresses that sort each group, group-major (see below) |

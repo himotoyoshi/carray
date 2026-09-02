@@ -507,7 +507,8 @@ grp = values.group_by_category(cat)
 
 grp.labels     #  => ["b", "a", "c"]
 grp.elements   #  => [ 3, 2, 1 ]                       cells per category
-grp.sum        #  => [ 100, 70, 40 ]                   value data type (int32)
+grp.sum        #  => [ 100.0, 70.0, 40.0 ]             float64, as CArray#sum
+grp.accumulate #  => [ 100, 70, 40 ]                   int32, the fold kept in type
 grp.mean       #  => [ 33.333…, 35.0, 40.0 ]           float64
 grp.median     #  => [ 30.0, 35.0, 40.0 ]
 ```
@@ -1006,7 +1007,9 @@ core [empty-reduction contract](04_reduction_and_statistics.md) — identity for
 ## Reference: `CACategoricalIterator` (`group_by_category`)
 
 Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless
-noted. `k` is `cat.labels.size`.
+noted. `k` is `cat.labels.size`. Each one is the core reduction lifted to the
+category, so its result data type is the one `CArray#<op>` promotes the value
+to.
 
 | method | result | notes |
 |---|---|---|
@@ -1016,16 +1019,16 @@ noted. `k` is `cat.labels.size`.
 | `count_not_masked` | int64 | present cells — the reductions' denominator |
 | `count_masked` | int64 | masked cells; `count(UNDEF)` is the same |
 | `count(v)` | int64 | cells whose value equals `v` |
-| `sum` | value data type | empty / all-masked = `0` (identity); folded in float64 and cast back |
+| `sum` | as `CArray#sum` | float64 for an integer value; empty / all-masked = `0` (identity) |
 | `accumulate` | value data type | the same fold kept in the value's own type, wrapping at its width |
-| `prod` | float64 | empty / all-masked = `1.0` (identity) |
-| `min` / `max` | value data type | empty / all-masked = `UNDEF` |
+| `prod` | as `CArray#prod` | float64 for an integer value; empty / all-masked = `1` (identity) |
+| `min` / `max` | as `CArray#min` / `#max` | the value's own type (a boolean widens to uint64); empty / all-masked = `UNDEF` |
 | `minmax` | `[min, max]` | pair of length-`k` arrays |
-| `mean` | float64 | empty / all-masked = `UNDEF` |
-| `variance` / `stddev` | float64 | sample (ddof = 1); single value = `0.0` |
-| `variancep` / `stddevp` | float64 | population (ddof = 0) |
-| `median` | float64 | = `percentile(50)` |
-| `percentile(p)` | float64 | `p` in `0..100` |
+| `mean` | as `CArray#mean` | float64 for an integer value, exact for an object one; empty / all-masked = `UNDEF` |
+| `variance` / `stddev` | as `CArray#variance` / `#stddev` | sample (ddof = 1); single value = `0.0` |
+| `variancep` / `stddevp` | as `CArray#variancep` / `#stddevp` | population (ddof = 0) |
+| `median` | as `CArray#median` | = `percentile(50)` |
+| `percentile(p)` | as `CArray#percentile` | `p` in `0..100` |
 | `quantile` | `Array<CArray>` | five-number summary `[min, Q1, median, Q3, max]` |
 | `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight in source order |
 | `all` / `any` | boolean | boolean value data type only |
