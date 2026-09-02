@@ -39,7 +39,8 @@ whose category is `labels[i]`. The category vocabulary is `#labels`.
 | `count_not_masked` | int64 | present (non-masked) cells — the denominator the value reductions divide by |
 | `count_masked` | int64 | masked cells in the category; `count(UNDEF)` is the same |
 | `count(v)` | int64 | cells whose value equals `v` |
-| `sum` | value data type | |
+| `sum` | value data type | folded in float64 and cast back, so a wide integer payload can lose its low bits — see `accumulate` |
+| `accumulate` | value data type | the same fold kept in the value's own type, wrapping at its width (exact for a wide integer payload) |
 | `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight CArray in the source order (same elements as the value) |
 | `prod` | float64 | empty / all-masked category is `1.0` (identity) |
 | `min` / `max` | value data type | |

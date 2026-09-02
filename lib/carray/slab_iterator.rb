@@ -98,11 +98,16 @@ class CASlabIterator < CAIterator
   # @overload sum
   #   Per-slab sum, delegating to `reference.sum(axis: slab_axes)`.
   #   @return [CArray] one value per slab (shape = self.dim minus the slab axes)
+  # @overload accumulate
+  #   Per-slab sum kept in the source's own data type, wrapping at its width,
+  #   as the core `accumulate` does -- `sum` answers in the type the core
+  #   promotes to (float64 for integers).
+  #   @return [CArray] one value per slab
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any, fused minmax ([min, max] pair), the axis-local
   # position min_index / max_index (index within the slab axes), and the flat
   # source address min_addr / max_addr (which source cell holds the extremum).
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index,
    :min_addr, :max_addr].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1

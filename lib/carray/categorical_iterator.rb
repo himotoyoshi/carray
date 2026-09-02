@@ -278,6 +278,24 @@ class CACategoricalIterator < CAIterator
     out
   end
 
+  # @overload accumulate
+  #   Returns per-category sums folded in the value's own data type, wrapping at
+  #   its width, as the core `accumulate` does.  This is the exact in-type fold:
+  #   `sum` reads its answer off a float64 moment and casts back, so it loses
+  #   the low bits of a wide integer payload and does not wrap.  An empty or
+  #   fully-masked category accumulates the empty set, the additive identity `0`
+  #   (unmasked).
+  #   @return [CArray]
+  # @overload accumulate(axis:)
+  #   Per-fiber per-category in-type sums along `axis`.  Output shape =
+  #   `[K, ...source.shape without axis]`.
+  #   @param axis [Integer] reduce axis of the source value.
+  #   @return [CArray]
+  def accumulate(axis: nil)
+    return axis_by_masked_copy(axis, :accumulate, @value.data_type) if axis
+    per_category(@grouped.data_type) { |s| s.accumulate }
+  end
+
   # @overload max
   #   Returns per-category maxima in the value data type.  Empty categories are
   #   MASKED.
@@ -370,7 +388,7 @@ class CACategoricalIterator < CAIterator
   #   sample variance.
   #   @return [CArray]
   def variance(axis: nil)
-    return axis_variance_family(axis, :variance) if axis
+    return axis_by_masked_copy(axis, :variance) if axis
     m = moments
     return per_category(CA_FLOAT64) { |s| s.variance } unless m
     cnt   = m[:count]
@@ -386,7 +404,7 @@ class CACategoricalIterator < CAIterator
   #   single-value `0.0`).
   #   @return [CArray]
   def stddev(axis: nil)
-    return axis_variance_family(axis, :stddev) if axis
+    return axis_by_masked_copy(axis, :stddev) if axis
     m = moments
     return per_category(CA_FLOAT64) { |s| s.stddev } unless m
     variance.sqrt                    # sqrt propagates the n=0 mask
@@ -454,7 +472,7 @@ class CACategoricalIterator < CAIterator
   #   reuses the centred two-pass kernel with no extra walk.
   #   @return [CArray]
   def variancep(axis: nil)
-    return axis_variance_family(axis, :variancep) if axis
+    return axis_by_masked_copy(axis, :variancep) if axis
     m = moments
     return per_category(CA_FLOAT64) { |s| s.variancep } unless m
     cnt = m[:count]
@@ -471,7 +489,7 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def stddevp(axis: nil)
-    return axis_variance_family(axis, :stddevp) if axis
+    return axis_by_masked_copy(axis, :stddevp) if axis
     m = moments
     return per_category(CA_FLOAT64) { |s| s.stddevp } unless m
     variancep.sqrt
@@ -727,17 +745,19 @@ class CACategoricalIterator < CAIterator
     out
   end
 
-  # Axis-aware variance / stddev / variancep / stddevp — Ruby-level per-c mask
-  # then delegate to the source's own axis-aware kernel.  Order (median /
-  # percentile / quantile) is genuinely order-statistical (needs sort per
-  # group), and remains deferred; the variance family is only a centred
-  # two-pass numeric aggregate, so this loop hits the same ε-close two-pass
-  # kernel per (group, axis) that CArray#variance uses, no new C needed.
+  # Axis-aware reduction by masked copy — Ruby-level per-c mask, then delegate
+  # to the source's own axis-aware kernel, so the core contract for `op` rides
+  # unchanged.  Used by the variance family (a centred two-pass numeric
+  # aggregate, hitting the same ε-close kernel per (group, axis) that
+  # CArray#variance uses) and by `accumulate` (whose in-type wrapping fold has
+  # no float64 moment to read it off).  Order (median / percentile / quantile)
+  # is genuinely order-statistical (needs a sort per group) and remains
+  # deferred.
   #
   # Cost: K axis-reductions over an h-shaped local (most cells masked away for
   # each c) — bounded by K, typically small.  A fused per-fiber variance
   # kernel is a natural follow-on if bench demands it.
-  def axis_variance_family (axis, op)
+  def axis_by_masked_copy (axis, op, out_data_type = CA_FLOAT64)
     h = @value
     unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
       raise ArgumentError,
@@ -746,7 +766,7 @@ class CACategoricalIterator < CAIterator
     end
     full_c    = resolve_axis_codes(@cat.codes, h.shape, axis)
     band      = h.shape.dup; band.delete_at(axis)
-    out       = CArray.float64(*([@k] + band))
+    out       = CArray.new(out_data_type, [@k] + band)
     slot_idx  = [nil] + [nil] * band.size    # placeholder; c fills slot 0
     codes_bad = full_c.has_mask? ? full_c.is_masked : nil
     @k.times do |c|

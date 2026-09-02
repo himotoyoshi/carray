@@ -37,7 +37,8 @@ class CAIterator
   # A member that genuinely cannot provide one overrides it to raise with its
   # own reason.
   [
-    :sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,   # tier 1
+    :sum, :accumulate, :prod, :mean, :min, :max,                      # tier 1
+    :variance, :stddev, :all, :any,
     :variancep, :stddevp, :minmax,                                    # tier 2
     :min_index, :max_index, :min_addr, :max_addr,                     # position
     :wsum, :wmean,                                                    # weighted

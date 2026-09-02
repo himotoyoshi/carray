@@ -292,7 +292,7 @@ Init_ca_group_iter (void)
      address of the extremum (there is no group-local min_index for the group
      iterator -- the order-preserving flat address is the meaningful position). */
   {
-    const char *ops[] = { "sum", "prod", "mean", "min", "max",
+    const char *ops[] = { "sum", "accumulate", "prod", "mean", "min", "max",
                           "variance", "stddev", "variancep", "stddevp",
                           "count", "count_not_masked", "min_addr", "max_addr",
                           "all", "any", NULL };

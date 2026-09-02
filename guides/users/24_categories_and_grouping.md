@@ -751,7 +751,8 @@ The group iterator exposes the [iterator-family surface](21_iterator_family.md),
 each taking `axis: :group`:
 
 ```
-sum   prod   mean   min   max   variance   stddev   variancep   stddevp
+sum   accumulate   prod   mean   min   max
+variance   stddev   variancep   stddevp
 count   count_masked   elements   minmax
 wsum(w)   wmean(w)
 median   percentile(p)   quantile
@@ -1015,7 +1016,8 @@ noted. `k` is `cat.labels.size`.
 | `count_not_masked` | int64 | present cells — the reductions' denominator |
 | `count_masked` | int64 | masked cells; `count(UNDEF)` is the same |
 | `count(v)` | int64 | cells whose value equals `v` |
-| `sum` | value data type | empty / all-masked = `0` (identity) |
+| `sum` | value data type | empty / all-masked = `0` (identity); folded in float64 and cast back |
+| `accumulate` | value data type | the same fold kept in the value's own type, wrapping at its width |
 | `prod` | float64 | empty / all-masked = `1.0` (identity) |
 | `min` / `max` | value data type | empty / all-masked = `UNDEF` |
 | `minmax` | `[min, max]` | pair of length-`k` arrays |

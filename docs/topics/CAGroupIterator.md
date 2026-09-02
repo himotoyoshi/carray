@@ -53,6 +53,7 @@ all taking `axis: :group`:
 
 ```ruby
 g.sum(axis: :group)          g.mean(axis: :group)      g.min(axis: :group)
+g.accumulate(axis: :group)   g.prod(axis: :group)      g.max(axis: :group)
 g.variance(axis: :group)     g.stddev(axis: :group)    g.minmax(axis: :group)
 g.wsum(w, axis: :group)      g.wmean(w, axis: :group)
 g.median(axis: :group)       g.percentile(90, axis: :group)   g.quantile(axis: :group)
@@ -65,6 +66,11 @@ the empty / all-masked contract carries through: `sum` of an empty group is `0`
 (identity), `mean` / `median` of an empty group is a masked (`UNDEF`) cell.
 Excluded cells — a value whose category code is masked or out of vocabulary —
 join no group.
+
+`sum` folds in float64, as the core does. `accumulate` is the same fold kept in
+the source's own data type, wrapping at its width — the spelling for staying in
+the type, and the exact one for an integer payload wider than float64's mantissa
+(a boolean accumulate is XOR parity, again as in the core).
 
 **Position: `min_addr` / `max_addr`, not `min_index`.** A group preserves source
 order, so a *within-group* index is weak; the group returns the **flat source

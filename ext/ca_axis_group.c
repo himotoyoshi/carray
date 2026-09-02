@@ -40,7 +40,8 @@
 enum {
   GR_SUM = 0, GR_PROD, GR_MEAN, GR_MIN, GR_MAX,
   GR_VARIANCE, GR_STDDEV, GR_COUNT, GR_ALL, GR_ANY,
-  GR_VARIANCEP, GR_STDDEVP, GR_MINADDR, GR_MAXADDR
+  GR_VARIANCEP, GR_STDDEVP, GR_MINADDR, GR_MAXADDR,
+  GR_ACCUM
 };
 
 static int
@@ -48,6 +49,7 @@ group_op_code (VALUE vop)
 {
   ID id = SYM2ID(vop);
   if      ( id == rb_intern("sum") )      return GR_SUM;
+  else if ( id == rb_intern("accumulate") ) return GR_ACCUM;
   else if ( id == rb_intern("prod") )     return GR_PROD;
   else if ( id == rb_intern("mean") )     return GR_MEAN;
   else if ( id == rb_intern("min") )      return GR_MIN;
@@ -188,6 +190,19 @@ group_op_code (VALUE vop)
   case CA_FLOAT64: GROUP_WALK(double,     ACCUM); break;                       \
   default: break;                                                              \
   }
+
+/* `accumulate` is the one op that folds in the SOURCE's own type instead of in
+   double, so it wraps at that width exactly as CArray#accumulate does.  It
+   folds straight into the (zeroed) output — whose data type is the source's —
+   so an empty group already holds the additive identity 0 and needs no mask.
+   The type cannot travel inside a GROUP_WALK ACCUM argument (an argument's own
+   tokens are not substituted for the macro's parameters), so the walk below
+   names its type twice. */
+#define GACC_ADD(T) ( ((T *) co->ptr)[o] += *(T *)(p + gw_doff[e]) )
+/* A boolean accumulate is XOR parity, matching the core: the result stays
+   boolean, so a second `true` has nowhere to carry into. */
+#define GACC_XOR \
+  ( ((boolean8_t *) co->ptr)[o] ^= (*(boolean8_t *)(p + gw_doff[e]) ? 1 : 0) )
 
 /* __axis_group_reduce__(group_axes, bundles, op) — group-reduces self along
  * the union of `group_axes` (ascending source-axis indices = the slab) into
@@ -376,6 +391,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   if      ( op == GR_COUNT )              out_dt = CA_INT64;
   else if ( op == GR_MINADDR || op == GR_MAXADDR ) out_dt = CA_INT64;
   else if ( op == GR_ALL || op == GR_ANY ) out_dt = CA_BOOLEAN;
+  else if ( op == GR_ACCUM )              out_dt = src->data_type;
   VALUE vout = rb_carray_new(out_dt, ondim, odim, 0, NULL);
   GetCArray(vout, co);
 
@@ -464,6 +480,23 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       }
     );
   }
+  else if ( op == GR_ACCUM ) {
+    MEMZERO(co->ptr, char, (size_t) nout * co->bytes);
+    switch ( ca->data_type ) {
+    case CA_BOOLEAN: GROUP_WALK(boolean8_t, GACC_XOR);           break;
+    case CA_INT8:    GROUP_WALK(int8_t,   GACC_ADD(int8_t));     break;
+    case CA_UINT8:   GROUP_WALK(uint8_t,  GACC_ADD(uint8_t));    break;
+    case CA_INT16:   GROUP_WALK(int16_t,  GACC_ADD(int16_t));    break;
+    case CA_UINT16:  GROUP_WALK(uint16_t, GACC_ADD(uint16_t));   break;
+    case CA_INT32:   GROUP_WALK(int32_t,  GACC_ADD(int32_t));    break;
+    case CA_UINT32:  GROUP_WALK(uint32_t, GACC_ADD(uint32_t));   break;
+    case CA_INT64:   GROUP_WALK(int64_t,  GACC_ADD(int64_t));    break;
+    case CA_UINT64:  GROUP_WALK(uint64_t, GACC_ADD(uint64_t));   break;
+    case CA_FLOAT32: GROUP_WALK(float,    GACC_ADD(float));      break;
+    case CA_FLOAT64: GROUP_WALK(double,   GACC_ADD(double));     break;
+    default: break;
+    }
+  }
   else {
     GROUP_DISPATCH(
       cnt[o] += 1;
@@ -501,6 +534,9 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       if ( cnt[o] == 0 ) { out[o] = 0; MARK_UNDEF(o); }   /* empty -> UNDEF */
       else out[o] = addr[o];
     }
+  }
+  else if ( op == GR_ACCUM ) {
+    /* already folded in place, in the source's own type; empty groups hold 0 */
   }
   else if ( op == GR_ALL ) {
     boolean8_t *out = (boolean8_t *) co->ptr;    /* empty -> true (vacuous) */

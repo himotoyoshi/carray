@@ -11,6 +11,15 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- New: every iterator now answers `accumulate` beside `sum` -- the same
+  per-piece fold, kept in the source's own data type and wrapping at its width,
+  where `sum` answers in the type the core promotes to (float64 for an integer
+  source). A tile or window count over `uint8` cells stays one byte wide instead
+  of eight. For a category or a coordinate group it is also the exact spelling:
+  `sum` folds those in float64, so an integer payload wider than float64's
+  mantissa loses its low bits. A boolean source accumulates as XOR parity, as it
+  does in the core.
+
 - Fix: a rolling window that does not cover the cell it is centred on --
   `windows(1..2)`, the two cells after this one -- was read as if it started at
   the array's edge, so every answer came out shifted by the range's start, and
