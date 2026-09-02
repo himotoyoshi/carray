@@ -104,13 +104,72 @@ class TestCategoricalIterator < Test::Unit::TestCase
     grp = CA_INT32([10, 20, 30, 40, 50, 60]).group_by_category(cat)
     assert_equal CA_INT64,   grp.elements.data_type
     assert_equal CA_INT64,   grp.count_not_masked.data_type
-    assert_equal CA_INT32,   grp.sum.data_type    # value dtype
-    assert_equal CA_INT32,   grp.max.data_type    # value dtype
-    assert_equal CA_INT32,   grp.min.data_type    # value dtype
+    # Every reduction answers in the type the core promotes the value to.
+    assert_equal CA_FLOAT64, grp.sum.data_type          # core sum promotes
+    assert_equal CA_INT32,   grp.accumulate.data_type   # the in-type fold
+    assert_equal CA_FLOAT64, grp.prod.data_type
+    assert_equal CA_INT32,   grp.max.data_type          # core min / max keep it
+    assert_equal CA_INT32,   grp.min.data_type
     assert_equal CA_FLOAT64, grp.mean.data_type
     assert_equal CA_FLOAT64, grp.median.data_type
     assert_equal CA_FLOAT64, grp.stddev.data_type
     assert_equal CA_FLOAT64, grp.variance.data_type
+  end
+
+  # The per-category answer is the core reduction lifted to the category, so its
+  # data type is whatever `CArray#<op>` promotes that value type to -- including
+  # the payloads that have no per-category fast path (boolean / complex /
+  # object) and once answered in a type of their own.
+  def test_reduction_output_dtype_follows_the_core
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    {
+      CA_BOOLEAN([1, 1, 0, 1])  => { sum: CA_UINT64,   accumulate: CA_BOOLEAN,
+                                     prod: CA_UINT64,  min: CA_UINT64,  max: CA_UINT64,
+                                     mean: CA_FLOAT64, variance: CA_FLOAT64,
+                                     stddev: CA_FLOAT64 },
+      CA_INT32([1, 2, 3, 4])    => { sum: CA_FLOAT64,  accumulate: CA_INT32,
+                                     prod: CA_FLOAT64, min: CA_INT32,   max: CA_INT32,
+                                     mean: CA_FLOAT64, variance: CA_FLOAT64,
+                                     stddev: CA_FLOAT64 },
+      CA_CMPLX128([1, 2, 3, 4]) => { sum: CA_CMPLX128, accumulate: CA_CMPLX128,
+                                     prod: CA_CMPLX128, mean: CA_CMPLX128,
+                                     variance: CA_FLOAT64 },
+      CA_OBJECT([1, 2, 3, 4])   => { sum: CA_OBJECT,   accumulate: CA_OBJECT,
+                                     prod: CA_OBJECT,  min: CA_OBJECT,  max: CA_OBJECT,
+                                     mean: CA_OBJECT,  variance: CA_OBJECT,
+                                     variancep: CA_OBJECT, stddev: CA_FLOAT64,
+                                     median: CA_OBJECT },
+    }.each do |value, expected|
+      grp = value.group_by_category(cat)
+      expected.each do |op, dtype|
+        assert_equal dtype, grp.public_send(op).data_type,
+                     "#{value.data_type} #{op}"
+        assert_equal value.reshape(1, value.elements).public_send(op, axis: 1).data_type,
+                     grp.public_send(op).data_type,
+                     "#{value.data_type} #{op} drifts from CArray##{op}"
+      end
+    end
+  end
+
+  # An object payload folds exactly (no float64 round trip), and a wide integer
+  # keeps every bit under `accumulate` where `sum` folds in float64.
+  def test_reduction_values_survive_the_promotion
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    assert_equal [Rational(3, 2), Rational(7, 2)],
+                 CA_OBJECT([Rational(1,2), Rational(1,1),
+                            Rational(3,2), Rational(2,1)]).group_by_category(cat).sum.to_a
+    big = 1 << 60
+    grp = CA_INT64([big, 1, big, 1]).group_by_category(cat)
+    assert_equal [big + 1, big + 1], grp.accumulate.to_a
+    assert_equal [2, 3],             CA_BOOLEAN([1, 1, 0, 1, 1, 1]).
+                                       group_by_category(CA_INT32([0,0,0,1,1,1]).categorize).sum.to_a
+
+    # Ratios stay exact for an object payload, and a complex one has a mean.
+    thirds = CA_OBJECT([Rational(1,3), Rational(2,3), Rational(1,4), Rational(3,4)])
+    assert_equal [Rational(1,2), Rational(1,2)], thirds.group_by_category(cat).mean.to_a
+    assert_equal [Complex(2,2), Complex(1,1)],
+                 CA_CMPLX128([Complex(1,1), Complex(3,3),
+                              Complex(0,2), Complex(2,0)]).group_by_category(cat).mean.to_a
   end
 
   # ---- Case 2: out-of-vocab excluded + empty category -----------------------
