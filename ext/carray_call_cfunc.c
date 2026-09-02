@@ -25,6 +25,18 @@
  *  operand invariant established in PROPOSAL_EAGER_ELEMENTWISE_NO_ATTACH
  *  and extended in PROPOSAL_EAGER_SLOWPATH_CHUNKING_ARENA).
  *
+ *  Slab variants `ca_call_cslab_N` / `ca_call_cslab_N_r` take the chunked
+ *  path instead (ca_sweep_acquire_chunked / ca_sweep_next_chunk /
+ *  ca_sweep_release_chunked) and hand the callback a whole chunk -- base /
+ *  stride per operand, a cell count, and the chunk's slice of the mask --
+ *  rather than one cell.  A non-alias INPUT is then re-gathered into a
+ *  ~32KB arena scratch per chunk rather than materialised whole, so input
+ *  memory peak stops scaling with the operand; and the indirect call is
+ *  paid once per chunk, so the author's inner loop is one the compiler can
+ *  vectorise.  Use cfunc when the per-cell body is what you have (a math
+ *  function to wrap); use cslab when the operand is large, virtual, or the
+ *  body is worth vectorising.
+ *
  *  L0.1 (PROPOSAL_L0_AUTHOR_SURFACE, 2026-06-11): the per-operand acquire
  *  + broadcast check + mask OR + release lifecycle is now factored out
  *  into ext/ca_sweep_engine.{c,h} (ca_sweep_acquire / ca_sweep_release).  This
@@ -35,6 +47,16 @@
 #include "carray.h"
 #include "ca_sweep_engine.h"
 #include <string.h>
+
+/* The chunk's iteration mask, or NULL when no INPUT operand carried one.
+   m0 is chunk-sized and re-gathered per chunk by ca_sweep_next_chunk, so
+   it is already the slice -- one byte per cell, indexed 0..chunk_n-1
+   alongside base[] and stride[]. */
+static const boolean8_t *
+ca_sweep_chunk_mask (ca_sweep_state_t *st)
+{
+  return st->m0;
+}
 
 VALUE
 ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
@@ -1622,6 +1644,1475 @@ ca_call_cfunc_3_3_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t 
   }
 
   ca_call_cfunc_6_r(mathfunc, "111000", ry1, ry2, ry3, rx1, rx2, rx3, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+/* -------------------------------------------------------------------- */
+/* Slab variants: the chunked counterpart of ca_call_cfunc_N.  The    */
+/* callback is handed a whole chunk (base / stride / count / mask     */
+/* slice) rather than one cell, and non-alias INPUTs are gathered     */
+/* into a ~32KB arena scratch per chunk instead of materialised       */
+/* whole, so input memory peak stops scaling with the operand.        */
+/* -------------------------------------------------------------------- */
+
+VALUE
+ca_call_cslab_1 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0)
+{
+  CArray   *cx[1];
+  char     *base[1];
+  char     *base_orig[1];
+  ca_size_t stride[1];
+  char     *owned_buf[1];
+  int       attached[1];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 1;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_1";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1)
+{
+  CArray   *cx[2];
+  char     *base[2];
+  char     *base_orig[2];
+  ca_size_t stride[2];
+  char     *owned_buf[2];
+  int       attached[2];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 2;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_2";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2)
+{
+  CArray   *cx[3];
+  char     *base[3];
+  char     *base_orig[3];
+  ca_size_t stride[3];
+  char     *owned_buf[3];
+  int       attached[3];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 3;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_3";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3)
+{
+  CArray   *cx[4];
+  char     *base[4];
+  char     *base_orig[4];
+  ca_size_t stride[4];
+  char     *owned_buf[4];
+  int       attached[4];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 4;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_4";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4)
+{
+  CArray   *cx[5];
+  char     *base[5];
+  char     *base_orig[5];
+  ca_size_t stride[5];
+  char     *owned_buf[5];
+  int       attached[5];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 5;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_5";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5)
+{
+  CArray   *cx[6];
+  char     *base[6];
+  char     *base_orig[6];
+  ca_size_t stride[6];
+  char     *owned_buf[6];
+  int       attached[6];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 6;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_6";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5, VALUE rcx6)
+{
+  CArray   *cx[7];
+  char     *base[7];
+  char     *base_orig[7];
+  ca_size_t stride[7];
+  char     *owned_buf[7];
+  int       attached[7];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
+  TypedData_Get_Struct(rcx6, CArray, &carray_data_type, cx[6]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 7;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_7";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_1_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0,
+                               void *userdata)
+{
+  CArray   *cx[1];
+  char     *base[1];
+  char     *base_orig[1];
+  ca_size_t stride[1];
+  char     *owned_buf[1];
+  int       attached[1];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 1;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_1_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1,
+                               void *userdata)
+{
+  CArray   *cx[2];
+  char     *base[2];
+  char     *base_orig[2];
+  ca_size_t stride[2];
+  char     *owned_buf[2];
+  int       attached[2];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 2;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_2_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2,
+                               void *userdata)
+{
+  CArray   *cx[3];
+  char     *base[3];
+  char     *base_orig[3];
+  ca_size_t stride[3];
+  char     *owned_buf[3];
+  int       attached[3];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 3;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_3_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3,
+                               void *userdata)
+{
+  CArray   *cx[4];
+  char     *base[4];
+  char     *base_orig[4];
+  ca_size_t stride[4];
+  char     *owned_buf[4];
+  int       attached[4];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 4;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_4_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4,
+                               void *userdata)
+{
+  CArray   *cx[5];
+  char     *base[5];
+  char     *base_orig[5];
+  ca_size_t stride[5];
+  char     *owned_buf[5];
+  int       attached[5];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 5;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_5_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5,
+                               void *userdata)
+{
+  CArray   *cx[6];
+  char     *base[6];
+  char     *base_orig[6];
+  ca_size_t stride[6];
+  char     *owned_buf[6];
+  int       attached[6];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 6;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_6_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5, VALUE rcx6,
+                               void *userdata)
+{
+  CArray   *cx[7];
+  char     *base[7];
+  char     *base_orig[7];
+  ca_size_t stride[7];
+  char     *owned_buf[7];
+  int       attached[7];
+  ca_sweep_state_t state;
+
+  TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
+  TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
+  TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
+  TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
+  TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
+  TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
+  TypedData_Get_Struct(rcx6, CArray, &carray_data_type, cx[6]);
+
+  /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
+     and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
+     shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
+     release.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}.
+     base_orig is the field the whole-buffer path leaves zero; the
+     chunked path walks it, so it has to be given here. */
+  state.n_ops     = 7;
+  state.fsync     = fsync;
+  state.cx        = cx;
+  state.base      = base;
+  state.base_orig = base_orig;
+  state.stride    = stride;
+  state.owned_buf = owned_buf;
+  state.attached  = attached;
+  state.no_mask   = 0;
+  state.src_label = "ca_call_cslab_7_r";
+
+  ca_sweep_acquire_chunked(&state);
+
+  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
+     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
+     at the arena scratch the chunk was just gathered into, which is
+     packed, so stride[] is the element size and the author's inner loop
+     sees contiguous data. */
+  while ( ca_sweep_next_chunk(&state) ) {
+    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
+  }
+
+  ca_sweep_release_chunked(&state);
+
+  return rcx0;
+}
+
+VALUE
+ca_call_cslab_1_1 (int8_t dty, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty != dtx1 ) {
+    ry = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_2(slabfunc, "10", ry, rx1);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_2 (int8_t dty, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty != dtx1 || dty != dtx2 ) {
+    ry = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_3(slabfunc, "100", ry, rx1, rx2);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_3 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 ) {
+    ry = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_4(slabfunc, "1000", ry, rx1, rx2, rx3);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_4 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 ) {
+    ry = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+
+  ca_call_cslab_5(slabfunc, "10000", ry, rx1, rx2, rx3, rx4);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_5 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+  rx5 = rb_ca_wrap_readonly(rx5, INT2NUM(dtx5));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 || dty != dtx5 ) {
+    ry = rb_ca_template_n(5, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)), rb_ca_wrap_readonly(rx5, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(5, rx1, rx2, rx3, rx4, rx5);
+  }
+
+  ca_call_cslab_6(slabfunc, "100000", ry, rx1, rx2, rx3, rx4, rx5);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_6 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, int8_t dtx6, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, volatile VALUE rx6)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+  rx5 = rb_ca_wrap_readonly(rx5, INT2NUM(dtx5));
+  rx6 = rb_ca_wrap_readonly(rx6, INT2NUM(dtx6));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 || dty != dtx5 || dty != dtx6 ) {
+    ry = rb_ca_template_n(6, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)), rb_ca_wrap_readonly(rx5, INT2NUM(dty)), rb_ca_wrap_readonly(rx6, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(6, rx1, rx2, rx3, rx4, rx5, rx6);
+  }
+
+  ca_call_cslab_7(slabfunc, "1000000", ry, rx1, rx2, rx3, rx4, rx5, rx6);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_2_1 (int8_t dty1, int8_t dty2, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty1 != dtx1 ) {
+    ry1 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty2 != dtx1 ) {
+    ry2 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_3(slabfunc, "110", ry1, ry2, rx1);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_2 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 ) {
+    ry1 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 ) {
+    ry2 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_4(slabfunc, "1100", ry1, ry2, rx1, rx2);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_3 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 ) {
+    ry1 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 ) {
+    ry2 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_5(slabfunc, "11000", ry1, ry2, rx1, rx2, rx3);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_4 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 || dty1 != dtx4 ) {
+    ry1 = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)), rb_ca_wrap_readonly(rx4, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 || dty2 != dtx4 ) {
+    ry2 = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)), rb_ca_wrap_readonly(rx4, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+
+  ca_call_cslab_6(slabfunc, "110000", ry1, ry2, rx1, rx2, rx3, rx4);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_3_1 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty1 != dtx1 ) {
+    ry1 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty2 != dtx1 ) {
+    ry2 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty3 != dtx1 ) {
+    ry3 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_4(slabfunc, "1110", ry1, ry2, ry3, rx1);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+VALUE
+ca_call_cslab_3_2 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 ) {
+    ry1 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 ) {
+    ry2 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty3 != dtx1 || dty3 != dtx2 ) {
+    ry3 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)), rb_ca_wrap_readonly(rx2, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_5(slabfunc, "11100", ry1, ry2, ry3, rx1, rx2);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+VALUE
+ca_call_cslab_3_3 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 ) {
+    ry1 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 ) {
+    ry2 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty3 != dtx1 || dty3 != dtx2 || dty3 != dtx3 ) {
+    ry3 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)), rb_ca_wrap_readonly(rx2, INT2NUM(dty3)), rb_ca_wrap_readonly(rx3, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_6(slabfunc, "111000", ry1, ry2, ry3, rx1, rx2, rx3);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+VALUE
+ca_call_cslab_1_1_r (int8_t dty, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty != dtx1 ) {
+    ry = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_2_r(slabfunc, "10", ry, rx1, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_2_r (int8_t dty, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty != dtx1 || dty != dtx2 ) {
+    ry = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_3_r(slabfunc, "100", ry, rx1, rx2, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_3_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 ) {
+    ry = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_4_r(slabfunc, "1000", ry, rx1, rx2, rx3, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_4_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 ) {
+    ry = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+
+  ca_call_cslab_5_r(slabfunc, "10000", ry, rx1, rx2, rx3, rx4, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_5_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+  rx5 = rb_ca_wrap_readonly(rx5, INT2NUM(dtx5));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 || dty != dtx5 ) {
+    ry = rb_ca_template_n(5, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)), rb_ca_wrap_readonly(rx5, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(5, rx1, rx2, rx3, rx4, rx5);
+  }
+
+  ca_call_cslab_6_r(slabfunc, "100000", ry, rx1, rx2, rx3, rx4, rx5, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_1_6_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, int8_t dtx6, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, volatile VALUE rx6, void *userdata)
+{
+  volatile VALUE ry = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+  rx5 = rb_ca_wrap_readonly(rx5, INT2NUM(dtx5));
+  rx6 = rb_ca_wrap_readonly(rx6, INT2NUM(dtx6));
+
+  if ( dty != dtx1 || dty != dtx2 || dty != dtx3 || dty != dtx4 || dty != dtx5 || dty != dtx6 ) {
+    ry = rb_ca_template_n(6, rb_ca_wrap_readonly(rx1, INT2NUM(dty)), rb_ca_wrap_readonly(rx2, INT2NUM(dty)), rb_ca_wrap_readonly(rx3, INT2NUM(dty)), rb_ca_wrap_readonly(rx4, INT2NUM(dty)), rb_ca_wrap_readonly(rx5, INT2NUM(dty)), rb_ca_wrap_readonly(rx6, INT2NUM(dty)));
+  } else {
+    ry = rb_ca_template_n(6, rx1, rx2, rx3, rx4, rx5, rx6);
+  }
+
+  ca_call_cslab_7_r(slabfunc, "1000000", ry, rx1, rx2, rx3, rx4, rx5, rx6, userdata);
+
+  if ( rb_ca_is_scalar(ry) ) {
+    ry = rb_ca_fetch_addr(ry, 0);
+  }
+  return ry;
+}
+
+VALUE
+ca_call_cslab_2_1_r (int8_t dty1, int8_t dty2, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty1 != dtx1 ) {
+    ry1 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty2 != dtx1 ) {
+    ry2 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_3_r(slabfunc, "110", ry1, ry2, rx1, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_2_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 ) {
+    ry1 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 ) {
+    ry2 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_4_r(slabfunc, "1100", ry1, ry2, rx1, rx2, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_3_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 ) {
+    ry1 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 ) {
+    ry2 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_5_r(slabfunc, "11000", ry1, ry2, rx1, rx2, rx3, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_2_4_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+  rx4 = rb_ca_wrap_readonly(rx4, INT2NUM(dtx4));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 || dty1 != dtx4 ) {
+    ry1 = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)), rb_ca_wrap_readonly(rx4, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 || dty2 != dtx4 ) {
+    ry2 = rb_ca_template_n(4, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)), rb_ca_wrap_readonly(rx4, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(4, rx1, rx2, rx3, rx4);
+  }
+
+  ca_call_cslab_6_r(slabfunc, "110000", ry1, ry2, rx1, rx2, rx3, rx4, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  return rb_ary_new3(2, ry1, ry2);
+}
+
+VALUE
+ca_call_cslab_3_1_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+
+  if ( dty1 != dtx1 ) {
+    ry1 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty2 != dtx1 ) {
+    ry2 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(1, rx1);
+  }
+  if ( dty3 != dtx1 ) {
+    ry3 = rb_ca_template_n(1, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(1, rx1);
+  }
+
+  ca_call_cslab_4_r(slabfunc, "1110", ry1, ry2, ry3, rx1, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+VALUE
+ca_call_cslab_3_2_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 ) {
+    ry1 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 ) {
+    ry2 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(2, rx1, rx2);
+  }
+  if ( dty3 != dtx1 || dty3 != dtx2 ) {
+    ry3 = rb_ca_template_n(2, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)), rb_ca_wrap_readonly(rx2, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(2, rx1, rx2);
+  }
+
+  ca_call_cslab_5_r(slabfunc, "11100", ry1, ry2, ry3, rx1, rx2, userdata);
+
+  if ( rb_ca_is_scalar(ry1) ) {
+    ry1 = rb_ca_fetch_addr(ry1, 0);
+  }
+  if ( rb_ca_is_scalar(ry2) ) {
+    ry2 = rb_ca_fetch_addr(ry2, 0);
+  }
+  if ( rb_ca_is_scalar(ry3) ) {
+    ry3 = rb_ca_fetch_addr(ry3, 0);
+  }
+  return rb_ary_new3(3, ry1, ry2, ry3);
+}
+
+VALUE
+ca_call_cslab_3_3_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata)
+{
+  volatile VALUE ry1 = Qnil, ry2 = Qnil, ry3 = Qnil;
+
+  rx1 = rb_ca_wrap_readonly(rx1, INT2NUM(dtx1));
+  rx2 = rb_ca_wrap_readonly(rx2, INT2NUM(dtx2));
+  rx3 = rb_ca_wrap_readonly(rx3, INT2NUM(dtx3));
+
+  if ( dty1 != dtx1 || dty1 != dtx2 || dty1 != dtx3 ) {
+    ry1 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty1)), rb_ca_wrap_readonly(rx2, INT2NUM(dty1)), rb_ca_wrap_readonly(rx3, INT2NUM(dty1)));
+  } else {
+    ry1 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty2 != dtx1 || dty2 != dtx2 || dty2 != dtx3 ) {
+    ry2 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty2)), rb_ca_wrap_readonly(rx2, INT2NUM(dty2)), rb_ca_wrap_readonly(rx3, INT2NUM(dty2)));
+  } else {
+    ry2 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+  if ( dty3 != dtx1 || dty3 != dtx2 || dty3 != dtx3 ) {
+    ry3 = rb_ca_template_n(3, rb_ca_wrap_readonly(rx1, INT2NUM(dty3)), rb_ca_wrap_readonly(rx2, INT2NUM(dty3)), rb_ca_wrap_readonly(rx3, INT2NUM(dty3)));
+  } else {
+    ry3 = rb_ca_template_n(3, rx1, rx2, rx3);
+  }
+
+  ca_call_cslab_6_r(slabfunc, "111000", ry1, ry2, ry3, rx1, rx2, rx3, userdata);
 
   if ( rb_ca_is_scalar(ry1) ) {
     ry1 = rb_ca_fetch_addr(ry1, 0);

@@ -49,6 +49,11 @@ spec/spec_ai/ext_cfunc_r_smoke/*.bundle
 spec/spec_ai/ext_cfunc_r_smoke/*.bundle.dSYM/
 spec/spec_ai/ext_cfunc_r_smoke/*.o
 spec/spec_ai/ext_cfunc_r_smoke/mkmf.log
+spec/spec_ai/ext_cslab_smoke/Makefile
+spec/spec_ai/ext_cslab_smoke/*.bundle
+spec/spec_ai/ext_cslab_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_cslab_smoke/*.o
+spec/spec_ai/ext_cslab_smoke/mkmf.log
 spec/spec_ai/ext_per_element_smoke/Makefile
 spec/spec_ai/ext_per_element_smoke/*.bundle
 spec/spec_ai/ext_per_element_smoke/*.bundle.dSYM/

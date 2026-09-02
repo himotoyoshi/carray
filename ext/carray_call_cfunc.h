@@ -16,6 +16,18 @@
 #ifndef CARRAY_CALL_CFUNC_H
 #define CARRAY_CALL_CFUNC_H
 
+/* Chunk callback for the ca_call_cslab_N family.  `base` and `stride` are
+   one entry per operand, in the order the operands were passed; `n` is the
+   number of cells in this chunk; `m0` is the chunk's slice of the mask,
+   one byte per cell, or NULL when no INPUT carried a mask.  The arity does
+   not appear in the signature -- the operands arrive through `base` -- so
+   one typedef serves every arity. */
+typedef void (*ca_cslab_t) (char **base, ca_size_t *stride, ca_size_t n,
+                            const boolean8_t *m0);
+
+typedef void (*ca_cslab_r_t) (char **base, ca_size_t *stride, ca_size_t n,
+                              const boolean8_t *m0, void *userdata);
+
 VALUE
 ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
                             VALUE rcx0);
@@ -156,5 +168,146 @@ ca_call_cfunc_3_2_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t 
 
 VALUE
 ca_call_cfunc_3_3_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, int8_t dtx3, void (*mathfunc)(void*, void*, void*, void*, void*, void*, void *userdata), volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata);
+
+VALUE
+ca_call_cslab_1 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0);
+
+VALUE
+ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1);
+
+VALUE
+ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2);
+
+VALUE
+ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3);
+
+VALUE
+ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4);
+
+VALUE
+ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5);
+
+VALUE
+ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
+                             VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5, VALUE rcx6);
+
+VALUE
+ca_call_cslab_1_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
+                               VALUE rcx0, VALUE rcx1, VALUE rcx2, VALUE rcx3, VALUE rcx4, VALUE rcx5, VALUE rcx6,
+                               void *userdata);
+
+VALUE
+ca_call_cslab_1_1 (int8_t dty, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1);
+
+VALUE
+ca_call_cslab_1_2 (int8_t dty, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2);
+
+VALUE
+ca_call_cslab_1_3 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3);
+
+VALUE
+ca_call_cslab_1_4 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4);
+
+VALUE
+ca_call_cslab_1_5 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5);
+
+VALUE
+ca_call_cslab_1_6 (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, int8_t dtx6, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, volatile VALUE rx6);
+
+VALUE
+ca_call_cslab_2_1 (int8_t dty1, int8_t dty2, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1);
+
+VALUE
+ca_call_cslab_2_2 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2);
+
+VALUE
+ca_call_cslab_2_3 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3);
+
+VALUE
+ca_call_cslab_2_4 (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4);
+
+VALUE
+ca_call_cslab_3_1 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, ca_cslab_t slabfunc, volatile VALUE rx1);
+
+VALUE
+ca_call_cslab_3_2 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2);
+
+VALUE
+ca_call_cslab_3_3 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3);
+
+VALUE
+ca_call_cslab_1_1_r (int8_t dty, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata);
+
+VALUE
+ca_call_cslab_1_2_r (int8_t dty, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata);
+
+VALUE
+ca_call_cslab_1_3_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata);
+
+VALUE
+ca_call_cslab_1_4_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, void *userdata);
+
+VALUE
+ca_call_cslab_1_5_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, void *userdata);
+
+VALUE
+ca_call_cslab_1_6_r (int8_t dty, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, int8_t dtx5, int8_t dtx6, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, volatile VALUE rx5, volatile VALUE rx6, void *userdata);
+
+VALUE
+ca_call_cslab_2_1_r (int8_t dty1, int8_t dty2, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata);
+
+VALUE
+ca_call_cslab_2_2_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata);
+
+VALUE
+ca_call_cslab_2_3_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata);
+
+VALUE
+ca_call_cslab_2_4_r (int8_t dty1, int8_t dty2, int8_t dtx1, int8_t dtx2, int8_t dtx3, int8_t dtx4, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, volatile VALUE rx4, void *userdata);
+
+VALUE
+ca_call_cslab_3_1_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, ca_cslab_r_t slabfunc, volatile VALUE rx1, void *userdata);
+
+VALUE
+ca_call_cslab_3_2_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, void *userdata);
+
+VALUE
+ca_call_cslab_3_3_r (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dtx2, int8_t dtx3, ca_cslab_r_t slabfunc, volatile VALUE rx1, volatile VALUE rx2, volatile VALUE rx3, void *userdata);
 
 #endif /* CARRAY_CALL_CFUNC_H */

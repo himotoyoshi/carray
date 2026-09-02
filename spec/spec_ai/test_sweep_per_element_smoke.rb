@@ -224,4 +224,60 @@ class TestSweepPerElementSmoke < Test::Unit::TestCase
     assert_equal true, out.mask[3]
     assert_equal false, out.mask[4]
   end
+  # ---------- masked forms across chunk boundaries ----------
+  #
+  # m0 is chunk-sized and re-gathered per chunk, so a masked form that never
+  # leaves the first chunk exercises none of that.  The cases above are all
+  # 3--10 cells; these cross boundaries deliberately.  An m0 indexed wrong
+  # would mask the wrong cells past chunk 0, and a chunk whose m_out writes
+  # were not flushed would lose them entirely -- neither shows up in a
+  # single-chunk test.
+
+  CROSSES_CHUNKS = 100_000
+
+  def test_masked_read_across_chunks
+    n = CROSSES_CHUNKS
+    arr = CArray.float64(n).seq
+    masked_at = [0, 1, 4095, 4096, 4097, n / 2, n - 1]
+    arr.mask = CArray.boolean(n) { |i| masked_at.include?(i) }
+    assert_equal n - masked_at.size, CArray.demo_count_unmasked_f64(arr)
+  end
+
+  def test_inout_masked_across_chunks_propagates_every_chunk
+    # The author writes m_out per cell; each chunk's writes have to reach
+    # the OUTPUT mask when that chunk finishes.
+    n = CROSSES_CHUNKS
+    inp = CArray.float64(n) { |i| (i + 1).to_f }
+    negative_at = [3, 4095, 4096, 8191, 8192, n - 2]
+    negative_at.each { |i| inp[i] = -1.0 }
+    # An INPUT mask has to exist for m_out to be honoured at all (documented
+    # above); put it somewhere that is not one of the negatives.
+    input_masked_at = [7, 50_000]
+    inp.mask = CArray.boolean(n) { |i| input_masked_at.include?(i) }
+    out = CArray.float64(n)
+    CArray.demo_safe_sqrt_f64(inp, out)
+    assert_equal (negative_at + input_masked_at).sort, out.mask.where.to_a
+    assert_in_delta Math.sqrt(1.0), out[0], 1e-12
+    # the first ordinary cell after a chunk boundary still gets its value
+    just_past_boundary = 4097
+    assert_in_delta Math.sqrt(inp[just_past_boundary]),
+                    out[just_past_boundary], 1e-12
+  end
+
+  def test_inout_masked_across_chunks_matches_a_single_chunk_walk
+    # Same computation over a size that fits one chunk and a size that does
+    # not: the answers must agree cell for cell on the shared prefix.
+    small = 100
+    build = lambda { |n|
+      inp = CArray.float64(n) { |i| (i % 7 == 3) ? -1.0 : (i + 1).to_f }
+      inp.mask = CArray.boolean(n) { |i| i % 11 == 5 }
+      out = CArray.float64(n)
+      CArray.demo_safe_sqrt_f64(inp, out)
+      out
+    }
+    one_chunk  = build.call(small)
+    many_chunks = build.call(CROSSES_CHUNKS)
+    assert_equal one_chunk.mask.to_a, many_chunks.mask[0...small].to_a
+    assert_equal one_chunk.to_a, many_chunks[0...small].to_a
+  end
 end

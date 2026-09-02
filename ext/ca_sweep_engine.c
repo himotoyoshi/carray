@@ -179,6 +179,7 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
     st->attached[k_op]  = 0;
   }
   st->m0            = NULL;
+  st->mask_scratch  = NULL;
   st->n_kernel      = 1;
   st->chunk_off     = 0;
   st->chunk_n       = 0;
@@ -243,8 +244,13 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
     }
   }
 
-  /* iter mask = OR of INPUT operand masks (full size, n_kernel bytes).
-   * Per-chunk mask gather is a future optim; this MVP gathers once. */
+  /* iter mask = OR of INPUT operand masks, chunk-sized (chunk_n_max bytes)
+   * and re-gathered per chunk in ca_sweep_next_chunk.  m0 is indexed by the
+   * offset within the chunk, m0[k] for k < chunk_n -- NOT by the flat cell
+   * index.  Sizing it to n_kernel instead would leave one allocation still
+   * scaling with the operand, which is the thing this path exists to avoid:
+   * at 1 byte per cell it is an eighth of an f64 operand, but an eighth of
+   * unbounded is still unbounded. */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     if (st->fsync[k_op] == '0' && ca_has_mask(st->cx[k_op])) {
       any_input_mask = 1;
@@ -258,31 +264,69 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
              st->src_label ? st->src_label : "ca_sweep_acquire_chunked");
   }
   if (any_input_mask) {
-    st->m0 = (boolean8_t *) ca_lazy_arena_acquire(st->n_kernel);
-    memset(st->m0, 0, st->n_kernel);
+    st->m0           = (boolean8_t *) ca_lazy_arena_acquire(st->chunk_n_max);
+    st->mask_scratch = (boolean8_t *) ca_lazy_arena_acquire(st->chunk_n_max);
+    memset(st->m0, 0, st->chunk_n_max);
+    /* The OUTPUT masks have to exist before the walk starts, because each
+     * chunk's m0 is flushed into them as the walk passes -- there is no
+     * whole m0 left at release time to propagate in one go. */
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
-      if (st->fsync[k_op] != '0') continue;
+      if (st->fsync[k_op] != '1') continue;
       ca_update_mask(ca);
-      if (!ca->mask) continue;
-      if (ca_is_scalar(ca)) {
-        boolean8_t bit = 0;
-        ca_xfer_all(ca->mask, &bit, CA_XFER_GET);
-        if (bit) memset(st->m0, 1, st->n_kernel);
-      } else {
-        boolean8_t *ms = (boolean8_t *) ca_lazy_arena_acquire(st->n_kernel);
-        ca_size_t j;
-        ca_xfer_all(ca->mask, ms, CA_XFER_GET);
-        for (j = 0; j < st->n_kernel; j++) st->m0[j] |= ms[j];
-        ca_lazy_arena_release(ms);
-      }
+      if (!ca->mask) ca_create_mask(ca);
     }
   }
 
-  /* CAREFUL: m0 -> OUTPUT mask propagation is deferred to release
-   * time so that author per-cell m_out writes during the chunk loop
-   * are captured in the final OUTPUT mask.  Do not fold this into
-   * acquire; doing so would clobber the author's writes. */
+  /* CAREFUL: m0 -> OUTPUT mask propagation happens per chunk, at the point
+   * the chunk is finished (= the top of the next ca_sweep_next_chunk, and
+   * once more in release), never at acquire.  Author per-cell m_out writes
+   * land in m0 during the chunk loop and must be captured after that loop
+   * has run, not before it. */
+}
+
+/* OR one INPUT operand's mask for the current chunk into m0.  Gathered via
+ * ca_chunked_gather rather than attached, so no operand mask is ever
+ * attached -- the same invariant the whole-buffer path keeps with
+ * ca_xfer_all. */
+static void
+ca_sweep_gather_chunk_mask (ca_sweep_state_t *st, ca_size_t off, ca_size_t n)
+{
+  int k_op;
+  ca_size_t j;
+
+  memset(st->m0, 0, n);
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    CArray *ca = st->cx[k_op];
+    if (st->fsync[k_op] != '0') continue;
+    ca_update_mask(ca);
+    if (!ca->mask) continue;
+    if (ca_is_scalar(ca)) {
+      /* one cell, broadcast across the chunk */
+      boolean8_t bit = 0;
+      ca_xfer_all(ca->mask, &bit, CA_XFER_GET);
+      if (bit) memset(st->m0, 1, n);
+    } else {
+      ca_chunked_gather(ca->mask, off, n, st->mask_scratch);
+      for (j = 0; j < n; j++) st->m0[j] |= st->mask_scratch[j];
+    }
+  }
+}
+
+/* Copy the chunk just finished out to every OUTPUT operand's mask.  Runs
+ * after the author's loop over that chunk, so m_out writes into m0 are
+ * carried through. */
+static void
+ca_sweep_flush_chunk_mask (ca_sweep_state_t *st)
+{
+  int k_op;
+  if (!st->m0 || st->chunked_state != 1 || st->chunk_n == 0) return;
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    CArray *ca = st->cx[k_op];
+    if (st->fsync[k_op] != '1') continue;
+    if (!ca->mask) continue;
+    memcpy((boolean8_t *) ca->mask->ptr + st->chunk_off, st->m0, st->chunk_n);
+  }
 }
 
 int
@@ -296,6 +340,8 @@ ca_sweep_next_chunk (ca_sweep_state_t *st)
     st->chunk_off     = 0;
     st->chunked_state = 1;
   } else {
+    /* the chunk that just finished is the author's last word on its mask */
+    ca_sweep_flush_chunk_mask(st);
     /* advance */
     st->chunk_off += st->chunk_n;
   }
@@ -326,6 +372,8 @@ ca_sweep_next_chunk (ca_sweep_state_t *st)
     }
   }
 
+  if (st->m0) ca_sweep_gather_chunk_mask(st, off, n);
+
   return 1;
 }
 
@@ -333,19 +381,10 @@ void
 ca_sweep_release_chunked (ca_sweep_state_t *st)
 {
   int k_op;
-  /* Propagate (possibly author-mutated) m0 to OUTPUT mask before
-   * sync.  For INOUT_MASKED forms this captures the author's per-cell
-   * m_out writes; other forms behave the same as the whole-buffer
-   * acquire-time propagation. */
-  if (st->m0) {
-    for (k_op = 0; k_op < st->n_ops; k_op++) {
-      CArray *ca = st->cx[k_op];
-      if (st->fsync[k_op] != '1') continue;
-      ca_update_mask(ca);
-      if (!ca->mask) ca_create_mask(ca);
-      memcpy(ca->mask->ptr, st->m0, st->n_kernel);
-    }
-  }
+  /* The final chunk has no next_chunk call to flush it, so it is flushed
+   * here.  For INOUT_MASKED forms this is what captures the author's
+   * per-cell m_out writes over that last chunk. */
+  ca_sweep_flush_chunk_mask(st);
   /* sync OUTPUTs (reverse order, regardless of whether chunk loop ran) */
   for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
     if (st->fsync[k_op] == '1') ca_sync(st->cx[k_op]);
@@ -362,6 +401,10 @@ ca_sweep_release_chunked (ca_sweep_state_t *st)
   if (st->m0) {
     ca_lazy_arena_release(st->m0);
     st->m0 = NULL;
+  }
+  if (st->mask_scratch) {
+    ca_lazy_arena_release(st->mask_scratch);
+    st->mask_scratch = NULL;
   }
 }
 

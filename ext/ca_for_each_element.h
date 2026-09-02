@@ -125,8 +125,9 @@ typedef struct {
  *   inner  : per-cell loop within chunk_n
  *
  * Memory peak per AC2: INPUT non-alias views materialise into a single
- * chunk scratch (~32KB at f64).  m0 (= masked form) is full size (=
- * n_kernel bytes) for simplicity; macro reads at m0[chunk_off + k].
+ * chunk scratch (~32KB at f64).  m0 (= masked form) is chunk-sized too and
+ * re-gathered per chunk, so the macro reads at m0[k] -- indexed within the
+ * chunk, not by the flat cell index.
  *
  * For MASKED forms (m / m_in / m_out): when source has no mask, m0 is
  * NULL and m / m_in == 0 always.  m_out writes during INOUT_MASKED are
@@ -162,8 +163,7 @@ typedef struct {
               && (((x) = *(T *)((_st1).core.base[0]                     \
                                 + __cfem_k * (_st1).core.stride[0])),   \
                   ((m) = (_st1).core.m0                                 \
-                            ? (_st1).core.m0[(_st1).core.chunk_off      \
-                                             + __cfem_k]                \
+                            ? (_st1).core.m0[__cfem_k]                  \
                             : (boolean8_t)0),                           \
                   1);                                                   \
             __cfem_k++ )
@@ -211,16 +211,14 @@ typedef struct {
               && (((in) = *(T_IN *)((_st2).core.base[0]                 \
                                     + __cfeim_k * (_st2).core.stride[0])), \
                   ((m_in) = (_st2).core.m0                              \
-                              ? (_st2).core.m0[(_st2).core.chunk_off    \
-                                               + __cfeim_k]             \
+                              ? (_st2).core.m0[__cfeim_k]               \
                               : (boolean8_t)0),                         \
                   ((m_out) = (m_in)),                                   \
                   1);                                                   \
             (*(T_OUT *)((_st2).core.base[1]                             \
                         + __cfeim_k * (_st2).core.stride[1]) = (out)),  \
             (((_st2).core.m0)                                           \
-                ? ((_st2).core.m0[(_st2).core.chunk_off + __cfeim_k]    \
-                     = (m_out))                                         \
+                ? ((_st2).core.m0[__cfeim_k] = (m_out))                 \
                 : (boolean8_t)0),                                       \
             __cfeim_k++ )
 
