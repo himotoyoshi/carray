@@ -4,9 +4,9 @@ A reduction combines many elements into fewer — for example, summing an array
 down to a single number. CArray can reduce over the whole array, or along one or
 more chosen axes.
 
-## Over the whole array
+## The reductions
 
-With no arguments, a reduction returns a single value.
+With no arguments, a reduction returns a single value for the whole array.
 
 ```ruby
 a = CA_DOUBLE([2, 4, 6])
@@ -20,25 +20,53 @@ a.variance   #  => 4.0
 a.stddev     #  => 2.0
 ```
 
-The common reductions are `sum`, `prod`, `min`, `max`, `mean`, `variance`,
-`stddev`. (`sum` and `mean` return a floating-point value even for an integer
-array, which is why the results above print with a `.0`.)
+Those seven are also the summary statistics you would want first of an array:
+its total and its product, its extremes, its centre, and its spread.
 
-### Each reduction on its own
-
-The individual behaviours, shown on small concrete arrays:
+`variance` and `stddev` are the sample statistics: they divide by one less than
+the count. `variancep` and `stddevp` are the population pair, dividing by the
+count itself.
 
 ```ruby
-CA_DOUBLE([1, 2, 3, 4]).sum        #  => 10.0
-CA_DOUBLE([1, 2, 3, 4]).prod       #  => 24.0
-CA_DOUBLE([3, 1, 4, 1, 5]).min     #  => 1.0
-CA_DOUBLE([3, 1, 4, 1, 5]).max     #  => 5.0
-CA_DOUBLE([2, 4, 4, 4, 5, 5, 7, 9]).mean       #  => 5.0
-CA_DOUBLE([0, 2, 4, 6]).variance               #  => 6.666666666666667
-CA_DOUBLE([0, 2, 4, 6]).stddev                 #  => 2.581988897471611
+a = CA_DOUBLE([0, 2, 4, 6])
+
+a.variance     #  => 6.666666666666667     divided by 3
+a.variancep    #  => 5.0                   divided by 4
+a.stddev       #  => 2.581988897471611
+a.stddevp      #  => 2.23606797749979
 ```
 
-## Position of the extreme element
+## The type of the answer
+
+Most reductions answer in `float64` whatever the array's own type is. That is
+why the results above print with a `.0`, and it holds for integer input too:
+the sum of an `int32` array is a Float, not an Integer. A total does not fit in
+the type of the things being totalled — widening is what keeps it from
+wrapping. `min` and `max` are the exceptions, since the answer is one of the
+elements and comes back in the array's own type.
+
+```ruby
+i = CA_INT([1000000, 2000000, 3000000])
+
+i.sum                #  => 6000000.0    a Float
+i.sum.class          #  => Float
+i.min                #  => 1000000      an Integer, from the array
+```
+
+`accumulate` is the sum without that widening: it answers in the array's own
+type. The total then has nowhere to overflow into, so it wraps, and nothing
+says that it did.
+
+```ruby
+a = CArray.int8(300).fill(1)     #  three hundred 1s
+
+a.sum                            #  => 300.0
+a.accumulate                     #  => 44       300 % 256
+```
+
+Reach for it only when that arithmetic is what you want.
+
+## Locating the minimum and maximum
 
 `min_index` and `max_index` give the *position* of the smallest or largest
 element, not its value. With no arguments they return a flat (one-dimensional)
@@ -55,8 +83,6 @@ m = CA_INT([[3, 1, 4],
 m.min_index(axis: 0)   #  => [ 1, 0, 0 ]   per column: which row holds the min
 m.max_index(axis: 1)   #  => [ 2, 2 ]      per row: which column holds the max
 ```
-
-CArray uses the `_index` suffix throughout — there is no `argmin` / `argmax`.
 
 ## Order statistics: median, percentile, quantile
 
@@ -89,48 +115,94 @@ m = CA_DOUBLE([[1, 2, 3, 4],
 m.median(axis: 1)      #  => [ 2.5, 6.5 ]
 ```
 
-An order statistic has no answer for an empty distribution, so — like `mean` —
-an empty array, or a zero-length reduction axis, gives `UNDEF` (never a raise):
-
-```ruby
-CA_DOUBLE([]).median                    #  => UNDEF
-CArray.float64(0, 3).median(axis: 0)    #  => [ _, _, _ ]
-```
-
-> **Current limitation:** the *whole-array* forms handle a mask — `data.median`
-> and `data.percentile(50)` reduce over the present values and skip the missing
-> ones — but the *per-axis* forms do not yet accept a masked input:
-> `data.median(axis: 1)` on an array that carries a mask raises rather than
-> reducing each slab over its present values. For now, reduce masked data with
-> the whole-array form, or strip the mask first (see
-> [Masks and missing values](05_masks.md)).
+An order statistic has no answer for an empty distribution. Like `mean`, it
+never raises there — see "When there is nothing to reduce" below.
 
 (To *generate* random arrays rather than summarise them, see `random!` in
 [Creating arrays](01_creating_arrays.md).)
 
 ## Counting
 
-`count(v)` counts how many elements equal `v`. `count_masked` and
-`count_not_masked` count the missing and present elements (see
-[Masks](05_masks.md) for what "masked" means).
+`count` with no argument is how many elements there are.
 
 ```ruby
 a = CA_INT([1, 2, 2, 3, 2, 4])
-a.count(2)            #  => 3
-a.count(5)            #  => 0
 
-a.count_masked        #  => 0
-a.count_not_masked    #  => 6
+a.count                     #  => 6
 ```
 
-## Along an axis
-
-Pass `axis:` to reduce along a particular axis. The result has that axis removed.
-For a 2-D array, `axis: 0` collapses the rows (giving a per-column result) and
-`axis: 1` collapses the columns (giving a per-row result).
+Given a value, it counts the elements equal to it:
 
 ```ruby
-m = CArray.int32(2, 3).seq
+a.count(2)                  #  => 3
+a.count(5)                  #  => 0
+```
+
+Given an array of values, it answers once for each of them, in that array's
+shape — a small frequency table over the values you name:
+
+```ruby
+a.count(CA_INT([2, 4]))     #  => [ 3, 1 ]     how many 2s, how many 4s
+```
+
+`axis:` counts within each slab, as it does for the other reductions:
+
+```ruby
+m = CA_INT([[1, 2, 2],
+            [3, 2, 4]])
+
+m.count(2, axis: 1)         #  => [ 2, 1 ]     per row
+```
+
+### `bincount`
+
+When the values are non-negative integers and you want every one of them
+counted, `bincount` does it in a single pass. The result is indexed *by the
+value*: entry `k` holds how many times `k` occurred.
+
+```ruby
+d = CA_INT([0, 1, 2, 2, 0, 1, 2, 0])
+
+d.bincount                  #  => [ 3, 2, 3 ]    three 0s, two 1s, three 2s
+```
+
+The output stops at the largest value present. `length:` asks for a longer
+one, so that tables built from different data line up:
+
+```ruby
+d.bincount(length: 5)       #  => [ 3, 2, 3, 0, 0 ]
+```
+
+`weights:` sums a weight per element instead of counting, and takes its data
+type from the weights — the same walk, answering "how much" rather than "how
+many":
+
+```ruby
+w = CA_DOUBLE([1, 1, 1, 1, 2, 2, 2, 2])
+
+d.bincount(weights: w)      #  => [ 5.0, 3.0, 4.0 ]
+```
+
+The labels have to be non-negative integers: a negative label raises, and so
+does a float array. [Histograms](25_histograms.md) covers binning values that
+are not already small integers.
+
+## Reducing along an axis
+
+An array's axes are the directions you index it in, numbered from 0 in the
+order you write them: in `a[i, j]`, `i` indexes axis 0 and `j` indexes axis 1.
+For a two-dimensional array that makes axis 0 the one running down the rows and
+axis 1 the one running across the columns. The last axis is the one whose
+elements lie next to each other in memory, which is the order `seq!` fills in
+and the order a flattened reduction walks.
+
+Pass `axis:` to reduce along one of them. The reduction runs along that axis
+and the axis is then gone from the result, so `axis: 0` collapses the rows and
+leaves one value per column, while `axis: 1` collapses the columns and leaves
+one per row.
+
+```ruby
+m = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 
@@ -148,12 +220,16 @@ m.prod(axis: 1)   #  => [ 0.0, 60.0 ]
 m.stddev(axis: 0) #  => [ 2.1213203435596424, 2.1213203435596424, 2.1213203435596424 ]
 ```
 
+An array of axis numbers collapses several at once, as the next section shows.
+The order statistics — `median`, `percentile`, `quantile` — take one axis only,
+and so do the cumulative scans.
+
 ## Reducing a higher-dimensional array
 
 The same rules extend to any number of axes. Here is a 2x2x2 array:
 
 ```ruby
-c = CArray.int32(2, 2, 2).seq
+c = CArray.int32(2, 2, 2).seq!
 #  => [ [ [ 0, 1 ],
 #         [ 2, 3 ] ],
 #       [ [ 4, 5 ],
@@ -189,75 +265,37 @@ c.sum(axis: [0, 1])
 
 ## Keeping the reduced axis with `keep_axis:`
 
-By default, the axis you reduce along disappears from the result — that is why
-`m.sum(axis: 1)` on a `[2, 3]` array gives a `[2]` array. Pass
-`keep_axis: true` to keep it as a size-1 axis instead. The result then has the
-same `ndim` as the input, and broadcasts cleanly against the original.
+Reducing removes the axis, which is why `m.sum(axis: 1)` on a `[2, 3]` array
+gives a `[2]` array. `keep_axis: true` keeps it, as an axis of length 1:
 
 ```ruby
-m = CArray.int32(2, 3).seq
-#  => [ [ 0, 1, 2 ],
-#       [ 3, 4, 5 ] ]
+m = CArray.int32(2, 3).seq!
 
 m.sum(axis: 1).shape                       #  => [2]
 m.sum(axis: 1, keep_axis: true).shape      #  => [2, 1]
-
-m.sum(axis: 1, keep_axis: true)
-#  => [ [  3.0 ],
-#       [ 12.0 ] ]                          shape [2, 1] — a column
-
-m.sum(axis: 0, keep_axis: true)
-#  => [ [ 3.0, 5.0, 7.0 ] ]                 shape [1, 3] — a row
 ```
 
-The point is broadcasting (see [Broadcasting](07_broadcasting.md)). With
-`keep_axis: true`, the reduced result has size 1 along the axis you collapsed,
-so it lines up automatically with the original — no need to insert the axis
-back manually with `:_`.
-
-**Subtract the row mean from each row** — the canonical use:
+The result then has as many axes as the array it came from, so it lines up
+against that array without further work — which is the whole point of asking
+for it:
 
 ```ruby
 x = CA_DOUBLE([[1, 2, 3],
                [4, 5, 6]])
 
-x.mean(axis: 1, keep_axis: true)
-#  => [ [ 2.0 ],
-#       [ 5.0 ] ]                           shape [2, 1]
-
-x - x.mean(axis: 1, keep_axis: true)
+x - x.mean(axis: 1, keep_axis: true)       #  each row less its own mean
 #  => [ [ -1.0, 0.0, 1.0 ],
 #       [ -1.0, 0.0, 1.0 ] ]
 ```
 
-Without `keep_axis:` you'd write `x - x.mean(axis: 1)[nil, :_]` — same result,
-one more step.
+Without it you would put the axis back by hand, writing
+`x - x.mean(axis: 1)[nil, :_]`; [Broadcasting](07_broadcasting.md) is where
+that form belongs. Multi-axis reductions take `keep_axis:` too — each reduced
+axis becomes length 1 and the others are left alone.
 
-**Normalise each row by its sum:**
-
-```ruby
-totals = x.sum(axis: 1, keep_axis: true)
-#  => [ [  6.0 ],
-#       [ 15.0 ] ]
-
-x / totals
-#  => [ [ 0.1667, 0.3333, 0.5 ],   shown rounded
-#       [ 0.2667, 0.3333, 0.4 ] ]    each row sums to 1
-```
-
-**3-D arrays.** `keep_axis: true` works with multi-axis reductions too — each
-reduced axis becomes size 1, leaving the other axes untouched.
-
-```ruby
-c = CArray.int32(2, 3, 4).seq
-
-c.mean(axis: 1, keep_axis: true).shape       #  => [2, 1, 4]
-c.mean(axis: [0, 2], keep_axis: true).shape  #  => [1, 3, 1]
-```
-
-`keep_axis:` is accepted by every reduction that takes `axis:` — `sum`,
-`prod`, `min`, `max`, `mean`, `variance`, `stddev`, `min_index`, `max_index`,
-`count`, `count_masked`, `count_not_masked`, `accumulate`.
+Every reduction in this chapter accepts `keep_axis:`, apart from `count` used
+without a value. The cumulative scans do not take it either, their output
+already having the shape of the input.
 
 ## Weighted reductions and frequency tables
 
@@ -272,11 +310,9 @@ v.wsum(w)     #  => 20.0    1*4 + 2*3 + 3*2 + 4*1
 v.wmean(w)    #  => 2.0     20.0 / (4 + 3 + 2 + 1)
 ```
 
-A natural use is a **frequency table**. `bincount` (see
-[Histograms](25_histograms.md)) counts how often each value `0, 1, 2, …` occurs:
-the *index* is the value and the entry is its count. The mean of the original
-data is then the weighted mean of the values by their counts — and `index` hands
-you the value axis directly:
+A natural use is a frequency table. The mean of the original data is the
+weighted mean of the values by their counts, and `index` hands you the value
+axis that `bincount` counted along:
 
 ```ruby
 data = CA_INT([1, 2, 2, 2, 0, 0, 0, 2, 1, 2, 0, 0, 0, 3, 2, 3, 2, 1, 0, 0, 0])
@@ -299,7 +335,7 @@ freq = CA_INT([[10, 0, 0, 0],     # each row is one frequency distribution
                [ 0, 0, 0, 10],
                [ 9, 3, 7, 2]])
 
-val  = CArray.int32(*freq.shape).seq(axis: 1)   # value axis: every row is 0, 1, 2, 3
+val  = CArray.int32(*freq.shape).seq!(axis: 1)   # value axis: every row is 0, 1, 2, 3
 wtot = freq.sum(axis: 1, keep_axis: true)       # total count per row, shape [3, 1]
 
 mean = (val * freq).sum(axis: 1, keep_axis: true) / wtot
@@ -324,8 +360,8 @@ undefined.
 
 ## Cumulative reductions (prefix scans)
 
-`cumsum` and `cumcount` are *running* totals — at each position they hold the
-result for everything up to and including that position. With no argument they
+`cumsum` is a *running* total — at each position it holds the sum of everything
+up to and including that position. With no argument they
 flatten the array first and return a 1-D running total; with `axis:` they run
 along that axis and keep the array's shape.
 
@@ -333,7 +369,7 @@ along that axis and keep the array's shape.
 v = CA_INT([1, 2, 3, 4])
 v.cumsum            #  => [ 1.0, 3.0, 6.0, 10.0 ]
 
-m = CArray.int32(2, 3).seq
+m = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 
@@ -349,179 +385,40 @@ m.cumsum(axis: 1)   #  run across each row
 #       [ 3.0, 7.0, 12.0 ] ]
 ```
 
-`cumcount` counts present (non-masked) elements as it goes:
-
-```ruby
-m.cumcount(axis: 1)
-#  => [ [ 1, 2, 3 ],
-#       [ 1, 2, 3 ] ]    no masked elements, so each row counts 1, 2, 3
-```
-
 Multi-axis cumulative is not supported directly because it is ambiguous (a
 flattened running sum, or a 2-D summed-area table?). Chain instead when you
 mean the latter: `m.cumsum(axis: 0).cumsum(axis: 1)`.
 
-## Reductions on a masked array
-
-If an array carries a mask (see [Masks and missing values](05_masks.md)), the
-masked elements are left out of reductions automatically. A masked sum adds only
-the present values; a masked mean divides by the count of present values.
-
-```ruby
-a = CArray.float64(2, 3).seq
-a[0, 1] = UNDEF
-a[1, 2] = UNDEF
-a
-#  => [ [ 0.0,   _, 2.0 ],
-#       [ 3.0, 4.0,   _ ] ]
-
-a.sum                 #  => 9.0      0 + 2 + 3 + 4
-a.mean                #  => 2.25     9 / 4 present elements
-a.count_not_masked    #  => 4
-a.count_masked        #  => 2
-a.count(3.0)          #  => 1        present elements only
-
-a.mean(axis: 0)       #  => [ 1.5, 4.0, 2.0 ]   per-column means of present
-a.mean(axis: 1)       #  => [ 1.0, 3.5 ]        per-row means of present
-```
-
-`cumsum` and `cumcount` step over masked elements — at a masked position the
-running total is carried forward unchanged:
-
-```ruby
-a.cumsum
-#  => [ 0.0, 0.0, 2.0, 5.0, 9.0, 9.0 ]    flat scan; mask positions hold the prior acc
-
-a.cumcount
-#  => [ 1, 1, 2, 3, 4, 4 ]                same idea, counting only present cells
-```
-
 ## When there is nothing to reduce
 
-A reduction can end up with **no elements to fold** — either the array is empty,
-or every element is masked. What comes back depends on whether the reduction has
-a natural "empty" answer:
+An empty array has no elements to fold, and some reductions still answer:
+adding no numbers gives 0, multiplying none gives 1, and none of them match
+the value you asked to count.
 
 ```ruby
-CA_FLOAT64([]).sum        #  => 0.0     the sum of no numbers is 0
-CA_FLOAT64([]).prod       #  => 1.0     the product of no numbers is 1
-CA_FLOAT64([]).count(1.0) #  => 0       zero matches among no elements
-CA_FLOAT64([]).min        #  => UNDEF   the minimum of no numbers has no value
-CA_FLOAT64([]).mean       #  => UNDEF   0 / 0 is undefined
+CA_FLOAT64([]).sum        #  => 0.0
+CA_FLOAT64([]).prod       #  => 1.0
+CA_FLOAT64([]).count(1.0) #  => 0
 ```
 
-An all-masked array behaves exactly like an empty one — masked cells are left
-out, so folding what remains folds nothing:
+The rest have nothing to answer with. The smallest of no numbers is not a
+number, and neither is their mean or their median, so what comes back is
+`UNDEF` — the object CArray uses for a value that is not defined. It is not
+Ruby's `nil`, and [Masks and missing values](05_masks.md) is where it is
+properly introduced.
 
 ```ruby
-a = CA_FLOAT64([1, 2, 3])
-a[] = UNDEF               # mask every cell
-a.sum                     #  => 0.0     same as CA_FLOAT64([]).sum
-a.min                     #  => UNDEF
+CA_FLOAT64([]).min        #  => UNDEF
+CA_FLOAT64([]).mean       #  => UNDEF
+CA_FLOAT64([]).median     #  => UNDEF
 ```
 
-The rule is consistent: a reduction with an identity element returns it
-(`sum` / `accumulate` / `wsum` → `0`, `prod` → `1`, `count` → `0`), and a
-reduction without one returns `UNDEF` — `min` / `max`, the ratio statistics
-`mean` / `variance` / `stddev`, and the order statistics `median` / `percentile`
-/ `quantile` (a middle value of nothing has no answer). This mirrors the masked
-case above: `sum` already skips masked cells, so a sum over *nothing left* is
-`0`.
-
-Per axis, this applies slab by slab — an all-masked slab yields the identity (or
-`UNDEF`), as a normal, unmasked result cell:
+`fill_value:` puts a value of your own choosing there instead:
 
 ```ruby
-m = CArray.float64(3, 2) { |i, j| i * 2.0 + j }
-m[1, nil] = UNDEF                 # mask the middle row
-m.sum(axis: 1)                    #  => [ 1.0, 0.0, 9.0 ]   masked row -> 0
-m.sum(axis: 1).has_mask?          #  => false
-```
-
-### Requiring present data with `min_count:`
-
-If you would rather treat "nothing to reduce" (or "too little to trust") as a
-missing result, pass `min_count:` — the reduction returns `UNDEF` unless at
-least that many present (unmasked) cells contributed:
-
-```ruby
-CA_FLOAT64([]).sum(min_count: 1)  #  => UNDEF   0 present < 1 required
-
-a = CA_FLOAT64([1, 2, 3])
-a[] = UNDEF
-a.sum(min_count: 1)               #  => UNDEF   all masked, 0 present
-```
-
-### Supplying a fallback with `fill_value:`
-
-When a reduction would return `UNDEF` — the no-answer reductions on empty input
-(`min` / `max` / `mean` / `median` / …), or any cell knocked out by `min_count:`
-— pass `fill_value:` to substitute a value instead. This is the lightweight way
-to say "…but use this if there was nothing to work with," and it works on both
-the whole-array and per-axis forms:
-
-```ruby
-CA_FLOAT64([]).mean(fill_value: 0.0)   #  => 0.0     instead of UNDEF
+CA_FLOAT64([]).mean(fill_value: 0.0)   #  => 0.0
 CA_FLOAT64([]).min(fill_value: -1.0)   #  => -1.0
-
-m = CArray.float64(3, 2) { |i, j| i * 2.0 + j }
-m[1, nil] = UNDEF
-m.sum(axis: 1, min_count: 1, fill_value: -1)   #  => [ 1.0, -1.0, 9.0 ]
 ```
-
-`fill_value:` only ever replaces `UNDEF` cells; a defined identity (an empty
-`sum` of `0`) is never `UNDEF`, so there is nothing to fill there.
-
-> **Careful — do not test a scalar result with `if`.** `UNDEF` is *truthy* in
-> Ruby (only `nil` and `false` are false), so `if v = a.mean; … end` treats an
-> empty/all-masked result as if it were present. Reach for `fill_value:` at the
-> call site, or compare explicitly with `v == UNDEF`, instead of relying on truth
-> value. (Search-style lookups such as `a.search(v)` return `nil`, not `UNDEF`,
-> for "not found" — see [Masks and missing values](05_masks.md) for why the two
-> differ.)
-
-## `accumulate` — sum that keeps the input type
-
-`accumulate` is `sum`, but its result keeps the input data type instead of
-widening to `float64`. Use it when you specifically want to stay in integer (or
-in another exact type) rather than land in floating-point.
-
-```ruby
-m = CA_INT([[1, 2, 3],
-            [4, 5, 6]])
-
-m.sum                  #  => 21.0      a Float
-m.accumulate           #  => 21        an Integer
-
-m.sum(axis: 0).data_type         #  => :float64
-m.accumulate(axis: 0).data_type  #  => :int32
-
-m.accumulate(axis: 0)  #  => [ 5, 7, 9 ]
-```
-
-### The sum wraps at the width of that type
-
-Keeping the type means the running total has nowhere to overflow into, so it
-wraps, exactly as adding into a register of that width would:
-
-```ruby
-a = CArray.int8(300) { 1 }   # three hundred 1s
-
-a.sum          #  => 300.0    widened, so the full total
-a.accumulate   #  => 44       300 wrapped at 256
-```
-
-Boolean is the same rule at its narrowest. Its values live in `0`/`1`, so the
-sum wraps at 2, and `accumulate` ends up reporting whether an *odd* number of
-elements were true:
-
-```ruby
-CA_BOOLEAN([1, 1, 1]).accumulate   #  => 1     three trues, odd
-CA_BOOLEAN([1, 1]).accumulate      #  => 0     two trues, wrapped
-```
-
-Reach for `sum` whenever the total matters more than the type. On booleans it
-widens to `uint64` and counts the trues.
 
 ## Method reference
 
@@ -541,6 +438,8 @@ removed. Without `axis:`, the result is a single value over the whole array.
 | `mean`                | `mean(axis: k)`                      | Arithmetic mean as `float64`                  |
 | `variance`            | `variance(axis: k)`                  | Sample variance as `float64`                  |
 | `stddev`              | `stddev(axis: k)`                    | Sample standard deviation as `float64`        |
+| `variancep`           | `variancep(axis: k)`                 | Population variance as `float64`              |
+| `stddevp`             | `stddevp(axis: k)`                   | Population standard deviation as `float64`    |
 | `wsum`                | `wsum(weights, axis: k)`             | Weighted sum as `float64`; `weights` is a per-element weight the same shape as the array |
 | `wmean`               | `wmean(weights, axis: k)`            | Weighted mean `sum(v*w)/sum(w)` as `float64`  |
 | `accumulate`          | `accumulate(axis: k)`                | Sum that keeps the input data type; wraps at that type's width |
@@ -559,9 +458,8 @@ removed. Without `axis:`, the result is a single value over the whole array.
 
 | Method             | Argument form                  | Returns                                                                    |
 |--------------------|--------------------------------|----------------------------------------------------------------------------|
-| `count`            | `count(value, axis: k)`        | Number of elements equal to `value`. `value` may be a scalar, `true`/`false` (for boolean arrays), or a same-shape CArray (compared element-wise). |
-| `count_masked`     | `count_masked(axis: k)`        | Number of masked (missing) elements.                                       |
-| `count_not_masked` | `count_not_masked(axis: k)`    | Number of present (non-masked) elements.                                   |
+| `count`            | `count(axis: k)` or `count(value, axis: k)` | Without a value, the number of elements. With one, how many equal it; `value` may be a scalar, `true`/`false` for a boolean array, or a CArray of values, in which case the answer carries that array's shape. |
+| `bincount`         | `bincount(length: 0, weights: nil)` | Counts per non-negative integer label, indexed by the label. `weights:` sums those instead of counting. Not a per-axis reduction. |
 
 ### Cumulative scans
 
@@ -572,20 +470,18 @@ ambiguous; chain two scans if you really want that).
 | Method      | Argument form         | Returns                                                                   |
 |-------------|-----------------------|---------------------------------------------------------------------------|
 | `cumsum`    | `cumsum(axis: k)`     | Running sum. Without `axis:`, a flattened 1-D scan over the whole array.  |
-| `cumcount`  | `cumcount(axis: k)`   | Running count of present (non-masked) cells.                              |
 
 ### Notes on `axis:` and `keep_axis:`
 
 * `axis: k` (a single integer) — collapse the one axis `k`.
-* `axis: [k1, k2, …]` (an array) — collapse several axes at once. Supported by
-  the scalar reductions (`sum`, `prod`, `min`, `max`, `mean`, `variance`,
-  `stddev`, `accumulate`) and the counting methods. Not supported by
-  cumulative scans.
+* `axis: [k1, k2, …]` (an array) — collapse several axes at once. Everything
+  here takes it except the order statistics (`median`, `percentile`,
+  `quantile`) and the cumulative scans, which take a single axis.
 * Without `axis:` — reduce over the whole array.
 * Negative axis numbers count from the last axis (`-1` is the last axis).
 * `keep_axis: true` — keep each reduced axis as a size-1 axis instead of
   removing it. The result then has the same `ndim` as the input and broadcasts
-  cleanly back against it (`x - x.mean(axis: 1, keep_axis: true)`). Accepted
-  by every reduction that takes `axis:`. Not applicable to cumulative scans
-  (their output already has the same shape as the input).
+  cleanly back against it (`x - x.mean(axis: 1, keep_axis: true)`). Every
+  reduction takes it apart from `count` without a value; the cumulative scans do
+  not, their output already having the shape of the input.
 
