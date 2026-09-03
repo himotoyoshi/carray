@@ -211,6 +211,31 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   `CArray.select` is now `data_type:`, spelled the way the rest of the
   library spells it. There is no alias: `dtype:` raises `unknown keyword`.
 
+- New: a time element is taken directly as a start or origin literal, so a
+  `floor` / `ceil` / `to_unit` answer feeds back into `CArray.time`,
+  `time_range`, `time_series`, `CArray#time` and a step-system `origin:`; it
+  used to have to go out through `DateTime` and be re-parsed. A `:M` or `:Y`
+  element names the first midnight of its granule. This also settles a
+  disagreement where such an element was a legal origin for a calendar bucket
+  and an illegal one for an hourly bucket on the same array. What an origin
+  must satisfy is unchanged.
+
+- Fix: `from_timesteps` on a week grid answered Thursdays. The week grid counts
+  from the epoch, which is one, so it cannot hold an ISO Monday head; a week
+  bucket now answers on the day grid and round-trips against `floor` cell for
+  cell. A day-or-finer array keeps the Monday default, a week-stored array its
+  own epoch-anchored ticks.
+
+- Fix: a masked cell decided whether a `CATime` conversion fit. The range
+  guards took their extremes with the mask stripped, so `to_unit` raised
+  `RangeError` over a wide value that was masked out. They now answer UNDEF
+  when there is nothing to bound -- an empty array, or every cell masked.
+
+- Fix: `CATimedelta::Element#/` floored a negative duration, so `-30h / 4`
+  answered `-8h` where the array form answered `-7h`. A duration is a
+  magnitude, so it shrinks toward zero, matching the array form in all four
+  sign combinations.
+
 - Fix: a field out of range no longer rolls over into another date.
   `"2019-02-31"` parsed to 2019-03-03, and `"201909"` -- a valid YYMMDD to
   Ruby, 2020-19-09 -- to 2021-07; both now raise.
