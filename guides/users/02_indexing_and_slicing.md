@@ -66,6 +66,8 @@ a[-1, -1] = 0
 take a row or a column.
 
 ```ruby
+a = CArray.int32(3, 4).seq   # back to the values it started with
+
 a[1, nil]    #  => [ 4, 5, 6, 7 ]    the second row
 a[nil, 2]    #  => [ 2, 6, 10 ]      the third column
 a[0, nil]    #  => [ 0, 1, 2, 3 ]    the first row

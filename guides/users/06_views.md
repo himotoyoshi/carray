@@ -44,7 +44,7 @@ to the same total.
 
 ```ruby
 flat = CArray.int32(24).seq
-#  => [ 0, 1, 2, 3, ..., 23 ]
+#  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, ..., 23 ]
 
 cube = flat.reshape(2, 3, 4)        #  re-fold 1-D into 3-D
 #  => [ [ [  0,  1,  2,  3 ],
@@ -55,7 +55,7 @@ cube = flat.reshape(2, 3, 4)        #  re-fold 1-D into 3-D
 #         [ 20, 21, 22, 23 ] ] ]
 
 cube.reshape(24)                    #  back down to 1-D
-#  => [ 0, 1, 2, ..., 23 ]
+#  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, ..., 23 ]
 
 cube.reshape(4, 6)                  #  any compatible 2-D shape
 #  => [ [  0,  1,  2,  3,  4,  5 ],
@@ -83,10 +83,10 @@ want. Pass the new axis order as integers.
 
 ```ruby
 c = CArray.int32(2, 2, 3).seq
-c.shape              #  => [ 2, 2, 3 ]
+c.shape              #  => [2, 2, 3]
 
 c.transpose(2, 0, 1).shape
-#  => [ 3, 2, 2 ]    axis 2 moved to the front, the rest follow
+#  => [3, 2, 2]     axis 2 moved to the front, the rest follow
 
 c.transpose(2, 0, 1)
 #  => [ [ [ 0, 3 ],

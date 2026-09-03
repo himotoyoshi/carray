@@ -50,7 +50,7 @@ require "numo/narray/memoryview"
 na = Numo::DFloat.new(3, 4).seq
 ca = CArray.from_memory_view(na)
 ca.class                #  => CArray        an entity, not a view
-ca.shape                #  => [ 3, 4 ]
+ca.shape                #  => [3, 4]
 ca[0, 0] = -1.0
 na[0, 0]                #  => 0.0           source untouched
 ```
@@ -62,7 +62,7 @@ during the copy:
 tr = Numo::DFloat.new(3, 4).seq.transpose   #  strided, shape [4, 3]
 ca = CArray.from_memory_view(tr)
 ca.class                #  => CArray
-ca.shape                #  => [ 4, 3 ]
+ca.shape                #  => [4, 3]
 ```
 
 Use `from_memory_view` when you want an independent snapshot, or when the
@@ -92,7 +92,7 @@ foreign buffer, no staging copy:
 tr = Numo::DFloat.new(3, 4).seq.transpose
 ca = CArray.wrap_memory_view(tr)
 ca.class                #  => CAStride
-ca.shape                #  => [ 4, 3 ]
+ca.shape                #  => [4, 3]
 ```
 
 The wrap is read-only if the producer is read-only. Closing or freeing the
