@@ -2,9 +2,11 @@
 
   Cast surface (3 layers):
 
-    to_<type>     `a.to_int32` etc.  Returns a fresh entity CArray
-                  of the target data_type.  Independent storage from
-                  `self`.
+    <type>        `a.int32` etc., and the general `a.to_type(:int32)`.
+                  Returns a fresh entity CArray of the target
+                  data_type.  Independent storage from `self`.  (The
+                  C functions are named rb_ca_to_<type>, but the
+                  methods they register carry no `to_` prefix.)
 
     as_<type>     `a.as_int32` etc.  Returns a writable CAMonOp view
                   that reinterprets `self` cell-by-cell at the target
