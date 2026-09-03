@@ -112,11 +112,12 @@ b.strip_mask(Float::NAN).sum(axis: 0)
 * [Getting started](guides/users/00_getting_started.md) — installing it, making a first array, and a short tour of the rest
 * [Creating arrays](guides/users/01_creating_arrays.md) — constructors, data types, and the ways of filling an array with values
 * [Indexing and slicing](guides/users/02_indexing_and_slicing.md) — elements, rows, columns, sub-blocks, and selection by condition
+* [Indexer reference](guides/users/16_indexer_reference.md) — every form `[]` accepts, the shape it gives back, and the view it produces
 * [Element-wise operations](guides/users/03_elementwise.md) — arithmetic, comparison, and the mathematical functions
+* [Broadcasting](guides/users/07_broadcasting.md) — combining arrays whose shapes differ
+* [Views](guides/users/06_views.md) — reshaping, transposing and slicing without copying, and what a write through a view reaches
 * [Reduction and statistics](guides/users/04_reduction_and_statistics.md) — summaries over the whole array or along the axes you choose
 * [Masks and missing values](guides/users/05_masks.md) — marking elements as undefined, and how calculations then treat them
-* [Views](guides/users/06_views.md) — reshaping, transposing and slicing without copying, and what a write through a view reaches
-* [Broadcasting](guides/users/07_broadcasting.md) — combining arrays whose shapes differ
 
 ## Contributing
 
