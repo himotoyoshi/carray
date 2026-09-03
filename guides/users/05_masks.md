@@ -278,6 +278,10 @@ when you want to inspect what is actually sitting in memory under the masked
 cells, or to feed a routine that does not understand masks.
 
 ```ruby
+a = CArray.float64(2, 3).seq     # the masked array from the top of the chapter
+a[0, 1] = UNDEF
+a[1, 2] = UNDEF
+
 a.value
 #  => [ [ 0.0, 1.0, 2.0 ],
 #       [ 3.0, 4.0, 5.0 ] ]

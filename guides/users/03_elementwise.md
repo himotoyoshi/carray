@@ -62,7 +62,9 @@ matching pair for both:
 
 ```ruby
 CA_DOUBLE([-0.4]) % 1.0        #  => [ 0.6 ]
-CA_DOUBLE([-7.0]).divmod(3.0)  #  => [ [ -3.0 ], [ 2.0 ] ]
+q, r = CA_DOUBLE([-7.0]).divmod(3.0)
+q                              #  => [ -3.0 ]
+r                              #  => [ 2.0 ]
 ```
 
 C's convention -- truncate toward zero, remainder carrying the sign of the
@@ -290,11 +292,17 @@ CA_DOUBLE([1, Math::E, Math::E ** 2]).log
 #  => [ 0.0, 1.0, 2.0 ]
 
 CA_DOUBLE([0, Math::PI / 2, Math::PI]).sin
-#  => [ 0.0, 1.0, 0.0 ]
+#  => [ 0.0, 1.0, 1.2246467991473532e-16 ]    shown in full, see below
 
 CA_DOUBLE([0, Math::PI / 2, Math::PI]).cos
-#  => [ 1.0, 0.0, -1.0 ]
+#  => [ 1.0, 6.123233995736766e-17, -1.0 ]
 ```
+
+The last two are printed in full rather than rounded, because rounding them
+would say something untrue. `Math::PI` is the nearest double to pi, not pi, so
+what is taken here is the sine of a number very close to pi -- a tiny value
+rather than zero. Reductions and comparisons will see that value, so an
+equality test against `0.0` fails where a tolerance test succeeds.
 
 Two-argument functions are methods too. `atan2` takes the `y` array as the
 receiver and `x` as the argument; `hypot` gives the Euclidean length of the

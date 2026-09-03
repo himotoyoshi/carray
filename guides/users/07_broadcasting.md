@@ -300,7 +300,7 @@ row_sum                              #  => [ 6.0, 15.0 ]
 
 b / row_sum[nil, :_]
 #  => [ [ 0.1667, 0.3333, 0.5    ],
-#       [ 0.2667, 0.3333, 0.4    ] ]    each row sums to 1.0
+#       [ 0.2667, 0.3333, 0.4    ] ]    shown rounded; each row sums to 1.0
 ```
 
 **Subtract the column mean from each column.** `b.mean(axis: 0)` collapses the

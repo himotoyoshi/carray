@@ -94,7 +94,7 @@ an empty array, or a zero-length reduction axis, gives `UNDEF` (never a raise):
 
 ```ruby
 CA_DOUBLE([]).median                    #  => UNDEF
-CArray.float64(0, 3).median(axis: 0)    #  => [ UNDEF, UNDEF, UNDEF ]
+CArray.float64(0, 3).median(axis: 0)    #  => [ _, _, _ ]
 ```
 
 > **Current limitation:** the *whole-array* forms handle a mask — `data.median`
@@ -203,11 +203,11 @@ m.sum(axis: 1).shape                       #  => [2]
 m.sum(axis: 1, keep_axis: true).shape      #  => [2, 1]
 
 m.sum(axis: 1, keep_axis: true)
-#  => [ [  3 ],
-#       [ 12 ] ]                            shape [2, 1] — a column
+#  => [ [  3.0 ],
+#       [ 12.0 ] ]                          shape [2, 1] — a column
 
 m.sum(axis: 0, keep_axis: true)
-#  => [ [ 3, 5, 7 ] ]                       shape [1, 3] — a row
+#  => [ [ 3.0, 5.0, 7.0 ] ]                 shape [1, 3] — a row
 ```
 
 The point is broadcasting (see [Broadcasting](07_broadcasting.md)). With
@@ -241,7 +241,7 @@ totals = x.sum(axis: 1, keep_axis: true)
 #       [ 15.0 ] ]
 
 x / totals
-#  => [ [ 0.1667, 0.3333, 0.5 ],
+#  => [ [ 0.1667, 0.3333, 0.5 ],   shown rounded
 #       [ 0.2667, 0.3333, 0.4 ] ]    each row sums to 1
 ```
 
