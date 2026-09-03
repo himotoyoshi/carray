@@ -279,32 +279,6 @@ a
 #       [   3,   4,   5 ] ]
 ```
 
-## A view onto the data, ignoring the mask: `.value`
-
-When an array carries a mask (see [Masks and missing values](05_masks.md)),
-`value` gives you a view that exposes the underlying storage as if the mask were
-not there. Because it is a view, it shares storage with the source — writing
-through it changes the data of the original, while leaving the mask intact.
-
-```ruby
-a = CArray.float64(2, 3).seq
-a[0, 1] = UNDEF
-a
-#  => [ [ 0.0,   _, 2.0 ],
-#       [ 3.0, 4.0, 5.0 ] ]
-
-v = a.value
-v.class             #  => CARefer    a view, not a copy
-
-v[0, 0] = 100.0     #  write through the mask-stripped view
-a
-#  => [ [ 100.0,   _, 2.0 ],
-#       [   3.0, 4.0, 5.0 ] ]
-```
-
-Notice that the mask on element `[0, 1]` is still there. `.value` only hides the
-mask from view; it does not remove it.
-
 ## Getting an independent copy: `copy`
 
 When you want a separate array that does not share storage, call `copy`. It
@@ -405,7 +379,7 @@ unchanged.
 | `CABlock`         | Integer / `nil` / `Range` slicing of one or more axes                       | `a[0, nil]`, `a[1..2, nil]`, `a[nil, 0..1]`              |
 | `CAStride`        | `reshape`, `insert_axis` (and `:_`), `reverse`, `flip`                      | `a.reshape(3, 2)`, `a[:_, nil]`, `a.reverse`             |
 | `CATranspose`     | `transpose`                                                                 | `a.transpose`                                            |
-| `CARefer`         | `.value` (mask-stripped view); some reshape forms                           | `a.value` on a masked array                              |
+| `CARefer`         | Flattening with a single `nil`; indexing by a multi-dimensional index array  | `a[nil]`, `a[CA_INT([[0, 1], [2, 3]])]`                  |
 | `CARemap`         | `sort` (a view onto the source in sorted order)                             | `a.sort`, `a.sort(axis: 1)`                              |
 | `CAGrid`          | Indexing by an array of positions on one or more axes                       | `a[CA_INT([0, 2, 4])]`                                   |
 | `CASelect`        | Indexing by a boolean array                                                 | `a[a.gt(3)]`                                             |
