@@ -1,6 +1,11 @@
 # Ruby/CArray
 
 Ruby/CArray is an extension library for the multi-dimensional array class.
+It provides arrays of a single, uniform data type, with indexing and slicing
+in many forms, element-wise arithmetic and mathematical functions, reductions
+and statistics over the whole array or along any axis, and broadcasting
+between shapes that differ in size-1 axes. The features listed below are in
+addition to these.
 
 ## Status
 
@@ -9,34 +14,21 @@ Ruby/CArray is an extension library for the multi-dimensional array class.
 
 ## Features
 
-* Multidimensional arrays holding values of a single, uniform data type
-* Indexing and slicing in many ways — by position, range, boolean mask, or
-  index/address arrays
-* Element-wise arithmetic, mathematical and transcendental functions
-* Reduction and statistics computed over the whole array or along any axis
-* Built-in per-element mask on every array to represent missing values, properly
-  accounted for in reductions and statistics
-* A rich family of views onto the original data — for indexing, reshaping, and
-  reinterpreting elements — without copying
-* Views compose into chains of any depth, and writing through them reaches all the
-  way back to the source data
-* Explicit broadcasting: operating on arrays of different shapes by stretching
-  size-1 axes to match, without ever adding axes implicitly
-* Fast reductions built on compiler auto-vectorization
-* Kernel-style iteration from Ruby: drive a Ruby block over each sub-array spanning
-  chosen axes
-* Faces: a mechanism for building extended data types on top of CArray (time,
-  categorical and variable-length string columns are such types)
-* Easily define record types that bind several data together as one element
-* User-defined array classes, written in Ruby, that share the full CArray interface
-  so your own type behaves like a CArray everywhere
-* A DataFrame (`CAFrame`) whose columns are plain CArrays — it adds names and row
-  operations (select, filter, sort, join, group-by, CSV I/O) and hands a column
-  back as the array itself, so masks, views and Faces keep working on it
-* Writing per-axis methods and functions in C extensions with ease — a single
-  kernel runs across every view type, with no per-view branching to write yourself
-* MemoryView protocol support — interoperate with other numerical libraries as both
-  producer and consumer
+* Every array carries a per-element mask for missing values, respected by
+  reductions and statistics
+* Views compose without copying — a write through the outermost view reaches
+  the source data
+* MemoryView protocol on both sides: share buffers with other numerical
+  libraries without copying
+* Kernel-style iteration: run a Ruby block over each sub-array spanning the axes
+  you choose
+* Attach domain meaning (time, angle, quantity with units…) without changing
+  storage — a Face
+* Define your own array class in pure Ruby while keeping the full CArray
+  interface
+* Pack multiple values into one element as a record type
+* A DataFrame (`CAFrame`) whose columns are plain CArrays, so masks, views and
+  Faces keep working
 
 ## Install
 
