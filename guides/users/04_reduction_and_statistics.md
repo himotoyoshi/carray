@@ -322,42 +322,6 @@ freq.index.wmean(freq)         #  => 1.0952380952380953
 data.mean                      #  => 1.0952380952380953   the same, computed directly
 ```
 
-### Higher moments, per axis
-
-Only `wsum` and `wmean` are built in, but every higher moment (variance,
-skewness, …) is a weighted sum of powers of `(value - mean)`, so you can build
-them from the same pieces. Two tools make the per-axis form clean: `seq(axis: k)`
-lays the value axis out at the shape of the frequency table, and
-`keep_axis: true` keeps the running mean lined up for the subtraction.
-
-```ruby
-freq = CA_INT([[10, 0, 0, 0],     # each row is one frequency distribution
-               [ 0, 0, 0, 10],
-               [ 9, 3, 7, 2]])
-
-val  = CArray.int32(*freq.shape).seq!(axis: 1)   # value axis: every row is 0, 1, 2, 3
-wtot = freq.sum(axis: 1, keep_axis: true)       # total count per row, shape [3, 1]
-
-mean = (val * freq).sum(axis: 1, keep_axis: true) / wtot
-#  => [ [ 0.0 ], [ 3.0 ], [ 1.0952 ] ]          shape [3, 1]
-
-dev  = val - mean                               # [3, 4] - [3, 1] broadcasts, no manual :_
-var  = (freq * dev**2).sum(axis: 1, keep_axis: true) / wtot
-#  => [ [ 0.0 ], [ 0.0 ], [ 1.1338 ] ]          population variance per row
-```
-
-`keep_axis: true` is what keeps this tidy: the running `mean` stays shape
-`[3, 1]`, so `val - mean` lines up against the `[3, 4]` value axis on its own —
-without it you would reinsert the axis by hand as `mean[nil, :_]`. The higher
-central moments follow the same shape: `(freq * dev**3).sum(…) / wtot` for the
-third, `dev**4` for the fourth. A row whose counts sum to zero, or whose spread
-is zero, yields `NaN` from the `0/0` — the honest answer where the moment is
-undefined.
-
-> **`index` gives the value axis only for a 1-D table.** For an N-D frequency
-> table, `freq.index` is not the per-row value axis, so build it with
-> `seq(axis: k)` as above.
-
 ## Cumulative reductions (prefix scans)
 
 `cumsum` is a *running* total — at each position it holds the sum of everything

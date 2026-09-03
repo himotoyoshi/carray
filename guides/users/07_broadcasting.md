@@ -7,7 +7,7 @@ the corresponding axis of the other, so that the two line up element for element
 All examples use:
 
 ```ruby
-a = CArray.int32(2, 3).seq
+a = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 ```
@@ -30,7 +30,7 @@ a * 2
 #  => [ [ 0, 2,  4 ],
 #       [ 6, 8, 10 ] ]
 
-f = CArray.float64(2, 3).seq
+f = CArray.float64(2, 3).seq!
 f + 0.5
 #  => [ [ 0.5, 1.5, 2.5 ],
 #       [ 3.5, 4.5, 5.5 ] ]
@@ -130,7 +130,9 @@ automatically — that is reported as an error rather than guessed at.
 v = CA_INT([100, 200, 300])    #  shape [3] — one axis
 
 a + v
-#  => RuntimeError: elements mismatch (6 <-> 3)
+#  => ArgumentError: shape mismatch between operands ([2, 3] and [3]);
+#     shapes must agree, or differ only in size-1 axes with equal ndim
+#     -- use .flatten on both sides to operate on the values in the order they lie
 ```
 
 This is a deliberate choice: a 1-D array of length 3 could mean either a row or a
@@ -140,11 +142,11 @@ The same applies in higher dimensions. A 3-D array does not silently combine
 with a 2-D array even if the trailing axes happen to match:
 
 ```ruby
-a3 = CArray.int32(2, 3, 4).seq    #  shape [2, 3, 4]
-b2 = CArray.int32(3, 4).seq       #  shape [3, 4]
+a3 = CArray.int32(2, 3, 4).seq!    #  shape [2, 3, 4]
+b2 = CArray.int32(3, 4).seq!       #  shape [3, 4]
 
 a3 + b2
-#  => RuntimeError: elements mismatch (24 <-> 12)
+#  => ArgumentError: shape mismatch between operands ([2, 3, 4] and [3, 4])
 ```
 
 ## Adding an axis when you mean to
@@ -171,8 +173,8 @@ The same fix works for the 3-D / 2-D case. To add a `[3, 4]` plane to every
 slice of a `[2, 3, 4]` array, give it a leading size-1 axis:
 
 ```ruby
-a3 = CArray.int32(2, 3, 4).seq    #  shape [2, 3, 4]
-b2 = CArray.int32(3, 4).seq       #  shape [3, 4]
+a3 = CArray.int32(2, 3, 4).seq!    #  shape [2, 3, 4]
+b2 = CArray.int32(3, 4).seq!       #  shape [3, 4]
 
 (a3 + b2[:_, nil, nil]).shape     #  => [2, 3, 4]
 ```
@@ -197,7 +199,7 @@ the **new** size-1 axis being introduced.
 So for a 2-D array `m` with shape `[2, 3]`:
 
 ```ruby
-m = CArray.int32(2, 3).seq          #  shape [2, 3]
+m = CArray.int32(2, 3).seq!          #  shape [2, 3]
 
 m[:_, nil, nil].shape    #  => [1, 2, 3]    new axis added at the front
 m[nil, :_, nil].shape    #  => [2, 1, 3]    new axis inserted between axes 0 and 1
@@ -233,7 +235,7 @@ inserted *before*; `-1` (or `ndim`) appends at the very end. The positions refer
 to the *original* axes, so giving several does not shift them around.
 
 ```ruby
-a = CArray.int32(2, 3).seq          #  shape [2, 3]
+a = CArray.int32(2, 3).seq!          #  shape [2, 3]
 
 a.insert_axis(0).shape       #  => [1, 2, 3]      before axis 0
 a.insert_axis(-1).shape      #  => [2, 3, 1]      at the end
@@ -280,64 +282,3 @@ v[nil, :_] * w[:_, nil]
 The same pattern works for any operation: `v[nil, :_] + w[:_, nil]` gives an
 outer sum, `v[nil, :_].lt(w[:_, nil])` gives an outer comparison table, and so
 on.
-
-## Common patterns
-
-A handful of recipes show up often. Each combines a per-axis reduction (see
-[Reduction and statistics](04_reduction_and_statistics.md)) with broadcasting
-back to the original shape.
-
-**Normalise each row by its sum.** `b.sum(axis: 1)` collapses axis 1, giving a
-1-D array of length 2 (one sum per row). Re-introduce the collapsed axis with
-`:_` so it lines up as a column, then divide:
-
-```ruby
-b = CA_DOUBLE([[1, 2, 3],
-               [4, 5, 6]])
-
-row_sum = b.sum(axis: 1)            #  shape [2]
-row_sum                              #  => [ 6.0, 15.0 ]
-
-b / row_sum[nil, :_]
-#  => [ [ 0.1667, 0.3333, 0.5    ],
-#       [ 0.2667, 0.3333, 0.4    ] ]    shown rounded; each row sums to 1.0
-```
-
-**Subtract the column mean from each column.** `b.mean(axis: 0)` collapses the
-rows, leaving one mean per column. Add a leading size-1 axis with `:_` to turn
-it into a row that broadcasts down the columns:
-
-```ruby
-col_mean = b.mean(axis: 0)          #  shape [3]
-col_mean                             #  => [ 2.5, 3.5, 4.5 ]
-
-b - col_mean[:_, nil]
-#  => [ [ -1.5, -1.5, -1.5 ],
-#       [  1.5,  1.5,  1.5 ] ]
-```
-
-**Centre each row on its own mean.** The mirror image: reduce along axis 1 and
-broadcast back as a column.
-
-```ruby
-row_mean = b.mean(axis: 1)          #  shape [2]
-row_mean                             #  => [ 2.0, 5.0 ]
-
-b - row_mean[nil, :_]
-#  => [ [ -1.0, 0.0, 1.0 ],
-#       [ -1.0, 0.0, 1.0 ] ]
-```
-
-**A per-row threshold check.** Combine a per-row reduction with a comparison:
-
-```ruby
-row_max = b.max(axis: 1)            #  shape [2]    => [ 3.0, 6.0 ]
-
-b.eq(row_max[nil, :_])
-#  => [ [ 0, 0, 1 ],
-#       [ 0, 0, 1 ] ]    mark the max in each row
-```
-
-The pattern is always the same: reduce along an axis to collapse it, then bring
-the size-1 axis back with `:_` so the reduced result broadcasts back over the
-original shape.
