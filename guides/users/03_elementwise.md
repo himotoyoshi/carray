@@ -6,7 +6,7 @@ array is left unchanged unless you use an in-place form.
 ## Arithmetic with a scalar
 
 ```ruby
-a = CArray.int32(2, 3).seq
+a = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 
@@ -43,49 +43,14 @@ a ** 2
 #       [ 9, 16, 25 ] ]
 ```
 
-### Signs in `/` and `%`
+`/` and `%` work exactly as Ruby's do: on integers `/` rounds toward negative
+infinity and `%` carries the sign of the divisor, so `(a / b) * b + a % b == a`
+whatever the signs are. C's convention — truncate toward zero, remainder taking
+the sign of the dividend — is a separate method, `fmod`, which takes integers as
+well as floats; `divmod` answers with the `/` and `%` pair together.
 
-Integer `/` floors toward negative infinity and `%` returns a remainder
-carrying the sign of the divisor, exactly as Ruby's `Integer#/` and `%` do.
-The pair holds together, so `(a / b) * b + a % b == a` for every combination
-of signs:
-
-```ruby
-CA_INT32([-7, -1, 7]) / 3      #  => [ -3, -1, 2 ]
-CA_INT32([-7, -1, 7]) % 3      #  => [  2,  2, 1 ]
-CA_INT32([-7]) % -3            #  => [ -1 ]        sign follows the divisor
-```
-
-Float `%` follows the same rule, while float `/` stays true division -- again
-as in Ruby, so the identity above is an integer one. `divmod` returns the
-matching pair for both:
-
-```ruby
-CA_DOUBLE([-0.4]) % 1.0        #  => [ 0.6 ]
-q, r = CA_DOUBLE([-7.0]).divmod(3.0)
-q                              #  => [ -3.0 ]
-r                              #  => [ 2.0 ]
-```
-
-C's convention -- truncate toward zero, remainder carrying the sign of the
-dividend -- is a separate method, `fmod`, over integers as well as floats:
-
-```ruby
-CA_INT32([-7, -1, 7]).fmod(3)  #  => [ -1, -1, 1 ]
-CA_DOUBLE([-0.4]).fmod(1.0)    #  => [ -0.4 ]
-```
-
-A common use for the floored `%` is folding a coordinate back into one period.
-Because the remainder never comes back negative for a positive period, this
-works on both sides of the origin:
-
-```ruby
-d = ((x - xc + 0.5) % 1.0) - 0.5    # wrap into [-0.5, 0.5)
-```
-
-For an integer array, `/` is integer division — the result is an integer array
-and any fractional part is discarded. To get a floating-point quotient, divide
-by a float (or convert the array first):
+An integer array divided by an integer stays integer. For a floating-point
+quotient, divide by a float (or convert the array first):
 
 ```ruby
 a / 2.0
@@ -94,7 +59,7 @@ a / 2.0
 ```
 
 The scalar's type widens the result: a float scalar promotes the whole result
-to floating point. (See "Mixed-type arithmetic" below.)
+to floating point, as "Data type promotion" below sets out.
 
 The operators have named equivalents — `add`, `sub`, `mul`, `div`, `mod`,
 `pow` — so `a + 1` and `a.add(1)` are the same:
@@ -116,7 +81,7 @@ position by position. (Arrays of *different* shapes are handled by
 [Broadcasting](07_broadcasting.md).)
 
 ```ruby
-a = CArray.int32(2, 3).seq                  #  => [ [ 0, 1, 2 ], [ 3, 4, 5 ] ]
+a = CArray.int32(2, 3).seq!                  #  => [ [ 0, 1, 2 ], [ 3, 4, 5 ] ]
 b = CArray.int32(2, 3) { |i, j| (i * 3 + j) * 10 }
 #  => [ [  0, 10, 20 ],
 #       [ 30, 40, 50 ] ]
@@ -142,118 +107,77 @@ a - b
 #       [ -27, -36, -45 ] ]
 ```
 
-## Mixed-type arithmetic
+## In-place forms
+
+Many operations have a bang (`!`) variant that modifies the array in place
+instead of returning a new one. This avoids allocating a result when you do not
+need the original.
+
+```ruby
+a = CArray.int32(2, 3).seq!
+a.add!(10)
+#  => [ [ 10, 11, 12 ],
+#       [ 13, 14, 15 ] ]    a itself is changed
+```
+
+The other arithmetic operators have the same form — `sub!`, `mul!`, `div!`,
+`mod!`, `pow!`:
+
+```ruby
+b = CArray.int32(2, 3).seq!
+b.sub!(1)
+#  => [ [ -1, 0, 1 ],
+#       [  2, 3, 4 ] ]
+
+c = CArray.int32(2, 3).seq!
+c.mul!(2)
+#  => [ [ 0, 2,  4 ],
+#       [ 6, 8, 10 ] ]
+
+d = CArray.int32(2, 3).seq!(0, 2)
+d.div!(2)
+#  => [ [ 0, 1, 2 ],
+#       [ 3, 4, 5 ] ]
+```
+
+An in-place form keeps the array's existing data type: it never widens the
+array to hold the result, so a float result assigned into an integer array is
+truncated, just as Ruby's own `Integer` arithmetic would truncate it. Widening
+is what the next section is about.
+
+## Data type promotion
 
 When the two sides of an operation have different element types, CArray picks a
-result type that can represent both. The rule is the usual numeric one: a
-floating-point operand promotes the result to floating point, and a wider
-integer promotes a narrower one.
+result type that can hold both, and promotes the operands to it. The rule is
+the usual numeric one: a floating-point operand carries the result to floating
+point, a complex one to complex, and a wider integer takes a narrower one with
+it.
 
 ```ruby
 i = CA_INT([1, 2, 3])
 f = CA_DOUBLE([0.5, 0.5, 0.5])
 
-(i + f)
-#  => [ 1.5, 2.5, 3.5 ]
-
-(i + f).data_type
-#  => :float64           the float operand wins
+(i + f)                        #  => [ 1.5, 2.5, 3.5 ]
+(i + f).data_type              #  => :float64      the float operand wins
 ```
 
-Same for a scalar of a different type:
+A scalar counts the same way:
 
 ```ruby
-(CA_INT([1, 2, 3]) / 2.0).data_type
-#  => :float64           the float scalar promotes the result
+(CA_INT([1, 2, 3]) / 2.0).data_type    #  => :float64
 ```
 
-If you want a particular result type regardless, convert explicitly before the
-operation (for example with `CArray::Float64.new(...)` or
-[`CA_DOUBLE`](01_creating_arrays.md)).
-
-## Comparison
-
-Comparison methods return a boolean array — `1` where the condition holds, `0`
-where it does not. Use the named methods `eq`, `ne`, `lt`, `le`, `gt`, `ge`:
+`CArray.result_type` answers the same question without doing the work, which
+is useful when you want to know what an expression will land in:
 
 ```ruby
-c = CA_INT([1, 2, 3, 4, 5])
-
-c.gt(3)      #  => [ 0, 0, 0, 1, 1 ]    greater than 3
-c.le(2)      #  => [ 1, 1, 0, 0, 0 ]    less than or equal to 2
-c.eq(3)      #  => [ 0, 0, 1, 0, 0 ]    equal to 3
-c.ne(3)      #  => [ 1, 1, 0, 1, 1 ]    not equal to 3
-c.lt(3)      #  => [ 1, 1, 0, 0, 0 ]    less than 3
-c.ge(3)      #  => [ 0, 0, 1, 1, 1 ]    greater than or equal to 3
+CArray.result_type(CA_INT8([1]), CA_INT32([1]))     #  => :int32
+CArray.result_type(CA_INT([1]), CA_DOUBLE([1.0]))   #  => :float64
 ```
 
-The operators `<`, `<=`, `>`, `>=` are also defined and behave the same way as
-`lt`, `le`, `gt`, `ge`:
-
-```ruby
-c > 3        #  => [ 0, 0, 0, 1, 1 ]
-c <= 2       #  => [ 1, 1, 0, 0, 0 ]
-```
-
-> ⚠️ **`==` is not an element-wise `eq`.** This is the single most common
-> trap, and it bites everyone at least once. `a == b` returns a single
-> `true` / `false` answering "are these two whole arrays equal?", *not*
-> a boolean array. For the element-wise result you **must** write
-> `a.eq(b)`. Same for `!=` vs `ne`. (Numo has the same convention for
-> the same reason — `==` is Ruby's whole-object equality and can't be
-> repurposed.)
->
-> ```ruby
-> c = CA_INT([1, 2, 3, 4, 5])
->
-> c == 3       #  => false             one boolean: "is c equal to 3?"
-> c.eq(3)      #  => [ 0, 0, 1, 0, 0 ] element-wise result you wanted
-> ```
-
-The flip side is that `==` is exactly the tool for the question it answers:
-"are these two whole arrays equal?" It returns `true` when the operands have the
-same shape and every element matches, and `false` otherwise; `!=` is its
-negation. Arrays of different data types compare unequal.
-
-```ruby
-CA_INT([1, 2, 3]) == CA_INT([1, 2, 3])   #  => true
-CA_INT([1, 2, 3]) == CA_INT([1, 2, 9])   #  => false
-CA_INT([1, 2, 3]) == CA_DOUBLE([1, 2, 3])   #  => false   different data type
-```
-
-Comparison between two arrays of the same shape is element by element:
-
-```ruby
-x = CA_INT([1, 5, 3, 7, 2])
-y = CA_INT([4, 2, 3, 6, 8])
-
-x.gt(y)      #  => [ 0, 1, 0, 1, 0 ]    x > y position by position
-x.eq(y)      #  => [ 0, 0, 1, 0, 0 ]
-```
-
-## Boolean combinations
-
-Boolean arrays combine with `&`, `|`, `^` (or the named `and`, `or`, `xor`):
-
-```ruby
-c.gt(1) & c.lt(5)      #  => [ 0, 1, 1, 1, 0 ]    both > 1 and < 5
-c.gt(4) | c.lt(2)      #  => [ 1, 0, 0, 0, 1 ]    either > 4 or < 2
-c.gt(1) ^ c.lt(4)      #  => [ 1, 0, 0, 1, 1 ]    one or the other, not both
-```
-
-The combinations chain, so you can build multi-condition tests directly:
-
-```ruby
-c.gt(1) & c.lt(5) & c.ne(3)
-#  => [ 0, 1, 0, 1, 0 ]    > 1 and < 5 and not 3
-
-(c.lt(2) | c.gt(4)) & c.ne(0)
-#  => [ 1, 0, 0, 0, 1 ]    at the extremes, excluding 0
-```
-
-Boolean arrays are commonly used to index — see
-[Indexing and slicing](02_indexing_and_slicing.md) — and to mark elements as
-missing (see [Masks](05_masks.md)).
+To land somewhere else, cast before the operation — `a.float64`, or
+`CA_DOUBLE(a)` (see
+[Creating arrays](01_creating_arrays.md)).
 
 ## Mathematical functions
 
@@ -318,7 +242,89 @@ y.atan2(x)        #  => [ 0.6435, 0.9273 ]        the angle, in radians
 
 The usual set is available — `exp`, `log`, `log10`, `sqrt`, `sin`, `cos`, `tan`,
 `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `abs`, `floor`, `ceil`, `round`,
-`atan2`, `hypot`, and more.
+`atan2`, `hypot`, and more. Each has a `!` form that writes the result back into
+the array, as the arithmetic operators do.
+
+## Comparison
+
+Comparison methods return a boolean array — `1` where the condition holds, `0`
+where it does not. Use the named methods `eq`, `ne`, `lt`, `le`, `gt`, `ge`:
+
+```ruby
+c = CA_INT([1, 2, 3, 4, 5])
+
+c.gt(3)      #  => [ 0, 0, 0, 1, 1 ]    greater than 3
+c.le(2)      #  => [ 1, 1, 0, 0, 0 ]    less than or equal to 2
+c.eq(3)      #  => [ 0, 0, 1, 0, 0 ]    equal to 3
+c.ne(3)      #  => [ 1, 1, 0, 1, 1 ]    not equal to 3
+c.lt(3)      #  => [ 1, 1, 0, 0, 0 ]    less than 3
+c.ge(3)      #  => [ 0, 0, 1, 1, 1 ]    greater than or equal to 3
+```
+
+The operators `<`, `<=`, `>`, `>=` are also defined and behave the same way as
+`lt`, `le`, `gt`, `ge`:
+
+```ruby
+c > 3        #  => [ 0, 0, 0, 1, 1 ]
+c <= 2       #  => [ 1, 1, 0, 0, 0 ]
+```
+
+> **`==` is not an element-wise `eq`.** `a == b` answers one question about the
+> two arrays taken whole — are they equal? — with a single `true` or `false`.
+> The element-wise comparison is `a.eq(b)`, and `a.ne(b)` for `!=`. `==` is
+> Ruby's own whole-object equality, and cannot be repurposed.
+>
+> ```ruby
+> c = CA_INT([1, 2, 3, 4, 5])
+>
+> c == 3       #  => false             one boolean: "is c equal to 3?"
+> c.eq(3)      #  => [ 0, 0, 1, 0, 0 ] element-wise result you wanted
+> ```
+
+The flip side is that `==` is exactly the tool for the question it answers:
+"are these two whole arrays equal?" It returns `true` when the operands have the
+same shape and every element matches, and `false` otherwise; `!=` is its
+negation. Arrays of different data types compare unequal.
+
+```ruby
+CA_INT([1, 2, 3]) == CA_INT([1, 2, 3])   #  => true
+CA_INT([1, 2, 3]) == CA_INT([1, 2, 9])   #  => false
+CA_INT([1, 2, 3]) == CA_DOUBLE([1, 2, 3])   #  => false   different data type
+```
+
+Comparison between two arrays of the same shape is element by element:
+
+```ruby
+x = CA_INT([1, 5, 3, 7, 2])
+y = CA_INT([4, 2, 3, 6, 8])
+
+x.gt(y)      #  => [ 0, 1, 0, 1, 0 ]    x > y position by position
+x.eq(y)      #  => [ 0, 0, 1, 0, 0 ]
+```
+
+## Boolean combinations
+
+Boolean arrays combine with `&`, `|`, `^` (or the named `and`, `or`, `xor`):
+
+```ruby
+c.gt(1) & c.lt(5)      #  => [ 0, 1, 1, 1, 0 ]    both > 1 and < 5
+c.gt(4) | c.lt(2)      #  => [ 1, 0, 0, 0, 1 ]    either > 4 or < 2
+c.gt(1) ^ c.lt(4)      #  => [ 1, 0, 0, 1, 1 ]    one or the other, not both
+```
+
+The combinations chain, so you can build multi-condition tests directly:
+
+```ruby
+c.gt(1) & c.lt(5) & c.ne(3)
+#  => [ 0, 1, 0, 1, 0 ]    > 1 and < 5 and not 3
+
+(c.lt(2) | c.gt(4)) & c.ne(0)
+#  => [ 1, 0, 0, 0, 1 ]    at the extremes, excluding 0
+```
+
+Boolean arrays are commonly used to index — see
+[Indexing and slicing](02_indexing_and_slicing.md) — and to mark elements as
+missing (see [Masks](05_masks.md)).
 
 ## Arithmetic with a masked array
 
@@ -327,7 +333,7 @@ mask is set wherever any input was masked. The arithmetic itself is otherwise
 unchanged:
 
 ```ruby
-a = CArray.float64(4).seq
+a = CArray.float64(4).seq!
 a[1] = UNDEF
 a
 #  => [ 0.0, _, 2.0, 3.0 ]
@@ -342,47 +348,6 @@ a.sqrt
 When both operands are arrays, the result is masked wherever either operand was
 masked at that position. Missing-ness carries through the calculation — see
 [Masks and missing values](05_masks.md) for the full story.
-
-## In-place forms
-
-Many operations have a bang (`!`) variant that modifies the array in place
-instead of returning a new one. This avoids allocating a result when you do not
-need the original.
-
-```ruby
-a = CArray.int32(2, 3).seq
-a.add!(10)
-#  => [ [ 10, 11, 12 ],
-#       [ 13, 14, 15 ] ]    a itself is changed
-
-f = CA_DOUBLE([0, 1, 4, 9])
-f.sqrt!
-#  => [ 0.0, 1.0, 2.0, 3.0 ]    f itself is changed
-```
-
-The other arithmetic operators have the same form — `sub!`, `mul!`, `div!`,
-`mod!`, `pow!`:
-
-```ruby
-b = CArray.int32(2, 3).seq
-b.sub!(1)
-#  => [ [ -1, 0, 1 ],
-#       [  2, 3, 4 ] ]
-
-c = CArray.int32(2, 3).seq
-c.mul!(2)
-#  => [ [ 0, 2,  4 ],
-#       [ 6, 8, 10 ] ]
-
-d = CArray.int32(2, 3) { |i, j| (i * 3 + j) * 2 }
-d.div!(2)
-#  => [ [ 0, 1, 2 ],
-#       [ 3, 4, 5 ] ]
-```
-
-In-place forms keep the array's existing data type — they do not promote.
-Assigning a float result into an integer array truncates, just as Ruby's own
-`Integer` arithmetic would.
 
 ## Boolean arrays
 
@@ -447,7 +412,7 @@ a.gt(99).any            #  => false
 For a 2-D array, `axis:` gives a result per row or per column:
 
 ```ruby
-m = CArray.int32(2, 3).seq
+m = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 
@@ -568,7 +533,7 @@ Each has a bang form (`floor!`, `ceil!`, `round!`, `trunc!`).
 | `log`    | Natural logarithm                                              |
 | `log2`   | Base-2 logarithm                                               |
 | `log10`  | Base-10 logarithm                                              |
-| `logb`   | Unbiased exponent of `x` as a float (`log2(|x|)` rounded down) |
+| `logb`   | Unbiased exponent of `x` as a float (`log2(\|x\|)` rounded down) |
 | `log1p`  | `log(1 + x)`, accurate for small `x`                           |
 | `sqrt`   | Square root                                                    |
 
@@ -622,7 +587,7 @@ square the modulus anyway; the answer comes out without going through
 | `a > b`  | `a.gt(b)`     | Greater than                                                                               |
 | `a >= b` | `a.ge(b)`     | Greater than or equal                                                                      |
 |          | `a.feq(b)`    | Float equality with a small built-in tolerance — guards against the `0.1 + 0.2 != 0.3` trap |
-|          | `a.is_close(b, tol)`  | `|a - b| <= tol` element-wise                                                      |
+|          | `a.is_close(b, tol)`  | `\|a - b\| <= tol` element-wise                                                      |
 |          | `a.is_equiv(b, tol)`  | `is_close` with relative tolerance                                                 |
 
 For object arrays:
