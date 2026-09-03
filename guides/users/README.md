@@ -37,6 +37,11 @@ both to set reader expectations and to keep later revisions consistent.
 
 ## Reading order
 
+[Introduction](introduction.md) comes first: what CArray is, and how the guide is
+arranged. It carries no number, because it is front matter rather than chapter
+zero — the `rake pdf:*` task names it explicitly and places it ahead of the
+numbered chapters, which sort into reading order on their own.
+
 The first eight chapters are the core walkthrough — read them in order to learn
 CArray from scratch.
 
