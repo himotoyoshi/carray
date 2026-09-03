@@ -40,6 +40,33 @@ x / x.sum(axis: 1, keep_axis: true)
 #       [ 0.2667, 0.3333, 0.4    ] ]
 ```
 
+### Subtract the column mean from each column
+
+The mirror of centring the rows: reduce along axis 0 instead, and the kept
+axis broadcasts down the columns.
+
+```ruby
+b = CA_DOUBLE([[1, 2, 3],
+               [4, 5, 6]])
+
+b - b.mean(axis: 0, keep_axis: true)
+#  => [ [ -1.5, -1.5, -1.5 ],
+#       [  1.5,  1.5,  1.5 ] ]
+```
+
+### Mark the largest element of each row
+
+A per-row reduction compared back against the row it came from.
+
+```ruby
+b = CA_DOUBLE([[1, 2, 3],
+               [4, 5, 6]])
+
+b.eq(b.max(axis: 1, keep_axis: true))
+#  => [ [ 0, 0, 1 ],
+#       [ 0, 0, 1 ] ]
+```
+
 ### Per-row z-score with broadcasting
 
 Subtract the row mean and divide by the row standard deviation. `keep_axis:
@@ -366,6 +393,36 @@ labels = CA_INT32([0, 1, 1, 2, 0, 1])
 labels[1] = UNDEF
 labels.bincount               #  => [ 2, 2, 1 ]    the masked '1' is dropped
 ```
+
+### Higher moments from a frequency table
+
+Only `wsum` and `wmean` are built in, but every higher moment is a weighted sum
+of powers of `(value - mean)`, so the same pieces build them. `seq!(axis: k)`
+lays the value axis out at the shape of the table, and `keep_axis: true` keeps
+the running mean lined up for the subtraction.
+
+```ruby
+freq = CA_INT([[10, 0, 0, 0],     # each row is one frequency distribution
+               [ 0, 0, 0, 10],
+               [ 9, 3, 7, 2]])
+
+val  = CArray.int32(*freq.shape).seq!(axis: 1)   # every row is 0, 1, 2, 3
+wtot = freq.sum(axis: 1, keep_axis: true)        # total count per row, [3, 1]
+
+mean = (val * freq).sum(axis: 1, keep_axis: true) / wtot
+#  => [ [ 0.0 ], [ 3.0 ], [ 1.0952 ] ]           shape [3, 1]
+
+dev  = val - mean                                # [3, 4] - [3, 1] broadcasts
+var  = (freq * dev**2).sum(axis: 1, keep_axis: true) / wtot
+#  => [ [ 0.0 ], [ 0.0 ], [ 1.1338 ] ]           population variance per row
+```
+
+The third and fourth moments follow the same shape, with `dev**3` and `dev**4`.
+A row whose counts sum to zero, or whose spread is zero, gives `NaN` from the
+`0/0` — the honest answer where the moment is undefined.
+
+For a 1-D table `freq.index` is the value axis and no `seq!` is needed. For an
+N-D one it is not, which is why the value axis is built above.
 
 ## Sort, search, and interpolation
 
