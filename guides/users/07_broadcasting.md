@@ -1,8 +1,10 @@
 # Broadcasting
 
-Broadcasting is the rule for combining arrays whose shapes are not identical. In
-an element-wise operation, an axis of size 1 in one operand is stretched to match
-the corresponding axis of the other, so that the two line up element for element.
+Broadcasting is the rule for combining two arrays whose shapes are not
+identical. In an element-wise operation, an axis of size 1 in one operand is
+stretched to match the corresponding axis of the other, so that the two line up
+element for element. (A scalar operand is simpler and needs no rule: it applies
+to every element, as [Element-wise operations](03_elementwise.md) showed.)
 
 All examples use:
 
@@ -10,43 +12,6 @@ All examples use:
 a = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
-```
-
-## A scalar against an array
-
-The simplest case: a scalar applies to every element.
-
-```ruby
-a + 10
-#  => [ [ 10, 11, 12 ],
-#       [ 13, 14, 15 ] ]
-```
-
-The same rule applies regardless of the array's data type. A scalar is just
-broadcast across every element:
-
-```ruby
-a * 2
-#  => [ [ 0, 2,  4 ],
-#       [ 6, 8, 10 ] ]
-
-f = CArray.float64(2, 3).seq!
-f + 0.5
-#  => [ [ 0.5, 1.5, 2.5 ],
-#       [ 3.5, 4.5, 5.5 ] ]
-
-f / 2.0
-#  => [ [ 0.0, 0.5, 1.0 ],
-#       [ 1.5, 2.0, 2.5 ] ]
-```
-
-Comparisons against a scalar broadcast in exactly the same way, producing a
-boolean array of the same shape (see [Element-wise operations](03_elementwise.md)):
-
-```ruby
-a > 2
-#  => [ [ 0, 0, 0 ],
-#       [ 1, 1, 1 ] ]
 ```
 
 ## A size-1 axis stretched to match
