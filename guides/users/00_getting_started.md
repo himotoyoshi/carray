@@ -44,12 +44,12 @@ a = CArray.float64(2, 3)
 zeros. This is how an array is made: ask for the shape and data type you want,
 then put values into it.
 
-Values go in a whole array at a time. `seq` fills with a sequence, an assignment
-writes one value everywhere it reaches, and arithmetic answers a filled array of
-its own:
+Values go in a whole array at a time. `seq!` fills it with a sequence, an
+assignment writes one value everywhere it reaches, and arithmetic answers a
+filled array of its own:
 
 ```ruby
-CArray.float64(2, 3).seq
+a.seq!
 #  => [ [ 0.0, 1.0, 2.0 ],
 #       [ 3.0, 4.0, 5.0 ] ]
 
@@ -58,10 +58,10 @@ a[] = 1.5
 #       [ 1.5, 1.5, 1.5 ] ]
 ```
 
-A block may also be given, and it is the exception among these: it is called
-once per element, so the values are produced by running Ruby as many times as
-the array has elements, rather than in C. Keep it for values that cannot be
-arrived at any other way.
+A block that takes indices is the one filling that does not stay in C: it is
+called once per element, so the values are produced by running Ruby as many
+times as the array has elements. Keep it for values that cannot be arrived at
+any other way.
 
 ```ruby
 CArray.float64(2, 3) { |i, j| i * 3 + j }
@@ -76,13 +76,13 @@ CArray.float64(2, 3) { |i, j| i * 3 + j }
 The same shape-and-type pattern works for every data type:
 
 ```ruby
-CArray.int32(4).seq
+CArray.int32(4).seq!
 #  => [ 0, 1, 2, 3 ]
 
 CArray.boolean(4)
 #  => [ 0, 0, 0, 0 ]
 
-CArray.float64(3).seq(0, 0.5)     # start at 0, step by 0.5
+CArray.float64(3).seq!(0, 0.5)     # start at 0, step by 0.5
 #  => [ 0.0, 0.5, 1.0 ]
 ```
 
@@ -118,7 +118,7 @@ Indexing uses `[]` with one argument per axis. An integer picks one element;
 `nil` means "every index along this axis"; a `Range` picks a contiguous run.
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 #  => [ [ 0,  1,  2,  3 ],
 #       [ 4,  5,  6,  7 ],
 #       [ 8,  9, 10, 11 ] ]
@@ -163,7 +163,7 @@ a.max         #  =>  6.0
 You can also reduce along a chosen axis of a higher-dimensional array:
 
 ```ruby
-m = CArray.int32(2, 3).seq
+m = CArray.int32(2, 3).seq!
 m.sum(axis: 0)    #  => [ 3.0, 5.0, 7.0 ]   sum down each column
 m.sum(axis: 1)    #  => [ 3.0, 12.0 ]       sum across each row
 ```
@@ -176,7 +176,7 @@ Many operations don't copy the data: they hand you a *view* that refers to the
 same storage in a different shape or order.
 
 ```ruby
-a = CArray.int32(2, 3).seq
+a = CArray.int32(2, 3).seq!
 row = a[0, nil]      #  a view of the first row
 row[1] = 99
 a
@@ -218,6 +218,3 @@ The rest of this guide walks through the basics in order:
   having calculations account for them
 * [Views](06_views.md) — reshaping, transposing, and slicing without copying
 * [Broadcasting](07_broadcasting.md) — combining arrays of different shapes
-
-> These documents are drafts. Method names and behaviour shown here are taken
-> from a current development build of CArray 3.0.

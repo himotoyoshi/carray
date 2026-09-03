@@ -1,15 +1,15 @@
-# CArray documentation (drafts)
+# CArray User's Guide
 
-These are draft introductory documents for Ruby/CArray 3.0, written for readers
-new to CArray. They assume no prior knowledge of CArray 2.0; familiarity with
-NumPy or Numo::NArray may help but is not required.
+An introduction to Ruby/CArray 3.0, written for readers new to it. No prior
+knowledge of CArray 2.0 is assumed; familiarity with NumPy or Numo::NArray may
+help but is not required.
 
 The tone is plain and example-driven, introducing one topic at a time. Only
 settled, confirmed methods are shown.
 
-## How these documents are written
+## How this guide is written
 
-A few editorial principles guide these drafts. They are worth stating up front,
+A few editorial principles guide these chapters. They are worth stating up front,
 both to set reader expectations and to keep later revisions consistent.
 
 - **Complete explanation, not a quick tutorial.** Each chapter aims to cover its
@@ -58,35 +58,35 @@ CArray from scratch.
 
 These can be read in any order, once the core walkthrough is comfortable. Each
 introduces a topic that also has its own, more thorough reference in `docs/`;
-the drafts here are the example-driven entry points.
+the chapters here are the example-driven entry points.
 
 9. [Lazy evaluation](09_lazy.md) — building unevaluated expression trees and
-   materialising on demand. Full reference: `docs/Lazy.md`.
+   materialising on demand. Full reference: `docs/topics/Lazy.md`.
 10. [Composition](10_composition.md) — combining arrays along existing or new
     axes (`meld`, `stack`, `montage`, `concatenate`, `mosaic`, `tabulate`).
-    Full reference: `docs/Composition.md`.
+    Full reference: `docs/topics/Composition.md`.
 11. [Slab iteration](11_slab_iteration.md) — iterating per-axis with
     `each_slab` / `map_slab` / `reduce_slab`. Full reference:
-    `docs/SlabIterator.md`.
+    `docs/topics/SlabIterator.md`.
 12. [Faces and extended data types](12_faces.md) — giving raw numbers an
     interpretation (dates, times, units), with `CATime` as the worked
     example. Chapter 26 covers the time arrays themselves in full.
-    Full reference: `docs/CAFace.md` and
-    `docs/CATime.md`.
+    Full reference: `docs/topics/CAFace.md` and
+    `docs/topics/CATime.md`.
 13. [Object arrays](13_object_arrays.md) — arrays of arbitrary Ruby objects.
-    Full reference: `docs/CAObject.md`.
+    Full reference: `docs/topics/CAObject.md`.
 14. [Text, fixed-length strings, and records](14_text_and_fixlen.md) — the
     string-array family (`CAString`, `CAFixlenString`, `CAConstString`, raw
     `CA_FIXLEN`) side by side with construction, string operations,
     ordering, conversions, and interop; plus `CARecord`, the array of
-    structs with named fields. Full reference: `docs/StringArrays.md`,
-    `docs/CAConstString.md`, `docs/CARecord.md`.
+    structs with named fields. Full reference: `docs/topics/StringArrays.md`,
+    `docs/objects/CAConstString.md`, `docs/objects/CARecord.md`.
 15. [MemoryView interop](15_memory_view.md) — zero-copy exchange with
     Numo::NArray, Apache Arrow, PyCall, fiddle. Full reference:
-    `docs/MemoryView.md`.
+    `docs/interop/MemoryView.md`.
 16. [Indexer reference](16_indexer_reference.md) — every form of `[]` and
     `[]=`, with a quick-lookup table. Companion to chapter 2.
-    Full reference: `docs/Indexer_decision_tree.md`.
+    Full reference: `docs/topics/Indexer_decision_tree.md`.
 17. [Tips and techniques](17_tips_and_techniques.md) — a cookbook of practical
     idioms drawn from across the chapters: shape reshaping, row-wise
     normalisation, conditional updates, in-place sort via view assignment,
@@ -105,22 +105,22 @@ the drafts here are the example-driven entry points.
 21. [The iterator family](21_iterator_family.md) — the map to the five
     reduction iterators (slab, window, block, categorical, group): one common
     surface, five engines, and how to choose. Full reference:
-    `docs/IteratorFamily.md`.
+    `docs/topics/IteratorFamily.md`.
 22. [Window iteration](22_window_iteration.md) — rolling / sliding statistics,
     the `bounds:` policy, and bounded `correlate` / `convolve`. Full reference:
-    `docs/CAWindowIterator.md`.
+    `docs/topics/CAWindowIterator.md`.
 23. [Block iteration](23_block_iteration.md) — non-overlapping tiles for
     pooling and downsampling (`a.blocks`). This chapter is its own reference.
 24. [Categories and grouping](24_categories_and_grouping.md) — the
     `CACategorical` classifier, categorical group-by (`group_by_category`), and
     axis / coordinate grouping (`value[cat, …]` with `axis: :group`). Full
-    references: `docs/CACategorical.md`,
-    `docs/CACategoricalIterator.md`,
-    `docs/AxisGroup.md`,
-    `docs/CAGroupIterator.md`.
+    references: `docs/objects/CACategorical.md`,
+    `docs/topics/CACategoricalIterator.md`,
+    `docs/topics/AxisGroup.md`,
+    `docs/topics/CAGroupIterator.md`.
 25. [Histograms](25_histograms.md) — binning values into counts (1-D and
     joint), weighted and streaming histograms, and the discrete sibling
-    `bincount_nd`. Full reference: `docs/Histogram.md`.
+    `bincount_nd`. Full reference: `docs/topics/Histogram.md`.
 26. [Time arrays](26_time_arrays.md) — `CATime` and `CATimedelta` in full:
     instants and durations on an integer tick grid; construction
     (`time_series`, `time_range`, `CArray.time`), resolutions (count × base,
@@ -154,9 +154,9 @@ the drafts here are the example-driven entry points.
 
 ## Out of scope
 
-These drafts cover what a CArray user needs to know. Material aimed at C
-extension authors — writing kernels (`docs/HOW_TO_WRITE_KERNEL.md`), the sweep
-author surface (`docs/Sweep_Author_Surface.md`), and writing C extensions
-generally (`docs/WritingCExtensions.md`) — is out of scope here. (The
-user-facing MemoryView format reference is `docs/MemoryViewFormat.md`, linked
+These chapters cover what a CArray user needs to know. Material aimed at C
+extension authors — writing kernels (`docs/authoring/HOW_TO_WRITE_KERNEL.md`), the sweep
+author surface (`docs/authoring/Sweep_Author_Surface.md`), and writing C extensions
+generally (`docs/authoring/WritingCExtensions.md`) — is out of scope here. (The
+user-facing MemoryView format reference is `docs/interop/MemoryViewFormat.md`, linked
 from chapter 15.)
