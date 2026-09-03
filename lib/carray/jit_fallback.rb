@@ -102,9 +102,15 @@ class CArray
   #   - `if` / `else` in statement position
   #   - `a[i] == UNDEF` to ask whether a cell is missing, and
   #     `a[i] = UNDEF` to mark one
-  #   - an inner loop, `(0...n).each { |j| ... }`, whose index addresses
-  #     arrays and writes nothing -- which is what makes a reduction, a dot
-  #     product and a matrix multiply expressible as loops
+  #   - an inner loop whose index addresses arrays and writes nothing -- which
+  #     is what makes a reduction, a dot product and a matrix multiply
+  #     expressible as loops.  It is written in the three spellings an extent
+  #     is written in: `(0...n).each { |j| ... }`, `n.times { |j| ... }` and
+  #     `(n..0).step(-2) { |j| ... }` (or `n.step(0, -2)`), the step written
+  #     out rather than computed
+  #   - `while` and `loop` are not in it, having no trip count to compile
+  #     from; a bounded loop with a `break` in it is how one with a condition
+  #     is written
   #   - `f.call(x)` for a C function bound with `CArray::JIT.cfunc`
   #
   #   === What the compiled form does differently
