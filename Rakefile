@@ -250,8 +250,14 @@ namespace :pdf do
 
   # src_dir: guides/devel etc.  out: path to pdf.  title / subtitle: cover page text.
   def build_md_bundle_pdf(src_dir:, out:, title:, subtitle:)
-    sources = Dir.glob(File.join(src_dir, "*.md")).sort
-                 .reject { |f| File.basename(f) == "README.md" }
+    # Chapters are numbered and so sort into reading order on their own.
+    # Front matter carries no number -- it is not chapter zero -- so name it
+    # here and put it ahead of them.
+    front_matter = %w[introduction.md]
+    chapters = Dir.glob(File.join(src_dir, "*.md")).sort
+                  .reject { |f| File.basename(f) == "README.md" }
+                  .reject { |f| front_matter.include?(File.basename(f)) }
+    sources = front_matter.map { |n| File.join(src_dir, n) }.select { |f| File.exist?(f) } + chapters
     raise "no .md files under #{src_dir}" if sources.empty?
 
     require "tmpdir"
