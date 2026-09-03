@@ -20,15 +20,27 @@ a[0, 0]              #  => 0.0
 
 It is neither of the two things it resembles.
 
-* It is **not `nil`**. A `float64` array holds float64 values and nothing else,
-  so a Ruby `nil` has nowhere to sit in a cell; `UNDEF` is what an array uses
-  in its place. The last section of this chapter compares the two.
-* It is **not `NaN`**. `NaN` is a floating-point *value*, and a value takes part
-  in arithmetic; `UNDEF` masks the cell rather than filling it, and an integer
-  array can be masked just as well. That comparison also has a section below.
+**Not `nil`.** A `float64` array holds float64 values and nothing else, so a
+Ruby `nil` has nowhere to sit in a cell; `UNDEF` is what an array uses in its
+place. `nil` is what a *query* answers with — `a.search(25.0)` gives `nil` when
+25 is not in the array, and that plugs straight into an `if`. Which of the two
+you get follows the container: one query answers `nil`, an array of queries
+answers an array whose misses are `UNDEF` cells.
 
-`UNDEF` is truthy, so `if a[0, 1]` takes the branch — ask the array
-(`a.is_masked`) or compare (`a[0, 1] == UNDEF`) instead.
+`UNDEF` is truthy, so `if a.mean` takes the branch even when there was nothing
+to average. Ask for a fallback at the call site instead:
+
+```ruby
+a.mean(fill_value: 0.0)   #  the average, or 0.0 when no cell is present
+```
+
+**Not `NaN`.** `NaN` is a floating-point value, and a value takes part in the
+arithmetic: a sum containing one `NaN` is `NaN`. `UNDEF` marks the cell rather
+than filling it, so a reduction leaves it out — and an integer array can be
+masked just as well, which `NaN` cannot do. Reach for the mask when a
+measurement was not taken, and for `NaN` when a missing value should poison
+what follows. Either can be turned into the other, with `mask_invalid` and
+`strip_mask` below.
 
 **`UNDEF` is what a masked cell shows you, not what the array computes with.**
 The only thing you can do with the object is compare it: `UNDEF + 1` raises,
@@ -39,9 +51,15 @@ calculation reads that record and leaves those cells out — no arithmetic on
 masked *element* is a bookkeeping fact about a cell, while `UNDEF` is the
 object handed to you when you look at one.
 
-In practice this rarely comes up, because working with whole arrays keeps you
-on the array's side of the line. `UNDEF` appears when you read a single cell,
-when you mask one, and when a reduction has nothing to answer with.
+The other side of that is that **what sits in a masked cell is not defined**.
+CArray promises which cells are missing, not what is stored in them, and a
+calculation may write anything there — that freedom is what lets it run over
+every cell without stopping to test the mask.
+
+In practice none of this comes up often, because working with whole arrays
+keeps you on the array's side of the line. `UNDEF` appears when you read a
+single cell, when you mask one, and when a reduction has nothing to answer
+with.
 
 ## Masking elements
 
@@ -103,11 +121,16 @@ x.mask_where(:gt, 2)            #  => [ 0, 1, 2, _, _ ]
 x                               #  => [ 0, 1, 2, 3, 4 ]   unchanged
 ```
 
-`mask_invalid` is the dedicated form for masking NaN / Inf in a float array:
+`mask_invalid` is the dedicated form for masking NaN / Inf in a float array. It
+is how IEEE-special cells stop poisoning a calculation and start being left out
+of it:
 
 ```ruby
 y = CA_DOUBLE([1.0, Float::NAN, 3.0, Float::INFINITY, 5.0])
 y.mask_invalid                  #  => [ 1.0, _, 3.0, _, 5.0 ]
+
+y.sum                           #  => NaN    IEEE rules poison the sum
+y.mask_invalid.sum              #  => 9.0    masked cells are left out
 ```
 
 `mask_where` also accepts a boolean array directly, which is handy when the
@@ -266,6 +289,14 @@ m.strip_mask(method: :forward, axis: 0)   #  down each column
 
 `unmask` takes the same keywords and fills in place.
 
+Filling with `NaN` is the way back to IEEE rules — the cells stop being skipped
+and start propagating instead:
+
+```ruby
+a.strip_mask(Float::NAN).sum(axis: 0)
+#  => [ 3.0, NaN, NaN ]
+```
+
 ## Reductions ignore masked elements
 
 This is the main reason the mask exists. Reductions and statistics
@@ -367,8 +398,8 @@ from each cell, so it behaves like arithmetic and the mask rides along;
 `fill_copy` puts a value in every cell, so nothing is missing afterwards:
 
 ```ruby
-a.zero        #  => [ [ 0.0,   _, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
-a.fill_copy(0)#  => [ [ 0.0, 0.0, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
+a.zero          #  => [ [ 0.0,   _, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
+a.fill_copy(0)  #  => [ [ 0.0, 0.0, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
 ```
 
 Because a view shares the mask rather than a copy of it, masking a cell through
@@ -378,108 +409,4 @@ a view masks it in the source:
 row = a[0, nil]
 row[0] = UNDEF
 a.count_masked    #  => 2
-```
-
-## `value` — the storage without the mask
-
-`value` is a view of the same storage with the mask dropped. Because it is a
-view, writes through it reach the original storage, and the mask itself is left
-alone — that is the difference from `unmask`, which removes it.
-
-```ruby
-a = CArray.float64(2, 3).seq!
-a[0, 1] = UNDEF
-a[1, 2] = UNDEF
-
-a.value
-#  => [ [ 0.0, 1.0, 2.0 ],
-#       [ 3.0, 4.0, 5.0 ] ]
-```
-
-**What sits in a masked cell is not defined.** CArray promises which cells are
-missing, not what is stored in them, and an operation may write anything there
-— that freedom is what lets it run over every cell without stopping to test the
-mask. Above, `a` still holds the values it was given, because nothing has been
-computed from it yet. After a calculation it need not:
-
-```ruby
-(a + 10).value
-#  => [ [ 10.0,  0.0, 12.0 ],     the masked cells are not 11.0 and 15.0
-#       [ 13.0, 14.0,  0.0 ] ]
-```
-
-So `value` is not a way of recovering what a masked cell held, and a script you
-depend on should not read those cells at all. It earns its place at the prompt,
-when you want to see the storage as it is. To feed an array to a routine that
-does not understand masks, use `strip_mask`, which puts a value of your choosing
-in the gaps.
-
-## NaN versus UNDEF: which to use
-
-The mask is deliberately *not* `NaN`. The two represent missing-ness in very
-different ways, and the right choice depends on what you want downstream:
-
-* **`UNDEF` (mask)** — missing-ness is tracked alongside the data. Reductions
-  skip it; arithmetic propagates it. Integer arrays can be masked too (`NaN`
-  does not exist for integers). Use this for "this measurement was not taken".
-
-* **`NaN`** — a floating-point value with IEEE semantics. It is a real number in
-  the array, so reductions *do not* skip it: `sum` of a column with one `NaN`
-  is `NaN`. Use this when you want missing values to poison downstream
-  computations rather than be ignored.
-
-If you want IEEE behaviour, fill the mask with `NaN` before reducing:
-
-```ruby
-a.strip_mask(Float::NAN).sum(axis: 0)
-#  => [ 3.0, NaN, NaN ]          NaN propagates rather than being ignored
-```
-
-And going the other way, `mask_invalid` lifts existing `NaN` / `Inf` cells into
-the mask, so they begin to be ignored instead of poisoning sums:
-
-```ruby
-w = CA_DOUBLE([1.0, Float::NAN, 3.0, Float::INFINITY])
-w.sum                            #  => NaN              IEEE poisons it
-w.mask_invalid.sum               #  => 4.0              skipped via mask
-```
-
-## `UNDEF` in a cell versus `nil` from a query
-
-`UNDEF` and Ruby's `nil` both mean "no value here", but they live in different
-places, and CArray uses each where it fits:
-
-* **`UNDEF` — absence inside a cell.** It is the mask value, so it is what a
-  reduction returns when a line has nothing to reduce (`mean` of an empty row),
-  and the only thing that can sit in a masked cell of a `CArray`. A `nil` cannot
-  live in an `int64` array; `UNDEF` can.
-
-* **`nil` — absence of a Ruby answer.** A lookup that returns a single Ruby value
-  uses `nil` for "not found", so it plugs straight into an `if`:
-
-  ```ruby
-  a = CA_DOUBLE([10.0, 20.0, 30.0])
-  if i = a.search(25.0)   #  25 is absent -> nil -> the branch is skipped
-    a[i]
-  end
-  ```
-
-The same method follows the container: `search` with a scalar query returns `nil`
-for "not found", but `search` with a *vector* of queries returns a `CArray` whose
-missing answers are `UNDEF` cells (a `CArray` cannot hold `nil`).
-
-Because `UNDEF` is truthy while `nil` is falsy, a reduction scalar cannot be
-tested the same way as a lookup. Prefer a call-site fallback:
-
-```ruby
-a.mean(fill_value: 0.0)   #  the average, or 0.0 when every cell is masked
-```
-
-Only when you must fold *several* possibly-`UNDEF` scalars together — where a
-per-call `fill_value:` cannot express the combination — reach for
-`CArray.guard_undef`, which short-circuits to its `fill_value` (default `UNDEF`)
-if any argument is `UNDEF` and otherwise yields the values to the block:
-
-```ruby
-CArray.guard_undef(a.min, a.max) { |lo, hi| hi - lo }   #  UNDEF if either is UNDEF
 ```
