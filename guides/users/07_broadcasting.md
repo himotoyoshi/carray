@@ -247,3 +247,46 @@ v[nil, :_] * w[:_, nil]
 The same pattern works for any operation: `v[nil, :_] + w[:_, nil]` gives an
 outer sum, `v[nil, :_].lt(w[:_, nil])` gives an outer comparison table, and so
 on.
+
+## Broadcasting on its own
+
+Two methods do the stretching without an operation attached.
+
+`broadcast_to` takes the shape you want and returns a view stretched to it. Only
+size-1 axes give way, so the rule is the one above; the array is not reshaped
+and no axis is added.
+
+```ruby
+col = CArray.int32(3, 1).seq!    #  shape [3, 1]
+
+col.broadcast_to(3, 4)
+#  => [ [ 0, 0, 0, 0 ],
+#       [ 1, 1, 1, 1 ],
+#       [ 2, 2, 2, 2 ] ]
+```
+
+The result is a view — the values are not copied, and the same source element
+is seen four times in each row. It is read-only for that reason: there is no
+single cell for a write to land in. `.copy` gives you a real array when you
+need one.
+
+`CArray.broadcast` takes several arrays and returns them all stretched to their
+common shape. This is what an operation does with its operands, made visible:
+
+```ruby
+a = CArray.int32(3, 1).seq!      #  shape [3, 1]
+b = CArray.int32(1, 4).seq!      #  shape [1, 4]
+
+x, y = CArray.broadcast(a, b)
+x.shape                          #  => [3, 4]
+y.shape                          #  => [3, 4]
+```
+
+Arguments that are not arrays come back unchanged, so a scalar in the list
+stays a scalar. Shapes that an operation would refuse are refused here too,
+with the same reason given:
+
+```ruby
+CArray.broadcast(CArray.int32(3, 2), CArray.int32(2))
+#  => ArgumentError: CArray.broadcast: ndim mismatch (got 1 and 2)
+```
