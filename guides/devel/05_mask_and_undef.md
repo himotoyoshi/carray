@@ -75,15 +75,14 @@ bytes. (For a CAStride subclass, the mask is itself a CAStride subclass with
 `mask->mask == NULL` — the cascade terminates because a mask has no mask of its
 own.)
 
-## UNDEF and NIL: the C singletons
+## UNDEF: the C singleton
 
-`UNDEF` is the sentinel a caller assigns to mark a cell missing; `NIL` is the
-empty-array sentinel. At the C level they are the globals `CA_UNDEF` and `CA_NIL`,
-both created during init (`ext/carray_undef.c`) and bound to Ruby constants:
+`UNDEF` is the sentinel a caller assigns to mark a cell missing. At the C level it
+is the global `CA_UNDEF`, created during init (`ext/carray_undef.c`) and bound to a
+top-level Ruby constant:
 
 ```c
 extern VALUE CA_UNDEF;   /* the "missing cell" marker */
-extern VALUE CA_NIL;     /* the empty-array sentinel  */
 /* … */
 CA_UNDEF = rb_funcall(rb_cUNDEF, rb_intern("new"), 0);
 rb_const_set(rb_cObject, rb_intern("UNDEF"), CA_UNDEF);
@@ -92,12 +91,21 @@ rb_gc_register_mark_object(CA_UNDEF);   /* pin against compacting GC */
 
 Two implementation points:
 
-- Both are compared by **raw pointer identity** (`rval == CA_UNDEF`) throughout the
-  C code — not by `==` — because they are pure markers.
-- That identity comparison means they must live at a **fixed address**. Ruby 3.x's
-  compacting GC would otherwise move them, so `rb_gc_register_mark_object` pins
-  each. This fixed an order-dependent UNDEF-flicker crash (a `TypeError` on the
-  second `GC.compact`); do not remove the pin.
+- It is compared by **raw pointer identity** (`rval == CA_UNDEF`) throughout the
+  C code — not by `==` — because it is a pure marker.
+- That identity comparison means it must live at a **fixed address**. Ruby 3.x's
+  compacting GC would otherwise move it, so `rb_gc_register_mark_object` pins it.
+  This fixed an order-dependent UNDEF-flicker crash (a `TypeError` on the second
+  `GC.compact`); do not remove the pin. The pin is needed because `UNDEF` makes the
+  round trip: the user writes the Ruby constant, and C compares what arrives against
+  the C global.
+
+A second, unrelated singleton lives in `ext/ruby_carray.c`: `CA_UNSPECIFIED`
+(`CArray::UNSPECIFIED`), which means "the caller did not give this argument". It
+exists because `nil` is itself a legal fill value, so `nil` cannot mark absence —
+see `unmask`, `shift(fill_value:)` and `window(fill_value:)`. It never makes the
+round trip through Ruby, so every comparison reads the same C global and no pin is
+required. Do not pass it in from Ruby.
 
 The Ruby surface assigns `UNDEF` to mark a cell missing:
 

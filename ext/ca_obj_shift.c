@@ -264,7 +264,7 @@ rb_ca_shift_new (VALUE cary, ca_size_t *shift, char *fill, int8_t *roll,
 VALUE
 rb_ca_shift (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, ropt, rfval = CA_NIL, rroll = Qnil, rcs;
+  volatile VALUE obj, ropt, rfval = CA_UNSPECIFIED, rroll = Qnil, rcs;
   CArray *ca;
   CScalar *cs;
   ca_size_t shift[CA_RANK_MAX];
@@ -301,7 +301,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
              "use fill_value: kwarg (e.g. shift(1, fill_value: -2))");
   }
 
-  if ( rfval == CA_NIL ) {
+  if ( rfval == CA_UNSPECIFIED ) {
     /* Default fill value = 0 (or INT2NUM(0) for OBJECT type) */
     rcs = rb_cscalar_new(ca->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);

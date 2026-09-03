@@ -10,6 +10,12 @@ class CArray < Object
   # Library semantic version, e.g. `"3.0.0.dev"`.
   VERSION = ""
 
+  # Sentinel marking "the caller did not give this argument", used by
+  # C entry points whose fill value may legitimately be `nil` (so `nil`
+  # itself cannot mark absence). Never pass it in.
+  # @api private
+  UNSPECIFIED = nil
+
   # `true` when the build links `<complex.h>`; `false` otherwise.
   # Complex array types (`:cmplx64`, `:cmplx128`) require this to be
   # `true`.
@@ -112,11 +118,6 @@ end
 
 # Maximum supported `ndim`.
 CA_RANK_MAX = nil
-
-# Sentinel value used internally to mark "no argument" in some
-# kwarg-accepting C entry points. Not a publicly useful value.
-# @api private
-CA_NIL = nil
 
 # @!group Data type symbols
 #

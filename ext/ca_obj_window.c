@@ -1365,7 +1365,7 @@ rb_ca_window_new (VALUE cary,
 VALUE
 rb_ca_window (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, ropt, rfval = CA_NIL, rbounds = Qnil, rcs;
+  volatile VALUE obj, ropt, rfval = CA_UNSPECIFIED, rbounds = Qnil, rcs;
   CArray *ca;
   CScalar *cs;
   ca_size_t start[CA_RANK_MAX];
@@ -1403,7 +1403,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
              "use fill_value: kwarg (e.g. window(-1..1, fill_value: UNDEF))");
   }
 
-  if ( rfval == CA_NIL ) {
+  if ( rfval == CA_UNSPECIFIED ) {
     ;
   }
   else if ( rfval == CA_UNDEF ) {

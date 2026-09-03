@@ -1113,7 +1113,7 @@ The returned array doesn't have the mask array.
 static VALUE
 rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE rfval = CA_NIL, rcs;
+  volatile VALUE rfval = CA_UNSPECIFIED, rcs;
   CArray *ca;
   CScalar *cv;
   char *fval = NULL;
@@ -1126,7 +1126,7 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( rfval != CA_NIL ) {
+  if ( rfval != CA_UNSPECIFIED ) {
     /* Face has surface != storage; the fill value is cast in the storage data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {
@@ -1172,7 +1172,7 @@ The returned array doesn't have the mask array.
 static VALUE
 rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, rfval = CA_NIL, rcs;
+  volatile VALUE obj, rfval = CA_UNSPECIFIED, rcs;
   CArray *ca, *co;
   CScalar *cv;
   char *fval = NULL;
@@ -1183,7 +1183,7 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( rfval != CA_NIL ) {
+  if ( rfval != CA_UNSPECIFIED ) {
     /* Face has surface != storage; the fill value is cast in the storage data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {
