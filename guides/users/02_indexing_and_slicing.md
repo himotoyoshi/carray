@@ -4,7 +4,7 @@ Indexing uses `[]` and `[]=`, with one argument per axis. The examples below all
 use this 3-by-4 array:
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 #  => [ [ 0,  1,  2,  3 ],
 #       [ 4,  5,  6,  7 ],
 #       [ 8,  9, 10, 11 ] ]
@@ -32,15 +32,8 @@ a[1, -1]     #  => 7    row 1, last column
 a[-1, 2]     #  => 10   last row, column 2
 ```
 
-A scalar read returns an ordinary Ruby object — an `Integer`, `Float`, etc., not
-a zero-dimensional array (see [Vocabulary](08_vocabulary.md)):
-
-```ruby
-a[1, 2]            #  => 6
-a[1, 2].class      #  => Integer
-
-CArray.float64(2, 2).seq[0, 1].class   #  => Float
-```
+Reading one element gives an ordinary Ruby object — an `Integer` here, a
+`Float` from a float array — not an array of one element.
 
 Assigning to a single position writes one element:
 
@@ -66,7 +59,7 @@ a[-1, -1] = 0
 take a row or a column.
 
 ```ruby
-a = CArray.int32(3, 4).seq   # back to the values it started with
+a = CArray.int32(3, 4).seq!   # back to the values it started with
 
 a[1, nil]    #  => [ 4, 5, 6, 7 ]    the second row
 a[nil, 2]    #  => [ 2, 6, 10 ]      the third column
@@ -132,6 +125,30 @@ a[0..-1, 0..-1]
 #       [ 8,  9, 10, 11 ] ]   the whole array, written with ranges
 ```
 
+A run does not have to be every index in the range. Ruby's `Range#step` gives
+an arithmetic sequence, and CArray takes it as the indices to pick:
+
+```ruby
+a[nil, (0..3).step(2)]
+#  => [ [ 0,  2 ],
+#       [ 4,  6 ],
+#       [ 8, 10 ] ]           every other column
+
+a[(0..2).step(2), nil]
+#  => [ [ 0, 1,  2,  3 ],
+#       [ 8, 9, 10, 11 ] ]    the first and third rows
+
+a[nil, (1..3).step(2)]
+#  => [ [ 1,  3 ],
+#       [ 5,  7 ],
+#       [ 9, 11 ] ]           starting from column 1 instead
+```
+
+A step of zero is an error, since it would name the same index for ever. There
+is a second spelling, `[start, count, step]`, which says how many to take
+rather than where to stop; [Indexer reference](16_indexer_reference.md) covers
+it and every other form of `[]`.
+
 ## Mixing integers, `nil`, and ranges
 
 The forms above combine freely. Each axis takes one argument; the result drops
@@ -155,7 +172,7 @@ The same rules generalise to any number of axes. With a 3-D array, you give
 three index arguments.
 
 ```ruby
-v = CArray.int32(2, 3, 4).seq
+v = CArray.int32(2, 3, 4).seq!
 #  shape (2, 3, 4), values 0..23
 
 v[0, 1, 2]       #  => 6           a single element
@@ -257,7 +274,7 @@ For a multi-dimensional array, the positions are addresses into the flat
 sequence:
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 a[CA_INT([0, 5, 11])]   #  => [ 0, 5, 11 ]      flat positions 0, 5, 11
 ```
 
@@ -281,7 +298,7 @@ copies it in element-wise.
 ### Filling a slice with a scalar
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 
 a[1, nil] = -1            #  fill the whole second row with -1
 #  => [ [  0,  1,  2,  3 ],
@@ -304,7 +321,7 @@ a[0..1, 1..2] = 99        #  fill a 2x2 sub-block with the same value
 A right-hand side of matching shape is copied in element by element:
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 
 a[nil, 0] = CA_INT([7, 8, 9])   #  copy three values into the first column
 #  => [ [ 7,  1,  2,  3 ],
@@ -320,7 +337,7 @@ a[0..1, 0..1] = CA_INT([[100, 200], [300, 400]])  #  copy a 2x2 block in
 You can also copy a slice from one array into a slice of another:
 
 ```ruby
-src = CArray.int32(3, 4).seq
+src = CArray.int32(3, 4).seq!
 dst = CArray.int32(3, 4)         #  starts at all zeros
 dst[0..1, 1..2] = src[1..2, 0..1]
 dst
@@ -337,7 +354,7 @@ particular for assigning a view of an array back into the array itself (see
 [Views](06_views.md)):
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 a[] = 0                          #  fill every element with 0
 #  => [ [ 0, 0, 0, 0 ],
 #       [ 0, 0, 0, 0 ],
@@ -357,7 +374,7 @@ row-major order, and so does a Ruby Array:
 
 ```ruby
 a = CArray.int32(3, 4)
-a[] = CArray.int32(12).seq        #  1-D source, 2-D target
+a[] = CArray.int32(12).seq!        #  1-D source, 2-D target
 #  => [ [ 0, 1,  2,  3 ],
 #       [ 4, 5,  6,  7 ],
 #       [ 8, 9, 10, 11 ] ]
@@ -370,7 +387,12 @@ A source that *does* claim a shape has to agree with the target's, and a
 
 ```ruby
 b = CArray.int32(2, 6)
-b[] = a                            #  => RuntimeError: shape mismatch
+b[] = a
+#  => RuntimeError: shape mismatch writing to carray ([2, 6] <- [3, 4]);
+#     shapes must agree once size-1 axes are dropped, or one side must be 1-D,
+#     or the source must be smaller and broadcastable -- use .flatten to write
+#     the values in the order they lie
+
 b[] = a.flatten                    #  say it explicitly
 #  => [ [ 0, 1, 2,  3,  4,  5 ],
 #       [ 6, 7, 8,  9, 10, 11 ] ]
@@ -379,11 +401,6 @@ b[] = a.flatten                    #  say it explicitly
 `#flatten` returns a view, so nothing is copied to say this. Axes of length 1
 do not count as a disagreement — `[2, 3, 1]` and `[2, 3]` are the same shape
 written two ways.
-
-> NumPy is stricter still: it requires the right-hand side to be the same
-> shape as the target or broadcastable to it, so `a[...] = np.arange(12)` into
-> a `(3, 4)` array raises `ValueError`. CArray accepts a flat source because a
-> 1-D array states only a length.
 
 ### Repeating along a size-1 axis
 
@@ -394,7 +411,7 @@ length 1; on assignment that axis is sized to the target's matching axis and
 the value is repeated to fill it.
 
 ```ruby
-row    = CArray.int32(3, 4).seq          # one [3, 4] block, values 0..11
+row    = CArray.int32(3, 4).seq!          # one [3, 4] block, values 0..11
 target = CArray.int32(5, 3, 4)
 
 target[] = row[:_, nil, nil]             # repeat the block along axis 0
@@ -406,7 +423,7 @@ The axis may sit anywhere — not only the first — and it works through a
 partial slice too:
 
 ```ruby
-mid = CArray.int32(5, 4).seq
+mid = CArray.int32(5, 4).seq!
 t   = CArray.int32(5, 3, 4)
 t[] = mid[nil, :_, nil]                   # stretch the middle axis to 3
 
@@ -422,11 +439,14 @@ This is the same size-1 broadcast an operation performs, so `:_` reads the same
 way on both sides:
 
 ```ruby
-a + row[:_, nil, nil]     # broadcasts in the operation
-target[] = row[:_, nil, nil]   # broadcasts on the store
+target + row[:_, nil, nil]      # broadcasts in the operation
+target[] = row[:_, nil, nil]    # broadcasts on the store
 ```
 
-See [Broadcasting](07_broadcasting.md) for the operation side.
+Both need the two to have the same number of axes before a size-1 axis can be
+stretched — CArray never adds an axis of its own to make shapes line up, which
+is what `:_` is for. See [Broadcasting](07_broadcasting.md) for the operation
+side.
 
 These slices are *views* onto the original data, not copies — writing through
 them changes the original array. That property is the subject of
