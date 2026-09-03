@@ -358,10 +358,9 @@ b[0, 0] = 99
 a[0, 0]         #  => 0    a is untouched
 ```
 
-`fill_copy` is that same copy with one value put everywhere, and `zero` and
-`one` are the two of those wanted often enough to have names of their own —
-`a.fill_copy(7)`, `a.zero`, `a.one`. Each of `zero` and `one` has a `!` form
-that writes into the receiver instead.
+`fill_copy` is that same copy with one value put everywhere — `a.fill_copy(7)`.
+Zeros and ones are wanted often enough to have methods of their own, `a.zero`
+and `a.one`, each with a `!` form that writes into the receiver instead.
 
 ### An array shaped like another one: `template`
 
