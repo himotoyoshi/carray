@@ -97,3 +97,9 @@ guides/pdf/
 benchmark
 CLAUDE.md
 .claude/
+
+# Written by the guide examples when the verification harness runs them
+/result.ca
+/big_endian.ca
+/little.ca
+/objs.marshal
