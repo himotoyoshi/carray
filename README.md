@@ -11,6 +11,7 @@ addition to these.
 
 3.0.x still moves: behavior can change between releases — see
 [CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on.
+Until then, treat it as a place to try things out.
 
 ## Features
 
@@ -27,8 +28,8 @@ addition to these.
 * Define your own array class in pure Ruby while keeping the full CArray
   interface
 * Pack multiple values into one element as a record type
-* A DataFrame (`CAFrame`) whose columns are plain CArrays, so masks, views and
-  Faces keep working
+* Comes with a DataFrame (`CAFrame`) whose columns are plain CArrays, so masks
+  and views keep working on them
 
 ## Install
 
