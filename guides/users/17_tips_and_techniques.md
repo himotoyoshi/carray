@@ -86,14 +86,15 @@ sd = x.stddev(axis: 1, keep_axis: true)
 
 ### Outer product of two vectors
 
-Turn one vector into a column (`[:_, nil]`) and the other into a row
-(`[nil, :_]`), then multiply. Broadcasting fills in the rectangle.
+Turn one vector into a column (`[nil, :_]` — a new axis after the existing one)
+and the other into a row (`[:_, nil]`), then multiply. Broadcasting fills in the
+rectangle.
 
 ```ruby
 v = CA_INT([1, 2, 3])
 w = CA_INT([10, 20, 30, 40])
 
-v[:_, nil] * w[nil, :_]
+v[nil, :_] * w[:_, nil]
 #  => [ [ 10, 20, 30,  40 ],
 #       [ 20, 40, 60,  80 ],
 #       [ 30, 60, 90, 120 ] ]
@@ -466,6 +467,27 @@ a.strip_mask(0)
 #  => [ [ 0.0, 0.0, 2.0 ],
 #       [ 3.0, 4.0, 5.0 ] ]
 ```
+
+### Fold several possibly-missing scalars
+
+A reduction that had nothing to work on answers `UNDEF`, and `UNDEF` is truthy,
+so an `if` will not catch it. For one call, ask for a fallback there:
+`a.mean(fill_value: 0.0)`. When you have to combine several such answers in
+Ruby code, `CArray.guard_undef` short-circuits: it yields the values to the
+block only when none of them is `UNDEF`, and otherwise returns its
+`fill_value:` (`UNDEF` by default).
+
+```ruby
+a = CArray.float64(4).seq!
+a[] = UNDEF
+
+CArray.guard_undef(a.min, a.max) { |lo, hi| hi - lo }   #  => UNDEF
+CArray.guard_undef(a.min, a.max, fill_value: 0.0) { |lo, hi| hi - lo }
+#  => 0.0
+```
+
+This is for Ruby-level code working on scalars. Whole-array work does not need
+it — the mask travels through the calculation on its own.
 
 ### Clean an array of NaN / Inf in place
 
