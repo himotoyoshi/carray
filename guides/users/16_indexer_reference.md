@@ -4,7 +4,7 @@ This page is the reference for `[]` and `[]=` on a CArray. It walks through
 every form the indexer accepts, what shape it gives back, and what class the
 result has. For a gentler introduction see
 [Indexing and slicing](02_indexing_and_slicing.md); for the underlying
-classifier wire format see `docs/Indexer_decision_tree.md`.
+classifier wire format see `docs/topics/Indexer_decision_tree.md`.
 
 **Every form of `[]` returns a view onto the original storage** — writing
 through it reaches back to the source. That property is the subject of
@@ -14,7 +14,7 @@ produces.
 Most examples use this 3-by-4 array:
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 #  => [ [ 0,  1,  2,  3 ],
 #       [ 4,  5,  6,  7 ],
 #       [ 8,  9, 10, 11 ] ]
@@ -52,7 +52,7 @@ zero-dimensional array.
 
 ```ruby
 a[1, 2].class                                   #  => Integer
-CArray.float64(2, 2).seq[0, 1].class            #  => Float
+CArray.float64(2, 2).seq![0, 1].class            #  => Float
 ```
 
 * **Shape back:** scalar (axis dropped).
@@ -113,7 +113,7 @@ Ruby's `(start..stop).step(n)` produces an arithmetic sequence; CArray
 accepts it directly.
 
 ```ruby
-v = CArray.int32(10).seq           #  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
+v = CArray.int32(10).seq!           #  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
 v[(0..9).step(2)]                  #  => [ 0, 2, 4, 6, 8 ]
 v[(1..8).step(3)]                  #  => [ 1, 4, 7 ]
 ```
@@ -136,7 +136,7 @@ classifier accepts four shapes:
 | `[start, count, step]`| `count` elements starting at `start`, stepping by `step` |
 
 ```ruby
-v = CArray.int32(10).seq
+v = CArray.int32(10).seq!
 v[[2]]                #  => [ 2 ]                length-1 axis (not a scalar)
 v[[nil, 2]]           #  => [ 0, 2, 4, 6, 8 ]    every other element from 0
 v[[3, 4]]             #  => [ 3, 4, 5, 6 ]       four elements starting at 3
@@ -168,7 +168,7 @@ a[false]     #  => the whole array (legacy form for a[])
 In a 3-D array `:~` can expand to more than one axis:
 
 ```ruby
-v = CArray.int32(2, 3, 4).seq
+v = CArray.int32(2, 3, 4).seq!
 v[1, :~].shape    #  => [3, 4]    :~ expands to two nils
 v[:~, 0].shape    #  => [2, 3]    :~ expands to two nils
 ```
@@ -314,7 +314,7 @@ So `:eq` turns the indexer into a **condition matcher**, the same as building
 a boolean mask first and using the form in §3.1.
 
 ```ruby
-c = CArray.int32(5).seq    #  => [ 0, 1, 2, 3, 4 ]
+c = CArray.int32(5).seq!    #  => [ 0, 1, 2, 3, 4 ]
 
 c[:eq, 2]    #  => [ 2 ]
 c[:gt, 2]    #  => [ 3, 4 ]
@@ -335,7 +335,7 @@ The same keys work on `[]=`, where they replace cells that match the
 condition:
 
 ```ruby
-d = CArray.int32(5).seq
+d = CArray.int32(5).seq!
 d[:gt, 2] = 0       #  => [ 0, 1, 2, 0, 0 ]
 d[:eq, 0] = -1      #  => [ -1, 1, 2, -1, -1 ]
 ```
@@ -362,8 +362,8 @@ written.
 There is no table of accepted keys — any method name works, because the form
 is the identity above. The ones worth knowing are the comparisons (`:eq`,
 `:ne`, `:gt`, `:ge`, `:lt`, `:le`) and the predicates (`:is_invalid`,
-`:is_finite`, `:is_nan`, `:is_masked`, `:is_not_masked`, and `:is_empty` on a
-string array), plus any boolean-returning method you define yourself.
+`:is_finite`, `:is_nan`, `:is_masked`, `:is_not_masked`), plus any
+boolean-returning method you define yourself.
 
 Read the identity both ways: `a[:fill, 0]` is `a[a.fill(0)]`, which empties
 `a` and then indexes it. Name a question, not a change.
@@ -411,7 +411,7 @@ v = CA_INT([1, 2, 3])
 v[:_, nil].shape    #  => [1, 3]    add a leading size-1 axis (a row)
 v[nil, :_].shape    #  => [3, 1]    add a trailing size-1 axis (a column)
 
-m = CArray.int32(2, 3).seq
+m = CArray.int32(2, 3).seq!
 m[nil, :_, nil].shape   #  => [2, 1, 3]    new axis inserted between the existing axes
 ```
 
@@ -431,7 +431,7 @@ matching shape (copied in cell by cell).
 ### 7.1 Fill with a scalar
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 
 a[1, nil] = -1              #  fill the whole second row
 a[nil, 0] =  0              #  zero the first column
@@ -443,7 +443,7 @@ a[:eq, 0] = -1              #  same effect through the predicate key
 ### 7.2 Copy from a matching-shape source
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 a[nil, 0] = CA_INT([7, 8, 9])
 a[0..1, 0..1] = CA_INT([[100, 200], [300, 400]])
 ```
@@ -451,7 +451,7 @@ a[0..1, 0..1] = CA_INT([[100, 200], [300, 400]])
 You can copy from a slice of one array into a slice of another:
 
 ```ruby
-src = CArray.int32(3, 4).seq
+src = CArray.int32(3, 4).seq!
 dst = CArray.int32(3, 4)
 dst[0..1, 1..2] = src[1..2, 0..1]
 ```
@@ -463,7 +463,7 @@ way to replace the contents in place without allocating a new entity. It is
 especially useful for writing a view of `a` back into `a` itself:
 
 ```ruby
-a = CArray.int32(3, 4).seq
+a = CArray.int32(3, 4).seq!
 a[] = 0                                     #  zero everything
 a[] = CA_INT([[1, 2, 3, 4],
               [5, 6, 7, 8],
@@ -480,7 +480,7 @@ Assigning `UNDEF` through any of these forms marks the selected cells as
 missing rather than overwriting their value:
 
 ```ruby
-b = CArray.float64(5).seq
+b = CArray.float64(5).seq!
 b[b.lt(2)] = UNDEF       #  mark cells less than 2 as missing
 b[:gt, 3]  = UNDEF       #  same idea through the predicate key
 ```
@@ -511,4 +511,4 @@ See [Masks and missing values](05_masks.md) for the full story.
 
 For the wire-format detail behind this table — the exact payload each
 region carries, every error condition, and the recursive flat-address scan
-used by `ADDRESS_COMPLEX` — see `docs/Indexer_decision_tree.md`.
+used by `ADDRESS_COMPLEX` — see `docs/topics/Indexer_decision_tree.md`.

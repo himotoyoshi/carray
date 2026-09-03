@@ -1,7 +1,19 @@
 # Indexing and slicing
 
-Indexing uses `[]` and `[]=`, with one argument per axis. The examples below all
-use this 3-by-4 array:
+Indexing uses `[]` and `[]=`, with one argument per axis. Each of those
+arguments is an **index**: a position along one axis, counted from 0. An
+element of a two-dimensional array therefore takes two indices, one per axis.
+
+There is a second way of naming the same element. Lay the whole array out as
+one long run — last axis first, so the elements that sit next to each other in
+memory come out next to each other — and number that run from 0. Such a number
+is an **address**. A `[3, 4]` array has indices `[i, j]` and addresses `0` to
+`11`, and `a[1, 2]` and address `6` name the same element.
+
+Most of this chapter is about indices. Addresses come back at the end, where
+an array of them selects elements.
+
+The examples below all use this 3-by-4 array:
 
 ```ruby
 a = CArray.int32(3, 4).seq!
@@ -261,21 +273,20 @@ a[a.gt(5)] = 0
 
 ## By an array of positions
 
-Indexing with an integer CArray picks out elements at the given flat
-*addresses* (see [Vocabulary](08_vocabulary.md) — addresses count elements in
-row-major order):
+Indexing with an integer CArray picks out elements by address — the single
+number that names an element in the flattened array, as above:
 
 ```ruby
 b = CA_INT([10, 20, 30, 40, 50])
-b[CA_INT([0, 2, 4])]    #  => [ 10, 30, 50 ]    elements at positions 0, 2, 4
+b[CA_INT([0, 2, 4])]    #  => [ 10, 30, 50 ]    the elements at addresses 0, 2, 4
 ```
 
-For a multi-dimensional array, the positions are addresses into the flat
-sequence:
+For a multi-dimensional array the addresses run through the whole array, not
+along one axis:
 
 ```ruby
 a = CArray.int32(3, 4).seq!
-a[CA_INT([0, 5, 11])]   #  => [ 0, 5, 11 ]      flat positions 0, 5, 11
+a[CA_INT([0, 5, 11])]   #  => [ 0, 5, 11 ]      addresses 0, 5 and 11
 ```
 
 Like every other form of indexing in CArray, this returns a view — assigning
