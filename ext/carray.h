@@ -1595,7 +1595,7 @@ void    ca_fill_stride_whole (void *ap, void *ptr);
 /* API : mask handling */
 
 extern VALUE CA_UNDEF;
-extern VALUE CA_NIL;
+extern VALUE CA_UNSPECIFIED;
 
 boolean8_t *ca_mask_ptr (void *ap);
 int     ca_has_mask (void *ap);

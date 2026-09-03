@@ -2,7 +2,7 @@
 
   Single entry point Init_carray_ext: declares the CArray class
   hierarchy + exception class + CA module, populates top-level
-  constants (CA_RANK_MAX / CA_NIL / CA_* data_type Symbols / alignment
+  constants (CA_RANK_MAX / CA_* data_type Symbols / alignment
   values), then drives the per-module Init_* sequence in load order.
 
   CAREFUL: the Init_* call order below carries real ordering
@@ -26,7 +26,7 @@ VALUE rb_cCAIterator;
 VALUE rb_eCADataTypeError;
 VALUE rb_mCA;
 
-VALUE CA_NIL;
+VALUE CA_UNSPECIFIED;
 
 void Init_carray_core ();
 void Init_carray_undef ();
@@ -178,8 +178,14 @@ Init_carray_ext (void)
 
   /* -- system -- */
   rb_define_const(rb_cObject, "CA_RANK_MAX", INT2NUM(CA_RANK_MAX));
-  CA_NIL = rb_funcall(rb_cObject, rb_intern("new"), 0);
-  rb_define_const(rb_cObject, "CA_NIL", CA_NIL);
+  /* Sentinel meaning "the caller did not give this argument".  It is
+     distinct from nil because nil is itself a legal fill value (a
+     CA_OBJECT array can be filled with nil), so nil cannot mark
+     absence.  C code only ever compares against it; the value is never
+     read and must never be passed in from Ruby.  The constant exists to
+     anchor the object against the GC. */
+  CA_UNSPECIFIED = rb_funcall(rb_cObject, rb_intern("new"), 0);
+  rb_define_const(rb_cCArray, "UNSPECIFIED", CA_UNSPECIFIED);
 
 #ifdef HAVE_COMPLEX_H
   /* @private */

@@ -11,6 +11,14 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: the top-level constant `CA_NIL` is gone. It was an internal
+  sentinel standing for "the caller did not give this argument", and its name
+  named the very value it exists to be distinguished from -- `nil` is itself a
+  legal fill value, which is why the sentinel is needed at all. It is now
+  `CArray::UNSPECIFIED` (`CA_UNSPECIFIED` in C). It is not a value to pass in;
+  nothing outside the C entry points for `unmask`, `shift(fill_value:)` and
+  `window(fill_value:)` ever read it, and their behaviour is unchanged.
+
 - New: `CArray.per_cell` and `CArray.per_element`, the surface an array
   algorithm is written on -- an index space for the first, so that a cell may
   reach its neighbours, an element-wise expression for the second. Both run the
