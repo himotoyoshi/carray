@@ -379,41 +379,6 @@ row[0] = UNDEF
 a.count_masked    #  => 2
 ```
 
-## Masking duplicates
-
-`mask_duplicates` masks every cell whose value was seen earlier, keeping the
-first occurrence. It paints over the repeats rather than squeezing them out, so
-the shape stays as it was:
-
-```ruby
-a = CA_INT([10, 20, 20, 30, 10])
-a.mask_duplicates      #  => [ 10, 20, _, 30, _ ]
-```
-
-Keeping the shape is what lets it work per fiber. Rows hold different numbers
-of distinct values, so a squeezed answer would be ragged and could not be a
-rectangular array:
-
-```ruby
-m = CA_INT([[1, 2, 1],
-            [1, 2, 3],
-            [4, 2, 1]])
-
-m.mask_duplicates(axis: 1)        #  along each row
-#  => [ [ 1, 2, _ ],
-#       [ 1, 2, 3 ],
-#       [ 4, 2, 1 ] ]
-```
-
-`axis: k` runs along each fiber of axis `k`; the default takes the whole array
-in flatten order. Values are judged by `==`, so `NaN` cells all survive unless
-you `mask_invalid` first, and a cell that is already masked takes no part.
-
-For the plain list of distinct values — Ruby's `Array#uniq` — use `unique`,
-covered in [Discovery](28_discovery.md) along with `value_counts`, `nunique`
-and `mode`. The two differ on one point: `unique` folds every `NaN` into a
-single value, while `mask_duplicates` keeps them apart.
-
 ## Looking past the mask: `value`
 
 `value` returns a view of the same storage with the mask dropped. It is useful

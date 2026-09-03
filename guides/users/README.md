@@ -138,8 +138,8 @@ the chapters here are the example-driven entry points.
 28. [Discovery — distinct values, counts, modes, membership](28_discovery.md) —
     `unique`, `value_counts`, `nunique`, `mode` / `is_mode`, `is_in`, and
     the set operations `intersection` / `union` / `difference`. The
-    value-hash discovery family (NaN-folding, mask-excluding) that sits
-    beside `mask_duplicates` in chapter 5.
+    value-hash discovery family (NaN-folding, mask-excluding), and
+    `mask_duplicates` beside it.
 
 > Note: chapters 09–25 have grown organically and are numbered in the order
 > they were written, not in a settled reading order. A pass to reorder them
