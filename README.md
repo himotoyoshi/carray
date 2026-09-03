@@ -1,35 +1,21 @@
 # Ruby/CArray
 
-Ruby/CArray is an extension library for the multi-dimensional array class.
-It provides arrays of a single, uniform data type, with indexing and slicing
-in many forms, element-wise arithmetic and mathematical functions, reductions
-and statistics over the whole array or along any axis, and broadcasting
-between shapes that differ in size-1 axes. The features listed below are in
-addition to these.
+Ruby/CArray is an extension library for the multi-dimensional array class. It provides arrays of a single, uniform data type, with indexing and slicing in many forms, element-wise arithmetic and mathematical functions, reductions and statistics over the whole array or along any axis, and broadcasting between shapes that differ in size-1 axes. The features listed below are in addition to these.
 
 ## Status
 
-3.0.x still moves: behavior can change between releases — see
-[CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on.
-Until then, treat it as a place to try things out.
+3.0.x still moves: behavior can change between releases — see [CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on. Until then, treat it as a place to try things out.
 
 ## Features
 
-* Every array carries a per-element mask for missing values, respected by
-  reductions and statistics
-* Views compose without copying — a write through the outermost view reaches
-  the source data
-* MemoryView protocol on both sides: share buffers with other numerical
-  libraries without copying
-* Kernel-style iteration: run a Ruby block over each sub-array spanning the axes
-  you choose
-* Attach domain meaning (time, angle, quantity with units…) without changing
-  storage — a Face
-* Define your own array class in pure Ruby while keeping the full CArray
-  interface
+* Every array carries a per-element mask for missing values, respected by reductions and statistics
+* Views compose without copying — a write through the outermost view reaches the source data
+* MemoryView protocol on both sides: share buffers with other numerical libraries without copying
+* Kernel-style iteration: run a Ruby block over each sub-array spanning the axes you choose
+* Attach domain meaning (time, angle, quantity with units…) without changing storage — a Face
+* Define your own array class in pure Ruby while keeping the full CArray interface
 * Pack multiple values into one element as a record type
-* Comes with a DataFrame (`CAFrame`) whose columns are plain CArrays, so masks
-  and views keep working on them
+* Comes with a DataFrame (`CAFrame`) whose columns are plain CArrays, so masks and views keep working on them
 
 ## Install
 
@@ -122,25 +108,27 @@ b.strip_mask(Float::NAN).sum(axis: 0)
 
 ## Documentation
 
-* [What is Ruby/CArray](docs/WhatIsCArray.md)
+* [Introduction](guides/users/introduction.md) — what Ruby/CArray is: one data type, many dimensions, views, and missing values
+* [Getting started](guides/users/00_getting_started.md) — installing it, making a first array, and a short tour of the rest
+* [Creating arrays](guides/users/01_creating_arrays.md) — constructors, data types, and the ways of filling an array with values
+* [Indexing and slicing](guides/users/02_indexing_and_slicing.md) — elements, rows, columns, sub-blocks, and selection by condition
+* [Element-wise operations](guides/users/03_elementwise.md) — arithmetic, comparison, and the mathematical functions
+* [Reduction and statistics](guides/users/04_reduction_and_statistics.md) — summaries over the whole array or along the axes you choose
+* [Masks and missing values](guides/users/05_masks.md) — marking elements as undefined, and how calculations then treat them
+* [Views](guides/users/06_views.md) — reshaping, transposing and slicing without copying, and what a write through a view reaches
+* [Broadcasting](guides/users/07_broadcasting.md) — combining arrays whose shapes differ
 
 ## Contributing
 
 Bug reports and feature requests are welcome — please open an issue.
 
-**Before opening a pull request, read [CONTRIBUTING.md](CONTRIBUTING.md).**
-It is short, and it says which form a contribution is best sent in. A small,
-self-contained bug fix is fine as a pull request. Anything larger is better
-started as an issue: code here gets rewritten as a matter of course, so a
-patch for a larger change is likely to end up reimplemented rather than
-merged, and describing the problem gets you further than writing one.
+**Before opening a pull request, read [CONTRIBUTING.md](CONTRIBUTING.md).** It is short, and it says which form a contribution is best sent in. A small, self-contained bug fix is fine as a pull request. Anything larger is better started as an issue: code here gets rewritten as a matter of course, so a patch for a larger change is likely to end up reimplemented rather than merged, and describing the problem gets you further than writing one.
 
 ## Credits
 
 Up to version 2.0, CArray was authored by himotoyoshi.
 
-CArray 3.0 was designed and reviewed by a human developer; the implementation was
-produced in collaboration with AI coding tools.
+CArray 3.0 was designed and reviewed by a human developer; the implementation was produced in collaboration with AI coding tools.
 
 ## License
 
