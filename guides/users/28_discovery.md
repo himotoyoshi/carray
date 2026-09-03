@@ -27,10 +27,10 @@ The methods:
 | `union`           | Values present in either self or another array                 |
 | `difference`      | Values present in self but not in the other array              |
 
-The `mask_duplicates` method covered in [Masks and missing values](05_masks.md)
-belongs to the same corner of the library, but with a different contract: it
-uses strict `==` (so NaNs are all kept) and returns a shape-preserving *view*
-that paints repeats over rather than compressing them out.
+`mask_duplicates`, at the end of this chapter, belongs to the same corner of
+the library with a different contract: it uses strict `==` (so NaNs are all
+kept) and keeps the shape, painting the repeats over rather than compressing
+them out.
 
 ## `unique` — the distinct values
 
@@ -65,10 +65,9 @@ Array method) would treat every `NaN` as a distinct object, whereas
 value.
 
 Historically CArray 2.x had a `uniq` method that returned the same
-first-seen list. The replacement here is `unique`, and the compressed form
-that `mask_duplicates` used to return (before 3.0) is now
-`a.mask_duplicates[:is_not_masked].copy` — see
-[Masks and missing values](05_masks.md).
+first-seen list. The replacement here is `unique`; the compressed form that
+`mask_duplicates` used to return before 3.0 is now
+`a.mask_duplicates[:is_not_masked].copy`.
 
 ## `value_counts` — distinct values and their counts
 
@@ -228,6 +227,38 @@ a.intersection(b, sort: true).to_a   #  => [2, 3]
 
 Data types are promoted the same way as `is_in`.
 
+## `mask_duplicates` — first occurrences, in place
+
+`mask_duplicates` masks every cell whose value was seen earlier, keeping the
+first occurrence. It paints over the repeats rather than squeezing them out, so
+the shape stays as it was (see [Masks and missing values](05_masks.md) for what
+a mask is):
+
+```ruby
+a = CA_INT([10, 20, 20, 30, 10])
+a.mask_duplicates      #  => [ 10, 20, _, 30, _ ]
+```
+
+Keeping the shape is what lets it work per fiber. Rows hold different numbers
+of distinct values, so a squeezed answer would be ragged and could not be a
+rectangular array:
+
+```ruby
+m = CA_INT([[1, 2, 1],
+            [1, 2, 3],
+            [4, 2, 1]])
+
+m.mask_duplicates(axis: 1)        #  along each row
+#  => [ [ 1, 2, _ ],
+#       [ 1, 2, 3 ],
+#       [ 4, 2, 1 ] ]
+```
+
+`axis: k` runs along each fiber of axis `k`; the default takes the whole array
+in flatten order. Values are judged by `==`, so every `NaN` survives — this is
+the one place in the chapter where NaNs are not folded together — and a cell
+that is already masked takes no part.
+
 ## What to reach for
 
 | You want to know                                    | Reach for                             |
@@ -241,9 +272,9 @@ Data types are promoted the same way as `is_in`.
 | Values common to two arrays                         | `a.intersection(b)`                   |
 | Combined set of values                              | `a.union(b)`                          |
 | Values in `a` not in `b`                            | `a.difference(b)`                     |
-| First-occurrence marker without squashing shape     | `a.mask_duplicates` (chapter 5)       |
+| First-occurrence marker without squashing shape     | `a.mask_duplicates`                   |
 
 `unique` / `value_counts` / `nunique` / `mode` all fold NaN into a single
 canonical bucket and exclude masked cells; `mask_duplicates` uses strict
 `==` and keeps every NaN separate. Pick by whether you want values-as-set
-semantics (this chapter) or positions-as-mask semantics (chapter 5).
+semantics or positions-as-mask semantics.
