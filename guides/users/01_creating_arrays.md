@@ -22,10 +22,47 @@ CArray.int32(2, 4)
 #       [ 0, 0, 0, 0 ] ]
 ```
 
-### Filling with a block
+### Filling with a value
 
-If a block is given, it is called once per element and its return value becomes
-that element. The block receives the indices of the element.
+`fill` puts one value into every element, in place, and returns the array:
+
+```ruby
+CArray.float64(2, 4).fill(9.0)
+#  => [ [ 9.0, 9.0, 9.0, 9.0 ],
+#       [ 9.0, 9.0, 9.0, 9.0 ] ]
+
+CArray.int32(5).fill(-1)
+#  => [ -1, -1, -1, -1, -1 ]
+```
+
+Assigning to the whole array with `a[] = 9.0` does the same thing.
+
+A block that takes no parameters is read as this same fill. Such a block
+receives no indices, so nothing in it can vary from element to element; CArray
+therefore evaluates it **once** and puts that one value everywhere:
+
+```ruby
+CArray.float64(2, 4) { 9.0 }
+#  => [ [ 9.0, 9.0, 9.0, 9.0 ],
+#       [ 9.0, 9.0, 9.0, 9.0 ] ]
+```
+
+The rule holds whatever the block contains. An expression that would give a
+different answer each time it ran is still run only once, and that one answer
+goes everywhere:
+
+```ruby
+CArray.int32(8) { rand(100) }
+#  => [ 42, 42, 42, 42, 42, 42, 42, 42 ]   #  one rand call, broadcast
+```
+
+To vary by element, the block has to be given the indices to vary by — which is
+the next section.
+
+### From the indices
+
+A block that takes parameters is called once per element and receives that
+element's indices; its return value becomes the element.
 
 ```ruby
 CArray.int32(5) { |i| i }
@@ -88,53 +125,17 @@ CArray.int32(2, 2, 2) { |i, j, k| i*4 + j*2 + k }
 #         [ 6, 7 ] ] ]
 ```
 
-### Block-fill with a constant: the arity-0 shortcut
-
-A block that ignores its indices is treated as a request to fill with a
-constant. CArray recognises this case (an arity-0 block) and evaluates the
-block **just once**, then broadcasts the value to every element:
-
-```ruby
-CArray.float64(2, 4) { 9.0 }
-#  => [ [ 9.0, 9.0, 9.0, 9.0 ],
-#       [ 9.0, 9.0, 9.0, 9.0 ] ]
-
-CArray.float64(3) { 3.14 }
-#  => [ 3.14, 3.14, 3.14 ]   #  (3 elements, same value everywhere)
-```
-
-This is fast — a single evaluation, no per-element call — but it has a sharp
-edge. If the block contains a non-constant expression like `rand`, it is still
-evaluated only once and that one value goes everywhere:
-
-```ruby
-CArray.int32(8) { rand(100) }
-#  => [ 42, 42, 42, 42, 42, 42, 42, 42 ]   #  one rand call, broadcast
-```
-
-To get a different value per element, give the block at least one parameter so
-CArray evaluates it per-cell:
+A single parameter is enough, and it does not have to be used: its presence is
+what puts the block into per-element mode.
 
 ```ruby
 CArray.int32(8) { |i| rand(100) }
 #  => [ 73, 14, 88,  3, 51, 60,  9, 27 ]   #  evaluated 8 times
 ```
 
-The parameter does not have to be used — its presence alone switches the block
-into per-element mode.
-
-Note that a per-cell Ruby block is convenient but not the fastest way to fill an
-array with random numbers — every element pays the cost of a block call. When
-performance matters, use the in-place `random!` method, which fills the array
-from C without invoking a Ruby block per element:
-
-```ruby
-CArray.int32(8).random!(100)
-#  => [ 73, 14, 88,  3, 51, 60,  9, 27 ]   #  same shape, filled in C
-```
-
-Treat `random!` as the standard way to generate random arrays; reach for
-`{ |i| rand(...) }` only when you actually want Ruby-level control per cell.
+Filling this way is convenient, but every element pays for a Ruby block call.
+Where the values can be had another way — a sequence, an arithmetic
+expression, or `random!` for the case above — that way stays in C.
 
 ## Data types
 
