@@ -119,6 +119,30 @@ cond = z.gt(2)
 z.mask_where(cond)              #  => [ 0.0, 1.0, 2.0, _, _ ]
 ```
 
+## Arithmetic propagates the mask
+
+In an element-wise operation, a result element is masked if any of its inputs was
+masked. Missing-ness carries through the calculation.
+
+```ruby
+a + 10
+#  => [ [ 10.0,    _, 12.0 ],
+#       [ 13.0, 14.0,    _ ] ]
+```
+
+The same holds for any binary operation with another array — only positions
+present in *both* operands stay present:
+
+```ruby
+p = CA_DOUBLE([1.0, 2.0, 3.0])
+p[1] = UNDEF
+q = CA_DOUBLE([10.0, 20.0, 30.0])
+
+p + q       #  => [ 11.0,  _, 33.0 ]
+p * q       #  => [ 10.0,  _, 90.0 ]
+p * 2       #  => [  2.0,  _,  6.0 ]    mask survives scalar ops too
+```
+
 ## Asking about the mask
 
 ```ruby
@@ -220,30 +244,6 @@ m.mean(axis: 1, fill_value: 0.0)
 
 m.sum(axis: 1, min_count: 1, fill_value: -1.0)
 #  => [ 6.0, -1.0, 38.0 ]       both together
-```
-
-## Arithmetic propagates the mask
-
-In an element-wise operation, a result element is masked if any of its inputs was
-masked. Missing-ness carries through the calculation.
-
-```ruby
-a + 10
-#  => [ [ 10.0,    _, 12.0 ],
-#       [ 13.0, 14.0,    _ ] ]
-```
-
-The same holds for any binary operation with another array — only positions
-present in *both* operands stay present:
-
-```ruby
-p = CA_DOUBLE([1.0, 2.0, 3.0])
-p[1] = UNDEF
-q = CA_DOUBLE([10.0, 20.0, 30.0])
-
-p + q       #  => [ 11.0,  _, 33.0 ]
-p * q       #  => [ 10.0,  _, 90.0 ]
-p * 2       #  => [  2.0,  _,  6.0 ]    mask survives scalar ops too
 ```
 
 ## What carries the mask
