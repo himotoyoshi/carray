@@ -205,9 +205,10 @@ b
 #       [  3.0,  4.0, -1.0 ] ]
 ```
 
-`unmask` with no argument at all clears the mask and leaves whatever was
-stored underneath. A masked cell still holds a value; the mask hides it rather
-than erasing it:
+`unmask` with no argument at all clears the mask and leaves whatever the
+storage holds. Here that is the values the array was given, since nothing has
+been computed from it — in general what sits in a masked cell is not defined,
+which the section on `value` below comes back to:
 
 ```ruby
 c = a.copy
@@ -379,14 +380,14 @@ row[0] = UNDEF
 a.count_masked    #  => 2
 ```
 
-## Looking past the mask: `value`
+## `value` — the storage without the mask
 
-`value` returns a view of the same storage with the mask dropped. It is useful
-when you want to inspect what is actually sitting in memory under the masked
-cells, or to feed a routine that does not understand masks.
+`value` is a view of the same storage with the mask dropped. Because it is a
+view, writes through it reach the original storage, and the mask itself is left
+alone — that is the difference from `unmask`, which removes it.
 
 ```ruby
-a = CArray.float64(2, 3).seq!     # the masked array from the top of the chapter
+a = CArray.float64(2, 3).seq!
 a[0, 1] = UNDEF
 a[1, 2] = UNDEF
 
@@ -395,10 +396,23 @@ a.value
 #       [ 3.0, 4.0, 5.0 ] ]
 ```
 
-Because it is a view, writes through `value` reach back into the original
-storage. The mask itself is not touched — which is the difference from
-`unmask`: `value` looks past the mask and leaves it in place, `unmask` removes
-it.
+**What sits in a masked cell is not defined.** CArray promises which cells are
+missing, not what is stored in them, and an operation may write anything there
+— that freedom is what lets it run over every cell without stopping to test the
+mask. Above, `a` still holds the values it was given, because nothing has been
+computed from it yet. After a calculation it need not:
+
+```ruby
+(a + 10).value
+#  => [ [ 10.0,  0.0, 12.0 ],     the masked cells are not 11.0 and 15.0
+#       [ 13.0, 14.0,  0.0 ] ]
+```
+
+So `value` is not a way of recovering what a masked cell held, and a script you
+depend on should not read those cells at all. It earns its place at the prompt,
+when you want to see the storage as it is. To feed an array to a routine that
+does not understand masks, use `strip_mask`, which puts a value of your choosing
+in the gaps.
 
 ## NaN versus UNDEF: which to use
 
