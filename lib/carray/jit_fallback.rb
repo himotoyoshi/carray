@@ -74,6 +74,12 @@ class CArray
   #   needs no extent, and is written with {CArray.per_element} instead; a
   #   block that names none is turned away here rather than run element-wise.
   #
+  #   `reassociate:` is a licence rather than an instruction -- it says a
+  #   reduction's accumulator *may* be taken out of order -- so it is accepted
+  #   and has nothing to do here, where the fold is a Ruby loop and runs in
+  #   the order it is written.  It is taken so that a program that asks the
+  #   compiler for one order or the other still runs without it.
+  #
   #   @return [nil, Object] nil here; see below.
   #
   #   === What a block may contain
@@ -115,14 +121,20 @@ class CArray
   #   served by getting the slow thing quietly.  It returns the compiled
   #   kernel, where this returns nil.
   #
-  #   Two things differ between running the block and compiling it, and both
-  #   are properties of Ruby rather than of either implementation:
+  #   Every operation means what Ruby means by it either way -- integer
+  #   division floors, `%` is not `fmod`, a named function is not swapped for
+  #   a cheaper one.  What differs is three things:
   #
   #   - A masked cell reads back as `UNDEF` here, so a kernel that computes
   #     with masked values raises where the compiled one propagates the mask.
   #     Ask outright -- `a[i] == UNDEF` -- and the two agree.
   #   - An `Integer` is unbounded here and 64-bit when compiled.
-  def self.per_cell (*extents, &block)
+  #   - A reduction folds serially here, and the compiled one splits the
+  #     accumulator into partial sums: a different order, and usually the
+  #     more accurate answer.  `per_cell(..., reassociate: false)` asks the
+  #     compiled form for this one's order, which is what makes the two
+  #     comparable to the last bit.
+  def self.per_cell (*extents, reassociate: nil, &block)
     unless block
       raise ArgumentError, "per_cell needs a block"
     end

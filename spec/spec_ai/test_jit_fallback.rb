@@ -143,6 +143,24 @@ class TestJitFallback < Test::Unit::TestCase
                  CArray.per_element(values) { |x| x > 2.0 }.to_a
   end
 
+  # `reassociate:` licenses the compiler to take a reduction's accumulator out
+  # of order.  Here the fold is a Ruby loop and runs as written, so the licence
+  # has nothing to do -- but it is accepted, so that a program that asks the
+  # compiler for one order or the other still runs without it.
+  def test_the_reassociation_licence_is_accepted
+    values = CArray.double(8).seq(1)
+    [nil, false, true].each do |licence|
+      box = CArray.double(1)
+      arguments = licence.nil? ? {} : { :reassociate => licence }
+      CArray.per_cell(1, **arguments) { |i|
+        accumulator = 0.0
+        (0...8).each { |j| accumulator = accumulator + values[j] }
+        box[i] = accumulator
+      }
+      assert_equal 36.0, box[0], "reassociate: #{licence.inspect}"
+    end
+  end
+
   # ---- the line between the two ----
 
   def test_per_cell_refuses_a_block_that_names_no_index
