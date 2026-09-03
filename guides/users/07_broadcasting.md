@@ -1,10 +1,6 @@
 # Broadcasting
 
-Broadcasting is the rule for combining two arrays whose shapes are not
-identical. In an element-wise operation, an axis of size 1 in one operand is
-stretched to match the corresponding axis of the other, so that the two line up
-element for element. (A scalar operand is simpler and needs no rule: it applies
-to every element, as [Element-wise operations](03_elementwise.md) showed.)
+Broadcasting is the rule for combining two arrays whose shapes are not identical. In an element-wise operation, an axis of size 1 in one operand is stretched to match the corresponding axis of the other, so that the two line up element for element. (A scalar operand is simpler and needs no rule: it applies to every element, as [Element-wise operations](03_elementwise.md) showed.)
 
 All examples use:
 
@@ -16,8 +12,7 @@ a = CArray.int32(2, 3).seq!
 
 ## A size-1 axis stretched to match
 
-When two arrays have the same number of axes and one of them has size 1 along an
-axis, that axis is stretched to match the other.
+When two arrays have the same number of axes and one of them has size 1 along an axis, that axis is stretched to match the other.
 
 A column (shape `[2, 1]`) is stretched across the three columns of `a`:
 
@@ -42,8 +37,7 @@ a + row
 #       [ 103, 204, 305 ] ]    the same three values added to each row
 ```
 
-The same stretching works for any operation, not just `+`. Multiplication by a
-column scales each row by a different factor:
+The same stretching works for any operation, not just `+`. Multiplication by a column scales each row by a different factor:
 
 ```ruby
 factor = CA_INT([[1], [10]])        #  shape [2, 1]
@@ -53,10 +47,7 @@ a * factor
 #       [ 30, 40, 50 ] ]    row 0 unchanged, row 1 multiplied by 10
 ```
 
-And two size-1 axes in different positions stretch in both directions at once.
-Here a column of shape `[2, 1]` meets a row of shape `[1, 3]`, and the result
-takes the full `[2, 3]` shape — every column entry is combined with every row
-entry. This is the **outer product** idiom:
+And two size-1 axes in different positions stretch in both directions at once. Here a column of shape `[2, 1]` meets a row of shape `[1, 3]`, and the result takes the full `[2, 3]` shape — every column entry is combined with every row entry. This is the **outer product** idiom:
 
 ```ruby
 col = CA_INT([[1], [2]])            #  shape [2, 1]
@@ -69,10 +60,7 @@ col * row
 
 ## Comparisons broadcast too
 
-A comparison between an array and a size-1 slice stretches just like an
-arithmetic operation, returning a boolean array of the broadcast shape. This is
-the natural way to ask "for each row, which elements exceed that row's
-threshold?":
+A comparison between an array and a size-1 slice stretches just like an arithmetic operation, returning a boolean array of the broadcast shape. This is the natural way to ask "for each row, which elements exceed that row's threshold?":
 
 ```ruby
 threshold = CA_INT([[1], [4]])      #  shape [2, 1] — one threshold per row
@@ -82,14 +70,11 @@ a > threshold
 #       [ 0, 0, 1 ] ]    row 0 against 1, row 1 against 4
 ```
 
-The boolean result can then be used as a mask or as an index — see
-[Indexing and slicing](02_indexing_and_slicing.md).
+The boolean result can then be used as a mask or as an index — see [Indexing and slicing](02_indexing_and_slicing.md).
 
 ## Axes are never added implicitly
 
-CArray broadcasting only stretches size-1 axes. It never invents new axes to make
-two arrays line up. So two arrays with a *different number of axes* do not combine
-automatically — that is reported as an error rather than guessed at.
+CArray broadcasting only stretches size-1 axes. It never invents new axes to make two arrays line up. So two arrays with a *different number of axes* do not combine automatically — that is reported as an error rather than guessed at.
 
 ```ruby
 v = CA_INT([100, 200, 300])    #  shape [3] — one axis
@@ -100,11 +85,9 @@ a + v
 #     -- use .flatten on both sides to operate on the values in the order they lie
 ```
 
-This is a deliberate choice: a 1-D array of length 3 could mean either a row or a
-column, so CArray asks you to say which.
+This is a deliberate choice: a 1-D array of length 3 could mean either a row or a column, so CArray asks you to say which.
 
-The same applies in higher dimensions. A 3-D array does not silently combine
-with a 2-D array even if the trailing axes happen to match:
+The same applies in higher dimensions. A 3-D array does not silently combine with a 2-D array even if the trailing axes happen to match:
 
 ```ruby
 a3 = CArray.int32(2, 3, 4).seq!    #  shape [2, 3, 4]
@@ -116,8 +99,7 @@ a3 + b2
 
 ## Adding an axis when you mean to
 
-Add the size-1 axis explicitly with `:_` in the index. `:_` introduces a new axis
-of size 1 at that position, turning a 1-D array into a row or a column.
+Add the size-1 axis explicitly with `:_` in the index. `:_` introduces a new axis of size 1 at that position, turning a 1-D array into a row or a column.
 
 ```ruby
 v = CA_INT([100, 200, 300])    #  shape [3]
@@ -134,8 +116,7 @@ a + v[:_, nil]      #  treat v as a row and add it to each row of a
 #       [ 103, 204, 305 ] ]
 ```
 
-The same fix works for the 3-D / 2-D case. To add a `[3, 4]` plane to every
-slice of a `[2, 3, 4]` array, give it a leading size-1 axis:
+The same fix works for the 3-D / 2-D case. To add a `[3, 4]` plane to every slice of a `[2, 3, 4]` array, give it a leading size-1 axis:
 
 ```ruby
 a3 = CArray.int32(2, 3, 4).seq!    #  shape [2, 3, 4]
@@ -144,8 +125,7 @@ b2 = CArray.int32(3, 4).seq!       #  shape [3, 4]
 (a3 + b2[:_, nil, nil]).shape     #  => [2, 3, 4]
 ```
 
-`:_` can appear anywhere — it always inserts a new size-1 axis at that
-position, and the surrounding `nil`s keep the existing axes:
+`:_` can appear anywhere — it always inserts a new size-1 axis at that position, and the surrounding `nil`s keep the existing axes:
 
 ```ruby
 v = CA_INT([1, 2, 3, 4])
@@ -156,10 +136,7 @@ v[nil, :_].shape    #  => [4, 1]
 
 ### Reading `[nil, :_, nil]` and friends
 
-When `:_` appears inside an index expression, it sits *between* the existing
-axes and inserts a new size-1 axis at that position. The `nil`s mark the
-**existing** axes (each `nil` means "keep this whole axis"); the `:_` marks
-the **new** size-1 axis being introduced.
+When `:_` appears inside an index expression, it sits *between* the existing axes and inserts a new size-1 axis at that position. The `nil`s mark the **existing** axes (each `nil` means "keep this whole axis"); the `:_` marks the **new** size-1 axis being introduced.
 
 So for a 2-D array `m` with shape `[2, 3]`:
 
@@ -171,13 +148,9 @@ m[nil, :_, nil].shape    #  => [2, 1, 3]    new axis inserted between axes 0 and
 m[nil, nil, :_].shape    #  => [2, 3, 1]    new axis added at the end
 ```
 
-Reading `m[nil, :_, nil]` left to right: "keep axis 0, then insert a new
-size-1 axis, then keep axis 1". The total number of `nil`s in the expression
-always equals the original `ndim`; each `:_` increases the resulting `ndim`
-by one.
+Reading `m[nil, :_, nil]` left to right: "keep axis 0, then insert a new size-1 axis, then keep axis 1". The total number of `nil`s in the expression always equals the original `ndim`; each `:_` increases the resulting `ndim` by one.
 
-The same applies to a 1-D vector — `:_` chooses *which* size-1 axis you are
-introducing:
+The same applies to a 1-D vector — `:_` chooses *which* size-1 axis you are introducing:
 
 ```ruby
 v = CA_INT([1, 2, 3])
@@ -194,10 +167,7 @@ v[:_, nil, :_].shape    #  => [1, 3, 1]
 
 ### `insert_axis` — the same effect, as a method
 
-`insert_axis(*axes)` does exactly what the `:_` form does, but as a regular
-method call. Each argument names the existing axis that the new size-1 axis is
-inserted *before*; `-1` (or `ndim`) appends at the very end. The positions refer
-to the *original* axes, so giving several does not shift them around.
+`insert_axis(*axes)` does exactly what the `:_` form does, but as a regular method call. Each argument names the existing axis that the new size-1 axis is inserted *before*; `-1` (or `ndim`) appends at the very end. The positions refer to the *original* axes, so giving several does not shift them around.
 
 ```ruby
 a = CArray.int32(2, 3).seq!          #  shape [2, 3]
@@ -209,8 +179,7 @@ a.insert_axis(0, 1).shape    #  => [1, 2, 1, 3]   before axis 0 and before axis 
 a.insert_axis(0, -1).shape   #  => [1, 2, 3, 1]   before axis 0 and at the end
 ```
 
-Both forms return a view onto the same storage — no data is copied; the new
-axes only exist in the shape.
+Both forms return a view onto the same storage — no data is copied; the new axes only exist in the shape.
 
 ```ruby
 v = CA_INT([1, 2, 3])
@@ -224,14 +193,11 @@ v.insert_axis(-1)
 #       [ 3 ] ]                    shape [3, 1]
 ```
 
-Use `:_` when you are already inside an index expression and the visual layout
-makes the position clear; use `insert_axis` when you want to name the
-operation explicitly or are chaining method calls.
+Use `:_` when you are already inside an index expression and the visual layout makes the position clear; use `insert_axis` when you want to name the operation explicitly or are chaining method calls.
 
 ## The outer-product idiom
 
-A common use of `:_` is to turn two 1-D vectors into a column and a row and
-combine them — the result is the "outer" combination of every pair.
+A common use of `:_` is to turn two 1-D vectors into a column and a row and combine them — the result is the "outer" combination of every pair.
 
 ```ruby
 v = CA_INT([1, 2, 3, 4])     #  shape [4]
@@ -244,17 +210,13 @@ v[nil, :_] * w[:_, nil]
 #       [ 40, 80, 120 ] ]
 ```
 
-The same pattern works for any operation: `v[nil, :_] + w[:_, nil]` gives an
-outer sum, `v[nil, :_].lt(w[:_, nil])` gives an outer comparison table, and so
-on.
+The same pattern works for any operation: `v[nil, :_] + w[:_, nil]` gives an outer sum, `v[nil, :_].lt(w[:_, nil])` gives an outer comparison table, and so on.
 
 ## Broadcasting on its own
 
 Two methods do the stretching without an operation attached.
 
-`broadcast_to` takes the shape you want and returns a view stretched to it. Only
-size-1 axes give way, so the rule is the one above; the array is not reshaped
-and no axis is added.
+`broadcast_to` takes the shape you want and returns a view stretched to it. Only size-1 axes give way, so the rule is the one above; the array is not reshaped and no axis is added.
 
 ```ruby
 col = CArray.int32(3, 1).seq!    #  shape [3, 1]
@@ -265,13 +227,9 @@ col.broadcast_to(3, 4)
 #       [ 2, 2, 2, 2 ] ]
 ```
 
-The result is a view — the values are not copied, and the same source element
-is seen four times in each row. It is read-only for that reason: there is no
-single cell for a write to land in. `.copy` gives you a real array when you
-need one.
+The result is a view — the values are not copied, and the same source element is seen four times in each row. It is read-only for that reason: there is no single cell for a write to land in. `.copy` gives you a real array when you need one.
 
-`CArray.broadcast` takes several arrays and returns them all stretched to their
-common shape. This is what an operation does with its operands, made visible:
+`CArray.broadcast` takes several arrays and returns them all stretched to their common shape. This is what an operation does with its operands, made visible:
 
 ```ruby
 a = CArray.int32(3, 1).seq!      #  shape [3, 1]
@@ -282,9 +240,7 @@ x.shape                          #  => [3, 4]
 y.shape                          #  => [3, 4]
 ```
 
-Arguments that are not arrays come back unchanged, so a scalar in the list
-stays a scalar. Shapes that an operation would refuse are refused here too,
-with the same reason given:
+Arguments that are not arrays come back unchanged, so a scalar in the list stays a scalar. Shapes that an operation would refuse are refused here too, with the same reason given:
 
 ```ruby
 CArray.broadcast(CArray.int32(3, 2), CArray.int32(2))

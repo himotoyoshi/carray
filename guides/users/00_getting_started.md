@@ -1,13 +1,8 @@
 # Getting Started
 
-Ruby/CArray is a library for multi-dimensional numerical arrays. An array holds
-many values of a single, uniform data type (for example 64-bit floats or 32-bit
-integers) in one contiguous block of memory, and lets you operate on all of them
-at once.
+Ruby/CArray is a library for multi-dimensional numerical arrays. An array holds many values of a single, uniform data type (for example 64-bit floats or 32-bit integers) in one contiguous block of memory, and lets you operate on all of them at once.
 
-This chapter is a quick tour: enough to install CArray, make an array, and see
-what working with one looks like. Everything it shows in passing has a chapter
-of its own further on.
+This chapter is a quick tour: enough to install CArray, make an array, and see what working with one looks like. Everything it shows in passing has a chapter of its own further on.
 
 ## Install
 
@@ -40,13 +35,9 @@ a = CArray.float64(2, 3)
 #       [ 0.0, 0.0, 0.0 ] ]
 ```
 
-`CArray.float64(2, 3)` creates a 2-by-3 array of 64-bit floats, filled with
-zeros. This is how an array is made: ask for the shape and data type you want,
-then put values into it.
+`CArray.float64(2, 3)` creates a 2-by-3 array of 64-bit floats, filled with zeros. This is how an array is made: ask for the shape and data type you want, then put values into it.
 
-Values go in a whole array at a time. `seq!` fills it with a sequence, an
-assignment writes one value everywhere it reaches, and arithmetic answers a
-filled array of its own:
+Values go in a whole array at a time. `seq!` fills it with a sequence, an assignment writes one value everywhere it reaches, and arithmetic answers a filled array of its own:
 
 ```ruby
 a.seq!
@@ -58,10 +49,7 @@ a[] = 1.5
 #       [ 1.5, 1.5, 1.5 ] ]
 ```
 
-A block that takes indices is the one filling that does not stay in C: it is
-called once per element, so the values are produced by running Ruby as many
-times as the array has elements. Keep it for values that cannot be arrived at
-any other way.
+A block that takes indices is the one filling that does not stay in C: it is called once per element, so the values are produced by running Ruby as many times as the array has elements. Keep it for values that cannot be arrived at any other way.
 
 ```ruby
 CArray.float64(2, 3) { |i, j| i * 3 + j }
@@ -114,8 +102,7 @@ a.data_type    #  => :float64  the element type
 
 ## Taking a slice
 
-Indexing uses `[]` with one argument per axis. An integer picks one element;
-`nil` means "every index along this axis"; a `Range` picks a contiguous run.
+Indexing uses `[]` with one argument per axis. An integer picks one element; `nil` means "every index along this axis"; a `Range` picks a contiguous run.
 
 ```ruby
 a = CArray.int32(3, 4).seq!
@@ -145,13 +132,11 @@ a * a         #  => [  1,  4,  9, 16 ]
 a.gt(2)       #  => [  0,  0,  1,  1 ]    a boolean result
 ```
 
-More — including comparisons and the usual math functions like `sqrt`, `exp`,
-`sin` — in [Element-wise operations](03_elementwise.md).
+More — including comparisons and the usual math functions like `sqrt`, `exp`, `sin` — in [Element-wise operations](03_elementwise.md).
 
 ## Reducing to a summary
 
-A reduction summarises an array down to fewer values — for example a sum,
-mean, or maximum:
+A reduction summarises an array down to fewer values — for example a sum, mean, or maximum:
 
 ```ruby
 a = CA_DOUBLE([2, 4, 6])
@@ -172,8 +157,7 @@ More in [Reduction and statistics](04_reduction_and_statistics.md).
 
 ## Views that share storage
 
-Many operations don't copy the data: they hand you a *view* that refers to the
-same storage in a different shape or order.
+Many operations don't copy the data: they hand you a *view* that refers to the same storage in a different shape or order.
 
 ```ruby
 a = CArray.int32(2, 3).seq!
@@ -198,23 +182,16 @@ a.transpose
 #       [ 2, 5 ] ]
 ```
 
-When you want an independent array you can change without disturbing the
-original, ask for one with `copy`. Views are a central idea in CArray and have a
-chapter to themselves: [Views](06_views.md).
+When you want an independent array you can change without disturbing the original, ask for one with `copy`. Views are a central idea in CArray and have a chapter to themselves: [Views](06_views.md).
 
 ## What you can do with it
 
 The rest of this guide walks through the basics in order:
 
-* [Creating arrays](01_creating_arrays.md) — constructors, data types, filling
-  with values
-* [Indexing and slicing](02_indexing_and_slicing.md) — reading and writing
-  elements, rows, columns, and sub-blocks
-* [Element-wise operations](03_elementwise.md) — arithmetic, comparison, and
-  mathematical functions applied to every element
-* [Reduction and statistics](04_reduction_and_statistics.md) — sums, means, and
-  other summaries over the whole array or along an axis
-* [Masks and missing values](05_masks.md) — marking elements as missing and
-  having calculations account for them
+* [Creating arrays](01_creating_arrays.md) — constructors, data types, filling with values
+* [Indexing and slicing](02_indexing_and_slicing.md) — reading and writing elements, rows, columns, and sub-blocks
+* [Element-wise operations](03_elementwise.md) — arithmetic, comparison, and mathematical functions applied to every element
+* [Reduction and statistics](04_reduction_and_statistics.md) — sums, means, and other summaries over the whole array or along an axis
+* [Masks and missing values](05_masks.md) — marking elements as missing and having calculations account for them
 * [Views](06_views.md) — reshaping, transposing, and slicing without copying
 * [Broadcasting](07_broadcasting.md) — combining arrays of different shapes
