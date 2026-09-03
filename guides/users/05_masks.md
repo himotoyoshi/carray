@@ -180,6 +180,91 @@ v.is_invalid                    #  => [ 0, 1, 1, 0 ]
 v.is_invalid.count(true)        #  => 2
 ```
 
+## Removing the mask
+
+Two methods clear a mask by supplying values for the missing cells. `unmask`
+works on the receiver — it is one of the two destructive methods that carry no
+`!` (`fill` is the other) — and `strip_mask` leaves the receiver alone and
+returns a new array.
+
+Given a value, every masked cell takes it:
+
+```ruby
+a.strip_mask(0)
+#  => [ [ 0.0, 0.0, 2.0 ],
+#       [ 3.0, 4.0, 0.0 ] ]
+
+a.strip_mask(-999)
+#  => [ [   0.0, -999.0,    2.0 ],
+#       [   3.0,    4.0, -999.0 ] ]
+
+b = a.copy
+b.unmask(-1)
+b
+#  => [ [  0.0, -1.0,  2.0 ],
+#       [  3.0,  4.0, -1.0 ] ]
+```
+
+`unmask` with no argument at all clears the mask and leaves whatever was
+stored underneath. A masked cell still holds a value; the mask hides it rather
+than erasing it:
+
+```ruby
+c = a.copy
+c.unmask
+c
+#  => [ [ 0.0, 1.0, 2.0 ],
+#       [ 3.0, 4.0, 5.0 ] ]
+```
+
+`strip_mask` has no such form. It insists on being told what to put in the
+gaps and raises if you give it nothing; when you want the stored values as a
+new array, copy first and unmask the copy, as above.
+
+### Filling from the neighbours
+
+Instead of one value everywhere, `method:` derives each gap from the cells
+around it. `:forward` carries the last present value forward, `:backward`
+carries the next one back, and `:linear` interpolates between the two.
+
+```ruby
+g = CA_DOUBLE([1.0, 2.0, 3.0, 4.0, 5.0])
+g[1] = UNDEF
+g[2] = UNDEF
+
+g.strip_mask(method: :forward)    #  => [ 1.0, 1.0, 1.0, 4.0, 5.0 ]
+g.strip_mask(method: :backward)   #  => [ 1.0, 4.0, 4.0, 4.0, 5.0 ]
+g.strip_mask(method: :linear)     #  => [ 1.0, 2.0, 3.0, 4.0, 5.0 ]
+```
+
+A gap with no neighbour to draw from stays masked — a leading run has nothing
+before it to carry forward:
+
+```ruby
+h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+h[0] = UNDEF
+h.strip_mask(method: :forward)    #  => [ _, 2.0, 3.0, 4.0 ]
+```
+
+On a multi-dimensional array, `axis:` says which way to carry. Without it the
+array is filled in flat order.
+
+```ruby
+m = CArray.float64(2, 4).seq!
+m[0, 1] = UNDEF
+m[1, 3] = UNDEF
+
+m.strip_mask(method: :forward, axis: 1)   #  across each row
+#  => [ [ 0.0, 0.0, 2.0, 3.0 ],
+#       [ 4.0, 5.0, 6.0, 6.0 ] ]
+
+m.strip_mask(method: :forward, axis: 0)   #  down each column
+#  => [ [ 0.0,   _, 2.0, 3.0 ],
+#       [ 4.0, 5.0, 6.0, 3.0 ] ]
+```
+
+`unmask` takes the same keywords and fills in place.
+
 ## Reductions ignore masked elements
 
 This is the main reason the mask exists. Reductions and statistics
@@ -296,22 +381,18 @@ a.count_masked    #  => 2
 
 ## Masking duplicates
 
-`mask_duplicates` is a mask *producer* that shows off why a mask is more than a
-convenience. It returns a shape-preserving copy in which every cell that repeats
-an earlier-seen value is masked, keeping only the first occurrence. It paints
-over the repeats; it does not squeeze them out.
+`mask_duplicates` masks every cell whose value was seen earlier, keeping the
+first occurrence. It paints over the repeats rather than squeezing them out, so
+the shape stays as it was:
 
 ```ruby
 a = CA_INT([10, 20, 20, 30, 10])
-a.mask_duplicates
-#  => [ 10, 20, _, 30, _ ]        the 2nd 20 and the 2nd 10 are masked
+a.mask_duplicates      #  => [ 10, 20, _, 30, _ ]
 ```
 
-The payoff of painting rather than squeezing is that the same operation works
-**per fiber**. Deduplicating each row of a matrix independently has no
-compressed answer — different rows keep different numbers of distinct values, so
-the result would be ragged and could not be a rectangular array. Masking keeps
-the shape and paints each row's repeats over in place:
+Keeping the shape is what lets it work per fiber. Rows hold different numbers
+of distinct values, so a squeezed answer would be ragged and could not be a
+rectangular array:
 
 ```ruby
 m = CA_INT([[1, 2, 1],
@@ -319,71 +400,19 @@ m = CA_INT([[1, 2, 1],
             [4, 2, 1]])
 
 m.mask_duplicates(axis: 1)        #  along each row
-#  => [ [ 1, 2, _ ],              row 0: the 2nd 1 is masked
-#       [ 1, 2, 3 ],              row 1: all distinct
-#       [ 4, 2, 1 ] ]             row 2: all distinct
+#  => [ [ 1, 2, _ ],
+#       [ 1, 2, 3 ],
+#       [ 4, 2, 1 ] ]
 ```
 
-`axis:` chooses the direction "earlier-seen" runs — `k` for each fiber along
-axis `k` independently, or `nil` (the default) for the whole array taken as one
-flatten-order fiber:
+`axis: k` runs along each fiber of axis `k`; the default takes the whole array
+in flatten order. Values are judged by `==`, so `NaN` cells all survive unless
+you `mask_invalid` first, and a cell that is already masked takes no part.
 
-```ruby
-m.mask_duplicates(axis: 0)        #  down each column
-#  => [ [ 1, 2, 1 ],
-#       [ _, _, 3 ],
-#       [ 4, _, _ ] ]
-
-m.mask_duplicates                 #  the whole array as one fiber
-#  => [ [ 1, 2, _ ],              only the first 1, 2, 3, 4 anywhere survive
-#       [ _, _, 3 ],
-#       [ 4, _, _ ] ]
-```
-
-Because positions are preserved, the result composes with everything else in
-this chapter. The survivors are the first-seen values, and a count of what
-survives per fiber is the distinct-value count:
-
-```ruby
-m.mask_duplicates[:is_not_masked]              #  distinct values, first-seen order
-#  => [ 1, 2, 3, 4 ]
-
-m.mask_duplicates(axis: 1).count_not_masked(axis: 1)   #  distinct per row
-#  => [ 2, 3, 3 ]
-```
-
-The duplicate mask can be lifted off and applied to a parallel array, which a
-compressed result could never do — masking never shifts indices, so the mask
-from one array lines up cell-for-cell with another:
-
-```ruby
-values = CA_INT([10, 20, 20, 30, 10])
-times  = CA_INT([ 1,  2,  3,  4,  5])
-
-times[values.mask_duplicates.is_masked] = UNDEF   #  mask times where values repeated
-times
-#  => [ 1, 2, _, 4, _ ]
-```
-
-Duplicate judging uses strict `==`. A masked input cell is invisible to it — it
-stays masked and neither counts as a duplicate nor blocks a later cell from
-being first-seen. Because `NaN != NaN`, `NaN` cells are all kept unless you mask
-them first with `mask_invalid`. Every data type works, including object arrays:
-
-```ruby
-CA_OBJECT(["a", "b", "a", "c", "b"]).mask_duplicates
-#  => [ "a", "b", _, "c", _ ]
-```
-
-If you want the older 1-D "distinct values" array (the pre-3.0 `uniq`), select
-the survivors and copy: `a.mask_duplicates[:is_not_masked].copy` — or use
-the newer `a.unique`, covered in
-[Discovery](28_discovery.md) along with `value_counts`, `nunique`, `mode`,
-and set membership. The two families differ in one crucial way: `unique`
-and friends fold every NaN into a single value (value-hash contract),
-while `mask_duplicates` uses strict `==` and keeps each NaN separate.
-
-The full reference is `docs/topics/MaskDuplicates.md`.
+For the plain list of distinct values — Ruby's `Array#uniq` — use `unique`,
+covered in [Discovery](28_discovery.md) along with `value_counts`, `nunique`
+and `mode`. The two differ on one point: `unique` folds every `NaN` into a
+single value, while `mask_duplicates` keeps them apart.
 
 ## Looking past the mask: `value`
 
@@ -402,93 +431,11 @@ a.value
 ```
 
 Because it is a view, writes through `value` reach back into the original
-storage. The mask itself is not touched.
+storage. The mask itself is not touched — which is the difference from
+`unmask`: `value` looks past the mask and leaves it in place, `unmask` removes
+it.
 
-## Removing the mask
-
-Two methods clear a mask by supplying values for the missing cells. `unmask`
-works on the receiver — it is one of the two destructive methods that carry no
-`!` (`fill` is the other) — and `strip_mask` leaves the receiver alone and
-returns a new array.
-
-Given a value, every masked cell takes it:
-
-```ruby
-a.strip_mask(0)
-#  => [ [ 0.0, 0.0, 2.0 ],
-#       [ 3.0, 4.0, 0.0 ] ]
-
-a.strip_mask(-999)
-#  => [ [   0.0, -999.0,    2.0 ],
-#       [   3.0,    4.0, -999.0 ] ]
-
-b = a.copy
-b.unmask(-1)
-b
-#  => [ [  0.0, -1.0,  2.0 ],
-#       [  3.0,  4.0, -1.0 ] ]
-```
-
-`unmask` with no argument at all clears the mask and leaves whatever was
-stored underneath — the values `value` shows:
-
-```ruby
-c = a.copy
-c.unmask
-c
-#  => [ [ 0.0, 1.0, 2.0 ],
-#       [ 3.0, 4.0, 5.0 ] ]
-```
-
-`strip_mask` has no such form; a copy of the values alone is `a.value.copy`. It
-insists on being told what to put in the gaps, and raises if you give it
-nothing.
-
-### Filling from the neighbours
-
-Instead of one value everywhere, `method:` derives each gap from the cells
-around it. `:forward` carries the last present value forward, `:backward`
-carries the next one back, and `:linear` interpolates between the two.
-
-```ruby
-g = CA_DOUBLE([1.0, 2.0, 3.0, 4.0, 5.0])
-g[1] = UNDEF
-g[2] = UNDEF
-
-g.strip_mask(method: :forward)    #  => [ 1.0, 1.0, 1.0, 4.0, 5.0 ]
-g.strip_mask(method: :backward)   #  => [ 1.0, 4.0, 4.0, 4.0, 5.0 ]
-g.strip_mask(method: :linear)     #  => [ 1.0, 2.0, 3.0, 4.0, 5.0 ]
-```
-
-A gap with no neighbour to draw from stays masked — a leading run has nothing
-before it to carry forward:
-
-```ruby
-h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
-h[0] = UNDEF
-h.strip_mask(method: :forward)    #  => [ _, 2.0, 3.0, 4.0 ]
-```
-
-On a multi-dimensional array, `axis:` says which way to carry. Without it the
-array is filled in flat order.
-
-```ruby
-m = CArray.float64(2, 4).seq!
-m[0, 1] = UNDEF
-m[1, 3] = UNDEF
-
-m.strip_mask(method: :forward, axis: 1)   #  across each row
-#  => [ [ 0.0, 0.0, 2.0, 3.0 ],
-#       [ 4.0, 5.0, 6.0, 6.0 ] ]
-
-m.strip_mask(method: :forward, axis: 0)   #  down each column
-#  => [ [ 0.0,   _, 2.0, 3.0 ],
-#       [ 4.0, 5.0, 6.0, 3.0 ] ]
-```
-
-`unmask` takes the same keywords and fills in place.
-
-### NaN versus UNDEF: which to use
+## NaN versus UNDEF: which to use
 
 The mask is deliberately *not* `NaN`. The two represent missing-ness in very
 different ways, and the right choice depends on what you want downstream:
