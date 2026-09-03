@@ -476,12 +476,12 @@ a separate buffer.
 
 ### 7.4 Masking through `[]= UNDEF`
 
-Assigning `UNDEF` through any of these forms marks the selected cells as
-missing rather than overwriting their value:
+Assigning `UNDEF` through any of these forms masks the selected cells rather
+than overwriting their value:
 
 ```ruby
 b = CArray.float64(5).seq!
-b[b.lt(2)] = UNDEF       #  mark cells less than 2 as missing
+b[b.lt(2)] = UNDEF       #  mask cells less than 2
 b[:gt, 3]  = UNDEF       #  same idea through the predicate key
 ```
 

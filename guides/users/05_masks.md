@@ -7,8 +7,8 @@ understand the mask leave the missing elements out.
 
 ## What `UNDEF` is
 
-`UNDEF` is a single object standing for "no value here". You assign it to mark
-a cell as missing, and you get it back when you read one:
+`UNDEF` is a single object standing for "no value here". You assign it to mask
+a cell, and you get it back when you read one:
 
 ```ruby
 a = CArray.float64(2, 3).seq!
@@ -21,11 +21,11 @@ a[0, 0]              #  => 0.0
 It is neither of the two things it resembles.
 
 * It is **not `nil`**. A `float64` array holds float64 values and nothing else,
-  so a Ruby `nil` has nowhere to sit in a cell; `UNDEF` is what an array marks
-  the cell with instead. The last section of this chapter compares the two.
+  so a Ruby `nil` has nowhere to sit in a cell; `UNDEF` is what an array uses
+  in its place. The last section of this chapter compares the two.
 * It is **not `NaN`**. `NaN` is a floating-point *value*, and a value takes part
-  in arithmetic; `UNDEF` marks the cell rather than filling it, and an integer
-  array can be marked just as well. That comparison also has a section below.
+  in arithmetic; `UNDEF` masks the cell rather than filling it, and an integer
+  array can be masked just as well. That comparison also has a section below.
 
 `UNDEF` is truthy, so `if a[0, 1]` takes the branch — ask the array
 (`a.is_masked`) or compare (`a[0, 1] == UNDEF`) instead.
@@ -41,12 +41,12 @@ object handed to you when you look at one.
 
 In practice this rarely comes up, because working with whole arrays keeps you
 on the array's side of the line. `UNDEF` appears when you read a single cell,
-when you mark one, and when a reduction has nothing to answer with.
+when you mask one, and when a reduction has nothing to answer with.
 
-## Marking elements as missing
+## Masking elements
 
-Assign the special constant `UNDEF` to mark an element as missing. Masked
-elements display as `_`.
+Assign the special constant `UNDEF` to mask an element. Masked elements
+display as `_`.
 
 ```ruby
 a = CArray.float64(2, 3).seq!
@@ -57,27 +57,27 @@ a
 #       [ 3.0, 4.0,   _ ] ]
 ```
 
-You can mark many elements at once by assigning `UNDEF` through a boolean index
+You can mask many elements at once by assigning `UNDEF` through a boolean index
 (see [Indexing and slicing](02_indexing_and_slicing.md)):
 
 ```ruby
 b = CArray.float64(4).seq!
-b[b.lt(2)] = UNDEF      #  mark every element less than 2 as missing
+b[b.lt(2)] = UNDEF      #  mask every element less than 2
 #  => [ _, _, 2.0, 3.0 ]
 ```
 
-## Marking by condition through the indexer
+## Masking by condition through the indexer
 
 The same `[]=` form takes a comparison keyword in place of the boolean array.
 The result is the same as building the boolean first; this form is just shorter.
 
 ```ruby
 c = CArray.int32(5).seq!         #  => [ 0, 1, 2, 3, 4 ]
-c[:eq, 2] = UNDEF               #  mark cells equal to 2
+c[:eq, 2] = UNDEF               #  mask cells equal to 2
 c                               #  => [ 0, 1, _, 3, 4 ]
 
 d = CArray.int32(5).seq!
-d[:gt, 2] = UNDEF               #  mark cells greater than 2
+d[:gt, 2] = UNDEF               #  mask cells greater than 2
 d                               #  => [ 0, 1, 2, _, _ ]
 ```
 
@@ -90,7 +90,7 @@ e[:is_invalid] = UNDEF
 e                               #  => [ 1.0, _, 3.0, _, 5.0 ]
 ```
 
-## Marking by condition through return-form methods
+## Masking by condition through return-form methods
 
 Sometimes you want a *new* masked array rather than mutating the original.
 The `mask_*` methods are the return-form counterparts of the indexer above.
@@ -132,19 +132,19 @@ a.is_masked          #  a boolean array, true where an element is missing
 ```
 
 `mask` is the mask itself, as a boolean array over the same storage. Reading it
-answers what `is_masked` answers; writing to it marks and unmarks cells:
+answers what `is_masked` answers; writing to it masks and unmasks cells:
 
 ```ruby
 t = a.copy
-t.mask[0, 0] = true    #  mark one more cell
+t.mask[0, 0] = true    #  mask one more cell
 t.count_masked         #  => 3
-t.mask = false         #  clear every mark
+t.mask = false         #  clear the whole mask
 t.count_masked         #  => 0
 ```
 
 `has_mask?` asks whether a mask exists at all, which is a different question
 from whether anything is missing right now: once an array has been given a
-mask it keeps it, even after the last mark is cleared. `count_masked` is the
+mask it keeps it, even after the last masked cell is cleared. `count_masked` is the
 one to ask about the present state.
 
 `is_invalid` is the matching probe for IEEE-special values. It returns a boolean
@@ -285,8 +285,8 @@ a.zero        #  => [ [ 0.0,   _, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
 a.fill_copy(0)#  => [ [ 0.0, 0.0, 0.0 ], [ 0.0, 0.0, 0.0 ] ]
 ```
 
-Because a view shares the mask rather than a copy of it, marking a cell through
-a view marks it in the source:
+Because a view shares the mask rather than a copy of it, masking a cell through
+a view masks it in the source:
 
 ```ruby
 row = a[0, nil]
@@ -429,7 +429,7 @@ b
 #       [  3.0,  4.0, -1.0 ] ]
 ```
 
-`unmask` with no argument at all clears the marks and leaves whatever was
+`unmask` with no argument at all clears the mask and leaves whatever was
 stored underneath — the values `value` shows:
 
 ```ruby

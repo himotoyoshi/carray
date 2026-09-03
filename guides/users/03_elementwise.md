@@ -323,8 +323,8 @@ c.gt(1) & c.lt(5) & c.ne(3)
 ```
 
 Boolean arrays are commonly used to index — see
-[Indexing and slicing](02_indexing_and_slicing.md) — and to mark elements as
-missing (see [Masks](05_masks.md)).
+[Indexing and slicing](02_indexing_and_slicing.md) — and to mask elements
+(see [Masks](05_masks.md)).
 
 ## Arithmetic with a masked array
 
@@ -445,7 +445,7 @@ a                       #  => [ 1, 2, 0, 0, 0 ]
 ### Float predicates that return booleans
 
 A handful of methods test each element of a float array and produce a boolean
-array. They are the natural way to mark NaN / Inf / finite cells before
+array. They are the natural way to find NaN / Inf / finite cells before
 acting on them.
 
 ```ruby
