@@ -246,7 +246,7 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   import. The check only knew PEP 3118's `B` / `b` / `?`, so it refused the
   masks the producer above now writes.
 
-## 3.0.0 — 2026-08-25
+## 3.0.0
 
 First public release. Earlier versions existed on RubyGems, but the library
 was developed for the author's own use; 3.0 is where it is packaged,
