@@ -185,6 +185,12 @@ describe "TestCABlock " do
     a = CArray.new(CA_INT32, [4, 4]).seq!
     b = a[0..2, 0..2]
     b[0..1, 0..1] = a[0..1, 0..1]
+    # source and destination overlap, so the assignment must leave the values
+    # where they were rather than read cells it has already written
+    is_asserted_by { [[ 0,  1,  2,  3],
+                      [ 4,  5,  6,  7],
+                      [ 8,  9, 10, 11],
+                      [12, 13, 14, 15]] == a.to_a }
   end
 
 end
