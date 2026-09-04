@@ -19,6 +19,14 @@ unrecorded.
 
 ## 3.0.1 (unreleased)
 
+- Change: element-wise math on a `cmplx64` array is now computed at that
+  width rather than widened to `cmplx128` and rounded back, so `sqrt`, `exp`,
+  `log`, the trigonometric and hyperbolic families, `power`, `abs`, `arg` and
+  `sign` are 1.1x to 3.3x faster there and can move by a bit or two in the
+  last place. `cmplx128` is unchanged, as are `is_close`, `is_equiv` and the
+  variance family, which still measure in double. To compute at the wider
+  width, cast with `.to_type(:cmplx128)` first.
+
 - Change: `abs`, `abs2` and `arg` on a `cmplx64` array now return `float32`
   instead of `float64` -- the width that type carries its real values in, the
   same one `real` and `imag` already returned. `arg` on a `float32` array

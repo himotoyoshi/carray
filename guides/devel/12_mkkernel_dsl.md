@@ -468,6 +468,15 @@ per-cell `:object` math branch,
 expression that computes Float/Integer/Rational in C and falls back
 to `rb_funcall` for other element types.
 
+Do not write a `complex:` body that names only the double-taking libm
+functions (`csqrt`, `cabs`, `cpow`, ...). It compiles for a cmplx64
+cell, but the cell widens on the way in and rounds on the way out, so
+the kernel computes at cmplx128 whatever the array said it was.
+`MkKernel.cmplx_widths(body)` builds the two array-keyed entries that
+hold each complex data_type at its own width: `<f>` marks each spot the
+`f` suffix belongs, `<t>` a real scalar of the matching width. Merge it
+into the Hash carrying the other families, as `rsqrt` does above.
+
 ### `MkKernel.binop` and `MkKernel.triop`
 
 `binop` is a binary element-wise op `(T, T) -> T`; `triop` is a
