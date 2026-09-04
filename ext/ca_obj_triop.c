@@ -61,12 +61,19 @@ typedef struct CATriOp {
   CArray   *parent;       /* = op1 */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as carray.h's
+         layout convention requires, so ca_has_mask can fold over both
+         operands and build the mask on demand instead of at setup. ---- */
+  int32_t   n_parents;        /* always 3 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CATriOp-specific tail */
   CArray   *op2;
   CArray   *op3;
   uint16_t  op_id;
   uint8_t   op2_is_scalar;
   uint8_t   op3_is_scalar;
+  CArray   *operands[3];      /* {op1, op2, op3}; what parents points at */
 } CATriOp;
 
 static size_t
@@ -117,7 +124,7 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
 
   ca->obj_type  = CA_OBJ_TRIOP;
   ca->data_type = out_dt;
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = op1->ndim;
   ca->bytes     = out_bytes;
   ca->elements  = op1->elements;
@@ -134,12 +141,17 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
   ca->op_id     = op_id;
   ca->op2_is_scalar = ( op2->elements == 1 && op1->elements > 1 ) ? 1 : 0;
   ca->op3_is_scalar = ( op3->elements == 1 && op1->elements > 1 ) ? 1 : 0;
+  ca->operands[0] = op1;
+  ca->operands[1] = op2;
+  ca->operands[2] = op3;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 3;
 
   memcpy(ca->dim, op1->dim, op1->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(op1) || ca_has_mask(op2) || ca_has_mask(op3) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one. */
 
   if ( ca_is_scalar(op1) && ca_is_scalar(op2) && ca_is_scalar(op3) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
