@@ -2976,7 +2976,15 @@ module MkKernel
       io.puts "      (void) masked_cnt;"
     end
     io.puts "      ca_lazy_arena_enter();"
-    io.puts "      #{si[:c]} *__chunk = (#{si[:c]} *) ca_lazy_arena_acquire(__chunk_elems * sizeof(#{si[:c]}));"
+    if si[:c] == "VALUE"
+      # Object lane: the chunk holds VALUEs pulled from the source, and
+      # the fold below calls rb_funcall per cell.  A collection there
+      # would free cells a lazy source produced into the chunk, so the
+      # slot has to stay marked for as long as it is held.
+      io.puts "      VALUE *__chunk = (VALUE *) ca_lazy_arena_acquire_object(__chunk_elems);"
+    else
+      io.puts "      #{si[:c]} *__chunk = (#{si[:c]} *) ca_lazy_arena_acquire(__chunk_elems * sizeof(#{si[:c]}));"
+    end
     io.puts "      while ( __outer_off < __outer ) {"
     io.puts "        ca_size_t __r = (__outer - __outer_off < __rows) ? (__outer - __outer_off) : __rows;"
     io.puts "        ca_size_t __n = __r * __inner;"

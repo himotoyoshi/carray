@@ -356,7 +356,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      left_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
+      left_scratch = ( bc->common_dt == CA_OBJECT )
+                       ? ca_lazy_arena_acquire_object(slab_n)
+                       : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->parent, starts, counts, operand_strides, left_scratch,
                      CA_XFER_GET);
@@ -385,7 +387,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     else {
       ca_size_t one_strides[CA_RANK_MAX];
       for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = operand_bytes;
-      right_scratch = ca_lazy_arena_acquire(operand_bytes);
+      right_scratch = ( bc->common_dt == CA_OBJECT )
+                        ? ca_lazy_arena_acquire_object(1)
+                        : ca_lazy_arena_acquire(operand_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->right, one_starts, one_counts, one_strides,
                      right_scratch, CA_XFER_GET);
@@ -404,7 +408,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      right_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
+      right_scratch = ( bc->common_dt == CA_OBJECT )
+                        ? ca_lazy_arena_acquire_object(slab_n)
+                        : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->right, starts, counts, operand_strides, right_scratch,
                      CA_XFER_GET);

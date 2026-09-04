@@ -258,6 +258,105 @@ rb_ca_lazy (VALUE self)
 }
 
 /* ------------------------------------------------------------------- */
+/* CA_OBJECT GC guard                                                   */
+/* ------------------------------------------------------------------- */
+
+/* A CA_OBJECT cell is a VALUE.  While a view materialises into a raw
+   buffer -- the destination `copy` will hand out, a view's own attach
+   buffer, or an arena scratch -- those VALUEs live somewhere the GC
+   cannot see: an xmalloc'd block owned by no Ruby object.  For every
+   other data_type that is harmless, but an object-lane kernel calls
+   rb_funcall per cell, and any of those can collect.  The results
+   written so far are then freed under the buffer, and the array comes
+   back holding recycled slots: wrong values, and a crash once a slot is
+   reused as something else.
+
+   So such buffers are registered here for the duration and marked from
+   a hidden guard object that lives as long as the process.  Two kinds
+   are registered:
+
+     holds   a contiguous run of cells, pushed and popped around a
+             whole-view transfer or the handoff to a Ruby owner
+     slots   an arena scratch, tagged at acquire and held until release
+
+   Only contiguous runs are held.  A strided window would cover the same
+   cells but its extent has to be taken on trust from the caller's
+   strides, and a window wider than the buffer behind it would be filled
+   and marked out of bounds.  The whole-view entry knows the extent
+   exactly, and every partial transfer writes inside it. */
+
+#define CA_GC_HOLD_MAX 64
+
+typedef struct ca_gc_hold {
+  VALUE    *ptr;
+  ca_size_t elements;
+} ca_gc_hold_t;
+
+static ca_gc_hold_t ca_gc_holds[CA_GC_HOLD_MAX];
+static int          ca_gc_hold_depth = 0;
+
+static void ca_lazy_arena_mark_object_slots (void);
+
+/* Returns the depth to hand back to ca_gc_hold_pop_to, so nested holds
+   unwind in order.  Pushing is best-effort at the ceiling: a chain
+   deeper than CA_GC_HOLD_MAX loses the protection for its innermost
+   buffers rather than raising in the middle of a materialise.  The cells
+   must already be valid VALUEs -- the caller fills a fresh buffer with
+   Qnil first. */
+int
+ca_gc_hold_push (void *ptr, ca_size_t n_elements)
+{
+  int depth = ca_gc_hold_depth;
+
+  if ( depth >= CA_GC_HOLD_MAX || n_elements <= 0 || ptr == NULL ) {
+    return -1;
+  }
+  ca_gc_holds[depth].ptr      = (VALUE *) ptr;
+  ca_gc_holds[depth].elements = n_elements;
+  ca_gc_hold_depth = depth + 1;
+  return depth;
+}
+
+void
+ca_gc_hold_pop_to (int depth)
+{
+  if ( depth >= 0 && depth < ca_gc_hold_depth ) {
+    ca_gc_hold_depth = depth;
+  }
+}
+
+static VALUE ca_gc_guard = Qnil;
+
+/* The wrapped pointer must be non-NULL: Ruby's GC skips the mark
+   function of a TypedData whose data pointer is NULL. */
+static int ca_gc_guard_body = 0;
+
+static void
+ca_gc_guard_mark (void *ptr)
+{
+  int i;
+  (void) ptr;
+  for ( i = 0; i < ca_gc_hold_depth; i++ ) {
+    VALUE    *p = ca_gc_holds[i].ptr;
+    ca_size_t n = ca_gc_holds[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+  ca_lazy_arena_mark_object_slots();
+}
+
+static void
+ca_gc_guard_free (void *ptr)
+{
+  (void) ptr;
+}
+
+static const rb_data_type_t ca_gc_guard_data_type = {
+  "carray_object_gc_guard",
+  { ca_gc_guard_mark, ca_gc_guard_free, NULL, },
+  0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+/* ------------------------------------------------------------------- */
 /* ca_lazy_arena                                                        */
 /* ------------------------------------------------------------------- */
 
@@ -291,6 +390,7 @@ typedef struct ca_lazy_arena_slot {
   void     *ptr;     /* xmalloc'd buffer, NULL = unused-and-unallocated */
   ca_size_t bytes;   /* allocated size of ptr (= capacity of this slot) */
   int       in_use;  /* 1 = currently acquired, 0 = available */
+  ca_size_t object_elements;  /* >0 = holds VALUEs; marked while in_use */
 } ca_lazy_arena_slot_t;
 
 typedef struct ca_lazy_arena {
@@ -313,6 +413,7 @@ ca_lazy_arena_enter (void)
     int i;
     for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
       ca_lazy_arena.slots[i].in_use = 0;
+      ca_lazy_arena.slots[i].object_elements = 0;
     }
   }
   ca_lazy_arena.depth++;
@@ -324,7 +425,16 @@ ca_lazy_arena_exit (void)
   if ( ca_lazy_arena.depth > 0 ) {
     ca_lazy_arena.depth--;
   }
-  /* Keep all slot buffers; they amortise into subsequent calls. */
+  /* Keep all slot buffers, and leave in_use and the object tags alone.
+     A scratch can be acquired outside any enter/exit bracket -- a lazy
+     view's attach path does exactly that -- so an inner materialise
+     dropping to depth 0 is not evidence that nothing is held.  Recovery
+     from an abandoned slot happens on the next depth-0 entry instead.
+
+     An abandoned object slot stays marked until then, which is a leak
+     but not a hazard: acquire only ever hands out a slot that is not in
+     use, so nothing overwrites it, and marking is what keeps its cells
+     from being collected in the first place. */
 }
 
 void *
@@ -355,6 +465,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
   }
   if ( best >= 0 ) {
     ca_lazy_arena.slots[best].in_use = 1;
+    ca_lazy_arena.slots[best].object_elements = 0;
     ca_lazy_arena.debug_reuse_count++;
     return ca_lazy_arena.slots[best].ptr;
   }
@@ -372,6 +483,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     ca_lazy_arena.slots[empty].ptr    = xmalloc(bytes);
     ca_lazy_arena.slots[empty].bytes  = bytes;
     ca_lazy_arena.slots[empty].in_use = 1;
+    ca_lazy_arena.slots[empty].object_elements = 0;
     ca_lazy_arena.debug_xmalloc_count++;
     return ca_lazy_arena.slots[empty].ptr;
   }
@@ -385,6 +497,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
       ca_lazy_arena.slots[i].ptr    = xmalloc(bytes);
       ca_lazy_arena.slots[i].bytes  = bytes;
       ca_lazy_arena.slots[i].in_use = 1;
+      ca_lazy_arena.slots[i].object_elements = 0;
       ca_lazy_arena.debug_xmalloc_count++;
       return ca_lazy_arena.slots[i].ptr;
     }
@@ -407,12 +520,59 @@ ca_lazy_arena_release (void *ptr)
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
     if ( ca_lazy_arena.slots[i].ptr == ptr ) {
       ca_lazy_arena.slots[i].in_use = 0;
+      ca_lazy_arena.slots[i].object_elements = 0;
       return;
     }
   }
   /* Unknown ptr — could indicate caller mixed arena release with a
      non-arena pointer.  Be lenient (= no raise) to avoid masking
      genuine bugs at unrelated callsites.  */
+}
+
+/* Acquire a scratch that will hold `n_elements` VALUEs.
+
+   Unlike the byte-sized acquire this one Qnil-fills the buffer and tags
+   the slot, so the cells stay markable for as long as the caller holds
+   it.  Object-lane kernels run rb_funcall over their operands, so a
+   scratch pulled from a lazy operand holds VALUEs that exist nowhere
+   else until the kernel has consumed them. */
+void *
+ca_lazy_arena_acquire_object (ca_size_t n_elements)
+{
+  void *ptr;
+  int i;
+
+  if ( n_elements < 0 ) n_elements = 0;
+  ptr = ca_lazy_arena_acquire(n_elements * (ca_size_t) sizeof(VALUE));
+
+  {
+    VALUE *p = (VALUE *) ptr;
+    ca_size_t n = n_elements;
+    while ( n-- ) *p++ = Qnil;
+  }
+
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    if ( ca_lazy_arena.slots[i].ptr == ptr ) {
+      ca_lazy_arena.slots[i].object_elements = n_elements;
+      break;
+    }
+  }
+  return ptr;
+}
+
+static void
+ca_lazy_arena_mark_object_slots (void)
+{
+  int i;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    ca_size_t n;
+    VALUE *p;
+    if ( ! s->in_use || s->object_elements <= 0 ) continue;
+    p = (VALUE *) s->ptr;
+    n = s->object_elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
 }
 
 /* Test instrumentation — exposed to Ruby for the arena smoke and
@@ -546,6 +706,12 @@ Init_carray_lazy (void)
                   INT2NUM(CA_OBJ_LAZY_MARKER));
 
   rb_define_method(rb_cCArray, "lazy", rb_ca_lazy, 0);
+
+  /* Hidden, never collected: its mark function is what keeps the
+     in-flight CA_OBJECT buffers reachable. */
+  ca_gc_guard = TypedData_Wrap_Struct(rb_cObject, &ca_gc_guard_data_type,
+                                      &ca_gc_guard_body);
+  rb_gc_register_mark_object(ca_gc_guard);
 
   rb_define_alloc_func(rb_cCALazyMarker, rb_ca_lazy_marker_s_allocate);
   rb_define_method(rb_cCALazyMarker, "initialize_copy",

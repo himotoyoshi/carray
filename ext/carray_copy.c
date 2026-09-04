@@ -10,6 +10,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"   /* CA_FACE_LIFT_IF_FACE */
+#include "carray_internal.h"   /* ca_gc_hold_push / ca_gc_hold_pop_to */
 #include <stdarg.h>
 
 /* ------------------------------------------------------------------- */
@@ -57,9 +58,18 @@ VALUE
 rb_ca_copy (VALUE self)
 {
   volatile VALUE obj;
-  CArray *ca;
+  CArray *ca, *co;
+  int guard = -1;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  obj = ca_wrap_struct(ca_copy(ca));
+  co = ca_copy(ca);
+  /* The copy holds VALUEs that so far exist only in co->ptr, and
+     ca_wrap_struct allocates.  Keep them reachable until the wrapper
+     that owns them exists. */
+  if ( ca_is_object_type(co) ) {
+    guard = ca_gc_hold_push(co->ptr, co->elements);
+  }
+  obj = ca_wrap_struct(co);
+  ca_gc_hold_pop_to(guard);
   CA_FACE_LIFT_IF_FACE(obj, self, ca);
   return obj;
 }

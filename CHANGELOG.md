@@ -11,6 +11,15 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: a lazy expression over an object array (`CArray.object`,
+  `CA_OBJECT`) returned wrong values, and crashed when materialised
+  repeatedly. Object cells are Ruby objects, and the results a lazy
+  materialise produced were unreachable to the garbage collector while it
+  ran, so a collection partway through freed them. Anything that computes
+  object cells outside an array the collector can see is affected: `to_ca`
+  and `copy` on a lazy view, an eager operation with a lazy operand, and a
+  reduction over one.
+
 - Change: `CArray.fuse` takes the expression rather than the arrays it is
   over — `CArray.fuse { (a + b) * c }` in place of
   `CArray.fuse(a, b, c) { |x, y, z| (x + y) * z }`. The block is read rather
