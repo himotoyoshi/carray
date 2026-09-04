@@ -11,6 +11,15 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: `CArray.per_cell` and `CArray.per_element` are now
+  `CArray.jit_for` and `CArray.jit_eval`, and CArray no longer runs their
+  block as a Ruby loop when the carray-jit gem is absent — it says where the
+  compiler is instead. The prefix is the warning that the block goes to a
+  compiler, and that there are rules about what may be in it: the same
+  program used to run without the gem and then raise once it was installed.
+  An expression over whole arrays wants `CArray.fuse` and never wanted these;
+  it needs no compiler either way.
+
 - Fix: a lazy expression over an object array (`CArray.object`,
   `CA_OBJECT`) returned wrong values, and crashed when materialised
   repeatedly. Object cells are Ruby objects, and the results a lazy
