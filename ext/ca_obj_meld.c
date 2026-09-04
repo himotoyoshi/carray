@@ -598,19 +598,24 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   int8_t   i;
   int      structural = 1;
 
-  /* Bound check on meld_axis */
+  s = ca->bytes;
+  for ( i = ca->ndim - 1; i >= 0; i-- ) { native[i] = s; s *= ca->dim[i]; }
+
+  /* Bound check on meld_axis.  The step along the axis is strides[ma] /
+     native[ma] and it can be negative -- a reversed read starts at the far
+     end and walks down -- so the region runs between the first and last
+     index, which is not the same as starts[ma] .. starts[ma] + counts[ma]. */
   {
-    ca_size_t req_lo = starts[ma];
-    ca_size_t req_hi = starts[ma] + counts[ma];
-    if ( req_lo < 0 || req_hi > ca->dim[ma] ) {
+    ca_size_t step = strides[ma] / native[ma];
+    ca_size_t last = starts[ma] + (counts[ma] - 1) * step;
+    ca_size_t req_lo = ( last < starts[ma] ) ? last : starts[ma];
+    ca_size_t req_hi = (( last < starts[ma] ) ? starts[ma] : last) + 1;
+    if ( counts[ma] > 0 && ( req_lo < 0 || req_hi > ca->dim[ma] ) ) {
       rb_raise(rb_eIndexError,
                "CAMeld xfer_stride meld_axis (axis %d) [%lld, %lld) out of range [0, %lld)",
                (int) ma, (long long) req_lo, (long long) req_hi, (long long) ca->dim[ma]);
     }
   }
-
-  s = ca->bytes;
-  for ( i = ca->ndim - 1; i >= 0; i-- ) { native[i] = s; s *= ca->dim[i]; }
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( strides[i] != native[i] ) { structural = 0; break; }
   }
