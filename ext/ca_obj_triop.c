@@ -409,9 +409,11 @@ ca_triop_func_create_mask (void *ap)
   dst = (boolean8_t *) to->mask->ptr;
   n = to->elements;
 
-  if ( has1 ) ca_attach(op1);
-  if ( has2 ) ca_attach(op2);
-  if ( has3 ) ca_attach(op3);
+  /* The masks are what is read here; attaching the operand instead
+     materialises the whole subexpression under it. */
+  if ( has1 ) ca_attach(op1->mask);
+  if ( has2 ) ca_attach(op2->mask);
+  if ( has3 ) ca_attach(op3->mask);
 
   m1 = has1 ? (boolean8_t *) op1->mask->ptr : NULL;
   m2 = has2 ? (boolean8_t *) op2->mask->ptr : NULL;
@@ -426,9 +428,9 @@ ca_triop_func_create_mask (void *ap)
     dst[i] = (boolean8_t) ( a | b | c );
   }
 
-  if ( has3 ) ca_detach(op3);
-  if ( has2 ) ca_detach(op2);
-  if ( has1 ) ca_detach(op1);
+  if ( has3 ) ca_detach(op3->mask);
+  if ( has2 ) ca_detach(op2->mask);
+  if ( has1 ) ca_detach(op1->mask);
 }
 
 ca_operation_function_t ca_triop_func = {

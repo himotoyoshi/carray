@@ -524,8 +524,18 @@ ca_binop_func_create_mask (void *ap)
   /* Kleene needs operand values even where an operand is unmasked. */
   need_l = has_l || kleene;
   need_r = has_r || kleene;
-  if ( need_l ) ca_attach(l);
-  if ( need_r ) ca_attach(r);
+  /* Only Kleene reads operand values.  Every other op reads the operand
+     masks alone, and attaching the operand to reach its mask materialises
+     the whole subexpression under it -- so a chain of k masked binops
+     evaluates its own subtree k times over.  Attach what is read. */
+  if ( kleene ) {
+    if ( need_l ) ca_attach(l);
+    if ( need_r ) ca_attach(r);
+  }
+  else {
+    if ( has_l ) ca_attach(l->mask);
+    if ( has_r ) ca_attach(r->mask);
+  }
 
   lm = has_l ? (boolean8_t *) l->mask->ptr : NULL;
   rm = has_r ? (boolean8_t *) r->mask->ptr : NULL;
@@ -550,8 +560,14 @@ ca_binop_func_create_mask (void *ap)
     dst[i] = m;
   }
 
-  if ( need_l ) ca_detach(l);
-  if ( need_r ) ca_detach(r);
+  if ( kleene ) {
+    if ( need_r ) ca_detach(r);
+    if ( need_l ) ca_detach(l);
+  }
+  else {
+    if ( has_r ) ca_detach(r->mask);
+    if ( has_l ) ca_detach(l->mask);
+  }
 }
 
 ca_operation_function_t ca_binop_func = {
