@@ -405,6 +405,17 @@ ca_triop_func_create_mask (void *ap)
   has3 = ca_has_mask(op3);
   if ( ! has1 && ! has2 && ! has3 ) return;
 
+  /* Exactly one masked operand: the answer is that operand's mask, cell
+     for cell.  Share it rather than allocating a copy per node. */
+  if ( has1 + has2 + has3 == 1 ) {
+    CArray *src = has1 ? op1 : ( has2 ? op2 : op3 );
+    if ( src->elements == to->elements ) {
+      to->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
+                                         to->ndim, to->dim, 0, 0);
+      return;
+    }
+  }
+
   to->mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
   dst = (boolean8_t *) to->mask->ptr;
   n = to->elements;
