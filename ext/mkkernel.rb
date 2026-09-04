@@ -1005,7 +1005,9 @@ module MkKernel
     # demotes to real f64).  Hash form requires the kernel author to
     # write expr that produces output data_type values for each source family
     # (e.g. cabs() for complex returning double).
-    raise "#{name}: unknown output #{output}" unless output == :preserve || DTYPES.key?(output) || output.is_a?(Hash)
+    raise "#{name}: unknown output #{output}" \
+      unless output == :preserve || output == :real_of_source ||
+             DTYPES.key?(output) || output.is_a?(Hash)
     KERNELS << {
       kind:     :monop,
       name:     name,
@@ -1188,6 +1190,13 @@ module MkKernel
   #     fallback when no family matches.  Uses the same family aliases
   #     as monop_expr_family_match? (:numeric / :int / :float / :complex
   #     / :bool / :object).
+  #
+  # A Hash value (or a bare output form) may also be :real_of_source,
+  # meaning "the real component width of the source complex data_type"
+  # (cmplx64 -> f32, cmplx128 -> f64).  This is what an op like abs
+  # wants for its complex family: the magnitude of a cmplx64 is a
+  # float32, the same width `.real` and `.imag` already return.  Naming
+  # :f64 there would hand cmplx64 the real width of cmplx128.
   # SL.1.1: Resolve the reduce macro suffix for a given kernel entry,
   # driven by reduction_kind.  Returns "" for :none (= legacy
   # CA_SLAB_REDUCE_T_EX), or "_PLUS" / "_MIN" / "_MAX" / "_STAR" to
@@ -1325,6 +1334,24 @@ module MkKernel
     end
   end
 
+  # Real component width of a complex data_type: cmplx64 -> f32,
+  # cmplx128 -> f64.  Raises for anything else, since :real_of_source
+  # only has a meaning for a complex source.
+  REAL_OF_CMPLX = { cmplx64: :f32, cmplx128: :f64 }.freeze
+
+  def self.resolve_output_dtype(kernel, src, dt)
+    case dt
+    when :preserve then DTYPES[src]
+    when :real_of_source
+      real = REAL_OF_CMPLX[src]
+      raise "#{kernel[:name]}: output :real_of_source needs a complex src (got #{src})" \
+        unless real
+      DTYPES[real]
+    else
+      DTYPES[dt]
+    end
+  end
+
   def self.output_info(kernel, src)
     out = kernel[:output]
     case out
@@ -1334,16 +1361,15 @@ module MkKernel
         next if family == :default
         if monop_expr_family_match?(family, src)
           # Hash value may itself be :preserve (= "same as source for this
-          # family") or a data_type symbol like :f64.
-          return (dt == :preserve) ? DTYPES[src] : DTYPES[dt]
+          # family"), :real_of_source, or a data_type symbol like :f64.
+          return resolve_output_dtype(kernel, src, dt)
         end
       end
       raise "#{kernel[:name]}: output Hash has no match for src #{src} and no :default" \
         unless out.key?(:default)
-      dt = out[:default]
-      (dt == :preserve) ? DTYPES[src] : DTYPES[dt]
+      resolve_output_dtype(kernel, src, out[:default])
     else
-      DTYPES[out]
+      resolve_output_dtype(kernel, src, out)
     end
   end
 
@@ -7911,7 +7937,9 @@ MkKernel.monop :abs_i,
 
 # abs: data_type-changing monop (the framework-piece test customer for monop
 # Hash output form).  numeric input -> preserve data_type (= int/float abs),
-# complex input -> f64 output (= magnitude is real).  Replaces the hand-
+# complex input -> the real component width of that complex data_type
+# (= magnitude is real, and a cmplx64 magnitude is a float32 just as
+# `.real` and `.imag` are).  Replaces the hand-
 # written rb_ca_abs / rb_ca_abs_bang in ext/carray_math.c.  Object data_type
 # kept on abs_i (= bind: false on object would need a different output
 # rule; deferred).  The abs_i monop above remains the primary kernel for
@@ -7920,7 +7948,7 @@ MkKernel.monop :abs_i,
 # returns the real-valued magnitude entity.
 MkKernel.monop :abs,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :preserve, complex: :f64 },
+  output: { numeric: :preserve, complex: :real_of_source },
   expr:   {
     MkKernel::SINT_SMALL_DTYPES => "(#2) = abs(#1);",
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
@@ -7937,10 +7965,11 @@ MkKernel.monop :abs,
 # optics, signal processing) do not pay for a sqrt they immediately
 # square away.
 #
-# Output data_type follows :abs: numeric preserved, complex -> f64.
+# Output data_type follows :abs: numeric preserved, complex demoted to
+# its own real component width.
 MkKernel.monop :abs2,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :preserve, complex: :f64 },
+  output: { numeric: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = (#1) * (#1);",
     complex: "{ double _r = creal(#1); double _i = cimag(#1); (#2) = _r * _r + _i * _i; }",
@@ -7963,11 +7992,11 @@ MkKernel.monop :conj,
 # Replaces the hand-written rb_ca_arg in ext/carray_numeric.c (which
 # was f64-only, float-or-complex parent, also computed `carg`).
 #
-# Output data_type is always CA_FLOAT64.
-# We do NOT use the abs Hash pattern `{numeric: :preserve}` because
-# pi does not fit any integer slot — preserving int data_type would
-# silently truncate `arg(-1) = pi` to 3.  Float32 input also returns
-# f64 since carg itself returns double.
+# Output data_type keeps the width the input carries its real values in:
+# a float stays that float, a complex demotes to its own real component
+# width (cmplx64 -> f32, cmplx128 -> f64).  Integers are the exception
+# and go to f64, because pi does not fit any integer slot — preserving
+# the int data_type would silently truncate `arg(-1) = pi` to 3.
 #
 # 3.0 breaking (vs hand-written rb_ca_arg):
 #   - integer input is now accepted (was a raise).  Returns f64
@@ -8002,7 +8031,7 @@ MkKernel.monop :sign,
 
 MkKernel.monop :arg,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :f64, complex: :f64 },
+  output: { int: :f64, float: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = carg((cmplx128_t)(#1));",
     complex: "(#2) = carg(#1);",

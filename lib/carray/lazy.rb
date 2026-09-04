@@ -118,12 +118,14 @@ class CArray
   # complex-specific dispatch (= magnitude as float).  Re-express that
   # dispatch via chain composition over existing lazy ops so abs rides
   # the lazy substrate fully:
-  #   numeric parent: CAMonOp(OP_ABS_I)                        (1 node)
-  #   complex parent: CAMonOp(cast_f64) ∘ CAMonOp(OP_ABS_I)    (2 nodes)
-  # The complex chain works because ca_monop_abs_i for cmplx128 stores
-  # |z| in the real slot with imag=0, then cast cmplx128->f64 picks up
-  # the real part — semantically identical to rb_ca_abs (= abs_i + .real
-  # + copy).  No new C kernel, no new op_id required.
+  #   numeric parent: CAMonOp(OP_ABS_I)                            (1 node)
+  #   complex parent: CAMonOp(cast_<float>) ∘ CAMonOp(OP_ABS_I)    (2 nodes)
+  # The complex chain works because ca_monop_abs_i stores |z| in the
+  # real slot with imag=0, then the cast picks up the real part —
+  # semantically identical to the eager abs.  The cast target is the
+  # real component width of the operand (cmplx64 -> f32, cmplx128 ->
+  # f64), matching the eager kernel's `complex: :real_of_source`.
+  # No new C kernel, no new op_id required.
   # ---------------------------------------------------------------------------
 
   # @private
@@ -133,10 +135,11 @@ class CArray
     if __lazy_view__?
       abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
       if complex?
-        # CA_FLOAT64 is a Symbol; convert via data_type_code so the cast
+        # float_dt is a Symbol; convert via data_type_code so the cast
         # op_id can be computed by Integer arithmetic.
+        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
         CAMonOp.__build__(abs_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(CA_FLOAT64))
+                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
       else
         abs_i_node
       end
@@ -218,8 +221,8 @@ class CArray
   end
 
   # ---------------------------------------------------------------------------
-  # arg lazy fuse: eager `arg` always returns f64 regardless of input
-  # data type (data_type-changing monop; see MkKernel.monop :arg output rule).
+  # arg lazy fuse: eager `arg` is a data_type-changing monop (see
+  # MkKernel.monop :arg output rule).
   # CAMonOp's cast-before invariant requires input data type == output data type
   # at each in-place step, so `arg` can't sit directly in the substrate.
   # Chain compose via the type-preserving `arg_i` primitive:
@@ -230,12 +233,10 @@ class CArray
   #                          component of complex slot; cast extracts
   #                          the real part, same trick as abs / imag)
   #
-  # Note: eager `arg` always widens to f64.  The lazy path preserves
-  # the operand's float / complex width (f32 → f32, cmplx64 → f32)
-  # rather than always going to f64 — matches the general lazy-substrate
-  # rule "scalar keeps operand's precision" (see ca_lazy_wrap_scalar
-  # header).  A user needing exact eager-parity can wrap with
-  # `.to_type(:float64)` before / after.
+  # Both paths keep the operand's float / complex width (f32 → f32,
+  # cmplx64 → f32), and both send integers to f64 since pi does not fit
+  # an integer slot.  That agrees with the general lazy-substrate rule
+  # "scalar keeps operand's precision" (see ca_lazy_wrap_scalar header).
   # ---------------------------------------------------------------------------
 
   # @private
