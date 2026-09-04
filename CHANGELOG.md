@@ -11,6 +11,12 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: reading a lazy expression (`a.lazy + b`, `CArray.fuse`) with a step
+  other than one — `expr[[0, 3, 2]]` and the like — returned values the
+  expression cannot produce, because its two operands were read from
+  different cells. Contiguous reads were never affected, and neither were
+  expressions with one operand.
+
 - Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
   something reads it, rather than when the expression is built. Two things
   follow. `root_array` and `ancestors` now stop at a lazy operation instead of
