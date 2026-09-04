@@ -121,9 +121,8 @@ ca_moncmp_setup (CAMonCmp *ca, CArray *parent, uint16_t op_id)
 
   memcpy(ca->dim, parent->dim, parent->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here: ca_has_mask creates a view's mask on
+     demand from its parent's. */
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }

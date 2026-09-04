@@ -60,6 +60,12 @@ typedef struct CABinCmp {
   CArray   *parent;          /* = left */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as carray.h's
+         layout convention requires, so ca_has_mask can fold over both
+         operands and build the mask on demand instead of at setup. ---- */
+  int32_t   n_parents;        /* always 2 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CABinCmp-specific tail */
   CArray   *right;
   uint16_t  op_id;
@@ -72,6 +78,7 @@ typedef struct CABinCmp {
                                 `eps` name is retained to keep the
                                 `__eps__` Ruby accessor stable across
                                 the dual purpose. */
+  CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinCmp;
 
 static size_t
@@ -119,7 +126,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
 {
   ca->obj_type  = CA_OBJ_BINCMP;
   ca->data_type = CA_BOOLEAN;          /* output is always boolean */
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = left->ndim;
   ca->bytes     = 1;                   /* boolean8_t */
   ca->elements  = left->elements;
@@ -137,12 +144,16 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
   ca->eps       = eps;
+  ca->operands[0] = left;
+  ca->operands[1] = right;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 2;
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(left) || ca_has_mask(right) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one. */
 
   if ( ca_is_scalar(left) && ca_is_scalar(right) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);

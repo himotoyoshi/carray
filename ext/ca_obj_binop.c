@@ -70,11 +70,21 @@ typedef struct CABinOp {
                              collapse and attach lifecycle traversal) */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as the layout
+         convention in carray.h requires, so generic code that would walk a
+         single ->parent folds over both operands instead.  What this buys
+         here is ca_has_mask: it answers for a two-parent view by asking both
+         and creating the mask on demand, which lets the mask stay unbuilt
+         until something reads it. ---- */
+  int32_t   n_parents;        /* always 2 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CABinOp-specific tail */
   CArray   *right;
   uint16_t  op_id;
   uint8_t   right_is_scalar;  /* 1 ⇒ right has elements == 1, walk
                                  with element-stride 0 (= broadcast) */
+  CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinOp;
 
 static size_t
@@ -125,7 +135,7 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 
   ca->obj_type  = CA_OBJ_BINOP;
   ca->data_type = out_dt;
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = left->ndim;
   ca->bytes     = out_bytes;
   ca->elements  = left->elements;
@@ -139,6 +149,10 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
   ca->nosync    = 0;
   ca->right     = right;
   ca->op_id     = op_id;
+  ca->operands[0] = left;
+  ca->operands[1] = right;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 2;
   /* right_is_scalar fast path: when right holds a single element,
      xfer_stride pulls only that cell into scratch and walks the
      kernel with element-stride 0 (broadcast).  The symmetric
@@ -148,9 +162,10 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(left) || ca_has_mask(right) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one -- and a chain of masked nodes builds
+     one array at the end rather than one per node. */
 
   if ( ca_is_scalar(left) && ca_is_scalar(right) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
