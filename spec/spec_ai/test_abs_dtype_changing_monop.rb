@@ -51,7 +51,7 @@ class TestAbsDtypeChangingMonop < Test::Unit::TestCase
     assert_equal([3.0, 0.0, 4.0], r.to_a)
   end
 
-  # ---- complex abs -> f64 (= data_type-changing) ----
+  # ---- complex abs -> the real component width (= data_type-changing) ----
 
   def test_cmplx128_abs_returns_f64
     a = CArray.cmplx128(3)
@@ -64,13 +64,29 @@ class TestAbsDtypeChangingMonop < Test::Unit::TestCase
     assert_in_delta(Math.sqrt(2), r[2], 1e-9)
   end
 
-  def test_cmplx64_abs_returns_f64
+  # The magnitude of a cmplx64 is a float32, the same width `.real` and
+  # `.imag` return.  Naming f64 here would hand cmplx64 the real width
+  # of cmplx128.
+  def test_cmplx64_abs_returns_f32
     a = CArray.cmplx64(2)
     [Complex(3, 4), Complex(0, -1)].each_with_index { |v,i| a[i] = v }
     r = a.abs
-    assert_equal(:float64, r.data_type_name.to_sym)
+    assert_equal(:float32, r.data_type_name.to_sym)
     assert_in_delta(5.0, r[0], 1e-6)
     assert_in_delta(1.0, r[1], 1e-6)
+  end
+
+  def test_cmplx64_abs_matches_real_and_imag_width
+    a = CArray.cmplx64(2)
+    assert_equal(a.real.data_type, a.abs.data_type)
+    assert_equal(a.imag.data_type, a.abs.data_type)
+  end
+
+  def test_complex_abs_width_matches_lazy
+    [CArray.cmplx64(2), CArray.cmplx128(2)].each do |a|
+      assert_equal(a.abs.data_type, a.lazy.abs.to_ca.data_type,
+                   "eager and lazy abs disagree for #{a.data_type_name}")
+    end
   end
 
   # ---- abs! ----

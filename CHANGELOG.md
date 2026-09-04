@@ -19,6 +19,13 @@ unrecorded.
 
 ## 3.0.1 (unreleased)
 
+- Change: `abs`, `abs2` and `arg` on a `cmplx64` array now return `float32`
+  instead of `float64` -- the width that type carries its real values in, the
+  same one `real` and `imag` already returned. `arg` on a `float32` array
+  likewise returns `float32` rather than widening. `cmplx128` and `float64`
+  are unchanged, and `arg` on an integer array still gives `float64`. To keep
+  the old width, add `.to_type(:float64)`.
+
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
   that is compiled rather than run. `jit_for` takes the loop indices, so a
   cell may reach the ones around it -- a recurrence, a stencil. `jit_each` and

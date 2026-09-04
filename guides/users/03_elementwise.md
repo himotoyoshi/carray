@@ -432,8 +432,8 @@ Methods marked **!** also have an in-place bang form that writes the result back
 | `-a`          | `a.neg`       | ✓     | Unary minus                                        |
 |               | `a.abs`       | ✓     | Absolute value (returns same data type)                |
 |               | `a.abs_i`     | ✓     | Absolute value, keep the data type (for complex stays complex) |
-|               | `a.abs2`      | ✓ (real only) | Squared magnitude: `x*x` for real, `re²+im²` for complex (no sqrt). f64 for complex, data type preserved for real |
-|               | `a.arg`       | ✓     | Phase angle (`carg`): for real → 0 or π, for complex → argument. Returns f64 in the eager form. |
+|               | `a.abs2`      | ✓ (real only) | Squared magnitude: `x*x` for real, `re²+im²` for complex (no sqrt). Same width rule as `abs` |
+|               | `a.arg`       | ✓ (real only) | Phase angle (`carg`): for real → 0 or π, for complex → argument. A float keeps its width, a complex gives its real component width, an integer gives `float64` |
 |               | `a.sign`      | ✓     | Sign: -1 / 0 / +1 for real (NaN-preserving on float), unit vector for complex, 0/1 for bool/uint |
 |               | `a.square`    | ✓     | `a * a` (equal to `abs2` for real inputs)          |
 |               | `a.rcp`       | ✓     | Reciprocal `1 / a`                                 |
@@ -495,13 +495,15 @@ All have a bang form.
 | Method   | Returns                                                        |
 |----------|----------------------------------------------------------------|
 | `conj`   | Complex conjugate                                              |
-| `arg`    | Argument (phase angle, in radians) — `float64` array           |
-| `abs`    | Modulus — `float64` array                                      |
+| `arg`    | Argument (phase angle, in radians) — real array                |
+| `abs`    | Modulus — real array                                           |
 | `abs_i`  | Modulus, kept as complex                                       |
-| `abs2`   | Squared modulus `re² + im²` — `float64` array, no `sqrt`       |
+| `abs2`   | Squared modulus `re² + im²` — real array, no `sqrt`            |
 | `imag_i` | Imaginary part, kept as complex (real part zero)               |
 
 `conj`, `abs_i`, `imag_i` have bang forms.
+
+The methods that hand back a real array — `real`, `imag`, `abs`, `abs2`, `arg` — all give the width that complex type carries its real values in. A `cmplx64` is a pair of `float32`, so all five return `float32`; a `cmplx128` is a pair of `float64` and they all return `float64`. Choosing `cmplx64` is a choice about width, and taking a real part of it does not undo that choice.
 
 `abs2` is the sqrt-free companion of `abs`. Use it when the magnitude is only compared against a threshold (`abs2(z) > r²` is `abs(z) > r`) or when you would square the modulus anyway; the answer comes out without going through `sqrt` and back.
 

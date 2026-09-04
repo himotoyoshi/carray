@@ -462,7 +462,7 @@ MkKernel.monfunc :rsqrt,
 | `bind:` | `true` (default) registers `#name` + `#name!`; `false` emits the kernel only. |
 | `cmath:` | whether the complex branch may use `<complex.h>` functions. |
 | `widening:` | auto-cast integer input to f64. Auto-detected from `source:` when omitted (no integer source ⇒ auto-cast). |
-| `output:` | `:preserve` (default) or a family Hash (e.g. `abs` demoting complex → real f64). |
+| `output:` | `:preserve` (default), a data_type symbol, `:real_of_source` (= the real component width of a complex source), or a family Hash (e.g. `abs`, which is `{ numeric: :preserve, complex: :real_of_source }`). |
 
 `monfunc` is a declarative alias of `monop` signalling "this is a math
 function" and relying on `widening`'s auto-detect. For the per-cell
