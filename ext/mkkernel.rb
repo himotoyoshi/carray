@@ -144,6 +144,31 @@ module MkKernel
     SNIPPET
   end
 
+  # Complex libm comes in two widths: `csqrt` takes a `double _Complex`,
+  # `csqrtf` a `float _Complex`.  A body written with only the double-
+  # taking name still compiles for a cmplx64 cell, because the cell
+  # widens on the way in and rounds on the way out -- so the kernel
+  # computes at cmplx128 whatever the array said it was, and the `+ - *`
+  # kernels beside it stay narrow.  This builds the two expr entries that
+  # hold each complex data_type at its own width.
+  #
+  # In `body`, `<f>` marks each spot the `f` suffix belongs and `<t>` a
+  # real scalar of the matching width:
+  #
+  #   cmplx_widths("(#2) = csqrt<f>(#1);")
+  #   cmplx_widths("{ <t> _r = creal<f>(#1); ... }")
+  #
+  # Returns array-keyed entries, so merge it into an expr Hash that
+  # carries the other families:
+  #
+  #   expr: { float: "...", object: "..." }.merge(cmplx_widths("..."))
+  def self.cmplx_widths(body)
+    {
+      [:cmplx64]  => body.gsub("<f>", "f").gsub("<t>", "float"),
+      [:cmplx128] => body.gsub("<f>", "").gsub("<t>", "double"),
+    }
+  end
+
   # CA_NTYPE order from ext/carray.h.  Drives the per-data_type table layout
   # for eager-style monop/binop tables `ca_<form>_<name>[CA_NTYPE]`.
   # `:reserved` slots emit `ca_<form>_not_implement` (= retired holes
@@ -7931,7 +7956,8 @@ MkKernel.monop :abs_i,
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
     MkKernel::UINT_DTYPES       => "(#2) = (#1);",
     MkKernel::FLOAT_DTYPES      => "(#2) = fabs((float64_t)#1);",
-    MkKernel::CMPLX_DTYPES      => "(#2) = cabs((cmplx128_t)#1);",
+    [:cmplx64]                  => "(#2) = cabsf(#1);",
+    [:cmplx128]                 => "(#2) = cabs(#1);",
     [:object]                   => '(#2) = rb_funcall((#1), rb_intern("abs"), 0);',
   }
 
@@ -7954,7 +7980,9 @@ MkKernel.monop :abs,
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
     MkKernel::UINT_DTYPES       => "(#2) = (#1);",
     MkKernel::FLOAT_DTYPES      => "(#2) = fabs(#1);",
-    MkKernel::CMPLX_DTYPES      => "(#2) = cabs(#1);",   # complex -> double (real magnitude)
+    # complex -> the real magnitude, at that complex type's own width
+    [:cmplx64]                  => "(#2) = cabsf(#1);",
+    [:cmplx128]                 => "(#2) = cabs(#1);",
   }
 
 # abs2: squared magnitude.  For real x this is x*x (identical to :square
@@ -7972,16 +8000,15 @@ MkKernel.monop :abs2,
   output: { numeric: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = (#1) * (#1);",
-    complex: "{ double _r = creal(#1); double _i = cimag(#1); (#2) = _r * _r + _i * _i; }",
-  }
+  }.merge(MkKernel.cmplx_widths(
+    "{ <t> _r = creal<f>(#1); <t> _i = cimag<f>(#1); (#2) = _r * _r + _i * _i; }"))
 
 MkKernel.monop :conj,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     numeric: "(#2) = (#1);",
-    complex: "(#2) = conj(#1);",
     object:  '(#2) = rb_funcall((#1), rb_intern("conj"), 0);',
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = conj<f>(#1);"))
 
 # arg: data_type-changing monop — phase angle of the complex plane.
 # Mathematically `arg(z)` for z = re + im*i is `atan2(im, re)` in
@@ -8026,16 +8053,15 @@ MkKernel.monop :sign,
     MkKernel::UINT_DTYPES       => "(#2) = ((#1) > 0) ? 1 : 0;",
     MkKernel::SINT_DTYPES       => "(#2) = ((#1) > 0) - ((#1) < 0);",
     MkKernel::FLOAT_DTYPES      => "(#2) = isnan(#1) ? (#1) : (((#1) > 0) - ((#1) < 0));",
-    MkKernel::CMPLX_DTYPES      => "{ double _m = cabs(#1); (#2) = (_m == 0.0) ? 0 : ((#1) / _m); }",
-  }
+  }.merge(MkKernel.cmplx_widths(
+    "{ <t> _m = cabs<f>(#1); (#2) = (_m == 0) ? 0 : ((#1) / _m); }"))
 
 MkKernel.monop :arg,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
   output: { int: :f64, float: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = carg((cmplx128_t)(#1));",
-    complex: "(#2) = carg(#1);",
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = carg<f>(#1);"))
 
 # imag_i: data_type-preserving kernel that places the imag part in the
 # slot (= cimag for complex stores into the real component since cmplx
@@ -8049,9 +8075,8 @@ MkKernel.monop :imag_i,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     numeric: "(#2) = 0;",
-    complex: "(#2) = cimag(#1);",
     object:  '(#2) = rb_funcall((#1), rb_intern("imaginary"), 0);',
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = cimag<f>(#1);"))
 
 # arg_i: data_type-preserving kernel that writes the complex argument
 # (phase angle) into the slot.  For complex input, cassignment from a
@@ -8066,9 +8091,9 @@ MkKernel.monop :imag_i,
 MkKernel.monop :arg_i,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES,
   expr:   {
-    [:f32]      => "(#2) = (float)carg((cmplx128_t)(#1));",
+    [:f32]      => "(#2) = cargf((cmplx64_t)(#1));",
     [:f64]      => "(#2) = carg((cmplx128_t)(#1));",
-    [:cmplx64]  => "(#2) = (float)carg((cmplx128_t)(#1));",
+    [:cmplx64]  => "(#2) = cargf(#1);",
     [:cmplx128] => "(#2) = carg(#1);",
   }
 
@@ -8145,9 +8170,8 @@ MkKernel.monfunc :rcp,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
       float:   "(#2) = #{c_fn}(#1);",
-      complex: "(#2) = c#{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
 # exp2 special case: complex variant uses cpow(2, x), not cexp2 (which
@@ -8156,9 +8180,8 @@ MkKernel.monfunc :exp2,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
     float:   "(#2) = exp2(#1);",
-    complex: "(#2) = cpow(2, (#1));",
     object:  MkKernel.obj_float_math("exp2(<v>)", "exp2"),
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = cpow<f>(2, (#1));"))
 
 # log10, log2, logb: no complex variant in the original mkmath emit
 {
@@ -8180,7 +8203,6 @@ MkKernel.monfunc :exp10,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
     float:   "(#2) = pow(10, (#1));",
-    complex: "(#2) = cpow(10, (#1));",
     object:  <<~SNIPPET,
       {
         VALUE _obj_arg = (#1);
@@ -8191,7 +8213,7 @@ MkKernel.monfunc :exp10,
         }
       }
     SNIPPET
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = cpow<f>(10, (#1));"))
 
 # Hyperbolic family: float uses the real-typed C function, complex uses
 # the C99 `c`-prefixed one.  Passing a `double _Complex` to `sinh(double)`
@@ -8209,9 +8231,8 @@ MkKernel.monfunc :exp10,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
       float:   "(#2) = #{c_fn}(#1);",
-      complex: "(#2) = c#{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
 # ---- M.1 (PyTorch alignment): additional monfunc / monop ------------------
@@ -8235,9 +8256,8 @@ MkKernel.monfunc :rsqrt,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
     float:   "(#2) = 1.0 / sqrt(#1);",
-    complex: "(#2) = 1.0 / csqrt(#1);",
     object:  MkKernel.obj_float_math("1.0 / sqrt(<v>)", "rsqrt"),
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = ((<t>)1.0) / csqrt<f>(#1);"))
 
 # trunc: toward-zero rounding.  Preserve-data_type form like ceil / floor /
 # round — int branch is identity, float branch uses C99 trunc, object
@@ -8732,9 +8752,8 @@ MkKernel.binop :power,
   expr:   {
     int:     "(#3) = op_powi_<type>((#1), (#2));",
     float:   "(#3) = pow((#1), (#2));",
-    complex: "(#3) = cpow((#1), (#2));",
     object:  '(#3) = rb_funcall((#1), rb_intern("**"), 1, (#2));',
-  }
+  }.merge(MkKernel.cmplx_widths("(#3) = cpow<f>((#1), (#2));"))
 
 # ---- M.2 + M.3 (PyTorch alignment): float-only binop family --------------
 #

@@ -450,9 +450,8 @@ MkKernel.monfunc :rsqrt,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
     float:   "(#2) = 1.0 / sqrt(#1);",
-    complex: "(#2) = 1.0 / csqrt(#1);",
     object:  MkKernel.obj_float_math("1.0 / sqrt(<v>)", "rsqrt"),
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = ((<t>)1.0) / csqrt<f>(#1);"))
 ```
 
 | option | meaning |
@@ -469,6 +468,15 @@ function" and relying on `widening`'s auto-detect. For the per-cell
 `:object` math branch, `obj_float_math(double_expr, fallback_method)` builds
 an expression that computes Float/Integer/Rational in C and falls back to
 `rb_funcall` for other element types.
+
+Do not write a `complex:` body that names only the double-taking libm
+functions (`csqrt`, `cabs`, `cpow`, ...). It compiles for a cmplx64 cell,
+but the cell widens on the way in and rounds on the way out, so the kernel
+computes at cmplx128 whatever the array said it was. `cmplx_widths(body)`
+builds the two array-keyed entries that hold each complex data_type at its
+own width: `<f>` marks each spot the `f` suffix belongs, `<t>` a real
+scalar of the matching width. Merge it into the Hash carrying the other
+families, as `rsqrt` does above.
 
 ### `binop` / `triop`
 
