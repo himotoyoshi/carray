@@ -22,6 +22,7 @@ New here? Start with [WhatIsCArray](WhatIsCArray.md), then skim the
 | Doc | Tag | What it is |
 |---|---|---|
 | [WhatIsCArray](WhatIsCArray.md) | Overview | What Ruby/CArray is and the shape of its object model |
+| [A tour of the features](FeatureTour.md) | Overview | One short example of each feature listed in the README |
 
 ## Core usage
 
