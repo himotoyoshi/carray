@@ -803,6 +803,15 @@ end
       end
       copy
     end
+
+    # Where something is registered to compute an expression -- a compiler,
+    # say -- it is asked here, and the walk below is what happens when it
+    # declines, when nothing is registered, or when the array is small
+    # enough that walking is the faster answer.
+    def copy
+      return super unless CArray.expression_evaluator
+      CArray::Fusion.evaluate(self) || super
+    end
   end
 end
 
@@ -835,6 +844,30 @@ end
 # happens where its source cannot be read.
 # ---------------------------------------------------------------------------
 class << CArray
+  # The object asked to compute an expression, or nil.  CArray can always
+  # walk one, so nothing has to be registered and nothing changes when
+  # nothing is; what a registered evaluator adds is a second way to arrive
+  # at the same answer, and it may decline.
+  #
+  # It is called as `call(plan, out)` -- see {CArray::Fusion} for what a
+  # plan holds -- and answers by filling `out` and returning something
+  # true, or by returning something false having written nothing.  Raising
+  # is not an answer: one that raises is dropped, with a warning, and
+  # expressions are walked from there on.
+  #
+  # @return [#call, nil]
+  attr_reader :expression_evaluator
+
+  # @param object [#call, nil] see {#expression_evaluator}
+  # @raise [ArgumentError] when it cannot be called.
+  def expression_evaluator= (object)
+    if object && ! object.respond_to?(:call)
+      raise ArgumentError,
+            "an expression evaluator must respond to #call(plan, out)"
+    end
+    @expression_evaluator = object
+  end
+
   # @overload fuse { <expression> }
   #   Builds the expression rather than evaluating it, so that it is
   #   computed in one pass with no array standing for a step along the way.
