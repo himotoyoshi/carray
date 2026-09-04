@@ -71,6 +71,15 @@ class CArray
   autoload :Fusion, "carray/fusion"
 end
 
+# ---- Reading a block as an expression (CArray.fuse) -------------------------
+#
+# Only `fuse` needs this, and only when it is called, so the parser it uses
+# is not loaded by `require "carray"`.
+
+class CArray
+  autoload :FuseSource, "carray/fuse_source"
+end
+
 # ---- Iterators (class / slab) ----------------------------------------------
 
 autoload :CASlabIterator,   "carray/slab_iterator"

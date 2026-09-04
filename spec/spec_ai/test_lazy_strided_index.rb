@@ -13,7 +13,7 @@ class TestLazyStridedIndex < Test::Unit::TestCase
   end
 
   def test_binop_strided_block_matches_eager
-    view  = CArray.lazy(@a, @b) { |x, y| x + y }
+    view  = CArray.fuse { @a + @b }
     eager = @a + @b
     [[0, 3, 2], [1, 2, 3], [0, 2, 5], [1, 3, 1], [2, 2, 2]].each do |spec|
       assert_equal eager[spec].to_a, view[spec].to_a,
@@ -24,27 +24,27 @@ class TestLazyStridedIndex < Test::Unit::TestCase
   def test_binop_strided_block_two_dimensional
     a = CArray.float64(4, 6) { |i, j| i * 10.0 + j }
     b = CArray.float64(4, 6) { |i, j| j.to_f }
-    view  = CArray.lazy(a, b) { |x, y| x * y }
+    view  = CArray.fuse { a * b }
     eager = a * b
     assert_equal eager[[0, 2, 2], [1, 3, 2]].to_a,
                  view[[0, 2, 2], [1, 3, 2]].to_a
   end
 
   def test_binop_strided_with_a_scalar_right
-    view  = CArray.lazy(@a) { |x| x * 2.0 }
+    view  = CArray.fuse { @a * 2.0 }
     eager = @a * 2.0
     assert_equal eager[[0, 3, 2]].to_a, view[[0, 3, 2]].to_a
   end
 
   def test_monop_and_bincmp_were_already_right
     assert_equal (@a * 10.0)[[0, 3, 2]].to_a,
-                 CArray.lazy(@a) { |x| x * 10.0 }[[0, 3, 2]].to_a
+                 CArray.fuse { @a * 10.0 }[[0, 3, 2]].to_a
     assert_equal (@a > @b)[[0, 3, 2]].to_a,
-                 CArray.lazy(@a, @b) { |x, y| x > y }[[0, 3, 2]].to_a
+                 CArray.fuse { @a > @b }[[0, 3, 2]].to_a
   end
 
   def test_contiguous_reads_are_unchanged
-    view  = CArray.lazy(@a, @b) { |x, y| x - y }
+    view  = CArray.fuse { @a - @b }
     eager = @a - @b
     assert_equal eager.to_a,          view.to_a
     assert_equal eager[1..4].to_a,    view[1..4].to_a
