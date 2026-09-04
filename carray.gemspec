@@ -26,8 +26,8 @@ Gem::Specification.new do |s|
     *Dir.glob("ext/*.rb"),
     "LICENSE",
     "README.md",
-    "CHANGELOG.1.0-2.0.md",
     "CHANGELOG.md",
+    "CHANGELOG.v1.md",
     ".yardopts",
     "carray.gemspec",
   ].select { |f| File.file?(f) }
