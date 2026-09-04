@@ -251,6 +251,8 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   int8_t    k;
   void     *scratch;
   ca_size_t operand_bytes;
+  ca_size_t operand_strides[CA_RANK_MAX];
+  int       is_contig;
 
   if ( dir != CA_XFER_GET ) {
     rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
@@ -262,26 +264,42 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   operand_bytes = mc->parent->bytes;
 
+  /* The operand's cell is operand_bytes wide where this view's is one byte
+     (CA_BOOLEAN), so the caller's strides have to be restated at the
+     operand's cell size before the pull; strides[k] / bytes is the index
+     step, which is what the two spaces share.
+
+     is_contig says the caller asked for the row-major slab that xfer_all
+     and attach send.  Only then does the parent's own buffer hold the
+     wanted cells in the packed order the kernel reads them in, so it is
+     also the only case the leaf in-place path is good for. */
+  {
+    ca_size_t native = mc->bytes;
+    is_contig = 1;
+    for ( k = mc->ndim - 1; k >= 0; k-- ) {
+      operand_strides[k] = strides[k] / mc->bytes * operand_bytes;
+      if ( strides[k] != native ) {
+        is_contig = 0;
+      }
+      native *= mc->dim[k];
+    }
+  }
+
   /* === 1. pull parent (leaf-opt or scratch) === */
   int scratch_is_inplace = 0;
   {
     char *inplace = NULL;
-    if ( ca_moncmp_try_leaf_inplace(mc->parent, starts, counts,
+    if ( is_contig &&
+         ca_moncmp_try_leaf_inplace(mc->parent, starts, counts,
                                      operand_bytes, &inplace) ) {
       scratch = inplace;
       scratch_is_inplace = 1;
       ca_moncmp_leaf_inplace_count++;
     }
     else {
-      ca_size_t scratch_strides[CA_RANK_MAX];
-      ca_size_t s = operand_bytes;
-      for ( k = mc->ndim - 1; k >= 0; k-- ) {
-        scratch_strides[k] = s;
-        s *= counts[k];
-      }
       scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_moncmp_scratch_acquire_count++;
-      ca_xfer_stride(mc->parent, starts, counts, scratch_strides, scratch,
+      ca_xfer_stride(mc->parent, starts, counts, operand_strides, scratch,
                      CA_XFER_GET);
     }
   }
