@@ -21,6 +21,7 @@ ext/.dev_build_mode
 ext/*.bundle
 ext/*.bundle.dSYM/
 ext/carray_config.h
+ext/carray_build_flags.h
 ext/mkmf.log
 
 # Yard generated documentation (`rake yard` output).  Source-of-truth

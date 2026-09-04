@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_build_flags.h"
 #include "version.h"
 
 #ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
@@ -169,6 +170,10 @@ Init_carray_ext (void)
 
   /* -- version -- */
 
+  /* The flags this build's arithmetic was compiled with.  Anything that
+     computes what these kernels compute, somewhere other than in them, has
+     to be built the same way to arrive at the same answer. */
+  rb_define_const(rb_cCArray, "BUILD_FLAGS",  rb_str_new2(CA_BUILD_FLAGS));
   rb_define_const(rb_cCArray, "VERSION",       rb_str_new2(CA_VERSION));
   rb_define_const(rb_cCArray, "VERSION_CODE",  INT2NUM(CA_VERSION_CODE));
   rb_define_const(rb_cCArray, "VERSION_MAJOR", INT2NUM(CA_VERSION_MAJOR));
