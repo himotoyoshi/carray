@@ -17,6 +17,8 @@ Ruby/CArray is an extension library for the multi-dimensional array class. It pr
 * Pack multiple values into one element as a record type
 * Comes with a DataFrame (`CAFrame`) whose columns are plain CArrays, so masks and views keep working on them
 
+Each of these is shown, briefly and with a runnable example, in [A tour of the features](docs/FeatureTour.md).
+
 ## Install
 
 ```
