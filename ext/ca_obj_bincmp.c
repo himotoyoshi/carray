@@ -305,7 +305,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   int8_t    k;
   void     *left_scratch, *right_scratch;
   ca_size_t operand_bytes;
+  ca_size_t operand_strides[CA_RANK_MAX];
   ca_size_t right_step;
+  int       is_contig;
   int       left_is_inplace  = 0;   /* skip release for leaf-opt path */
   int       right_is_inplace = 0;
 
@@ -319,10 +321,33 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   operand_bytes = ca_sizeof[bc->common_dt];
 
+  /* An operand cell is operand_bytes wide where this view's is one byte
+     (CA_BOOLEAN), so the caller's strides cannot be handed to the operand
+     pull the way a binop hands them on -- they have to be restated at the
+     operand's cell size.  strides[k] / bytes is the index step, which is
+     what the two spaces share.
+
+     is_contig says the caller asked for the row-major slab that xfer_all
+     and attach send.  Only then does an operand's own buffer hold the
+     wanted cells in the packed order the kernel reads them in, so it is
+     also the only case the leaf in-place path is good for. */
+  {
+    ca_size_t native = bc->bytes;
+    is_contig = 1;
+    for ( k = bc->ndim - 1; k >= 0; k-- ) {
+      operand_strides[k] = strides[k] / bc->bytes * operand_bytes;
+      if ( strides[k] != native ) {
+        is_contig = 0;
+      }
+      native *= bc->dim[k];
+    }
+  }
+
   /* === 1. pull LEFT (leaf in-place read or arena scratch) === */
   {
     char *left_inplace = NULL;
-    if ( ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
+    if ( is_contig &&
+         ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
                                      starts, counts, operand_bytes,
                                      &left_inplace) ) {
       /* Leaf-opt path: use parent->ptr + byte_offset directly. */
@@ -331,15 +356,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      ca_size_t left_strides[CA_RANK_MAX];
-      ca_size_t s = operand_bytes;
-      for ( k = bc->ndim - 1; k >= 0; k-- ) {
-        left_strides[k] = s;
-        s *= counts[k];
-      }
       left_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->parent, starts, counts, left_strides, left_scratch,
+      ca_xfer_stride(bc->parent, starts, counts, operand_strides, left_scratch,
                      CA_XFER_GET);
     }
   }
@@ -376,7 +395,8 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   else {
     /* Same-shape right: full slab pull or leaf-opt. */
     char *right_inplace = NULL;
-    if ( ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
+    if ( is_contig &&
+         ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
                                      starts, counts, operand_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
@@ -384,15 +404,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      ca_size_t right_strides[CA_RANK_MAX];
-      ca_size_t s = operand_bytes;
-      for ( k = bc->ndim - 1; k >= 0; k-- ) {
-        right_strides[k] = s;
-        s *= counts[k];
-      }
       right_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->right, starts, counts, right_strides, right_scratch,
+      ca_xfer_stride(bc->right, starts, counts, operand_strides, right_scratch,
                      CA_XFER_GET);
     }
     right_step = 1;
