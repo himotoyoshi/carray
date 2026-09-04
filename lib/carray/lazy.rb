@@ -827,65 +827,44 @@ end
 #   - A bare lazy return auto-materialises; escaping the lazy view (e.g.
 #     stashing it in an Array) is the user's responsibility.
 # ---------------------------------------------------------------------------
+# CArray.fuse
+#
+# Builds an expression instead of evaluating it, so that it is computed in
+# one pass with no array standing for a step along the way.  The block is
+# read rather than called; see CArray::FuseSource for why, and for what
+# happens where its source cannot be read.
+# ---------------------------------------------------------------------------
 class << CArray
-  # @overload fuse(*args) { |*shadows| ... }
-  #   Runs a transient lazy-fusion scope: wraps each CArray argument
-  #   with `.lazy`, yields the wrappers (and any non-CArray args)
-  #   to the block, then auto-materialises a bare lazy return value
-  #   into an entity. Non-lazy returns pass through as-is.
-  #   @param args [Array<CArray, Object>] operands.
-  #   @yieldparam shadows [Array<CArray, Object>] lazy wrappers
-  #     paired with pass-through non-CArray operands.
-  #   @return [Object]
+  # @overload fuse { <expression> }
+  #   Builds the expression rather than evaluating it, so that it is
+  #   computed in one pass with no array standing for a step along the way.
+  #
+  #   The block is not called.  Its source is read, every name in it that
+  #   holds a CArray is given `.lazy`, and the result is evaluated back in
+  #   the block's own binding -- so `self`, instance variables, methods and
+  #   constants are what they were where it was written.
+  #
+  #     out[] = CArray.fuse { (a + b) * (c - a) }
+  #     total = CArray.fuse { a * weight }.sum
+  #
+  #   What comes back is the expression, not an array: it is computed where
+  #   it is used -- stored into an array, reduced, or asked for one with
+  #   `to_ca`.  A block holding anything but an expression over arrays comes
+  #   back as whatever it evaluated to.
+  #
+  #   @return [Object] the expression, as a lazy view
   #   @raise [LocalJumpError] when no block is given.
-  def fuse(*args)
-    raise LocalJumpError, "CArray.fuse requires a block" unless block_given?
-    shadows = args.map { |a| a.is_a?(CArray) ? a.lazy : a }
-    result = yield(*shadows)
-    case result
-    when CAMonOp, CABinOp, CAMonCmp, CABinCmp, CALazyMarker
-      result.to_ca
-    else
-      result
+  #   @raise [ArgumentError] when the block's source cannot be read -- in
+  #     irb, in `eval`, or from a file that is gone.  Write `.lazy` on the
+  #     operands there: `a.lazy + b.lazy`.
+  def fuse (*args, &block)
+    raise LocalJumpError, "CArray.fuse requires a block" unless block
+    unless args.empty?
+      raise ArgumentError,
+            "CArray.fuse takes no arguments: write the expression itself, " \
+            "`CArray.fuse { a + b }`, and the names in it are read from " \
+            "where the block was written"
     end
-  end
-
-  # CArray.lazy(*args) { |lazies| ... }  —  dual of fuse
-  #
-  # Like `fuse`, wraps each CArray argument with `.lazy` and yields it to
-  # the block, but **does not auto-materialise at block exit** (= returns
-  # the lazy structure as-is). If the block return is non-lazy (= Numeric
-  # / entity CArray / Array etc.) it's pass-through (= same polymorphic
-  # semantics as fuse).
-  #
-  # Use cases:
-  #   - Passing a chain between functions: build the lazy expression
-  #     inside the function and materialise at the caller
-  #     (= `.to_ca` / `.sum` / `.mean(axis:)` etc.)
-  #   - Reusable expressions: apply the same expr to multiple datasets
-  #   - debug / dump_tree: observe the lazy structure as-is
-  #   - Pick the materialise form later: full materialise or reduction
-  #
-  # Example:
-  #   expr = CArray.lazy(a, b) { |s, o| (s + o) * 2 }
-  #   expr.class           #=> CABinOp (lazy view)
-  #   expr.to_ca           # full materialise
-  #   expr.sum             # reduction (= chain + reduce in 1 pass)
-  #
-  # Polymorphic semantics (= symmetric with fuse):
-  #   CArray.lazy(25.0, b) { |s, o| s + o }   # s=25.0 Float pass-through
-  #   CArray.lazy(arr, b)  { |s, o| s + o }   # s=arr.lazy
-  # @overload lazy(*args) { |*shadows| ... }
-  #   Like {.fuse} but does not auto-materialise: returns whatever
-  #   the block yields (typically a lazy view) so the expression
-  #   can be materialised later via `.to_ca`, `.sum`, `.mean`, etc.
-  #   @param args [Array<CArray, Object>] operands.
-  #   @yieldparam shadows [Array<CArray, Object>] lazy wrappers.
-  #   @return [Object]
-  #   @raise [LocalJumpError] when no block is given.
-  def lazy(*args)
-    raise LocalJumpError, "CArray.lazy requires a block" unless block_given?
-    shadows = args.map { |a| a.is_a?(CArray) ? a.lazy : a }
-    yield(*shadows)
+    CArray::FuseSource.evaluate(block)
   end
 end

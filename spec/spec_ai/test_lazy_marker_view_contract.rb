@@ -111,16 +111,15 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
 
   def test_fuse_stencil_matches_eager
     want = @f.shift(1, 0) + @f.shift(-1, 0) + @f.shift(0, 1) + @f.shift(0, -1) - 4 * @f
-    got  = CArray.fuse(@f) { |u|
-             u.shift(1, 0) + u.shift(-1, 0) + u.shift(0, 1) + u.shift(0, -1) - 4 * u
+    got  = CArray.fuse {
+             @f.shift(1, 0) + @f.shift(-1, 0) + @f.shift(0, 1) + @f.shift(0, -1) - 4 * @f
            }
-    assert_equal CArray, got.class
     assert_equal want.to_a, got.to_a
   end
 
   def test_fuse_stencil_with_fill_value_matches_eager
     want = @f.shift(1, 0, fill_value: 0) + @f.shift(-1, 0, fill_value: 0)
-    got  = CArray.fuse(@f) { |u| u.shift(1, 0, fill_value: 0) + u.shift(-1, 0, fill_value: 0) }
+    got  = CArray.fuse { @f.shift(1, 0, fill_value: 0) + @f.shift(-1, 0, fill_value: 0) }
     assert_equal want.to_a, got.to_a
   end
 
@@ -128,7 +127,7 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
     m = @f.copy
     m[1, 1] = UNDEF
     want = m.shift(1, 0) + m.shift(-1, 0)
-    got  = CArray.fuse(m) { |u| u.shift(1, 0) + u.shift(-1, 0) }
+    got  = CArray.fuse { m.shift(1, 0) + m.shift(-1, 0) }
     assert_equal want.mask.to_a, got.mask.to_a
     assert_equal want.to_a, got.to_a
   end
@@ -182,7 +181,7 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
     assert_equal @a.mean(axis: 0).to_a, @a.lazy.mean(axis: 0).to_a
     assert_equal @a.max(axis: 1).to_a,  @a.lazy.max(axis: 1).to_a
     assert_equal @a.mean(axis: 0).to_a,
-                 CArray.fuse(@a) { |v| v.mean(axis: 0) }.to_a
+                 CArray.fuse { @a.mean(axis: 0) }.to_a
     # One lazy op above the marker went through even before the strip.
     assert_equal @a.sum(axis: 0).to_a, (@a.lazy + 0).sum(axis: 0).to_a
   end
