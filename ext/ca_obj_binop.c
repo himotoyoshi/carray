@@ -517,6 +517,19 @@ ca_binop_func_create_mask (void *ap)
              ( bo->op_id == CA_BINOP_BIT_AND || bo->op_id == CA_BINOP_BIT_OR ) );
   is_or  = ( bo->op_id == CA_BINOP_BIT_OR );
 
+  /* One masked operand and no Kleene resolution: the answer is that
+     operand's mask, cell for cell.  Share it the way CAMonOp shares its
+     parent's, rather than allocating a copy per node -- a chain of k
+     binops over one masked array then holds one boolean array, not k. */
+  if ( ! kleene && ( has_l != has_r ) ) {
+    CArray *src = has_l ? l : r;
+    if ( src->elements == bo->elements ) {
+      bo->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
+                                         bo->ndim, bo->dim, 0, 0);
+      return;
+    }
+  }
+
   bo->mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
   dst = (boolean8_t *) bo->mask->ptr;
   n = bo->elements;
