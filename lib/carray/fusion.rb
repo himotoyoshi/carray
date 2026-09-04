@@ -51,6 +51,46 @@ class CArray
 
     class Refused < StandardError; end
 
+    # ---- who computes a plan --------------------------------------------
+    #
+    # CArray can always walk the expression, so nothing has to be registered
+    # and nothing changes when nothing is.  What a registered evaluator adds
+    # is a second way to arrive at the same answer; it is asked, and it may
+    # decline.  The dispatch point stays on CArray's side, which is what
+    # keeps the threshold below a decision about CArray's own walk rather
+    # than one that moves with whatever is installed.
+    #
+    # The evaluator itself is held by CArray (see carray/lazy.rb), so that
+    # materialising an expression need not reach for this file at all until
+    # something has been registered.
+
+    # Reaching a compiled kernel costs about the same whatever the array's
+    # size, and what it buys is the passes the walk would make.  Below this
+    # the walk is the faster answer.  The crossing moves with how wide the
+    # expression is -- measured, thirty thousand cells at one operation, six
+    # thousand at six -- and this brackets those: a one-operation expression
+    # loses a couple of microseconds here, a six-operation one wins ten.
+    THRESHOLD = 10_000
+
+    # Returns the array, or nil where nothing computed it.
+    def self.evaluate (view)
+      evaluator = CArray.expression_evaluator or return nil
+      return nil if view.elements < THRESHOLD
+      plan = plan(view) or return nil
+      # A marker over an array, or anything else with nothing to compute,
+      # is not worth handing over.
+      return nil unless plan.nodes.any? { |n| n.is_a?(Op) }
+      out = CArray.__alloc_uninit__(plan.data_type, plan.dim)
+      out.mask = 0 if plan.masked
+      evaluator.call(plan, out) ? out : nil
+    rescue StandardError => error
+      CArray.expression_evaluator = nil
+      warn "CArray: the registered expression evaluator raised " \
+           "(#{error.class}: #{error.message}); expressions will be walked " \
+           "from here on"
+      nil
+    end
+
     # Returns a Plan, or nil where the expression holds something a plan
     # cannot describe.  Refusing is ordinary: the caller walks instead.
     def self.plan (view)
