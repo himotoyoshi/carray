@@ -77,6 +77,20 @@ rake test          # every test suite, plus the yard-stubs drift check
 `rake test` must report no failures. It is also the default task, so a bare
 `rake` does the same thing.
 
+It runs two separate bodies of tests, and only one of them is yours to
+add to:
+
+- `spec/Classes`, `spec/Features` and `spec/UnitTest` are written by hand.
+  A test for your fix goes here. Both rspec and test/unit are in use —
+  follow whichever the neighbouring file uses.
+- `spec/spec_ai` is a large set of regression pins written alongside the
+  3.0 rewrite with AI tooling, which is what the name records. They pin
+  behaviour rather than describe it, and many are named after development
+  phases that mean nothing from outside. You are not expected to read them
+  or to add to them. If one fails on your change, do not edit it to pass —
+  say which one failed; either your change broke something the pin was
+  guarding, or the pin was guarding an accident.
+
 Then, in the same pull request:
 
 - If you touched `ext/*.c`, check the matching `yard-stubs/*.rb`. Those

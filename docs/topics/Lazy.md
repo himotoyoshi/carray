@@ -1,163 +1,116 @@
-# Lazy element-wise views — `.lazy` / `CArray.lazy` / `CArray.fuse`
+# Lazy element-wise views — `.lazy` and `CArray.fuse`
 
-CArray 3.0 introduces **lazy element-wise views**: an element-wise
-expression like `(a + b * t).sum` builds a small operator tree (no
-intermediate buffer) and evaluates in one streamed pass on first
-materialise.  Three surfaces are provided:
+An element-wise expression like `(a + b * t).sum` can be built as a small
+operator tree rather than evaluated a step at a time: no array stands for a
+step along the way, and the whole of it runs in one pass when something asks
+for the answer.  Two surfaces build one:
 
-| surface | scope | output |
-|---|---|---|
-| `head.lazy` | persistent — keep a lazy view and consume it many times | lazy view (escape OK) |
-| `CArray.lazy(args...) { |args...| body }` | transient block scope, **lazy structure preserved** | lazy view (pass-through on block exit) |
-| `CArray.fuse(args...) { |args...| body }` | transient — fuse a single expression and get back an entity | entity (auto-materialise on block exit) |
+| surface | what it is for |
+|---|---|
+| `a.lazy` | mark one array, and build from there |
+| `CArray.fuse { ... }` | write the expression itself |
 
-All three surfaces are type-driven (no thread-local state).  `a + b` syntax
-is unchanged; eager and lazy paths coexist.
+Both are type-driven, with no thread-local state.  `a + b` still means what
+it meant; the eager and lazy paths sit side by side.
 
 ---
 
-## 1. `.lazy` — persistent lazy view
+## 1. `.lazy` — marking an array
 
 ```ruby
-m = a.lazy            # zero-cost marker
-y = (m.sqrt + m.sin)  # CABinOp tree, not yet evaluated
-y.to_ca               # materialise — single pass, no intermediates
+m = a.lazy            # a read-only marker over a, costing nothing
+y = m.sqrt + m.sin    # an operator tree, not yet evaluated
+y.to_ca               # computed here, in one pass, with no intermediates
 ```
 
 - `.lazy` returns a read-only marker wrapping `a`
-- subsequent element-wise / affine ops build a `CAMonOp` / `CABinOp`
+- element-wise and affine operations on it build a `CAMonOp` / `CABinOp`
   / `CATriOp` / `CAMonCmp` / `CABinCmp` tree
-- nothing is computed until you call `.to_ca` (or trigger materialise
-  via `each`, `to_a`, `sum`, etc.; see §4)
-- the marker (and the tree) is **read-only**: `m[0] = v` raises
+- nothing is computed until something asks: `to_ca`, or a store, or a
+  reduction such as `sum` (see §4)
+- the marker, and the tree over it, is **read-only**: `m[0] = v` raises
 
 ---
 
-## 2. `CArray.fuse` — transient fusion + polymorphic helper
-
-`CArray.fuse(args...) { |args...| body }` wraps each CArray argument
-with `.lazy`, yields the wrappers to the block, then on block exit
-auto-materialises any bare lazy return value into an entity.
+## 2. `CArray.fuse` — writing the expression
 
 ```ruby
-result = CArray.fuse(u) { |u|
-  (u.shift(1,0,fill_value:0) + u.shift(-1,0,fill_value:0) +
-   u.shift(0,1,fill_value:0) + u.shift(0,-1,fill_value:0) - 4*u) / h**2
-}
-# result is a CArray entity
+out[] = CArray.fuse { (a + b) * (c - a) + b * c - a }
+total = CArray.fuse { a * weight }.sum
 ```
 
-Arguments that are **not** CArray (Float, Integer, Rational, etc.) are
-passed through unchanged — this enables the polymorphic numeric helper
-idiom:
+The block is **read, not called**.  Its `a` is the array itself, so calling
+it would compute the expression eagerly — the thing this exists to avoid.
+The source is rewritten so that every name in it holding a CArray reads as
+`a.lazy`, and the result is evaluated back in the block's own binding: `self`,
+instance variables, methods and constants are what they were where it was
+written.
+
+```ruby
+class Field
+  def gradient
+    CArray.fuse { (@u.shift(1, 0) - @u.shift(-1, 0)) / (2 * spacing) }
+  end
+end
+```
+
+What comes back is the **expression**, not an array.  It is computed where it
+is used — stored into an array, reduced, or asked for one with `to_ca`.  A
+block holding anything but an expression over arrays comes back as whatever
+it evaluated to.
+
+Ruby has no macro, so the alternative was to hand the arrays in and take
+shadows back.  Julia writes `@.` for the same reason, and does the same thing
+to the expression underneath.
+
+### A value that is not an array passes through
+
+Only names holding a CArray are given `.lazy`; everything else is left as it
+is.  One helper then reads the same for a scalar and for an array:
 
 ```ruby
 using CArray::CoreExtensions   # postfix sqrt/exp/log/sin/... on Numeric
 
-def magnus(t)
-  CArray.fuse(t) { |t| 6.1078 * ((17.27 * t) / (t + 237.3)).exp }
+def magnus (t)
+  CArray.fuse { 6.1078 * ((17.27 * t) / (t + 237.3)).exp }
 end
 
-magnus(25.0)               # => 31.677 (Float — refinement maps .exp to Math.exp)
-magnus(temperature_array)  # => CArray (CAMonOp tree materialised in one pass)
+magnus(25.0)               # => 31.677, a Float: the refinement maps .exp to Math.exp
+magnus(temperature_array)  # => the expression, computed in one pass
 ```
 
-The **same expression** carries both scalar and array paths.  No
-`is_a?` branching, no formula duplication.  This is unique to CArray
-among Ruby numeric libraries; it builds on:
+The **same expression** carries both paths — no `is_a?` branching, no
+formula written twice.  It rests on two things: the `CArray::CoreExtensions`
+refinement, which puts the same postfix math on `Float` / `Integer` /
+`Rational` as on a CArray, and the lazy views, which give the array path its
+fusion.
 
-- the `CArray::CoreExtensions` refinement (= same postfix math methods
-  on `Float` / `Integer` / `Rational` as on `CArray` instances), and
-- the lazy view substrate (= `CAMonOp` / `CABinOp` etc. give CArray
-  args fusion + 1-pass materialise).
+### The operands are read-only
 
-### Block exit semantics
-
-| block return value | what `fuse` returns |
-|---|---|
-| `CAMonOp` / `CABinOp` / `CATriOp` / `CAMonCmp` / `CABinCmp` / `CALazyMarker` | `.to_ca` applied → entity |
-| plain `CArray` entity | passes through unchanged |
-| `Numeric` | passes through unchanged |
-| `Array`, `Hash`, `nil`, etc. | passes through unchanged (Array containing lazy views does **not** recursively materialise; if you need that, call `.to_ca` explicitly inside the block) |
-
-### Shadow read-only
-
-Inside the block, the lazy-wrapped argument (= "shadow") is read-only:
+Inside the block the arrays are read through a marker, so writing raises:
 
 ```ruby
-CArray.fuse(arr) { |a| a[0] = 99 }   # raises RuntimeError
+CArray.fuse { arr[0] = 99 }   # raises RuntimeError
 ```
 
-Eager arrays captured from outside the block remain mutable normally.
-Numeric arguments are pass-through and behave like ordinary Ruby
-numbers.
+The arrays themselves are untouched, and stay writable outside.
 
-### Nested `fuse`
+### An index is a position, not a value
 
-Inner `fuse` materialises at its own exit:
+`a[i]` reads array `a` at `i`; only `a` is an operand of the expression, so
+`i` is left alone whatever it holds.
+
+### When the source cannot be read
+
+A block written in irb, in `eval`, or in a file that is no longer there has
+no source to read, and `fuse` says so rather than quietly computing the
+expression the slow way.  Write `.lazy` on the operands there:
 
 ```ruby
-CArray.fuse(a) { |a|
-  inner = CArray.fuse(b) { |b| a + b }   # inner is an entity here
-  a + inner                               # outer is `lazy + entity`
-}
+a.lazy + b.lazy
 ```
 
-Nested `fuse` breaks fusion at the inner boundary; for a single
-fused expression prefer a flat call: `CArray.fuse(a, b) { |a, b| ... }`.
-
-### When `fuse` is overhead
-
-Numeric args add ~100 ns of Ruby overhead per `fuse` call (= block
-yield + a few `is_a?` checks).  Irrelevant for typical use, but if you
-call a `fuse`-based helper in a tight loop with Numeric args (= an
-antipattern; bulk-op the array instead), you can branch on
-`arg.is_a?(CArray)` at the call site for raw speed.
-
----
-
-## 3. `CArray.lazy` — transient lazy scope (= no auto-materialise)
-
-`CArray.lazy(args...) { |args...| body }` is the pair of `CArray.fuse`
-that **does not** auto-materialise on block exit.  Each CArray arg is
-wrapped with `.lazy` (read-only marker), the block runs, and the
-return value passes through unchanged.
-
-```ruby
-expr = CArray.lazy(a, b) { |s, o| (s + o) * 2 }
-expr.class          #=> CABinOp (lazy view)
-expr.to_ca          # full materialise on demand
-expr.sum            # reduce in one chain+reduce pass
-```
-
-Use this when you want to:
-
-- **build a reusable lazy expression** (= apply the same expression to
-  multiple datasets):
-  ```ruby
-  def normalised(arr)
-    CArray.lazy(arr) { |a| (a - a.mean) / a.stddev }
-  end
-  series = many_arrays.map { |arr| normalised(arr).to_ca }
-  ```
-- **pass a lazy chain across function boundaries** (= caller decides
-  how to materialise: full / reduction / cast / etc.)
-- **debug / introspect** the lazy tree (= `expr.dump_tree`,
-  `expr.inspect`) without triggering materialise
-- **choose the materialise shape later** (= `.to_ca` for full,
-  `.sum` / `.mean(axis: k)` for reduction, etc.)
-
-Polymorphic semantics match `fuse` — Numeric / non-CArray args pass
-through unchanged, so the same helper definition supports both
-`CArray.lazy(arr, b) { ... }` and `CArray.lazy(scalar, b) { ... }`.
-
-### `fuse` vs `lazy` — when to use which
-
-| You want | Surface |
-|---|---|
-| A single closed-form expression that returns an entity | `CArray.fuse(args) { ... }` |
-| To keep the expression as a lazy view (= caller chooses materialise) | `CArray.lazy(args) { ... }` |
-| To hold a lazy view across many statements / iterations | `.lazy` (= persistent surface, no block) |
+That always works, and it is what `fuse` writes for you.
 
 ---
 
@@ -179,21 +132,14 @@ through unchanged, so the same helper definition supports both
 
 ## 5. When to use which surface
 
-- **`.lazy`** — when you want to hold onto a lazy expression across
-  many statements/iterations, e.g. a parametric model
-  `model = (a.lazy + b * param)` evaluated for thousands of `param`
-  values in a tight loop.
-- **`CArray.fuse(args) { ... }`** — when you want to write a single
-  closed-form expression and get an entity back, and (especially) when
-  the same helper should accept both `CArray` and `Numeric`.
-- **`CArray.lazy(args) { ... }`** — when you want `fuse`-style block
-  scope but need to **return the lazy view** to the caller (= caller
-  picks the materialise form: `.to_ca` / `.sum` / `.mean(axis:)` /
-  etc.).
+- **`CArray.fuse { ... }`** — most of the time.  The expression reads as
+  itself, and one helper serves a scalar and an array alike.
+- **`.lazy`** — when the expression is held rather than written in one
+  place: a parametric model `model = a.lazy + b * param` kept across many
+  values of `param`, or an operand marked once and combined further on.
+  Also where a block's source cannot be read, in irb or in `eval`.
 
-When in doubt, `fuse` is the safer default: nothing escapes the block
-as a lazy view, so external code never has to know about the lazy
-substrate.
+Both give back an expression, so what forces it is the same either way.
 
 ---
 
@@ -314,6 +260,7 @@ of a chain you intend to materialise more than once.
 ## 7. Source
 
 - `lib/carray/lazy.rb` — Ruby-level dispatch and `CArray.fuse`
+- `lib/carray/fuse_source.rb` — reading a block as an expression
 - `lib/carray/core_extensions.rb` — `CArray::CoreExtensions` refinement
 - `ext/carray_lazy.c` — `CALazyMarker` C-level view
 - `ext/ca_obj_monop.c`, `ext/ca_obj_binop.c`, `ext/ca_obj_triop.c` — `CAMonOp`, `CABinOp`, `CATriOp`

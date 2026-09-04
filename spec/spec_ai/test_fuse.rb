@@ -94,6 +94,17 @@ class TestFuse < Test::Unit::TestCase
     assert_equal (@a + @b).to_a, (CArray.fuse do @a + @b end).to_a
   end
 
+  def test_a_line_carrying_a_multi_byte_character
+    # A block's reported columns count bytes, so a line with anything
+    # multi-byte before the block slices in the wrong place unless the
+    # reader counts bytes too -- and a wrong slice reads as an empty
+    # expression rather than as an error.
+    labelled = ["§ mark", CArray.fuse { @a + @b }]
+    assert_equal (@a + @b).to_a, labelled[1].to_a
+    japanese = ["あいう", CArray.fuse { @a * 2.0 }]
+    assert_equal (@a * 2.0).to_a, japanese[1].to_a
+  end
+
   # -- one helper for a scalar and for an array --------------------------
   #
   # The point of reading names rather than taking them as arguments: the

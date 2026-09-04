@@ -11,6 +11,17 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: `CArray.fuse` takes the expression rather than the arrays it is
+  over — `CArray.fuse { (a + b) * c }` in place of
+  `CArray.fuse(a, b, c) { |x, y, z| (x + y) * z }`. The block is read rather
+  than run, so the names in it are the ones you wrote where you wrote them;
+  a block whose source cannot be read, at an `irb` prompt or inside `eval`,
+  says so and points at `a.lazy + b.lazy`, which always works. What comes
+  back is the expression, computed where it is used — by a store, a
+  reduction, or `to_ca` — so `x = CArray.fuse { ... }` now wants `.to_ca` if
+  what you want is an array. `CArray.lazy(*args) { ... }` was the same
+  method once fuse stopped materialising, and is gone.
+
 - Fix: reading a concatenated view (`CArray.concat`, `CAFrame.concat`)
   backwards along the concatenated axis — `m.reverse` and any other negative
   step — raised IndexError instead of answering.
