@@ -313,18 +313,14 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     right_step = 0;
   }
   else {
-    /* Same-shape right.  Pull with the same byte layout the caller
-       requested for the output; right.bytes matches output.bytes
-       because right.data_type == out.data_type by cast-before. */
-    ca_size_t right_strides[CA_RANK_MAX];
-    ca_size_t s = right_bytes;
-    for ( k = bo->ndim - 1; k >= 0; k-- ) {
-      right_strides[k] = s;
-      s *= counts[k];
-    }
+    /* Same-shape right.  `strides` is the step through the operand, the
+       same one the left was pulled with -- recomputing a packed one here
+       reads the right operand's cells 0, 1, 2 against the left's 0, 2, 4.
+       right.bytes matches output.bytes because right.data_type ==
+       out.data_type by cast-before, so the same steps serve both. */
     scratch = ca_lazy_arena_acquire(slab_n * right_bytes);
     ca_binop_scratch_acquire_count++;
-    ca_xfer_stride(bo->right, starts, counts, right_strides, scratch,
+    ca_xfer_stride(bo->right, starts, counts, strides, scratch,
                    CA_XFER_GET);
     right_step = 1;
   }
