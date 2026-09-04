@@ -132,16 +132,16 @@ g["lat"].mean              #  => 37.833333333333336
 
 ```ruby
 df = CAFrame.new(
-  "station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
-  "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]),
+  "fruit" => CA_OBJECT(["apple", "orange", "apple"]),
+  "price" => CA_FLOAT64([120.0, 80.0, 140.0]),
 )
 
-df["temp"].class              #  => CArray
-df.group_by("station").mean
-#  station   temp
-#  -------  -----
-#  tokyo    20.55
-#  osaka     25.3
+df["price"].class             #  => CArray
+df.group_by("fruit").mean
+#  fruit   price
+#  ------  -----
+#  apple   130.0
+#  orange   80.0
 ```
 
-Columns may carry trailing axes of their own, so a wind vector or a 3×3 tensor per row is an ordinary column rather than something to flatten.
+Columns may carry trailing axes of their own, so a pair of coordinates or a 3×3 tensor per row is an ordinary column rather than something to flatten.
