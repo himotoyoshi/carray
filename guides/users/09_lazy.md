@@ -65,22 +65,24 @@ A lazy chain stores *one description* of the calculation and produces *one* resu
 
 The shape and the type rules are unchanged — the lazy result has the same shape and the same promoted type it would have had under eager evaluation. Only the *timing* and *intermediate allocation* differ.
 
-## `CArray.fuse` — one expression, one result
+## `CArray.fuse` — writing the expression
 
-When you have a single closed-form expression and just want the final array back, `CArray.fuse` is the convenient surface. It wraps each CArray argument with `.lazy` for you, runs the block, then materialises the result on the way out.
+Marking each operand with `.lazy` gets repetitive once there is more than one of them. `CArray.fuse` lets you write the expression itself:
 
 ```ruby
 a = CArray.float64(4).seq
 b = CArray.float64(4).seq + 1.0
 
-result = CArray.fuse(a, b) { |x, y| (x + y) * 2 }
+result = CArray.fuse { (a + b) * 2 }
 result.class
-#  => CArray
-result
+#  => CABinOp
+result.to_ca
 #  => [ 2.0, 6.0, 10.0, 14.0 ]
 ```
 
-Inside the block, `x` and `y` are lazy wrappers. The block returns a lazy expression, and `fuse` calls `to_ca` on it for you. From the outside, it looks like an ordinary array operation that just happens to skip the intermediates.
+The block is **read, not run**. Its `a` is the array itself, so running it would compute the expression eagerly — the very thing we are avoiding. `fuse` reads the block's source, gives every name in it that holds an array a `.lazy`, and evaluates the result back where the block was written. Instance variables, methods on `self` and constants all still mean what they meant there.
+
+What comes back is the expression, the same as from a hand-marked chain. It is computed where it is used — stored into an array, reduced, or asked for one with `to_ca`.
 
 The classic example is a finite-difference stencil — many operands, modest arithmetic per cell, large arrays:
 
@@ -88,11 +90,11 @@ The classic example is a finite-difference stencil — many operands, modest ari
 u = CArray.float64(64, 64).seq
 h = 0.1
 
-laplacian = CArray.fuse(u) { |u|
+laplacian = CArray.fuse {
   (u.shift(1, 0, fill_value: 0) + u.shift(-1, 0, fill_value: 0) +
    u.shift(0, 1, fill_value: 0) + u.shift(0, -1, fill_value: 0) - 4 * u) / h**2
 }
-laplacian.class
+laplacian.to_ca.class
 #  => CArray
 ```
 
@@ -100,38 +102,53 @@ Five operands, one pass. Written eagerly the same expression allocates four inte
 
 Note where `.lazy` is *not* needed. Views built inside the block — `shift` here, but equally `[]`, `transpose`, `reshape`, `flip`, `roll`, `window`, `diagonal`, `tile` — stay part of the expression on their own. You do not have to think about the order you build them in.
 
-A polymorphic helper falls out of this naturally. Arguments that are *not* CArray (a `Float`, `Integer`, etc.) are passed through to the block unchanged, so the same code works for a single scalar input:
+A polymorphic helper falls out of this naturally. Only names holding an array are marked; a `Float` or an `Integer` is left alone, so the same formula reads either way:
 
 ```ruby
 using CArray::CoreExtensions    #  enables postfix .exp on Numeric
 
 def magnus(t)
-  CArray.fuse(t) { |t| 6.1078 * ((17.27 * t) / (t + 237.3)).exp }
+  CArray.fuse { 6.1078 * ((17.27 * t) / (t + 237.3)).exp }
 end
 
 magnus(25.0)
 #  => 31.6767     a Float
 
-magnus(CA_DOUBLE([0.0, 15.0, 25.0, 35.0]))
+magnus(CA_DOUBLE([0.0, 15.0, 25.0, 35.0])).to_ca
 #  => [ 6.1078, 17.0529, 31.6767, 56.2250 ]
 ```
 
 One formula, scalar or array, no type-checks needed at the call site.
 
-## Pass a repeated subexpression in as an argument
+### When the block cannot be read
 
-Inside the block, a variable does not hold a result. It holds a calculation.
+A block written at an `irb` prompt, or inside `eval`, has no source file to read from, and `fuse` says so rather than quietly computing the expression the slow way. Mark the operands by hand there:
 
 ```ruby
-CArray.fuse(a) { |x|
-  y = x * 2          # y is "multiply x by 2", not the doubled array
+a.lazy + b.lazy
+```
+
+That always works — it is what `fuse` writes for you.
+
+## Compute a repeated subexpression before the block
+
+Inside the block, a name that you assign does not hold a result. It holds a calculation.
+
+```ruby
+CArray.fuse {
+  y = a * 2          # y is "multiply a by 2", not the doubled array
   y + y              # so the multiply runs twice
 }
 ```
 
 Naming it does not compute it, and using it twice does not reuse anything. This is the reverse of eager code, where assigning to a variable is exactly how you avoid repeating work.
 
-Arguments are different. Whatever you pass to `fuse` has already been calculated before the block starts, so using it several times just uses the value several times.
+Names from *outside* the block are different. Whatever they hold has already been calculated, so using one several times just reads the value several times.
+
+```ruby
+y = a * 2            # computed here, once
+CArray.fuse { y + y }
+```
 
 The cost of getting this wrong is easy to measure. Here one expensive calculation is used `n` times inside the block (2000x2000 float64):
 
@@ -152,20 +169,20 @@ The saturation vapour pressure formula uses `TS / T` three times:
 TS, ES = 373.16, 1013.246
 L = Math.log10(ES)
 
-# TS / t written inside the block: the division runs three times per cell
-CArray.fuse(T) { |t|
-  r = TS / t
+# TS / T written inside the block: the division runs three times per cell
+CArray.fuse {
+  r = TS / T
   (-7.90298 * (r - 1) + 5.02808 * r.log10 -
-    1.3816e-7 * ((11.344 * (1 - t / TS)).exp10 - 1) +
+    1.3816e-7 * ((11.344 * (1 - T / TS)).exp10 - 1) +
     8.1328e-3 * ((-3.49149 * (r - 1)).exp10 - 1) + L).exp10
 }
 
-# computed first and passed in: one division per cell, and the rest still fuses
+# computed before the block: one division per cell, and the rest still fuses
 r = TS / T
-CArray.fuse(T, r) { |t, rr|
-  (-7.90298 * (rr - 1) + 5.02808 * rr.log10 -
-    1.3816e-7 * ((11.344 * (1 - t / TS)).exp10 - 1) +
-    8.1328e-3 * ((-3.49149 * (rr - 1)).exp10 - 1) + L).exp10
+CArray.fuse {
+  (-7.90298 * (r - 1) + 5.02808 * r.log10 -
+    1.3816e-7 * ((11.344 * (1 - T / TS)).exp10 - 1) +
+    8.1328e-3 * ((-3.49149 * (r - 1)).exp10 - 1) + L).exp10
 }
 ```
 
@@ -175,11 +192,11 @@ Measured on 1000x1000 float64, in units of one array copy:
 |---|---|
 | eager, with intermediate variables | 47.3 |
 | everything inside `fuse` | 52.0 |
-| `TS / T` passed in, rest fused | **34.9** |
+| `TS / T` computed first, rest fused | **34.9** |
 
 The middle row is worth noticing: for this formula, fusing everything is *slower* than plain eager code. `exp10` and `log10` dominate the cost, so there is little memory traffic to save, and the repeated divisions cost more than the saving. Moving one line out of the block reverses the result.
 
-Do not overdo it. Passing `r - 1` in as well (also used twice, but only a subtraction) measured 35.8 — slightly worse. The question is not "is it repeated?" but:
+Do not overdo it. Computing `r - 1` beforehand as well (also used twice, but only a subtraction) measured 35.8 — slightly worse. The question is not "is it repeated?" but:
 
 > **Is repeating this calculation cheaper than computing it once and reading the values back?**
 
@@ -194,7 +211,7 @@ C = [6.11583699, 0.444606896, 0.143177157e-1, 0.264224321e-3,
      0.299291081e-5, 0.203154182e-7, 0.702620698e-10, 0.379534310e-13,
      -0.321582393e-15]
 
-CArray.fuse(T) { |t| C.reverse.inject { |acc, c| acc * t + c } }   # Horner
+CArray.fuse { C.reverse.inject { |acc, c| acc * T + c } }   # Horner
 ```
 
 Measured on 2000x2000 float64, in units of one array copy:
@@ -209,10 +226,10 @@ Measured on 2000x2000 float64, in units of one array copy:
 Everything lines up in fusion's favour here:
 
 - the arithmetic is one multiply and one add per term — cheap next to a memory read, so the intermediates were most of the cost;
-- `t` is an argument, so using it eight times costs eight reads and no recalculation;
+- `T` is an array from outside the block, so using it eight times costs eight reads and no recalculation;
 - Horner's rule builds a fresh `acc` each step, so nothing is repeated.
 
-The naive form is worth a glance too. Writing `t**k` for each term recomputes the powers, and fusion cannot fix that — but it still removes the intermediates, so it gains 3.3x anyway. Rewriting to Horner gains a further 3.4x on top. **Choosing the algorithm and fusing it are independent wins.**
+The naive form is worth a glance too. Writing `T**k` for each term recomputes the powers, and fusion cannot fix that — but it still removes the intermediates, so it gains 3.3x anyway. Rewriting to Horner gains a further 3.4x on top. **Choosing the algorithm and fusing it are independent wins.**
 
 The pair is worth remembering:
 
@@ -223,30 +240,24 @@ The pair is worth remembering:
 
 Same answer to four decimal places, opposite conclusion about fusion. It is the shape of the arithmetic that decides, not the problem being solved.
 
-## `CArray.lazy` — keep the tree
+## Handing the expression on
 
-`CArray.lazy(args) { ... }` is `fuse`'s sibling that **does not** materialise on the way out. You get the lazy view back, and the caller decides when and how to evaluate it.
+Because what `fuse` returns is the expression and not a result, it travels. A helper can build one and let the caller decide when and how to evaluate it:
 
 ```ruby
 def normalised(arr)
-  CArray.lazy(arr) { |a| (a - a.mean) / a.stddev }
+  CArray.fuse { (arr - arr.mean) / arr.stddev }
 end
 
 expr = normalised(CA_DOUBLE([1, 2, 3, 4, 5]))
 expr.class
-#  => CABinOp                   still a lazy view
+#  => CABinOp                   still an expression
 
 expr.to_ca
-#  => [ -1.4142, -0.7071, 0.0, 0.7071, 1.4142 ]
+#  => [ -1.2649, -0.6325, 0.0, 0.6325, 1.2649 ]
 ```
 
-This is useful when:
-
-- you want to reuse the same expression on many datasets;
-- you want the caller to choose the materialisation form (`to_ca`, `sum`, `mean(axis: 0)`, etc.);
-- you want to build a parametric expression once and evaluate it many times in a loop.
-
-If you cannot decide, prefer `fuse` — nothing escapes the block as a lazy view, so callers never need to know the lazy machinery exists.
+This is what lets you reuse the same expression on many datasets, let the caller pick the form to materialise into (`to_ca`, `sum`, `mean(axis: 0)`), or build a parametric expression once and evaluate it many times in a loop.
 
 ## Masks pass through
 
@@ -308,7 +319,7 @@ Reach for fusion when:
 - the chain is several operations long;
 - the arithmetic is cheap (add, multiply, compare) relative to a memory read;
 - the arrays are large enough that intermediates spill out of cache;
-- no subexpression is used more than once (or the shared ones are passed in);
+- no subexpression is used more than once (or the shared ones are computed before the block);
 - you want a single helper that works for both scalars and arrays.
 
 Stay eager when:
@@ -326,8 +337,8 @@ The expression can be built once and reused. It refers to the array itself, not 
 
 ```ruby
 c = alpha * dt / h**2
-expr = CArray.lazy(u) { |v|
-  v + c * (v.shift(1, 0) + v.shift(-1, 0) + v.shift(0, 1) + v.shift(0, -1) - 4 * v)
+expr = CArray.fuse {
+  u + c * (u.shift(1, 0) + u.shift(-1, 0) + u.shift(0, 1) + u.shift(0, -1) - 4 * u)
 }
 
 nstep.times do
@@ -345,7 +356,7 @@ Measured over 30 steps of a 1000x1000 diffusion problem, the fused loop runs **1
 A lazy expression turns into a regular CArray the moment you call `to_ca`, `copy`, or any reduction. From there, everything works as in earlier chapters — you can index it, mutate it, mask it, pass it to a view method, hand it to MemoryView consumers. The lazy substrate is just a way to defer the work; once it is done, the result is an ordinary array.
 
 ```ruby
-result = CArray.fuse(a, b) { |x, y| (x.sqrt + y) * 2 }
+result = CArray.fuse { (a.sqrt + b) * 2 }.to_ca
 result[0] = 0.0                   #  ordinary entity, writable
 result + 1                        #  ordinary eager arithmetic
 ```

@@ -40,8 +40,12 @@ class CArray
       wrapped = "proc " + text
       node = Prism.parse(wrapped).value
                   .breadth_first_search { |n| n.is_a?(Prism::BlockNode) }
-      inner = node && node.body or return ""
-      wrapped[inner.location.start_offset...inner.location.end_offset]
+      inner = node && node.body
+      unless inner
+        raise ArgumentError,
+              "CArray.fuse could not read an expression out of this block"
+      end
+      wrapped.byteslice(inner.location.start_offset...inner.location.end_offset)
     end
 
     def self.extract (block)
@@ -56,12 +60,14 @@ class CArray
       end
       lines = File.readlines(path)
       first_line, first_column, last_line, last_column = location
+      # The columns count bytes, not characters, so a line with anything
+      # multi-byte on it slices in the wrong place unless this does too.
       if first_line == last_line
-        lines[first_line - 1][first_column...last_column]
+        lines[first_line - 1].byteslice(first_column...last_column)
       else
-        [lines[first_line - 1][first_column..],
+        [lines[first_line - 1].byteslice(first_column..),
          *lines[first_line...(last_line - 1)],
-         lines[last_line - 1][0...last_column]].join
+         lines[last_line - 1].byteslice(0...last_column)].join
       end
     end
 
