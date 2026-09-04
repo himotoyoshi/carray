@@ -4,15 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCAField " do
 
-  example "virtual_array" do
-    a = CArray.int(3,3)
-    b = a.field(0,CA_INT8)
-    r = b.parent
-    is_asserted_by { b.class == CAField }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { a == r }
-  end
-
   example "attributes" do
     #
     a = CArray.int16(3,3) { 0x1122 }

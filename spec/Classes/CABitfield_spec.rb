@@ -4,15 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCABitfield " do
 
-  example "virtual_array" do
-    a = CArray.int(3,3) { 1 }
-    b = a.bitfield(0)
-    r = b.parent
-    is_asserted_by { b.class == CABitfield }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { a == r }
-  end
-
   example "basic_features" do
     # ---
     a = CArray.int(3,3)

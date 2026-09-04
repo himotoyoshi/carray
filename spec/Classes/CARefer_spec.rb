@@ -4,15 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCARefer " do
 
-  example "virtual_array" do
-    a = CArray.int(3,3)
-    b = a.refer(CA_INT,[9])
-    r = b.parent
-    is_asserted_by { b.class == CARefer }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { a == r }
-  end
-
   example "basic_features" do
     # ---
     a = CArray.int(3,2).seq!

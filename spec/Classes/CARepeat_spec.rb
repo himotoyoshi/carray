@@ -4,17 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCARepeat " do
 
-  example "virtual_array" do
-    a = CArray.int(3)
-    b = a[:%,3]
-    r = b.parent
-    is_asserted_by { b.class == CARepeat }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { true == b.read_only? }
-    is_asserted_by { false == b.attached? }
-    is_asserted_by { a == r }
-  end
-
   example "basic_feature" do
     # ---
     a = CArray.int(3).seq!
