@@ -11,6 +11,19 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
+  something reads it, rather than when the expression is built. Two things
+  follow. `root_array` and `ancestors` now stop at a lazy operation instead of
+  walking into its left operand -- the expression fans out to both operands
+  there, so naming the left one its root was wrong. And a mask set on either
+  operand after the expression was built is now seen; before, only the left
+  one was. Masked expressions are also much faster to build: a chain of
+  sixteen operations over one masked array of two million cells took 125 ms
+  and now takes none.
+
+- Fix: `a.value + b` raised `can not create mask array for the value array`
+  when `b` carried a mask. It now propagates `b`'s mask.
+
 - Change: the top-level constant `CA_NIL` is gone. It was an internal
   sentinel standing for "the caller did not give this argument", and its name
   named the very value it exists to be distinguished from -- `nil` is itself a
