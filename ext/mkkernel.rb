@@ -6055,6 +6055,90 @@ module MkKernel
   # The aggregator init.c, where Init_carray_kernels() calls each per-tag
   # Init_<suffix>() in file_tags order.  No tag depends on another: an alias
   # already sits after its target within its own file.
+  # ---------------------------------------------------------------------
+  # The kernel bodies, as text, for a caller that has to compute the same
+  # thing somewhere other than in these kernels -- a compiler handed an
+  # expression tree, which must produce what the eager kernel produces.
+  # Emitting the table here rather than reading this generator at runtime
+  # keeps a build-time tool out of the running process.
+  #
+  # The bodies keep their `#1` / `#2` / `#3` and `<type>` placeholders: the
+  # caller substitutes its own operands.  Object-lane bodies are left out,
+  # since they call back into the interpreter and cannot be compiled apart
+  # from it.
+  # ---------------------------------------------------------------------
+
+  BODY_TABLE_DTYPES = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
+                         bool cmplx64 cmplx128].freeze
+
+  def self.body_table_rows
+    rows = []
+    KERNELS.each do |k|
+      next unless %i[monop binop triop].include?(k[:kind])
+      BODY_TABLE_DTYPES.each do |src|
+        body = monop_expr_for(k, src)
+        next unless body.is_a?(String)
+        next if body.include?("rb_funcall")
+        rows << [k[:kind].to_s, k[:name].to_s,
+                 DTYPES[src][:ca].sub(/\ACA_/, "").downcase, body]
+      end
+    end
+    rows
+  end
+
+  def self.c_string_literal(text)
+    '"' + text.gsub("\\", "\\\\").gsub('"', '\\"').gsub("\n", '\\n') + '"'
+  end
+
+  def self.emit_kernel_bodies(io)
+    rows = body_table_rows
+    io.puts
+    io.puts "/* The text of every kernel body, for a caller that compiles the same"
+    io.puts "   operation elsewhere.  Placeholders are left in place. */"
+    io.puts
+    io.puts "typedef struct {"
+    io.puts "  const char *kind;"
+    io.puts "  const char *name;"
+    io.puts "  const char *data_type;"
+    io.puts "  const char *body;"
+    io.puts "} ca_kernel_body_t;"
+    io.puts
+    io.puts "static const ca_kernel_body_t ca_kernel_bodies[] = {"
+    rows.each do |kind, name, dtype, body|
+      io.puts "  { #{c_string_literal(kind)}, #{c_string_literal(name)}, " \
+              "#{c_string_literal(dtype)},"
+      io.puts "    #{c_string_literal(body)} },"
+    end
+    io.puts "};"
+    io.puts
+    io.puts "static const int ca_kernel_bodies_count = #{rows.size};"
+    io.puts
+    io.puts <<~C
+      /* CArray.__kernel_body__(kind, name, data_type) -> String, or nil where
+         this operation has no body at that data type. */
+      static VALUE
+      rb_ca_s_kernel_body (VALUE klass, VALUE rkind, VALUE rname, VALUE rtype)
+      {
+        VALUE kind = rb_obj_as_string(rkind);
+        VALUE name = rb_obj_as_string(rname);
+        VALUE type = rb_obj_as_string(rtype);
+        const char *k = StringValueCStr(kind);
+        const char *n = StringValueCStr(name);
+        const char *t = StringValueCStr(type);
+        int i;
+        for ( i = 0; i < ca_kernel_bodies_count; i++ ) {
+          const ca_kernel_body_t *e = &ca_kernel_bodies[i];
+          if ( strcmp(e->kind, k) == 0 &&
+               strcmp(e->name, n) == 0 &&
+               strcmp(e->data_type, t) == 0 ) {
+            return rb_str_new_cstr(e->body);
+          }
+        }
+        return Qnil;
+      }
+    C
+  end
+
   def self.emit_aggregator_init(io, tags)
     io.puts "/* GENERATED aggregator: dispatches to per-tag Init_carray_kernels_<tag>() */"
     io.puts "#include \"carray.h\""
@@ -6063,23 +6147,30 @@ module MkKernel
       io.puts "void Init_carray_kernels_#{file_suffix(kind, sub)} (void);"
     end
     io.puts
+    emit_kernel_bodies(io)
+    io.puts
     io.puts "void"
     io.puts "Init_carray_kernels (void)"
     io.puts "{"
     tags.each do |kind, sub|
       io.puts "  Init_carray_kernels_#{file_suffix(kind, sub)}();"
     end
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
+    io.puts "                             rb_ca_s_kernel_body, 3);"
     io.puts "}"
   end
 
   # Single-stream Init_carray_kernels(): every kind emitted in order inside
   # one function.
   def self.emit_init(io)
+    emit_kernel_bodies(io)
     io.puts
     io.puts "void"
     io.puts "Init_carray_kernels (void)"
     io.puts "{"
     KERNELS.each { |k| emit_init_line(io, k) }
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
+    io.puts "                             rb_ca_s_kernel_body, 3);"
     io.puts "}"
   end
 
