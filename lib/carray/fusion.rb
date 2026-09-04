@@ -74,21 +74,33 @@ class CArray
 
     # Returns the array, or nil where nothing computed it.
     def self.evaluate (view)
-      evaluator = CArray.expression_evaluator or return nil
-      return nil if view.elements < THRESHOLD
-      plan = plan(view) or return nil
+      return nil unless askable?(view)
+      out = CArray.__alloc_uninit__(view.data_type, view.dim)
+      evaluate_into(view, out) ? out : nil
+    end
+
+    # Fills an array the caller already has.  Called from the store as well,
+    # where making one and copying it over would be most of the work.
+    # Returns true when something computed it.
+    def self.evaluate_into (view, out)
+      evaluator = CArray.expression_evaluator or return false
+      return false unless askable?(view)
+      plan = plan(view) or return false
       # A marker over an array, or anything else with nothing to compute,
       # is not worth handing over.
-      return nil unless plan.nodes.any? { |n| n.is_a?(Op) }
-      out = CArray.__alloc_uninit__(plan.data_type, plan.dim)
-      out.mask = 0 if plan.masked
-      evaluator.call(plan, out) ? out : nil
+      return false unless plan.nodes.any? { |n| n.is_a?(Op) }
+      out.mask = 0 if plan.masked && ! out.has_mask?
+      evaluator.call(plan, out) ? true : false
     rescue StandardError => error
       CArray.expression_evaluator = nil
       warn "CArray: the registered expression evaluator raised " \
            "(#{error.class}: #{error.message}); expressions will be walked " \
            "from here on"
-      nil
+      false
+    end
+
+    def self.askable? (view)
+      ! CArray.expression_evaluator.nil? && view.elements >= THRESHOLD
     end
 
     # Returns a Plan, or nil where the expression holds something a plan

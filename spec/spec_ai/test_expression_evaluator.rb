@@ -143,6 +143,71 @@ class TestExpressionEvaluator < Test::Unit::TestCase
     $stderr = kept
   end
 
+  # -- storing into an array ----------------------------------------------
+  #
+  # The saving is in filling the destination directly: making an array and
+  # copying it over is most of the work once the expression itself is fast.
+
+  def test_a_store_asks_and_the_answer_lands_in_the_destination
+    out = CArray.float64(BIG)
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { @a + @b }
+    assert_equal [-1.0] * BIG, out.to_a
+    assert_equal 1, @asked.size
+  end
+
+  def test_what_the_store_hands_over_is_the_destination_itself
+    out = CArray.float64(BIG)
+    seen = nil
+    evaluator = Object.new
+    evaluator.define_singleton_method(:call) { |plan, o| seen = o ; false }
+    CArray.expression_evaluator = evaluator
+    out[] = CArray.fuse { @a + @b }
+    assert_same out, seen
+  end
+
+  def test_declining_leaves_the_store_to_the_walk
+    out = CArray.float64(BIG)
+    CArray.expression_evaluator = declining
+    out[] = CArray.fuse { @a + @b }
+    assert_equal (@a + @b).to_a, out.to_a
+  end
+
+  def test_a_store_of_anything_but_an_expression_is_untouched
+    out = CArray.float64(BIG)
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = @b
+    assert_equal @b.to_a, out.to_a
+    out[] = 7.0
+    assert_equal [7.0] * BIG, out.to_a
+    assert_empty @asked
+  end
+
+  def test_a_store_that_would_have_to_cast_is_left_to_the_walk
+    out = CArray.int32(BIG)
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { @a + @b }
+    assert_equal (@a + @b).to_a.map(&:to_i), out.to_a
+    assert_empty @asked
+  end
+
+  def test_a_store_into_a_different_shape_is_left_to_the_walk
+    out = CArray.float64(BIG / 2, 2)
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { @a + @b }
+    assert_equal (@a + @b).to_a, out.flatten.to_a
+    assert_empty @asked
+  end
+
+  def test_a_small_store_is_walked
+    small = CArray.float64(SMALL) { |i| i.to_f }
+    out = CArray.float64(SMALL)
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { small + small }
+    assert_equal (small + small).to_a, out.to_a
+    assert_empty @asked
+  end
+
   # -- masks --------------------------------------------------------------
 
   def test_a_masked_expression_arrives_with_somewhere_to_put_the_mask
