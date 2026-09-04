@@ -62,6 +62,15 @@ class CArray
   autoload :TableMethods, "carray/table"
 end
 
+# ---- Fusion (reading a lazy expression as a plan) --------------------------
+#
+# Nothing in the core asks for a plan -- CArray can always walk the view --
+# so this loads only when something that compiles one asks.
+
+class CArray
+  autoload :Fusion, "carray/fusion"
+end
+
 # ---- Iterators (class / slab) ----------------------------------------------
 
 autoload :CASlabIterator,   "carray/slab_iterator"
