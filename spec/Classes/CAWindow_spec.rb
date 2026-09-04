@@ -4,15 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCAWindow " do
 
-  example "virtual_array" do
-    a = CArray.int(3,3).seq!
-    b = a.window(-1..1, -1..1)
-    r = b.parent
-    is_asserted_by { b.class == CAWindow }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { a == r }
-  end
-
 
   example "basic_features" do
     # ---

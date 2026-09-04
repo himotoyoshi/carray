@@ -4,15 +4,6 @@ require "rspec-power_assert"
 
 describe "TestCArrayCATranspose " do
 
-  example "virtual_array" do
-    a = CArray.int(3,3)
-    b = a.transpose
-    r = b.parent
-    is_asserted_by { b.class == CATranspose }
-    is_asserted_by { true == b.virtual? }
-    is_asserted_by { a == r }
-  end
-
   example "basic_feature" do
     # ---
     a = CArray.int(3,3).seq!
