@@ -7,74 +7,66 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
      ones below it, and a new entry goes directly under its own release
      heading -- not at the end of the section. The kind of change is
      carried by the `- Fix:` / `- Change:` / `- New:` that opens the
-     entry; there are no per-kind subheadings. -->
+     entry; there are no per-kind subheadings.
+
+     An entry says three things and stops: what changed, what to do about
+     it (the migration, the replacement, the condition under which nothing
+     changes), and what is excluded. It does not say how the code was
+     broken, name the internals that were fixed, break down where the
+     speed came from, or argue the design -- those belong in the commit
+     message. Two to six lines. -->
 
 ## 3.0.1 (unreleased)
 
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
   that is compiled rather than run. `jit_for` takes the loop indices, so a
-  cell may reach the ones around it — a recurrence, a stencil. `jit_each` and
+  cell may reach the ones around it -- a recurrence, a stencil. `jit_each` and
   `jit_map` take no indices and work at the cell, the first writing into
   arrays of yours (`CArray.jit_each { out = a + b * c }`) and the second
-  handing the value back (`CArray.jit_map { a > b ? a : b }`); the name is
-  what says whether a value comes back. The compiler is the carray-jit gem,
-  and without it these raise NotImplementedError saying so, rather than
-  running the block as a Ruby loop: the `jit_` prefix is the warning that
-  there are rules about what may be in the block, and a slow interpretation
-  would accept blocks the compiler refuses. An expression over whole arrays
-  wants `CArray.fuse`, which needs no compiler.
+  handing the value back (`CArray.jit_map { a > b ? a : b }`). Compiling them
+  needs the carray-jit gem; without it they raise `NotImplementedError`. An
+  expression over whole arrays wants `CArray.fuse`, which needs no compiler.
 
 - Fix: a lazy expression over an object array (`CArray.object`,
   `CA_OBJECT`) returned wrong values, and crashed when materialised
-  repeatedly. Object cells are Ruby objects, and the results a lazy
-  materialise produced were unreachable to the garbage collector while it
-  ran, so a collection partway through freed them. Anything that computes
-  object cells outside an array the collector can see is affected: `to_ca`
-  and `copy` on a lazy view, an eager operation with a lazy operand, and a
-  reduction over one.
+  repeatedly. Affects `to_ca` and `copy` on a lazy view, an eager operation
+  with a lazy operand, and a reduction over one. Other data types were never
+  affected.
 
 - Change: `CArray.fuse` takes the expression rather than the arrays it is
-  over — `CArray.fuse { (a + b) * c }` in place of
+  over -- `CArray.fuse { (a + b) * c }` in place of
   `CArray.fuse(a, b, c) { |x, y, z| (x + y) * z }`. The block is read rather
-  than run, so the names in it are the ones you wrote where you wrote them;
-  a block whose source cannot be read, at an `irb` prompt or inside `eval`,
-  says so and points at `a.lazy + b.lazy`, which always works. What comes
-  back is the expression, computed where it is used — by a store, a
-  reduction, or `to_ca` — so `x = CArray.fuse { ... }` now wants `.to_ca` if
-  what you want is an array. `CArray.lazy(*args) { ... }` was the same
-  method once fuse stopped materialising, and is gone.
+  than run, so a block whose source is not available -- at an `irb` prompt,
+  inside `eval` -- raises and points at `a.lazy + b.lazy`, which always
+  works. What comes back is the expression, computed where it is used, so
+  `x = CArray.fuse { ... }` now wants `.to_ca` if what you want is an array.
+  `CArray.lazy(*args) { ... }` is gone; it was the same method.
 
 - Fix: reading a concatenated view (`CArray.concat`, `CAFrame.concat`)
-  backwards along the concatenated axis — `m.reverse` and any other negative
-  step — raised IndexError instead of answering.
+  backwards along the concatenated axis -- `m.reverse` and any other negative
+  step -- raised IndexError instead of answering.
 
 - Fix: reading a lazy expression (`a.lazy + b`, `CArray.fuse`) with a step
-  other than one — `expr[[0, 3, 2]]`, `expr.reverse` and the like — returned
+  other than one -- `expr[[0, 3, 2]]`, `expr.reverse` and the like -- returned
   values the expression cannot produce, because its operands were read from
   the wrong cells. Comparisons carried the same fault, `a.lazy > b` and
   one-operand ones such as `a.lazy.is_nan` alike. Contiguous reads were never
   affected.
 
 - Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
-  something reads it, rather than when the expression is built. Two things
-  follow. `root_array` and `ancestors` now stop at a lazy operation instead of
-  walking into its left operand -- the expression fans out to both operands
-  there, so naming the left one its root was wrong. And a mask set on either
-  operand after the expression was built is now seen; before, only the left
-  one was. Masked expressions are also much faster to build: a chain of
-  sixteen operations over one masked array of two million cells took 125 ms
-  and now takes none.
+  something reads it, rather than when the expression is built. A mask set on
+  either operand after the expression was built is now seen; before, only the
+  left one was. `root_array` and `ancestors` now stop at a lazy operation
+  instead of walking into its left operand. Building a long masked expression
+  is also no longer quadratic in the length of the chain.
 
 - Fix: `a.value + b` raised `can not create mask array for the value array`
   when `b` carried a mask. It now propagates `b`'s mask.
 
-- Change: the top-level constant `CA_NIL` is gone. It was an internal
-  sentinel standing for "the caller did not give this argument", and its name
-  named the very value it exists to be distinguished from -- `nil` is itself a
-  legal fill value, which is why the sentinel is needed at all. It is now
-  `CArray::UNSPECIFIED` (`CA_UNSPECIFIED` in C). It is not a value to pass in;
-  nothing outside the C entry points for `unmask`, `shift(fill_value:)` and
-  `window(fill_value:)` ever read it, and their behaviour is unchanged.
+- Change: the top-level constant `CA_NIL` is now `CArray::UNSPECIFIED`
+  (`CA_UNSPECIFIED` in C). It is an internal sentinel for "the caller gave no
+  argument", not a value to pass in; `unmask`, `shift(fill_value:)` and
+  `window(fill_value:)` behave as before.
 
 - Change: `group_by_category` reductions now answer in the data type the core
   reduction promotes the value to, instead of choosing one per reduction. `sum`
@@ -104,18 +96,12 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   is unaffected.
 
 - Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` over a
-  small window is now 2-5x faster. `windows(-1..1, -1..1).sum` folded each
-  window separately, once per output cell, and paid the same setup for a
-  nine-cell window as for a large one; for windows up to five cells wide on
-  every axis it now accumulates one window offset at a time across the whole
-  array instead. `min_count:` and `fill_value:` come along, since the count a
-  window folded is known without folding it, and so does a masked source
-  (1.3-4x). The answers are unchanged for `min`, `max` and `prod`; `sum` and
-  `mean` may differ in the last bits, as reductions always may. It holds one
-  more buffer while it works -- the window's own, in the type the result is
-  accumulated in -- which for a `sum` over a large byte array is more than the
-  previous path held. A wider window, or any other reduction, takes the
-  previous path unchanged.
+  window up to five cells wide on every axis is now 2-5x faster, and 1.3-4x
+  over a masked source; `min_count:` and `fill_value:` come along. `min`,
+  `max` and `prod` answer exactly as before; `sum` and `mean` may differ in
+  the last bits, as reductions always may. It holds one more buffer while it
+  works, one window's worth in the type the result accumulates in. A wider
+  window, or any other reduction, is unchanged.
 
 - Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
   of a negative zero real part only when the imaginary part was also negative;
@@ -137,12 +123,11 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   with `using CArray::CoreExtensions`.
 
 - Fix: `sinh`, `cosh`, `tanh`, `asinh`, `acosh` and `atanh` on a complex array
-  gave the hyperbolic function of the real part alone. The kernel called the
-  real-typed C function, which drops the imaginary part of its argument, so
-  `cmplx128` and `cmplx64` arrays came back with `tanh(Re z)` where `ctanh(z)`
-  was meant -- wrong in both parts, and `acosh` and `atanh` also returned 0 or
-  infinity where the true value is finite. They now agree with C99
-  `complex.h`. Real and object arrays were never affected.
+  gave the hyperbolic function of the real part alone: `cmplx128` and
+  `cmplx64` arrays came back with `tanh(Re z)` where `ctanh(z)` was meant,
+  wrong in both parts, and `acosh` and `atanh` also returned 0 or infinity
+  where the true value is finite. They now agree with C99 `complex.h`. Real
+  and object arrays were never affected.
 
 - Change: the `:*` unbound repeat is retired. `a[:*, nil]` raises `IndexError`;
   `CArray#unbound_repeat`, `CAUnboundRepeat` and `insert_axis(repeat: :*)` are
@@ -174,15 +159,12 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   recognised too.
 
 - Fix: a region asked for in column-major order -- axes and steps reversed
-  against the view's own -- came back wrong from a view with a length-1 axis.
-  An `(n, 1)` view (`v[nil, :_]`, `v.reshape(n, 1)`, a one-column slice) has
-  the same step on both axes, so the reversed request looked axis-aligned and
-  was composed onto the length-1 axis, whose parent step is 0. `CAStride`,
-  `CABlock`, `CATranspose`, `CAWindow` and `CATile` delivered the first cell n
-  times with nothing raised; `CAGrid` read out of bounds and crashed; `CARoll`
-  spun; a `CAObject` was handed a region outside its own axes. Reached from a
-  Fortran-LAPACK backend gathering its operands -- `carray-linalg-accelerate`'s
-  `solve(a, b)` returned `b[0]` repeated for a single-column right-hand side.
+  against the view's own -- came back wrong from a view with a length-1 axis,
+  such as `v[nil, :_]`, `v.reshape(n, 1)` or a one-column slice. Depending on
+  the view it repeated the first cell, read out of bounds, or hung. Reached
+  from a Fortran-LAPACK backend gathering its operands:
+  `carray-linalg-accelerate`'s `solve(a, b)` returned `b[0]` repeated for a
+  single-column right-hand side.
 
 - Fix: an operation between two views of an array that computes its values --
   a lazy expression such as `(a.lazy + b)`, or a `CAObject` over a file -- no
@@ -321,8 +303,7 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   writes `c` / `C` / `s` / `S` in place of `b` / `B` / `h` / `H`. From 32 bits
   up the two already agreed, and `?`, `Zf` / `Zd`, `T{...}` and `Ns` stay PEP
   3118, which Ruby has no spelling for. The consumer side already accepted
-  both, so views produced by 3.0.0 still import. Supersedes the table in
-  [MemoryViewFormat.md](docs/interop/MemoryViewFormat.md).
+  both, so views produced by 3.0.0 still import.
 
 - Fix: a mask published in Ruby's format vocabulary (`C` / `c`) is accepted on
   import. The check only knew PEP 3118's `B` / `b` / `?`, so it refused the
