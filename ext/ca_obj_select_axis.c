@@ -933,7 +933,7 @@ rb_ca_select_axis_s_new_debug (VALUE klass, VALUE rparent, VALUE rindirect,
   obj = TypedData_Make_Struct(klass, CASelectAxis, &caselectaxis_data_type, ca);
   ca_select_axis_setup(ca, parent, indirect_axis, selector,
                        ap_start_buf, ap_count_buf, ap_step_buf);
-  rb_ivar_set(obj, rb_intern("_parent"),   rparent);
+  rb_ca_set_parent(obj, rparent);
   rb_ivar_set(obj, rb_intern("_selector"), rselector);
   return obj;
 }
@@ -1074,8 +1074,10 @@ rb_ca_select_axis (int argc, VALUE *argv, VALUE self)
   ca_select_axis_setup(ca, parent, indirect_axis, selector,
                        ap_start, ap_count, ap_step);
 
-  /* Keep Ruby objects alive (parent and selector references). */
-  rb_ivar_set(obj, rb_intern("_parent"),   self);
+  /* Keep Ruby objects alive (parent and selector references).  The parent
+     goes through rb_ca_set_parent so #parent, #root_array and #ancestors
+     read the same link here as they do through every other view. */
+  rb_ca_set_parent(obj, self);
   rb_ivar_set(obj, rb_intern("_selector"), rselector_keep);
   return obj;
 }
