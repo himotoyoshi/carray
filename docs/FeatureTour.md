@@ -37,19 +37,26 @@ Covered in full by the guide: [Views](../guides/users/06_views.md).
 
 An array is bytes, a shape, a data type, and strides. MemoryView is Ruby's standard envelope for exactly that, and CArray implements it as both producer and consumer — so a buffer can cross between libraries without being copied, and without either side knowing about the other.
 
+Anything that exposes a MemoryView can be taken in. `fiddle` is in the standard library, so this needs nothing installed:
+
 ```ruby
-require "numo/narray"
-require "numo/narray/memoryview"
+require "fiddle"
 
-na = Numo::DFloat.new(2, 3).seq
-ca = CArray.wrap_memory_view(na)     #  no copy
-ca.class                             #  => CAWrap
-
-ca[0, 0] = -1.0
-na[0, 0]                             #  => -1.0   the same memory
+buf = Fiddle::Pointer[[1.5, 2.5, 3.5].pack("d*")]   #  a foreign buffer
+ca  = CArray::Float64.wrap_memory_view(buf)         #  no copy
+ca.sum                                              #  => 7.5
 ```
 
-`CArray.from_memory_view` takes a copy instead, and a CArray handed to any consumer that reads MemoryView is picked up through the protocol with no conversion code on either side.
+`wrap_memory_view` points at the producer's memory; `CArray.from_memory_view` takes a copy instead. A buffer that is laid out strided rather than contiguous is accepted either way.
+
+The other direction needs no code at all — a consumer reads the array through the protocol:
+
+```ruby
+mv = Fiddle::MemoryView.new(CArray.float64(2, 3).seq!)
+mv.shape                   #  => [2, 3]
+mv.format                  #  => "d"
+mv[1, 2]                   #  => 5.0
+```
 
 ## Kernel-style iteration
 
