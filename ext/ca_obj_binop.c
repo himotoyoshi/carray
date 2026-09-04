@@ -306,7 +306,9 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       one_counts[k]  = 1;
       one_strides[k] = right_bytes;
     }
-    scratch = ca_lazy_arena_acquire(right_bytes);
+    scratch = ( bo->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(1)
+                : ca_lazy_arena_acquire(right_bytes);
     ca_binop_scratch_acquire_count++;
     ca_xfer_stride(bo->right, one_starts, one_counts, one_strides,
                    scratch, CA_XFER_GET);
@@ -318,7 +320,9 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
        reads the right operand's cells 0, 1, 2 against the left's 0, 2, 4.
        right.bytes matches output.bytes because right.data_type ==
        out.data_type by cast-before, so the same steps serve both. */
-    scratch = ca_lazy_arena_acquire(slab_n * right_bytes);
+    scratch = ( bo->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(slab_n)
+                : ca_lazy_arena_acquire(slab_n * right_bytes);
     ca_binop_scratch_acquire_count++;
     ca_xfer_stride(bo->right, starts, counts, strides, scratch,
                    CA_XFER_GET);
@@ -449,6 +453,14 @@ ca_binop_func_allocate (void *ap)
 {
   CABinOp *ca = (CABinOp *) ap;
   ca->ptr = xmalloc(ca_length(ca));
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
 }
 
 static void
@@ -470,6 +482,14 @@ ca_binop_func_attach (void *ap)
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
   ca_binop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 

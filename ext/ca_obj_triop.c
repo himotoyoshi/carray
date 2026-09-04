@@ -265,7 +265,9 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
       one_counts[k]  = 1;
       one_strides[k] = bytes;
     }
-    scratch = ca_lazy_arena_acquire(bytes);
+    scratch = ( op->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(1)
+                : ca_lazy_arena_acquire(bytes);
     ca_triop_scratch_acquire_count++;
     ca_xfer_stride(op, one_starts, one_counts, one_strides, scratch,
                    CA_XFER_GET);
@@ -278,7 +280,9 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
       op_strides[k] = s;
       s *= counts[k];
     }
-    scratch = ca_lazy_arena_acquire(slab_n * bytes);
+    scratch = ( op->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(slab_n)
+                : ca_lazy_arena_acquire(slab_n * bytes);
     ca_triop_scratch_acquire_count++;
     ca_xfer_stride(op, starts, counts, op_strides, scratch, CA_XFER_GET);
     *step_out = 1;
@@ -355,6 +359,14 @@ ca_triop_func_allocate (void *ap)
 {
   CATriOp *ca = (CATriOp *) ap;
   ca->ptr = xmalloc(ca_length(ca));
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
 }
 
 static void
@@ -374,6 +386,14 @@ ca_triop_func_attach (void *ap)
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
   ca_triop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 

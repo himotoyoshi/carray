@@ -297,7 +297,9 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_moncmp_leaf_inplace_count++;
     }
     else {
-      scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
+      scratch = ( mc->parent->data_type == CA_OBJECT )
+                  ? ca_lazy_arena_acquire_object(slab_n)
+                  : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_moncmp_scratch_acquire_count++;
       ca_xfer_stride(mc->parent, starts, counts, operand_strides, scratch,
                      CA_XFER_GET);

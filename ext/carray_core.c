@@ -1559,10 +1559,12 @@ ca_xfer_all_body (VALUE arg)
   return Qnil;
 }
 
+/* `arg` carries the hold depth to unwind to, so nested ca_xfer_all calls
+   each drop their own hold rather than the whole stack. */
 static VALUE
 ca_xfer_all_ensure (VALUE arg)
 {
-  (void) arg;
+  ca_gc_hold_pop_to(NUM2INT(arg));
   ca_lazy_arena_exit();
   return Qnil;
 }
@@ -1572,6 +1574,7 @@ ca_xfer_all (void *ap, void *data, int dir)
 {
   CArray *ca = (CArray *) ap;
   ca_xfer_all_args_t args;
+  int guard = -1;
   if ( ! ca_func[ca->obj_type].xfer_all ) {
     rb_raise(rb_eRuntimeError,
              "[BUG] xfer_all not defined for object type <%i>",
@@ -1589,8 +1592,25 @@ ca_xfer_all (void *ap, void *data, int dir)
      next entry. */
   ca_lazy_arena_enter();
   args.ca = ca; args.data = data; args.dir = dir;
+
+  /* A CA_OBJECT cell is a VALUE, and this buffer belongs to no Ruby
+     object yet -- it is the destination `copy` will hand out, or a
+     view's own freshly allocated one.  The object lane calls rb_funcall
+     per cell, so a collection partway through would free what has been
+     written so far.  ca_xfer_all is the whole-view entry, so the window
+     is exactly ca->elements contiguous cells: the one place where the
+     extent is known without trusting a caller's strides.  Sub-windows
+     written by nested transfers land inside it. */
+  if ( ca->data_type == CA_OBJECT && dir == CA_XFER_GET ) {
+    if ( data != (void *) ca->ptr ) {
+      VALUE *p = (VALUE *) data;
+      ca_size_t i;
+      for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+    }
+    guard = ca_gc_hold_push(data, ca->elements);
+  }
   rb_ensure(ca_xfer_all_body, (VALUE) &args,
-            ca_xfer_all_ensure, Qnil);
+            ca_xfer_all_ensure, INT2NUM(guard));
 }
 
 /* ------------------------------------------------------------------- */
