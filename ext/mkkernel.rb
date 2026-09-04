@@ -164,9 +164,33 @@ module MkKernel
   #   expr: { float: "...", object: "..." }.merge(cmplx_widths("..."))
   def self.cmplx_widths(body)
     {
-      [:cmplx64]  => body.gsub("<f>", "f").gsub("<t>", "float"),
-      [:cmplx128] => body.gsub("<f>", "").gsub("<t>", "double"),
+      [:cmplx64]  => at_width(body, "f", "float"),
+      [:cmplx128] => at_width(body, "", "double"),
     }
+  end
+
+  # The same split for the real families, and for the same reason: `sin`
+  # takes a double, so an f32 cell widens on the way in and rounds on the
+  # way out.  Use it in place of a `float:` entry whenever the body calls
+  # a libm function that has an `f` variant.
+  #
+  #   expr: { object: "..." }.merge(float_widths("(#2) = sin<f>(#1);"))
+  #
+  # Not every double-taking call wants this.  `fabs`, `fmin` / `fmax`,
+  # `ceil` / `floor` / `trunc` and the `isnan` family are exact on a
+  # float either way, and `round` (`floor(x + 0.5)`) is exact only in
+  # double -- narrowing it would round `x + 0.5f` first and step the
+  # answer at the boundary.
+  def self.float_widths(body)
+    {
+      [:f32] => at_width(body, "f", "float"),
+      [:f64] => at_width(body, "", "double"),
+    }
+  end
+
+  # Substitute the width markers in a kernel body.
+  def self.at_width(body, suffix, real_type)
+    body.gsub("<f>", suffix).gsub("<t>", real_type)
   end
 
   # CA_NTYPE order from ext/carray.h.  Drives the per-data_type table layout
@@ -8169,9 +8193,9 @@ MkKernel.monfunc :rcp,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
-      float:   "(#2) = #{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }.merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
+     .merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
 # exp2 special case: complex variant uses cpow(2, x), not cexp2 (which
@@ -8179,9 +8203,9 @@ end
 MkKernel.monfunc :exp2,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = exp2(#1);",
     object:  MkKernel.obj_float_math("exp2(<v>)", "exp2"),
-  }.merge(MkKernel.cmplx_widths("(#2) = cpow<f>(2, (#1));"))
+  }.merge(MkKernel.float_widths("(#2) = exp2<f>(#1);"))
+   .merge(MkKernel.cmplx_widths("(#2) = cpow<f>(2, (#1));"))
 
 # log10, log2, logb: no complex variant in the original mkmath emit
 {
@@ -8192,9 +8216,8 @@ MkKernel.monfunc :exp2,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#2) = #{c_fn}(#1);",
       object: MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
 end
 
 # exp10: special object expr (= bypass OBJ_FLOAT_MATH for the
@@ -8202,7 +8225,6 @@ end
 MkKernel.monfunc :exp10,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = pow(10, (#1));",
     object:  <<~SNIPPET,
       {
         VALUE _obj_arg = (#1);
@@ -8213,7 +8235,8 @@ MkKernel.monfunc :exp10,
         }
       }
     SNIPPET
-  }.merge(MkKernel.cmplx_widths("(#2) = cpow<f>(10, (#1));"))
+  }.merge(MkKernel.float_widths("(#2) = pow<f>(10, (#1));"))
+   .merge(MkKernel.cmplx_widths("(#2) = cpow<f>(10, (#1));"))
 
 # Hyperbolic family: float uses the real-typed C function, complex uses
 # the C99 `c`-prefixed one.  Passing a `double _Complex` to `sinh(double)`
@@ -8230,9 +8253,9 @@ MkKernel.monfunc :exp10,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
-      float:   "(#2) = #{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }.merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
+     .merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
 # ---- M.1 (PyTorch alignment): additional monfunc / monop ------------------
@@ -8246,18 +8269,17 @@ end
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#2) = #{c_fn}(#1);",
       object: MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
 end
 
 # rsqrt: 1 / sqrt(x).  float + complex + object (complex via 1.0 / csqrt).
 MkKernel.monfunc :rsqrt,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = 1.0 / sqrt(#1);",
     object:  MkKernel.obj_float_math("1.0 / sqrt(<v>)", "rsqrt"),
-  }.merge(MkKernel.cmplx_widths("(#2) = ((<t>)1.0) / csqrt<f>(#1);"))
+  }.merge(MkKernel.float_widths("(#2) = ((<t>)1.0) / sqrt<f>(#1);"))
+   .merge(MkKernel.cmplx_widths("(#2) = ((<t>)1.0) / csqrt<f>(#1);"))
 
 # trunc: toward-zero rounding.  Preserve-data_type form like ceil / floor /
 # round — int branch is identity, float branch uses C99 trunc, object
@@ -8572,9 +8594,8 @@ MkKernel.binop :fmod,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
-    float:  "(#3) = fmod((#1), (#2));",
     object: '(#3) = rb_funcall((#1), rb_intern("remainder"), 1, (#2));',
-  }
+  }.merge(MkKernel.float_widths("(#3) = fmod<f>((#1), (#2));"))
 
 MkKernel.binop :bit_and_i,
   op:     "&",
@@ -8751,9 +8772,9 @@ MkKernel.binop :power,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#3) = op_powi_<type>((#1), (#2));",
-    float:   "(#3) = pow((#1), (#2));",
     object:  '(#3) = rb_funcall((#1), rb_intern("**"), 1, (#2));',
-  }.merge(MkKernel.cmplx_widths("(#3) = cpow<f>((#1), (#2));"))
+  }.merge(MkKernel.float_widths("(#3) = pow<f>((#1), (#2));"))
+   .merge(MkKernel.cmplx_widths("(#3) = cpow<f>((#1), (#2));"))
 
 # ---- M.2 + M.3 (PyTorch alignment): float-only binop family --------------
 #
@@ -8776,7 +8797,6 @@ MkKernel.binop :power,
   MkKernel.binop op_name,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#3) = #{c_fn}((#1), (#2));",
       object: <<~SNIPPET,
         {
           VALUE _l = (#1);
@@ -8789,7 +8809,7 @@ MkKernel.binop :power,
           }
         }
       SNIPPET
-    }
+    }.merge(MkKernel.float_widths("(#3) = #{c_fn}<f>((#1), (#2));"))
 end
 
 # logaddexp: log(exp(x) + exp(y)).  Numerically stable form:
@@ -8798,7 +8818,6 @@ end
 MkKernel.binop :logaddexp,
   source: MkKernel::FLOAT_DTYPES + [:object],
   expr:   {
-    float:  "(#3) = fmax((#1), (#2)) + log1p(exp(-fabs((#1) - (#2))));",
     object: <<~SNIPPET,
       {
         VALUE _l = (#1);
@@ -8814,7 +8833,8 @@ MkKernel.binop :logaddexp,
         }
       }
     SNIPPET
-  }
+  }.merge(MkKernel.float_widths(
+    "(#3) = fmax<f>((#1), (#2)) + log1p<f>(exp<f>(-fabs<f>((#1) - (#2))));"))
 
 # ---- P.5b.4: moncmp family (predicates returning bool) ----------------
 
