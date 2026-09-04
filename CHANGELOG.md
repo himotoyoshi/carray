@@ -19,13 +19,20 @@ unrecorded.
 
 ## 3.0.1 (unreleased)
 
-- Change: element-wise math on a `cmplx64` array is now computed at that
-  width rather than widened to `cmplx128` and rounded back, so `sqrt`, `exp`,
-  `log`, the trigonometric and hyperbolic families, `power`, `abs`, `arg` and
-  `sign` are 1.1x to 3.3x faster there and can move by a bit or two in the
-  last place. `cmplx128` is unchanged, as are `is_close`, `is_equiv` and the
-  variance family, which still measure in double. To compute at the wider
-  width, cast with `.to_type(:cmplx128)` first.
+- Fix: `nextafter` on a `float32` array returned its own input. The step was
+  taken in double, and the next double above a float rounds back to that same
+  float. It now steps by one float32 ulp.
+
+- Change: element-wise math on a `float32` or `cmplx64` array is now computed
+  at that width rather than widened to `float64` / `cmplx128` and rounded
+  back, so `sqrt`, `exp`, `log`, the trigonometric and hyperbolic families,
+  `power`, `atan2`, `hypot`, `logaddexp`, `abs`, `arg` and `sign` are 1.1x to
+  3.5x faster there and can move by a bit or two in the last place. The wider
+  types are unchanged, as are `round`, `ceil`, `floor`, `trunc`, `fabs`, the
+  min / max family, `is_close`, `is_equiv` and the variance family, which are
+  either exact at any width or measure in double by declaration. To compute at
+  the wider width, cast with `.to_type(:float64)` or `.to_type(:cmplx128)`
+  first.
 
 - Change: `abs`, `abs2` and `arg` on a `cmplx64` array now return `float32`
   instead of `float64` -- the width that type carries its real values in, the
