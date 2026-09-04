@@ -492,6 +492,14 @@ rb_ca_ref_all (VALUE self, CAIndexInfo *info)
   return rb_funcall(self, rb_intern("refer"), 0);
 }
 
+static ID
+ca_id_expression_evaluator (void)
+{
+  static ID id = 0;
+  if ( ! id ) id = rb_intern("@expression_evaluator");
+  return id;
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -514,6 +522,31 @@ rb_ca_store_all (VALUE self, VALUE rval)
   if ( rb_obj_is_carray(rval) ) {
     CArray *cv;
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+
+    /* Where something is registered to compute an expression, and this is
+       one, it is asked before the walk below -- it fills the destination
+       directly, which is the whole of the saving; making an array and
+       copying it over is most of the work once the expression itself is
+       fast.  It may decline, and then the walk does it.  Narrow on purpose:
+       the same shape and data type, so nothing here has to broadcast or
+       cast on the way. */
+    if ( ca_is_lazy_view(cv)
+         && ca->data_type == cv->data_type
+         && ca->ndim == cv->ndim
+         && ca->elements == cv->elements
+         && RTEST(rb_attr_get(rb_cCArray, ca_id_expression_evaluator())) ) {
+      int8_t k;
+      int    same = 1;
+      for ( k = 0; k < ca->ndim; k++ ) {
+        if ( ca->dim[k] != cv->dim[k] ) { same = 0; break; }
+      }
+      if ( same ) {
+        VALUE fusion = rb_const_get(rb_cCArray, rb_intern("Fusion"));
+        if ( RTEST(rb_funcall(fusion, rb_intern("evaluate_into"), 2, rval, self)) ) {
+          return rval;
+        }
+      }
+    }
 
     /* The destination owns the shape; see ca_broadcast_to_destination. */
     ca_broadcast_to_destination(self, &rval);
