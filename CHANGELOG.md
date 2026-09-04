@@ -11,11 +11,16 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
+- Fix: reading a concatenated view (`CArray.concat`, `CAFrame.concat`)
+  backwards along the concatenated axis — `m.reverse` and any other negative
+  step — raised IndexError instead of answering.
+
 - Fix: reading a lazy expression (`a.lazy + b`, `CArray.fuse`) with a step
-  other than one — `expr[[0, 3, 2]]` and the like — returned values the
-  expression cannot produce, because its two operands were read from
-  different cells. Contiguous reads were never affected, and neither were
-  expressions with one operand.
+  other than one — `expr[[0, 3, 2]]`, `expr.reverse` and the like — returned
+  values the expression cannot produce, because its operands were read from
+  the wrong cells. Comparisons carried the same fault, `a.lazy > b` and
+  one-operand ones such as `a.lazy.is_nan` alike. Contiguous reads were never
+  affected.
 
 - Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
   something reads it, rather than when the expression is built. Two things
