@@ -910,13 +910,23 @@ class << CArray
     raise NotImplementedError, no_compiler("jit_for")
   end
 
-  # @overload jit_eval { ... }
+  # @overload jit_each { ... }
   #   Runs a block over the cells of arrays at once, naming each cell by the
-  #   array it came from.  The block is compiled, and the compiler is the
-  #   carray-jit gem.
+  #   array it came from, and writing what it computes into arrays of yours:
+  #   `CArray.jit_each { out = a + b * c }`.  The block is compiled, and the
+  #   compiler is the carray-jit gem.
   #   @raise [NotImplementedError] when that gem is not installed.
-  def jit_eval (*arrays, **options)
-    raise NotImplementedError, no_compiler("jit_eval")
+  def jit_each (&block)
+    raise NotImplementedError, no_compiler("jit_each")
+  end
+
+  # @overload jit_map { ... }
+  #   The same block with its value asked for: the last statement is what
+  #   every cell of the result gets, and the result comes back.  The block is
+  #   compiled, and the compiler is the carray-jit gem.
+  #   @raise [NotImplementedError] when that gem is not installed.
+  def jit_map (&block)
+    raise NotImplementedError, no_compiler("jit_map")
   end
 
   private

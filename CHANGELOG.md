@@ -11,14 +11,18 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
 
 ## 3.0.1 (unreleased)
 
-- Change: `CArray.per_cell` and `CArray.per_element` are now
-  `CArray.jit_for` and `CArray.jit_eval`, and CArray no longer runs their
-  block as a Ruby loop when the carray-jit gem is absent — it says where the
-  compiler is instead. The prefix is the warning that the block goes to a
-  compiler, and that there are rules about what may be in it: the same
-  program used to run without the gem and then raise once it was installed.
-  An expression over whole arrays wants `CArray.fuse` and never wanted these;
-  it needs no compiler either way.
+- New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
+  that is compiled rather than run. `jit_for` takes the loop indices, so a
+  cell may reach the ones around it — a recurrence, a stencil. `jit_each` and
+  `jit_map` take no indices and work at the cell, the first writing into
+  arrays of yours (`CArray.jit_each { out = a + b * c }`) and the second
+  handing the value back (`CArray.jit_map { a > b ? a : b }`); the name is
+  what says whether a value comes back. The compiler is the carray-jit gem,
+  and without it these raise NotImplementedError saying so, rather than
+  running the block as a Ruby loop: the `jit_` prefix is the warning that
+  there are rules about what may be in the block, and a slow interpretation
+  would accept blocks the compiler refuses. An expression over whole arrays
+  wants `CArray.fuse`, which needs no compiler.
 
 - Fix: a lazy expression over an object array (`CArray.object`,
   `CA_OBJECT`) returned wrong values, and crashed when materialised
@@ -71,14 +75,6 @@ Releases from 3.0.0 onward are recorded here. For the pre-3.0 history
   `CArray::UNSPECIFIED` (`CA_UNSPECIFIED` in C). It is not a value to pass in;
   nothing outside the C entry points for `unmask`, `shift(fill_value:)` and
   `window(fill_value:)` ever read it, and their behaviour is unchanged.
-
-- New: `CArray.per_cell` and `CArray.per_element`, the surface an array
-  algorithm is written on -- an index space for the first, so that a cell may
-  reach its neighbours, an element-wise expression for the second. Both run the
-  block as ordinary Ruby here, so code written against them runs wherever CArray
-  does; installing the carray-jit gem replaces both with versions that compile
-  the block to C. The subset a block has to stay inside to compile is documented
-  with the methods, in `carray/jit_fallback.rb`.
 
 - Change: `group_by_category` reductions now answer in the data type the core
   reduction promotes the value to, instead of choosing one per reduction. `sum`
