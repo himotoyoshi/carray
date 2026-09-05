@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 #
-# cmplx64 division is computed in double and rounded once.
+# cmplx64 products and quotients are computed in double, rounded once.
 #
 # The compiler turns a `float _Complex` divide into a call to `__divsc3`
 # -- Smith's algorithm (scale by the larger component so the squares
@@ -21,7 +21,7 @@
 require "test/unit"
 require "carray"
 
-class TestComplexDivision < Test::Unit::TestCase
+class TestComplexArithmeticWidth < Test::Unit::TestCase
 
   INF = Float::INFINITY
   NAN = Float::NAN
@@ -152,7 +152,95 @@ class TestComplexDivision < Test::Unit::TestCase
     assert_equal (a / b).to_a, (a.lazy / b.lazy).to_ca.to_a
   end
 
+  # ---- multiplication takes the same route, for accuracy alone ------
+  #
+  # A complex product subtracts two products of the parts, so it cancels
+  # the same way the quotient does.  Unlike the divide this costs speed
+  # (the compiler already inlines a naive float product), so it is paid
+  # for the accuracy on its own.
+
+  def exact_product(x, y)
+    xr = x.real.to_r; xi = x.imaginary.to_r
+    yr = y.real.to_r; yi = y.imaginary.to_r
+    [f32(xr * yr - xi * yi), f32(xr * yi + xi * yr)]
+  end
+
+  def test_multiply_is_correctly_rounded
+    srand 999
+    n = 4000
+    x = CA_CMPLX64(Array.new(n) { Complex(rand * 16 - 8, rand * 16 - 8) })
+    y = CA_CMPLX64(Array.new(n) { Complex(rand * 8 - 4,  rand * 8 - 4)  })
+    p = x * y
+    worst = 0
+    n.times do |k|
+      er, ei = exact_product(x[k], y[k])
+      worst = [worst, ulp32(p[k].real, er), ulp32(p[k].imaginary, ei)].max
+    end
+    assert_equal 0, worst, "cmplx64 * is no longer correctly rounded"
+  end
+
+  # A partial product that overflows a float but not a double.  The true
+  # real part here is exactly zero; computing at the operands' width gave
+  # `inf - inf` and so a NaN.
+  def test_multiply_does_not_invent_a_nan_on_overflowing_partials
+    [1e30, 1e25, 2e19].each do |v|
+      z = CA_CMPLX64([Complex(v, v)])
+      r = (z * z)[0]
+      assert_equal 0.0, r.real, "(#{v}+#{v}i)^2 real part"
+      assert r.imaginary.infinite?, "(#{v}+#{v}i)^2 imaginary part should overflow to infinity"
+    end
+  end
+
+  def test_multiply_keeps_the_infinity_rules
+    inf = INF
+    [[Complex(inf, 0), Complex(1, 1), [inf, inf]],
+     [Complex(inf, 0), Complex(0, 0), [:nan, :nan]],
+     [Complex(0, 0),   Complex(inf, 0), [:nan, :nan]],
+     [Complex(NAN, 0), Complex(1, 1), [:nan, :nan]]].each do |a, b, (wr, wi)|
+      r = (CA_CMPLX64([a]) * CA_CMPLX64([b]))[0]
+      [[wr, r.real, "real"], [wi, r.imaginary, "imag"]].each do |want, got, part|
+        if want == :nan
+          assert got.nan?, "#{a} * #{b} #{part}: expected NaN, got #{got}"
+        else
+          assert_equal want, got, "#{a} * #{b} #{part}"
+        end
+      end
+    end
+  end
+
+  def test_multiply_keeps_zero_signs
+    r = (CA_CMPLX64([Complex(-0.0, 1)]) * CA_CMPLX64([Complex(1, 0)]))[0]
+    assert_equal :neg, sign_of_zero(r.real), "(-0.0+1i) * (1+0i) real sign"
+  end
+
+  def test_multiply_lazy_matches_eager
+    a, b = sample_pair(500)
+    assert_equal (a * b).to_a, (a.lazy * b.lazy).to_ca.to_a
+  end
+
+  # + and - work on the parts independently and were left alone: each
+  # part is one float32 addition, which is correctly rounded on its own.
+  # (The expected value is computed in double and rounded once, which is
+  # the same thing -- adding two floats is exact in a double.)
+  def test_add_and_subtract_are_unchanged
+    a, b = sample_pair(200)
+    200.times do |k|
+      assert_equal f32(a[k].real + b[k].real), (a + b)[k].real, "add real at #{k}"
+      assert_equal f32(a[k].imaginary + b[k].imaginary), (a + b)[k].imaginary, "add imag at #{k}"
+      assert_equal f32(a[k].real - b[k].real), (a - b)[k].real, "sub real at #{k}"
+      assert_equal f32(a[k].imaginary - b[k].imaginary), (a - b)[k].imaginary, "sub imag at #{k}"
+    end
+  end
+
   # ---- cmplx128 is deliberately untouched ---------------------------
+
+  def test_cmplx128_multiply_keeps_the_compiler_helper
+    x = Complex(-4.458879470825195, 1.2791328430175781)
+    y = Complex(-1.1097438335418701, -3.8695855140686035)
+    q = (CA_CMPLX128([x]) * CA_CMPLX128([y]))[0]
+    r = x * y
+    assert_in_delta 0.0, (q - r).abs, 1e-12 * [r.abs, 1.0].max
+  end
 
   def test_cmplx128_keeps_the_compiler_helper
     # Not an accuracy claim -- just that the wide type still divides and
