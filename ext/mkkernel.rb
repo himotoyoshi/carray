@@ -8489,12 +8489,12 @@ MkKernel.binop :minimum,
     object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
   }
 
-# +, -, * use the same generic expression across all numeric data_types.
+# + and - work on the parts independently, so one generic expression
+# covers every numeric data_type at any width.
 {
-  add: ["+", "+", '"+"'],
-  sub: ["-", "-", '"-"'],
-  mul: ["*", "*", '"*"'],
-}.each do |name, (op, c_op, _ruby_op)|
+  add: ["+", "+"],
+  sub: ["-", "-"],
+}.each do |name, (op, c_op)|
   MkKernel.binop name,
     op:     op,
     source: MkKernel::MATH_NUMERIC + [:object],
@@ -8504,6 +8504,20 @@ MkKernel.binop :minimum,
       object:  %{(#3) = rb_funcall((#1), rb_intern("#{op}"), 1, (#2));},
     }
 end
+
+# * does not: a complex product subtracts two products of the parts, and
+# that subtraction cancels.  A cmplx64 gets it in double, where there are
+# bits left underneath -- see ca_op_cmplx64.h.  Unlike the divide this
+# costs speed rather than saving it, and is paid for the accuracy alone.
+MkKernel.binop :mul,
+  op:     "*",
+  source: MkKernel::MATH_NUMERIC + [:object],
+  expr:   {
+    numeric:     "(#3) = (#1) * (#2);",
+    [:cmplx64]  => "(#3) = op_cmul_cmplx64((#1), (#2));",
+    [:cmplx128] => "(#3) = (#1) * (#2);",
+    object:      '(#3) = rb_funcall((#1), rb_intern("*"), 1, (#2));',
+  }
 
 # div: `/`.  Integer division floors toward -inf (= Ruby `Integer#/` and
 # NumPy `floor_divide`), so that `(a / b) * b + a % b == a` holds for
@@ -8528,7 +8542,7 @@ MkKernel.binop :div,
     },
     float:   "(#3) = (#1) / (#2);",
     # A cmplx64 divide is computed in double and rounded once: see
-    # ca_op_cdiv.h for why that is both faster and correctly rounded,
+    # ca_op_cmplx64.h for why that is both faster and correctly rounded,
     # and how Annex G survives it.  cmplx128 has no wider type to
     # borrow, so it stays on the compiler's helper.
     [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#1), (#2));",
@@ -8707,7 +8721,7 @@ MkKernel.alias_binop :bit_rshift,  :">>"
 # pow / cpow.  Object uses Ruby's `**`.
 MkKernel.header_block <<~C
   #include "ca_op_powi.h"
-  #include "ca_op_cdiv.h"
+  #include "ca_op_cmplx64.h"
 C
 
 # ---- triop family ---------------------------------------------------------

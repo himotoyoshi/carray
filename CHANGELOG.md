@@ -19,11 +19,15 @@ unrecorded.
 
 ## 3.0.1 (unreleased)
 
-- Change: dividing a `cmplx64` array (`/`, `rcp`, `rcp_mul`) is now computed in
-  double and rounded once, which is 4.2x to 5.3x faster and correctly rounded --
-  the previous route lost up to about 1800 units in the last place when the
-  quotient's real part nearly cancelled. Infinities, NaNs and the signs of zeros
-  are unchanged. `cmplx128` is unchanged.
+- Change: multiplying and dividing a `cmplx64` array (`*`, `/`, `rcp`,
+  `rcp_mul`) is now computed in double and rounded once, so both are correctly
+  rounded -- the previous route lost up to about 1800 units in the last place
+  when the real part nearly cancelled. Division also gets 4.2x to 5.3x faster;
+  multiplication is 1.3x slower, which buys only the accuracy. A product whose
+  partial terms overflow a float but not a double no longer comes back NaN
+  (`(1e30+1e30i) ** 2` gives `0.0+Infinity*i`, not `NaN+Infinity*i`).
+  Infinities, NaNs and the signs of zeros are otherwise unchanged, as are `+`,
+  `-` and every `cmplx128` operation.
 
 - Fix: `nextafter` on a `float32` array returned its own input. The step was
   taken in double, and the next double above a float rounds back to that same
