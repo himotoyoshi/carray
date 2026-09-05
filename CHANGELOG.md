@@ -36,8 +36,10 @@ unrecorded.
 - Change: element-wise math on a `float32` or `cmplx64` array is now computed
   at that width rather than widened to `float64` / `cmplx128` and rounded
   back, so `sqrt`, `exp`, `log`, the trigonometric and hyperbolic families,
-  `power`, `atan2`, `hypot`, `logaddexp`, `abs`, `arg` and `sign` are 1.1x to
-  3.5x faster there and can move by a bit or two in the last place. The wider
+  `atan2`, `hypot`, `logaddexp`, `abs`, `arg` and `sign` are 1.1x to 3.5x
+  faster there and can move by a bit or two in the last place. Complex `log`,
+  `power`, `exp2` and `exp10` keep computing in double, because a complex
+  logarithm cancels and loses the answer rather than its last bits. The wider
   types are unchanged, as are `round`, `ceil`, `floor`, `trunc`, `fabs`, the
   min / max family, `is_close`, `is_equiv` and the variance family, which are
   either exact at any width or measure in double by declaration. To compute at
