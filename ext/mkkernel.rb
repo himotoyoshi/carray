@@ -8173,7 +8173,8 @@ MkKernel.monfunc :rcp,
   expr:   {
     int:     "if ((#1)==0) {ca_zerodiv();}; (#2) = 1/(#1);",
     float:   "(#2) = 1/(#1);",
-    complex: "(#2) = 1/(#1);",
+    [:cmplx64]  => "(#2) = op_crcp_cmplx64(#1);",
+    [:cmplx128] => "(#2) = 1/(#1);",
     object:  '(#2) = rb_funcall(INT2NUM(1), rb_intern("/"), 1, (#1));',
   }
 
@@ -8526,7 +8527,12 @@ MkKernel.binop :div,
       }
     },
     float:   "(#3) = (#1) / (#2);",
-    complex: "(#3) = (#1) / (#2);",
+    # A cmplx64 divide is computed in double and rounded once: see
+    # ca_op_cdiv.h for why that is both faster and correctly rounded,
+    # and how Annex G survives it.  cmplx128 has no wider type to
+    # borrow, so it stays on the compiler's helper.
+    [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#1), (#2));",
+    [:cmplx128] => "(#3) = (#1) / (#2);",
     object:  '(#3) = rb_funcall((#1), rb_intern("/"), 1, (#2));',
   }
 
@@ -8546,7 +8552,8 @@ MkKernel.binop :rcp_mul,
   expr:   {
     int:     "if ((#1)==0) {ca_zerodiv();}; (#3) = (#2) / (#1);",
     float:   "(#3) = (#2) / (#1);",
-    complex: "(#3) = (#2) / (#1);",
+    [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#2), (#1));",
+    [:cmplx128] => "(#3) = (#2) / (#1);",
     object:  '(#3) = rb_funcall((#2), rb_intern("/"), 1, (#1));',
   }
 
@@ -8700,6 +8707,7 @@ MkKernel.alias_binop :bit_rshift,  :">>"
 # pow / cpow.  Object uses Ruby's `**`.
 MkKernel.header_block <<~C
   #include "ca_op_powi.h"
+  #include "ca_op_cdiv.h"
 C
 
 # ---- triop family ---------------------------------------------------------
