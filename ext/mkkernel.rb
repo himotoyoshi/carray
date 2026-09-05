@@ -8183,7 +8183,6 @@ MkKernel.monfunc :rcp,
 {
   sqrt:  "sqrt",
   exp:   "exp",
-  log:   "log",
   sin:   "sin",
   cos:   "cos",
   tan:   "tan",
@@ -8199,14 +8198,32 @@ MkKernel.monfunc :rcp,
      .merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
+# log is the one member of the family whose complex form cancels, so it
+# does not follow the others onto `clogf`.  The real part of `clog(z)` is
+# `log|z|`, which vanishes on the unit circle; computing |z| at the
+# operand's width rounds away everything the logarithm then needs, and
+# the answer comes back with a relative error near 400 instead of 1e-7.
+# The complex branch therefore stays on the double-taking `clog`, the way
+# `*` and `/` do -- see ca_op_cmplx64.h.  Real `log` has no such step:
+# its operand is the argument itself, and `logf` measures at one float
+# epsilon right through x = 1.
+MkKernel.monfunc :log,
+  source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
+  expr:   {
+    complex: "(#2) = clog(#1);",
+    object:  MkKernel.obj_float_math("log(<v>)", "log"),
+  }.merge(MkKernel.float_widths("(#2) = log<f>(#1);"))
+
 # exp2 special case: complex variant uses cpow(2, x), not cexp2 (which
 # isn't standardized in C99/POSIX).
 MkKernel.monfunc :exp2,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
+    # cpow(a, z) is cexp(z * clog(a)), so it inherits clog's cancellation
+    # and stays on the double-taking form for both complex data_types.
+    complex: "(#2) = cpow(2, (#1));",
     object:  MkKernel.obj_float_math("exp2(<v>)", "exp2"),
   }.merge(MkKernel.float_widths("(#2) = exp2<f>(#1);"))
-   .merge(MkKernel.cmplx_widths("(#2) = cpow<f>(2, (#1));"))
 
 # log10, log2, logb: no complex variant in the original mkmath emit
 {
@@ -8236,8 +8253,8 @@ MkKernel.monfunc :exp10,
         }
       }
     SNIPPET
+    complex: "(#2) = cpow(10, (#1));",   # see exp2 on why cpow stays wide
   }.merge(MkKernel.float_widths("(#2) = pow<f>(10, (#1));"))
-   .merge(MkKernel.cmplx_widths("(#2) = cpow<f>(10, (#1));"))
 
 # Hyperbolic family: float uses the real-typed C function, complex uses
 # the C99 `c`-prefixed one.  Passing a `double _Complex` to `sinh(double)`
@@ -8794,9 +8811,9 @@ MkKernel.binop :power,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#3) = op_powi_<type>((#1), (#2));",
+    complex: "(#3) = cpow((#1), (#2));",   # see exp2 on why cpow stays wide
     object:  '(#3) = rb_funcall((#1), rb_intern("**"), 1, (#2));',
   }.merge(MkKernel.float_widths("(#3) = pow<f>((#1), (#2));"))
-   .merge(MkKernel.cmplx_widths("(#3) = cpow<f>((#1), (#2));"))
 
 # ---- M.2 + M.3 (PyTorch alignment): float-only binop family --------------
 #
