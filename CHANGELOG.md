@@ -11,6 +11,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      carried by the `- Fix:` / `- Change:` / `- New:` that opens the
      entry; there are no per-kind subheadings.
 
+     A section is written newest-first while the release is open, and
+     sorted into New, Change, Fix when it closes -- in the same commit
+     that drops `(unreleased)`. Within Change, the entries that break
+     backward compatibility come first: code written for the previous
+     release either stops working, or gets a different answer than it was
+     entitled to rely on. A last-bit difference in a float result is not
+     one of those; a changed return type, keyword, spelling or default is.
+
      An entry says three things and stops: what changed, what to do about
      it (the migration, the replacement, the condition under which nothing
      changes), and what is excluded. It does not say how the code was
