@@ -54,13 +54,9 @@ unrecorded.
   the old width, add `.to_type(:float64)`.
 
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
-  that is compiled rather than run. `jit_for` takes the loop indices, so a
-  cell may reach the ones around it -- a recurrence, a stencil. `jit_each` and
-  `jit_map` take no indices and work at the cell, the first writing into
-  arrays of yours (`CArray.jit_each { out = a + b * c }`) and the second
-  handing the value back (`CArray.jit_map { a > b ? a : b }`). Compiling them
-  needs the carray-jit gem; without it they raise `NotImplementedError`. An
-  expression over whole arrays wants `CArray.fuse`, which needs no compiler.
+  that is compiled rather than run. Compiling needs the carray-jit gem;
+  without it they raise `NotImplementedError`. An expression over whole
+  arrays wants `CArray.fuse`, which needs no compiler.
 
 - Fix: a lazy expression over an object array (`CArray.object`,
   `CA_OBJECT`) returned wrong values, and crashed when materialised
