@@ -128,6 +128,8 @@ p * 2       #  => [  2.0,  _,  6.0 ]    mask survives scalar ops too
 
 ## Asking about the mask
 
+These methods report on the mask rather than on the values: whether an array carries one at all, how many elements it marks, and which ones.
+
 ```ruby
 a.has_mask?          #  => true    does this array carry a mask at all?
 a.count_masked       #  => 2       how many elements are missing
