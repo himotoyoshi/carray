@@ -51,7 +51,7 @@ describe "TestCArrayStruct " do
     is_asserted_by {  true == a.has_data_class? }
     is_asserted_by {  st == a.data_class }
     is_asserted_by {  CAField == a.field(:mem_i).class }
-    # P.5 (PROPOSAL_DEPRECATE_LEGACY_DATA_CLASS): nested struct fields lift
+    # Nested struct fields lift
     # to CARecord (Face) so the inner data_class is carried.
     is_asserted_by {  CARecord == a.field(:mem_s).class }
     is_asserted_by {  a.field("mem_i") == a["mem_i"] }

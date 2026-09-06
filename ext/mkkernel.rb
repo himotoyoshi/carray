@@ -144,6 +144,55 @@ module MkKernel
     SNIPPET
   end
 
+  # Complex libm comes in two widths: `csqrt` takes a `double _Complex`,
+  # `csqrtf` a `float _Complex`.  A body written with only the double-
+  # taking name still compiles for a cmplx64 cell, because the cell
+  # widens on the way in and rounds on the way out -- so the kernel
+  # computes at cmplx128 whatever the array said it was, and the `+ - *`
+  # kernels beside it stay narrow.  This builds the two expr entries that
+  # hold each complex data_type at its own width.
+  #
+  # In `body`, `<f>` marks each spot the `f` suffix belongs and `<t>` a
+  # real scalar of the matching width:
+  #
+  #   cmplx_widths("(#2) = csqrt<f>(#1);")
+  #   cmplx_widths("{ <t> _r = creal<f>(#1); ... }")
+  #
+  # Returns array-keyed entries, so merge it into an expr Hash that
+  # carries the other families:
+  #
+  #   expr: { float: "...", object: "..." }.merge(cmplx_widths("..."))
+  def self.cmplx_widths(body)
+    {
+      [:cmplx64]  => at_width(body, "f", "float"),
+      [:cmplx128] => at_width(body, "", "double"),
+    }
+  end
+
+  # The same split for the real families, and for the same reason: `sin`
+  # takes a double, so an f32 cell widens on the way in and rounds on the
+  # way out.  Use it in place of a `float:` entry whenever the body calls
+  # a libm function that has an `f` variant.
+  #
+  #   expr: { object: "..." }.merge(float_widths("(#2) = sin<f>(#1);"))
+  #
+  # Not every double-taking call wants this.  `fabs`, `fmin` / `fmax`,
+  # `ceil` / `floor` / `trunc` and the `isnan` family are exact on a
+  # float either way, and `round` (`floor(x + 0.5)`) is exact only in
+  # double -- narrowing it would round `x + 0.5f` first and step the
+  # answer at the boundary.
+  def self.float_widths(body)
+    {
+      [:f32] => at_width(body, "f", "float"),
+      [:f64] => at_width(body, "", "double"),
+    }
+  end
+
+  # Substitute the width markers in a kernel body.
+  def self.at_width(body, suffix, real_type)
+    body.gsub("<f>", suffix).gsub("<t>", real_type)
+  end
+
   # CA_NTYPE order from ext/carray.h.  Drives the per-data_type table layout
   # for eager-style monop/binop tables `ca_<form>_<name>[CA_NTYPE]`.
   # `:reserved` slots emit `ca_<form>_not_implement` (= retired holes
@@ -757,7 +806,7 @@ module MkKernel
   #                 output cell is UNDEF).
   #   :sentinel  -> masked cells are treated as an incomparable sentinel,
   #                 the same role NaN plays for :end nan_policy but runtime-
-  #                 selectable and dtype-agnostic.  Per fiber, unmasked
+  #                 selectable and type-agnostic.  Per fiber, unmasked
   #                 cells are compacted into a contiguous sub-range and only
   #                 that sub-range is sorted/quickselected; masked cells are
   #                 compacted into the complementary sub-range at the head
@@ -1005,7 +1054,9 @@ module MkKernel
     # demotes to real f64).  Hash form requires the kernel author to
     # write expr that produces output data_type values for each source family
     # (e.g. cabs() for complex returning double).
-    raise "#{name}: unknown output #{output}" unless output == :preserve || DTYPES.key?(output) || output.is_a?(Hash)
+    raise "#{name}: unknown output #{output}" \
+      unless output == :preserve || output == :real_of_source ||
+             DTYPES.key?(output) || output.is_a?(Hash)
     KERNELS << {
       kind:     :monop,
       name:     name,
@@ -1188,6 +1239,13 @@ module MkKernel
   #     fallback when no family matches.  Uses the same family aliases
   #     as monop_expr_family_match? (:numeric / :int / :float / :complex
   #     / :bool / :object).
+  #
+  # A Hash value (or a bare output form) may also be :real_of_source,
+  # meaning "the real component width of the source complex data_type"
+  # (cmplx64 -> f32, cmplx128 -> f64).  This is what an op like abs
+  # wants for its complex family: the magnitude of a cmplx64 is a
+  # float32, the same width `.real` and `.imag` already return.  Naming
+  # :f64 there would hand cmplx64 the real width of cmplx128.
   # SL.1.1: Resolve the reduce macro suffix for a given kernel entry,
   # driven by reduction_kind.  Returns "" for :none (= legacy
   # CA_SLAB_REDUCE_T_EX), or "_PLUS" / "_MIN" / "_MAX" / "_STAR" to
@@ -1208,7 +1266,7 @@ module MkKernel
   #
   # Ineligible:
   #   - suffix == ""  (:object src / no_simd_src override — reduce body
-  #     is Ruby callback or dtype-specific, single-accumulator required)
+  #     is Ruby callback or type-specific, single-accumulator required)
   #   - array_arg (weighted reductions use the ARRAY_T_EX macro family,
   #     which has its own emit path)
   def self.reduce_8way_eligible?(k, src, suffix)
@@ -1325,6 +1383,24 @@ module MkKernel
     end
   end
 
+  # Real component width of a complex data_type: cmplx64 -> f32,
+  # cmplx128 -> f64.  Raises for anything else, since :real_of_source
+  # only has a meaning for a complex source.
+  REAL_OF_CMPLX = { cmplx64: :f32, cmplx128: :f64 }.freeze
+
+  def self.resolve_output_dtype(kernel, src, dt)
+    case dt
+    when :preserve then DTYPES[src]
+    when :real_of_source
+      real = REAL_OF_CMPLX[src]
+      raise "#{kernel[:name]}: output :real_of_source needs a complex src (got #{src})" \
+        unless real
+      DTYPES[real]
+    else
+      DTYPES[dt]
+    end
+  end
+
   def self.output_info(kernel, src)
     out = kernel[:output]
     case out
@@ -1334,16 +1410,15 @@ module MkKernel
         next if family == :default
         if monop_expr_family_match?(family, src)
           # Hash value may itself be :preserve (= "same as source for this
-          # family") or a data_type symbol like :f64.
-          return (dt == :preserve) ? DTYPES[src] : DTYPES[dt]
+          # family"), :real_of_source, or a data_type symbol like :f64.
+          return resolve_output_dtype(kernel, src, dt)
         end
       end
       raise "#{kernel[:name]}: output Hash has no match for src #{src} and no :default" \
         unless out.key?(:default)
-      dt = out[:default]
-      (dt == :preserve) ? DTYPES[src] : DTYPES[dt]
+      resolve_output_dtype(kernel, src, out[:default])
     else
-      DTYPES[out]
+      resolve_output_dtype(kernel, src, out)
     end
   end
 
@@ -2643,8 +2718,8 @@ module MkKernel
            write stride 1 (= contig output tail) both preserved -> SIMD
            tile reduce + write maintained.
 
-           Performance characteristic (deliver-via-view, per the CLAUDE.md
-           "deliver the materials" principle): bench (b2 pattern, M=200, K=5, eff_INNER
+           Performance characteristic (deliver-via-view -- the surface
+           prioritises delivering the cells over avoiding a copy): bench (b2 pattern, M=200, K=5, eff_INNER
            =360, INNER_pre_K=16) yields 3674 us vs eager-entity 1545 us
            = 2.38x slow.  Root cause is the multi-parent data layout
            (= 5 separate 9 MB regions instead of one contig 46 MB),
@@ -2800,8 +2875,8 @@ module MkKernel
   #     reductions consume the same slab)
   #   - no streaming / view_flat / array_arg / value_arg
   #   - reduction_kind: :none only
-  # The if-form discipline (CLAUDE.md "write multi-reduction fused kernels
-  # in if-form") is enforced by author, not by the generator.
+  # The if-form discipline for multi-reduction fused kernels (see
+  # emit_min_max below) is enforced by author, not by the generator.
   def self.emit_reduce_native_multi(io, k, src)
     si        = DTYPES[src]
     oi        = output_info(k, src)
@@ -2976,7 +3051,15 @@ module MkKernel
       io.puts "      (void) masked_cnt;"
     end
     io.puts "      ca_lazy_arena_enter();"
-    io.puts "      #{si[:c]} *__chunk = (#{si[:c]} *) ca_lazy_arena_acquire(__chunk_elems * sizeof(#{si[:c]}));"
+    if si[:c] == "VALUE"
+      # Object lane: the chunk holds VALUEs pulled from the source, and
+      # the fold below calls rb_funcall per cell.  A collection there
+      # would free cells a lazy source produced into the chunk, so the
+      # slot has to stay marked for as long as it is held.
+      io.puts "      VALUE *__chunk = (VALUE *) ca_lazy_arena_acquire_object(__chunk_elems);"
+    else
+      io.puts "      #{si[:c]} *__chunk = (#{si[:c]} *) ca_lazy_arena_acquire(__chunk_elems * sizeof(#{si[:c]}));"
+    end
     io.puts "      while ( __outer_off < __outer ) {"
     io.puts "        ca_size_t __r = (__outer - __outer_off < __rows) ? (__outer - __outer_off) : __rows;"
     io.puts "        ca_size_t __n = __r * __inner;"
@@ -3794,7 +3877,7 @@ module MkKernel
   # `masked_last` parameter.  Sets `sort_lo` / `sort_n` to the unmasked
   # sub-range so the downstream sort/quickselect call only ever compares
   # unmasked pairs -- masked cells are an incomparable sentinel, the same
-  # role NaN plays for nan_policy: :end, but dtype-agnostic and runtime-
+  # role NaN plays for nan_policy: :end, but type-agnostic and runtime-
   # selectable.  `payload_expr(k)` computes the `.i` payload (fiber-local
   # index for :fiber_local semantics, view-flat address for :view_flat)
   # given the Ruby string `k` naming the C loop variable.
@@ -4829,7 +4912,7 @@ module MkKernel
       {
         /* rev4 A1 via single-element CArray: convert CScalar / [1] 1-D /
            all dim==1 etc. to a Ruby Float and route it through the Case A
-           scalar path. The dtype matches ca (= rb_ca_obj2ptr coerces it
+           scalar path. The data type matches ca (= rb_ca_obj2ptr coerces it
            downstream). */
         if ( rb_obj_is_carray(rval) ) {
           CArray *cv_pre_;
@@ -6055,6 +6138,90 @@ module MkKernel
   # The aggregator init.c, where Init_carray_kernels() calls each per-tag
   # Init_<suffix>() in file_tags order.  No tag depends on another: an alias
   # already sits after its target within its own file.
+  # ---------------------------------------------------------------------
+  # The kernel bodies, as text, for a caller that has to compute the same
+  # thing somewhere other than in these kernels -- a compiler handed an
+  # expression tree, which must produce what the eager kernel produces.
+  # Emitting the table here rather than reading this generator at runtime
+  # keeps a build-time tool out of the running process.
+  #
+  # The bodies keep their `#1` / `#2` / `#3` and `<type>` placeholders: the
+  # caller substitutes its own operands.  Object-lane bodies are left out,
+  # since they call back into the interpreter and cannot be compiled apart
+  # from it.
+  # ---------------------------------------------------------------------
+
+  BODY_TABLE_DTYPES = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
+                         bool cmplx64 cmplx128].freeze
+
+  def self.body_table_rows
+    rows = []
+    KERNELS.each do |k|
+      next unless %i[monop binop triop].include?(k[:kind])
+      BODY_TABLE_DTYPES.each do |src|
+        body = monop_expr_for(k, src)
+        next unless body.is_a?(String)
+        next if body.include?("rb_funcall")
+        rows << [k[:kind].to_s, k[:name].to_s,
+                 DTYPES[src][:ca].sub(/\ACA_/, "").downcase, body]
+      end
+    end
+    rows
+  end
+
+  def self.c_string_literal(text)
+    '"' + text.gsub("\\", "\\\\").gsub('"', '\\"').gsub("\n", '\\n') + '"'
+  end
+
+  def self.emit_kernel_bodies(io)
+    rows = body_table_rows
+    io.puts
+    io.puts "/* The text of every kernel body, for a caller that compiles the same"
+    io.puts "   operation elsewhere.  Placeholders are left in place. */"
+    io.puts
+    io.puts "typedef struct {"
+    io.puts "  const char *kind;"
+    io.puts "  const char *name;"
+    io.puts "  const char *data_type;"
+    io.puts "  const char *body;"
+    io.puts "} ca_kernel_body_t;"
+    io.puts
+    io.puts "static const ca_kernel_body_t ca_kernel_bodies[] = {"
+    rows.each do |kind, name, dtype, body|
+      io.puts "  { #{c_string_literal(kind)}, #{c_string_literal(name)}, " \
+              "#{c_string_literal(dtype)},"
+      io.puts "    #{c_string_literal(body)} },"
+    end
+    io.puts "};"
+    io.puts
+    io.puts "static const int ca_kernel_bodies_count = #{rows.size};"
+    io.puts
+    io.puts <<~C
+      /* CArray.__kernel_body__(kind, name, data_type) -> String, or nil where
+         this operation has no body at that data type. */
+      static VALUE
+      rb_ca_s_kernel_body (VALUE klass, VALUE rkind, VALUE rname, VALUE rtype)
+      {
+        VALUE kind = rb_obj_as_string(rkind);
+        VALUE name = rb_obj_as_string(rname);
+        VALUE type = rb_obj_as_string(rtype);
+        const char *k = StringValueCStr(kind);
+        const char *n = StringValueCStr(name);
+        const char *t = StringValueCStr(type);
+        int i;
+        for ( i = 0; i < ca_kernel_bodies_count; i++ ) {
+          const ca_kernel_body_t *e = &ca_kernel_bodies[i];
+          if ( strcmp(e->kind, k) == 0 &&
+               strcmp(e->name, n) == 0 &&
+               strcmp(e->data_type, t) == 0 ) {
+            return rb_str_new_cstr(e->body);
+          }
+        }
+        return Qnil;
+      }
+    C
+  end
+
   def self.emit_aggregator_init(io, tags)
     io.puts "/* GENERATED aggregator: dispatches to per-tag Init_carray_kernels_<tag>() */"
     io.puts "#include \"carray.h\""
@@ -6063,23 +6230,30 @@ module MkKernel
       io.puts "void Init_carray_kernels_#{file_suffix(kind, sub)} (void);"
     end
     io.puts
+    emit_kernel_bodies(io)
+    io.puts
     io.puts "void"
     io.puts "Init_carray_kernels (void)"
     io.puts "{"
     tags.each do |kind, sub|
       io.puts "  Init_carray_kernels_#{file_suffix(kind, sub)}();"
     end
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
+    io.puts "                             rb_ca_s_kernel_body, 3);"
     io.puts "}"
   end
 
   # Single-stream Init_carray_kernels(): every kind emitted in order inside
   # one function.
   def self.emit_init(io)
+    emit_kernel_bodies(io)
     io.puts
     io.puts "void"
     io.puts "Init_carray_kernels (void)"
     io.puts "{"
     KERNELS.each { |k| emit_init_line(io, k) }
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
+    io.puts "                             rb_ca_s_kernel_body, 3);"
     io.puts "}"
   end
 
@@ -6155,7 +6329,7 @@ module MkKernel
       # bench A/B comparison during Phase E (E.1-E.5); after E.7 they
       # are retired.  Maps and scans keep their `_ki` names because
       # they have no user-facing equivalent yet (cumsum etc. pending
-      # rewire per CLAUDE.md "methods awaiting reimplementation").
+      # rewire).
       #
       # SO.2 rev6 (2026-06-04): sort kernels can opt out of the _ki
       # binding via bind_ruby: false (= internal-only kernels consumed
@@ -6500,11 +6674,11 @@ MkKernel.reduce :stddev,
 # -fopenmp-simd).  The 2x f64 speedup survives SL.1.2's reduction(min/max:)
 # vectorizer reject because fminnm + fmaxnm dual-issue on M2's two FP pipes.
 #
-# if-form discipline (CLAUDE.md "write multi-reduction fused kernels in if-form"):
+# if-form discipline for multi-reduction fused kernels:
 # the body uses `if (v < lo) lo = v;` etc, NOT ternary `lo = (v < lo) ? v : lo;`.
 # DO NOT change to ternary — pragma-less ILP path depends on if-form.
 #
-# FM.1.0 scope: mask not yet propagated (FM.1.5).  Numeric dtypes only.
+# FM.1.0 scope: mask not yet propagated (FM.1.5).  Numeric data types only.
 
 MkKernel.reduce :minmax,
   state:           { lo: :load_type, hi: :load_type },
@@ -6541,9 +6715,9 @@ MkKernel.reduce :minmax,
 # actual name (`best_v` here) through to the macro -- the macro accepts
 # any identifier as its accumulator argument.
 #
-# Exposed as Ruby `min_index` / `max_index` (= naming convention
-# "methods returning a position use *_index", see CLAUDE.md "methods
-# awaiting reimplementation" table).  These
+# Exposed as Ruby `min_index` / `max_index` (= the naming rule that a
+# method returning a position uses the `_index` suffix; see the rules
+# table in guides/devel/00_glossary.md).  These
 # replace the legacy `min_addr` / `max_addr` retired in E.7 stat_proc
 # retire (commit f5c7ecd).  3.0 breaking: name change from `*_addr` to
 # `*_index` is intentional.
@@ -6595,10 +6769,10 @@ MkKernel.reduce :argmax,
 # axis-local-to-flat-addr round-trip).
 #
 # Paired with the sort family's sort_addr(axis:) (= already public)
-# and partition family's partition_addr_ki (= internal).  Per
-# CLAUDE.md "«`_addr` is OK to expose: a per-axis primitive that returns a real flat address»"
-# (= "dual API: _index for axis-local position, _addr for view-flat
-# address").
+# and partition family's partition_addr_ki (= internal).  `_addr`
+# is OK to expose for a per-axis primitive that returns a real flat
+# address: the dual API is `_index` for an axis-local position, `_addr`
+# for a view-flat one.
 #
 # Runtime constraints:
 #   - naxes == 1 (single-axis reduce): view-flat transform applied
@@ -6806,7 +6980,8 @@ MkKernel.reduce :count_equal,
 #     paths removed (= ALL_NUMERIC + :raise fallback).  Re-add via demand-
 #     driven complex specialization or CA_OBJECT bridge phase.
 #   - **per-axis support gained**: `a.wsum(w, 0)`, `a.wsum(w, 0, 1)`, etc.
-#     (= original "open per-axis" goal, CLAUDE.md per-axis-for-all principle).
+#     (= the original "open per-axis" goal: every reduction gains an
+#     axis form).
 #
 # public_method: true rebinds `wsum` from legacy rb_ca_wsum to
 # rb_ca_wsum_ki at Init time.
@@ -7015,7 +7190,7 @@ MkKernel.scan :cumcount,
 # acc_type: :load_type -> acc carries T_LOAD (= last seen input value).
 # STEP additionally sees `first` (int) marking the first live cell of
 # the fiber.  Output data_type = :bool.  No production consumer remains:
-# every dtype's mask_duplicates now uses the O(distinct) seen-set hash
+# every data type's mask_duplicates now uses the O(distinct) seen-set hash
 # lane (__mask_duplicates__, with boolean riding its uint8 lane), which
 # has no sort buffers.  The numeric widths are kept as a standalone scan
 # kernel (a sort-path reference oracle in the mask_duplicates tests).
@@ -7392,8 +7567,8 @@ MkKernel.search :search_nearest,
 # (= axis-local position) is transformed to a view-flat (row-major) address
 # into self by the dispatcher.  Paired with the *_index family
 # (= bsearch / search / search_nearest already returning axis-local
-# positions per the dual `_index` / `_addr` API in CLAUDE.md "`_addr` is
-# OK to expose: a per-axis primitive that returns a real flat address").
+# positions per the dual `_index` / `_addr` API: `_index` for an
+# axis-local position, `_addr` for a view-flat one).
 #
 # Scope: scalar val path only (= case A).  CArray val + broadcast
 # path (case B/C) raises NotImpError until extended (= the per-element
@@ -7805,13 +7980,16 @@ MkKernel.monop :abs_i,
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
     MkKernel::UINT_DTYPES       => "(#2) = (#1);",
     MkKernel::FLOAT_DTYPES      => "(#2) = fabs((float64_t)#1);",
-    MkKernel::CMPLX_DTYPES      => "(#2) = cabs((cmplx128_t)#1);",
+    [:cmplx64]                  => "(#2) = cabsf(#1);",
+    [:cmplx128]                 => "(#2) = cabs(#1);",
     [:object]                   => '(#2) = rb_funcall((#1), rb_intern("abs"), 0);',
   }
 
 # abs: data_type-changing monop (the framework-piece test customer for monop
 # Hash output form).  numeric input -> preserve data_type (= int/float abs),
-# complex input -> f64 output (= magnitude is real).  Replaces the hand-
+# complex input -> the real component width of that complex data_type
+# (= magnitude is real, and a cmplx64 magnitude is a float32 just as
+# `.real` and `.imag` are).  Replaces the hand-
 # written rb_ca_abs / rb_ca_abs_bang in ext/carray_math.c.  Object data_type
 # kept on abs_i (= bind: false on object would need a different output
 # rule; deferred).  The abs_i monop above remains the primary kernel for
@@ -7820,13 +7998,15 @@ MkKernel.monop :abs_i,
 # returns the real-valued magnitude entity.
 MkKernel.monop :abs,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :preserve, complex: :f64 },
+  output: { numeric: :preserve, complex: :real_of_source },
   expr:   {
     MkKernel::SINT_SMALL_DTYPES => "(#2) = abs(#1);",
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
     MkKernel::UINT_DTYPES       => "(#2) = (#1);",
     MkKernel::FLOAT_DTYPES      => "(#2) = fabs(#1);",
-    MkKernel::CMPLX_DTYPES      => "(#2) = cabs(#1);",   # complex -> double (real magnitude)
+    # complex -> the real magnitude, at that complex type's own width
+    [:cmplx64]                  => "(#2) = cabsf(#1);",
+    [:cmplx128]                 => "(#2) = cabs(#1);",
   }
 
 # abs2: squared magnitude.  For real x this is x*x (identical to :square
@@ -7837,22 +8017,22 @@ MkKernel.monop :abs,
 # optics, signal processing) do not pay for a sqrt they immediately
 # square away.
 #
-# Output data_type follows :abs: numeric preserved, complex -> f64.
+# Output data_type follows :abs: numeric preserved, complex demoted to
+# its own real component width.
 MkKernel.monop :abs2,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :preserve, complex: :f64 },
+  output: { numeric: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = (#1) * (#1);",
-    complex: "{ double _r = creal(#1); double _i = cimag(#1); (#2) = _r * _r + _i * _i; }",
-  }
+  }.merge(MkKernel.cmplx_widths(
+    "{ <t> _r = creal<f>(#1); <t> _i = cimag<f>(#1); (#2) = _r * _r + _i * _i; }"))
 
 MkKernel.monop :conj,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     numeric: "(#2) = (#1);",
-    complex: "(#2) = conj(#1);",
     object:  '(#2) = rb_funcall((#1), rb_intern("conj"), 0);',
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = conj<f>(#1);"))
 
 # arg: data_type-changing monop — phase angle of the complex plane.
 # Mathematically `arg(z)` for z = re + im*i is `atan2(im, re)` in
@@ -7863,11 +8043,11 @@ MkKernel.monop :conj,
 # Replaces the hand-written rb_ca_arg in ext/carray_numeric.c (which
 # was f64-only, float-or-complex parent, also computed `carg`).
 #
-# Output data_type is always CA_FLOAT64.
-# We do NOT use the abs Hash pattern `{numeric: :preserve}` because
-# pi does not fit any integer slot — preserving int data_type would
-# silently truncate `arg(-1) = pi` to 3.  Float32 input also returns
-# f64 since carg itself returns double.
+# Output data_type keeps the width the input carries its real values in:
+# a float stays that float, a complex demotes to its own real component
+# width (cmplx64 -> f32, cmplx128 -> f64).  Integers are the exception
+# and go to f64, because pi does not fit any integer slot — preserving
+# the int data_type would silently truncate `arg(-1) = pi` to 3.
 #
 # 3.0 breaking (vs hand-written rb_ca_arg):
 #   - integer input is now accepted (was a raise).  Returns f64
@@ -7897,16 +8077,15 @@ MkKernel.monop :sign,
     MkKernel::UINT_DTYPES       => "(#2) = ((#1) > 0) ? 1 : 0;",
     MkKernel::SINT_DTYPES       => "(#2) = ((#1) > 0) - ((#1) < 0);",
     MkKernel::FLOAT_DTYPES      => "(#2) = isnan(#1) ? (#1) : (((#1) > 0) - ((#1) < 0));",
-    MkKernel::CMPLX_DTYPES      => "{ double _m = cabs(#1); (#2) = (_m == 0.0) ? 0 : ((#1) / _m); }",
-  }
+  }.merge(MkKernel.cmplx_widths(
+    "{ <t> _m = cabs<f>(#1); (#2) = (_m == 0) ? 0 : ((#1) / _m); }"))
 
 MkKernel.monop :arg,
   source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :f64, complex: :f64 },
+  output: { int: :f64, float: :preserve, complex: :real_of_source },
   expr:   {
     numeric: "(#2) = carg((cmplx128_t)(#1));",
-    complex: "(#2) = carg(#1);",
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = carg<f>(#1);"))
 
 # imag_i: data_type-preserving kernel that places the imag part in the
 # slot (= cimag for complex stores into the real component since cmplx
@@ -7920,9 +8099,8 @@ MkKernel.monop :imag_i,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     numeric: "(#2) = 0;",
-    complex: "(#2) = cimag(#1);",
     object:  '(#2) = rb_funcall((#1), rb_intern("imaginary"), 0);',
-  }
+  }.merge(MkKernel.cmplx_widths("(#2) = cimag<f>(#1);"))
 
 # arg_i: data_type-preserving kernel that writes the complex argument
 # (phase angle) into the slot.  For complex input, cassignment from a
@@ -7937,9 +8115,9 @@ MkKernel.monop :imag_i,
 MkKernel.monop :arg_i,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES,
   expr:   {
-    [:f32]      => "(#2) = (float)carg((cmplx128_t)(#1));",
+    [:f32]      => "(#2) = cargf((cmplx64_t)(#1));",
     [:f64]      => "(#2) = carg((cmplx128_t)(#1));",
-    [:cmplx64]  => "(#2) = (float)carg((cmplx128_t)(#1));",
+    [:cmplx64]  => "(#2) = cargf(#1);",
     [:cmplx128] => "(#2) = carg(#1);",
   }
 
@@ -7995,7 +8173,8 @@ MkKernel.monfunc :rcp,
   expr:   {
     int:     "if ((#1)==0) {ca_zerodiv();}; (#2) = 1/(#1);",
     float:   "(#2) = 1/(#1);",
-    complex: "(#2) = 1/(#1);",
+    [:cmplx64]  => "(#2) = op_crcp_cmplx64(#1);",
+    [:cmplx128] => "(#2) = 1/(#1);",
     object:  '(#2) = rb_funcall(INT2NUM(1), rb_intern("/"), 1, (#1));',
   }
 
@@ -8004,7 +8183,6 @@ MkKernel.monfunc :rcp,
 {
   sqrt:  "sqrt",
   exp:   "exp",
-  log:   "log",
   sin:   "sin",
   cos:   "cos",
   tan:   "tan",
@@ -8015,21 +8193,37 @@ MkKernel.monfunc :rcp,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
-      float:   "(#2) = #{c_fn}(#1);",
-      complex: "(#2) = c#{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
+     .merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
+
+# log is the one member of the family whose complex form cancels, so it
+# does not follow the others onto `clogf`.  The real part of `clog(z)` is
+# `log|z|`, which vanishes on the unit circle; computing |z| at the
+# operand's width rounds away everything the logarithm then needs, and
+# the answer comes back with a relative error near 400 instead of 1e-7.
+# The complex branch therefore stays on the double-taking `clog`, the way
+# `*` and `/` do -- see ca_op_cmplx64.h.  Real `log` has no such step:
+# its operand is the argument itself, and `logf` measures at one float
+# epsilon right through x = 1.
+MkKernel.monfunc :log,
+  source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
+  expr:   {
+    complex: "(#2) = clog(#1);",
+    object:  MkKernel.obj_float_math("log(<v>)", "log"),
+  }.merge(MkKernel.float_widths("(#2) = log<f>(#1);"))
 
 # exp2 special case: complex variant uses cpow(2, x), not cexp2 (which
 # isn't standardized in C99/POSIX).
 MkKernel.monfunc :exp2,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = exp2(#1);",
+    # cpow(a, z) is cexp(z * clog(a)), so it inherits clog's cancellation
+    # and stays on the double-taking form for both complex data_types.
     complex: "(#2) = cpow(2, (#1));",
     object:  MkKernel.obj_float_math("exp2(<v>)", "exp2"),
-  }
+  }.merge(MkKernel.float_widths("(#2) = exp2<f>(#1);"))
 
 # log10, log2, logb: no complex variant in the original mkmath emit
 {
@@ -8040,9 +8234,8 @@ MkKernel.monfunc :exp2,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#2) = #{c_fn}(#1);",
       object: MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
 end
 
 # exp10: special object expr (= bypass OBJ_FLOAT_MATH for the
@@ -8050,8 +8243,6 @@ end
 MkKernel.monfunc :exp10,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = pow(10, (#1));",
-    complex: "(#2) = cpow(10, (#1));",
     object:  <<~SNIPPET,
       {
         VALUE _obj_arg = (#1);
@@ -8062,10 +8253,13 @@ MkKernel.monfunc :exp10,
         }
       }
     SNIPPET
-  }
+    complex: "(#2) = cpow(10, (#1));",   # see exp2 on why cpow stays wide
+  }.merge(MkKernel.float_widths("(#2) = pow<f>(10, (#1));"))
 
-# Hyperbolic family: complex variant uses the real-typed C function
-# (matches original mkmath emit, which doesn't prefix `c`).
+# Hyperbolic family: float uses the real-typed C function, complex uses
+# the C99 `c`-prefixed one.  Passing a `double _Complex` to `sinh(double)`
+# discards the imaginary part, so the complex branch must not share the
+# real-typed name.
 {
   sinh:  "sinh",
   cosh:  "cosh",
@@ -8077,10 +8271,9 @@ MkKernel.monfunc :exp10,
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
     expr:   {
-      float:   "(#2) = #{c_fn}(#1);",
-      complex: "(#2) = #{c_fn}(#1);",
       object:  MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
+     .merge(MkKernel.cmplx_widths("(#2) = c#{c_fn}<f>(#1);"))
 end
 
 # ---- M.1 (PyTorch alignment): additional monfunc / monop ------------------
@@ -8094,19 +8287,17 @@ end
   MkKernel.monfunc op,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#2) = #{c_fn}(#1);",
       object: MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),
-    }
+    }.merge(MkKernel.float_widths("(#2) = #{c_fn}<f>(#1);"))
 end
 
 # rsqrt: 1 / sqrt(x).  float + complex + object (complex via 1.0 / csqrt).
 MkKernel.monfunc :rsqrt,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES + [:object],
   expr:   {
-    float:   "(#2) = 1.0 / sqrt(#1);",
-    complex: "(#2) = 1.0 / csqrt(#1);",
     object:  MkKernel.obj_float_math("1.0 / sqrt(<v>)", "rsqrt"),
-  }
+  }.merge(MkKernel.float_widths("(#2) = ((<t>)1.0) / sqrt<f>(#1);"))
+   .merge(MkKernel.cmplx_widths("(#2) = ((<t>)1.0) / csqrt<f>(#1);"))
 
 # trunc: toward-zero rounding.  Preserve-data_type form like ceil / floor /
 # round — int branch is identity, float branch uses C99 trunc, object
@@ -8136,7 +8327,7 @@ MkKernel.monop :square,
 # with f64-forced input/output via ca_call_cfunc_1_1; the mkkernel form
 # preserves the same numeric behaviour but rides the lazy substrate +
 # kernel_iterator engine.  Widening monfunc: integer input auto-casts
-# to f64, float input preserves dtype.
+# to f64, float input preserves data type.
 
 # deg_360: fold into [0, 360).  Use double-typed local for the fold
 # computation regardless of input precision (matches legacy hand-written
@@ -8315,12 +8506,12 @@ MkKernel.binop :minimum,
     object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
   }
 
-# +, -, * use the same generic expression across all numeric data_types.
+# + and - work on the parts independently, so one generic expression
+# covers every numeric data_type at any width.
 {
-  add: ["+", "+", '"+"'],
-  sub: ["-", "-", '"-"'],
-  mul: ["*", "*", '"*"'],
-}.each do |name, (op, c_op, _ruby_op)|
+  add: ["+", "+"],
+  sub: ["-", "-"],
+}.each do |name, (op, c_op)|
   MkKernel.binop name,
     op:     op,
     source: MkKernel::MATH_NUMERIC + [:object],
@@ -8331,13 +8522,48 @@ MkKernel.binop :minimum,
     }
 end
 
+# * does not: a complex product subtracts two products of the parts, and
+# that subtraction cancels.  A cmplx64 gets it in double, where there are
+# bits left underneath -- see ca_op_cmplx64.h.  Unlike the divide this
+# costs speed rather than saving it, and is paid for the accuracy alone.
+MkKernel.binop :mul,
+  op:     "*",
+  source: MkKernel::MATH_NUMERIC + [:object],
+  expr:   {
+    numeric:     "(#3) = (#1) * (#2);",
+    [:cmplx64]  => "(#3) = op_cmul_cmplx64((#1), (#2));",
+    [:cmplx128] => "(#3) = (#1) * (#2);",
+    object:      '(#3) = rb_funcall((#1), rb_intern("*"), 1, (#2));',
+  }
+
+# div: `/`.  Integer division floors toward -inf (= Ruby `Integer#/` and
+# NumPy `floor_divide`), so that `(a / b) * b + a % b == a` holds for
+# every sign combination.  C's `/` truncates toward zero, so the signed
+# lanes correct the quotient by one when the division is inexact and the
+# operands have opposite signs.  Unsigned operands can never disagree in
+# sign, so they keep the bare C form.  Float `/` is true division and is
+# unchanged (matching Ruby `Float#/`); the identity above therefore holds
+# for integers only, exactly as in Ruby.
 MkKernel.binop :div,
   op:     "/",
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
-    int:     "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
+    MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
+    int:     %{
+      if ((#2)==0) {ca_zerodiv();};
+      {
+        <type> _q = (#1) / (#2);
+        if ( (#1) % (#2) != 0 && (((#1) < 0) != ((#2) < 0)) ) { _q -= 1; }
+        (#3) = _q;
+      }
+    },
     float:   "(#3) = (#1) / (#2);",
-    complex: "(#3) = (#1) / (#2);",
+    # A cmplx64 divide is computed in double and rounded once: see
+    # ca_op_cmplx64.h for why that is both faster and correctly rounded,
+    # and how Annex G survives it.  cmplx128 has no wider type to
+    # borrow, so it stays on the compiler's helper.
+    [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#1), (#2));",
+    [:cmplx128] => "(#3) = (#1) / (#2);",
     object:  '(#3) = rb_funcall((#1), rb_intern("/"), 1, (#2));',
   }
 
@@ -8357,27 +8583,57 @@ MkKernel.binop :rcp_mul,
   expr:   {
     int:     "if ((#1)==0) {ca_zerodiv();}; (#3) = (#2) / (#1);",
     float:   "(#3) = (#2) / (#1);",
-    complex: "(#3) = (#2) / (#1);",
+    [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#2), (#1));",
+    [:cmplx128] => "(#3) = (#2) / (#1);",
     object:  '(#3) = rb_funcall((#2), rb_intern("/"), 1, (#1));',
   }
 
+# mod: `%`.  Floored modulo -- the result carries the sign of the divisor
+# (= Ruby `%` and NumPy `np.mod`), and pairs with the floored `/` above.
+# C's `%` and `fmod` carry the sign of the dividend instead, so the signed
+# lanes add the divisor back when the remainder is non-zero and disagrees
+# in sign with it.  A zero remainder is given the divisor's sign so the
+# rule holds without exception (float only; integers have no signed zero).
+# Unsigned operands already satisfy the rule.  The truncating form stays
+# available as `fmod`.
 MkKernel.binop :mod,
   op:     "%",
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
-    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
-    float:  "(#3) = fmod(#1, #2);",
+    MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+    int:    %{
+      if ((#2)==0) {ca_zerodiv();};
+      {
+        <type> _r = (#1) % (#2);
+        if ( _r != 0 && ((_r < 0) != ((#2) < 0)) ) { _r += (#2); }
+        (#3) = _r;
+      }
+    },
+    float:  %{
+      {
+        <type> _r = fmod((#1), (#2));
+        if ( _r != 0 ) {
+          if ( (_r < 0) != ((#2) < 0) ) { _r += (#2); }
+        }
+        else { _r = copysign((<type>) 0, (#2)); }
+        (#3) = _r;
+      }
+    },
     object: '(#3) = rb_funcall((#1), rb_intern("%"), 1, (#2));',
   }
 
-MkKernel.binop :reminder,
-  op:     "reminder",
+# fmod: the truncating counterpart of `%` -- the remainder carries the
+# sign of the dividend, as C's `fmod` and `%` do.  Defined over integers
+# too (`%` no longer reaches that form since it floors), where it is C's
+# `%` with the same zero-divisor guard.  Ruby's `Numeric#remainder` is
+# this same operation, so the object lane delegates to it and keeps the
+# element's class (an Integer stays an Integer).
+MkKernel.binop :fmod,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
-    float:  "(#3) = remainder(#1, #2);",
-    object: '(#3) = rb_funcall((#1), rb_intern("%"), 1, (#2));',
-  }
+    object: '(#3) = rb_funcall((#1), rb_intern("remainder"), 1, (#2));',
+  }.merge(MkKernel.float_widths("(#3) = fmod<f>((#1), (#2));"))
 
 MkKernel.binop :bit_and_i,
   op:     "&",
@@ -8482,6 +8738,7 @@ MkKernel.alias_binop :bit_rshift,  :">>"
 # pow / cpow.  Object uses Ruby's `**`.
 MkKernel.header_block <<~C
   #include "ca_op_powi.h"
+  #include "ca_op_cmplx64.h"
 C
 
 # ---- triop family ---------------------------------------------------------
@@ -8554,10 +8811,9 @@ MkKernel.binop :power,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#3) = op_powi_<type>((#1), (#2));",
-    float:   "(#3) = pow((#1), (#2));",
-    complex: "(#3) = cpow((#1), (#2));",
+    complex: "(#3) = cpow((#1), (#2));",   # see exp2 on why cpow stays wide
     object:  '(#3) = rb_funcall((#1), rb_intern("**"), 1, (#2));',
-  }
+  }.merge(MkKernel.float_widths("(#3) = pow<f>((#1), (#2));"))
 
 # ---- M.2 + M.3 (PyTorch alignment): float-only binop family --------------
 #
@@ -8573,7 +8829,6 @@ MkKernel.binop :power,
   copysign:  ["copysign",  "copysign"],
   logaddexp: [nil,         nil],          # custom expr — see below
   nextafter: ["nextafter", "nextafter"],
-  fmod:      ["fmod",      "fmod"],
   atan2:     ["atan2",     "atan2"],
   hypot:     ["hypot",     "hypot"],
 }.each do |op_name, (c_fn, ruby_fb)|
@@ -8581,7 +8836,6 @@ MkKernel.binop :power,
   MkKernel.binop op_name,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
-      float:  "(#3) = #{c_fn}((#1), (#2));",
       object: <<~SNIPPET,
         {
           VALUE _l = (#1);
@@ -8594,7 +8848,7 @@ MkKernel.binop :power,
           }
         }
       SNIPPET
-    }
+    }.merge(MkKernel.float_widths("(#3) = #{c_fn}<f>((#1), (#2));"))
 end
 
 # logaddexp: log(exp(x) + exp(y)).  Numerically stable form:
@@ -8603,7 +8857,6 @@ end
 MkKernel.binop :logaddexp,
   source: MkKernel::FLOAT_DTYPES + [:object],
   expr:   {
-    float:  "(#3) = fmax((#1), (#2)) + log1p(exp(-fabs((#1) - (#2))));",
     object: <<~SNIPPET,
       {
         VALUE _l = (#1);
@@ -8619,7 +8872,8 @@ MkKernel.binop :logaddexp,
         }
       }
     SNIPPET
-  }
+  }.merge(MkKernel.float_widths(
+    "(#3) = fmax<f>((#1), (#2)) + log1p<f>(exp<f>(-fabs<f>((#1) - (#2))));"))
 
 # ---- P.5b.4: moncmp family (predicates returning bool) ----------------
 
@@ -8669,7 +8923,7 @@ MkKernel.moncmp :is_invalid,
 # -0.0).  Integer branch: sint = (#1) < 0, uint = always 0.  Float branch
 # uses C99 signbit (handles -0.0 / NaN sign correctly).  No complex
 # variant (signbit on a complex is ambiguous; rejected at this layer).
-# `:sint` / `:uint` aren't family aliases — use array-of-dtypes form.
+# `:sint` / `:uint` aren't family aliases — use the array-of-types form.
 MkKernel.moncmp :signbit,
   source: MkKernel::SINT_DTYPES + MkKernel::UINT_DTYPES +
           MkKernel::FLOAT_DTYPES + [:object],

@@ -217,7 +217,7 @@ class CArray
   #
   #   Implemented in Ruby (see `lib/carray/methods/locate_addr.rb`)
   #   over the `__locate_addr__` hash-lane kernel; `self` is coerced
-  #   to `ref`'s dtype within the same family (cross-family raises).
+  #   to `ref`'s data type within the same family (cross-family raises).
   #   @param ref [CArray] reference values to match against; any
   #     shape (used as flat).
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape

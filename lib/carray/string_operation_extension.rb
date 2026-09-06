@@ -26,18 +26,18 @@ class CArray
   #   Boolean result  -> :boolean CArray
   module StringOperationMixin
 
-    # Per-cell map through the Face's scalar fetch.  `dtype` nil returns a
-    # CAString (string results); an explicit dtype returns a plain typed array
+    # Per-cell map through the Face's scalar fetch.  A nil `data_type` returns a
+    # CAString (string results); an explicit one returns a plain typed array
     # (integer / boolean results).  Shape and mask are carried.
-    def string_map (dtype = nil) # :nodoc:
-      out = dtype ? template(dtype) : CArray.object(*shape)
+    def string_map (data_type = nil) # :nodoc:
+      out = data_type ? template(data_type) : CArray.object(*shape)
       if has_mask?
         m = is_masked
         elements.times { |i| out[i] = (m[i] ? UNDEF : yield(self[i])) }
       else
         elements.times { |i| out[i] = yield(self[i]) }
       end
-      dtype ? out : CAString.wrap(out)
+      data_type ? out : CAString.wrap(out)
     end
     private :string_map
 

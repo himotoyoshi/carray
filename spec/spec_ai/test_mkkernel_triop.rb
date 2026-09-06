@@ -219,6 +219,6 @@ class TestMkKernelTriop < Test::Unit::TestCase
     a = CA_FLOAT64([1.0, 2.0, 3.0])
     b = CA_FLOAT64([1.0, 2.0])  # wrong length
     c = CA_FLOAT64([1.0, 2.0, 3.0])
-    assert_raise(RuntimeError) { a.fma(b, c) }
+    assert_raise(ArgumentError) { a.fma(b, c) }
   end
 end

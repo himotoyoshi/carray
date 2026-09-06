@@ -85,6 +85,8 @@ typedef struct ca_sweep_state {
   ca_size_t       inner;         /* product of dims except outermost (= row
                                     size in elements for outer-axis chunking) */
   int             chunked_state; /* 0=pre-init, 1=active, 2=done */
+  boolean8_t     *mask_scratch;  /* chunk-sized staging for the per-chunk
+                                    mask OR; NULL when no INPUT is masked */
 } ca_sweep_state_t;
 
 /* Validate fsync length, acquire per-op buffers, compute broadcast shape +
@@ -134,10 +136,17 @@ void ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out,
  *     for the entire walk; ca_chunked_gather rewrites it per chunk.
  *
  * Mask handling (m0):
- *   Built once in acquire_chunked at full size (= n_kernel bytes).
- *   Macros that want per-cell mask read at m0[chunk_off + k].
- *   Full-size m0 mirrors the whole path; per-chunk mask gather is a
- *   future optim.
+ *   Chunk-sized (= chunk_n_max bytes), re-gathered per chunk in
+ *   ca_sweep_next_chunk.  Read it at m0[k] for k < chunk_n -- it is
+ *   indexed within the chunk, NOT by the flat cell index.  (This differs
+ *   from the whole-buffer path, where m0 spans n_kernel.)
+ *
+ *   An author may WRITE m0[k] during the chunk loop (= the INOUT_MASKED
+ *   forms' m_out).  Those writes are flushed into the OUTPUT operands'
+ *   masks when the chunk finishes -- at the top of the following
+ *   ca_sweep_next_chunk, and once more in ca_sweep_release_chunked for
+ *   the last chunk -- so the OUTPUT masks are created up front in
+ *   acquire_chunked rather than propagated in one go at release.
  */
 void ca_sweep_acquire_chunked (ca_sweep_state_t *st);
 int  ca_sweep_next_chunk      (ca_sweep_state_t *st); /* 1 = chunk ready, 0 = done */

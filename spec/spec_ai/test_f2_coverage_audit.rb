@@ -68,14 +68,6 @@ class TestF2CoverageAudit < Test::Unit::TestCase
     assert_kernel_iterator_accepts(a.transpose, "CATranspose")
   end
 
-  def test_caunbound_repeat_bound
-    # CAUnboundRepeat once bound has the same attach pointer as
-    # ca_stride_func (= shared typedef), reached via SRC_CASTRIDE.
-    a = CArray.float64(3).seq
-    ub = a.unbound_repeat(:*, nil)        # shape [1, 3]
-    assert_kernel_iterator_accepts(ub, "CAUnboundRepeat (auto-bound smoke)")
-  end
-
   # ==== descriptor framework views (SRC_DESCRIPTOR / L2_ALIASABLE) ====
 
   def test_cawindow

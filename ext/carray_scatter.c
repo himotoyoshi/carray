@@ -9,7 +9,7 @@
     duplicates unbuffered (sequential) — collisions accumulate
     mask       pair skipped when any of addrs[i] / vals[i] / self[addrs[i]] is masked
     cast       vals silently cast to self.data_type
-    dtype      arithmetic (add / sub / mul / min / max): numeric only
+    data type      arithmetic (add / sub / mul / min / max): numeric only
                (boolean / object / fixlen → CADataTypeError; the bang
                cannot widen self, same rationale as fma! / fms!)
                replace: numeric or boolean (assignment, no widening)

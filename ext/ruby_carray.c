@@ -2,7 +2,7 @@
 
   Single entry point Init_carray_ext: declares the CArray class
   hierarchy + exception class + CA module, populates top-level
-  constants (CA_RANK_MAX / CA_NIL / CA_* data_type Symbols / alignment
+  constants (CA_RANK_MAX / CA_* data_type Symbols / alignment
   values), then drives the per-module Init_* sequence in load order.
 
   CAREFUL: the Init_* call order below carries real ordering
@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_build_flags.h"
 #include "version.h"
 
 #ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
@@ -26,7 +27,7 @@ VALUE rb_cCAIterator;
 VALUE rb_eCADataTypeError;
 VALUE rb_mCA;
 
-VALUE CA_NIL;
+VALUE CA_UNSPECIFIED;
 
 void Init_carray_core ();
 void Init_carray_undef ();
@@ -81,7 +82,6 @@ void Init_ca_obj_stack ();   /* multi-parent outer-axis stack */
 void Init_ca_obj_meld ();    /* multi-parent ragged concat along existing axis */
 void Init_ca_obj_transpose ();
 void Init_ca_obj_repeat ();
-void Init_ca_obj_unbound_repeat ();
 void Init_ca_obj_reduce ();
 void Init_ca_obj_field ();
 void Init_ca_obj_fake ();
@@ -107,7 +107,7 @@ void Init_ca_obj_moncmp ();  /* CAMonCmp + lazy elementwise predicate dispatch *
 
 /* Init_carray_iterator retired; CAIterator is a form-only base defined inline
    in Init_carray_ext (accessors in lib/carray/iterator.rb).  The 2.0 C engines
-   (dimension / window / block iterators) live at samples/caiterator/. */
+   (dimension / window / block iterators) were retired in 3.0. */
 
 void Init_carray_mathfunc ();
 
@@ -142,7 +142,7 @@ Init_carray_ext (void)
   rb_cCScalar    = rb_define_class("CScalar",   rb_cCArray);
   rb_cCAView  = rb_define_class("CAView", rb_cCArray);
   /* CAREFUL: CAStride must exist before its subclasses (CARefer /
-     CABlock / CAField / CARepeat / CAUnboundRepeat / CATranspose /
+     CABlock / CAField / CARepeat / CATranspose /
      CAFarray) are defined or registered.  See devel/CAStride.md. */
   rb_cCAStride   = rb_define_class("CAStride",  rb_cCAView);
   rb_cCARefer    = rb_define_class("CARefer",   rb_cCAStride);
@@ -151,10 +151,6 @@ Init_carray_ext (void)
   rb_cCASelect   = rb_define_class("CASelect",  rb_cCAView);
   rb_cCAObject   = rb_define_class("CAObject",  rb_cCAView);
   rb_cCARepeat   = rb_define_class("CARepeat",  rb_cCAStride);
-  /* CAUnboundRepeat: a CAStride with stride-0 axes on each `*` position
-     and sized (matching parent) on each nil position. */
-  rb_cCAUnboundRepeat  = rb_define_class("CAUnboundRepeat",  rb_cCAStride);
-
   rb_cCArrayMask     = rb_define_class("CArrayMask",    rb_cCArray);
   rb_cCAStrideMask   = rb_define_class("CAStrideMask",  rb_cCAStride);
   rb_cCAReferMask    = rb_define_class("CAReferMask",   rb_cCARefer);
@@ -162,7 +158,6 @@ Init_carray_ext (void)
   rb_cCAFieldMask    = rb_define_class("CAFieldMask",   rb_cCAField);
   rb_cCASelectMask   = rb_define_class("CASelectMask",  rb_cCASelect);
   rb_cCARepeatMask   = rb_define_class("CARepeatMask",  rb_cCARepeat);
-  rb_cCAUnboundRepeatMask  = rb_define_class("CAUnboundRepeatMask",  rb_cCAUnboundRepeat);
 
   /* -- Exception class -- */
 
@@ -175,6 +170,10 @@ Init_carray_ext (void)
 
   /* -- version -- */
 
+  /* The flags this build's arithmetic was compiled with.  Anything that
+     computes what these kernels compute, somewhere other than in them, has
+     to be built the same way to arrive at the same answer. */
+  rb_define_const(rb_cCArray, "BUILD_FLAGS",  rb_str_new2(CA_BUILD_FLAGS));
   rb_define_const(rb_cCArray, "VERSION",       rb_str_new2(CA_VERSION));
   rb_define_const(rb_cCArray, "VERSION_CODE",  INT2NUM(CA_VERSION_CODE));
   rb_define_const(rb_cCArray, "VERSION_MAJOR", INT2NUM(CA_VERSION_MAJOR));
@@ -184,8 +183,14 @@ Init_carray_ext (void)
 
   /* -- system -- */
   rb_define_const(rb_cObject, "CA_RANK_MAX", INT2NUM(CA_RANK_MAX));
-  CA_NIL = rb_funcall(rb_cObject, rb_intern("new"), 0);
-  rb_define_const(rb_cObject, "CA_NIL", CA_NIL);
+  /* Sentinel meaning "the caller did not give this argument".  It is
+     distinct from nil because nil is itself a legal fill value (a
+     CA_OBJECT array can be filled with nil), so nil cannot mark
+     absence.  C code only ever compares against it; the value is never
+     read and must never be passed in from Ruby.  The constant exists to
+     anchor the object against the GC. */
+  CA_UNSPECIFIED = rb_funcall(rb_cObject, rb_intern("new"), 0);
+  rb_define_const(rb_cCArray, "UNSPECIFIED", CA_UNSPECIFIED);
 
 #ifdef HAVE_COMPLEX_H
   /* @private */
@@ -320,7 +325,6 @@ Init_carray_ext (void)
   Init_ca_obj_meld();
   Init_ca_obj_transpose();
   Init_ca_obj_repeat();
-  Init_ca_obj_unbound_repeat();
   Init_ca_obj_reduce();
   Init_ca_obj_field();
   Init_ca_obj_fake();
@@ -351,9 +355,7 @@ Init_carray_ext (void)
   /* CAIterator is the form-only base of the 3.0 iterator family; its shared
      accessors are plain Ruby attr_readers (lib/carray/iterator.rb).  The C
      reduction iterators subclass it and carray_access.c constructs
-     CASlabIterator by name, so the class object must exist here.  The retired
-     2.0 dispatch engines (dimension / window / block C iterators + the
-     kernel_at_addr base) are preserved at samples/caiterator/. */
+     CASlabIterator by name, so the class object must exist here. */
   rb_cCAIterator = rb_define_class("CAIterator", rb_cObject);
 
   Init_ca_group_iter();    /* devel/MEMO_AXIS_GROUP.md — axis-group [] surface

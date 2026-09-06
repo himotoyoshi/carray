@@ -7,7 +7,7 @@
   Siblings:
     carray_copy.c        — CArray-to-CArray copy / template family
     carray_element.c     — element-level fetch/store (rb_ca_ptr2obj / obj2ptr)
-    carray_cast_func.c   — dtype cast table used by rb_ca_ptr2obj
+    carray_cast_func.c   — data type cast table used by rb_ca_ptr2obj
 
 ---------------------------------------------------------------------------- */
 
@@ -16,15 +16,15 @@
 #include "ruby/io.h"
 
 /* to_a dispatch:
-     numeric / boolean dtype + entity or attach-able view -> fast path
-       (dtype-direct leaf loop over the attached contig buffer)
+     numeric / boolean data type + entity or attach-able view -> fast path
+       (data type-direct leaf loop over the attached contig buffer)
      CA_OBJECT / CA_FIXLEN                                -> universal
        (rb_ca_fetch_index per cell; ptr is VALUE or byte string, not
         directly castable through the leaf switch)
 
    Masked cells materialise as CA_UNDEF on both paths. */
 
-/* Leaf macro: dtype-specialized inner loop.  Produces `n` VALUE objects
+/* Leaf macro: data type-specialized inner loop.  Produces `n` VALUE objects
    from a contig ptr base + element width, storing into `dst` (Ruby Array). */
 #define TO_A_LEAF_LOOP(T, TO_VALUE) do { \
   const T *src = (const T *) base; \
@@ -42,7 +42,7 @@
 
 #define TO_A_DISPATCH_LEAF(LOOP) do { \
   ca_size_t li; \
-  switch ( dtype ) { \
+  switch ( data_type ) { \
   case CA_FLOAT64: LOOP(double,   rb_float_new); break; \
   case CA_FLOAT32: LOOP(float,    rb_float_new); break; \
   case CA_INT64:   LOOP(int64_t,  LL2NUM);       break; \
@@ -67,13 +67,13 @@
     } \
     break; \
   default: \
-    rb_bug("to_a fast path: unexpected dtype %d", dtype); \
+    rb_bug("to_a fast path: unexpected data type %d", data_type); \
   } \
 } while (0)
 
 #define TO_A_DISPATCH_LEAF_MASKED(LOOP) do { \
   ca_size_t li; \
-  switch ( dtype ) { \
+  switch ( data_type ) { \
   case CA_FLOAT64: LOOP(double,   rb_float_new); break; \
   case CA_FLOAT32: LOOP(float,    rb_float_new); break; \
   case CA_INT64:   LOOP(int64_t,  LL2NUM);       break; \
@@ -95,7 +95,7 @@
     } \
     break; \
   default: \
-    rb_bug("to_a fast path masked: unexpected dtype %d", dtype); \
+    rb_bug("to_a fast path masked: unexpected data type %d", data_type); \
   } \
 } while (0)
 
@@ -105,7 +105,7 @@
 static void
 to_a_fast_recurse (CArray *ca, int32_t level, const char *base,
                    const boolean8_t *mask_base, VALUE dst,
-                   int dtype, ca_size_t bytes, int has_mask)
+                   int data_type, ca_size_t bytes, int has_mask)
 {
   ca_size_t i, n, slab_elements, slab_bytes;
 
@@ -135,7 +135,7 @@ to_a_fast_recurse (CArray *ca, int32_t level, const char *base,
     to_a_fast_recurse(ca, level + 1,
                       base + i * slab_bytes,
                       has_mask ? mask_base + i * slab_elements : NULL,
-                      child, dtype, bytes, has_mask);
+                      child, data_type, bytes, has_mask);
   }
 }
 
@@ -172,8 +172,8 @@ rb_ca_to_a_loop_universal (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
  * ndim-1 nesting: shape [2, 3] -> 2-element Array of 3-element Arrays.
  * Masked cells become CA_UNDEF; the mask itself is not preserved on the
  * result.  ca_attach(self) supplies a contig row-major buffer for the
- * fast path, so all view kinds land in the dtype-direct leaf loop when
- * the dtype is numeric or boolean; CA_OBJECT / CA_FIXLEN fall through
+ * fast path, so all view kinds land in the data type-direct leaf loop when
+ * the data type is numeric or boolean; CA_OBJECT / CA_FIXLEN fall through
  * to the universal fetch_index walk. */
 VALUE
 rb_ca_to_a (VALUE self)
@@ -181,7 +181,7 @@ rb_ca_to_a (VALUE self)
   volatile VALUE ary;
   CArray *ca;
   ca_size_t idx[CA_RANK_MAX];
-  int dtype, fast_eligible;
+  int data_type, fast_eligible;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ary = rb_ca_is_empty(self) ? rb_ary_new() : rb_ary_new2(ca->dim[0]);
@@ -199,22 +199,22 @@ rb_ca_to_a (VALUE self)
      numeric-storage Face -- CATimedelta serials instead of CATimedelta
      Elements -- while ca[i] / each / to_type(:object) all decode.  The
      universal loop goes through rb_ca_fetch_addr, which decodes. */
-  dtype = ca->data_type;
+  data_type = ca->data_type;
   fast_eligible = (ca->elements > 0)
                   && ( ! ca_is_face(ca) )
-                  && (dtype == CA_FLOAT64 || dtype == CA_FLOAT32
-                      || dtype == CA_INT64   || dtype == CA_INT32
-                      || dtype == CA_INT16   || dtype == CA_INT8
-                      || dtype == CA_UINT64  || dtype == CA_UINT32
-                      || dtype == CA_UINT16  || dtype == CA_UINT8
-                      || dtype == CA_BOOLEAN);
+                  && (data_type == CA_FLOAT64 || data_type == CA_FLOAT32
+                      || data_type == CA_INT64   || data_type == CA_INT32
+                      || data_type == CA_INT16   || data_type == CA_INT8
+                      || data_type == CA_UINT64  || data_type == CA_UINT32
+                      || data_type == CA_UINT16  || data_type == CA_UINT8
+                      || data_type == CA_BOOLEAN);
 
   if ( fast_eligible ) {
     int has_mask = (ca->mask != NULL);
     const boolean8_t *mask_base = has_mask
         ? (const boolean8_t *) ca->mask->ptr : NULL;
     to_a_fast_recurse(ca, 0, ca->ptr, mask_base, ary,
-                      dtype, ca->bytes, has_mask);
+                      data_type, ca->bytes, has_mask);
   }
   else if ( ca->elements > 0 ) {
     rb_ca_to_a_loop_universal(self, 0, idx, ary);
@@ -229,7 +229,7 @@ rb_ca_to_a (VALUE self)
 #undef TO_A_DISPATCH_LEAF_MASKED
 
 /* CArray#convert(data_type=nil, bytes: nil) { |elem| ... } — map every cell
- * through the block, into a new array whose dtype is chosen by argv via
+ * through the block, into a new array whose data type is chosen by argv via
  * CArray#template (shape is inherited from self).
  *
  * Masked cells skip the block; if the block returns CA_UNDEF, the

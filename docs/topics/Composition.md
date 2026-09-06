@@ -16,7 +16,7 @@ The key concepts are:
 ## At a glance
 
 ```
-                    | view (same dtype)              | eager (auto-cast)
+                    | view (same data type)          | eager (auto-cast)
 --------------------+--------------------------------+-------------------------
 new axis added      | stack           (CAStack view) | (ragged impossible)
 existing axis grows | meld            (CAMeld view)  | concatenate (materialised)
@@ -31,7 +31,7 @@ grid of tiles       | montage                        | mosaic (materialised)
 - {CArray.concatenate} — eager materialised copy along an existing axis;
   auto-casts to the common `data_type` (or an explicit `data_type:` kwarg).
   Reach for this when you want an owned entity, or when pieces have mixed
-  dtype and you don't want to cast them yourself.
+  data type and you don't want to cast them yourself.
 
 See [CAMeld.md](../objects/CAMeld.md) for the meld view and
 [CAStack.md](../objects/CAStack.md) for the K-axis stack view.

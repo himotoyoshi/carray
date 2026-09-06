@@ -18,7 +18,7 @@
 #  margins filled by the boundary policy), take its `sliding_windows` view
 #  (a pure strided view over the padded buffer), and run a core reduction over
 #  the trailing window axes.  One vectorized pass; the named reductions
-#  delegate straight to the core reduction, so their dtype / mask / empty
+#  delegate straight to the core reduction, so their data type / mask / empty
 #  (ERI) / epsilon contracts are the core's, unchanged.  This replaces the 2.0
 #  per-anchor C engine (ext/ca_iter_window.c, retired).
 #
@@ -116,12 +116,21 @@ class CAWindowIterator < CAIterator
     # Trailing window axes of the sliding_windows view: [ndim .. 2*ndim-1].
     @window_axes = (@sndim...(2 * @sndim)).to_a
 
-    # Output iteration space (reference-shaped, except :truncate which shrinks).
+    # Output iteration space (reference-shaped, except :truncate, which keeps
+    # only the anchors whose window lies wholly inside the source), and where
+    # each axis's first window starts in the buffer the windows are read from.
+    # A window that does not cover its own anchor -- `windows(1..2)`, the two
+    # cells after this one -- starts further along than the margin allows for,
+    # which is what @origins carries.
     rshape = @source.shape
     if @bounds == :truncate
-      @shape = @sndim.times.map { |i| rshape[i] - @widths[i] + 1 }
+      first  = @ranges.map { |r| [0, -r.begin].max }
+      last   = @sndim.times.map { |i| [rshape[i] - 1, rshape[i] - 1 - @ranges[i].end].min }
+      @shape = @sndim.times.map { |i| [last[i] - first[i] + 1, 0].max }
+      @origins = @ranges.map { |r| [r.begin, 0].max }
     else
       @shape = rshape.dup
+      @origins = @sndim.times.map { |i| @lefts[i] + @ranges[i].begin }
     end
     @ndim = @shape.size
     self
@@ -149,10 +158,22 @@ class CAWindowIterator < CAIterator
   #   the padded entity.
   #   @return [CArray]
   def sliding_view
-    @sliding_view ||= padded_entity.sliding_windows(*@widths)
+    @sliding_view ||= anchored_buffer.sliding_windows(*@widths)
   end
 
   private
+
+  # The stretch of the padded buffer the windows are taken from: it begins at
+  # the first window and holds one window per anchor.  For a window that covers
+  # its own anchor and a boundary policy that pads, that is the whole buffer.
+  def anchored_buffer
+    buffer = padded_entity
+    wanted = @ndim.times.map { |k| @origins[k]...(@origins[k] + @shape[k] + @widths[k] - 1) }
+    return buffer if wanted.each_with_index.all? { |range, k|
+      range.begin.zero? && range.end == buffer.dim[k]
+    }
+    buffer[*wanted]
+  end
 
   # Build the padded entity (or, for :truncate, the source itself).  Memoised.
   def padded_entity
@@ -237,6 +258,27 @@ class CAWindowIterator < CAIterator
     end
   end
 
+  # How many of one axis's window offsets fall inside the source, per anchor.
+  # A window away from the edges holds all of them, so the vector is the window
+  # width everywhere but the two ends, and only the ends -- at most one window
+  # width of cells each -- are counted out.
+  def axis_cell_counts (k)
+    length = @shape[k]
+    first  = @ranges[k].begin
+    last   = @ranges[k].end
+    counts = CArray.int64(length)
+    counts[] = @widths[k]
+    truncated_at_the_start = [[-first, 0].max, length].min
+    truncated_at_the_end   = [[length - last, 0].max, 0].max
+    indices = (0...truncated_at_the_start).to_a | (truncated_at_the_end...length).to_a
+    indices.each do |i|
+      low  = [first, -i].max
+      high = [last, length - 1 - i].min
+      counts[i] = [high - low + 1, 0].max
+    end
+    counts
+  end
+
   # An index list of length `nd` that is `nil` (full range) on every axis
   # except `ax`, which is pinned to `k`.
   def axis_selector (nd, ax, k)
@@ -251,7 +293,7 @@ class CAWindowIterator < CAIterator
   #
   # A per-window fold to one value over the trailing window axes is exactly a
   # core per-axis reduction over those axes, so every reduction delegates to
-  # `sliding_view.<op>(axis: window_axes, ...)`.  This inherits the core dtype,
+  # `sliding_view.<op>(axis: window_axes, ...)`.  This inherits the core data type,
   # mask, empty / all-masked (identity vs UNDEF) and epsilon-close contracts
   # unchanged.  `min_count:` / `fill_value:` pass straight to the core (the
   # boundary strictness + result fill knobs).
@@ -259,17 +301,28 @@ class CAWindowIterator < CAIterator
   # @overload sum(min_count: nil, fill_value: nil)
   #   Rolling sum, delegating to `sliding_view.sum(axis: window_axes)`.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @overload accumulate(min_count: nil, fill_value: nil)
+  #   Rolling sum in the source's own data type, wrapping at its width, as the
+  #   core `accumulate` does.  `sum` answers in the type the core promotes to
+  #   (float64 for integers), which for a window over bytes moves eight times
+  #   the bytes; this is the spelling for staying in the type when the window
+  #   cannot overflow it.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any, fused minmax, and the window-local position
   # min_index / max_index (index within the window axes).
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
-    define_method(op) do |min_count: nil, fill_value: nil|
-      kw = {}
-      kw[:min_count]  = min_count  unless min_count.nil?
-      kw[:fill_value] = fill_value unless fill_value.nil?
-      sliding_view.send(op, axis: @window_axes, **kw)
-    end
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (min_count: nil, fill_value: nil)
+        folded = fold_by_offset(:#{op}, min_count, fill_value)
+        return folded unless folded.nil?
+        kw = {}
+        kw[:min_count]  = min_count  unless min_count.nil?
+        kw[:fill_value] = fill_value unless fill_value.nil?
+        sliding_view.#{op}(axis: @window_axes, **kw)
+      end
+    RUBY
   end
 
   # @overload min_addr
@@ -290,6 +343,225 @@ class CAWindowIterator < CAIterator
 
   private
 
+  # ---- folding by offset instead of by anchor ---------------------------
+  #
+  # Delegating to `sliding_view.<op>(axis: window_axes)` folds the window axes,
+  # which are the innermost ones, so the core pays its per-fiber setup once per
+  # output cell -- about 10 ns, whatever the window holds.  For a 3x3 window
+  # that setup is nine tenths of the time.
+  #
+  # The same fold can be run the other way round: walk the window offsets, and
+  # for each one add the whole shifted plane into an accumulator.  Then the
+  # setup is paid once per offset rather than once per output cell, and every
+  # pass is a straight walk over contiguous memory.  It costs one pass per
+  # offset, so it only pays while the window is small; the crossover moves with
+  # rank and data type, but stays above width 5 on every axis in every
+  # combination measured (see devel/PROPOSAL_WINDOW_OFFSET_ACCUMULATION.md).
+  #
+  # What is decided here is the order of the fold and which pad it reads; the
+  # arithmetic is the core's elementwise kernel, and the result data type is
+  # the core's answer for the same reduction (asked below, so it cannot drift).
+
+  # The in-place elementwise kernel that accumulates one offset, per operation.
+  # An operation absent here has no identity to accumulate from and always
+  # takes the delegating path.
+  OFFSET_FOLD = { :sum  => :add!,  :accumulate => :add!,
+                  :prod => :mul!,
+                  :min  => :pmin!, :max  => :pmax!,
+                  :all  => :and!,  :any  => :or! }.freeze
+
+  # Widest window this path takes on any one axis.
+  OFFSET_FOLD_MAX_WIDTH = 5
+
+  # Runs the fold by offset, or returns nil when this window is not one it can
+  # answer for -- in which case the caller delegates as before.
+  def fold_by_offset (op, min_count, fill_value = nil)
+    return nil unless op == :mean || OFFSET_FOLD.key?(op)
+    return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
+    return nil if neutral_value(op).nil?
+
+    folded = op == :mean ? fold_mean : accumulate_offsets(op)
+    folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
+    folded = apply_min_count(folded, min_count)
+    # A `fill_value:` on the call replaces a result that came out undefined.
+    folded = folded.strip_mask(fill_value) if !fill_value.nil? && folded.has_mask?
+    folded
+  end
+
+  # The mean is the sum over the same offsets, divided by the number of cells
+  # each window folded.  A window that folded nothing divides by one here and
+  # is masked out by {#mask_empty_windows} after.
+  def fold_mean
+    counts = window_cell_counts
+    divisor = counts
+    if counts.is_a?(CArray) && counts.min.zero?
+      divisor = counts.copy
+      divisor[counts.eq(0)] = 1
+    end
+    accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) / divisor
+  end
+
+  # Walks the window offsets, accumulating each shifted plane into the result.
+  def accumulate_offsets (op, base = nil, kernel = nil, data_type = nil)
+    base      ||= offset_fold_base(op)
+    kernel    ||= OFFSET_FOLD.fetch(op)
+    data_type ||= offset_fold_data_type(op)
+    accumulator = nil
+    offset_grid.each do |offset|
+      plane = base[*@ndim.times.map { |k|
+        start = @origins[k] + offset[k]
+        start...(start + @shape[k])
+      }]
+      if accumulator.nil?
+        accumulator = CArray.new(data_type, @shape)
+        accumulator[] = plane
+      else
+        accumulator.send(kernel, plane)
+      end
+    end
+    accumulator
+  end
+
+  # These have no value to give for a window that folded nothing; the ones not
+  # listed answer with their identity, which the accumulation already holds.
+  EMPTY_WINDOW_IS_UNDEFINED = [:min, :max, :mean].freeze
+
+  def mask_empty_windows (folded)
+    return folded unless windows_can_be_empty?
+    folded[window_cell_counts.eq(0)] = UNDEF
+    folded
+  end
+
+  # Whether any window can come out holding nothing at all.  A masked source
+  # can leave one empty anywhere.  Without one, it takes a window that reaches
+  # past the array and does not cover its own anchor -- `windows(1..2)` at the
+  # far edge -- and the count on an axis falls away towards its ends, so the
+  # two ends are the only places to look.
+  def windows_can_be_empty?
+    return true if @source.has_mask?
+    return false if window_cell_counts.is_a?(Integer)
+    @ndim.times.any? do |k|
+      along = axis_cell_counts(k)
+      along[0].zero? || along[@shape[k] - 1].zero?
+    end
+  end
+
+  # `min_count` asks for a result only where the window held that many cells.
+  def apply_min_count (folded, min_count)
+    return folded if min_count.nil?
+    counts = window_cell_counts
+    if counts.is_a?(Integer)
+      folded[] = UNDEF if counts < min_count
+    else
+      folded[counts.lt(min_count)] = UNDEF
+    end
+    folded
+  end
+
+  # What stands in for a cell the fold must not see: a margin the boundary
+  # policy does not fill, or a masked cell of the source.  For sum, prod, all
+  # and any that is the operation's identity.  For min and max it is any value
+  # that cannot win, and the array's own extreme is one -- so no table of
+  # per-type limits is needed.  Nil means there is none to be had (a source
+  # masked everywhere), and the caller delegates instead.
+  def neutral_value (op)
+    @neutral_value ||= {}
+    return @neutral_value[op] if @neutral_value.key?(op)
+    @neutral_value[op] =
+      case op
+      when :sum, :accumulate, :mean then 0
+      when :prod       then 1
+      when :all        then true
+      when :any        then false
+      when :min        then source_extreme(:max)
+      when :max        then source_extreme(:min)
+      end
+  end
+
+  def source_extreme (op)
+    value = @source.send(op)
+    value.equal?(UNDEF) ? nil : value
+  end
+
+  # The buffer the offsets are read from: the source with its margins filled
+  # per the boundary policy, with any masked cell replaced by the neutral value
+  # -- an accumulation propagates a mask where the fold would skip it -- and in
+  # the type the result is accumulated in.  Adding across two types runs a
+  # different kernel from adding within one, and how much slower that is
+  # depends on the pair, the working set and the compiler; converting once is
+  # one behaviour everywhere.  It costs a buffer in the wider type, which for
+  # a `sum` over bytes is the one case where it does not pay.
+  def offset_fold_base (op)
+    @offset_fold_base ||= {}
+    @offset_fold_base[op] ||=
+      begin
+        padded =
+          if @source.has_mask?
+            pad_for(@source.strip_mask(neutral_value(op)), neutral_value(op))
+          elsif @bounds == :skip
+            pad_source(@source, @lefts, @rights, :constant, neutral_value(op))
+          else
+            padded_entity
+          end
+        wanted = offset_fold_data_type(op)
+        padded.data_type == wanted ? padded : padded.to_type(wanted)
+      end
+  end
+
+  # Pads `values` the way this window's boundary policy says, with `outside`
+  # standing in for the margin where the policy does not fill one.
+  def pad_for (values, outside)
+    case @bounds
+    when :truncate then values
+    when :nearest  then pad_source(values, @lefts, @rights, :edge, nil)
+    when :constant then pad_source(values, @lefts, @rights, :constant, @fill_value)
+    else                pad_source(values, @lefts, @rights, :constant, outside)
+    end
+  end
+
+  # How many cells each window holds.  With an unmasked source this follows
+  # from the geometry: every boundary policy but `:skip` fills its margins with
+  # real values, so the count is the whole window and one Integer says it;
+  # `:skip` counts the in-bounds offsets, which is separable -- the count on
+  # one axis depends on that axis alone.  A masked source has to be counted for
+  # real, by accumulating over the same offsets.
+  def window_cell_counts
+    return @window_cell_counts unless @window_cell_counts.nil?
+    @window_cell_counts =
+      if @source.has_mask?
+        accumulate_offsets(:sum, pad_for(@source.is_not_masked.int64, 0),
+                           :add!, CA_INT64)
+      elsif @bounds != :skip
+        @widths.inject(:*)
+      else
+        counts = CArray.int64(*@shape)
+        counts[] = 1
+        @ndim.times do |k|
+          shape = Array.new(@ndim, 1)
+          shape[k] = @shape[k]
+          counts.mul!(axis_cell_counts(k).reshape(*shape))
+        end
+        counts
+      end
+  end
+
+  # The data type the delegating path would have produced, asked of the core
+  # itself so the two paths cannot disagree.
+  def offset_fold_data_type (op)
+    @offset_fold_data_type ||= {}
+    @offset_fold_data_type[op] ||=
+      CArray.new(@source.data_type, [1, 1]).send(op, axis: [1]).data_type
+  end
+
+  # Every offset within the window, as a list of per-axis positions into the
+  # padded buffer.
+  def offset_grid
+    @offset_grid ||=
+      @widths.map { |width| (0...width).to_a }
+             .inject { |grid, axis| grid.product(axis).map { |pair| Array(pair).flatten } }
+             .map { |offset| Array(offset) }
+  end
+
   # Source address of the per-anchor winner. The window-local flat index
   # (min_index / max_index) decomposes into per-axis window coordinates; the
   # source coordinate on each axis is anchor + offset + window-coordinate (the
@@ -303,7 +575,7 @@ class CAWindowIterator < CAIterator
     (@sndim - 1).downto(0) { |i| wstride[i] = acc; acc *= @widths[i] }
     sstride = Array.new(@sndim); acc = 1
     (@sndim - 1).downto(0) { |i| sstride[i] = acc; acc *= n[i] }
-    lo = (@bounds == :truncate) ? Array.new(@sndim, 0) : @ranges.map(&:begin)
+    lo = (@bounds == :truncate) ? @origins : @ranges.map(&:begin)
     addr = CArray.int64(*@shape); addr[] = 0
     oob  = CArray.boolean(*@shape); oob[] = 0
     (0...@sndim).each do |i|

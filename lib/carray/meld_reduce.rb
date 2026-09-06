@@ -190,7 +190,7 @@ class CAMeld
   # is unchanged.  (Reduced axis == meld_axis is handled by the callers'
   # meld_axis branch and never reaches here.)
   def non_meld_axis_decompose(op, axis)
-    parts = parents.map { |p| p.send(op, axis: axis) }
+    parts = parents.map { |p| p.public_send(op, axis: axis) }
     axis_norm = axis < 0 ? axis + ndim : axis
     new_meld_axis = axis_norm < meld_axis ? meld_axis - 1 : meld_axis
     CArray.meld(parts, axis: new_meld_axis).copy
@@ -202,7 +202,7 @@ class CAMeld
     # Empty-parent / short-parent handling — Welford needs n >= 2 per parent
     # to recover m2 from p.variance for sample, n >= 1 for variancep (n=1
     # gives m2=0, fine).  Any parent below its threshold punts to super,
-    # which handles UNDEF / 0-count per CLAUDE.md contract.
+    # which handles the UNDEF / zero-count cases.
     min_n = sample ? 2 : 1
     if axis.nil?
       return yield if parents.any? { |p| p.elements < min_n }

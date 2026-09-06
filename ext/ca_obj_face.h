@@ -34,7 +34,8 @@
                via parent)
      - detach: release ptr alias, parent detach
      - xfer_*: delegate to parent's xfer_* (= identical shape / index space)
-     - fill_data: delegate to parent's ca_fill (= identical storage bytes)
+     - fill_data / fill_*: delegate to parent (= identical storage bytes,
+       and the identity layout makes the parent's addresses ours)
 
    Subclasses may override as needed (= default policy, not an invariant;
    does not preclude a future transform Face). */
@@ -43,6 +44,9 @@ void ca_face_attach     (void *ap);
 void ca_face_sync       (void *ap);
 void ca_face_detach     (void *ap);
 void ca_face_fill_data  (void *ap, void *ptr);
+void ca_face_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr);
+void ca_face_fill_stride(void *ap, ca_size_t base, int8_t ndim,
+                                 ca_size_t *counts, ca_size_t *steps, void *ptr);
 void ca_face_xfer_index (void *ap, ca_size_t *idx,
                                  void *data, int dir);
 void ca_face_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
@@ -111,6 +115,34 @@ VALUE   rb_ca_record_get_data_class (CArray *ca);
     (obj) = ca_face_lift((obj), (self));                          \
   }                                                               \
 } while (0)
+
+/* -- wrapper lift (Face or CALazyMarker) --
+
+   A Face and a CALazyMarker are both storage-identical wrappers: they add
+   an interpretation over their parent's bytes without changing them.  Both
+   want the same invariant at a view-creating method -- the wrapper stays on
+   top, and the view is built against what the wrapper wraps.  For a Face
+   that keeps `dt.shift(1)` a CATime; for a marker it keeps a fuse block's
+   expression lazy instead of dropping out of the chain.
+
+   The flag test comes first and covers both bits in one mask, so an
+   ordinary array leaves through a single AND.  That matters: `[]` is the
+   hottest method this is deployed on (see devel/bench_index_percall.rb).
+
+   NOT interchangeable with CA_FACE_LIFT_IF_FACE.  Face is lifted at ~24
+   sites, including ones a marker must not follow it through -- `copy` owns
+   its data, `sort` reorders values, `value` and `strip_mask` change what
+   the mask means.  Deploy this only where the result is a view whose shape
+   was fixed at construction and which only moves positions
+   (PROPOSAL_LAZY_MARKER_LIFT section 4). */
+#define CA_WRAPPER_LIFT(obj, self, ca) do {                          \
+  if ( ca_test_flag((ca), CA_FLAG_IS_FACE | CA_FLAG_IS_LAZY_MARKER)  \
+       && rb_obj_is_kind_of((obj), rb_cCArray) ) {                   \
+    (obj) = ca_wrapper_lift((obj), (self), (ca));                    \
+  }                                                                  \
+} while (0)
+
+VALUE ca_wrapper_lift (VALUE view, VALUE wrapper, void *wrapper_ca);
 
 /* -- Scalar fetch decode hook (storage -> surface) --
    On the scalar-return path (= tail of rb_ca_fetch_index /

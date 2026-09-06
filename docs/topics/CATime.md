@@ -112,6 +112,13 @@ CArray.time("2024-06-15", unit: :D)                  # 1-element
 CArray.time(%w[2024-01-15 2024-02-15 2024-03-15], unit: :D)   # Ruby Array
 CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)   # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
+
+# A time element is an instant already, so it needs no parsing: a `floor` /
+# `ceil` / `to_unit` answer feeds straight back in, as a start or an origin.
+q1 = CArray.time("2020-05-17T13:45:00Z", unit: :s).ceil(unit: "3 months",
+                                                        origin: "2000-01-01")
+CArray.time_range(q1[0], "2021-02-01", unit: :M, step: "3 months")
+# => 2020-07, 2020-10, 2021-01
 ```
 
 `CArray.time` is **strict by default**: an unparseable value raises.
@@ -135,6 +142,16 @@ any string `Date.parse` / `Time.strptime` accepts works here, and
 Passing `format:` switches from the flexible heuristic to strict pattern
 matching against that `strftime`-style template (e.g. `"%d/%m/%Y"`) —
 what you want for an unambiguous day/month order or a non-ISO layout.
+
+Two departures from `Date._parse`. A **year-month** (`"2019-09"`) and a
+**bare year** (`"2019"`) are read as such — Ruby's parser reads neither as
+a date — so the form a `:M` / `:Y` element prints comes back in, and a
+missing finer field names the head of that period (`"2019-09"` on `:s` is
+`2019-09-01T00:00:00Z`). And a **field out of range raises** rather than
+rolling over into another date: `"2019-02-31"` is refused instead of
+becoming 2019-03-03. Note that `"201909"` is a valid **YYMMDD** to Ruby
+(2020-19-09), so it is refused too — name the layout with
+`format: "%Y%m"` for a compact year-month.
 
 ### 2.3 Rebasing relative indices (`origin:`)
 
@@ -199,10 +216,12 @@ CATime::Resolution.new(3, :h)
 
 ### 3.2 Changing the unit — `to_unit`
 
-`to_unit(unit)` re-expresses the same instants on a **finer** grid, returning a
-new `CATime` (a `CATimedelta` for a duration). It is accepted only when the
-receiver's tick is a whole multiple of the target's, so every element lands
-exactly on the new grid and no instant moves:
+`to_unit(unit)` returns the same instants stored on the `unit` grid — a new
+`CATime` (a `CATimedelta` for a duration). Changing the resolution is a
+**cast**, the same relation `CArray.time` has to its input, not an assertion
+that the values happen to fit.
+
+A **finer** target is exact: every instant lands on the new grid unchanged.
 
 ```ruby
 dt = CArray.time_series("2024-06-15", count: 3, unit: :D)
@@ -213,21 +232,51 @@ dt.to_unit("10 minutes")    # 1 day = 144 whole ten-minute ticks
 CArray.time(["2024-01-01"], unit: :Y).to_unit(:M)   # 1 year = 12 whole months
 ```
 
-The decision is made on the **units alone**, never on the values, so the same
-call either always works or always raises — it cannot quietly succeed for one
-array and round for the next:
+A **coarser** target floors each instant to the head of the tick it falls in —
+**toward the past**, the direction `CArray.time` and `floor` already use, so a
+pre-epoch instant rounds the same way a later one does:
 
 ```ruby
-CArray.time(["2024-01-01"], unit: :h).to_unit(:D)   # ArgumentError (coarser)
-CArray.time(["2024-01-01"], unit: "90 minutes").to_unit(:h)
-                                                   # ArgumentError (not a whole multiple)
-CArray.time(["2024-01-01"], unit: :D).to_unit(:M)   # ArgumentError (no fixed ratio)
+CArray.time(["2024-01-01 05:00"], unit: :h).to_unit(:D)   # => 2024-01-01
+CArray.time(["1969-03-05 12:00"], unit: :h).to_unit(:D)   # => 1969-03-05
 ```
 
-To move to a **coarser** grid you have to say what happens to the remainder, so
-use `floor` / `ceil` / `round` (§11.3), which name the rounding at the call
-site. Widening a wide span into a very fine unit raises `RangeError` rather
-than wrapping `int64` (§11.11).
+Reach for `ceil` / `round` (§11.3) first when a different boundary is wanted;
+they move the values and keep the storage unit, so pair them with `to_unit`
+when the storage should change too.
+
+#### Crossing the calendar / fixed-length boundary
+
+`:Y` / `:M` and `:D`-or-finer have no fixed ratio (§11.7), but a `:M` **time**
+is a real instant — the month's first midnight — so the two grids are still
+connected, through civil-date algebra rather than a ratio:
+
+```ruby
+m = CArray.time(["2024-03-01"], unit: :M)
+m.to_unit(:D)                                       # => 2024-03-01
+m.to_unit(:s)                                       # => 2024-03-01T00:00:00Z
+CArray.time(["2024-03-05"], unit: :D).to_unit(:M)   # => 2024-03   (floors)
+```
+
+This is the route from a calendar series into day-level work: walk a quarterly
+grid on `:M`, move the storage to `:D`, then add a day offset.
+
+```ruby
+q = CArray.time_range("2019-09-01", "2020-06-01", unit: :M, step: "3 months")
+q.to_unit(:D) + CATimedelta.wrap(CA_INT64([14]), unit: :D)
+# => 2019-09-15, 2019-12-15, 2020-03-15, 2020-06-15
+```
+
+`:Y` / `:M` → `:W` is the one refusal: a month head is not week-aligned, so
+widening would move the instant.
+
+A **duration** behaves differently. `CATimedelta#to_unit` truncates **toward
+zero** (`+30 h` → `+1 D`, `-30 h` → `-1 D`), because a duration is a magnitude
+rather than a point on an axis, and it refuses to cross the calendar boundary
+at all — a one-month duration has no length in days.
+
+Widening a wide span into a very fine unit raises `RangeError` rather than
+wrapping `int64` (§11.11).
 
 ---
 
@@ -558,13 +607,12 @@ it reduces in — no drop into day space happens behind your back:
 m = CArray.time(%w[2024-01-01 2024-03-01], unit: :M)   # ticks 648, 650
 
 m.mean                                 # => 2024-02      (648 + 650) / 2 = 649
-CArray.time(m.to_time, unit: :D).mean  # => 2024-01-31   the day-space answer
+m.to_unit(:D).mean                     # => 2024-01-31   the day-space answer
 ```
 
 The two answers differ because months have different lengths; neither is
-more correct than the other, so the array's own unit decides. `to_unit`
-cannot make the move here (a calendar tick is not a whole number of days),
-so the day-space route rebuilds the array on the `:D` grid.
+more correct than the other, so the array's own unit decides. Declaring the
+day grid with `to_unit` (§3.2) is how a caller asks for the other one.
 
 ### CATimedelta
 
@@ -779,8 +827,8 @@ tf.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
 `linear_fetch` returns times, so it returns a `CATime` **on the same unit as
 the axis**. The array's unit is its grid, so an interpolated instant landing
 between two ticks is rounded to the nearest tick. Widen the grid first when
-the interpolation needs sub-tick precision — `to_unit` (§3.2) only ever moves
-to a finer grid, so it is exact:
+the interpolation needs sub-tick precision — `to_unit` (§3.2) is exact in that
+direction, so nothing moves:
 
 ```ruby
 t.linear_fetch(CA_FLOAT64([0.0, 0.25]))
@@ -842,16 +890,62 @@ A step is "N of a unit". Write it as a **String** (the human surface) or a bare
 
 Singular and plural are both accepted (`"1 day"` / `"3 days"`); the compact
 `"3h"` (no space) is rejected, and unknown words raise. Internally a spec
-becomes a frozen `CATime::Step` value object — value-equal and hashable,
+becomes a frozen `CATime::Resolution` value object — value-equal and hashable,
 so it can serve as a hash / group key.
 
 Note `:m` is **minute** and `:M` is **month** (the unit letters are
 case-sensitive). To avoid confusion, spell months out: `"1 month"`.
 
+A step spec says how wide a bucket is. Every method below also wants to know
+**where bucket 0 starts** — the `origin:` keyword. `CATime::Grid` is that pair
+given a name, so it can be built once and passed as one value:
+
+```ruby
+g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+g.unit                        # => 12 × :h
+g.origin                      # => 2017-11-30T09:00:00Z  (a CATime::Element)
+
+six = g.range("2017-11-30 09:00", "2017-12-01 21:00")
+# => 11-30 09:00, 11-30 21:00, 12-01 09:00, 12-01 21:00
+
+six.timesteps(g)              # => [0, 1, 2, 3]
+#   instead of (unit: "12 hours", origin: "2017-11-30 09:00")
+six.snap(g, direction: :floor)
+g.at(CA_INT64([0, 1, 2]))     # and back — the from_timesteps direction
+g.on?(six)                    # => true   (every element on a bucket head?)
+```
+
+Passing the pair as one value is not only shorter: it removes the chance of
+handing `floor` one origin and `timesteps` another. A grid is frozen,
+value-equal and hashable, like a resolution.
+
+The string form is the one udunits and CF write into a `units` attribute.
+Reading is generous — udunits' origin-shift operators `since`, `after`,
+`from`, `ref` and the `@` sign are all accepted — and `to_s` emits `since`,
+so a grid round-trips through `parse`. Storage stays epoch-anchored `int64`
+either way: a grid names a calling convention, it does not add a second time
+representation.
+
+```ruby
+CATime::Grid.parse("seconds@1970-01-01").to_s   # => "seconds since 1970-01-01 00:00:00"
+```
+
+`Grid#storage` is the resolution an array on that grid is stored on: the unit
+itself, or finer when the origin's phase needs it. This is what lets
+`"12 hours since ... 09:00"` work at all — 09:00 is not on the 12-hour grid
+counted from the epoch, so the grid answers on seconds, and `at` / `index`
+round-trip exactly (the bare `origin:` keyword raises on that phase, §11.11).
+
+`CATime#grid` is the grid an array is stored on — its own tick, anchored at
+the epoch — which is what the `unit:` default of `timesteps` has always meant.
+
 ### 11.2 `timesteps` — the core primitive
 
-`timesteps(unit:, origin: nil)` returns an `int64` CArray: the index `k` of the
-bucket each element falls in, counted from `origin` (default: the epoch).
+`timesteps(grid = nil, unit:, origin: nil)` returns an `int64` CArray: the
+index `k` of the bucket each element falls in, counted from `origin`
+(default: the epoch). The bucket can be given as a `CATime::Grid` — passed
+positionally or as `unit:` — or as the loose keyword pair, which is what the
+examples here spell out.
 With no `unit` the bucket is the storage resolution itself, so the result is a
 copy of the raw tick indices since the epoch (the values behind
 `ticks`, §16.2). Everything else in this section is a thin layer on
@@ -879,7 +973,7 @@ An origin that does not land exactly on the grid the buckets are counted on
 **raises** rather than silently shifting the phase (§11.11), and a bare
 `Integer` origin is rejected (it is epoch-dependent and ambiguous).
 
-### 11.3 `floor` / `ceil` / `round` — snap to a bucket head
+### 11.3 `snap` / `floor` / `ceil` / `round` — snap to a bucket head
 
 These return a `CATime` (same unit) at the bucket boundary:
 
@@ -898,6 +992,16 @@ dt.round(unit: "3 hours", origin: t0).strftime("%H:%M")
 nearest head with ties toward the future, and is exact even for odd step widths
 (no half-tick loss). These take an argument, so they do **not** collide with the
 argument-less numeric `CArray#floor` / `#round`.
+
+All three are `snap` with `direction:` fixed — the shape `CArray#snap`
+(`step`, `offset:`, `direction:`) already has for numbers, with a grid
+standing in for the step-and-offset pair:
+
+```ruby
+dt.snap(g, direction: :floor)     # same as dt.floor(g)
+dt.snap(g)                        # :round is the default, as in CArray#snap
+dt.snap(g, direction: :nearest)   # => ArgumentError
+```
 
 ### 11.4 `is_righttime` — the on-grid guard
 
@@ -924,6 +1028,20 @@ CATime.from_timesteps(2, unit: "3 hours", origin: t0).to_s
 # => "2024-03-10T06:00:00Z"
 ```
 
+The result is stored on the `unit:` grid, with one exception: a **week
+bucket answers on `:D`**. A week grid counts from the epoch, a Thursday, so
+it cannot hold its own bucket head — the head is the ISO Monday, four days
+off every week tick. Days hold it exactly, so `unit: :W` names the bucket
+and the answer lands on the day grid, where it matches `floor` cell for
+cell:
+
+```ruby
+dt = CArray.time(%w[2024-06-10 2024-06-15 2024-06-17], unit: :D)   # Mon, Sat, Mon
+back = CATime.from_timesteps(dt.timesteps(unit: :W), unit: :W)
+back.unit                      # => #<CATime::Resolution 1 D>
+back.strftime("%F").to_a       # => ["2024-06-10", "2024-06-10", "2024-06-17"]  (== floor)
+```
+
 ### 11.6 Calendar steps — month and year
 
 Months and years are variable-length, but the step system handles them on
@@ -944,10 +1062,12 @@ dt.timesteps(unit: "1 month")   # months since 1970-01
 # => [648, 649, 649, 647]
 ```
 
-For a calendar step the origin's **day and time are ignored** — only its year
-and month set the phase — so month buckets always start on the 1st. This makes
-**fiscal years / quarters** a one-liner: point the origin at the fiscal start
-month.
+A calendar grid is addressed by **month ordinal**, so its bucket heads are
+month heads and nothing else. The origin therefore has to be **the 1st at
+00:00**; anywhere else names a bucket that does not exist and raises, the same
+way a lossy origin does on a fixed-length grid (§11.11). Which month it is
+remains free, and that makes **fiscal years / quarters** a one-liner: point the
+origin at the fiscal start month.
 
 ```ruby
 fy = CArray.time(CA_OBJECT(["2024-03-01", "2024-08-01", "2025-01-01"]), unit: :D)
@@ -1073,12 +1193,14 @@ The step system converts "silently wrong" into a loud error:
   span would overflow the `int64` arithmetic, the op raises `RangeError` instead
   of silently wrapping. Coarse units (`:s` / `:h` / `:D` / `:M` …) cannot
   overflow for any realistic time, so they pay no check.
-- **Lossy origin.** An origin that does not land exactly on the grid the
-  buckets are counted on (e.g. an `:h` axis bucketed by the hour, with a
-  `00:30` origin) raises, rather than truncating the grid phase. A bare
-  `Integer` origin is rejected outright. When the bucket is finer than the
-  storage tick the grid is the *bucket* grid, so a `00:30` origin is fine
-  against a `"1 minute"` bucket — it is exactly 30 buckets.
+- **Lossy origin.** `origin` is the head of bucket 0, so it has to be a bucket
+  head. One that does not land on the grid the buckets are counted on (an `:h`
+  axis bucketed by the hour, with a `00:30` origin) raises, rather than
+  truncating the grid phase. A bare `Integer` origin is rejected outright.
+  When the bucket is finer than the storage tick the grid is the *bucket*
+  grid, so a `00:30` origin is fine against a `"1 minute"` bucket — it is
+  exactly 30 buckets. On a calendar grid the rule reads as “the 1st at
+  00:00” (§11.6), and a `:Y` tick additionally starts in January.
 
 ```ruby
 CA_INT64([0]).time(unit: :h).timesteps(unit: "1 hour", origin: "2024-01-01T00:30:00Z")

@@ -90,7 +90,7 @@ class CASlabIterator < CAIterator
   # A per-slab reduction that folds each slab to one value is exactly the core
   # per-axis reduction over the slab axes, so every reduction is a direct
   # delegation to `reference.<op>(axis: slab_axes)`. This inherits the core
-  # dtype, mask, empty/all-masked (identity vs UNDEF) and epsilon-close
+  # data type, mask, empty/all-masked (identity vs UNDEF) and epsilon-close
   # contracts unchanged -- there is no separate slab reduction kernel. (Unlike
   # the map / reduce block surface, these are mask-aware: they route through the
   # core reduction, which handles masked sources.)
@@ -98,14 +98,23 @@ class CASlabIterator < CAIterator
   # @overload sum
   #   Per-slab sum, delegating to `reference.sum(axis: slab_axes)`.
   #   @return [CArray] one value per slab (shape = self.dim minus the slab axes)
+  # @overload accumulate
+  #   Per-slab sum kept in the source's own data type, wrapping at its width,
+  #   as the core `accumulate` does -- `sum` answers in the type the core
+  #   promotes to (float64 for integers).
+  #   @return [CArray] one value per slab
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any, fused minmax ([min, max] pair), the axis-local
   # position min_index / max_index (index within the slab axes), and the flat
   # source address min_addr / max_addr (which source cell holds the extremum).
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index,
    :min_addr, :max_addr].each do |op|
-    define_method(op) { @reference.send(op, axis: @slab_axes) }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        @reference.#{op}(axis: @slab_axes)
+      end
+    RUBY
   end
 
   # @overload count(v = <none>)
@@ -243,7 +252,7 @@ class CASlabIterator < CAIterator
   #
   # A per-slab running accumulation along the slab axis is exactly the core
   # per-axis cumulative over that axis, so every scan delegates to
-  # `reference.<op>(axis: slab_axis)`, inheriting the core dtype / mask (masked
+  # `reference.<op>(axis: slab_axis)`, inheriting the core data type / mask (masked
   # cells hold the running total, output unmasked) contracts unchanged. Each
   # cell is in exactly one slab (a partition), so the running value is
   # well-defined; the surface is uniform with the family even though it
@@ -258,16 +267,20 @@ class CASlabIterator < CAIterator
   #   Per-slab inclusive running product (float64), reference-shaped.
   #   @return [CArray]
   # @overload cummax
-  #   Per-slab inclusive running maximum (reference dtype), reference-shaped.
+  #   Per-slab inclusive running maximum (reference data type), reference-shaped.
   #   @return [CArray]
   # @overload cummin
-  #   Per-slab inclusive running minimum (reference dtype), reference-shaped.
+  #   Per-slab inclusive running minimum (reference data type), reference-shaped.
   #   @return [CArray]
   # @overload cumcount
   #   Per-slab running count of present cells (int64), reference-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { @reference.send(op, axis: single_scan_axis(op)) }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        @reference.#{op}(axis: single_scan_axis(:#{op}))
+      end
+    RUBY
   end
 
   private

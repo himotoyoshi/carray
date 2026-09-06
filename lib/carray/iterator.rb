@@ -14,8 +14,8 @@
 #  those are NOT part of the common contract because some members legitimately
 #  omit them (a window has no map, a group has no within-piece min_index).
 #
-#  The retired 2.0 generic dispatch (calculate / filter / evaluate over a
-#  kernel_at_addr slot) is preserved at `samples/caiterator/iterator.{rb,c}`.
+#  The 2.0 generic dispatch (calculate / filter / evaluate over a
+#  kernel_at_addr slot) was retired in 3.0.
 #
 # ----------------------------------------------------------------------------
 
@@ -37,7 +37,8 @@ class CAIterator
   # A member that genuinely cannot provide one overrides it to raise with its
   # own reason.
   [
-    :sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,   # tier 1
+    :sum, :accumulate, :prod, :mean, :min, :max,                      # tier 1
+    :variance, :stddev, :all, :any,
     :variancep, :stddevp, :minmax,                                    # tier 2
     :min_index, :max_index, :min_addr, :max_addr,                     # position
     :wsum, :wmean,                                                    # weighted

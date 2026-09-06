@@ -26,18 +26,18 @@
 #  the mask contract (empty / all-masked -> identity for sum/prod, UNDEF for
 #  ratios) carries through unchanged.  Results are length-k CArrays aligned to
 #  `cat.labels`; undefined slots are MASKED cells (never magic floats).  Output
-#  dtype and the empty / all-masked answer per method:
+#  data type and the empty / all-masked answer per method:
 #
 #      elements                     -> int64,      classified cells (incl. masked)
 #      count / count_not_masked / count_masked / count(v) -> int64
-#      sum                          -> value dtype, empty/all-masked = 0 (identity)
+#      sum                          -> value data type, empty/all-masked = 0 (identity)
 #      prod                         -> float64,     empty/all-masked = 1 (identity)
-#      max / min                    -> value dtype, empty/all-masked = MASKED
+#      max / min                    -> value data type, empty/all-masked = MASKED
 #      mean                         -> float64,     empty/all-masked = MASKED
 #      median / percentile          -> float64,     empty/all-masked = MASKED
 #      variance / stddev (sample, ddof=1) -> float64, empty/all-masked = MASKED,
 #                                                   single value = 0.0 (n=1 contract)
-#      all / any                    -> boolean (boolean value dtype only)
+#      all / any                    -> boolean (boolean value data type only)
 #      labels                       -> cat.labels
 #
 #  Generic iteration (the escape hatch for statistics not in the named surface),
@@ -125,7 +125,7 @@ class CACategoricalIterator < CAIterator
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
       # is unrecoverable (preserves the old strict check).  For higher-rank
       # value, defer validation to reduce time — check only that cat.ndim fits
-      # one of the 3 axis: cases (§2.2 of PROPOSAL_CATEGORICAL_REDUCE_AXIS);
+      # one of the 3 axis: cases;
       # any no-axis reduce called on this iterator will surface the mismatch
       # because @grouped stays undefined.
       if value.ndim == 1 ||
@@ -217,21 +217,20 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64, aligned to {#labels}
   # @overload count(axis:)
   #   No-arg + axis: = per-fiber per-category count_not_masked (shape [K, ...band]).
-  #   `count(v, axis:)` (value equality) and `count(UNDEF, axis:)` are deferred
-  #   to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS.
+  #   `count(v, axis:)` (value equality) and `count(UNDEF, axis:)` are not
+  #   implemented; use them without `axis:`.
   #   @param axis [Integer]
   #   @return [CArray]
   def count (*args, axis: nil)
     if axis
       return count_not_masked(axis: axis) if args.empty?
       raise NotImplementedError,
-            "CACategoricalIterator#count(v, axis:) not yet implemented — " \
-            "value-equality count with axis: deferred to Phase 3 of " \
-            "PROPOSAL_CATEGORICAL_REDUCE_AXIS."
+            "CACategoricalIterator#count(v, axis:) is not implemented — " \
+            "value-equality count is available without axis:."
     end
     return count_not_masked if args.empty?
     # Delegate per group to CArray#count (handles count(UNDEF) -> masked count and
-    # count(v) alike, with core's exact dtype equality). The group slice is a
+    # count(v) alike, with core's exact data type equality). The group slice is a
     # CABlock, whose own #count is the block geometry accessor, so dispatch
     # CArray#count explicitly. (Not fused: a value-equality reduceat would have
     # to reproduce core's cross-type / out-of-range equality exactly.)
@@ -244,70 +243,84 @@ class CACategoricalIterator < CAIterator
   #   Empty categories are `0`.
   #   @return [CArray]
   # @overload count_masked(axis:)
-  #   Deferred to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS (needs a separate
-  #   "assigned count" scatter that counts cells regardless of value mask).
+  #   Not implemented; call it without `axis:`.
   #   @param axis [Integer]
   #   @return [CArray]
   def count_masked(axis: nil)
     if axis
       raise NotImplementedError,
-            "CACategoricalIterator#count_masked(axis:) not yet implemented — " \
-            "deferred to Phase 3 of PROPOSAL_CATEGORICAL_REDUCE_AXIS " \
-            "(needs a separate value-mask-only scatter kernel)."
+            "CACategoricalIterator#count_masked(axis:) is not implemented — " \
+            "call it without axis:."
     end
     m = moments
     m ? @elements - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
   end
 
   # @overload sum
-  #   Returns per-category sums in the value dtype.  An empty or fully-masked
-  #   category sums the empty set, which is the additive identity `0`
-  #   (unmasked) — the same contract as `CArray#sum` on an empty / all-masked
-  #   array.
+  #   Returns per-category sums in the data type `CArray#sum` promotes the value
+  #   to (float64 for an integer value).  `accumulate` is the same fold kept in
+  #   the value's own type.  An empty or fully-masked category sums the empty
+  #   set, which is the additive identity `0` (unmasked) — the same contract as
+  #   `CArray#sum` on an empty / all-masked array.
   #   @return [CArray]
   # @overload sum(axis:)
   #   Returns per-category sums per fiber along `axis`.  Cat may be 1-D (case
   #   A, broadcasts across band axes), same rank as source (case B, per-fiber
   #   independent classifier), or one rank less (band-only, constant along
-  #   reduce axis).  Output shape = `[K, ...source.shape without axis]`.  See
-  #   PROPOSAL_CATEGORICAL_REDUCE_AXIS.
+  #   reduce axis).  Output shape = `[K, ...source.shape without axis]`.
   #   @param axis [Integer] reduce axis of the source value.
   #   @return [CArray]
   def sum(axis: nil)
     return axis_sum(axis) if axis
     m = moments
-    return per_category(@grouped.data_type) { |s| s.sum } unless m
-    out = CArray.new(@grouped.data_type, [@k])
-    out[] = m[:sum]                 # cast float64 sums -> value dtype (empty -> 0)
-    out
+    return per_category(core_reduce_type(:sum)) { |s| s.sum } unless m
+    m[:sum].copy                    # the moments sum IS the core fold (empty -> 0.0)
+  end
+
+  # @overload accumulate
+  #   Returns per-category sums folded in the value's own data type, wrapping at
+  #   its width, as the core `accumulate` does.  This is the exact in-type fold:
+  #   `sum` reads its answer off a float64 moment and casts back, so it loses
+  #   the low bits of a wide integer payload and does not wrap.  An empty or
+  #   fully-masked category accumulates the empty set, the additive identity `0`
+  #   (unmasked).
+  #   @return [CArray]
+  # @overload accumulate(axis:)
+  #   Per-fiber per-category in-type sums along `axis`.  Output shape =
+  #   `[K, ...source.shape without axis]`.
+  #   @param axis [Integer] reduce axis of the source value.
+  #   @return [CArray]
+  def accumulate(axis: nil)
+    return axis_by_masked_copy(axis, :accumulate, core_reduce_type(:accumulate)) if axis
+    per_category(core_reduce_type(:accumulate)) { |s| s.accumulate }
   end
 
   # @overload max
-  #   Returns per-category maxima in the value dtype.  Empty categories are
+  #   Returns per-category maxima in the value data type.  Empty categories are
   #   MASKED.
   #   @return [CArray]
   # @overload max(axis:)
-  #   Per-fiber per-category maxima along `axis` (h dtype, masked where empty).
+  #   Per-fiber per-category maxima along `axis` (h's data type, masked where empty).
   #   @param axis [Integer]
   #   @return [CArray]
   def max(axis: nil)
     return axis_moments(axis)[:max] if axis
     m = moments
-    m ? m[:max] : per_category(@grouped.data_type) { |s| s.max }
+    m ? m[:max] : per_category(core_reduce_type(:max)) { |s| s.max }
   end
 
   # @overload min
-  #   Returns per-category minima in the value dtype.  Empty categories are
+  #   Returns per-category minima in the value data type.  Empty categories are
   #   MASKED.
   #   @return [CArray]
   # @overload min(axis:)
-  #   Per-fiber per-category minima along `axis` (h dtype, masked where empty).
+  #   Per-fiber per-category minima along `axis` (h's data type, masked where empty).
   #   @param axis [Integer]
   #   @return [CArray]
   def min(axis: nil)
     return axis_moments(axis)[:min] if axis
     m = moments
-    m ? m[:min] : per_category(@grouped.data_type) { |s| s.min }
+    m ? m[:min] : per_category(core_reduce_type(:min)) { |s| s.min }
   end
 
   # @overload mean
@@ -320,7 +333,7 @@ class CACategoricalIterator < CAIterator
   def mean(axis: nil)
     return axis_mean(axis) if axis
     m = moments
-    return per_category(CA_FLOAT64) { |s| s.mean } unless m
+    return per_category(core_reduce_type(:mean)) { |s| s.mean } unless m
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN, masked next
     out[cnt.eq(0)] = UNDEF           # empty / all-masked category -> MASKED
@@ -345,7 +358,7 @@ class CACategoricalIterator < CAIterator
   def percentile (p, axis: nil)
     axis_order_stat_defer!(:percentile) if axis
     unless MONOID_TYPES.include?(@grouped.data_type)
-      return per_category(CA_FLOAT64) { |s| s.percentile(p) }
+      return per_category(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
     @grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
@@ -374,9 +387,9 @@ class CACategoricalIterator < CAIterator
   #   sample variance.
   #   @return [CArray]
   def variance(axis: nil)
-    return axis_variance_family(axis, :variance) if axis
+    return axis_by_masked_copy(axis, :variance) if axis
     m = moments
-    return per_category(CA_FLOAT64) { |s| s.variance } unless m
+    return per_category(core_reduce_type(:variance)) { |s| s.variance } unless m
     cnt   = m[:count]
     means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
     out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
@@ -390,9 +403,9 @@ class CACategoricalIterator < CAIterator
   #   single-value `0.0`).
   #   @return [CArray]
   def stddev(axis: nil)
-    return axis_variance_family(axis, :stddev) if axis
+    return axis_by_masked_copy(axis, :stddev) if axis
     m = moments
-    return per_category(CA_FLOAT64) { |s| s.stddev } unless m
+    return per_category(core_reduce_type(:stddev)) { |s| s.stddev } unless m
     variance.sqrt                    # sqrt propagates the n=0 mask
   end
 
@@ -408,7 +421,7 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_category(CA_FLOAT64) { |s| s.prod } unless MONOID_TYPES.include?(@grouped.data_type)
+    return per_category(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(@grouped.data_type)
     out = CArray.float64(@k)
     @grouped.send(:__reduceat_prod__, @offsets, out)
     out
@@ -417,7 +430,7 @@ class CACategoricalIterator < CAIterator
   # @overload all
   #   Returns the per-category `all` as boolean (matching `CArray#all`): true
   #   iff every present value is truthy (empty category -> true, vacuously).
-  #   The value dtype must be boolean, as for `CArray#all`.
+  #   The value data type must be boolean, as for `CArray#all`.
   #   @return [CArray]
   def all
     aa = all_any
@@ -427,7 +440,7 @@ class CACategoricalIterator < CAIterator
   # @overload any
   #   Returns the per-category `any` as boolean (matching `CArray#any`): true
   #   iff some present value is truthy (empty category -> false). The value
-  #   dtype must be boolean, as for `CArray#any`.
+  #   data type must be boolean, as for `CArray#any`.
   #   @return [CArray]
   def any
     aa = all_any
@@ -438,11 +451,11 @@ class CACategoricalIterator < CAIterator
 
   # @overload minmax
   #   Returns the per-category `[min, max]` pair (each a length-k CArray in the
-  #   value dtype; empty categories MASKED), matching `CArray#minmax`. Both come
+  #   value data type; empty categories MASKED), matching `CArray#minmax`. Both come
   #   from the single cached moments pass.
   #   @return [Array<CArray>]
   # @overload minmax(axis:)
-  #   Per-fiber `[min_ca, max_ca]` along `axis` (each shape [K, ...band], h dtype,
+  #   Per-fiber `[min_ca, max_ca]` along `axis` (each shape [K, ...band], h's data type,
   #   empty group cells MASKED).  Ruby Array of two CArrays, not stacked.
   #   @param axis [Integer]
   #   @return [Array<CArray>]
@@ -458,9 +471,9 @@ class CACategoricalIterator < CAIterator
   #   reuses the centred two-pass kernel with no extra walk.
   #   @return [CArray]
   def variancep(axis: nil)
-    return axis_variance_family(axis, :variancep) if axis
+    return axis_by_masked_copy(axis, :variancep) if axis
     m = moments
-    return per_category(CA_FLOAT64) { |s| s.variancep } unless m
+    return per_category(core_reduce_type(:variancep)) { |s| s.variancep } unless m
     cnt = m[:count]
     vp  = variance * (cnt - 1).float64 / cnt.float64
     vp[cnt.eq(0)] = UNDEF                 # empty / all-masked stays masked
@@ -475,9 +488,9 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def stddevp(axis: nil)
-    return axis_variance_family(axis, :stddevp) if axis
+    return axis_by_masked_copy(axis, :stddevp) if axis
     m = moments
-    return per_category(CA_FLOAT64) { |s| s.stddevp } unless m
+    return per_category(core_reduce_type(:stddevp)) { |s| s.stddevp } unless m
     variancep.sqrt
   end
 
@@ -660,8 +673,8 @@ class CACategoricalIterator < CAIterator
   # Excluded (out-of-vocabulary / masked-code) and source-masked cells join no
   # running total and are UNDEF.  Mirroring the reductions (sum / mean), a scan
   # takes no axis argument.  cumsum / cumprod -> float64, cummax / cummin
-  # preserve the value dtype, cumcount -> int64 (1-based within-category
-  # ordinal); an object value dtype is carried by the kernel's object branch.
+  # preserve the value data type, cumcount -> int64 (1-based within-category
+  # ordinal); an object value data type is carried by the kernel's object branch.
 
   # @overload cumsum
   #   Per-category inclusive running sum (float64), source-shaped.
@@ -670,10 +683,10 @@ class CACategoricalIterator < CAIterator
   #   Per-category inclusive running product (float64), source-shaped.
   #   @return [CArray]
   # @overload cummax
-  #   Per-category inclusive running maximum (value dtype), source-shaped.
+  #   Per-category inclusive running maximum (value data type), source-shaped.
   #   @return [CArray]
   # @overload cummin
-  #   Per-category inclusive running minimum (value dtype), source-shaped.
+  #   Per-category inclusive running minimum (value data type), source-shaped.
   #   @return [CArray]
   # @overload cumcount
   #   Per-category 1-based within-category ordinal (int64), source-shaped.
@@ -688,7 +701,7 @@ class CACategoricalIterator < CAIterator
   # the fused per-fiber scatter-reduce C kernel and cached (matches the flat
   # #moments caching in spirit: pay one kernel per {iterator, axis} pair, share
   # across sum / mean / min / max / minmax / count* consumers).  Returns
-  # `{count: <int64>, sum: <float64>, min: <h dtype masked>, max: <h dtype masked>}`,
+  # `{count: <int64>, sum: <float64>, min: <h's type, masked>, max: <h's type, masked>}`,
   # all shape [K, ...band].
   def axis_moments (axis)
     @axis_moments_cache ||= {}
@@ -712,13 +725,10 @@ class CACategoricalIterator < CAIterator
     @axis_moments_cache[axis] = {count: counts, sum: sums, min: mins, max: maxs}
   end
 
-  # Axis-aware sum: from moments, cast float64 sums to h dtype so empty-group
-  # identity 0 rides (matching flat #sum).
+  # Axis-aware sum: the moments sum is already the core fold in the core's own
+  # type, so it is handed back as is (an empty group cell carries identity 0.0).
   def axis_sum (axis)
-    m   = axis_moments(axis)
-    out = CArray.new(@value.data_type, m[:sum].shape)
-    out[] = m[:sum]
-    out
+    axis_moments(axis)[:sum].copy
   end
 
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
@@ -731,17 +741,19 @@ class CACategoricalIterator < CAIterator
     out
   end
 
-  # Axis-aware variance / stddev / variancep / stddevp — Ruby-level per-c mask
-  # then delegate to the source's own axis-aware kernel.  Order (median /
-  # percentile / quantile) is genuinely order-statistical (needs sort per
-  # group), and remains deferred; the variance family is only a centred
-  # two-pass numeric aggregate, so this loop hits the same ε-close two-pass
-  # kernel per (group, axis) that CArray#variance uses, no new C needed.
+  # Axis-aware reduction by masked copy — Ruby-level per-c mask, then delegate
+  # to the source's own axis-aware kernel, so the core contract for `op` rides
+  # unchanged.  Used by the variance family (a centred two-pass numeric
+  # aggregate, hitting the same ε-close kernel per (group, axis) that
+  # CArray#variance uses) and by `accumulate` (whose in-type wrapping fold has
+  # no float64 moment to read it off).  Order (median / percentile / quantile)
+  # is genuinely order-statistical (needs a sort per group) and remains
+  # deferred.
   #
   # Cost: K axis-reductions over an h-shaped local (most cells masked away for
   # each c) — bounded by K, typically small.  A fused per-fiber variance
   # kernel is a natural follow-on if bench demands it.
-  def axis_variance_family (axis, op)
+  def axis_by_masked_copy (axis, op, out_data_type = CA_FLOAT64)
     h = @value
     unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
       raise ArgumentError,
@@ -750,7 +762,7 @@ class CACategoricalIterator < CAIterator
     end
     full_c    = resolve_axis_codes(@cat.codes, h.shape, axis)
     band      = h.shape.dup; band.delete_at(axis)
-    out       = CArray.float64(*([@k] + band))
+    out       = CArray.new(out_data_type, [@k] + band)
     slot_idx  = [nil] + [nil] * band.size    # placeholder; c fills slot 0
     codes_bad = full_c.has_mask? ? full_c.is_masked : nil
     @k.times do |c|
@@ -855,9 +867,8 @@ class CACategoricalIterator < CAIterator
   # Called from median / percentile / variance / stddev when axis: is given.
   def axis_order_stat_defer! (op)
     raise NotImplementedError,
-          "CACategoricalIterator##{op}(axis:) not yet implemented — order " \
-          "statistics deferred to Phase 4 of PROPOSAL_CATEGORICAL_REDUCE_AXIS " \
-          "(needs per-fiber counting-sort C kernel, tracked separately)."
+          "CACategoricalIterator##{op}(axis:) is not implemented — order " \
+          "statistics are available without axis:."
   end
 
   # Drive a segment scan through the axis-group scan kernel: the whole value as
@@ -910,7 +921,7 @@ class CACategoricalIterator < CAIterator
 
   # Fused per-segment weighted sum + weighted mean (one C pass over the grouped
   # copy, weights in group order). Returns [wsum, wmean]; wmean is masked where a
-  # segment has no present (value AND weight) pair. Numeric value dtypes only.
+  # segment has no present (value AND weight) pair. Numeric value data types only.
   def kernel_weighted (wg)
     ws = CArray.float64(@k)
     wm = CArray.float64(@k)
@@ -918,7 +929,7 @@ class CACategoricalIterator < CAIterator
     [ws, wm]
   end
 
-  # Per-group weighted fallback for non-numeric value dtypes (complex): delegate
+  # Per-group weighted fallback for non-numeric value data types (complex): delegate
   # each group to CArray#wsum / #wmean. Empty segments take the given identity.
   def fold_weighted (wg, empty)
     out = CArray.float64(@k)
@@ -943,9 +954,9 @@ class CACategoricalIterator < CAIterator
   # Single-pass reduceat moments (count / sum / min / max per category), computed
   # once over the grouped copy and cached — the whole point of the eager copy is
   # that one scatter is followed by cheap single-pass reductions with no
-  # per-segment views.  Nil for a non-numeric value dtype (complex / object /
+  # per-segment views.  Nil for a non-numeric value data type (complex / object /
   # bool), where the monoid reductions fall back to per_category.
-  # numeric value dtypes the C moments kernel handles (int8..float64); bool /
+  # numeric value data types the C moments kernel handles (int8..float64); bool /
   # complex / object fall back to per_category.
   MONOID_TYPES = %i[int8 uint8 int16 uint16 int32 uint32
                     int64 uint64 float32 float64].freeze
@@ -965,7 +976,7 @@ class CACategoricalIterator < CAIterator
   end
 
   # Single-pass fused group-local argmin / argmax (min_index / max_index),
-  # cached. Nil for a non-numeric value dtype (fall back to per_category).
+  # cached. Nil for a non-numeric value data type (fall back to per_category).
   def arg_minmax
     return @arg_minmax if defined?(@arg_minmax)
     @arg_minmax =
@@ -978,7 +989,7 @@ class CACategoricalIterator < CAIterator
   end
 
   # Single-pass fused per-category boolean all / any, cached. Nil unless the
-  # value dtype is boolean (fall back to per_category, which raises like
+  # value data type is boolean (fall back to per_category, which raises like
   # CArray#all on a non-boolean).
   def all_any
     return @all_any if defined?(@all_any)
@@ -993,11 +1004,22 @@ class CACategoricalIterator < CAIterator
 
   # Build a length-k typed output by folding each category's members with the
   # given reduction block.  Fallback path (order statistics, and monoids on a
-  # non-numeric value dtype): each group is delegated to the same CArray
+  # non-numeric value data type): each group is delegated to the same CArray
   # reduction, so the per-group result matches `CArray#<reduction>` over that
   # group's members — the mask carries the "insufficient present data" contract
   # for free (an all-masked group reduces like an empty one; identity-bearing
   # reductions return their identity, ratios return UNDEF; see ext ERI).
+  # The data type the core reduction `op` promotes this value to.  Asked of the
+  # core itself -- a one-cell reduction of the value's type -- rather than
+  # restated here, so a per-category answer cannot drift from `CArray#<op>`
+  # (`sum` on an integer promotes, `accumulate` stays, `min` / `max` keep the
+  # type but a boolean widens, `prod` on an object stays an object).  A payload
+  # the core refuses to fold this way raises here, with the core's own error.
+  def core_reduce_type (op, *args)
+    (@core_reduce_type ||= {})[[op, args]] ||=
+      CArray.new(@grouped.data_type, [1, 1]).public_send(op, *args, axis: 1).data_type
+  end
+
   def per_category (data_type)
     out = CArray.new(data_type, [@k])
     @k.times { |c| out[c] = yield(group_slice(c)) }

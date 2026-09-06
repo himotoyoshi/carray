@@ -62,6 +62,24 @@ class CArray
   autoload :TableMethods, "carray/table"
 end
 
+# ---- Fusion (reading a lazy expression as a plan) --------------------------
+#
+# Nothing in the core asks for a plan -- CArray can always walk the view --
+# so this loads only when something that compiles one asks.
+
+class CArray
+  autoload :Fusion, "carray/fusion"
+end
+
+# ---- Reading a block as an expression (CArray.fuse) -------------------------
+#
+# Only `fuse` needs this, and only when it is called, so the parser it uses
+# is not loaded by `require "carray"`.
+
+class CArray
+  autoload :FuseSource, "carray/fuse_source"
+end
+
 # ---- Iterators (class / slab) ----------------------------------------------
 
 autoload :CASlabIterator,   "carray/slab_iterator"
@@ -171,6 +189,7 @@ end
 # ============================================================================
 # (2) Single-feature method files under carray/methods/
 # ============================================================================
+
 
 class CArray
   # composition family (eager ragged list -> one array)

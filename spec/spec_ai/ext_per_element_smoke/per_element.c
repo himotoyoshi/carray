@@ -1,15 +1,15 @@
 /* spec_ai/ext_per_element_smoke/per_element.c
  *
- * TEST FIXTURE — byte-for-byte mirror of samples/c-extensions/per_element/per_element.c
+ * TEST FIXTURE — byte-for-byte mirror of examples/c-extensions/per_element/per_element.c
  * (the user-facing runnable example).  Kept here so the spec_ai suite owns
- * its own build and never reaches into samples/.  If you edit one, edit both
+ * its own build and never reaches into examples/.  If you edit one, edit both
  * (the samples copy is documentation; this copy is the regression fixture).
  */
 /* ---------------------------------------------------------------------------
  *
  *  per_element.c -- CA_FOR_EACH_ELEMENT macro family usage example
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE L0.2a.  Demonstrates the 5 forms of the
+ *  Demonstrates the 5 forms of the
  *  CA_FOR_EACH_ELEMENT macro family for per-cell iteration:
  *
  *    CA_FOR_EACH_ELEMENT                  read-only, no mask

@@ -70,11 +70,21 @@ typedef struct CABinOp {
                              collapse and attach lifecycle traversal) */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as the layout
+         convention in carray.h requires, so generic code that would walk a
+         single ->parent folds over both operands instead.  What this buys
+         here is ca_has_mask: it answers for a two-parent view by asking both
+         and creating the mask on demand, which lets the mask stay unbuilt
+         until something reads it. ---- */
+  int32_t   n_parents;        /* always 2 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CABinOp-specific tail */
   CArray   *right;
   uint16_t  op_id;
   uint8_t   right_is_scalar;  /* 1 ⇒ right has elements == 1, walk
                                  with element-stride 0 (= broadcast) */
+  CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinOp;
 
 static size_t
@@ -125,7 +135,7 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 
   ca->obj_type  = CA_OBJ_BINOP;
   ca->data_type = out_dt;
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = left->ndim;
   ca->bytes     = out_bytes;
   ca->elements  = left->elements;
@@ -139,6 +149,10 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
   ca->nosync    = 0;
   ca->right     = right;
   ca->op_id     = op_id;
+  ca->operands[0] = left;
+  ca->operands[1] = right;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 2;
   /* right_is_scalar fast path: when right holds a single element,
      xfer_stride pulls only that cell into scratch and walks the
      kernel with element-stride 0 (broadcast).  The symmetric
@@ -148,9 +162,10 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(left) || ca_has_mask(right) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one -- and a chain of masked nodes builds
+     one array at the end rather than one per node. */
 
   if ( ca_is_scalar(left) && ca_is_scalar(right) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -291,25 +306,25 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       one_counts[k]  = 1;
       one_strides[k] = right_bytes;
     }
-    scratch = ca_lazy_arena_acquire(right_bytes);
+    scratch = ( bo->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(1)
+                : ca_lazy_arena_acquire(right_bytes);
     ca_binop_scratch_acquire_count++;
     ca_xfer_stride(bo->right, one_starts, one_counts, one_strides,
                    scratch, CA_XFER_GET);
     right_step = 0;
   }
   else {
-    /* Same-shape right.  Pull with the same byte layout the caller
-       requested for the output; right.bytes matches output.bytes
-       because right.data_type == out.data_type by cast-before. */
-    ca_size_t right_strides[CA_RANK_MAX];
-    ca_size_t s = right_bytes;
-    for ( k = bo->ndim - 1; k >= 0; k-- ) {
-      right_strides[k] = s;
-      s *= counts[k];
-    }
-    scratch = ca_lazy_arena_acquire(slab_n * right_bytes);
+    /* Same-shape right.  `strides` is the step through the operand, the
+       same one the left was pulled with -- recomputing a packed one here
+       reads the right operand's cells 0, 1, 2 against the left's 0, 2, 4.
+       right.bytes matches output.bytes because right.data_type ==
+       out.data_type by cast-before, so the same steps serve both. */
+    scratch = ( bo->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(slab_n)
+                : ca_lazy_arena_acquire(slab_n * right_bytes);
     ca_binop_scratch_acquire_count++;
-    ca_xfer_stride(bo->right, starts, counts, right_strides, scratch,
+    ca_xfer_stride(bo->right, starts, counts, strides, scratch,
                    CA_XFER_GET);
     right_step = 1;
   }
@@ -438,6 +453,14 @@ ca_binop_func_allocate (void *ap)
 {
   CABinOp *ca = (CABinOp *) ap;
   ca->ptr = xmalloc(ca_length(ca));
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
 }
 
 static void
@@ -459,6 +482,14 @@ ca_binop_func_attach (void *ap)
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
   ca_binop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 
@@ -517,6 +548,19 @@ ca_binop_func_create_mask (void *ap)
              ( bo->op_id == CA_BINOP_BIT_AND || bo->op_id == CA_BINOP_BIT_OR ) );
   is_or  = ( bo->op_id == CA_BINOP_BIT_OR );
 
+  /* One masked operand and no Kleene resolution: the answer is that
+     operand's mask, cell for cell.  Share it the way CAMonOp shares its
+     parent's, rather than allocating a copy per node -- a chain of k
+     binops over one masked array then holds one boolean array, not k. */
+  if ( ! kleene && ( has_l != has_r ) ) {
+    CArray *src = has_l ? l : r;
+    if ( src->elements == bo->elements ) {
+      bo->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
+                                         bo->ndim, bo->dim, 0, 0);
+      return;
+    }
+  }
+
   bo->mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
   dst = (boolean8_t *) bo->mask->ptr;
   n = bo->elements;
@@ -524,8 +568,18 @@ ca_binop_func_create_mask (void *ap)
   /* Kleene needs operand values even where an operand is unmasked. */
   need_l = has_l || kleene;
   need_r = has_r || kleene;
-  if ( need_l ) ca_attach(l);
-  if ( need_r ) ca_attach(r);
+  /* Only Kleene reads operand values.  Every other op reads the operand
+     masks alone, and attaching the operand to reach its mask materialises
+     the whole subexpression under it -- so a chain of k masked binops
+     evaluates its own subtree k times over.  Attach what is read. */
+  if ( kleene ) {
+    if ( need_l ) ca_attach(l);
+    if ( need_r ) ca_attach(r);
+  }
+  else {
+    if ( has_l ) ca_attach(l->mask);
+    if ( has_r ) ca_attach(r->mask);
+  }
 
   lm = has_l ? (boolean8_t *) l->mask->ptr : NULL;
   rm = has_r ? (boolean8_t *) r->mask->ptr : NULL;
@@ -550,8 +604,14 @@ ca_binop_func_create_mask (void *ap)
     dst[i] = m;
   }
 
-  if ( need_l ) ca_detach(l);
-  if ( need_r ) ca_detach(r);
+  if ( kleene ) {
+    if ( need_r ) ca_detach(r);
+    if ( need_l ) ca_detach(l);
+  }
+  else {
+    if ( has_r ) ca_detach(r->mask);
+    if ( has_l ) ca_detach(l->mask);
+  }
 }
 
 ca_operation_function_t ca_binop_func = {
@@ -682,8 +742,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 
   /* === Step 2: broadcast via ca_broadcast_pair (same-ndim size-1
      expansion).  No-op when shapes already match or either operand
-     is scalar; also a no-op for incompatible shapes, which the
-     final elements-mismatch check below catches. */
+     is scalar; refuses a pair that cannot be brought to one shape. */
   ca_broadcast_pair(&l_resolved, &r_resolved);
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
@@ -735,14 +794,12 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
       }
     }
     else {
-      /* Cross-ndim or otherwise incompatible shapes; see the
-         builder header comment for why CArray rejects implicit
-         cross-ndim promotion. */
+      /* Unreachable from Ruby: ca_broadcast_pair above refuses a pair
+         it cannot bring to one shape, and states the rule there.  Kept
+         so a caller reaching this builder by another route still finds
+         the kernel guarded. */
       rb_raise(rb_eArgError,
-               "CABinOp: shape mismatch (%lld vs %lld) — only same-"
-               "ndim size-1 broadcast is supported; cross-ndim "
-               "promotion is not adopted in CArray "
-               "(reshape explicitly)",
+               "CABinOp: element count mismatch (%lld vs %lld)",
                (long long) l->elements, (long long) r->elements);
     }
   }
@@ -866,7 +923,6 @@ Init_ca_obj_binop (void)
   rb_define_const(rb_cCABinOp, "OP_AND",        INT2NUM(CA_BINOP_AND));
   rb_define_const(rb_cCABinOp, "OP_OR",         INT2NUM(CA_BINOP_OR));
   rb_define_const(rb_cCABinOp, "OP_XOR",        INT2NUM(CA_BINOP_XOR));
-  rb_define_const(rb_cCABinOp, "OP_REMINDER",   INT2NUM(CA_BINOP_REMINDER));
 
   rb_define_alloc_func(rb_cCABinOp, rb_ca_binop_s_allocate);
   rb_define_method(rb_cCABinOp, "initialize_copy",

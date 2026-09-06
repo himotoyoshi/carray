@@ -150,6 +150,37 @@ class TestMkKernelMonopP5b2 < Test::Unit::TestCase
     assert_in_delta 0.0, a.tanh[0], 1e-12
   end
 
+  # Regression: the complex branch of the hyperbolic family used to emit the
+  # real-typed C function (sinh/cosh/... instead of csinh/ccosh/...), so the
+  # imaginary part was silently discarded and only Re(z) was computed.
+  # Expected values are C99 complex.h for z = 1+2i.
+  COMPLEX_HYPERBOLIC_AT_1_PLUS_2I = {
+    sinh:  Complex(-0.489056259041294,  1.40311925062204),
+    cosh:  Complex(-0.64214812471552,   1.06860742138278),
+    tanh:  Complex( 1.16673625724092,  -0.243458201185725),
+    asinh: Complex( 1.46935174436819,   1.06344002357775),
+    acosh: Complex( 1.528570919481,     1.14371774040242),
+    atanh: Complex( 0.173286795139986,  1.17809724509617),
+  }
+
+  def test_complex_hyperbolic_cmplx128
+    a = CArray.cmplx128(1); a[] = [Complex(1.0, 2.0)]
+    COMPLEX_HYPERBOLIC_AT_1_PLUS_2I.each do |op, want|
+      got = a.send(op)[0]
+      assert_in_delta want.real, got.real, 1e-12, "Re(#{op})"
+      assert_in_delta want.imag, got.imag, 1e-12, "Im(#{op})"
+    end
+  end
+
+  def test_complex_hyperbolic_cmplx64
+    a = CArray.cmplx64(1); a[] = [Complex(1.0, 2.0)]
+    COMPLEX_HYPERBOLIC_AT_1_PLUS_2I.each do |op, want|
+      got = a.send(op)[0]
+      assert_in_delta want.real, got.real, 1e-6, "Re(#{op})"
+      assert_in_delta want.imag, got.imag, 1e-6, "Im(#{op})"
+    end
+  end
+
   def test_inverse_trig
     a = CArray.float64(1); a[] = [1.0]
     assert_in_delta Math::PI/2, a.asin[0], 1e-12

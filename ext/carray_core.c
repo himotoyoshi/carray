@@ -231,7 +231,6 @@ ca_cast_table2[CA_NTYPE][CA_NTYPE] = {
     * CASelect
     * CAObject
     * CARepeat
-    * CAUnboundRepeat
 */
 
 void
@@ -243,7 +242,6 @@ ca_init_obj_type (void)
   extern ca_operation_function_t ca_select_func;
   extern ca_operation_function_t ca_object_func;
   extern ca_operation_function_t ca_stride_func;
-  extern ca_operation_function_t ca_ubrep_func;
 
   /* CArray */
   ca_func[CA_OBJ_ARRAY]       = ca_array_func;
@@ -309,12 +307,6 @@ ca_init_obj_type (void)
   ca_mask_class[CA_OBJ_REPEAT] = rb_cCARepeatMask;
   ca_mask_typeddata[CA_OBJ_REPEAT] = &castride_mask_data_type;
 
-  /* CAUnboundRepeat */
-  ca_func[CA_OBJ_UNBOUND_REPEAT]  = ca_ubrep_func;
-  ca_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeat;
-  ca_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_data_type;
-  ca_mask_class[CA_OBJ_UNBOUND_REPEAT] = rb_cCAUnboundRepeatMask;
-  ca_mask_typeddata[CA_OBJ_UNBOUND_REPEAT] = &caunboundrepeat_mask_data_type;
 
   ca_obj_num = 9;
 }
@@ -432,11 +424,22 @@ ca_attach_is_alias (void *ap)
 {
   CArray *ca = (CArray *) ap;
   extern ca_operation_function_t ca_stride_func;
+  extern ca_operation_function_t ca_lazy_marker_func;
   extern int ca_stride_is_contiguous (CAStride *ca);
   extern int ca_stride_attach_aliases_root (CAStride *ca);
 
   if ( ca == NULL ) return 0;
   if ( ca_is_entity(ca) )  return 1;
+
+  /* CALazyMarker's attach is literally `ca->ptr = ca->parent->ptr` after
+     attaching the parent — it adds no layout of its own — so it aliases
+     exactly when its parent does.  Without this a marker looks expensive
+     to every caller and views built on it fall onto materialising paths,
+     even though there is nothing between the marker and real memory. */
+  if ( ca_func[ca->obj_type].attach == ca_lazy_marker_func.attach ) {
+    return ca_attach_is_alias(((CAView *) ca)->parent);
+  }
+
   /* CAStride family share ca_stride_func.attach (= ca_stride_func_attach).
      The alias-attach fast path is taken iff composed strides are
      row-major contiguous.  ca_stride_is_contiguous checks the leaf
@@ -1399,6 +1402,30 @@ ca_xfer_strided_walk (char            *src_base,
   }
 }
 
+/* See the comment on the prototype in carray.h. */
+int
+ca_xfer_stride_request_is_axis_box (void *ap, ca_size_t *starts,
+                                    ca_size_t *counts, ca_size_t *strides)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t native[CA_RANK_MAX];
+  ca_size_t s = ca->bytes;
+  int8_t    ndim = ca->ndim, k;
+
+  for ( k = ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
+
+  for ( k = 0; k < ndim; k++ ) {
+    ca_size_t q;
+    if ( counts[k] <= 1 ) continue;          /* moves nothing */
+    if ( strides[k] <= 0 ) return 0;         /* zero / negative: not an axis walk */
+    if ( strides[k] % native[k] != 0 ) return 0;
+    q = strides[k] / native[k];
+    if ( q < 1 ) return 0;
+    if ( starts[k] + (counts[k] - 1) * q >= ca->dim[k] ) return 0;   /* runs off axis k */
+  }
+  return 1;
+}
+
 static void
 ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
                          ca_size_t *strides, void *data, int dir)
@@ -1532,10 +1559,12 @@ ca_xfer_all_body (VALUE arg)
   return Qnil;
 }
 
+/* `arg` carries the hold depth to unwind to, so nested ca_xfer_all calls
+   each drop their own hold rather than the whole stack. */
 static VALUE
 ca_xfer_all_ensure (VALUE arg)
 {
-  (void) arg;
+  ca_gc_hold_pop_to(NUM2INT(arg));
   ca_lazy_arena_exit();
   return Qnil;
 }
@@ -1545,6 +1574,7 @@ ca_xfer_all (void *ap, void *data, int dir)
 {
   CArray *ca = (CArray *) ap;
   ca_xfer_all_args_t args;
+  int guard = -1;
   if ( ! ca_func[ca->obj_type].xfer_all ) {
     rb_raise(rb_eRuntimeError,
              "[BUG] xfer_all not defined for object type <%i>",
@@ -1562,8 +1592,25 @@ ca_xfer_all (void *ap, void *data, int dir)
      next entry. */
   ca_lazy_arena_enter();
   args.ca = ca; args.data = data; args.dir = dir;
+
+  /* A CA_OBJECT cell is a VALUE, and this buffer belongs to no Ruby
+     object yet -- it is the destination `copy` will hand out, or a
+     view's own freshly allocated one.  The object lane calls rb_funcall
+     per cell, so a collection partway through would free what has been
+     written so far.  ca_xfer_all is the whole-view entry, so the window
+     is exactly ca->elements contiguous cells: the one place where the
+     extent is known without trusting a caller's strides.  Sub-windows
+     written by nested transfers land inside it. */
+  if ( ca->data_type == CA_OBJECT && dir == CA_XFER_GET ) {
+    if ( data != (void *) ca->ptr ) {
+      VALUE *p = (VALUE *) data;
+      ca_size_t i;
+      for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+    }
+    guard = ca_gc_hold_push(data, ca->elements);
+  }
   rb_ensure(ca_xfer_all_body, (VALUE) &args,
-            ca_xfer_all_ensure, Qnil);
+            ca_xfer_all_ensure, INT2NUM(guard));
 }
 
 /* ------------------------------------------------------------------- */

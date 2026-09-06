@@ -2,7 +2,7 @@
 #
 # Two entry points, mirroring the CArray-level taxonomy:
 #
-#   +CAFrame.meld+         view frame,  strict same-dtype per column,
+#   +CAFrame.meld+         view frame,  strict same data type per column,
 #                          each column is a CAMeld view over the inputs
 #   +CAFrame.concatenate+  eager frame, auto-casts per column,
 #                          each column is a materialised entity
@@ -48,10 +48,10 @@ class CAFrame
 
   # Concatenate frames along the row axis, eagerly.  Each output column is
   # +CArray.concatenate+ of that column across the input frames, so per-column
-  # dtypes auto-promote to a common type.  The result is a fresh, independent
+  # data types auto-promote to a common type.  The result is a fresh, independent
   # frame — writes to it do not propagate back to the input frames.
   #
-  # For a view frame that shares storage with the inputs (strict same dtype
+  # For a view frame that shares storage with the inputs (strict same data type
   # per column, chain composability preserved) use {CAFrame.meld}.
   #
   # Column matching, index handling, and column-set / index-mix rules

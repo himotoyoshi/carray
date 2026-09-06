@@ -292,7 +292,8 @@ offset_new (int8_t obj_type, CArray *parent, int32_t offset)
   CAIterOffset *ca = ALLOC(CAIterOffset);
 
   /* ALLOC does not zero the struct and the pool framework keys on
-     _pool; take the legacy path explicitly (see CLAUDE.md). */
+     _pool, so a view struct taken from ALLOC() must have _pool set to
+     NULL before its setup runs. */
   ca->_pool     = NULL;
   ca->obj_type  = obj_type;
   ca->data_type = CA_INT32;
@@ -378,7 +379,7 @@ rb_stride_reg_wrap (VALUE klass, VALUE parent_obj)
   for (i = ndim - 1; i >= 0; i--) { strides[i] = s; s *= parent->dim[i]; }
 
   ca = ALLOC(CAStride);
-  ca->_pool = NULL;           /* legacy allocation path; see CLAUDE.md */
+  ca->_pool = NULL;           /* NULL before setup: see offset_new above */
   ca_stride_setup(ca, CA_OBJ_ITER_STRIDE_REG, parent,
                   parent->data_type, parent->bytes,
                   ndim, parent->dim, strides, 0);

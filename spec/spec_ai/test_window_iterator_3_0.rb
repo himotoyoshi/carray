@@ -286,3 +286,94 @@ class TestWindowIterator30Differential < Test::Unit::TestCase
     end
   end
 end
+
+# A window need not cover the cell it is centred on: `windows(1..2)` is "the
+# two cells after this one".  The anchor's window then starts further along the
+# padded buffer than its left margin accounts for, and under :truncate the
+# anchors that survive are a different set.  Both were once read as if the
+# window began at the margin, which shifted every answer by the range's begin
+# and, under :truncate, produced one anchor too many.
+class TestWindowIterator30OneSidedWindows < Test::Unit::TestCase
+
+  def setup
+    @a = CArray.float64(8).seq(1)              # [1..8]
+  end
+
+  # Folds each window by hand, one anchor at a time.
+  def by_hand (source, range, bounds, op)
+    length = source.elements
+    first  = [0, -range.begin].max
+    last   = [length - 1, length - 1 - range.end].min
+    anchors = bounds == :truncate ? (first..last).to_a : (0...length).to_a
+    anchors.map do |anchor|
+      cells = range.map { |offset|
+        cell = anchor + offset
+        if cell.between?(0, length - 1)   then source[cell]
+        elsif bounds == :nearest          then source[[[cell, 0].max, length - 1].min]
+        end
+      }.compact
+      case op
+      when :sum  then cells.sum                          # nothing folded: zero
+      when :prod then cells.inject(1.0) { |a, b| a * b } # nothing folded: one
+      else            cells.empty? ? nil : (op == :mean ? cells.sum / cells.size
+                                                        : cells.send(op))
+      end
+    end
+  end
+
+  def assert_folds_by_hand (range, bounds, op)
+    want = by_hand(@a, range, bounds, op)
+    got  = @a.windows(range, bounds: bounds).send(op).to_a
+             .map { |value| value.equal?(UNDEF) ? nil : value }
+    assert_equal want.size, got.size, "#{range} #{bounds} #{op}: anchor count"
+    want.zip(got).each_with_index do |(wanted, actual), i|
+      if wanted.nil?
+        assert_nil actual, "#{range} #{bounds} #{op} at #{i}"
+      else
+        assert_in_delta wanted, actual, 1e-12, "#{range} #{bounds} #{op} at #{i}"
+      end
+    end
+  end
+
+  def test_folds_match_a_hand_written_reference
+    [1..2, 2..3, -2..-1, -3..-2, -1..1, 0..2, -2..0, 0..0].each do |range|
+      [:skip, :nearest, :truncate].each do |bounds|
+        [:sum, :prod, :min, :max, :mean].each do |op|
+          assert_folds_by_hand(range, bounds, op)
+        end
+      end
+    end
+  end
+
+  def test_the_two_cells_after_this_one
+    # anchor 0 folds cells 1 and 2, and the last anchor has nothing after it.
+    assert_equal [5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 8.0, 0.0],
+                 @a.windows(1..2).sum.to_a
+    assert_equal [2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.0, UNDEF],
+                 @a.windows(1..2).mean.to_a
+  end
+
+  def test_the_two_cells_before_this_one
+    assert_equal [0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0],
+                 @a.windows(-2..-1).sum.to_a
+  end
+
+  # :truncate keeps the anchors whose window lies wholly inside the source.
+  def test_truncate_keeps_only_the_anchors_that_fit
+    assert_equal [5.0, 7.0, 9.0, 11.0, 13.0, 15.0],
+                 @a.windows(1..2, bounds: :truncate).sum.to_a
+    assert_equal [3.0, 5.0, 7.0, 9.0, 11.0, 13.0],
+                 @a.windows(-2..-1, bounds: :truncate).sum.to_a
+    assert_equal [6.0, 9.0, 12.0, 15.0, 18.0, 21.0],
+                 @a.windows(-1..1, bounds: :truncate).sum.to_a
+  end
+
+  def test_the_winner_address_points_at_the_right_cell
+    # The window at anchor 0 is cells 1 and 2; the smaller is cell 1.
+    assert_equal 1, @a.windows(1..2).min_addr[0]
+    assert_equal 2, @a.windows(1..2).max_addr[0]
+    # Nothing after the last cell, so no address either.
+    assert_equal UNDEF, @a.windows(1..2).min_addr[7]
+  end
+
+end

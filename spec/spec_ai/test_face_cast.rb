@@ -213,3 +213,95 @@ class TestFaceNumericCast < Test::Unit::TestCase
     assert_raise(ArgumentError) { klass.new(@cents).to_type(:float64) }
   end
 end
+
+
+# The view side of the same rule.  as_type / fake / wrap_readonly /
+# wrap_writable reinterpret storage under another data_type, and a Face's
+# storage is what its surface exists to hide, so none of them may hand it
+# back.  wrap_readonly -- which already returns entities for its non-CArray
+# inputs -- answers with the eager conversion; as_type, fake and
+# wrap_writable have no honest answer and say so.  A Numeric Face is not
+# affected: its surface is its storage.
+class TestFaceTypeAdaptView < Test::Unit::TestCase
+
+  def setup
+    @t = CArray.time([0, 1], unit: :s)
+  end
+
+  def test_as_type_refuses_and_names_both_ways_down
+    e = assert_raise(TypeError) { @t.as_type(:object) }
+    assert_match(/CATime/, e.message)
+    assert_match(/to_type/, e.message)
+    assert_match(/parent/, e.message)
+    assert_raise(TypeError) { @t.as_type(:int64) }
+  end
+
+  def test_fake_refuses_and_points_at_the_storage
+    e = assert_raise(TypeError) { @t.fake(:object) }
+    assert_match(/parent\.fake/, e.message)
+  end
+
+  def test_the_storage_stays_reachable_through_parent
+    assert_equal [0, 1], @t.parent.fake(:object).to_a
+  end
+
+  def test_wrap_readonly_answers_with_the_surface
+    o = CArray.wrap_readonly(@t, CA_OBJECT)
+    assert_equal :object, o.data_type
+    assert_equal @t.to_a, o.to_a
+    assert_kind_of CATime::Element, o[0]
+  end
+
+  def test_wrap_readonly_to_a_number_asks_the_face_for_one
+    e = assert_raise(TypeError) { CArray.wrap_readonly(@t, CA_INT64) }
+    assert_match(/to_numeric/, e.message)
+  end
+
+  def test_a_declared_conversion_serves_wrap_readonly
+    fp = TestFaceNumericCast::ScaledInt.new(CArray.int64(2) { |i| [12345, 13020][i] })
+    assert_equal [123.45, 130.20], CArray.wrap_readonly(fp, CA_FLOAT64).to_a
+  end
+
+  def test_wrap_writable_refuses_outright
+    e = assert_raise(TypeError) { CArray.wrap_writable(@t, CA_OBJECT) }
+    assert_match(/writable/, e.message)
+  end
+
+  def test_const_string_does_not_leak_its_descriptor
+    cs = CArray.const_string(["ab", "cde"])
+    assert_raise(TypeError) { cs.fake(:object) }
+    assert_equal ["ab", "cde"], CArray.wrap_readonly(cs, CA_OBJECT).to_a
+  end
+
+  def test_fixlen_string_gives_the_string_not_the_padding
+    fs = CArray.fixlen_string(["ab", "cdef"], bytes: 4)
+    assert_equal ["ab", "cdef"], CArray.wrap_readonly(fs, CA_OBJECT).to_a
+  end
+
+  # A Face operand of a plain object array used to be coerced by reading its
+  # storage bytes, so the comparison silently saw byte strings and answered
+  # false.  The eager side had always refused loudly; the two agree now.
+  def test_an_object_array_compares_against_the_surface
+    o = CA_OBJECT([@t[0], @t[1]])
+    assert_equal [true, true], o.eq(@t).to_a
+  end
+
+  # A Numeric Face declares its storage as its surface, so an ordinary cast
+  # is right and the view stays a view.
+  def test_a_numeric_face_still_adapts
+    r = TestFaceNumericCast::Radians.new(CA_FLOAT64([1.0, 2.0]))
+    assert_equal [1.0, 2.0], r.as_type(:float32).to_a
+    assert_equal [1.0, 2.0], CArray.wrap_readonly(r, CA_FLOAT32).to_a
+  end
+
+  # Nothing above applies to a plain array: fake and as_type are its
+  # documented reinterpret, and they still return views.
+  def test_a_plain_array_is_untouched
+    a = CA_INT32([1, 2])
+    assert_equal [1, 2], a.fake(:object).to_a
+    assert_kind_of CAFake, a.fake(:object)
+    assert_equal [1.0, 2.0], a.as_type(:float64).to_a
+    assert_equal [1.0, 2.0], CArray.wrap_readonly(a, CA_FLOAT64).to_a
+    assert_equal [1.0, 2.0], CArray.wrap_writable(a, CA_FLOAT64).to_a
+  end
+end

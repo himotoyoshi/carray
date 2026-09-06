@@ -271,19 +271,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     cmp [10], [f]    # IndexError data_type ... invalid
   end
 
-  # ============== I.3d: REPEAT / UNBOUND_REPEAT ==============
-
-  def test_unbound_repeat_argc1
-    cmp [3, 3], [:*]
-    cmp [10], [:*]
-  end
-
-  def test_unbound_repeat_pre_scan
-    # `:*` at any position triggers UNBOUND_REPEAT regardless of other argv
-    cmp [3, 3], [nil, nil, :*]
-    cmp [3, 3], [:*, nil]
-    cmp [3, 3], [1, :*, 2]    # would be argc>ndim in normal path; :* preempts
-  end
+  # ============== I.3d: REPEAT ==============
 
   def test_repeat_pre_scan
     # `:%` at any position triggers REPEAT
@@ -293,9 +281,8 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   end
 
   def test_repeat_preempts_validation
-    # v1 lets :% / :* preempt the argc != ndim validation; v2 must match
+    # v1 lets :% preempt the argc != ndim validation; v2 must match
     cmp [3], [1, 2, :%]      # argc=3, ndim=1, would normally raise; :% wins
-    cmp [3], [1, 2, 3, :*]   # similar
   end
 
   # ============== I.3e: ADDRESS_COMPLEX ==============
@@ -333,7 +320,6 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     cmp [3, 3], [a]
     cmp [3, 3], [i, i]
     cmp [3, 3], [:%, :%, 2]
-    cmp [3, 3], [nil, nil, :*]
   end
 
   # Multi-arg GRID via axis-position CArray (= main loop short-circuit).

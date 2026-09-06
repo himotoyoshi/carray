@@ -186,9 +186,7 @@ ca_iter_classify_source (CArray *src)
   if ( attach == ca_window_func.attach      ) return CA_ITER_SRC_DESCRIPTOR;  /* + CAShift */
 
   /* Step 9: SRC_ATTACH 5 view.  Each view-specific attach materialises
-     src->ptr via per-element transform; kernel sees a flat contig slab.
-     CAUnboundRepeat shares ca_stride_func.attach so it was already
-     classified as SRC_CASTRIDE above (prep doc §2.6). */
+     src->ptr via per-element transform; kernel sees a flat contig slab. */
   if ( attach == ca_fake_func.attach        ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_byte_swap_func.attach   ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bitfield_func.attach    ) return CA_ITER_SRC_ATTACH;
@@ -526,6 +524,35 @@ ca_iter_validate_inputs (ca_iter_state    *st,
   return CA_ITER_OK;
 }
 
+/* Storage-identical wrapper strip for the kernel-compute entry.
+
+   A Face layers a semantic identifier and a CALazyMarker layers "read this
+   as the leaf of a lazy chain"; neither changes the storage, so routing and
+   alias decisions belong to what they wrap.  ca_strip_face answers this for
+   Face alone and is read that way in ~60 other places, so the marker is
+   added here rather than inside it.
+
+   The marker is NOT classified as a source in its own right.  Routing it to
+   CA_ITER_SRC_ATTACH would work but would allocate elements * bytes and pull
+   the whole array through ca_xfer_all first -- a.lazy.sum(axis: 0) would copy
+   what a.sum(axis: 0) aliases.  Descending instead lets the parent be
+   classified on its own merits, which costs nothing.
+
+   Unlike Face, nothing re-wraps the result: a reduction over a lazy marker
+   yields a plain entity, not a lazy view.
+
+   CAREFUL: a marker carries CA_FLAG_READ_ONLY and its parent usually does
+   not, so the WRITE rejection has to happen against the wrapper.  The caller
+   does that before stripping. */
+static CArray *
+ca_iter_strip_storage_wrapper (CArray *src)
+{
+  while ( src && ( ca_is_face(src) || ca_is_lazy_marker(src) ) ) {
+    src = ((CAView *) src)->parent;
+  }
+  return src;
+}
+
 int
 ca_iter_state_init_l1 (ca_iter_state    *st,
                        struct _CArray   *src,
@@ -534,10 +561,19 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
                        int8_t            naxes,
                        uint32_t          flags)
 {
-  /* PROPOSAL_CAFACE_PHASE_2 F.2.6: Face strip at entry (= same rationale as
-     init_l2 above). Strip before validate_inputs. */
-  if ( ca_is_face(src) ) {
-    src = ca_strip_face(src);
+  /* PROPOSAL_CAFACE_PHASE_2 F.2.6 + PROPOSAL_LAZY_MARKER_LIFT Phase 0:
+     storage-identical wrapper strip at entry (= same rationale as init_l2
+     below).  Strip before validate_inputs.
+
+     The WRITE rejection is taken against the wrapper, not what it wraps: a
+     CALazyMarker is read-only while its parent is not, and stripping first
+     would let a destructive kernel through to the parent.  validate_inputs
+     re-checks the stripped source, which is harmless. */
+  if ( (flags & CA_KERNEL_WRITE) && ca_is_readonly(src) ) {
+    return CA_ITER_ERR_READONLY;
+  }
+  if ( ca_is_face(src) || ca_is_lazy_marker(src) ) {
+    src = ca_iter_strip_storage_wrapper(src);
   }
 
   int rc = ca_iter_validate_inputs(st, src, policy, flags);
@@ -712,16 +748,27 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
                        int8_t            naxes,
                        uint32_t          flags)
 {
-  /* PROPOSAL_CAFACE_PHASE_2 F.2.6 (= MEMO §3.5 kernel_iterator entry strip):
-     Face only layers a semantic identifier; storage is identical to parent,
-     so strip at the kernel-compute entry and descend to parent. The Face
-     identifier is re-wrapped onto the result by the caller's lift hook
-     (= primary operators / reductions / etc.). Because Face is an identity
-     mask, routing / alias decisions should be based on parent.
-     Strip before validate_inputs — `classify_source` would reject Face as
-     knows-no. */
-  if ( ca_is_face(src) ) {
-    src = ca_strip_face(src);
+  /* PROPOSAL_CAFACE_PHASE_2 F.2.6 (= MEMO §3.5 kernel_iterator entry strip)
+     + PROPOSAL_LAZY_MARKER_LIFT Phase 0.
+
+     A Face only layers a semantic identifier and a CALazyMarker only layers
+     "leaf of a lazy chain"; storage is identical to the parent either way, so
+     strip at the kernel-compute entry and descend.  Routing and alias
+     decisions belong to the parent.  Strip before validate_inputs —
+     classify_source rejects both as knows-no.
+
+     The Face identifier is re-wrapped onto the result by the caller's lift
+     hook (= primary operators / reductions / etc.).  The marker is not:
+     a reduction over a lazy marker yields a plain entity.
+
+     WRITE is rejected against the wrapper, before the strip — a marker is
+     read-only while its parent is not.  validate_inputs re-checks the
+     stripped source, which is harmless. */
+  if ( (flags & CA_KERNEL_WRITE) && ca_is_readonly(src) ) {
+    return CA_ITER_ERR_READONLY;
+  }
+  if ( ca_is_face(src) || ca_is_lazy_marker(src) ) {
+    src = ca_iter_strip_storage_wrapper(src);
   }
 
   int rc = ca_iter_validate_inputs(st, src, policy, flags);
@@ -1028,8 +1075,8 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
       }
       /* slab is all-STRIDE: fall through to B.1.5 / Phase B paths. */
       /* Phase B.1.5: outer SHIFT axis → materialise downgrade.  Alias
-         can't deliver OOB cells (= need fill_value), so per the
-         delivery principle (CLAUDE.md §"deliver" + D1.3 confirmed),
+         can't deliver OOB cells (= need fill_value), and the view-family
+         surface prioritises delivering the cells over avoiding a copy, so
          we materialise the entire view into a row-major scratch
          buffer via ca_axis_dispatch_attach (= same engine as the
          existing SRC_DESCRIPTOR L2 NONE path), then walk it with
@@ -1804,9 +1851,9 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     return CA_ITER_OK;
   }
 
-  /* Sub-step 5.3: L2 dispatch over descriptor sources.  Per the
-     delivery principle (CLAUDE.md "view-family surface prioritises delivery",
-     PROPOSAL_T1_STEP5_DESCRIPTOR.md §0): always materialise into a
+  /* Sub-step 5.3: L2 dispatch over descriptor sources.  The view-family
+     surface prioritises delivering the cells over avoiding a copy: always
+     materialise into a
      scratch buffer via ca_axis_dispatch_attach and yield a single
      strided slab (stride = bytes).  CASelect/CAMapping always reach
      here, CSA/CAGrid/CAWindow/CAShift when INDEX/SHIFT axes are
@@ -4316,6 +4363,5 @@ Init_ca_kernel_iterator (void)
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_CONTIG",    INT2NUM(CA_ITER_ALIAS_CONTIG));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_STRIDED",   INT2NUM(CA_ITER_ALIAS_STRIDED));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_ATTACH",    INT2NUM(CA_ITER_ALIAS_ATTACH));
-  rb_define_const(rb_cCArray, "T1_ITER_ERR_UNBOUND_SHAPE", INT2NUM(CA_ITER_ERR_UNBOUND_SHAPE));
 #endif /* CARRAY_DEV_BUILD */
 }

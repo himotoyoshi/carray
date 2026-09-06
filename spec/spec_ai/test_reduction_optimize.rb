@@ -103,7 +103,7 @@ class TestReductionFastPath < Test::Unit::TestCase
   # ---- min / max -------------------------------------------------- #
 
   def test_min_max_correct
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     assert_equal(0.0,       @a.min)
     assert_equal((N-1).to_f, @a.max)
     assert_equal(0,         @a.min_addr)
@@ -111,7 +111,7 @@ class TestReductionFastPath < Test::Unit::TestCase
   end
 
   def test_min_max_negative_values
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.float64(4); [-3.0, -1.0, -5.0, -2.0].each_with_index { |v, i| a[i] = v }
     assert_equal(-5.0, a.min)
     assert_equal(-1.0, a.max)
@@ -120,7 +120,7 @@ class TestReductionFastPath < Test::Unit::TestCase
   end
 
   def test_min_addr_returns_first_occurrence
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     # min appears at two positions; min_addr should return the earliest.
     a = CArray.float64(5); [3.0, 1.0, 4.0, 1.0, 5.0].each_with_index { |v, i| a[i] = v }
     assert_equal(1.0, a.min)
@@ -143,19 +143,19 @@ class TestReductionFastPath < Test::Unit::TestCase
   end
 
   def test_accumulate_correct
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.int32(10).seq + 1                # 1..10
     assert_equal(55, a.accumulate)
   end
 
   def test_count_no_mask
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.float64(100).seq
     assert_equal(100, a.count_valid)
   end
 
   def test_count_with_mask
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.float64(100).seq
     a.mask = CArray.boolean(100).fill(0)
     a.mask[10] = 1
@@ -167,21 +167,21 @@ class TestReductionFastPath < Test::Unit::TestCase
   # ---- cumsum ----------------------------------------------------- #
 
   def test_cumsum_first_and_last
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     cs = @a.cumsum
     assert_equal(0.0, cs[0])
     assert_in_delta(@ref.sum, cs[-1], 1e-9)
   end
 
   def test_cumsum_monotonic_for_positive
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.float64(50).seq + 1.0
     cs = a.cumsum
     49.times { |i| assert(cs[i] <= cs[i+1]) }
   end
 
   def test_cumsum_masked_slow_path
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     a = CArray.float64(4); [1.0, 2.0, 3.0, 4.0].each_with_index { |v, i| a[i] = v }
     a.mask = [0, 1, 0, 0]
     cs = a.cumsum
@@ -216,7 +216,7 @@ class TestReductionFastPath < Test::Unit::TestCase
   # ---- equivalence: fast path vs slow path ------------------------ #
 
   def test_fast_and_slow_paths_agree_on_unmasked_data
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     # Build the same data twice, one masked-no-elements (slow path),
     # one bare (fast path).  Results must match bit-for-bit (for sum)
     # or within float ulp (for products with FP rounding).
@@ -236,7 +236,7 @@ class TestReductionFastPath < Test::Unit::TestCase
   end
 
   def test_fast_and_slow_paths_agree_on_integer_data
-    omit "Removed in E.7 stat_proc retire; re-implement per CLAUDE.md"
+    omit "removed when stat_proc was retired; awaiting reimplementation"
     base = (0...500).to_a
     a_fast = CArray.int32(base.length); base.each_with_index { |v, i| a_fast[i] = v }
     a_slow = CArray.int32(base.length); base.each_with_index { |v, i| a_slow[i] = v }

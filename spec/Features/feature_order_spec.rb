@@ -49,8 +49,8 @@ describe "TestCArrayOrder " do
     a = CA_INT32([[5,4,3],
                   [0,1,2],
                   [8,7,6]])
-    # SO.2 (3.0 breaking, PROPOSAL_SORT_AXIS rev3 §3.3 Q1(A)):
-    # `a.sort` (no-arg) returns a CARemap 1-D view of flatten-then-sort.
+    # 3.0 breaking: `a.sort` (no-arg) returns a CARemap 1-D view of
+    # flatten-then-sort.
     flat = CA_INT32([0,1,2,3,4,5,6,7,8])
     is_asserted_by { flat == a.sort }
     is_asserted_by { a.sort.class == CARemap }

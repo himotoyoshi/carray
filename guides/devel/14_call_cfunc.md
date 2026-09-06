@@ -202,7 +202,7 @@ demo (VALUE self, VALUE r_a, VALUE r_b, VALUE r_scale, VALUE r_threshold)
 ```
 
 The full runnable example is
-`samples/c-extensions/cfunc_r/cfunc_r.c` (mirrored as the regression
+`examples/c-extensions/cfunc_r/cfunc_r.c` (mirrored as the regression
 fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
 
 > **There is no `_ex` variant.** A proposed `ca_call_cfunc_M_N_ex` with
@@ -343,7 +343,7 @@ function takes VALUEs.
 - [ch. 15 carray.h helper reference](15_carray_h_helper_reference.md)
   — the primitives the bridge calls into.
 - `ext/mk_call_cfunc.rb` — the generator (arity matrix + template).
-- `samples/c-extensions/cfunc_r/cfunc_r.c` — runnable `_r` example.
+- `examples/c-extensions/cfunc_r/cfunc_r.c` — runnable `_r` example.
 
 ---
 *When done, update the status row in [README](README.md).*

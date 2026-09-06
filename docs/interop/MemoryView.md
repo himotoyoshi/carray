@@ -253,7 +253,7 @@ The full export matrix:
 | `CA_OBJ_REFER` (reshape) | direct/attach | contiguous |
 | `CA_OBJ_BLOCK` / `CA_OBJ_FARRAY` / `CA_OBJ_TRANSPOSE` / `CA_OBJ_REPEAT` / `CA_OBJ_STRIDE` / `CA_OBJ_FIELD` | strided | computed |
 | `CA_OBJ_SELECT` / `CA_OBJ_MAPPING` / `CA_OBJ_GRID` / `CA_OBJ_SHIFT` / `CA_OBJ_WINDOW` / `CA_OBJ_FAKE` / `CA_OBJ_BYTE_SWAP` / `CA_OBJ_REDUCE` | attach | contiguous |
-| `CA_OBJ_BITARRAY` / `CA_OBJ_BITFIELD` / `CA_OBJ_OBJECT` / `CA_OBJ_UNBOUND_REPEAT` | reject | — |
+| `CA_OBJ_BITARRAY` / `CA_OBJ_BITFIELD` / `CA_OBJ_OBJECT` | reject | — |
 | any obj_type installed by an extension (`ca_install_obj_type`) | reject | — |
 
 The strategy table is keyed by class name with no registration hook, so a

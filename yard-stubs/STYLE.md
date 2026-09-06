@@ -72,6 +72,7 @@ all collapse into `Sorting and searching`):
 - `Masking` — mask access and mutation, `value`, `mask_where`, ...
 - `Sorting and searching` — `sort*`, `partition*`, `search*`, `bsearch*`, `linear_*`
 - `Statistics` — `median`, `percentile`, `quantile`, `count`
+- `Elementwise math` — arithmetic operators and their named forms (`/`, `%`, `fmod`, `divmod`), `round`, `frac`, ...
 - `Scatter and generation` — `scatter_*!`, `seq`, `set`, `unset`, `where`
 - `Random` — `random(!)`, `randomn(!)`, `shuffle(!)`
 - `Attach lifecycle` — `attach`, `attach!`, `__attach__`, ...
@@ -211,6 +212,4 @@ Differences:
 
 `rake stub_check` validates structural drift (method set vs C
 extension). Style drift (vocabulary, tags) is reviewed at PR time
-against this document. There is no automated style linter yet — if
-this becomes painful, see §12.5 of
-`devel/PROPOSAL_DOCS_INFRASTRUCTURE.md` for tooling notes.
+against this document. There is no automated style linter yet.

@@ -87,22 +87,3 @@ class CArray
 
 end
 
-class CAUnboundRepeat
-  # Overrides {CArray#template} for unbound-repeat views.
-  #
-  # The C-level `CArray#template` allocates an entity sized to `self.shape`,
-  # which for a CAUnboundRepeat would include the inflated unbound (`:*`)
-  # axes — semantically wrong (unbound axes are not yet bound to a size)
-  # and a memory bomb on broadcast patterns.  Required for correctness.
-  #
-  # This override allocates at the **parent's compact shape** instead, then
-  # rewraps the result with the same `spec` so the returned view preserves
-  # the unbound broadcast pattern.
-  #
-  # @param argv [Array] forwarded to {CArray#template} (data_type, bytes:, ...)
-  # @yield forwarded to {CArray#template}
-  # @return [CAUnboundRepeat] new entity wrapped with the original unbound spec
-  def template (*argv, &block)
-    return parent.template(*argv,&block)[*spec.map{|x| x != :* ? nil : x}]
-  end
-end

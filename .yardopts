@@ -1,11 +1,12 @@
 --markup markdown
+--output-dir .yard-html
 --markup-provider redcarpet
 --no-private
 --exclude lib/carray/obsolete.rb
 --exclude lib/carray/autoload.rb
 --exclude 'lib/carray/autoload/'
 --readme README.md
---files CHANGELOG.md,NEWS.md
+--files CHANGELOG.md,CHANGELOG.v1.md
 lib/carray.rb
 lib/carray/**/*.rb
 yard-stubs/**/*.rb

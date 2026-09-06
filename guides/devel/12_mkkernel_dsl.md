@@ -459,7 +459,7 @@ MkKernel.monfunc :rsqrt,
 | `bind:` | `true` (default) registers `#name` + `#name!`; `false` emits the kernel only. |
 | `cmath:` | whether the complex branch may use `<complex.h>` functions. |
 | `widening:` | auto-cast integer input to f64. Auto-detected from `source:` when omitted (no integer source ⇒ auto-cast). |
-| `output:` | `:preserve` (default) or a family Hash (e.g. `abs` demoting complex → real f64). |
+| `output:` | `:preserve` (default), a data_type symbol, `:real_of_source` (= the real component width of a complex source), or a family Hash (e.g. `abs`, which is `{ numeric: :preserve, complex: :real_of_source }`). |
 
 `monfunc` is a declarative alias of `monop` signalling "this is a
 math function" and relying on `widening`'s auto-detect. For the
@@ -467,6 +467,22 @@ per-cell `:object` math branch,
 `MkKernel.obj_float_math(double_expr, fallback_method)` builds an
 expression that computes Float/Integer/Rational in C and falls back
 to `rb_funcall` for other element types.
+
+Do not write a `float:` or `complex:` body that names only the
+double-taking libm functions (`sqrt`, `pow`, `csqrt`, `cabs`, ...). It
+compiles for an f32 or cmplx64 cell, but the cell widens on the way in
+and rounds on the way out, so the kernel computes at f64 / cmplx128
+whatever the array said it was. `MkKernel.float_widths(body)` and
+`MkKernel.cmplx_widths(body)` build the two array-keyed entries that
+hold each data_type at its own width: `<f>` marks each spot the `f`
+suffix belongs, `<t>` a real scalar of the matching width. Merge them
+into the Hash carrying the other families, as `rsqrt` does above.
+
+Only bodies that actually compute need this. `fabs`, `fmin` / `fmax`,
+`ceil` / `floor` / `trunc` and the `isnan` family are exact on a float
+whichever width they run at, and `round` (`floor(x + 0.5)`) is exact
+only in double -- narrowing it would round `x + 0.5f` first and step the
+answer at the boundary. Those keep one shared `float:` body.
 
 ### `MkKernel.binop` and `MkKernel.triop`
 

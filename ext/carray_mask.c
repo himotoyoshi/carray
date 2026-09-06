@@ -607,7 +607,7 @@ ca_count_not_masked (void *ap)
 /* Scalar-fill every masked cell with fill_value, then clear its mask bit.
    This depends only on the cell BYTE WIDTH, not the data type (the work is
    a width-sized copy), so a single width switch covers every numeric /
-   complex / object dtype; the default arm handles fixlen and any other
+   complex / object data type; the default arm handles fixlen and any other
    width via memcpy.  The typed arms let the compiler emit a plain store.  */
 #define proc_fill_bang_width(T)                 \
   {                                             \
@@ -894,6 +894,7 @@ rb_ca_value_array (VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   obj = rb_ca_refer_new(self, ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
+
   TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   /* Value arrays ignore the mask by definition.  ca_stride_setup
@@ -1112,7 +1113,7 @@ The returned array doesn't have the mask array.
 static VALUE
 rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE rfval = CA_NIL, rcs;
+  volatile VALUE rfval = CA_UNSPECIFIED, rcs;
   CArray *ca;
   CScalar *cv;
   char *fval = NULL;
@@ -1125,7 +1126,7 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( rfval != CA_NIL ) {
+  if ( rfval != CA_UNSPECIFIED ) {
     /* Face has surface != storage; the fill value is cast in the storage data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {
@@ -1171,7 +1172,7 @@ The returned array doesn't have the mask array.
 static VALUE
 rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, rfval = CA_NIL, rcs;
+  volatile VALUE obj, rfval = CA_UNSPECIFIED, rcs;
   CArray *ca, *co;
   CScalar *cv;
   char *fval = NULL;
@@ -1182,7 +1183,7 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( rfval != CA_NIL ) {
+  if ( rfval != CA_UNSPECIFIED ) {
     /* Face has surface != storage; the fill value is cast in the storage data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {

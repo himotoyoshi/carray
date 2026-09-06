@@ -59,7 +59,23 @@ void ca_bit_pack   (const boolean8_t *src, ca_size_t elements, ca_size_t pbytes,
 void    ca_lazy_arena_enter   (void);
 void    ca_lazy_arena_exit    (void);
 void   *ca_lazy_arena_acquire (ca_size_t bytes);
+void   *ca_lazy_arena_acquire_object (ca_size_t n_elements);
 void    ca_lazy_arena_release (void *ptr);
+
+/* ---- CA_OBJECT GC guard (carray_lazy.c) ----------------------------------
+
+   A CA_OBJECT cell is a VALUE, and a materialise writes those cells into a
+   buffer no Ruby object owns.  Object-lane kernels call rb_funcall per cell,
+   so a collection can happen halfway through and free what has been written
+   so far.  Hold the buffer while it is exposed like that, and after the
+   materialise until a Ruby object takes ownership of it.
+
+   The cells must already be valid VALUEs, so a fresh buffer is Qnil-filled
+   before it is held.  ca_gc_hold_push returns the depth to hand back to
+   ca_gc_hold_pop_to, so nested holds unwind in order. */
+
+int     ca_gc_hold_push   (void *ptr, ca_size_t n_elements);
+void    ca_gc_hold_pop_to (int depth);
 
 /* Non-zero iff the object is an element-wise lazy view (CAMonOp / CABinOp /
    CABinCmp / CAMonCmp / CALazyMarker).  The streaming branch of the
@@ -111,10 +127,10 @@ VALUE    rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes);
 CARepeat *ca_repeat_new (CArray *carray, int8_t ndim, ca_size_t *count);
 VALUE     rb_ca_repeat_new (VALUE cary, int8_t ndim, ca_size_t *count);
 
-/* ca_obj_unbound_repeat.c */
-VALUE    rb_ca_ubrep_new (VALUE cary, int32_t rep_ndim, ca_size_t *rep_dim);
-
 /* ca_obj_reduce.c */
 CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
+
+/* carray_broadcast.c */
+void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
 
 #endif /* CARRAY_INTERNAL_H */

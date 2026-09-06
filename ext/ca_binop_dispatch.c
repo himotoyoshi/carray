@@ -14,9 +14,9 @@
   operands arrive at the common type.  Two ops break the uniform rule:
 
     QUO    -- only has a CA_OBJECT kernel; both operands promoted to
-              CA_OBJECT regardless of input dtypes
+              CA_OBJECT regardless of input data types
     IPOWER -- heterogeneous (left: float/cmplx preserved, right: int64);
-              output preserves left dtype.  See ca_op_ipower.c.
+              output preserves left data type.  See ca_op_ipower.c.
 
 ---------------------------------------------------------------------------- */
 
@@ -58,7 +58,6 @@ ca_binop_kernel_lookup_vv (uint16_t op_id, int8_t common_dt)
     case CA_BINOP_AND:        return ca_binop_and        [common_dt];
     case CA_BINOP_OR:         return ca_binop_or         [common_dt];
     case CA_BINOP_XOR:        return ca_binop_xor        [common_dt];
-    case CA_BINOP_REMINDER:   return ca_binop_reminder   [common_dt];
     default:                  return NULL;
   }
 }
@@ -107,8 +106,8 @@ ca_binop_kernel_input_data_types (uint16_t op_id, int8_t l_dt, int8_t r_dt,
 int
 ca_binop_is_trapping (uint16_t op_id, int8_t common_dt)
 {
-  /* Integer DIV / MOD / QUO can SIGFPE on a zero divisor.  Float DIV
-     returns NaN/Inf and does NOT trap, so it is not classified
+  /* Integer DIV / MOD / QUO / FMOD can SIGFPE on a zero divisor.  Float
+     DIV returns NaN/Inf and does NOT trap, so it is not classified
      trapping.                                                          */
   int is_integer = ( common_dt >= CA_INT8 && common_dt <= CA_UINT64 );
   if ( ! is_integer ) return 0;
@@ -117,7 +116,7 @@ ca_binop_is_trapping (uint16_t op_id, int8_t common_dt)
     case CA_BINOP_DIV:
     case CA_BINOP_MOD:
     case CA_BINOP_QUO:
-    case CA_BINOP_REMINDER:
+    case CA_BINOP_FMOD:
       return 1;
     default:
       return 0;

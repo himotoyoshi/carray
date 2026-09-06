@@ -1,15 +1,15 @@
 /* spec_ai/ext_with_buffer_smoke/with_buffer.c
  *
- * TEST FIXTURE — byte-for-byte mirror of samples/c-extensions/with_buffer/with_buffer.c
+ * TEST FIXTURE — byte-for-byte mirror of examples/c-extensions/with_buffer/with_buffer.c
  * (the user-facing runnable example).  Kept here so the spec_ai suite owns
- * its own build and never reaches into samples/.  If you edit one, edit both
+ * its own build and never reaches into examples/.  If you edit one, edit both
  * (the samples copy is documentation; this copy is the regression fixture).
  */
 /* ---------------------------------------------------------------------------
  *
  *  with_buffer.c -- CA_WITH_BUFFER / rb_ca_call_with_buffer usage example
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE L0.2c.  Demonstrates the whole-view family:
+ *  Demonstrates the whole-view family:
  *
  *    CA_WITH_BUFFER            scoped read-only view (attach+sync+detach
  *                            handled by the macro for the scope body)

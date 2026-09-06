@@ -138,8 +138,10 @@ deep nested Ruby array).
 | `sync_block(starts, counts, steps, data)`    | Write `data` back to that same sub-region.                                 |
 | `copy_addrs(addrs, data)`                    | Gather an arbitrary flat-address list into `data` in one call.             |
 | `sync_addrs(addrs, data)`                    | Scatter `data` back to that address list.                                  |
+| `fill_block(starts, counts, steps, val)`     | Broadcast one value into that same sub-region.                             |
+| `fill_addrs(addrs, val)`                     | Broadcast one value to that address list.                                  |
 
-All four are **optional** — define only what your backing can speed up.
+All six are **optional** — define only what your backing can speed up.
 The engine dispatches as a fallback chain:
 
 1. **`copy_block` first.** If you define it and the request can be
@@ -191,6 +193,30 @@ them only if your array is writable (see *Writable arrays* below).
   user's `addrs.each_with_index { |a, i| backing[a] = data[i] }`).
 - **`data` is a 1-D CArray** of length `addrs.elements`, data_type = self.
 
+#### `fill_block` / `fill_addrs` user notes
+
+`fill_data` carries no region, so it can only say *fill everything I
+cover*. These two say *fill this part of me*, and they take the same two
+shapes as the readers: `fill_block` when the region is a forward per-axis
+sub-region of self, `fill_addrs` when it is not (transpose, descending
+range, a region that drops an axis).
+
+- **`val` is a single Ruby value**, as for `fill_data` — it does not
+  scale with the region, so nothing `counts`-shaped is handed over.
+- **`starts` / `counts` / `steps` mean what they mean in `copy_block`**,
+  and `addrs` what it means in `copy_addrs`.
+- The chain is the same: `fill_block`, then `fill_addrs`, then one
+  `store_addr` per cell. A partial fill **never** escalates to filling
+  the whole view, whichever rung it lands on — the per-cell floor already
+  touched only the cells the caller named. What these buy is the cost of
+  getting there.
+
+```ruby
+def fill_block (starts, counts, steps, val)
+  @buf[*starts.zip(counts, steps)] = val
+end
+```
+
 Define partial callbacks when your backing has *bulk granularity* that
 the per-cell loop cannot exploit — most often when the backing is a
 lazy data source where a single round-trip costs the same as fetching
@@ -216,9 +242,12 @@ The bulk write methods are optional opt-ins (same fallback story as
 |--------------------------|------------------------------------------------------------|
 | `sync_data(data)`        | Write a whole CArray buffer back (used by attach/sync).    |
 | `fill_data(value)`       | Broadcast a single value to every element.                 |
+| `fill_block(...)`        | Broadcast a single value into part of the array.           |
+| `fill_addrs(addrs, val)` | Broadcast a single value to an address list.               |
 
 When undefined, the engine loops the corresponding `store_addr` over
-every element. Override them only when you can do meaningfully faster
+every element the request names (see *partial-region fast paths* above
+for the region forms). Override them only when you can do meaningfully faster
 than a Ruby-callback-per-element loop.
 
 Pass `read_only: true` to `super` (see *Constructor options* below) to
@@ -315,40 +344,11 @@ pass `:bytes` explicitly when you mean a non-trivial fixlen element.
 
 ---
 
-## 3. Real examples (`lib/carray/object/`)
+## 3. Real examples (`examples/caobject/`)
 
-Three subclasses ship with CArray as canonical patterns. They are
-small enough to read in one sitting.
-
-### `CAIteratorArray` — wrap an iterator as a CArray
-
-```ruby
-class CAIteratorArray < CAObject
-  def initialize(it)
-    @it = it
-    super(CA_OBJECT, @it.dim)
-  end
-
-  private
-
-  def fetch_index(idx)
-    @it.kernel_at_index(idx)
-  end
-
-  def store_index(idx, val)
-    @it.kernel_at_index(idx)[] = val
-  end
-
-  def copy_data(data)
-    data.each_index { |*idx| data[*idx] = @it.kernel_at_index(idx) }
-  end
-
-  # sync_data / fill_data: see the source file
-end
-```
-
-Pattern: a single object (the iterator) provides per-index access; the
-class converts that into the full CArray protocol.
+Three subclasses live under `examples/caobject/` as canonical patterns.
+They are not part of the library; each is small enough to read in one
+sitting and meant to be copied.
 
 ### `CALink` — a derived array from a block
 
@@ -437,11 +437,10 @@ sq.read_only?           # => true   (inherited from frozen base)
 sq.frozen?              # => true   (inherited from frozen base)
 ```
 
-The `:parent` slot accepts **one** CArray. The three examples above
-(`CAIteratorArray`, `CALink`, `CAPack`) hold their sources in plain
-Ruby ivars instead — they are structurally multi-source (iterator,
-multiple block arguments, list of CArrays) and don't fit the single
-canonical-parent slot. Use `:parent` only when there is a clear
+The `:parent` slot accepts **one** CArray. `CALink` and `CAPack` above
+hold their sources in plain Ruby ivars instead — they are structurally
+multi-source (multiple block arguments, list of CArrays) and don't fit
+the single canonical-parent slot. Use `:parent` only when there is a clear
 single antecedent.
 
 ### 3.5 Face mode (`face: true` + optional `:storage`)
@@ -465,7 +464,7 @@ A complete Face subclass therefore needs only `initialize`,
 optionally `copy_state`, optionally `storage_to_scalar` /
 `scalar_to_storage` (scalar read/write conversion), plus whatever
 domain methods you want — zero storage-callback boilerplate. See
-`samples/face/ca_circular.rb` and `samples/face/ca_fixed_point.rb`:
+`examples/face/ca_circular.rb` and `examples/face/ca_fixed_point.rb`:
 both define a fully functional Face without a single `fetch_*` /
 `store_*` / `copy_data` method.
 
@@ -725,8 +724,8 @@ across calls, the cache will diverge from the function and bulk
 results will be wrong. As long as your callbacks are pure, the cache
 is a transparent memoisation layer.
 
-This family is rarely used in practice. The shipped examples in
-`lib/carray/object/` do not define any of these. Reach for them only
+This family is rarely used in practice. The examples under
+`examples/caobject/` do not define any of these. Reach for them only
 when:
 
 - the mask is genuinely *computed* (not stored), and
@@ -740,9 +739,8 @@ faster.
 
 ## 7. See also
 
-- `lib/carray/object/ca_obj_iterator.rb`, `ca_obj_link.rb`,
-  `ca_obj_nested.rb`, `ca_obj_pack.rb` — the canonical examples
-  (all under ~130 lines).
+- `examples/caobject/` — the canonical examples (`nested.rb`, `link.rb`,
+  `pack.rb`, `recurrence.rb`; all under ~130 lines).
 - `ext/ca_obj_object.c` — the C-side dispatcher; the comment header
   enumerates every template method the engine looks for.
 - `docs/Composition.md` — `bind` / `merge` / `combine` / `composite` /

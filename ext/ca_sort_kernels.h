@@ -4,7 +4,7 @@
 
   Portable textbook sort kernels (PROPOSAL_PORTABLE_TEXTBOOK_SORT).
 
-    P.1 / P.2 : quicksort + mergesort over the 10 numeric dtypes
+    P.1 / P.2 : quicksort + mergesort over the 10 numeric data types
                 (i8 / u8 / i16 / u16 / i32 / u32 / i64 / u64 / f32 / f64)
     P.3       : NaN pre-partition for f32 / f64
     P.4       : pair (value + index) variants for argsort kernels —
@@ -33,7 +33,7 @@
    flight. */
 #include "carray.h"
 
-/* P.1 / P.2: quicksort over 10 numeric dtypes. */
+/* P.1 / P.2: quicksort over 10 numeric data types. */
 void ca_sort_quick_i8  (int8_t    *a, ca_size_t n);
 void ca_sort_quick_u8  (uint8_t   *a, ca_size_t n);
 void ca_sort_quick_i16 (int16_t   *a, ca_size_t n);
@@ -45,8 +45,8 @@ void ca_sort_quick_u64 (uint64_t  *a, ca_size_t n);
 void ca_sort_quick_f32 (float32_t *a, ca_size_t n);
 void ca_sort_quick_f64 (double    *a, ca_size_t n);
 
-/* P.1 / P.2: mergesort over 10 numeric dtypes (`aux` is caller-supplied
-   scratch buffer of the same length / dtype as `a`). */
+/* P.1 / P.2: mergesort over 10 numeric data types (`aux` is caller-supplied
+   scratch buffer of the same length / data type as `a`). */
 void ca_sort_merge_i8  (int8_t    *a, int8_t    *aux, ca_size_t n);
 void ca_sort_merge_u8  (uint8_t   *a, uint8_t   *aux, ca_size_t n);
 void ca_sort_merge_i16 (int16_t   *a, int16_t   *aux, ca_size_t n);
@@ -58,7 +58,7 @@ void ca_sort_merge_u64 (uint64_t  *a, uint64_t  *aux, ca_size_t n);
 void ca_sort_merge_f32 (float32_t *a, float32_t *aux, ca_size_t n);
 void ca_sort_merge_f64 (double    *a, double    *aux, ca_size_t n);
 
-/* P.3: NaN pre-partition for float dtypes (Hoare 1-pass, returns finite count). */
+/* P.3: NaN pre-partition for float data types (Hoare 1-pass, returns finite count). */
 ca_size_t ca_partition_nan_f32 (float32_t *a, ca_size_t n);
 ca_size_t ca_partition_nan_f64 (double    *a, ca_size_t n);
 

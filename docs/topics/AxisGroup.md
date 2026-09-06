@@ -42,7 +42,7 @@ Everything in this guide works after `require "carray"`.
 
 ## 1. The classifier: `CACategorical`
 
-A `CACategorical` is a categorical dtype: dense integer **codes** (`0 …
+A `CACategorical` is a categorical data type: dense integer **codes** (`0 …
 k-1`) plus a **label** vocabulary. Structurally it is the same idea as a
 pandas `Categorical` or an Arrow dictionary — each cell is an index into
 a small set of categories. [CACategorical.md](../objects/CACategorical.md) is the

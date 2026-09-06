@@ -532,9 +532,9 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     h, cat = h_and_cat_case_B_with_gaps
     grp = h.group_by_category(cat)
     err = assert_raise(NotImplementedError) { grp.count_masked(axis: 0) }
-    assert err.message =~ /Phase 3|deferred|not yet/i
+    assert err.message =~ /not implemented/i
     err = assert_raise(NotImplementedError) { grp.count(0, axis: 0) }
-    assert err.message =~ /Phase 3|deferred|not yet/i
+    assert err.message =~ /not implemented/i
   end
 
   def test_moments_cache_hit_for_same_axis

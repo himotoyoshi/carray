@@ -37,7 +37,6 @@ static ID ca_classifier_id_excl_end = 0;
 /* Symbol cache — see the range-macro comment above for why this
    file keeps its own copy independent of carray_access.c. */
 
-static VALUE ca_classifier_sym_star  = Qundef;
 static VALUE ca_classifier_sym_perc  = Qundef;
 static VALUE ca_classifier_sym_under = Qundef;
 static VALUE ca_classifier_sym_gt    = Qundef;   /* :> slab-iterator marker */
@@ -46,8 +45,7 @@ static VALUE ca_classifier_sym_tilde = Qundef;   /* :~ rubber-dim alias for `fal
 static inline void
 ca_classifier_sym_cache_init (void)
 {
-  if ( ca_classifier_sym_star == Qundef ) {
-    ca_classifier_sym_star  = ID2SYM(rb_intern("*"));
+  if ( ca_classifier_sym_perc == Qundef ) {
     ca_classifier_sym_perc  = ID2SYM(rb_intern("%"));
     ca_classifier_sym_under = ID2SYM(rb_intern("_"));
     ca_classifier_sym_gt    = ID2SYM(rb_intern(">"));
@@ -166,7 +164,7 @@ ca_classifier_try_address_fast_path (ca_classifier_ctx_t *ctx)
 /* Single-character alphabetic Symbols (`:a`-`:z` / `:A`-`:Z`) are
    reserved for future contraction notation.  Raises
    NotImplementedError rather than the generic IndexError.  The
-   caller passes any Symbol that is not `:_` / `:*` / `:%`; a
+   caller passes any Symbol that is not `:_` / `:%`; a
    non-reserved Symbol returns without action. */
 static inline void
 ca_classifier_check_reserved_contraction_symbol (VALUE sym)
@@ -763,12 +761,6 @@ ca_classifier_try_argc1_special (ca_classifier_ctx_t *ctx)
              ca_type_name[cs->data_type]);
   }
 
-  /* :* → UNBOUND_REPEAT. */
-  if ( arg == ca_classifier_sym_star ) {
-    info->type = CA_REG_UNBOUND_REPEAT;
-    return 1;
-  }
-
   /* ndim > 1 with Integer → ADDRESS.  Fixnum was caught by the
      fast path; this branch handles Bignum. */
   if ( ctx->ca_ndim > 1 && rb_obj_is_kind_of(arg, rb_cInteger) ) {
@@ -832,7 +824,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
   }
 
   /* argv[0] = multi-char Symbol → METHOD_CALL.  Single-char
-     specials (:_ / :* / :%) fall through the strlen check and are
+     specials (:_ / :%) fall through the strlen check and are
      handled downstream (argc == 1 special / fast paths / main
      loop).  Single-char alphabetic reserved-contraction Symbols
      also fall through here and are raised later by the per-axis
@@ -859,18 +851,13 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
      when argc == 1 && ndim == 1 falls through to the POINT 1-D
      classification below. */
 
-  /* CAREFUL: pre-scan for :% / :*.  Either Symbol at any position
-     pins the final REG and short-circuits both the main loop and
-     the argc / ndim validation below — skipping the pre-scan lets
-     the ndim mismatch check fire before the Symbol is
-     recognised. */
+  /* CAREFUL: pre-scan for :%.  The Symbol at any position pins the
+     final REG and short-circuits both the main loop and the argc /
+     ndim validation below — skipping the pre-scan lets the ndim
+     mismatch check fire before the Symbol is recognised. */
   for (i = 0; i < ctx.argc; i++) {
     if ( ctx.argv[i] == ca_classifier_sym_perc ) {
       info->type = CA_REG_REPEAT;
-      return;
-    }
-    if ( ctx.argv[i] == ca_classifier_sym_star ) {
-      info->type = CA_REG_UNBOUND_REPEAT;
       return;
     }
   }
@@ -941,7 +928,6 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
     case CA_REG_GRID:
     case CA_REG_MAPPING:
     case CA_REG_METHOD_CALL:
-    case CA_REG_UNBOUND_REPEAT:
     case CA_REG_MEMBER:
     case CA_REG_ATTRIBUTE:
       break;

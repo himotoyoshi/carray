@@ -6,7 +6,7 @@ class CArray
   # @!group Random
 
   # @overload random!(rng: nil)
-  #   Float dtype: samples `[0.0, 1.0)`.  Integer dtype: raises
+  #   A float array: samples `[0.0, 1.0)`.  An integer array: raises
   #   (a range is required).
   # @overload random!(high, rng: nil)
   #   Samples `[0, high)` (Ruby `rand` / Numo `.rand` shorthand).
@@ -14,9 +14,9 @@ class CArray
   #   Samples `[low, high)` (Numo positional convention).
   # @overload random!(range, rng: nil)
   #   Samples from a Ruby Range: `a..b` closed, `a...b` half-open.
-  #   Integer dtype honors the endpoint distinction (dice: `1..6`
+  #   An integer array honors the endpoint distinction (dice: `1..6`
   #   yields values in `1..6` including 6; `1...6` yields `1..5`).
-  #   For float dtype, closed and half-open are equivalent at the
+  #   For a float array, closed and half-open are equivalent at the
   #   sampler level (endpoint probability ≈ 2^-53), matching
   #   NumPy/SciPy convention — `..` is accepted for syntax but the
   #   endpoint is not enforced at the mantissa.
@@ -33,7 +33,7 @@ class CArray
   #     default RNG.
   #   @return [self]
   #   @raise [CArray::DataTypeError] for `:object` / `:fixlen` arrays.
-  #   @raise [ArgumentError] when integer dtype is called with no
+  #   @raise [ArgumentError] when an integer array is called with no
   #     range, when `low >= high`, when a Range is combined with a
   #     second positional argument, or when a Range endpoint is nil.
   def random!(*args, rng: nil); end
@@ -50,7 +50,7 @@ class CArray
   # @overload randomn!(rng: nil)
   #   Fills `self` with standard normal `N(0, 1)` samples via
   #   Box-Muller and returns `self`. Restricted to float / complex
-  #   dtypes; complex fills real and imaginary parts as two
+  #   data types; complex fills real and imaginary parts as two
   #   independent normals per cell.
   #   @param rng [Random, nil] RNG instance; nil uses the per-ractor
   #     default RNG.

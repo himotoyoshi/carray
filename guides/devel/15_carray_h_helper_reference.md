@@ -281,10 +281,13 @@ build the output entity first, then OR the input masks into its mask. The
 `_safe` variant avoids attaching the input masks (= no shrinking-view
 materialise).
 
-`CA_UNDEF` and `CA_NIL` are the global sentinels — `CA_UNDEF` is the
-"masked cell" value the user sees; `CA_NIL` is the empty-array sentinel.
-Both are GC-anchored via `rb_gc_register_mark_object` so the compacting GC
-won't move them.
+`CA_UNDEF` and `CA_UNSPECIFIED` are the global sentinels. `CA_UNDEF` is the
+"masked cell" value the user sees (`UNDEF`); it is GC-anchored via
+`rb_gc_register_mark_object` so the compacting GC won't move it, because the
+value round-trips through Ruby and is compared by pointer identity.
+`CA_UNSPECIFIED` (`CArray::UNSPECIFIED`) means "the caller did not give this
+argument" — needed because `nil` is itself a legal fill value. It is never
+passed in from Ruby, so both sides of every comparison read the same C global.
 
 ## Type / data-type queries
 

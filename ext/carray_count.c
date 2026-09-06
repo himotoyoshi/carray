@@ -2,7 +2,7 @@
 
   CArray#count dispatcher (= value-comparison family entry point).
   Hand-routed because the dispatch decision depends on (self.data_type,
-  v's runtime class), which the per-dtype mkkernel kernels can't see;
+  v's runtime class), which the per-type mkkernel kernels can't see;
   the actual counting is delegated to the kernel-iterator helpers
   listed below.
 

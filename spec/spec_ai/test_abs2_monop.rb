@@ -51,7 +51,7 @@ class TestAbs2Monop < Test::Unit::TestCase
     [2.25, 0.25, 0.25, 2.25].each_with_index { |exp, i| assert_in_delta(exp, r[i], 1e-12) }
   end
 
-  #  ---- complex: creal^2 + cimag^2, output f64 ----
+  #  ---- complex: creal^2 + cimag^2, output = the real component width ----
 
   def test_cmplx128_abs2
     c = CArray.cmplx128(3) { |i| Complex(3, 4) * (i + 1) }
@@ -63,8 +63,16 @@ class TestAbs2Monop < Test::Unit::TestCase
   def test_cmplx64_abs2
     c = CArray.cmplx64(2) { |i| Complex(1, 2) * (i + 1) }
     r = c.abs2
-    assert_equal(:float64, r.data_type_name.to_sym)
+    # Follows abs: a cmplx64 squared magnitude is a float32.
+    assert_equal(:float32, r.data_type_name.to_sym)
     [5.0, 20.0].each_with_index { |exp, i| assert_in_delta(exp, r[i], 1e-6) }
+  end
+
+  def test_complex_abs2_width_follows_abs
+    [CArray.cmplx64(2), CArray.cmplx128(2)].each do |c|
+      assert_equal(c.abs.data_type, c.abs2.data_type,
+                   "abs2 and abs disagree for #{c.data_type_name}")
+    end
   end
 
   #  ---- equivalence with abs ----

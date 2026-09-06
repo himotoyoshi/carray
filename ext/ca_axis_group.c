@@ -8,7 +8,7 @@
   reduce dispatch, GroupLabels) is wired in ca_group_iter.c (the `[]` gate and
   the iterator) + `axis_group` (lib/carray/axis_group.rb).  Both kernels are
   written in the general form: several group axes + rank-N categorical (an N-D
-  codes map) via a per-slab-element composite code, native dtype dispatch,
+  codes map) via a per-slab-element composite code, native data type dispatch,
   mask support.  They take pre-built code bundles, so they are independent of
   how the classifier is constructed.
 
@@ -40,7 +40,8 @@
 enum {
   GR_SUM = 0, GR_PROD, GR_MEAN, GR_MIN, GR_MAX,
   GR_VARIANCE, GR_STDDEV, GR_COUNT, GR_ALL, GR_ANY,
-  GR_VARIANCEP, GR_STDDEVP, GR_MINADDR, GR_MAXADDR
+  GR_VARIANCEP, GR_STDDEVP, GR_MINADDR, GR_MAXADDR,
+  GR_ACCUM
 };
 
 static int
@@ -48,6 +49,7 @@ group_op_code (VALUE vop)
 {
   ID id = SYM2ID(vop);
   if      ( id == rb_intern("sum") )      return GR_SUM;
+  else if ( id == rb_intern("accumulate") ) return GR_ACCUM;
   else if ( id == rb_intern("prod") )     return GR_PROD;
   else if ( id == rb_intern("mean") )     return GR_MEAN;
   else if ( id == rb_intern("min") )      return GR_MIN;
@@ -72,14 +74,14 @@ group_op_code (VALUE vop)
    group code, applies the mask, and folds the value into whichever
    accumulator buffers are non-NULL.  Accumulation is always in `double` (or
    counts in ca_size_t), so the op-finalisation below is type-agnostic — only
-   the LOAD is monomorphised per dtype, keeping the inner loop autovectorisable
+   the LOAD is monomorphised per data type, keeping the inner loop autovectorisable
    while avoiding a forced float64 materialise of the (large) source. */
 
 /* GROUP_WALK(T, ACCUM): one CA_FOR_EACH_SLAB pass.  For each slab element it
    computes the composite group code, applies the mask, then runs ACCUM with
    `v` (the element, widened to double) and `o` (the output flat index =
    code * band + band_flat) in scope.  ACCUM is the only per-op-varying part,
-   so the dtype is monomorphised once per type while sum / mean / variance /
+   so the data type is monomorphised once per type while sum / mean / variance /
    ... reuse the same walk. */
 /* Sentinel o-code for a slab element whose composite code is out of range
    (excluded categorical), stored in the precomputed plan below. */
@@ -171,7 +173,7 @@ group_op_code (VALUE vop)
     if ( gw_gaddr ) xfree(gw_gaddr);                                          \
   } while (0)
 
-/* Run one walk over every supported native dtype.  Dispatched on the source
+/* Run one walk over every supported native data type.  Dispatched on the source
    data_type so the inner loop stays monomorphic (no forced float64 cast). */
 #define GROUP_DISPATCH(ACCUM)                                                  \
   switch ( ca->data_type ) {                                                   \
@@ -188,6 +190,19 @@ group_op_code (VALUE vop)
   case CA_FLOAT64: GROUP_WALK(double,     ACCUM); break;                       \
   default: break;                                                              \
   }
+
+/* `accumulate` is the one op that folds in the SOURCE's own type instead of in
+   double, so it wraps at that width exactly as CArray#accumulate does.  It
+   folds straight into the (zeroed) output — whose data type is the source's —
+   so an empty group already holds the additive identity 0 and needs no mask.
+   The type cannot travel inside a GROUP_WALK ACCUM argument (an argument's own
+   tokens are not substituted for the macro's parameters), so the walk below
+   names its type twice. */
+#define GACC_ADD(T) ( ((T *) co->ptr)[o] += *(T *)(p + gw_doff[e]) )
+/* A boolean accumulate is XOR parity, matching the core: the result stays
+   boolean, so a second `true` has nowhere to carry into. */
+#define GACC_XOR \
+  ( ((boolean8_t *) co->ptr)[o] ^= (*(boolean8_t *)(p + gw_doff[e]) ? 1 : 0) )
 
 /* __axis_group_reduce__(group_axes, bundles, op) — group-reduces self along
  * the union of `group_axes` (ascending source-axis indices = the slab) into
@@ -358,7 +373,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   }
   ca_size_t nout = K_total * band;
 
-  /* --- supported dtype gate (before any allocation) --- */
+  /* --- supported data type gate (before any allocation) --- */
   ca = src;
   switch ( src->data_type ) {
   case CA_BOOLEAN: case CA_INT8:  case CA_UINT8:  case CA_INT16: case CA_UINT16:
@@ -371,11 +386,12 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
              src->data_type);
   }
 
-  /* output dtype per op */
+  /* output data type per op */
   int8_t out_dt = CA_FLOAT64;
   if      ( op == GR_COUNT )              out_dt = CA_INT64;
   else if ( op == GR_MINADDR || op == GR_MAXADDR ) out_dt = CA_INT64;
   else if ( op == GR_ALL || op == GR_ANY ) out_dt = CA_BOOLEAN;
+  else if ( op == GR_ACCUM )              out_dt = src->data_type;
   VALUE vout = rb_carray_new(out_dt, ondim, odim, 0, NULL);
   GetCArray(vout, co);
 
@@ -432,7 +448,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     }
   }
 
-  /* --- compute pass(es), native dtype dispatch, no forced float64 cast ---
+  /* --- compute pass(es), native data type dispatch, no forced float64 cast ---
      variance / stddev use a centred two-pass (= matches CArray's own
      variance, avoids the one-pass sumsq cancellation that breaks ε-close
      for small near-constant groups).  Pass 1 fills sum + cnt; sum is then
@@ -463,6 +479,23 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
         mx[o] = v; mxaddr[o] = (int64_t) faddr;
       }
     );
+  }
+  else if ( op == GR_ACCUM ) {
+    MEMZERO(co->ptr, char, (size_t) nout * co->bytes);
+    switch ( ca->data_type ) {
+    case CA_BOOLEAN: GROUP_WALK(boolean8_t, GACC_XOR);           break;
+    case CA_INT8:    GROUP_WALK(int8_t,   GACC_ADD(int8_t));     break;
+    case CA_UINT8:   GROUP_WALK(uint8_t,  GACC_ADD(uint8_t));    break;
+    case CA_INT16:   GROUP_WALK(int16_t,  GACC_ADD(int16_t));    break;
+    case CA_UINT16:  GROUP_WALK(uint16_t, GACC_ADD(uint16_t));   break;
+    case CA_INT32:   GROUP_WALK(int32_t,  GACC_ADD(int32_t));    break;
+    case CA_UINT32:  GROUP_WALK(uint32_t, GACC_ADD(uint32_t));   break;
+    case CA_INT64:   GROUP_WALK(int64_t,  GACC_ADD(int64_t));    break;
+    case CA_UINT64:  GROUP_WALK(uint64_t, GACC_ADD(uint64_t));   break;
+    case CA_FLOAT32: GROUP_WALK(float,    GACC_ADD(float));      break;
+    case CA_FLOAT64: GROUP_WALK(double,   GACC_ADD(double));     break;
+    default: break;
+    }
   }
   else {
     GROUP_DISPATCH(
@@ -501,6 +534,9 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       if ( cnt[o] == 0 ) { out[o] = 0; MARK_UNDEF(o); }   /* empty -> UNDEF */
       else out[o] = addr[o];
     }
+  }
+  else if ( op == GR_ACCUM ) {
+    /* already folded in place, in the source's own type; empty groups hold 0 */
   }
   else if ( op == GR_ALL ) {
     boolean8_t *out = (boolean8_t *) co->ptr;    /* empty -> true (vacuous) */
@@ -722,10 +758,10 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
   }
 
 /* GROUP_SCAN_EXTREMUM_WALK(T, CMP): running extremum (cummax / cummin).  The
-   extremum keeps the source dtype (its magnitude never grows), so it holds a
+   extremum keeps the source data type (its magnitude never grows), so it holds a
    native T accumulator, not a widened double.  The first member of a group
    emits its own value: a per-group `seen` byte initialises the accumulator
-   lazily on first hit — no sentinel like HUGE_VAL, which an integer dtype could
+   lazily on first hit — no sentinel like HUGE_VAL, which an integer data type could
    not represent.  CMP is > for max, < for min: a later member replaces the
    running extremum when `rv CMP acc`.  A cell masked within its group holds the
    current extremum once a member has been seen (output NOT masked, like sum);
@@ -863,18 +899,18 @@ group_scan_op_code (VALUE vop)
  * its group up to and including that cell, in row-major position order along
  * the grouped axes (per band).
 
-   op / output dtype:
+   op / output data type:
      :cumsum   -> float64, inclusive within-group running sum.
      :cumprod  -> float64, inclusive within-group running product (init 1.0;
                   float64 like cumsum since the product grows).
-     :cummax   -> source dtype, running within-group maximum (extrema do not
-                  grow magnitude, so the dtype is preserved; int stays int).
-     :cummin   -> source dtype, running within-group minimum.
+     :cummax   -> source data type, running within-group maximum (extrema do not
+                  grow magnitude, so the data type is preserved; int stays int).
+     :cummin   -> source data type, running within-group minimum.
      :cumcount -> int64, 1-based within-group running count of present cells
                   (matching the core CArray#cumcount): the first present member
                   of a group emits 1, the next 2, ...
    cumsum / cumprod keep float64 (matching the reduce siblings sum / prod);
-   integer-preserving sum / prod is a deliberate non-goal (overflow / dtype
+   integer-preserving sum / prod is a deliberate non-goal (overflow / data type
    consistency), as on the reduce side.  A CA_OBJECT source emits a CA_OBJECT
    result for cumsum / cumprod / cummax / cummin (cumcount stays int64).
 
@@ -1011,7 +1047,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
 
   ca_size_t band = (group_prod > 0) ? (src->elements / group_prod) : 0;
 
-  /* --- supported dtype gate (CA_OBJECT handled by its own lane below) --- */
+  /* --- supported data type gate (CA_OBJECT handled by its own lane below) --- */
   ca = src;
   switch ( src->data_type ) {
   case CA_BOOLEAN: case CA_INT8:  case CA_UINT8:  case CA_INT16: case CA_UINT16:
@@ -1024,8 +1060,8 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
              src->data_type);
   }
 
-  /* --- output dtype per op: cumcount int64; cumsum / cumprod float64 (object
-     source -> object); cummax / cummin preserve the source dtype (object ->
+  /* --- output data type per op: cumcount int64; cumsum / cumprod float64 (object
+     source -> object); cummax / cummin preserve the source data type (object ->
      object). --- */
   int8_t out_dt;
   if      ( op == GS_CUMCOUNT )                        { out_dt = CA_INT64; }
@@ -1153,7 +1189,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       }
     }
   }
-  else {                                          /* native dtype dispatch */
+  else {                                          /* native data type dispatch */
     switch ( op ) {
     case GS_CUMSUM: {
       double *outd = (double *) co->ptr;

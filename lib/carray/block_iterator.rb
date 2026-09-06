@@ -19,7 +19,7 @@
 #  is a `block_view` (a CAStride: zero-copy over the source via compose-fold),
 #  reduced over the trailing tile axes by a core reduction and scattered into the
 #  ceil-shaped tile grid.  One core reduction per region; the named reductions
-#  delegate straight to the core, so their dtype / mask / empty (ERI) / epsilon
+#  delegate straight to the core, so their data type / mask / empty (ERI) / epsilon
 #  contracts are the core's, unchanged.  Because tiles do not overlap, no
 #  padded entity is built (unlike CAWindowIterator) and the interior stays on
 #  the source buffer.
@@ -165,7 +165,7 @@ class CABlockIterator < CAIterator
   # quantile) which are assembled into that many grids.  Boundary regions use a
   # smaller (unmasked, ragged) block_view whose present cell count is naturally
   # below a full tile, so `min_count:` marks them UNDEF with no masking.  The
-  # output dtype is seeded from the first region (all regions share it).
+  # output data type is seeded from the first region (all regions share it).
   def assemble
     outs = nil
     each_region do |strip_ranges, tiles, out_ranges|
@@ -184,7 +184,7 @@ class CABlockIterator < CAIterator
 
   # Fold every region with a single core reduction `op` (the tier-1 shape).
   def fold (op, **kw)
-    assemble { |view, _tiles| view.send(op, axis: @tile_axes, **kw) }
+    assemble { |view, _tiles| view.public_send(op, axis: @tile_axes, **kw) }
   end
 
   public
@@ -194,14 +194,20 @@ class CABlockIterator < CAIterator
   # A per-tile fold to one value over the trailing tile axes is exactly a core
   # per-axis reduction over those axes, so every reduction delegates to
   # `block_view.<op>(axis: tile_axes, ...)` per region.  This inherits the core
-  # dtype, mask, empty / all-masked (identity vs UNDEF) and epsilon-close
+  # data type, mask, empty / all-masked (identity vs UNDEF) and epsilon-close
   # contracts unchanged.  `min_count:` / `fill_value:` pass straight to the core.
 
   # @overload sum(min_count: nil, fill_value: nil)
   #   Per-tile sum.  @return [CArray] tile-grid shaped
+  # @overload accumulate(min_count: nil, fill_value: nil)
+  #   Per-tile sum kept in the source's own data type, wrapping at its width,
+  #   as the core `accumulate` does -- `sum` answers in the type the core
+  #   promotes to (float64 for integers), so a tile count over `uint8` cells
+  #   stays one byte wide instead of eight.
+  #   @return [CArray] tile-grid shaped
   # The rest are analogous: prod / mean / min / max, sample and population
   # variance / stddev, all / any.
-  [:sum, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
       kw = {}
@@ -281,7 +287,11 @@ class CABlockIterator < CAIterator
   #   Per-tile position of the maximum (tile-local flat index).
   #   @return [CArray]
   [:min_index, :max_index].each do |op|
-    define_method(op) { assemble { |view, _| view.send(op, axis: @tile_axes) } }
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op}
+        assemble { |view, _| view.#{op}(axis: @tile_axes) }
+      end
+    RUBY
   end
 
   # @overload min_addr
@@ -309,7 +319,7 @@ class CABlockIterator < CAIterator
     each_region do |strip_ranges, tiles, out_ranges|
       vview = @source[*strip_ranges].block_view(*tiles)
       sview = saddr[*strip_ranges].block_view(*tiles)
-      mi    = vview.send(idx_op, axis: @tile_axes)         # tile-local flat index
+      mi    = vview.public_send(idx_op, axis: @tile_axes)  # tile-local flat index
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
       safe  = mi.copy
@@ -380,7 +390,7 @@ class CABlockIterator < CAIterator
       wt     = tiles == @sizes ? weights : weights[*tiles.map { |t| 0...t }]
       wshape = ([1] * @sndim) + tiles
       # Pass the weights through unchanged, like the window iterator: core wsum /
-      # wmean own weight/dtype coercion, so do not pre-coerce the weights here.
+      # wmean own weight / type coercion, so do not pre-coerce the weights here.
       wfull  = wt.reshape(*wshape).broadcast_to(*view.shape)
       yield view, wfull
     end
@@ -516,8 +526,8 @@ class CABlockIterator < CAIterator
   # reusing the same padded (masked-margin) entity as the iterate escape
   # hatches, so this is the slow path (a per-tile materialize), and the
   # out-of-bounds cells of a partial edge tile are dropped from the result.
-  # cumsum / cumprod -> float64, cummax / cummin preserve the value dtype,
-  # cumcount -> int64 running count of present cells; the output dtype is seeded
+  # cumsum / cumprod -> float64, cummax / cummin preserve the value data type,
+  # cumcount -> int64 running count of present cells; the output data type is seeded
   # from the first tile's scan.
 
   # @overload cumsum
@@ -527,10 +537,10 @@ class CABlockIterator < CAIterator
   #   Per-tile inclusive running product (float64), source-shaped.
   #   @return [CArray]
   # @overload cummax
-  #   Per-tile inclusive running maximum (value dtype), source-shaped.
+  #   Per-tile inclusive running maximum (value data type), source-shaped.
   #   @return [CArray]
   # @overload cummin
-  #   Per-tile inclusive running minimum (value dtype), source-shaped.
+  #   Per-tile inclusive running minimum (value data type), source-shaped.
   #   @return [CArray]
   # @overload cumcount
   #   Per-tile running count of present cells (int64), source-shaped.
@@ -542,7 +552,7 @@ class CABlockIterator < CAIterator
   private
 
   # Drive a within-tile segment scan: scan each tile flattened row-major and
-  # scatter back to a source-shaped result.  The output dtype is taken from the
+  # scatter back to a source-shaped result.  The output data type is taken from the
   # first tile's scan (all tiles share it); the padded margin is UNDEF and the
   # OOB cells of a partial edge tile are cropped from the result.
   def block_scan (op)
@@ -552,7 +562,7 @@ class CABlockIterator < CAIterator
     pgv  = nil
     CArray.each_index(*@shape) do |*g|
       tile    = tgv[*g, *nils]
-      scanned = tile.copy.reshape(tile.elements).send(op).reshape(*@sizes)
+      scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
       unless pout
         pout = CArray.new(scanned.data_type, padded_source.shape)
         pout[] = UNDEF

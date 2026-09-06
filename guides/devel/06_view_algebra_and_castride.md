@@ -194,6 +194,28 @@ VALUE     rb_ca_stride_new (VALUE cary,
 `obj_type` is the runtime-assigned `CA_OBJ_STRIDE` (external global) for
 the base class, or the subclass's installed id for typedef descendants.
 
+### Recognising a family member
+
+Nothing in the struct says "I am a CAStride". Membership is a property
+of the operation table an `obj_type` was installed with: every member
+was installed with a copy of `ca_stride_func`, and the engine tests
+
+```c
+ca_func[ca->obj_type].attach == ca_stride_func.attach
+```
+
+`ca_stride_func` is not declared in `carray.h`, so callers outside the
+core use the public form:
+
+```c
+int ca_is_stride_family (const void *ca);
+```
+
+Because the test reads the table rather than a class or an `obj_type`
+list, an externally installed view that shares the table answers true
+as well. Guard every `ca_stride_compose_to_root` call with it —
+handing it a non-member reads the struct past its end.
+
 ### Compose-fold
 
 ```c
@@ -283,7 +305,6 @@ view's parameters.
 | CATranspose | runtime | pure typedef | `a.transpose` |
 | CAFarray | runtime | pure typedef | column-major view |
 | CAField | runtime | pure typedef | fixlen field access (zero-copy) |
-| CAUnboundRepeat | `CA_OBJ_UNBOUND_REPEAT` (fixed = 8) | prefix + `rep_dim` tail | `:*` unbound axis (pre-broadcast) |
 
 `CARepeat` is technically `typedef CAStride CARepeat;` — the
 "repeat" semantics are entirely encoded by `strides[k] == 0` on the

@@ -21,12 +21,15 @@ ext/.dev_build_mode
 ext/*.bundle
 ext/*.bundle.dSYM/
 ext/carray_config.h
+ext/carray_build_flags.h
 ext/mkmf.log
 
 # Yard generated documentation (`rake yard` output).  Source-of-truth
 # user documentation lives in docs/ (= hand-written .md files, tracked).
+# The HTML output goes to .yard-html/ rather than doc/, which sat one
+# letter away from docs/ at the top level.
 .yardoc/
-doc/
+.yard-html/
 
 # spec_ai borrower extension build artifacts
 spec/spec_ai/ext_memory_view_test/Makefile
@@ -40,12 +43,17 @@ spec/spec_ai/ext_eager_no_attach_test/*.bundle.dSYM/
 spec/spec_ai/ext_eager_no_attach_test/*.o
 spec/spec_ai/ext_eager_no_attach_test/mkmf.log
 
-# spec_ai author-surface smoke fixtures (mirrors of samples/c-extensions/*)
+# spec_ai author-surface smoke fixtures (mirrors of examples/c-extensions/*)
 spec/spec_ai/ext_cfunc_r_smoke/Makefile
 spec/spec_ai/ext_cfunc_r_smoke/*.bundle
 spec/spec_ai/ext_cfunc_r_smoke/*.bundle.dSYM/
 spec/spec_ai/ext_cfunc_r_smoke/*.o
 spec/spec_ai/ext_cfunc_r_smoke/mkmf.log
+spec/spec_ai/ext_cslab_smoke/Makefile
+spec/spec_ai/ext_cslab_smoke/*.bundle
+spec/spec_ai/ext_cslab_smoke/*.bundle.dSYM/
+spec/spec_ai/ext_cslab_smoke/*.o
+spec/spec_ai/ext_cslab_smoke/mkmf.log
 spec/spec_ai/ext_per_element_smoke/Makefile
 spec/spec_ai/ext_per_element_smoke/*.bundle
 spec/spec_ai/ext_per_element_smoke/*.bundle.dSYM/
@@ -67,19 +75,11 @@ spec/spec_ai/ext_iter_source_kind/*.bundle.dSYM/
 spec/spec_ai/ext_iter_source_kind/*.o
 spec/spec_ai/ext_iter_source_kind/mkmf.log
 
-# Stray extconf artifacts when extconf.rb is invoked from repo root
-# (root で `ruby extconf.rb && make` を走らせた事故 — 必ず ext/ 内で実行する)
-/Makefile
-/mkmf.log
-/carray_config.h
-/carray_core.c
-/carray_cast_func.c
-/carray_stat_proc.c
-/carray_kernels.c
-/carray_kernels_*.c
-/carray_kernels.stamp
-/*.bundle
-/*.bundle.dSYM/
-
 # Generated PDF bundles (rake pdf:*)
 guides/pdf/
+
+# Private development notes (separate repository)
+/devel/
+benchmark
+CLAUDE.md
+.claude/

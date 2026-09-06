@@ -198,15 +198,9 @@ typedef enum {
 #define CA_ITER_ERR_READONLY    4    /* WRITE on readonly view (CARepeat etc.) */
 #define CA_ITER_ERR_MASK        5    /* masked source — step 4-5 only, lifted in step 6 */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source (step 7) */
-#define CA_ITER_ERR_UNBOUND_SHAPE 7  /* CAUnboundRepeat passed before bind() — reserved for
-                                        sub-step 9.3 (= used iff unbound CAUbrep smoke shows
-                                        unsafe behavior on the existing SRC_CASTRIDE path) */
-
 /* ---- source kind (step 5+, internal routing) ------------------------- */
 #define CA_ITER_SRC_NONE       0
-#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4).
-                                        CAUnboundRepeat is also classified
-                                        here via ca_ubrep_func = ca_stride_func. */
+#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
 #define CA_ITER_SRC_DESCRIPTOR 2     /* CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift (step 5+) */
 #define CA_ITER_SRC_ATTACH     3     /* CAFake / CAByteSwap / CABitfield /
                                         CABitarray / CAReduce — view's own
@@ -1100,8 +1094,7 @@ void ca_iter_state_finish (ca_iter_state *st);
  *
  *   PoC (2026-06-12): N=1M f64 sum 906 us -> 116 us (= 7.8x, 68.8 GB/s).
  *   Parity: ε-close (relative error < 2e-16 for f64 sum), bit-exact
- *   not guaranteed (= reassoc license, documented in CLAUDE.md
- *   ε-close policy section, SL.1.5).
+ *   not guaranteed (= the SIMD license; see guides/devel/11_kernel_iterator.md).
  *
  *   Other state vars referenced inside REDUCE (induction counters
  *   like `cnt`, position counters like `idx`) are auto-vectorised
@@ -1217,7 +1210,7 @@ void ca_iter_state_finish (ca_iter_state *st);
  *   EXPR(x) is a function-like macro producing the per-element contribution
  *   (Pass 1: (double)(x); Pass 2: ((double)(x)-mean)*((double)(x)-mean)).
  *   Reassoc across the 8 lanes is the same ε-close license as _PLUS_EX
- *   (bit-exact not guaranteed; CLAUDE.md ε-close policy, SL.1.5).
+ *   (bit-exact not guaranteed; see guides/devel/11_kernel_iterator.md).
  *
  *   Only the no-mask + contig branch is 8-way; masked / non-contig
  *   branches stay single-accumulator (not the hot path).  Position

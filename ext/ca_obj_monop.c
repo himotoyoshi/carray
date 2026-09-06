@@ -207,9 +207,9 @@ ca_monop_setup (CAMonOp *ca, CArray *parent, uint16_t op_id)
 
   memcpy(ca->dim, parent->dim, parent->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here: ca_has_mask creates a view's mask on
+     demand from its parent's, so an expression whose mask nobody reads
+     never allocates one. */
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -380,8 +380,8 @@ ca_size_t ca_monop_materialise_call_count = 0;
    but they are unobservable: the output mask is built separately via
    the attach lifecycle (ca_monop_func_create_mask + parent.mask
    CARefer), so reads of masked cells return UNDEF regardless of byte
-   contents.  This is the design license stated in CLAUDE.md
-   §"design premises" ("mask is not a protection mechanism").
+   contents.  The mask marks cells as undefined; it does not guard their
+   bytes, so writing garbage into a masked cell is licensed.
 
    A "partial mask slow path" (= a cell-wise branch to skip masked-cell
    compute) is a possible future micro-optimisation; it is not done
@@ -461,7 +461,9 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
     }
   }
   (void) holder;
-  scratch = ca_lazy_arena_acquire(total_bytes);
+  scratch = ( leaf->data_type == CA_OBJECT )
+              ? ca_lazy_arena_acquire_object(slab_n)
+              : ca_lazy_arena_acquire(total_bytes);
   ca_monop_scratch_acquire_count++;
   ca_xfer_stride(leaf, starts, counts, parent_strides, scratch, CA_XFER_GET);
 
@@ -615,7 +617,9 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
          → data (in target data_type).  Required because in-place cast
          would overlap source/dest reads when target_bytes > src_bytes
          (forward-walk reads cells past their own write boundary). */
-      scratch = ca_lazy_arena_acquire(total_bytes);
+      scratch = ( cur_dt == CA_OBJECT )
+                  ? ca_lazy_arena_acquire_object(slab_n)
+                  : ca_lazy_arena_acquire(total_bytes);
       ca_monop_scratch_acquire_count++;
       memcpy(scratch, data, total_bytes);
       ca_cast_block(slab_n, &src_stub, scratch, &dst_stub, data);
@@ -728,6 +732,14 @@ ca_monop_func_attach (void *ap)
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
   ca_monop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 

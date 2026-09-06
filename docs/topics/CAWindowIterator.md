@@ -32,7 +32,7 @@ interior, the margins filled by the boundary policy), takes its
 every window), and runs one vectorized core reduction over the trailing window
 axes. So a named reduction is a single pass over a strided view — much faster
 than folding each window one at a time, and the reduction inherits the core
-`dtype` / mask / empty / epsilon contracts unchanged.
+data type / mask / empty / epsilon contracts unchanged.
 
 The practical consequence — which drives the [performance guidance](#performance-and-recommended-settings)
 below — is that the iterator itself adds essentially **no** overhead over
@@ -108,7 +108,7 @@ array (or a shrunk one under `:truncate`):
 
 | family | methods |
 |---|---|
-| arithmetic | `sum` `prod` `mean` |
+| arithmetic | `sum` `accumulate` `prod` `mean` |
 | extrema | `min` `max` `minmax` |
 | spread | `variance` `stddev` (sample) · `variancep` `stddevp` (population) |
 | boolean | `all` `any` |
@@ -120,6 +120,11 @@ array (or a shrunk one under `:truncate`):
 `elements` is the (constant) window size; `count_not_masked` is the effective
 number of in-bounds cells per window (the renormalizing denominator). All
 reductions accept `min_count:` / `fill_value:`.
+
+`sum` answers in the type the core promotes to — float64 for an integer
+source. `accumulate` is the same fold kept in the source's own type, wrapping
+at its width, for a window that cannot overflow it: a 3x3 count over `uint8`
+cells stays one byte wide instead of eight.
 
 ## Bounded convolution — `correlate` / `convolve`
 

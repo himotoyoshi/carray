@@ -282,13 +282,13 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     # Reference-side reconcile (PROPOSAL_TO_COMPARABLE_RECEIVER_FLIP): only a
     # Face *reference* drives reconciliation.  Here r is plain int64 (not a
     # Face), so there is no reference to bring the Face query into its space;
-    # the query is passed as-is and its fixlen surface cannot be cast to the
-    # int64 storage, which raises (a DataTypeError).  Either way the Face
-    # query against a plain axis is rejected -- descend via q.parent to search
-    # the storage directly.
+    # the query is coerced to the reference's data_type, and a Face has no
+    # view of its values in another one -- it says so, naming #to_numeric and
+    # #parent.  Descend via q.parent to search the storage directly.
     r = dt_ref.parent
     q = CArray.int64(3) { |i| T0 + [0, 3600 * 5, 3600 * 23].to_a[i] }.time(unit: :s)
-    assert_raise(CArray::DataTypeError) { r.bsearch(q) }
+    err = assert_raise(TypeError) { r.bsearch(q) }
+    assert_match(/no numeric conversion/, err.message)
   end
 
   # ----- linear_section / linear_fetch on time (float-space) -----

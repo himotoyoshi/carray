@@ -2,7 +2,7 @@
 #
 #  carray/categorical.rb
 #
-#  CACategorical — a categorical dtype: dense integer codes (the storage) plus
+#  CACategorical — a categorical data type: dense integer codes (the storage) plus
 #  a label vocabulary. Structurally the same as a pandas Categorical or an
 #  Arrow dictionary: each element is an index into a small set of categories.
 #
@@ -66,7 +66,7 @@ class CACategorical < CAObject
   }.freeze
 
   # The exclusion sentinel per codes data_type: the all-ones bit pattern, read
-  # as type-max for an unsigned dtype and as -1 for a signed one. Either way it
+  # as type-max for an unsigned data type and as -1 for a signed one. Either way it
   # is out of every valid [0, k) range and byte-identical to a pandas / Arrow
   # missing code.
   SENTINEL = {
@@ -521,7 +521,7 @@ class CArray
     # Integer / Float keys stay distinct (eql?, so 1 and 1.0 are separate
     # categories). The discovery path below is reserved for sort_labels (which
     # reorders the vocabulary, desyncing the appearance-order codes), an explicit
-    # labels list, and the dtypes the factorize kernel does not take (complex).
+    # labels list, and the data types the factorize kernel does not take (complex).
     if labels.nil? && !sort_labels && (integer? || float? || object? || fixlen? || boolean?)
       codes, levels = __factorize_appearance__
       return CACategorical.from_codes(codes, levels.to_a)
@@ -541,7 +541,7 @@ class CArray
       end
     end
 
-    # Choose a narrow unsigned code dtype, reserving its top value as the
+    # Choose a narrow unsigned code type, reserving its top value as the
     # exclusion sentinel so it never collides with a real code 0..k-1.
     k = labels_arr.size
     code_type, sentinel =

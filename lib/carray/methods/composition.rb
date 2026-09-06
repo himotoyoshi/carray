@@ -12,7 +12,7 @@
 # (`stack` / `meld` / `montage`, plus `CArray#stack` and `CAStack#append`)
 # lives in carray/stack.rb.  The cheat sheet below covers the whole family.
 #
-#                       | view (same dtype)      | eager (auto-cast)
+#                       | view (same data type)      | eager (auto-cast)
 #   -------------------+------------------------+-----------------------
 #   concat existing    | meld  (CAMeld view)    | concatenate (materialised)
 #   axis (ndim same)   |                        |

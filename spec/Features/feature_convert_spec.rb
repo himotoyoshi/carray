@@ -15,8 +15,8 @@ describe "TestCArray " do
     a = CArray.int(4,1,3,1,2,1).seq!
     b = CArray.int(4,3,2).seq!
 
-    # 3.0: drop_axis returns a view (CAStride for representable reshapes
-    # post-PROPOSAL_RESHAPE_STRIDE_REWRITE, CARefer for the fallback).
+    # 3.0: drop_axis returns a view (CAStride for representable reshapes,
+    # CARefer for the fallback).
     # Behavioral contract: the result equals the dropped-axis entity and
     # materialises to a plain CArray via .copy.
     is_asserted_by { b == a.drop_axis }

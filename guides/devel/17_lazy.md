@@ -34,7 +34,7 @@ Nothing has computed yet; the tree is just nodes pointing at operands.
 Because these are views, they compose with the rest of the view algebra — a lazy
 node can sit over a slice, a transpose, a scalar broadcast — and they obey the same
 attach lifecycle. A scalar operand is represented as a CScalar broadcast with
-element-stride 0 (or wrapped in CAUnboundRepeat), so `a.lazy + 1` needs no
+element-stride 0, so `a.lazy + 1` needs no
 temporary for the `1`.
 
 ## Forcing: how a tree becomes an entity

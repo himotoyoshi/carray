@@ -14,6 +14,7 @@ class CARoll < CATile
 end
 
 # Mask companion of {CARoll}.
+# @private
 class CARollMask < CARoll
 end
 

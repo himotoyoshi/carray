@@ -12,6 +12,22 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_* */
+
+/* Operand scratch for a chunked / gathered kernel run.
+
+   For CA_OBJECT the scratch holds VALUEs, and an object-lane kernel
+   calls rb_funcall per cell -- a collection in the middle would free
+   whatever the gather pulled in from a lazy operand, since those cells
+   exist nowhere else.  The object form of the arena acquire keeps the
+   slot marked until it is released. */
+static void *
+ca_op_acquire_operand_scratch (CArray *ca, ca_size_t n_elements)
+{
+  return ( ca->data_type == CA_OBJECT )
+           ? ca_lazy_arena_acquire_object(n_elements)
+           : ca_lazy_arena_acquire(n_elements * ca->bytes);
+}
+
 #include "ca_obj_face.h"   /* ca_face_reconcile_comparison (comparison Face gate) */
 
 VALUE rb_mCAMath;
@@ -324,8 +340,6 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     }
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self, out);
-
   return out;
 }
 
@@ -479,8 +493,6 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
     }
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self, out);
-
   return out;
 }
 
@@ -543,7 +555,7 @@ kleene_gather_bool (CArray *ca, boolean8_t *vbuf, boolean8_t *mbuf, ca_size_t n)
    undetermined cells (U|U, U&U, U|F, U&T) keep the blind mask.  All other
    cells were already correct from the value kernel.
 
-   Gate: boolean dtype + output has a mask (else no-op -- the hot path is
+   Gate: boolean data type + output has a mask (else no-op -- the hot path is
    untouched, integer bitwise stays blind).  `out` is a fresh entity, so
    out->ptr / out->mask->ptr are writable without attach. */
 VALUE
@@ -870,8 +882,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
           }
         }
 
-        out = rb_ca_rewrap_unbound_repeat(self, out);
-        out = rb_ca_rewrap_unbound_repeat(other, out);
         return out;
       }
       /* else fall through to the use_chunked / ALLOCV path */
@@ -907,8 +917,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       if ( a2 ) { ca_detach(ca2); } else { ALLOCV_END(h2); }
       if ( a1 ) { ca_detach(ca1); } else { ALLOCV_END(h1); }
 
-      out = rb_ca_rewrap_unbound_repeat(self, out);
-      out = rb_ca_rewrap_unbound_repeat(other, out);
       return out;
     }
 
@@ -936,7 +944,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
         p1_src = (char *) ca1->ptr;
         attached1 = 1;
       } else {
-        s1_arena = ca_lazy_arena_acquire(ca1->bytes);
+        s1_arena = ca_op_acquire_operand_scratch(ca1, 1);
         ca_xfer_all(ca1, s1_arena, CA_XFER_GET);
         p1_src = (char *) s1_arena;
       }
@@ -945,7 +953,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       p1_src = (char *) ca1->ptr;
       attached1 = 1;
     } else {
-      s1_arena = ca_lazy_arena_acquire(chunk_n * ca1->bytes);
+      s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
       p1_src = (char *) s1_arena;
       gather_per_chunk1 = 1;
     }
@@ -957,7 +965,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
         p2_src = (char *) ca2->ptr;
         attached2 = 1;
       } else {
-        s2_arena = ca_lazy_arena_acquire(ca2->bytes);
+        s2_arena = ca_op_acquire_operand_scratch(ca2, 1);
         ca_xfer_all(ca2, s2_arena, CA_XFER_GET);
         p2_src = (char *) s2_arena;
       }
@@ -966,7 +974,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       p2_src = (char *) ca2->ptr;
       attached2 = 1;
     } else {
-      s2_arena = ca_lazy_arena_acquire(chunk_n * ca2->bytes);
+      s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
       p2_src = (char *) s2_arena;
       gather_per_chunk2 = 1;
     }
@@ -1005,10 +1013,6 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     ca_lazy_arena_exit();
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self, out);
-
-  out = rb_ca_rewrap_unbound_repeat(other, out);
-
   return out;
 }
 
@@ -1035,13 +1039,13 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   self_is_scalar  = RTEST(rb_obj_is_cscalar(self));
   other_is_scalar = RTEST(rb_obj_is_cscalar(other));
 
-  /* shape compat: non-scalar self vs non-scalar other → elements must match.
-     scalar self vs array other historically raises (mismatch). */
-  if ( !self_is_scalar && !other_is_scalar &&
-       ca1->elements != ca2->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in binop (%" PRId64 " <-> %" PRId64 ")",
-                               (ca_size_t) ca1->elements,
-                               (ca_size_t) ca2->elements);
+  /* self is the write target, so its shape is the result's by definition
+     and the destination rule applies (the same one assignment uses), not
+     the symmetric one a binary operation is held to. */
+  if ( !self_is_scalar && !other_is_scalar ) {
+    ca_broadcast_to_destination(self, &other);
+    TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
+    other_is_scalar = RTEST(rb_obj_is_cscalar(other));
   }
   if ( self_is_scalar && !other_is_scalar &&
        ca1->elements != ca2->elements ) {
@@ -1291,14 +1295,14 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
         if ( ca_attach_is_alias(ca1) ) {
           ca_attach(ca1);  p1_src = (char *) ca1->ptr;  att1 = 1;
         } else {
-          s1_arena = ca_lazy_arena_acquire(ca1->bytes);
+          s1_arena = ca_op_acquire_operand_scratch(ca1, 1);
           ca_xfer_all(ca1, s1_arena, CA_XFER_GET);
           p1_src = (char *) s1_arena;
         }
       } else if ( ca_attach_is_alias(ca1) ) {
         ca_attach(ca1);  p1_src = (char *) ca1->ptr;  att1 = 1;
       } else {
-        s1_arena = ca_lazy_arena_acquire(chunk_n * ca1->bytes);
+        s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
         p1_src = (char *) s1_arena;  gpc1 = 1;
       }
       /* ca2 acquire (mirror) */
@@ -1306,14 +1310,14 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
         if ( ca_attach_is_alias(ca2) ) {
           ca_attach(ca2);  p2_src = (char *) ca2->ptr;  att2 = 1;
         } else {
-          s2_arena = ca_lazy_arena_acquire(ca2->bytes);
+          s2_arena = ca_op_acquire_operand_scratch(ca2, 1);
           ca_xfer_all(ca2, s2_arena, CA_XFER_GET);
           p2_src = (char *) s2_arena;
         }
       } else if ( ca_attach_is_alias(ca2) ) {
         ca_attach(ca2);  p2_src = (char *) ca2->ptr;  att2 = 1;
       } else {
-        s2_arena = ca_lazy_arena_acquire(chunk_n * ca2->bytes);
+        s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
         p2_src = (char *) s2_arena;  gpc2 = 1;
       }
       /* ca3 acquire (mirror) */
@@ -1321,14 +1325,14 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
         if ( ca_attach_is_alias(ca3) ) {
           ca_attach(ca3);  p3_src = (char *) ca3->ptr;  att3 = 1;
         } else {
-          s3_arena = ca_lazy_arena_acquire(ca3->bytes);
+          s3_arena = ca_op_acquire_operand_scratch(ca3, 1);
           ca_xfer_all(ca3, s3_arena, CA_XFER_GET);
           p3_src = (char *) s3_arena;
         }
       } else if ( ca_attach_is_alias(ca3) ) {
         ca_attach(ca3);  p3_src = (char *) ca3->ptr;  att3 = 1;
       } else {
-        s3_arena = ca_lazy_arena_acquire(chunk_n * ca3->bytes);
+        s3_arena = ca_op_acquire_operand_scratch(ca3, chunk_n);
         p3_src = (char *) s3_arena;  gpc3 = 1;
       }
 
@@ -1367,10 +1371,6 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
     }
   }
 
-  out = rb_ca_rewrap_unbound_repeat(self,   out);
-  out = rb_ca_rewrap_unbound_repeat(other2, out);
-  out = rb_ca_rewrap_unbound_repeat(other3, out);
-
   return out;
 }
 
@@ -1392,14 +1392,15 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
 
-  /* element-count check (self is the destination)                       */
-  if ( ! rb_obj_is_cscalar(other2) && ca2->elements != ca1->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in triop! (op2: %" PRId64 " != %" PRId64 ")",
-             (ca_size_t) ca2->elements, (ca_size_t) ca1->elements);
+  /* self is the write target, so the destination rule applies to each
+     input operand in turn (the same one assignment uses). */
+  if ( ! rb_obj_is_cscalar(other2) ) {
+    ca_broadcast_to_destination(self, &other2);
+    TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   }
-  if ( ! rb_obj_is_cscalar(other3) && ca3->elements != ca1->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch in triop! (op3: %" PRId64 " != %" PRId64 ")",
-             (ca_size_t) ca3->elements, (ca_size_t) ca1->elements);
+  if ( ! rb_obj_is_cscalar(other3) ) {
+    ca_broadcast_to_destination(self, &other3);
+    TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
   }
 
   /* self IS the output (= write target; attach legit per refined invariant) */
@@ -1462,8 +1463,8 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
       }
 
       ca_lazy_arena_enter();
-      s2_arena = ca_lazy_arena_acquire(chunk_n * ca2->bytes);
-      s3_arena = ca_lazy_arena_acquire(chunk_n * ca3->bytes);
+      s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
+      s3_arena = ca_op_acquire_operand_scratch(ca3, chunk_n);
 
       for ( off = 0; off < n_total; off += chunk_n ) {
         ca_size_t n_done = (off + chunk_n > n_total) ? n_total - off
@@ -1534,8 +1535,6 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
                          (boolean8_t *) ca2->ptr, 1);
     EAGER_RELEASE_INPUT(ca1, h1, attached1);
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
 
   return out;
 }
@@ -1683,8 +1682,8 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
         }
 
         ca_lazy_arena_enter();
-        s1_arena = ca_lazy_arena_acquire(chunk_n * b1);
-        s2_arena = ca_lazy_arena_acquire(chunk_n * b2);
+        s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
+        s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
 
         for ( off = 0; off < n_kernel; off += chunk_n ) {
           ca_size_t n_done = (off + chunk_n > n_kernel) ? n_kernel - off
@@ -1707,8 +1706,6 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       }
     }
   }
-
-  out = rb_ca_rewrap_unbound_repeat(self, out);
 
   return out;
 }

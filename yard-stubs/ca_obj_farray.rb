@@ -10,6 +10,7 @@ class CAFarray < CAStride
 end
 
 # Mask companion of {CAFarray}.
+# @private
 class CAFarrayMask < CAFarray
 end
 

@@ -28,7 +28,7 @@ class TestBincount < Test::Unit::TestCase
 
   # ---- weighted bincount ----
 
-  def test_bincount_weighted_inherits_weights_dtype
+  def test_bincount_weighted_inherits_weights_data_type
     labels  = CA_INT64([0, 1, 1, 2, 0, 1])
     weights = CA_DOUBLE([1, 2, 3, 4, 5, 6])
     r = labels.bincount(weights: weights)

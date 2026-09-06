@@ -204,6 +204,17 @@ class TestDatetimeScalar < Test::Unit::TestCase
     assert_raise(ArgumentError) { T.new(1, :M) + T.new(1, :s) }   # cross-group scale
   end
 
+  def test_timedelta_division_truncates_toward_zero
+    # A duration shrinks toward zero (matching the array CATimedelta#/ and
+    # #to_unit), not Ruby Integer division's floor.
+    assert_equal(-7, (T.new(-30, :h) / 4).value)
+    assert_equal 7, (T.new(30, :h) / 4).value
+    assert_equal(-7, (T.new(30, :h) / -4).value)
+    # scalar / array parity
+    assert_equal (CA_INT64([-30]).timedelta(unit: :h) / 4).ticks[0],
+                 (T.new(-30, :h) / 4).value
+  end
+
   # -- S0: scale vs instant unit algebra -----------------------------------
 
   def test_convert_scale_cross_group_raises

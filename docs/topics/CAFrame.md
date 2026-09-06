@@ -341,7 +341,7 @@ df.sort_by_key("time")                             # by the index (axis name)
   (default `:asc`). A key must be a scalar (1-D) column (an N-D key raises).
 - **`masked_position:`** sends masked key rows to the `:last` (default) or
   `:first` end.
-- Descending works for **every dtype** (a descending key is internally its dense
+- Descending works for **every data type** (a descending key is internally its dense
   descending rank via `CArray#order` — reliable where negating a value is not,
   and tie-safe in a multi-key sort).
 
@@ -593,7 +593,7 @@ owned = df.to_ca.copy       # independent, owned matrix
 
 Only all-scalar (**1-D**) columns qualify; an N-D column has no single
 matrix form and raises — escape it per column with `df["name"]`. A mixed
-dtype set is promoted to a common type (`result_type`) through lazy cast
+data type set is promoted to a common type (`result_type`) through lazy cast
 lanes, so the promotion costs no buffer either.
 
 `to_ca(writable: true)` — the 3.0 "give me something my writes reach"
@@ -622,7 +622,7 @@ df.to_csv(sep: ";", header: false, index: false)
 `to_csv` is the text form of the same flat table `to_ca` needs: every column
 must be **1-D** (an N-D column has no flat CSV cell and raises — export it per
 column, or use `to_records` + JSON for the structured shape). Unlike `to_ca` it
-does **not** promote to a common dtype — each column is formatted to text on its
+does **not** promote to a common data type — each column is formatted to text on its
 own, so numbers, strings, and time / categorical columns sit side by side.
 
 The index (if any) is written as the first column under `axis_name` unless
@@ -632,6 +632,44 @@ empty string is written quoted (`""`) to stay distinct from missing. Fields
 containing the separator, a quote, or a newline are quoted with internal quotes
 doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
 `index` default to true.
+
+### Looking at a frame — `to_table`, `p`, `puts`
+
+```ruby
+p df                       # summary line + first 8 / last 2 rows
+puts df                    # the whole frame (to_s)
+puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
+```
+
+```
+#<CAFrame nrow=1286 vars=[name:object, lat:float64, temp:int32] index="id">
+  id  name              lat  temp
+----  ----------  ---------  ----
+   0  観測点0          45.0     0
+   1  観測点1     44.999667     1
+   :  :                   :     :
+1285  観測点1285  44.571667    25
+```
+
+`to_table` is the display counterpart of `to_csv` and shares none of its
+constraints — it is text to be looked at, not read back. Numeric columns are
+right-aligned and everything else left-aligned, a **masked cell shows as `_`**
+(the marker CArray's own inspect uses), and an **N-D column** — which `to_csv`
+rejects, having no flat cell — shows each row's slice as an Array literal.
+Column widths are counted in terminal cells, so a CJK name occupies two per
+character and the columns stay square.
+
+Float cells are rounded to `precision` decimal places **for display only**
+(default 6): full precision lets one value like `141.67833333333334` set the
+width of the whole column. `precision: nil` prints them as Ruby renders them.
+
+`rows` caps the printed rows (default 20) and the elided middle becomes a `:`
+row; `rows: nil` prints every row. When rows are elided, a footer states the
+full size. `index: false` drops the index column.
+
+`inspect` and `to_s` sit on the same renderer: **`p df` stays a screenful**
+(the summary line, then the first 8 and last 2 rows) while **`puts df` is the
+whole frame**.
 
 ### Index
 
@@ -724,18 +762,29 @@ df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
 # serial -> time: reinterpret integer counts since an epoch
 df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
 df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
+
+# the same pair as one value — a units attribute goes straight in
+df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
 - **`parse_to_time(name, format = nil, unit: :s)`** parses a
   string-bearing column (an object `CArray` of Strings, or a `CAString` /
   `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
   `UNDEF` (parse-mask). A non-string column raises.
-- **`to_time(name, unit:, epoch: nil)`** reads an integer column as counts
-  of `unit` resolution since `epoch` (default the Unix epoch). `epoch` takes any
-  time literal (String / `Time` / Integer), so columns measured from another
-  origin convert directly. A float column is accepted only when every value is
-  whole; a fractional serial raises (use a finer `unit`). A non-numeric column
-  raises.
+- **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
+  as counts of `unit` resolution since `epoch` (default the Unix epoch).
+  `epoch` takes any time literal (String / `Time` / Integer), so columns
+  measured from another origin convert directly. A float column is accepted
+  only when every value is whole; a fractional serial raises (use a finer
+  `unit`). A non-numeric column raises.
+
+  A [`CATime::Grid`](CATime.md) carries that (unit, epoch)
+  pair as one value — passed positionally or as `unit:` — so a netCDF `units`
+  attribute needs no taking apart. It also carries a phase the keyword form
+  cannot: the keyword `epoch` is read on the `unit` grid, so
+  `unit: :D, epoch: "1980-01-01 12:00"` loses the time of day, while
+  `CATime::Grid.parse("days since 1980-01-01 12:00")` resolves the finer
+  storage that holds it.
 
 There is no bundled "convert and index" verb — compose the conversion with
 `set_index`, keeping each step explicit.
@@ -921,7 +970,7 @@ CAFrame.concat([jan, feb, mar])   # an Array is accepted too
 
 - Columns are **matched by name** (output order follows the first frame); every
   frame must carry the same column-name set, or it raises.
-- Each output column is `CArray.concatenate` of that column, so **dtypes promote**
+- Each output column is `CArray.concatenate` of that column, so **data types promote**
   to a common type, **masks are preserved**, and an **N-D column** carries its
   trailing dimensions (which must agree across frames).
 - The **index** is concatenated when every frame has one (their `axis_name` must

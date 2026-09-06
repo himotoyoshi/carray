@@ -73,11 +73,11 @@ class CArray
     rad_2pi: CAMonOp::OP_RAD_2PI,
     rad_pi:  CAMonOp::OP_RAD_PI,
 
-    # Sign function (preserve dtype).  bool/uint → 0/1, sint → -1/0/1,
+    # Sign function (preserves the data type).  bool/uint → 0/1, sint → -1/0/1,
     # float → -1/0/1 NaN-preserving, complex → unit vector or 0.
     sign:    CAMonOp::OP_SIGN,
 
-    # imag_i: preserve-dtype primitive (0 for numeric, cimag for complex
+    # imag_i: type-preserving primitive (0 for numeric, cimag for complex
     # in the real slot).  Primarily consumed by the `imag` special case
     # below but also directly callable via `a.lazy.imag_i`; entry here
     # so the direct call fuses instead of falling to eager.
@@ -118,24 +118,28 @@ class CArray
   # complex-specific dispatch (= magnitude as float).  Re-express that
   # dispatch via chain composition over existing lazy ops so abs rides
   # the lazy substrate fully:
-  #   numeric parent: CAMonOp(OP_ABS_I)                        (1 node)
-  #   complex parent: CAMonOp(cast_f64) ∘ CAMonOp(OP_ABS_I)    (2 nodes)
-  # The complex chain works because ca_monop_abs_i for cmplx128 stores
-  # |z| in the real slot with imag=0, then cast cmplx128->f64 picks up
-  # the real part — semantically identical to rb_ca_abs (= abs_i + .real
-  # + copy).  No new C kernel, no new op_id required.
+  #   numeric parent: CAMonOp(OP_ABS_I)                            (1 node)
+  #   complex parent: CAMonOp(cast_<float>) ∘ CAMonOp(OP_ABS_I)    (2 nodes)
+  # The complex chain works because ca_monop_abs_i stores |z| in the
+  # real slot with imag=0, then the cast picks up the real part —
+  # semantically identical to the eager abs.  The cast target is the
+  # real component width of the operand (cmplx64 -> f32, cmplx128 ->
+  # f64), matching the eager kernel's `complex: :real_of_source`.
+  # No new C kernel, no new op_id required.
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__abs_eager__, :abs
   __abs_eager_um__ = instance_method(:__abs_eager__)
   define_method(:abs) do
     if __lazy_view__?
       abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
       if complex?
-        # CA_FLOAT64 is a Symbol; convert via data_type_code so the cast
+        # float_dt is a Symbol; convert via data_type_code so the cast
         # op_id can be computed by Integer arithmetic.
+        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
         CAMonOp.__build__(abs_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(CA_FLOAT64))
+                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
       else
         abs_i_node
       end
@@ -174,6 +178,7 @@ class CArray
   # mutability on the lazy path is not a regression.
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__real_eager__, :real
   __real_eager_um__ = instance_method(:__real_eager__)
   define_method(:real) do
@@ -216,11 +221,11 @@ class CArray
   end
 
   # ---------------------------------------------------------------------------
-  # arg lazy fuse: eager `arg` always returns f64 regardless of input
-  # dtype (data_type-changing monop; see MkKernel.monop :arg output rule).
-  # CAMonOp's cast-before invariant requires input dtype == output dtype
+  # arg lazy fuse: eager `arg` is a data_type-changing monop (see
+  # MkKernel.monop :arg output rule).
+  # CAMonOp's cast-before invariant requires input data type == output data type
   # at each in-place step, so `arg` can't sit directly in the substrate.
-  # Chain compose via the preserve-dtype `arg_i` primitive:
+  # Chain compose via the type-preserving `arg_i` primitive:
   #
   #   integer / bool parent → cast_f64 ∘ arg_i (result f64)
   #   float parent         → arg_i             (result same float)
@@ -228,14 +233,13 @@ class CArray
   #                          component of complex slot; cast extracts
   #                          the real part, same trick as abs / imag)
   #
-  # Note: eager `arg` always widens to f64.  The lazy path preserves
-  # the operand's float / complex width (f32 → f32, cmplx64 → f32)
-  # rather than always going to f64 — matches the general lazy-substrate
-  # rule "scalar keeps operand's precision" (see ca_lazy_wrap_scalar
-  # header).  A user needing exact eager-parity can wrap with
-  # `.to_type(:float64)` before / after.
+  # Both paths keep the operand's float / complex width (f32 → f32,
+  # cmplx64 → f32), and both send integers to f64 since pi does not fit
+  # an integer slot.  That agrees with the general lazy-substrate rule
+  # "scalar keeps operand's precision" (see ca_lazy_wrap_scalar header).
   # ---------------------------------------------------------------------------
 
+  # @private
   alias_method :__arg_eager__, :arg
   __arg_eager_um__ = instance_method(:__arg_eager__)
   define_method(:arg) do
@@ -307,7 +311,6 @@ class CArray
 
     # IEEE 754 remainder (distinct semantics from `%` / `mod`: float
     # branch uses C99 `remainder`, round-half-to-even).
-    :reminder  => CABinOp::OP_REMINDER,
   }.freeze
 
   LAZY_BINOP_OP_IDS.each do |method_name, op_id|
@@ -533,7 +536,7 @@ class CArray
     if __lazy_view__?
       dt_name = data_type_name
       if CScalar.respond_to?(dt_name)
-        s = CScalar.send(dt_name)
+        s = CScalar.public_send(dt_name)
         s[0] = other
         [s, self]
       else
@@ -801,6 +804,15 @@ end
       end
       copy
     end
+
+    # Where something is registered to compute an expression -- a compiler,
+    # say -- it is asked here, and the walk below is what happens when it
+    # declines, when nothing is registered, or when the array is small
+    # enough that walking is the faster answer.
+    def copy
+      return super unless CArray.expression_evaluator
+      CArray::Fusion.evaluate(self) || super
+    end
   end
 end
 
@@ -825,65 +837,105 @@ end
 #   - A bare lazy return auto-materialises; escaping the lazy view (e.g.
 #     stashing it in an Array) is the user's responsibility.
 # ---------------------------------------------------------------------------
+# CArray.fuse
+#
+# Builds an expression instead of evaluating it, so that it is computed in
+# one pass with no array standing for a step along the way.  The block is
+# read rather than called; see CArray::FuseSource for why, and for what
+# happens where its source cannot be read.
+# ---------------------------------------------------------------------------
 class << CArray
-  # @overload fuse(*args) { |*shadows| ... }
-  #   Runs a transient lazy-fusion scope: wraps each CArray argument
-  #   with `.lazy`, yields the wrappers (and any non-CArray args)
-  #   to the block, then auto-materialises a bare lazy return value
-  #   into an entity. Non-lazy returns pass through as-is.
-  #   @param args [Array<CArray, Object>] operands.
-  #   @yieldparam shadows [Array<CArray, Object>] lazy wrappers
-  #     paired with pass-through non-CArray operands.
-  #   @return [Object]
-  #   @raise [LocalJumpError] when no block is given.
-  def fuse(*args)
-    raise LocalJumpError, "CArray.fuse requires a block" unless block_given?
-    shadows = args.map { |a| a.is_a?(CArray) ? a.lazy : a }
-    result = yield(*shadows)
-    case result
-    when CAMonOp, CABinOp, CAMonCmp, CABinCmp, CALazyMarker
-      result.to_ca
-    else
-      result
+  # The object asked to compute an expression, or nil.  CArray can always
+  # walk one, so nothing has to be registered and nothing changes when
+  # nothing is; what a registered evaluator adds is a second way to arrive
+  # at the same answer, and it may decline.
+  #
+  # It is called as `call(plan, out)` -- see {CArray::Fusion} for what a
+  # plan holds -- and answers by filling `out` and returning something
+  # true, or by returning something false having written nothing.  Raising
+  # is not an answer: one that raises is dropped, with a warning, and
+  # expressions are walked from there on.
+  #
+  # @return [#call, nil]
+  attr_reader :expression_evaluator
+
+  # @param object [#call, nil] see {#expression_evaluator}
+  # @raise [ArgumentError] when it cannot be called.
+  def expression_evaluator= (object)
+    if object && ! object.respond_to?(:call)
+      raise ArgumentError,
+            "an expression evaluator must respond to #call(plan, out)"
     end
+    @expression_evaluator = object
   end
 
-  # CArray.lazy(*args) { |lazies| ... }  —  dual of fuse
+  # @overload fuse { <expression> }
+  #   Builds the expression rather than evaluating it, so that it is
+  #   computed in one pass with no array standing for a step along the way.
   #
-  # Like `fuse`, wraps each CArray argument with `.lazy` and yields it to
-  # the block, but **does not auto-materialise at block exit** (= returns
-  # the lazy structure as-is). If the block return is non-lazy (= Numeric
-  # / entity CArray / Array etc.) it's pass-through (= same polymorphic
-  # semantics as fuse).
+  #   The block is not called.  Its source is read, every name in it that
+  #   holds a CArray is given `.lazy`, and the result is evaluated back in
+  #   the block's own binding -- so `self`, instance variables, methods and
+  #   constants are what they were where it was written.
   #
-  # Use cases:
-  #   - Passing a chain between functions: build the lazy expression
-  #     inside the function and materialise at the caller
-  #     (= `.to_ca` / `.sum` / `.mean(axis:)` etc.)
-  #   - Reusable expressions: apply the same expr to multiple datasets
-  #   - debug / dump_tree: observe the lazy structure as-is
-  #   - Pick the materialise form later: full materialise or reduction
+  #     out[] = CArray.fuse { (a + b) * (c - a) }
+  #     total = CArray.fuse { a * weight }.sum
   #
-  # Example:
-  #   expr = CArray.lazy(a, b) { |s, o| (s + o) * 2 }
-  #   expr.class           #=> CABinOp (lazy view)
-  #   expr.to_ca           # full materialise
-  #   expr.sum             # reduction (= chain + reduce in 1 pass)
+  #   What comes back is the expression, not an array: it is computed where
+  #   it is used -- stored into an array, reduced, or asked for one with
+  #   `to_ca`.  A block holding anything but an expression over arrays comes
+  #   back as whatever it evaluated to.
   #
-  # Polymorphic semantics (= symmetric with fuse):
-  #   CArray.lazy(25.0, b) { |s, o| s + o }   # s=25.0 Float pass-through
-  #   CArray.lazy(arr, b)  { |s, o| s + o }   # s=arr.lazy
-  # @overload lazy(*args) { |*shadows| ... }
-  #   Like {.fuse} but does not auto-materialise: returns whatever
-  #   the block yields (typically a lazy view) so the expression
-  #   can be materialised later via `.to_ca`, `.sum`, `.mean`, etc.
-  #   @param args [Array<CArray, Object>] operands.
-  #   @yieldparam shadows [Array<CArray, Object>] lazy wrappers.
-  #   @return [Object]
+  #   @return [Object] the expression, as a lazy view
   #   @raise [LocalJumpError] when no block is given.
-  def lazy(*args)
-    raise LocalJumpError, "CArray.lazy requires a block" unless block_given?
-    shadows = args.map { |a| a.is_a?(CArray) ? a.lazy : a }
-    yield(*shadows)
+  #   @raise [ArgumentError] when the block's source cannot be read -- in
+  #     irb, in `eval`, or from a file that is gone.  Write `.lazy` on the
+  #     operands there: `a.lazy + b.lazy`.
+  def fuse (*args, &block)
+    raise LocalJumpError, "CArray.fuse requires a block" unless block
+    unless args.empty?
+      raise ArgumentError,
+            "CArray.fuse takes no arguments: write the expression itself, " \
+            "`CArray.fuse { a + b }`, and the names in it are read from " \
+            "where the block was written"
+    end
+    CArray::FuseSource.evaluate(block)
+  end
+
+  # @overload jit_for (*extents) { |i, j, ...| ... }
+  #   Runs a block over an index space, so that a cell may reach the ones
+  #   around it -- a recurrence, a stencil.  The block is compiled, and the
+  #   compiler is the carray-jit gem.
+  #   @raise [NotImplementedError] when that gem is not installed.
+  def jit_for (*extents, **options)
+    raise NotImplementedError, no_compiler("jit_for")
+  end
+
+  # @overload jit_each { ... }
+  #   Runs a block over the cells of arrays at once, naming each cell by the
+  #   array it came from, and writing what it computes into arrays of yours:
+  #   `CArray.jit_each { out = a + b * c }`.  The block is compiled, and the
+  #   compiler is the carray-jit gem.
+  #   @raise [NotImplementedError] when that gem is not installed.
+  def jit_each (&block)
+    raise NotImplementedError, no_compiler("jit_each")
+  end
+
+  # @overload jit_map { ... }
+  #   The same block with its value asked for: the last statement is what
+  #   every cell of the result gets, and the result comes back.  The block is
+  #   compiled, and the compiler is the carray-jit gem.
+  #   @raise [NotImplementedError] when that gem is not installed.
+  def jit_map (&block)
+    raise NotImplementedError, no_compiler("jit_map")
+  end
+
+  private
+
+  def no_compiler (name)
+    "CArray.#{name} compiles its block, and the compiler is the carray-jit " \
+    "gem, which is not installed.  An expression over whole arrays can be " \
+    "written as `CArray.fuse { ... }` instead, which needs no compiler; " \
+    "reaching a neighbouring cell, or writing the loop itself, does."
   end
 end

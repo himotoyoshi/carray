@@ -492,6 +492,14 @@ rb_ca_ref_all (VALUE self, CAIndexInfo *info)
   return rb_funcall(self, rb_intern("refer"), 0);
 }
 
+static ID
+ca_id_expression_evaluator (void)
+{
+  static ID id = 0;
+  if ( ! id ) id = rb_intern("@expression_evaluator");
+  return id;
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -515,16 +523,34 @@ rb_ca_store_all (VALUE self, VALUE rval)
     CArray *cv;
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
-    if ( cv->obj_type == CA_OBJ_UNBOUND_REPEAT ) {
-      rval = ca_ubrep_bind_with(rval, self);
-      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+    /* Where something is registered to compute an expression, and this is
+       one, it is asked before the walk below -- it fills the destination
+       directly, which is the whole of the saving; making an array and
+       copying it over is most of the work once the expression itself is
+       fast.  It may decline, and then the walk does it.  Narrow on purpose:
+       the same shape and data type, so nothing here has to broadcast or
+       cast on the way. */
+    if ( ca_is_lazy_view(cv)
+         && ca->data_type == cv->data_type
+         && ca->ndim == cv->ndim
+         && ca->elements == cv->elements
+         && RTEST(rb_attr_get(rb_cCArray, ca_id_expression_evaluator())) ) {
+      int8_t k;
+      int    same = 1;
+      for ( k = 0; k < ca->ndim; k++ ) {
+        if ( ca->dim[k] != cv->dim[k] ) { same = 0; break; }
+      }
+      if ( same ) {
+        VALUE fusion = rb_const_get(rb_cCArray, rb_intern("Fusion"));
+        if ( RTEST(rb_funcall(fusion, rb_intern("evaluate_into"), 2, rval, self)) ) {
+          return rval;
+        }
+      }
     }
 
-    if ( ca->elements != cv->elements ) {
-      rb_raise(rb_eRuntimeError,
-               "mismatch in data size (%" PRId64 " <-> %" PRId64 ") for storing to carray", 
-               (ca_size_t) ca->elements, (ca_size_t) cv->elements);
-    }
+    /* The destination owns the shape; see ca_broadcast_to_destination. */
+    ca_broadcast_to_destination(self, &rval);
+    TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
     /* Source delivery via ca_xfer_all into a local scratch instead of
        ca_attach(cv).  This routes through ca_*_func_xfer_all's per-region
@@ -985,7 +1011,16 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
 
   switch ( info.type ) {
   case CA_REG_ADDRESS_COMPLEX:
+    /* Re-enter against a flattened view of self.  rb_ca_refer_new_flatten
+       is an internal builder and hands back a bare refer, so a marker
+       receiver would be dropped here and the result would never be lifted
+       at the tail.  Put it back on before the re-entry.  (A Face survives
+       on its own -- the internal builder still lifts those.) */
     self = rb_ca_refer_new_flatten(self);
+    if ( ca_is_lazy_marker(ca) ) {
+      extern VALUE rb_ca_lazy_marker_new (VALUE cary);
+      self = rb_ca_lazy_marker_new(self);
+    }
     goto retry;
   case CA_REG_ADDRESS:
     obj = rb_ca_ref_address(self, &info);
@@ -1010,9 +1045,6 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     break;
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
-    break;
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
     break;
   case CA_REG_MAPPING:
     obj = rb_ca_fancy_index_chain(self, argv[0]);
@@ -1050,19 +1082,19 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eIndexError, "invalid index specified");
   }
 
-  /* Face lift at the read touch point: if `self` is a Face, re-wrap the
-     view result as a Face (ca_face_lift).  Guards: lift only when the result
-     is a CArray instance (excludes Hash / iterator / scalar), and only when
-     it is not ALREADY a Face -- some builders (select / repeat / ...) lift
-     their own result, so re-lifting here would double-wrap and leave `.parent`
-     pointing at a Face instead of the storage. */
-  if ( ca_is_face(ca) && rb_obj_is_kind_of(obj, rb_cCArray) ) {
-    CArray *obj_ca;
-    TypedData_Get_Struct(obj, CArray, &carray_data_type, obj_ca);
-    if ( ! ca_is_face(obj_ca) ) {
-      obj = ca_face_lift(obj, self);
-    }
-  }
+  /* Wrapper lift at the read touch point: if `self` is a Face or a
+     CALazyMarker, re-wrap the view result so the wrapper stays on top.
+     Guarded to CArray results, which drops the scalar / CASlabIterator /
+     CAGroupIterator / Hash cases the switch above can produce.  The
+     already-a-Face case (some builders lift their own result) is handled
+     inside ca_wrapper_lift.
+
+     Every CA_REG_* branch converges here, so this one line covers all of
+     them -- but not every index form: `a[:*, nil]` builds a CAUnboundRepeat,
+     whose shape stays open until an operand binds it, and a marker copies
+     shape at construction.  ca_wrapper_lift refuses that one, in one place,
+     because `unbound_repeat` reaches it by a second route. */
+  CA_WRAPPER_LIFT(obj, self, ca);
 
   return obj;
 }
@@ -1305,9 +1337,6 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
   case CA_REG_REPEAT:
     obj = rb_ca_repeat(argc, argv, self);
     break;
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
-    break;
   case CA_REG_MAPPING:
     obj = rb_ca_fancy_index_chain(self, argv[0]);
     break;
@@ -1491,10 +1520,6 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_store_all(obj, rval);
     break;
   }
-  case CA_REG_UNBOUND_REPEAT:
-    obj = rb_funcall2(self, rb_intern("unbound_repeat"), (int) argc, argv);
-    obj = rb_ca_store_all(obj, rval);
-    break;
   case CA_REG_MAPPING: {
     obj = rb_ca_fancy_index_chain(self, argv[0]);
     obj = rb_ca_store_all(obj, rval);
@@ -1669,7 +1694,6 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_GRID:
   case CA_REG_MAPPING:
   case CA_REG_METHOD_CALL:
-  case CA_REG_UNBOUND_REPEAT:
   case CA_REG_MEMBER:  
   case CA_REG_ATTRIBUTE:  
     break;
@@ -2094,8 +2118,6 @@ Init_carray_access (void)
   rb_define_const(rb_cObject, "CA_REG_MAPPING",  INT2NUM(CA_REG_MAPPING));
   rb_define_const(rb_cObject, "CA_REG_METHOD_CALL",
                                                  INT2NUM(CA_REG_METHOD_CALL));
-  rb_define_const(rb_cObject, "CA_REG_UNBOUND_REPEAT",
-                                                 INT2NUM(CA_REG_UNBOUND_REPEAT));
   rb_define_const(rb_cObject, "CA_REG_MEMBER",   INT2NUM(CA_REG_MEMBER));
   rb_define_const(rb_cObject, "CA_REG_ATTRIBUTE",   INT2NUM(CA_REG_ATTRIBUTE));
 

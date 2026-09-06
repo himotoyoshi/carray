@@ -30,7 +30,7 @@ class CArray
         flatten.send(:__mask_duplicates__, 0).reshape(*shape)
       else
         # Per-fiber single-pass seen-set hash (C __mask_duplicates__): one lane
-        # per dtype family (integer widen, float bitwise key with NaN collapse,
+        # per data type family (integer widen, float bitwise key with NaN collapse,
         # object rb_hash + rb_eql, fixlen byte-hash + memcmp, boolean via the
         # uint8 lane). O(distinct) memory, no sort/gather/scatter buffers.
         __mask_duplicates__(normalize_axis(axis, "mask_duplicates"))

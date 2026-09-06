@@ -273,7 +273,9 @@ ca_operation_function_t ca_timedelta_func = {
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride */
   ca_face_xfer_stride,
-  ca_face_xfer_all
+  ca_face_xfer_all,
+  .fill_addrs  = ca_face_fill_addrs,
+  .fill_stride = ca_face_fill_stride,
 };
 
 /* ------------------------------------------------------------------- */

@@ -1,21 +1,12 @@
 # Views
 
-A *view* is an array that does not own its data. Instead it refers to another
-array's storage and presents it in a different shape, order, or arrangement.
-Because a view shares storage with the array it refers to, creating one does not
-copy the data.
+A *view* is an array that does not own its data. Instead it refers to another array's storage and presents it in a different shape, order, or arrangement. Because a view shares storage with the array it refers to, creating one does not copy the data.
 
-**You use a view exactly like any other array** — the same methods, the same
-indexing, the same behaviour. You do not have to know or check whether what you
-are holding is a view or an entity; they feel identical to use.
+**You use a view exactly like any other array** — the same methods, the same indexing, the same behaviour. You do not have to know or check whether what you are holding is a view or an entity; they feel identical to use.
 
-> **The one thing to keep in mind:** writing through a view reaches back and
-> changes the data it refers to. This is the whole point of a view, and the main
-> thing to be aware of. If you want a separate array that you can change freely,
-> make a copy with `copy` (shown at the end of this page).
+> **The one thing to keep in mind:** writing through a view reaches back and changes the data it refers to. This is the whole point of a view, and the main thing to be aware of. If you want a separate array that you can change freely, make a copy with `copy` (shown at the end of this page).
 
-The slices from [Indexing and slicing](02_indexing_and_slicing.md) are views.
-Several methods produce views directly.
+The slices from [Indexing and slicing](02_indexing_and_slicing.md) are views. Several methods produce views directly.
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -25,8 +16,7 @@ a = CArray.int32(2, 3).seq
 
 ## Reshaping
 
-`reshape` presents the same elements with a different shape, as long as the total
-number of elements is unchanged.
+`reshape` presents the same elements with a different shape, as long as the total number of elements is unchanged.
 
 ```ruby
 a.reshape(3, 2)
@@ -38,13 +28,11 @@ a.reshape(6)            #  flatten to one dimension
 #  => [ 0, 1, 2, 3, 4, 5 ]
 ```
 
-Reshape works in either direction — you can flatten a multi-dimensional array
-down to 1-D, or re-fold a 1-D array into any shape whose elements multiply out
-to the same total.
+Reshape works in either direction — you can flatten a multi-dimensional array down to 1-D, or re-fold a 1-D array into any shape whose elements multiply out to the same total.
 
 ```ruby
 flat = CArray.int32(24).seq
-#  => [ 0, 1, 2, 3, ..., 23 ]
+#  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, ..., 23 ]
 
 cube = flat.reshape(2, 3, 4)        #  re-fold 1-D into 3-D
 #  => [ [ [  0,  1,  2,  3 ],
@@ -55,7 +43,7 @@ cube = flat.reshape(2, 3, 4)        #  re-fold 1-D into 3-D
 #         [ 20, 21, 22, 23 ] ] ]
 
 cube.reshape(24)                    #  back down to 1-D
-#  => [ 0, 1, 2, ..., 23 ]
+#  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, ..., 23 ]
 
 cube.reshape(4, 6)                  #  any compatible 2-D shape
 #  => [ [  0,  1,  2,  3,  4,  5 ],
@@ -64,8 +52,7 @@ cube.reshape(4, 6)                  #  any compatible 2-D shape
 #       [ 18, 19, 20, 21, 22, 23 ] ]
 ```
 
-Every one of these is a view onto `flat`; writing into any of them updates the
-shared storage.
+Every one of these is a view onto `flat`; writing into any of them updates the shared storage.
 
 ## Transposing
 
@@ -78,15 +65,14 @@ a.transpose
 #       [ 2, 5 ] ]
 ```
 
-For a higher-dimensional array, `transpose` takes the permutation of axes you
-want. Pass the new axis order as integers.
+For a higher-dimensional array, `transpose` takes the permutation of axes you want. Pass the new axis order as integers.
 
 ```ruby
 c = CArray.int32(2, 2, 3).seq
-c.shape              #  => [ 2, 2, 3 ]
+c.shape              #  => [2, 2, 3]
 
 c.transpose(2, 0, 1).shape
-#  => [ 3, 2, 2 ]    axis 2 moved to the front, the rest follow
+#  => [3, 2, 2]     axis 2 moved to the front, the rest follow
 
 c.transpose(2, 0, 1)
 #  => [ [ [ 0, 3 ],
@@ -97,22 +83,13 @@ c.transpose(2, 0, 1)
 #         [ 8, 11 ] ] ]
 ```
 
-Transposes are pure views — even multi-axis ones — so they cost nothing to
-create.
+Transposes are pure views — even multi-axis ones — so they cost nothing to create.
 
 ## Operations that return views, even when you might not expect it
 
-Reshape and transpose are obviously about rearranging without copying. But a
-number of operations that *look* like they should produce a brand-new, modified
-array also return views and **leave the original untouched**: `sort`, `reverse`,
-`flip`, `shift`, `roll`, and others.
+Reshape and transpose are obviously about rearranging without copying. But a number of operations that *look* like they should produce a brand-new, modified array also return views and **leave the original untouched**: `sort`, `reverse`, `flip`, `shift`, `roll`, and others.
 
-The general rule is worth holding onto: in CArray, an operation that only
-**rearranges or selects existing elements** gives you a view. An actual copy
-happens only when you ask for one with `to_ca`, or when an operation has to
-compute new values (like arithmetic). So rather than memorising which methods
-copy, assume you have a view and remember that writing through it reaches the
-source.
+The general rule is worth holding onto: in CArray, an operation that only **rearranges or selects existing elements** gives you a view. An actual copy happens only when you ask for one with `to_ca`, or when an operation has to compute new values (like arithmetic). So rather than memorising which methods copy, assume you have a view and remember that writing through it reaches the source.
 
 ```ruby
 a = CA_INT([3, 1, 2, 5, 4])
@@ -132,8 +109,7 @@ a.shift(1).class     #  => CAShift
 a.roll(1).class      #  => CARoll
 ```
 
-Other view-producing forms have their own classes too, and you can confirm them
-the same way:
+Other view-producing forms have their own classes too, and you can confirm them the same way:
 
 ```ruby
 b = CArray.int32(2, 3).seq
@@ -146,8 +122,7 @@ b[CA_INT([0, 2])].class  #  => CAGrid
 b[b.gt(2)].class         #  => CASelect
 ```
 
-The names differ because the underlying mechanics differ, but from your side
-they are all just arrays — and writing through any of them reaches the source.
+The names differ because the underlying mechanics differ, but from your side they are all just arrays — and writing through any of them reaches the source.
 
 `flip`, `shift`, and `roll` rearrange along an axis:
 
@@ -175,8 +150,7 @@ m.sort(axis: 1)      #  sort within each row
 
 ### Selecting with an index array or a boolean array
 
-Picking elements out by an array of positions, or by a boolean condition, also
-produces a view rather than a copy:
+Picking elements out by an array of positions, or by a boolean condition, also produces a view rather than a copy:
 
 ```ruby
 a = CA_INT([10, 20, 30, 40, 50])
@@ -192,8 +166,7 @@ a[CA_INT([0, 2, 4])] = 0
 a                       #  => [ 0, 20, 0, 40, 0 ]
 ```
 
-The boolean form works the same way — assigning through it updates exactly the
-selected positions:
+The boolean form works the same way — assigning through it updates exactly the selected positions:
 
 ```ruby
 a = CA_INT([10, 20, 30, 40, 50])
@@ -201,14 +174,11 @@ a[a.gt(25)] = -1
 a                       #  => [ 10, 20, -1, -1, -1 ]
 ```
 
-(In some libraries this style of indexing — "fancy indexing" — makes a copy. In
-CArray it is a view, like every other form of indexing.)
+(In some libraries this style of indexing — "fancy indexing" — makes a copy. In CArray it is a view, like every other form of indexing.)
 
 ### Applying the result in place
 
-Because these return views, the natural way to *replace* an array with its sorted
-(or flipped, rolled, ...) version is to assign the view back into the whole array
-with `a[] = ...`:
+Because these return views, the natural way to *replace* an array with its sorted (or flipped, rolled, ...) version is to assign the view back into the whole array with `a[] = ...`:
 
 ```ruby
 a = CA_INT([3, 1, 2, 5, 4])
@@ -236,14 +206,11 @@ m
 #       [ 4, 5, 6 ] ]
 ```
 
-This `a[] = a.something` idiom replaces the older `something!` bang methods —
-the view does the work, and the assignment writes the result back into the
-original storage.
+This `a[] = a.something` idiom replaces the older `something!` bang methods — the view does the work, and the assignment writes the result back into the original storage.
 
 ## Writing through a view changes the original
 
-A view shares the storage of the array it refers to, so assigning through it
-updates that array:
+A view shares the storage of the array it refers to, so assigning through it updates that array:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -268,8 +235,7 @@ a
 #       [  3, 4, 5 ] ]
 ```
 
-It also holds through arbitrarily long chains. Each step is a view, and the
-write at the end propagates back through them all:
+It also holds through arbitrarily long chains. Each step is a view, and the write at the end propagates back through them all:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -279,37 +245,9 @@ a
 #       [   3,   4,   5 ] ]
 ```
 
-## A view onto the data, ignoring the mask: `.value`
-
-When an array carries a mask (see [Masks and missing values](05_masks.md)),
-`value` gives you a view that exposes the underlying storage as if the mask were
-not there. Because it is a view, it shares storage with the source — writing
-through it changes the data of the original, while leaving the mask intact.
-
-```ruby
-a = CArray.float64(2, 3).seq
-a[0, 1] = UNDEF
-a
-#  => [ [ 0.0,   _, 2.0 ],
-#       [ 3.0, 4.0, 5.0 ] ]
-
-v = a.value
-v.class             #  => CARefer    a view, not a copy
-
-v[0, 0] = 100.0     #  write through the mask-stripped view
-a
-#  => [ [ 100.0,   _, 2.0 ],
-#       [   3.0, 4.0, 5.0 ] ]
-```
-
-Notice that the mask on element `[0, 1]` is still there. `.value` only hides the
-mask from view; it does not remove it.
-
 ## Getting an independent copy: `copy`
 
-When you want a separate array that does not share storage, call `copy`. It
-allocates new memory and copies the data, so changes to the copy do not touch the
-original.
+When you want a separate array that does not share storage, call `copy`. It allocates new memory and copies the data, so changes to the copy do not touch the original.
 
 ```ruby
 a  = CArray.int32(2, 3).seq
@@ -324,9 +262,7 @@ a                       #  unchanged
 #       [ 3, 4, 5 ] ]
 ```
 
-`copy` always makes a fresh, independent copy. `to_ca`, by contrast, does the
-least work needed to hand you a CArray — and a view is already a CArray, so it is
-returned unchanged:
+`copy` always makes a fresh, independent copy. `to_ca`, by contrast, does the least work needed to hand you a CArray — and a view is already a CArray, so it is returned unchanged:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -336,22 +272,14 @@ v.to_ca.equal?(v)    #  => true    already a CArray → returned as-is, no copy
 v.copy.equal?(v)     #  => false   copy always allocates a new, owned array
 ```
 
-The two `equal?` outcomes pin down the semantics: `to_ca` hands back the very
-same object (same `object_id`), while `copy` always produces a fresh one.
+The two `equal?` outcomes pin down the semantics: `to_ca` hands back the very same object (same `object_id`), while `copy` always produces a fresh one.
 
 So:
 
-* **`to_ca`** — "give me this as a CArray". Any CArray — an entity or a view — is
-  returned unchanged (no copy). Use it when you just need a CArray to read or pass
-  along. It does **not** turn a view into independent memory.
-* **`copy`** — always returns a new, independent, contiguous array. Use it when
-  you intend to modify the result, must not disturb the original, or need real
-  owned memory out of a view.
+* **`to_ca`** — "give me this as a CArray". Any CArray — an entity or a view — is returned unchanged (no copy). Use it when you just need a CArray to read or pass along. It does **not** turn a view into independent memory.
+* **`copy`** — always returns a new, independent, contiguous array. Use it when you intend to modify the result, must not disturb the original, or need real owned memory out of a view.
 
-> **Anti-pattern: don't use `dup` or `clone` to copy a view.** They are Ruby's
-> standard shallow copy: on a *view* they return **another view onto the same
-> storage**, so writing to the result still changes the source. This is a
-> classic trap.
+> **Anti-pattern: don't use `dup` or `clone` to copy a view.** They are Ruby's standard shallow copy: on a *view* they return **another view onto the same storage**, so writing to the result still changes the source. This is a classic trap.
 >
 > ```ruby
 > a = CArray.int32(2, 3).seq
@@ -367,9 +295,7 @@ So:
 
 ## Composing views
 
-Views can be built on top of views, to any depth. A transpose of a reshape is
-just another view, and writing through the whole chain still reaches the original
-data.
+Views can be built on top of views, to any depth. A transpose of a reshape is just another view, and writing through the whole chain still reaches the original data.
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -382,30 +308,22 @@ a.reshape(3, 2).transpose[nil, 0]
 #  => [ 0, 1 ]          a view through three steps
 ```
 
-Materialising into real memory happens only when you ask for it (with `to_ca`),
-or when an operation needs a concrete array.
+Materialising into real memory happens only when you ask for it (with `to_ca`), or when an operation needs a concrete array.
 
-CArray offers a wide range of view-producing methods beyond reshape and
-transpose. The ones in this document are the basics; the others build on the same
-idea — refer to the data, copy only when asked.
+CArray offers a wide range of view-producing methods beyond reshape and transpose. The ones in this document are the basics; the others build on the same idea — refer to the data, copy only when asked.
 
 ## View classes
 
-In CArray, each kind of view is its own named class — the array tells you what
-kind of view it is if you ask. You rarely need to use these names directly; the
-table below is a reference for what you might see when you call `.class` on a
-view.
+In CArray, each kind of view is its own named class — the array tells you what kind of view it is if you ask. You rarely need to use these names directly; the table below is a reference for what you might see when you call `.class` on a view.
 
-All of these are subclasses of `CAView` (and `CAView` itself is a subclass of
-`CArray`), so every method you can call on a regular array works on a view
-unchanged.
+All of these are subclasses of `CAView` (and `CAView` itself is a subclass of `CArray`), so every method you can call on a regular array works on a view unchanged.
 
 | Class             | Produced by                                                                 | Example                                                  |
 |-------------------|-----------------------------------------------------------------------------|----------------------------------------------------------|
 | `CABlock`         | Integer / `nil` / `Range` slicing of one or more axes                       | `a[0, nil]`, `a[1..2, nil]`, `a[nil, 0..1]`              |
 | `CAStride`        | `reshape`, `insert_axis` (and `:_`), `reverse`, `flip`                      | `a.reshape(3, 2)`, `a[:_, nil]`, `a.reverse`             |
 | `CATranspose`     | `transpose`                                                                 | `a.transpose`                                            |
-| `CARefer`         | `.value` (mask-stripped view); some reshape forms                           | `a.value` on a masked array                              |
+| `CARefer`         | Flattening with a single `nil`; indexing by a multi-dimensional index array  | `a[nil]`, `a[CA_INT([[0, 1], [2, 3]])]`                  |
 | `CARemap`         | `sort` (a view onto the source in sorted order)                             | `a.sort`, `a.sort(axis: 1)`                              |
 | `CAGrid`          | Indexing by an array of positions on one or more axes                       | `a[CA_INT([0, 2, 4])]`                                   |
 | `CASelect`        | Indexing by a boolean array                                                 | `a[a.gt(3)]`                                             |
@@ -434,16 +352,9 @@ v.shift(1).class          #  => CAShift
 v.roll(1).class           #  => CARoll
 ```
 
-There are a few more specialised view classes (`CAReduce`, `CAWindow`,
-`CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`,
-`CAUnboundRepeat`) which you may encounter when using advanced features such as
-window scans, fixed-size record fields, sub-byte storage, or unbound broadcast
-tools. These follow the same rule: they are views onto data they do not own, so
-writing through them updates the source.
+There are a few more specialised view classes (`CAReduce`, `CAWindow`, `CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`) which you may encounter when using advanced features such as window scans, fixed-size record fields, or sub-byte storage. These follow the same rule: they are views onto data they do not own, so writing through them updates the source.
 
-An entity — a real, data-owning array — has class `CArray` (or, for a
-zero-dimensional value, `CScalar`). The check `ca.entity?` returns `true` for
-those and `false` for any of the view classes above:
+An entity — a real, data-owning array — has class `CArray` (or, for a zero-dimensional value, `CScalar`). The check `ca.entity?` returns `true` for those and `false` for any of the view classes above:
 
 ```ruby
 a = CArray.int32(3, 3).seq

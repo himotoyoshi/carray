@@ -10,6 +10,12 @@ class CArray < Object
   # Library semantic version, e.g. `"3.0.0.dev"`.
   VERSION = ""
 
+  # Sentinel marking "the caller did not give this argument", used by
+  # C entry points whose fill value may legitimately be `nil` (so `nil`
+  # itself cannot mark absence). Never pass it in.
+  # @api private
+  UNSPECIFIED = nil
+
   # `true` when the build links `<complex.h>`; `false` otherwise.
   # Complex array types (`:cmplx64`, `:cmplx128`) require this to be
   # `true`.
@@ -68,11 +74,6 @@ end
 class CARepeat < CAStride
 end
 
-# Unbound repeat view (`a[:*, nil, :*]`). Acquires concrete shape
-# when paired with a target view in an assignment.
-class CAUnboundRepeat < CAStride
-end
-
 # Ragged concatenation view (`CArray.meld(*arrays, axis:)`). Welds
 # K parents along one of their existing axes with (potentially) uneven
 # segment lengths. Prefix-sum table {#seg_offsets} keeps segment
@@ -80,8 +81,7 @@ end
 # than per-cell.  Ruby entry: {CArray.meld} / {CArray#meld}
 # (`lib/carray/stack.rb`).
 #
-# See `docs/objects/CAMeld.md` for the user-facing overview and
-# `devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md` for design rationale.
+# See `docs/objects/CAMeld.md` for the user-facing overview.
 class CAMeld < CAView
   # Returns the number of parent arrays welded by `self`.
   # @return [Integer]
@@ -118,11 +118,6 @@ end
 
 # Maximum supported `ndim`.
 CA_RANK_MAX = nil
-
-# Sentinel value used internally to mark "no argument" in some
-# kwarg-accepting C entry points. Not a publicly useful value.
-# @api private
-CA_NIL = nil
 
 # @!group Data type symbols
 #

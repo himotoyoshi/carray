@@ -161,6 +161,40 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
                  heads.map { |t| t.strftime("%F") }
   end
 
+  def test_from_timesteps_answers_a_week_bucket_on_the_day_grid
+    # A week grid counts from the epoch Thursday, so it cannot hold its own
+    # bucket head (the ISO Monday, four days off every tick).  The answer
+    # lands on :D, where the head is exact and the round trip closes.
+    dt = CArray.time(%w[2024-06-10 2024-06-15 2024-06-17], unit: :D)  # Mon, Sat, Mon
+    back = CATime.from_timesteps(dt.timesteps(unit: :W), unit: :W)
+    assert_equal CATime::Resolution.new(1, :D), back.unit
+    assert_equal dt.floor(unit: :W).ticks.to_a, back.ticks.to_a
+    assert_equal %w[2024-06-10 2024-06-17],
+                 back.strftime("%F").to_a.uniq
+
+    head = CATime.from_timesteps(0, unit: :W)
+    assert_instance_of CATime::Element, head
+    assert_equal "1970-01-05", head.to_s                  # ISO Monday, not the epoch
+    assert_equal CATime::Resolution.new(1, :D), head.unit
+  end
+
+  def test_from_timesteps_week_bucket_accepts_a_day_aligned_origin
+    # The day grid can hold any midnight, so an explicit week origin is
+    # reachable now; on the week grid it could not be expressed at all.
+    assert_equal "2024-01-01", CATime.from_timesteps(0, unit: :W,
+                                                     origin: "2024-01-01").to_s
+    assert_equal "2024-01-15", CATime.from_timesteps(2, unit: :W,
+                                                     origin: "2024-01-01").to_s
+  end
+
+  def test_from_timesteps_keeps_the_bucket_grid_for_other_units
+    { :M => CATime::Resolution.new(1, :M),
+      :D => CATime::Resolution.new(1, :D),
+      :h => CATime::Resolution.new(1, :h) }.each do |u, res|
+      assert_equal res, CATime.from_timesteps(1, unit: u).unit, "unit #{u}"
+    end
+  end
+
   # -- origin discipline ---------------------------------------------------
 
   def test_lossy_origin_raises
@@ -170,9 +204,68 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     end
   end
 
+  def test_calendar_origin_must_be_a_month_head
+    # a calendar grid is addressed by month ordinal, so a day-of-month or
+    # time-of-day phase names a bucket head that does not exist.  Dropping
+    # it silently is the failure the fixed-length side already refuses.
+    dt = CArray.time(["2020-03-05"], unit: :D)
+    assert_raise(ArgumentError) { dt.floor(unit: "3 months", origin: "2000-12-15") }
+    assert_raise(ArgumentError) { dt.timesteps(unit: "3 months", origin: "2000-12-15") }
+    assert_raise(ArgumentError) do
+      dt.floor(unit: "1 month", origin: Time.utc(2024, 5, 17, 13, 45))
+    end
+    assert_raise(ArgumentError) do
+      dt.floor(unit: "3 months", origin: "2000-12-01T00:00:00+09:00")   # 11-30 15:00Z
+    end
+    assert_equal "2020-03-01", dt.floor(unit: "3 months", origin: "2000-12-01")[0].to_s
+  end
+
+  def test_calendar_origin_accepts_a_month_head_scalar
+    dt = CArray.time(["2020-03-05"], unit: :D)
+    head = CArray.time(["2000-12-01"], unit: :M)[0]
+    assert_equal "2020-03-01", dt.floor(unit: "3 months", origin: head)[0].to_s
+    off = CArray.time(["2000-12-15"], unit: :D)[0]
+    assert_raise(ArgumentError) { dt.floor(unit: "3 months", origin: off) }
+  end
+
+  def test_year_storage_origin_must_start_in_january
+    # a :Y tick starts in January, so a July phase cannot be stored on it --
+    # the month used to be dropped as quietly as the day was.
+    y = CArray.time(["2020-03-05"], unit: :Y)
+    assert_raise(ArgumentError) { y.floor(unit: "1 year", origin: "2000-07-01") }
+    assert_equal "2020", y.floor(unit: "1 year", origin: "2000-01-01")[0].to_s
+    # a :D-stored array keeps the civil path, where a July phase is fine
+    d = CArray.time(["2024-03-01"], unit: :D)
+    assert_equal [-1], d.timesteps(unit: "1 year", origin: "2024-07-01").to_a
+  end
+
   def test_integer_origin_rejected
     dt = CA_INT64([0]).time(unit: :h)
     assert_raise(ArgumentError) { dt.timesteps(unit: :h, origin: 100) }
+  end
+
+  def test_a_calendar_element_origin_on_a_fixed_grid
+    # A calendar element names an instant -- the first midnight of its
+    # granule -- so it is a bucket head like any other, and the fixed path
+    # reads it the way the calendar path always did.  It used to be turned
+    # away as having "no exact seconds", which is true of a month-long
+    # duration but not of a month's head.
+    h = CArray.time(["2020-08-15T05:00:00Z"], unit: :h)
+    m = CArray.time("2000-01-01", unit: :M)[0]
+    y = CArray.time("2000-06-01", unit: :Y)[0]           # -> 2000-01-01
+    assert_equal h.timesteps(unit: "1 hour", origin: "2000-01-01").to_a,
+                 h.timesteps(unit: "1 hour", origin: m).to_a
+    assert_equal h.timesteps(unit: "6 hours", origin: "2000-01-01").to_a,
+                 h.timesteps(unit: "6 hours", origin: y).to_a
+    assert_equal ["2020-08-15T00:00:00Z"],
+                 h.floor(unit: "1 day", origin: m).strftime("%FT%TZ").to_a
+
+    # a month head is still not on a week grid, and a bare Integer is still
+    # ambiguous -- accepting the element changes neither
+    assert_raise(ArgumentError) do
+      CA_INT64([0]).time(unit: :W).timesteps(unit: "1 week", origin: m)
+    end
+    assert_raise(ArgumentError) { h.timesteps(unit: "1 hour", origin: 100) }
   end
 
   # -- (bucket, storage) acceptance table ----------------------------------
@@ -309,6 +402,24 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     assert_nothing_raised { a.timesteps(unit: "1 hour") }
   end
 
+  def test_overflow_guard_ignores_a_masked_extreme
+    # A masked cell carries no time, so it must not decide the range the
+    # guard checks: the same array raises unmasked.
+    a = CA_INT64([0, MAX64]).time(unit: :ns)
+    assert_raise(RangeError) { a.ceil(unit: "1 second") }
+    a.ticks.mask = CA_BOOLEAN([false, true])
+    assert_equal [0, UNDEF], a.ceil(unit: "1 second").ticks.to_a
+  end
+
+  def test_overflow_guard_on_an_all_masked_or_empty_array
+    # Nothing to bound, so nothing to guard -- and no Integer(UNDEF).
+    a = CA_INT64([7, 8]).time(unit: :ns)
+    a.ticks.mask = CA_BOOLEAN([true, true])
+    assert_equal [UNDEF, UNDEF], a.timesteps(unit: "1 second").to_a
+    assert_equal [UNDEF, UNDEF], a.floor(unit: "1 second").ticks.to_a
+    assert_equal [], CArray.int64(0).time(unit: :ns).floor(unit: "1 second").ticks.to_a
+  end
+
   # -- categorize composition (period buckets -> categorical) --------------
 
   def test_floor_categorize_composition
@@ -370,7 +481,7 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
 
   def test_invariant_roundtrip_from_timesteps
     dt = _prop_dt(:h)
-    ["1 hour", "6 hours", "1 day", "1 month", "1 year"].each do |s|
+    ["1 hour", "6 hours", "1 day", "1 week", "2 weeks", "1 month", "1 year"].each do |s|
       k = dt.timesteps(unit: s)
       back = CATime.from_timesteps(k, unit: s)
       assert_equal dt.floor(unit: s).to_time.to_a, back.to_time.to_a, "roundtrip (#{s})"
@@ -460,6 +571,121 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     assert_equal [0, 1, 2, 3], sel.timesteps(unit: "1 hour", origin: "2024-01-01T00:00:00Z").to_a
     assert_equal [2024, 2024, 2024, 2024], sel.year.to_a
     assert_instance_of CATime, sel.floor(unit: "1 day")
+  end
+
+  # -- Grid (resolution + origin) -----------------------------------------
+
+  def test_grid_parses_the_udunits_origin_shift_operators
+    g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+    assert_equal [12, :h], [g.unit.count, g.unit.base]
+    # since / after / from / ref and the `@` sign are the same operator
+    %w[since after from ref].each do |word|
+      assert_equal g, CATime::Grid.parse("12 hours #{word} 2017-11-30 09:00")
+    end
+    assert_equal CATime::Grid.parse("seconds since 1970-01-01"),
+                 CATime::Grid.parse("seconds@1970-01-01")
+    # to_s emits `since` only, and reads back into an equal grid
+    assert_equal "12 hours since 2017-11-30 09:00:00", g.to_s
+    assert_equal g, CATime::Grid.parse(g.to_s)
+    # a count of 1 drops the number, the spelling a units attribute uses
+    assert_equal "days since 1980-01-01 00:00:00",
+                 CATime::Grid.parse("1 day since 1980-01-01").to_s
+    # no origin-shift clause: a bare unit, origin defaulting to the epoch
+    assert_nil CATime::Grid.parse("days").origin
+  end
+
+  def test_grid_value_object_semantics
+    a = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+    b = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+    assert_equal a, b
+    assert a.frozen?
+    assert_equal({ a => 1 }[b], 1)                                  # hashable key
+    assert_not_equal a, CATime::Grid.parse("12 hours since 2017-11-30 21:00")
+    assert_not_equal a, CATime::Grid.parse("6 hours since 2017-11-30 09:00")
+  end
+
+  def test_grid_storage_holds_a_phased_origin
+    # 09:00 is not on the 12-hour grid counted from the epoch, so the grid
+    # answers on a finer storage -- the round trip the keyword form cannot do.
+    g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
+    assert_equal [1, :s], [g.storage.count, g.storage.base]
+    t = g.at(CA_INT64([0, 1, 2, 3]))
+    assert_equal ["2017-11-30 09:00", "2017-11-30 21:00",
+                  "2017-12-01 09:00", "2017-12-01 21:00"],
+                 t.strftime("%Y-%m-%d %H:%M").to_a
+    assert_equal [0, 1, 2, 3], g.index(t).to_a
+    assert g.on?(t)
+    # an origin already on the unit grid keeps the unit as its storage
+    assert_equal [1, :D], CATime::Grid.parse("days since 1980-01-01").storage
+                            .then {|r| [r.count, r.base] }
+  end
+
+  def test_grid_at_takes_a_scalar_and_an_array
+    g = CATime::Grid.parse("6 hours since 2024-03-10")
+    assert_instance_of CATime::Element, g.at(2)
+    assert_instance_of CATime, g.at(CA_INT64([2]))
+    assert_equal "2024-03-10T12:00:00Z", g.at(2).to_s
+  end
+
+  def test_catime_grid_is_its_own_storage_anchored_at_the_epoch
+    dt = CArray.time_series("2024-03-10T00:00:00Z", count: 3, unit: "3 hours")
+    assert_equal CATime::Grid.new("3 hours"), dt.grid
+    assert_nil dt.grid.origin
+    # which is what the `unit:` default of #timesteps has always meant
+    assert_equal dt.timesteps.to_a, dt.timesteps(dt.grid).to_a
+  end
+
+  # -- snap ----------------------------------------------------------------
+
+  def test_snap_directions_match_floor_ceil_round
+    t0 = "2024-03-10T00:00:00Z"
+    dt = CArray.time_series(t0, count: 6, unit: :h)
+    g  = CATime::Grid.new("3 hours", t0)
+    assert_equal dt.floor(g).ticks.to_a, dt.snap(g, direction: :floor).ticks.to_a
+    assert_equal dt.ceil(g).ticks.to_a,  dt.snap(g, direction: :ceil).ticks.to_a
+    assert_equal dt.round(g).ticks.to_a, dt.snap(g, direction: :round).ticks.to_a
+    assert_equal dt.snap(g).ticks.to_a,  dt.snap(g, direction: :round).ticks.to_a  # default
+    assert_equal ["00:00", "00:00", "00:00", "03:00", "03:00", "03:00"],
+                 dt.snap(g, direction: :floor).strftime("%H:%M").to_a
+    assert_equal ["00:00", "03:00", "03:00", "03:00", "06:00", "06:00"],
+                 dt.snap(g, direction: :ceil).strftime("%H:%M").to_a
+    assert_equal ["00:00", "00:00", "03:00", "03:00", "03:00", "06:00"],
+                 dt.snap(g, direction: :round).strftime("%H:%M").to_a
+  end
+
+  def test_snap_rejects_an_unknown_direction
+    dt = CArray.time_series("2024-03-10T00:00:00Z", count: 2, unit: :h)
+    assert_raise(ArgumentError) { dt.snap(unit: "3 hours", direction: :nearest) }
+  end
+
+  def test_snap_works_on_a_calendar_grid
+    dt = CArray.time(CA_OBJECT(%w[2024-01-20 2024-02-05 2024-03-20]), unit: :D)
+    g  = CATime::Grid.parse("months since 2024-01-01")
+    assert_equal ["2024-01-01", "2024-02-01", "2024-03-01"],
+                 dt.snap(g, direction: :floor).strftime("%Y-%m-%d").to_a
+    assert_equal ["2024-02-01", "2024-03-01", "2024-04-01"],
+                 dt.snap(g, direction: :ceil).strftime("%Y-%m-%d").to_a
+  end
+
+  # -- the grid reaches every timestep method ------------------------------
+
+  def test_timestep_methods_take_a_grid
+    t0 = "2024-03-10T00:00:00Z"
+    dt = CArray.time_series(t0, count: 6, unit: :h)
+    g  = CATime::Grid.new("3 hours", t0)
+    assert_equal dt.timesteps(unit: "3 hours", origin: t0).to_a, dt.timesteps(g).to_a
+    assert_equal dt.is_righttime(unit: "3 hours", origin: t0).to_a, dt.is_righttime(g).to_a
+    assert_equal dt.floor(unit: "3 hours", origin: t0).ticks.to_a, dt.floor(g).ticks.to_a
+    assert_equal CATime.from_timesteps(CA_INT64([0, 1]), unit: "3 hours", origin: t0).ticks.to_a,
+                 CATime.from_timesteps(CA_INT64([0, 1]), g).ticks.to_a
+    # `unit:` takes a grid too, for a call site that already spells the keyword
+    assert_equal dt.floor(g).ticks.to_a, dt.floor(unit: g).ticks.to_a
+  end
+
+  def test_a_positional_argument_that_is_not_a_grid_raises
+    dt = CArray.time_series("2024-03-10T00:00:00Z", count: 2, unit: :h)
+    assert_raise(ArgumentError) { dt.floor("3 hours") }
+    assert_raise(ArgumentError) { dt.timesteps("3 hours") }
   end
 
   # -- crown jewel: obs / forecast integer matching ------------------------

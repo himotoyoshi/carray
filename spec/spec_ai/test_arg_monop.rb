@@ -3,8 +3,10 @@
 # arg (phase angle) — mkkernel monop migration.
 #
 # Migration of the hand-written rb_ca_arg (ext/carray_numeric.c) to a
-# data_type-changing monop with output: { numeric: :f64, complex: :f64 }
-# Hash form.  Always returns f64 (= NumPy `np.angle` convention).
+# data_type-changing monop with
+# output: { int: :f64, float: :preserve, complex: :real_of_source }.
+# The result keeps the width the input carries its real values in; only
+# integers widen, because pi does not fit an integer slot.
 #
 # Semantics: `carg(z)` for complex, `carg((cmplx128_t)x)` for real
 # (positive real -> 0, negative real -> pi, 0 -> 0).
@@ -43,12 +45,12 @@ class TestArgMonop < Test::Unit::TestCase
     assert_equal [0.0], r.to_a
   end
 
-  def test_float32_output_data_type_is_f64
-    # f64 output (not preserve) since pi does not exactly fit / NumPy
-    # `np.angle` convention.
+  def test_float32_output_data_type_is_f32
+    # A float keeps its own width; widening f32 to f64 would claim
+    # precision the input never had.
     a = CA_FLOAT32([1.0, -1.0, 0.0])
     r = a.arg
-    assert_equal CA_FLOAT64, r.data_type
+    assert_equal CA_FLOAT32, r.data_type
     assert_in_delta 0.0, r[0], 1e-12
     assert_in_delta PI,  r[1], 1e-6
     assert_in_delta 0.0, r[2], 1e-12
@@ -97,7 +99,8 @@ class TestArgMonop < Test::Unit::TestCase
   def test_cmplx64_carg
     a = CA_CMPLX64([Complex(1, 0), Complex(0, 1)])
     r = a.arg
-    assert_equal CA_FLOAT64, r.data_type
+    # The real component width of a cmplx64, matching abs / real / imag.
+    assert_equal CA_FLOAT32, r.data_type
     assert_in_delta 0.0,    r[0], 1e-6
     assert_in_delta PI / 2, r[1], 1e-6
   end
@@ -164,5 +167,41 @@ class TestArgMonop < Test::Unit::TestCase
     r = a.transpose.arg
     assert_equal [2, 2], r.dim
     assert_equal CA_FLOAT64, r.data_type
+  end
+
+  # --- width agrees with the rest of the complex-to-real family -----
+
+  def test_complex_arg_width_matches_abs_real_imag
+    [CArray.cmplx64(2), CArray.cmplx128(2)].each do |a|
+      w = a.real.data_type
+      assert_equal w, a.imag.data_type, "imag width for #{a.data_type_name}"
+      assert_equal w, a.abs.data_type,  "abs width for #{a.data_type_name}"
+      assert_equal w, a.arg.data_type,  "arg width for #{a.data_type_name}"
+    end
+  end
+
+  def test_arg_width_matches_lazy
+    [CArray.cmplx64(2), CArray.cmplx128(2),
+     CArray.float32(2),  CArray.float64(2), CArray.int32(2)].each do |a|
+      assert_equal(a.arg.data_type, a.lazy.arg.to_ca.data_type,
+                   "eager and lazy arg disagree for #{a.data_type_name}")
+    end
+  end
+
+  # --- bang form -----------------------------------------------------
+
+  # `arg!` is available exactly when the output width equals the input
+  # width, which is now true for a float and never for a complex.
+  def test_arg_bang_in_place_for_float
+    a = CA_FLOAT32([1.0, -1.0])
+    a.arg!
+    assert_equal CA_FLOAT32, a.data_type
+    assert_in_delta 0.0, a[0], 1e-6
+    assert_in_delta PI,  a[1], 1e-6
+  end
+
+  def test_arg_bang_raises_for_complex
+    a = CA_CMPLX64([Complex(3, 4)])
+    assert_raise(RuntimeError) { a.arg! }
   end
 end

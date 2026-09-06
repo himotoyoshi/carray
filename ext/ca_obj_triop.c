@@ -61,12 +61,19 @@ typedef struct CATriOp {
   CArray   *parent;       /* = op1 */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as carray.h's
+         layout convention requires, so ca_has_mask can fold over both
+         operands and build the mask on demand instead of at setup. ---- */
+  int32_t   n_parents;        /* always 3 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CATriOp-specific tail */
   CArray   *op2;
   CArray   *op3;
   uint16_t  op_id;
   uint8_t   op2_is_scalar;
   uint8_t   op3_is_scalar;
+  CArray   *operands[3];      /* {op1, op2, op3}; what parents points at */
 } CATriOp;
 
 static size_t
@@ -117,7 +124,7 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
 
   ca->obj_type  = CA_OBJ_TRIOP;
   ca->data_type = out_dt;
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = op1->ndim;
   ca->bytes     = out_bytes;
   ca->elements  = op1->elements;
@@ -134,12 +141,17 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
   ca->op_id     = op_id;
   ca->op2_is_scalar = ( op2->elements == 1 && op1->elements > 1 ) ? 1 : 0;
   ca->op3_is_scalar = ( op3->elements == 1 && op1->elements > 1 ) ? 1 : 0;
+  ca->operands[0] = op1;
+  ca->operands[1] = op2;
+  ca->operands[2] = op3;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 3;
 
   memcpy(ca->dim, op1->dim, op1->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(op1) || ca_has_mask(op2) || ca_has_mask(op3) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one. */
 
   if ( ca_is_scalar(op1) && ca_is_scalar(op2) && ca_is_scalar(op3) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -253,7 +265,9 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
       one_counts[k]  = 1;
       one_strides[k] = bytes;
     }
-    scratch = ca_lazy_arena_acquire(bytes);
+    scratch = ( op->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(1)
+                : ca_lazy_arena_acquire(bytes);
     ca_triop_scratch_acquire_count++;
     ca_xfer_stride(op, one_starts, one_counts, one_strides, scratch,
                    CA_XFER_GET);
@@ -266,7 +280,9 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
       op_strides[k] = s;
       s *= counts[k];
     }
-    scratch = ca_lazy_arena_acquire(slab_n * bytes);
+    scratch = ( op->data_type == CA_OBJECT )
+                ? ca_lazy_arena_acquire_object(slab_n)
+                : ca_lazy_arena_acquire(slab_n * bytes);
     ca_triop_scratch_acquire_count++;
     ca_xfer_stride(op, starts, counts, op_strides, scratch, CA_XFER_GET);
     *step_out = 1;
@@ -343,6 +359,14 @@ ca_triop_func_allocate (void *ap)
 {
   CATriOp *ca = (CATriOp *) ap;
   ca->ptr = xmalloc(ca_length(ca));
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
 }
 
 static void
@@ -362,6 +386,14 @@ ca_triop_func_attach (void *ap)
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
+     soon as the view is, so it must not be handed to the GC as raw
+     xmalloc garbage. */
+  if ( ca->data_type == CA_OBJECT ) {
+    VALUE *p = (VALUE *) ca->ptr;
+    ca_size_t i;
+    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+  }
   ca_triop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 
@@ -405,13 +437,26 @@ ca_triop_func_create_mask (void *ap)
   has3 = ca_has_mask(op3);
   if ( ! has1 && ! has2 && ! has3 ) return;
 
+  /* Exactly one masked operand: the answer is that operand's mask, cell
+     for cell.  Share it rather than allocating a copy per node. */
+  if ( has1 + has2 + has3 == 1 ) {
+    CArray *src = has1 ? op1 : ( has2 ? op2 : op3 );
+    if ( src->elements == to->elements ) {
+      to->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
+                                         to->ndim, to->dim, 0, 0);
+      return;
+    }
+  }
+
   to->mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
   dst = (boolean8_t *) to->mask->ptr;
   n = to->elements;
 
-  if ( has1 ) ca_attach(op1);
-  if ( has2 ) ca_attach(op2);
-  if ( has3 ) ca_attach(op3);
+  /* The masks are what is read here; attaching the operand instead
+     materialises the whole subexpression under it. */
+  if ( has1 ) ca_attach(op1->mask);
+  if ( has2 ) ca_attach(op2->mask);
+  if ( has3 ) ca_attach(op3->mask);
 
   m1 = has1 ? (boolean8_t *) op1->mask->ptr : NULL;
   m2 = has2 ? (boolean8_t *) op2->mask->ptr : NULL;
@@ -426,9 +471,9 @@ ca_triop_func_create_mask (void *ap)
     dst[i] = (boolean8_t) ( a | b | c );
   }
 
-  if ( has3 ) ca_detach(op3);
-  if ( has2 ) ca_detach(op2);
-  if ( has1 ) ca_detach(op1);
+  if ( has3 ) ca_detach(op3->mask);
+  if ( has2 ) ca_detach(op2->mask);
+  if ( has1 ) ca_detach(op1->mask);
 }
 
 ca_operation_function_t ca_triop_func = {
@@ -597,23 +642,17 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
   TypedData_Get_Struct(r3, CArray, &carray_data_type, op3);
 
-  /* Step 3: shape sanity — each of op2 / op3 must match op1's element
-     count OR be a 1-element CScalar (kernel walks with element_step
-     = 0 in that case). */
+  /* Step 3: each of op2 / op3 must match op1's element count OR be a
+     1-element CScalar (kernel walks with element_step = 0 in that case).
+     Unreachable from Ruby; see the note in ca_obj_binop.c. */
   if ( op2->elements != op1->elements && op2->elements != 1 ) {
     rb_raise(rb_eArgError,
-             "CATriOp: shape mismatch on op2 (%lld vs %lld) — only "
-             "same-ndim size-1 broadcast is supported; cross-ndim "
-             "promotion is not adopted in CArray "
-             "(reshape explicitly)",
+             "CATriOp: element count mismatch on op2 (%lld vs %lld)",
              (long long) op2->elements, (long long) op1->elements);
   }
   if ( op3->elements != op1->elements && op3->elements != 1 ) {
     rb_raise(rb_eArgError,
-             "CATriOp: shape mismatch on op3 (%lld vs %lld) — only "
-             "same-ndim size-1 broadcast is supported; cross-ndim "
-             "promotion is not adopted in CArray "
-             "(reshape explicitly)",
+             "CATriOp: element count mismatch on op3 (%lld vs %lld)",
              (long long) op3->elements, (long long) op1->elements);
   }
 

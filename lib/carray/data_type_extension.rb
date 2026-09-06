@@ -194,10 +194,27 @@ class CArray
         start = 0
         stop, = *args
         step = 1
+      else
+        raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 1..3)"
       end
+      raise ArgumentError, "step must not be 0" if step == 0
       data_type = self::DataType
       data_type ||= guess_data_type_from_values(start, stop, step)
-      CArray.send(:__cast__, data_type, start..stop-step, step)
+      #  Element count comes from the arguments as given, not from the
+      #  target data type: CArray::Int32.arange(0, 1, 0.25) counts four
+      #  elements from the float step and truncates them on store.
+      #  Integer arguments count exactly (divmod) so that a step dividing
+      #  the span evenly does not gain a spurious element through float
+      #  rounding.
+      span = stop - start
+      if span.is_a?(Integer) && step.is_a?(Integer)
+        q, r = span.divmod(step)
+        n = r.zero? ? q : q + 1
+      else
+        n = (span.to_f / step).ceil
+      end
+      n = 0 if n < 0
+      CArray.new(data_type, [n]).seq(start, step)
     end
 
     # @overload full(shape, fill_value)

@@ -21,8 +21,10 @@ or from the repo root:
 ```sh
 rake build_ext     # cd ext && ruby extconf.rb && make
 rake clean_ext     # cd ext && make distclean
-rake spec          # :build_ext + spec/
+rake test          # every suite below, plus stub_check; also the default task
+rake spec          # :build_ext + spec/*_spec.rb
 rake spec_ai       # :build_ext + spec_ai/
+rake spec_unit     # :build_ext + spec/UnitTest/
 ```
 
 `extconf.rb` requires `ruby/memory_view.h` (Ruby 3.0+), which the
@@ -88,30 +90,41 @@ Run a release build (smoke excluded) deliberately with `CARRAY_DEV= rake build_e
 or `unset CARRAY_DEV`. `rake install` (gem build) always runs a release build, so
 smoke never reaches gem users. Daily dev runs smoke-in.
 
-### Baseline test counts
+### Telling a dev build from a release build
 
-These are the drift-detection reference (a future session should match them):
+The tests that need the smoke surface guard themselves on it:
 
-| Build | tests | assertions | failures | omissions |
-|-------|------:|-----------:|---------:|----------:|
-| dev (`CARRAY_DEV=1`) | 4213 | 86683 | 0 | 65 |
-| release (gem build) | 3574 | 75303 | 0 | 64 |
-| rspec (both) | 267 examples | — | 0 | 7 pending |
+```ruby
+omit "requires CARRAY_DEV_BUILD" unless CAGrid.method_defined?(:_describe_axes)
+```
 
-A dev build that reports the *release* counts means `CARRAY_DEV` is not set.
-(These numbers are themselves a snapshot — verify against the current tree and
-update them in the `done` pass.)
+So a release build does not fail them — it omits them, and the omission count
+is the signal. A dev run reports omissions in the dozens. Hundreds means the
+extension was built without `CARRAY_DEV`, whatever the environment says now:
+
+```sh
+echo $CARRAY_DEV                            # must print 1
+rake clean_ext && rake build_ext            # then rebuild with it exported
+```
 
 ## The test suites
 
-- **`spec/`** — the legacy `*_spec.rb` suite; `ruby spec/spec_all.rb` or
-  `rake spec`. Not exhaustive.
-- **`spec_ai/`** — the AI-generated `test/unit` suite, rich on MemoryView and
-  CAStride (`test_memory_view*.rb`, `test_ca_obj_stride*.rb`, `test_castride_family.rb`,
-  `ext_memory_view_test/` for the C-side MV borrower peer). `rake spec_ai`.
+There are three, in two frameworks, and `rake test` runs all of them.
 
-When you delete or change behaviour, run **both** `rake spec_ai` and `rake spec` —
-a unit pass alone has missed library-load failures and old-contract regressions
+- **`spec_ai/`** — the `test/unit` suite, and the one 3.0 grew. Rich on
+  MemoryView and CAStride (`test_memory_view*.rb`, `test_ca_obj_stride*.rb`,
+  `test_castride_family.rb`, `ext_memory_view_test/` for the C-side MV borrower
+  peer). `rake spec_ai`.
+- **`spec/*_spec.rb`** — the RSpec suite carried over from 2.x; `rake spec`, or
+  `ruby spec/spec_all.rb`. Not exhaustive, but it is the only thing pinning
+  parts of the 2.x surface: `rank` / `dim0`–`dim3` / `size0`, the type
+  predicates, the `elem_*` family, `inherit_mask`, `bind` / `bind_with`.
+  spec_ai does not call any of those.
+- **`spec/UnitTest/`** — one `test/unit` file, also from 2.x, applying the same
+  mixin to nine view classes. `rake spec_unit`.
+
+When you delete or change behaviour, run `rake test` rather than one suite — a
+unit pass alone has missed library-load failures and old-contract regressions
 before (memory: run-tests-after-deletion).
 
 ## The bench / smoke discipline

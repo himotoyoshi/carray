@@ -1,4 +1,4 @@
-# CACategorical — categorical dtype (dense codes + label vocabulary)
+# CACategorical — categorical data type (dense codes + label vocabulary)
 
 `CACategorical` is a categorical column: a dense integer **codes** array plus a
 small **label vocabulary**, structurally identical to a pandas `Categorical`
@@ -55,11 +55,11 @@ cat.labels        # => ["a", "b"]                   (masked key not a level)
 cat[2]            # => UNDEF
 ```
 
-The code dtype is chosen automatically as the narrowest unsigned integer
+The code type is chosen automatically as the narrowest unsigned integer
 that fits the vocabulary while reserving its top value as the exclusion
 sentinel:
 
-| categories | code dtype | sentinel |
+| categories | code type | sentinel |
 |---|---|---|
 | up to 255      | `uint8`  | `0xFF` |
 | up to 65 535   | `uint16` | `0xFFFF` |
@@ -102,7 +102,7 @@ cat.to_a          # => ["tokyo", "osaka", "tokyo", "kyoto", "osaka", "tokyo"]
 ```
 
 Excluded cells are identified by the **all-ones sentinel** (type-max for an
-unsigned dtype, `-1` for a signed one — the same missing code that pandas
+unsigned type, `-1` for a signed one — the same missing code that pandas
 and Arrow use) and masked here. Both encodings survive because the Face is
 READONLY, so exports round-trip without conversion.
 
@@ -137,7 +137,7 @@ Two value-returning primitives cover the two grid shapes:
 - [`CArray#snap_to(list, lfill:, ufill:)`](../../lib/carray/methods/snap.rb) —
   **non-uniform** grid given as an ascending list
 
-Both return the snapped **value** (same dtype as the source /
+Both return the snapped **value** (same data type as the source /
 `list`). Because the returned array is just a coarser version of the
 input, `categorize` on it works exactly like `categorize` on any other
 column.

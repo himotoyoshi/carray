@@ -41,7 +41,7 @@ extern VALUE rb_ca_partition_addr_ki_mp (VALUE self, VALUE vaxis, VALUE vkth, in
  * Comparator-based dispatch keeps this routine data_type-generic (used
  * by the CA_FIXLEN partition_copy path); the mkkernel-generated
  * partition_index_quickselect_* functions inline the comparator per
- * dtype for the numeric paths.
+ * data type for the numeric paths.
  *
  * `swap_tmp` and `pivot` must be caller-provided scratch buffers of size
  * `bytes` (used for cell swaps via memcpy; avoids alloca / per-swap
@@ -222,7 +222,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   CArray *cao;
   TypedData_Get_Struct(vout, CArray, &carray_data_type, cao);
 
-  /* Numeric path: per-dtype quickselect with inline cmp via the typed
+  /* Numeric path: per-type quickselect with inline cmp via the typed
      ca_partition_quick_* kernels (avoids the function-pointer
      indirection of the comparator-based ca_quickselect_bytes).
      Float NaN policy = pre-partition NaN to tail (same convention as
@@ -271,7 +271,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
 
 /* masked_position: -aware twin of {rb_ca_partition_copy_c}.  Masked
  * cells are an incomparable sentinel (same role NaN plays for float
- * dtypes): unmasked input takes the fast rb_ca_partition_copy_c path
+ * data types): unmasked input takes the fast rb_ca_partition_copy_c path
  * unchanged; masked input delegates to {partition} (which handles the
  * masked_position split via partition_addr_ki_mp) + copy, mirroring the
  * CA_FIXLEN / CA_OBJECT delegation pattern already used by sort_copy.
@@ -381,7 +381,7 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* CA_FIXLEN flows through the same partition_addr_ki fixlen dialect
-     as numeric; masked_position: applies uniformly across dtypes. */
+     as numeric; masked_position: applies uniformly across data types. */
   VALUE target = self;
 
   /* partition_addr_ki_mp validates axis + kth, splits masked cells to

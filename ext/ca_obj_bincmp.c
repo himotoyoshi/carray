@@ -9,7 +9,7 @@
   ca_bincmp_kernel_lookup from ca_bincmp_dispatch.h.
 
   Dispatch by data_type:
-    numeric (i8..f64, +complex) -> ca_bincmp_<op>_<dtype> kernel
+    numeric (i8..f64, +complex) -> ca_bincmp_<op>_<type> kernel
     boolean / fixlen / object   -> not implemented (raise)
 
   CAREFUL: the binop in-place trick (= pull left into the output
@@ -60,6 +60,12 @@ typedef struct CABinCmp {
   CArray   *parent;          /* = left */
   uint32_t  attach;
   uint8_t   nosync;
+  /* ---- CAMultiParent conformance (CA_FLAG_MULTI_PARENTS): n_parents and
+         parents[] sit immediately after the CAView header, as carray.h's
+         layout convention requires, so ca_has_mask can fold over both
+         operands and build the mask on demand instead of at setup. ---- */
+  int32_t   n_parents;        /* always 2 */
+  CArray  **parents;          /* = &operands[0]; no separate allocation */
   /* CABinCmp-specific tail */
   CArray   *right;
   uint16_t  op_id;
@@ -72,6 +78,7 @@ typedef struct CABinCmp {
                                 `eps` name is retained to keep the
                                 `__eps__` Ruby accessor stable across
                                 the dual purpose. */
+  CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinCmp;
 
 static size_t
@@ -119,7 +126,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
 {
   ca->obj_type  = CA_OBJ_BINCMP;
   ca->data_type = CA_BOOLEAN;          /* output is always boolean */
-  ca->flags     = CA_FLAG_READ_ONLY;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_MULTI_PARENTS;
   ca->ndim      = left->ndim;
   ca->bytes     = 1;                   /* boolean8_t */
   ca->elements  = left->elements;
@@ -137,12 +144,16 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
   ca->eps       = eps;
+  ca->operands[0] = left;
+  ca->operands[1] = right;
+  ca->parents     = ca->operands;
+  ca->n_parents   = 2;
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(left) || ca_has_mask(right) ) {
-    ca_create_mask(ca);
-  }
+  /* The mask is NOT built here.  ca_has_mask folds over parents[] for a
+     multi-parent view and creates it on demand, so an expression whose mask
+     nobody reads never allocates one. */
 
   if ( ca_is_scalar(left) && ca_is_scalar(right) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -294,7 +305,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   int8_t    k;
   void     *left_scratch, *right_scratch;
   ca_size_t operand_bytes;
+  ca_size_t operand_strides[CA_RANK_MAX];
   ca_size_t right_step;
+  int       is_contig;
   int       left_is_inplace  = 0;   /* skip release for leaf-opt path */
   int       right_is_inplace = 0;
 
@@ -308,10 +321,33 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   operand_bytes = ca_sizeof[bc->common_dt];
 
+  /* An operand cell is operand_bytes wide where this view's is one byte
+     (CA_BOOLEAN), so the caller's strides cannot be handed to the operand
+     pull the way a binop hands them on -- they have to be restated at the
+     operand's cell size.  strides[k] / bytes is the index step, which is
+     what the two spaces share.
+
+     is_contig says the caller asked for the row-major slab that xfer_all
+     and attach send.  Only then does an operand's own buffer hold the
+     wanted cells in the packed order the kernel reads them in, so it is
+     also the only case the leaf in-place path is good for. */
+  {
+    ca_size_t native = bc->bytes;
+    is_contig = 1;
+    for ( k = bc->ndim - 1; k >= 0; k-- ) {
+      operand_strides[k] = strides[k] / bc->bytes * operand_bytes;
+      if ( strides[k] != native ) {
+        is_contig = 0;
+      }
+      native *= bc->dim[k];
+    }
+  }
+
   /* === 1. pull LEFT (leaf in-place read or arena scratch) === */
   {
     char *left_inplace = NULL;
-    if ( ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
+    if ( is_contig &&
+         ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
                                      starts, counts, operand_bytes,
                                      &left_inplace) ) {
       /* Leaf-opt path: use parent->ptr + byte_offset directly. */
@@ -320,15 +356,11 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      ca_size_t left_strides[CA_RANK_MAX];
-      ca_size_t s = operand_bytes;
-      for ( k = bc->ndim - 1; k >= 0; k-- ) {
-        left_strides[k] = s;
-        s *= counts[k];
-      }
-      left_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
+      left_scratch = ( bc->common_dt == CA_OBJECT )
+                       ? ca_lazy_arena_acquire_object(slab_n)
+                       : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->parent, starts, counts, left_strides, left_scratch,
+      ca_xfer_stride(bc->parent, starts, counts, operand_strides, left_scratch,
                      CA_XFER_GET);
     }
   }
@@ -355,7 +387,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     else {
       ca_size_t one_strides[CA_RANK_MAX];
       for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = operand_bytes;
-      right_scratch = ca_lazy_arena_acquire(operand_bytes);
+      right_scratch = ( bc->common_dt == CA_OBJECT )
+                        ? ca_lazy_arena_acquire_object(1)
+                        : ca_lazy_arena_acquire(operand_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->right, one_starts, one_counts, one_strides,
                      right_scratch, CA_XFER_GET);
@@ -365,7 +399,8 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   else {
     /* Same-shape right: full slab pull or leaf-opt. */
     char *right_inplace = NULL;
-    if ( ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
+    if ( is_contig &&
+         ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
                                      starts, counts, operand_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
@@ -373,15 +408,11 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_bincmp_leaf_inplace_count++;
     }
     else {
-      ca_size_t right_strides[CA_RANK_MAX];
-      ca_size_t s = operand_bytes;
-      for ( k = bc->ndim - 1; k >= 0; k-- ) {
-        right_strides[k] = s;
-        s *= counts[k];
-      }
-      right_scratch = ca_lazy_arena_acquire(slab_n * operand_bytes);
+      right_scratch = ( bc->common_dt == CA_OBJECT )
+                        ? ca_lazy_arena_acquire_object(slab_n)
+                        : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->right, starts, counts, right_strides, right_scratch,
+      ca_xfer_stride(bc->right, starts, counts, operand_strides, right_scratch,
                      CA_XFER_GET);
     }
     right_step = 1;
@@ -644,10 +675,9 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
       TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
     }
     else {
+      /* Unreachable from Ruby; see the note in ca_obj_binop.c. */
       rb_raise(rb_eArgError,
-               "CABinCmp: shape mismatch (%lld vs %lld) — only same-"
-               "ndim size-1 broadcast is supported; cross-ndim "
-               "promotion is not adopted in CArray",
+               "CABinCmp: element count mismatch (%lld vs %lld)",
                (long long) l->elements, (long long) r->elements);
     }
   }

@@ -53,6 +53,7 @@ all taking `axis: :group`:
 
 ```ruby
 g.sum(axis: :group)          g.mean(axis: :group)      g.min(axis: :group)
+g.accumulate(axis: :group)   g.prod(axis: :group)      g.max(axis: :group)
 g.variance(axis: :group)     g.stddev(axis: :group)    g.minmax(axis: :group)
 g.wsum(w, axis: :group)      g.wmean(w, axis: :group)
 g.median(axis: :group)       g.percentile(90, axis: :group)   g.quantile(axis: :group)
@@ -65,6 +66,11 @@ the empty / all-masked contract carries through: `sum` of an empty group is `0`
 (identity), `mean` / `median` of an empty group is a masked (`UNDEF`) cell.
 Excluded cells — a value whose category code is masked or out of vocabulary —
 join no group.
+
+`sum` folds in float64, as the core does. `accumulate` is the same fold kept in
+the source's own data type, wrapping at its width — the spelling for staying in
+the type, and the exact one for an integer payload wider than float64's mantissa
+(a boolean accumulate is XOR parity, again as in the core).
 
 **Position: `min_addr` / `max_addr`, not `min_index`.** A group preserves source
 order, so a *within-group* index is weak; the group returns the **flat source
@@ -111,9 +117,9 @@ data[station, nil].cumsum(axis: :group)
 data[station].cumcount(axis: :group)
 ```
 
-Output dtype follows the reduce siblings: `cumsum` / `cumprod` are `float64` (the
+The output data type follows the reduce siblings: `cumsum` / `cumprod` are `float64` (the
 running value grows, so integer-preserving sums are a deliberate non-goal, as on
-the reduce side); `cummax` / `cummin` **preserve the source dtype** (extrema do
+the reduce side); `cummax` / `cummin` **preserve the source data type** (extrema do
 not grow magnitude — `int` stays `int`); `cumcount` is `int64`, 1-based (running
 count of present cells, inclusive). An `object` source produces an `object`
 result for `cumsum` / `cumprod` / `cummax` / `cummin` (`cumsum` / `cumprod` seed

@@ -16,6 +16,40 @@ task :stub_check => :build_ext do
   ruby "-I lib -I ext utils/check_stub_drift.rb" or exit($?.exitstatus)
 end
 
+# The repo root should hold nothing but what git tracks.  A generator run from
+# the wrong directory drops its output here -- extconf.rb outside ext/, a guide
+# example that writes a file -- and adding the name to .gitignore hides it for
+# good instead of stopping it.  Name the strays instead.
+ROOT_LOCAL = %w[
+  .git .envrc .claude .yardoc .yard-html devel benchmark CLAUDE.md
+].freeze
+
+def root_strays
+  tracked = `git ls-files -z`.split("\0").map { |p| p[%r{\A[^/]+}] }.uniq
+  keep = tracked + ROOT_LOCAL
+  Dir.children(".").reject { |e| keep.include?(e) || e.end_with?(".gem") }.sort
+end
+
+desc "Name the files at the repo root that no generator should have left there"
+task :tidy do
+  strays = root_strays
+  if strays.empty?
+    puts "The repo root holds only what git tracks."
+  else
+    puts "Left at the repo root (`rake tidy:clean` removes them):"
+    strays.each { |e| puts "  #{e}" }
+  end
+end
+
+namespace :tidy do
+  desc "Remove them"
+  task :clean do
+    strays = root_strays
+    puts "The repo root holds only what git tracks." if strays.empty?
+    rm_rf strays unless strays.empty?
+  end
+end
+
 desc "Check the kernel_iterator author surface for freeze drift (3.0+ pin)"
 task :kernel_surface_check do
   ruby "utils/check_kernel_surface_freeze.rb" or exit($?.exitstatus)
@@ -37,7 +71,7 @@ task :install do
 end
 
 desc "Build C extension in-place (ext/extconf.rb -> Makefile -> make). " \
-     "Set CARRAY_DEV=1 to enable smoke surface (see PROPOSAL_SMOKE_DEV_BUILD_GATE.md)"
+     "Set CARRAY_DEV=1 to enable the smoke surface (dev builds only)"
 task :build_ext do
   dev  = ENV["CARRAY_DEV"] == "1"
   arch = ENV["CARRAY_MARCH_NATIVE"] != "0"   # default on (matches extconf.rb)
@@ -73,6 +107,10 @@ task :build_ext do
       File.write(".dev_build_mode", curr)
     end
     sh "make"
+  end
+  strays = root_strays
+  unless strays.empty?
+    warn "note: the repo root holds #{strays.join(', ')} -- see `rake tidy`"
   end
 end
 
@@ -155,8 +193,8 @@ task :build_xfer_smoke do
 end
 
 # spec_ai-local smoke fixtures for the kernel-author surface.  These are
-# byte-for-byte mirrors of samples/c-extensions/* kept under spec/spec_ai/ so the
-# test suite owns its own build and never reaches into samples/ (samples/ is
+# byte-for-byte mirrors of examples/c-extensions/* kept under spec/spec_ai/ so the
+# test suite owns its own build and never reaches into examples/ (examples/ is
 # user-facing documentation, not a test dependency).
 def build_spec_ai_smoke (dirname, basename)
   dir = "spec/spec_ai/#{dirname}"
@@ -174,18 +212,19 @@ end
 desc "Build spec_ai author-surface smoke fixtures (cfunc_r / per_element / with_buffer / source / iter_source_kind)"
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
+  build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
   build_spec_ai_smoke("ext_per_element_smoke", "per_element")
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
 end
 
-# NOTE: the tasks below build the user-facing examples under samples/.  They
+# NOTE: the tasks below build the user-facing examples under examples/.  They
 # are intentionally NOT a spec_ai prerequisite (spec_ai uses its own fixtures
 # above); run `rake build_c_extension_examples` manually to verify the docs
 # examples still compile.
 def build_c_extension_example (subdir, basename)
-  dir = "samples/c-extensions/#{subdir}"
+  dir = "examples/c-extensions/#{subdir}"
   src = "#{dir}/#{basename}.c"
   bundle = Dir["#{dir}/#{basename}.{bundle,so}"].first
   if fixture_stale?(bundle, src)
@@ -197,18 +236,22 @@ def build_c_extension_example (subdir, basename)
   end
 end
 
-desc "Build samples/c-extensions/cfunc_r/cfunc_r (rebuild if source/header newer than bundle)"
+desc "Build examples/c-extensions/cfunc_r/cfunc_r (rebuild if source/header newer than bundle)"
 task(:build_cfunc_r_example)       { build_c_extension_example("cfunc_r",     "cfunc_r") }
 
-desc "Build samples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
+desc "Build examples/c-extensions/cslab/cslab (rebuild if source/header newer than bundle)"
+task(:build_cslab_example)         { build_c_extension_example("cslab",       "cslab") }
+
+desc "Build examples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
 task(:build_per_element_example)   { build_c_extension_example("per_element", "per_element") }
 
-desc "Build samples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
+desc "Build examples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
 task(:build_with_buffer_example)     { build_c_extension_example("with_buffer",   "with_buffer") }
 
-desc "Build all samples/c-extensions/ examples"
+desc "Build all examples/c-extensions/ examples"
 task :build_c_extension_examples => [
   :build_cfunc_r_example,
+  :build_cslab_example,
   :build_per_element_example,
   :build_with_buffer_example,
 ]
@@ -227,7 +270,17 @@ task :spec_ai => [:kernel_surface_check,
   sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/*.rb\"].sort.each{|f| require_relative f}'"
 end
 
-task :default => :spec
+desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"
+task :spec_unit => :build_ext do
+  # Carried over from 2.x, and test-unit rather than RSpec, so neither the
+  # :spec nor the :spec_ai glob picks these up.  Run them explicitly.
+  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/UnitTest/*.rb\"].sort.each{|f| require_relative f}'"
+end
+
+desc "Run every test suite and the stub drift check"
+task :test => [:spec_ai, :spec, :spec_unit, :stub_check]
+
+task :default => :test
 
 
 namespace :pdf do
@@ -235,8 +288,14 @@ namespace :pdf do
 
   # src_dir: guides/devel etc.  out: path to pdf.  title / subtitle: cover page text.
   def build_md_bundle_pdf(src_dir:, out:, title:, subtitle:)
-    sources = Dir.glob(File.join(src_dir, "*.md")).sort
-                 .reject { |f| File.basename(f) == "README.md" }
+    # Chapters are numbered and so sort into reading order on their own.
+    # Front matter carries no number -- it is not chapter zero -- so name it
+    # here and put it ahead of them.
+    front_matter = %w[introduction.md]
+    chapters = Dir.glob(File.join(src_dir, "*.md")).sort
+                  .reject { |f| File.basename(f) == "README.md" }
+                  .reject { |f| front_matter.include?(File.basename(f)) }
+    sources = front_matter.map { |n| File.join(src_dir, n) }.select { |f| File.exist?(f) } + chapters
     raise "no .md files under #{src_dir}" if sources.empty?
 
     require "tmpdir"
@@ -323,31 +382,3 @@ end
 # ---------------------------------------------------------------------------
 bench_tasks = File.expand_path("benchmark/tasks.rake", __dir__)
 load bench_tasks if File.exist?(bench_tasks)
-
-
-__END__
-require 'rake'
-require 'rake/testtask'
-require 'rspec/core/rake_task'
-
-task :default => :test
-
-GEMSPEC = "carray.gemspec"
-
-task :install do
-  spec = eval File.read(GEMSPEC)
-  system %{
-    gem build #{GEMSPEC}; gem install #{spec.full_name}.gem
-  }
-end
-
-desc "Run the tests"
-Rake::TestTask::new(:test) do |t|
-  t.test_files = FileList['test/test_ALL.rb']
-  t.verbose = true
-end
-
-RSpec::Core::RakeTask.new(:spec) do |t|
-  t.pattern = "spec/**/*_spec.rb"
-  t.rspec_opts = ["-c", "-fs"]
-end

@@ -206,7 +206,7 @@ typedef int8_t boolean8_t;
 #define CA_FLAG_MULTI_PARENTS   32
 #define CA_FLAG_CYCLE_CHECK     64
 #define CA_FLAG_IS_FACE        128
-/* Face opt-in ordering/search flags (PROPOSAL_FACE_ORDERING_GATE §Future work).
+/* Face opt-in ordering/search flags.
    A Face declares that its numeric storage may be descended to for kernel
    dispatch.  The two flags are on independent axes -- do not conflate:
      ORDERABLE_STORAGE: storage native order == surface <=> order (self-scope).
@@ -224,6 +224,14 @@ typedef int8_t boolean8_t;
    search / count / value-hash entries.  Whether COMPARABLE holds is likewise
    not a question of being numeric but of carrying a unit -- CATimedelta is
    int64 on both sides and still sets ORDERABLE only. */
+/* CALazyMarker.  A marker layers "read this as the leaf of a lazy chain"
+   over storage that is identical to its parent's — the same premise as
+   CA_FLAG_IS_FACE — so the two are asked about together wherever a
+   storage-identical wrapper has to be seen through.  Kept as its own bit
+   rather than folded into CA_FLAG_IS_FACE: ca_is_face is read in ~100
+   places that mean the Face mechanism specifically. */
+#define CA_FLAG_IS_LAZY_MARKER 1024
+
 #define CA_FLAG_FACE_ORDERABLE_STORAGE  256
 #define CA_FLAG_FACE_COMPARABLE_STORAGE 512
 /* NOTE: `flags` is int32_t, so there is plenty of bit space left. */
@@ -247,7 +255,6 @@ enum {
   CA_OBJ_SELECT,
   CA_OBJ_OBJECT,
   CA_OBJ_REPEAT,
-  CA_OBJ_UNBOUND_REPEAT,
 };
 
 enum {
@@ -311,12 +318,13 @@ enum {
    preamble stays focused on basic types + struct definitions. */
 #include "ca_axis_descriptor.h"
 
-/* xfer protocol direction flags (PROPOSAL_XFER_PROTOCOL.md §3) */
+/* xfer protocol direction flags.  The protocol is walked through in
+   guides/devel/04_attach_lifecycle.md. */
 #define CA_XFER_GET 0   /* target -> data (gather) */
 #define CA_XFER_PUT 1   /* data -> target (scatter) */
 
-/* compose-fold state threaded through ca_stride_compose_to_root
-   (PROPOSAL_XFER_PROTOCOL.md §5.5).  strides / base / counts are expressed
+/* compose-fold state threaded through ca_stride_compose_to_root.
+   strides / base / counts are expressed
    in the *current parent*'s byte space; ndim is invariant through the walk.
    counts[] is the leaf's per-dim extent (== leaf->dim), used by
    ca_stride_compose_through's bounds check and by sometimes-fold
@@ -339,20 +347,20 @@ typedef struct {
   void   (*detach)       (void *ap);
   void   (*fill_data)    (void *ap, void *data);
   void   (*create_mask)  (void *ap);
-  /* xfer protocol (PROPOSAL_XFER_PROTOCOL.md). Added at struct end so existing
+  /* xfer protocol.  Added at struct end so existing
      positional initializers leave it NULL automatically.  dir = CA_XFER_GET /
      CA_XFER_PUT. */
   void   (*xfer_index)   (void *ap, ca_size_t *idx, void *data, int dir);
   void   (*xfer_addrs)   (void *ap, ca_size_t n, ca_size_t *addrs,
                           void *data, int dir);
-  /* fold_stride (PROPOSAL_XFER_PROTOCOL.md §5.2/§5.5): one compose-fold hop
+  /* fold_stride: one compose-fold hop
      for sometimes-fold participants (CAWindow now; CAGrid/CSA/CATile later).
      Compose *f into next_parent's byte space and return 1, or decline
      (leave *f / *next_parent untouched) and return 0 -> this view is the
      fold boundary.  CAStride family leaves this NULL (handled open-inline
      by ca_stride_compose_to_root). */
   int    (*fold_stride)  (void *ap, ca_fold_t *f, void **next_parent);
-  /* xfer_stride (PROPOSAL_XFER_PROTOCOL.md §3/§4.4): deliver a region of
+  /* xfer_stride: deliver a region of
      counts[k] cells per axis to/from a caller buffer.  Local materialise of
      the requested region only (never the whole view).
 
@@ -365,21 +373,20 @@ typedef struct {
      with strides[].  dir = CA_XFER_GET / CA_XFER_PUT. */
   void   (*xfer_stride)  (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir);
-  /* xfer_all (PROPOSAL_XFER_PROTOCOL.md §6 / §7 step 4): whole-view transfer,
-     direction-unified replacement of copy_data / sync_data.  Holds the view's
-     optimal whole-domain delivery (compose-fold, partial materialise, etc.);
-     copy_data / sync_data become thin forwarders (removed in step 5).
+  /* xfer_all: whole-view transfer, the direction-unified replacement of
+     copy_data / sync_data.  Holds the view's optimal whole-domain delivery
+     (compose-fold, partial materialise, etc.).
      dir = CA_XFER_GET (gather: view -> data) / CA_XFER_PUT (scatter). */
   void   (*xfer_all)     (void *ap, void *data, int dir);
-  /* Pool framework (PROPOSAL_CARRAY_POOL_STANDARDIZATION.md).  Optional;
+  /* Pool framework (guides/devel/03_memory_management.md).  Optional;
      unfilled slots leave the obj_type on the legacy ALLOC_N path.  When
      populated, framework primitives in ca_array_pool.c manage a single
      contiguous `_pool` buffer that holds dim/strides/<subclass tail>. */
   size_t struct_size;                              /* sizeof(<concrete struct>) */
   size_t (*pool_bytes)   (int8_t ndim);            /* required if struct_size != 0 */
   void   (*pool_init)    (void *ap, int8_t ndim);  /* required if struct_size != 0 */
-  /* fill_addrs / fill_stride (PROPOSAL_PARTIAL_FILL_WHOLE_ROOT_WRITEBACK.md
-     section 6.3): write one value into part of the view.  fill_data carries no
+  /* fill_addrs / fill_stride: write one value into part of the view.
+     fill_data carries no
      region and so can only say "fill everything I cover"; without a region the
      only way left to fill part of a view was to borrow a pointer, which
      materialises a non-foldable root and writes it all back.  `ptr` is a
@@ -413,7 +420,7 @@ void   ca_array_func_xfer_all     (void *ap, void *data, int dir);
 void   ca_array_func_fill_data    (void *ap, void *val);
 void   ca_array_func_create_mask  (void *ap);
 
-/* Pool framework primitives (PROPOSAL_CARRAY_POOL_STANDARDIZATION.md).
+/* Pool framework primitives (guides/devel/03_memory_management.md).
    - ca_array_alloc:       xmalloc(struct_size) + ca_array_pool_alloc().
                            For the C construction path (= replaces
                            TypedData_Make_Struct + per-field ALLOC_N).
@@ -449,8 +456,7 @@ struct _CArray {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
 };                         /* 28 + 4*ndim (bytes) */
 
 typedef CArray CAWrap;
@@ -468,8 +474,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   ca_size_t  _dim;
 } CScalar;                 /* 32 (bytes) */
 
@@ -486,8 +491,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -516,8 +520,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -551,8 +554,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -580,8 +582,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -603,14 +604,13 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
   /* ---------- */
-  uint8_t   *bounds;       /* [ndim] per-axis policy (PROPOSAL_CAWINDOW_UNIFICATION
-                              Tier 2.G; scalar uint8_t before).  Allows
+  uint8_t   *bounds;       /* [ndim] per-axis policy (a scalar uint8_t
+                              before).  Allows
                               CAShift (per-axis roll[]) to be expressed as
                               a CAWindow specialisation. */
   ca_size_t  *start;
@@ -620,8 +620,7 @@ typedef struct {
   /* COMPOSITE_FAMILY Phase 1 (E.2): embed descriptor model.  Computed by
      ca_compute_embed_descriptor at setup time, immutable for view lifetime.
      Used by attach/sync (E.3-E.4) to skip per-element bound checks via
-     "1 alias + 1 fill" decomposition.  Dormant in E.2 (no readers yet).
-     See devel/PROPOSAL_COMPOSITE_FAMILY.md §4.1. */
+     "1 alias + 1 fill" decomposition. */
   ca_size_t  *embed_parent_start;   /* [ndim] parent-side alias rectangle start */
   ca_size_t  *embed_count;          /* [ndim] alias rectangle size per axis */
   ca_size_t  *embed_output_offset;  /* [ndim] output-side alias rectangle start */
@@ -640,13 +639,12 @@ typedef struct {
                                        must be contig in parent storage. */
 } CAWindow;                /* 56 + 16*(ndim) + 1*(bytes) + 1*ndim + 24*ndim (bytes) */
 
-/* Tier 2.G.2 (PROPOSAL_CAWINDOW_UNIFICATION): CAShift is a pure typedef
-   of CAWindow.  CAShift construction maps (shift[], roll[], fill,
+/* CAShift is a pure typedef of CAWindow.  CAShift construction maps (shift[], roll[], fill,
    fill_mask) onto CAWindow's (start = -shift, count = parent->dim,
    bounds = roll ? PERIODIC : (fill_mask ? MASK : FILL), fill).  The
    two views share the operation table (ca_window_func); only obj_type
    differs (CA_OBJ_SHIFT vs CA_OBJ_WINDOW) to preserve user-facing class
-   distinction.  See devel/PROPOSAL_CAWINDOW_UNIFICATION.md. */
+   distinction. */
 typedef CAWindow CAShift;
 
 /* COMPOSITE_FAMILY Phase 2 (T.3, 2026-05-26): CATile = N-region
@@ -655,9 +653,8 @@ typedef CAWindow CAShift;
    is a full-parent alias at output offset
    (i_0 * parent.dim[0], i_1 * parent.dim[1], ...). Attach iterates
    total_tiles regions, calling ca_composite_region_gather for each.
-   See devel/PROPOSAL_CATILE.md §1.2 / §1.3.
 
-   CARoll = typedef CATile (same pattern as the Phase G
+   CARoll = typedef CATile (same pattern as the
    CAShift = CAWindow precedent); constructor parameters differ but the
    C struct layout is shared, and the attach/sync routine is identical
    (= dispatch the region list in order). */
@@ -674,8 +671,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -689,10 +685,8 @@ typedef CATile CARoll;   /* T.4 will land CARoll-specific constructor +
                             obj_type CA_OBJ_ROLL.  Until then CARoll path
                             is just CATile (= typedef body identical). */
 
-/* CAStack (COMPOSITE_FAMILY Phase 3, PROPOSAL_CASTACK.md): outer-axis-only
-   stack view of K uniform-shape parents.  shape = (K, *parent_shape),
+/* CAStack: outer-axis-only stack view of K uniform-shape parents.  shape = (K, *parent_shape),
    axis 0 maps to parent index, axes 1..ndim-1 are per-parent contig.
-   See devel/MEMO_CASTACK_DESIGN.md for design rationale.
    - parents stored as Ruby Array @parents on the wrapper object (= GC
      anchor); C-side tail `parents[]` is alias pointer array.
    - CAView.parent points to parents[0] (= legacy compat for paths that
@@ -711,8 +705,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;        /* = parents[0] (legacy CAView field) */
   uint32_t  attach;
   uint8_t   nosync;
@@ -733,8 +726,7 @@ typedef struct {
    All other axes must match across parents (uniform check at constructor).
 
    v0.1 stub: external-axis (meld_axis == 0) structural xfer_stride path only.
-   Other paths raise NotImplementedError until fleshed out per staging plan
-   in devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md §4. */
+   Other paths raise NotImplementedError. */
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
@@ -785,8 +777,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -813,8 +804,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   /* -------------*/
   VALUE     array;
 } CAObjectMask;
@@ -822,35 +812,6 @@ typedef struct {
 /* CARepeat (Phase R migration): structurally identical to CAStride.
    The "repeat" axes are encoded as strides[k] == 0. */
 typedef CAStride CARepeat;
-
-/* CAUnboundRepeat (Phase U.1: CAStride prefix + rep_dim tail).
-   `rep_dim[i] == 0` marks an unbound (`*`) axis (size 1, stride 0);
-   `rep_dim[i] != 0` marks a sized axis inheriting parent's stride.
-   `ndim` replaces the former `rep_ndim` field (they are equal). */
-typedef struct {
-  int16_t   obj_type;
-  int8_t    data_type;
-  int8_t    ndim;
-  int32_t   flags;
-  ca_size_t   bytes;
-  ca_size_t   elements;
-  ca_size_t  *dim;
-  char     *ptr;
-  CArray   *mask;
-  char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
-                              Reserved for framework use; ext authors must not read,
-                              write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
-  CArray   *parent;
-  uint32_t  attach;
-  uint8_t   nosync;
-  /* --- CAStride prefix continues --- */
-  ca_size_t  *strides;
-  ca_size_t   base_offset;
-  /* --- CAUnboundRepeat tail --- */
-  ca_size_t  *rep_dim;
-} CAUnboundRepeat;
 
 /* 
    CAReduce is an internal class 
@@ -870,8 +831,7 @@ typedef struct {
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
                               Reserved for framework use; ext authors must not read,
                               write, or xfree this field directly.  See
-                              ext/ca_array_pool.c and
-                              devel/PROPOSAL_CARRAY_POOL_STANDARDIZATION.md. */
+                              ext/ca_array_pool.c. */
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
@@ -882,9 +842,8 @@ typedef struct {
 
 /* -------------------------------------------------------------------- */
 
-/* CAIterator is a form-only Ruby base (see ext/carray_iterator.c); the retired
-   2.0 C struct (a kernel_at_addr dispatch slot) lives at
-   samples/caiterator/iterator.c. */
+/* CAIterator is a form-only Ruby base (see ext/carray_iterator.c); the 2.0 C
+   struct (a kernel_at_addr dispatch slot) was retired in 3.0. */
 
 /* -------------------------------------------------------------------- */
 
@@ -896,10 +855,8 @@ extern const int ca_cast_table[CA_NTYPE][CA_NTYPE];
 extern const int ca_cast_table2[CA_NTYPE][CA_NTYPE];
 
 /* data_type promotion reducer — pure function over ca_cast_table.  Used by
-   CArray.result_type and (from PROPOSAL_LAZY_ELEMENTWISE_VIEW Phase 1)
-   the lazy view layer.  See ext/carray_cast.c definition + comment, and
-   devel/AUDIT_DTYPE_PROMOTION.md for the audit that confirmed single
-   source. */
+   CArray.result_type and by the lazy view layer.  See ext/carray_cast.c
+   for the definition; this is the single source of the promotion rule. */
 int8_t ca_promote_type (int8_t a, int8_t b);
 
 /* Infer a data_type code from a Ruby *value* (literal Numeric, true/false,
@@ -918,8 +875,7 @@ int8_t ca_mv_probe_data_type (VALUE obj);
 /* Symbol cache for data_type code → Symbol lookup.  Initialized in
    Init_carray_class.  Indexed by data_type code (0 = CA_FIXLEN ...
    CA_NTYPE-1 = CA_OBJECT).  Use rb_ca_data_type_to_sym for the public
-   conversion entry point (it validates the code first).
-   PROPOSAL_DTYPE_SYMBOL_FLIP rev3 Q5=(Y). */
+   conversion entry point (it validates the code first). */
 extern ID ca_data_type_sym[CA_NTYPE];
 VALUE rb_ca_data_type_to_sym (int8_t data_type);
 
@@ -932,9 +888,13 @@ extern int ca_obj_num;
 
 #define CAVIEW(x) ((CAView *)(x))
 
-#define ca_set_flag(ca, flag)   ( ca->flags |= flag )
-#define ca_unset_flag(ca, flag) ( ca->flags &= ~flag )
-#define ca_test_flag(ca, flag) (( ca->flags & flag ) ? 1 : 0)
+/* CAREFUL: `flag` is parenthesised.  Without it, ca_test_flag(ca, A | B)
+   expands to `ca->flags & A | B`, and since & binds tighter than | the
+   test is true for every array.  ca_unset_flag had the mirror hazard
+   through ~. */
+#define ca_set_flag(ca, flag)   ( (ca)->flags |= (flag) )
+#define ca_unset_flag(ca, flag) ( (ca)->flags &= ~(flag) )
+#define ca_test_flag(ca, flag) (( (ca)->flags & (flag) ) ? 1 : 0)
 
 /* -------------------------------------------------------------------- */
 
@@ -993,7 +953,6 @@ extern VALUE rb_cCAStrideMask;
 extern VALUE rb_cCASelect;
 extern VALUE rb_cCAObject;
 extern VALUE rb_cCARepeat;
-extern VALUE rb_cCAUnboundRepeat;
 extern VALUE rb_cCAIterator;
 
 extern VALUE rb_cCArrayMask;
@@ -1003,7 +962,6 @@ extern VALUE rb_cCAFieldMask;
 extern VALUE rb_cCASelectMask;
 extern VALUE rb_cCAObjectMask;
 extern VALUE rb_cCARepeatMask;
-extern VALUE rb_cCAUnboundRepeatMask;
 
 extern VALUE rb_mCA;
 extern VALUE rb_mCAMath;
@@ -1098,18 +1056,34 @@ extern VALUE rb_cCArrayObject;
 
 #ifdef HAVE_COMPLEX_H
 
+/* CMPLX(re, im) builds a complex from its two parts without going through
+   "re + I * im".  That expression evaluates I * im first, so an im of +0.0
+   yields (0.0 + 0.0i) and adding it to a re of -0.0 gives +0.0: the sign of
+   a negative zero real part is lost.  The sign matters -- branch cuts are
+   selected by the sign of a zero (log(-1+0i) = +pi*i, log(-1-0i) = -pi*i).
+   CMPLX is C11; provide it when the toolchain predates that. */
+#ifndef CMPLX
+#  if defined(__clang__) || (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 7)))
+#    define CMPLX(re, im) __builtin_complex((double)(re), (double)(im))
+#  else
+#    define CMPLX(re, im) \
+       (((union { double _parts[2]; double complex _value; }) \
+           { { (double)(re), (double)(im) } })._value)
+#  endif
+#endif
+
 static inline double complex
 rb_carray_num2cmplx (VALUE num)
 {
   if ( RB_TYPE_P(num, T_COMPLEX) ) {
-    return NUM2DBL(rb_complex_real(num)) + I * NUM2DBL(rb_complex_imag(num));
+    return CMPLX(NUM2DBL(rb_complex_real(num)), NUM2DBL(rb_complex_imag(num)));
   }
   if ( RB_FLOAT_TYPE_P(num) || RB_INTEGER_TYPE_P(num) ) {
     return (double complex) NUM2DBL(num);
   }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);
-    return NUM2DBL(rb_complex_real(c)) + I * NUM2DBL(rb_complex_imag(c));
+    return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
   }
   if ( rb_respond_to(num, rb_intern("to_f")) ) {
     return (double complex) NUM2DBL(rb_funcall(num, rb_intern("to_f"), 0));
@@ -1176,7 +1150,6 @@ enum {
   CA_REG_GRID,
   CA_REG_MAPPING,
   CA_REG_METHOD_CALL,
-  CA_REG_UNBOUND_REPEAT,
   CA_REG_MEMBER,
   CA_REG_ATTRIBUTE,
 }; /* CA_REGION_TYPE */
@@ -1218,7 +1191,7 @@ typedef struct {
 /* The element-wise kernel typedefs (ca_monop_func_t / ca_binop_func_t /
    ca_triop_func_t / ca_moncmp_func_t / ca_bincmp_func_t), the rb_ca_call_*
    drivers, ca_math_call, and the per-data_type dispatch tables now live in
-   carray_math_kernel.h (PROPOSAL_CARRAY_H_REORG H.3), which this header
+   carray_math_kernel.h, which this header
    includes at the bottom (umbrella).  Declarations only moved — definitions
    and ABI are unchanged. */
 
@@ -1261,7 +1234,7 @@ CArray  *carray_new_adopt (int8_t data_type,
 VALUE    rb_carray_new_adopt (int8_t data_type,
                               int8_t ndim, ca_size_t *dim, ca_size_t bytes, char *ptr);
 
-/* Phase A capstone helper (PROPOSAL_CAPSTONE_PHASE_A.md A.3): allocate
+/* Capstone helper: allocate
    a reduction-output CArray for kernel_iterator authors.  Computes
    output shape = self.dim with slab axes removed (ascending order),
    collapses to shape [1] when fully reduced.  See
@@ -1273,7 +1246,7 @@ VALUE    rb_ca_new_reduced (VALUE self, int8_t *slab_axes,
 VALUE    rb_ca_new_reduced_bytes (VALUE self, int8_t *slab_axes, int8_t naxes,
                                   int32_t data_type, ca_size_t bytes, int keep_axis);
 
-/* Phase B capstone helper (PROPOSAL_CAPSTONE_PHASE_B.md B.3): parse
+/* Capstone helper: parse
    variadic axis argv into validated int8_t array.  Accepts Integer
    args or a single Array arg, normalises negative axes (Python-style),
    range / duplicate / overflow checks all raise ArgumentError.
@@ -1347,7 +1320,7 @@ int       ca_stride_compose_through (CAStride *leaf, CAStride *parent,
 
 /* --- ca_obj_grid.c --- */
 
-/* Tier 3 / C1 (PROPOSAL_CAGRID_REBUILD): rb_ca_grid_new signature
+/* rb_ca_grid_new signature
    changed to take a per-axis cag_axis_t proto array (private to
    ca_obj_grid.c).  No external callers exist so the declaration is
    removed from the public header. */
@@ -1371,19 +1344,12 @@ VALUE   rb_ca_fake_type (VALUE self, VALUE rtype, VALUE rbytes);
 
 VALUE   rb_ca_repeat (int argc, VALUE *argv, VALUE self);
 
-/* --- ca_obj_unbound_repeat.c --- */
-
-VALUE   rb_ca_ubrep_shave (VALUE self, VALUE other);
-VALUE   rb_ca_rewrap_unbound_repeat (VALUE src, VALUE out);
-
 /* --- carray_broadcast.c --- */
 
 VALUE   ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim);
 void    ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other);
-VALUE   ca_ubrep_bind_with (VALUE self, VALUE other);
 
-/* --- ca_iter_dimension retired (SI.4): CADimensionIterator -> CASlabIterator,
-   reference impl at samples/caiterator/dimension.c --- */
+/* --- ca_iter_dimension retired: CADimensionIterator -> CASlabIterator --- */
 
 /* -------------------------------------------------------------------- */
 
@@ -1436,10 +1402,26 @@ int     ca_is_entity (const void *ap);
 #endif
 
 int     ca_is_view (void *ap);
+
+/* True iff ca is a member of the CAStride family -- the views whose
+   addressing is a linear stride expression over a single parent, and
+   which ca_stride_compose_to_root therefore folds into
+   root->ptr + base + sum(idx[k] * strides[k]).  Currently CAStride,
+   CARefer, CABlock, CARepeat, CATranspose, CAFarray and CAField, plus
+   the mask array of each.  Membership is decided by the operation table
+   an obj_type was installed with, so an externally installed view that
+   shares the table is recognised too.  Passing a non-member to
+   ca_stride_compose_to_root reads the struct past its end, so guard the
+   call with this.  (Defined in ca_obj_stride.c, out of line: it indexes
+   ca_func[], and a function keeps that stride out of separately built
+   callers.) */
+int     ca_is_stride_family (const void *ap);
+
 int     ca_is_readonly (void *ap);
 int     ca_is_value_array (void *ap);
 int     ca_is_mask_array (void *ap);
 #define ca_is_face(ca) ( ca_test_flag((ca), CA_FLAG_IS_FACE) )
+#define ca_is_lazy_marker(ca) ( ca_test_flag((ca), CA_FLAG_IS_LAZY_MARKER) )
 
 #define ca_is_attached(ca) ( (ca)->ptr != NULL )
 #define ca_is_empty(ca) ( (ca)->elements == 0 )
@@ -1454,13 +1436,11 @@ int     ca_is_mask_array (void *ap);
    attached), CAWrap, CScalar, and CAStride-family views whose composed
    strides are row-major contiguous (alias-attach path).  Used by
    kernel_iterator's L1 alias decision (ca_iter_can_alias level 1) and
-   by Tier A (PROPOSAL_DELEGATE_COPY_DATA) overlay-view dispatch.
-   Renamed 2026-05-25 (T1 step 9.4a): _is_cheap → _is_alias to express
-   the structural property (= aliasable without materialise) rather
-   than the perf characteristic. */
+   by overlay-view dispatch.  The name says the structural property
+   (= aliasable without materialise), not the perf characteristic. */
 int     ca_attach_is_alias (void *ap);
 
-/* C.3 (PROPOSAL_EAGER_SLOWPATH_CHUNKING_ARENA): OR operand masks into
+/* OR operand masks into
    ca_out->mask without ca_attach on operand masks (= gathers via
    ca_xfer_all into arena scratch then byte OR-folds).  ca_out must be
    a freshly templated entity.  For bang variant where ca_out IS one of
@@ -1533,10 +1513,10 @@ void    ca_store_index (void *ap, ca_size_t *idx, void *ptr);
 void    ca_store_addr (void *ap, ca_size_t addr, void *ptr);
 void    ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir);
 void    ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir);
-/* Y.1/Y.2 (PROPOSAL_XFER_ADDRS_PER_REGION_GAPS.md §4.1) shared predicate:
-   detect if addrs[] is a sequential run (addrs[i] == addrs[0]+i for all i).
-   Used by ca_xfer_addrs_dispatch (Y.2) and view xfer_addrs slots (Y.1) for
-   whole-view / sub-region run detection -> opportunistic engine dispatch. */
+/* Shared predicate: detect if addrs[] is a sequential run
+   (addrs[i] == addrs[0]+i for all i).  Used by ca_xfer_addrs_dispatch and
+   by view xfer_addrs slots for whole-view / sub-region run detection ->
+   opportunistic engine dispatch. */
 int     ca_xfer_addrs_is_sequential_run (ca_size_t n, ca_size_t *addrs,
                                          ca_size_t *base_out);
 /* Y.1.e: resolve cand through identity CAStride compose-fold to find an
@@ -1545,6 +1525,25 @@ int     ca_xfer_addrs_is_sequential_run (ca_size_t n, ca_size_t *addrs,
    resolved root (which has ptr).  Used by view xfer_addrs slots to lift
    parent->ptr gate through view CAStride layers (= chain pattern). */
 CArray *ca_resolve_attached_root_via_identity (CArray *cand);
+
+/* Shared gate for the xfer_stride slots' structural fast paths.
+
+   An xfer_stride request is given over the view's linear ADDRESSES (see the
+   slot comment above), so request axis k need not be view axis k: a caller
+   is free to hand over a transposed region -- counts/strides in one order,
+   the packed destination buffer in another -- and a degenerate axis makes
+   that indistinguishable from an axis-aligned request by divisibility alone
+   (an (n, 1) view has the same native step on both axes).  A structural path
+   that composes request axis k onto view axis k must therefore ask first:
+   does request axis k advance view axis k, and stay inside it for the whole
+   traversal?  Returns 1 when that holds for every axis (count <= 1 axes move
+   nothing and always pass), 0 when the request is not such a box -- the
+   caller then takes its per-cell fallback, which is address-correct for any
+   request.  ndim is the request's rank, which the slots' wiring keeps equal
+   to ca->ndim. */
+int     ca_xfer_stride_request_is_axis_box (void *ap, ca_size_t *starts,
+                                            ca_size_t *counts,
+                                            ca_size_t *strides);
 
 void    ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                         ca_size_t *strides, void *data, int dir);
@@ -1596,7 +1595,7 @@ void    ca_fill_stride_whole (void *ap, void *ptr);
 /* API : mask handling */
 
 extern VALUE CA_UNDEF;
-extern VALUE CA_NIL;
+extern VALUE CA_UNSPECIFIED;
 
 boolean8_t *ca_mask_ptr (void *ap);
 int     ca_has_mask (void *ap);
@@ -1700,8 +1699,8 @@ VALUE   rb_ca_wrap_writable (VALUE obj, VALUE vtype);
 VALUE   rb_ca_wrap_readonly (VALUE obj, VALUE vtype);
 
 /* inheritance */
-/* rb_ca_data_type_inherit / rb_ca_data_type_import were removed in 3.0
-   (PROPOSAL_DEPRECATE_LEGACY_DATA_CLASS P.2/P.3). data_class lives on
+/* rb_ca_data_type_inherit / rb_ca_data_type_import were removed in 3.0.
+   data_class lives on
    Face (CARecord) tail; view ctors no longer carry data_class via
    @data_class ivar — Face dispatch (CA_FACE_LIFT_IF_FACE) handles it. */
 VALUE   rb_ca_set_parent (VALUE self, VALUE obj);
@@ -1748,8 +1747,7 @@ VALUE   rb_ca_is_scalar (VALUE self);
 VALUE   rb_obj_is_data_class (VALUE rtype);
 VALUE   rb_ca_has_data_class (VALUE self);
 VALUE   rb_ca_data_class (VALUE self);
-/* rb_ca_set_data_class was removed in 3.0
-   (PROPOSAL_DEPRECATE_LEGACY_DATA_CLASS P.5). The Ruby method
+/* rb_ca_set_data_class was removed in 3.0.  The Ruby method
    CArray#data_class= raises ArgumentError with migration message. */
 VALUE   rb_ca_data_class_decode (VALUE self, VALUE str);
 VALUE   rb_ca_data_class_encode (VALUE self, VALUE obj);
@@ -1878,16 +1876,15 @@ void ca_debug ();
 
 /* -------------------------------------------------------------------- */
 
-/* PROPOSAL_PORTABLE_TEXTBOOK_SORT — portable textbook sort kernels.
+/* Portable textbook sort kernels.
    These are layer ③ true-internal (ca_sort_kernels.h self-describes as
    "ext-internal, signatures may change across 3.x").  They are NOT pulled
-   into the carray.h umbrella and NOT installed (PROPOSAL_CARRAY_H_REORG
-   H.4.1): the internal consumers (carray_sort_kernel.c / carray_sort.c /
+   into the carray.h umbrella and NOT installed: the internal consumers (carray_sort_kernel.c / carray_sort.c /
    carray_partition.c / carray_kernels.c) include ca_sort_kernels.h
    directly. */
 
 /* -------------------------------------------------------------------- */
-/* Public umbrella (PROPOSAL_CARRAY_H_REORG H.3)                         */
+/* Public umbrella                                                       */
 /* -------------------------------------------------------------------- */
 
 /* Pull the ext-author / math-backend surface in under the carray.h
