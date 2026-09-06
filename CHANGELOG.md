@@ -306,17 +306,19 @@ unrecorded.
   magnitude, so it shrinks toward zero, matching the array form in all four
   sign combinations.
 
-- Fix: a field out of range no longer rolls over into another date.
-  `"2019-02-31"` parsed to 2019-03-03, and `"201909"` -- a valid YYMMDD to
-  Ruby, 2020-19-09 -- to 2021-07; both now raise.
+- Fix: `CArray.time` no longer rolls a field that is out of range over into
+  another date. `"2019-02-31"` parsed to 2019-03-03, and `"201909"` -- a valid
+  YYMMDD to Ruby, 2020-19-09 -- to 2021-07; both now raise.
 
-- New: a year-month (`"2019-09"`) and a bare year (`"2019"`) parse, so the
-  form a `:M` / `:Y` element prints reads back in. A missing finer field
-  names the head of that period.
+- New: `CArray.time` parses a year-month (`"2019-09"`) and a bare year
+  (`"2019"`), so the form a `:M` / `:Y` element prints reads back in. A
+  missing finer field names the head of that period.
 
-- Change: a calendar-grid `origin:` now has to be a month head (the 1st at
-  00:00); it used to drop the day and time silently. A `:Y` tick likewise has
-  to start in January. `from_timesteps` already refused an off-grid origin.
+- Change: a calendar-grid `origin:` given to the bucket-grid methods of a
+  `CATime` array -- `timesteps`, `snap`, `floor`, `ceil`, `round`,
+  `is_righttime` -- now has to be a month head (the 1st at 00:00); it used to
+  drop the day and time silently. A `:Y` tick likewise has to start in
+  January. `from_timesteps` already refused an off-grid origin.
 
 - Change: `CATime#to_unit` floors to a coarser grid instead of raising, and
   crosses the calendar / fixed-length boundary (`:M` <-> `:D`) through
