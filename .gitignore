@@ -30,7 +30,6 @@ ext/mkmf.log
 # letter away from docs/ at the top level.
 .yardoc/
 .yard-html/
-doc/
 
 # spec_ai borrower extension build artifacts
 spec/spec_ai/ext_memory_view_test/Makefile
@@ -76,20 +75,6 @@ spec/spec_ai/ext_iter_source_kind/*.bundle.dSYM/
 spec/spec_ai/ext_iter_source_kind/*.o
 spec/spec_ai/ext_iter_source_kind/mkmf.log
 
-# Stray extconf artifacts when extconf.rb is invoked from repo root
-# (root で `ruby extconf.rb && make` を走らせた事故 — 必ず ext/ 内で実行する)
-/Makefile
-/mkmf.log
-/carray_config.h
-/carray_core.c
-/carray_cast_func.c
-/carray_stat_proc.c
-/carray_kernels.c
-/carray_kernels_*.c
-/carray_kernels.stamp
-/*.bundle
-/*.bundle.dSYM/
-
 # Generated PDF bundles (rake pdf:*)
 guides/pdf/
 
@@ -98,9 +83,3 @@ guides/pdf/
 benchmark
 CLAUDE.md
 .claude/
-
-# Written by the guide examples when the verification harness runs them
-/result.ca
-/big_endian.ca
-/little.ca
-/objs.marshal
