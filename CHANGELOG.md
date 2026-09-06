@@ -34,7 +34,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.1 (unreleased)
+## 3.0.1
 
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
   that is compiled rather than run. Compiling needs the carray-jit gem;
