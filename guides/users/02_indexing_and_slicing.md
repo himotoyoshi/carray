@@ -278,6 +278,8 @@ Any of the slice forms above can appear on the left of an assignment. Assigning 
 
 ### Filling a slice with a scalar
 
+A single value on the right of the assignment fills every element the slice names, however many that is.
+
 ```ruby
 a = CArray.int32(3, 4).seq!
 

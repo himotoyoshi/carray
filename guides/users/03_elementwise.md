@@ -4,6 +4,8 @@ Operations apply to every element and return a new array of results. The origina
 
 ## Arithmetic with a scalar
 
+A number on either side of an operator applies to every element, and what comes back is a new array of the same shape.
+
 ```ruby
 a = CArray.int32(2, 3).seq!
 #  => [ [ 0, 1, 2 ],
