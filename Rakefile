@@ -16,6 +16,40 @@ task :stub_check => :build_ext do
   ruby "-I lib -I ext utils/check_stub_drift.rb" or exit($?.exitstatus)
 end
 
+# The repo root should hold nothing but what git tracks.  A generator run from
+# the wrong directory drops its output here -- extconf.rb outside ext/, a guide
+# example that writes a file -- and adding the name to .gitignore hides it for
+# good instead of stopping it.  Name the strays instead.
+ROOT_LOCAL = %w[
+  .git .envrc .claude .yardoc .yard-html devel benchmark CLAUDE.md
+].freeze
+
+def root_strays
+  tracked = `git ls-files -z`.split("\0").map { |p| p[%r{\A[^/]+}] }.uniq
+  keep = tracked + ROOT_LOCAL
+  Dir.children(".").reject { |e| keep.include?(e) || e.end_with?(".gem") }.sort
+end
+
+desc "Name the files at the repo root that no generator should have left there"
+task :tidy do
+  strays = root_strays
+  if strays.empty?
+    puts "The repo root holds only what git tracks."
+  else
+    puts "Left at the repo root (`rake tidy:clean` removes them):"
+    strays.each { |e| puts "  #{e}" }
+  end
+end
+
+namespace :tidy do
+  desc "Remove them"
+  task :clean do
+    strays = root_strays
+    puts "The repo root holds only what git tracks." if strays.empty?
+    rm_rf strays unless strays.empty?
+  end
+end
+
 desc "Check the kernel_iterator author surface for freeze drift (3.0+ pin)"
 task :kernel_surface_check do
   ruby "utils/check_kernel_surface_freeze.rb" or exit($?.exitstatus)
@@ -73,6 +107,10 @@ task :build_ext do
       File.write(".dev_build_mode", curr)
     end
     sh "make"
+  end
+  strays = root_strays
+  unless strays.empty?
+    warn "note: the repo root holds #{strays.join(', ')} -- see `rake tidy`"
   end
 end
 
