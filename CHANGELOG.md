@@ -1,8 +1,9 @@
 # Changelog
 
-Releases from 3.0.0 onward are recorded here. The 1.x history, up to the
-2.0.0 release, is in [CHANGELOG.v1.md](CHANGELOG.v1.md); 2.0.1 went
-unrecorded.
+Releases from 3.0.0 onward are recorded here. There is no separate NEWS
+file: this is where to look for what changed between the version you have
+and a newer one. The 1.x history, up to the 2.0.0 release, is in
+[CHANGELOG.v1.md](CHANGELOG.v1.md); 2.0.1 went unrecorded.
 
 <!-- Newest first, at both levels: a new release section goes above the
      ones below it, and a new entry goes directly under its own release
@@ -15,7 +16,17 @@ unrecorded.
      changes), and what is excluded. It does not say how the code was
      broken, name the internals that were fixed, break down where the
      speed came from, or argue the design -- those belong in the commit
-     message. Two to six lines. -->
+     message. Two to six lines.
+
+     It is written for someone using the library, not someone working on
+     it: with no NEWS file, this is what a reader consults before
+     upgrading. An entry naming something only a C extension touches says
+     so in its opening words.
+
+     Every entry has to read on its own. Entries are looked at one at a
+     time and move about within a section, so none may lean on a
+     neighbour ("as well", "the producer above") or leave unnamed the
+     method, class or keyword it is about. -->
 
 ## 3.0.1 (unreleased)
 
