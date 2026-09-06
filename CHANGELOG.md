@@ -13,11 +13,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
      A section is written newest-first while the release is open, and
      sorted into New, Change, Fix when it closes -- in the same commit
-     that drops `(unreleased)`. Within Change, the entries that break
-     backward compatibility come first: code written for the previous
-     release either stops working, or gets a different answer than it was
-     entitled to rely on. A last-bit difference in a float result is not
-     one of those; a changed return type, keyword, spelling or default is.
+     that drops `(unreleased)`. Within Change, the ones that ask the
+     reader to change code come first. It is a reading order rather than
+     a classification: where it is not obvious, either place will do.
 
      An entry says three things and stops: what changed, what to do about
      it (the migration, the replacement, the condition under which nothing
