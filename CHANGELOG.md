@@ -41,14 +41,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   without it they raise `NotImplementedError`. An expression over whole
   arrays wants `CArray.fuse`, which needs no compiler.
 
-- New: every iterator now answers `accumulate` beside `sum` -- the same
-  per-piece fold, kept in the source's own data type and wrapping at its width,
-  where `sum` answers in the type the core promotes to (float64 for an integer
-  source). A tile or window count over `uint8` cells stays one byte wide instead
-  of eight. For a category or a coordinate group it is also the exact spelling:
-  `sum` folds those in float64, so an integer payload wider than float64's
-  mantissa loses its low bits. A boolean source accumulates as XOR parity, as it
-  does in the core.
+- New: every iterator answers `accumulate` beside `sum`; some of them did not.
+  It is the same fold kept in the source's own data type, where `sum` answers
+  in the type the core promotes to -- a window or tile count over `uint8` cells
+  stays one byte wide.
 
 - New: `CArray::CoreExtensions` adds postfix math on `Complex`, so an
   expression written for a complex array still reads for a single cell taken
