@@ -336,9 +336,9 @@ unrecorded.
   3118, which Ruby has no spelling for. The consumer side already accepted
   both, so views produced by 3.0.0 still import.
 
-- Fix: a mask published in Ruby's format vocabulary (`C` / `c`) is accepted on
-  import. The check only knew PEP 3118's `B` / `b` / `?`, so it refused the
-  masks the producer above now writes.
+- Fix: importing a MemoryView whose mask is published as `C` or `c` no longer
+  fails. The check knew only PEP 3118's `B`, `b` and `?`, so a producer that
+  spells a byte in Ruby's format vocabulary was refused.
 
 ## 3.0.0
 
