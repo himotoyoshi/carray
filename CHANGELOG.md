@@ -190,11 +190,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Change: element-wise math on a `float32` or `cmplx64` array is computed at
   that width rather than widened and rounded back, so `sqrt`, `exp`, `log`,
-  the trigonometric and hyperbolic families, `atan2`, `hypot`, `logaddexp`,
-  `abs`, `arg` and `sign` are 1.1-3.5x faster there and can move by a bit or
-  two in the last place. Complex `log`, `power`, `exp2` and `exp10` are
-  unchanged, as are the rounding, min / max, comparison and variance families
-  and the wider types. To compute at the wider width, cast first.
+  the trigonometric and hyperbolic families, `atan2`, `hypot`, `abs` and `arg`
+  are 1.1-3.5x faster there and can move by a bit or two in the last place.
+  Complex `log`, `power`, `exp2` and `exp10` are unchanged, as are the
+  rounding, min / max, comparison and variance families and the wider types.
 
 - Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` --
   `a.windows(-1..1).sum` and the like -- over a window up to five cells wide on
