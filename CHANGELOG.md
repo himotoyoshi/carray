@@ -126,11 +126,12 @@ unrecorded.
   nothing after it. A window that covers its anchor, which is every centred one,
   is unaffected.
 
-- Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` over a
-  window up to five cells wide on every axis is now 2-5x faster, and 1.3-4x
-  over a masked source; `min_count:` and `fill_value:` come along. `min`,
-  `max` and `prod` answer exactly as before; `sum` and `mean` may differ in
-  the last bits, as reductions always may. It holds one more buffer while it
+- Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` --
+  `a.windows(-1..1).sum` and the like -- over a window up to five cells wide on
+  every axis is now 2-5x faster, and 1.3-4x over a masked source; `min_count:`
+  and `fill_value:` come along. `min`, `max` and `prod` answer exactly as
+  before; `sum` and `mean` may differ in the last bits, as reductions always
+  may. It holds one more buffer while it
   works, one window's worth in the type the result accumulates in. A wider
   window, or any other reduction, is unchanged.
 
@@ -173,9 +174,9 @@ unrecorded.
   and the lazy forms follow the same rule. Scalars are unaffected, but a
   one-element 1-D array such as `CArray.int32(1)` counts as a shape.
 
-- Change: assignment matches shapes as well. `t[] = src` with a differently
-  shaped source raises `RuntimeError`; use `src.flatten`. In exchange a
-  smaller source is repeated to fit, so `t[] = row[:_, nil, nil]` and
+- Change: an assignment requires the shapes to match. `t[] = src` with a
+  differently shaped source raises `RuntimeError`; use `src.flatten`. In
+  exchange a smaller source is repeated to fit, so `t[] = row[:_, nil, nil]` and
   `t[] = col` (shape `(n,1)`) work where they used to raise; the destination
   is never stretched. A 1-D side on either end still passes, as do shapes
   differing only in size-1 axes. Ruby Arrays and scalars are unchanged. The
@@ -189,11 +190,11 @@ unrecorded.
   was installed with, so an externally installed view sharing that table is
   recognised too.
 
-- Fix: a region asked for in column-major order -- axes and steps reversed
-  against the view's own -- came back wrong from a view with a length-1 axis,
-  such as `v[nil, :_]`, `v.reshape(n, 1)` or a one-column slice. Depending on
-  the view it repeated the first cell, read out of bounds, or hung. Reached
-  from a Fortran-LAPACK backend gathering its operands:
+- Fix: a C extension reading a view in column-major order -- axes and steps
+  reversed against the view's own -- got wrong values from a view with a
+  length-1 axis, such as `v[nil, :_]`, `v.reshape(n, 1)` or a one-column slice.
+  Depending on the view it repeated the first cell, read out of bounds, or
+  hung. Seen through a Fortran-LAPACK backend gathering its operands:
   `carray-linalg-accelerate`'s `solve(a, b)` returned `b[0]` repeated for a
   single-column right-hand side.
 
@@ -222,9 +223,9 @@ unrecorded.
   and anything over a masked array failed, so `a.lazy.sum(axis: 0)` raised
   while `a.lazy.sum` worked.
 
-- Fix: `ca_test_flag` / `ca_set_flag` / `ca_unset_flag` in `carray.h` did not
-  parenthesise their flag argument, so testing two flags at once was true for
-  every array. C extensions only.
+- Fix: `ca_test_flag` / `ca_set_flag` / `ca_unset_flag` in `carray.h`, which
+  only a C extension calls, did not parenthesise their flag argument, so
+  testing two flags at once was true for every array.
 
 - Change: `/` and `%` follow Ruby instead of C. Integer division floors and the
   remainder carries the sign of the divisor; float `%` floors too, float `/` is
