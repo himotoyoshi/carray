@@ -38,95 +38,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.1 (unreleased)
 
-- Change: multiplying and dividing a `cmplx64` array (`*`, `/`, `rcp`,
-  `rcp_mul`) is now computed in double and rounded once, so both are correctly
-  rounded -- the previous route lost up to about 1800 units in the last place
-  when the real part nearly cancelled. Division also gets 4.2x to 5.3x faster;
-  multiplication is 1.3x slower, which buys only the accuracy. A product whose
-  partial terms overflow a float but not a double no longer comes back NaN
-  (`(1e30+1e30i) ** 2` gives `0.0+Infinity*i`, not `NaN+Infinity*i`).
-  Infinities, NaNs and the signs of zeros are otherwise unchanged, as are `+`,
-  `-` and every `cmplx128` operation.
-
-- Fix: `nextafter` on a `float32` array returned its own input. The step was
-  taken in double, and the next double above a float rounds back to that same
-  float. It now steps by one float32 ulp.
-
-- Change: element-wise math on a `float32` or `cmplx64` array is now computed
-  at that width rather than widened to `float64` / `cmplx128` and rounded
-  back, so `sqrt`, `exp`, `log`, the trigonometric and hyperbolic families,
-  `atan2`, `hypot`, `logaddexp`, `abs`, `arg` and `sign` are 1.1x to 3.5x
-  faster there and can move by a bit or two in the last place. Complex `log`,
-  `power`, `exp2` and `exp10` keep computing in double, because a complex
-  logarithm cancels and loses the answer rather than its last bits. The wider
-  types are unchanged, as are `round`, `ceil`, `floor`, `trunc`, `fabs`, the
-  min / max family, `is_close`, `is_equiv` and the variance family, which are
-  either exact at any width or measure in double by declaration. To compute at
-  the wider width, cast with `.to_type(:float64)` or `.to_type(:cmplx128)`
-  first.
-
-- Change: `abs`, `abs2` and `arg` on a `cmplx64` array now return `float32`
-  instead of `float64` -- the width that type carries its real values in, the
-  same one `real` and `imag` already returned. `arg` on a `float32` array
-  likewise returns `float32` rather than widening. `cmplx128` and `float64`
-  are unchanged, and `arg` on an integer array still gives `float64`. To keep
-  the old width, add `.to_type(:float64)`.
-
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block
   that is compiled rather than run. Compiling needs the carray-jit gem;
   without it they raise `NotImplementedError`. An expression over whole
   arrays wants `CArray.fuse`, which needs no compiler.
-
-- Fix: a lazy expression over an object array (`CArray.object`,
-  `CA_OBJECT`) returned wrong values, and crashed when materialised
-  repeatedly. Affects `to_ca` and `copy` on a lazy view, an eager operation
-  with a lazy operand, and a reduction over one. Other data types were never
-  affected.
-
-- Change: `CArray.fuse` takes the expression rather than the arrays it is
-  over -- `CArray.fuse { (a + b) * c }` in place of
-  `CArray.fuse(a, b, c) { |x, y, z| (x + y) * z }`. The block is read rather
-  than run, so a block whose source is not available -- at an `irb` prompt,
-  inside `eval` -- raises and points at `a.lazy + b.lazy`, which always
-  works. What comes back is the expression, computed where it is used, so
-  `x = CArray.fuse { ... }` now wants `.to_ca` if what you want is an array.
-  `CArray.lazy(*args) { ... }` is gone; it was the same method.
-
-- Fix: reading a concatenated view (`CArray.concat`, `CAFrame.concat`)
-  backwards along the concatenated axis -- `m.reverse` and any other negative
-  step -- raised IndexError instead of answering.
-
-- Fix: reading a lazy expression (`a.lazy + b`, `CArray.fuse`) with a step
-  other than one -- `expr[[0, 3, 2]]`, `expr.reverse` and the like -- returned
-  values the expression cannot produce, because its operands were read from
-  the wrong cells. Comparisons carried the same fault, `a.lazy > b` and
-  one-operand ones such as `a.lazy.is_nan` alike. Contiguous reads were never
-  affected.
-
-- Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
-  something reads it, rather than when the expression is built. A mask set on
-  either operand after the expression was built is now seen; before, only the
-  left one was. `root_array` and `ancestors` now stop at a lazy operation
-  instead of walking into its left operand. Building a long masked expression
-  is also no longer quadratic in the length of the chain.
-
-- Fix: `a.value + b` raised `can not create mask array for the value array`
-  when `b` carried a mask. It now propagates `b`'s mask.
-
-- Change: the top-level constant `CA_NIL` is now `CArray::UNSPECIFIED`
-  (`CA_UNSPECIFIED` in C). It is an internal sentinel for "the caller gave no
-  argument", not a value to pass in; `unmask`, `shift(fill_value:)` and
-  `window(fill_value:)` behave as before.
-
-- Change: `group_by_category` reductions now answer in the data type the core
-  reduction promotes the value to, instead of choosing one per reduction. `sum`
-  on an integer value answers in float64 (`accumulate` is the spelling that
-  stays in the value's type), and the rest follow the core for a boolean,
-  complex or object value -- among them `mean`, `variance` and `median` on an
-  object value, which stay exact instead of passing through float64, so a
-  payload of `Rational` keeps its denominators. This also fixes three payloads
-  that could not be reduced at all: `sum` on a boolean value, `prod` on a
-  complex one and `mean` on a complex one all raised.
 
 - New: every iterator now answers `accumulate` beside `sum` -- the same
   per-piece fold, kept in the source's own data type and wrapping at its width,
@@ -136,31 +51,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `sum` folds those in float64, so an integer payload wider than float64's
   mantissa loses its low bits. A boolean source accumulates as XOR parity, as it
   does in the core.
-
-- Fix: a rolling window that does not cover the cell it is centred on --
-  `windows(1..2)`, the two cells after this one -- was read as if it started at
-  the array's edge, so every answer came out shifted by the range's start, and
-  `bounds: :truncate` produced anchors whose window did not fit. `windows(1..2)`
-  on `[1..8]` now sums to `[5, 7, 9, 11, 13, 15, 8, 0]`, the last anchor having
-  nothing after it. A window that covers its anchor, which is every centred one,
-  is unaffected.
-
-- Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` --
-  `a.windows(-1..1).sum` and the like -- over a window up to five cells wide on
-  every axis is now 2-5x faster, and 1.3-4x over a masked source; `min_count:`
-  and `fill_value:` come along. `min`, `max` and `prod` answer exactly as
-  before; `sum` and `mean` may differ in the last bits, as reductions always
-  may. It holds one more buffer while it
-  works, one window's worth in the type the result accumulates in. A wider
-  window, or any other reduction, is unchanged.
-
-- Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
-  of a negative zero real part only when the imaginary part was also negative;
-  `Complex(-0.0, 0.0)` came back as `0.0+0.0i`. The sign of a zero selects the
-  side of a branch cut (`log(-1+0i)` is `+pi*i`, `log(-1-0i)` is `-pi*i`), so a
-  value stored this way could be carried to the wrong branch. All four sign
-  combinations now round-trip, through element assignment and through
-  `to_type`.
 
 - New: `CArray::CoreExtensions` adds postfix math on `Complex`, so an
   expression written for a complex array still reads for a single cell taken
@@ -173,34 +63,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `CArray::DataTypeError` for them. The refinement still has to be opted into
   with `using CArray::CoreExtensions`.
 
-- Fix: `sinh`, `cosh`, `tanh`, `asinh`, `acosh` and `atanh` on a complex array
-  gave the hyperbolic function of the real part alone: `cmplx128` and
-  `cmplx64` arrays came back with `tanh(Re z)` where `ctanh(z)` was meant,
-  wrong in both parts, and `acosh` and `atanh` also returned 0 or infinity
-  where the true value is finite. They now agree with C99 `complex.h`. Real
-  and object arrays were never affected.
-
-- Change: the `:*` unbound repeat is retired. `a[:*, nil]` raises `IndexError`;
-  `CArray#unbound_repeat`, `CAUnboundRepeat` and `insert_axis(repeat: :*)` are
-  gone. Use `:_`, which gives the same shape and now stretches on a store as
-  well as in an operation. `CArray#broadcast_to` and
-  `CArray.meshgrid(sparse: true)` are unaffected.
-
-- Change: a binary operation requires shapes to agree, or to differ only in
-  size-1 axes at equal ndim. `(3,2) + (2,3)` and `(3,2) + (6)` raise
-  `ArgumentError` where they used to answer in one operand's shape; flatten
-  both sides to combine the values in the order they lie. Comparisons, `fma`
-  and the lazy forms follow the same rule. Scalars are unaffected, but a
-  one-element 1-D array such as `CArray.int32(1)` counts as a shape.
-
-- Change: an assignment requires the shapes to match. `t[] = src` with a
-  differently shaped source raises `RuntimeError`; use `src.flatten`. In
-  exchange a smaller source is repeated to fit, so `t[] = row[:_, nil, nil]` and
-  `t[] = col` (shape `(n,1)`) work where they used to raise; the destination
-  is never stretched. A 1-D side on either end still passes, as do shapes
-  differing only in size-1 axes. Ruby Arrays and scalars are unchanged. The
-  in-place operators (`add!` and its siblings) follow the assignment rule.
-
 - New: `ca_is_stride_family(ca)` in `carray.h`, for C extensions that want to
   fold a view into `root->ptr + base + sum(idx[k] * strides[k])` themselves.
   It is the guard `ca_stride_compose_to_root` needs: true for CAStride,
@@ -208,52 +70,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   mask array of each. Membership follows the operation table an `obj_type`
   was installed with, so an externally installed view sharing that table is
   recognised too.
-
-- Fix: a C extension reading a view in column-major order -- axes and steps
-  reversed against the view's own -- got wrong values from a view with a
-  length-1 axis, such as `v[nil, :_]`, `v.reshape(n, 1)` or a one-column slice.
-  Depending on the view it repeated the first cell, read out of bounds, or
-  hung. Seen through a Fortran-LAPACK backend gathering its operands:
-  `carray-linalg-accelerate`'s `solve(a, b)` returned `b[0]` repeated for a
-  single-column right-hand side.
-
-- Fix: an operation between two views of an array that computes its values --
-  a lazy expression such as `(a.lazy + b)`, or a `CAObject` over a file -- no
-  longer reads that source one cell at a time. `+`, `fma` and comparisons on
-  such a pair now run at the speed of copying each operand first, so the
-  `.copy` that worked around it is no longer needed. Single-operand
-  operations, copies, region transfers and reductions were already unaffected.
-
-- Fix: views built inside a `CArray.fuse` block stay part of the expression
-  instead of dropping out of it, so a stencil written the natural way is fused.
-  `[]`, `shift`, `roll`, `flip`/`reverse`, `transpose`/`T`, `reshape`,
-  `flatten`, `window`, `diagonal`, `tile` and `refer` keep the chain;
-  `unbound_repeat` and `[:*, ...]` deliberately do not.
-
-- Change: `to_ca` on a view derived from a lazy marker returns a new entity
-  rather than the view itself -- `a.lazy.shift(1, 0).to_ca`, inside a `fuse`
-  block or not. `copy` behaves as before.
-
-- Fix: a window or shift over a view parent no longer copies that parent in
-  full on every transfer. `a[nil, nil].shift(1, 0)` and friends now read at
-  parity with an entity parent and write several times faster.
-
-- Fix: reductions over a bare `.lazy` marker no longer raise. Per-axis forms
-  and anything over a masked array failed, so `a.lazy.sum(axis: 0)` raised
-  while `a.lazy.sum` worked.
-
-- Fix: `ca_test_flag` / `ca_set_flag` / `ca_unset_flag` in `carray.h`, which
-  only a C extension calls, did not parenthesise their flag argument, so
-  testing two flags at once was true for every array.
-
-- Change: `/` and `%` follow Ruby instead of C. Integer division floors and the
-  remainder carries the sign of the divisor; float `%` floors too, float `/` is
-  unchanged. For the old behaviour use `fmod`, which now takes integers as well
-  as floats.
-
-- Change: `reminder` is removed -- it was IEEE 754 remainder on floats but C `%`
-  on integers. Use `fmod` for the truncated remainder. The IEEE form has no
-  replacement.
 
 - New: `divmod` returns `[quotient, remainder]` element-wise with the quotient
   floored, the pair Ruby's `Integer#divmod` and `Float#divmod` return. The
@@ -264,12 +80,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   forward per-axis sub-region, `fill_addrs(addrs, val)` otherwise. Defining
   neither keeps the old behaviour. Filling a 1000x1000 region of a 2000x2000
   CAObject: 116 ms to 0.6 ms.
-
-- Fix: a Face no longer hands back its storage bytes through the type casts.
-  `as_type`, `fake` and `CArray.wrap_writable` raise; `CArray.wrap_readonly`
-  converts as `to_type` does, which also makes `t.eq(o)` and `o.eq(t)` agree.
-  Reach the storage explicitly with `t.parent.fake(...)`. Numeric Faces are
-  unaffected.
 
 - New: `CAFrame#to_table` renders the frame as an aligned text table, and
   `inspect` / `to_s` sit on it: `p df` summarises the first 8 and last 2 rows,
@@ -292,15 +102,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `CArray#snap` has for numbers. `#floor` / `#ceil` / `#round` are its
   fixed-direction forms; their results and keyword forms are unchanged.
 
-- Fix: `arange` raised `NoMethodError` in every form; it builds the array now.
-  Integer arguments count exactly, so a step dividing the span evenly no longer
-  picks up an extra element. A zero step or a wrong argument count raises
-  `ArgumentError`.
-
-- Change: the result-type override of `CArray#conditional` and
-  `CArray.select` is now `data_type:`, spelled the way the rest of the
-  library spells it. There is no alias: `dtype:` raises `unknown keyword`.
-
 - New: a time element is taken directly as a start or origin literal, so a
   `floor` / `ceil` / `to_unit` answer feeds back into `CArray.time`,
   `time_range`, `time_series`, `CArray#time` and a step-system `origin:`; it
@@ -309,6 +110,229 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   disagreement where such an element was a legal origin for a calendar bucket
   and an illegal one for an hourly bucket on the same array. What an origin
   must satisfy is unchanged.
+
+- New: `CArray.time` parses a year-month (`"2019-09"`) and a bare year
+  (`"2019"`), so the form a `:M` / `:Y` element prints reads back in. A
+  missing finer field names the head of that period.
+
+- Change: `abs`, `abs2` and `arg` on a `cmplx64` array now return `float32`
+  instead of `float64` -- the width that type carries its real values in, the
+  same one `real` and `imag` already returned. `arg` on a `float32` array
+  likewise returns `float32` rather than widening. `cmplx128` and `float64`
+  are unchanged, and `arg` on an integer array still gives `float64`. To keep
+  the old width, add `.to_type(:float64)`.
+
+- Change: `CArray.fuse` takes the expression rather than the arrays it is
+  over -- `CArray.fuse { (a + b) * c }` in place of
+  `CArray.fuse(a, b, c) { |x, y, z| (x + y) * z }`. The block is read rather
+  than run, so a block whose source is not available -- at an `irb` prompt,
+  inside `eval` -- raises and points at `a.lazy + b.lazy`, which always
+  works. What comes back is the expression, computed where it is used, so
+  `x = CArray.fuse { ... }` now wants `.to_ca` if what you want is an array.
+  `CArray.lazy(*args) { ... }` is gone; it was the same method.
+
+- Change: a lazy expression (`a.lazy + b`, `CArray.fuse`) builds its mask when
+  something reads it, rather than when the expression is built. A mask set on
+  either operand after the expression was built is now seen; before, only the
+  left one was. `root_array` and `ancestors` now stop at a lazy operation
+  instead of walking into its left operand. Building a long masked expression
+  is also no longer quadratic in the length of the chain.
+
+- Change: the top-level constant `CA_NIL` is now `CArray::UNSPECIFIED`
+  (`CA_UNSPECIFIED` in C). It is an internal sentinel for "the caller gave no
+  argument", not a value to pass in; `unmask`, `shift(fill_value:)` and
+  `window(fill_value:)` behave as before.
+
+- Change: `group_by_category` reductions now answer in the data type the core
+  reduction promotes the value to, instead of choosing one per reduction. `sum`
+  on an integer value answers in float64 (`accumulate` is the spelling that
+  stays in the value's type), and the rest follow the core for a boolean,
+  complex or object value -- among them `mean`, `variance` and `median` on an
+  object value, which stay exact instead of passing through float64, so a
+  payload of `Rational` keeps its denominators. This also fixes three payloads
+  that could not be reduced at all: `sum` on a boolean value, `prod` on a
+  complex one and `mean` on a complex one all raised.
+
+- Change: the `:*` unbound repeat is retired. `a[:*, nil]` raises `IndexError`;
+  `CArray#unbound_repeat`, `CAUnboundRepeat` and `insert_axis(repeat: :*)` are
+  gone. Use `:_`, which gives the same shape and now stretches on a store as
+  well as in an operation. `CArray#broadcast_to` and
+  `CArray.meshgrid(sparse: true)` are unaffected.
+
+- Change: a binary operation requires shapes to agree, or to differ only in
+  size-1 axes at equal ndim. `(3,2) + (2,3)` and `(3,2) + (6)` raise
+  `ArgumentError` where they used to answer in one operand's shape; flatten
+  both sides to combine the values in the order they lie. Comparisons, `fma`
+  and the lazy forms follow the same rule. Scalars are unaffected, but a
+  one-element 1-D array such as `CArray.int32(1)` counts as a shape.
+
+- Change: an assignment requires the shapes to match. `t[] = src` with a
+  differently shaped source raises `RuntimeError`; use `src.flatten`. In
+  exchange a smaller source is repeated to fit, so `t[] = row[:_, nil, nil]` and
+  `t[] = col` (shape `(n,1)`) work where they used to raise; the destination
+  is never stretched. A 1-D side on either end still passes, as do shapes
+  differing only in size-1 axes. Ruby Arrays and scalars are unchanged. The
+  in-place operators (`add!` and its siblings) follow the assignment rule.
+
+- Change: `to_ca` on a view derived from a lazy marker returns a new entity
+  rather than the view itself -- `a.lazy.shift(1, 0).to_ca`, inside a `fuse`
+  block or not. `copy` behaves as before.
+
+- Change: `/` and `%` follow Ruby instead of C. Integer division floors and the
+  remainder carries the sign of the divisor; float `%` floors too, float `/` is
+  unchanged. For the old behaviour use `fmod`, which now takes integers as well
+  as floats.
+
+- Change: `reminder` is removed -- it was IEEE 754 remainder on floats but C `%`
+  on integers. Use `fmod` for the truncated remainder. The IEEE form has no
+  replacement.
+
+- Change: the result-type override of `CArray#conditional` and
+  `CArray.select` is now `data_type:`, spelled the way the rest of the
+  library spells it. There is no alias: `dtype:` raises `unknown keyword`.
+
+- Change: a calendar-grid `origin:` given to the bucket-grid methods of a
+  `CATime` array -- `timesteps`, `snap`, `floor`, `ceil`, `round`,
+  `is_righttime` -- now has to be a month head (the 1st at 00:00); it used to
+  drop the day and time silently. A `:Y` tick likewise has to start in
+  January. `from_timesteps` already refused an off-grid origin.
+
+- Change: the MemoryView producer emits the format vocabulary
+  `ruby/memory_view.h` specifies rather than PEP 3118's, so below 32 bits it
+  writes `c` / `C` / `s` / `S` in place of `b` / `B` / `h` / `H`. From 32 bits
+  up the two already agreed, and `?`, `Zf` / `Zd`, `T{...}` and `Ns` stay PEP
+  3118, which Ruby has no spelling for. The consumer side already accepted
+  both, so views produced by 3.0.0 still import.
+
+- Change: multiplying and dividing a `cmplx64` array (`*`, `/`, `rcp`,
+  `rcp_mul`) is now computed in double and rounded once, so both are correctly
+  rounded -- the previous route lost up to about 1800 units in the last place
+  when the real part nearly cancelled. Division also gets 4.2x to 5.3x faster;
+  multiplication is 1.3x slower, which buys only the accuracy. A product whose
+  partial terms overflow a float but not a double no longer comes back NaN
+  (`(1e30+1e30i) ** 2` gives `0.0+Infinity*i`, not `NaN+Infinity*i`).
+  Infinities, NaNs and the signs of zeros are otherwise unchanged, as are `+`,
+  `-` and every `cmplx128` operation.
+
+- Change: element-wise math on a `float32` or `cmplx64` array is now computed
+  at that width rather than widened to `float64` / `cmplx128` and rounded
+  back, so `sqrt`, `exp`, `log`, the trigonometric and hyperbolic families,
+  `atan2`, `hypot`, `logaddexp`, `abs`, `arg` and `sign` are 1.1x to 3.5x
+  faster there and can move by a bit or two in the last place. Complex `log`,
+  `power`, `exp2` and `exp10` keep computing in double, because a complex
+  logarithm cancels and loses the answer rather than its last bits. The wider
+  types are unchanged, as are `round`, `ceil`, `floor`, `trunc`, `fabs`, the
+  min / max family, `is_close`, `is_equiv` and the variance family, which are
+  either exact at any width or measure in double by declaration. To compute at
+  the wider width, cast with `.to_type(:float64)` or `.to_type(:cmplx128)`
+  first.
+
+- Change: a rolling `sum`, `mean`, `prod`, `min`, `max`, `all` or `any` --
+  `a.windows(-1..1).sum` and the like -- over a window up to five cells wide on
+  every axis is now 2-5x faster, and 1.3-4x over a masked source; `min_count:`
+  and `fill_value:` come along. `min`, `max` and `prod` answer exactly as
+  before; `sum` and `mean` may differ in the last bits, as reductions always
+  may. It holds one more buffer while it
+  works, one window's worth in the type the result accumulates in. A wider
+  window, or any other reduction, is unchanged.
+
+- Change: `CATime#to_unit` floors to a coarser grid instead of raising, and
+  crosses the calendar / fixed-length boundary (`:M` <-> `:D`) through
+  civil-date algebra. `:Y` / `:M` -> `:W` still raises.
+
+- Change: `CATimedelta#to_unit` truncates toward zero instead of raising on a
+  coarser target. Crossing the calendar boundary still raises.
+
+- Fix: `nextafter` on a `float32` array returned its own input. The step was
+  taken in double, and the next double above a float rounds back to that same
+  float. It now steps by one float32 ulp.
+
+- Fix: a lazy expression over an object array (`CArray.object`,
+  `CA_OBJECT`) returned wrong values, and crashed when materialised
+  repeatedly. Affects `to_ca` and `copy` on a lazy view, an eager operation
+  with a lazy operand, and a reduction over one. Other data types were never
+  affected.
+
+- Fix: reading a concatenated view (`CArray.concat`, `CAFrame.concat`)
+  backwards along the concatenated axis -- `m.reverse` and any other negative
+  step -- raised IndexError instead of answering.
+
+- Fix: reading a lazy expression (`a.lazy + b`, `CArray.fuse`) with a step
+  other than one -- `expr[[0, 3, 2]]`, `expr.reverse` and the like -- returned
+  values the expression cannot produce, because its operands were read from
+  the wrong cells. Comparisons carried the same fault, `a.lazy > b` and
+  one-operand ones such as `a.lazy.is_nan` alike. Contiguous reads were never
+  affected.
+
+- Fix: `a.value + b` raised `can not create mask array for the value array`
+  when `b` carried a mask. It now propagates `b`'s mask.
+
+- Fix: a rolling window that does not cover the cell it is centred on --
+  `windows(1..2)`, the two cells after this one -- was read as if it started at
+  the array's edge, so every answer came out shifted by the range's start, and
+  `bounds: :truncate` produced anchors whose window did not fit. `windows(1..2)`
+  on `[1..8]` now sums to `[5, 7, 9, 11, 13, 15, 8, 0]`, the last anchor having
+  nothing after it. A window that covers its anchor, which is every centred one,
+  is unaffected.
+
+- Fix: storing a `Complex` into a `cmplx64` or `cmplx128` array kept the sign
+  of a negative zero real part only when the imaginary part was also negative;
+  `Complex(-0.0, 0.0)` came back as `0.0+0.0i`. The sign of a zero selects the
+  side of a branch cut (`log(-1+0i)` is `+pi*i`, `log(-1-0i)` is `-pi*i`), so a
+  value stored this way could be carried to the wrong branch. All four sign
+  combinations now round-trip, through element assignment and through
+  `to_type`.
+
+- Fix: `sinh`, `cosh`, `tanh`, `asinh`, `acosh` and `atanh` on a complex array
+  gave the hyperbolic function of the real part alone: `cmplx128` and
+  `cmplx64` arrays came back with `tanh(Re z)` where `ctanh(z)` was meant,
+  wrong in both parts, and `acosh` and `atanh` also returned 0 or infinity
+  where the true value is finite. They now agree with C99 `complex.h`. Real
+  and object arrays were never affected.
+
+- Fix: a C extension reading a view in column-major order -- axes and steps
+  reversed against the view's own -- got wrong values from a view with a
+  length-1 axis, such as `v[nil, :_]`, `v.reshape(n, 1)` or a one-column slice.
+  Depending on the view it repeated the first cell, read out of bounds, or
+  hung. Seen through a Fortran-LAPACK backend gathering its operands:
+  `carray-linalg-accelerate`'s `solve(a, b)` returned `b[0]` repeated for a
+  single-column right-hand side.
+
+- Fix: an operation between two views of an array that computes its values --
+  a lazy expression such as `(a.lazy + b)`, or a `CAObject` over a file -- no
+  longer reads that source one cell at a time. `+`, `fma` and comparisons on
+  such a pair now run at the speed of copying each operand first, so the
+  `.copy` that worked around it is no longer needed. Single-operand
+  operations, copies, region transfers and reductions were already unaffected.
+
+- Fix: views built inside a `CArray.fuse` block stay part of the expression
+  instead of dropping out of it, so a stencil written the natural way is fused.
+  `[]`, `shift`, `roll`, `flip`/`reverse`, `transpose`/`T`, `reshape`,
+  `flatten`, `window`, `diagonal`, `tile` and `refer` keep the chain;
+  `unbound_repeat` and `[:*, ...]` deliberately do not.
+
+- Fix: a window or shift over a view parent no longer copies that parent in
+  full on every transfer. `a[nil, nil].shift(1, 0)` and friends now read at
+  parity with an entity parent and write several times faster.
+
+- Fix: reductions over a bare `.lazy` marker no longer raise. Per-axis forms
+  and anything over a masked array failed, so `a.lazy.sum(axis: 0)` raised
+  while `a.lazy.sum` worked.
+
+- Fix: `ca_test_flag` / `ca_set_flag` / `ca_unset_flag` in `carray.h`, which
+  only a C extension calls, did not parenthesise their flag argument, so
+  testing two flags at once was true for every array.
+
+- Fix: a Face no longer hands back its storage bytes through the type casts.
+  `as_type`, `fake` and `CArray.wrap_writable` raise; `CArray.wrap_readonly`
+  converts as `to_type` does, which also makes `t.eq(o)` and `o.eq(t)` agree.
+  Reach the storage explicitly with `t.parent.fake(...)`. Numeric Faces are
+  unaffected.
+
+- Fix: `arange` raised `NoMethodError` in every form; it builds the array now.
+  Integer arguments count exactly, so a step dividing the span evenly no longer
+  picks up an extra element. A zero step or a wrong argument count raises
+  `ArgumentError`.
 
 - Fix: `from_timesteps` on a week grid answered Thursdays. The week grid counts
   from the epoch, which is one, so it cannot hold an ISO Monday head; a week
@@ -330,33 +354,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   another date. `"2019-02-31"` parsed to 2019-03-03, and `"201909"` -- a valid
   YYMMDD to Ruby, 2020-19-09 -- to 2021-07; both now raise.
 
-- New: `CArray.time` parses a year-month (`"2019-09"`) and a bare year
-  (`"2019"`), so the form a `:M` / `:Y` element prints reads back in. A
-  missing finer field names the head of that period.
-
-- Change: a calendar-grid `origin:` given to the bucket-grid methods of a
-  `CATime` array -- `timesteps`, `snap`, `floor`, `ceil`, `round`,
-  `is_righttime` -- now has to be a month head (the 1st at 00:00); it used to
-  drop the day and time silently. A `:Y` tick likewise has to start in
-  January. `from_timesteps` already refused an off-grid origin.
-
-- Change: `CATime#to_unit` floors to a coarser grid instead of raising, and
-  crosses the calendar / fixed-length boundary (`:M` <-> `:D`) through
-  civil-date algebra. `:Y` / `:M` -> `:W` still raises.
-
-- Change: `CATimedelta#to_unit` truncates toward zero instead of raising on a
-  coarser target. Crossing the calendar boundary still raises.
-
 - Fix: `CATime#to_unit` and `CATimedelta#to_unit` were wrong between two
   resolutions where neither tick is a whole multiple of the other: converting
   3 hours to a `"90 minutes"` grid gave 1 unit rather than 2.
-
-- Change: the MemoryView producer emits the format vocabulary
-  `ruby/memory_view.h` specifies rather than PEP 3118's, so below 32 bits it
-  writes `c` / `C` / `s` / `S` in place of `b` / `B` / `h` / `H`. From 32 bits
-  up the two already agreed, and `?`, `Zf` / `Zd`, `T{...}` and `Ns` stay PEP
-  3118, which Ruby has no spelling for. The consumer side already accepted
-  both, so views produced by 3.0.0 still import.
 
 - Fix: importing a MemoryView whose mask is published as `C` or `c` no longer
   fails. The check knew only PEP 3118's `B`, `b` and `?`, so a producer that
