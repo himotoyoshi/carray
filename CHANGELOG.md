@@ -325,9 +325,9 @@ unrecorded.
 - Change: `CATimedelta#to_unit` truncates toward zero instead of raising on a
   coarser target. Crossing the calendar boundary still raises.
 
-- Fix: converting between two resolutions where neither tick is a whole
-  multiple of the other (`"90 minutes"` and `:h`) dropped the ratio numerator
-  and gave a wrong value.
+- Fix: `CATime#to_unit` and `CATimedelta#to_unit` were wrong between two
+  resolutions where neither tick is a whole multiple of the other: converting
+  3 hours to a `"90 minutes"` grid gave 1 unit rather than 2.
 
 - Change: the MemoryView producer emits the format vocabulary
   `ruby/memory_view.h` specifies rather than PEP 3118's, so below 32 bits it
