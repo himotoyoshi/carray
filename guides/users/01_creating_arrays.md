@@ -1,5 +1,11 @@
 # Creating arrays
 
+An array is made by naming two things: the data type of its elements and its shape. What the elements then hold is a separate question, and there are several answers — a constant, a value computed from the position of each element, a sequence, random numbers, or data you already have in some other form.
+
+This chapter takes them in that order, and ends with the conversions: changing the data type of an array, and turning something that is not a CArray into one.
+
+Everything made here is an **entity**: an array that owns the memory its values live in. An array can also own no memory of its own and read from another array instead — that is a view, and views are the subject of [Views](06_views.md).
+
 ## By shape and data type
 
 The basic constructor is a class method named after the data type. It takes the shape — one integer per axis — and returns an array of that shape.
@@ -368,7 +374,19 @@ CA_FLOAT32(a)              #  => [ 1.5, 2.5, 3.5 ]
 (0..4).to_ca                   #  => [ 0, 1, 2, 3, 4 ]
 ```
 
-It promises a CArray and nothing beyond that. In particular it does **not** promise a duplicate. What comes back may share its memory with the source or may be freshly made, and which of those you get is the implementer's business. A CArray asked for `to_ca` hands back itself.
+It promises a CArray and nothing beyond that. In particular it does **not** promise a duplicate: what comes back may share its memory with the source or may be freshly made, and which of those you get is the implementer's business.
+
+Asked of a CArray, it does the least work it can and returns **the receiver itself** — the same object, not a copy of it. This holds for a view as well: `to_ca` on a slice returns that slice, still referring to the array underneath, rather than turning it into an array of its own.
+
+```ruby
+a = CArray.int32(2, 3).seq!
+b = a.to_ca
+b.equal?(a)          #  => true    the same object
+b[0, 0] = 99
+a[0, 0]              #  => 99      so this store went to a
+```
+
+The one exception is an array that has no data to hand back — the result of a lazy expression such as `a.lazy + 1`. There, `to_ca` evaluates the expression and returns a new array.
 
 So when you want something you can change freely, say so: `copy` always allocates, and `x.to_ca.copy` is the spelling for an `x` that may not be a CArray yet.
 
