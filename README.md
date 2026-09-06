@@ -110,7 +110,16 @@ b.strip_mask(Float::NAN).sum(axis: 0)
 
 ## Documentation
 
-The [User's Guide](guides/users/) covers the library chapter by chapter and is meant to be read in order. Begin with the [Introduction](guides/users/introduction.md), or with [Getting started](guides/users/00_getting_started.md) to have an array in front of you first; the guide's own contents page lists the later chapters, from views and masks through to iterators, time arrays and data frames.
+* [Introduction](guides/users/introduction.md) — what Ruby/CArray is
+* [Getting started](guides/users/00_getting_started.md) — install, and a first array
+* [Creating arrays](guides/users/01_creating_arrays.md) — constructors, data types, filling
+* [Indexing and slicing](guides/users/02_indexing_and_slicing.md) — elements, rows, blocks, conditions
+* [Indexer reference](guides/users/16_indexer_reference.md) — every form `[]` accepts
+* [Element-wise operations](guides/users/03_elementwise.md) — arithmetic and mathematical functions
+* [Broadcasting](guides/users/07_broadcasting.md) — shapes that differ
+* [Views](guides/users/06_views.md) — referring to data without copying
+* [Reduction and statistics](guides/users/04_reduction_and_statistics.md) — summaries, whole or per axis
+* [Masks and missing values](guides/users/05_masks.md) — undefined elements, and how calculations treat them
 
 ## Contributing
 
