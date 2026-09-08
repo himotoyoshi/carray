@@ -36,6 +36,26 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: C extensions only. A kernel iterator init that the engine refuses
+  now raises instead of returning a code the block macros
+  (`CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER` and their variants) discarded.
+  An axis that does not exist, or a flag combination a source cannot serve,
+  says so. Kernels that want to handle a refusal rather than propagate it
+  can call `ca_iter_state_init_l1` / `_l2` directly and read the code.
+
+- Fix: C extensions only. A kernel writing into a view the caller supplied
+  now reaches the array. Writes were lost when the destination was a
+  CAStack, and when it was a cast, byte-swapped, rolled or tiled view
+  iterated along an axis whose fiber is not contiguous; a single-cast view
+  iterated that way crashed. Kernels writing into an array they allocated
+  themselves were never affected, which is every kernel inside carray.
+
+- Fix: `CArray#each_slab` yields a read-only slab, and writing through it
+  raises rather than reaching the array on one axis and being dropped on
+  another. Return values from the block instead: `map_slab` collects them
+  and `reduce_slab` folds them. To write in place, assign through the array
+  itself. Reading the slab, and `map_slab` / `reduce_slab`, are unchanged.
+
 ## 3.0.1
 
 - New: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` name a block

@@ -227,14 +227,15 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal(-1.0, a.value[1, 1])
   end
 
-  # --- F-5: the yielded mask is a snapshot of the input ------------------
+  # --- the yielded mask is an input ------------------------------------
   # alias_mask is scratch_mask (a ca_copy_data snapshot) at every site that
-  # assigns it, and no branch of sync_slab scatters it.
-  # EXPECTED TO STAY, as a contract: the decision is that a WRITE kernel
-  # authors its output mask with ca_create_mask(co), not through the yield.
-  # What should change is that the signature stops looking symmetric.
+  # assigns it, and no branch of sync_slab scatters it.  That is the
+  # contract, not a defect: a kernel authors its output mask on its own
+  # output array with ca_create_mask.  These two pin the halves of the
+  # reason it is not worth making writable -- see ca_kernel_iterator.h at
+  # ca_iter_state_next_slab.
 
-  def test_F5_mask_written_through_the_yield_does_not_reach_the_array
+  def test_a_mask_written_through_the_yield_does_not_reach_the_array
     a = CArray.float64(3, 4).seq!(1)
     a[0, 0] = UNDEF
     yielded = CArray.iw_slab_fill_mask(a, 0, -1.0)
@@ -243,7 +244,7 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal(-1.0, a.value[1, 1], "while the data half of the same yield lands")
   end
 
-  def test_F5_an_unmasked_destination_yields_no_mask_to_write
+  def test_an_unmasked_destination_yields_no_mask_to_write
     # Why making the yielded mask writable would only be half a feature:
     # there is nothing to write into when the destination has no mask.
     a = CArray.float64(3, 4).seq!(1)

@@ -10,16 +10,18 @@ class CArray
 
   # @overload each_slab(axis:)
   #   Yields each slab of `self` (a view along the axes NOT in `axis`) to
-  #   the block and returns `self`.  The slab is a live view valid only
-  #   for the duration of the block — capturing it across iterations sees
-  #   the last slab's data.
+  #   the block and returns `self`.  The slab is valid only for the
+  #   duration of the block — capturing it across iterations sees the last
+  #   slab's data — and it is read-only: writing through it raises.  To
+  #   produce values per slab use `map_slab` or `reduce_slab`; to write in
+  #   place, assign through the array itself.
   # @overload each_slab(axis:)
   #   Returns an Enumerator when no block is given.
   #   @param axis [Integer, Array<Integer>, nil] the slab axis or axes
   #     (`nil` = the whole view as a single slab).
   #   @return [self, Enumerator]
-  #   @see file:docs/SlabIterator.md SlabIterator
-  #   @see file:docs/drafts/11_slab_iteration.md Slab iteration
+  #   @see file:docs/topics/SlabIterator.md SlabIterator
+  #   @see file:guides/users/11_slab_iteration.md Slab iteration
   def each_slab(axis:); end
 
   # @overload map_slab(axis:, data_type: nil)
@@ -33,7 +35,7 @@ class CArray
   #   @return [CArray]
   #   @raise [ArgumentError] when the block result's shape does not match
   #     the slab.
-  #   @see file:docs/SlabIterator.md SlabIterator
+  #   @see file:docs/topics/SlabIterator.md SlabIterator
   def map_slab(axis:, data_type: nil); end
 
   # @overload reduce_slab(axis:, data_type: nil)
@@ -50,7 +52,7 @@ class CArray
   #     per-element form).
   #   @param data_type [Symbol, Integer, Class, nil] output data type.
   #   @return [CArray] the reduced array (slab axes collapsed).
-  #   @see file:docs/SlabIterator.md SlabIterator
+  #   @see file:docs/topics/SlabIterator.md SlabIterator
   def reduce_slab(axis:, init: nil, data_type: nil); end
 
   # @!endgroup

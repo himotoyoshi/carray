@@ -528,7 +528,24 @@ int  ca_iter_state_init_l2 (ca_iter_state    *st,
    source carries a mask (= ca_has_mask(src)), or NULL otherwise.
    The mask layout matches the value layout (= same iteration order
    and same n).  Step 6+: kernels use the CA_FOR_EACH_UNMASKED macro
-   family (carray.h) to skip masked cells. */
+   family (carray.h) to skip masked cells.
+
+   The mask is an input.  What it points at is a copy taken when the
+   walk began, so writing through it changes nothing -- not even under
+   CA_KERNEL_WRITE, where the value half of the same yield is often a
+   live alias.  It also cannot express the thing an author would most
+   want it for: an unmasked source yields NULL, so there is nowhere to
+   record that a cell has become undefined.  A kernel authors its
+   output mask on its own output array instead:
+
+       if ( op_mask == NULL ) {
+         ca_create_mask(co);
+         op_mask = (boolean8_t *) co->mask->ptr;
+       }
+       op_mask[out_i] = 1;
+
+   which is what every kernel in carray does (carray_hold.c, and the
+   reduction kernels mkkernel emits). */
 int  ca_iter_state_next_slab (ca_iter_state *st,
                               char         **out_ptr,
                               boolean8_t   **out_mask,
@@ -624,7 +641,9 @@ int ca_iter_check_init (int rc);
      surrounding scope.
    - `flags` arg propagates to init_l2 (= CA_KERNEL_WRITE supported).
      `sync_slab` is called automatically after each iteration; it's a
-     no-op when WRITE flag is absent.
+     no-op when WRITE flag is absent.  The mask cursor is an input even
+     under WRITE -- see ca_iter_state_next_slab above for why, and for
+     where an output mask is written instead.
    - Init failure (ca_iter_state_init_l2 returns CA_ITER_ERR_*) raises:
      the macro passes the code to ca_iter_check_init, which reports what
      the iterator declined to do.  The body does not run and finish is

@@ -242,4 +242,27 @@ class TestEachSlabBeta4 < Test::Unit::TestCase
     a.each_slab(axis: 1) { |row| seen << row.sum }
     assert_equal [6.0, 22.0, 38.0], seen
   end
+  # The slab is a window onto the source when the fiber is contiguous and a
+  # copy in scratch when it is not, so a write through it used to land on
+  # the inner axis and vanish on the outer one, with nothing said either
+  # way.  It is refused on both now.
+  def test_the_slab_is_read_only_on_every_axis
+    a = CArray.float64(3, 4).seq!(1)
+    [0, 1].each do |axis|
+      b = a.copy
+      assert_raise(RuntimeError, "axis #{axis}") do
+        b.each_slab(axis: axis) { |slab| slab[] = 0 }
+      end
+      assert_equal a.to_a, b.to_a, "axis #{axis} left unchanged"
+    end
+  end
+
+  def test_the_value_producing_forms_are_unaffected
+    a = CArray.float64(3, 4).seq!(1)
+    assert_equal [-1.5, -0.5, 0.5, 1.5],
+                 a.map_slab(axis: 1) { |row| row - row.mean }.to_a.first
+    assert_equal [10.0, 26.0, 42.0],
+                 a.reduce_slab(axis: 1) { |row| row.sum }.to_a
+  end
+
 end
