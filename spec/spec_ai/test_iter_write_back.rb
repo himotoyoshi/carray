@@ -6,11 +6,11 @@
 # view.  spec_ai/ext_iter_write/ is that caller, and this file walks the
 # matrix it opens up.
 #
-# MOST OF THE ASSERTIONS BELOW PIN BEHAVIOUR THAT IS WRONG.  They are here
-# so that the fixes land visibly: each one is expected to flip, and the test
-# that flips it should be rewritten to assert the correct behaviour rather
-# than deleted.  Tests whose name begins with `test_sound_` are the opposite
-# -- they pin the invariant the working half rests on and must not change.
+# A test named `test_F<n>_` pins behaviour that is WRONG, so that the fix
+# lands visibly: it is expected to flip, and whoever flips it rewrites it to
+# assert the correct behaviour rather than deleting it.  Every other test
+# pins behaviour that is correct -- `test_sound_` for the invariant the
+# working half rests on, and plain names for what has since been fixed.
 #
 # The invariant that makes the sound cells sound: under CA_SLAB_WHOLE the
 # gather extent and the scatter extent are the same, so what was collected
@@ -157,31 +157,46 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
   end
 
-  def test_F3_a_rejected_init_can_return_silently
-    # The author asked for an axis that does not exist and was told nothing
-    # at all: the call returns normally, having written nothing.
+  def test_a_rejected_init_says_so
+    b = CArray.float64(3, 4).seq!(1)
+    {
+      "axis past the end" => [b, 9],
+      "negative axis"     => [b, -1],
+      "axis 1 of a 1-D view" => [b[b.gt(0)], 1],
+      "shift as a WRITE destination" => [b.shift(1, 0), 0],
+      "read-only destination" => [b.lazy + 1, 0],
+    }.each do |what, (view, axis)|
+      e = assert_raise(RuntimeError, what) do
+        CArray.iw_slab_fill(view, axis, -1.0)
+      end
+      assert_match(/kernel iterator: .+ \(rc=\d+\)/, e.message, what)
+    end
+  end
+
+  def test_a_rejected_init_leaves_the_destination_alone
     a = CArray.float64(3, 4).seq!(1)
     before = a.to_a.flatten
-    assert_nothing_raised { CArray.iw_slab_fill(a, 9, -1.0) }
+    assert_raise(RuntimeError) { CArray.iw_slab_fill(a, 9, -1.0) }
     assert_equal before, a.to_a.flatten
   end
 
-  def test_F3_a_rejected_init_can_also_take_the_process_down
-    # Which of the two happens is decided by which check inside init_l2
-    # fires, since only some of them reach that branch's memset before
-    # returning.  Poisoning the caller's frame does not change either
-    # outcome, so this is a property of the reject site, not of luck.
-    [['b.shift(1, 0)', 0], ['b[b.gt(0)]', 1]].each do |view, axis|
-      %w[iw_slab_fill iw_slab_fill_poisoned].each do |entry|
-        st = status_of(<<~RUBY)
-          require "carray"
-          require "iter_write"
-          b = CArray.float64(3, 4).seq!(1)
-          CArray.#{entry}(#{view}, #{axis}, -1.0)
-        RUBY
-        assert_not_nil st.termsig, "#{view} axis #{axis} via #{entry}"
+  def test_a_rejected_init_does_not_depend_on_the_callers_frame
+    # init writes the state before it can return, so a caller whose frame
+    # is already dirty gets the same refusal as one sitting on clean stack
+    # -- it used to get a dead process.
+    st = status_of(<<~RUBY)
+      require "carray"
+      require "iter_write"
+      b = CArray.float64(3, 4).seq!(1)
+      begin
+        CArray.iw_slab_fill_poisoned(b.shift(1, 0), 0, -1.0)
+      rescue RuntimeError
+        exit 0
       end
-    end
+      exit 1
+    RUBY
+    assert_nil st.termsig, "no signal"
+    assert_predicate st, :success?, "refused, not crashed"
   end
 
   # --- F-4: CAStack skips sync unconditionally --------------------------

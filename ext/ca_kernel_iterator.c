@@ -554,6 +554,40 @@ ca_iter_strip_storage_wrapper (CArray *src)
 }
 
 int
+ca_iter_check_init (int rc)
+{
+  const char *why;
+
+  if ( rc == CA_ITER_OK ) return rc;
+
+  switch ( rc ) {
+  case CA_ITER_ERR_NOT_CHEAP:
+    why = "the source cannot be read without materialising it";
+    break;
+  case CA_ITER_ERR_POLICY:
+    why = "the slab policy or the axes given do not apply to this source";
+    break;
+  case CA_ITER_ERR_FLAGS:
+    why = "this flag combination is not supported for this source";
+    break;
+  case CA_ITER_ERR_READONLY:
+    why = "the array is read-only and the kernel asked to write";
+    break;
+  case CA_ITER_ERR_MASK:
+    why = "the source carries a mask";
+    break;
+  case CA_ITER_ERR_MASK_NOT_ALLOWED:
+    why = "the kernel declared CA_KERNEL_NO_MASK and the source carries a mask";
+    break;
+  default:
+    why = "the request was refused";
+    break;
+  }
+  rb_raise(rb_eRuntimeError, "kernel iterator: %s (rc=%d)", why, rc);
+  return rc;   /* not reached */
+}
+
+int
 ca_iter_state_init_l1 (ca_iter_state    *st,
                        struct _CArray   *src,
                        ca_slab_policy_t  policy,
@@ -561,6 +595,13 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
                        int8_t            naxes,
                        uint32_t          flags)
 {
+  /* Leave the state defined before anything can return.  Every error
+     return below hands control back to a caller that may not look at the
+     code, so what it is left holding has to be a state that iterates zero
+     times rather than whatever its stack frame happened to contain. */
+  if ( st == NULL ) return CA_ITER_ERR_FLAGS;
+  memset(st, 0, sizeof(*st));
+
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 + PROPOSAL_LAZY_MARKER_LIFT Phase 0:
      storage-identical wrapper strip at entry (= same rationale as init_l2
      below).  Strip before validate_inputs.
@@ -586,7 +627,6 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
 
   uint8_t src_kind = ca_iter_classify_source(src);
 
-  memset(st, 0, sizeof(*st));
   st->src      = src;
   st->src_kind = src_kind;
   st->level    = 1;
@@ -748,6 +788,13 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
                        int8_t            naxes,
                        uint32_t          flags)
 {
+  /* Leave the state defined before anything can return.  Every error
+     return below hands control back to a caller that may not look at the
+     code, so what it is left holding has to be a state that iterates zero
+     times rather than whatever its stack frame happened to contain. */
+  if ( st == NULL ) return CA_ITER_ERR_FLAGS;
+  memset(st, 0, sizeof(*st));
+
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 (= MEMO §3.5 kernel_iterator entry strip)
      + PROPOSAL_LAZY_MARKER_LIFT Phase 0.
 
@@ -828,7 +875,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
                                             row_byte_strides[fiber_ax],
                                             flags) ) {
-          memset(st, 0, sizeof(*st));
           st->src      = src;
           st->src_kind = src_kind;
           st->level    = 2;
@@ -922,7 +968,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
           return CA_ITER_ERR_FLAGS;
         }
 
-        memset(st, 0, sizeof(*st));
         st->src      = src;
         st->src_kind = CA_ITER_SRC_DESCRIPTOR;
         st->level    = 2;
@@ -1091,7 +1136,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
       }
 
       if ( outer_has_shift ) {
-        memset(st, 0, sizeof(*st));
         st->src      = src;
         st->src_kind = CA_ITER_SRC_DESCRIPTOR;
         st->level    = 2;
@@ -1185,7 +1229,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         return CA_ITER_OK;
       }
 
-      memset(st, 0, sizeof(*st));
       st->src      = src;
       st->src_kind = CA_ITER_SRC_DESCRIPTOR;  /* Phase B alias path */
       st->level    = 2;
@@ -1333,7 +1376,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         in_slab[ax] = 1;
       }
 
-      memset(st, 0, sizeof(*st));
       st->src      = src;
       st->src_kind = CA_ITER_SRC_ATTACH;
       st->level    = 2;
@@ -1721,7 +1763,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
      / CATile / CARoll).  Same shape as L1 SRC_ATTACH: iterator-owns
      scratch + xfer_all GET/PUT.  Yield as one 1-D strided slab. */
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_ATTACH;
     st->level    = 2;
@@ -1773,7 +1814,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     int8_t  nd = raw_ndim;
     int8_t  k;
 
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE;
     st->level    = 2;
@@ -1864,7 +1904,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     /* raw_descs / raw_pdims / raw_ndim were populated by route_source
        above so we skip the local describe_axes call.  Kept locals
        named raw_* to match the original code. */
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_DESCRIPTOR;
     st->level    = 2;
@@ -1938,7 +1977,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
   }
 
   /* === CAStride / entity L2 path === */
-  memset(st, 0, sizeof(*st));
   st->src      = src;
   st->src_kind = CA_ITER_SRC_CASTRIDE;
   st->level    = 2;
