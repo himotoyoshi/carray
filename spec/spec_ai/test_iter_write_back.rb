@@ -199,26 +199,48 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_predicate st, :success?, "refused, not crashed"
   end
 
-  # --- F-4: CAStack skips sync unconditionally --------------------------
-  # ca_kernel_iterator.c:2757 skips sync for ALIAS_STACK / STACK_OUTER_K as
-  # "READ-only scope", but init_l2:1389 / :1508 pick those modes without
-  # looking at CA_KERNEL_WRITE.
-  # EXPECTED TO FLIP: to a refusal (Step 2) or to 12 (Step 4).
+  # --- F-4 was: CAStack skipped sync unconditionally --------------------
+  # ca_kernel_iterator.c:2795 skips sync for ALIAS_STACK / STACK_OUTER_K,
+  # and init_l2 used to pick those modes without looking at CA_KERNEL_WRITE.
+  # Declining them for WRITE routes a write destination through the generic
+  # SRC_ATTACH path, which gathers and scatters the whole view -- so what is
+  # left is F-2, which stack now shares with the rest of that family.
 
-  def test_F4_stack_loses_the_write_when_the_slab_axis_is_the_stack_axis
+  def test_stack_receives_the_slab_write_on_every_axis
     mk = ->(b) { CArray.stack([b, b.copy], axis: 0) }
-    assert_equal 0, cells_reached(mk, :iw_slab_fill, 0)
-    assert_equal 0, cells_reached(mk, :iw_fiber_fill, 0)
-    assert_equal 0, CArray.iw_init_rc(CArray.stack([base, base], axis: 0), 0, WRITE),
-                 "and init does not refuse it"
+    [0, 1, 2].each do |axis|
+      assert_equal 12, cells_reached(mk, :iw_slab_fill, axis), "axis #{axis}"
+    end
   end
 
-  def test_F4_stack_loses_half_the_write_on_another_axis
-    # Worse than losing all of it: the fiber form lands 6 of the 12 cells
-    # this parent owns, so the array is left half updated.
+  def test_F2_stack_loses_the_fiber_write_like_the_other_attach_views
     mk = ->(b) { CArray.stack([b, b.copy], axis: 0) }
-    assert_equal 6, cells_reached(mk, :iw_fiber_fill, 1)
-    assert_equal 12, cells_reached(mk, :iw_slab_fill, 1)
+    assert_equal 0, cells_reached(mk, :iw_fiber_fill, 0)
+    assert_equal 0, cells_reached(mk, :iw_fiber_fill, 1)
+    # The contiguous fiber is fine, as it is for every other view here.
+    assert_equal 12, cells_reached(mk, :iw_fiber_fill, 2)
+  end
+
+  def test_stack_over_view_parents_receives_the_write
+    # The case that used to lose the write silently: STACK_OUTER_K aliased
+    # parents[k]->ptr, which for a view parent is the attach buffer, and
+    # finish detached it without syncing.
+    r1 = CArray.float64(3, 8).seq!(1)
+    r2 = CArray.float64(3, 8).seq!(100)
+    s = CArray.stack([r1[nil, 0...4], r2[nil, 0...4]], axis: 0)
+    before = r1.to_a.flatten + r2.to_a.flatten
+    CArray.iw_slab_fill(s, 1, -1.0)
+    after = r1.to_a.flatten + r2.to_a.flatten
+    assert_equal 24, before.zip(after).count { |x, y| x != y }
+  end
+
+  def test_masked_stack_receives_the_write_and_keeps_its_mask
+    a = CArray.float64(3, 4).seq!(1)
+    a[0, 0] = UNDEF
+    CArray.iw_slab_fill(CArray.stack([a, CArray.float64(3, 4).seq!(50)], axis: 0),
+                        1, -1.0)
+    assert_equal 1, a.count_masked
+    assert_equal(-1.0, a.value[1, 1])
   end
 
   # --- F-5: the yielded mask is a snapshot of the input ------------------

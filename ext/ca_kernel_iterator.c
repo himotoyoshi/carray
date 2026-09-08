@@ -1428,6 +1428,7 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
          k_axis..N-2]; either way outer_idx[m] = parent axis m). */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !ca_has_mask(src)
+           && !(flags & CA_KERNEL_WRITE)
            && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis ) {
         CAStack *stack = (CAStack *) src;
         int8_t   parent_ndim = src->ndim - 1;
@@ -1543,6 +1544,7 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
          s - 1); only the K stack axis (s == k_axis) has no parent
          counterpart. */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+           && !(flags & CA_KERNEL_WRITE)
            && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis] ) {
         CAStack *stack = (CAStack *) src;
         int8_t   k_axis = stack->k_axis;
@@ -2786,18 +2788,16 @@ ca_iter_state_sync_slab (ca_iter_state *st)
   /* READ walk: nothing to sync. */
   if ( st == NULL || !(st->flags & CA_KERNEL_WRITE) ) return;
 
-  /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2: STACK path is
-     READ-only in initial scope.  Kernel writes into scratch would not
-     be valid to scatter back via xfer_all PUT (= scratch is slab-sized
-     not whole-view), so the SRC_ATTACH PUT below would be a semantic
-     mismatch.  Per-slab scatter via direct per-parent memcpy is a
-     future extension once a WRITE-using kernel materialises. */
+  /* Neither stack mode can be reached with WRITE set: both are declined
+     at init, which sends a write destination down the generic SRC_ATTACH
+     path instead.  They cannot serve a write themselves -- ALIAS_STACK
+     hands out a tile cache that finish frees, and STACK_OUTER_K aliases
+     parents[k]->ptr, which is the attach buffer rather than the parent's
+     own memory whenever the parent is a view.  Scattering per parent
+     would let the fast paths carry writes too; until then this branch is
+     just the assertion that they are not asked to. */
   if ( st->alias_mode == CA_ITER_ALIAS_STACK
        || st->alias_mode == CA_ITER_ALIAS_STACK_OUTER_K ) {
-    /* STACK_OUTER_K (P.2 Case A) is READ-only scope: slabs are direct
-       aliases into parents[k]->ptr, kernel WRITE would scatter into
-       parent memory which is out of scope (see proposal R1).  Skip
-       sync. */
     st->write_dirty = 0;
     return;
   }
