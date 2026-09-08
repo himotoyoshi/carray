@@ -2802,20 +2802,6 @@ ca_iter_state_sync_slab (ca_iter_state *st)
     return;
   }
 
-  /* SRC_ATTACH path (step 9 + 2026-05-31 refactor): kernel wrote into
-     iterator-owned scratch (= scratch_ptr).  Push back via xfer_all PUT
-     which routes through the view's xfer_all slot -- handles CAFake
-     (cast back), CAByteSwap (swap back), CABitfield/CABitarray (bit
-     pack back), CAReduce (broadcast across reduce window).  Inherits
-     transform-fused / partial materialise / etc. automatically. */
-  if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
-    if ( st->src->elements > 0 ) {
-      ca_xfer_all(st->src, st->scratch_ptr, CA_XFER_PUT);
-    }
-    st->write_dirty = 0;
-    return;
-  }
-
   /* ======================================================================
    *           !!! CORRECTNESS HAZARD - DO NOT MOVE !!!
    *
@@ -2890,12 +2876,32 @@ ca_iter_state_sync_slab (ca_iter_state *st)
       ca_stride_scatter_run(dst, st->fiber_data_scratch,
                             bytes, n, data_step);
     }
-    /* Fall through to any subsequent src_kind scatter (= harmless: for
-       the alias paths reached here, scratch_ptr is NULL and the switch
-       below early-returns).  But for SRC_DESCRIPTOR / SRC_ATTACH that
-       use the per-slab materialise path, fiber_data_scratch stays NULL
-       (those paths use scratch_ptr and the PER_SLAB(_HOIST) yield), so
-       this block does not fire. */
+    /* Fall through.  The gather above is not specific to a src_kind --
+       it fires for any source whose fiber is not innermost-contig -- so
+       for SRC_ATTACH this has just written the fiber back into the
+       whole-view scratch, and the push-back below carries it to the
+       source.  For the alias paths scratch_ptr is NULL and the switch
+       below early-returns. */
+  }
+
+  /* SRC_ATTACH path (step 9 + 2026-05-31 refactor): kernel wrote into
+     iterator-owned scratch (= scratch_ptr).  Push back via xfer_all PUT
+     which routes through the view's xfer_all slot -- handles CAFake
+     (cast back), CAByteSwap (swap back), CABitfield/CABitarray (bit
+     pack back), CAReduce (broadcast across reduce window).  Inherits
+     transform-fused / partial materialise / etc. automatically.
+
+     This has to stay below the two per-fiber blocks: consulting
+     src_kind first would push back the whole-view buffer while the
+     fiber the author actually wrote sat unscattered in
+     fiber_data_scratch, and would push back a NULL one for
+     PER_FIBER_FUSED, which owns no whole-view buffer at all. */
+  if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
+    if ( st->src->elements > 0 ) {
+      ca_xfer_all(st->src, st->scratch_ptr, CA_XFER_PUT);
+    }
+    st->write_dirty = 0;
+    return;
   }
 
   /* alias path: kernel wrote through alias_ptr into parent directly

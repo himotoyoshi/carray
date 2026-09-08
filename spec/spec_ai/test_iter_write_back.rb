@@ -69,40 +69,34 @@ class TestIterWriteBack < Test::Unit::TestCase
     RUBY
   end
 
-  # --- the working half: gather extent == scatter extent ----------------
+  # --- the matrix ------------------------------------------------------
 
-  def test_sound_entity_and_stride_family_receive_every_write
-    {
-      "entity"    => ->(b) { b },
-      "refer"     => ->(b) { b.refer(:float64, [3, 4]) },
-      "block"     => ->(b) { b[nil, 1..3] },
-      "transpose" => ->(b) { b.transpose },
-      "grid"      => ->(b) { b[[0, 2], [1, 3]] },
-      "window"    => ->(b) { b.window(0..1, 0..1) },
-    }.each do |name, mk|
+  VIEWS = {
+    "entity"    => ->(b) { b },
+    "refer"     => ->(b) { b.refer(:float64, [3, 4]) },
+    "block"     => ->(b) { b[nil, 1..3] },
+    "transpose" => ->(b) { b.transpose },
+    "grid"      => ->(b) { b[[0, 2], [1, 3]] },
+    "window"    => ->(b) { b.window(0..1, 0..1) },
+    "fake"      => ->(b) { b.fake(:float64) },
+    "swap"      => ->(b) { b.swap_bytes },
+    "roll"      => ->(b) { b.roll(1, 0) },
+    "tile"      => ->(b) { b.tile(1, 1) },
+  }
+
+  def test_sound_every_destination_receives_every_write
+    VIEWS.each do |name, mk|
       n = mk.call(base).elements
       [0, 1].each do |axis|
-        assert_equal n, cells_reached(mk, :iw_fiber_fill, axis),
-                     "#{name} fiber axis #{axis}"
-        assert_equal n, cells_reached(mk, :iw_slab_fill, axis),
-                     "#{name} slab axis #{axis}"
-      end
-    end
-  end
-
-  def test_sound_slab_axes_without_fiber_contig_reaches_transform_views
-    # The same views that lose fiber writes (below) are fine without
-    # FIBER_CONTIG: the whole-view scratch is gathered and scattered with
-    # the same extent.
-    {
-      "fake"  => ->(b) { b.fake(:float64) },
-      "swap"  => ->(b) { b.swap_bytes },
-      "roll"  => ->(b) { b.roll(1, 0) },
-      "tile"  => ->(b) { b.tile(1, 1) },
-    }.each do |name, mk|
-      [0, 1].each do |axis|
-        assert_equal 12, cells_reached(mk, :iw_slab_fill, axis),
-                     "#{name} slab axis #{axis}"
+        %i[iw_fiber_fill iw_slab_fill].each do |entry|
+          b = base
+          v = mk.call(b)
+          before = b.to_a.flatten
+          CArray.send(entry, v, axis, -1.0)
+          where = "#{name} #{entry} axis #{axis}"
+          assert_equal n, before.zip(b.to_a.flatten).count { |x, y| x != y }, where
+          assert_equal [-1.0], v.to_a.flatten.uniq, where
+        end
       end
     end
   end
@@ -111,36 +105,27 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end
 
-  # --- F-2: SRC_ATTACH + FIBER_CONTIG drops a non-contiguous fiber ------
-  # ca_kernel_iterator.c:2773 pushes back the untouched whole-view scratch
-  # and returns before the per-fiber scatter at :2836.
-  # EXPECTED TO FLIP: every count below should become 12.
+  # --- what the matrix above used to look like --------------------------
+  # sync_slab consulted src_kind before alias_mode, so the SRC_ATTACH
+  # branch at ca_kernel_iterator.c:2773 ran first and returned.  Two ways
+  # that went wrong, both on the fiber form:
 
-  def test_F2_fiber_write_is_lost_on_the_outer_axis
-    {
-      "swap" => ->(b) { b.swap_bytes },
-      "roll" => ->(b) { b.roll(1, 0) },
-      "tile" => ->(b) { b.tile(1, 1) },
-    }.each do |name, mk|
-      assert_equal 0, cells_reached(mk, :iw_fiber_fill, 0),
-                   "#{name}: write is currently lost"
-      # The contiguous fiber on the same view is fine.
-      assert_equal 12, cells_reached(mk, :iw_fiber_fill, 1), "#{name} inner"
-    end
-  end
-
-  def test_F2_fake_loses_the_outer_fiber_too
-    # Split from the others because its inner axis crashes (F-1).
-    assert_equal 0, cells_reached(->(b) { b.fake(:float64) }, :iw_fiber_fill, 0)
-  end
-
-  # --- F-1: PER_FIBER_FUSED has no scratch, and :2773 pushes back NULL --
-  # EXPECTED TO FLIP: the child should exit 0 and write all 12 cells.
-
-  def test_F1_fused_fiber_write_crashes_the_process
+  def test_a_fused_fiber_write_reaches_the_array
+    # PER_FIBER_FUSED owns no whole-view buffer, so the SRC_ATTACH branch
+    # pushed back a NULL one and took the process down.
     st = status_of(child('b.fake(:float64)', "iw_fiber_fill", 1))
-    assert_not_predicate st, :success?,
-                         "fused fiber write currently takes the process down"
+    assert_predicate st, :success?
+    assert_equal 12, cells_reached(->(b) { b.fake(:float64) }, :iw_fiber_fill, 1)
+  end
+
+  def test_a_gathered_fiber_is_scattered_before_the_view_is_pushed_back
+    # A non-contiguous fiber is gathered into fiber_data_scratch, and the
+    # whole-view push-back used to run without it, so the author's writes
+    # stayed in a buffer nobody read.  Outer axis on each of these views
+    # is a non-contiguous fiber.
+    %w[fake swap roll tile].each do |name|
+      assert_equal 12, cells_reached(VIEWS[name], :iw_fiber_fill, 0), name
+    end
   end
 
   # --- F-3: the block macros discard init's return code -----------------
@@ -213,12 +198,11 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
-  def test_F2_stack_loses_the_fiber_write_like_the_other_attach_views
+  def test_stack_receives_the_fiber_write_on_every_axis
     mk = ->(b) { CArray.stack([b, b.copy], axis: 0) }
-    assert_equal 0, cells_reached(mk, :iw_fiber_fill, 0)
-    assert_equal 0, cells_reached(mk, :iw_fiber_fill, 1)
-    # The contiguous fiber is fine, as it is for every other view here.
-    assert_equal 12, cells_reached(mk, :iw_fiber_fill, 2)
+    [0, 1, 2].each do |axis|
+      assert_equal 12, cells_reached(mk, :iw_fiber_fill, axis), "axis #{axis}"
+    end
   end
 
   def test_stack_over_view_parents_receives_the_write
