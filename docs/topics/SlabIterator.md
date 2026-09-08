@@ -119,6 +119,21 @@ Negative axes are supported (`axis: -1` is the innermost). The
 current surface is single-axis only; multi-axis slabs
 (`axis: [k1, k2]`) are not supported.
 
+## The slab is read-only
+
+Writing through the slab raises. The slab is a window onto the source when
+the fiber it covers is contiguous and a copy in the iterator's scratch when
+it is not, so a write used to reach the array on one axis and disappear on
+the next, with nothing in the surface saying which you would get.
+
+```ruby
+ca.each_slab(axis: 0) { |row| row[] = 0 }   # RuntimeError
+```
+
+To produce values per slab, return them — `map_slab` collects the block's
+result and `reduce_slab` folds it. To write in place, assign through the
+array itself (`ca[] = ...`), or write a C kernel with `CA_KERNEL_WRITE`.
+
 ## Slab persistence — block-only contract
 
 The slab CArray is **reused per iteration**: its underlying `ptr` is
