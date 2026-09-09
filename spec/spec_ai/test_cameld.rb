@@ -648,4 +648,41 @@ class TestCAMeld < Test::Unit::TestCase
     a = CArray.float64(2, 3) { 0 }
     assert_raises(ArgumentError) { a.concatenate(axis: 0) }
   end
+  # --- non-identity region requests on an internal meld axis ------------
+  #
+  # The meld-axis bound check reads strides[ma] / native[ma] as a step along
+  # view axis ma.  That is only what it is once the structural gate has proved
+  # request axis ma is view axis ma; asked before the gate, it rejects legal
+  # requests.  meld_axis 0 is unaffected -- there native[0] is the largest
+  # stride, so the bogus step truncates to 0 and the check degenerates.
+
+  def meld_h
+    CArray.int32(4, 3).seq!.meld(CArray.int32(4, 2).seq!(100), axis: 1)
+  end
+
+  def test_transpose_of_an_internal_axis_meld_reads
+    assert_equal [[0, 3, 6, 9], [1, 4, 7, 10], [2, 5, 8, 11],
+                  [100, 102, 104, 106], [101, 103, 105, 107]],
+                 meld_h.transpose.to_a
+  end
+
+  def test_reshape_of_an_internal_axis_meld_reads
+    assert_equal meld_h.to_a.flatten, meld_h.reshape(2, 10).to_a.flatten
+  end
+
+  def test_a_reduction_over_a_transposed_internal_axis_meld
+    assert_equal meld_h.sum, meld_h.transpose.sum
+  end
+
+  def test_an_out_of_range_structural_request_still_raises
+    h = meld_h
+    assert_raises(IndexError) { h[0..1, 3..6].to_a }
+  end
+
+  def test_meld_axis_zero_is_unaffected
+    v = CArray.int32(2, 3).seq!.meld(CArray.int32(3, 3).seq!(100), axis: 0)
+    assert_equal 15, v.transpose.to_a.flatten.size
+    assert_equal 15, v.reshape(3, 5).to_a.flatten.size
+  end
+
 end
