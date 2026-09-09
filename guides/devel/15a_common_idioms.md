@@ -231,7 +231,7 @@ ca_attach_n(2, ca, ci);
 ca_detach_n(2, ca, ci);
 ```
 
-The R1-R4 contract is in [ch. 4](04_attach_lifecycle.md); the short
+The R1–R5 contract is in [ch. 4](04_attach_lifecycle.md); the short
 version is: `_n` opens left-to-right and detaches right-to-left for you,
 so it is symmetric.
 

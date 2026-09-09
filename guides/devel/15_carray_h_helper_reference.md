@@ -80,7 +80,7 @@ layout.
 ```
 
 `ca_is_attached` is the structural property — `ca->ptr != NULL` — used as
-the lifecycle marker (see [ch. 4](04_attach_lifecycle.md), R1–R4 contract).
+the lifecycle marker (see [ch. 4](04_attach_lifecycle.md), R1–R5 contract).
 
 ## Allocation primitives
 
