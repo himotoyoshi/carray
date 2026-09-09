@@ -269,6 +269,38 @@ class TestCAObjectPartialFill < Test::Unit::TestCase
     assert_equal expected.to_a, o.to_a
   end
 
+  # A gather view hands the parent one region per contiguous run of parent
+  # cells.  When the innermost selected axis picks individual indices, every
+  # run is one cell, so the parent got one call per cell -- for the same cell
+  # count that costs it eight calls when the selection is on the outer axis.
+
+  def test_a_column_selection_is_not_one_parent_call_per_cell
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    sel = CA_INT32([1, 5, 9, 13, 17, 21, 25, 29])
+    o[nil, sel] = 7
+    assert_equal 512, o.log[:cells]
+    assert o.log[:fill_addrs] <= 8,
+           "expected the column selection to be batched, got " +
+           o.log[:fill_addrs].to_s + " calls"
+  end
+
+  def test_a_row_selection_keeps_its_long_runs
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    sel = CA_INT32([1, 5, 9, 13, 17, 21, 25, 29])
+    o[sel, nil] = 7
+    assert_equal 512, o.log[:cells]
+    assert_equal 8, o.log[:fill_addrs]
+  end
+
+  def test_the_column_selection_writes_the_right_cells
+    o = AddrsOnly.new(CArray.int32(8, 8))
+    sel = CA_INT32([1, 5])
+    o[nil, sel] = 7
+    expected = CArray.int32(8, 8) { 0 }
+    expected[nil, sel] = 7
+    assert_equal expected.to_a, o.to_a
+  end
+
   def test_an_author_with_no_fill_slots_still_gets_the_per_cell_default
     plain = Class.new(CAObject) do
       attr_reader :log
