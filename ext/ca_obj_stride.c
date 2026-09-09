@@ -837,6 +837,59 @@ ca_stride_region_axes (CAStride *ca, ca_size_t base, int8_t ndim,
    and the per-cell descent stands in. */
 
 static void
+ca_stride_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
+{
+  CAStride *ca = (CAStride *) ap;
+  CArray   *root;
+  ca_size_t composed_strides[CA_RANK_MAX];
+  ca_size_t composed_base;
+  ca_size_t rbytes;
+  ca_size_t *paddrs;
+  ca_size_t  i;
+  int8_t     k;
+  int        all_aligned = 1;
+  volatile VALUE holder;
+
+  /* Addresses name cells one by one, so unlike fill_stride there is nothing
+     here that only the whole extent can express: translate each view address
+     into the root's and hand the list down in one call.  Without this the
+     region is still the only thing touched -- ca_fill_addrs_default sees to
+     that -- but it costs the parent one call per cell, which is the whole
+     difference on a backing where a call is a request. */
+  if ( n == 0 ) {
+    return;
+  }
+
+  ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
+  rbytes = root->bytes;
+
+  if ( ca->bytes != rbytes ) {
+    ca_fill_addrs_default(ca, n, addrs, ptr);
+    return;
+  }
+
+  paddrs = ALLOCV_N(ca_size_t, holder, n);
+  for ( i = 0; i < n; i++ ) {
+    ca_size_t idx[CA_RANK_MAX];
+    ca_size_t off = composed_base;
+    ca_addr2index((CArray *) ca, addrs[i], idx);
+    for ( k = 0; k < ca->ndim; k++ ) {
+      off += idx[k] * composed_strides[k];
+    }
+    if ( off % rbytes != 0 ) { all_aligned = 0; break; }
+    paddrs[i] = off / rbytes;
+  }
+
+  if ( all_aligned ) {
+    ca_fill_addrs(root, n, paddrs, ptr);
+  }
+  else {
+    ca_fill_addrs_default(ca, n, addrs, ptr);
+  }
+  ALLOCV_END(holder);
+}
+
+static void
 ca_stride_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                             ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
@@ -1483,6 +1536,7 @@ ca_operation_function_t ca_stride_func = {
   sizeof(CAStride),           /* struct_size: pool framework */
   ca_stride_pool_bytes,       /* pool_bytes  */
   ca_stride_pool_init,        /* pool_init   */
+  .fill_addrs   = ca_stride_func_fill_addrs,
   .fill_stride  = ca_stride_func_fill_stride,
 };
 
