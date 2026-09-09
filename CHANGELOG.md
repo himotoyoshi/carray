@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: filling part of an array backed by a CAObject or CASource subclass
+  reaches the backing in far fewer calls. A whole-array fill takes the
+  `fill_block` / `fill_addrs` slots when the subclass defines them, instead of
+  one `store_addr` per cell; a selection made through a slice, and a selection
+  along an inner axis, arrive as one list rather than one call per cell. Which
+  cells are written is unchanged, and a subclass that defines none of the fill
+  slots keeps the per-cell path it had.
+
 - Change: the Ruby attach surface is gone from released builds:
   `CArray.attach` / `.attach!`, `CArray#attach` / `#attach!`, and
   `#__attach__` / `#__sync__` / `#__detach__`. It opened an attach window from
