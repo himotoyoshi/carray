@@ -601,21 +601,6 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   s = ca->bytes;
   for ( i = ca->ndim - 1; i >= 0; i-- ) { native[i] = s; s *= ca->dim[i]; }
 
-  /* Bound check on meld_axis.  The step along the axis is strides[ma] /
-     native[ma] and it can be negative -- a reversed read starts at the far
-     end and walks down -- so the region runs between the first and last
-     index, which is not the same as starts[ma] .. starts[ma] + counts[ma]. */
-  {
-    ca_size_t step = strides[ma] / native[ma];
-    ca_size_t last = starts[ma] + (counts[ma] - 1) * step;
-    ca_size_t req_lo = ( last < starts[ma] ) ? last : starts[ma];
-    ca_size_t req_hi = (( last < starts[ma] ) ? starts[ma] : last) + 1;
-    if ( counts[ma] > 0 && ( req_lo < 0 || req_hi > ca->dim[ma] ) ) {
-      rb_raise(rb_eIndexError,
-               "CAMeld xfer_stride meld_axis (axis %d) [%lld, %lld) out of range [0, %lld)",
-               (int) ma, (long long) req_lo, (long long) req_hi, (long long) ca->dim[ma]);
-    }
-  }
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( strides[i] != native[i] ) { structural = 0; break; }
   }
@@ -624,6 +609,23 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_meld_xfer_stride_per_cell(ca, starts, counts, strides, data, dir);
     return;
   }
+
+  /* Bound check on meld_axis, after the gate and not before it.  Only once
+     strides == native is established does request axis ma mean view axis ma;
+     asked earlier, strides[ma] / native[ma] is not a step along the meld axis
+     and legal requests get rejected.  Inside the gate the step is 1, so the
+     region is starts[ma] .. starts[ma] + counts[ma].  ca_meld_xfer_stride_ma_
+     internal below is handed no strides at all and depends on both facts. */
+  {
+    ca_size_t req_lo = starts[ma];
+    ca_size_t req_hi = starts[ma] + counts[ma];
+    if ( counts[ma] > 0 && ( req_lo < 0 || req_hi > ca->dim[ma] ) ) {
+      rb_raise(rb_eIndexError,
+               "CAMeld xfer_stride meld_axis (axis %d) [%lld, %lld) out of range [0, %lld)",
+               (int) ma, (long long) req_lo, (long long) req_hi, (long long) ca->dim[ma]);
+    }
+  }
+
   if ( ma == 0 ) {
     ca_meld_xfer_stride_ma0(ca, starts, counts, strides, data, dir);
   } else {
