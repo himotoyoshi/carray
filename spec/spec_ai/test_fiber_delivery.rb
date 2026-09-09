@@ -11,10 +11,10 @@
 # Source kinds (= 14 per proposal §2.1, abbreviated below for testing
 # practicality — we drive each form against entity, CAStride family,
 # representative SRC_DESCRIPTOR (CSA / CAGrid / CASelect / CAWindow /
-# CAShift), and SRC_ATTACH (CAFake / CAByteSwap).  CAMapping,
-# CABitfield, CABitarray, CAReduce, CAUnboundRepeat coverage rides on
-# the broader spec_ai/test_t1_step9_src_attach.rb regression set since
-# they go through the same engine paths).
+# CAShift), and SRC_ATTACH (CAFake / CAByteSwap).  CABitfield,
+# CABitarray and CAReduce coverage rides on the broader
+# spec_ai/test_t1_step9_src_attach.rb regression set since they go
+# through the same engine paths).
 #
 # Axis position coverage: every test exercises BOTH innermost-axis
 # (= alias fast path, slab_strides[0] == bytes) and non-innermost-axis

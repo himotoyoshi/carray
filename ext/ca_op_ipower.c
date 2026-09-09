@@ -273,8 +273,7 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
 /* CArray#pow(other) (alias `**`) — Float/Complex ** Integer takes the
  * ipower fast path in this file; everything else falls through to the
  * mkkernel-generated general pow/cpow (rb_ca_power in
- * ext/carray_kernels.c).  Non-bang variant preserves UnboundRepeat
- * wrapping on the result. */
+ * ext/carray_kernels.c). */
 static VALUE rb_ca_pow (VALUE self, VALUE other)
 {
   volatile VALUE obj;

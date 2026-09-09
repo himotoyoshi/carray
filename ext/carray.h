@@ -922,7 +922,6 @@ extern const rb_data_type_t careduce_data_type;
 extern const rb_data_type_t carefer_data_type;
 extern const rb_data_type_t caselect_data_type;
 extern const rb_data_type_t cashift_data_type;
-extern const rb_data_type_t caunboundrepeat_data_type;
 extern const rb_data_type_t cawindow_data_type;
 
 extern const rb_data_type_t carray_mask_data_type;
@@ -933,7 +932,6 @@ extern const rb_data_type_t careduce_mask_data_type;
 extern const rb_data_type_t carefer_mask_data_type;
 extern const rb_data_type_t caselect_mask_data_type;
 extern const rb_data_type_t cashift_mask_data_type;
-extern const rb_data_type_t caunboundrepeat_mask_data_type;
 extern const rb_data_type_t cawindow_mask_data_type;
 
 /* -------------------------------------------------------------------- */
