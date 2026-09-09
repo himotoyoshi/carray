@@ -366,6 +366,15 @@ m[nil, :_, nil].shape   #  => [2, 1, 3]    new axis inserted between the existin
 
 This is the canonical way to line up shapes for broadcasting; see [Broadcasting](07_broadcasting.md) for the full story.
 
+If every other index is a scalar, the axes those scalars name are all dropped and what is left is exactly what `:_` asked for:
+
+```ruby
+v[1, :_].shape       #  => [1]       one element, held at rank 1
+v[1, :_, :_].shape   #  => [1, 1]    the same element at rank 2
+```
+
+The result is still a view — it reads, writes back to `v`, and carries the mask. Note that it states its rank, so `v[1, :_]` pairs with another 1-D array, not with a 2-D one. When you want to keep an axis rather than drop it, index it with something that is not a scalar — `v[[1], :_]` or `v[1..1, :_]` both give `[1, 1]` — which is the same rule every axis follows.
+
 * **Class back:** `CAStride` (a reshape view).
 
 ---
