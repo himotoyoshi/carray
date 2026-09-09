@@ -58,12 +58,51 @@ class TestNewaxisSigil < Test::Unit::TestCase
     assert_equal 6, m[2, 3]   # 2*3
   end
 
-  # --- AC8 / reject cases (IndexError) ---
+  # --- every real axis scalar: the result carries only the :_ axes ---
 
-  def test_all_scalar_newaxis_raises
+  def test_all_scalar_newaxis_keeps_only_the_requested_axes
     a = CArray.int32(3, 4).seq
-    assert_raise(IndexError) { a[2, 3, :_] }
+    assert_equal [1],       a[2, 3, :_].dim
+    assert_equal [1, 1],    a[2, :_, 3, :_].dim
+    assert_equal [1, 1, 1], a[:_, 2, :_, 3, :_].dim
+    assert_equal 11, a[2, 3, :_][0]
   end
+
+  def test_all_scalar_newaxis_is_a_view
+    a = CArray.int32(5).seq
+    v = a[1, :_]
+    assert_kind_of CArray, v
+    v[0] = 99
+    assert_equal 99, a[1]
+  end
+
+  def test_all_scalar_newaxis_takes_negative_indices
+    a = CArray.int32(5).seq
+    assert_equal 4, a[-1, :_][0]
+  end
+
+  def test_all_scalar_newaxis_carries_the_mask
+    a = CArray.int32(3).seq
+    a[1] = UNDEF
+    assert_equal [true], a[1, :_].is_masked.to_a
+  end
+
+  def test_all_scalar_newaxis_range_checks_like_a_scalar_index
+    a = CArray.int32(5).seq
+    assert_raise(IndexError) { a[9, :_] }
+  end
+
+  # The result states rank -- it is not a scalar, so the shape rules hold
+  # it to the rank it declares.  This is the whole point of writing :_.
+  def test_all_scalar_newaxis_states_its_rank
+    a = CArray.int32(5).seq(1)
+    b = CArray.int32(4).seq(1)
+    assert_equal [4],    (a[1, :_] * b).dim            # same ndim, size-1
+    assert_equal [1, 4], (a[1, :_, :_] * b[:_, nil]).dim
+    assert_raise(ArgumentError) { a[1, :_] * b[:_, nil] }   # rank 1 vs 2
+  end
+
+  # --- AC8 / reject cases (IndexError) ---
 
   def test_partial_newaxis_raises
     a = CArray.int32(3, 4).seq

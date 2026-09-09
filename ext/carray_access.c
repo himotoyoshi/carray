@@ -1104,6 +1104,8 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
 {
   int i;
   int nclean = 0;
+  int nscalar = 0;
+  int nunder = 0;
   VALUE clean[CA_RANK_MAX];
   volatile VALUE base;
   ca_size_t final_dims[CA_RANK_MAX];
@@ -1115,7 +1117,13 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   /* Build clean argv (strip :_); reject disjoint sigils + rubber dim. */
   for (i = 0; i < argc; i++) {
     VALUE a = argv[i];
-    if ( a == sym_under ) continue;
+    if ( a == sym_under ) {
+      nunder++;
+      continue;
+    }
+    if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+      nscalar++;
+    }
     if ( a == sym_gt || a == sym_perc
          || a == Qfalse || a == sym_tilde ) {
       rb_raise(rb_eIndexError,
@@ -1137,17 +1145,25 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
              nclean, (int) ca->ndim);
   }
 
-  base = rb_ca_fetch_method(nclean, clean, self);
-
-  /* Degenerate: all real axes scalar -> base is a scalar element, not a
-     CArray.  Out of scope (rare + degenerate); user indexes the element
-     and reshapes explicitly.  IndexError keeps it catchable + consistent
-     with the other newaxis rejects. */
-  if ( ! rb_obj_is_kind_of(base, rb_cCArray) ) {
-    rb_raise(rb_eIndexError,
-             "newaxis (:_) needs at least one non-scalar axis "
-             "(all-scalar indexing yields a single element)");
+  /* Every real axis indexed by a scalar: fetching `clean` would yield the
+     element itself, and there would be nothing left to reshape.  Ask for a
+     length-1 block on each axis instead, so the base stays a CArray and the
+     result is a view into self.  The result carries exactly the axes :_ asked
+     for, all of length 1 -- an operand that states rank nunder and one
+     element, which is what the shape rules then hold it to. */
+  if ( nscalar == nclean ) {
+    VALUE blocks[CA_RANK_MAX];
+    for (i = 0; i < nclean; i++) {
+      blocks[i] = rb_assoc_new(clean[i], INT2FIX(1));
+    }
+    base = rb_ca_fetch_method(nclean, blocks, self);
+    for (i = 0; i < nunder; i++) {
+      dim_argv[i] = INT2FIX(1);
+    }
+    return rb_ca_reshape(nunder, dim_argv, base);
   }
+
+  base = rb_ca_fetch_method(nclean, clean, self);
 
   TypedData_Get_Struct(base, CArray, &carray_data_type, cb);
 
