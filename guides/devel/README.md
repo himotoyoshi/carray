@@ -58,7 +58,7 @@ that, the parts are independent; jump to whichever subsystem you are working on.
 - [03 Memory management](03_memory_management.md) — `xmalloc`/`xfree`, the
   CArray pool framework, GC integration, mask storage.
 - [04 The attach lifecycle](04_attach_lifecycle.md) — `attach`/`sync`/`detach`,
-  the R1–R4 contract, the alias fast path, compose-fold.
+  the R1–R5 contract, the alias fast path, compose-fold.
 - [05 Mask and UNDEF](05_mask_and_undef.md) — the built-in mask that **only
   CArray has** and that **threads through all of view algebra**: mask as a child
   CArray, mask classes, propagation through views and operations, UNDEF. A

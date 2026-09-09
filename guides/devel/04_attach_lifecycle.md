@@ -46,33 +46,34 @@ A typical internal use is attach → operate on the contiguous `ptr` → sync �
 detach. Both gather and scatter run through the unified `xfer_all` hook with
 `dir = CA_XFER_GET` / `CA_XFER_PUT` ([ch. 2](02_core_data_structures.md)).
 
-## The R1–R4 contract
+## The R1–R5 contract (from `ext/carray.h`)
 
-The lifecycle is ownership-based and **not transitive**. These four rules are the
-contract every piece of view code depends on:
+The lifecycle is ownership-based and **not transitive**. These five rules are the
+contract every piece of view code depends on. The canonical statement lives beside
+the `ca_attach` declaration in `ext/carray.h`; this section copies it.
 
-- **R1** — `ca_attach(x)` makes **`x.ptr` only** valid. It says nothing about any
-  other array.
-- **R2** — there is **no transitive guarantee**: attaching a child does *not*
-  attach its parent. (An implementation may attach the parent as a side effect,
-  but that is an internal optimisation, never something to rely on.)
-- **R3 (necessity)** — if you want to touch `ca->parent->ptr` directly, call
-  `ca_attach(ca->parent)` yourself. Do not assume the child's attach filled it
-  (that is just R2 restated).
-- **R4 (ordering)** — when attaching both parent and child, open parent → child
-  and close child → parent, with sync in the same order as attach:
+- **R1 (validity)** — `ca_attach(x)` makes **`x.ptr` only** valid. It says nothing
+  about any other array.
+- **R2 (no transit)** — attaching a child does *not* attach its parent. An
+  implementation may do so as an internal optimisation; never rely on it.
+- **R3 (necessity)** — to touch `ca->parent->ptr`, call `ca_attach(ca->parent)`
+  yourself.
+- **R4 (ordering)** — attaching both parent and child: open parent → child, close
+  child → parent, sync in attach order.
   ```c
   ca_attach(parent); ca_attach(child);
   /* … work … */
   ca_sync(child);    ca_sync(parent);
   ca_detach(child);  ca_detach(parent);
   ```
-  Symmetric nesting keeps things correct even if a view internally double-attaches
-  (attach/detach are idempotent via the `attach` refcount).
+  Symmetric nesting stays correct when a view double-attaches internally (views
+  carry an attach refcount; entities do not).
+- **R5 (traffic)** — attach hands you a buffer, not a live array. Use `x.ptr`; a
+  view derived from `x` composes past the buffer to the root.
 
 ### Reader and writer conventions
 
-Two conventions follow from R1–R4 for code that touches a parent's `ptr`:
+Two conventions follow from R1–R5 for code that touches a parent's `ptr`:
 
 - **Reader (opportunistic use of the parent buffer)** — guard with the marker,
   do not test the raw pointer:
