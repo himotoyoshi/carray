@@ -267,24 +267,27 @@ smoke_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   for (k = ndim - 1; k >= 0; k--) { native[k] = s; s *= ca->dim[k]; }
   for (k = 0; k < ndim; k++) { base += starts[k] * native[k]; idx[k] = 0; }
 
+  /* starts/counts/strides all describe the region in *this view's* own address
+     space, and `data` holds the Pi counts[k] selected cells packed row-major --
+     it is not laid out with strides[].  So the source walks by strides[] and the
+     buffer advances one cell at a time.  Reading strides[] as the destination
+     layout happens to agree only for the whole-view request. */
   while ( 1 ) {
-    ca_size_t soff = base, doff = 0;
-    for (k = 0; k < ndim - 1; k++) {
-      soff += idx[k] * native[k];
-      doff += idx[k] * strides[k];
-    }
-    if ( strides[ndim - 1] == ca->bytes ) {   /* contiguous run */
+    ca_size_t soff = base;
+    ca_size_t j;
+    for (k = 0; k < ndim - 1; k++) soff += idx[k] * strides[k];
+    if ( strides[ndim - 1] == ca->bytes ) {   /* contiguous run in the view */
       ca_size_t run = counts[ndim - 1] * ca->bytes;
-      if ( dir == CA_XFER_GET ) memcpy(d + doff, base_ptr + soff, run);
-      else                      memcpy(base_ptr + soff, d + doff, run);
+      if ( dir == CA_XFER_GET ) memcpy(d, base_ptr + soff, run);
+      else                      memcpy(base_ptr + soff, d, run);
+      d += run;
     }
     else {
-      ca_size_t j;
       for (j = 0; j < counts[ndim - 1]; j++) {
-        char *p = base_ptr + soff + j * native[ndim - 1];
-        char *q = d + doff + j * strides[ndim - 1];
-        if ( dir == CA_XFER_GET ) memcpy(q, p, ca->bytes);
-        else                      memcpy(p, q, ca->bytes);
+        char *p = base_ptr + soff + j * strides[ndim - 1];
+        if ( dir == CA_XFER_GET ) memcpy(d, p, ca->bytes);
+        else                      memcpy(p, d, ca->bytes);
+        d += ca->bytes;
       }
     }
     k = ndim - 2;
