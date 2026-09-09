@@ -113,7 +113,7 @@ All three return a view, so writing through it updates `a`. See [Views](06_views
 
 ### Inserting axes programmatically with `insert_axis`
 
-When you write the index at the call site, the `:_` and `:*` sigils are the natural way to add an axis. `insert_axis` is for the other case — library code that builds the axis list from data, where the positions and sizes are only known at run time.
+When you write the index at the call site, the `:_` sigil is the natural way to add an axis. `insert_axis` is for the other case — library code that builds the axis list from data, where the positions and sizes are only known at run time.
 
 Each position names the existing axis the new axis goes *before* (`ndim` appends at the end; negatives count from the end). Positions are in the source frame, so they do not shift as other axes are inserted, and the same position twice stacks two axes there. By default it inserts size-1 axes:
 

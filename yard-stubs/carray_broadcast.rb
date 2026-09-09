@@ -25,7 +25,7 @@ class CArray
   #   @return [CArray]
   #   @raise [RuntimeError] if a source axis cannot be paired with a
   #     target axis (cross-ndim expansion is intentionally strict —
-  #     see {CArray.broadcast} for the explicit-`:_` / `:*` axis
+  #     see {CArray.broadcast} for the explicit-`:_` axis
   #     declaration form).
   #   @example
   #     a = CArray.float64(3) { [1.0, 2.0, 3.0] }

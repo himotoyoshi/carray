@@ -3,9 +3,7 @@
 # spec_ai/test_t1_step9_src_attach.rb
 #
 # T1 step 9 — SRC_ATTACH path coverage for the 5 residual views
-# (CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce) plus the
-# CAUnboundRepeat unbound-state pin (already accepted via SRC_CASTRIDE
-# since ca_ubrep_func = ca_stride_func).
+# (CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce).
 #
 # Matrix: 5 views × {L1, L2} × {READ, WRITE} = 20 cases.  Each case
 # checks binary parity against `view.to_ca.dump_binary` for READ, or

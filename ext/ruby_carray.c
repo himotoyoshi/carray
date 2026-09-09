@@ -310,7 +310,7 @@ Init_carray_ext (void)
   Init_ca_obj_refer();
   Init_ca_obj_stride();       /* CAREFUL: must precede CAStride subclasses
                                  (farray / block / transpose / repeat /
-                                 unbound_repeat / field). */
+                                 field). */
   Init_ca_obj_farray();
   Init_ca_obj_block();
   Init_ca_obj_select();

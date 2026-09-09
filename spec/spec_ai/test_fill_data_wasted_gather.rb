@@ -7,7 +7,7 @@ require "carray"
 #
 # Test coverage:
 #   - delegate path で各 view (CAGrid / CAFake / CASelect / CABitfield /
-#     CABitarray / CAByteSwap / CAObject / CAReduce / CAUnboundRepeat 等)
+#     CABitarray / CAByteSwap / CAObject / CAReduce 等)
 #     の write-through が値・shape・mask に対して既存 path と equivalent
 #   - bytes-mismatch (CAField over complex) で delegate を skip して
 #     既存 path に fallback、過剰 write しない (regression pin)

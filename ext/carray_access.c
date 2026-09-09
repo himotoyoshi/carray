@@ -19,7 +19,7 @@ static ID id_begin, id_end, id_excl_end;
 #define RANGE_EXCL(r) (rb_funcall(r, id_excl_end, 0))
 
 static ID id_to_ca;
-static VALUE sym_star, sym_perc, sym_under, sym_gt, sym_tilde;
+static VALUE sym_perc, sym_under, sym_gt, sym_tilde;
 static VALUE S_CAInfo;
 
 VALUE
@@ -1089,11 +1089,8 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
      already-a-Face case (some builders lift their own result) is handled
      inside ca_wrapper_lift.
 
-     Every CA_REG_* branch converges here, so this one line covers all of
-     them -- but not every index form: `a[:*, nil]` builds a CAUnboundRepeat,
-     whose shape stays open until an operand binds it, and a marker copies
-     shape at construction.  ca_wrapper_lift refuses that one, in one place,
-     because `unbound_repeat` reaches it by a second route. */
+     Every CA_REG_* branch converges here, so this one line covers every
+     index form that returns a CArray. */
   CA_WRAPPER_LIFT(obj, self, ca);
 
   return obj;
@@ -1119,10 +1116,10 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   for (i = 0; i < argc; i++) {
     VALUE a = argv[i];
     if ( a == sym_under ) continue;
-    if ( a == sym_gt || a == sym_star || a == sym_perc
+    if ( a == sym_gt || a == sym_perc
          || a == Qfalse || a == sym_tilde ) {
       rb_raise(rb_eIndexError,
-               "newaxis (:_) cannot be combined with :>, :*, :%%, "
+               "newaxis (:_) cannot be combined with :>, :%%, "
                "or rubber dim (false / :~)");
     }
     if ( nclean >= CA_RANK_MAX ) {
@@ -2076,7 +2073,6 @@ Init_carray_access (void)
   id_excl_end = rb_intern("exclude_end?");
 
   id_to_ca = rb_intern("to_ca");
-  sym_star  = ID2SYM(rb_intern("*"));
   sym_perc  = ID2SYM(rb_intern("%"));
   sym_under = ID2SYM(rb_intern("_"));
   sym_gt    = ID2SYM(rb_intern(">"));

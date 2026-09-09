@@ -22,7 +22,7 @@ class CArray
   #   - Integer CArray — fancy gather (index array); shape follows the
   #     index array.
   #   - `:_` — newaxis: insert a size-1 axis at this position.
-  #   - `:*` / `:%` — repeat / tiling sugar.
+  #   - `:%` — repeat / tiling sugar.
   #   - `:>` — slab axis: wrap the result in a `CASlabIterator`.
   #   - a member name Symbol — project a struct field (see `CARecord`).
   #

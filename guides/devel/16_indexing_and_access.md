@@ -12,7 +12,7 @@ that surface rests on. The implementation is `ext/carray_access.c`.
 ## The shape of the problem
 
 `a[...]` has to turn a heterogeneous argument list — integers, `nil`, ranges,
-index arrays, boolean arrays, symbols like `:_` / `:*` — into either a **scalar
+index arrays, boolean arrays, symbols like `:_` / `:~` — into either a **scalar
 read** or a **concrete view object**. The mechanism is a two-stage classifier
 (`scan_index`) followed by view construction keyed on the classification result.
 
