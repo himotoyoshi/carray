@@ -945,6 +945,73 @@ int ca_iter_check_init (int rc);
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
 
+/* PAIR forms: two sources read together along the same axis.
+
+   The INOUT forms cover input + output.  These cover input + input, which
+   is what a routine taking two vectors of the same length wants -- a
+   correlation, a dot product, a distance.  Neither state gets
+   CA_KERNEL_WRITE, and `flags` must not carry it: use the INOUT forms to
+   write.
+
+   Both fibers are contig-delivered, so the pair may be handed straight to
+   a C routine that walks it itself.  The MASKED form yields BOTH mask
+   cursors: which cells a pair of fibers may be used at is a question about
+   both of them, and the INOUT forms answer only about the input.
+
+   Shape agreement is guarded the way the INOUT forms guard it (ndim,
+   elements, fiber length), and the body is skipped on mismatch.  The two
+   sources may be the same array. */
+
+#define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
+                               flags, p_a, p_b, n)                            \
+  for ( int __cffp_init = (                                                   \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            (n) = (st_a).slab_dims[0],                                        \
+            1);                                                               \
+        __cffp_init;                                                          \
+        __cffp_init = 0,                                                      \
+          ca_iter_state_finish(&(st_a)),                                      \
+          ca_iter_state_finish(&(st_b)) )                                     \
+    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
+         && (st_a).src->elements == (st_b).src->elements                      \
+         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
+         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
+         && ca_iter_state_next_slab_axes(&(st_b), &(p_b), NULL);              \
+            ca_iter_state_sync_slab(&(st_a)),                                 \
+            ca_iter_state_sync_slab(&(st_b)) )
+
+#define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
+                                      flags, p_a, p_b, n, m_a, m_b)           \
+  for ( int __cffpm_init = (                                                  \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            (n) = (st_a).slab_dims[0],                                        \
+            1);                                                               \
+        __cffpm_init;                                                         \
+        __cffpm_init = 0,                                                     \
+          ca_iter_state_finish(&(st_a)),                                      \
+          ca_iter_state_finish(&(st_b)) )                                     \
+    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
+         && (st_a).src->elements == (st_b).src->elements                      \
+         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
+         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
+         && ca_iter_state_next_slab_axes(&(st_b), &(p_b), &(m_b));            \
+            ca_iter_state_sync_slab(&(st_a)),                                 \
+            ca_iter_state_sync_slab(&(st_b)) )
+
 /* ---- Phase D: per-data_type reduction macro suite ----------------------- */
 
 /* CA_SLAB_REDUCE_T(T, ...): generic per-data_type slab reduction.  T is the

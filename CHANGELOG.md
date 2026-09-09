@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: C extensions can read two arrays along the same axis at once.
+  `CA_FOR_EACH_FIBER_PAIR` and `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one
+  contiguous fiber from each of two sources at the same position, which is
+  what a C routine taking two vectors of equal length wants. The masked
+  form yields both mask cursors, since whether a cell may be used is a
+  question about both fibers. Nothing else changes: the existing macros,
+  the iterator engine and every Ruby method are untouched.
+
 - Change: filling part of an array backed by a CAObject or CASource subclass
   reaches the backing in far fewer calls. A whole-array fill takes the
   `fill_block` / `fill_addrs` slots when the subclass defines them, instead of
