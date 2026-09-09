@@ -181,6 +181,68 @@ class TestCAObjectPartialFill < Test::Unit::TestCase
     assert_equal 1, o.log[:fill_block]
     assert_equal ref.to_a, o.buf.to_a
   end
+  # --- whole-extent fill takes the region slots too -------------------
+  #
+  # An author who wrote the region slots but not fill_data used to get the
+  # per-cell default for "fill everything" -- the one request that is easiest
+  # to batch -- while a strictly smaller region got one call.
+
+  class RegionOnly < CAObject
+    attr_reader :log
+    def initialize(buf)
+      @buf = buf
+      @log = Hash.new(0)
+      super(CA_INT32, buf.shape)
+    end
+
+    private
+
+    def fetch_addr(addr) = @buf[addr]
+    def store_addr(addr, val) = (@log[:store_addr] += 1; @buf[addr] = val)
+    def copy_data(data) = data[] = @buf
+    def sync_data(data) = @buf[] = data
+
+    def fill_block(starts, counts, steps, val)
+      @log[:fill_block] += 1
+      @buf[*starts.each_index.map { |k| [starts[k], counts[k], steps[k]] }] = val
+    end
+  end
+
+  def test_a_whole_fill_reaches_the_region_slot
+    o = RegionOnly.new(CArray.int32(8, 8))
+    o[] = 7
+    assert_equal 1, o.log[:fill_block]
+    assert_equal 0, o.log[:store_addr]
+    assert_equal [7] * 64, o.to_a.flatten
+  end
+
+  def test_a_whole_extent_region_request_reaches_it_as_well
+    o = RegionOnly.new(CArray.int32(8, 8))
+    o[0...8, 0...8] = 7
+    assert_equal 1, o.log[:fill_block]
+    assert_equal 0, o.log[:store_addr]
+  end
+
+  def test_an_author_with_no_fill_slots_still_gets_the_per_cell_default
+    plain = Class.new(CAObject) do
+      attr_reader :log
+      define_method(:initialize) do |buf|
+        @buf = buf
+        @log = Hash.new(0)
+        super(CA_INT32, buf.shape)
+      end
+      private
+      define_method(:fetch_addr) { |addr| @buf[addr] }
+      define_method(:store_addr) { |addr, val| @log[:store_addr] += 1; @buf[addr] = val }
+      define_method(:copy_data)  { |data| data[] = @buf }
+      define_method(:sync_data)  { |data| @buf[] = data }
+    end
+    o = plain.new(CArray.int32(4, 4))
+    o[] = 3
+    assert_equal 16, o.log[:store_addr]
+    assert_equal [3] * 16, o.to_a.flatten
+  end
+
 end
 
 # A Face has the same layout as its parent, so a region of the Face is the
