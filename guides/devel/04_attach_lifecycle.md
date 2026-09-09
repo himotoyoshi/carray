@@ -225,11 +225,13 @@ gather/scatter interface that replaces the historical `copy_data` /
 Every view implements (or inherits) the four `xfer_*` slots in `ca_func`
 (`xfer_index` / `xfer_addrs` / `xfer_stride` / `xfer_all` — the struct fields and
 their per-slot comments are in [ch. 2](02_core_data_structures.md), the operation
-table). Two dispatch details matter here: `xfer_stride` takes `strides[]` as the
-*destination* (caller-buffer) layout, which is what the kernel iterator's
-per-fiber fused path and the partial-materialise path use; `xfer_all` is the
-whole-view transfer the scratch path uses, and `ca_copy_data` / `ca_sync_data` are
-thin forwarders onto it.
+table). Two dispatch details matter here: `xfer_stride` describes its region in
+the **view's own** address space — `starts` / `counts` / `strides` all refer to
+the view, and `data` is the caller's buffer holding the selected cells packed
+row-major, *not* laid out with `strides[]` (the canonical wording is beside
+`xfer_stride` in `ext/carray.h`); `xfer_all` is the whole-view transfer the
+scratch path uses, and `ca_copy_data` / `ca_sync_data` are thin forwarders onto
+it.
 
 Five public entry points wrap the dispatch:
 
