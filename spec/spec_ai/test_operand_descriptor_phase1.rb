@@ -226,6 +226,7 @@ class TestOperandDescriptorPhase1 < Test::Unit::TestCase
   # ---------------------------------------------------------------
 
   def test_attach_round_trip
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     a = CArray.float64(5, 3, 4).seq + 0.5
     m = CArray.boolean(5).tap { |__a| __a[] = [1, 0, 1, 1, 0] }
     v = a[m, nil, nil]

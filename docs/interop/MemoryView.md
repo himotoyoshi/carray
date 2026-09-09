@@ -505,53 +505,7 @@ sync), but pay an O(N) materialise cost each call.
 
 ---
 
-## 11. Amortising materialise cost: `attach!`-loop
-
-`CArray#attach!` is a low-level escape hatch that exposes the
-internal attach/sync/detach lifecycle. Most users never need it
-— the regular code paths handle attach internally. The one
-legitimate use case is **amortising materialise cost across many
-I/O ops into the same non-contiguous destination**.
-
-```ruby
-# Without attach!: 39 × (materialise + I/O + sync) = 39 sync passes
-39.times do |i|
-  nc.var("temp").read_into(big[i, k, nil, nil])
-end
-
-# With attach!: 1 materialise + 39 × zero-copy I/O + 1 sync
-big[nil, k, nil, nil].attach! do |ca|
-  39.times do |i|
-    nc.var("temp").read_into(ca[i, nil, nil])
-  end
-end
-```
-
-The block parameter is the (now-materialised) virtual; inside the
-block its inner slices are contiguous and exportable zero-copy.
-`attach!` uses `rb_ensure` so sync + detach run on block exit
-even on exception.
-
-### Safety constraints
-
-- **Block-required**: calling `attach!` without a block raises
-  `LocalJumpError`. This forces the attached state to live
-  inside an explicit scope (the same idiom as
-  `File.open { |f| ... }` and `Mutex#synchronize { ... }`).
-- **Do not cache the block parameter** past the block. After the
-  block returns, the materialised buffer is freed.
-- **Do not call `attach!` recursively on the same array.** Use
-  nested MemoryView wraps inside the block — those cooperate
-  correctly with the internal ownership tracking.
-
-`CArray` also defines `__attach__` / `__sync__` / `__detach__`.
-The `__` prefix marks them as internal; user and library-author
-code should never call them directly. `attach!` is the only
-public form.
-
----
-
-## 12. Worked examples
+## 11. Worked examples
 
 ### CArray ↔ Numo::NArray
 
@@ -611,7 +565,7 @@ arr    = CArray::Float64.wrap_memory_view(region).reshape(1000, 1000)
 
 ---
 
-## 13. Distinct concepts: `reshape` vs `refer` vs `as_type`
+## 12. Distinct concepts: `reshape` vs `refer` vs `as_type`
 
 These three CArray methods return view-style results but differ in
 what they do at the byte level:
@@ -630,7 +584,7 @@ in memory.
 
 ---
 
-## 14. Limitations
+## 13. Limitations
 
 - `CA_OBJECT` is not exported or imported (VALUE column, not raw
   memory). `CA_FIXLEN` is not exported as a plain buffer either,
@@ -646,7 +600,7 @@ in memory.
 
 ---
 
-## 15. Where to find the tests
+## 14. Where to find the tests
 
 | File | Coverage |
 |---|---|

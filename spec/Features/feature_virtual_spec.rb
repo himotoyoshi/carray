@@ -16,6 +16,7 @@ describe "TestCArrayVirtual " do
   end
 
   example "attached?" do
+    skip "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach)
     a = CArray.int(10,10)
     r = a[]
     is_asserted_by {  false == r.attached? }

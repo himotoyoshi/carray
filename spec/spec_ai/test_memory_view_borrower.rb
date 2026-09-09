@@ -403,6 +403,7 @@ class TestMemoryViewBorrower < Test::Unit::TestCase
   # SIMPLE rejects when the leaf's composed strides are non-contig
   # in entity space; STRIDES accepts.
   def test_attach_bang_inner_wrap_accepts_with_strides_flag
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     big = CArray.float64(8, 5, 3, 4).seq
     ca = big[nil, 2, nil, nil]    # strided (col slice), non-contig
     ca.attach! do

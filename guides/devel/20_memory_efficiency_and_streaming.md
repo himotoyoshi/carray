@@ -218,16 +218,6 @@ Binary serialisation avoids doubling memory through a Ruby String.
   *after* the data, so the writer never has to buffer the whole file to backfill
   a header. See [ch. 18a](18a_serialization.md).
 
-### `attach!` — one materialise, N zero-copy operations, one sync
-
-`attach!` (`ext/carray_core.c:1935`) is the block form that lets user code
-amortise a single materialise across many operations: materialise a view once,
-do N zero-copy reads/writes against the resident buffer inside the block, then
-sync-and-detach once (guaranteed via `rb_ensure`). The canonical use is chunked
-I/O into a slice — one gather, N cheap I/O calls, one scatter — instead of N
-independent attach/detach round-trips. This is a library-author lifecycle tool,
-not a user-facing surface.
-
 ## 8. Small elisions worth knowing
 
 - **Broadcast scalar fill** skips the wasted gather: filling a whole array (or a
@@ -259,7 +249,6 @@ not a user-facing surface.
 | `fz_hash` single pass | `carray_factorize.c:45` | O(distinct), no sort/gather scratch |
 | `dump_binary` (entity→file) | `carray_conversion.c:320` | no doubling via a String |
 | `load_binary` (entity) | `carray_conversion.c:402` | 64 KiB chunked read into `ca->ptr` |
-| `attach!` | `carray_core.c:1935` | 1 materialise + N zero-copy ops + 1 sync |
 | Broadcast scalar fill | `ca_obj_array.c`, `carray_mask.c:484` | no full-length source built |
 | Cheap mask scan | `carray_mask.c` | word-level scan, mask not materialised |
 

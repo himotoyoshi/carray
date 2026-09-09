@@ -103,6 +103,7 @@ end
 
 class TestComposeFoldMaskSyncData < Test::Unit::TestCase
   def test_attach_bang_view_mask_edit_propagates_to_entity
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Edit the mask on a CAStride view inside attach!; the scatter
     # path must write the mask change back to the entity.
     src = CArray.int32(10).seq
@@ -117,6 +118,7 @@ class TestComposeFoldMaskSyncData < Test::Unit::TestCase
   end
 
   def test_attach_bang_non_contig_view_mask_edit_propagates
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Non-contig column slice: forces gather-on-attach / scatter-on-detach.
     # Mask scatter must follow composed stride.
     src = CArray.int32(4, 5).seq
@@ -133,6 +135,7 @@ class TestComposeFoldMaskSyncData < Test::Unit::TestCase
   end
 
   def test_attach_bang_chain_mask_edit_propagates
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # CABlock of CATranspose: write-back must compose mask strides
     # through both links to land in the right entity position.
     src = CArray.int32(3, 4).seq
@@ -146,6 +149,7 @@ class TestComposeFoldMaskSyncData < Test::Unit::TestCase
   end
 
   def test_index_assignment_propagates_mask_through_view
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Direct []= on view (no explicit attach! block): also goes through
     # compose-fold sync via store_index.
     src = CArray.float64(5, 5).seq

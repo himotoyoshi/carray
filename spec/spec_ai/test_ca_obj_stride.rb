@@ -52,6 +52,7 @@ class TestCAStride < Test::Unit::TestCase
   end
 
   def test_castride_attach_materialises
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # The two-mode behavior: ptr is NULL until attached.  Inside an
     # attach! scope, ptr is a contiguous gather buffer; on detach it
     # is freed and modifications are scattered back to the parent.
@@ -104,6 +105,7 @@ class TestCAStride < Test::Unit::TestCase
   end
 
   def test_as_strided_attach_scatter
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     src = CArray.float64(4, 5).seq
     v = src.as_strided(shape: [4, 5], strides: [-40, 8], offset: 120)
     v.attach! do |buf|

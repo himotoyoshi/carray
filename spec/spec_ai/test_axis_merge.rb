@@ -62,6 +62,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
   end
 
   def test_mid_axis_3d_attach_bang_roundtrip
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     a = CArray.float64(10, 30, 10).seq
     view = a[nil, 5..14, nil]
     view.attach! do |inner|
