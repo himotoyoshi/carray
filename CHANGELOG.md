@@ -36,16 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
-- Change: an index whose every real axis is a scalar no longer raises when
-  it also carries the newaxis sigil. `a[1, :_]` and `a[2, 3, :_, :_]` now
-  return a view holding just the axes `:_` asked for, each of length 1,
-  instead of `IndexError`. The view reads, writes back to the source and
-  carries the mask like any other. Indices with at least one non-scalar
-  axis are unaffected. The result states its rank, so it pairs with an
-  operand of the same rank: `a[1, :_] * b` works for a 1-D `b`, and
-  `a[1, :_] * b[:_, nil]` raises the usual shape mismatch. To keep an axis
-  rather than drop it, index it with something that is not a scalar --
-  `a[[1], :_]` or `a[1..1, :_]`.
+- Change: an index whose every real axis is a scalar no longer raises when it
+  also carries the newaxis sigil. `a[1, :_]` returns a view of just the axes
+  `:_` asked for, each of length 1, instead of `IndexError`. It states that
+  rank, so to keep an axis rather than drop it, index it with something that
+  is not a scalar -- `a[[1], :_]`. Indices with a non-scalar axis are
+  unaffected.
 
 - Change: C extensions only. A kernel iterator init that the engine refuses
   now raises instead of returning a code the block macros
