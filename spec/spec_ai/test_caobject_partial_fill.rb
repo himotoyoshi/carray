@@ -223,6 +223,52 @@ class TestCAObjectPartialFill < Test::Unit::TestCase
     assert_equal 0, o.log[:store_addr]
   end
 
+  # A CAStride between a boolean selection and the backing used to turn one
+  # parent call into one per cell: CAStride carried fill_stride but no
+  # fill_addrs, so the selection fell to the per-cell default.
+
+  class AddrsOnly < CAObject
+    attr_reader :log
+    def initialize(buf)
+      @buf = buf
+      @log = Hash.new(0)
+      super(CA_INT32, buf.shape)
+    end
+
+    private
+
+    def fetch_addr(addr) = @buf[addr]
+    def store_addr(addr, val) = (@log[:store_addr] += 1; @buf[addr] = val)
+    def copy_data(data) = data[] = @buf
+    def sync_data(data) = @buf[] = data
+
+    def fill_addrs(addrs, val)
+      @log[:fill_addrs] += 1
+      @log[:cells] += addrs.elements
+      addrs.each { |a| @buf[a] = val }
+    end
+  end
+
+  def test_a_boolean_selection_through_a_slice_is_one_parent_call
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    v = o[0...32, nil]
+    m = CArray.boolean(32, 64) { |i| i % 4 == 0 }
+    v[m] = 7
+    assert_equal 1, o.log[:fill_addrs]
+    assert_equal 0, o.log[:store_addr]
+    assert_equal 512, o.log[:cells]
+  end
+
+  def test_the_selected_cells_are_the_ones_written
+    o = AddrsOnly.new(CArray.int32(8, 8))
+    v = o[0...4, nil]
+    m = CArray.boolean(4, 8) { |i| i % 4 == 0 }
+    v[m] = 7
+    expected = CArray.int32(8, 8) { 0 }
+    expected[0...4, nil] = CArray.int32(4, 8) { |i| i % 4 == 0 ? 7 : 0 }
+    assert_equal expected.to_a, o.to_a
+  end
+
   def test_an_author_with_no_fill_slots_still_gets_the_per_cell_default
     plain = Class.new(CAObject) do
       attr_reader :log
