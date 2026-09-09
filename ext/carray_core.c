@@ -2087,6 +2087,17 @@ ca_fill (void *ap, void *aptr)
 
 /* ------------------------------------------------------------------- */
 
+#ifdef CARRAY_DEV_BUILD
+
+/* The Ruby attach surface is built into development builds only.  Ruby has no
+   raw pointer, so the only thing a block can do inside an attach window is call
+   back into the array API -- and which door that takes is invisible in the
+   syntax: v[0] reads the attached buffer while v[] and v[0..1] compose past it
+   to the root (R5, see the contract beside ca_attach in carray.h).  Per-cell and
+   whole-array writes reach the buffer and survive the sync; a write through a
+   derived view is discarded.  The in-tree tests drive the healthy spellings, so
+   the surface stays reachable here and out of released builds. */
+
 /* subroutines for CArray.attach, CArray.attach!
                    CArray#attach, CArray#attach! */
 
@@ -2307,6 +2318,8 @@ rb_ca__detach__ (VALUE self)
   return self;
 }
 
+#endif /* CARRAY_DEV_BUILD */
+
 /* ------------------------------------------------------------------- */
 
 static ID id_decode, id_encode;
@@ -2515,6 +2528,7 @@ Init_carray_core (void)
 
   ca_init_obj_type();
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "attach", rb_ca_s_attach, -1);
   rb_define_singleton_method(rb_cCArray, "attach!", rb_ca_s_attach_bang, -1);
 
@@ -2524,6 +2538,7 @@ Init_carray_core (void)
   rb_define_method(rb_cCArray, "__attach__", rb_ca__attach__, 0);
   rb_define_method(rb_cCArray, "__sync__", rb_ca__sync__, 0);
   rb_define_method(rb_cCArray, "__detach__", rb_ca__detach__, 0);
+#endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);
 

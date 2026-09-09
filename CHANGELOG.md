@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: the Ruby attach surface is gone from released builds:
+  `CArray.attach` / `.attach!`, `CArray#attach` / `#attach!`, and
+  `#__attach__` / `#__sync__` / `#__detach__`. It opened an attach window from
+  Ruby, and what a block did inside one depended on the spelling -- `v[0] = x`
+  reached the array, `v[0..1] = x` could be silently discarded -- with nothing
+  in the syntax to say which. Write through the array directly instead.
+  `CArray#attached?` is unchanged, and so is the C lifecycle (`ca_attach` /
+  `ca_sync` / `ca_detach`) that extensions use.
+
 - Change: an index whose every real axis is a scalar no longer raises when it
   also carries the newaxis sigil. `a[1, :_]` returns a view of just the axes
   `:_` asked for, each of length 1, instead of `IndexError`. It states that

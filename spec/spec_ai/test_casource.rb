@@ -178,8 +178,11 @@ class TestCASourceSubclass < Test::Unit::TestCase
     "copy"               => ->(s) { s.copy },
     "lazy chain"         => ->(s) { (s.lazy * 2).to_ca },
     "mask_eq"            => ->(s) { s.mask_eq(1) },
-    "attach!"            => ->(s) { s.attach! { } },
   }
+
+  # The Ruby attach surface exists only in development builds; the rest of the
+  # table runs either way.
+  PATHS["attach!"] = ->(s) { s.attach! { } } if CArray.method_defined?(:attach!)
 
   def test_the_array_is_cold_at_rest
     assert_false @src.attached?
@@ -231,6 +234,7 @@ class TestCASourceSubclass < Test::Unit::TestCase
   # hold counting an inner attach/detach pair would clear ptr under an
   # outer holder and its sync would fail.
   def test_overlapping_attach_windows
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     assert_equal 78, @src.attach! { @src.attach! { }; @src.sum }
     v = @src[1..2, nil]
     assert_equal [[5, 6, 7, 8], [9, 10, 11, 12]],
@@ -248,6 +252,7 @@ class TestCASourceSubclass < Test::Unit::TestCase
   # piece rather than a cell at a time fills in the slot; either way it is
   # never asked for the cells the caller did not name.
   def test_observed_attach_routing
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     counters = lambda do |&op|
       @src.reset_counters
       op.call

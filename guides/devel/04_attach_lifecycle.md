@@ -112,20 +112,16 @@ that keeps a deep view chain as cheap as one gather. The `ca_fold_t` state, the
 `fold_stride` one-hop primitive, and the measured speedup are in "Compose-fold in
 detail" below.
 
-## The public `attach!` (and the internal forms)
+## No Ruby attach surface
 
-`attach!` is a block form that wraps attach + sync + detach in `rb_ensure`, so the
-sync/detach run even if the block raises. Mechanically the pattern it expresses is
-*one* materialise on entry, N operations against the now-contiguous `ptr`, then
-*one* sync on exit — the amortisation that makes a "materialise once, write into
-the buffer repeatedly, flush once" loop cheap.
-
-It is a minor convenience, not load-bearing: internally it is used in only a
-handful of places (`lib/carray/iterator.rb`) and is kept mainly as insurance. The
-real machinery is `ca_attach` / `ca_sync` / `ca_detach`.
-
-`__attach__` / `__sync__` / `__detach__` (double underscore) are **internal
-only** — never call them from user or ext code.
+The lifecycle has no user-facing Ruby form. `attach` / `attach!` and the
+`__attach__` / `__sync__` / `__detach__` trio are built only under
+`-DCARRAY_DEV_BUILD`, where the test suite drives them; released builds do not
+define them. Ruby has no raw pointer, so the only thing a block could do inside
+an attach window is call back into the array API — and R5 is invisible there:
+`v[0]` reads the attached buffer while `v[]` and `v[0..1]` compose past it to the
+root, and `v[]` writes the buffer while it reads the root. From C the two sides
+of R5 are different expressions; from Ruby they are the same operator.
 
 ## Why this is a thread-safety hazard
 
@@ -373,8 +369,8 @@ CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n) { /* writable, sync on exit */ }
 Both wrap attach / (sync) / detach in a `for` loop teardown clause —
 exception-safe across `break`, leaks across `return`. For the
 `rb_ensure`-protected function form, use `rb_ca_call_with_buffer`
-([ch. 13](13_sweep_author_surface.md)). The Ruby-surface counterpart is `attach!`
-("The public `attach!`" above).
+([ch. 13](13_sweep_author_surface.md)). There is no Ruby-surface counterpart
+("No Ruby attach surface" above).
 
 ## Where to go next
 

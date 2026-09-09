@@ -264,6 +264,7 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
   # ----------------------------------------------------------------
 
   def test_csa_attach_bang_round_trip_through_mergeable_axes
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     a = CArray.int(4, 3, 5).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     v = a[m, nil, nil]

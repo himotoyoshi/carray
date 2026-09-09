@@ -137,6 +137,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
   end
 
   def test_to_ca_materialises
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Read-only views use `.to_ca` as the canonical materialise path
     # (not `attach!`, since sync would attempt to push back, which is a
     # contract violation for read-only).
