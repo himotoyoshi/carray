@@ -110,6 +110,8 @@ module CATimeUnitAlgebra
     g  = rgcd(a.tick_ratio, b.tick_ratio)
     CATime::Resolution.new(Integer(g / base_ratio(fb)), fb)
   end
+  # Alias of {#common}, used where the caller reads the result as "the finer
+  # of the two grids" rather than "the grid they share".
   alias_method :finer, :common
   module_function :finer
 
