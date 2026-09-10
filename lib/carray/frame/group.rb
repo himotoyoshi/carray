@@ -124,6 +124,23 @@ class GroupedFrame
 
   # Convenience reductions over every numeric scalar column (memo §6-4
   # "grp.mean"). Non-numeric / N-D columns are skipped.
+  #
+  # @!method sum
+  #   Returns a frame of the per-group sum of every numeric one-dimensional
+  #   column. Non-numeric and multi-dimensional columns are left out.
+  #   @return [CAFrame] one row per group, indexed by the group labels.
+  # @!method mean
+  #   Returns a frame of the per-group arithmetic mean of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method min
+  #   Returns a frame of the per-group minimum of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method max
+  #   Returns a frame of the per-group maximum of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
     define_method(red) { reduce_numeric(red) }
   end

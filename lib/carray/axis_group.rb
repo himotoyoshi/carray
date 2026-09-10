@@ -308,6 +308,9 @@ end
 # / min / max / variance / stddev / variancep / stddevp / count /
 # count_not_masked / all / any) bind in C to one driver; the rest of the common
 # iterator surface that composes cheaply from those is added here.
+# CAGroupIterator subclasses CAIterator, but the class itself is created in
+# C, so the reopening below carries no superclass for YARD to read.
+# @!parse class CAGroupIterator < CAIterator; end
 class CAGroupIterator
   # Per-group classified cell count (mask-independent) = count on the
   # mask-stripped value, so every classified cell is counted regardless of the
