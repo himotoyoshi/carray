@@ -1,7 +1,7 @@
 # 16b — The `fz_hash` discovery engine
 
-A whole family of Ruby-side methods — `unique`, `value_counts`, `nunique`,
-`mask_duplicates`, `categorize`, `is_in`, the set operations
+A whole family of Ruby-side methods — `factorize`, `unique`, `value_counts`,
+`nunique`, `mask_duplicates`, `categorize`, `is_in`, the set operations
 (`intersection` / `difference` / `union`), `is_mode`, `mode` — all read
 different answers out of the *same* one-pass value-seen-set. That shared
 substrate lives in `ext/carray_factorize.c` and is named after its central
@@ -136,7 +136,7 @@ side effect they record.
 
 | kernel | side effect per element | output |
 |---|---|---|
-| `__factorize_appearance__` (categorize) | write `code` into a uint32 scratch; push level on `is_new` | `[narrow-codes CArray, levels CArray]` |
+| `__factorize_appearance__` (`factorize`, `categorize`) | write `code` into a uint32 scratch; push level on `is_new` | `[narrow-codes CArray, levels CArray]` |
 | `__mask_duplicates__(axis)` | write `!is_new` into a boolean output | boolean CArray, source shape |
 | `__unique_flat__` | push level on `is_new` | 1-D CArray of levels |
 | `__value_counts_flat__` | push level on `is_new`; `++counts[code]` | `[levels, counts]` (`counts` = 1-D int64) |
@@ -148,9 +148,10 @@ side effect they record.
 | `__locate_addr__(ref)` | build seen-set from `ref` (position beside each key); probe self, emit index | int64 CArray, source shape |
 
 The `factorize` kernel is the archetype — it exposes both projections
-(codes *and* levels) in one pass. Every other kernel is a specialisation
-that drops one of them or replaces it with a different accumulator
-(counts, first-seen flag, presence bit, per-fiber max-count marking).
+(codes *and* levels) in one pass, and `CArray#factorize` hands that pair
+out unchanged. Every other kernel is a specialisation that drops one of
+them or replaces it with a different accumulator (counts, first-seen
+flag, presence bit, per-fiber max-count marking).
 
 ### `is_in` and the set operations — two-phase intern-then-probe
 

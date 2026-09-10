@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `CArray#factorize` answers `[codes, levels]` in one pass — the distinct
+  values in first-appearance order, which is what `unique` answers, and an
+  integer array of the receiver's shape indexing them, so `levels[codes[i]]` is
+  the cell. It is for a caller who wants the codes as storage: a position to
+  scatter into, a key to group by, a dense renumbering of sparse keys.
+  `categorize` wraps the same two in a `CACategorical` and hands the vocabulary
+  back as a Ruby Array. A masked cell is masked in `codes` and holds the
+  exclusion sentinel, as a categorical's storage is. There is no `sort:`,
+  because the codes index the levels.
+
 - New: C extensions can read two arrays along the same axis at once.
   `CA_FOR_EACH_FIBER_PAIR` and `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one
   contiguous fiber from each of two sources at the same position, which is
