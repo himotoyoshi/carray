@@ -206,6 +206,7 @@ class CArray
   autoload_method "put_nd",         "carray/methods/gather_nd"
   autoload_method "mask_duplicates", "carray/methods/mask_duplicates"
   autoload_method "unique",          "carray/methods/unique"
+  autoload_method "factorize",       "carray/methods/factorize"
   autoload_method "is_in",           "carray/methods/is_in"
   autoload_method "intersection",    "carray/methods/is_in"
   autoload_method "difference",      "carray/methods/is_in"
