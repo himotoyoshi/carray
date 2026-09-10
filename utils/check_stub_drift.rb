@@ -26,6 +26,7 @@ TRACKED_CLASSES = %w[
   CAShift CAGrid CAFake CABitarray CABitfield
   CATile CARoll CAByteSwap
   CAStack CAMeld CARecord
+  CAMonOp CABinOp CATriOp CAMonCmp CABinCmp CALazyMarker
   UndefClass
   CAMath
 ]
