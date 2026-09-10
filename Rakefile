@@ -267,7 +267,12 @@ task :spec_ai => [:kernel_surface_check,
   # hiding on Mac.  This is what backs the rule that a view struct taken
   # from ALLOC() must have _pool set to NULL before its setup runs.
   ENV["MallocZeroOnFree"] ||= "0"
-  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/*.rb\"].sort.each{|f| require_relative f}'"
+  # test_*.rb, not every .rb: the fixture directories hold their own
+  # extconf.rb, and requiring one of those runs mkmf here -- compiler probes
+  # during the test run, and a Makefile / mkmf.log left at the repo root.
+  # Their helper (ext_xfer_smoke/load.rb) is pulled in by the tests that need
+  # it, so it does not want collecting either.
+  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
 end
 
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"
