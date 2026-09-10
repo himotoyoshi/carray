@@ -197,16 +197,92 @@ class CABlockIterator < CAIterator
   # data type, mask, empty / all-masked (identity vs UNDEF) and epsilon-close
   # contracts unchanged.  `min_count:` / `fill_value:` pass straight to the core.
 
-  # @overload sum(min_count: nil, fill_value: nil)
-  #   Per-tile sum.  @return [CArray] tile-grid shaped
-  # @overload accumulate(min_count: nil, fill_value: nil)
-  #   Per-tile sum kept in the source's own data type, wrapping at its width,
-  #   as the core `accumulate` does -- `sum` answers in the type the core
-  #   promotes to (float64 for integers), so a tile count over `uint8` cells
-  #   stays one byte wide instead of eight.
+  # @!method sum(min_count: nil, fill_value: nil)
+  #   Per-tile sum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  # The rest are analogous: prod / mean / min / max, sample and population
-  # variance / stddev, all / any.
+  # @!method accumulate(min_count: nil, fill_value: nil)
+  #   Per-tile sum kept in the source's own data type, wrapping at its
+  #   width, as the core `accumulate` does -- `sum` answers in the type
+  #   the core promotes to (float64 for integers).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method prod(min_count: nil, fill_value: nil)
+  #   Per-tile product.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method mean(min_count: nil, fill_value: nil)
+  #   Per-tile arithmetic mean.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method min(min_count: nil, fill_value: nil)
+  #   Per-tile minimum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method max(min_count: nil, fill_value: nil)
+  #   Per-tile maximum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method variance(min_count: nil, fill_value: nil)
+  #   Per-tile sample variance (divisor `n - 1`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method stddev(min_count: nil, fill_value: nil)
+  #   Per-tile sample standard deviation (divisor `n - 1`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method all(min_count: nil, fill_value: nil)
+  #   Whether every cell of each tile is true.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method any(min_count: nil, fill_value: nil)
+  #   Whether any cell of each tile is true.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method variancep(min_count: nil, fill_value: nil)
+  #   Per-tile population variance (divisor `n`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
+  # @!method stddevp(min_count: nil, fill_value: nil)
+  #   Per-tile population standard deviation (divisor `n`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] tile-grid shaped
   [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
@@ -279,11 +355,11 @@ class CABlockIterator < CAIterator
     assemble { |view, _| view.minmax(axis: @tile_axes, **kw) }
   end
 
-  # @overload min_index
+  # @!method min_index
   #   Per-tile position of the minimum, as a flat index within the tile (a
   #   partial edge tile indexes within its own present cells).
   #   @return [CArray] tile-grid shaped
-  # @overload max_index
+  # @!method max_index
   #   Per-tile position of the maximum (tile-local flat index).
   #   @return [CArray]
   [:min_index, :max_index].each do |op|
@@ -530,19 +606,19 @@ class CABlockIterator < CAIterator
   # cumcount -> int64 running count of present cells; the output data type is seeded
   # from the first tile's scan.
 
-  # @overload cumsum
+  # @!method cumsum
   #   Per-tile inclusive running sum (float64), source-shaped.
   #   @return [CArray]
-  # @overload cumprod
+  # @!method cumprod
   #   Per-tile inclusive running product (float64), source-shaped.
   #   @return [CArray]
-  # @overload cummax
+  # @!method cummax
   #   Per-tile inclusive running maximum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cummin
+  # @!method cummin
   #   Per-tile inclusive running minimum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cumcount
+  # @!method cumcount
   #   Per-tile running count of present cells (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|

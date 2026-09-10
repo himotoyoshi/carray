@@ -676,19 +676,19 @@ class CACategoricalIterator < CAIterator
   # preserve the value data type, cumcount -> int64 (1-based within-category
   # ordinal); an object value data type is carried by the kernel's object branch.
 
-  # @overload cumsum
+  # @!method cumsum
   #   Per-category inclusive running sum (float64), source-shaped.
   #   @return [CArray]
-  # @overload cumprod
+  # @!method cumprod
   #   Per-category inclusive running product (float64), source-shaped.
   #   @return [CArray]
-  # @overload cummax
+  # @!method cummax
   #   Per-category inclusive running maximum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cummin
+  # @!method cummin
   #   Per-category inclusive running minimum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cumcount
+  # @!method cumcount
   #   Per-category 1-based within-category ordinal (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|

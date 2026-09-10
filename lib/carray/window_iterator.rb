@@ -298,19 +298,113 @@ class CAWindowIterator < CAIterator
   # unchanged.  `min_count:` / `fill_value:` pass straight to the core (the
   # boundary strictness + result fill knobs).
 
-  # @overload sum(min_count: nil, fill_value: nil)
-  #   Rolling sum, delegating to `sliding_view.sum(axis: window_axes)`.
+  # @!method sum(min_count: nil, fill_value: nil)
+  #   Rolling sum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # @overload accumulate(min_count: nil, fill_value: nil)
-  #   Rolling sum in the source's own data type, wrapping at its width, as the
-  #   core `accumulate` does.  `sum` answers in the type the core promotes to
-  #   (float64 for integers), which for a window over bytes moves eight times
-  #   the bytes; this is the spelling for staying in the type when the window
-  #   cannot overflow it.
+  # @!method accumulate(min_count: nil, fill_value: nil)
+  #   Rolling sum kept in the source's own data type, wrapping at its
+  #   width, as the core `accumulate` does -- `sum` answers in the type
+  #   the core promotes to (float64 for integers).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # The rest are analogous: prod / mean / min / max, sample and population
-  # variance / stddev, all / any, fused minmax, and the window-local position
-  # min_index / max_index (index within the window axes).
+  # @!method prod(min_count: nil, fill_value: nil)
+  #   Rolling product.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method mean(min_count: nil, fill_value: nil)
+  #   Rolling arithmetic mean.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method min(min_count: nil, fill_value: nil)
+  #   Rolling minimum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method max(min_count: nil, fill_value: nil)
+  #   Rolling maximum.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method variance(min_count: nil, fill_value: nil)
+  #   Rolling sample variance (divisor `n - 1`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method stddev(min_count: nil, fill_value: nil)
+  #   Rolling sample standard deviation (divisor `n - 1`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method all(min_count: nil, fill_value: nil)
+  #   Whether every cell of each rolling is true.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method any(min_count: nil, fill_value: nil)
+  #   Whether any cell of each rolling is true.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method variancep(min_count: nil, fill_value: nil)
+  #   Rolling population variance (divisor `n`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method stddevp(min_count: nil, fill_value: nil)
+  #   Rolling population standard deviation (divisor `n`).
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method minmax(min_count: nil, fill_value: nil)
+  #   Rolling minimum and maximum, found in one pass.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [Array<CArray>] the pair `[min, max]`, reference-shaped (or shrunk, for :truncate)
+  # @!method min_index(min_count: nil, fill_value: nil)
+  #   Rolling position of the minimum, local to the window axes.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method max_index(min_count: nil, fill_value: nil)
+  #   Rolling position of the maximum, local to the window axes.
+  #   @param min_count [Integer, nil] fewest cells that must be present
+  #     for a result; a piece with fewer comes back masked.
+  #   @param fill_value [Object, nil] value to put in place of a masked
+  #     result instead of leaving it masked.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
   [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
@@ -873,13 +967,41 @@ class CAWindowIterator < CAIterator
           "sort of source addresses is ill-defined."
   end
 
-  # @overload cumsum
-  # @overload cumprod
-  # @overload cummax
-  # @overload cummin
-  # @overload cumcount
-  #   Not supported for a window iterator: a segment scan writes a per-cell
-  #   running statistic, which is single-valued only when each cell belongs to
+  # @!method cumsum
+  #   Not supported for a window iterator.  A segment scan writes a per-cell
+  #   running sum, which is single-valued only when each cell belongs to
+  #   exactly one piece.  Overlapping windows put a cell in many windows, so
+  #   there is no single running value.  Raises NotImplementedError, exactly as
+  #   {#map} / {#sort_addr} do (min / max reductions stay available: a single
+  #   winner is well-defined).
+  #   @raise [NotImplementedError]
+  # @!method cumprod
+  #   Not supported for a window iterator.  A segment scan writes a per-cell
+  #   running product, which is single-valued only when each cell belongs to
+  #   exactly one piece.  Overlapping windows put a cell in many windows, so
+  #   there is no single running value.  Raises NotImplementedError, exactly as
+  #   {#map} / {#sort_addr} do (min / max reductions stay available: a single
+  #   winner is well-defined).
+  #   @raise [NotImplementedError]
+  # @!method cummax
+  #   Not supported for a window iterator.  A segment scan writes a per-cell
+  #   running maximum, which is single-valued only when each cell belongs to
+  #   exactly one piece.  Overlapping windows put a cell in many windows, so
+  #   there is no single running value.  Raises NotImplementedError, exactly as
+  #   {#map} / {#sort_addr} do (min / max reductions stay available: a single
+  #   winner is well-defined).
+  #   @raise [NotImplementedError]
+  # @!method cummin
+  #   Not supported for a window iterator.  A segment scan writes a per-cell
+  #   running minimum, which is single-valued only when each cell belongs to
+  #   exactly one piece.  Overlapping windows put a cell in many windows, so
+  #   there is no single running value.  Raises NotImplementedError, exactly as
+  #   {#map} / {#sort_addr} do (min / max reductions stay available: a single
+  #   winner is well-defined).
+  #   @raise [NotImplementedError]
+  # @!method cumcount
+  #   Not supported for a window iterator.  A segment scan writes a per-cell
+  #   running count of present cells, which is single-valued only when each cell belongs to
   #   exactly one piece.  Overlapping windows put a cell in many windows, so
   #   there is no single running value.  Raises NotImplementedError, exactly as
   #   {#map} / {#sort_addr} do (min / max reductions stay available: a single
