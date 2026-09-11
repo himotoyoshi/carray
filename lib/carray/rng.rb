@@ -51,14 +51,34 @@ class CArray
       File.read(path, :encoding => "UTF-8")
     }.freeze
 
-    # The function in SOURCE that takes a state and gives one double in
-    # [0.0, 1.0), by generator.
+    # What every generator's text needs beside it, and what none of them
+    # owns: turning uniforms into a normal is the same arithmetic whichever
+    # generator the uniforms came from.
+    #
+    # Handed out apart from SOURCE because whoever pastes it pastes it once,
+    # however many generators are drawing.  Folded into each generator's own
+    # text instead, two generators in one translation unit would define it
+    # twice.
+    COMMON_SOURCE = File.read(
+      File.expand_path("../../ext/ca_rng_normal.h", __dir__), :encoding => "UTF-8"
+    ).freeze
+
+    # The functions in SOURCE a caller may reach, by generator and by what
+    # the draw answers: `:random` a double in [0.0, 1.0), `:randomn` a
+    # standard normal, `:bits` the raw word a draw came from.  Each takes the
+    # state and advances it -- `:randomn` by two draws, the other two by one.
     #
     # Named here rather than worked out by whoever pastes the text: which
-    # symbol is the entry point is a fact about the generator, and the
-    # generator is CArray's.
-    DRAW_FUNCTION = {
-      :xoshiro256pp => "ca_xoshiro256pp_next_real",
+    # symbols are the entry points is a fact about the generator, and the
+    # generator is CArray's.  These are the three `#random`, `#randomn`
+    # and `#bits` call, so a caller pasting the text draws the sequence
+    # this one draws.
+    DRAW_FUNCTIONS = {
+      :xoshiro256pp => {
+        :random  => "ca_xoshiro256pp_next_real",
+        :randomn => "ca_xoshiro256pp_next_normal",
+        :bits    => "ca_xoshiro256pp_next",
+      }.freeze,
     }.freeze
 
   end
