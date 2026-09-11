@@ -87,3 +87,19 @@ ca_xoshiro256pp_next_real (int64_t *s)
 {
   return (double) (ca_xoshiro256pp_next(s) >> 11) * 0x1.0p-53;
 }
+
+/* One standard normal, which is two draws.  ca_rng_normal is what turns
+   them into one, and it is in a file of its own because it belongs to no
+   generator.
+
+   The two draws are taken into locals rather than written as two
+   arguments: C does not say which order a call's arguments are
+   evaluated in, and these two are not interchangeable -- they advance a
+   state. */
+static inline double
+ca_xoshiro256pp_next_normal (int64_t *s)
+{
+  const double u1 = ca_xoshiro256pp_next_real(s);
+  const double u2 = ca_xoshiro256pp_next_real(s);
+  return ca_rng_normal(u1, u2);
+}

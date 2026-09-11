@@ -40,18 +40,27 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
   `Random`. `CArray::Rng.new(seed: 4)` seeds one, and a first positional
   argument picks the generator from `CArray::Rng::GENERATORS`, which is
-  `:xoshiro256pp` today and is where another would be added. `#rand` takes a
-  draw in `[0.0, 1.0)`, as `Random#rand` does; `#bits` is the same draw as the
-  generator's raw word; `#reset` starts the run over. Draws carry a full
-  53-bit mantissa, and a fill through one runs about 2.5x faster than through
-  a Ruby `Random`: the draw inlines where a call into Ruby's MT19937 cannot.
-  `#state` is the four `int64` cells it advances, and `CArray::Rng::SOURCE`
-  is the generator's C as text -- the same file this extension compiled -- so
-  another gem can paste it and continue a sequence this one started rather
+  `:xoshiro256pp` today and is where another would be added. `#random` takes a
+  draw in `[0.0, 1.0)` and `#randomn` a standard normal, pairing as
+  `CArray#random!` and `#randomn!` do; `#bits` is the raw word a draw came
+  from; `#reset` starts the run over. It is not `#rand`, because Ruby's
+  `random:` keyword calls `rand(n)` on what it is handed and this takes no
+  argument -- a `#rand` here would look usable there and fail on arity.
+  Uniform draws carry a full 53-bit mantissa, and a fill through one runs
+  about 2.5x faster than through a Ruby `Random`: the draw inlines where a
+  call into Ruby's MT19937 cannot. `#state` is the four `int64` cells it
+  advances, and `CArray::Rng::SOURCE`, `CArray::Rng::COMMON_SOURCE` and
+  `CArray::Rng::DRAW_FUNCTIONS` are the generator's C as text and the entry
+  points in it -- the same files this extension compiled -- so another gem
+  can paste them and continue a sequence this one started rather
   than reimplement it. It is `Rng` and not `Random` because the two are
   different generators and a `CArray::Random` would shadow `::Random` for
   every bare `Random` written inside `class CArray`. Without `rng:`, or with
-  a Ruby `Random`, nothing changes: those still draw through Ruby's MT19937.
+  a Ruby `Random`, nothing changes: those still draw through Ruby's MT19937,
+  and `randomn!` still fills in pairs there. Through a `CArray::Rng` it fills
+  one cell per call instead, so that two fills -- and a kernel drawing after
+  one -- are the one sequence; a normal is then two draws with no spare kept,
+  which measures the same as the paired form because the transform dominates.
 
 - New: `CArray#factorize` answers `[codes, levels]` in one pass — the distinct
   values in first-appearance order, which is what `unique` answers, and an

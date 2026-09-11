@@ -24,6 +24,7 @@
 
 /* The generator itself, shared verbatim with carray-jit.  See the file's
    own comment for why it carries no include guard. */
+#include "ca_rng_normal.h"
 #include "ca_rng_xoshiro256pp.h"
 
 VALUE rb_cCARng;
@@ -365,6 +366,23 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
 
 /* ---- randomn! ---------------------------------------------------------- */
 
+/* One standard normal from the resolved source.
+ *
+ * For CArray::Rng this is two draws and no spare, which is what
+ * ca_rng_normal is and what lets a kernel's `randomn` continue a
+ * `randomn!` -- both are this function, called once per cell.
+ *
+ * For Ruby's MT the paired form below is kept: nothing there draws one
+ * at a time, so there is no second caller to agree with, and changing it
+ * would change the numbers an existing call gets. */
+static inline double
+ca_random_normal (ca_rng_t *source)
+{
+  double u1 = ca_random_real(source);
+  double u2 = ca_random_real(source);
+  return ca_rng_normal(u1, u2);
+}
+
 static inline void
 box_muller_pair(ca_rng_t *source, double *r1, double *r2)
 {
@@ -407,6 +425,54 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
   n = ca->elements;
   ca_attach(ca);
   ca_rng_open(rng, &source);
+
+  /* A CArray::Rng fills one cell per call rather than two, so that this
+     and a kernel drawing afterwards are the one sequence: both are
+     `ca_random_normal` run once per cell.  It costs a draw a cell over
+     the paired form, and what it buys is that where the generator
+     stands can be worked out rather than run. */
+  if (source.kind == CA_RNG_OWN) {
+    switch (ca->data_type) {
+    case CA_FLOAT64: {
+      double *p = (double *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = ca_random_normal(&source);
+      break;
+    }
+    case CA_FLOAT32: {
+      float *p = (float *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (float) ca_random_normal(&source);
+      break;
+    }
+    case CA_CMPLX128: {
+      double complex *p = (double complex *)ca->ptr;
+      for (i = 0; i < n; i++) {
+        /* Into locals first: C does not say which order a call's
+           arguments are evaluated in, and these two advance a state. */
+        double re = ca_random_normal(&source);
+        double im = ca_random_normal(&source);
+        p[i] = re + im * I;
+      }
+      break;
+    }
+    case CA_CMPLX64: {
+      float complex *p = (float complex *)ca->ptr;
+      for (i = 0; i < n; i++) {
+        double re = ca_random_normal(&source);
+        double im = ca_random_normal(&source);
+        p[i] = (float) re + (float) im * I;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+    ca_rng_close(&source);
+    ca_sync(ca);
+    ca_detach(ca);
+    return self;
+  }
 
   switch (ca->data_type) {
   case CA_FLOAT64: {
@@ -693,16 +759,19 @@ rb_ca_rng_reset (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
-/* CArray::Rng#rand — one draw in [0.0, 1.0), the state advanced.
+/* CArray::Rng#random — one draw in [0.0, 1.0), the state advanced.
  *
- * Named as Ruby names it: `Random#rand` with no argument is a float in
- * [0.0, 1.0), and this is the same thing from a different generator.
+ * Named for `CArray#random!`, which it is the one-cell form of, and to
+ * pair with `#randomn` the way those two pair.  Not `#rand`: Ruby's
+ * `random:` keyword calls `rand(n)` on what it is given, and a `#rand`
+ * here that takes no argument would make this look usable there and
+ * then fail with an arity error rather than say what it is.
  *
  * It is the same draw `random!` takes for one cell, and the same one a
  * kernel's `random(rng:)` takes, because all three run the code in
  * ca_rng_xoshiro256pp.h. */
 static VALUE
-rb_ca_rng_rand (VALUE self)
+rb_ca_rng_random (VALUE self)
 {
   CArray *ca;
   int64_t *cells;
@@ -735,6 +804,30 @@ rb_ca_rng_bits (VALUE self)
   return ULL2NUM(value);
 }
 
+/* CArray::Rng#randomn — one standard normal, which is two draws.
+ *
+ * The same one `randomn!(rng: self)` writes into a cell and the same
+ * one a kernel's `randomn(rng: self)` takes, because all three are
+ * ca_random_normal. */
+static VALUE
+rb_ca_rng_randomn (VALUE self)
+{
+  CArray *ca;
+  int64_t *cells;
+  ca_rng_t source;
+  double value;
+
+  ca = ca_rng_cells(self, &cells);
+  source.kind = CA_RNG_OWN;
+  source.rng = self;
+  source.state = NULL;
+  source.cells = cells;
+  value = ca_random_normal(&source);
+  ca_sync(ca);
+  ca_detach(ca);
+  return rb_float_new(value);
+}
+
 static VALUE
 rb_ca_rng_inspect (VALUE self)
 {
@@ -751,7 +844,8 @@ Init_carray_random (void)
   rb_cCARng = rb_define_class_under(rb_cCArray, "Rng", rb_cObject);
   rb_define_method(rb_cCARng, "initialize", rb_ca_rng_initialize, -1);
   rb_define_method(rb_cCARng, "reset",      rb_ca_rng_reset,      -1);
-  rb_define_method(rb_cCARng, "rand",       rb_ca_rng_rand,        0);
+  rb_define_method(rb_cCARng, "random",     rb_ca_rng_random,      0);
+  rb_define_method(rb_cCARng, "randomn",    rb_ca_rng_randomn,     0);
   rb_define_method(rb_cCARng, "bits",       rb_ca_rng_bits,        0);
   rb_define_method(rb_cCARng, "inspect",    rb_ca_rng_inspect,     0);
   rb_define_attr(rb_cCARng, "generator", 1, 0);
