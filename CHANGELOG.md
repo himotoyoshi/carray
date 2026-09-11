@@ -36,6 +36,23 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `CArray::Rng` is a random number generator with its own state, which
+  `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
+  `Random`. `CArray::Rng.new(seed: 4)` seeds one, and a first positional
+  argument picks the generator from `CArray::Rng::GENERATORS`, which is
+  `:xoshiro256pp` today and is where another would be added. `#rand` takes a
+  draw in `[0.0, 1.0)`, as `Random#rand` does; `#bits` is the same draw as the
+  generator's raw word; `#reset` starts the run over. Draws carry a full
+  53-bit mantissa, and a fill through one runs about 2.5x faster than through
+  a Ruby `Random`: the draw inlines where a call into Ruby's MT19937 cannot.
+  `#state` is the four `int64` cells it advances, and `CArray::Rng::SOURCE`
+  is the generator's C as text -- the same file this extension compiled -- so
+  another gem can paste it and continue a sequence this one started rather
+  than reimplement it. It is `Rng` and not `Random` because the two are
+  different generators and a `CArray::Random` would shadow `::Random` for
+  every bare `Random` written inside `class CArray`. Without `rng:`, or with
+  a Ruby `Random`, nothing changes: those still draw through Ruby's MT19937.
+
 - New: `CArray#factorize` answers `[codes, levels]` in one pass — the distinct
   values in first-appearance order, which is what `unique` answers, and an
   integer array of the receiver's shape indexing them, so `levels[codes[i]]` is
