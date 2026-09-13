@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: each numeric data type names its own limits as constants on the class
+  for that type -- `CArray::Int32::MIN` / `MAX`, and for float and complex
+  types `TINY` (the smallest positive normal) and `EPSILON` (the step above
+  1.0) as well. `MIN` is the bottom of the range for every type, so `MIN` and
+  `MAX` bracket an integer and a float the same way; note that Ruby's
+  `Float::MIN` is a different value, and is `TINY` here. `boolean`, `fixlen`
+  and `object` have no numeric range and carry none of these.
+
 - New: `CArray::Rng` is a random number generator with its own state, which
   `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
   `Random`. `CArray::Rng.new(seed: 4)` seeds one, and a first positional

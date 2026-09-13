@@ -189,3 +189,4 @@ A **Face** is an extended data type built on top of CArray — a way to give the
 | a view (anonymous)    | a view, but with a named class (`CABlock`, `CATranspose`, ...) |
 | `axis=` argument      | `axis:` keyword (e.g. `a.sum(axis: 0)`); positional axis arguments are not accepted |
 | `argmin` / `argmax`   | `min_index` / `max_index` (CArray uses `*_index` instead of `arg*`) |
+| `iinfo(t).min` / `finfo(t).max` | `CArray::Int32::MIN` / `CArray::Float64::MAX` — constants on the class for the type; `finfo(t).tiny` is `TINY` and `finfo(t).eps` is `EPSILON` |
