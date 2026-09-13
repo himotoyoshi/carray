@@ -1416,6 +1416,12 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
   }
 
   if ( ! NIL_P(rbounds) ) {
+    /* A Symbol says the same thing as the String, and is what the window
+       iterator (CArray#windows) is given -- accept both so the two spellings
+       of one policy do not diverge. */
+    if ( SYMBOL_P(rbounds) ) {
+      rbounds = rb_sym2str(rbounds);
+    }
     switch ( TYPE(rbounds) ) {
     case T_STRING:
       cbounds = StringValuePtr(rbounds);
