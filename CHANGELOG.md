@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `CAFrame.from_csv` reads an open IO as well as a path -- anything
+  answering `gets`, so `CAFrame.from_csv(StringIO.new(text))` reads CSV that is
+  already in memory instead of writing it to a temporary file first. A String
+  argument is still always a path, never CSV text. An IO is read from where it
+  is and left open, and `encoding:` applies to the path form only, an IO being
+  already open. `parser:` is handed whatever was passed as the source.
+
 - New: `inspect_full` renders an array the way `inspect` does but without the
   `...` abbreviation, for when the whole array is what you want to look at.
   The header, the layout and the `_` for a masked cell are `inspect`'s, so on

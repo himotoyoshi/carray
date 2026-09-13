@@ -11,12 +11,27 @@ class CAFrame
   # later. Broken cells fail to_type and become UNDEF automatically
   # (parse-mask, §6-2).
   #
+  # +source+ is a path, or an open IO -- anything answering +gets+, which a
+  # StringIO is. So CSV that is already in memory does not have to go to a
+  # temporary file first:
+  #
+  #   CAFrame.from_csv("obs.csv")                    # a path
+  #   CAFrame.from_csv(StringIO.new(body))           # text already in hand
+  #   File.open("obs.csv") { |io| CAFrame.from_csv(io) }
+  #
+  # A String is always read as a path, never as CSV text: guessing between the
+  # two by looking for a newline is the kind of guess that is right until it is
+  # not, and StringIO says which one you meant in six characters. An IO is read
+  # from where it is and left open -- the caller opened it and closes it.
+  #
   # Parsing uses the built-in fast tokenizer (CSVParser). Options:
   #   sep:      field separator (default ",")
   #   quote:    quote character (default '"')
   #   strip:    trim spaces from unquoted fields (default false, RFC spacing)
-  #   +encoding+: IO open-mode encoding (default "bom|utf-8", strips a BOM)
-  #   parser:   a callable path -> [headers, rows] to inject another parser
+  #   +encoding+: open-mode encoding for a path (default "bom|utf-8", strips a
+  #             BOM). It has nothing to open when +source+ is an IO, so there
+  #             the IO's own encoding governs and a BOM is the caller's.
+  #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
   #             sep/quote/strip/encoding and any block are that parser's concern.
   #
@@ -31,22 +46,17 @@ class CAFrame
   # Columns are handed to the frame as CABlock views over one backing object
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
-  def self.from_csv(path, types: nil,
+  def self.from_csv(source, types: nil,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     names, rows =
       if parser
-        parser.call(path)
+        parser.call(source)
+      elsif source.respond_to?(:gets)
+        read_csv(source, sep: sep, quote: quote, strip: strip, &block)
       else
-        File.open(path, "r:#{encoding}") do |io|
-          reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
-          if block
-            block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
-          else
-            reader.header
-            reader.body
-          end
-          reader.result
+        File.open(source, "r:#{encoding}") do |io|
+          read_csv(io, sep: sep, quote: quote, strip: strip, &block)
         end
       end
 
@@ -54,6 +64,22 @@ class CAFrame
     frame.cast(types) if types
     frame
   end
+
+  # Drive the reading-control DSL over one open IO and hand back
+  # [names, rows]. Shared by the path and the IO source, so the two cannot
+  # come to read a file differently.
+  def self.read_csv (io, sep:, quote:, strip:, &block)
+    reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
+    if block
+      block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
+    else
+      reader.header
+      reader.body
+    end
+    reader.result
+  end
+
+  private_class_method :read_csv
 
   # Build a frame from parsed [names, rows]. When names is nil (headerless and
   # no column_names) positional names "c0".."cN" are generated from the widest
