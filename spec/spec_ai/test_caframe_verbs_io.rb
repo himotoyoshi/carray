@@ -1,6 +1,7 @@
 require "test/unit"
 require "carray"
 require "tempfile"
+require "stringio"
 
 # CAFrame increments 2 (MEMO_DATAFRAME_ON_CARRAY.md):
 #   from_csv (§11.2/§6-2), column verbs (§11.4), each_row/to_ca (§11.9/§11.11),
@@ -165,6 +166,86 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
       assert_equal 28.5, df["temp"][0]
       assert_equal UNDEF, df["temp"][1]
     end
+  end
+end
+
+#  from_csv reads a path or an open IO.  CSV already in memory does not
+#  have to go to a temporary file first, which is the whole point.
+
+class TestCAFrameFromCsvSource < Test::Unit::TestCase
+  TEXT = "a,b,c\n1,2,3\n4,,6\n"
+
+  def with_csv(text)
+    Tempfile.create(["obs", ".csv"]) do |f|
+      f.write(text)
+      f.flush
+      yield f.path
+    end
+  end
+
+  def test_reads_a_stringio
+    df = CAFrame.from_csv(StringIO.new(TEXT))
+    assert_equal ["a", "b", "c"], df.variable_names
+    assert_equal [["1", "2", "3"], ["4", nil, "6"]], df.to_ca.to_a
+  end
+
+  def test_reads_an_open_file
+    with_csv(TEXT) do |path|
+      File.open(path) do |io|
+        assert_equal [["1", "2", "3"], ["4", nil, "6"]],
+                     CAFrame.from_csv(io).to_ca.to_a
+      end
+    end
+  end
+
+  #  One reader drives both, so a path and the same bytes in memory cannot
+  #  come to be read differently.
+  def test_a_path_and_an_io_agree
+    with_csv(TEXT) do |path|
+      assert_equal CAFrame.from_csv(path).to_ca.to_a,
+                   CAFrame.from_csv(StringIO.new(TEXT)).to_ca.to_a
+    end
+  end
+
+  #  The caller opened it, so the caller closes it.
+  def test_the_io_is_left_open
+    with_csv(TEXT) do |path|
+      io = File.open(path)
+      begin
+        CAFrame.from_csv(io)
+        assert_equal false, io.closed?
+      ensure
+        io.close
+      end
+    end
+  end
+
+  def test_the_reading_control_block_works_over_an_io
+    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { skip 1; body }
+    assert_equal ["c0", "c1"], df.variable_names
+    assert_equal [["1", "2"], ["3", "4"]], df.to_ca.to_a
+  end
+
+  def test_keywords_work_over_an_io
+    assert_equal ["a", "b"],
+                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";").variable_names
+    assert_equal :int32,
+                 CAFrame.from_csv(StringIO.new(TEXT), types: { "a" => :int32 })["a"].data_type
+    #  a blank cell is still UNDEF, not a filled-in number
+    assert_equal 1,
+                 CAFrame.from_csv(StringIO.new(TEXT), types: { "b" => :int32 })["b"].count_masked
+  end
+
+  #  A String is a path, always.  Guessing between a path and CSV text by
+  #  looking for a newline is right until it is not.
+  def test_a_string_is_a_path_not_content
+    assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n") }
+  end
+
+  def test_an_injected_parser_is_handed_the_source
+    seen = nil
+    CAFrame.from_csv(:whatever, parser: ->(src) { seen = src; [["a"], [["1"]]] })
+    assert_equal :whatever, seen
   end
 end
 

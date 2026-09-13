@@ -122,7 +122,26 @@ CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([1, 2, 3]))
 
 ### `CAFrame.from_csv`
 
-Read a CSV. The header row supplies column names (Strings). Every column is
+Read a CSV from a path, or from an open IO — anything answering `gets`, which
+a `StringIO` is. So CSV already in memory does not have to go to a temporary
+file first:
+
+```ruby
+CAFrame.from_csv("obs.csv")                      # a path
+CAFrame.from_csv(StringIO.new(body))             # text already in hand
+File.open("obs.csv") { |io| CAFrame.from_csv(io) }
+```
+
+A String is always read as a **path**, never as CSV text. Guessing between the
+two by looking for a newline is the kind of guess that is right until it is
+not, and `StringIO` says which one you meant. An IO is read from wherever it
+is and left open — the caller opened it, so the caller closes it. One reader
+drives both forms, so a path and the same bytes in memory cannot come to be
+read differently; `encoding:` is the exception, since it is an open mode and an
+IO is already open (there the IO's own encoding governs, and a BOM is the
+caller's).
+
+The header row supplies column names (Strings). Every column is
 read **raw as an object column of the cell strings** — CAFrame does not guess
 types. Casting is a separate, explicit step: pass `types:` to cast named
 columns on the way in, or call [`cast`](#8-column-verbs) later. Cells that fail
@@ -161,7 +180,8 @@ Without a block the default is `header` then `body`. A headerless file gets
 positional names `c0`, `c1`, … unless you supply `column_names`.
 
 To swap in a different parser (the stdlib `csv`, or a typed-table source), pass
-`parser:` — a callable `path -> [headers, rows]`. When given, it owns parsing,
+`parser:` — a callable `source -> [headers, rows]`, handed whatever you passed
+as the source. When given, it owns parsing,
 so `sep:` / `quote:` / `strip:` / `encoding:` and any block are its concern:
 
 ```ruby
