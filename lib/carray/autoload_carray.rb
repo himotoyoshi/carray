@@ -201,6 +201,7 @@ class CArray
   autoload_method "self.meshgrid",  "carray/methods/meshgrid"
 
   autoload_method "bincount",       "carray/methods/bincount"
+  autoload_method "repeat",         "carray/methods/repeat"
   autoload_method "self.broadcast", "carray/methods/broadcast"
   autoload_method "gather_nd",      "carray/methods/gather_nd"
   autoload_method "put_nd",         "carray/methods/gather_nd"
