@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `unique`, `nunique` and `mask_duplicates` take `along: k`, which
+  compares whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the
+  distinct rows of a 2-D array, `along: 1` the distinct columns, and the same
+  works for slabs of an N-D array. This is `np.unique(z, axis=k)`. It is a
+  different question from `axis:` on the same methods, which asks about the
+  values inside each fiber, and giving both raises. A sub-array holding a
+  masked cell does not take part; `sort:` and `object` arrays are refused.
+
 - New: each numeric data type names its own limits as constants on the class
   for that type -- `CArray::Int32::MIN` / `MAX`, and for float and complex
   types `TINY` (the smallest positive normal) and `EPSILON` (the step above
