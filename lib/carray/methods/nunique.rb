@@ -1,3 +1,5 @@
+require "carray/methods/discovery_along"
+
 class CArray
 
   # @overload nunique(axis: nil, keep_axis: false)
@@ -29,7 +31,26 @@ class CArray
   #     axis as a length-1 axis instead of dropping it.
   #   @return [Integer, CArray] Integer for `axis: nil`, otherwise a
   #     reduced `CA_INT64` CArray.
-  def nunique (axis: nil, keep_axis: false)
+  # @overload nunique(along: k)
+  #   Returns how many distinct **sub-arrays** `self` holds, comparing
+  #   whole sub-arrays rather than cells: `along: k` names the axis
+  #   whose index enumerates them, so `z.nunique(along: 0)` counts the
+  #   distinct rows of a 2-D array. This is `len(np.unique(z, axis=k))`.
+  #
+  #   Note the contrast with `axis:`, which names the axis a *fiber runs
+  #   along* and counts the distinct values inside each fiber -- one
+  #   count per fiber, not one count for the array. The two cannot be
+  #   given together.
+  #
+  #   Sub-arrays holding a masked cell do not participate and are not
+  #   counted. `object` arrays are refused, because their cells hold
+  #   Ruby references.
+  #
+  #   @param along [Integer] axis whose index enumerates the sub-arrays.
+  #   @return [Integer] the number of distinct sub-arrays.
+  def nunique (axis: nil, keep_axis: false, along: nil)
+    reject_axis_with_along(axis, along, "nunique")
+    return fibers_as_cells(along, "nunique").nunique if along
     # Per-fiber single-pass seen-set hash (C __nunique__), one lane per data type
     # family (numeric widen / NaN collapse, object rb_hash + rb_eql, fixlen
     # byte-hash + memcmp). Masked cells are skipped; the accumulator is a no-op

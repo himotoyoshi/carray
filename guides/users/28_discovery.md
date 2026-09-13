@@ -205,6 +205,53 @@ m.mask_duplicates(axis: 1)        #  along each row
 
 `axis: k` runs along each fiber of axis `k`; the default takes the whole array in flatten order. Values are judged by `==`, so every `NaN` survives — this is the one place in the chapter where NaNs are not folded together — and a cell that is already masked takes no part.
 
+## Comparing whole sub-arrays — `along:`
+
+Everything above compares **cells**. `along:` widens the unit to a whole sub-array, so a row, a column, or a slab is compared as one value:
+
+```ruby
+z = CA_INT([[0, 1, 1],
+            [1, 0, 0],
+            [0, 1, 1],        # the same row as the first
+            [1, 1, 0],
+            [1, 0, 0]])       # the same row as the second
+
+z.unique(along: 0)
+#  => [ [ 0, 1, 1 ],
+#       [ 1, 0, 0 ],
+#       [ 1, 1, 0 ] ]
+
+z.nunique(along: 0)           #  => 3
+z.mask_duplicates(along: 0)
+#  => [ [ 0, 1, 1 ],
+#       [ 1, 0, 0 ],
+#       [ _, _, _ ],
+#       [ 1, 1, 0 ],
+#       [ _, _, _ ] ]
+```
+
+`along: k` names the axis whose **index enumerates** the sub-arrays: `along: 0` walks the rows of a 2-D array, `along: 1` the columns. This is NumPy's `np.unique(z, axis=k)`.
+
+**`along:` and `axis:` are different questions, and neither is a spelling of the other.** `axis:` names the axis a fiber runs *along* and asks about the values inside each fiber; `along:` asks which sub-arrays are distinct. For a 2-D array both end up talking about rows, with different numbers:
+
+```ruby
+c = CA_INT([[0, 1, 0],
+            [1, 0, 1],
+            [2, 3, 2]])       # column 2 repeats column 0
+
+c.nunique(axis: 1)            #  => [ 2, 2, 2 ]   values within each row
+c.nunique(along: 0)           #  => 3             distinct rows (all three differ)
+c.nunique(along: 1)           #  => 2             distinct columns
+```
+
+Giving both at once raises.
+
+The distinctness rule is the chapter's, widened: two sub-arrays are the same when every cell is, with all NaN folded together and `-0.0 == +0.0`. A sub-array holding a masked cell does not take part — it is not counted, never appears in `unique`, and in `mask_duplicates` keeps the mask it came with rather than being painted over.
+
+`unique(along:)` answers with a **view** of the surviving sub-arrays, not copies of them, so writing through it reaches the source; take a `copy` when that is not what you want. Two things it will not do: `sort:` has no meaning here, since sub-arrays have no order to sort by, and an `object` array is refused, because its cells hold Ruby references and would compare by identity rather than by value.
+
+`along:` is on `unique`, `nunique` and `mask_duplicates`. `value_counts`, `mode` and `is_in` still compare cells only.
+
 ## What to reach for
 
 | You want to know                                    | Reach for                             |
@@ -219,5 +266,6 @@ m.mask_duplicates(axis: 1)        #  along each row
 | Combined set of values                              | `a.union(b)`                          |
 | Values in `a` not in `b`                            | `a.difference(b)`                     |
 | First-occurrence marker without squashing shape     | `a.mask_duplicates`                   |
+| Which whole rows / columns / slabs are distinct      | `a.unique(along: k)`, `a.nunique(along: k)` |
 
 `unique` / `value_counts` / `nunique` / `mode` all fold NaN into a single canonical bucket and exclude masked cells; `mask_duplicates` uses strict `==` and keeps every NaN separate. Pick by whether you want values-as-set semantics or positions-as-mask semantics.
