@@ -208,6 +208,53 @@ m
 
 This `a[] = a.something` idiom replaces the older `something!` bang methods — the view does the work, and the assignment writes the result back into the original storage.
 
+## Reaching outside the array: `window`
+
+Every view so far names a part of the array. `window` names a region that may be **bigger** than it: give an index range per axis, let it run past either end, and the cells outside are made up rather than left out.
+
+```ruby
+a = CArray.int32(3, 3) { 1 }
+
+a.window(-1..3, -1..3)
+#  => [ [ 0, 0, 0, 0, 0 ],
+#       [ 0, 1, 1, 1, 0 ],
+#       [ 0, 1, 1, 1, 0 ],
+#       [ 0, 1, 1, 1, 0 ],
+#       [ 0, 0, 0, 0, 0 ] ]
+```
+
+A 3-by-3 read over `-1..3` is five wide, so that is a border added all round — what NumPy calls `pad`, except that this is a `CAWindow` **view** and allocates nothing. The ranges are indices of the source, so where the border goes and how thick it is are said by the same numbers that say everything else: `-1..3` is one cell on each side, `-2..3` is two on the left and one on the right, and `0..2` is no border at all.
+
+What fills the margin is `fill_value:` or `bounds:`:
+
+```ruby
+a.window(-1..3, -1..3)                      # 0 — the default fill
+a.window(-1..3, -1..3, fill_value: -1)      # a constant of your choosing
+a.window(-1..3, -1..3, fill_value: UNDEF)   # masked, so reductions skip it
+a.window(-1..3, -1..3, bounds: :nearest)    # the nearest edge cell, replicated
+```
+
+Against NumPy's `pad` modes: `fill_value:` is `constant`, `:nearest` is `edge`, and `fill_value: UNDEF` has no counterpart there — it is the one that says the border is *not data*, which is usually what a border is. `reflect` and `periodic` are not policies here; `periodic` is `roll`, which is its own view, and `reflect` has no view-shaped answer.
+
+Only one axis needs to grow, and the rest can be named normally:
+
+```ruby
+row = CArray.int32(4).seq!(1)
+row.window(-2..5, fill_value: 0)            #  => [ 0, 0, 1, 2, 3, 4, 0, 0 ]
+```
+
+Being a view, it reads and writes through to the source — but a write that lands in the margin has no cell to land in, and is **discarded** rather than raising:
+
+```ruby
+w = row.window(-1..4, fill_value: 0)
+w[1] = 99      # the source's first cell; row is now [99, 2, 3, 4]
+w[0] = 77      # in the margin: nothing is stored, and nothing complains
+```
+
+`copy` gives the padded array as an entity when that is what you want.
+
+Note the singular. `a.window(...)` is one such region; `a.windows(...)` is the [window iterator](22_window_iteration.md), which anchors one window on *every* cell and folds each — a different job, sharing the `bounds:` / `fill_value:` vocabulary.
+
 ## Writing through a view changes the original
 
 A view shares the storage of the array it refers to, so assigning through it updates that array:
@@ -329,6 +376,7 @@ All of these are subclasses of `CAView` (and `CAView` itself is a subclass of `C
 | `CASelect`        | Indexing by a boolean array                                                 | `a[a.gt(3)]`                                             |
 | `CAShift`         | `shift` (shifted view; vacated slots filled)                                | `a.shift(1)`                                             |
 | `CARoll`          | `roll` (rotated view; wrap-around)                                          | `a.roll(1)`                                              |
+| `CAWindow`        | `window` (a region that may reach outside the array; the margin is filled)   | `a.window(-1..3, -1..3)`                                 |
 
 Confirm them in irb:
 
@@ -350,9 +398,10 @@ a[a.gt(3)].class          #  => CASelect
 v = CA_INT([1, 2, 3, 4, 5])
 v.shift(1).class          #  => CAShift
 v.roll(1).class           #  => CARoll
+v.window(-1..5).class     #  => CAWindow
 ```
 
-There are a few more specialised view classes (`CAReduce`, `CAWindow`, `CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`) which you may encounter when using advanced features such as window scans, fixed-size record fields, or sub-byte storage. These follow the same rule: they are views onto data they do not own, so writing through them updates the source.
+There are a few more specialised view classes (`CAReduce`, `CAMapping`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`) which you may encounter when using advanced features such as window scans, fixed-size record fields, or sub-byte storage. These follow the same rule: they are views onto data they do not own, so writing through them updates the source.
 
 An entity — a real, data-owning array — has class `CArray` (or, for a zero-dimensional value, `CScalar`). The check `ca.entity?` returns `true` for those and `false` for any of the view classes above:
 

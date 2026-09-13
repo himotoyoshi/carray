@@ -20,7 +20,14 @@ class CArray
   # axis, which may extend past either end of the parent.  Cells inside the
   # parent alias it, so writes through the view reach the parent; cells
   # outside take `fill_value` (default `0`), and `fill_value: UNDEF` masks
-  # them instead.
+  # them instead.  A write that lands outside the parent has no cell to land
+  # in and is discarded.
+  #
+  # A range wider than its axis is how an array is **padded**: `a.window(-1..
+  # a.dim0, -1..a.dim1)` puts a one-cell border all round, which is NumPy's
+  # `pad` with no allocation (`fill_value:` is its `constant`, `bounds:
+  # :nearest` its `edge`).  {#windows} is the different, plural thing: one
+  # such window anchored on every cell, folded.
   #
   # Only unit-step ranges are accepted, and each range must run forward, so
   # the `0..-1` end-relative notation cannot be used here.
@@ -30,7 +37,8 @@ class CArray
   #     must equal `self.ndim`.
   #   @param fill_value [Object] value given to out-of-range cells; `UNDEF`
   #     masks them instead.
-  #   @param bounds [String] what an out-of-range index means: `"fill"`
+  #   @param bounds [String, Symbol] what an out-of-range index means; a
+  #     Symbol says the same as the String, matching {#windows}: `"fill"`
   #     (default) uses `fill_value`, `"nearest"` clamps to the edge cell,
   #     `"ruby"` reads negative indices from the far end, `"strict"` raises.
   #     `"mask"` masks the cell but warns — pass `fill_value: UNDEF` instead.

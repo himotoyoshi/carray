@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `window` accepts `bounds:` as a Symbol (`bounds: :nearest`) as well
+  as a String, which is the spelling `windows` already took, so one policy is
+  not written two ways depending on which method is being called. Strings keep
+  working. `window` is also documented for users now, in
+  `guides/users/06_views.md`: a range wider than its axis is how an array is
+  padded, and the view allocates nothing to do it.
+
 - New: `CAFrame.from_csv` reads an open IO as well as a path -- anything
   answering `gets`, so `CAFrame.from_csv(StringIO.new(text))` reads CSV that is
   already in memory instead of writing it to a temporary file first. A String
