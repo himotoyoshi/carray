@@ -200,6 +200,57 @@ The second positional argument `[2, 2]` is the tile pattern: two rows of two blo
 
 `montage` has no direct NumPy equivalent — `np.block` partially overlaps.
 
+## `repeat` — each element, several times over
+
+The methods above build a bigger array out of several. `repeat` builds one out of a single array, by laying each element down more than once:
+
+```ruby
+v = CA_INT([10, 20, 30])
+
+v.repeat(2)              #  => [ 10, 10, 20, 20, 30, 30 ]
+v.tile(2)                #  => [ 10, 20, 30, 10, 20, 30 ]
+```
+
+Those two are worth seeing side by side, because the names are close and the results are not. `repeat` keeps the copies of one element together; `tile` lays the whole array down again.
+
+The count may be given per element, which is the thing `tile` cannot express. A count of `0` drops that element:
+
+```ruby
+v.repeat([3, 1, 2])      #  => [ 10, 10, 10, 20, 30, 30 ]
+v.repeat([2, 0, 1])      #  => [ 10, 10, 30 ]
+v.repeat([0, 0, 0])      #  => [ ]
+```
+
+This is the inverse of a count. `bincount` turns a run of labels into how many of each; `repeat` turns how many of each back into a run of labels:
+
+```ruby
+counts = CA_INT([1, 1, 2, 3, 4, 4, 6]).bincount   #  => [ 0, 2, 1, 1, 2, 0, 1 ]
+CArray.int32(counts.elements).seq!.repeat(counts) #  => [ 1, 1, 2, 3, 4, 4, 6 ]
+```
+
+`axis: k` repeats the sub-arrays enumerated by axis `k` rather than the cells, so a 2-D array repeats whole rows and keeps its shape apart from that axis:
+
+```ruby
+t = CA_INT([[0, 1], [2, 3], [4, 5]])
+
+t.repeat([2, 1, 1], axis: 0)
+#  => [ [ 0, 1 ],
+#       [ 0, 1 ],
+#       [ 2, 3 ],
+#       [ 4, 5 ] ]
+
+t.repeat([2, 1], axis: 1)
+#  => [ [ 0, 0, 1 ],
+#       [ 2, 2, 3 ],
+#       [ 4, 4, 5 ] ]
+```
+
+Without `axis:` a multi-dimensional receiver is taken in flatten order and the result is 1-D, which is what `np.repeat` does.
+
+The result is a **view**: the same element named as many times as it was repeated, so nothing is copied, and a write through one of those positions reaches the cell it names — and therefore shows at every other position naming the same cell. `copy` when that is not what you want.
+
+Counts must be non-negative and there must be exactly as many as there are elements (or sub-arrays along `axis:`); a masked count is refused, since it names no number of repetitions.
+
 ## `concatenate` and `mosaic` — the eager siblings
 
 `concatenate` is the eager counterpart of `meld`, and `mosaic` of `montage`. They allocate a destination, paste each piece in, and return a fresh owned CArray. Reach for them when:
@@ -321,5 +372,6 @@ CArray.meld([i, f])                   #  ArgumentError — cast first, or
 | Concatenate along an existing axis into an owned entity, auto-casting | `concatenate` | eager |
 | Tile a ragged block-matrix into an N-D grid                  | `mosaic`       | eager    |
 | Assemble a 2-D table from a list of columns                  | `tabulate`     | eager    |
+| Lay each element of one array down several times            | `repeat`       | view     |
 
 The view methods keep you connected to the pieces; the eager methods hand you an independent entity and auto-cast mixed types along the way.

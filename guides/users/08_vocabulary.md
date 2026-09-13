@@ -189,5 +189,6 @@ A **Face** is an extended data type built on top of CArray — a way to give the
 | a view (anonymous)    | a view, but with a named class (`CABlock`, `CATranspose`, ...) |
 | `axis=` argument      | `axis:` keyword (e.g. `a.sum(axis: 0)`); positional axis arguments are not accepted |
 | `argmin` / `argmax`   | `min_index` / `max_index` (CArray uses `*_index` instead of `arg*`) |
+| `np.repeat` / `np.tile` | `repeat` / `tile` — the same distinction; `repeat` also takes one count per element |
 | `np.unique(a, axis=k)` | `a.unique(along: k)` — `along:` names the axis whose index enumerates the sub-arrays; `axis:` on these methods is a different question |
 | `iinfo(t).min` / `finfo(t).max` | `CArray::Int32::MIN` / `CArray::Float64::MAX` — constants on the class for the type; `finfo(t).tiny` is `TINY` and `finfo(t).eps` is `EPSILON` |

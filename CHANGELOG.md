@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `repeat` lays each element of an array down several times --
+  `v.repeat(2)` repeats every element twice, and `v.repeat([3, 1, 2])` gives
+  each its own count, with `0` dropping that element. It is the inverse of
+  `bincount`, and it is not `tile`: `repeat` keeps the copies of one element
+  together where `tile` lays the whole array down again. `axis: k` repeats
+  whole sub-arrays instead of cells; without it a multi-dimensional receiver
+  goes in flatten order. The result is a view of the receiver.
+
 - New: `unique`, `nunique` and `mask_duplicates` take `along: k`, which
   compares whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the
   distinct rows of a 2-D array, `along: 1` the distinct columns, and the same
