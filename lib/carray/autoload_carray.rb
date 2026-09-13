@@ -30,8 +30,9 @@
 
 class CArray
   inspect_rb = "carray/inspect"
-  autoload_method "inspect",     inspect_rb
-  autoload_method "source_code", inspect_rb
+  autoload_method "inspect",      inspect_rb
+  autoload_method "inspect_full", inspect_rb
+  autoload_method "source_code",  inspect_rb
 end
 
 # ---- Serializer / Marshal / dump / load ------------------------------------

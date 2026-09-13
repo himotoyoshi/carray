@@ -7,7 +7,12 @@ class CArray::Inspector  # :nodoc:
   end
 
   # @!visibility private
-  def inspect_string
+  #
+  #  `abbrev` false renders every element instead of eliding with `...`.
+  #  It is the one difference between #inspect and #inspect_full: the
+  #  header and the layout are the same, so there is one renderer rather
+  #  than two that could drift apart.
+  def inspect_string (abbrev: true)
     if @carray.ndim == 0
       raise "can't inspect CArray of ndim == 0"
     end
@@ -15,7 +20,7 @@ class CArray::Inspector  # :nodoc:
     class_name = get_class_name()
     type_name  = get_type_name()
     shape      = get_shape()
-    data_spec  = get_data_spec(0, Array.new(@carray.ndim){0}, formatter)
+    data_spec  = get_data_spec(0, Array.new(@carray.ndim){0}, formatter, abbrev)
     info_list  = get_info_list()
     output = ["<",
               format("%s.%s(%s)", class_name, type_name, shape.join(",")),
@@ -146,7 +151,7 @@ class CArray::Inspector  # :nodoc:
     end
   end
 
-  def get_data_spec (level, idx, formatter)
+  def get_data_spec (level, idx, formatter, abbrev = true)
     io = +"[ "  # mutable buffer; `<<` below appends into it
     ndim = @carray.ndim
     dim  = @carray.shape
@@ -163,7 +168,7 @@ class CArray::Inspector  # :nodoc:
         if i != dim[level] - 1
           io << ", "
         end
-        if io.length > 48 - 2*level
+        if abbrev and io.length > 48 - 2*level
           if i < dim[level] - 1
             io << "..."
             over = true
@@ -182,24 +187,24 @@ class CArray::Inspector  # :nodoc:
       end
     else
       over = false
-      show = [dim[level], 5].min
+      show = abbrev ? [dim[level], 5].min : dim[level]
       show.times do |i|
         idx[level] = i
-        io << get_data_spec(level+1, idx, formatter)
+        io << get_data_spec(level+1, idx, formatter, abbrev)
         if i < show - 1
           io << ",\n" + "  " * (level+1)
         end
-        if i >= 2 and dim[level] > 5
+        if abbrev and i >= 2 and dim[level] > 5
           break
         end
       end
-      if dim[level] > 5
+      if abbrev and dim[level] > 5
         io << "... ... ..."
         over = true
       end
       if over
         idx[level] = dim[level] - 1
-        io << "\n"+ "  " * (level+1) + get_data_spec(level+1, idx, formatter)
+        io << "\n"+ "  " * (level+1) + get_data_spec(level+1, idx, formatter, abbrev)
       end
     end
     io << " ]"
@@ -217,6 +222,34 @@ class CArray
   #   @return [String]
   def inspect
     return CArray::Inspector.new(self).inspect_string
+  end
+
+  # @overload inspect_full
+  #   The same description as {#inspect}, with every element rendered
+  #   instead of the `...` preview.
+  #
+  #   `inspect` abbreviates on purpose -- it is what `p`, `irb` and an
+  #   error message call, and a million-cell array has to stay readable
+  #   there. `inspect_full` is for the other moment, when the whole
+  #   array is the thing you came to look at:
+  #
+  #     puts a.inspect_full
+  #
+  #   The header, the layout and the `_` for a masked cell are
+  #   `inspect`'s; only the eliding is dropped, so for an array small
+  #   enough that `inspect` was not abbreviating anything the two give
+  #   the same string.
+  #
+  #   Note that neither of these is `to_s`, which returns the **raw
+  #   bytes** of the storage rather than anything printable.
+  #
+  #   The result is one String holding every element, so it is as large
+  #   as the array is: nothing here is streamed, and a line is as long
+  #   as the last axis makes it.
+  #
+  #   @return [String]
+  def inspect_full
+    return CArray::Inspector.new(self).inspect_string(abbrev: false)
   end
 
   private

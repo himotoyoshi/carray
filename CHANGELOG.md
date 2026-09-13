@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `inspect_full` renders an array the way `inspect` does but without the
+  `...` abbreviation, for when the whole array is what you want to look at.
+  The header, the layout and the `_` for a masked cell are `inspect`'s, so on
+  an array small enough that `inspect` was not eliding anything the two give
+  the same String. There is no threshold to configure: `inspect` always
+  previews, `inspect_full` never does. Note that neither is `to_s`, which
+  still returns the raw bytes of the storage.
+
 - New: `repeat` lays each element of an array down several times --
   `v.repeat(2)` repeats every element twice, and `v.repeat([3, 1, 2])` gives
   each its own count, with `0` dropping that element. It is the inverse of
