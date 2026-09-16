@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` are no
+  longer defined here. They exist once `require "carray/jit"` has loaded the
+  carray-jit gem: without it `CArray.respond_to?(:jit_for)` is false and a call
+  raises `NoMethodError`, where 3.0.1 defined them to raise
+  `NotImplementedError`. Code that rescued that error to fall back to
+  `CArray.fuse` asks `CArray.respond_to?(:jit_each)` instead. `CArray.fuse` is
+  unchanged.
+
 - Change: `window` accepts `bounds:` as a Symbol (`bounds: :nearest`) as well
   as a String, which is the spelling `windows` already took, so one policy is
   not written two ways depending on which method is being called. Strings keep
