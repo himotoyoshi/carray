@@ -55,6 +55,21 @@ module CATimeCivil
     doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
     era * 146097 + doe - 719468
   end
+
+  # Same algebra for one date, on plain Integers.  A literal is parsed one
+  # at a time, and routing each one through the vectorized form costs a
+  # one-cell CArray and a kernel call per literal -- which is where nearly
+  # all the time in a bulk column parse used to go (170k rows: 3.5 s, of
+  # which 3.1 s was this).  Ruby's Integer `/` floors, as CArray's does,
+  # so the two forms read alike and agree everywhere.
+  def days_from_civil_1 (y, m, d)
+    y  -= 1 if m <= 2
+    era = y / 400
+    yoe = y - era * 400
+    doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + (d - 1)
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+  end
 end
 
 # Unit algebra for the time surface: how two units relate (same group, which
@@ -1656,8 +1671,7 @@ module CATimeLiteral
       end
     when String
       h = parse_date_fields(spec, format)
-      days = CATimeCivil.days_from_civil(CA_INT64([h[:year]]), CA_INT64([h[:mon] || 1]),
-                               CA_INT64([h[:mday] || 1]))[0]
+      days = CATimeCivil.days_from_civil_1(h[:year], h[:mon] || 1, h[:mday] || 1)
       sec  = Rational(days * 86400 + (h[:hour] || 0) * 3600 +
                       (h[:min] || 0) * 60 + (h[:sec] || 0))
       sec += h[:sec_fraction] if h[:sec_fraction]
