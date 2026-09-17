@@ -336,6 +336,48 @@ median_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
    Every function in this block (down to the median entry) is [object].
    ===================================================================== */
 
+/* [object] Is this operand's arithmetic the arithmetic interpolation means?
+   `lo` / `hi` are a stored object on the flat path and an object CArray of
+   them on the per-axis one, so look through a CArray to an element.  An
+   empty one has nothing to interpolate and passes. */
+static int
+mp_object_interpolates (VALUE v)
+{
+  if ( rb_obj_is_kind_of(v, rb_cNumeric) ) {
+    return 1;
+  }
+  if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
+    CArray *ca;
+    GetCArray(v, ca);
+    if ( ca->elements == 0 ) {
+      return 1;
+    }
+    return rb_obj_is_kind_of(rb_ca_fetch_addr(v, 0), rb_cNumeric) ? 1 : 0;
+  }
+  return 0;
+}
+
+/* [object] Refuse to interpolate between two elements that have no
+   arithmetic meaning it.  A String has both a `*` and a `+`, and
+   String#* truncates the Float weight to zero -- so :linear quietly
+   returned "" instead of failing, which is the reason this guard is
+   here rather than a rescue.  The three picking methods need no
+   arithmetic and are the way through. */
+static void
+mp_require_interpolable (const char *who, VALUE method, VALUE lo)
+{
+  if ( mp_object_interpolates(lo) ) {
+    return;
+  }
+  rb_raise(rb_eCADataTypeError,
+           "%s: method: :%s interpolates between two elements, which %s "
+           "does not support; use method: :lower, :higher or :nearest to "
+           "pick an element instead",
+           who, rb_id2name(SYM2ID(method)),
+           rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
+                            ? rb_ca_fetch_addr(lo, 0) : lo));
+}
+
 /* [object] recv.mid(axis: raxis) -- e.g. min/max/sort along an axis. */
 static VALUE
 obj_call_axis (VALUE recv, ID mid, VALUE raxis)
@@ -419,6 +461,17 @@ median_object_axis (VALUE self, long axis, long n, int keep_axis)
     long k = n / 2 - 1;
     VALUE lo, hi;
     obj_kth_pair(self, axis, k, n, &lo, &hi);
+    /* An even count has no middle element, only the average of two -- so
+       a column whose objects have no arithmetic has a median only at odd
+       length.  percentile(50, method: :lower) names one either way. */
+    if ( ! mp_object_interpolates(lo) ) {
+      rb_raise(rb_eCADataTypeError,
+               "median: an even number of elements has no middle one, and "
+               "%s cannot be averaged; use percentile(50, method: :lower) "
+               "(or :higher / :nearest) to pick an element instead",
+               rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
+                                ? rb_ca_fetch_addr(lo, 0) : lo));
+    }
     result = rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
   } else {
     VALUE kv = obj_kth_one(self, axis, (n - 1) / 2);
@@ -480,12 +533,14 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
   }
   if ( method == sym_linear ) {
     if ( r == 0.0 || k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    mp_require_interpolable("percentile", method, lo);
     VALUE a = rb_funcall(lo, id_mul, 1, DBL2NUM(1.0 - r));
     VALUE b = rb_funcall(hi, id_mul, 1, DBL2NUM(r));
     return rb_funcall(a, id_plus, 1, b);
   }
   if ( method == sym_midpoint ) {
     if ( k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    mp_require_interpolable("percentile", method, lo);
     return rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
   }
   rb_raise(rb_eArgError, "percentile: invalid method (BUG)");

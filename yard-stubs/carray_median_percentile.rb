@@ -13,6 +13,11 @@ class CArray
   #   result of Ruby `+` / `/` on the stored objects. Fixlen arrays
   #   raise, since no numeric midpoint is defined.
   #
+  #   An even number of elements has no middle one, only the average of
+  #   two -- so an object array whose elements cannot be averaged (a
+  #   column of Strings) has a median at odd length and raises at even.
+  #   `percentile(50, method: :lower)` names an element either way.
+  #
   #   Masked cells are excluded. Per-axis, each fiber uses only its own
   #   present values; a fully masked fiber reduces to `UNDEF`. If the
   #   count of not-masked cells (per fiber, or over all elements in the
@@ -27,7 +32,8 @@ class CArray
   #     count is below `min_count`.
   #   @param keep_axis [Boolean]
   #   @return [Float, CArray, Object]
-  #   @raise [CArray::DataTypeError] for fixlen data_type.
+  #   @raise [CArray::DataTypeError] for fixlen data_type, or for an even
+  #     number of elements whose objects cannot be averaged.
   #   @raise [ArgumentError] on negative `min_count`.
   def median(*); end
 
@@ -52,6 +58,12 @@ class CArray
   #   - `:nearest` — round-half-to-even to the nearer neighbor.
   #   - `:midpoint` — arithmetic mean of the two neighbors.
   #
+  #   The first three pick an element and the last two compute one, so
+  #   only the first three apply to a `CA_OBJECT` array whose elements
+  #   have no arithmetic: `:linear` and `:midpoint` raise there, and do
+  #   so only when the requested `p` actually falls between two
+  #   elements (`percentile(50)` of five Strings still answers).
+  #
   #   Numeric arrays produce `Float` results; `CA_OBJECT` arrays
   #   apply Ruby `+` / `/` / `*` on the stored objects. Fixlen
   #   arrays raise.
@@ -67,7 +79,9 @@ class CArray
   #     `:nearest`, `:midpoint`.
   #   @param keep_axis [Boolean]
   #   @return [Float, CArray, Object, Array<Float>, Array<CArray>, Array<Object>]
-  #   @raise [CArray::DataTypeError] for fixlen data_type.
+  #   @raise [CArray::DataTypeError] for fixlen data_type, or when an
+  #     interpolating `method` is asked to interpolate between objects
+  #     that have no arithmetic.
   #   @raise [ArgumentError] on empty `p` list, `p` outside `[0, 100]`,
   #     empty axis, unknown `method`, or invalid option combinations.
   def percentile(*); end
