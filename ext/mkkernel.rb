@@ -6945,9 +6945,12 @@ MkKernel.reduce :count_false,
 
 MkKernel.reduce :count_equal,
   init:        "0",
-  reduce:      "if (v == value_arg) acc += 1",
+  # The object lane compares with rb_equal (= Ruby ==), not the C ==, which
+  # on two VALUEs would ask whether they are the same object.
+  reduce:      { numeric: "if (v == value_arg) acc += 1",
+                 object:  "if (RTEST(rb_equal(v, value_arg))) acc += 1" },
   reduction_kind: :plus,         # SL.1.4 (conditional predication; clang predicates safely under reduction(+:acc))
-  source:      MkKernel::ALL_NUMERIC,
+  source:      MkKernel::ALL_NUMERIC + [:object],
   output:      :i64,
   ruby_scalar: :LL2NUM,
   fallback:    :raise,
