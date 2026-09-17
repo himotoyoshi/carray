@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CAFrame.from_csv` reads a missing field as UNDEF in every column,
+  not only in one named by `types:`. An unquoted empty field, and a cell a
+  short row never reached, used to arrive as a Ruby `nil` sitting in an
+  uncast column, so a mask written by `to_csv` did not survive the trip back.
+  A quoted empty field (`""`) is still the empty string, which is a value.
+  Code that worked around this with `col[:eq, nil] = UNDEF` can drop the line.
+
 - Fix: `each_with_index` and `map_with_index!` no longer raise
   `SystemStackError` on a long array, and neither do `CArray#format` /
   `CArray.format`, which are built on them. The ceiling was the C stack, so

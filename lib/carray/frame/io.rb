@@ -43,6 +43,11 @@ class CAFrame
   #     skip 2; header; skip 1; body
   #   end
   #
+  # A missing field -- an unquoted empty one, or a cell a short row never
+  # reached -- is UNDEF in the frame, whether or not the column is cast by
+  # +types:+. A quoted empty field ("") is the empty string, which is a value.
+  # So the mask +to_csv+ writes comes back as a mask.
+  #
   # Columns are handed to the frame as CABlock views over one backing object
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
@@ -340,6 +345,13 @@ class CAFrame
       end
     end
     table = CArray.object(rows.size, ncol) { rows }
+    # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
+    # tokenizer says missing with nil (an unquoted empty field; a quoted
+    # one is the empty string and stays a value), and an object array will
+    # hold that nil quite happily -- so a column read without `types:` used
+    # to carry nil where the same column read with one carried UNDEF, and
+    # the mask a to_csv had written did not survive the trip back.
+    table[:eq, nil] = UNDEF
     names.each_with_index { |name, j| cols[name] = table[nil, j] }
     new(cols)
   end
