@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `CArray.empty(data_type, dim, bytes: nil)` returns an array whose
+  contents are undefined, reading its arguments exactly as `CArray.new` does
+  and leaving out only the zero fill. Use it where every cell is written
+  before anything reads it; `:object` is still zero-initialised, since the
+  garbage collector walks those cells, and a block is refused. The
+  compatibility spelling `CArray.empty(*shape)` and the typed
+  `CArray::Int64.empty(3)` are unchanged. One call that used to be an error
+  now allocates: `CArray.empty(3, [4])` reads the `3` as a data type, like
+  `CArray.new(3, [4])`, and gives a `:uint8` array of shape `[4]` where 3.0.1
+  raised `TypeError`.
+
 - Change: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` are no
   longer defined here. They exist once `require "carray/jit"` has loaded the
   carray-jit gem: without it `CArray.respond_to?(:jit_for)` is false and a call
