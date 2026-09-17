@@ -426,7 +426,7 @@ class TestCABlockStepKernel < Test::Unit::TestCase
     blk = src[[0, 5, 2]]       # start=0 count=5 step=2 -> [0, 2, 4, 6, 8]
     assert_kind_of(CABlock, blk)
     assert_equal([2], blk.step)
-    assert_equal([5], blk.count)
+    assert_equal([5], blk.shape)
     assert_equal([0, 2, 4, 6, 8], blk.to_a)
   end
 

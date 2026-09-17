@@ -65,7 +65,6 @@ describe "TestCABlock " do
     is_asserted_by { b.dim == [3, 3] }
     is_asserted_by { b.start == [0, 0] }
     is_asserted_by { b.step == [1, 1] }
-    is_asserted_by { b.count == [3, 3] }
     is_asserted_by { b.elements == 9 }
     is_asserted_by { b == CArray.int32(3, 3) { 1 } }
   end
