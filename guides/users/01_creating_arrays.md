@@ -47,6 +47,24 @@ CArray.int32(3).data_type      #  => :int32
 CArray.boolean(3).data_type    #  => :boolean
 ```
 
+### Skipping the zero fill
+
+Zeroing an array costs something, and when every element is going to be written before anything reads it, that work is thrown away. `CArray.empty` allocates without the fill:
+
+```ruby
+a = CArray.empty(:float64, [3])
+a[] = CA_DOUBLE([1.0, 2.0, 3.0])
+#  => [ 1.0, 2.0, 3.0 ]
+```
+
+It takes the data type and the shape, the shape as an Array. `CArray.new(:float64, [3])` is the same spelling with the zeros put back, so the two read the same arguments; the width of a `:fixlen` element goes in `bytes:` for both.
+
+```ruby
+CArray.empty(:fixlen, [3], bytes: 8)
+```
+
+What is in such an array before you write to it is not defined, and nothing promises it is the same twice. Reading a cell before writing it is a bug — if the zeros are what you wanted, ask for `CArray.new`. Arrays of `:object` are the exception: their cells are set to zero whatever you ask, because the garbage collector walks them.
+
 ### Filling the whole array
 
 `fill` puts one value into every element and returns the array. It is a destructive method: it writes into the array it is called on, even though its name carries no `!`. Because the plain name is taken, the copying form is the one that had to be given a suffix — `fill_copy`, at the end of this chapter.

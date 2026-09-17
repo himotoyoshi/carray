@@ -237,6 +237,9 @@ class CArray
     #   **uninitialised**. The caller must overwrite the array
     #   before reading from it. `CA_OBJECT` silently falls back to
     #   a zero-VALUE init required for GC safety.
+    #
+    #   carray's own spelling is `CArray.empty(data_type, dim)`, which
+    #   names the element type instead of taking it from the receiver.
     #   @param shape [Array<Integer>, Array<Array<Integer>>]
     #   @return [CArray]
     def empty (*args)
