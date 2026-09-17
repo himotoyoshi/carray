@@ -36,157 +36,79 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
-- New: `CArray.empty(data_type, dim, bytes: nil)` returns an array whose
-  contents are undefined, reading its arguments exactly as `CArray.new` does
-  and leaving out only the zero fill. Use it where every cell is written
-  before anything reads it; `:object` is still zero-initialised, since the
-  garbage collector walks those cells, and a block is refused. The
-  compatibility spelling `CArray.empty(*shape)` and the typed
-  `CArray::Int64.empty(3)` are unchanged. One call changes rather than
-  appears: `CArray.empty(3, [4])` raised `TypeError` in 3.0.1 and now gives
-  the same result as `CArray.new(3, [4])`.
+- New: `CArray.empty(data_type, dim, bytes: nil)` allocates without the zero
+  fill, for an array whose every cell is written before anything reads it. One
+  existing call changes: `CArray.empty(3, [4])` raised `TypeError` in 3.0.1
+  and now matches `CArray.new(3, [4])`.
 
 - Change: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` are no
-  longer defined here. They exist once `require "carray/jit"` has loaded the
-  carray-jit gem: without it `CArray.respond_to?(:jit_for)` is false and a call
-  raises `NoMethodError`, where 3.0.1 defined them to raise
-  `NotImplementedError`. Code that rescued that error to fall back to
-  `CArray.fuse` asks `CArray.respond_to?(:jit_each)` instead. `CArray.fuse` is
-  unchanged.
+  longer defined here; they arrive with `require "carray/jit"`. Without it a
+  call raises `NoMethodError` where 3.0.1 raised `NotImplementedError`, so
+  code that rescued that to fall back asks `CArray.respond_to?(:jit_each)`.
 
-- Change: `window` accepts `bounds:` as a Symbol (`bounds: :nearest`) as well
-  as a String, which is the spelling `windows` already took, so one policy is
-  not written two ways depending on which method is being called. Strings keep
-  working. `window` is also documented for users now, in
-  `guides/users/06_views.md`: a range wider than its axis is how an array is
-  padded, and the view allocates nothing to do it.
+- Change: `window` accepts `bounds:` as a Symbol as well as a String, which is
+  the spelling `windows` already took. Strings keep working.
 
-- New: `CAFrame.from_csv` reads an open IO as well as a path -- anything
-  answering `gets`, so `CAFrame.from_csv(StringIO.new(text))` reads CSV that is
-  already in memory instead of writing it to a temporary file first. A String
-  argument is still always a path, never CSV text. An IO is read from where it
-  is and left open, and `encoding:` applies to the path form only, an IO being
-  already open. `parser:` is handed whatever was passed as the source.
+- New: `CAFrame.from_csv` reads an open IO as well as a path, so CSV already
+  in memory need not go through a temporary file first. A String argument is
+  still always a path, never CSV text.
 
 - New: `inspect_full` renders an array the way `inspect` does but without the
-  `...` abbreviation, for when the whole array is what you want to look at.
-  The header, the layout and the `_` for a masked cell are `inspect`'s, so on
-  an array small enough that `inspect` was not eliding anything the two give
-  the same String. There is no threshold to configure: `inspect` always
-  previews, `inspect_full` never does. Note that neither is `to_s`, which
-  still returns the raw bytes of the storage.
+  `...` abbreviation.
 
 - New: `repeat` lays each element of an array down several times --
-  `v.repeat(2)` repeats every element twice, and `v.repeat([3, 1, 2])` gives
-  each its own count, with `0` dropping that element. It is the inverse of
-  `bincount`, and it is not `tile`: `repeat` keeps the copies of one element
-  together where `tile` lays the whole array down again. `axis: k` repeats
-  whole sub-arrays instead of cells; without it a multi-dimensional receiver
-  goes in flatten order. The result is a view of the receiver.
+  `v.repeat(2)`, or `v.repeat([3, 1, 2])` for a count each. It is not `tile`,
+  which lays the whole array down again. The result is a view.
 
-- New: `unique`, `nunique` and `mask_duplicates` take `along: k`, which
-  compares whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the
-  distinct rows of a 2-D array, `along: 1` the distinct columns, and the same
-  works for slabs of an N-D array. This is `np.unique(z, axis=k)`. It is a
-  different question from `axis:` on the same methods, which asks about the
-  values inside each fiber, and giving both raises. A sub-array holding a
-  masked cell does not take part; `sort:` and `object` arrays are refused.
+- New: `unique`, `nunique` and `mask_duplicates` take `along: k`, comparing
+  whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the distinct
+  rows of a 2-D array. Giving both `along:` and `axis:` raises.
 
-- New: each numeric data type names its own limits as constants on the class
-  for that type -- `CArray::Int32::MIN` / `MAX`, and for float and complex
-  types `TINY` (the smallest positive normal) and `EPSILON` (the step above
-  1.0) as well. `MIN` is the bottom of the range for every type, so `MIN` and
-  `MAX` bracket an integer and a float the same way; note that Ruby's
-  `Float::MIN` is a different value, and is `TINY` here. `boolean`, `fixlen`
-  and `object` have no numeric range and carry none of these.
+- New: each numeric data type names its own limits on its class --
+  `CArray::Int32::MIN` / `MAX`, and `TINY` / `EPSILON` for float and complex
+  types. `MIN` is the bottom of the range, where Ruby's `Float::MIN` is what
+  is called `TINY` here.
 
 - New: `CArray::Rng` is a random number generator with its own state, which
   `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
-  `Random`. `CArray::Rng.new(seed: 4)` seeds one, and a first positional
-  argument picks the generator from `CArray::Rng::GENERATORS`, which is
-  `:xoshiro256pp` today and is where another would be added. `#random` takes a
-  draw in `[0.0, 1.0)` and `#randomn` a standard normal, pairing as
-  `CArray#random!` and `#randomn!` do; `#bits` is the raw word a draw came
-  from; `#reset` starts the run over. It is not `#rand`, because Ruby's
-  `random:` keyword calls `rand(n)` on what it is handed and this takes no
-  argument -- a `#rand` here would look usable there and fail on arity.
-  Uniform draws carry a full 53-bit mantissa, and a fill through one runs
-  about 2.5x faster than through a Ruby `Random`: the draw inlines where a
-  call into Ruby's MT19937 cannot. `#state` is the four `int64` cells it
-  advances, and `CArray::Rng::SOURCE`, `CArray::Rng::COMMON_SOURCE` and
-  `CArray::Rng::DRAW_FUNCTIONS` are the generator's C as text and the entry
-  points in it -- the same files this extension compiled -- so another gem
-  can paste them and continue a sequence this one started rather
-  than reimplement it. It is `Rng` and not `Random` because the two are
-  different generators and a `CArray::Random` would shadow `::Random` for
-  every bare `Random` written inside `class CArray`. Without `rng:`, or with
-  a Ruby `Random`, nothing changes: those still draw through Ruby's MT19937,
-  and `randomn!` still fills in pairs there. Through a `CArray::Rng` it fills
-  one cell per call instead, so that two fills -- and a kernel drawing after
-  one -- are the one sequence; a normal is then two draws with no spare kept,
-  which measures the same as the paired form because the transform dominates.
+  `Random`. Without `rng:`, or with a Ruby `Random`, nothing changes.
 
-- New: `CArray#factorize` answers `[codes, levels]` in one pass — the distinct
-  values in first-appearance order, which is what `unique` answers, and an
-  integer array of the receiver's shape indexing them, so `levels[codes[i]]` is
-  the cell. It is for a caller who wants the codes as storage: a position to
-  scatter into, a key to group by, a dense renumbering of sparse keys.
-  `categorize` wraps the same two in a `CACategorical` and hands the vocabulary
-  back as a Ruby Array. A masked cell is masked in `codes` and holds the
-  exclusion sentinel, as a categorical's storage is. There is no `sort:`,
-  because the codes index the levels.
+- New: `CArray#factorize` answers `[codes, levels]` in one pass, for a caller
+  who wants the codes as storage rather than the `CACategorical` that
+  `categorize` builds from the same two.
 
-- New: C extensions can read two arrays along the same axis at once.
-  `CA_FOR_EACH_FIBER_PAIR` and `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one
-  contiguous fiber from each of two sources at the same position, which is
-  what a C routine taking two vectors of equal length wants. The masked
-  form yields both mask cursors, since whether a cell may be used is a
-  question about both fibers. Nothing else changes: the existing macros,
-  the iterator engine and every Ruby method are untouched.
+- New: C extensions only. `CA_FOR_EACH_FIBER_PAIR` and
+  `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one contiguous fiber from each of two
+  sources at the same position.
 
-- Change: filling part of an array backed by a CAObject or CASource subclass
-  reaches the backing in far fewer calls. A whole-array fill takes the
-  `fill_block` / `fill_addrs` slots when the subclass defines them, instead of
-  one `store_addr` per cell; a selection made through a slice, and a selection
-  along an inner axis, arrive as one list rather than one call per cell. Which
-  cells are written is unchanged, and a subclass that defines none of the fill
-  slots keeps the per-cell path it had.
+- Change: C extensions only. A partial fill of an array backed by a CAObject
+  or CASource subclass takes the `fill_block` / `fill_addrs` slots where the
+  subclass defines them, instead of one `store_addr` per cell. Which cells are
+  written is unchanged, and a subclass defining no fill slot keeps the
+  per-cell path.
 
 - Change: the Ruby attach surface is gone from released builds:
   `CArray.attach` / `.attach!`, `CArray#attach` / `#attach!`, and
-  `#__attach__` / `#__sync__` / `#__detach__`. It opened an attach window from
-  Ruby, and what a block did inside one depended on the spelling -- `v[0] = x`
-  reached the array, `v[0..1] = x` could be silently discarded -- with nothing
-  in the syntax to say which. Write through the array directly instead.
-  `CArray#attached?` is unchanged, and so is the C lifecycle (`ca_attach` /
-  `ca_sync` / `ca_detach`) that extensions use.
+  `#__attach__` / `#__sync__` / `#__detach__`. Write through the array
+  directly instead. `CArray#attached?` and the C lifecycle are unchanged.
 
-- Change: an index whose every real axis is a scalar no longer raises when it
-  also carries the newaxis sigil. `a[1, :_]` returns a view of just the axes
-  `:_` asked for, each of length 1, instead of `IndexError`. It states that
-  rank, so to keep an axis rather than drop it, index it with something that
-  is not a scalar -- `a[[1], :_]`. Indices with a non-scalar axis are
-  unaffected.
+- Change: `a[1, :_]` returns a view of the axes `:_` asked for instead of
+  raising `IndexError`. To keep an axis rather than drop it, index it with
+  something that is not a scalar -- `a[[1], :_]`.
 
-- Change: C extensions only. A kernel iterator init that the engine refuses
-  now raises instead of returning a code the block macros
-  (`CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER` and their variants) discarded.
-  An axis that does not exist, or a flag combination a source cannot serve,
-  says so. Kernels that want to handle a refusal rather than propagate it
-  can call `ca_iter_state_init_l1` / `_l2` directly and read the code.
+- Change: C extensions only. A kernel iterator init the engine refuses now
+  raises instead of returning a code the block macros discarded. To handle a
+  refusal rather than propagate it, call `ca_iter_state_init_l1` / `_l2`
+  directly and read the code.
 
-- Fix: C extensions only. A kernel writing into a view the caller supplied
-  now reaches the array. Writes were lost when the destination was a
-  CAStack, and when it was a cast, byte-swapped, rolled or tiled view
-  iterated along an axis whose fiber is not contiguous; a single-cast view
-  iterated that way crashed. Kernels writing into an array they allocated
-  themselves were never affected, which is every kernel inside carray.
+- Fix: C extensions only. A kernel writing into a view the caller supplied now
+  reaches the array; writes were lost, or crashed, for several view kinds
+  iterated along an axis whose fiber is not contiguous. Kernels writing into
+  an array they allocated themselves were never affected.
 
 - Fix: `CArray#each_slab` yields a read-only slab, and writing through it
   raises rather than reaching the array on one axis and being dropped on
-  another. Return values from the block instead: `map_slab` collects them
-  and `reduce_slab` folds them. To write in place, assign through the array
-  itself. Reading the slab, and `map_slab` / `reduce_slab`, are unchanged.
+  another. Return values from the block instead, or assign through the array.
 
 ## 3.0.1
 
