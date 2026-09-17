@@ -36,6 +36,28 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAConstString#sort_addr`, `#sort_index`, `#rank_index`, `#order`,
+  `#min_index`, `#max_index`, `#partition_copy` and `#partition_index` read the
+  strings. They read the `(start, end)` offsets that hold them, which order by
+  how the column was packed, so they gave well-formed wrong answers rather than
+  raising: `sort_addr` on an unsorted column gave the identity, and
+  `partition_copy` gave NUL bytes. `#minmax` answers instead of raising, and
+  sorting a column with masked cells no longer raises.
+
+- Change: the `CAConstString` ordering family takes `axis:` -- and `kind:` /
+  `masked_position:` / `keep_axis:` where CArray does -- across `min`, `max`,
+  `minmax`, `min_index`, `max_index`, `sort`, `sort_copy`, `sort_addr`,
+  `sort_index`, `rank_index`, `order`, `partition_copy` and `partition_index`.
+  Three answers move to CArray's: `sort_index` gives per-fiber indices where it
+  gave view-flat addresses (ask `sort_addr` for those); `sort` with no `axis:`
+  flattens first, where it kept the shape (a 1-D column is unaffected); and
+  `min` / `max` on an empty or wholly masked column give UNDEF, not nil.
+
+- Fix: `to_const_string` gives an N-D source back with its shape instead of
+  flattened, and `CAConstString#unique` / `#mode` / `#mask_duplicates` /
+  `#intersection` / `#difference` / `#union` keep the column's encoding --
+  on a column that was not UTF-8 they raised out of the builder's check.
+
 - Change: `CABlock#count` and `CAWindow#count` are gone. They gave back the
   per-axis number of cells the view exposes -- which is what `shape` answers
   -- and in doing so hid `CArray#count` on the two classes an indexing

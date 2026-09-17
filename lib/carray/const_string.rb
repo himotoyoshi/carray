@@ -89,21 +89,118 @@ class CAConstString
   # override the L1 generics where present.
   include CArray::StringOperationMixin
 
-  # @overload sort
-  #   Returns a byte-order sorted view built by gathering the
-  #   offsets with `sort_index`. Neither bytes nor offsets are
-  #   copied.
+  # ---- ordering family ---------------------------------------------------
+  #
+  # A storage cell is a `(start, end)` byte range into the shared buffer, so
+  # storage order is the order the strings were packed in, not the order they
+  # compare in.  Without these overrides the family sorted the offsets: the
+  # answers came back well-formed and wrong -- `%w[pear apple].sort_addr` gave
+  # the identity, and `partition_copy` gave NUL bytes.
+  #
+  # Every member therefore reads the bytes.  The flat forms do it natively
+  # (a byte-memcmp scan over the packed buffer, an order of magnitude faster
+  # than decoding a Ruby String per cell), the per-axis forms through
+  # {#to_string}, where a cell is the string and CArray's own kernels apply.
+  # Arguments are forwarded verbatim, so `kind:` / `masked_position:` /
+  # `keep_axis:` mean here what they mean on CArray.
+  #
+  # Anything whose cells are strings comes back a CAConstString, gathered
+  # over the same buffer where it can be (sort / sort_copy) and rebuilt where
+  # it cannot.  Indices, addresses and counts need no conversion.
+
+  # @overload sort(axis: nil, kind: :quick, masked_position: :last)
+  #   Returns a sorted {CAConstString} view, gathered over the same buffer
+  #   and offsets.  With no `axis:` the array is flattened first, as
+  #   `CArray#sort` does.
   #   @return [CAConstString]
-  def sort
-    self[sort_index]
+  def sort (*args, **kw)
+    addr = sort_addr(*args, **kw)
+    kw[:axis].nil? ? self[addr.flatten] : self[addr]
   end
 
-  # @overload sort_copy
-  #   Returns an owned sorted {CAConstString}; the materialised
-  #   counterpart to {#sort}.
+  # @overload sort_copy(axis: nil, kind: :quick, masked_position: :last)
+  #   Returns an owned sorted {CAConstString}; the materialised counterpart
+  #   to {#sort}.
   #   @return [CAConstString]
-  def sort_copy
-    self[sort_index].copy
+  def sort_copy (*args, **kw)
+    sort(*args, **kw).copy
+  end
+
+  # @overload sort_addr(axis: nil, kind: :quick, masked_position: :last)
+  #   Returns the view-flat addresses that index a sort by string order.
+  #   @return [CArray] `:int64` addresses.
+  def sort_addr (*args, **kw)
+    # The native scan has no notion of an incomparable sentinel, so a masked
+    # column goes the same way a per-axis one does.
+    return __sort_addr_bytes__ if args.empty? && kw.empty? && ! has_mask?
+    to_string.sort_addr(*args, **kw)
+  end
+
+  # @overload sort_index(axis: nil, kind: :quick, masked_position: :last)
+  #   Returns the per-fiber indices that index a sort by string order.
+  #   @return [CArray] `:int64` indices.
+  def sort_index (*args, **kw)
+    to_string.sort_index(*args, **kw)
+  end
+
+  # @overload rank_index(axis: nil)
+  #   @return [CArray] each cell's rank in string order.
+  def rank_index (*args, **kw)
+    to_string.rank_index(*args, **kw)
+  end
+
+  # @overload order(*args)
+  #   @return [CArray] the ordering of the cells by string order.
+  def order (*args, **kw)
+    to_string.order(*args, **kw)
+  end
+
+  # @overload min(axis: nil, keep_axis: false)
+  #   Returns the byte-smallest string, skipping masked cells; UNDEF when
+  #   every cell is masked or the array is empty.
+  #   @return [String, CAConstString]
+  def min (*args, **kw)
+    return __min_bytes__ || UNDEF if args.empty? && kw.empty?
+    const_string_lift(to_string.min(*args, **kw))
+  end
+
+  # @overload max(axis: nil, keep_axis: false)
+  #   Byte-largest counterpart of {#min}.
+  #   @return [String, CAConstString]
+  def max (*args, **kw)
+    return __max_bytes__ || UNDEF if args.empty? && kw.empty?
+    const_string_lift(to_string.max(*args, **kw))
+  end
+
+  # @overload minmax(axis: nil, keep_axis: false)
+  #   @return [Array] `[min, max]`.
+  def minmax (*args, **kw)
+    return [min, max] if args.empty? && kw.empty?
+    to_string.minmax(*args, **kw).map { |r| const_string_lift(r) }
+  end
+
+  # @overload min_index(axis: nil)
+  #   @return [Integer, CArray] where the byte-smallest string sits.
+  def min_index (*args, **kw)
+    to_string.min_index(*args, **kw)
+  end
+
+  # @overload max_index(axis: nil)
+  #   @return [Integer, CArray] where the byte-largest string sits.
+  def max_index (*args, **kw)
+    to_string.max_index(*args, **kw)
+  end
+
+  # @overload partition_copy(kth, axis: nil)
+  #   @return [CAConstString] partitioned about the `kth` string in order.
+  def partition_copy (*args, **kw)
+    const_string_lift(to_string.partition_copy(*args, **kw))
+  end
+
+  # @overload partition_index(kth, axis: nil)
+  #   @return [CArray] the indices that partition about the `kth` string.
+  def partition_index (*args, **kw)
+    to_string.partition_index(*args, **kw)
   end
 
   # CAConstString is the one Face with three separate entities -- storage
@@ -144,14 +241,14 @@ class CAConstString
   # @overload unique(sort: false)
   #   @return [CAConstString] the distinct strings.
   def unique (sort: false)
-    to_string.unique(sort: sort).to_const_string
+    const_string_lift(to_string.unique(sort: sort))
   end
 
   # @overload value_counts(sort: false)
   #   @return [Array(CAConstString, CArray)] `[values, counts]`.
   def value_counts (sort: false)
     values, counts = to_string.value_counts(sort: sort)
-    [values.to_const_string, counts]
+    [const_string_lift(values), counts]
   end
 
   # @overload nunique(axis: nil, keep_axis: false)
@@ -164,11 +261,7 @@ class CAConstString
   #   @return [CAConstString, Array] the most frequent string(s).
   def mode (axis: nil)
     r = to_string.mode(axis: axis)
-    case r
-    when CArray then r.to_const_string
-    when Array  then r.map { |c| c.is_a?(CArray) ? c.to_const_string : c }
-    else r
-    end
+    r.is_a?(Array) ? r.map { |c| const_string_lift(c) } : const_string_lift(r)
   end
 
   # @overload is_mode(axis: nil)
@@ -180,7 +273,7 @@ class CAConstString
   # @overload mask_duplicates(axis: nil)
   #   @return [CAConstString] a copy with every repeat occurrence masked.
   def mask_duplicates (axis: nil)
-    to_string.mask_duplicates(axis: axis).to_const_string
+    const_string_lift(to_string.mask_duplicates(axis: axis))
   end
 
   # @overload is_in(values)
@@ -192,19 +285,19 @@ class CAConstString
   # @overload intersection(other, sort: false)
   #   @return [CAConstString] the distinct strings present in both.
   def intersection (other, sort: false)
-    to_string.intersection(string_operand(other), sort: sort).to_const_string
+    const_string_lift(to_string.intersection(string_operand(other), sort: sort))
   end
 
   # @overload difference(other, sort: false)
   #   @return [CAConstString] the distinct strings only `self` has.
   def difference (other, sort: false)
-    to_string.difference(string_operand(other), sort: sort).to_const_string
+    const_string_lift(to_string.difference(string_operand(other), sort: sort))
   end
 
   # @overload union(other, sort: false)
   #   @return [CAConstString] the distinct strings of either side.
   def union (other, sort: false)
-    to_string.union(string_operand(other), sort: sort).to_const_string
+    const_string_lift(to_string.union(string_operand(other), sort: sort))
   end
 
   # @overload locate_addr(ref)
@@ -223,6 +316,14 @@ class CAConstString
   # an object array, an Array) already compares as strings.
   private def string_operand (other)
     other.is_a?(CAConstString) ? other.to_string : other
+  end
+
+  # Pack a string-bearing result back into a column of this one's encoding.
+  # The encoding has to be carried: the builder checks each element against
+  # the column's, so a Shift_JIS column rebuilt as the UTF-8 default raised
+  # rather than coming back.
+  private def const_string_lift (x)
+    x.is_a?(CArray) ? CArray.const_string(x, encoding: encoding) : x
   end
 
 end

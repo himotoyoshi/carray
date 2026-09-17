@@ -836,9 +836,15 @@ rb_ca_const_string_sort_index (VALUE self)
   return vout;
 }
 
-/* CAConstString#sort is defined in Ruby (lib/carray/const_string.rb) as `self[sort_index]`,
-   i.e. a no-copy view over the offset source (buffer + offsets shared, only
-   the gather order changes) — consistent with CArray#sort being a view. */
+/* The ordering surface is defined in Ruby (lib/carray/const_string.rb) on
+   top of these three: a storage cell is a byte range, so storage order is
+   insertion order rather than string order, and every member has to read
+   the bytes.  What is native here is the flat form, which is the common one
+   for a string column and which a byte scan does an order of magnitude
+   faster than decoding a Ruby String per cell; the per-axis forms go
+   through #to_string.  These are spelled as internals because the public
+   names carry CArray's meanings: what the permutation below answers is
+   sort_addr (view-flat addresses in sorted order), not sort_index. */
 
 /* CAConstString#min / #max → the byte-min / byte-max element as a frozen String,
    skipping masked elements; nil if empty or all masked. */
@@ -949,11 +955,13 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "search",           rb_ca_const_string_search, 1);
   rb_define_method(rb_cCAConstString, "find_value_index",  rb_ca_const_string_search, 1);
 
-  /* native sort_index / min / max (§3.7), byte-memcmp comparator.
-     sort / sort_copy are defined in Ruby on top of sort_index. */
-  rb_define_method(rb_cCAConstString, "sort_index", rb_ca_const_string_sort_index, 0);
-  rb_define_method(rb_cCAConstString, "min",        rb_ca_const_string_min, 0);
-  rb_define_method(rb_cCAConstString, "max",        rb_ca_const_string_max, 0);
+  /* Native flat sort permutation / min / max (§3.7), byte-memcmp
+     comparator.  The public ordering surface is built on these in
+     lib/carray/const_string.rb; see the comment above their definitions. */
+  rb_define_method(rb_cCAConstString, "__sort_addr_bytes__",
+                                      rb_ca_const_string_sort_index, 0);
+  rb_define_method(rb_cCAConstString, "__min_bytes__", rb_ca_const_string_min, 0);
+  rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
   ca_face_register_storage_to_scalar(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_scalar);

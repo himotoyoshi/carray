@@ -120,8 +120,10 @@ encoding — so it is faithful to sorting the Ruby strings.
 ct.sort         # sorted, same class — a NO-COPY VIEW (the (start,end) pairs are
                 #   gathered; the bytes never move)
 ct.sort_copy    # sorted, standalone — an owned, compacted column
-ct.sort_index   # ascending permutation -> :int
-ct.min / ct.max # byte-extremum element (skips masked; nil / UNDEF if all-masked)
+ct.sort_addr    # view-flat addresses in sorted order -> :int64
+ct.sort_index   # per-fiber indices in sorted order -> :int64
+ct.min / ct.max # byte-extremum element (skips masked; UNDEF if all-masked)
+ct.minmax       # both, in one pass each
 
 ct.search("foo")            # flat index of the first match, or nil
 ct.find_value_index("foo")  # (native — the (start,end)-pair + buffer storage
@@ -130,6 +132,24 @@ ct.find_value_index("foo")  # (native — the (start,end)-pair + buffer storage
 
 `sort` is cheap precisely because it is a view over rearranged ranges; use
 `sort_copy` when you want an owned, compacted result.
+
+The whole ordering family reads the bytes and answers what it answers on any
+other array: `sort` / `sort_copy` / `sort_addr` / `sort_index` / `rank_index` /
+`order` / `min` / `max` / `minmax` / `min_index` / `max_index` /
+`partition_copy` / `partition_index`, each taking `axis:` (and `kind:` /
+`masked_position:` where CArray does).  Masked cells are an incomparable
+sentinel clustered at one end.
+
+```ruby
+ct = CArray.const_string(%w[pear apple fig kiwi]).reshape(2, 2)
+ct.min(axis: 1)   # => CAConstString ["apple", "fig"]
+ct.sort(axis: 1)  # => CAConstString [["apple", "pear"], ["fig", "kiwi"]]
+```
+
+The flat forms are native byte scans.  A per-axis one goes through
+`to_string`, which decodes a Ruby `String` per cell — so on a large column
+reach for the flat form, or `to_string` once and work there, rather than
+calling several per-axis members in a row.
 
 ## Numeric gate
 
