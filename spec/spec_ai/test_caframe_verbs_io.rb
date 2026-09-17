@@ -68,18 +68,48 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     end
   end
 
-  def test_empty_unquoted_is_nil_quoted_is_empty_string
+  def test_empty_unquoted_is_missing_quoted_is_empty_string
     with_csv(%Q{a,b\np,\np,""\n}) do |path|
       df = CAFrame.from_csv(path)
-      assert_equal [nil, ""], df["b"].to_a
+      assert_equal [UNDEF, ""], df["b"].to_a
+      assert_equal [true, false], df["b"].mask.to_a
     end
+  end
+
+  #  A missing field reads the same whether or not the column is cast, so a
+  #  frame read without types: does not carry nil where the same frame read
+  #  with them carries UNDEF.
+  def test_missing_is_undef_with_and_without_a_cast
+    with_csv("a,b\n1,x\n,y\n3,\n") do |path|
+      plain = CAFrame.from_csv(path)
+      typed = CAFrame.from_csv(path, types: { "a" => :int32 })
+      assert_equal [false, true, false], plain["a"].mask.to_a
+      assert_equal [false, true, false], typed["a"].mask.to_a
+      assert_equal ["1", UNDEF, "3"], plain["a"].to_a
+      assert_equal [1, UNDEF, 3],     typed["a"].to_a
+      assert_equal ["x", "y", UNDEF], plain["b"].to_a
+    end
+  end
+
+  #  to_csv writes UNDEF as an empty field; from_csv has to read one back as
+  #  UNDEF for the mask to survive the trip.
+  def test_a_mask_round_trips_through_csv
+    df = CAFrame.new("s" => CArray.object(3) { |i| i.zero? ? UNDEF : "v" },
+                     "n" => CArray.int32(3) { |i| i })
+    df["n"][1] = UNDEF
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)),
+                            types: { "n" => :int32 })
+    assert_equal [true, false, false], back["s"].mask.to_a
+    assert_equal [false, true, false], back["n"].mask.to_a
+    assert_equal [UNDEF, "v", "v"],    back["s"].to_a
+    assert_equal [0, UNDEF, 2],        back["n"].to_a
   end
 
   def test_ragged_short_row_padded_long_row_raises
     with_csv("a,b,c\n1,2\n1,2,3\n") do |path|
       df = CAFrame.from_csv(path)
       assert_equal 2, df.nrow
-      assert_equal [nil, "3"], df["c"].to_a
+      assert_equal [UNDEF, "3"], df["c"].to_a
     end
     with_csv("a,b\n1,2,3\n") do |path|
       assert_raise(ArgumentError) { CAFrame.from_csv(path) }
@@ -186,13 +216,13 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   def test_reads_a_stringio
     df = CAFrame.from_csv(StringIO.new(TEXT))
     assert_equal ["a", "b", "c"], df.variable_names
-    assert_equal [["1", "2", "3"], ["4", nil, "6"]], df.to_ca.to_a
+    assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]], df.to_ca.to_a
   end
 
   def test_reads_an_open_file
     with_csv(TEXT) do |path|
       File.open(path) do |io|
-        assert_equal [["1", "2", "3"], ["4", nil, "6"]],
+        assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]],
                      CAFrame.from_csv(io).to_ca.to_a
       end
     end
