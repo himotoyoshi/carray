@@ -36,6 +36,23 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `each_with_index` and `map_with_index!` no longer raise
+  `SystemStackError` on a long array, and neither do `CArray#format` /
+  `CArray.format`, which are built on them. The ceiling was the C stack, so
+  where it fell depended on where the code ran: around a million cells on the
+  main thread, under a hundred thousand inside a `Thread`.
+
+- Fix: `CArray.concatenate` and `CArray.mosaic` take a zero-length piece --
+  an empty slice such as `a[0...0]`, or `CArray.int32(0)` -- instead of
+  raising `IndexError`. The piece contributes nothing and the remaining ones
+  concatenate as before. `CArray#paste` likewise accepts a source covering no
+  cell, and writes nothing.
+
+- Change: `CArray.time` reads a string array about eight times faster with an
+  explicit `format:`, and about three times faster letting it auto-detect --
+  so `CAFrame#parse_to_time`, which calls it, speeds up by the same amount.
+  Parsed values are unchanged.
+
 - New: `CArray.empty(data_type, dim, bytes: nil)` allocates without the zero
   fill, for an array whose every cell is written before anything reads it. One
   existing call changes: `CArray.empty(3, [4])` raised `TypeError` in 3.0.1
