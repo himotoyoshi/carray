@@ -198,13 +198,12 @@ The whole ordering family — `sort` / `sort_copy` / `sort_addr` / `sort_index` 
 a view (the `(start,end)` pairs are gathered, bytes never move); `sort_copy`
 gives an owned, compacted column.
 
-`search` works on all three. The other two searches have one gap each, from
-opposite directions:
+`search` and `count(v)` work on all three. `bsearch` has one gap:
 
 | | `search` | `count(v)` | `bsearch` |
 |---|---|---|---|
 | `CAString` | ✓ | ✓ | ✓ |
-| `CAFixlenString` | ✓ | — a value argument is the one thing the kernels do not carry for fixlen | ✓ |
+| `CAFixlenString` | ✓ | ✓ | ✓ |
 | `CAConstString` | ✓ (native) | ✓ (native) | — its storage is byte ranges rather than bytes, so a query cannot be compared against it |
 
 `search_nearest` has no meaning for any of them: nearest needs a distance, and

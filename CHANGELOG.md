@@ -62,11 +62,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `median`. Numbers stored as objects -- Integer, Rational, BigDecimal -- are
   unaffected.
 
-- New: `count(v)` counts an object array, which used to raise
-  `CArray::DataTypeError`. Cells are compared by Ruby `==`, so `count(1)` and
-  `count(1.0)` agree, and `true` / `false` / `nil` are values to count rather
-  than the boolean array's `true` / `false`. `:fixlen` still raises;
-  `CAConstString` answers `count(v)` natively.
+- New: `count(v)` counts an object or fixlen array, which used to raise
+  `CArray::DataTypeError`. An object array compares by Ruby `==`, so
+  `count(1)` and `count(1.0)` agree, and `true` / `false` / `nil` are values to
+  count rather than the boolean array's `true` / `false`. A fixlen array
+  compares the whole cell by `memcmp`, with a short String query padded out to
+  the cell width -- so a 4-byte cell holding `"a\0\0\0"` is counted by
+  `count("a")`.
 
 - Fix: `sort_copy` takes whatever `sort` takes. It refused everything its own
   fast path could not handle, so an object or boolean array sorted through

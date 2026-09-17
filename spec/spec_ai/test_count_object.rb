@@ -72,11 +72,6 @@ class TestCountObject < Test::Unit::TestCase
   def test_other_data_types_are_untouched
     assert_equal 2, CA_INT32([1, 2, 1]).count(1)
     assert_equal 2, CArray.boolean(3) { |i| i != 1 }.count(true)
-    assert_raise(CArray::DataTypeError) do
-      x = CArray.new(CA_FIXLEN, [3], bytes: 4)
-      %w[a b a].each_with_index { |v, i| x[i] = v }
-      x.count("a")
-    end
   end
 
 end

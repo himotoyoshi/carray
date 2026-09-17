@@ -478,16 +478,29 @@ module MkKernel
     # selects direction (:min / :max) and output kind:
     #   :min / :max       -> extremum blob, output data_type = CA_FIXLEN
     #   :argmin / :argmax -> position of the extremum, output i64
+    #   :count_equal      -> how many cells memcmp-equal value_arg, output i64
     # Author must also list :fixlen in source: (parallel to how :object
     # opts in via source: + an :object body).
+    #
+    # :count_equal is the one mode that takes a value_arg, and takes it as a
+    # byte blob rather than a scalar: the dispatcher packs the query with
+    # rb_ca_obj2ptr into a ca->bytes buffer, the same way the search family
+    # already does for a fixlen query (which is what makes a short query
+    # NUL-pad to the cell width instead of never matching).
     if fixlen
-      unless %i[min max argmin argmax].include?(fixlen)
-        raise "#{name}: fixlen: must be :min / :max / :argmin / :argmax (got #{fixlen.inspect})"
+      unless %i[min max argmin argmax count_equal].include?(fixlen)
+        raise "#{name}: fixlen: must be :min / :max / :argmin / :argmax / :count_equal (got #{fixlen.inspect})"
       end
       raise "#{name}: fixlen: requires :fixlen in source:" unless source.include?(:fixlen)
       raise "#{name}: fixlen: requires mask_policy: :min_count" unless mask_policy == :min_count
       raise "#{name}: fixlen: requires outputs: 1" unless outputs == 1
-      raise "#{name}: fixlen: does not support value_arg / array_arg" if value_arg || array_arg
+      raise "#{name}: fixlen: does not support array_arg" if array_arg
+      if value_arg && fixlen != :count_equal
+        raise "#{name}: fixlen: only :count_equal takes a value_arg"
+      end
+      if fixlen == :count_equal && !value_arg
+        raise "#{name}: fixlen: :count_equal requires value_arg"
+      end
     elsif source.include?(:fixlen)
       raise "#{name}: source includes :fixlen but no fixlen: spec given"
     end
@@ -2037,13 +2050,15 @@ module MkKernel
   # the numeric argmin's best_i.  mask_policy is always :min_count here.
   def self.emit_reduce_native_fixlen(io, k, src)
     name      = k[:name]
+    counting  = k[:fixlen] == :count_equal
     want_max  = %i[max argmax].include?(k[:fixlen])
-    index_out = %i[argmin argmax].include?(k[:fixlen])
+    index_out = %i[argmin argmax].include?(k[:fixlen]) || counting
     cmp       = want_max ? ">" : "<"
+    varg      = counting ? ", const char *value_arg" : ""
 
     io.puts
     io.puts "static VALUE"
-    io.puts "#{name}_ki_native_fixlen (VALUE self, CArray *ca, int8_t *slab_axes, int8_t naxes, int keep_axis, ca_size_t min_count)"
+    io.puts "#{name}_ki_native_fixlen (VALUE self, CArray *ca, int8_t *slab_axes, int8_t naxes, int keep_axis#{varg}, ca_size_t min_count)"
     io.puts "{"
     io.puts "  ca_size_t K = ca->bytes;   /* uniform fixlen byte width */"
     if index_out
@@ -2064,9 +2079,13 @@ module MkKernel
     io.puts "  ca_size_t   out_i   = 0;"
     io.puts "  boolean8_t *op_mask = NULL;   /* lazily allocated on first UNDEF */"
     io.puts "  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {"
-    io.puts "    const char *best   = NULL;"
-    io.puts "    ca_size_t   best_i = 0;"
-    io.puts "    (void) best_i;" unless index_out   # value output ignores the index
+    if counting
+      io.puts "    int64_t     cnt    = 0;"
+    else
+      io.puts "    const char *best   = NULL;"
+      io.puts "    ca_size_t   best_i = 0;"
+      io.puts "    (void) best_i;" unless index_out   # value output ignores the index
+    end
     io.puts "    ca_size_t   masked_cnt = 0;"
     io.puts "    int8_t      sndim   = st.slab_ndim;"
     io.puts "    ca_size_t   sidx[CA_RANK_MAX] = { 0 };"
@@ -2082,12 +2101,18 @@ module MkKernel
     io.puts "      }"
     io.puts "      else {"
     io.puts "        const char *q = (const char *) p + doff;"
-    io.puts "        if ( best == NULL ) {"
-    io.puts "          best = q; best_i = idx;"
-    io.puts "        }"
-    io.puts "        else if ( memcmp(q, best, (size_t) K) #{cmp} 0 ) {"
-    io.puts "          best = q; best_i = idx;"
-    io.puts "        }"
+    if counting
+      io.puts "        if ( memcmp(q, value_arg, (size_t) K) == 0 ) {"
+      io.puts "          cnt++;"
+      io.puts "        }"
+    else
+      io.puts "        if ( best == NULL ) {"
+      io.puts "          best = q; best_i = idx;"
+      io.puts "        }"
+      io.puts "        else if ( memcmp(q, best, (size_t) K) #{cmp} 0 ) {"
+      io.puts "          best = q; best_i = idx;"
+      io.puts "        }"
+    end
     io.puts "      }"
     io.puts "      /* row-major odometer (innermost slab axis fastest) so idx"
     io.puts "         matches CA_SLAB_REDUCE_T's flat slab index. */"
@@ -2096,8 +2121,16 @@ module MkKernel
     io.puts "        sidx[sk] = 0;"
     io.puts "      }"
     io.puts "    }"
-    io.puts "    if ( min_count < 0 ? masked_cnt == st.slab_elements"
-    io.puts "                       : st.slab_elements - masked_cnt < min_count ) {"
+    # ERI.0: a count over nothing is 0, not UNDEF -- so the default
+    # (min_count < 0) never fires the mask for :count_equal.  An explicit
+    # min_count: still does.
+    if counting
+      io.puts "    if ( min_count < 0 ? 0"
+      io.puts "                       : st.slab_elements - masked_cnt < min_count ) {"
+    else
+      io.puts "    if ( min_count < 0 ? masked_cnt == st.slab_elements"
+      io.puts "                       : st.slab_elements - masked_cnt < min_count ) {"
+    end
     io.puts "      if ( ! op_mask ) {"
     io.puts "        ca_create_mask(co);"
     io.puts "        op_mask = (boolean8_t *) co->mask->ptr;"
@@ -2111,7 +2144,9 @@ module MkKernel
     io.puts "      out_i++;"
     io.puts "    }"
     io.puts "    else {"
-    if index_out
+    if counting
+      io.puts "      ((int64_t *) op)[out_i] = cnt;"
+    elsif index_out
       io.puts "      ((int64_t *) op)[out_i] = (int64_t) best_i;"
     else
       io.puts "      memcpy(op + out_i * K, best, (size_t) K);"
@@ -3318,7 +3353,17 @@ module MkKernel
     k[:source].each do |s|
       si = DTYPES[s]
       # Per-src value_arg cast: NUM2LL / NUM2ULL / NUM2DBL -> (T_IN).
-      varg_decl = has_varg ? "      #{si[:c]} value_arg = (#{si[:c]}) #{si[:num2c]}(rval);\n" : ""
+      varg_decl = if !has_varg
+                    ""
+                  elsif s == :fixlen
+                    # A fixlen query is a runtime-width byte blob with no
+                    # scalar cast; pack it the way the search family does,
+                    # which NUL-pads a short String to the cell width.
+                    "      char *value_arg = ALLOCA_N(char, src->bytes);\n" \
+                    "      rb_ca_obj2ptr(self, rval, value_arg);\n"
+                  else
+                    "      #{si[:c]} value_arg = (#{si[:c]}) #{si[:num2c]}(rval);\n"
+                  end
       if use_result_var || has_varg
         io.puts "    case #{si[:ca]}: {"
         io.print varg_decl unless varg_decl.empty?
@@ -6950,7 +6995,8 @@ MkKernel.reduce :count_equal,
   reduce:      { numeric: "if (v == value_arg) acc += 1",
                  object:  "if (RTEST(rb_equal(v, value_arg))) acc += 1" },
   reduction_kind: :plus,         # SL.1.4 (conditional predication; clang predicates safely under reduction(+:acc))
-  source:      MkKernel::ALL_NUMERIC + [:object],
+  source:      MkKernel::ALL_NUMERIC + [:object, :fixlen],
+  fixlen:      :count_equal,   # bespoke memcmp walk (a blob has no scalar C type)
   output:      :i64,
   ruby_scalar: :LL2NUM,
   fallback:    :raise,
