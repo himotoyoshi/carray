@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CABlock#count` and `CAWindow#count` are gone. They gave back the
+  per-axis number of cells the view exposes -- which is what `shape` answers
+  -- and in doing so hid `CArray#count` on the two classes an indexing
+  expression lands on most: `a[2...8].count(true)` raised `ArgumentError`,
+  and `a[2...8].count` gave a shape rather than a population. Read the
+  geometry with `shape`. `size0` / `start` / `step` / `offset`, which say
+  where the view sits in its parent, are unchanged.
+
 - Change: `CAFrame.from_csv` reads a missing field as UNDEF in every column,
   not only in one named by `types:`. An unquoted empty field, and a cell a
   short row never reached, used to arrive as a Ruby `nil` sitting in an

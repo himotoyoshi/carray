@@ -83,10 +83,10 @@ class CAWindowIterator < CAIterator
   def initialize (source, *ranges, bounds: :skip, fill_value: nil)
     if source.is_a?(CArray) && source.obj_type == CA_OBJ_WINDOW
       # Backward-compat: read geometry from a CAWindow view built by #window.
-      # start[i] = lo, dim[i] (window width) = w, so hi = lo + w - 1.
+      # start[i] = lo, shape[i] (window width) = w, so hi = lo + w - 1.
       win     = source
       @source = win.parent
-      widths  = win.count
+      widths  = win.shape
       @ranges = win.start.each_with_index.map { |lo, i| lo..(lo + widths[i] - 1) }
       # The legacy #window default is FILL (constant), whose value is the
       # view's fill_value; map that to a :constant margin.
