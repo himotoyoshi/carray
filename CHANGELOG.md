@@ -36,6 +36,21 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `percentile` and `median` no longer interpolate between objects that
+  have no arithmetic. On a column of Strings `percentile(30)` quietly answered
+  `""` and even-length `median` raised `NoMethodError` from inside a funcall;
+  both now raise `CArray::DataTypeError` naming `method: :lower` / `:higher` /
+  `:nearest`, which pick an element and work. A `p` that lands exactly on an
+  element (`percentile(50)` of five) still answers, as does an odd-length
+  `median`. Numbers stored as objects -- Integer, Rational, BigDecimal -- are
+  unaffected.
+
+- New: `count(v)` counts an object array, which used to raise
+  `CArray::DataTypeError`. Cells are compared by Ruby `==`, so `count(1)` and
+  `count(1.0)` agree, and `true` / `false` / `nil` are values to count rather
+  than the boolean array's `true` / `false`. `:fixlen` still raises;
+  `CAConstString` answers `count(v)` natively.
+
 - Fix: `sort_copy` takes whatever `sort` takes. It refused everything its own
   fast path could not handle, so an object or boolean array sorted through
   `sort` and raised `CArray::DataTypeError` through `sort_copy`; complex, which
