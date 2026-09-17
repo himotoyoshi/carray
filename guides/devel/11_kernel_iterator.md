@@ -79,6 +79,8 @@ output operand:
 | `CA_FOR_EACH_FIBER_INOUT` | + a parallel contig output (`p_out[i]`) |
 | `CA_FOR_EACH_FIBER_MASKED` | + contig mask (`m[i]`) |
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | + both |
+| `CA_FOR_EACH_FIBER_PAIR` | one contig fiber from **each of two sources** at the same position |
+| `CA_FOR_EACH_FIBER_PAIR_MASKED` | + both mask cursors |
 
 The engine picks alias (zero-copy when the fiber stride permits) or
 per-fiber materialise (including per-fiber mask gather for non-innermost
@@ -112,7 +114,17 @@ CA_FOR_EACH_FIBER_INOUT (st_in, st_out, ca_in, ca_out, axis,
                          flags, p_in, p_out, n);
 CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca_in, ca_out, axis,
                                flags, p_in, p_out, n, m);
+CA_FOR_EACH_FIBER_PAIR  (st_a, st_b, ca_a, ca_b, axis,
+                         flags, p_a, p_b, n);
+CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,
+                              flags, p_a, p_b, n, m_a, m_b);
 ```
+
+The `PAIR` forms are for a C routine that takes two vectors of equal
+length -- a dot product, a correlation, an interpolation of `y` over `x`.
+Both sources are walked along the same axis and must agree in shape; the
+masked form yields both mask cursors, since whether a cell may be used is
+a question about both fibers.
 
 Each fiber macro auto-sets `CA_KERNEL_FIBER_CONTIG`; the engine guarantees
 contig data delivery (gathers strided fibers into per-state scratch when
