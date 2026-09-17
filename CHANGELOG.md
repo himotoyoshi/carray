@@ -43,13 +43,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   already worked, is unchanged, and so is `CAConstString`, which answers
   `search` / `count(v)` natively and still has no `bsearch`.
 
-- Change: `search_nearest` and `search_nearest_addr` on an object array raise
-  `CArray::DataTypeError` naming the query's class when it does not answer
-  `#distance`, instead of letting a bare `NoMethodError` out of the kernel.
-  Nearest is measured with `#distance`, and since `Numeric#distance` became an
-  opt-in refinement nothing an ordinary program holds answers it -- define one
-  on the stored objects, or use `search` / `bsearch` for an exact match.
-  Numeric arrays are unaffected.
+- Change: `search_nearest` and `search_nearest_addr` work on an object array of
+  numbers, and say why when they cannot. They measured only with `#distance`,
+  and since `Numeric#distance` became an opt-in refinement -- which a C-level
+  call does not see -- that raised `NoMethodError` for an Integer as readily as
+  for a String. A number is now measured as `(query - cell).abs`, exactly for
+  Rational and BigDecimal; an object defining a real `#distance` still uses it;
+  anything else raises `CArray::DataTypeError` naming the query's class, and
+  points at `search` / `bsearch` for an exact match. Numeric arrays are
+  unaffected.
 
 - Fix: `percentile` and `median` no longer interpolate between objects that
   have no arithmetic. On a column of Strings `percentile(30)` quietly answered

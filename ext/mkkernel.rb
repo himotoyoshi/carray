@@ -7547,14 +7547,20 @@ MkKernel.search :search_nearest,
       /* CA_OBJECT nearest: minimum of query_val.distance(cell), compared
          with `<` (matches the legacy flat proc_nearest_addr_VALUE). */
       /* Nearest needs a metric.  #distance is the protocol the 2.0 flat
-         kernel used, and a stored object that does not answer it has no
-         nearest -- say so here rather than let a bare NoMethodError out
-         of the funcall below. */
-      if ( ! rb_respond_to(query_val, rb_intern("distance")) ) {
+         kernel used, back when Numeric#distance was a monkey patch; it
+         is an opt-in refinement now, and a refinement does not reach an
+         rb_funcall from C -- so a number reaching here answers no more
+         than a String does.  Measure a number the way #distance itself
+         does, keep #distance for anything that defines a real one, and
+         refuse the rest by name rather than let a bare NoMethodError out
+         of the loop below. */
+      ID nearest_id = rb_intern("distance");
+      int nearest_by_distance = rb_respond_to(query_val, nearest_id);
+      if ( ! nearest_by_distance && ! rb_obj_is_kind_of(query_val, rb_cNumeric) ) {
         rb_raise(rb_eCADataTypeError,
-                 "search_nearest: nearest needs a distance, and %s does not "
-                 "answer #distance (define one on the stored objects, or use "
-                 "search / bsearch for an exact match)",
+                 "search_nearest: nearest needs a distance, and %s is neither a "
+                 "number nor answers #distance (define one on the stored "
+                 "objects, or use search / bsearch for an exact match)",
                  rb_obj_classname(query_val));
       }
       result = (ca_size_t) -1;
@@ -7562,7 +7568,10 @@ MkKernel.search :search_nearest,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        VALUE dist = rb_funcall(query_val, rb_intern("distance"), 1, v);
+        VALUE dist = nearest_by_distance
+                   ? rb_funcall(query_val, nearest_id, 1, v)
+                   : rb_funcall(rb_funcall(query_val, '-', 1, v),
+                                rb_intern("abs"), 0);
         if ( NIL_P(best) || RTEST(rb_funcall(dist, rb_intern("<"), 1, best)) ) {
           best = dist; result = i;
         }
@@ -7739,14 +7748,20 @@ MkKernel.search :search_nearest_addr,
       /* CA_OBJECT nearest (view_flat addr): minimum of
          query_val.distance(cell), compared with `<`. */
       /* Nearest needs a metric.  #distance is the protocol the 2.0 flat
-         kernel used, and a stored object that does not answer it has no
-         nearest -- say so here rather than let a bare NoMethodError out
-         of the funcall below. */
-      if ( ! rb_respond_to(query_val, rb_intern("distance")) ) {
+         kernel used, back when Numeric#distance was a monkey patch; it
+         is an opt-in refinement now, and a refinement does not reach an
+         rb_funcall from C -- so a number reaching here answers no more
+         than a String does.  Measure a number the way #distance itself
+         does, keep #distance for anything that defines a real one, and
+         refuse the rest by name rather than let a bare NoMethodError out
+         of the loop below. */
+      ID nearest_id = rb_intern("distance");
+      int nearest_by_distance = rb_respond_to(query_val, nearest_id);
+      if ( ! nearest_by_distance && ! rb_obj_is_kind_of(query_val, rb_cNumeric) ) {
         rb_raise(rb_eCADataTypeError,
-                 "search_nearest_addr: nearest needs a distance, and %s does not "
-                 "answer #distance (define one on the stored objects, or use "
-                 "search / bsearch for an exact match)",
+                 "search_nearest_addr: nearest needs a distance, and %s is neither a "
+                 "number nor answers #distance (define one on the stored "
+                 "objects, or use search / bsearch for an exact match)",
                  rb_obj_classname(query_val));
       }
       result = (ca_size_t) -1;
@@ -7754,7 +7769,10 @@ MkKernel.search :search_nearest_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        VALUE dist = rb_funcall(query_val, rb_intern("distance"), 1, v);
+        VALUE dist = nearest_by_distance
+                   ? rb_funcall(query_val, nearest_id, 1, v)
+                   : rb_funcall(rb_funcall(query_val, '-', 1, v),
+                                rb_intern("abs"), 0);
         if ( NIL_P(best) || RTEST(rb_funcall(dist, rb_intern("<"), 1, best)) ) {
           best = dist; result = i;
         }

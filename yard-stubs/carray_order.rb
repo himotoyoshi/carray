@@ -170,10 +170,17 @@ class CArray
 
   # @overload search_nearest(val)
   #   Returns the flat address of the element of `self` whose value
-  #   is closest to `val`. For `:object` arrays, uses
-  #   `val.distance(other)` to compare.
+  #   is closest to `val`.
+  #
+  #   In an `:object` array the distance is `val.distance(other)` when
+  #   `val` answers `#distance`, and `(val - other).abs` when it is a
+  #   number. Anything else -- a String, say -- has no distance and
+  #   raises `CArray::DataTypeError`; use {#search} or {#bsearch} for an
+  #   exact match.
   #   @param val [Object]
   #   @return [Integer, nil]
+  #   @raise [CArray::DataTypeError] when `val` is neither a number nor
+  #     answers `#distance`.
   # @overload search_nearest(val, axis:)
   #   Per-fiber nearest-value search along `axis`. Returns
   #   axis-local positions.
