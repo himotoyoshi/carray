@@ -90,10 +90,14 @@ ca_string_setup (CAString *ca, CArray *parent)
 
   ca->obj_type  = CA_OBJ_STRING;
   ca->data_type = CA_OBJECT;
-  /* ORDERABLE: object storage sorts by <=> (= String order on the surface),
-     so the sort family may descend to storage.  COMPARABLE is left off for
-     now; ordered search (bsearch) is a later phase. */
-  ca->flags     = CA_FLAG_IS_FACE | CA_FLAG_FACE_ORDERABLE_STORAGE;
+  /* ORDERABLE + COMPARABLE, and both hold by construction: a storage cell
+     IS the Ruby String the surface shows, so storage order is surface
+     order and an external String compares against storage directly, with
+     nothing to reconcile.  (A unit-bearing Face like CATime is the case
+     that has to stop at ORDERABLE; this one carries no unit.) */
+  ca->flags     = CA_FLAG_IS_FACE
+                | CA_FLAG_FACE_ORDERABLE_STORAGE
+                | CA_FLAG_FACE_COMPARABLE_STORAGE;
   ca->ndim      = parent->ndim;
   ca->bytes     = sizeof(VALUE);
   ca->elements  = parent->elements;
