@@ -1137,9 +1137,16 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
     rb_raise(rb_eArgError, "__is_in__: values must be a CArray");
   }
   GetCArray(rvalues, cv);
-  if ( cv->data_type != dt || (dt == CA_FIXLEN && cv->bytes != ca->bytes) ) {
+  if ( cv->data_type != dt ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: values data type must match self (%d)", dt);
+             "__is_in__: values data type (%s) must match self (%s)",
+             ca_type_name[cv->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && cv->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "__is_in__: a fixlen value is a cell-width blob, so the values "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) cv->bytes);
   }
   if ( cv->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__is_in__: values need ndim >= 1");
@@ -1554,8 +1561,16 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
     rb_raise(rb_eArgError, "set relation: other must be a CArray");
   }
   GetCArray(rother, co);
-  if ( co->data_type != dt || (dt == CA_FIXLEN && co->bytes != ca->bytes) ) {
-    rb_raise(rb_eCADataTypeError, "set relation: other data type must match self (%d)", dt);
+  if ( co->data_type != dt ) {
+    rb_raise(rb_eCADataTypeError,
+             "set relation: other data type (%s) must match self (%s)",
+             ca_type_name[co->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && co->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "set relation: a fixlen value is a cell-width blob, so other "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) co->bytes);
   }
   if ( co->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "set relation: other need ndim >= 1");
