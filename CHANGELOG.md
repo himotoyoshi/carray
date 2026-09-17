@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `sort_copy` takes whatever `sort` takes. It refused everything its own
+  fast path could not handle, so an object or boolean array sorted through
+  `sort` and raised `CArray::DataTypeError` through `sort_copy`; complex, which
+  neither can order, refused differently depending on which one was asked, and
+  now refuses alike. Numeric arrays keep the fast path and are unchanged.
+
 - Fix: `CAConstString#sort_addr`, `#sort_index`, `#rank_index`, `#order`,
   `#min_index`, `#max_index`, `#partition_copy` and `#partition_index` read the
   strings. They read the `(start, end)` offsets that hold them, which order by

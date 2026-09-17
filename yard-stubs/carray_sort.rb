@@ -67,11 +67,13 @@ class CArray
   #   along `axis`. Use this when you want an independent array
   #   rather than a view.
   #
-  #   Unmasked numeric paths use a per-fiber gather + sort +
-  #   scatter, bypassing the `CARemap` scatter layer that `sort`
-  #   uses. `CA_FIXLEN` and masked input both materialize the
-  #   `sort` view instead (same shape, ordering, and
-  #   `masked_position:` semantics as {#sort}).
+  #   It takes whatever {#sort} takes: numeric (`i8`..`f64`),
+  #   `CA_BOOLEAN`, `CA_FIXLEN` and `CA_OBJECT`, masked or not.
+  #
+  #   Unmasked `i8`..`f64` uses a per-fiber gather + sort + scatter,
+  #   bypassing the `CARemap` scatter layer that `sort` uses.
+  #   Everything else materializes the `sort` view instead (same
+  #   shape, ordering, and `masked_position:` semantics as {#sort}).
   #   @param axis [Integer, nil]
   #   @param kind [Symbol] `:quick` or `:stable`.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
