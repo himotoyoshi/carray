@@ -22,7 +22,10 @@ class CArray
   #   value-hash discovery family ({#unique} / {#value_counts}):
   #   numeric follows `==` with all NaN collapsed to one value and
   #   -0.0 == +0.0; `CA_OBJECT` follows Ruby `hash` / `eql?` with Float
-  #   NaN collapsed; `CA_FIXLEN` follows byte equality.
+  #   NaN collapsed; `CA_FIXLEN` follows byte equality over the whole
+  #   cell, with a short String in the set padded out to the cell width
+  #   (so a 5-byte array written from `"be"` is `is_in(["be"])`). A
+  #   `CA_FIXLEN` set given as a CArray must already be of that width.
   #
   #   Masked cells of `values` do not enter the set. Masked cells of
   #   `self` stay masked in the result (membership is unknown), so
@@ -126,7 +129,15 @@ class CArray
   # object / fixlen self the elements are values, not data type specifiers (a
   # String is a value, not a type name), so build the set in self's data type.
   def promote_elements (elems)
-    if data_type == CA_OBJECT || data_type == CA_FIXLEN
+    if data_type == CA_FIXLEN
+      # A fixlen value is a cell-width blob, so the set has to be built at
+      # this array's width -- to_type(:fixlen) with no bytes: builds it at
+      # width 0, where every element is "" and the C guard then refuses the
+      # set for not matching self.  Same rule the scalar operand of a
+      # comparison follows: a String standing in for a cell is padded to the
+      # cell's width.
+      [self, elems.to_ca.to_type(data_type, bytes: bytes)]
+    elsif data_type == CA_OBJECT
       [self, elems.to_ca.to_type(data_type)]
     else
       t = CArray.result_type(self, *elems)

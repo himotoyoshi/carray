@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `is_in`, `intersection`, `difference` and `union` take an Array or Range
+  of Strings against a fixlen array, where every such call raised
+  `CArray::DataTypeError` -- `CAFixlenString` included. The set is built at the
+  array's cell width, so a short String matches a padded cell the way it does
+  everywhere else. A set given as a CArray must still be of that width; when it
+  is not, the refusal now says which width was wanted instead of reporting a
+  data type mismatch between two fixlen arrays.
+
 - Fix: comparing a fixlen array against a String compares it as a value of
   that array's cell width. The String became an object operand, so `eq` / `ne` /
   `lt` / `gt` / `ge` / `le` and the `[:eq, v]` indexer ran `String#==` per cell
