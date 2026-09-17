@@ -111,11 +111,29 @@ class TestCArrayEmpty < Test::Unit::TestCase
 
   # --- parity with CArray.new at the edges
 
-  # Was a TypeError before this form existed; now it is read the way
-  # CArray.new(3, [4]) reads it (an Integer is an internal type code).
-  def test_integer_type_code_matches_new
-    assert_equal CArray.new(3, [4]).data_type, CArray.empty(3, [4]).data_type
-    assert_equal [4], CArray.empty(3, [4]).shape
+  # An Integer first argument reaches an internal numbering that is not
+  # part of the public API (the CA_* constants have been Symbols since
+  # 3.0), so what it yields is not pinned here -- only that empty reads
+  # it as new reads it, whichever way that falls.  Before this form
+  # existed the pair was read as a shape and raised TypeError.
+  def test_integer_first_argument_matches_new
+    from_new = begin
+                 CArray.new(3, [4])
+               rescue Exception => e
+                 e
+               end
+    from_empty = begin
+                   CArray.empty(3, [4])
+                 rescue Exception => e
+                   e
+                 end
+    if from_new.is_a?(Exception)
+      assert_equal from_new.class, from_empty.class
+      assert_equal from_new.message, from_empty.message
+    else
+      assert_equal from_new.data_type, from_empty.data_type
+      assert_equal from_new.shape, from_empty.shape
+    end
   end
 
   def test_empty_dim_refused_as_new_refuses_it
