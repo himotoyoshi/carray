@@ -1366,6 +1366,36 @@ rb_ca_cast (volatile VALUE self)
   return obj;
 }
 
+/* A String operand against a fixlen array is a value of that array's cell
+   width.  ca_value_to_data_type answers CA_OBJECT for a String, so without
+   this the operand became an object scalar and the comparison ran down the
+   object lane -- an rb_funcall of String#== per cell, against the cell's
+   NUL-padded text.  A fixlen array pads a short String on write
+   (`a[i] = "be"` stores "be\0\0\0"), so that answered that an array does
+   not equal the string it was written from, and did it 30x slower than the
+   memcmp lane the fixlen comparison bodies are there to provide.
+
+   Two fixlen *arrays* of different widths keep the variable-width byte
+   string semantics those bodies implement (min-width memcmp with a length
+   tiebreak); this is only about a scalar standing in for a cell. */
+static int
+ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
+{
+  CArray *cr;
+  /* A String is the only operand that means a cell value here.  A Regexp
+     (match) or any other object keeps its own coercion: those are asking
+     something about the bytes, not standing in for them. */
+  if ( ! RB_TYPE_P(*scalar, T_STRING) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( cr->data_type != CA_FIXLEN ) {
+    return 0;
+  }
+  *scalar = rb_cscalar_new_with_value(CA_FIXLEN, cr->bytes, *scalar);
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -1409,6 +1439,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
     }
 #endif
+    else if ( ca_fixlen_scalar_operand(self, *other) ) {
+      /* width taken from the fixlen reference; see the helper above */
+    }
     else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
     }
@@ -1437,6 +1470,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
     }
 #endif
+    else if ( ca_fixlen_scalar_operand(other, *self) ) {
+      /* width taken from the fixlen reference; see the helper above */
+    }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
     }
@@ -1823,6 +1859,9 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
+    }
+    else if ( ca_fixlen_scalar_operand(other, *self) ) {
+      return;   /* already the receiver's data_type and width */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);

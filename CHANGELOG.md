@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: comparing a fixlen array against a String compares it as a value of
+  that array's cell width. The String became an object operand, so `eq` / `ne` /
+  `lt` / `gt` / `ge` / `le` and the `[:eq, v]` indexer ran `String#==` per cell
+  against the cell's NUL-padded text -- and an array pads a short String on
+  write, so `a[i] = "be"` then `a.eq("be")` was false, `a.gt("be")` was true,
+  and the scan took 30x longer than the same one in `search`. Two fixlen
+  arrays of different widths compare as before, as does a Regexp for `match`.
+  `CAFixlenString` was never affected.
+
 - New: a `CAString` column can be searched, not only sorted: `bsearch`,
   `bsearch_addr`, `search` and `count(v)` answer where they used to raise
   `ArgumentError`. A cell of one is the Ruby String it shows, so a String query
