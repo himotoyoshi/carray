@@ -213,14 +213,20 @@ class TestCAConstString < Test::Unit::TestCase
     assert_equal "b", ct.max
   end
 
-  def test_ac5_min_all_masked_is_nil
+  def test_ac5_min_all_masked_is_undef
     ct = CArray.const_string([nil, nil])
-    assert_nil ct.min
+    assert_equal UNDEF, ct.min
+    assert_equal UNDEF, ct.max
+    assert_equal [UNDEF, UNDEF], ct.minmax
+    assert_equal UNDEF, CArray.const_string([]).min
   end
 
-  def test_ac5_sort_masked_raises
+  # A masked cell is an incomparable sentinel clustered at one end, as it is
+  # for every other array; sorting one used to raise here.
+  def test_ac5_sort_clusters_masked_cells
     ct = CArray.const_string(["b", "a", nil])
-    assert_raise(ArgumentError) { ct.sort }
+    assert_equal ["a", "b", UNDEF], ct.sort.to_a
+    assert_equal [UNDEF, "a", "b"], ct.sort(masked_position: :first).to_a
   end
 
   # =========================================================================

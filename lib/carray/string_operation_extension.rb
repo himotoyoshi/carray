@@ -229,7 +229,11 @@ class CArray
       else
         values = Array.new(elements) { |i| self[i] }
       end
-      CArray.const_string(values, encoding: encoding)
+      out = CArray.const_string(values, encoding: encoding)
+      # The builder takes a flat list, so give the shape back -- as
+      # to_fixlen_string above already does.  Without this an N-D column
+      # came back 1-D.
+      ndim > 1 ? out.reshape(*shape) : out
     end
 
     # In-place transforms, mixed into the mutable Faces only (CAString /
