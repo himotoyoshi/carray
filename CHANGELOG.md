@@ -36,6 +36,21 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: a `CAString` column can be searched, not only sorted: `bsearch`,
+  `bsearch_addr`, `search` and `count(v)` answer where they used to raise
+  `ArgumentError`. A cell of one is the Ruby String it shows, so a String query
+  compares against it directly, with nothing to reconcile. Sorting, which
+  already worked, is unchanged, and so is `CAConstString`, which answers
+  `search` / `count(v)` natively and still has no `bsearch`.
+
+- Change: `search_nearest` and `search_nearest_addr` on an object array raise
+  `CArray::DataTypeError` naming the query's class when it does not answer
+  `#distance`, instead of letting a bare `NoMethodError` out of the kernel.
+  Nearest is measured with `#distance`, and since `Numeric#distance` became an
+  opt-in refinement nothing an ordinary program holds answers it -- define one
+  on the stored objects, or use `search` / `bsearch` for an exact match.
+  Numeric arrays are unaffected.
+
 - Fix: `percentile` and `median` no longer interpolate between objects that
   have no arithmetic. On a column of Strings `percentile(30)` quietly answered
   `""` and even-length `median` raised `NoMethodError` from inside a funcall;

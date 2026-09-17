@@ -7546,6 +7546,17 @@ MkKernel.search :search_nearest,
     object: <<~C,
       /* CA_OBJECT nearest: minimum of query_val.distance(cell), compared
          with `<` (matches the legacy flat proc_nearest_addr_VALUE). */
+      /* Nearest needs a metric.  #distance is the protocol the 2.0 flat
+         kernel used, and a stored object that does not answer it has no
+         nearest -- say so here rather than let a bare NoMethodError out
+         of the funcall below. */
+      if ( ! rb_respond_to(query_val, rb_intern("distance")) ) {
+        rb_raise(rb_eCADataTypeError,
+                 "search_nearest: nearest needs a distance, and %s does not "
+                 "answer #distance (define one on the stored objects, or use "
+                 "search / bsearch for an exact match)",
+                 rb_obj_classname(query_val));
+      }
       result = (ca_size_t) -1;
       VALUE best = Qnil;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
@@ -7727,6 +7738,17 @@ MkKernel.search :search_nearest_addr,
     object: <<~C,
       /* CA_OBJECT nearest (view_flat addr): minimum of
          query_val.distance(cell), compared with `<`. */
+      /* Nearest needs a metric.  #distance is the protocol the 2.0 flat
+         kernel used, and a stored object that does not answer it has no
+         nearest -- say so here rather than let a bare NoMethodError out
+         of the funcall below. */
+      if ( ! rb_respond_to(query_val, rb_intern("distance")) ) {
+        rb_raise(rb_eCADataTypeError,
+                 "search_nearest_addr: nearest needs a distance, and %s does not "
+                 "answer #distance (define one on the stored objects, or use "
+                 "search / bsearch for an exact match)",
+                 rb_obj_classname(query_val));
+      }
       result = (ca_size_t) -1;
       VALUE best = Qnil;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
