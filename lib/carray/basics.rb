@@ -159,6 +159,10 @@ end
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
   def paste (offset, src)
     raise ArgumentError, "offset length must equal ndim" if offset.length != ndim
+    # A zero-length source covers no cell, so there is nothing to write --
+    # and the empty range it would ask for is not a window CAWindow can
+    # build.  This is what lets concatenate / mosaic take an empty piece.
+    return self if src.elements.zero?
     ranges = offset.each_with_index.map { |o, i| o...(o + src.shape[i]) }
     self.window(*ranges)[] = src
     self
