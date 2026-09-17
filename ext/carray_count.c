@@ -42,9 +42,9 @@ VALUE rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self);
      - self is numeric or object, v scalar -> count_equal_ki (numeric ==
                                     for a number, Ruby == for an object)
 
-   FIXLEN raises CArray::DataTypeError: a value argument is the one thing
-   the kernel DSL does not carry for fixlen.  CAConstString, the fixlen
-   surface that wants this most, answers count(v) natively instead. */
+     - self is fixlen, v scalar -> count_equal_ki (memcmp over the whole
+                                    cell; a short String query is padded
+                                    out to the cell width) */
 
 static VALUE
 rb_ca_count (int argc, VALUE *argv, VALUE self)

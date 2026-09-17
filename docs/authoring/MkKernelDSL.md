@@ -277,11 +277,34 @@ type and exposed as `value_arg` in the body. Used by `count_equal`:
 
 ```ruby
 MkKernel.reduce :count_equal,
-  init: "0", reduce: "if (v == value_arg) acc += 1",
+  init: "0",
+  reduce: { numeric: "if (v == value_arg) acc += 1",
+            object:  "if (RTEST(rb_equal(v, value_arg))) acc += 1" },
   reduction_kind: :plus,
-  source: MkKernel::ALL_NUMERIC, output: :i64, ruby_scalar: :LL2NUM,
+  source: MkKernel::ALL_NUMERIC + [:object, :fixlen],
+  fixlen: :count_equal,
+  output: :i64, ruby_scalar: :LL2NUM,
   value_arg: { target: :T_IN }, mask_policy: :min_count, bind_ruby: false
 ```
+
+**`fixlen:`** opts a reduce kernel into a bespoke slab walk instead of
+`CA_SLAB_REDUCE_T`, which a fixlen cell cannot ride: it is a runtime-width
+byte blob with no scalar C type to load it as. Cells are ordered by
+`memcmp`, the same lexicographic order the sort family gives `CA_FIXLEN`.
+The value picks the mode:
+
+| `fixlen:` | accumulator | output |
+|---|---|---|
+| `:min` / `:max` | the winning blob | `CA_FIXLEN` of the same width |
+| `:argmin` / `:argmax` | its position | `:i64` |
+| `:count_equal` | how many cells equal `value_arg` | `:i64` |
+
+`:count_equal` is the one mode that takes a `value_arg`, and takes it as a
+blob rather than a scalar: there is no `NUM2*` to cast a query to, so the
+dispatcher packs it with `rb_ca_obj2ptr` into a `ca->bytes` buffer — the
+same thing the search family does, and what makes a short String query
+NUL-pad to the cell width instead of never matching. The kernel must also
+list `:fixlen` in `source:`, the way `:object` opts in.
 
 **`array_arg:`** adds a per-cell auxiliary operand (a second CArray)
 exposed as `w`, with scalar / 1-D axis-broadcast / same-shape acceptance.
