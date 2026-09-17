@@ -326,6 +326,7 @@ ORDERABLE plus the cast is sufficient.
 |---|---|---|---|---|
 | unit-bearing (time, timedelta) | ORDERABLE | define it (reference reconciles the operand) | ✓ | ✓ via reconcile; bare storage value → raise |
 | single-interpretation relabel | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; plain query OK |
+| transparent over object storage (`CAString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; the cell *is* the value |
 | fixlen storage (record, fixed-width string) | none | — | ✓ by **memcmp** (default) | reject (numeric-only) |
 | non-orderable numeric storage | none | — | reject | reject |
 
@@ -344,6 +345,10 @@ then relies on the storage's `data_type`:
 
 `search` / `linear` stay numeric-only for now: they need a comparable/
 interpolatable numeric coordinate, so a fixlen Face is still rejected there.
+Object storage is admitted where the kernel has an object lane — `bsearch`,
+`search` and `count(v)` have one and `CAString` reaches it; `search_nearest`
+asks the query for `#distance` and refuses, by name, anything that does not
+answer it.
 
 The reject remains the last line of defence for the cases that have no defined
 order: a non-orderable numeric Face still raises, so nothing silently
