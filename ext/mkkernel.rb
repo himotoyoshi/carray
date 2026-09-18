@@ -360,6 +360,7 @@ module MkKernel
                   face_gate: nil,
                   object_escape: nil,
                   identity_on_empty: false,
+                  all_nan_result: nil,
                   outputs: 1,
                   # Two-pass centred algorithm (variance / stddev family).
                   # When algorithm: :two_pass_centred is set, `state / init /
@@ -464,6 +465,30 @@ module MkKernel
           raise "#{name}: reduction_kind[#{k.inspect}] = #{v.inspect} invalid"
         end
       end
+    end
+    # all_nan_result: what an extreme-value reduction answers when every
+    # contributing cell was NaN.  The `(v < acc) ? v : acc` reduce body is
+    # false for NaN, so acc is never updated and the init (+/-INFINITY)
+    # leaks out as the answer -- a value that is neither the minimum of
+    # anything nor a missing marker, and indistinguishable from data that
+    # genuinely held only +INFINITY.
+    #
+    #   :nan   -- answer NaN (C99 fmin folded: a lone non-NaN wins, two
+    #             NaNs give NaN).  For kernels whose output can hold it.
+    #   :undef -- answer UNDEF, by folding into the mask_policy trigger.
+    #             For kernels whose output is a position (argmin family):
+    #             an integer output cannot hold NaN, and index 0 would be
+    #             a lie about where the minimum is.
+    #
+    # Only the float srcs act on it; integers and boolean have no NaN and
+    # their init is a legitimate value.
+    unless all_nan_result.nil? || %i[nan undef].include?(all_nan_result)
+      raise "#{name}: all_nan_result #{all_nan_result.inspect} invalid " \
+            "(expected :nan, :undef, or nil)"
+    end
+    if all_nan_result == :undef && mask_policy.nil?
+      raise "#{name}: all_nan_result: :undef needs a mask_policy " \
+            "(UNDEF is written through the mask_policy trigger)"
     end
     if value_arg
       raise "#{name}: value_arg must be a Hash" unless value_arg.is_a?(Hash)
@@ -625,6 +650,7 @@ module MkKernel
       face_gate:       face_gate,
       object_escape:   object_escape,
       identity_on_empty: identity_on_empty,
+      all_nan_result:  all_nan_result,
       outputs:         outputs,
       algorithm:       algorithm,
       divisor:         divisor,
@@ -1364,6 +1390,62 @@ module MkKernel
     io.puts "#undef #{expr_macro}"
   end
 
+  # State vars that start at the type's limit (T_LIMIT_HI / T_LIMIT_LO)
+  # and so can leak their init as an answer.  A position state (argmin's
+  # best_i, init "0") is deliberately not one of them: index 0 is a value
+  # a real minimum can legitimately produce.
+  def self.limit_init_state_vars(k, si, oi, src)
+    return [] unless k[:state]
+    k[:state].keys.filter_map do |var|
+      token = pick_family_string(k[:init][var], src, "init")
+      next unless %w[T_LIMIT_HI T_LIMIT_LO].include?(token)
+      [var, resolve_init_expr(k[:init][var], oi, si, src)]
+    end
+  end
+
+  # Emit the all-NaN fix-up for an extreme-value reduction (see the
+  # all_nan_result: validation in MkKernel.reduce for why it exists).
+  #
+  # The per-cell reduce body is left alone: it stays the SIMD-licensed
+  # ternary, so the 8-way horizontal split (reduce_8way_eligible?) and
+  # the `reduction(min:acc)` clause are untouched, and ordinary data pays
+  # one comparison per slab.  Carrying a "saw a number" flag as a second
+  # DSL state var was the alternative and costs more than it looks: it
+  # takes the kernel over reduce_8way_eligible?'s single-state gate and
+  # drops min / max back onto the legacy single-accumulator macro.
+  #
+  # acc still sitting at its init means either nothing updated it or the
+  # data genuinely held only +/-INFINITY.  Those are told apart by
+  # walking the slab once more for a non-NaN cell -- O(n), and only for
+  # a slab whose answer came out equal to the init.
+  #
+  # Returns true when it emitted anything.
+  def self.emit_all_nan_fixup(io, k, src, si, pairs, valid_guard,
+                              indent: "      ", flag_var: nil)
+    mode = k[:all_nan_result]
+    return false unless mode
+    return false unless FLOAT_DTYPES.include?(src)
+    cond = pairs.map { |var, init| "#{var} == (#{init})" }.join(" && ")
+    cond = "(#{cond}) && #{valid_guard}" if valid_guard
+    io.puts "#{indent}/* all-NaN fix-up (all_nan_result: #{mode.inspect}). */"
+    io.puts "#{indent}if ( #{cond} ) {"
+    io.puts "#{indent}  int64_t   __anf_seen = 0;"
+    io.puts "#{indent}  ca_size_t __anf_mc   = 0;"
+    io.puts "#{indent}  CA_SLAB_REDUCE_T_EX(#{si[:c]}, st, p, m, __anf_seen, 0, " \
+            "__anf_seen |= (v == v), __anf_mc);"
+    io.puts "#{indent}  (void) __anf_mc;"
+    io.puts "#{indent}  if ( ! __anf_seen ) {"
+    if mode == :nan
+      pairs.each { |var, _| io.puts "#{indent}    #{var} = (#{si[:c]}) NAN;" }
+    else
+      raise "#{k[:name]}: all_nan_result: :undef needs flag_var" unless flag_var
+      io.puts "#{indent}    #{flag_var} = 1;"
+    end
+    io.puts "#{indent}  }"
+    io.puts "#{indent}}"
+    true
+  end
+
   def self.reduce_macro_suffix(k, src = nil)
     # CA_OBJECT cannot ride the SIMD-licensed macros (= _PLUS / _MIN / _MAX
     # / _STAR), which assume C operators (= acc is a VALUE, so
@@ -1787,7 +1869,7 @@ module MkKernel
 
     if streamable
       emit_reduce_streaming(io, k, si, oi, ruby_wrap, acc_var, acc_init,
-                            decls, reduce_stmt, finish_expr, extra_args)
+                            decls, reduce_stmt, finish_expr, extra_args, src)
     end
 
     # L.1 / L.3 / L.4 (PROPOSAL_REDUCTION_LOOP_INTERCHANGE):
@@ -1947,6 +2029,17 @@ module MkKernel
         emit_reduce_slab_call(io, k, src, si, oi, suffix, acc_var, acc_init,
                               reduce_stmt, "masked_cnt", indent: "      ")
       end
+      all_nan_flag = nil
+      if k[:all_nan_result]
+        pairs = limit_init_state_vars(k, si, oi, src)
+        if k[:all_nan_result] == :undef && FLOAT_DTYPES.include?(src)
+          all_nan_flag = "__anf_all_nan"
+          io.puts "      int #{all_nan_flag} = 0;"
+        end
+        emit_all_nan_fixup(io, k, src, si, pairs,
+                           "masked_cnt < st.slab_elements",
+                           indent: "      ", flag_var: all_nan_flag)
+      end
       trigger = case k[:mask_policy]
                 when :strict     then "masked_cnt > 0"
                 when :all_masked then "masked_cnt == st.slab_elements"
@@ -1968,6 +2061,7 @@ module MkKernel
                       ": st.slab_elements - masked_cnt < min_count)"
                   end
                 end
+      trigger = "(#{trigger}) || #{all_nan_flag}" if all_nan_flag
       finish_emit = view_flat \
         ? "(transform_active ? (outer_off + ((ca_size_t)(#{finish_expr})) * axis_vstride) : ((ca_size_t)(#{finish_expr})))" \
         : "(#{finish_expr})"
@@ -2474,6 +2568,49 @@ module MkKernel
     buf_decls = plus_info.map do |pi|
       "          #{pi[:c_type]}  #{pi[:buf]}[512];\n"
     end.join
+
+    # all-NaN fix-up for the tiled core (see emit_all_nan_fixup for the
+    # reduction counterpart).  Each output cell of a tile has its own
+    # accumulator, so the check is per column: a column whose accumulator
+    # is still at the init either saw only NaN or only +/-INFINITY.
+    #
+    # The `_Pragma("omp simd")` j-loop is left alone -- carrying a
+    # "saw a number" flag beside the accumulator would double its loads
+    # and stores on every cell of every column.  Instead the tile is
+    # tested once after the M loop (tile_len comparisons against M *
+    # tile_len already done), and only a tile that holds a suspicious
+    # column re-reads its rows.
+    li_nan_fixup =
+      if k[:all_nan_result] == :nan && FLOAT_DTYPES.include?(src) &&
+         plus_info.size == 1
+        pi = plus_info.first
+        seen_buf = "__li_buf_seen"
+        lambda do |m_step|
+          <<~C.rstrip
+                    {
+                      int __li_susp = 0;
+                      for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
+                        if ( #{pi[:buf]}[__j] == (#{pi[:c_type]}) (#{pi[:init]}) ) { __li_susp = 1; break; }
+                      }
+                      if ( __li_susp ) {
+                        int8_t #{seen_buf}[512];
+                        for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) #{seen_buf}[__j] = 0;
+                        for ( ca_size_t __li_i = 0; __li_i < __li_M; __li_i++ ) {
+                          const #{si[:c]} *__li_row = __li_plane + __li_i * #{m_step} + __li_tile;
+                          for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
+                            #{seen_buf}[__j] |= (__li_row[__j] == __li_row[__j]);
+                          }
+                        }
+                        for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
+                          if ( ! #{seen_buf}[__j] ) #{pi[:buf]}[__j] = (#{pi[:c_type]}) NAN;
+                        }
+                      }
+                    }
+          C
+        end
+      else
+        lambda { |_m_step| "" }
+      end
     init_loops = plus_info.map do |pi|
       "              for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {\n" \
       "                #{pi[:buf]}[__j] = (#{pi[:c_type]}) (#{pi[:init]});\n" \
@@ -2503,6 +2640,7 @@ module MkKernel
                         (void) v;
                       }
                     }
+        #{li_nan_fixup.call("__li_INNER")}
                     for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
                       #{opv}[__li_o * __li_INNER + __li_tile + __j] = (#{oi[:c]}) (#{finish_li});
                     }
@@ -2723,6 +2861,7 @@ module MkKernel
                       (void) v;
                     }
                   }
+        #{li_nan_fixup.call("__li_INNER")}
                   for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
                     __li_op_k[__li_tile + __j] = (#{oi[:c]}) (#{finish_li});
                   }
@@ -2881,6 +3020,7 @@ module MkKernel
                       (void) v;
                     }
                   }
+        #{li_nan_fixup.call("__li_M_stride")}
                   for ( ca_size_t __j = 0; __j < __li_tile_len; __j++ ) {
                     __li_op_k[__li_tile + __j] = (#{oi[:c]}) (#{finish_li});
                   }
@@ -2972,6 +3112,10 @@ module MkKernel
     if min_count
       io.puts "      ca_size_t masked_cnt = 0;"
       io.puts "      CA_SLAB_REDUCE_T_EX(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt}, masked_cnt);"
+      if k[:all_nan_result]
+        emit_all_nan_fixup(io, k, src, si, limit_init_state_vars(k, si, oi, src),
+                           "masked_cnt < st.slab_elements", indent: "      ")
+      end
       # Same trigger as single-output :min_count: legacy default (all_masked)
       # when min_count < 0, otherwise need at least min_count valid cells.
       trigger = "(min_count < 0 ? masked_cnt == st.slab_elements " \
@@ -3047,7 +3191,7 @@ module MkKernel
   #   - mask present: ca_has_mask(ca)
   def self.emit_reduce_streaming(io, k, si, oi, ruby_wrap, acc_var,
                                   acc_init, decls, reduce_stmt,
-                                  finish_expr, extra_args)
+                                  finish_expr, extra_args, src)
     name      = k[:name]
     min_count = (k[:mask_policy] == :min_count)
     has_mp    = !k[:mask_policy].nil?
@@ -3078,6 +3222,14 @@ module MkKernel
     # acc_var requires explicit init (= the macro normally does this).
     # Other state vars in decls already include `= init` per line.
     io.puts "      #{acc_var} = (#{acc_init});"
+    # all-NaN fix-up, streaming variant.  The other two paths confirm a
+    # suspicious answer by re-reading the data; here re-reading means
+    # evaluating the lazy chain a second time, so the flag rides along in
+    # the chunk loop instead.  The loop already pays for producing each
+    # cell, which is what makes one more compare affordable here and not
+    # in the tiled core.
+    all_nan_stream = k[:all_nan_result] == :nan && FLOAT_DTYPES.include?(src)
+    io.puts "      int64_t __anf_seen = 0;" if all_nan_stream
     if has_mp
       # Mask-policy reductions need masked_cnt to satisfy the macro/
       # finish_expr signature.  On streaming we have no mask, so it's
@@ -3105,11 +3257,15 @@ module MkKernel
     io.puts "        for ( __i = 0; __i < __n; __i++ ) {"
     io.puts "          #{si[:c]} v = __chunk[__i];"
     io.puts "          #{reduce_stmt};"
+    io.puts "          __anf_seen |= (v == v);" if all_nan_stream
     io.puts "        }"
     io.puts "        __outer_off += __r;"
     io.puts "      }"
     io.puts "      ca_lazy_arena_release(__chunk);"
     io.puts "      ca_lazy_arena_exit();"
+    if all_nan_stream
+      io.puts "      if ( ! __anf_seen && ca->elements > 0 ) #{acc_var} = (#{si[:c]}) NAN;"
+    end
     if has_mp
       # Streaming path has no mask source, so masked_cnt is 0; min_count
       # / strict / all_masked triggers all evaluate to false except
@@ -6488,6 +6644,7 @@ MkKernel.reduce :min,
                      bool:    "acc = ((uint64_t) v < acc) ? (uint64_t) v : acc",
                      object:  'if (acc == Qundef) acc = v; else if (RTEST(rb_funcall(v, rb_intern("<"), 1, acc))) acc = v;' },
   reduction_kind:  :min,     # SL.1.2
+  all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic min (byte order == the fixlen sort
   # order); the numeric reduce/init above are unused for fixlen (bespoke
   # slab walk, see the fixlen: option in MkKernel.reduce).
@@ -6512,6 +6669,7 @@ MkKernel.reduce :max,
                      bool:    "acc = ((uint64_t) v > acc) ? (uint64_t) v : acc",
                      object:  'if (acc == Qundef) acc = v; else if (RTEST(rb_funcall(v, rb_intern(">"), 1, acc))) acc = v;' },
   reduction_kind:  :max,     # SL.1.2
+  all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic max (byte order == the fixlen sort order).
   fixlen:          :max,
   source:          MkKernel::ALL_NUMERIC + [:bool, :object, :fixlen],
@@ -6737,6 +6895,7 @@ MkKernel.reduce :minmax,
                      # together on init, get set together on first reduce).
                      object:  'if (lo == Qundef) { lo = v; hi = v; } else { if (RTEST(rb_funcall(v, rb_intern("<"), 1, lo))) lo = v; if (RTEST(rb_funcall(v, rb_intern(">"), 1, hi))) hi = v; }' },
   outputs:         2,
+  all_nan_result:  :nan,
   finish:          { min: "lo", max: "hi" },
   source:          MkKernel::ALL_NUMERIC + [:bool, :object],
   # bool: u64 (Integer 0/1) so minmax returns [0/1, 0/1], not
@@ -6785,6 +6944,7 @@ MkKernel.reduce :argmin,
   # An ORDERABLE Face descends to its numeric storage (position output needs
   # no re-lift; the axis-local index is identical for Face and storage).
   face_gate:       :strip,
+  all_nan_result:  :undef,
   public_method: :min_index
 
 MkKernel.reduce :argmax,
@@ -6803,6 +6963,7 @@ MkKernel.reduce :argmax,
   fallback:        :raise,
   mask_policy:     :min_count,
   face_gate:       :strip,
+  all_nan_result:  :undef,
   public_method: :max_index
 
 # ---- argmin_addr / argmax_addr (view-flat address variants) ---------
@@ -6846,6 +7007,7 @@ MkKernel.reduce :argmin_addr,
   mask_policy:     :min_count,
   semantics:       :view_flat,
   face_gate:       :strip,
+  all_nan_result:  :undef,
   public_method: :min_addr
 
 MkKernel.reduce :argmax_addr,
@@ -6863,6 +7025,7 @@ MkKernel.reduce :argmax_addr,
   mask_policy:     :min_count,
   semantics:       :view_flat,
   face_gate:       :strip,
+  all_nan_result:  :undef,
   public_method: :max_addr
 
 # ---- mask_policy demos ------------------------------------------------
@@ -7189,22 +7352,38 @@ MkKernel.scan :cumprod,
 # init Qnil is the "no running extremum yet" sentinel, also never leaked
 # (unseen cells are masked).  First unmasked cell adopts v as acc;
 # subsequent unmasked cells compare via rb_funcall(:>) / rb_funcall(:<).
+# The float lane starts at NaN and folds with C99 fmin / fmax, whose
+# rule is exactly the one wanted: a lone number beats NaN, two NaNs give
+# NaN.  So a prefix that has seen only NaN answers NaN instead of leaking
+# +/-INFINITY -- the running form of the rule min / max follow
+# (all_nan_result:).  fmin / fmax are exact on a float at either width,
+# so the f32 lane needs no narrowing.  Integer and boolean have no NaN
+# and keep the limit init and the plain compare.
 MkKernel.scan :cummax,
   source:       MkKernel::ALL_NUMERIC + [:bool, :object],
   output:       { bool: :u64, default: :preserve },
-  init:         { numeric: "T_LIMIT_LO", bool: "T_LIMIT_LO", object: "Qnil" },
-  step:         { numeric: "if (v > acc) acc = v; r = acc",
+  init:         { float: "NAN", numeric: "T_LIMIT_LO", bool: "T_LIMIT_LO", object: "Qnil" },
+  step:         { float: "acc = fmax(acc, v); r = acc",
+                  numeric: "if (v > acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v > acc) acc = v; r = acc",
                   object:  'if (acc == Qnil) acc = v; else if (RTEST(rb_funcall(v, rb_intern(">"), 1, acc))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
 
+# The float lane starts at NaN and folds with C99 fmin / fmax, whose
+# rule is exactly the one wanted: a lone number beats NaN, two NaNs give
+# NaN.  So a prefix that has seen only NaN answers NaN instead of leaking
+# +/-INFINITY -- the running form of the rule min / max follow
+# (all_nan_result:).  fmin / fmax are exact on a float at either width,
+# so the f32 lane needs no narrowing.  Integer and boolean have no NaN
+# and keep the limit init and the plain compare.
 MkKernel.scan :cummin,
   source:       MkKernel::ALL_NUMERIC + [:bool, :object],
   output:       { bool: :u64, default: :preserve },
-  init:         { numeric: "T_LIMIT_HI", bool: "T_LIMIT_HI", object: "Qnil" },
-  step:         { numeric: "if (v < acc) acc = v; r = acc",
+  init:         { float: "NAN", numeric: "T_LIMIT_HI", bool: "T_LIMIT_HI", object: "Qnil" },
+  step:         { float: "acc = fmin(acc, v); r = acc",
+                  numeric: "if (v < acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v < acc) acc = v; r = acc",
                   object:  'if (acc == Qnil) acc = v; else if (RTEST(rb_funcall(v, rb_intern("<"), 1, acc))) acc = v; r = acc' },
   fallback:     :raise,
