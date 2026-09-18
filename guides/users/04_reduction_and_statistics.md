@@ -320,6 +320,53 @@ CA_FLOAT64([]).mean(fill_value: 0.0)   #  => 0.0
 CA_FLOAT64([]).min(fill_value: -1.0)   #  => -1.0
 ```
 
+### `NaN` is a different kind of nothing
+
+A masked cell is one that was not taken; a `NaN` is a value that takes part
+in the arithmetic and poisons it. A sum containing one `NaN` is `NaN`, and so
+is the mean and the median.
+
+`min` and `max` are the exception. They are built on a comparison, and a
+comparison against `NaN` is false, so a `NaN` loses every contest and the
+smallest number in the array comes back regardless:
+
+```ruby
+a = CA_FLOAT64([1.0, Float::NAN, 3.0])
+a.sum   #  => NaN
+a.min   #  => 1.0
+a.max   #  => 3.0
+```
+
+When every cell is `NaN` there is no number left to win, and the answer is
+`NaN`:
+
+```ruby
+CA_FLOAT64([Float::NAN, Float::NAN]).min      #  => NaN
+CA_FLOAT64([Float::NAN, Float::NAN]).minmax   #  => [NaN, NaN]
+CA_FLOAT64([Float::NAN, Float::NAN]).cummin   #  => [ NaN, NaN ]
+```
+
+This is the same rule the element-wise `pmin` / `pmax` follow, and it is why
+they and `min` / `max` agree on any array.
+
+`min_index` and its relatives answer `UNDEF` there instead. They return a
+position, and no position in an array of `NaN` is the one holding the
+minimum:
+
+```ruby
+CA_FLOAT64([Float::NAN, Float::NAN]).min_index  #  => UNDEF
+```
+
+Neither `min_count:` nor `fill_value:` reaches these cases: both count
+masked cells, and a `NaN` cell is not masked. Use
+[`mask_invalid`](05_masks.md) first when you want `NaN` treated as missing.
+
+```ruby
+a = CA_FLOAT64([Float::NAN, Float::NAN])
+a.mask_invalid.min                    #  => UNDEF
+a.mask_invalid.min(fill_value: -1.0)  #  => -1.0
+```
+
 ## Method reference
 
 The reduction and statistics methods covered above, with their argument forms. Every method shown takes `axis:` as an optional keyword argument; passing it collapses that axis (or those axes) and returns an array with the chosen axis removed. Without `axis:`, the result is a single value over the whole array.

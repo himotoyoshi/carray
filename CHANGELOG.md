@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `min`, `max`, `minmax`, `cummin` and `cummax` answer `NaN`, and
+  `min_index`, `max_index`, `min_addr` and `max_addr` answer `UNDEF`, when every
+  cell a float array contributes is `NaN`. They used to answer `Infinity`,
+  `-Infinity`, the interval `[Infinity, -Infinity]` and position `0`. A `NaN`
+  still loses to any number, so an array holding at least one number answers as
+  before, as does one holding only real infinities. Empty and all-masked still
+  answer `UNDEF`, and integer, boolean, fixlen and object arrays are unchanged
+  -- an object array already answered `NaN`. To have `NaN` counted as missing
+  rather than skipped, call `mask_invalid` first; `min_count:` and `fill_value:`
+  act on masked cells and do not reach `NaN` ones.
+
 - Fix: `is_in`, `intersection`, `difference` and `union` take an Array or Range
   of Strings against a fixlen array, where every such call raised
   `CArray::DataTypeError` -- `CAFixlenString` included. The set is built at the
