@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `a[sel]` no longer leaks memory when reading the boolean selector
+  raises -- for example `fake(CA_BOOLEAN)` over an int32 array holding a
+  2. Nothing to change in calling code.
+
 - Fix: a view that converts on read -- for example `fake(CA_BOOLEAN)` over
   an int32 array holding a 2 -- now raises every time it is read, where
   the second read used to succeed silently and return values from a

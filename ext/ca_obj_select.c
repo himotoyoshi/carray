@@ -83,22 +83,57 @@ VALUE rb_cCASelectMask;
 
 /* ------------------------------------------------------------------- */
 
-/* Snapshot the selector into ca->select (always a copy) and pre-compute
-   ca->indices (TRUE positions in flat parent order).  Masked selector
-   cells become false in the snapshot.  After construction, mutating
-   the caller's live selector does not affect the view. */
-static int
-ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
+/* Owned snapshot of the selector: masked selector cells become false.
+   After construction, mutating the caller's live selector does not affect
+   the view.  Reading the selector can raise (a lazy boolean view), so the
+   snapshot is taken before the view struct is allocated, and a snapshot
+   whose fill raises is freed on the way out. */
+static VALUE
+ca_select_snapshot_masked (VALUE arg)
 {
-  int8_t data_type;
-  ca_size_t bytes;
+  CArray **pair = (CArray **) arg;
+  CArray *select = pair[0], *snap = pair[1];
+  boolean8_t *p, *q, *m;
   ca_size_t i;
+  ca_attach(select);
+  q = (boolean8_t *) snap->ptr;
+  p = (boolean8_t *) select->ptr;
+  m = (boolean8_t *) select->mask->ptr;
+  for (i = 0; i < select->elements; i++) {
+    *q = ( *m ) ? 0 : *p;
+    q++; p++; m++;
+  }
+  ca_detach(select);
+  return Qnil;
+}
 
+static CArray *
+ca_select_snapshot (CArray *select)
+{
   if ( ! ca_is_boolean_type(select) ) {
     rb_raise(rb_eRuntimeError,
              "selection array for CASelect should be have "
              "the data_type of CA_BOOLEAN");
   }
+  if ( ca_has_mask(select) ) {
+    CArray *pair[2];
+    pair[0] = select;
+    pair[1] = ca_template(select);
+    ca_fill_or_free(pair[1], ca_select_snapshot_masked, (VALUE) pair);
+    return pair[1];
+  }
+  return ca_copy(select);
+}
+
+/* Set up the view over `parent` from an owned selector snapshot (see
+   ca_select_snapshot) and pre-compute ca->indices (TRUE positions in flat
+   parent order).  Does not raise. */
+static int
+ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
+{
+  int8_t data_type;
+  ca_size_t bytes;
+  ca_size_t i;
 
   data_type = parent->data_type;
   bytes     = parent->bytes;
@@ -114,26 +149,7 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->indices   = NULL;
-
-  /* The `share` argument is preserved for source compatibility but
-     no longer toggles a live-reference path; both paths copy.
-     Masked selector cells become false in the snapshot. */
-  (void) share;
-  if ( ca_has_mask(select) ) {
-    boolean8_t *p, *q, *m;
-    ca->select = ca_template(select);
-    ca_attach(select);
-    q = (boolean8_t *) ca->select->ptr;
-    p = (boolean8_t *) select->ptr;
-    m = (boolean8_t *) select->mask->ptr;
-    for (i = 0; i < select->elements; i++) {
-      *q = ( *m ) ? 0 : *p;
-      q++; p++; m++;
-    }
-    ca_detach(select);
-  } else {
-    ca->select = ca_copy(select);
-  }
+  ca->select    = snapshot;
 
   /* Count TRUE positions and snapshot them into ca->indices. */
   {
@@ -181,7 +197,7 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
   ca->dim       = &(ca->_dim);
   ca->dim[0]    = ca->elements;
 
-  if ( ca_is_scalar(select) ) {
+  if ( ca_is_scalar(snapshot) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
 
@@ -191,8 +207,9 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *select, int share)
 CArray *
 ca_select_new (CArray *parent, CArray *select)
 {
+  CArray *snapshot = ca_select_snapshot(select);
   CASelect *ca = ALLOC(CASelect);
-  ca_select_setup(ca, parent, select, 0);
+  ca_select_setup(ca, parent, snapshot);
   return (CArray*) ca;
 }
 
@@ -202,9 +219,7 @@ ca_select_new (CArray *parent, CArray *select)
 CArray *
 ca_select_new_share (CArray *parent, CArray *select)
 {
-  CASelect *ca = ALLOC(CASelect);
-  ca_select_setup(ca, parent, select, 1);
-  return (CArray*) ca;
+  return ca_select_new(parent, select);
 }
 
 static void
@@ -613,7 +628,7 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
 
   /* Re-snapshot from the source's selector copy so the two views
      end up with independent indices buffers. */
-  ca_select_setup(ca, cs->parent, cs->select, 1);
+  ca_select_setup(ca, cs->parent, ca_select_snapshot(cs->select));
 
   return self;
 }
