@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: when `to_type` on a view raises part way through the cast -- for
+  example an int32 value other than 0 or 1 cast to boolean -- the view is
+  no longer left holding a stale copy of its parent, which made later
+  reads through it return the old values. Nothing to change in calling
+  code.
+
 - Fix: `copy` and `strip_mask(fill)` no longer leak the result's memory
   when reading the source raises part way through -- for example a
   float64 view of an object array holding a cell that is not a number.
