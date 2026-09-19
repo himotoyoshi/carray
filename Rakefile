@@ -213,6 +213,7 @@ desc "Build spec_ai author-surface smoke fixtures (cfunc_r / per_element / with_
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
+  build_spec_ai_smoke("ext_sweep_raw",         "sweep_raw")
   build_spec_ai_smoke("ext_per_element_smoke", "per_element")
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
