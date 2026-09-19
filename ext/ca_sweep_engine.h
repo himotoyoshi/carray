@@ -84,14 +84,20 @@ typedef struct ca_sweep_state {
   ca_size_t       chunk_n_max;   /* max chunk size from ca_chunk_compute_n */
   ca_size_t       inner;         /* product of dims except outermost (= row
                                     size in elements for outer-axis chunking) */
-  int             chunked_state; /* 0=pre-init, 1=active, 2=done */
+  int             chunked_state; /* 0=pre-init, 1=active, 2=done,
+                                    3=aborted (a read raised; resources
+                                    already given back) */
   boolean8_t     *mask_scratch;  /* chunk-sized staging for the per-chunk
                                     mask OR; NULL when no INPUT is masked */
 } ca_sweep_state_t;
 
-/* Validate fsync length, acquire per-op buffers, compute broadcast shape +
- * strides, build mask m0, propagate mask to OUTPUTs.  May raise (fsync
- * length mismatch, shape mismatch). */
+/* Validate fsync length, pair the operands (shape), acquire per-op
+ * buffers, build mask m0, propagate mask to OUTPUTs.  May raise: refusals
+ * (fsync length, shape mismatch, masked INPUT in a NO_MASK form) before
+ * anything is held, and a raising operand read after -- in which case
+ * everything acquired so far is detached / freed before the raise
+ * propagates, so the caller must not call release.  The chunked path
+ * does the same for acquire_chunked and each ca_sweep_next_chunk. */
 void ca_sweep_acquire (ca_sweep_state_t *st);
 
 /* Reverse-order release: sync OUTPUTs, detach attached / xfree owned_buf,
