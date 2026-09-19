@@ -20,22 +20,27 @@
  * and bytes as `ca`, copies the element payload, and reproduces the
  * mask state.  Always copies even when `ca` is an entity; for view
  * sources the data path goes through `ca_copy_data`, otherwise a flat
- * memcpy of `ca_length(ca)` bytes.
+ * memcpy of `ca_length(ca)` bytes.  If reading the source raises, the
+ * copy is freed before the raise propagates.
  *
  * Backs `CArray#copy` and is also reachable as a C-level utility from
  * other ext files that need an owned snapshot. */
-CArray *
-ca_copy (void *ap)
+void
+ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg)
 {
-  CArray *ca = (CArray *) ap;
-  CArray *co;
+  int tag = 0;
+  rb_protect(fill, arg, &tag);
+  if ( tag ) {
+    ca_free(co);
+    rb_jump_tag(tag);
+  }
+}
 
-  if ( ca_is_scalar(ca) ) {
-    co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
-  }
-  else {
-    co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
-  }
+static VALUE
+ca_copy_fill (VALUE arg)
+{
+  CArray **pair = (CArray **) arg;
+  CArray *ca = pair[0], *co = pair[1];
 
   if ( ca_is_attached(ca) ) {
     memcpy(co->ptr, ca->ptr, ca_length(ca));
@@ -48,6 +53,26 @@ ca_copy (void *ap)
   if ( ca->mask ) {
     ca_copy_mask(co, ca);
   }
+  return Qnil;
+}
+
+CArray *
+ca_copy (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  CArray *co;
+  CArray *pair[2];
+
+  if ( ca_is_scalar(ca) ) {
+    co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
+  }
+  else {
+    co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
+  }
+
+  pair[0] = ca;
+  pair[1] = co;
+  ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
 
   return co;
 }
