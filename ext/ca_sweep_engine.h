@@ -105,6 +105,15 @@ void ca_sweep_acquire (ca_sweep_state_t *st);
  * state without re-initializing the caller-owned arrays. */
 void ca_sweep_release (ca_sweep_state_t *st);
 
+/* Run walk(arg) -- the caller's loop over the acquired state -- and then
+ * release.  If walk raises (a callback refusing a value), everything the
+ * engine holds is detached / freed without syncing before the raise
+ * propagates.  Use in place of calling ca_sweep_release /
+ * ca_sweep_release_chunked yourself whenever the loop can raise.  The
+ * chunked walk calls ca_sweep_next_chunk itself. */
+void ca_sweep_run         (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg);
+void ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg);
+
 /* Shape pairing shared with rb_ca_template_n: non-zero when a and b have
  * the same ndim and dims; the refusal raises ArgumentError naming both
  * shapes. */

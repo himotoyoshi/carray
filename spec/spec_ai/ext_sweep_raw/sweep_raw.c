@@ -27,6 +27,30 @@ add_slab (char **base, ca_size_t *stride, ca_size_t n, const boolean8_t *m0)
   }
 }
 
+/* The same sum, but a negative input is refused by raising from inside
+   the callback. */
+static void
+add_cell_checked (void *p_out, void *p_a, void *p_b)
+{
+  if ( *(double *) p_a < 0 ) {
+    rb_raise(rb_eArgError, "negative input");
+  }
+  add_cell(p_out, p_a, p_b);
+}
+
+static void
+add_slab_checked (char **base, ca_size_t *stride, ca_size_t n,
+                  const boolean8_t *m0)
+{
+  ca_size_t k;
+  for (k = 0; k < n; k++) {
+    if ( *(double *)(base[1] + k * stride[1]) < 0 ) {
+      rb_raise(rb_eArgError, "negative input");
+    }
+  }
+  add_slab(base, stride, n, m0);
+}
+
 static VALUE
 sweep_raw_add (VALUE self, VALUE out, VALUE a, VALUE b)
 {
@@ -39,9 +63,25 @@ sweep_raw_add_slab (VALUE self, VALUE out, VALUE a, VALUE b)
   return ca_call_cslab_3(add_slab, "100", out, a, b);
 }
 
+static VALUE
+sweep_raw_add_checked (VALUE self, VALUE out, VALUE a, VALUE b)
+{
+  return ca_call_cfunc_3(add_cell_checked, "100", out, a, b);
+}
+
+static VALUE
+sweep_raw_add_slab_checked (VALUE self, VALUE out, VALUE a, VALUE b)
+{
+  return ca_call_cslab_3(add_slab_checked, "100", out, a, b);
+}
+
 void
 Init_sweep_raw (void)
 {
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_checked__",
+                             sweep_raw_add_checked, 3);
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_slab_checked__",
+                             sweep_raw_add_slab_checked, 3);
   rb_define_singleton_method(rb_cCArray, "__sweep_raw_add__",
                              sweep_raw_add, 3);
   rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_slab__",

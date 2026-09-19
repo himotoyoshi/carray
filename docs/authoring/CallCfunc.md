@@ -213,6 +213,10 @@ The full runnable example is `examples/c-extensions/cfunc_r/cfunc_r.c`
   operands (`fsync == '1'`) use `ca_attach` + `ca_sync`. This honors the
   input-only-operand invariant (no giant-parent materialise from a
   shrinking input view).
+- **Raising** — the callback may `rb_raise` to refuse a value. The bridge
+  then detaches and frees what it holds before the exception propagates;
+  so does a raise while reading an input (a conversion that fails). The
+  outputs are left partly written: treat them as undefined.
 - **Scalar fold-back** — rank-0 outputs are returned as plain Ruby
   scalars, matching CArray's scalar surface.
 
