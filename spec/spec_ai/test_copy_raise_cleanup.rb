@@ -70,4 +70,9 @@ class TestCopyRaiseCleanup < Test::Unit::TestCase
   def test_strip_mask_frees_result_on_raise
     assert_levels_off("input.strip_mask(0.0)")
   end
+
+  # A lazy view's to_a materialises through copy.
+  def test_lazy_to_a_frees_result_on_raise
+    assert_levels_off("input.to_a")
+  end
 end
