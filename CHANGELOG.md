@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `copy` and `strip_mask(fill)` no longer leak the result's memory
+  when reading the source raises part way through -- for example a
+  float64 view of an object array holding a cell that is not a number.
+  Nothing to change in calling code.
+
 - Fix: functions built on the C-extension bridge (`ca_call_cfunc_*`,
   `ca_call_cslab_*`, the `CA_FOR_EACH_ELEMENT` macros, and
   `CAMath.lgamma` and its siblings) no longer leak memory, or leave an
