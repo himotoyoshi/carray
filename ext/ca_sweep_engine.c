@@ -22,6 +22,69 @@
 #include "ca_for_buffer.h"
 #include <string.h>
 
+/* "[2, 3]" for an operand's shape. */
+static VALUE
+ca_sweep_shape_str (CArray *ca)
+{
+  volatile VALUE s = rb_str_new_cstr("[");
+  int k;
+  for (k = 0; k < ca->ndim; k++) {
+    if (k > 0) rb_str_cat_cstr(s, ", ");
+    rb_str_catf(s, "%lld", (long long) ca->dim[k]);
+  }
+  rb_str_cat_cstr(s, "]");
+  return s;
+}
+
+void
+ca_sweep_refuse_shapes (CArray *a, CArray *b)
+{
+  volatile VALUE sa = ca_sweep_shape_str(a);
+  volatile VALUE sb = ca_sweep_shape_str(b);
+  rb_raise(rb_eArgError,
+           "shape mismatch between operands (%s and %s); a scalar pairs "
+           "with any array, two arrays only when their shapes agree",
+           StringValueCStr(sa), StringValueCStr(sb));
+}
+
+int
+ca_sweep_same_shape (CArray *a, CArray *b)
+{
+  int k;
+  if (a->ndim != b->ndim) return 0;
+  for (k = 0; k < a->ndim; k++) {
+    if (a->dim[k] != b->dim[k]) return 0;
+  }
+  return 1;
+}
+
+/* Pair the operands: a scalar walks with stride 0, every other operand
+ * must have the shape of the first non-scalar one, which is returned (NULL
+ * when all operands are scalars).  Sets stride[] and n_kernel.  Allocates
+ * nothing, so it runs before any operand is acquired. */
+static CArray *
+ca_sweep_pair_operands (ca_sweep_state_t *st)
+{
+  CArray *donor = NULL;
+  int k_op;
+  st->n_kernel = 1;
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    CArray *ca = st->cx[k_op];
+    if (ca_is_scalar(ca)) {
+      st->stride[k_op] = 0;
+      continue;
+    }
+    st->stride[k_op] = ca->bytes;
+    if (!donor) {
+      donor        = ca;
+      st->n_kernel = ca->elements;
+    } else if (!ca_sweep_same_shape(donor, ca)) {
+      ca_sweep_refuse_shapes(donor, ca);
+    }
+  }
+  return donor;
+}
+
 void
 ca_sweep_acquire (ca_sweep_state_t *st)
 {
@@ -41,9 +104,10 @@ ca_sweep_acquire (ca_sweep_state_t *st)
     st->attached[k_op]  = 0;
   }
   st->m0       = NULL;
-  st->n_kernel = 1;
   /* CAREFUL: do not reset st->no_mask here — caller sets it before
    * acquire and the NO_MASK guard below consumes it. */
+
+  ca_sweep_pair_operands(st);
 
   /* Per-operand acquire:
    *   OUTPUT (fsync == '1')       -> ca_attach + base = ca->ptr
@@ -66,21 +130,6 @@ ca_sweep_acquire (ca_sweep_state_t *st)
       st->owned_buf[k_op] = xmalloc(bytes_total);
       st->base[k_op]      = st->owned_buf[k_op];
       ca_xfer_all(ca, st->base[k_op], CA_XFER_GET);
-    }
-  }
-
-  /* compute n_kernel (= broadcast shape) and per-cell strides */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    CArray *ca = st->cx[k_op];
-    if (ca_is_scalar(ca)) {
-      st->stride[k_op] = 0;
-    } else {
-      st->stride[k_op] = ca->bytes;
-      if (st->n_kernel == 1) {
-        st->n_kernel = ca->elements;
-      } else if (ca->elements != st->n_kernel) {
-        rb_raise(rb_eRuntimeError, "data size mismatch in operation");
-      }
     }
   }
 
@@ -180,31 +229,15 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
   }
   st->m0            = NULL;
   st->mask_scratch  = NULL;
-  st->n_kernel      = 1;
   st->chunk_off     = 0;
   st->chunk_n       = 0;
   st->chunk_n_max   = 0;
   st->inner         = 1;
   st->chunked_state = 0;
 
-  /* compute broadcast shape (n_kernel + strides) from operand shapes.
-   * scalar operands collapse to stride 0; non-scalar operands must agree
-   * on element count.  shape_donor is the first non-scalar operand and
-   * defines the chunking inner-axis size. */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    CArray *ca = st->cx[k_op];
-    if (ca_is_scalar(ca)) {
-      st->stride[k_op] = 0;
-    } else {
-      st->stride[k_op] = ca->bytes;
-      if (st->n_kernel == 1) {
-        st->n_kernel = ca->elements;
-        shape_donor  = ca;
-      } else if (ca->elements != st->n_kernel) {
-        rb_raise(rb_eRuntimeError, "data size mismatch in operation");
-      }
-    }
-  }
+  /* shape_donor is the first non-scalar operand and defines the chunking
+   * inner-axis size. */
+  shape_donor = ca_sweep_pair_operands(st);
 
   /* chunk-size policy: inner = donor's product of dims[1..]; chunk_n_max
    * = compute_n on donor->bytes (= type-dependent 32KB target). */

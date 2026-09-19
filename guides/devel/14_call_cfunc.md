@@ -128,8 +128,8 @@ above), each scalar-folded if rank-0.
   `rb_ca_wrap_readonly` ([ch. 15](15_carray_h_helper_reference.md)) —
   zero-cost when the type already matches, a `CAFake` cast view
   otherwise.
-- Each output is a fresh template (`rb_ca_template_n`) shaped by
-  broadcasting the inputs, with the declared `dty` data type.
+- Each output is a fresh template (`rb_ca_template_n`) shaped like
+  the first non-scalar input, with the declared `dty` data type.
 - It delegates to the raw `ca_call_cfunc_(M+N)` with `fsync` built as
   `"1"*M + "0"*N` (outputs first).
 
@@ -218,7 +218,8 @@ fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
 - **Output allocation** — outputs are templated from the (broadcast)
   input shape with the declared output type.
 - **Broadcasting** — scalar operands collapse (stride 0); non-scalar
-  operands must agree in shape (a shape mismatch raises). There is no
+  operands must agree in shape (a mismatch raises `ArgumentError`, even
+  when the two arrays hold the same number of cells). There is no
   implicit NumPy-style trailing-axis alignment (CArray policy).
 - **Mask handling** — the masks of all **input** operands are OR-folded
   into a single mask byte array and propagated to the outputs; masked

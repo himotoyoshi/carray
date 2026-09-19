@@ -121,8 +121,8 @@ Ruby value when rank-0). `M > 1` returns a Ruby Array of the `M` outputs
 - each input is wrapped to its declared `dtx` via `rb_ca_wrap_readonly`
   (zero-cost when the type already matches, a `CAFake` cast view
   otherwise);
-- each output is a fresh template (`rb_ca_template_n`) shaped by
-  broadcasting the inputs, with the declared `dty` data type;
+- each output is a fresh template (`rb_ca_template_n`) shaped like
+  the first non-scalar input, with the declared `dty` data type;
 - it delegates to the raw `ca_call_cfunc_(M+N)` with the right `fsync`.
 
 ## The raw layer `ca_call_cfunc_N` + fsync
@@ -201,7 +201,8 @@ The full runnable example is `examples/c-extensions/cfunc_r/cfunc_r.c`
 - **Output allocation** — outputs are templated from the (broadcast)
   input shape with the declared output type.
 - **Broadcasting** — scalar operands collapse (stride 0); non-scalar
-  operands must agree in shape (a shape mismatch raises). There is no
+  operands must agree in shape (a mismatch raises `ArgumentError`, even
+  when the two arrays hold the same number of cells). There is no
   implicit NumPy-style trailing-axis alignment (CArray policy).
 - **Mask handling** — the masks of all **input** operands are OR-folded
   and propagated to the outputs; masked cells are **skipped** (the

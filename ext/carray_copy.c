@@ -11,6 +11,7 @@
 #include "carray.h"
 #include "ca_obj_face.h"   /* CA_FACE_LIFT_IF_FACE */
 #include "carray_internal.h"   /* ca_gc_hold_push / ca_gc_hold_pop_to */
+#include "ca_sweep_engine.h"   /* ca_sweep_same_shape / ca_sweep_refuse_shapes */
 #include <stdarg.h>
 
 /* ------------------------------------------------------------------- */
@@ -272,16 +273,16 @@ rb_ca_template_with_type (VALUE self, VALUE rtype, VALUE rbytes)
   return rb_ca_template_method(2, args, self);
 }
 
-/* Picks the largest-shape CArray among `n` variadic CArray arguments
- * and returns `template(largest)`.  Used by `carray_call_cfunc.c` to
- * size the output of vectorised scalar C-function calls, where the
- * inputs may be a mix of scalars and arrays. */
+/* Returns `template` of the first non-scalar among `n` variadic CArray
+ * arguments (of the first argument when all are scalars).  Used by
+ * `carray_call_cfunc.c` to size the output of vectorised scalar
+ * C-function calls: a scalar pairs with any array, two arrays only when
+ * their shapes agree. */
 VALUE
 rb_ca_template_n (int n, ...)
 {
-  volatile VALUE varg, obj;
-  CArray *ca;
-  ca_size_t elements = -1;
+  volatile VALUE varg, obj = Qnil;
+  CArray *ca, *donor = NULL;
   va_list vargs;
   int i;
 
@@ -289,24 +290,23 @@ rb_ca_template_n (int n, ...)
   for (i=0; i<n; i++) {
     varg = va_arg(vargs, VALUE);
     if ( ! rb_obj_is_carray(varg) ) {
+      va_end(vargs);
       rb_raise(rb_eRuntimeError, "[BUG] not-carray object given to rb_ca_template_n");
     }
     TypedData_Get_Struct(varg, CArray, &carray_data_type, ca);
     if ( i == 0 ) {
       obj = varg;
-      elements = ca->elements;
     }
-    else {
-      if ( rb_obj_is_cscalar(varg) ) {
-        continue;
-      }
-      if ( rb_obj_is_cscalar(obj) ) {
-        obj = varg;
-        elements = ca->elements;
-      }
-      else if ( ca->elements != elements ) {
-        rb_raise(rb_eRuntimeError, "size mismatch");
-      }
+    if ( ca_is_scalar(ca) ) {
+      continue;
+    }
+    if ( ! donor ) {
+      donor = ca;
+      obj   = varg;
+    }
+    else if ( ! ca_sweep_same_shape(donor, ca) ) {
+      va_end(vargs);
+      ca_sweep_refuse_shapes(donor, ca);
     }
   }
   va_end(vargs);

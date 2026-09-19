@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: functions built on the C-extension bridge (`ca_call_cfunc_*`,
+  `ca_call_cslab_*`, and `CAMath.spherical_to_xyz` / `xyz_to_spherical`)
+  pair two array operands only when their shapes agree, and otherwise
+  raise `ArgumentError` naming both shapes. Arrays of the same size but
+  different shape, such as (2,3) and (3,2), used to be accepted and read
+  in flat order; reshape one of them first. Arrays of different sizes
+  raised `RuntimeError` before, so a `rescue` of that class needs
+  updating. A scalar still pairs with any array.
+
 - Change: `min`, `max`, `minmax`, `cummin` and `cummax` answer `NaN`, and
   `min_index`, `max_index`, `min_addr` and `max_addr` answer `UNDEF`, when every
   cell a float array contributes is `NaN`. They used to answer `Infinity`,

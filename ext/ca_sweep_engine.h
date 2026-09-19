@@ -13,7 +13,7 @@
  *          OUTPUT (fsync=='1') -> ca_attach + use ca->ptr (sync on release)
  *          INPUT  (fsync=='0') alias-able -> ca_attach + use ca->ptr
  *          INPUT  (fsync=='0') non-alias  -> xmalloc + ca_xfer_all(GET)
- *    (2) broadcast shape check (scalar collapse + n_kernel agreement)
+ *    (2) operand pairing (scalar collapse; arrays must agree in shape)
  *    (3) mask OR across INPUT operands -> m0 (xmalloc, NULL if none)
  *    (4) mask propagate to OUTPUT operands (overwrite output->mask)
  *    (5) caller runs the per-cell loop using base[] + stride[]
@@ -98,6 +98,12 @@ void ca_sweep_acquire (ca_sweep_state_t *st);
  * xfree m0.  State is single-use; do not call acquire again on the same
  * state without re-initializing the caller-owned arrays. */
 void ca_sweep_release (ca_sweep_state_t *st);
+
+/* Shape pairing shared with rb_ca_template_n: non-zero when a and b have
+ * the same ndim and dims; the refusal raises ArgumentError naming both
+ * shapes. */
+int  ca_sweep_same_shape (CArray *a, CArray *b);
+NORETURN(void ca_sweep_refuse_shapes (CArray *a, CArray *b));
 
 /* Strict full-shape equality check used by INOUT macros (AC5: silent-
  * corruption seam prevention).  Raises if ndim differs or any dim[k]
