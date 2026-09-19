@@ -1655,6 +1655,18 @@ ca_allocate (void *ap)
   ca_allocate(ca->mask);
 }
 
+/* The first attach of a view: materialise through the type's slot, then
+   its mask.  Run under rb_protect by ca_attach. */
+static VALUE
+ca_attach_view_first (VALUE arg)
+{
+  CArray *ca = (CArray *) arg;
+  ca_func[ca->obj_type].attach(ca);
+  ca_update_mask(ca);
+  ca_attach(ca->mask);
+  return Qnil;
+}
+
 /* attach parent's data to ca->ptr */
 
 void
@@ -1668,14 +1680,30 @@ ca_attach (void *ap)
 
   if ( ca_is_view(ca) ) {  /* view array */
 
-    CAVIEW(ca)->attach += 1; /* increments attach level */
-    if ( CAVIEW(ca)->attach > CA_ATTACH_MAX ) {
+    if ( CAVIEW(ca)->attach >= CA_ATTACH_MAX ) {
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
+    CAVIEW(ca)->attach += 1; /* increments attach level */
 
     if ( ! ca->ptr ) {
-      ca_func[ca->obj_type].attach(ap);
+      /* A slot can raise part way (a conversion meeting a value it cannot
+         hold).  Undo the attach then, or the next attach finds ca->ptr
+         set, skips the slot and reads a half-filled buffer.  A slot that
+         got as far as publishing ca->ptr has also attached what its
+         detach slot releases; one that raised earlier has published
+         nothing and released its own parent attach on the way out. */
+      int tag = 0;
+      rb_protect(ca_attach_view_first, (VALUE) ca, &tag);
+      if ( tag ) {
+        if ( ca->ptr ) {
+          ca_func[ca->obj_type].detach(ca);
+          ca->ptr = NULL;
+        }
+        CAVIEW(ca)->attach -= 1;
+        rb_jump_tag(tag);
+      }
+      return;
     }
   }
   else {                      /* entity array */
@@ -1684,6 +1712,43 @@ ca_attach (void *ap)
 
   ca_update_mask(ca);
   ca_attach(ca->mask);
+}
+
+/* Attach every array in list[0..n-1], or, if one of those attaches
+   raises, none of them: the ones already attached are detached before the
+   raise propagates.  For views over several parents. */
+
+typedef struct {
+  CArray **list;
+  int32_t  n;
+  int32_t  done;
+} ca_attach_all_ctx_t;
+
+static VALUE
+ca_attach_all_body (VALUE arg)
+{
+  ca_attach_all_ctx_t *c = (ca_attach_all_ctx_t *) arg;
+  for ( ; c->done < c->n; c->done++ ) {
+    ca_attach(c->list[c->done]);
+  }
+  return Qnil;
+}
+
+void
+ca_attach_all (CArray **list, int32_t n)
+{
+  ca_attach_all_ctx_t c;
+  int tag = 0;
+  c.list = list;
+  c.n    = n;
+  c.done = 0;
+  rb_protect(ca_attach_all_body, (VALUE) &c, &tag);
+  if ( tag ) {
+    while ( c.done > 0 ) {
+      ca_detach(list[--c.done]);
+    }
+    rb_jump_tag(tag);
+  }
 }
 
 /* attach parent's data to ca->ptr */

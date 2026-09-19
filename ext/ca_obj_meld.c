@@ -39,6 +39,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_all */
 
 /* ------------------------------------------------------------------- */
 /* TypedData                                                            */
@@ -772,10 +773,7 @@ static void
 ca_meld_func_allocate (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  int32_t k;
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_attach(ca->parents[k]);
-  }
+  ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
 }
 
@@ -783,10 +781,7 @@ static void
 ca_meld_func_attach (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  int32_t k;
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_attach(ca->parents[k]);
-  }
+  ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
   ca_meld_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
 }

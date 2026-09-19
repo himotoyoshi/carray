@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a view that converts on read -- for example `fake(CA_BOOLEAN)` over
+  an int32 array holding a 2 -- now raises every time it is read, where
+  the second read used to succeed silently and return values from a
+  half-converted buffer. A view stacked or melded over such an array no
+  longer leaves its other parents attached when the read raises, and a
+  reshape of a lazy view no longer leaks its buffer. Nothing to change in
+  calling code.
+
 - Fix: for C extensions, a callback passed to `ca_call_cfunc_*` or
   `ca_call_cslab_*` may now `rb_raise` to refuse a value: the bridge
   detaches and frees what it holds before the exception propagates,

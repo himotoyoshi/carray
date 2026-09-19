@@ -1056,6 +1056,15 @@ ca_stride_func_allocate (void *ap)
   }
 }
 
+/* Region request into the cold-root attach buffer; a lazy root can raise. */
+static VALUE
+ca_stride_cold_fill (VALUE arg)
+{
+  void **args = (void **) arg;
+  ca_copy_data((CArray *) args[0], (char *) args[1]);
+  return Qnil;
+}
+
 static void
 ca_stride_func_attach (void *ap)
 {
@@ -1071,7 +1080,15 @@ ca_stride_func_attach (void *ap)
        view with a live ptr is what makes the per-cell dispatchers bypass the
        transfer slots. */
     char *buf = xmalloc(ca_length(ca));
-    ca_copy_data(ca, buf);       /* region request, root stays cold */
+    void *args[2];
+    int tag = 0;
+    args[0] = ca;
+    args[1] = buf;
+    rb_protect(ca_stride_cold_fill, (VALUE) args, &tag);   /* root stays cold */
+    if (tag) {
+      xfree(buf);
+      rb_jump_tag(tag);
+    }
     ca->ptr = buf;
     return;
   }
