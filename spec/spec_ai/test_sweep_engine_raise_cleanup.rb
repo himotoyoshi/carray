@@ -68,6 +68,41 @@ class TestSweepEngineRaiseCleanup < Test::Unit::TestCase
     end
   end
 
+  # The callback itself raises (a negative input).  The INPUT here converts
+  # from int32, so it is read into scratch rather than aliased.
+  CHECKED = [:__sweep_raw_add_checked__, :__sweep_raw_add_slab_checked__]
+
+  def negative_input (n)
+    CArray.wrap_readonly(CArray.int32(n) { |i| i == 5 ? -1 : i }, CA_FLOAT64)
+  end
+
+  def test_raising_callback_detaches_output
+    CHECKED.each do |m|
+      big, out = column_output
+      assert_raise(ArgumentError, m.to_s) { CArray.send(m, out, negative_input(8), good(8)) }
+      assert_equal false, out.attached?, m.to_s
+    end
+  end
+
+  def test_raising_callback_returns_arena_slots
+    before = CArray.__lazy_arena_slot_in_use_count__
+    5.times do
+      _, out = column_output
+      assert_raise(ArgumentError) {
+        CArray.__sweep_raw_add_slab_checked__(out, negative_input(8), good(8))
+      }
+    end
+    assert_equal before, CArray.__lazy_arena_slot_in_use_count__
+  end
+
+  def test_checked_callback_without_raise
+    CHECKED.each do |m|
+      big, out = column_output
+      CArray.send(m, out, good(8), good(8))
+      assert_equal good(8).to_a.map { |v| v * 2 }, big[nil, 1].to_a, m.to_s
+    end
+  end
+
   def test_chunked_failure_returns_arena_slots
     before = CArray.__lazy_arena_slot_in_use_count__
     5.times do

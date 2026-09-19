@@ -128,9 +128,61 @@ def indent(s, prefix = "  ")
 end
 
 # --- raw ca_call_cfunc_N ----------------------------------------------------
+#
+# The per-cell loop runs in a walker function of its own, handed to
+# ca_sweep_run: a callback that raises part way through gives back the
+# operands and scratch the engine holds, rather than leaving them behind.
+#
+# The `_r` variant (reentrant: + void *userdata at signature tail) passes a
+# trailing `void *userdata` through to every per-cell `func(...)`
+# invocation as its last argument.  Naming follows POSIX convention
+# (qsort_r / bsearch_r / strtok_r), where `_r` marks a reentrant form that
+# takes a thunk so the callback no longer depends on file-static / global
+# state.  Use when the callback needs to share state with the caller (e.g.
+# accumulators, configuration flags, library plan handles) without
+# resorting to file-static plumbing.
+def emit_raw_common(n, r:)
+  name   = r ? "ca_call_cfunc_#{n}_r" : "ca_call_cfunc_#{n}"
+  fsig   = r ? void_p_list_r(n) : void_p_list(n)
+  call   = "c->func(#{args_p(n)}#{r ? ", c->userdata" : ""})"
 
-def emit_raw(n)
-  $src.puts sig_raw(n)
+  $src.puts <<~END_C
+    typedef struct {
+      ca_sweep_state_t *st;
+      void (*func)(#{fsig});
+      void *userdata;
+    } #{name}_ctx_t;
+
+    static VALUE
+    #{name}_walk (VALUE arg)
+    {
+      #{name}_ctx_t *c = (#{name}_ctx_t *) arg;
+      ca_sweep_state_t *st = c->st;
+      char *p[#{n}];
+      ca_size_t k;
+      int k_op;
+      if ( st->m0 ) {
+        for ( k = 0; k < st->n_kernel; k++ ) {
+          if ( ! st->m0[k] ) {
+            for ( k_op = 0; k_op < #{n}; k_op++ ) {
+              p[k_op] = st->base[k_op] + k * st->stride[k_op];
+            }
+            #{call};
+          }
+        }
+      } else {
+        for ( k = 0; k < st->n_kernel; k++ ) {
+          for ( k_op = 0; k_op < #{n}; k_op++ ) {
+            p[k_op] = st->base[k_op] + k * st->stride[k_op];
+          }
+          #{call};
+        }
+      }
+      return Qnil;
+    }
+
+  END_C
+  $src.puts(r ? sig_raw_r(n) : sig_raw(n))
   $src.puts "{"
   $src.puts indent(<<~END_C)
       CArray   *cx[#{n}];
@@ -139,18 +191,17 @@ def emit_raw(n)
       char     *owned_buf[#{n}];
       int       attached[#{n}];
       ca_sweep_state_t state;
-      int k_op;
+      #{name}_ctx_t ctx;
 
   END_C
-  # extract CArray* from VALUE
   (0...n).each do |k|
     $src.puts "  TypedData_Get_Struct(rcx#{k}, CArray, &carray_data_type, cx[#{k}]);"
   end
   $src.puts ""
   $src.puts <<~END_C
       /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-         broadcast shape check, mask OR across INPUTs, mask propagate to
-         OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+         operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+         Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
       state.n_ops     = #{n};
       state.fsync     = fsync;
       state.cx        = cx;
@@ -159,34 +210,14 @@ def emit_raw(n)
       state.owned_buf = owned_buf;
       state.attached  = attached;
       state.no_mask   = 0;
-      state.src_label = "ca_call_cfunc_#{n}";
+      state.src_label = "#{name}";
 
       ca_sweep_acquire(&state);
 
-      /* inner loop: advance per-cell ptrs and invoke user kernel func */
-      {
-        char *p[#{n}];
-        ca_size_t k;
-        if ( state.m0 ) {
-          for ( k = 0; k < state.n_kernel; k++ ) {
-            if ( ! state.m0[k] ) {
-              for ( k_op = 0; k_op < #{n}; k_op++ ) {
-                p[k_op] = base[k_op] + k * stride[k_op];
-              }
-              func(#{args_p(n)});
-            }
-          }
-        } else {
-          for ( k = 0; k < state.n_kernel; k++ ) {
-            for ( k_op = 0; k_op < #{n}; k_op++ ) {
-              p[k_op] = base[k_op] + k * stride[k_op];
-            }
-            func(#{args_p(n)});
-          }
-        }
-      }
-
-      ca_sweep_release(&state);
+      ctx.st       = &state;
+      ctx.func     = func;
+      ctx.userdata = #{r ? "userdata" : "NULL"};
+      ca_sweep_run(&state, #{name}_walk, (VALUE) &ctx);
 
       return rcx0;
     }
@@ -194,76 +225,8 @@ def emit_raw(n)
   END_C
 end
 
-# --- raw ca_call_cfunc_N_r (reentrant: + void *userdata at signature tail) --
-#
-# Variant of emit_raw with a trailing `void *userdata` parameter passed
-# through to every per-cell `func(...)` invocation as its last argument.
-# Naming follows POSIX convention (qsort_r / bsearch_r / strtok_r), where
-# `_r` marks a reentrant form that takes a thunk so the callback no longer
-# depends on file-static / global state.  Use when the callback needs to
-# share state with the caller (e.g. accumulators, configuration flags,
-# library plan handles) without resorting to file-static plumbing.
-def emit_raw_r(n)
-  $src.puts sig_raw_r(n)
-  $src.puts "{"
-  $src.puts indent(<<~END_C)
-      CArray   *cx[#{n}];
-      char     *base[#{n}];
-      ca_size_t stride[#{n}];
-      char     *owned_buf[#{n}];
-      int       attached[#{n}];
-      ca_sweep_state_t state;
-      int k_op;
-
-  END_C
-  (0...n).each do |k|
-    $src.puts "  TypedData_Get_Struct(rcx#{k}, CArray, &carray_data_type, cx[#{k}]);"
-  end
-  $src.puts ""
-  $src.puts <<~END_C
-      /* sweep engine: same lifecycle as ca_call_cfunc_#{n}; the difference is
-         the per-cell `func(...)` call has `userdata` as its last argument. */
-      state.n_ops     = #{n};
-      state.fsync     = fsync;
-      state.cx        = cx;
-      state.base      = base;
-      state.stride    = stride;
-      state.owned_buf = owned_buf;
-      state.attached  = attached;
-      state.no_mask   = 0;
-      state.src_label = "ca_call_cfunc_#{n}_r";
-
-      ca_sweep_acquire(&state);
-
-      {
-        char *p[#{n}];
-        ca_size_t k;
-        if ( state.m0 ) {
-          for ( k = 0; k < state.n_kernel; k++ ) {
-            if ( ! state.m0[k] ) {
-              for ( k_op = 0; k_op < #{n}; k_op++ ) {
-                p[k_op] = base[k_op] + k * stride[k_op];
-              }
-              func(#{args_p_r(n)});
-            }
-          }
-        } else {
-          for ( k = 0; k < state.n_kernel; k++ ) {
-            for ( k_op = 0; k_op < #{n}; k_op++ ) {
-              p[k_op] = base[k_op] + k * stride[k_op];
-            }
-            func(#{args_p_r(n)});
-          }
-        }
-      }
-
-      ca_sweep_release(&state);
-
-      return rcx0;
-    }
-
-  END_C
-end
+def emit_raw(n)   ; emit_raw_common(n, r: false); end
+def emit_raw_r(n) ; emit_raw_common(n, r: true);  end
 
 # --- typed dispatchers: M outputs, N inputs ---------------------------------
 #
@@ -418,7 +381,7 @@ def sig_slab_r(n)
   "VALUE\nca_call_cslab_#{n}_r (ca_cslab_r_t func, const char *fsync,\n                               #{value_param_list(n)},\n                               void *userdata)"
 end
 
-def emit_slab_body(n, name, call)
+def emit_slab_body(n, name, walker, userdata)
   $src.puts indent(<<~END_C)
       CArray   *cx[#{n}];
       char     *base[#{n}];
@@ -427,6 +390,7 @@ def emit_slab_body(n, name, call)
       char     *owned_buf[#{n}];
       int       attached[#{n}];
       ca_sweep_state_t state;
+      ca_cslab_ctx_t ctx;
 
   END_C
   (0...n).each do |k|
@@ -453,16 +417,11 @@ def emit_slab_body(n, name, call)
 
       ca_sweep_acquire_chunked(&state);
 
-      /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-         per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-         at the arena scratch the chunk was just gathered into, which is
-         packed, so stride[] is the element size and the author's inner loop
-         sees contiguous data. */
-      while ( ca_sweep_next_chunk(&state) ) {
-        #{call};
-      }
-
-      ca_sweep_release_chunked(&state);
+      ctx.st       = &state;
+      ctx.func     = #{userdata == "NULL" ? "func" : "NULL"};
+      ctx.func_r   = #{userdata == "NULL" ? "NULL" : "func"};
+      ctx.userdata = #{userdata};
+      ca_sweep_run_chunked(&state, #{walker}, (VALUE) &ctx);
 
       return rcx0;
     }
@@ -473,8 +432,7 @@ end
 def emit_slab(n)
   $src.puts sig_slab(n)
   $src.puts "{"
-  emit_slab_body(n, "ca_call_cslab_#{n}",
-                 "func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state))")
+  emit_slab_body(n, "ca_call_cslab_#{n}", "ca_cslab_walk", "NULL")
 end
 
 # Variant of emit_slab with a trailing `void *userdata` parameter passed
@@ -483,8 +441,7 @@ end
 def emit_slab_r(n)
   $src.puts sig_slab_r(n)
   $src.puts "{"
-  emit_slab_body(n, "ca_call_cslab_#{n}_r",
-                 "func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata)")
+  emit_slab_body(n, "ca_call_cslab_#{n}_r", "ca_cslab_r_walk", "userdata")
 end
 
 # --- header declaration emitters --------------------------------------------
@@ -557,14 +514,44 @@ $src.puts <<~END_C
   #include "ca_sweep_engine.h"
   #include <string.h>
 
-  /* The chunk's iteration mask, or NULL when no INPUT operand carried one.
-     m0 is chunk-sized and re-gathered per chunk by ca_sweep_next_chunk, so
-     it is already the slice -- one byte per cell, indexed 0..chunk_n-1
-     alongside base[] and stride[]. */
-  static const boolean8_t *
-  ca_sweep_chunk_mask (ca_sweep_state_t *st)
+  /* Chunk walk for the ca_call_cslab_N family, run by ca_sweep_run_chunked
+     so that a callback raising part way through gives back what the engine
+     holds.  Hands the author one chunk at a time.  base[] is rewritten per
+     chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points at the
+     arena scratch the chunk was just gathered into, which is packed, so
+     stride[] is the element size and the author's inner loop sees
+     contiguous data.  m0 is the chunk's iteration mask, or NULL when no
+     INPUT operand carried one: chunk-sized and re-gathered per chunk, so it
+     is already the slice -- one byte per cell, indexed 0..chunk_n-1
+     alongside base[] and stride[].  The arity does not appear here: the
+     operands reach the callback through base[] / stride[]. */
+  typedef struct {
+    ca_sweep_state_t *st;
+    ca_cslab_t        func;      /* ca_call_cslab_N   */
+    ca_cslab_r_t      func_r;    /* ca_call_cslab_N_r */
+    void             *userdata;
+  } ca_cslab_ctx_t;
+
+  static VALUE
+  ca_cslab_walk (VALUE arg)
   {
-    return st->m0;
+    ca_cslab_ctx_t *c = (ca_cslab_ctx_t *) arg;
+    ca_sweep_state_t *st = c->st;
+    while ( ca_sweep_next_chunk(st) ) {
+      c->func(st->base, st->stride, st->chunk_n, st->m0);
+    }
+    return Qnil;
+  }
+
+  static VALUE
+  ca_cslab_r_walk (VALUE arg)
+  {
+    ca_cslab_ctx_t *c = (ca_cslab_ctx_t *) arg;
+    ca_sweep_state_t *st = c->st;
+    while ( ca_sweep_next_chunk(st) ) {
+      c->func_r(st->base, st->stride, st->chunk_n, st->m0, c->userdata);
+    }
+    return Qnil;
   }
 
 END_C

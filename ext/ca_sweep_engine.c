@@ -253,6 +253,34 @@ ca_sweep_acquire (ca_sweep_state_t *st)
 }
 
 void
+ca_sweep_run (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(walk, arg, &tag);
+  if (tag) {
+    ca_sweep_abort(st, 0);
+    rb_jump_tag(tag);
+  }
+  ca_sweep_release(st);
+}
+
+void
+ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(walk, arg, &tag);
+  if (tag) {
+    /* a raise inside ca_sweep_next_chunk has already given back */
+    if (st->chunked_state != 3) {
+      ca_sweep_abort(st, 1);
+      st->chunked_state = 3;
+    }
+    rb_jump_tag(tag);
+  }
+  ca_sweep_release_chunked(st);
+}
+
+void
 ca_sweep_release (ca_sweep_state_t *st)
 {
   int k_op;

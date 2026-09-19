@@ -48,14 +48,78 @@
 #include "ca_sweep_engine.h"
 #include <string.h>
 
-/* The chunk's iteration mask, or NULL when no INPUT operand carried one.
-   m0 is chunk-sized and re-gathered per chunk by ca_sweep_next_chunk, so
-   it is already the slice -- one byte per cell, indexed 0..chunk_n-1
-   alongside base[] and stride[]. */
-static const boolean8_t *
-ca_sweep_chunk_mask (ca_sweep_state_t *st)
+/* Chunk walk for the ca_call_cslab_N family, run by ca_sweep_run_chunked
+   so that a callback raising part way through gives back what the engine
+   holds.  Hands the author one chunk at a time.  base[] is rewritten per
+   chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points at the
+   arena scratch the chunk was just gathered into, which is packed, so
+   stride[] is the element size and the author's inner loop sees
+   contiguous data.  m0 is the chunk's iteration mask, or NULL when no
+   INPUT operand carried one: chunk-sized and re-gathered per chunk, so it
+   is already the slice -- one byte per cell, indexed 0..chunk_n-1
+   alongside base[] and stride[].  The arity does not appear here: the
+   operands reach the callback through base[] / stride[]. */
+typedef struct {
+  ca_sweep_state_t *st;
+  ca_cslab_t        func;      /* ca_call_cslab_N   */
+  ca_cslab_r_t      func_r;    /* ca_call_cslab_N_r */
+  void             *userdata;
+} ca_cslab_ctx_t;
+
+static VALUE
+ca_cslab_walk (VALUE arg)
 {
-  return st->m0;
+  ca_cslab_ctx_t *c = (ca_cslab_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  while ( ca_sweep_next_chunk(st) ) {
+    c->func(st->base, st->stride, st->chunk_n, st->m0);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_cslab_r_walk (VALUE arg)
+{
+  ca_cslab_ctx_t *c = (ca_cslab_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  while ( ca_sweep_next_chunk(st) ) {
+    c->func_r(st->base, st->stride, st->chunk_n, st->m0, c->userdata);
+  }
+  return Qnil;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0);
+  void *userdata;
+} ca_call_cfunc_1_ctx_t;
+
+static VALUE
+ca_call_cfunc_1_walk (VALUE arg)
+{
+  ca_call_cfunc_1_ctx_t *c = (ca_call_cfunc_1_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[1];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 1; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 1; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -68,13 +132,13 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
   char     *owned_buf[1];
   int       attached[1];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_1_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 1;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -87,32 +151,46 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[1];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 1; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 1; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_1_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1);
+  void *userdata;
+} ca_call_cfunc_2_ctx_t;
+
+static VALUE
+ca_call_cfunc_2_walk (VALUE arg)
+{
+  ca_call_cfunc_2_ctx_t *c = (ca_call_cfunc_2_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[2];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 2; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 2; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -125,14 +203,14 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
   char     *owned_buf[2];
   int       attached[2];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_2_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 2;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -145,32 +223,46 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[2];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 2; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 2; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_2_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2);
+  void *userdata;
+} ca_call_cfunc_3_ctx_t;
+
+static VALUE
+ca_call_cfunc_3_walk (VALUE arg)
+{
+  ca_call_cfunc_3_ctx_t *c = (ca_call_cfunc_3_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[3];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 3; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 3; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -183,15 +275,15 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
   char     *owned_buf[3];
   int       attached[3];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_3_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
   TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 3;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -204,32 +296,46 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[3];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 3; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 3; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_3_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3);
+  void *userdata;
+} ca_call_cfunc_4_ctx_t;
+
+static VALUE
+ca_call_cfunc_4_walk (VALUE arg)
+{
+  ca_call_cfunc_4_ctx_t *c = (ca_call_cfunc_4_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[4];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 4; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 4; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -242,7 +348,7 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
   char     *owned_buf[4];
   int       attached[4];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_4_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -250,8 +356,8 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
   TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 4;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -264,32 +370,46 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[4];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 4; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 4; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_4_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4);
+  void *userdata;
+} ca_call_cfunc_5_ctx_t;
+
+static VALUE
+ca_call_cfunc_5_walk (VALUE arg)
+{
+  ca_call_cfunc_5_ctx_t *c = (ca_call_cfunc_5_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[5];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 5; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 5; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -302,7 +422,7 @@ ca_call_cfunc_5 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4),
   char     *owned_buf[5];
   int       attached[5];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_5_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -311,8 +431,8 @@ ca_call_cfunc_5 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4),
   TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 5;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -325,32 +445,46 @@ ca_call_cfunc_5 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4),
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[5];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 5; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 5; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_5_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, void *p5);
+  void *userdata;
+} ca_call_cfunc_6_ctx_t;
+
+static VALUE
+ca_call_cfunc_6_walk (VALUE arg)
+{
+  ca_call_cfunc_6_ctx_t *c = (ca_call_cfunc_6_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[6];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 6; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4], p[5]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 6; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4], p[5]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -363,7 +497,7 @@ ca_call_cfunc_6 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   char     *owned_buf[6];
   int       attached[6];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_6_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -373,8 +507,8 @@ ca_call_cfunc_6 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 6;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -387,32 +521,46 @@ ca_call_cfunc_6 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[6];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 6; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4], p[5]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 6; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4], p[5]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_6_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, void *p5, void *p6);
+  void *userdata;
+} ca_call_cfunc_7_ctx_t;
+
+static VALUE
+ca_call_cfunc_7_walk (VALUE arg)
+{
+  ca_call_cfunc_7_ctx_t *c = (ca_call_cfunc_7_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[7];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 7; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 7; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -425,7 +573,7 @@ ca_call_cfunc_7 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   char     *owned_buf[7];
   int       attached[7];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_7_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -436,8 +584,8 @@ ca_call_cfunc_7 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   TypedData_Get_Struct(rcx6, CArray, &carray_data_type, cx[6]);
 
   /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
-     broadcast shape check, mask OR across INPUTs, mask propagate to
-     OUTPUTs.  Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 7;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -450,30 +598,10 @@ ca_call_cfunc_7 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
 
   ca_sweep_acquire(&state);
 
-  /* inner loop: advance per-cell ptrs and invoke user kernel func */
-  {
-    char *p[7];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 7; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 7; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = NULL;
+  ca_sweep_run(&state, ca_call_cfunc_7_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -867,6 +995,40 @@ ca_call_cfunc_3_3 (int8_t dty1, int8_t dty2, int8_t dty3, int8_t dtx1, int8_t dt
 /* `void *userdata` parameter forwarded to every per-cell invocation. */
 /* -------------------------------------------------------------------- */
 
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *userdata);
+  void *userdata;
+} ca_call_cfunc_1_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_1_r_walk (VALUE arg)
+{
+  ca_call_cfunc_1_r_ctx_t *c = (ca_call_cfunc_1_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[1];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 1; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 1; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], c->userdata);
+    }
+  }
+  return Qnil;
+}
+
 VALUE
 ca_call_cfunc_1_r (void (*func)(void *p0, void *userdata), const char *fsync,
                               VALUE rcx0,
@@ -878,12 +1040,13 @@ ca_call_cfunc_1_r (void (*func)(void *p0, void *userdata), const char *fsync,
   char     *owned_buf[1];
   int       attached[1];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_1_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_1; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 1;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -896,31 +1059,46 @@ ca_call_cfunc_1_r (void (*func)(void *p0, void *userdata), const char *fsync,
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[1];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 1; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 1; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_1_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *userdata);
+  void *userdata;
+} ca_call_cfunc_2_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_2_r_walk (VALUE arg)
+{
+  ca_call_cfunc_2_r_ctx_t *c = (ca_call_cfunc_2_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[2];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 2; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 2; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -934,13 +1112,14 @@ ca_call_cfunc_2_r (void (*func)(void *p0, void *p1, void *userdata), const char 
   char     *owned_buf[2];
   int       attached[2];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_2_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_2; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 2;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -953,31 +1132,46 @@ ca_call_cfunc_2_r (void (*func)(void *p0, void *p1, void *userdata), const char 
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[2];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 2; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 2; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_2_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *userdata);
+  void *userdata;
+} ca_call_cfunc_3_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_3_r_walk (VALUE arg)
+{
+  ca_call_cfunc_3_r_ctx_t *c = (ca_call_cfunc_3_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[3];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 3; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 3; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -991,14 +1185,15 @@ ca_call_cfunc_3_r (void (*func)(void *p0, void *p1, void *p2, void *userdata), c
   char     *owned_buf[3];
   int       attached[3];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_3_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
   TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_3; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 3;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -1011,31 +1206,46 @@ ca_call_cfunc_3_r (void (*func)(void *p0, void *p1, void *p2, void *userdata), c
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[3];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 3; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 3; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_3_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *userdata);
+  void *userdata;
+} ca_call_cfunc_4_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_4_r_walk (VALUE arg)
+{
+  ca_call_cfunc_4_r_ctx_t *c = (ca_call_cfunc_4_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[4];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 4; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 4; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -1049,15 +1259,16 @@ ca_call_cfunc_4_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *us
   char     *owned_buf[4];
   int       attached[4];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_4_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
   TypedData_Get_Struct(rcx2, CArray, &carray_data_type, cx[2]);
   TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_4; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 4;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -1070,31 +1281,46 @@ ca_call_cfunc_4_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *us
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[4];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 4; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 4; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_4_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, void *userdata);
+  void *userdata;
+} ca_call_cfunc_5_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_5_r_walk (VALUE arg)
+{
+  ca_call_cfunc_5_r_ctx_t *c = (ca_call_cfunc_5_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[5];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 5; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 5; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -1108,7 +1334,7 @@ ca_call_cfunc_5_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   char     *owned_buf[5];
   int       attached[5];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_5_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1116,8 +1342,9 @@ ca_call_cfunc_5_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   TypedData_Get_Struct(rcx3, CArray, &carray_data_type, cx[3]);
   TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_5; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 5;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -1130,31 +1357,46 @@ ca_call_cfunc_5_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[5];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 5; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 5; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_5_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, void *p5, void *userdata);
+  void *userdata;
+} ca_call_cfunc_6_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_6_r_walk (VALUE arg)
+{
+  ca_call_cfunc_6_r_ctx_t *c = (ca_call_cfunc_6_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[6];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 6; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4], p[5], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 6; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4], p[5], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -1168,7 +1410,7 @@ ca_call_cfunc_6_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   char     *owned_buf[6];
   int       attached[6];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_6_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1177,8 +1419,9 @@ ca_call_cfunc_6_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   TypedData_Get_Struct(rcx4, CArray, &carray_data_type, cx[4]);
   TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_6; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 6;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -1191,31 +1434,46 @@ ca_call_cfunc_6_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[6];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 6; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4], p[5], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 6; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4], p[5], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_6_r_walk, (VALUE) &ctx);
 
   return rcx0;
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, void *p5, void *p6, void *userdata);
+  void *userdata;
+} ca_call_cfunc_7_r_ctx_t;
+
+static VALUE
+ca_call_cfunc_7_r_walk (VALUE arg)
+{
+  ca_call_cfunc_7_r_ctx_t *c = (ca_call_cfunc_7_r_ctx_t *) arg;
+  ca_sweep_state_t *st = c->st;
+  char *p[7];
+  ca_size_t k;
+  int k_op;
+  if ( st->m0 ) {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      if ( ! st->m0[k] ) {
+        for ( k_op = 0; k_op < 7; k_op++ ) {
+          p[k_op] = st->base[k_op] + k * st->stride[k_op];
+        }
+        c->func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], c->userdata);
+      }
+    }
+  } else {
+    for ( k = 0; k < st->n_kernel; k++ ) {
+      for ( k_op = 0; k_op < 7; k_op++ ) {
+        p[k_op] = st->base[k_op] + k * st->stride[k_op];
+      }
+      c->func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], c->userdata);
+    }
+  }
+  return Qnil;
 }
 
 VALUE
@@ -1229,7 +1487,7 @@ ca_call_cfunc_7_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   char     *owned_buf[7];
   int       attached[7];
   ca_sweep_state_t state;
-  int k_op;
+  ca_call_cfunc_7_r_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1239,8 +1497,9 @@ ca_call_cfunc_7_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   TypedData_Get_Struct(rcx5, CArray, &carray_data_type, cx[5]);
   TypedData_Get_Struct(rcx6, CArray, &carray_data_type, cx[6]);
 
-  /* sweep engine: same lifecycle as ca_call_cfunc_7; the difference is
-     the per-cell `func(...)` call has `userdata` as its last argument. */
+  /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
+     operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
+     Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
   state.n_ops     = 7;
   state.fsync     = fsync;
   state.cx        = cx;
@@ -1253,29 +1512,10 @@ ca_call_cfunc_7_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
 
   ca_sweep_acquire(&state);
 
-  {
-    char *p[7];
-    ca_size_t k;
-    if ( state.m0 ) {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        if ( ! state.m0[k] ) {
-          for ( k_op = 0; k_op < 7; k_op++ ) {
-            p[k_op] = base[k_op] + k * stride[k_op];
-          }
-          func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], userdata);
-        }
-      }
-    } else {
-      for ( k = 0; k < state.n_kernel; k++ ) {
-        for ( k_op = 0; k_op < 7; k_op++ ) {
-          p[k_op] = base[k_op] + k * stride[k_op];
-        }
-        func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], userdata);
-      }
-    }
-  }
-
-  ca_sweep_release(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.userdata = userdata;
+  ca_sweep_run(&state, ca_call_cfunc_7_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1676,6 +1916,7 @@ ca_call_cslab_1 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[1];
   int       attached[1];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
 
@@ -1698,16 +1939,11 @@ ca_call_cslab_1 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1723,6 +1959,7 @@ ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[2];
   int       attached[2];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1746,16 +1983,11 @@ ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1771,6 +2003,7 @@ ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[3];
   int       attached[3];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1795,16 +2028,11 @@ ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1820,6 +2048,7 @@ ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[4];
   int       attached[4];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1845,16 +2074,11 @@ ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1870,6 +2094,7 @@ ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[5];
   int       attached[5];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1896,16 +2121,11 @@ ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1921,6 +2141,7 @@ ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[6];
   int       attached[6];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -1948,16 +2169,11 @@ ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -1973,6 +2189,7 @@ ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
   char     *owned_buf[7];
   int       attached[7];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2001,16 +2218,11 @@ ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state));
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = func;
+  ctx.func_r   = NULL;
+  ctx.userdata = NULL;
+  ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2027,6 +2239,7 @@ ca_call_cslab_1_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[1];
   int       attached[1];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
 
@@ -2049,16 +2262,11 @@ ca_call_cslab_1_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2075,6 +2283,7 @@ ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[2];
   int       attached[2];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2098,16 +2307,11 @@ ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2124,6 +2328,7 @@ ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[3];
   int       attached[3];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2148,16 +2353,11 @@ ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2174,6 +2374,7 @@ ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[4];
   int       attached[4];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2199,16 +2400,11 @@ ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2225,6 +2421,7 @@ ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[5];
   int       attached[5];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2251,16 +2448,11 @@ ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2277,6 +2469,7 @@ ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[6];
   int       attached[6];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2304,16 +2497,11 @@ ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }
@@ -2330,6 +2518,7 @@ ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
   char     *owned_buf[7];
   int       attached[7];
   ca_sweep_state_t state;
+  ca_cslab_ctx_t ctx;
 
   TypedData_Get_Struct(rcx0, CArray, &carray_data_type, cx[0]);
   TypedData_Get_Struct(rcx1, CArray, &carray_data_type, cx[1]);
@@ -2358,16 +2547,11 @@ ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
 
   ca_sweep_acquire_chunked(&state);
 
-  /* outer loop: hand the author one chunk at a time.  base[] is rewritten
-     per chunk by ca_sweep_next_chunk -- for a non-alias INPUT it points
-     at the arena scratch the chunk was just gathered into, which is
-     packed, so stride[] is the element size and the author's inner loop
-     sees contiguous data. */
-  while ( ca_sweep_next_chunk(&state) ) {
-    func(base, stride, state.chunk_n, ca_sweep_chunk_mask(&state), userdata);
-  }
-
-  ca_sweep_release_chunked(&state);
+  ctx.st       = &state;
+  ctx.func     = NULL;
+  ctx.func_r   = func;
+  ctx.userdata = userdata;
+  ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
   return rcx0;
 }

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: for C extensions, a callback passed to `ca_call_cfunc_*` or
+  `ca_call_cslab_*` may now `rb_raise` to refuse a value: the bridge
+  detaches and frees what it holds before the exception propagates,
+  where it used to leave an output view attached and its scratch memory
+  behind. The outputs are left partly written. Nothing to change in
+  calling code.
+
 - Fix: when `to_type` on a view raises part way through the cast -- for
   example an int32 value other than 0 or 1 cast to boolean -- the view is
   no longer left holding a stale copy of its parent, which made later
