@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: reductions, scans and order statistics no longer leak memory when
+  reading their source raises part way through -- for example
+  `cumsum`, `sum` or `median` over a float64 view of an object array
+  holding a cell that is not a number. Each call used to leave the
+  slab the walk was gathering into behind. Nothing to change in calling
+  code.
+
 - Fix: `a[sel]` no longer leaks memory when reading the boolean selector
   raises -- for example `fake(CA_BOOLEAN)` over an int32 array holding a
   2. Nothing to change in calling code.
