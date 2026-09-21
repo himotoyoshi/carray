@@ -654,7 +654,11 @@ int ca_iter_check_init (int rc);
      correctly (= outer for's "increment" clause runs once on natural
      exit; `break` from the inner while breaks both).  `return` inside
      the body LEAKS resources (scratch_ptr, parent attach) — drop to
-     raw API if early return is needed.
+     raw API if early return is needed.  A body that raises leaks the
+     same way: the engine releases what it holds when the walk itself
+     raises (a gather or a write-back through the source's slots), but
+     the body runs in the caller's frame, where it has no hold on it.
+     An object-lane body calling back into Ruby is the case to watch.
    - Macros are not statement-equivalent (= they expand to nested for
      constructs).  Don't follow them with `else` etc. */
 
