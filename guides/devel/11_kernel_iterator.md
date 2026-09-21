@@ -682,6 +682,11 @@ Constraints (the same across the family):
   runs `finish`).
 - `return;` from the body LEAKS resources (scratch, parent attach). If
   you need early return, drop to the raw API.
+- A body that **raises** leaks the same way. The walk releases what it
+  holds when the raise is its own (a gather, or a write-back through the
+  source's transfer slots), but the body runs in the caller's frame,
+  where the engine has no hold on it — watch for an object-lane body
+  calling back into Ruby.
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
 - INOUT macros runtime-assert strict full-shape equality (= same `ndim`
