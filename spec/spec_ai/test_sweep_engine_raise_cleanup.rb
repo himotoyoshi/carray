@@ -114,33 +114,56 @@ class TestSweepEngineRaiseCleanup < Test::Unit::TestCase
     assert_equal before, CArray.__lazy_arena_slot_in_use_count__
   end
 
-  # The whole-buffer path's scratch copy of a converted INPUT is plain
-  # malloc, invisible from Ruby, so it is measured by the resident size, in
-  # a fresh process (what earlier tests left in this one's heap changes how
-  # the pages count).  The heap grows over the first thousand or so calls
-  # whether or not anything leaks, so the measurement starts after that: a
-  # leak keeps growing it by about 0.3 MB per call, a sound path levels off.
-  def test_failing_input_frees_scratch
+  # Bytes added to the malloc zone per call of `expr`, with `input` bound
+  # to a float64 view over an object array holding a cell that is not a
+  # number.  Measured in a fresh process (what earlier tests left in this
+  # one's heap moves the count) and through Fiddle, because the resident
+  # size at these sizes reads the heap's fragmentation rather than the
+  # leak: macOS only.
+  def bytes_per_call (expr, n, calls)
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     script = <<~RUBY
       require "carray"
-      rss = -> { Integer(`ps -o rss= -p \#{Process.pid}`.strip, exception: false) }
-      exit 2 unless rss.()
-      o = CArray.object(1 << 16) { 1.0 }
+      begin
+        require "fiddle"
+        stats = Fiddle::Function.new(
+          Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+      rescue LoadError, Fiddle::DLError
+        exit 2
+      end
+      in_use = -> {
+        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+        stats.call(nil, buf)
+        buf[8, 8].unpack1("Q")          # malloc_statistics_t#size_in_use
+      }
+      o = CArray.object(#{n}) { 1.0 }
       o[5] = Object.new
       input = CArray.wrap_readonly(o, CA_FLOAT64)
-      call = -> { CAMath.lgamma(input) rescue nil }
-      1500.times { call.() }
+      call = -> { (#{expr}) rescue nil }
+      50.times { call.() }
       GC.start
-      r0 = rss.()
-      1000.times { call.() }
+      before = in_use.()
+      #{calls}.times { call.() }
       GC.start
-      puts (rss.() - r0) / 1024.0
+      puts (in_use.() - before).fdiv(#{calls})
     RUBY
     inc = $LOAD_PATH.map { |d| ["-I", d] }.flatten
     out = IO.popen([RbConfig.ruby, *inc, "-e", script], &:read)
-    omit "ps unavailable" if $?.exitstatus == 2
+    omit "malloc zone statistics unavailable" if $?.exitstatus == 2
     assert $?.success?, "measuring process failed"
-    grown_mb = Float(out)
-    assert_operator grown_mb, :<, 100, "resident size grew #{grown_mb.round} MB over 1000 calls"
+    Float(out)
+  end
+
+  def assert_frees_scratch (expr, n: 1 << 14, calls: 200)
+    grown = bytes_per_call(expr, n, calls)
+    assert_operator grown, :<, 4096,
+                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
+  end
+
+  # The whole-buffer path's scratch copy of a converted INPUT (128 KB
+  # here) is freed when the conversion raises.
+  def test_failing_input_frees_scratch
+    assert_frees_scratch("CAMath.lgamma(input)")
   end
 end

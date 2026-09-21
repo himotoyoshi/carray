@@ -6,47 +6,59 @@
 # is freed rather than left behind.
 #
 # The buffer is plain malloc, invisible from Ruby, so it is measured by
-# the resident size.  The heap grows over the first thousand or so calls
-# whether or not anything leaks, so the measurement starts after that: a
-# leak keeps growing it by a quarter MB or more per call, a sound path
-# levels off.
+# the malloc zone's bytes-in-use: at these sizes the resident size reads
+# the heap's own growth rather than the leak.
 
 require "test/unit"
 require "carray"
 
 class TestCopyRaiseCleanup < Test::Unit::TestCase
 
-  # Resident-size growth, in MB, over the second 1000 of 2500 calls of
-  # `expr` (with `input` bound to a float64 view over an object array that
-  # holds a cell that is not a number).  Measured in a fresh process: what
-  # earlier tests left in this one's heap changes how the pages count.
-  def growth_mb (expr)
+  # Bytes added to the malloc zone per call of `expr`, with `input` bound
+  # to a float64 view over an object array holding a cell that is not a
+  # number.  Measured in a fresh process (what earlier tests left in this
+  # one's heap moves the count) and through Fiddle, because the resident
+  # size at these sizes reads the heap's fragmentation rather than the
+  # leak: macOS only.
+  def bytes_per_call (expr, n, calls)
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     script = <<~RUBY
       require "carray"
-      rss = -> { Integer(`ps -o rss= -p \#{Process.pid}`.strip, exception: false) }
-      exit 2 unless rss.()
-      o = CArray.object(1 << 16) { 1.0 }
+      begin
+        require "fiddle"
+        stats = Fiddle::Function.new(
+          Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+      rescue LoadError, Fiddle::DLError
+        exit 2
+      end
+      in_use = -> {
+        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+        stats.call(nil, buf)
+        buf[8, 8].unpack1("Q")          # malloc_statistics_t#size_in_use
+      }
+      o = CArray.object(#{n}) { 1.0 }
       o[5] = Object.new
       input = CArray.wrap_readonly(o, CA_FLOAT64)
       call = -> { (#{expr}) rescue nil }
-      1500.times { call.() }
+      50.times { call.() }
       GC.start
-      r0 = rss.()
-      1000.times { call.() }
+      before = in_use.()
+      #{calls}.times { call.() }
       GC.start
-      puts (rss.() - r0) / 1024.0
+      puts (in_use.() - before).fdiv(#{calls})
     RUBY
     inc = $LOAD_PATH.map { |d| ["-I", d] }.flatten
     out = IO.popen([RbConfig.ruby, *inc, "-e", script], &:read)
-    omit "ps unavailable" if $?.exitstatus == 2
+    omit "malloc zone statistics unavailable" if $?.exitstatus == 2
     assert $?.success?, "measuring process failed"
     Float(out)
   end
 
-  def assert_levels_off (expr)
-    grown = growth_mb(expr)
-    assert_operator grown, :<, 100,
-                    "#{expr}: resident size grew #{grown.round} MB over 1000 calls"
+  def assert_frees_scratch (expr, n: 1 << 14, calls: 200)
+    grown = bytes_per_call(expr, n, calls)
+    assert_operator grown, :<, 4096,
+                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
   end
 
   def failing_input
@@ -64,15 +76,15 @@ class TestCopyRaiseCleanup < Test::Unit::TestCase
   end
 
   def test_copy_frees_result_on_raise
-    assert_levels_off("input.copy")
+    assert_frees_scratch("input.copy")
   end
 
   def test_strip_mask_frees_result_on_raise
-    assert_levels_off("input.strip_mask(0.0)")
+    assert_frees_scratch("input.strip_mask(0.0)")
   end
 
   # A lazy view's to_a materialises through copy.
   def test_lazy_to_a_frees_result_on_raise
-    assert_levels_off("input.to_a")
+    assert_frees_scratch("input.to_a")
   end
 end

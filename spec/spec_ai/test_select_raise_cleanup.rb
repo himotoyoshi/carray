@@ -59,14 +59,18 @@ class TestSelectRaiseCleanup < Test::Unit::TestCase
     assert_raise(RuntimeError) { CArray.float64(6)[s.fake(CA_BOOLEAN)] }
   end
 
-  # The view struct alone (about 130 bytes).
+  # The view struct alone (about 130 bytes a call when it leaks), so the
+  # window is long enough to average the measurement's own noise out.
   def test_raising_selector_leaves_nothing
-    assert_operator bytes_per_call(false, 64, 5000), :<, 64
+    grown = bytes_per_call(false, 64, 20_000)
+    assert_operator grown, :<, 64, "the malloc zone grew #{grown.round} bytes per call"
   end
 
-  # The snapshot of a masked selector as well (a quarter MB here).
+  # The snapshot of a masked selector as well: a quarter MB a call, so a
+  # threshold far above the noise still catches it.
   def test_masked_raising_selector_leaves_nothing
-    assert_operator bytes_per_call(true, 1 << 18, 200), :<, 64
+    grown = bytes_per_call(true, 1 << 18, 500)
+    assert_operator grown, :<, 4096, "the malloc zone grew #{grown.round} bytes per call"
   end
 
   def test_masked_selector_snapshot
