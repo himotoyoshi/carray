@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `count(axis:)` and `count_not_masked(axis:)` on `group_by_category`
+  now work for a complex, boolean or object payload. They counted cells
+  through a numeric-only kernel, which refused those payloads for an answer
+  that never depended on the payload. The no-axis form already worked.
+
 - Fix: a `group_by_category` iterator whose classifier does not line up
   cell-for-cell with the value now says so. A no-axis reduction on one raises
   `ArgumentError` naming the mismatch and pointing at the `axis:` form, rather
