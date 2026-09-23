@@ -121,6 +121,13 @@ void Init_ca_kernel_iterator ();
 
 void Init_carray_slab ();
 
+void Init_carray_address_basis (); /* CArray::AddressBasis: pointer + byte
+                                      strides lent for the length of a block,
+                                      for code that addresses cells itself.
+                                      A runtime facility at the ca_attach
+                                      layer, not a user surface; see
+                                      guides/devel/21_address_basis.md */
+
 void
 Init_carray_ext (void)
 {
@@ -373,5 +380,7 @@ Init_carray_ext (void)
   Init_ca_kernel_iterator();
 
   Init_carray_slab();
+
+  Init_carray_address_basis();
 }
 
