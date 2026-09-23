@@ -925,6 +925,23 @@ class TestCAFrameToTable < Test::Unit::TestCase
     assert_equal "[1.0, 2.0]", df.to_table.split("\n")[2]
   end
 
+  # The intersection of the two cases above: a masked element inside an N-D
+  # cell takes the same marker a masked scalar cell does. One table, one
+  # spelling of missing.
+  def test_masked_element_of_an_nd_cell_shows_underscore
+    w = CA_FLOAT64([[1.0, 2.0], [3.0, 4.0]])
+    w[0, 1] = UNDEF
+    df = CAFrame.new("wind" => w)
+    assert_equal "[1.0, _]", df.to_table.split("\n")[2]
+  end
+
+  def test_masked_element_of_a_nested_nd_cell_shows_underscore
+    t = CArray.float64(2, 2, 2) { |i, j, k| i * 4.0 + j * 2 + k }
+    t[0, 0, 1] = UNDEF
+    df = CAFrame.new("t" => t)
+    assert_equal "[[0.0, _], [2.0, 3.0]]", df.to_table.split("\n")[2]
+  end
+
   def test_long_frame_truncates_with_ellipsis_row
     df = CAFrame.new("i" => CArray.int32(100) { |i| i })
     lines = df.to_table(rows: 4).split("\n")
