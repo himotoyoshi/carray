@@ -40,6 +40,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_all */
+#include "ca_obj_face.h"       /* ca_face_state_portable */
 
 /* ------------------------------------------------------------------- */
 /* TypedData                                                            */
@@ -150,6 +151,19 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
   CArray *ref;
   int32_t i;
   int8_t  a;
+
+  /* Pre-strip Face parents one level to storage, as CAStack does, so a
+     melded Face lifts to a single-Face chain (CATime[CAMeld[entity, ...]])
+     rather than a Face sitting on Face parents.  One level, not a full walk,
+     preserves any distinct Face a parent melded underneath.  A Face is
+     storage-transparent, so welding over storage reads the same bytes; the
+     lifted top Face (rb_ca_meld_s_new) carries the identity.  The @parents
+     accessor keeps the originals, which the callers set. */
+  for ( i = 0; i < n_parents; i++ ) {
+    if ( ca_is_face(parents[i]) ) {
+      parents[i] = CAVIEW(parents[i])->parent;
+    }
+  }
 
   ca_meld_check_uniform(n_parents, parents, meld_axis);
   ref = parents[0];
@@ -884,6 +898,17 @@ ca_operation_function_t ca_meld_func = {
 /* Ruby surface                                                         */
 /* ------------------------------------------------------------------- */
 
+/* One-level strip of a Face VALUE to its storage-side parent (non-Face as-is).
+   Keeps the @parent ivar in step with the pre-stripped C parents, so the
+   Ruby-visible chain of a melded Face is single-Face too. */
+static VALUE
+ca_meld_face_parent1 (VALUE v)
+{
+  CArray *c;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, c);
+  return ca_is_face(c) ? rb_ca_parent(v) : v;
+}
+
 VALUE
 rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
 {
@@ -907,7 +932,7 @@ rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
   ca  = ca_meld_new((int32_t) n, parents, meld_axis);
   obj = ca_wrap_struct(ca);
   rb_ivar_set(obj, id_parents, rb_ary_dup(parents_ary));
-  rb_ca_set_parent(obj, rb_ary_entry(parents_ary, 0));
+  rb_ca_set_parent(obj, ca_meld_face_parent1(rb_ary_entry(parents_ary, 0)));
   ALLOCV_END(holder);
   return obj;
 }
@@ -964,9 +989,84 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
   }
   ca_meld_setup(ca, (int32_t) n, parents, meld_axis);
   rb_ivar_set(self, id_parents, rb_ary_dup(list));
-  rb_ca_set_parent(self, rb_ary_entry(list, 0));
+  rb_ca_set_parent(self, ca_meld_face_parent1(rb_ary_entry(list, 0)));
   ALLOCV_END(holder);
   return self;
+}
+
+/* CAMeld.new(list, axis: 0) -- Class#new override, the twin of
+   rb_ca_stack_s_new.  A melded view has one surface over many parents, so a
+   homogeneous Face list is treated the way CAStack treats it: refuse a Face
+   whose state is per-parent (the cells of parent i are only readable against
+   parent i's own state -- a CAConstString's cells are byte ranges into ITS
+   buffer), and lift the rest so the Face survives the weld.
+
+   Without this meld was the one multi-parent constructor that neither asked
+   nor lifted: it returned the raw storage of whatever it was given, which for
+   CAConstString meant 16-byte (start,end) pairs presented as the string cells,
+   and for CATime meant raw int64 ticks.  Both looked like data.
+
+   Doing it here rather than in CArray.meld covers CAFrame.meld and a direct
+   CAMeld.new by the same check. */
+static VALUE
+rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE list, kwargs;
+  long n, i;
+  int  all_face = 1;
+  VALUE face_class = Qnil;
+  CArray *ref_face = NULL;
+  VALUE obj;
+
+  rb_scan_args(argc, argv, "1:", &list, &kwargs);
+  Check_Type(list, T_ARRAY);
+  n = RARRAY_LEN(list);
+  if ( n <= 0 ) {
+    rb_raise(rb_eArgError, "CAMeld.new requires at least one parent");
+  }
+
+  for ( i = 0; i < n; i++ ) {
+    VALUE p = rb_ary_entry(list, i);
+    CArray *ca;
+    rb_check_carray_object(p);
+    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
+    if ( !ca_is_face(ca) ) { all_face = 0; break; }
+    if ( i == 0 ) {
+      face_class = rb_obj_class(p);
+      ref_face   = ca;
+    } else if ( rb_obj_class(p) != face_class ) {
+      all_face = 0; break;
+    }
+  }
+
+  /* A single parent has nothing to weld against, so its Face rides the
+     chain as it always did; refuse and lift only apply from two up. */
+  if ( all_face && n > 1
+       && !ca_face_state_portable(ref_face->obj_type, face_class) ) {
+    rb_raise(rb_eArgError,
+             "CAMeld.new: %s state is not portable across multiple "
+             "parents (= per-parent storage like CAConstString's buffer); "
+             "strip Face with .parent if a storage-level CAMeld is intended",
+             rb_class2name(face_class));
+  }
+
+  obj = rb_obj_alloc(klass);
+  rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
+
+  if ( !all_face || n < 2 ) return obj;
+
+  for ( i = 1; i < n; i++ ) {
+    VALUE p = rb_ary_entry(list, i);
+    CArray *ca;
+    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
+    if ( !ca_face_state_compatible(rb_ary_entry(list, 0), ref_face, p, ca) ) {
+      rb_raise(rb_eArgError,
+               "CAMeld.new: Face state mismatch across parents "
+               "(= %s instance at index %ld differs in state from index 0)",
+               rb_class2name(face_class), i);
+    }
+  }
+  return ca_face_lift(obj, rb_ary_entry(list, 0));
 }
 
 static VALUE
@@ -1024,6 +1124,7 @@ Init_ca_obj_meld (void)
   id_parents = rb_intern("parents");
 
   rb_define_alloc_func(rb_cCAMeld, rb_ca_meld_s_allocate);
+  rb_define_singleton_method(rb_cCAMeld, "new", rb_ca_meld_s_new, -1);
   rb_define_method(rb_cCAMeld, "initialize",
                                       rb_ca_meld_initialize, -1);
   rb_define_method(rb_cCAMeld, "initialize_copy",
