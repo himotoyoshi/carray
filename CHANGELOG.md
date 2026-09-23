@@ -36,6 +36,23 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame`'s `to_table` (and so `p` / `puts` / `to_s`) now prints a masked
+  element inside an N-D cell as `_`, the marker it already used for a masked
+  scalar cell, instead of the literal `UNDEF`. Nothing to change in calling
+  code.
+
+- Fix: `CAFrame#group_by` with a composite key no longer makes a group of its
+  own for rows whose key has a masked component. Such a row now forms no group,
+  which is what a single masked key cell already did. Nothing to change in
+  calling code unless you relied on the UNDEF-labelled group.
+
+- Fix: two `CAFrame` verbs that change every column now decide before changing
+  any, so a column that refuses no longer leaves the frame half-changed in an
+  order that depends on how the columns were inserted. `df[sel] = UNDEF` on a
+  frame holding a read-only column (a categorical) raises without masking
+  anything, and `promote(type)` raises without casting anything when some
+  column would narrow. Nothing to change in calling code.
+
 - Fix: `CAFrame.from_records` now reads a `nil` cell back as UNDEF in every
   column, not only in one a numeric cast happens to convert. A string, boolean,
   object or N-D column used to keep the `nil` as a value, so a mask written by

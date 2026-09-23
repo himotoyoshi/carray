@@ -283,6 +283,15 @@ class CAFrame
     "#{n} #{noun}#{n == 1 ? '' : 's'}"
   end
 
+  # Render one N-D cell the way Array#inspect would, except that a masked
+  # element prints as the table's missing marker rather than as UNDEF.
+  private def format_nested_cell(v)
+    case v
+    when Array then "[" + v.map { |x| format_nested_cell(x) }.join(", ") + "]"
+    else UNDEF.equal?(v) || v.nil? ? "_" : v.inspect
+    end
+  end
+
   private def format_table_cell(col, i, precision)
     e = elem_at(col, i)
     if UNDEF.equal?(e) || e.nil?
@@ -293,7 +302,10 @@ class CAFrame
       # to read. precision: nil prints the value as Ruby renders it.
       e.round(precision).to_s
     elsif e.is_a?(CArray)
-      e.to_a.inspect
+      # An N-D cell renders its elements, and a masked element among them
+      # takes the same marker a masked scalar does -- UNDEF's own inspect
+      # would put a second spelling of "missing" in the same table.
+      format_nested_cell(e.to_a)
     elsif e.is_a?(String)
       e
     elsif e.respond_to?(:iso8601)
