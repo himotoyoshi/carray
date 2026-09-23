@@ -51,6 +51,10 @@
 
 --------------------------------------------------------------------------- */
 
+/* Rounded so that each section of the block below starts where the widest
+   thing in it may be read. */
+#define ROUND_UP_8(n) (((n) + 7u) & ~(size_t) 7u)
+
 #define TIER_ENTITY 1
 #define TIER_STRIDE 2
 #define TIER_XFER   3
@@ -60,6 +64,7 @@
    same kind of view -- a CABlock's mask is a CABlockMask -- so it is opened
    by exactly the same tier logic as the data. */
 typedef struct {
+  char      *block;           /* the one allocation the arrays below carve up */
   int        count;
   int        slots;
   VALUE      arrays;
@@ -378,14 +383,7 @@ open_ensure (VALUE argument)
       ca_detach(state->roots[i]);
     }
   }
-  xfree(state->carrays);
-  xfree(state->roots);
-  xfree(state->tier);
-  xfree(state->writable);
-  xfree(state->attached_root);
-  xfree(state->region);
-  xfree(state->region_start);
-  xfree(state->region_count);
+  xfree(state->block);
   return Qnil;
 }
 
@@ -495,28 +493,34 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
   state.slots         = state.count * 2;
   state.arrays        = arrays;
   state.bases         = rb_ary_new_capa(state.count);
-  state.carrays       = ALLOC_N(CArray *, state.slots + 1);
-  state.roots         = ALLOC_N(CArray *, state.slots + 1);
-  state.tier          = ALLOC_N(int, state.slots + 1);
-  state.writable      = ALLOC_N(int, state.slots + 1);
-  state.attached_root = ALLOC_N(int, state.slots + 1);
-  state.region        = ALLOC_N(char *, state.slots + 1);
-  state.region_start  = ALLOC_N(ca_size_t, (state.slots + 1) * CA_RANK_MAX);
-  state.region_count  = ALLOC_N(ca_size_t, (state.slots + 1) * CA_RANK_MAX);
+  /* One allocation, carved up, rather than eight.  Every array here is the
+     same length in slots and lives exactly as long as the open, so there is
+     nothing for eight separate lifetimes to buy -- and this is a per-call
+     cost on a path whose whole point is to be cheap enough to cross often.
+     Zeroed once as a block, which is also what the slots want to start as:
+     a NULL array, a NULL root, not writable, not attached, no region. */
+  {
+    size_t n        = (size_t) state.slots + 1;
+    size_t pointers = ROUND_UP_8(n * sizeof(CArray *));
+    size_t chars    = ROUND_UP_8(n * sizeof(char *));
+    size_t sizes    = ROUND_UP_8(n * CA_RANK_MAX * sizeof(ca_size_t));
+    size_t ints     = ROUND_UP_8(n * sizeof(int));
+    size_t total = 2 * pointers + chars + 2 * sizes + 3 * ints;
+    char  *p;
+    state.block = ALLOC_N(char, total);
+    MEMZERO(state.block, char, total);
+    p = state.block;
+    state.carrays       = (CArray **)  p; p += pointers;
+    state.roots         = (CArray **)  p; p += pointers;
+    state.region        = (char **)    p; p += chars;
+    state.region_start  = (ca_size_t *) p; p += sizes;
+    state.region_count  = (ca_size_t *) p; p += sizes;
+    state.tier          = (int *)      p; p += ints;
+    state.writable      = (int *)      p; p += ints;
+    state.attached_root = (int *)      p;
+  }
   state.box_starts    = box_start;
   state.box_counts    = box_count;
-
-  for ( i = 0; i < state.slots; i++ ) {
-    state.carrays[i]       = NULL;
-    state.roots[i]         = NULL;
-    state.writable[i]      = 0;
-    state.attached_root[i] = 0;
-    state.region[i]        = NULL;
-    memset(&state.region_start[i * CA_RANK_MAX], 0,
-           sizeof(ca_size_t) * CA_RANK_MAX);
-    memset(&state.region_count[i * CA_RANK_MAX], 0,
-           sizeof(ca_size_t) * CA_RANK_MAX);
-  }
 
   for ( i = 0; i < state.count; i++ ) {
     VALUE   object = rb_ary_entry(arrays, i);
