@@ -107,18 +107,35 @@ exposes the within-piece index.
 
 ## Calling conventions
 
-Four of the members bind the axis at construction, so a reduction takes no axis:
+Three of the members bind the axis at construction, so a reduction takes no axis:
 
 ```ruby
 a[nil, :>].mean                 # slab
 a.windows(-1..1).mean           # window (rolling)
 a.blocks(2, 2).mean             # block (pooling)
-value.group_by_category(cat).mean   # categorical
 ```
 
-**`CAGroupIterator` is the exception**: the same array indexer produces either a
-plain selection or a grouping, so a group reduction takes `axis: :group` to
-engage the grouping (without it the value is reduced plainly):
+**`CACategoricalIterator` takes either form.** With no axis it reads the value
+and the classifier flat, which needs one classifier cell per value cell, and
+answers one value per category. With `axis:` it groups each fiber along that
+axis and keeps the other axes, and the classifier may instead carry one cell per
+position along that axis, or one per kept cell:
+
+```ruby
+values.group_by_category(keys).mean          # one value per category
+                                             # keys.elements == values.elements
+
+grid.group_by_category(day).mean(axis: 0)    # per category, per kept cell
+                                             # day.elements == grid.shape[0]
+```
+
+See [`CACategoricalIterator`](CACategoricalIterator.md) for the classifier
+shapes the axis form accepts, and for which reductions take it.
+
+**`CAGroupIterator` is the other one that asks for an axis**: the same array
+indexer produces either a plain selection or a grouping, so a group reduction
+takes `axis: :group` to engage the grouping (without it the value is reduced
+plainly):
 
 ```ruby
 value[cat, nil].mean(axis: :group)   # per-group mean, band axis preserved
