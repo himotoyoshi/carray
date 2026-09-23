@@ -775,4 +775,39 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
     assert_equal([[1, 1], [2, 2]], h.group_by_category(cat).count(axis: 0).to_a)
   end
+  # ---- band-only is reachable at every rank --------------------------------
+  #
+  # The three accepted classifier shapes were told apart by rank. For a 2-D
+  # source the case A shape and the band-only shape are both rank 1, so case A
+  # was taken every time and band-only could not be reached -- while the
+  # refusal went on to list the very shape it had just refused among the ones
+  # it accepts.
+
+  def test_band_only_works_on_a_two_dimensional_source
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])   # [4, 3]
+    cat = CA_INT32([0, 1, 1]).categorize                             # band = [3]
+    r = h.group_by_category(cat).sum(axis: 0)
+    assert_equal([2, 3], r.shape)
+    # column 0 is group "a"; columns 1 and 2 are group "b"
+    assert_equal([[22.0, 0.0, 0.0], [0.0, 26.0, 30.0]], r.to_a)
+  end
+
+  def test_case_a_wins_when_both_shapes_fit
+    # a square source makes case A and band-only both fit; classifying along
+    # the reduce axis is the reading that holds at every rank, so it wins
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    cat = CA_INT32([0, 0, 1]).categorize
+    assert_equal([[5.0, 7.0, 9.0], [7.0, 8.0, 9.0]],
+                 h.group_by_category(cat).sum(axis: 0).to_a)
+  end
+
+  def test_the_refusal_does_not_list_the_shape_it_is_refusing
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+    e = assert_raise(ArgumentError) {
+      h.group_by_category(CA_INT32([0, 1]).categorize).mean(axis: 0)
+    }
+    assert_match(/cat\.shape=\[2\]/, e.message)
+    # and it does not claim the caller asked for sum when they asked for mean
+    assert_not_match(/\.sum\(/, e.message)
+  end
 end
