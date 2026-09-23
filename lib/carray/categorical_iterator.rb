@@ -899,22 +899,20 @@ class CACategoricalIterator < CAIterator
   def resolve_axis_codes (codes, h_shape, axis)
     ndim = h_shape.size
     band = h_shape.dup; band.delete_at(axis)
-    case codes.ndim
-    when 1
-      unless codes.shape == [h_shape[axis]]
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    # Chosen by shape, not by rank. For a 2-D source the case A shape and the
+    # band-only shape are both rank 1, so choosing by rank took case A every
+    # time and band-only could never be reached there -- while the refusal
+    # went on to list the very shape it was refusing among the ones it
+    # accepts. When both fit, which a square source makes possible, case A
+    # wins: classifying along the reduce axis is the reading that holds at
+    # every rank.
+    case
+    when codes.shape == [h_shape[axis]]                      # case A
       view_shape = Array.new(ndim, 1); view_shape[axis] = h_shape[axis]
       codes.reshape(*view_shape).broadcast_to(*h_shape)
-    when ndim
-      unless codes.shape == h_shape
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    when codes.shape == h_shape                              # case B
       codes
-    when ndim - 1
-      unless codes.shape == band
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    when codes.shape == band                                 # band-only
       view_shape = h_shape.dup; view_shape[axis] = 1
       codes.reshape(*view_shape).broadcast_to(*h_shape)
     else
@@ -923,8 +921,11 @@ class CACategoricalIterator < CAIterator
   end
 
   def axis_shape_mismatch! (cat_shape, h_shape, axis, band)
+    # No method name: the one place that resolves this serves sum, mean, min,
+    # max, count and the rest alike, and naming one of them would be wrong for
+    # the others. The backtrace says which was called.
     raise ArgumentError,
-          "group_by_category.sum(axis: #{axis}): cat.shape=#{cat_shape.inspect} " \
+          "group_by_category (axis: #{axis}): cat.shape=#{cat_shape.inspect} " \
           "does not fit any of the 3 accepted forms for h.shape=#{h_shape.inspect}: " \
           "case A cat.shape=[#{h_shape[axis]}], " \
           "case B cat.shape=#{h_shape.inspect}, " \

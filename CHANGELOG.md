@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: the band-only classifier shape for a `group_by_category(axis:)`
+  reduction is now reachable on a two-dimensional source, where it was
+  refused and the refusal listed it among the accepted forms. Where both the
+  case A shape and the band-only shape fit, which a square source allows,
+  case A is taken, as before. The refusal no longer names `sum` when another
+  reduction was the one called.
+
 - Fix: `count(axis:)` and `count_not_masked(axis:)` on `group_by_category`
   now work for a complex, boolean or object payload. They counted cells
   through a numeric-only kernel, which refused those payloads for an answer
