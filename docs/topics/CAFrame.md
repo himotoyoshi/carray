@@ -1119,9 +1119,10 @@ exposed.
 
 | reader | returns |
 |---|---|
-| `variables` | `Array<String>` of column names, in column order |
+| `variable_names` | `Array<String>` of column names, in column order |
+| `variables` | `Array<CArray>` of the stored columns themselves, in column order |
 | `nvar` | number of columns |
-| `nrow` | number of rows (axis-0 length `N`) |
+| `nrow` | number of rows (axis-0 length `N`) — backed by a column, or by the index when the frame has no columns |
 | `data_types` | `Hash<String, Symbol>` of `name => data_type` |
 | `axis_name` | row-axis name (String) |
 | `index` | the index `CArray`, or `nil` |
