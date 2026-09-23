@@ -720,4 +720,24 @@ class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
     assert_equal [10, 20, 30], f.index.to_a
     assert_equal false, f.index.has_mask?
   end
+
+  # p on a frame whose only data is its index showed none of it: the gate was
+  # the column set, where the table itself counts the index as a column.
+  def test_inspect_shows_the_table_of_an_index_only_frame
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    assert_match(/^#<CAFrame nrow=3 vars=\[\] index="t">$/, f.inspect.lines.first.chomp)
+    assert_operator f.inspect.lines.size, :>, 1
+    assert_match(/10/, f.inspect)
+  end
+
+  def test_inspect_of_a_frame_with_nothing_in_it_is_the_summary_alone
+    assert_equal 1, CAFrame.new({}).inspect.lines.size
+  end
+
+  # The message has to name the side the caller can act on.
+  def test_a_wrong_length_column_is_blamed_not_the_index
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    e = assert_raise(ArgumentError) { f.append("v", CA_FLOAT64([1, 2])) }
+    assert_match(/"v"/, e.message)
+  end
 end

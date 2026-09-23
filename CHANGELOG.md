@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `p` / `inspect` on a `CAFrame` whose only data is its index now shows the
+  table. It printed the summary line alone, because it gated on the column set
+  while the table itself counts the index as a column.
+
 - Fix: `CAFrame` no longer reports a row count that nothing in the frame backs.
   Splicing a frame that has no columns into another that has neither columns nor
   an index left the target claiming the spliced frame's row count, while its own
