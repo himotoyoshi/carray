@@ -463,15 +463,23 @@ scattered selector raises.
 >   columns** — writing through the frame after a delete reaches a column escaped
 >   before it, and vice versa. Nothing is copied; the original full-length
 >   buffers stay alive behind the views, so `copy` if you want to reclaim them.
-> - `= other` rebuilds each column with `CArray.concatenate`, which
->   **materializes**, so the spliced columns are fresh, independent buffers (the
->   one row form that copies). This holds **even when `other` has the same row
->   count as the span** — `= other` is splice (structural), not an element-write,
->   so it never writes through, unlike CArray's `ca[sel] = other`. A column
->   escaped before the splice keeps the old data. (Making it write-through when
->   the counts happen to match would make the same expression copy or mutate
->   depending on lengths — the row count deciding the behavior — so it always
->   copies.)
+> - `= other` rebuilds each column with `CArray.meld` of three pieces: a view of
+>   the rows before the span, a **snapshot** of `other`'s column, and a view of
+>   the rows after it. The result is a `CAMeld` view, so the two halves behave
+>   differently:
+>   - The **spliced span is independent of `other`**: writing the frame's new
+>     rows never reaches `other`, and `other`'s later writes never reach the
+>     frame. This holds **even when `other` has the same row count as the
+>     span** — `= other` is splice (structural), not an element-write, so it
+>     does not write through to `other` the way CArray's `ca[sel] = other`
+>     does. (Making it write-through when the counts happen to match would make
+>     the same expression copy or mutate depending on lengths — the row count
+>     deciding the behavior — so it always snapshots.)
+>   - The **rows outside the span still share storage with the original
+>     columns**, just as in the `= nil` form. A column escaped before the splice
+>     keeps its own length and its own values in the replaced span, but writes to
+>     the rows on either side of that span propagate both ways. `copy` the result
+>     if you want a frame detached from the originals.
 >
 > To drop rows **without** mutating the frame in place, take a filtered view
 > instead — `df[mask]` / `filter` return a new frame and leave this one bound to
@@ -1087,7 +1095,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df["c"] = UNDEF` | **write-through self** — masks the stored column in place, visible through every alias |
 | `df[sel] = UNDEF` | **write-through self** — masks the selected rows in place; shape unchanged, visible through every derived view |
 | `df[sel] = nil` | **self** — rebinds each column to a row-gather view of itself; surviving rows still share storage with the originals (§3) |
-| `df[sel] = frame` | **self** — rebuilds columns via `concatenate` (materialized, independent of the old columns); splice is the one row form that copies (§3) |
+| `df[sel] = frame` | **self** — rebuilds each column as a `CAMeld` of [rows before the span, a snapshot of `other`'s column, rows after it]. The spliced span is independent of `other`; the rows on either side still share storage with the original columns (§3) |
 | `df.to_ca` | a **view** — a `CAStack` of shape `(nrow, nvar)` over the stored columns; writes flow back, `copy` for an owned matrix |
 
 Because view-frames share storage, mutating a view writes through to the
