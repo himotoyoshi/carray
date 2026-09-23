@@ -28,7 +28,14 @@ class CAFrame
       # values, categorized by content (the codes are composed from the
       # per-column keys).
       n = nrow
-      CArray.object(n) { |i| cols.map { |c| c[i] } }.categorize
+      key = CArray.object(n) { |i| cols.map { |c| c[i] } }
+      # One undetermined component makes the whole tuple undetermined, the same
+      # answer a single masked key cell gets. Left as a value, the UNDEF inside
+      # the tuple would intern as an ordinary distinct key and the row would
+      # form a group of its own.
+      undetermined = CArray.boolean(n) { |i| key[i].any? { |v| UNDEF.equal?(v) } }
+      key[undetermined] = UNDEF if undetermined.any
+      key.categorize
     end
   end
 

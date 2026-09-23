@@ -161,6 +161,22 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [40.0], stat["s"].to_a
   end
 
+  # A single masked key cell means the row's group is undetermined, and such a
+  # row forms no group (test_masked_key_rows_excluded). A composite key has to
+  # say the same: one undetermined component makes the tuple undetermined, not
+  # a group of its own labelled with UNDEF.
+  def test_masked_component_of_a_composite_key_excludes_the_row
+    k = CA_OBJECT(["a", "b", "c"])
+    k[1] = UNDEF
+    df = CAFrame.new("k" => k,
+                     "p" => CA_OBJECT(["p", "p", "p"]),
+                     "v" => CA_FLOAT64([1, 2, 3]))
+    grp = df.group_by("k", "p")
+    assert_equal 2, grp.ngroup
+    assert_equal [["a", "p"], ["c", "p"]], grp.labels.to_a
+    assert_equal [1.0, 3.0], grp.aggregate("s" => ["v", :sum])["s"].to_a
+  end
+
   def test_empty_group_by_raises
     assert_raise(ArgumentError) { @df.group_by }
   end
