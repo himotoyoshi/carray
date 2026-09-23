@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CAFrame#at(UNDEF)` now raises `ArgumentError` instead of returning a
+  row. An index can hold a masked cell -- an `:outer` / `:right` join and
+  `align` both produce one -- but a row with no label cannot be identified by
+  one, and two undefined labels are not the same label; the key matching behind
+  `join` and `align` already treats a masked key as matching nothing. Use
+  `df.filter { |f| f.index.is_masked }` for the rows with no label, which also
+  handles more than one of them. Asking for a real label whose cell is masked
+  still raises `KeyError`, unchanged.
+
 - Fix: `CAFrame`'s `to_table` (and so `p` / `puts` / `to_s`) now prints a masked
   element inside an N-D cell as `_`, the marker it already used for a masked
   scalar cell, instead of the literal `UNDEF`. Nothing to change in calling

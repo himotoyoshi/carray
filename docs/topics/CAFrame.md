@@ -340,6 +340,18 @@ unique) — reach for the multi-row, frame-returning path instead:
 df.filter { |f| f.index.eq(label) }   # every row whose label matches
 ```
 
+An index may carry a **masked cell** — an `:outer` / `:right` join and `align`
+both produce one for a row that matched nothing. Such a row has no label, so
+`at` cannot reach it: `at(UNDEF)` raises `ArgumentError`, and asking for a real
+label whose cell is masked raises `KeyError` like any other absent label. Two
+undefined labels are not the same label, so there is nothing for `at` to return
+one row for — which is the answer the key-matching primitives behind `join` and
+`align` already give. Reach for those rows with mask vocabulary instead:
+
+```ruby
+df.filter { |f| f.index.is_masked }   # every row with no label
+```
+
 ### `sort_by_key` → reorder rows by key columns (view-frame)
 
 `sort_by_key(*keys, order:, masked_position:)` sorts rows **lexicographic** by
