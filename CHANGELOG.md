@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CACategorical.from_codes` now checks what it is handed and
+  normalises it. It raises `ArgumentError` for duplicate labels, for more
+  labels than the codes data type can carry once its top value is reserved as
+  the exclusion sentinel, and for an unmasked code outside `0...labels.size`
+  that is not the sentinel. A cell that arrives masked also gets the sentinel
+  written into its code byte, so the mask and the byte now agree for every
+  reader, a byte-reinterpret export included. Codes built by `categorize`
+  already satisfy all of this, so nothing changes for a categorical made that
+  way.
+
 - Change: `CAFrame#at(UNDEF)` now raises `ArgumentError` instead of returning a
   row. An index can hold a masked cell -- an `:outer` / `:right` join and
   `align` both produce one -- but a row with no label cannot be identified by
