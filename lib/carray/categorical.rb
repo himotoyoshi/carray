@@ -95,9 +95,11 @@ class CACategorical < CAObject
 
   class << self
     # Wrap already-dense codes + labels with no discovery — the import receiver
-    # for a pandas Categorical or an Arrow dictionary. `codes` becomes the
-    # Face's storage parent verbatim (zero-copy when it is a wrapped memory
-    # view and nothing needs rewriting), and from_codes takes ownership of it.
+    # for a pandas Categorical or an Arrow dictionary. from_codes takes
+    # ownership of `codes`, which becomes the Face's storage parent: verbatim
+    # when it is an entity that needs no rewriting, so a wrapped memory view
+    # stays a view, and materialised when it is a view over an array the caller
+    # still holds, since a view owns no bytes to take ownership of.
     #
     # This is the one door through which an already-built encoding enters, so
     # it validates rather than assumes, and it normalises before handing over:
@@ -117,8 +119,9 @@ class CACategorical < CAObject
     # @overload from_codes(codes, labels)
     #   Returns a {CACategorical} wrapping already-dense integer
     #   `codes` with the given `labels`, without discovery. `codes`
-    #   becomes the Face's storage parent. A cell that is masked or
-    #   holds the type-max sentinel is excluded, and leaves as both.
+    #   becomes the Face's storage parent, materialised first if it is
+    #   a view. A cell that is masked or holds the type-max sentinel is
+    #   excluded, and leaves as both.
     #   @param codes [CArray] integer code storage.
     #   @param labels [Array, CArray] category vocabulary indexed by
     #     code. Must be unique, and must fit the codes data type with
@@ -181,16 +184,30 @@ class CACategorical < CAObject
               "(use #{sentinel} to exclude a cell, or mask it)"
       end
 
-      # Normalise, so the byte reader and the mask reader agree from here on.
-      # Nothing is written when the two already agree, which keeps a clean
-      # zero-copy import zero-copy.
+      # Take real ownership, then normalise so the byte reader and the mask
+      # reader agree from here on.
+      #
+      # A view owns no bytes — its root does, and the caller still holds that
+      # root. #initialize marks what it is given read-only, which would stop
+      # `cat.codes[i] = x` but not `root[i] = x`, so the codes could still
+      # change underneath a Face that is supposed to be immutable (and
+      # underneath the grouping plan memoised against them). Marking the root
+      # instead is worse: it would freeze bytes outside the window the caller
+      # handed over. So a view is materialised. Read-only codes are copied for
+      # the adjacent reason — the normalising writes need somewhere to land.
+      #
+      # An entity that needs no rewriting is adopted verbatim, which is what
+      # keeps a wrapped memory view a view. That buffer's producer can still
+      # write it; that is the borrowed-buffer bargain, and not something this
+      # constructor can close.
       needs_mask = masked ? (excluded & masked.not).any : excluded.any
       needs_byte = (excluded & raw.ne(sentinel)).any
+      if !codes.entity? || ((needs_mask || needs_byte) && codes.read_only?)
+        codes = codes.copy
+      end
       if needs_mask || needs_byte
-        work = codes.read_only? ? codes.copy : codes
-        work.value[excluded] = sentinel if needs_byte
-        work.mask = excluded
-        codes = work
+        codes.value[excluded] = sentinel if needs_byte
+        codes.mask = excluded
       end
 
       new(codes, labels_arr)
@@ -232,8 +249,9 @@ class CACategorical < CAObject
     # through views/Faces (a reshape of frozen codes is frozen) and would block
     # the grouping cache from memoising. The flag gives the same write protection
     # (mutations raise) while keeping the object non-frozen. One-way: it takes
-    # ownership of `codes` (categorize / from_codes build or receive it, mask
-    # already derived above); a caller keeping a mutable array must pass `.copy`.
+    # ownership of `codes`, which from_codes has already validated, materialised
+    # if it was a view, and normalised; a caller keeping a mutable entity of its
+    # own must pass `.copy`.
     codes.set_read_only_flag
   end
 

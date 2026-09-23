@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CACategorical.from_codes` now materialises `codes` when it is a
+  view rather than an array of its own, so writing through the array the view
+  was taken from no longer changes the categorical underneath it. A wrapped
+  memory view is an array of its own and is still adopted without a copy, so a
+  zero-copy import stays zero-copy. The array you pass is never marked
+  read-only beyond what you handed over.
+
 - Change: `CACategorical.from_codes` now checks what it is handed and
   normalises it. It raises `ArgumentError` for duplicate labels, for more
   labels than the codes data type can carry once its top value is reserved as

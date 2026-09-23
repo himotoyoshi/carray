@@ -168,6 +168,33 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_same(sent, CACategorical.from_codes(sent, ["a", "b"]).codes)
   end
 
+  def test_from_codes_materialises_a_view_so_its_root_cannot_change_the_codes
+    # read-only is a per-object flag: setting it on a view stops
+    # `cat.codes[i] = x` but not `root[i] = x`, and the categorical (plus the
+    # grouping plan memoised against it) would move underneath a Face that is
+    # supposed to be immutable
+    root = CArray.uint8(6) { |i| [0, 1, 0, 2, 1, 0][i] }
+    cat  = CACategorical.from_codes(root[1..4], ["a", "b", "c"])
+    assert_true(cat.codes.entity?)
+    assert_equal(["b", "a", "c", "b"], cat.to_a)
+
+    root[1] = 200
+    assert_equal(["b", "a", "c", "b"], cat.to_a)
+    assert_equal([1, 0, 2, 1], cat.codes.value.to_a)
+    # the caller's array is not frozen as a side effect — taking ownership of a
+    # window must not freeze the bytes outside it
+    assert_false(root.read_only?)
+  end
+
+  def test_from_codes_adopts_a_borrowed_entity_without_copying
+    # a CAWrap over a producer's buffer is an entity, so the zero-copy import
+    # stays zero-copy (that producer can still write its own buffer — the
+    # borrowed-buffer bargain, which this constructor does not pretend to close)
+    w = CArray.wrap_memory_view(CArray.uint8(3) { |i| [0, 1, 1][i] })
+    cat = CACategorical.from_codes(w, ["a", "b"])
+    assert_same(w, cat.codes)
+  end
+
   # ---- READONLY -----------------------------------------------------------
 
   def test_readonly
