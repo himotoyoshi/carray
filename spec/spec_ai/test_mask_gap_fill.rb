@@ -224,6 +224,18 @@ class TestMaskGapFillHold < Test::Unit::TestCase
     assert_equal([UNDEF, 1.0, 2.0, 3.0, UNDEF], c.to_a)
   end
 
+  # The intersection of the two cases above: an integer column whose masked
+  # cells are outside the interpolable span. Out of range comes back as NaN,
+  # which has to be marked while the values are still floating point -- casting
+  # first turns it into a legitimate-looking 0.
+  def test_linear_leading_trailing_stay_masked_on_an_integer_array
+    v = CA_INT32([0, 1, 0, 3, 0]); v[0] = UNDEF; v[2] = UNDEF; v[4] = UNDEF
+    c = v.strip_mask(method: :linear)
+    assert_equal(CA_INT32, c.data_type)
+    assert_equal([true, false, false, false, true], c.is_masked.to_a)
+    assert_equal([1, 2, 3], c[1..3].to_a)
+  end
+
   def test_linear_per_axis
     m = CA_FLOAT64([[1.0, 0, 0, 4.0], [10.0, 0, 30.0, 0]])
     m[0, 1] = UNDEF; m[0, 2] = UNDEF; m[1, 1] = UNDEF; m[1, 3] = UNDEF

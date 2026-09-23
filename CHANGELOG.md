@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: linear gap-fill on an **integer** array no longer fills the cells
+  outside the interpolable span with `0` and drops their mask. It now leaves
+  them masked, as it already did for a float array and as the documentation
+  says. This covers `unmask(method: :linear)` and `strip_mask(method: :linear)`
+  as well as `CAFrame#fill(name, :linear)`, with or without a frame index.
+  Nothing to change in calling code.
+
 - Fix: on a frame grouped by a numeric column, `CAFrame`'s `mean`, `sum`, `min`
   and `max` shortcuts now work. They raised `axis_name "..." collides with a
   column of the same name`, because the key column was reduced into the result

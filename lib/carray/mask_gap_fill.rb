@@ -172,7 +172,9 @@ class CArray
       return vec[present].linear_fetch(addr)
     end
     vval = vec.value.float64[present]         # valid values
-    vval.linear_fetch(addr).to_type(vec.data_type).mask_invalid
+    # Mark the out-of-range NaN before casting back: for an integer data_type
+    # the cast turns NaN into 0, and mask_invalid then has nothing left to find.
+    vval.linear_fetch(addr).mask_invalid.to_type(vec.data_type)
   end
 
   # Yield an index key (Array with `nil` at `axis`, integers elsewhere)

@@ -230,7 +230,9 @@ class CAFrame
       return
     end
     yvalid = col.value.float64[present]
-    col[] = yvalid.linear_fetch(addr).to_type(col.data_type).mask_invalid   # write-through
+    # mask_invalid before the cast: linear_fetch marks out of range with NaN,
+    # and casting back to an integer column would turn it into a plausible 0.
+    col[] = yvalid.linear_fetch(addr).mask_invalid.to_type(col.data_type)  # write-through
   end
 
   private def cast_one(name, type)
