@@ -240,9 +240,10 @@ class CAFrame
     end
   end
 
-  # Bind +key+ to +column+, adding the name when it is new.  This is the one
-  # place a column enters an existing frame, so it is where the axis-0 length
-  # invariant is enforced (§12-A).  It is a replacement rather than an edit,
+  # Bind +key+ to +column+, adding the name when it is new.  This is where a
+  # column arriving from outside the frame has its axis-0 length checked
+  # (§12-A); the conversions in verbs.rb rebind +@columns+ directly and rely on
+  # being length-preserving instead.  It is a replacement rather than an edit,
   # which is what sets it apart from the rest: +fill+ / +mask_eq+ /
   # +df[rows] = UNDEF+ write to the shared column and are therefore visible
   # wherever it is held, while this binds the name to a different column and
