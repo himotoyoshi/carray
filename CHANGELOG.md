@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CArray.load_from_file` no longer exhausts the stack. It was
+  registered for autoload but defined nowhere, so calling it recursed until
+  Ruby gave up; it now raises `NoMethodError` like any other method that does
+  not exist. Use `CArray.load`, which is unchanged. An autoload registration
+  whose library defines no such method now says which method and which
+  library, rather than recursing.
+
 - Fix: a `group_by_category` reduction over a read-only Face — a
   `CAConstString` column — no longer fails with an `IndexError` about a buffer
   range. Such a Face cannot be built by writing into it, so `min`, `max` and
