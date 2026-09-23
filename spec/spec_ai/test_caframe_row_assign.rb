@@ -258,3 +258,38 @@ class TestCAFrameRowAssignErrors < Test::Unit::TestCase
     assert_raise(ArgumentError) { mk[0..1] = 5 }
   end
 end
+
+# A verb that changes every column has to decide before it changes any: a
+# column that refuses part way through would otherwise leave the frame in a
+# state that depends on column insertion order.
+class TestCAFrameMultiColumnAtomicity < Test::Unit::TestCase
+  def frame_with_readonly_at(pos)
+    cols = {}
+    names = ["v", "w"]
+    names.insert(pos, "c")
+    names.each do |n|
+      cols[n] = n == "c" ? CA_OBJECT(%w[x y z]).categorize : CA_FLOAT64([1, 2, 3])
+    end
+    CAFrame.new(cols)
+  end
+
+  def test_row_mask_leaves_every_column_untouched_when_one_refuses
+    [0, 1, 2].each do |pos|
+      df = frame_with_readonly_at(pos)
+      assert_raise(RuntimeError) { df[CA_BOOLEAN([1, 0, 0])] = UNDEF }
+      assert_equal [1.0, 2.0, 3.0], df["v"].to_a, "column order #{pos}"
+      assert_equal [1.0, 2.0, 3.0], df["w"].to_a, "column order #{pos}"
+    end
+  end
+
+  def test_promote_leaves_every_column_untouched_when_one_would_narrow
+    [["a", "b"], ["b", "a"]].each do |order|
+      cols = {}
+      order.each { |n| cols[n] = n == "a" ? CA_INT8([1, 2]) : CA_FLOAT64([1.5, 2.5]) }
+      df = CAFrame.new(cols)
+      before = df.data_types
+      assert_raise(ArgumentError) { df.promote(:int32) }
+      assert_equal before, df.data_types, "column order #{order.inspect}"
+    end
+  end
+end
