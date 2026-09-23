@@ -259,6 +259,21 @@ void ca_face_register_state_portable (int obj_type, int portable);
    (= falls through to default). */
 int ca_face_state_portable (int obj_type, VALUE klass);
 
+/* Bring a Face *operand* into the reference's storage space, or refuse.
+
+   The gate asks `fz_face_descend`'s question -- "is your storage your
+   surface?" -- of the receiver, and for a long time asked nothing at all of
+   the operand: a COMPARABLE receiver stripped any Face handed to it, and got
+   back that Face's encoding rather than its values.  Where the two encodings
+   happened to be the same width the comparison then answered, wrongly and
+   silently.  Call this instead of stripping an operand by hand.
+
+   A Face passes only if it declares COMPARABLE_STORAGE, i.e. its storage
+   cells *are* the values it shows.  Anything else -- a byte range, a code, a
+   tick -- is refused rather than compared as bytes.  Non-Face operands are
+   returned untouched.  `name` opens the message. */
+VALUE ca_face_operand_descend (VALUE operand, const char *name);
+
 #define CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca) do {                \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                  \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                         \

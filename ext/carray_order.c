@@ -854,7 +854,7 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
     }
     if ( self_comparable ) {
       if ( val_is_face ) {
-        val = rb_ca_strip_face_value(val);
+        val = ca_face_operand_descend(val, "linear_section");
       }
     }
     else if ( self_is_face ) {

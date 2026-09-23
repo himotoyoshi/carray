@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `is_in`, `count(v)`, the set operations, `locate_addr`, `search`,
+  `bsearch` and `linear_section` no longer compare a Face operand by its
+  storage when that storage is not the value it shows. Passing a
+  `CAConstString` (whose cells are byte ranges) to one of these on another
+  Face used to answer from the byte ranges: where the two cell widths
+  coincided — a `CAConstString` cell is 16 bytes, and so is a
+  `CAFixlenString` cell whose column is 16 bytes wide — you got a wrong
+  answer with no error, and a set operation could return raw offset bytes as
+  its values. Such an operand now raises `ArgumentError`; convert it first,
+  with `#to_string` for a string Face, or pass `.parent` on both sides to work
+  in storage space. Plain operands, and Faces whose cells are their values
+  (`CAString`, `CAFixlenString`), are unaffected, as is the cross-unit
+  reconciliation `CATime` does through `to_comparable`.
+
 - Change: `CArray.meld` (and `CAMeld.new`, and so `CAFrame.meld`) now treats a
   homogeneous list of Faces the way `CArray.stack` does: a Face whose state is
   per-parent is refused, and one that can be carried is kept on the result.

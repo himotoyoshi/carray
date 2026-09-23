@@ -105,13 +105,27 @@
 /* Descend `self` when it is an ORDERABLE Face; *pface keeps the pre-strip Face
    for the re-lift (Qnil when there is nothing to put back). */
 static VALUE
-fz_face_descend (VALUE self, volatile VALUE *pface)
+fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
-  if ( ca_is_face(ca) && ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    *pface = self;
-    return rb_ca_strip_face_value(self);
+  if ( ca_is_face(ca) ) {
+    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+      *pface = self;
+      return rb_ca_strip_face_value(self);
+    }
+    /* A Face that cannot be descended must not flow on undescended: whatever
+       reads it next reads its storage anyway, which is the encoding rather
+       than the values.  A Face in this position normally never arrives --
+       CAConstString and CACategorical define their own members in Ruby -- but
+       the overrides only fire when the Face is the receiver, and this same
+       helper descends the *reference* for locate_addr, where it is the
+       argument. */
+    rb_raise(rb_eArgError,
+             "%s: %s is not orderable by storage (a cell encodes the value "
+             "rather than being it); convert it first -- #to_string for a "
+             "string Face -- or pass .parent to work in storage space",
+             name, rb_obj_classname(self));
   }
   *pface = Qnil;
   return self;
@@ -140,15 +154,7 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
                                              rb_intern("to_comparable"),
                                              1, operand));
   }
-  if ( rb_obj_is_carray(operand) ) {
-    CArray *op;
-    GetCArray(operand, op);
-    if ( ca_is_face(op) ) {
-      return rb_ca_strip_face_value(operand);
-    }
-  }
-  (void) name;
-  return operand;
+  return ca_face_operand_descend(operand, name);
 }
 
 /* Put the Face back on a value-carrying output. */
@@ -495,7 +501,7 @@ rb_ca_factorize_appearance (VALUE self)
 {
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face);
+  self = fz_face_descend(self, &face, "categorize");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -863,7 +869,7 @@ rb_ca_unique_flat (VALUE self)
 {
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face);
+  self = fz_face_descend(self, &face, "unique");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -1113,7 +1119,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
 {
   CArray *ca, *cv;
   volatile VALUE face;
-  self     = fz_face_descend(self, &face);
+  self     = fz_face_descend(self, &face, "is_in");
   rvalues  = fz_face_reconcile(face, rvalues, "is_in");
   GetCArray(self, ca);
 
@@ -1278,7 +1284,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
      output is an address, so nothing is lifted back. */
   {
     volatile VALUE ref_face;
-    rref = fz_face_descend(rref, &ref_face);
+    rref = fz_face_descend(rref, &ref_face, "locate_addr");
     self = fz_face_reconcile(ref_face, self, "locate_addr");
   }
   GetCArray(self, ca);
@@ -1538,7 +1544,7 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
 {
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face);
+  self   = fz_face_descend(self, &face, "set relation");
   rother = fz_face_reconcile(face, rother, "set relation");
   GetCArray(self, ca);
 
@@ -1731,7 +1737,7 @@ rb_ca_set_union (VALUE self, VALUE rother)
 {
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face);
+  self   = fz_face_descend(self, &face, "union");
   rother = fz_face_reconcile(face, rother, "union");
   GetCArray(self, ca);
 
@@ -1808,7 +1814,7 @@ rb_ca_value_counts_flat (VALUE self)
 {
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face);
+  self = fz_face_descend(self, &face, "value_counts");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -2347,7 +2353,7 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
 {
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face);
+  self = fz_face_descend(self, &face, "mode");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;

@@ -96,11 +96,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     }
     if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
       if ( ! query_was_scalar ) {
-        CArray *cv;
-        GetCArray(rval, cv);
-        if ( ca_is_face(cv) ) {
-          rval = rb_ca_strip_face_value(rval);
-        }
+        rval = ca_face_operand_descend(rval, "count(v)");
       }
     }
     else if ( rb_respond_to(self_ref, rb_intern("to_comparable")) ) {
