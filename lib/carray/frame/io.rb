@@ -190,7 +190,9 @@ class CAFrame
     parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
     idx = @index ? " index=#{@axis_name.inspect}" : ""
     head = "#<CAFrame nrow=#{@nrow} vars=[#{parts.join(', ')}]#{idx}>"
-    return head if @columns.empty?
+    # The table counts the index as a column, so a frame whose only data is its
+    # index has one to show.  Gate on the same thing render_table does.
+    return head if @columns.empty? && @index.nil?
     head + "\n" + render_table(head: 8, tail: 2, index: true, precision: 6,
                                footer: false)
   end

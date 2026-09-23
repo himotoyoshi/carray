@@ -47,12 +47,14 @@ class CAFrame
     @index     = nil
 
     n = nil
+    n_from = nil
     columns.each do |name, col|
       key = name.to_s
       ca  = coerce_column(col)
       len = ca.shape[0]
       if n.nil?
-        n = len
+        n      = len
+        n_from = key
       elsif len != n
         raise ArgumentError,
               "column #{key.inspect} has axis-0 length #{len}, expected #{n}"
@@ -67,8 +69,12 @@ class CAFrame
         raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"
       end
       if n && idx.shape[0] != n
+        # Name the column as well as the index: when the index is the frame's
+        # existing one and a column is the new arrival, blaming the index alone
+        # points at the side the caller cannot change.
         raise ArgumentError,
-              "index length #{idx.shape[0]} does not match nrow #{n}"
+              "column #{n_from.inspect} has axis-0 length #{n}, " \
+              "but the index has length #{idx.shape[0]}"
       end
       @index = idx
       @nrow  = idx.shape[0] if n.nil?
