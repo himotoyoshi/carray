@@ -176,7 +176,12 @@ class CACategoricalIterator < CAIterator
   #   (structural, mask-independent) lifted per group.
   #   @return [CArray]
   def elements
-    @elements
+    # A copy, like every other member that reads off a memo: the memo is the
+    # iterator's own state, and handing out the array itself lets a caller
+    # write into it and change what the iterator answers from then on. This
+    # one invites it -- the docs point at its prefix sum for splitting a
+    # column apart, which reads as scratch.
+    @elements.copy
   end
 
   # Group-vocabulary alias for {#elements}; reads naturally next to
@@ -205,9 +210,9 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def count_not_masked(axis: nil)
-    return axis_moments(axis)[:count] if axis
+    return axis_moments(axis)[:count].copy if axis
     m = moments
-    m ? m[:count] : per_category(CA_INT64) { |s| s.count_not_masked }
+    m ? m[:count].copy : per_category(CA_INT64) { |s| s.count_not_masked }
   end
 
   # @overload count(v = <none>)
@@ -304,9 +309,9 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def max(axis: nil)
-    return axis_moments(axis)[:max] if axis
+    return axis_moments(axis)[:max].copy if axis
     m = moments
-    m ? m[:max] : per_category(core_reduce_type(:max)) { |s| s.max }
+    m ? m[:max].copy : per_category(core_reduce_type(:max)) { |s| s.max }
   end
 
   # @overload min
@@ -318,9 +323,9 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def min(axis: nil)
-    return axis_moments(axis)[:min] if axis
+    return axis_moments(axis)[:min].copy if axis
     m = moments
-    m ? m[:min] : per_category(core_reduce_type(:min)) { |s| s.min }
+    m ? m[:min].copy : per_category(core_reduce_type(:min)) { |s| s.min }
   end
 
   # @overload mean
@@ -502,7 +507,7 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64
   def min_index
     am = arg_minmax
-    am ? am[:min] : per_category(CA_INT64) { |s| s.min_index }
+    am ? am[:min].copy : per_category(CA_INT64) { |s| s.min_index }
   end
 
   # @overload max_index
@@ -510,7 +515,7 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64
   def max_index
     am = arg_minmax
-    am ? am[:max] : per_category(CA_INT64) { |s| s.max_index }
+    am ? am[:max].copy : per_category(CA_INT64) { |s| s.max_index }
   end
 
   # @overload min_addr

@@ -730,6 +730,56 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_true(mx[1, 1].nan?)
   end
 
+  # ---- a result is the caller's, not the iterator's ------------------------
+  #
+  # Several members are memoised: one fused kernel fills count / sum / min /
+  # max and every consumer reads off it. They handed back the memo itself, so
+  # writing into a result changed what the iterator answered from then on --
+  # permanently, and for every other member sharing that memo. #sum already
+  # copied; the rest did not.
+
+  FLAT_MEMBERS = [:sum, :min, :max, :count, :count_not_masked, :count_masked,
+                  :elements, :mean, :prod, :variance, :stddev, :median,
+                  :min_index, :max_index].freeze
+
+  def test_no_member_hands_back_the_memo_itself
+    grp = CA_DOUBLE([1.0, 2.0, 3.0, 4.0]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    FLAT_MEMBERS.each do |op|
+      a = grp.public_send(op)
+      next unless a.is_a?(CArray)
+      assert_not_same(a, grp.public_send(op), "#{op} hands out the same array twice")
+    end
+    lo1, hi1 = grp.minmax
+    lo2, hi2 = grp.minmax
+    assert_not_same(lo1, lo2, "minmax lower")
+    assert_not_same(hi1, hi2, "minmax upper")
+  end
+
+  def test_no_axis_member_hands_back_the_memo_itself
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    [:sum, :min, :max, :count, :count_not_masked, :mean, :prod, :variance].each do |op|
+      a = grp.public_send(op, axis: 0)
+      assert_not_same(a, grp.public_send(op, axis: 0),
+                      "#{op}(axis:) hands out the same array twice")
+    end
+  end
+
+  def test_writing_into_a_result_does_not_change_the_iterator
+    grp = CA_DOUBLE([1.0, 2.0, 3.0, 4.0]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    before = { max: grp.max.to_a, minmax: grp.minmax.map(&:to_a),
+               count: grp.count.to_a, elements: grp.elements.to_a }
+
+    grp.max[0]      = 999.0
+    grp.count[0]    = 77
+    grp.elements[0] = 42
+
+    assert_equal(before[:max],      grp.max.to_a)
+    assert_equal(before[:minmax],   grp.minmax.map(&:to_a))   # shares the memo
+    assert_equal(before[:count],    grp.count.to_a)
+    assert_equal(before[:elements], grp.elements.to_a)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)
