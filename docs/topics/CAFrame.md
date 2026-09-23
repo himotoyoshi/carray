@@ -641,6 +641,15 @@ a boolean column comes back as an object column of `true` / `false`. When the
 exact types matter, `to_csv` with `types:` on the way back, or `cast`
 afterwards, is the way to pin them.
 
+> **`nil` and `UNDEF` are the same thing on the way out.** In memory they are
+> distinct — a masked cell is `UNDEF`, and an object column can hold a genuine
+> Ruby `nil` as a value (§3). Neither `to_records` nor `to_csv` keeps that apart:
+> both write either one as missing, and both read missing back as `UNDEF`. So a
+> `nil` held as a value in an object column comes back masked. Serialization has
+> one way to say "nothing here", and this is it; if the distinction matters,
+> keep it in a value the format can carry (an empty string, a sentinel) rather
+> than in `nil`.
+
 If a 2-D CArray of shape `(nrow, nvar)` is what you want, `to_ca` hands
 one over — a **view**, one column per variable in column order:
 
@@ -890,6 +899,14 @@ grp = df.group_by("station")
 grp.ngroup                 # => number of groups
 grp.labels                 # => group key values, in code order
 ```
+
+A row whose key is **masked** belongs to **no group**: which group it falls in
+is undetermined, and grouping takes the same default `filter` does and leaves it
+out rather than inventing a group for it. With a composite key one undetermined
+component is enough to make the whole tuple undetermined. So the group sizes
+need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) if
+you need to account for the difference, or fill them first
+(`df.fill("k", value)`) to group them together.
 
 A `GroupedFrame` has three surfaces:
 
