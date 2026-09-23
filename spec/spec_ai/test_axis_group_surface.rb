@@ -779,4 +779,69 @@ class TestAxisGroupSurface < Test::Unit::TestCase
                    g.send(op, axis: :group).is_masked.to_a, "#{op} mask"
     end
   end
+  # ---- a zero-length group axis -------------------------------------------
+  #
+  # The output shape is [K, *band_dims] whatever the group axes are, so a
+  # zero-length group axis still has cells to fill -- every one of them a group
+  # with no member. It used to fill none of them: the band width was taken as
+  # src.elements / (product of group dims), which is 0/0 here, so the count of
+  # output cells came out as 0 while the array really had K x band of them.
+  # Every finalisation loop ran zero times and the zeroed buffer went back
+  # unmasked, reporting 0.0 as a mean, a min and a variance.
+
+  def test_a_zero_length_group_axis_gives_every_cell_the_empty_group_answer
+    z   = CArray.float64(0, 3)
+    cat = CACategorical.from_codes(CArray.uint8(0), ["a", "b"])
+    g   = z.axis_group(cat, nil)
+
+    identity = { sum: 0.0, prod: 1.0, all: true, any: false }
+    identity.each do |op, want|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([want] * 6, r.to_a.flatten, "#{op} is its identity")
+      assert_equal([false], r.is_masked.to_a.flatten.uniq, "#{op} is not masked")
+    end
+
+    [:count, :count_not_masked].each do |op|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([0] * 6, r.to_a.flatten, "#{op} counts nothing")
+    end
+
+    # no identity to return, so UNDEF -- never a bare 0.0
+    [:mean, :min, :max, :variance, :stddev, :variancep, :stddevp,
+     :min_addr, :max_addr].each do |op|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([true], r.is_masked.to_a.flatten.uniq, "#{op} is all UNDEF")
+    end
+  end
+
+  def test_a_zero_length_group_axis_answers_as_an_ordinary_empty_group_does
+    # the same answers a group that simply has no member gives, which is the
+    # contract this was measured against
+    z    = CArray.float64(0, 1)
+    zcat = CACategorical.from_codes(CArray.uint8(0), ["a", "b"])
+    v    = CArray.float64(2, 1).seq!(1)
+    # codes 0, 0 leaves category "b" with no member at all
+    vcat = CACategorical.from_codes(CArray.uint8(2) { 0 }, ["a", "b"])
+
+    [:sum, :prod, :mean, :min, :max, :variance, :all, :any].each do |op|
+      zero_len = z[z.axis_group(zcat, nil)].public_send(op, axis: :group)
+      no_member = v[v.axis_group(vcat, nil)].public_send(op, axis: :group)
+      assert_equal(no_member.is_masked[1, 0], zero_len.is_masked[0, 0],
+                   "#{op}: mask of a zero-length group axis vs an empty group")
+      unless no_member.is_masked[1, 0]
+        assert_equal(no_member[1, 0], zero_len[0, 0],
+                     "#{op}: value of a zero-length group axis vs an empty group")
+      end
+    end
+  end
+
+  def test_a_zero_length_band_axis_still_reduces_to_nothing
+    b   = CArray.float64(4, 0)
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i % 2 }, ["a", "b"])
+    r   = b[b.axis_group(cat, nil)].sum(axis: :group)
+    assert_equal([2, 0], r.shape)
+    assert_equal(0, r.elements)
+  end
 end

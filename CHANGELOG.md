@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: an `axis_group` reduction over a grouping whose group axis has length
+  zero now answers each output cell the way a group with no member is answered
+  -- `sum` 0, `prod` 1, `count` 0, `all` true, `any` false, and UNDEF for
+  `mean`, `min`, `max`, `min_addr`, `max_addr` and the variance family. It
+  previously returned an unmasked 0 for all of them, so a mean and a variance
+  both read as 0.0. A zero-length band axis, which reduces to no cells at all,
+  is unchanged.
+
 - Fix: a per-category `min`, `max`, `min_index`, `max_index`, `median`,
   `percentile` or `quantile` from `group_by_category` now treats `NaN` the way
   `CArray`'s own reduction does: a `NaN` loses every contest, a category
