@@ -128,6 +128,13 @@ that, the parts are independent; jump to whichever subsystem you are working on.
   a tour of the optimisations that keep peak memory low: not materialising
   intermediate views (compose-fold, alias, axis-merge), slab/chunk/tile
   streaming, fused scatter kernels, single-pass discovery, and streaming I/O.
+- [21 The address basis](21_address_basis.md) — `CArray::AddressBasis`, which
+  lends a pointer and one byte stride per axis for the length of a block, to
+  code that addresses cells itself rather than being handed them. A runtime
+  facility at the `ca_attach` layer, not a user API and not a fifth author
+  surface; it cuts across the view algebra (its three tiers), the attach
+  lifecycle, and the region protocol. Includes the packed buffer layout as a
+  written contract.
 
 ## Status and handoff
 
@@ -168,6 +175,7 @@ update its row. Statuses:
 | 18a | 18a_serialization.md | draft | verified vs lib/carray/serialize.rb (header layout, save/load, marshal_dump) |
 | 19 | 19_build_generators_testing.md | draft | verified vs the build/test discipline in the source tree |
 | 20 | 20_memory_efficiency_and_streaming.md | draft | cross-cutting; refs verified vs ext/ sources (compose-fold, streaming reduce, scatter kernels, tile cache, streaming I/O) |
+| 21 | 21_address_basis.md | draft | verified vs ext/carray_address_basis.c; the tier table, region behaviour and packed layout re-run on a live build (spec/spec_ai/test_address_basis.rb) |
 
 ### Conventions for writers
 
