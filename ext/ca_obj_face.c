@@ -595,6 +595,30 @@ ca_face_class_has_portable_method (VALUE klass)
   return ( owner != rb_singleton_class(rb_cCArray) ) ? 1 : 0;
 }
 
+VALUE
+ca_face_operand_descend (VALUE operand, const char *name)
+{
+  CArray *op;
+  if ( ! RTEST(rb_obj_is_carray(operand)) ) {
+    return operand;
+  }
+  TypedData_Get_Struct(operand, CArray, &carray_data_type, op);
+  if ( ! ca_is_face(op) ) {
+    return operand;
+  }
+  if ( ca_test_flag(op, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
+    return rb_ca_strip_face_value(operand);
+  }
+  rb_raise(rb_eArgError,
+           "%s: cannot take a %s operand: its storage is not its surface "
+           "(a cell encodes the value rather than being it), so comparing "
+           "the storage would compare the encoding. Convert the operand to "
+           "the receiver's space first -- #to_string for a string Face -- "
+           "or pass .parent on both sides to work in storage space",
+           name, rb_obj_classname(operand));
+  return Qnil;   /* not reached */
+}
+
 int
 ca_face_state_portable (int obj_type, VALUE klass)
 {

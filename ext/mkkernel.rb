@@ -5534,7 +5534,7 @@ module MkKernel
     io.puts "    }"
     io.puts "    if ( self_face_comparable ) {"
     io.puts "      if ( rval_is_face ) {"
-    io.puts "        rval = rb_ca_strip_face_value(rval);"
+    io.puts %Q[        rval = ca_face_operand_descend(rval, "#{name}_ki");]
     io.puts "      }"
     io.puts "    } else if ( self_was_face ) {"
     io.puts "      if ( rb_respond_to(self_ref, rb_intern(\"to_comparable\")) ) {"
