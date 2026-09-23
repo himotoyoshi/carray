@@ -299,6 +299,54 @@ rb_ca_const_string_wrap (VALUE parent_val, VALUE buffer, int encoding_id)
     rb_raise(rb_eTypeError, "CAConstString.wrap: buffer: must be a String");
   }
 
+  /* This is the one door through which already-built offsets enter, so it
+     validates rather than assumes.  Everything downstream -- the per-cell
+     decode, the native byte scans, the sort comparator -- reads `buf + start`
+     for `end - start` bytes on the strength of these pairs; an out-of-range
+     one is an out-of-bounds read of the heap, not a wrong answer.  Refuse it
+     here, while the input is still in the caller's hands, rather than letting
+     it surface as an IndexError from a decode or as a crash from a scan.
+
+     A masked cell is exempt: its bytes may be anything at all, that being the
+     CArray mask contract, and no reader dereferences them (the scan skips on
+     the mask before touching an offset; `.value`, the explicit strip, raises
+     from the decode). */
+  {
+    ca_size_t i, n;
+    int64_t *pair;
+    boolean8_t *m;
+
+    ca_attach(parent);
+    ca_update_mask(parent);
+    n    = parent->elements;
+    pair = (int64_t *) parent->ptr;
+    m    = parent->mask ? (boolean8_t *) parent->mask->ptr : NULL;
+    for ( i = 0; i < n; i++ ) {
+      int64_t start = pair[2 * i], end = pair[2 * i + 1];
+      if ( m && m[i] ) {
+        continue;
+      }
+      if ( start < 0 || end < start || end > (int64_t) RSTRING_LEN(buffer) ) {
+        ca_detach(parent);
+        rb_raise(rb_eArgError,
+                 "CAConstString.wrap: element %lld has range [%lld,%lld), "
+                 "outside the %ld-byte buffer",
+                 (long long) i, (long long) start, (long long) end,
+                 (long) RSTRING_LEN(buffer));
+      }
+    }
+    ca_detach(parent);
+  }
+
+  /* Take ownership of the offsets, the way CACategorical.from_codes takes
+     ownership of its codes.  Without this the Face is read-only but its
+     storage is not, so `cs.parent[i] = <anything>` walks straight past the
+     check above and back into an out-of-bounds read.  The flag rather than
+     #freeze, for the reason from_codes gives: freeze would propagate through
+     views and Faces.  A caller that wants to keep a mutable entity of its own
+     passes `.copy`. */
+  ca_set_flag(parent, CA_FLAG_READ_ONLY);
+
   ca  = ca_const_string_new(parent, rb_str_freeze(buffer), encoding_id);
   obj = TypedData_Wrap_Struct(rb_cCAConstString, &catext_data_type, ca);
   rb_ca_set_parent(obj, parent_val);   /* pin parent VALUE for GC */
@@ -540,7 +588,7 @@ ca_const_string_scan_end (ca_const_string_scan_t *s)
    so element i occupies s->off[2*i] (start) .. s->off[2*i+1] (end).
    The buffer is a pure concatenation; length = end - start. */
 static inline int
-ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp, int32_t *plen)
+ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp, int64_t *plen)
 {
   int64_t start, end;
   if ( s->m && s->m[i] ) {
@@ -549,7 +597,7 @@ ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp,
   start = s->off[2 * i];
   end   = s->off[2 * i + 1];
   *pp   = s->buf + start;
-  *plen = (int32_t) (end - start);
+  *plen = (int64_t) (end - start);
   return 1;
 }
 
@@ -598,7 +646,7 @@ rb_ca_const_string_byte_length (VALUE self)
   CArray *co;
   int64_t *op;
   const char *p;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
 
   ca_const_string_scan_begin(self, &s);
@@ -633,7 +681,7 @@ ca_const_string_predicate (VALUE self, VALUE query, int op)
   boolean8_t *out;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
 
   if ( TYPE(query) != T_STRING ) {
@@ -686,7 +734,7 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
        they are read only when both records are valid, but GCC cannot prove
        that -- initialize to keep -Wmaybe-uninitialized quiet and defensive. */
     const char *pa = NULL, *pb = NULL;
-    int32_t la = 0, lb = 0;
+    int64_t la = 0, lb = 0;
     ca_size_t i;
 
     ca_const_string_scan_begin(self, &a);
@@ -717,7 +765,7 @@ rb_ca_const_string_count (VALUE self, VALUE query)
   ca_const_string_scan_t s;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i, c = 0;
 
   if ( TYPE(query) != T_STRING ) {
@@ -747,7 +795,7 @@ rb_ca_const_string_search (VALUE self, VALUE query)
   ca_const_string_scan_t s;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
   VALUE result = Qnil;
 
@@ -786,7 +834,7 @@ ca_const_string_byte_cmp (const void *a, const void *b)
   /* sort raises on masked input, so record() always sets these here; the
      initializers keep -Wmaybe-uninitialized quiet and stay defensive. */
   const char *pa = NULL, *pb = NULL;
-  int32_t la = 0, lb = 0;
+  int64_t la = 0, lb = 0;
   int c;
   ca_const_string_record(ca_const_string_sort_ctx, ia, &pa, &la);
   ca_const_string_record(ca_const_string_sort_ctx, ib, &pb, &lb);
@@ -853,7 +901,7 @@ ca_const_string_extremum (VALUE self, int want_max)
 {
   ca_const_string_scan_t s;
   const char *p, *bestp = NULL;
-  int32_t len, bestlen = 0;
+  int64_t len, bestlen = 0;
   ca_size_t i;
   int found = 0;
 
