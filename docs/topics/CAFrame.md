@@ -983,7 +983,7 @@ a time / integer key matches natively (and faster).
 
 Because the reference is external, `align` stays a pure gather with no
 interpolation or resampling — fill the `UNDEF` gaps afterward with an explicit
-step (a forthcoming `fill`, or your own column math on the escaped columns).
+step (`fill`, §8, or your own column math on the escaped columns).
 
 ### `CAFrame.meld` / `CAFrame.concatenate` — stack rows
 
@@ -1122,9 +1122,8 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 
 ## 13. Planned features (TBD)
 
-These appear in the design and are intended, but are **not implemented yet**:
+This appears in the design and is intended, but is **not implemented yet**:
 
-- **`fill(name, :ffill | :bfill)`** — forward / back-fill of masked cells.
 - **`cast(name, type, strict: true)`** — parse failure raises instead of
   masking.
   > **Naming caveat (settle before building).** "strict" is overloaded across
