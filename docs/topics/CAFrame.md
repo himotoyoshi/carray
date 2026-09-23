@@ -903,7 +903,7 @@ df.group_by("station")["temp"].mean    # => per-group means as a CArray
 
 ---
 
-## 10. `join` and `join_asof`
+## 10. Combining frames — `join`, `align`, `meld`, `paste`
 
 Join delegates to CArray addressing primitives: the key yields an address
 array, and each column is gathered by `project` (length-preserving,
@@ -977,35 +977,50 @@ Because the reference is external, `align` stays a pure gather with no
 interpolation or resampling — fill the `UNDEF` gaps afterward with an explicit
 step (a forthcoming `fill`, or your own column math on the escaped columns).
 
-### `CAFrame.concat` — stack rows
+### `CAFrame.meld` / `CAFrame.concatenate` — stack rows
 
-`CAFrame.concat(*frames)` stacks frames along the **row axis** (vertical): same
-columns, more rows. It is the **symmetric sibling of `join`** — no frame is
-privileged — so it is a class method (like `CArray.concatenate`), not `df.join`.
+Both stack frames along the **row axis** (vertical): same columns, more rows.
+They are the **symmetric sibling of `join`** — no frame is privileged — so they
+are class methods (mirroring `CArray.meld` / `CArray.concatenate`), not `df.join`.
+
+The pair mirrors the CArray-level taxonomy, and the choice is view vs. eager:
+
+| | result | data types | when to use |
+|---|---|---|---|
+| `CAFrame.meld` | **view frame** — each column is a `CAMeld` over the inputs, sharing their storage | **must match** per column; a mismatch raises, because a view constructor cannot auto-cast without hiding schema drift | you want the stacked frame to stay connected to its inputs, or you want to avoid the copy |
+| `CAFrame.concatenate` | **eager frame** — each column is a materialized entity, independent of the inputs | **promote** to a common type per column | you want a detached result, or the inputs' types differ |
 
 ```ruby
-CAFrame.concat(jan, feb, mar)     # three months of rows, stacked
-CAFrame.concat([jan, feb, mar])   # an Array is accepted too
+CAFrame.meld(jan, feb, mar)          # a view over three months
+CAFrame.concatenate(jan, feb, mar)   # an independent frame
+CAFrame.meld([jan, feb, mar])        # an Array is accepted too
 ```
+
+Everything else is shared between the two:
 
 - Columns are **matched by name** (output order follows the first frame); every
   frame must carry the same column-name set, or it raises.
-- Each output column is `CArray.concatenate` of that column, so **data types promote**
-  to a common type, **masks are preserved**, and an **N-D column** carries its
-  trailing dimensions (which must agree across frames).
-- The **index** is concatenated when every frame has one (their `axis_name` must
-  agree); if none do, the result has no index; a mix raises.
-- The result is a **new materialized frame**, not a view. A single-frame
-  `concat(df)` returns an independent copy.
+- **Masks are preserved**, and an **N-D column** carries its trailing dimensions
+  (which must agree across frames).
+- The **index** is stacked the same way as the columns when every frame has one
+  (their `axis_name` must agree) — a `CAMeld` view for `meld`, a materialized
+  column for `concatenate`. If none of the frames has an index, the result has
+  none; a mix raises.
+- A single-frame call is not special-cased: `CAFrame.meld(df)` returns a view
+  sharing `df`'s columns, `CAFrame.concatenate(df)` returns an independent copy.
 
-This is deliberately strict (same columns only) — a union-with-`UNDEF` mode is a
+Because `meld` shares storage, writes flow **both ways**: writing a row of the
+result reaches whichever input frame owns that row, and writing an input reaches
+the result. `copy` the result if you want it detached.
+
+Both are deliberately strict (same columns only) — a union-with-`UNDEF` mode is a
 possible future opt-in, kept out to stay explicit.
 
 ### `paste` — merge columns by position
 
 `paste(other)` puts `other`'s variables **beside** this frame's, matched by
 **row position** — a keyless column merge (the column-direction counterpart of
-the row-stacking `concat`, named after the UNIX `paste`; the positional
+the row-stacking `meld` / `concatenate`, named after the UNIX `paste`; the positional
 counterpart of the key-aligned `join`). Both frames must have the same `nrow`;
 rows are assumed to already correspond (no key alignment — consistent with the
 no-implicit-align stance).
