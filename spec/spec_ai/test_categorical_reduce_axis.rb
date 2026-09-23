@@ -150,39 +150,38 @@ module CategoricalReduceAxisRef
 
   # Broadcast codes CArray to `h_shape`, treating `axis` as the reduce direction.
   # Returns a fresh CArray of same dtype as codes, shape == h_shape. Resolves the
-  # three supported cases (§2.2 of PROPOSAL rev2):
-  #   case A       : codes.ndim == 1 and codes.shape == [h_shape[axis]]
-  #   case B       : codes.ndim == h_shape.size and codes.shape == h_shape
-  #   band-only    : codes.ndim == h_shape.size - 1 and codes.shape == h_shape without axis
+  # three supported cases:
+  #   case A       : codes.shape == [h_shape[axis]]
+  #   case B       : codes.shape == h_shape
+  #   band-only    : codes.shape == h_shape without axis
   # Preserves the codes mask under broadcast.
   def broadcast_codes(codes, h_shape, axis)
     ndim = h_shape.size
     out  = CArray.new(codes.data_type, h_shape)
     out.mask = 0 if codes.has_mask?
-    case codes.ndim
-    when 1
-      unless codes.shape == [h_shape[axis]]
-        raise ArgumentError, "codes shape #{codes.shape} does not match case A"
-      end
+    band_shape = h_shape.dup; band_shape.delete_at(axis)
+    # Chosen by shape, not by rank -- the same rule the implementation follows,
+    # and for the same reason: at ndim 2 the case A shape and the band-only
+    # shape are both rank 1, so a rank dispatch takes case A every time and
+    # band-only is unreachable. This reference carried that dispatch too, and
+    # every band-only case here used a 3-D source, so the oracle was blind to
+    # it in exactly the way the implementation was.
+    case
+    when codes.shape == [h_shape[axis]]                       # case A
       iter_fiber_coords(h_shape) do |full_ix|
         out[*full_ix] = codes[full_ix[axis]]
       end
-    when ndim
-      unless codes.shape == h_shape
-        raise ArgumentError, "codes shape #{codes.shape} != h shape #{h_shape} (case B needs exact match)"
-      end
+    when codes.shape == h_shape                               # case B
       out[] = codes
-    when ndim - 1
-      band_shape = h_shape.dup; band_shape.delete_at(axis)
-      unless codes.shape == band_shape
-        raise ArgumentError, "codes shape #{codes.shape} != h shape without axis #{band_shape}"
-      end
+    when codes.shape == band_shape                            # band-only
       iter_fiber_coords(h_shape) do |full_ix|
         band_ix = full_ix.dup; band_ix.delete_at(axis)
         out[*full_ix] = codes[*band_ix]
       end
     else
-      raise ArgumentError, "codes.ndim=#{codes.ndim} not in {1, #{ndim-1}, #{ndim}}"
+      raise ArgumentError,
+            "codes shape #{codes.shape} fits none of [#{h_shape[axis]}] (case A), " \
+            "#{h_shape} (case B), #{band_shape} (band-only)"
     end
     out
   end
@@ -191,7 +190,7 @@ module CategoricalReduceAxisRef
   # each output cell (K × band-coord), scans the reduce-axis fiber, accumulates
   # into out[c, band_coord]. Value dtype = h.data_type (like existing #sum).
   #
-  # Mask contract per PROPOSAL §2.4:
+  # Mask contract:
   #   - codes mask on cell → that cell contributes to no group (excluded)
   #   - value mask on cell → that cell not counted (skipped)
   #   - empty group cell → sum identity 0 (unmasked; ERI contract, no UNDEF for sum)
@@ -809,5 +808,25 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_match(/cat\.shape=\[2\]/, e.message)
     # and it does not claim the caller asked for sum when they asked for mean
     assert_not_match(/\.sum\(/, e.message)
+  end
+  # ---- the oracle covers band-only at rank 2 as well -----------------------
+  #
+  # Every band-only case above uses a 3-D source. At rank 2 the case A shape
+  # and the band-only shape are both rank 1, which is the pair the dispatch has
+  # to tell apart by shape; checking the kernel against the reference there is
+  # what makes this file able to catch a regression to the rank rule.
+
+  def test_band_only_at_rank_two_matches_the_reference
+    h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])   # [4, 3]
+    cat = CA_INT32([0, 1, 1]).categorize                               # band = [3]
+    assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
+                 h.group_by_category(cat).sum(axis: 0).to_a)
+  end
+
+  def test_case_a_at_rank_two_still_matches_the_reference
+    h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+    cat = CA_INT32([0, 0, 1, 1]).categorize                            # [4]
+    assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
+                 h.group_by_category(cat).sum(axis: 0).to_a)
   end
 end
