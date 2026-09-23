@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a per-category `min`, `max`, `min_index`, `max_index`, `median`,
+  `percentile` or `quantile` from `group_by_category` now treats `NaN` the way
+  `CArray`'s own reduction does: a `NaN` loses every contest, a category
+  holding nothing but `NaN` answers `NaN` for an extremum and UNDEF for a
+  position, and an order statistic sorts `NaN` last. Before, the answer
+  depended on where in the category the `NaN` sat, so the same values in a
+  different row order gave different results. Nothing to change in calling
+  code.
+
 - Fix: `p` / `inspect` on a `CAFrame` whose only data is its index now shows the
   table. It printed the summary line alone, because it gated on the column set
   while the table itself counts the index as a column.

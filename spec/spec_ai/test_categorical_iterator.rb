@@ -631,6 +631,105 @@ class TestCategoricalIterator < Test::Unit::TestCase
 
   # ---- Enumerable is not mixed in (no reduction-name leak) -------------------
 
+  # ---- NaN ---------------------------------------------------------------
+  #
+  # The contract above -- a group result equals CArray#<reduction> over the
+  # group's members -- has to hold when a member is NaN. It did not: the
+  # extremum kernels seeded the accumulator with the first present cell and
+  # then compared, so a NaN seed was never displaced (every comparison against
+  # it is false) and the answer depended on where in the segment the NaN sat.
+  # A reduction that is order-free stopped being order-free.
+
+  NAN = 0.0 / 0.0
+
+  def assert_same_float(expected, actual, what)
+    if expected.is_a?(Float) && expected.nan?
+      assert_true(actual.is_a?(Float) && actual.nan?, "#{what}: want NaN, got #{actual.inspect}")
+    else
+      assert_equal(expected, actual, what)
+    end
+  end
+
+  def test_a_nan_loses_every_contest_and_the_answer_does_not_move_with_it
+    [[NAN, 1.0, 5.0], [1.0, NAN, 5.0], [1.0, 5.0, NAN]].each do |vals|
+      grp = CA_DOUBLE(vals).group_by_category(CA_INT32([0, 0, 0]).categorize)
+      ref = CA_DOUBLE(vals)
+      assert_same_float(ref.min, grp.min[0], "min #{vals.inspect}")
+      assert_same_float(ref.max, grp.max[0], "max #{vals.inspect}")
+      assert_equal(ref.min_index, grp.min_index[0], "min_index #{vals.inspect}")
+      assert_same_float(ref.median, grp.median[0], "median #{vals.inspect}")
+    end
+  end
+
+  def test_a_group_of_nothing_but_nan
+    grp = CA_DOUBLE([NAN, NAN]).group_by_category(CA_INT32([0, 0]).categorize)
+    # the extremum is that NaN, as in the core; the position of it is UNDEF,
+    # the same answer the core gives for a group with no present cell at all
+    assert_true(grp.min[0].nan?)
+    assert_true(grp.max[0].nan?)
+    assert_true(grp.min_index.is_masked[0])
+    assert_true(grp.max_index.is_masked[0])
+  end
+
+  def test_an_order_statistic_puts_nan_last_and_clamps_its_neighbour
+    # NaN sorts last, so a position is picked out of [numbers..., NaN...];
+    # a position whose upper neighbour would be a NaN interpolates against
+    # itself rather than producing NaN
+    g2 = CA_DOUBLE([NAN, -9.0]).group_by_category(CA_INT32([0, 0]).categorize)
+    assert_equal(-9.0, g2.median[0])
+    assert_equal(-9.0, g2.percentile(75)[0])
+    g4 = CA_DOUBLE([NAN, 1.0, 7.0, -8.0]).group_by_category(CA_INT32([0] * 4).categorize)
+    assert_equal(4.0, g4.median[0])
+    assert_equal(7.0, g4.percentile(75)[0])
+  end
+
+  def test_nan_answers_match_the_core_across_shapes_and_data_types
+    # the strongest form of the contract: sweep random NaN patterns and check
+    # every member against CArray's own reduction over the same cells
+    srand(12345)
+    [CA_FLOAT64, CA_FLOAT32].each do |dt|
+      120.times do
+        n = 1 + rand(9)
+        k = 1 + rand(3)
+        vals  = Array.new(n) { rand < 0.35 ? NAN : (rand(20) - 10).to_f }
+        codes = Array.new(n) { rand(k) }
+        h = CArray.new(dt, [n]); h[] = CA_DOUBLE(vals)
+        grp = h.group_by_category(CA_INT32(codes).categorize(labels: (0...k).to_a))
+        got = { min: grp.min, max: grp.max, min_index: grp.min_index,
+                median: grp.median, p25: grp.percentile(25) }
+        (0...k).each do |c|
+          members = (0...n).select { |i| codes[i] == c }
+          next if members.empty?
+          ref = CArray.new(dt, [members.size])
+          ref[] = CA_DOUBLE(members.map { |i| vals[i] })
+          what = "#{CArray.data_type_name(dt)} #{members.map { |i| vals[i] }.inspect}"
+          assert_same_float(ref.min,       got[:min][c],       "min #{what}")
+          assert_same_float(ref.max,       got[:max][c],       "max #{what}")
+          assert_equal(ref.min_index,      got[:min_index][c], "min_index #{what}")
+          assert_same_float(ref.median,    got[:median][c],    "median #{what}")
+          assert_same_float(ref.percentile(25), got[:p25][c],  "p25 #{what}")
+        end
+      end
+    end
+  end
+
+  def test_the_axis_form_handles_nan_like_the_flat_one
+    rows  = [[NAN, 2.0], [1.0, NAN], [5.0, NAN], [NAN, NAN]]
+    codes = [0, 0, 1, 1]
+    grp = CA_DOUBLE(rows).group_by_category(CA_INT32(codes).categorize)
+    mn, mx = grp.min(axis: 0), grp.max(axis: 0)
+    2.times do |c|
+      2.times do |j|
+        members = (0...rows.size).select { |r| codes[r] == c }
+        ref = CA_DOUBLE(members.map { |r| rows[r][j] })
+        assert_same_float(ref.min, mn[c, j], "min at [#{c}, #{j}]")
+        assert_same_float(ref.max, mx[c, j], "max at [#{c}, #{j}]")
+      end
+    end
+    # the all-NaN cell is the one the seeding defect used to get wrong
+    assert_true(mx[1, 1].nan?)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)
