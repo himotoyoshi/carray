@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `all` and `any` on an `axis_group` reduction now require a boolean
+  payload, as `CArray#all` / `#any` and the other iterators do. They folded any
+  numeric payload, counting a non-zero cell as true, so `data.all` refused and
+  `data[g].all(axis: :group)` answered for the same float array. Convert first
+  if you meant the old reading: `data.ne(0)[g].all(axis: :group)`.
+
+- Fix: the reductions without `axis:` on `group_by_category` now agree with one
+  another about which values they are reducing. `cumsum` and the other scans
+  read the array when called while every other member worked from the copy
+  taken when the iterator was built, so a write through the source between two
+  calls was visible to one and not the other. All of them now answer about the
+  values as they were when the iterator was built; build a new iterator to pick
+  up a write. The `axis:` reductions read the array when called, unchanged.
+
 - Fix: `CArray.load_from_file` no longer exhausts the stack. It was
   registered for autoload but defined nowhere, so calling it recursed until
   Ruby gave up; it now raises `NoMethodError` like any other method that does

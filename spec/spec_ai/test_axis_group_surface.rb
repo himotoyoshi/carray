@@ -66,6 +66,7 @@ class TestAxisGroupSurface < Test::Unit::TestCase
         idx[k] += 1; break if idx[k] < shape[k]; idx[k] = 0
       end
     end
+    truthy = lambda { |x| x == true || (x.is_a?(Numeric) && x != 0) }
     reduce = lambda do |vals|
       # ERI: identity-bearing ops return their identity on empty (sum 0, prod 1,
       # count 0, all true, any false); ratios / extrema return nil (masked).
@@ -73,8 +74,10 @@ class TestAxisGroupSurface < Test::Unit::TestCase
       when :sum   then vals.sum(0.0)
       when :prod  then vals.inject(1.0) { |a, b| a * b }
       when :count then vals.size
-      when :all   then vals.all? { |x| x != 0 }
-      when :any   then vals.any? { |x| x != 0 }
+      # a boolean cell reads as Ruby true / false, and `false != 0` is true,
+      # so truth is asked for rather than inferred from inequality with zero
+      when :all   then vals.all? { |x| truthy.call(x) }
+      when :any   then vals.any? { |x| truthy.call(x) }
       when :mean  then vals.empty? ? nil : vals.sum(0.0) / vals.size
       when :min   then vals.empty? ? nil : vals.min.to_f
       when :max   then vals.empty? ? nil : vals.max.to_f
@@ -169,13 +172,32 @@ class TestAxisGroupSurface < Test::Unit::TestCase
     end
   end
 
+  # This asserted that all / any fold a float payload, counting a non-zero cell
+  # as true. They do -- the engine has always counted that way -- but the core
+  # and the other four engines refuse a payload that is not boolean, so the
+  # group was the one member of the family where `data.all` refused and
+  # `data[g].all(axis: :group)` answered. The engine is unchanged; the question
+  # is now asked of the core first, and this pins that.
   def test_boolean_reductions
-    tb = CArray.float64(6, 2, 3) { |i, j, k| (i + j + k).even? ? 0.0 : 1.0 }
+    tb = CArray.boolean(6, 2, 3) { |i, j, k| (i + j + k).odd? }
     [:all, :any].each do |op|
       r = tb[@mon, nil, nil].public_send(op, axis: :group)
       rb = r.to_a.flatten
       rf = ref(tb, [@mon, nil, nil], op).flatten.map { |x| x.nil? ? nil : !!x }
       assert_equal rf, rb, op.to_s
+    end
+  end
+
+  def test_all_and_any_want_a_boolean_payload_as_the_core_does
+    tf = CArray.float64(6, 2, 3) { |i, j, k| (i + j + k).even? ? 0.0 : 1.0 }
+    [:all, :any].each do |op|
+      assert_raise(CArray::DataTypeError, "group #{op} on a float payload") {
+        tf[@mon, nil, nil].public_send(op, axis: :group)
+      }
+      # which is what the core answers for the same payload
+      assert_raise(CArray::DataTypeError, "core #{op} on a float payload") {
+        tf.public_send(op)
+      }
     end
   end
 
@@ -794,12 +816,21 @@ class TestAxisGroupSurface < Test::Unit::TestCase
     cat = CACategorical.from_codes(CArray.uint8(0), ["a", "b"])
     g   = z.axis_group(cat, nil)
 
-    identity = { sum: 0.0, prod: 1.0, all: true, any: false }
+    identity = { sum: 0.0, prod: 1.0 }
     identity.each do |op, want|
       r = z[g].public_send(op, axis: :group)
       assert_equal([2, 3], r.shape, "#{op} shape")
       assert_equal([want] * 6, r.to_a.flatten, "#{op} is its identity")
       assert_equal([false], r.is_masked.to_a.flatten.uniq, "#{op} is not masked")
+    end
+
+    # all / any want a boolean payload, so they are asked of a boolean one
+    zb = CArray.boolean(0, 3)
+    gb = zb.axis_group(cat, nil)
+    { all: true, any: false }.each do |op, want|
+      r = zb[gb].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([want] * 6, r.to_a.flatten, "#{op} is its identity")
     end
 
     [:count, :count_not_masked].each do |op|
@@ -825,7 +856,7 @@ class TestAxisGroupSurface < Test::Unit::TestCase
     # codes 0, 0 leaves category "b" with no member at all
     vcat = CACategorical.from_codes(CArray.uint8(2) { 0 }, ["a", "b"])
 
-    [:sum, :prod, :mean, :min, :max, :variance, :all, :any].each do |op|
+    [:sum, :prod, :mean, :min, :max, :variance].each do |op|
       zero_len = z[z.axis_group(zcat, nil)].public_send(op, axis: :group)
       no_member = v[v.axis_group(vcat, nil)].public_send(op, axis: :group)
       assert_equal(no_member.is_masked[1, 0], zero_len.is_masked[0, 0],
