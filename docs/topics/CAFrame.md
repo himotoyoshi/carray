@@ -629,9 +629,17 @@ a Ruby `Array`, and a scalar stays a Ruby value. That normalization (which
 slices) is what lets it round-trip and serialize:
 
 ```ruby
-CAFrame.from_records(df.to_records)   # rebuilds the same columns and types
+CAFrame.from_records(df.to_records)   # rebuilds the same columns
 JSON.generate(df.to_records)          # -> a JSON array of objects
 ```
+
+The **mask survives**: `nil` on the way back in is the only spelling a missing
+cell has, so it becomes `UNDEF` again in every column. The **data type is
+rebuilt from the values**, which is not always the one you started with — a
+Ruby `Integer` carries no width, so any integer column comes back `int64`, and
+a boolean column comes back as an object column of `true` / `false`. When the
+exact types matter, `to_csv` with `types:` on the way back, or `cast`
+afterwards, is the way to pin them.
 
 If a 2-D CArray of shape `(nrow, nvar)` is what you want, `to_ca` hands
 one over — a **view**, one column per variable in column order:
