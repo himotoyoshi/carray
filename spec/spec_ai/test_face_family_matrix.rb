@@ -253,6 +253,92 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     end
   end
 
+  # ---- the iterator family -------------------------------------------------
+  #
+  # A per-category reduction is the core reduction lifted to the group, so it is
+  # this file's own question one layer out. There was no column for it, which is
+  # how CATime#min through group_by_category came to answer with an internal
+  # message about a zero width while the core answered the same values fine.
+  #
+  # The expectation is not tabulated: it is taken from the core for the same
+  # cells, refusals included. So a Face that starts or stops supporting a member
+  # needs no edit here, and a member answering differently through the iterator
+  # than off the array is the failure this is for.
+
+  ITERATOR_MEMBERS = {
+    "min"        => ->(x) { x.min },
+    "max"        => ->(x) { x.max },
+    "median"     => ->(x) { x.median },
+    "percentile" => ->(x) { x.percentile(50) },
+    "mean"       => ->(x) { x.mean },
+    "sum"        => ->(x) { x.sum },
+  }.freeze
+
+  # what the core does with these cells, or what it raises trying
+  def answer_or_error
+    [yield, nil]
+  rescue StandardError => e
+    [nil, e.class]
+  end
+
+  def each_face_group
+    each_face do |face, a|
+      cat = CA_INT32([0, 0, 1]).categorize        # groups {0, 1} and {2}
+      yield face, a, a.group_by_category(cat)
+    end
+  end
+
+  def test_a_per_category_reduction_answers_as_the_core_does
+    each_face_group do |face, a, grp|
+      ITERATOR_MEMBERS.each do |mname, m|
+        want, want_err = answer_or_error { m.call(a[0..1]) }
+        got,  got_err  = answer_or_error { m.call(grp)[0] }
+
+        if want_err
+          assert_equal want_err, got_err,
+                       "#{face[:name]}##{mname}: the core refuses with " \
+                       "#{want_err}, the group with #{got_err.inspect}"
+          next
+        end
+        assert_nil got_err,
+                   "#{face[:name]}##{mname} raised #{got_err} where the core answered"
+        assert_equal want, got, "#{face[:name]}##{mname} differs from the core"
+        assert_kind_of want.class, got, "#{face[:name]}##{mname} lost the Face (P1)"
+      end
+    end
+  end
+
+  # A Face is filled by writing surface values into storage, so an output can
+  # be lifted back only for a Face that can be written into. A read-only one --
+  # a const string's records index a shared pool -- has no blank form to fill,
+  # and its answers come back as the surface objects they already are. Either
+  # way the values are the core's; this pins which of the two you get.
+  def test_a_per_category_result_carries_the_faces_space_when_it_can
+    each_face_group do |face, a, grp|
+      %w[min max].each do |mname|
+        next if answer_or_error { ITERATOR_MEMBERS[mname].call(a[0..1]) }[1]
+        r = grp.public_send(mname)
+        if a.read_only?
+          assert_equal CA_OBJECT, r.data_type,
+                       "#{face[:name]}##{mname}: a read-only Face gives surface objects"
+          next
+        end
+        assert_kind_of face[:value_class], r, "#{face[:name]}##{mname} is not the Face"
+        next unless face[:space]
+        assert_equal face[:space].call(a), face[:space].call(r),
+                     "#{face[:name]}##{mname} changed the space"
+      end
+    end
+  end
+
+  def test_a_per_category_count_stays_plain
+    each_face_group do |face, _a, grp|
+      # counting cells does not look at what is in them
+      assert_equal [2, 1], grp.count.to_a, "#{face[:name]}#count"
+      assert_equal CA_INT64, grp.count.data_type, "#{face[:name]}#count data type"
+    end
+  end
+
   def test_a_spread_answers_in_the_faces_difference_type
     each_face do |face, a|
       SPREAD_MEMBERS.each do |mname, m|

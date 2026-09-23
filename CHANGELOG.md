@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a `group_by_category` reduction over a read-only Face — a
+  `CAConstString` column — no longer fails with an `IndexError` about a buffer
+  range. Such a Face cannot be built by writing into it, so `min`, `max` and
+  the other value members hand back the surface values (the strings) rather
+  than the Face. A writable Face such as `CATime` still answers in its Face.
+
 - Fix: a group iterator from `axis_group` now answers `shape`, `ndim` and
   `dim`, which every other iterator answers and which it returned `nil` for,
   and its `count` takes the two forms the family declares: `count(UNDEF)` for
