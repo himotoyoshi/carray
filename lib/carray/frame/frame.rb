@@ -352,6 +352,14 @@ class CAFrame
     # not overwrite it with the first index's name.
     @axis_name_before_index = @axis_name if @index.nil?
     @columns.delete(key)
+    if @index
+      # Re-indexing replaces the index, so the one being replaced goes back to
+      # being a column -- the same demotion reset_index performs, in the same
+      # position, which makes set_index over an existing index equivalent to
+      # reset_index followed by set_index.  Dropping it would lose the column it
+      # was made from.
+      @columns = { @axis_name => @index }.merge(@columns)
+    end
     @index     = idx
     @axis_name = key
     @nrow      = idx.shape[0]
