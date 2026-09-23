@@ -13,7 +13,7 @@ class CAFrame
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
     cat  = grouping_categorical(keys)
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
-    GroupedFrame.new(self, cat, axis)
+    GroupedFrame.new(self, cat, axis, keys.grep(String))
   end
 
   # Number of rows currently selected — used by group per-group view-frames
@@ -56,10 +56,14 @@ end
 #   aggregate    -> declarative per-column reductions into a new frame
 #   table { |g| }-> cross-column Ruby escape, g is a per-group view-frame
 class GroupedFrame
-  def initialize(frame, cat, axis_name)
+  # +key_names+ are the frame columns the grouping was keyed on. They become
+  # the result's index, so the reduction shortcuts must not also return them as
+  # reduced columns; an external CArray key contributes no name.
+  def initialize(frame, cat, axis_name, key_names = [])
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
+    @key_names = key_names
     @labels    = cat.labels          # group values, in code order
   end
 
@@ -160,6 +164,11 @@ class GroupedFrame
   private def reduce_numeric(reduction)
     cols = {}
     @frame.variable_names.each do |name|
+      # A key column is the index here, not a result column. Filtering it out
+      # by name rather than by data type is what makes a numeric key behave
+      # like a string one: NON_NUMERIC is about which columns a reduction can
+      # apply to, which happened to cover string keys and nothing else.
+      next if @key_names.include?(name)
       col = @frame[name]
       next unless col.ndim == 1 && !NON_NUMERIC.include?(col.data_type)
       cols[name] = col.group_by_category(@cat).public_send(reduction)
