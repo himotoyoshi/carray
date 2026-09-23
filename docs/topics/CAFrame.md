@@ -1084,10 +1084,15 @@ Frame view/copy semantics follow CArray exactly:
 | `df["col"]` | the **stored column** (alias) — writing mutates the frame |
 | `df.select(...)` | **view-frame**, columns aliased (zero-copy) |
 | `df[0..1]` / `df[bool]` / `df.filter { }` | **view-frame**, columns are row views sharing storage |
+| `df.head(n)` / `df.tail(n)` | **view-frame**, as a row slice |
+| `df.sort_by_key(...)` / `df.sort_by { }` | **view-frame**, columns are row-gather views in the sorted order |
 | `df.copy` | an **independent** frame — every column materialized |
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
+| `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
+| `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
 | `df.cast(...)` | **self** — rebinds a fresh column of the new type; does not write through to frames sharing the old column |
 | `df.promote(...)` | **self** — same as `cast`, applied to every column (fresh columns, common type) |
+| `df.parse_to_time(...)` / `df.to_time(...)` | **self** — as `cast`: rebinds that column to a fresh time column |
 | `df.set_index` / `reset_index` | **self** — an index-role change, data unchanged |
 | `df.mask_eq(...)` / `df.fill(...)` | **write-through self** — mutates the shared column in place, visible through every alias / parent |
 | `df["c"] = col` | **self** — binds the name to a different column; a replacement, not an edit, so it does not reach holders of the old one (as `cast`) |
@@ -1096,6 +1101,13 @@ Frame view/copy semantics follow CArray exactly:
 | `df[sel] = UNDEF` | **write-through self** — masks the selected rows in place; shape unchanged, visible through every derived view |
 | `df[sel] = nil` | **self** — rebinds each column to a row-gather view of itself; surviving rows still share storage with the originals (§3) |
 | `df[sel] = frame` | **self** — rebuilds each column as a `CAMeld` of [rows before the span, a snapshot of `other`'s column, rows after it]. The spliced span is independent of `other`; the rows on either side still share storage with the original columns (§3) |
+| `CAFrame.meld(...)` | a **view-frame** — each column a `CAMeld` over the inputs; writes flow both ways (§10) |
+| `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
+| `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
+| `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
+| `grouped.table { \|sub\| }` | each `sub` is a **view-frame** of that group's rows — writing it reaches the grouped frame (§9) |
+| `df.each_row` | a Hash of **raw cells** per row: a scalar cell is a Ruby value, an N-D cell is a **live view** of that row's slice (§7) |
+| `df.to_records` | plain Ruby Hashes — values normalized (`CArray` -> `Array`, UNDEF -> `nil`), so independent of the frame (§7) |
 | `df.to_ca` | a **view** — a `CAStack` of shape `(nrow, nvar)` over the stored columns; writes flow back, `copy` for an owned matrix |
 
 Because view-frames share storage, mutating a view writes through to the
