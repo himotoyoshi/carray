@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: an `axis_group` reduction or scan that raises part-way through no
+  longer leaks the working memory it had taken. An object-valued scan
+  (`cumsum`, `cummax` and the rest) calls back into Ruby for every cell, so a
+  value that will not coerce or a `<=>` that answers `nil` raises from an
+  ordinary call and used to leave roughly 36 bytes per source element behind
+  each time. Nothing to change in calling code.
+
 - Fix: `CAFrame#set_index` on a frame that already has an index no longer
   discards it. The index being replaced now goes back to being a column, the
   same demotion `reset_index` performs and in the same position, so re-indexing

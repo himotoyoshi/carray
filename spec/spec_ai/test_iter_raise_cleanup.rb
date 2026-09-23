@@ -99,6 +99,57 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
   end
 
   # An order statistic sorts a copy of each fiber.
+  # ---- axis_group ---------------------------------------------------------
+  #
+  # The group walks hold more than the iterator's own scratch: a plan sized to
+  # the slab, per-group accumulators, and a code table read on every cell. The
+  # object lane calls back into Ruby for each cell, so a raise part-way through
+  # is ordinary there -- an operand that will not coerce, a `<=>` that answers
+  # nil -- and it reaches the caller from a plain public call, no `send`.
+
+  def group_setup (n)
+    <<~RUBY
+      n = #{n}
+      cat = CACategorical.from_codes(CArray.uint8(n) { |i| i % 2 }, ["a", "b"])
+    RUBY
+  end
+
+  def test_object_group_scan_frees_its_plan_when_a_cell_will_not_coerce
+    setup = group_setup(4096) + <<~RUBY
+      input = CArray.object(n) { |i| i < n - 1 ? 1 : Object.new }
+    RUBY
+    assert_frees_scratch("input.group_by_category(cat).cumsum", setup)
+  end
+
+  def test_object_group_scan_frees_its_plan_when_a_comparison_answers_nil
+    # NUM2INT on the nil that `1 <=> "s"` returns -- the likeliest way to get
+    # here by accident with an object array
+    setup = group_setup(4096) + <<~RUBY
+      input = CArray.object(n) { |i| i < n - 1 ? 1 : "s" }
+    RUBY
+    assert_frees_scratch("input.group_by_category(cat).cummax", setup)
+  end
+
+  def test_group_reduce_frees_what_it_holds_when_the_gather_raises
+    setup = group_setup(2048) + <<~RUBY
+      o = CArray.object(n, 2) { 1.0 }
+      o[n - 1, 1] = Object.new
+      input = CArray.wrap_readonly(o, CA_FLOAT64)
+    RUBY
+    assert_frees_scratch("input[cat, nil].sum(axis: :group)", setup)
+  end
+
+  def test_the_group_raises_are_reachable_without_send
+    n = 64
+    cat = CACategorical.from_codes(CArray.uint8(n) { |i| i % 2 }, ["a", "b"])
+    assert_raise(TypeError) {
+      CArray.object(n) { |i| i < n - 1 ? 1 : Object.new }.group_by_category(cat).cumsum
+    }
+    assert_raise(TypeError) {
+      CArray.object(n) { |i| i < n - 1 ? 1 : "s" }.group_by_category(cat).cummax
+    }
+  end
+
   def test_median_frees_scratch
     assert_frees_scratch("input.median")
   end
