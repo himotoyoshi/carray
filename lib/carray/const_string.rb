@@ -5,12 +5,15 @@
 #  CAConstString high-level construction + conversion surface.
 #
 #  CAConstString itself (the Face + tail buffer + fetch decode + numeric gate) lives
-#  in ext/ca_obj_const_string.c.  This file provides the ergonomic builders that pack
-#  Ruby Strings into the internal length-prefix buffer + int64 offset entity
-#  and wrap them via the CAConstString.wrap C primitive.
+#  in ext/ca_obj_const_string.c.  This file provides the ergonomic builders that
+#  pack Ruby Strings into the shared buffer + (start,end) pair entity, via the
+#  CAConstString.__build__ C primitive.
 #
-#  Internal buffer format: concatenation of `[int32 length][bytes...]` records
-#  (self-delimiting → one offset per element, permutation-safe view).
+#  Internal buffer format: a pure concatenation of the element bytes, with no
+#  per-record length prefix (= the Arrow values buffer).  Each element carries
+#  its own `(start, end)` byte range in the storage, so it is self-describing
+#  and a gather / sort / select view over the pairs decodes correctly with no
+#  buffer copy.
 #
 # ----------------------------------------------------------------------------
 

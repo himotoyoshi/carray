@@ -134,11 +134,11 @@ s.gsub("a", "@")
 #       encode force_encoding scrub extract(regexp, repl='\0')
 
 # predicates -> :boolean
-s.start_with?("B")   # => [0, 0, 1]
+s.start_with?("B")   # => [false, false, true]
 s.end_with?("Z")     # also: include?(sub), match?(regexp)
 
 # set membership -> :boolean  (marks EVERY matching cell)
-s.in?("bar", "BAZ")  # => [0, 1, 1]
+s.in?("bar", "BAZ")  # => [false, true, true]
 
 # lengths / positions -> :int      (str_ prefix where a bare name is an array op)
 s.str_len            # per-cell character length   (#length/#size = element count)

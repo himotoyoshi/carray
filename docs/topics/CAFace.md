@@ -1110,19 +1110,34 @@ precedent:
 | Class | ORDERABLE | COMPARABLE | `to_comparable` | value families |
 |---|---|---|---|---|
 | `CATime` / `CATimedelta` | yes | no (a unit-bearing operand needs converting) | yes | ride the gate; `linear_fetch` and the centroid reductions are Ruby overrides |
-| `CAString` | yes | no | **no** (one space, nothing to convert) | ride the gate |
+| `CAString` | yes | yes | no (one space, nothing to convert) | ride the gate |
 | `CAConstString` | **no** — storage is a byte range, not the bytes | — | — | own overrides via `#to_string` (§6.3) |
 | `CACategorical` | **no** — code order is the vocabulary's | — | — | own overrides in label space (§6.3) |
-| `CAFixlenString` | yes | yes | no (one space) | ride the gate. Both flags hold *by construction*: a cell decodes to its own bytes, padding included, so the descent is the identity map — see the note below |
+| `CAFixlenString` | yes | yes | no (one space) | ride the gate. Both flags hold, but *not* because the descent is the identity map — it strips trailing NUL. See the note below |
 | `CARecord` | no | — | — | not wired; `memcmp` is the sort default and field-order ordering is still future work |
 
-`CAFixlenString` is the degenerate case worth knowing about: its surface *is*
-its storage, byte for byte, so ORDERABLE and COMPARABLE are true by
-construction and it should declare both. It did not, and the cost was exactly
-P1 — `unique` / `value_counts` / `mode` / the set operations handed their
-results back as a plain fixlen array while `sort` / `mask_duplicates` kept the
-class — plus a search family that refused a String query for no reason. If your
-Face is an identity relabel like this one, declare both flags.
+`CAFixlenString` is the case worth knowing about, because the flags are right
+and the tempting reason for them is wrong. Its surface is *not* its storage
+byte for byte: the scalar decode strips trailing NUL, so the descent is not the
+identity map. The flags hold anyway, for two reasons worth separating:
+
+- **ORDERABLE** because every cell is padded to the same width with NUL, and
+  NUL is the smallest byte. `memcmp` on the padded cells therefore orders them
+  the way `String#<=>` orders the stripped strings — a prefix sorts before any
+  continuation, which is exactly what the padding reproduces. The stripping is
+  *order-preserving*, which is a weaker and truer claim than *absent*.
+- **COMPARABLE** because a String query is padded out to the cell width before
+  it is compared, so byte equality on the padded form is equality on the
+  stripped form. Note the boundary: a query longer than the cell width is
+  truncated by that same padding step, and then matches a cell it is not equal
+  to.
+
+Declaring them was worth it — without the flags the cost was exactly P1:
+`unique` / `value_counts` / `mode` / the set operations handed their results
+back as a plain fixlen array while `sort` / `mask_duplicates` kept the class,
+plus a search family that refused a String query for no reason. But if your
+Face declares a flag, state the reason it actually holds. "Surface is storage"
+is the easy reason and it is not this one.
 
 `CATime` is the canonical NonNumericFace example: `dt + dt` is
 a category error, so its surface flips to `CA_FIXLEN` and the mkkernel

@@ -3,7 +3,7 @@
 #  CAFixlenString high-level construction surface.
 #
 #  CAFixlenString itself (the string interpretation of CA_FIXLEN storage) lives
-#  in ext/ca_obj_string.c.  This file provides the ergonomic builder that packs
+#  in ext/ca_obj_fixlen_string.c.  This file provides the ergonomic builder that packs
 #  Ruby Strings into a fixed-width CA_FIXLEN entity and wraps it via
 #  CAFixlenString.wrap.
 #

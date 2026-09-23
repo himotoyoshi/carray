@@ -38,10 +38,10 @@
 typedef struct {
   /* === CAView prefix === */
   int16_t    obj_type;
-  int8_t     data_type;        /* CA_FIXLEN surface (numeric gate); storage is int64 */
+  int8_t     data_type;        /* CA_FIXLEN surface (numeric gate); storage is fixlen-16 */
   int8_t     ndim;
   int32_t    flags;            /* CA_FLAG_IS_FACE set */
-  ca_size_t  bytes;            /* sizeof(int64_t) = 8 (one offset per element) */
+  ca_size_t  bytes;            /* 2 * sizeof(int64_t) = 16 (one (start,end) pair per element) */
   ca_size_t  elements;
   ca_size_t *dim;
   char      *ptr;
@@ -445,10 +445,13 @@ rb_ca_const_string_encoding (VALUE self)
   return rb_enc_from_encoding(rb_enc_from_index(ca->encoding_id));
 }
 
-/* `CAConstString#buffer` — returns the frozen internal byte buffer
-   (length-prefix format).  Exposes the defining tail state for
-   introspection and the Arrow-boundary component-buffer export
-   path. */
+/* `CAConstString#buffer` — returns the frozen internal byte buffer: a pure
+   concatenation of the element bytes, with no per-record length prefix (=
+   the Arrow values buffer).  Exposes the defining tail state for
+   introspection and the Arrow-boundary component-buffer export path.  The
+   ranges that index it live in the storage, one (start,end) int64 pair per
+   element; `wrap` is where a hand-built pair array is checked against a
+   buffer. */
 static VALUE
 rb_ca_const_string_buffer (VALUE self)
 {
@@ -948,9 +951,9 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
   CAConstString *ca, *cs;
   TypedData_Get_Struct(self,  CAConstString, &catext_data_type, ca);
   TypedData_Get_Struct(other, CAConstString, &catext_data_type, cs);
-  /* T.0/T.1: shallow re-setup (shares buffer + offset-source).  T.3 will
-     replace this with compacting deep copy (rebased offsets + compacted
-     buffer + detach). */
+  /* Shallow re-setup: shares the buffer and the offset source, which is the
+     documented `dup` semantics for a view.  `copy` is the compacting deep
+     copy (rebased offsets, compacted buffer, detached). */
   if ( ca_func[CA_OBJ_CONST_STRING].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_CONST_STRING, cs->parent->ndim);
   }
