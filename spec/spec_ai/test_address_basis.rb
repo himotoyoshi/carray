@@ -176,9 +176,38 @@ class TestAddressBasis < Test::Unit::TestCase
                   [12, 13, 14, 15]], a.to_a
   end
 
-  def test_xfer_region_outside_the_array_is_refused
+  # A region is checked against the array whatever tier that array lands in.
+  # Only tier 3 goes on to read it, so checking it there alone would mean a
+  # region that is wrong about a plain array is noticed only once the same
+  # call is handed a gather view.
+  def test_a_region_outside_the_array_is_refused_in_every_tier
+    {
+      entity: entity,
+      stride: stride_view,
+      xfer:   xfer_view,
+    }.each do |tier, array|
+      assert_raise(ArgumentError, "#{tier}: a count past the end") do
+        AB.open([array], [false], [[0, 0]], [[5, 4]]) { }
+      end
+      assert_raise(ArgumentError, "#{tier}: a start before the beginning") do
+        AB.open([array], [false], [[-1, 0]], [[2, 2]]) { }
+      end
+    end
+  end
+
+  # Every array's region is checked before any array is opened, so a region
+  # that is wrong about the second one refuses the call without the first
+  # having been touched.
+  def test_a_region_is_checked_before_anything_is_opened
     assert_raise(ArgumentError) do
-      AB.open([xfer_view], [false], [[0, 0]], [[5, 4]]) { }
+      AB.open([xfer_view, entity], [true, true],
+              [[0, 0], [0, 0]], [[2, 2], [9, 9]]) { }
+    end
+  end
+
+  def test_a_region_that_is_not_numbers_is_refused
+    assert_raise(TypeError) do
+      AB.open([entity], [false], [[0, :middle]], [[2, 2]]) { }
     end
   end
 
