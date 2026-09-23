@@ -88,9 +88,45 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
 
   def test_mean_shortcut_over_numeric_scalar_columns
     m = @df.group_by("station").mean
-    # object "station" and N-D "wind" are skipped; only "temp".
+    # the key "station" is the index; N-D "wind" has no reduction; only "temp".
     assert_equal ["temp"], m.variable_names
     assert_equal [20.55, 27.65, 15.0], m["temp"].to_a
+  end
+
+  # The key column is the result's index, so it must not also come back as a
+  # reduced column -- whatever its data type. A string key was excluded only
+  # because reductions skip object columns, which left a numeric key colliding
+  # with the axis name it had just been given.
+  def test_mean_shortcut_with_a_numeric_key
+    df = CAFrame.new("id" => CA_INT32([7, 7, 9]),
+                     "v"  => CA_FLOAT64([1, 2, 3]))
+    m = df.group_by("id").mean
+    assert_equal ["v"], m.variable_names
+    assert_equal "id", m.axis_name
+    assert_equal [7, 9], m.index.to_a
+    assert_equal [1.5, 3.0], m["v"].to_a
+  end
+
+  # A composite numeric key has the same duty: neither key column is a result
+  # column, so the result has the same column set as the string-key case.
+  def test_mean_shortcut_with_a_composite_numeric_key
+    df = CAFrame.new("a" => CA_INT32([1, 1, 2]),
+                     "b" => CA_INT32([5, 5, 6]),
+                     "v" => CA_FLOAT64([1, 2, 3]))
+    m = df.group_by("a", "b").mean
+    assert_equal ["v"], m.variable_names
+    assert_equal "group", m.axis_name
+    assert_equal [1.5, 3.0], m["v"].to_a
+  end
+
+  # Every reduction in the family goes through the same path.
+  def test_every_reduction_shortcut_accepts_a_numeric_key
+    df = CAFrame.new("id" => CA_INT32([7, 7, 9]),
+                     "v"  => CA_FLOAT64([1, 2, 3]))
+    grp = df.group_by("id")
+    [:mean, :sum, :min, :max].each do |op|
+      assert_equal ["v"], grp.public_send(op).variable_names, "#{op} kept the key column"
+    end
   end
 
   def test_composite_key

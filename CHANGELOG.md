@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: on a frame grouped by a numeric column, `CAFrame`'s `mean`, `sum`, `min`
+  and `max` shortcuts now work. They raised `axis_name "..." collides with a
+  column of the same name`, because the key column was reduced into the result
+  while also being its index; a key only stayed out of the way when its data
+  type was one a reduction skips anyway -- a string, boolean, categorical or
+  time column. A composite numeric key no longer returns its key columns as
+  reduced columns either, so it gives the same column set a composite string
+  key gives. `aggregate` and `table` were never affected. Nothing to change in
+  calling code.
+
 - Fix: `CAFrame#filter(keep_masked: true)` no longer hands back a frame whose
   index writes through to the original. Its columns were already independent,
   so writing the result's index changed the original while writing its columns
