@@ -918,4 +918,52 @@ class TestAxisGroupSurface < Test::Unit::TestCase
       assert_equal(5.0, a[g].max(axis: :group)[0, 0], vals.inspect)
     end
   end
+  # ---- the parts of the iterator surface the group was missing --------------
+  #
+  # The base declares these and the other four engines answer them. The group
+  # inherited the readers without anything setting them, so #shape and #ndim
+  # answered nil -- the base's own rule says a member it does not provide
+  # raises cleanly and never answers wrongly. #count took keywords only, so
+  # the value and UNDEF forms came back as "wrong number of arguments". And
+  # all / any answered for a numeric payload that CArray#all refuses.
+
+  def simple_group
+    t = CArray.float64(4, 2) { |i, j| i + j }
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    [t, t[t.axis_group(cat, nil)]]
+  end
+
+  def test_the_group_iterator_reports_its_shape
+    t, it = simple_group
+    assert_equal([2, 2], it.shape)
+    assert_equal([2, 2], it.dim)
+    assert_equal(2, it.ndim)
+    # and it is the shape a reduction actually comes back in
+    assert_equal(it.shape, t[t.axis_group(*[CACategorical.from_codes(
+      CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"]), nil])].sum(axis: :group).shape)
+  end
+
+  def test_the_group_shape_covers_fused_and_band_slots
+    t = CArray.float64(4, 2, 3) { |i, j, k| i + j + k }
+    g4 = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    g3 = CACategorical.from_codes(CArray.uint8(3) { |i| i.zero? ? 0 : 1 }, ["x", "y"])
+    [[g4, nil, nil], [g4, nil, g3], [nil, nil, g3]].each do |slots|
+      it = t[t.axis_group(*slots)]
+      assert_equal(it.shape, it.sum(axis: :group).shape, slots.map { |x| x ? "g" : "b" }.join)
+    end
+  end
+
+  def test_count_takes_the_value_and_undef_forms
+    t, it = simple_group
+    assert_equal([[2, 2], [2, 2]], it.count(axis: :group).to_a)
+    assert_equal([[1, 1], [0, 0]], it.count(1.0, axis: :group).to_a)
+
+    tm = t.copy
+    tm[0, 0] = UNDEF
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    itm = tm[tm.axis_group(cat, nil)]
+    assert_equal([[1, 2], [2, 2]], itm.count(axis: :group).to_a)
+    assert_equal([[1, 0], [0, 0]], itm.count(UNDEF, axis: :group).to_a)
+    assert_equal(itm.count_masked(axis: :group).to_a, itm.count(UNDEF, axis: :group).to_a)
+  end
 end

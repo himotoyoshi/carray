@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a group iterator from `axis_group` now answers `shape`, `ndim` and
+  `dim`, which every other iterator answers and which it returned `nil` for,
+  and its `count` takes the two forms the family declares: `count(UNDEF)` for
+  masked cells and `count(v)` for cells equal to `v`. Both previously raised
+  `ArgumentError` about the number of arguments.
+
 - Fix: a `group_by_category` reduction over values that carry a Face (a
   `CATime` column, say) now answers in that Face, as `CArray`'s own reduction
   does: `min`, `max` and `median` come back as a `CATime` of elements rather
