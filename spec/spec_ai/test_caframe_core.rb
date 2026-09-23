@@ -437,6 +437,37 @@ class TestCAFrameAtLabel < Test::Unit::TestCase
     df = CAFrame.new("v" => CA_INT32([1, 2, 3]))
     assert_raise(ArgumentError) { df.at(0) }
   end
+
+  # An index may carry a masked cell -- an outer join and align both produce
+  # one -- but an undefined label identifies no row, which is the same answer
+  # the addressing primitives give: a masked key matches nothing, not another
+  # masked key. Asking for it through at is a malformed question, so it is
+  # refused rather than answered.
+  def test_at_undef_is_refused
+    idx = CA_INT32([100, 200, 300])
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    e = assert_raise(ArgumentError) { df.at(UNDEF) }
+    assert_match(/is_masked/, e.message)
+  end
+
+  # Rows whose label is missing are still reachable, with mask vocabulary.
+  def test_rows_with_a_missing_label_are_reachable_through_filter
+    idx = CA_INT32([100, 0, 0])
+    idx[1] = UNDEF
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    sub = df.filter { |f| f.index.is_masked }
+    assert_equal [2.0, 3.0], sub["t"].to_a
+  end
+
+  # A real label whose row is masked is simply absent, not undetermined.
+  def test_at_a_label_whose_cell_is_masked_is_a_key_error
+    idx = CA_INT32([100, 200, 300])
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    assert_raise(KeyError) { df.at(300) }
+  end
 end
 
 class TestCAFrameFilterAndGather < Test::Unit::TestCase

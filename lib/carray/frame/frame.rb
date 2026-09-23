@@ -376,6 +376,17 @@ class CAFrame
   # multi-row, frame-returning path). Positional access is +df[i]+.
   def at(label)
     raise ArgumentError, "at requires an index (set one with set_index)" unless @index
+    # An index may hold a masked cell -- an outer join and align both build one
+    # -- but an undefined label identifies no row, and two undefined labels are
+    # not the same label. The addressing primitives already say this (a masked
+    # key matches nothing, not another masked key), so at says it too rather
+    # than answering through eq(UNDEF), which asks about the mask and not about
+    # the label at all.
+    if UNDEF.equal?(label)
+      raise ArgumentError,
+            "at(UNDEF): an undefined label identifies no row; " \
+            "use filter { |f| f.index.is_masked } for the rows with no label"
+    end
     pos = @index.eq(label).where
     case pos.elements
     when 0
