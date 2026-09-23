@@ -741,3 +741,59 @@ class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
     assert_match(/"v"/, e.message)
   end
 end
+
+# set_index / reset_index are documented as each other's inverse, so the round
+# trip has to put the row axis name back. set_index overwrites it with the name
+# of the column it promotes, and that name is user-visible -- it is the CSV
+# header of the first column and the key of the index in a row Hash.
+class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
+  def frame(axis_name)
+    CAFrame.new({ "t" => CA_INT32([1, 2, 3]), "v" => CA_FLOAT64([1, 2, 3]) },
+                axis_name: axis_name)
+  end
+
+  def test_reset_index_restores_the_name_the_frame_had_before
+    df = frame("obs")
+    df.set_index("t")
+    assert_equal "t", df.axis_name
+    df.reset_index
+    assert_equal "obs", df.axis_name
+    assert_equal ["t", "v"], df.variable_names
+  end
+
+  def test_the_round_trip_is_the_identity_on_the_default_name
+    df = CAFrame.new("t" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]))
+    before = df.axis_name
+    df.set_index("t").reset_index
+    assert_equal before, df.axis_name
+  end
+
+  # Only the name held before the frame had an index is remembered, so a second
+  # set_index does not overwrite it with the first index's name.
+  def test_a_second_set_index_does_not_replace_the_remembered_name
+    df = CAFrame.new({ "a" => CA_INT32([1, 2]), "b" => CA_INT32([7, 8]),
+                       "v" => CA_FLOAT64([1, 2]) }, axis_name: "obs")
+    df.set_index("a")
+    df.set_index("b")
+    df.reset_index
+    assert_equal "obs", df.axis_name
+  end
+
+  # A frame born with an index never had a name before it, so there is nothing
+  # to restore and the default stands. A derived frame is born that way too.
+  def test_a_frame_born_with_an_index_resets_to_the_default
+    df = CAFrame.new({ "v" => CA_FLOAT64([1, 2]) },
+                     index: CA_INT32([9, 8]), axis_name: "obs")
+    df.reset_index
+    assert_equal CAFrame::DEFAULT_AXIS_NAME, df.axis_name
+    assert_equal ["obs", "v"], df.variable_names
+  end
+
+  def test_resetting_twice_is_harmless
+    df = frame("obs")
+    df.set_index("t").reset_index
+    assert_equal "obs", df.axis_name
+    df.reset_index
+    assert_equal "obs", df.axis_name
+  end
+end

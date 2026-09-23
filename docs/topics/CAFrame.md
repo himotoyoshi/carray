@@ -808,6 +808,21 @@ df.index                   # the index CArray (or nil)
 df.axis_name               # the row-axis name
 ```
 
+`set_index` renames the row axis after the column it promotes, because that is
+the name the index then appears under — as the first CSV column, and as its key
+in a row `Hash`. `reset_index` is its inverse, and puts the earlier name back:
+
+```ruby
+df = CAFrame.new({ "t" => …, "v" => … }, axis_name: "obs")
+df.set_index("t").axis_name    # => "t"
+df.reset_index.axis_name       # => "obs"
+```
+
+A frame **built** with an index never had a row axis name before it, so there is
+nothing to put back and `reset_index` leaves the default `"row"`. A frame
+derived from an indexed one — a row slice, `filter`, `copy` — is born indexed in
+the same way, so it behaves the same.
+
 ---
 
 ## 8. Column verbs
