@@ -36,6 +36,21 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame.from_records` now reads a `nil` cell back as UNDEF in every
+  column, not only in one a numeric cast happens to convert. A string, boolean,
+  object or N-D column used to keep the `nil` as a value, so a mask written by
+  `to_records` did not survive the trip and a row with no index label came back
+  labelled `nil`. Note that the data type is still rebuilt from the values, so
+  an integer column returns as `int64` and a boolean column as an object
+  column; `cast` afterwards if the exact type matters.
+
+- Fix: a CSV written from a frame with a single column -- or with only an
+  index -- now reads back with all of its rows. A masked cell is written as an
+  empty field, which for a one-column row is a line with nothing on it, and the
+  reader skipped it as a blank line. Blank lines in a file with more than one
+  column are still skipped, as a row there always carries a separator. Nothing
+  to change in calling code.
+
 - Fix: linear gap-fill on an **integer** array no longer fills the cells
   outside the interpolable span with `0` and drops their mask. It now leaves
   them masked, as it already did for a float array and as the documentation
