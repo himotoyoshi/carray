@@ -186,6 +186,24 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_false(root.read_only?)
   end
 
+  def test_every_code_to_label_path_shares_one_decode
+    # #to_a guarded an out-of-range code and #unique did not, so the two
+    # contradicted each other on the same cell — and #unique could return a
+    # label twice, which is not what unique means. from_codes now refuses such
+    # codes, so this reaches the decoders directly: the point of the pin is that
+    # there is one rule, not two that can drift apart again.
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| [0, 1, 2, 0][i] },
+                                   ["a", "b", "c"])
+    assert_nil(cat.send(:label_at, -2))          # not "b", via Array#[] from the end
+    assert_nil(cat.send(:label_at, 9))
+    assert_equal("b", cat.send(:label_at, 1))
+    # the bulk path agrees with the per-cell path, code for code
+    assert_equal(["a", nil, "b", nil],
+                 cat.send(:labels_for, CA_INT32([0, -2, 1, 9])).to_a)
+    assert_equal([-2, 9, 1].map { |c| cat.send(:label_at, c) },
+                 cat.send(:labels_for, CA_INT32([-2, 9, 1])).to_a)
+  end
+
   def test_from_codes_adopts_a_borrowed_entity_without_copying
     # a CAWrap over a producer's buffer is an entity, so the zero-copy import
     # stays zero-copy (that producer can still write its own buffer — the

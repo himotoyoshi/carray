@@ -295,12 +295,11 @@ class CACategorical < CAObject
     other.is_a?(CACategorical) && @labels == other.labels
   end
 
-  # Face hook: decode a per-cell code into its category label. An out-of-range
-  # code (e.g. an unmasked external sentinel) decodes to nil rather than a
-  # wrong category via Ruby negative indexing.
+  # Face hook: decode a per-cell code into its category label, through the one
+  # decode every code-to-label path shares (see #label_at).
   def storage_to_scalar(raw)
     code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(parent.data_type)) : raw
-    (code < 0 || code >= @labels.size) ? nil : @labels[code]
+    label_at(code)
   end
 
   # ---- category-space operations (by label, not code) -------------------
@@ -457,10 +456,21 @@ class CACategorical < CAObject
 
   private
 
-  # Labels for a code array (the discovery kernels skip masked cells, so the
-  # code arrays reaching here hold real codes only).
+  # The one decode from a code to its label. An out-of-range code — a negative
+  # one, or an unmasked sentinel that reached us from outside — has no label,
+  # so it decodes to nil. Writing `@labels[code]` instead would read a negative
+  # code from the *end* of the vocabulary and hand back a real label for a cell
+  # that has none. Every code-to-label path goes through here rather than
+  # indexing @labels itself, because two decodes are two chances to disagree,
+  # and disagreeing is how #unique came to contradict #to_a on the same cell.
+  def label_at (code)
+    (code < 0 || code >= @labels.size) ? nil : @labels[code]
+  end
+
+  # Labels for a code array. The discovery kernels skip masked cells, so what
+  # reaches here is real codes — but it is decoded like any other code.
   def labels_for (code_array)
-    CA_OBJECT(code_array.to_a.map { |c| @labels[c] })
+    CA_OBJECT(code_array.to_a.map { |c| label_at(c) })
   end
 
   # This categorical's cells as their labels; a masked cell stays masked.
