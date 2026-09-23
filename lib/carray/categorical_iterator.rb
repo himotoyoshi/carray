@@ -1091,33 +1091,45 @@ class CACategoricalIterator < CAIterator
   # this, is exactly the case that would have found it missing.
   def core_reduce_type (op, *args)
     (@core_reduce_type ||= {})[[op, args]] ||=
-      core_probe.public_send(op, *args, axis: 1).data_type
+      @value.face? && @value.elements.zero? ?
+        CA_OBJECT : core_probe.public_send(op, *args, axis: 1).data_type
   end
 
-  # A one-cell array of the same kind as the values, Face included, so the
-  # core answers about the same thing the group slices will hand back. A Face
-  # cannot be allocated from its surface data type alone -- a fixlen surface
-  # has no width without its storage -- which is why this lifts one rather
-  # than building a bare array of that type.
+  # A one-cell array of the same kind as the values, so the core answers about
+  # the same thing the group slices will hand back. For a Face that is a view
+  # of the values themselves rather than a blank: a Face cannot be allocated
+  # from its surface data type alone, and a blank storage array is not a valid
+  # Face for every one of them -- a const string's record indexes a shared
+  # pool, so a zeroed record points nowhere.
   def core_probe
-    if @value.face?
-      CArray.new(@value.parent.data_type, [1, 1]).face_lift(@value)
-    else
-      CArray.new(@value.data_type, [1, 1])
-    end
+    return CArray.new(@value.data_type, [1, 1]) unless @value.face?
+    @value.reshape(@value.elements)[[0]].reshape(1, 1)
+  end
+
+  # Whether an output can be built by lifting one. A Face is filled by writing
+  # surface values into storage, so this needs a Face that can be written
+  # into; a read-only one -- a const string's records index a shared pool, a
+  # categorical's codes index a vocabulary -- has no blank form to fill.
+  def face_output?
+    @value.face? && ! @value.read_only?
   end
 
   def per_category (data_type)
-    out = if @value.face? && data_type == @value.data_type
+    out = if ! @value.face? || data_type != @value.data_type
+            CArray.new(data_type, [@k])
+          elsif face_output?
             # the core answered in the values' own Face, so the output is one
             # too: CATime#min hands back a CATime::Element, which only a
-            # CATime has anywhere to put. A member the core refuses for this
-            # Face still refuses -- the group slice is the Face, so the
-            # refusal comes from there, in the core's own words.
-            CArray.new(@value.parent.data_type, [@k]).face_lift(@value)
+            # CATime has anywhere to put
+            CArray.new(@value.parent.data_type, [@k],
+                       bytes: @value.parent.bytes).face_lift(@value)
           else
-            CArray.new(data_type, [@k])
+            # a read-only Face cannot be filled, so its answers are collected
+            # as the surface objects they already are
+            CArray.new(CA_OBJECT, [@k])
           end
+    # A member the core refuses for this Face still refuses: the group slice is
+    # the Face, so the refusal comes from there, in the core's own words.
     @k.times { |c| out[c] = yield(group_slice(c)) }
     out
   end
