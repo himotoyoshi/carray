@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a `group_by_category` reduction over values that carry a Face (a
+  `CATime` column, say) now answers in that Face, as `CArray`'s own reduction
+  does: `min`, `max` and `median` come back as a `CATime` of elements rather
+  than failing with an internal message about a zero width. A member the core
+  does not define for that Face still refuses, in the core's own words.
+
 - Fix: the band-only classifier shape for a `group_by_category(axis:)`
   reduction is now reachable on a two-dimensional source, where it was
   refused and the refusal listed it among the accepted forms. Where both the
