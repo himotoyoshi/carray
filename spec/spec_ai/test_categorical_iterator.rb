@@ -780,6 +780,49 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_equal(before[:elements], grp.elements.to_a)
   end
 
+  # ---- an iterator that answers only the per-fiber form ---------------------
+  #
+  # When the classifier does not line up cell-for-cell with the value, there is
+  # no grouped copy to reduce, and only the axis: form can work. That was left
+  # implicit -- the ivar simply stayed nil -- so a no-axis reduction surfaced
+  # whatever NoMethodError the nil reached first, #elements answered nil, and
+  # #inspect printed an empty grouping that does not exist. accumulate(axis:)
+  # was collateral: it is the one axis: member that asks the core what type it
+  # folds into, and the probe was built from the missing buffer.
+
+  def deferred_iterator
+    CA_INT32([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+      .group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+  end
+
+  def test_a_no_axis_reduction_names_the_mismatch
+    grp = deferred_iterator
+    [:sum, :mean, :median, :prod, :count, :elements].each do |op|
+      e = assert_raise(ArgumentError, "#{op} should name the mismatch") {
+        grp.public_send(op)
+      }
+      assert_match(/value\.elements \(12\) != cat\.elements \(4\)/, e.message, op.to_s)
+      assert_match(/per-fiber/, e.message, op.to_s)
+    end
+  end
+
+  def test_inspect_says_so_instead_of_showing_an_empty_grouping
+    # inspect is what you reach for when something is already puzzling, so it
+    # neither raises nor claims a grouping that classified nothing
+    assert_match(/per-fiber only/, deferred_iterator.inspect)
+    ordinary = CA_INT32([1, 2, 3, 4]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    assert_match(/elements=\[2, 2\]/, ordinary.inspect)
+  end
+
+  def test_accumulate_along_an_axis_works_without_a_grouped_copy
+    assert_equal([[5, 7, 9], [17, 19, 21]], deferred_iterator.accumulate(axis: 0).to_a)
+  end
+
+  def test_accumulate_along_an_axis_keeps_the_value_data_type
+    grp = deferred_iterator
+    assert_equal(CA_INT32, grp.accumulate(axis: 0).data_type)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)
