@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame#filter(keep_masked: true)` no longer hands back a frame whose
+  index writes through to the original. Its columns were already independent,
+  so writing the result's index changed the original while writing its columns
+  did not. The result is now materialized throughout -- columns and index --
+  whether or not the selector actually carries a masked cell, so the same call
+  site no longer switches between sharing and copying depending on the data.
+  Code that wants a frame sharing storage with the original should use plain
+  `filter`, which is still a view-frame.
+
 - Fix: reductions, scans and order statistics no longer leak memory when
   reading their source raises part way through -- for example
   `cumsum`, `sum` or `median` over a float64 view of an object array

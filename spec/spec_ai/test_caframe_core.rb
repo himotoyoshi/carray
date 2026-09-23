@@ -523,6 +523,40 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     assert_equal [0.5, 1.5, 2.5, 3.5], @df["b"].to_a
   end
 
+  # keep_masked: has to write the carried-forward UNDEF into the result, so the
+  # result is materialized -- and materialized means the index too, not just the
+  # columns. Writing the result must not reach the parent through either.
+  def test_keep_masked_result_index_is_independent
+    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
+                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
+    df["v"][2] = UNDEF
+    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
+    sub.index[0] = -1
+    assert_equal [100, 200, 300, 400], df.index.to_a
+  end
+
+  # The same call site must not switch between sharing and copying on whether
+  # that day's data happened to produce an undetermined cell (the reasoning
+  # CAFrame.md section 3 gives for splice always snapshotting).
+  def test_keep_masked_is_materialized_whether_or_not_the_selector_is_masked
+    cols = { "v" => CA_INT32([10, 20, 30, 40]) }
+    unmasked = CAFrame.new(cols.transform_values(&:copy),
+                           index: CA_INT32([100, 200, 300, 400]))
+    masked   = CAFrame.new(cols.transform_values(&:copy),
+                           index: CA_INT32([100, 200, 300, 400]))
+    masked["v"][2] = UNDEF
+
+    [unmasked, masked].each do |df|
+      before_v = df["v"].to_a
+      before_i = df.index.to_a
+      sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
+      sub["v"][0] = -1
+      sub.index[0] = -1
+      assert_equal before_v, df["v"].to_a
+      assert_equal before_i, df.index.to_a
+    end
+  end
+
   def test_keep_masked_without_masked_selector_equals_drop
     df = CAFrame.new("a" => CA_INT32([10, 20, 30, 40]))
     drop = df.filter { |f| f["a"] > 15 }

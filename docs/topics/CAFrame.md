@@ -575,6 +575,29 @@ df.filter { |f| f.index >= "2024-06-15 01:00" }
 df.filter { |f| (f.index >= lo) & (f.index <= hi) }   # a label range
 ```
 
+### Rows whose membership is undetermined — `keep_masked:`
+
+A **masked (UNDEF) selector cell** means the row's membership is genuinely
+undetermined: the predicate read a masked input, so the answer is neither true
+nor false. By default such a row is **dropped**, exactly as a false cell would
+be. Pass `keep_masked: true` to carry the UNDEF forward instead:
+
+```ruby
+df.filter { |f| f["temp"] > 24 }                     # undetermined rows dropped
+df.filter(keep_masked: true) { |f| f["temp"] > 24 }  # they survive, masked
+```
+
+The surviving undetermined rows arrive with their **data cells masked** and
+their **index value present**, so the row stays identifiable and a later,
+better-informed pass can re-judge it. Definitely-true rows carry their values
+through unchanged either way.
+
+> `keep_masked: true` returns a **materialized** frame, not a view-frame —
+> writing the carried-forward UNDEF into the result is something a view cannot
+> do without masking the parent's rows. This holds whether or not the selector
+> actually carries a masked cell, so the same call site does not switch between
+> sharing and copying depending on the data.
+
 Two-frame comparisons don't fit a single-frame block — pull the columns out as
 local variables instead (they're raw CArrays, so you can name them):
 
@@ -1086,6 +1109,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df[0..1]` / `df[bool]` / `df.filter { }` | **view-frame**, columns are row views sharing storage |
 | `df.head(n)` / `df.tail(n)` | **view-frame**, as a row slice |
 | `df.sort_by_key(...)` / `df.sort_by { }` | **view-frame**, columns are row-gather views in the sorted order |
+| `df.filter(keep_masked: true) { }` | a **materialized** frame — columns and index both independent; the carried-forward UNDEF has to be written into the result, which a view cannot do (§6) |
 | `df.copy` | an **independent** frame — every column materialized |
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
