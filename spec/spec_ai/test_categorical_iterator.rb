@@ -860,6 +860,54 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_not_match(/rb_ca_new_reduced/, e.message)
   end
 
+  # ---- the no-axis surface is one snapshot ---------------------------------
+  #
+  # Every no-axis reduction works from the category-major copy taken when the
+  # iterator was built. The scans read the value array instead, so a write
+  # through the source between two calls was visible to a cumsum and not to a
+  # sum, off the same iterator. (The axis: form is live throughout, which is
+  # its own contract.)
+
+  SNAPSHOT_MEMBERS = [:sum, :mean, :min, :max, :median, :count, :elements,
+                      :cumsum, :cumprod, :cummax, :cummin, :cumcount].freeze
+
+  def test_a_write_through_the_source_reaches_no_member
+    h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    before = SNAPSHOT_MEMBERS.to_h { |op| [op, grp.public_send(op).to_a] }
+
+    h[0] = 100.0
+
+    SNAPSHOT_MEMBERS.each do |op|
+      assert_equal(before[op], grp.public_send(op).to_a,
+                   "#{op} moved with a write through the source")
+    end
+  end
+
+  def test_a_fresh_iterator_sees_the_write
+    h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    h.group_by_category(cat).cumsum        # take the old snapshot
+    h[0] = 100.0
+    assert_equal([100.0, 102.0, 3.0, 7.0], h.group_by_category(cat).cumsum.to_a)
+    assert_equal([102.0, 7.0], h.group_by_category(cat).sum.to_a)
+  end
+
+  def test_the_scan_snapshot_carries_masks_and_exclusions
+    # it is rebuilt from the permutation and the grouped copy rather than
+    # copied again, so this pins that the rebuild is faithful
+    h = CA_DOUBLE([1, 2, 3, 4, 5, 6])
+    h[2] = UNDEF                                        # masked, still classified
+    codes = CArray.uint8(6) { |i| [0, 0, 0, 1, 1, 255][i] }   # cell 5 excluded
+    grp = h.group_by_category(CACategorical.from_codes(codes, %w[a b]))
+
+    assert_equal([1.0, 3.0, 3.0, 4.0, 9.0, UNDEF], grp.cumsum.to_a)
+    # the masked cell is classified, so the running count holds rather than
+    # breaking; only the excluded cell has no group to run in
+    assert_equal([1, 2, 2, 1, 2, UNDEF], grp.cumcount.to_a)
+    assert_equal([3.0, 9.0], grp.sum.to_a)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)
