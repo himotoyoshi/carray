@@ -17,8 +17,12 @@
 #                         (per-category counts), `cat.codes.count(code)`, etc.
 #    - per-cell access  = decode the code into its label (`cat[i]` -> category)
 #
-#  Exclusion (missing / out-of-vocabulary) is encoded two ways at once, and
-#  because the Face is READONLY they can never desync:
+#  Exclusion (missing / out-of-vocabulary) is encoded two ways at once. Both
+#  are written when the categorical is built — categorize produces them, and
+#  from_codes normalises whatever it receives into them — and the Face is
+#  READONLY afterwards, so they stay in step. Both are needed because they have
+#  different readers: the axis-group kernel classifies on the code byte, the
+#  materialising paths classify on the mask.
 #
 #    - the cell is MASKED                  -> CArray-native idiom: `cat[i]` is
 #                                             UNDEF, `is_masked` / mask-aware
@@ -76,46 +80,131 @@ class CACategorical < CAObject
     CA_UINT64 => 0xFFFFFFFFFFFFFFFF, CA_INT64 => -1,
   }.freeze
 
+  # The largest vocabulary each codes data type can carry: every valid code in
+  # 0...k has to be representable AND distinct from the exclusion sentinel.  An
+  # unsigned type spends its top value on the sentinel; a signed one spends -1,
+  # which was never a valid index, so a signed type carries one more label than
+  # the unsigned type of the same width.  categorize picks a width by this rule
+  # when it builds codes; from_codes has to check it when it receives them.
+  MAX_LABELS = {
+    CA_UINT8  => 0xFF,               CA_INT8  => 0x80,
+    CA_UINT16 => 0xFFFF,             CA_INT16 => 0x8000,
+    CA_UINT32 => 0xFFFFFFFF,         CA_INT32 => 0x80000000,
+    CA_UINT64 => 0xFFFFFFFFFFFFFFFF, CA_INT64 => 0x8000000000000000,
+  }.freeze
+
   class << self
     # Wrap already-dense codes + labels with no discovery — the import receiver
     # for a pandas Categorical or an Arrow dictionary. `codes` becomes the
     # Face's storage parent verbatim (zero-copy when it is a wrapped memory
-    # view), and from_codes takes ownership of it.
+    # view and nothing needs rewriting), and from_codes takes ownership of it.
     #
-    # Excluded cells are identified by the all-ones sentinel value (type-max
-    # for unsigned codes, -1 for signed — both the pandas / Arrow missing code)
-    # and masked here, so the categorical is well-formed regardless of whether
-    # the caller pre-masked. Only the mask buffer is touched; the code bytes
-    # are left intact (so a pandas byte-reinterpret round-trips).
+    # This is the one door through which an already-built encoding enters, so
+    # it validates rather than assumes, and it normalises before handing over:
+    # a cell is excluded when it arrives masked OR holds the all-ones sentinel
+    # (type-max for unsigned codes, -1 for signed — both the pandas / Arrow
+    # missing code), and every excluded cell leaves here holding the sentinel
+    # AND masked. Writing both matters because the two encodings have different
+    # readers: the axis-group kernel classifies on the code byte, the
+    # materialising paths classify on the mask. A categorical that carries only
+    # one of them answers membership two ways, silently. An Arrow dictionary
+    # carries its missingness in a validity bitmap with arbitrary code bytes —
+    # frequently 0 — so arriving masked-only is the normal import, not an edge.
+    #
+    # #initialize marks the codes read-only, so this is also the last point at
+    # which they can be written; a read-only argument is copied rather than
+    # refused.
     # @overload from_codes(codes, labels)
     #   Returns a {CACategorical} wrapping already-dense integer
     #   `codes` with the given `labels`, without discovery. `codes`
-    #   becomes the Face's storage parent; excluded cells (identified
-    #   by the type-max sentinel value) are masked automatically.
+    #   becomes the Face's storage parent. A cell that is masked or
+    #   holds the type-max sentinel is excluded, and leaves as both.
     #   @param codes [CArray] integer code storage.
     #   @param labels [Array, CArray] category vocabulary indexed by
-    #     code.
+    #     code. Must be unique, and must fit the codes data type with
+    #     the sentinel reserved.
     #   @return [CACategorical]
-    #   @raise [ArgumentError] when `codes` is not an integer CArray.
+    #   @raise [ArgumentError] when `codes` is not an integer CArray,
+    #     when `labels` holds duplicates or is too large for the codes
+    #     data type, or when an unmasked code is outside `0...labels.size`
+    #     and is not the sentinel.
     def from_codes(codes, labels)
       unless codes.is_a?(CArray) && SENTINEL.key?(codes.data_type)
         got = codes.is_a?(CArray) ? codes.data_type : codes.class
         raise ArgumentError, "from_codes: codes must be an integer CArray (got #{got})"
       end
-      excluded = codes.eq(SENTINEL[codes.data_type])
-      if excluded.count(true) > 0
-        codes.mask = codes.has_mask? ? (codes.mask | excluded) : excluded
+
+      labels_arr = labels.respond_to?(:to_a) ? labels.to_a : Array(labels)
+      if labels_arr.uniq.size != labels_arr.size
+        raise ArgumentError, "from_codes: labels must be unique (got duplicates)"
       end
-      new(codes, labels)
+      k        = labels_arr.size
+      sentinel = SENTINEL[codes.data_type]
+      max      = MAX_LABELS[codes.data_type]
+      if k > max
+        raise ArgumentError,
+              "from_codes: #{k} labels do not fit #{CArray.data_type_name(codes.data_type)} " \
+              "codes, which carry at most #{max} (the top value is reserved as the " \
+              "exclusion sentinel); widen the codes data type"
+      end
+
+      # Classify on the code bytes with the mask set aside (`.value`): a
+      # comparison against a masked cell yields UNDEF, which would read as
+      # "not excluded" and let the cell through carrying a valid-looking code.
+      raw = codes.value
+      if sentinel == -1                 # signed codes: -1 is the sentinel
+        out = raw.lt(0)
+        # Only test the upper bound when k is representable in the codes data
+        # type. At the very top of the range (k == max) no value can reach k
+        # anyway, and comparing against an unrepresentable literal would wrap
+        # and flag every cell as out of range.
+        out = out | raw.ge(k) if k <= max - 1
+      else                              # unsigned codes: type-max is the sentinel
+        out = raw.ge(k)                 # k <= max here, so always representable
+      end
+      masked   = codes.has_mask? ? codes.is_masked : nil
+      excluded = masked ? (out | masked) : out
+      # A masked cell may hold any byte at all — that is the CArray contract —
+      # so it is never corrupt, only in need of normalising. An *unmasked* cell
+      # holding an out-of-range code that is not the sentinel is neither a
+      # category nor missingness; refuse it here, where the input is still in
+      # the caller's hands, instead of letting it surface later as an IndexError
+      # from the grouping plan or as a wrong label from a decode.
+      corrupt = out & raw.ne(sentinel)
+      corrupt = corrupt & masked.not if masked
+      if corrupt.any
+        bad = raw[corrupt].to_a.uniq.sort
+        shown = bad.first(4).join(", ") + (bad.size > 4 ? ", ..." : "")
+        raise ArgumentError,
+              "from_codes: code#{bad.size == 1 ? "" : "s"} #{shown} outside " \
+              "0...#{k} for #{k} label#{k == 1 ? "" : "s"} " \
+              "(use #{sentinel} to exclude a cell, or mask it)"
+      end
+
+      # Normalise, so the byte reader and the mask reader agree from here on.
+      # Nothing is written when the two already agree, which keeps a clean
+      # zero-copy import zero-copy.
+      needs_mask = masked ? (excluded & masked.not).any : excluded.any
+      needs_byte = (excluded & raw.ne(sentinel)).any
+      if needs_mask || needs_byte
+        work = codes.read_only? ? codes.copy : codes
+        work.value[excluded] = sentinel if needs_byte
+        work.mask = excluded
+        codes = work
+      end
+
+      new(codes, labels_arr)
     end
   end
 
-  # codes : integer CArray, the storage parent. Excluded cells are both
-  #         masked AND store the type-max sentinel value (= the all-ones bit
-  #         pattern, which is signed -1 byte-for-byte — the pandas / Arrow
-  #         missing code). Because the Face is READONLY the two never desync,
-  #         so consumers may rely on either: the mask (CArray-native) or the
-  #         sentinel (axis-group's out-of-range skip, zero-copy export).
+  # codes : integer CArray, the storage parent, already normalised by the
+  #         caller (categorize builds it that way; from_codes rewrites what it
+  #         receives). Excluded cells are both masked AND store the type-max
+  #         sentinel value (= the all-ones bit pattern, which is signed -1
+  #         byte-for-byte — the pandas / Arrow missing code). Marking the codes
+  #         read-only below keeps the two in step from here on, so consumers may
+  #         rely on either: the mask (CArray-native) or the sentinel
+  #         (axis-group's out-of-range skip, zero-copy export).
   # labels: Array | CArray, the vocabulary; labels[code] = category.
   # @overload initialize(codes, labels)
   #   Allocates a READONLY {CACategorical} Face whose storage is
