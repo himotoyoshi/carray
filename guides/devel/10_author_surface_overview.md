@@ -24,15 +24,16 @@ most of the battle:
 | **sweep author surface** ([ch. 13](13_sweep_author_surface.md)) | `ext/ca_for_each_element.h`, `ext/ca_for_buffer.h`, `ext/ca_sweep_engine.h` | flat element-wise loops; whole-buffer delivery to external libraries | `ca_sweep_state_t` engine; same `xfer_all` plumbing |
 | **call_cfunc** ([ch. 14](14_call_cfunc.md)) | `ext/carray_call_cfunc.h` (generated) | vectorising an existing scalar C function | `ca_sweep_state_t` engine (typed wrapper) |
 
-A non-surface for the same reason it shows up in conversations:
+Two non-surfaces, listed for the same reason they show up in conversations:
 
 | Lookalike | Where | Why **not** a C kernel surface |
 |---|---|---|
 | `each_slab` / `map_slab` / `reduce_slab` | Ruby surface (user-facing) | These are Ruby end-user features — they call back into a Ruby block per slab. You cannot write a C kernel against them. |
+| `CArray::AddressBasis` ([ch. 21](21_address_basis.md)) | runtime facility, `ca_attach` layer | It lends an addressing basis — a pointer and one byte stride per axis — rather than delivering cells, because its consumer is *generated* code that writes its own loop. If you are writing a kernel by hand, you want the kernel iterator. |
 
 ### The category-error trap
 
-The last row is the one that catches people. `each_slab` and friends look
+The `each_slab` row is the one that catches people. `each_slab` and friends look
 like "per-axis iteration", so it is tempting to reach for them when
 implementing a C extension that needs per-axis work. **That is a category
 error.** `each_slab` is a Ruby block bridge for end users; it is not how
