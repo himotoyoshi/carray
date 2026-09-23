@@ -91,13 +91,19 @@ class CAFrame
         @recno    = 0
       end
 
-      # Fields of the next non-blank record, or nil at EOF.
-      def read(io)
+      # Fields of the next record, or nil at EOF.  A blank line carries no
+      # separator, so it cannot be a row of a file with more than one column
+      # and is skipped as noise between records.  In a single-column file it
+      # is the only spelling a missing single field has -- which is what
+      # to_csv writes for a masked cell -- so the caller passes
+      # +blank_is_row: true+ once the column count is known to be one, and
+      # the empty record becomes a row of no fields for build_frame to pad.
+      def read(io, blank_is_row: false)
         loop do
           rec = CSVParser.read_record(io, @quote)
           return nil if rec.nil?
           @recno += 1
-          next if rec.empty?
+          next if rec.empty? && !blank_is_row
           return rec.count(@quote).zero? ? simple(rec) : scan(rec)
         end
       end
@@ -195,7 +201,8 @@ class CAFrame
     # Consume the remaining records as data rows.
     def body
       rows = []
-      while (fields = @tok.read(@io))
+      blank_is_row = @names && @names.size == 1
+      while (fields = @tok.read(@io, blank_is_row: blank_is_row))
         rows << fields
       end
       @rows = rows

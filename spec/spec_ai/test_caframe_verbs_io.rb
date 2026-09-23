@@ -105,6 +105,40 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     assert_equal [0, UNDEF, 2],        back["n"].to_a
   end
 
+  # A single-column row whose only field is missing is written as a line with
+  # nothing on it. A blank line carries no separator, so it can only be a data
+  # row when the file has one column -- there it is the one spelling a missing
+  # single field has. With more columns a row carries at least one separator,
+  # so a blank line stays what it was: noise between records.
+  def test_a_mask_round_trips_through_a_single_column_csv
+    s = CA_OBJECT(["a", "b", "c"]); s[1] = UNDEF
+    df = CAFrame.new("s" => s)
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)))
+    assert_equal 3, back.nrow
+    assert_equal [false, true, false], back["s"].mask.to_a
+    assert_equal [UNDEF, "a", "c"].size, back.nrow
+    assert_equal ["a", UNDEF, "c"], back["s"].to_a
+  end
+
+  def test_a_mask_round_trips_through_an_index_only_csv
+    idx = CA_OBJECT(["x", "y", "z"]); idx[1] = UNDEF
+    df = CAFrame.new({}, index: idx, axis_name: "id")
+    back = CAFrame.from_csv(StringIO.new(df.to_csv))
+    assert_equal 3, back.nrow
+    assert_equal [false, true, false], back["id"].mask.to_a
+  end
+
+  def test_a_blank_line_between_records_is_still_skipped_with_two_columns
+    back = CAFrame.from_csv(StringIO.new("a,b\n1,2\n\n3,4\n"))
+    assert_equal 2, back.nrow
+  end
+
+  def test_a_blank_line_before_the_header_is_still_skipped
+    back = CAFrame.from_csv(StringIO.new("\ns\na\n"))
+    assert_equal ["s"], back.variable_names
+    assert_equal 1, back.nrow
+  end
+
   def test_ragged_short_row_padded_long_row_raises
     with_csv("a,b,c\n1,2\n1,2,3\n") do |path|
       df = CAFrame.from_csv(path)
