@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CAConstString.wrap` now checks the `(start, end)` pairs it is given
+  against the buffer, and takes ownership of the offsets entity by marking it
+  read-only. A pair outside the buffer raises `ArgumentError` naming the
+  element; masked cells are exempt, since their bytes may be anything. Code
+  that built a column with well-formed offsets is unaffected, except that the
+  entity it passed can no longer be written afterwards — pass `.copy` to keep
+  a mutable one. This also means the storage behind an existing column
+  (`column.parent[i] = ...`) now raises rather than silently rewriting a column
+  that reports itself read-only.
+
 - Change: `all` and `any` on an `axis_group` reduction now require a boolean
   payload, as `CArray#all` / `#any` and the other iterators do. They folded any
   numeric payload, counting a non-zero cell as true, so `data.all` refused and

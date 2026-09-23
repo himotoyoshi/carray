@@ -444,8 +444,7 @@ class TestCAConstString < Test::Unit::TestCase
   end
 
   def test_discovery_skips_masked_cells
-    cs = CArray.const_string(%w[ab cd ab])
-    cs.parent[1] = UNDEF
+    cs = CArray.const_string(["ab", nil, "ab"])
     assert_equal 1, cs.nunique
     assert_equal %w[ab], cs.unique.to_a
   end
