@@ -45,6 +45,26 @@ class TestCAFrameFill < Test::Unit::TestCase
     assert_equal([0.0, 4.0, 8.0], df["v"].to_a)
   end
 
+  # An integer column whose masked cells fall outside the interpolable span:
+  # out of range is NaN, which has to be marked before the cast back to the
+  # column's type turns it into a plausible 0. Both the indexed path and the
+  # cell-position fallback go through their own copy of that expression.
+  def test_linear_leaves_an_integer_column_exterior_masked
+    v = CA_INT32([0, 2, 5, 8, 0]); v[0] = UNDEF; v[4] = UNDEF
+    df = CAFrame.new({ "v" => v }, index: CA_INT32([0, 1, 2, 3, 4]))
+    df.fill("v", :linear)
+    assert_equal([true, false, false, false, true], df["v"].is_masked.to_a)
+    assert_equal([2, 5, 8], df["v"][1..3].to_a)
+  end
+
+  def test_linear_leaves_an_integer_column_exterior_masked_without_an_index
+    v = CA_INT32([0, 2, 5, 8, 0]); v[0] = UNDEF; v[4] = UNDEF
+    df = CAFrame.new("v" => v)
+    df.fill("v", :linear)
+    assert_equal([true, false, false, false, true], df["v"].is_masked.to_a)
+    assert_equal([2, 5, 8], df["v"][1..3].to_a)
+  end
+
   # ---- time columns ------------------------------------------------------
 
   def time_col(masked)
