@@ -120,11 +120,12 @@ Two things about how the region lands:
   box row-major, so a `2 × 2` box of `int32` has strides `[8, 4]`, not the
   view's `[16, 4]`. The `:dim` the basis reports is still the *view's* shape.
 
-The region is only consulted by tier 3 — tiers 1 and 2 address the whole
-array, which already covers any box inside it. The rank of the region is
-checked for every array whatever tier it lands in; its **bounds** are checked
-where it is used, so an out-of-range region raises on a tier-3 array and is
-ignored on a tier-1 one.
+The region is only *used* by tier 3 — tiers 1 and 2 address the whole array,
+which already covers any box inside it. It is **checked** for every array all
+the same, before any of them is opened: one start and one count per axis, both
+numbers, and the box inside the array. A region that is wrong is refused the
+same way whatever the arrays turn out to be, rather than being noticed only
+once the same call is handed a gather view.
 
 ## Masks
 

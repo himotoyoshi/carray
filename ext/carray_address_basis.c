@@ -89,14 +89,24 @@ native_steps (CArray *ca, ca_size_t *steps)
   }
 }
 
-/* Checks one array's box description.  Run for every array, whatever tier it
-   lands in, so that the same call is refused the same way regardless of what
-   the array turns out to be -- and because this is a C extension, where a
-   wrong type has to be a message and not a crash. */
+/* Checks one array's box description, all of it: that it is one start and one
+   count per axis, that they are numbers, and that the box they describe is
+   inside the array.
+
+   Run for every array before any of them is opened, whatever tier each turns
+   out to land in.  Only tier 3 goes on to read the box -- tiers 1 and 2
+   address the whole array, which covers any box inside it -- so this is the
+   only place a caller's description is looked at at all for two of the three
+   tiers.  Checking it there too is what keeps the same call refused the same
+   way whatever the arrays turn out to be, rather than a box that is wrong
+   about a plain array being noticed only once the same code is handed a
+   gather view.  And it is a C extension, where a wrong type has to be a
+   message and not a crash. */
 static void
 verify_box (VALUE box_starts, VALUE box_counts, int index, CArray *ca)
 {
-  VALUE starts, counts;
+  VALUE  starts, counts;
+  int8_t k;
   if ( NIL_P(box_starts) ) return;
   starts = rb_ary_entry(box_starts, index);
   counts = rb_ary_entry(box_counts, index);
@@ -108,10 +118,19 @@ verify_box (VALUE box_starts, VALUE box_counts, int index, CArray *ca)
              "a region is described by one start and one count per axis; "
              "this array has %d", (int) ca->ndim);
   }
+  for ( k = 0; k < ca->ndim; k++ ) {
+    ca_size_t start = NUM2LL(rb_ary_entry(starts, k));
+    ca_size_t count = NUM2LL(rb_ary_entry(counts, k));
+    if ( start < 0 || count < 0 || start + count > ca->dim[k] ) {
+      rb_raise(rb_eArgError,
+               "the requested region falls outside the array on axis %d", (int) k);
+    }
+  }
 }
 
 /* Reads one array's box out of the Ruby-side description, defaulting to the
-   whole array.  Its shape was checked by verify_box. */
+   whole array.  verify_box checked it, and checks it again here because this
+   is the last thing between a caller's numbers and pointer arithmetic. */
 static void
 read_box (open_state *state, int index, CArray *ca,
           ca_size_t *starts, ca_size_t *counts)
