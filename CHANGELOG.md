@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a reduction from `group_by_category` now hands back an array of the
+  caller's own. `min`, `max`, `minmax`, `count`, `count_not_masked`,
+  `elements`, `min_index` and `max_index` returned the iterator's memo itself,
+  so writing into a result changed what that iterator answered from then on,
+  and changed it for the other members reading the same memo. `sum` already
+  copied. Nothing to change in calling code unless you relied on writing
+  through a result.
+
 - Fix: an `axis_group` reduction or scan that raises part-way through no
   longer leaks the working memory it had taken. An object-valued scan
   (`cumsum`, `cummax` and the rest) calls back into Ruby for every cell, so a
