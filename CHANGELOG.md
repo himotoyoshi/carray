@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame` no longer reports a row count that nothing in the frame backs.
+  Splicing a frame that has no columns into another that has neither columns nor
+  an index left the target claiming the spliced frame's row count, while its own
+  `copy`, `head` and `filter` all answered 0 and it would then accept only
+  columns of that length. The count is now read off a column, or off the index
+  when there are no columns. Nothing to change in calling code.
+
+- Fix: `CAFrame`'s `df[rows] = UNDEF` now refuses a row outside the frame on a
+  frame with no columns, as the read and delete forms already did. It used to
+  return quietly, because the bound check came from the column indexer the
+  selector was handed to and there was no column to hand it to. Masking a row
+  that does exist on such a frame is still a no-op -- there are no data cells,
+  and the index is left alone by design.
+
 - Change: `CACategorical.from_codes` now materialises `codes` when it is a
   view rather than an array of its own, so writing through the array the view
   was taken from no longer changes the categorical underneath it. A wrapped

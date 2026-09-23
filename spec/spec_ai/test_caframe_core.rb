@@ -677,3 +677,47 @@ class TestCAFrameIndex < Test::Unit::TestCase
     assert_equal [3], df.index.shape
   end
 end
+
+# nrow is the frame's claim about its row axis. It has to be backed by
+# something the frame actually holds -- a column or the index -- and every row
+# form has to be able to refuse a row outside it, including on a frame that
+# holds no column to forward the selector to.
+class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
+  def test_a_splice_that_welds_nothing_claims_no_rows
+    df = CAFrame.new({})
+    df[0...0] = CAFrame.new({}, index: CA_INT32([1, 2, 3]))
+    assert_equal 0, df.nrow
+    assert_equal 0, df.copy.nrow          # the frame's own verbs agree with it
+    assert_equal 0, df.dup.nrow
+    assert_equal [], df.to_records
+  end
+
+  def test_a_normal_splice_still_counts_its_rows
+    df = CAFrame.new("a" => CA_INT32([1, 2, 3, 4]))
+    df[1..1] = CAFrame.new("a" => CA_INT32([9, 9, 9]))
+    assert_equal 6, df.nrow
+    assert_equal [1, 9, 9, 9, 3, 4], df["a"].to_a
+    assert_equal df["a"].shape[0], df.nrow
+  end
+
+  def test_a_splice_that_replaces_every_row_counts_them
+    df = CAFrame.new("a" => CA_INT32([1, 2, 3]))
+    df[0..2] = CAFrame.new("a" => CA_INT32([7, 8]))
+    assert_equal 2, df.nrow
+    assert_equal [7, 8], df["a"].to_a
+  end
+
+  def test_an_out_of_range_row_is_refused_with_no_columns_to_forward_to
+    [CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t"),
+     CAFrame.new({})].each do |f|
+      assert_raise(IndexError, "nrow=#{f.nrow} nvar=#{f.nvar}") { f[99] = UNDEF }
+    end
+  end
+
+  def test_masking_a_row_that_exists_is_still_a_no_op_with_no_columns
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    f[0] = UNDEF                            # a row that exists: nothing to mask
+    assert_equal [10, 20, 30], f.index.to_a
+    assert_equal false, f.index.has_mask?
+  end
+end
