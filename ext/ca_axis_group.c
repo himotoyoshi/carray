@@ -158,11 +158,12 @@ group_op_code (VALUE vop)
           ca_size_t oc = gw_ocode[e];                                          \
           if ( oc == GW_SKIP ) continue;                                       \
           if ( m && m[ gw_moff[e] ] ) continue;                                \
-          double    v = (double) ( *(T *)(p + gw_doff[e]) );                   \
+          T         rv = *(T *)(p + gw_doff[e]);                              \
+          double    v = (double) rv;                                           \
           ca_size_t o = oc + b;                                                \
           ca_size_t gaddr = gw_gaddr[e];                                       \
           ACCUM;                                                               \
-          (void) v; (void) o; (void) gaddr;                                    \
+          (void) rv; (void) v; (void) o; (void) gaddr;                         \
         }                                                                      \
       }                                                                        \
       b++;                                                                     \
@@ -172,6 +173,81 @@ group_op_code (VALUE vop)
     if ( gw_moff )  xfree(gw_moff);                                           \
     if ( gw_gaddr ) xfree(gw_gaddr);                                          \
   } while (0)
+
+/* GROUP_DISPATCH_T(ACCUM_T): the same walk, for an accumulator that needs to
+   name the source type -- one that keeps its answer in that type instead of
+   widening to double.  ACCUM_T is invoked as ACCUM_T(T). */
+#define GROUP_DISPATCH_T(ACCUM_T)                                              \
+  switch ( ca->data_type ) {                                                   \
+  case CA_BOOLEAN: GROUP_WALK(boolean8_t, ACCUM_T(boolean8_t)); break;         \
+  case CA_INT8:    GROUP_WALK(int8_t,   ACCUM_T(int8_t));   break;             \
+  case CA_UINT8:   GROUP_WALK(uint8_t,  ACCUM_T(uint8_t));  break;             \
+  case CA_INT16:   GROUP_WALK(int16_t,  ACCUM_T(int16_t));  break;             \
+  case CA_UINT16:  GROUP_WALK(uint16_t, ACCUM_T(uint16_t)); break;             \
+  case CA_INT32:   GROUP_WALK(int32_t,  ACCUM_T(int32_t));  break;             \
+  case CA_UINT32:  GROUP_WALK(uint32_t, ACCUM_T(uint32_t)); break;             \
+  case CA_INT64:   GROUP_WALK(int64_t,  ACCUM_T(int64_t));  break;             \
+  case CA_UINT64:  GROUP_WALK(uint64_t, ACCUM_T(uint64_t)); break;             \
+  case CA_FLOAT32: GROUP_WALK(float,    ACCUM_T(float));    break;             \
+  case CA_FLOAT64: GROUP_WALK(double,   ACCUM_T(double));   break;             \
+  default: break;                                                              \
+  }
+
+/* An extremum keeps the source data type: its magnitude never grows, so
+   widening to double buys nothing and costs exactness -- an int64 past 2^53
+   came back rounded, and a genuinely larger value could lose the comparison
+   to a smaller one that rounded to the same double.  The scan siblings
+   (GROUP_SCAN_EXTREMUM_WALK) already held a native accumulator; these are the
+   reduce twins.
+
+   A NaN loses every contest, as it does in CArray's own min / max: it is held
+   only while nothing else has landed, the first number displaces it, and a
+   group of nothing but NaN answers NaN (for a position, UNDEF).  `v` is the
+   widened load, so testing it for NaN is the same question for every source
+   type and costs an integer body nothing.  seen_num[] says whether a number
+   has landed; cnt[] still says whether anything has. */
+#define GMINMAX(T, A, CMP)                                                     \
+  do {                                                                         \
+    A *acc = (A *) co->ptr;                                                     \
+    A  av  = (A) rv;                                                            \
+    if ( v == v ) {                                                             \
+      if ( ! seen_num[o] ) { acc[o] = av; seen_num[o] = 1; }                     \
+      else if ( av CMP acc[o] ) acc[o] = av;                                     \
+    } else if ( cnt[o] == 0 ) acc[o] = av;                                       \
+    cnt[o] += 1;                                                                \
+  } while (0)
+
+/* Boolean answers as its 0/1 numeric storage, which is what CArray#min / #max
+   do with a boolean array -- the boolean-returning twins are all / any. Every
+   other type answers in its own. */
+#define GROUP_DISPATCH_EXTREMUM(CMP)                                           \
+  switch ( ca->data_type ) {                                                   \
+  case CA_BOOLEAN: GROUP_WALK(boolean8_t, GMINMAX(boolean8_t, uint64_t, CMP)); break; \
+  case CA_INT8:    GROUP_WALK(int8_t,   GMINMAX(int8_t,   int8_t,   CMP)); break; \
+  case CA_UINT8:   GROUP_WALK(uint8_t,  GMINMAX(uint8_t,  uint8_t,  CMP)); break; \
+  case CA_INT16:   GROUP_WALK(int16_t,  GMINMAX(int16_t,  int16_t,  CMP)); break; \
+  case CA_UINT16:  GROUP_WALK(uint16_t, GMINMAX(uint16_t, uint16_t, CMP)); break; \
+  case CA_INT32:   GROUP_WALK(int32_t,  GMINMAX(int32_t,  int32_t,  CMP)); break; \
+  case CA_UINT32:  GROUP_WALK(uint32_t, GMINMAX(uint32_t, uint32_t, CMP)); break; \
+  case CA_INT64:   GROUP_WALK(int64_t,  GMINMAX(int64_t,  int64_t,  CMP)); break; \
+  case CA_UINT64:  GROUP_WALK(uint64_t, GMINMAX(uint64_t, uint64_t, CMP)); break; \
+  case CA_FLOAT32: GROUP_WALK(float,    GMINMAX(float,    float,    CMP)); break; \
+  case CA_FLOAT64: GROUP_WALK(double,   GMINMAX(double,   double,   CMP)); break; \
+  default: break;                                                              \
+  }
+
+#define GMINMAXADDR(T, CMP, ADDR)                                              \
+  do {                                                                         \
+    T *acc = (T *) xbuf;                                                        \
+    if ( v == v && ( ! seen_num[o] || rv CMP acc[o] ) ) {                        \
+      acc[o] = rv;                                                              \
+      ADDR[o] = (int64_t) ( band_addr[b] + gaddr );                             \
+      seen_num[o] = 1;                                                          \
+    }                                                                           \
+    cnt[o] += 1;                                                                \
+  } while (0)
+#define GMINADDR(T) GMINMAXADDR(T, <, mnaddr)
+#define GMAXADDR(T) GMINMAXADDR(T, >, mxaddr)
 
 /* Run one walk over every supported native data type.  Dispatched on the source
    data_type so the inner loop stays monomorphic (no forced float64 cast). */
@@ -398,12 +474,16 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   else if ( op == GR_MINADDR || op == GR_MAXADDR ) out_dt = CA_INT64;
   else if ( op == GR_ALL || op == GR_ANY ) out_dt = CA_BOOLEAN;
   else if ( op == GR_ACCUM )              out_dt = src->data_type;
+  else if ( op == GR_MIN || op == GR_MAX )
+    out_dt = ( src->data_type == CA_BOOLEAN ) ? CA_UINT64 : src->data_type;
   VALUE vout = rb_carray_new(out_dt, ondim, odim, 0, NULL);
   GetCArray(vout, co);
 
   /* --- accumulator buffers (only those the op needs; all O(nout)) --- */
   ca_size_t *cnt   = ALLOC_N(ca_size_t, nout);  MEMZERO(cnt, ca_size_t, nout);
-  double    *sum   = NULL, *sumsq = NULL, *prod = NULL, *mn = NULL, *mx = NULL;
+  double    *sum   = NULL, *sumsq = NULL, *prod = NULL;
+  boolean8_t *seen_num = NULL;       /* has a number (not a NaN) landed here? */
+  char      *xbuf  = NULL;           /* running extremum, in the source type */
   ca_size_t *nz    = NULL;
   int64_t   *mnaddr = NULL, *mxaddr = NULL;   /* flat source addr of min / max */
   ca_size_t *band_addr = NULL;                /* raveled addr of each band cell */
@@ -415,13 +495,18 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     prod = ALLOC_N(double, nout);
     for ( ca_size_t o = 0; o < nout; o++ ) prod[o] = 1.0;
   }
-  if ( op == GR_MIN || op == GR_MINADDR ) {
-    mn = ALLOC_N(double, nout);
-    for ( ca_size_t o = 0; o < nout; o++ ) mn[o] = HUGE_VAL;
+  if ( op == GR_MIN || op == GR_MAX ||
+       op == GR_MINADDR || op == GR_MAXADDR ) {
+    seen_num = ALLOC_N(boolean8_t, nout);
+    MEMZERO(seen_num, boolean8_t, nout);
   }
-  if ( op == GR_MAX || op == GR_MAXADDR ) {
-    mx = ALLOC_N(double, nout);
-    for ( ca_size_t o = 0; o < nout; o++ ) mx[o] = -HUGE_VAL;
+  if ( op == GR_MIN || op == GR_MAX ) {
+    /* the walk writes the extremum straight into the output, in its own type */
+    MEMZERO(co->ptr, char, (size_t) nout * co->bytes);
+  }
+  if ( op == GR_MINADDR || op == GR_MAXADDR ) {
+    xbuf = ALLOC_N(char, (size_t) nout * src->bytes);
+    MEMZERO(xbuf, char, (size_t) nout * src->bytes);
   }
   if ( op == GR_MINADDR ) { mnaddr = ALLOC_N(int64_t, nout); MEMZERO(mnaddr, int64_t, nout); }
   if ( op == GR_MAXADDR ) { mxaddr = ALLOC_N(int64_t, nout); MEMZERO(mxaddr, int64_t, nout); }
@@ -468,24 +553,10 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     sumsq = ALLOC_N(double, nout);  MEMZERO(sumsq, double, nout);
     GROUP_DISPATCH( { double _d = v - sum[o]; sumsq[o] += _d * _d; } );
   }
-  else if ( op == GR_MINADDR ) {
-    GROUP_DISPATCH(
-      cnt[o] += 1;
-      if ( v < mn[o] ) {
-        ca_size_t faddr = band_addr[b] + gaddr;
-        mn[o] = v; mnaddr[o] = (int64_t) faddr;
-      }
-    );
-  }
-  else if ( op == GR_MAXADDR ) {
-    GROUP_DISPATCH(
-      cnt[o] += 1;
-      if ( v > mx[o] ) {
-        ca_size_t faddr = band_addr[b] + gaddr;
-        mx[o] = v; mxaddr[o] = (int64_t) faddr;
-      }
-    );
-  }
+  else if ( op == GR_MINADDR ) { GROUP_DISPATCH_T(GMINADDR); }
+  else if ( op == GR_MAXADDR ) { GROUP_DISPATCH_T(GMAXADDR); }
+  else if ( op == GR_MIN )     { GROUP_DISPATCH_EXTREMUM(<); }
+  else if ( op == GR_MAX )     { GROUP_DISPATCH_EXTREMUM(>); }
   else if ( op == GR_ACCUM ) {
     MEMZERO(co->ptr, char, (size_t) nout * co->bytes);
     switch ( ca->data_type ) {
@@ -508,8 +579,6 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       cnt[o] += 1;
       if ( sum )  sum[o]  += v;
       if ( prod ) prod[o] *= v;
-      if ( mn )   { if ( v < mn[o] ) mn[o] = v; }
-      if ( mx )   { if ( v > mx[o] ) mx[o] = v; }
       if ( nz )   { if ( v != 0.0 ) nz[o] += 1; }
     );
   }
@@ -537,12 +606,19 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     int64_t *out  = (int64_t *) co->ptr;
     int64_t *addr = ( op == GR_MINADDR ) ? mnaddr : mxaddr;
     for ( ca_size_t o = 0; o < nout; o++ ) {
-      if ( cnt[o] == 0 ) { out[o] = 0; MARK_UNDEF(o); }   /* empty -> UNDEF */
+      /* Nothing present, or nothing but NaN: either way no cell here won,
+         and the core answers UNDEF for both. */
+      if ( cnt[o] == 0 || ! seen_num[o] ) { out[o] = 0; MARK_UNDEF(o); }
       else out[o] = addr[o];
     }
   }
   else if ( op == GR_ACCUM ) {
     /* already folded in place, in the source's own type; empty groups hold 0 */
+  }
+  else if ( op == GR_MIN || op == GR_MAX ) {
+    /* the walk wrote the extremum in place, in the source's own type; a group
+       with no cell in it has nothing to report */
+    for ( ca_size_t o = 0; o < nout; o++ ) if ( cnt[o] == 0 ) MARK_UNDEF(o);
   }
   else if ( op == GR_ALL ) {
     boolean8_t *out = (boolean8_t *) co->ptr;    /* empty -> true (vacuous) */
@@ -563,12 +639,6 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       case GR_MEAN:
         if ( cnt[o] == 0 ) { out[o] = 0.0; MARK_UNDEF(o); }
         else out[o] = sum[o] / (double) cnt[o];
-        break;
-      case GR_MIN:
-        if ( cnt[o] == 0 ) { out[o] = 0.0; MARK_UNDEF(o); } else out[o] = mn[o];
-        break;
-      case GR_MAX:
-        if ( cnt[o] == 0 ) { out[o] = 0.0; MARK_UNDEF(o); } else out[o] = mx[o];
         break;
       case GR_VARIANCE:
       case GR_STDDEV:
@@ -593,8 +663,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   if ( sum ) xfree(sum);
   if ( sumsq ) xfree(sumsq);
   if ( prod ) xfree(prod);
-  if ( mn ) xfree(mn);
-  if ( mx ) xfree(mx);
+  if ( seen_num ) xfree(seen_num);
+  if ( xbuf ) xfree(xbuf);
   if ( nz ) xfree(nz);
   if ( mnaddr ) xfree(mnaddr);
   if ( mxaddr ) xfree(mxaddr);

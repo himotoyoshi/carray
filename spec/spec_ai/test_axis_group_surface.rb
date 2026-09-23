@@ -844,4 +844,78 @@ class TestAxisGroupSurface < Test::Unit::TestCase
     assert_equal([2, 0], r.shape)
     assert_equal(0, r.elements)
   end
+  # ---- the extremum family keeps the source data type ----------------------
+  #
+  # A reduction is meant to be the core's reduction lifted to the group, data
+  # type included. min / max widened every load to double and answered in
+  # float64, which rounded an int64 past 2^53 -- and left the accumulator's
+  # own sentinel (+/-HUGE_VAL) showing when a group held nothing but NaN.
+
+  def test_an_extremum_answers_in_the_source_data_type
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    {
+      CA_INT32   => [3, 1, 7, 2],
+      CA_INT64   => [3, 1, 7, 2],
+      CA_UINT8   => [3, 1, 7, 2],
+      CA_FLOAT32 => [3.5, 1.5, 7.5, 2.5],
+      CA_FLOAT64 => [3.5, 1.5, 7.5, 2.5],
+    }.each do |dt, vals|
+      a   = CArray.new(dt, [4, 1]) { |i, _| vals[i] }
+      ref = CArray.new(dt, [2, 1]) { |i, _| vals[i] }
+      [:min, :max].each do |op|
+        got  = a[a.axis_group(codes, nil)].public_send(op, axis: :group)
+        want = ref.public_send(op, axis: 0)
+        assert_equal(want.data_type, got.data_type,
+                     "#{CArray.data_type_name(dt)} #{op} data type")
+        assert_equal(want[0], got[0, 0], "#{CArray.data_type_name(dt)} #{op}")
+      end
+    end
+  end
+
+  def test_an_int64_extremum_past_the_float_mantissa_is_exact
+    big = 2**62
+    a = CArray.int64(4, 1) { |i, _| [big + 1, big + 3, 5, 7][i] }
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    r = a[a.axis_group(codes, nil)].max(axis: :group)
+    assert_equal(big + 3, r[0, 0])        # not 4.611686018427388e+18
+  end
+
+  def test_a_boolean_extremum_answers_as_its_numeric_storage
+    # what CArray#min / #max do with a boolean array; the boolean-returning
+    # twins are all / any
+    a = CA_BOOLEAN([[1], [0], [1], [1]])
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    r = a[a.axis_group(codes, nil)].min(axis: :group)
+    assert_equal(CA_UINT64, r.data_type)
+    assert_equal(0, r[0, 0])
+  end
+
+  def test_a_group_of_nothing_but_nan_answers_nan_and_no_position
+    nan = 0.0 / 0.0
+    a = CA_DOUBLE([[nan], [nan], [1.0], [5.0]])
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    g = a.axis_group(codes, nil)
+
+    mn = a[g].min(axis: :group)
+    assert_true(mn[0, 0].nan?, "an all-NaN group answers NaN, not the sentinel")
+    assert_false(mn.is_masked[0, 0])
+    assert_equal(1.0, mn[1, 0])
+
+    # no cell won, so there is no position to report -- as the core answers
+    # UNDEF for min_index over the same values
+    ma = a[g].min_addr(axis: :group)
+    assert_true(ma.is_masked[0, 0])
+    assert_false(ma.is_masked[1, 0])
+  end
+
+  def test_a_nan_does_not_win_an_extremum_wherever_it_sits
+    nan = 0.0 / 0.0
+    codes = CACategorical.from_codes(CArray.uint8(3) { 0 }, ["a"])
+    [[nan, 1.0, 5.0], [1.0, nan, 5.0], [1.0, 5.0, nan]].each do |vals|
+      a = CA_DOUBLE(vals).reshape(3, 1)
+      g = a.axis_group(codes, nil)
+      assert_equal(1.0, a[g].min(axis: :group)[0, 0], vals.inspect)
+      assert_equal(5.0, a[g].max(axis: :group)[0, 0], vals.inspect)
+    end
+  end
 end
