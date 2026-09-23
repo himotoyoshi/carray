@@ -307,6 +307,12 @@ class CAFrame
   # value kept, so the row stays identifiable), leaving a later, better-informed
   # pass to re-judge them. Definitely-true rows carry their values through
   # unchanged in both modes.
+  #
+  # The default is a view-frame. +keep_masked: true+ returns a **materialized**
+  # frame instead -- carrying the UNDEF forward means writing it into the
+  # result, which a view cannot do without masking the parent's rows. That holds
+  # whether or not the selector actually carries a masked cell, so the same call
+  # site does not switch between sharing and copying with the data.
   def filter(keep_masked: false)
     mask = yield(self)
     unless mask.is_a?(CArray) && mask.data_type == :boolean
@@ -609,8 +615,11 @@ class CAFrame
   end
 
   private def select_rows(selector, keep_masked: false)
-    if keep_masked && selector.is_a?(CArray) &&
-       selector.data_type == :boolean && selector.has_mask?
+    if keep_masked && selector.is_a?(CArray) && selector.data_type == :boolean
+      # Not gated on selector.has_mask?: gating there would make the same call
+      # site return a view-frame or a materialized one depending on whether that
+      # run's data happened to produce an undetermined cell (the reason splice
+      # always snapshots -- see CAFrame.md section 3).
       return select_rows_keep_masked(selector)
     end
     cols = {}
@@ -631,7 +640,12 @@ class CAFrame
       g[undet_kept, *tail] = UNDEF
       cols[name] = g
     end
-    new_index = @index ? @index[keep] : nil
+    # The index is copied along with the columns. Its values are carried over
+    # unmasked (an undetermined row keeps its label, as mask_rows leaves the
+    # index alone), but a materialized frame has to be materialized whole: an
+    # aliased index would write through to the parent from a frame whose columns
+    # do not.
+    new_index = @index ? @index[keep].copy : nil
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
   end
 
