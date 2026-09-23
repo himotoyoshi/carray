@@ -45,6 +45,11 @@ class CAFrame
     @columns   = {}
     @axis_name = axis_name || DEFAULT_AXIS_NAME
     @index     = nil
+    # The row axis name this frame had before set_index promoted a column over
+    # it, so reset_index can put it back.  A frame built with an index never
+    # had one, and neither does a frame derived from an indexed one: both are
+    # born indexed, so there is nothing to restore and the default stands.
+    @axis_name_before_index = nil
 
     n = nil
     n_from = nil
@@ -343,6 +348,9 @@ class CAFrame
     unless idx.ndim == 1
       raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"
     end
+    # Only the name held before the frame had an index: a second set_index must
+    # not overwrite it with the first index's name.
+    @axis_name_before_index = @axis_name if @index.nil?
     @columns.delete(key)
     @index     = idx
     @axis_name = key
@@ -357,7 +365,8 @@ class CAFrame
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)
     @index     = nil
-    @axis_name = DEFAULT_AXIS_NAME
+    @axis_name = @axis_name_before_index || DEFAULT_AXIS_NAME
+    @axis_name_before_index = nil
     self
   end
 

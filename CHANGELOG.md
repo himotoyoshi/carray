@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame#reset_index` now restores the row axis name the frame had
+  before `set_index` promoted a column over it, so the two are each other's
+  inverse as documented. It used to leave `"row"`, which is user-visible: the
+  row axis name is the header of the index's column in `to_csv` and its key in
+  a row `Hash`. A frame built with an index, or derived from one, never had an
+  earlier name, so `reset_index` still leaves the default there.
+
 - Fix: `min` and `max` on an `axis_group` reduction now answer in the source
   array's data type, as `CArray#min` / `#max` do, instead of float64 -- an
   int64 beyond the float mantissa came back rounded. A boolean array answers
