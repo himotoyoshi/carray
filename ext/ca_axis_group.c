@@ -110,16 +110,20 @@ group_op_code (VALUE vop)
     ca_size_t  *gw_ocode = NULL, *gw_doff = NULL, *gw_moff = NULL,             \
                *gw_gaddr = NULL;                                               \
     int         gw_ready = 0;                                                  \
+    /* freed by the unwind too: the walk can raise between here and the        \
+       releases below (a gather that cannot convert a cell, and in the object  \
+       lane a callback into Ruby). */                                          \
+    volatile VALUE gw_h1 = 0, gw_h2 = 0, gw_h3 = 0, gw_h4 = 0;                 \
     int         gw_need_addr = ( op == GR_MINADDR || op == GR_MAXADDR );       \
     CA_FOR_EACH_SLAB(st, ca, axes, (int8_t) ngroup, CA_KERNEL_READ, p, m) {    \
       int8_t    sndim = st.slab_ndim;                                          \
       ca_size_t SE    = st.slab_elements;                                      \
       if ( SE > 0 ) {                                                          \
         if ( ! gw_ready ) {                                                    \
-          gw_ocode = ALLOC_N(ca_size_t, SE);                                   \
-          gw_doff  = ALLOC_N(ca_size_t, SE);                                   \
-          gw_moff  = ALLOC_N(ca_size_t, SE);                                   \
-          gw_gaddr = ALLOC_N(ca_size_t, SE);                                   \
+          gw_ocode = ALLOCV_N(ca_size_t, gw_h1, SE);                           \
+          gw_doff  = ALLOCV_N(ca_size_t, gw_h2, SE);                           \
+          gw_moff  = ALLOCV_N(ca_size_t, gw_h3, SE);                           \
+          gw_gaddr = ALLOCV_N(ca_size_t, gw_h4, SE);                           \
           ca_size_t sidx[CA_RANK_MAX];                                         \
           for ( int8_t k = 0; k < sndim; k++ ) sidx[k] = 0;                    \
           for ( ca_size_t e = 0; e < SE; e++ ) {                               \
@@ -168,10 +172,8 @@ group_op_code (VALUE vop)
       }                                                                        \
       b++;                                                                     \
     }                                                                          \
-    if ( gw_ocode ) xfree(gw_ocode);                                          \
-    if ( gw_doff )  xfree(gw_doff);                                           \
-    if ( gw_moff )  xfree(gw_moff);                                           \
-    if ( gw_gaddr ) xfree(gw_gaddr);                                          \
+    ALLOCV_END(gw_h1); ALLOCV_END(gw_h2);                                      \
+    ALLOCV_END(gw_h3); ALLOCV_END(gw_h4);                                      \
   } while (0)
 
 /* GROUP_DISPATCH_T(ACCUM_T): the same walk, for an accumulator that needs to
@@ -377,12 +379,25 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       rb_raise(rb_eArgError, "axis_group_reduce: bundle k must be positive");
     }
 
-    /* int32 view of the codes (metadata-sized, O(consumed-axis dims)) */
+    /* The code table is copied out and the source let go of at once, rather
+       than held attached for the length of the walk. Everything between here
+       and the end of the walk can raise -- a validation just below, a gather
+       that cannot convert a cell, an object-lane callback into Ruby -- and a
+       raise jumps over every detach, leaving the source materialised with
+       nothing left to release it. The copy rides a temporary buffer that the
+       unwind collects. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    ca_attach(bundle_ca[bi]);
-    bundle_codes[bi] = (int32_t *) bundle_ca[bi]->ptr;
+    {
+      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
+      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
+      rb_ary_push((VALUE) keep, vbuf);
+      ca_attach(bundle_ca[bi]);
+      memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
+      ca_detach(bundle_ca[bi]);
+      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
+    }
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -462,7 +477,6 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: break;
   default:
-    for ( int bi = 0; bi < n_bundles; bi++ ) ca_detach(bundle_ca[bi]);
     rb_raise(rb_eRuntimeError,
              "axis_group_reduce: unsupported source data_type %d",
              src->data_type);
@@ -480,7 +494,15 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   GetCArray(vout, co);
 
   /* --- accumulator buffers (only those the op needs; all O(nout)) --- */
-  ca_size_t *cnt   = ALLOC_N(ca_size_t, nout);  MEMZERO(cnt, ca_size_t, nout);
+  /* Scratch that the unwind collects. A raise anywhere in the walk -- an
+     object-lane callback into Ruby, a gather that cannot convert a cell --
+     jumps over every release below, so these ride ALLOCV rather than plain
+     malloc: the temporary buffer behind each holder is freed whether the
+     function returns or unwinds. */
+  volatile VALUE h_cnt = 0, h_sum = 0, h_sumsq = 0, h_prod = 0, h_seen = 0,
+                 h_xbuf = 0, h_nz = 0, h_mnaddr = 0, h_mxaddr = 0, h_band = 0;
+  ca_size_t *cnt   = ALLOCV_N(ca_size_t, h_cnt, nout);
+  MEMZERO(cnt, ca_size_t, nout);
   double    *sum   = NULL, *sumsq = NULL, *prod = NULL;
   boolean8_t *seen_num = NULL;       /* has a number (not a NaN) landed here? */
   char      *xbuf  = NULL;           /* running extremum, in the source type */
@@ -489,15 +511,15 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ca_size_t *band_addr = NULL;                /* raveled addr of each band cell */
   if ( op == GR_SUM || op == GR_MEAN || op == GR_VARIANCE || op == GR_STDDEV ||
        op == GR_VARIANCEP || op == GR_STDDEVP ) {
-    sum = ALLOC_N(double, nout);  MEMZERO(sum, double, nout);
+    sum = ALLOCV_N(double, h_sum, nout);  MEMZERO(sum, double, nout);
   }
   if ( op == GR_PROD ) {
-    prod = ALLOC_N(double, nout);
+    prod = ALLOCV_N(double, h_prod, nout);
     for ( ca_size_t o = 0; o < nout; o++ ) prod[o] = 1.0;
   }
   if ( op == GR_MIN || op == GR_MAX ||
        op == GR_MINADDR || op == GR_MAXADDR ) {
-    seen_num = ALLOC_N(boolean8_t, nout);
+    seen_num = ALLOCV_N(boolean8_t, h_seen, nout);
     MEMZERO(seen_num, boolean8_t, nout);
   }
   if ( op == GR_MIN || op == GR_MAX ) {
@@ -505,13 +527,13 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     MEMZERO(co->ptr, char, (size_t) nout * co->bytes);
   }
   if ( op == GR_MINADDR || op == GR_MAXADDR ) {
-    xbuf = ALLOC_N(char, (size_t) nout * src->bytes);
+    xbuf = ALLOCV_N(char, h_xbuf, (size_t) nout * src->bytes);
     MEMZERO(xbuf, char, (size_t) nout * src->bytes);
   }
-  if ( op == GR_MINADDR ) { mnaddr = ALLOC_N(int64_t, nout); MEMZERO(mnaddr, int64_t, nout); }
-  if ( op == GR_MAXADDR ) { mxaddr = ALLOC_N(int64_t, nout); MEMZERO(mxaddr, int64_t, nout); }
+  if ( op == GR_MINADDR ) { mnaddr = ALLOCV_N(int64_t, h_mnaddr, nout); MEMZERO(mnaddr, int64_t, nout); }
+  if ( op == GR_MAXADDR ) { mxaddr = ALLOCV_N(int64_t, h_mxaddr, nout); MEMZERO(mxaddr, int64_t, nout); }
   if ( op == GR_ALL || op == GR_ANY ) {
-    nz = ALLOC_N(ca_size_t, nout);  MEMZERO(nz, ca_size_t, nout);
+    nz = ALLOCV_N(ca_size_t, h_nz, nout);  MEMZERO(nz, ca_size_t, nout);
   }
 
   /* min_addr / max_addr need the flat raveled source address of each cell.
@@ -527,7 +549,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     int band_axis[CA_RANK_MAX]; int nband_axes = 0;
     for ( int8_t k = 0; k < src->ndim; k++ )
       if ( ! is_group[k] ) band_axis[nband_axes++] = k;
-    band_addr = ALLOC_N(ca_size_t, band > 0 ? band : 1);
+    band_addr = ALLOCV_N(ca_size_t, h_band, band > 0 ? band : 1);
     for ( ca_size_t bb = 0; bb < band; bb++ ) {
       ca_size_t rem = bb, addr = 0;
       for ( int j = nband_axes - 1; j >= 0; j-- ) {     /* last band axis fastest */
@@ -550,7 +572,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     GROUP_DISPATCH( cnt[o] += 1; sum[o] += v; );
     for ( ca_size_t o = 0; o < nout; o++ )
       if ( cnt[o] > 0 ) sum[o] /= (double) cnt[o];   /* sum -> mean */
-    sumsq = ALLOC_N(double, nout);  MEMZERO(sumsq, double, nout);
+    sumsq = ALLOCV_N(double, h_sumsq, nout);  MEMZERO(sumsq, double, nout);
     GROUP_DISPATCH( { double _d = v - sum[o]; sumsq[o] += _d * _d; } );
   }
   else if ( op == GR_MINADDR ) { GROUP_DISPATCH_T(GMINADDR); }
@@ -658,17 +680,10 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   }
   #undef MARK_UNDEF
 
-  for ( int bi = 0; bi < n_bundles; bi++ ) ca_detach(bundle_ca[bi]);
-  xfree(cnt);
-  if ( sum ) xfree(sum);
-  if ( sumsq ) xfree(sumsq);
-  if ( prod ) xfree(prod);
-  if ( seen_num ) xfree(seen_num);
-  if ( xbuf ) xfree(xbuf);
-  if ( nz ) xfree(nz);
-  if ( mnaddr ) xfree(mnaddr);
-  if ( mxaddr ) xfree(mxaddr);
-  if ( band_addr ) xfree(band_addr);
+  ALLOCV_END(h_cnt);    ALLOCV_END(h_sum);    ALLOCV_END(h_sumsq);
+  ALLOCV_END(h_prod);   ALLOCV_END(h_seen);   ALLOCV_END(h_xbuf);
+  ALLOCV_END(h_nz);     ALLOCV_END(h_mnaddr); ALLOCV_END(h_mxaddr);
+  ALLOCV_END(h_band);
 
   RB_GC_GUARD(keep);
   return vout;
@@ -852,7 +867,8 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
     boolean8_t *m;                                                            \
     ca_size_t   b = 0;                                                        \
     int         ready = 0;                                                    \
-    T          *acce = ALLOC_N(T, K_total);                                   \
+    volatile VALUE h_acce = 0;   /* freed by the unwind if the walk raises */ \
+    T          *acce = ALLOCV_N(T, h_acce, K_total);                          \
     T          *outp = (T *) co->ptr;                                         \
     CA_FOR_EACH_SLAB(st, ca, axes, (int8_t) ngroup, CA_KERNEL_READ, p, m) {   \
       ca_size_t SE = st.slab_elements;                                        \
@@ -885,7 +901,7 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
       }                                                                       \
       b++;                                                                    \
     }                                                                         \
-    xfree(acce);                                                              \
+    ALLOCV_END(h_acce);                                                       \
   } while (0)
 
 #define GROUP_SCAN_EXTREMUM_DISPATCH(CMP)                                     \
@@ -1066,11 +1082,25 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       rb_raise(rb_eArgError, "axis_group_scan: bundle k must be positive");
     }
 
+    /* The code table is copied out and the source let go of at once, rather
+       than held attached for the length of the walk. Everything between here
+       and the end of the walk can raise -- a validation just below, a gather
+       that cannot convert a cell, an object-lane callback into Ruby -- and a
+       raise jumps over every detach, leaving the source materialised with
+       nothing left to release it. The copy rides a temporary buffer that the
+       unwind collects. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    ca_attach(bundle_ca[bi]);
-    bundle_codes[bi] = (int32_t *) bundle_ca[bi]->ptr;
+    {
+      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
+      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
+      rb_ary_push((VALUE) keep, vbuf);
+      ca_attach(bundle_ca[bi]);
+      memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
+      ca_detach(bundle_ca[bi]);
+      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
+    }
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -1130,7 +1160,6 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: case CA_OBJECT: break;
   default:
-    for ( int bi = 0; bi < n_bundles; bi++ ) ca_detach(bundle_ca[bi]);
     rb_raise(rb_eRuntimeError,
              "axis_group_scan: unsupported source data_type %d",
              src->data_type);
@@ -1167,7 +1196,8 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   int band_axis[CA_RANK_MAX]; int nband_axes = 0;
   for ( int8_t k = 0; k < src->ndim; k++ )
     if ( ! is_group[k] ) band_axis[nband_axes++] = k;
-  ca_size_t *band_addr = ALLOC_N(ca_size_t, band > 0 ? band : 1);
+  volatile VALUE h_band2 = 0;
+  ca_size_t *band_addr = ALLOCV_N(ca_size_t, h_band2, band > 0 ? band : 1);
   for ( ca_size_t bb = 0; bb < band; bb++ ) {
     ca_size_t rem = bb, addr = 0;
     for ( int j = nband_axes - 1; j >= 0; j-- ) {
@@ -1184,13 +1214,20 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
      member / object identity init) are all tiny; acco (object running VALUE) is
      allocated only for the object arithmetic / extremum ops. */
   ca_size_t  plan_n  = (group_prod > 0) ? group_prod : 1;
-  ca_size_t *sw_code = ALLOC_N(ca_size_t, plan_n);
-  ca_size_t *sw_doff = ALLOC_N(ca_size_t, plan_n);
-  ca_size_t *sw_moff = ALLOC_N(ca_size_t, plan_n);
-  ca_size_t *sw_addr = ALLOC_N(ca_size_t, plan_n);
-  double    *accd    = ALLOC_N(double,    K_total);
-  ca_size_t *accn    = ALLOC_N(ca_size_t, K_total);
-  char      *seen    = ALLOC_N(char,      K_total);
+  /* Scratch that the unwind collects. The object lane calls back into Ruby
+     for every cell, so a raise in the middle of the walk is ordinary here --
+     an operand that will not coerce, a <=> that answers nil -- and it jumps
+     over every release below. ALLOCV frees the buffer behind each holder
+     whether the function returns or unwinds. */
+  volatile VALUE h_code = 0, h_doff = 0, h_moff = 0, h_addr = 0,
+                 h_accd = 0, h_accn = 0, h_seen = 0, h_acco = 0;
+  ca_size_t *sw_code = ALLOCV_N(ca_size_t, h_code, plan_n);
+  ca_size_t *sw_doff = ALLOCV_N(ca_size_t, h_doff, plan_n);
+  ca_size_t *sw_moff = ALLOCV_N(ca_size_t, h_moff, plan_n);
+  ca_size_t *sw_addr = ALLOCV_N(ca_size_t, h_addr, plan_n);
+  double    *accd    = ALLOCV_N(double,    h_accd, K_total);
+  ca_size_t *accn    = ALLOCV_N(ca_size_t, h_accn, K_total);
+  char      *seen    = ALLOCV_N(char,      h_seen, K_total);
   VALUE     *acco    = NULL;
   double     acc_init = ( op == GS_CUMPROD ) ? 1.0 : 0.0;
 
@@ -1213,7 +1250,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     }
     else {                                        /* object running VALUE */
       VALUE *outo = (VALUE *) co->ptr;
-      acco = ALLOC_N(VALUE, K_total);
+      acco = ALLOCV_N(VALUE, h_acco, K_total);
       switch ( op ) {
       case GS_CUMSUM:
         /* Identity 0 (matching the core object cumsum): a group's acc is lazily
@@ -1295,16 +1332,9 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   }
   #undef MARK_OUT_UNDEF
 
-  for ( int bi = 0; bi < n_bundles; bi++ ) ca_detach(bundle_ca[bi]);
-  xfree(band_addr);
-  xfree(sw_code);
-  xfree(sw_doff);
-  xfree(sw_moff);
-  xfree(sw_addr);
-  xfree(accd);
-  xfree(accn);
-  xfree(seen);
-  if ( acco ) xfree(acco);
+  ALLOCV_END(h_band2); ALLOCV_END(h_code);  ALLOCV_END(h_doff);
+  ALLOCV_END(h_moff);  ALLOCV_END(h_addr);  ALLOCV_END(h_accd);
+  ALLOCV_END(h_accn);  ALLOCV_END(h_seen);  ALLOCV_END(h_acco);
 
   RB_GC_GUARD(keep);
   return vout;
