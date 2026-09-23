@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: `CArray.meld` (and `CAMeld.new`, and so `CAFrame.meld`) now treats a
+  homogeneous list of Faces the way `CArray.stack` does: a Face whose state is
+  per-parent is refused, and one that can be carried is kept on the result.
+  `CAConstString` and `CAString` now raise `ArgumentError` — weld the storage
+  instead, with `.parent`, or use `CArray.concatenate`. `CAFixlenString`,
+  `CATime` and `CATimedelta` come back as themselves rather than as the raw
+  storage; melding pieces whose Face state differs, such as two `CATime`
+  columns in different units, now raises rather than welding the ticks. Lists
+  of plain arrays, and a list of one, are unaffected.
+
 - Change: `CAConstString.wrap` now checks the `(start, end)` pairs it is given
   against the buffer, and takes ownership of the offsets entity by marking it
   read-only. A pair outside the buffer raises `ArgumentError` naming the
