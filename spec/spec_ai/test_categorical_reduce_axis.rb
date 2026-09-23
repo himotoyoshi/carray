@@ -537,17 +537,46 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert err.message =~ /not implemented/i
   end
 
-  def test_moments_cache_hit_for_same_axis
-    # sum + mean + min + max at the same axis should share the moments cache
-    # (invisible for correctness; visible if we peek at internals).
-    h, cat = h_and_cat_case_B_with_gaps
+  # Replaces an earlier pin that asserted sum / mean / min / max shared a
+  # memoised moments hash per axis. They did, and the rest of the axis:
+  # family -- prod, the variance family, wsum / wmean -- did not: half the
+  # family answered about the values as they were when first asked and half
+  # about the values as they are. One iterator could report a mean of 2.0
+  # beside a variance of 4704.5 for the same cell. The memo went; the whole
+  # family reads the source when asked. Reading four members off one
+  # iterator now costs four kernel runs instead of one, which is the price.
+
+  def test_the_axis_family_answers_about_the_values_as_they_are
+    h = CA_DOUBLE([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
+    cat = CA_INT32([0, 0, 1, 1]).categorize
     grp = h.group_by_category(cat)
-    grp.sum(axis: 0)
-    cache1 = grp.instance_variable_get(:@axis_moments_cache)
+    members = [:sum, :mean, :min, :max, :count, :prod, :variance]
+
+    members.each { |op| grp.public_send(op, axis: 0) }   # fill anything cacheable
+    h[0, 0] = 100.0
+
+    fresh = h.group_by_category(cat)
+    members.each do |op|
+      assert_equal(fresh.public_send(op, axis: 0).to_a,
+                   grp.public_send(op, axis: 0).to_a,
+                   "#{op}(axis: 0) after a write through the source")
+    end
+  end
+
+  def test_the_axis_family_is_internally_consistent_after_a_write
+    h = CA_DOUBLE([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
     grp.mean(axis: 0)
-    cache2 = grp.instance_variable_get(:@axis_moments_cache)
-    # Same object identity for axis 0 entry (not rebuilt)
-    assert_equal cache1[0].object_id, cache2[0].object_id
+    grp.variance(axis: 0)
+    h[0, 0] = 100.0
+
+    # a variance is the mean of the squared deviations from that same mean;
+    # if the two read different data the identity does not hold
+    mean = grp.mean(axis: 0)[0, 0]
+    var  = grp.variance(axis: 0)[0, 0]
+    members = [100.0, 3.0]
+    assert_in_delta(members.sum / 2, mean, 1e-9)
+    assert_in_delta(members.map { |v| (v - mean)**2 }.sum / (members.size - 1), var, 1e-9)
   end
 
   def test_axis_case_A_parity_family

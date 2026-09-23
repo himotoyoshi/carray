@@ -210,7 +210,7 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def count_not_masked(axis: nil)
-    return axis_moments(axis)[:count].copy if axis
+    return axis_moments(axis)[:count] if axis
     m = moments
     m ? m[:count].copy : per_category(CA_INT64) { |s| s.count_not_masked }
   end
@@ -309,7 +309,7 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def max(axis: nil)
-    return axis_moments(axis)[:max].copy if axis
+    return axis_moments(axis)[:max] if axis
     m = moments
     m ? m[:max].copy : per_category(core_reduce_type(:max)) { |s| s.max }
   end
@@ -323,7 +323,7 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def min(axis: nil)
-    return axis_moments(axis)[:min].copy if axis
+    return axis_moments(axis)[:min] if axis
     m = moments
     m ? m[:min].copy : per_category(core_reduce_type(:min)) { |s| s.min }
   end
@@ -457,15 +457,22 @@ class CACategoricalIterator < CAIterator
   # @overload minmax
   #   Returns the per-category `[min, max]` pair (each a length-k CArray in the
   #   value data type; empty categories MASKED), matching `CArray#minmax`. Both come
-  #   from the single cached moments pass.
+  #   from one moments pass.
   #   @return [Array<CArray>]
   # @overload minmax(axis:)
   #   Per-fiber `[min_ca, max_ca]` along `axis` (each shape [K, ...band], h's data type,
   #   empty group cells MASKED).  Ruby Array of two CArrays, not stacked.
+  #   Both come from one kernel run.
   #   @param axis [Integer]
   #   @return [Array<CArray>]
   def minmax(axis: nil)
-    return [min(axis: axis), max(axis: axis)] if axis
+    if axis
+      # take both off one pass rather than asking min and max separately,
+      # which would run the kernel twice now that nothing is kept between
+      # calls -- this is the "keep the result" the axis: family expects
+      m = axis_moments(axis)
+      return [m[:min], m[:max]]
+    end
     [min, max]
   end
 
@@ -702,16 +709,21 @@ class CACategoricalIterator < CAIterator
 
   private
 
-  # Axis-aware moments (count / sum / min / max) — computed once per axis via
-  # the fused per-fiber scatter-reduce C kernel and cached (matches the flat
-  # #moments caching in spirit: pay one kernel per {iterator, axis} pair, share
-  # across sum / mean / min / max / minmax / count* consumers).  Returns
+  # Axis-aware moments (count / sum / min / max) via the fused per-fiber
+  # scatter-reduce C kernel.  Returns
   # `{count: <int64>, sum: <float64>, min: <h's type, masked>, max: <h's type, masked>}`,
   # all shape [K, ...band].
+  #
+  # Read fresh on every call, deliberately.  It used to be kept per axis, and
+  # since the rest of the axis: family (prod, the variance family, wsum /
+  # wmean) reads the source when asked, half of the family answered about the
+  # values as they were and half about the values as they are.  Writing
+  # through another view of the source between two calls got you a mean of 2.0
+  # beside a variance of 4704.5 for the same cell, which is not a pair any
+  # data can produce.  The axis: path materialises nothing else, so holding
+  # this one thing was the odd choice; a caller who wants a fused kernel's
+  # four answers shares them by keeping the result.
   def axis_moments (axis)
-    @axis_moments_cache ||= {}
-    cached = @axis_moments_cache[axis]
-    return cached if cached
     h = @value
     unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
       raise ArgumentError,
@@ -727,13 +739,13 @@ class CACategoricalIterator < CAIterator
     maxs          = CArray.new(h.data_type, out_shape)
     h.__send__(:__fiber_scatter_moments__, codes_h_shape, axis, @k,
                counts, sums, mins, maxs)
-    @axis_moments_cache[axis] = {count: counts, sum: sums, min: mins, max: maxs}
+    {count: counts, sum: sums, min: mins, max: maxs}
   end
 
   # Axis-aware sum: the moments sum is already the core fold in the core's own
   # type, so it is handed back as is (an empty group cell carries identity 0.0).
   def axis_sum (axis)
-    axis_moments(axis)[:sum].copy
+    axis_moments(axis)[:sum]
   end
 
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
