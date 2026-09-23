@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Change: the `axis:` reductions on `group_by_category` now read the source
+  array when asked, rather than some of them answering from a result kept
+  from an earlier call. `sum`, `mean`, `min`, `max` and the counts shared a
+  kept result per axis while `prod`, the variance family and `wsum` / `wmean`
+  did not, so after a write through the source one iterator could report a
+  mean and a variance that no data can produce together. Reading several
+  members off one iterator now costs one kernel run each instead of one
+  shared run; keep the result if you want the old sharing. The no-axis
+  reductions are unchanged: they still work from the copy taken when the
+  iterator was built.
+
 - Fix: a reduction from `group_by_category` now hands back an array of the
   caller's own. `min`, `max`, `minmax`, `count`, `count_not_masked`,
   `elements`, `min_index` and `max_index` returned the iterator's memo itself,
