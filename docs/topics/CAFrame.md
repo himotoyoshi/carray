@@ -68,6 +68,54 @@ df.nvar   # => 2
 df["wind"].shape  # => [3, 2]
 ```
 
+### What holds the row count
+
+`nrow` is not a number the frame remembers on its own — it is read off
+something the frame holds. A column holds it; so does the **index**, which is
+why a frame may have an index and **no columns at all** and still be a frame of
+`N` rows:
+
+```ruby
+CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t").nrow   # => 3
+```
+
+Such a frame is an ordinary one. `at`, `filter`, `head`, `sort_by_key`, `align`,
+`copy`, `to_csv` and `to_records` all work on it, reading and carrying the index
+the same way they carry a column (§12). What does not work is asking for the
+index as a column — `df["t"]` raises `KeyError`, because the index is not one
+(§3) — and `to_ca`, which has no column to stack.
+
+You reach one by dropping every column of an indexed frame. **`drop` cannot
+remove the index**: the index is not a column, so `drop(axis_name)` raises
+`KeyError` like any other absent name. `reset_index` is the way, and it does not
+delete the index either — it *demotes* it to an ordinary column at the front:
+
+```ruby
+df = CAFrame.new({ "a" => CA_INT32([1, 2, 3]) },
+                 index: CA_INT32([10, 20, 30]), axis_name: "t")
+df.drop("a").nrow           # => 3   -- the index still holds the row count
+df.drop("a").nvar           # => 0
+df.reset_index.variables    # => ["t", "a"]   -- the index became a column
+```
+
+When the last witness goes — no columns **and** no index — there is no row count
+to keep, and the frame reports `nrow` 0. The next column assigned then fixes `N`
+again, exactly as it does for a frame that was built empty:
+
+```ruby
+df = CAFrame.new("a" => CA_INT32([1, 2, 3]))   # no index
+df.nrow                                        # => 3
+e = df.drop("a")
+e.nrow                                         # => 0   -- nothing holds 3 any more
+e.append("b", CArray.int32(99).seq!).nrow      # => 99  -- the new column fixes N
+```
+
+That is a real change of row count, so it is worth being deliberate about:
+a frame that still has an index refuses a differently-sized column
+(`column "b" has axis-0 length 99, expected 3`), while one with no witness left
+accepts it. Keep an index, or rebuild with `CAFrame.new`, when you want the
+old length enforced.
+
 ### Ownership — columns are shared views, `copy` is the only cut
 
 A frame is a **thin envelope over living columns**. Sub-frames (from `select`,
@@ -1158,6 +1206,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df.promote(...)` | **self** — same as `cast`, applied to every column (fresh columns, common type) |
 | `df.parse_to_time(...)` / `df.to_time(...)` | **self** — as `cast`: rebinds that column to a fresh time column |
 | `df.set_index` / `reset_index` | **self** — an index-role change, data unchanged |
+| `df.drop` of every column | **a new frame with no columns** — it keeps the index, and with it the row count; `drop` cannot remove the index (§1) |
 | `df.mask_eq(...)` / `df.fill(...)` | **write-through self** — mutates the shared column in place, visible through every alias / parent |
 | `df["c"] = col` | **self** — binds the name to a different column; a replacement, not an edit, so it does not reach holders of the old one (as `cast`) |
 | `df["c"] = nil` | **self** — removes the column from this frame's set |
