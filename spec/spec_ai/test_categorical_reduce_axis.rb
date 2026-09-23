@@ -743,4 +743,36 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
       assert diff < tol, "max abs diff #{diff} > #{tol}"
     end
   end
+  # ---- counting does not look at what is being counted ----------------------
+
+  def test_count_along_an_axis_works_for_any_payload
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    rows = [[1, 2], [3, 4], [5, 6], [7, 8]]
+    [CA_OBJECT, CA_CMPLX128, CA_BOOLEAN, CA_INT32, CA_FLOAT64].each do |dt|
+      h = CArray.new(dt, [4, 2]) { |i, j| dt == CA_BOOLEAN ? rows[i][j] % 2 : rows[i][j] }
+      got = h.group_by_category(cat).count(axis: 0)
+      assert_equal([[2, 2], [2, 2]], got.to_a, CArray.data_type_name(dt))
+      assert_equal(CA_INT64, got.data_type, CArray.data_type_name(dt))
+    end
+  end
+
+  def test_count_along_an_axis_still_counts_present_cells_only
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    h[1, 1] = UNDEF
+    assert_equal([[2, 1], [2, 2]], h.group_by_category(cat).count_not_masked(axis: 0).to_a)
+
+    # and an object payload, where the old route refused before it could look
+    o = CArray.object(4, 2) { |i, j| i * 2 + j }
+    o[1, 1] = UNDEF
+    assert_equal([[2, 1], [2, 2]], o.group_by_category(cat).count_not_masked(axis: 0).to_a)
+  end
+
+  def test_a_masked_classifier_cell_belongs_to_no_group_when_counting
+    codes = CArray.uint8(4) { |i| i < 2 ? 0 : 1 }
+    codes[1] = UNDEF
+    cat = CACategorical.from_codes(codes, ["a", "b"])
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    assert_equal([[1, 1], [2, 2]], h.group_by_category(cat).count(axis: 0).to_a)
+  end
 end

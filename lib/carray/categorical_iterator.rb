@@ -219,7 +219,7 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def count_not_masked(axis: nil)
-    return axis_moments(axis)[:count] if axis
+    return axis_counts(axis) if axis
     m = moments
     m ? m[:count].copy : per_category(CA_INT64) { |s| s.count_not_masked }
   end
@@ -730,6 +730,34 @@ class CACategoricalIterator < CAIterator
   # reason.
   def counts
     @elements || raise(ArgumentError, @no_flat)
+  end
+
+  # Axis-aware count of present cells. Counting how many cells fall in a
+  # group does not look at what is in them, so it is taken from the codes and
+  # the value's mask rather than from the fused moments kernel, which is
+  # numeric-only and refused a complex, boolean or object payload for an
+  # answer that never depended on the payload.
+  def axis_counts (axis)
+    h = @value
+    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
+      raise ArgumentError,
+            "group_by_category.count(axis: #{axis.inspect}): axis must be an " \
+            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
+    end
+    full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
+    band    = h.shape.dup; band.delete_at(axis)
+    out     = CArray.int64(*([@k] + band))
+    present = h.has_mask? ? h.is_not_masked : nil
+    slot    = [nil] * (band.size + 1)
+    @k.times do |c|
+      # a masked code belongs to no group, and eq yields UNDEF there
+      belongs = full_c.eq(c)
+      belongs = belongs.strip_mask(false) if belongs.has_mask?
+      belongs = belongs & present if present
+      slot[0] = c
+      out[*slot] = belongs.int64.sum(axis: axis)
+    end
+    out
   end
 
   # Axis-aware moments (count / sum / min / max) via the fused per-fiber
