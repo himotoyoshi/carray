@@ -489,6 +489,14 @@ class CAFrame
   # and index are untouched; the selected cells of every column go to UNDEF.
   # The selector is forwarded to the column indexer, which classifies it.
   private def mask_rows(selector)
+    # Decide before changing anything. A read-only column (a categorical, whose
+    # codes are read-only) refuses the write, and refusing half way through
+    # would leave the frame masked in whichever columns happened to come first.
+    refusing = @columns.find { |_, col| col.read_only? }
+    if refusing
+      raise "can not modify read-only array: column #{refusing[0].inspect} " \
+            "refuses the write, so no column was masked"
+    end
     @columns.each_value do |col|
       col[selector, *([nil] * (col.ndim - 1))] = UNDEF
     end
