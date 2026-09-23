@@ -103,7 +103,7 @@ class CACategoricalIterator < CAIterator
       # index): offsets[c] = sum of counts[0...c]. Both come off the shared
       # plan, so the counting sort is not repeated here.
       @elements = cat.category_sizes.int64
-      nvalid    = @elements.sum
+      nvalid    = counts.sum
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
       # Group-major source indices = the valid prefix of the cached sort_addr.
       # With no classified cell the prefix is empty (and slicing a length-0
@@ -119,25 +119,30 @@ class CACategoricalIterator < CAIterator
       # range — so build the empty grouped buffer directly.
       @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
                              : CArray.new(value.data_type, [0])
-      @empty    = CArray.new(@grouped.data_type, [0])
+      @empty    = CArray.new(grouped.data_type, [0])
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
       # is unrecoverable (preserves the old strict check).  For higher-rank
       # value, defer validation to reduce time — check only that cat.ndim fits
       # one of the 3 axis: cases;
-      # any no-axis reduce called on this iterator will surface the mismatch
-      # because @grouped stays undefined.
+      # A no-axis reduce has no grouped buffer to work from. The reason is
+      # recorded here and raised from wherever one is asked for, so what
+      # surfaces names the mismatch instead of being whatever NoMethodError
+      # the nil produced first.
+      mismatch = "group_by_category: value.elements (#{value.elements}) != " \
+                 "cat.elements (#{cat.elements})"
       if value.ndim == 1 ||
          ! [1, value.ndim - 1, value.ndim].include?(cat.ndim)
         raise ArgumentError,
-              "group_by_category: value.elements (#{value.elements}) != " \
-              "cat.elements (#{cat.elements})" +
+              mismatch +
               (value.ndim == 1 ? "" :
                 ". For per-fiber reduce use `.sum(axis: k)`; cat.ndim=" \
                 "#{cat.ndim} must be 1 (case A), #{value.ndim} (case B), " \
                 "or #{value.ndim - 1} (band-only) for h.ndim=#{value.ndim}.")
       end
+      @no_flat = mismatch + ". This iterator answers only the per-fiber form, " \
+                 "`.<reduce>(axis: k)`."
     end
     self
   end
@@ -181,7 +186,7 @@ class CACategoricalIterator < CAIterator
     # write into it and change what the iterator answers from then on. This
     # one invites it -- the docs point at its prefix sum for splitting a
     # column apart, which reads as scratch.
-    @elements.copy
+    counts.copy
   end
 
   # Group-vocabulary alias for {#elements}; reads naturally next to
@@ -194,8 +199,12 @@ class CACategoricalIterator < CAIterator
   #   internal grouped/value/codes buffers.
   #   @return [String]
   def inspect
-    "#<#{self.class} ngroups=#{@k} labels=#{@labels.inspect} " \
-    "elements=#{@elements.to_a.inspect}>"
+    # An iterator that answers only the per-fiber form has no per-category
+    # counts to show. Saying so beats both raising -- inspect is what you
+    # reach for when something is already puzzling -- and printing an empty
+    # list, which reads as a grouping that classified nothing.
+    tail = @elements ? "elements=#{@elements.to_a.inspect}" : "per-fiber only"
+    "#<#{self.class} ngroups=#{@k} labels=#{@labels.inspect} #{tail}>"
   end
 
   # @overload count_not_masked
@@ -258,7 +267,7 @@ class CACategoricalIterator < CAIterator
             "call it without axis:."
     end
     m = moments
-    m ? @elements - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
+    m ? counts - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
   end
 
   # @overload sum
@@ -362,11 +371,11 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray]
   def percentile (p, axis: nil)
     axis_order_stat_defer!(:percentile) if axis
-    unless MONOID_TYPES.include?(@grouped.data_type)
+    unless MONOID_TYPES.include?(grouped.data_type)
       return per_category(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
-    @grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
+    grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
     out
   end
 
@@ -377,11 +386,11 @@ class CACategoricalIterator < CAIterator
   #   MASKED. For a single fraction q in 0..1 use `percentile(q * 100)`.
   #   @return [Array<CArray>]
   def quantile
-    unless MONOID_TYPES.include?(@grouped.data_type)
+    unless MONOID_TYPES.include?(grouped.data_type)
       return [0, 25, 50, 75, 100].map { |p| percentile(p) }
     end
     outs = Array.new(5) { CArray.float64(@k) }
-    @grouped.send(:__reduceat_quantile__, @offsets, *outs)
+    grouped.send(:__reduceat_quantile__, @offsets, *outs)
     outs
   end
 
@@ -398,7 +407,7 @@ class CACategoricalIterator < CAIterator
     cnt   = m[:count]
     means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
     out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
-    @grouped.send(:__reduceat_variance__, @offsets, means, cnt, out)
+    grouped.send(:__reduceat_variance__, @offsets, means, cnt, out)
     out
   end
 
@@ -426,9 +435,9 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_category(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(@grouped.data_type)
+    return per_category(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
     out = CArray.float64(@k)
-    @grouped.send(:__reduceat_prod__, @offsets, out)
+    grouped.send(:__reduceat_prod__, @offsets, out)
     out
   end
 
@@ -561,14 +570,14 @@ class CACategoricalIterator < CAIterator
   #   {#min_addr} vs the skipped group-local min_index-into-source.
   #   @return [CArray] length-nvalid int64
   def sort_addr
-    out = CArray.int64(@grouped.elements)
+    out = CArray.int64(grouped.elements)
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
       next unless hi > lo
       # View-local sort order of the segment (0..size-1), lifted to grouped
       # slots, then mapped back to source addresses via perm.
-      out[lo...hi] = perm[@grouped[lo...hi].sort_addr + lo]
+      out[lo...hi] = perm[grouped[lo...hi].sort_addr + lo]
     end
     out
   end
@@ -592,7 +601,7 @@ class CACategoricalIterator < CAIterator
   def wsum (weights, axis: nil)
     return axis_wsum_wmean(weights, axis)[0] if axis
     wg = scatter_weights(weights)
-    return kernel_weighted(wg)[0] if MONOID_TYPES.include?(@grouped.data_type)
+    return kernel_weighted(wg)[0] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, 0.0) { |v, ws| v.wsum(ws) }
   end
 
@@ -612,7 +621,7 @@ class CACategoricalIterator < CAIterator
   def wmean (weights, axis: nil)
     return axis_wsum_wmean(weights, axis)[1] if axis
     wg = scatter_weights(weights)
-    return kernel_weighted(wg)[1] if MONOID_TYPES.include?(@grouped.data_type)
+    return kernel_weighted(wg)[1] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, UNDEF) { |v, ws| v.wmean(ws) }
   end
 
@@ -653,14 +662,14 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] shaped like the source value
   def map (data_type: nil)
     raise LocalJumpError, "no block given (yield)" unless block_given?
-    dt = data_type || @grouped.data_type
+    dt = data_type || grouped.data_type
     # Apply the block per category, assembled in grouped (category-contiguous)
     # order: a same-length result scatters cell for cell, a scalar broadcasts.
-    transformed = CArray.new(dt, [@grouped.elements])
+    transformed = CArray.new(dt, [grouped.elements])
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-      transformed[lo...hi] = yield(@grouped[lo...hi]) if hi > lo
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      transformed[lo...hi] = yield(grouped[lo...hi]) if hi > lo
     end
     # Scatter back to source positions via the permutation (grouped-order source
     # indices). Excluded cells are absent from perm and stay UNDEF.
@@ -708,6 +717,20 @@ class CACategoricalIterator < CAIterator
   end
 
   private
+
+  # The category-major copy every no-axis reduction works from. It does not
+  # exist when the classifier does not line up cell-for-cell with the value;
+  # such an iterator answers the per-fiber form only, and says so here rather
+  # than letting a nil surface as whatever NoMethodError it reaches first.
+  def grouped
+    @grouped || raise(ArgumentError, @no_flat)
+  end
+
+  # Per-category cell counts, alongside #grouped and unavailable for the same
+  # reason.
+  def counts
+    @elements || raise(ArgumentError, @no_flat)
+  end
 
   # Axis-aware moments (count / sum / min / max) via the fused per-fiber
   # scatter-reduce C kernel.  Returns
@@ -917,7 +940,7 @@ class CACategoricalIterator < CAIterator
             "value.elements (#{@codes.elements})"
     end
     wf = weights.float64
-    wg = CArray.float64(@grouped.elements)
+    wg = CArray.float64(grouped.elements)
     @codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
                 @offsets.copy, wg, @k)
     wg
@@ -942,7 +965,7 @@ class CACategoricalIterator < CAIterator
   def kernel_weighted (wg)
     ws = CArray.float64(@k)
     wm = CArray.float64(@k)
-    @grouped.send(:__reduceat_wsum_wmean__, @offsets, wg, ws, wm)
+    grouped.send(:__reduceat_wsum_wmean__, @offsets, wg, ws, wm)
     [ws, wm]
   end
 
@@ -952,8 +975,8 @@ class CACategoricalIterator < CAIterator
     out = CArray.float64(@k)
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-      out[c] = hi > lo ? yield(@grouped[lo...hi], wg[lo...hi]) : empty
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      out[c] = hi > lo ? yield(grouped[lo...hi], wg[lo...hi]) : empty
     end
     out
   end
@@ -964,8 +987,8 @@ class CACategoricalIterator < CAIterator
   # contract we want (identity for sum, UNDEF for ratios).
   def group_slice (c)
     lo = @offsets[c]
-    hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-    hi > lo ? @grouped[lo...hi] : @empty
+    hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+    hi > lo ? grouped[lo...hi] : @empty
   end
 
   # Single-pass reduceat moments (count / sum / min / max per category), computed
@@ -981,13 +1004,13 @@ class CACategoricalIterator < CAIterator
   def moments
     return @moments if defined?(@moments)
     @moments =
-      if MONOID_TYPES.include?(@grouped.data_type)
-        dt     = @grouped.data_type
+      if MONOID_TYPES.include?(grouped.data_type)
+        dt     = grouped.data_type
         counts = CArray.int64(@k)
         sums   = CArray.float64(@k)
         mins   = CArray.new(dt, [@k])
         maxs   = CArray.new(dt, [@k])
-        @grouped.send(:__reduceat_moments__, @offsets, counts, sums, mins, maxs)
+        grouped.send(:__reduceat_moments__, @offsets, counts, sums, mins, maxs)
         { count: counts, sum: sums, min: mins, max: maxs }
       end
   end
@@ -997,10 +1020,10 @@ class CACategoricalIterator < CAIterator
   def arg_minmax
     return @arg_minmax if defined?(@arg_minmax)
     @arg_minmax =
-      if MONOID_TYPES.include?(@grouped.data_type)
+      if MONOID_TYPES.include?(grouped.data_type)
         mn = CArray.int64(@k)
         mx = CArray.int64(@k)
-        @grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
+        grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
         { min: mn, max: mx }
       end
   end
@@ -1011,10 +1034,10 @@ class CACategoricalIterator < CAIterator
   def all_any
     return @all_any if defined?(@all_any)
     @all_any =
-      if @grouped.data_type == CA_BOOLEAN
+      if grouped.data_type == CA_BOOLEAN
         a = CArray.boolean(@k)
         o = CArray.boolean(@k)
-        @grouped.send(:__reduceat_all_any__, @offsets, a, o)
+        grouped.send(:__reduceat_all_any__, @offsets, a, o)
         { all: a, any: o }
       end
   end
@@ -1032,9 +1055,14 @@ class CACategoricalIterator < CAIterator
   # (`sum` on an integer promotes, `accumulate` stays, `min` / `max` keep the
   # type but a boolean widens, `prod` on an object stays an object).  A payload
   # the core refuses to fold this way raises here, with the core's own error.
+  # Probes the core with a one-cell array of the value's data type and takes
+  # the answer's. Asks @value rather than the grouped copy, which has the same
+  # data type but does not exist on an iterator that answers only the
+  # per-fiber form -- and `accumulate(axis:)`, the one axis: member that needs
+  # this, is exactly the case that would have found it missing.
   def core_reduce_type (op, *args)
     (@core_reduce_type ||= {})[[op, args]] ||=
-      CArray.new(@grouped.data_type, [1, 1]).public_send(op, *args, axis: 1).data_type
+      CArray.new(@value.data_type, [1, 1]).public_send(op, *args, axis: 1).data_type
   end
 
   def per_category (data_type)

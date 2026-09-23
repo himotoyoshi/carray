@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: a `group_by_category` iterator whose classifier does not line up
+  cell-for-cell with the value now says so. A no-axis reduction on one raises
+  `ArgumentError` naming the mismatch and pointing at the `axis:` form, rather
+  than a `NoMethodError` about `nil`; `elements` raises the same instead of
+  answering `nil`; and `inspect` says "per-fiber only" instead of printing an
+  empty grouping. `accumulate(axis:)`, which failed outright on such an
+  iterator, now works.
+
 - Change: the `axis:` reductions on `group_by_category` now read the source
   array when asked, rather than some of them answering from a result kept
   from an earlier call. `sum`, `mean`, `min`, `max` and the counts shared a
