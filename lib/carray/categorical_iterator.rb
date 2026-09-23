@@ -944,9 +944,28 @@ class CACategoricalIterator < CAIterator
   # one grouped axis, the flat codes as the single bundle.  The kernel emits in
   # source order, so the flat result reshapes straight back to the source shape.
   def scan (op)
-    @value.reshape(@value.elements)
-          .__axis_group_scan__([0], [[@codes, @k, [0]]], op)
-          .reshape(*@src_shape)
+    scan_source.reshape(@value.elements)
+               .__axis_group_scan__([0], [[@codes, @k, [0]]], op)
+               .reshape(*@src_shape)
+  end
+
+  # The values as they were when the iterator was built, in source order.
+  # Every no-axis reduction works from the category-major copy taken then; the
+  # scans read @value, so a write through the source between two calls used to
+  # be visible to a cumsum and not to a sum, off one iterator.
+  #
+  # Rebuilt rather than copied a second time: @perm is exactly the classified
+  # cells and @grouped holds their values and their masks, which is everything
+  # a scan reads -- a cell classified by nothing is skipped on its code, before
+  # its value is looked at. So this costs nothing until a scan asks for it, and
+  # nothing at all for an iterator that never scans.
+  def scan_source
+    @scan_source ||=
+      begin
+        snap = @value.template
+        snap.reshape(snap.elements)[perm] = grouped
+        snap
+      end
   end
 
 
