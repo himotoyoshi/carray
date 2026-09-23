@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- New: `CArray::AddressBasis`, for a C extension whose code addresses cells
+  itself rather than being handed them — a kernel generated from an
+  expression, which writes its own loop. `open` lends a pointer and one byte
+  stride per axis for the length of a block, and closes what it opened even
+  when the block raises; `classify` reports how an array would be opened
+  without opening it. It is a runtime facility at the `ca_attach` layer, not
+  a user API: what it lends is a raw machine address, so it is described in
+  the developer's guide rather than in the user documentation.
+
 - Fix: `is_in`, `count(v)`, the set operations, `locate_addr`, `search`,
   `bsearch` and `linear_section` no longer compare a Face operand by its
   storage when that storage is not the value it shows. Passing a
