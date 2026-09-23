@@ -355,6 +355,25 @@ class CAGroupIterator
     self.class.__build__(hit.int64, spec).sum(**kw).int64
   end
 
+  alias __all_folded__ all
+  alias __any_folded__ any
+
+  # @overload all
+  #   Per-group `all` over a boolean payload.
+  #   @return [CArray]
+  def all (**kw)
+    boolean_payload!(:all)
+    __all_folded__(**kw)
+  end
+
+  # @overload any
+  #   Per-group `any` over a boolean payload.
+  #   @return [CArray]
+  def any (**kw)
+    boolean_payload!(:any)
+    __any_folded__(**kw)
+  end
+
   # Per-group classified cell count (mask-independent) = count on the
   # mask-stripped value, so every classified cell is counted regardless of the
   # value mask (unlike count / count_not_masked, which count present cells).
@@ -595,6 +614,18 @@ class CAGroupIterator
   # (the shape a length-K result reshapes to). This is the classification the C
   # scatter kernel computes on the fly, materialised once so the order
   # statistics / iterate / sort_addr can hold each group's members together.
+  # Whether a payload folds with all / any is the core's call, not this
+  # engine's. The engine counts any non-zero numeric cell as true, which made
+  # the group the one member of the family that answered where CArray#all and
+  # every sibling refuse -- so `data.all` and `data[g].all(axis: :group)` on
+  # the same float array disagreed about whether the question was even
+  # askable. Asking a one-cell array of the same data type lets the core's own
+  # refusal through, unworded by us.
+  def boolean_payload! (op)
+    CArray.new(value.data_type, [1]).public_send(op)
+    nil
+  end
+
   def composite_layout
     gslots = spec.slot_meta.select { |m| m[:kind] == :group }
     bslots = spec.slot_meta.select { |m| m[:kind] == :band }
