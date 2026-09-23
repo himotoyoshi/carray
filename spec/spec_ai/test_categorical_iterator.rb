@@ -823,6 +823,43 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_equal(CA_INT32, grp.accumulate(axis: 0).data_type)
   end
 
+  # ---- a payload that carries a Face ---------------------------------------
+  #
+  # The contract is that a group's answer equals the core's reduction over the
+  # group's members, and for a Face the core answers in that Face -- CATime#min
+  # is a CATime::Element. The output was built from the answer's data type
+  # alone, which a fixlen surface has no width from, so what came back was
+  # `rb_ca_new_reduced: bytes=0 invalid for data_type=0`: an internal message
+  # naming nothing the caller could act on, for members the core handles fine.
+
+  def time_group
+    t = CArray.time(["2020-01-03", "2020-01-01", "2020-01-05", "2020-01-02"], unit: :D)
+    [t, t.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)]
+  end
+
+  def test_a_face_payload_answers_in_its_own_face
+    t, grp = time_group
+    [:min, :max, :median].each do |op|
+      got = grp.public_send(op)
+      assert_kind_of(CATime, got, "#{op} comes back as the Face")
+      assert_equal(t[0..1].public_send(op), got[0], "#{op} group 0")
+      assert_equal(t[2..3].public_send(op), got[1], "#{op} group 1")
+    end
+  end
+
+  def test_a_payload_independent_member_stays_plain_for_a_face
+    _t, grp = time_group
+    assert_equal([2, 2], grp.count.to_a)
+    assert_equal(CA_INT64, grp.count.data_type)
+  end
+
+  def test_a_member_the_core_refuses_for_a_face_still_refuses_in_its_words
+    _t, grp = time_group
+    e = assert_raise(TypeError) { grp.sum }
+    assert_match(/CATime/, e.message)          # the core's own refusal
+    assert_not_match(/rb_ca_new_reduced/, e.message)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)
