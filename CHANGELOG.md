@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `CAFrame#set_index` on a frame that already has an index no longer
+  discards it. The index being replaced now goes back to being a column, the
+  same demotion `reset_index` performs and in the same position, so re-indexing
+  keeps every column and `set_index("b")` on a frame indexed by `"a"` is the
+  same as `reset_index` followed by `set_index("b")`. Previously the column the
+  old index had been made from was gone, with nothing said.
+
 - Fix: `CAFrame#reset_index` now restores the row axis name the frame had
   before `set_index` promoted a column over it, so the two are each other's
   inverse as documented. It used to leave `"row"`, which is user-visible: the

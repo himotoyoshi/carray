@@ -823,6 +823,19 @@ nothing to put back and `reset_index` leaves the default `"row"`. A frame
 derived from an indexed one — a row slice, `filter`, `copy` — is born indexed in
 the same way, so it behaves the same.
 
+`set_index` on a frame that **already has an index** replaces it, and the index
+being replaced goes back to being a column — the same demotion `reset_index`
+performs, in the same position. So re-indexing keeps every column, and
+`set_index("b")` on a frame indexed by `"a"` is the same as `reset_index`
+followed by `set_index("b")`:
+
+```ruby
+df.set_index("a")
+df.set_index("b")
+df.variables        # => ["a", "v"]   -- "a" is a column again, not lost
+df.reset_index      # => axis_name "obs" again, variables ["b", "a", "v"]
+```
+
 ---
 
 ## 8. Column verbs
