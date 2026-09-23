@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.2 (unreleased)
 
+- Fix: `min` and `max` on an `axis_group` reduction now answer in the source
+  array's data type, as `CArray#min` / `#max` do, instead of float64 -- an
+  int64 beyond the float mantissa came back rounded. A boolean array answers
+  as its 0/1 numeric storage (`all` / `any` are the boolean-returning twins).
+  A group holding nothing but `NaN` now answers `NaN` rather than the
+  accumulator's infinity, and `min_addr` / `max_addr` answer UNDEF for it,
+  since no cell won.
+
 - Fix: an `axis_group` reduction over a grouping whose group axis has length
   zero now answers each output cell the way a group with no member is answered
   -- `sum` 0, `prod` 1, `count` 0, `all` true, `any` false, and UNDEF for
