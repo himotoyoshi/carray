@@ -508,6 +508,11 @@ class CAFrame
       raise "can not modify read-only array: column #{refusing[0].inspect} " \
             "refuses the write, so no column was masked"
     end
+    # The selector is classified by the column indexer, which is also what
+    # bound-checks it -- so with no column to forward it to, nothing would.
+    # Build the row mask purely to have the frame's own row axis refuse an
+    # out-of-range row, as every other row form does.
+    selected_row_mask(selector) if @columns.empty?
     @columns.each_value do |col|
       col[selector, *([nil] * (col.ndim - 1))] = UNDEF
     end
@@ -565,7 +570,16 @@ class CAFrame
     new_index = splice_index(other, lo, hi)
     @columns  = new_cols
     @index    = new_index
-    @nrow     = @nrow - (hi - lo) + other.nrow
+    # Read the new count off something the frame now holds, rather than
+    # computing it. For every column the pieces welded above are head (lo) +
+    # other's rows + tail (nrow - hi), so the arithmetic and the objects agree
+    # -- except when there is nothing to weld: a frame with no columns and no
+    # index would otherwise come away claiming rows that nothing backs.
+    @nrow = if (witness = new_cols.each_value.first || new_index)
+              witness.shape[0]
+            else
+              0
+            end
     self
   end
 
