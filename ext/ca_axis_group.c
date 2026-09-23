@@ -255,7 +255,6 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   int8_t    axes[CA_RANK_MAX];
   char      is_group[CA_RANK_MAX];
   for ( int8_t i = 0; i < src->ndim; i++ ) is_group[i] = 0;
-  ca_size_t group_prod = 1;
   for ( long i = 0; i < ngroup; i++ ) {
     int a = NUM2INT(RARRAY_AREF(vgaxes, i));
     if ( a < 0 || a >= src->ndim ) {
@@ -269,7 +268,6 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     }
     is_group[a]  = 1;
     axes[i]      = (int8_t) a;
-    group_prod  *= src->dim[a];
   }
 
   /* --- bundles: small per-group code tables (metadata, kept alive) --- */
@@ -363,13 +361,21 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     }
   }
 
-  /* --- band layout + output shape [K_total, *band_dims] --- */
-  ca_size_t band = (group_prod > 0) ? (src->elements / group_prod) : 0;
+  /* --- band layout + output shape [K_total, *band_dims] ---
+     band is the product of the band dims, taken directly rather than as
+     src->elements / group_prod: a zero-length *group* axis makes group_prod
+     zero, and the division has to answer something. Answering 0 made nout 0
+     while the output really had K_total x band cells, so every finalisation
+     loop below ran zero times and the freshly zeroed buffer went back to the
+     caller unmasked -- a mean, a min and a variance all reported as 0.0.
+     Taken directly, nout == co->elements for every shape, and the group with
+     no cell in it takes the same empty-group path as any other. */
+  ca_size_t band = 1;
   ca_size_t odim[CA_RANK_MAX];
   int8_t    ondim = 1;
   odim[0] = K_total;
   for ( int8_t i = 0; i < src->ndim; i++ ) {
-    if ( ! is_group[i] ) odim[ondim++] = src->dim[i];
+    if ( ! is_group[i] ) { odim[ondim++] = src->dim[i]; band *= src->dim[i]; }
   }
   ca_size_t nout = K_total * band;
 
