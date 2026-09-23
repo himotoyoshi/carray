@@ -327,7 +327,8 @@ ORDERABLE plus the cast is sufficient.
 | unit-bearing (time, timedelta) | ORDERABLE | define it (reference reconciles the operand) | ✓ | ✓ via reconcile; bare storage value → raise |
 | single-interpretation relabel | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; plain query OK |
 | transparent over object storage (`CAString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; the cell *is* the value |
-| fixlen storage (record, fixed-width string) | none | — | ✓ by **memcmp** (default) | reject (numeric-only) |
+| fixlen storage, bytes with no string reading (`CARecord`) | none | — | ✓ by **memcmp** (default) | reject (numeric-only) |
+| fixlen storage read as strings (`CAFixlenString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; a String query is padded to the cell width |
 | non-orderable numeric storage | none | — | reject | reject |
 
 **Sort-family Face gate.** The sort family descends any Face to its storage and

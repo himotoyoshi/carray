@@ -91,11 +91,24 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
 
   ca->obj_type  = CA_OBJ_FIXLEN_STRING;
   ca->data_type = CA_FIXLEN;
-  /* ORDERABLE + COMPARABLE, and both hold by construction: this Face's surface
-     IS its storage, byte for byte (a cell decodes to its own bytes, padding
-     included), so the descent is the identity map.  memcmp order is therefore
-     String#<=> order for these cells, and byte equality is cell equality --
-     which is what the equality families need (docs/topics/CAFace.md §6.3).
+  /* ORDERABLE + COMPARABLE.  The descent is NOT the identity map -- the
+     scalar decode below strips trailing NUL -- but both flags still hold,
+     for a reason worth stating exactly, since it is what a Face author
+     copying this would need:
+
+       ORDERABLE: every cell is padded to the same K with NUL, and NUL is
+       the smallest byte, so memcmp on the padded cells orders them the same
+       way String#<=> orders the stripped strings (a prefix sorts before any
+       continuation, which is what the padding reproduces).  Stripping is
+       order-preserving; it is not order-irrelevant by being absent.
+
+       COMPARABLE: a String query is padded out to the cell width before it
+       is compared, so byte equality on the padded form is equality on the
+       stripped form -- for a query that fits.  A query longer than K is
+       truncated to its own first K bytes by that same padding step, and
+       then matches a cell it is not equal to.
+
+     Which is what the equality families need (docs/topics/CAFace.md §6.3).
      Without the flags the sort family still worked (it exempts CA_FIXLEN
      storage from the gate and orders by memcmp), but the value-hash family
      handed its results back as a plain fixlen array, and search refused a
