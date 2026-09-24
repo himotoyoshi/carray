@@ -13,6 +13,8 @@ a.windows(-1..1).mean            #  rolling mean over a width-3 window
 
 Every interior cell averages itself and its two neighbours. The edges have no neighbour on one side, so — by default — they average only the cells that exist: cell 0 sees `[1, 2]` and reports `1.5`, cell 7 sees `[7, 8]` and reports `7.5`. What the edges do is the [boundary policy](#the-boundary-policy-bounds), covered below.
 
+Do not confuse it with the singular `window`, which is a plain view: `a.window(-1..3, -1..3)` is *one* region, reaching past the array's ends, and is how an array is padded (see [Views](06_views.md#reaching-outside-the-array-window)). `windows` anchors one of those on every cell and folds each. They share the `bounds:` / `fill_value:` vocabulary and nothing else.
+
 `windows` returns a **`CAWindowIterator`**, the window member of the 3.0 iterator family — a sibling of the [slab iterator](11_slab_iteration.md) and the categorical (group-by) iterator; see the [iterator family overview](21_iterator_family.md). Like them, it carries a broad common surface of named reductions, plus an `each` / `reduce` escape hatch and a few members of its own.
 
 ## Building a window

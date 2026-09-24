@@ -269,8 +269,10 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
 }
 
 /* Per-axis accessor macro: defines a method that returns the named
-   CABlock tail array (size0 / start / step / count) as a Ruby Array.
-   `offset` is a single Integer and uses its own accessor below. */
+   CABlock tail array (size0 / start / step) as a Ruby Array.
+   `offset` is a single Integer and uses its own accessor below.
+   `count` has no accessor: it is what `shape` already answers, and the
+   name belongs to CArray#count. */
 #define rb_cb_get_attr_ary(name)                    \
 rb_cb_ ## name (VALUE self)                         \
 {                                                   \
@@ -288,7 +290,6 @@ rb_cb_ ## name (VALUE self)                         \
 static VALUE rb_cb_get_attr_ary(size0)
 static VALUE rb_cb_get_attr_ary(start)
 static VALUE rb_cb_get_attr_ary(step)
-static VALUE rb_cb_get_attr_ary(count)
 
 static VALUE
 rb_cb_offset (VALUE self)
@@ -376,7 +377,6 @@ Init_ca_obj_block (void)
   rb_define_method(rb_cCABlock, "size0",  rb_cb_size0, 0);
   rb_define_method(rb_cCABlock, "start",  rb_cb_start, 0);
   rb_define_method(rb_cCABlock, "step",   rb_cb_step, 0);
-  rb_define_method(rb_cCABlock, "count",  rb_cb_count, 0);
   rb_define_method(rb_cCABlock, "offset", rb_cb_offset, 0);
 
   rb_define_method(rb_cCABlock, "idx2addr0",   rb_cb_idx2addr0, -1);

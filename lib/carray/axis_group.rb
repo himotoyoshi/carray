@@ -308,7 +308,72 @@ end
 # / min / max / variance / stddev / variancep / stddevp / count /
 # count_not_masked / all / any) bind in C to one driver; the rest of the common
 # iterator surface that composes cheaply from those is added here.
+# CAGroupIterator subclasses CAIterator, but the class itself is created in
+# C, so the reopening below carries no superclass for YARD to read.
+# @!parse class CAGroupIterator < CAIterator; end
 class CAGroupIterator
+  # The shape one value per piece comes back in: a group slot contributes its
+  # category count, a band slot its length, in slot order. The base declares
+  # these and every other member answers them; this one inherited the readers
+  # without anything ever setting the ivars, so it answered nil -- which the
+  # base's own rule calls out as the one thing a member must not do ("a clean
+  # NotImplementedError, never a wrong answer").
+  def shape
+    spec.slot_meta.map { |m| m[:kind] == :group ? m[:k] : m[:len] }
+  end
+  alias dim shape
+
+  def ndim
+    spec.nslots
+  end
+
+  # The C dispatcher every reduction shares takes keywords only, so the
+  # value-equality and masked forms the base declares -- count(v), count(UNDEF)
+  # -- arrived as "wrong number of arguments", which reads as a method that
+  # does not take one rather than one whose engine has no such fold. Both are
+  # composed here instead, out of folds the engine does have.
+  alias __count_present__ count
+
+  # @overload count
+  #   Per-group count of present (non-masked) cells.
+  # @overload count(UNDEF)
+  #   Per-group count of masked cells, as {#count_masked}.
+  # @overload count(v)
+  #   Per-group count of cells equal to `v`.
+  #   @return [CArray]
+  def count (*args, **kw)
+    return __count_present__(**kw) if args.empty?
+    if args.size > 1
+      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
+    end
+    v = args.first
+    return count_masked(**kw) if v.equal?(UNDEF)
+    # a masked cell equals nothing, and eq marks it UNDEF; drop that to false
+    # so it is simply not counted
+    hit = value.eq(v)
+    hit = hit.strip_mask(false) if hit.has_mask?
+    self.class.__build__(hit.int64, spec).sum(**kw).int64
+  end
+
+  alias __all_folded__ all
+  alias __any_folded__ any
+
+  # @overload all
+  #   Per-group `all` over a boolean payload.
+  #   @return [CArray]
+  def all (**kw)
+    boolean_payload!(:all)
+    __all_folded__(**kw)
+  end
+
+  # @overload any
+  #   Per-group `any` over a boolean payload.
+  #   @return [CArray]
+  def any (**kw)
+    boolean_payload!(:any)
+    __any_folded__(**kw)
+  end
+
   # Per-group classified cell count (mask-independent) = count on the
   # mask-stripped value, so every classified cell is counted regardless of the
   # value mask (unlike count / count_not_masked, which count present cells).
@@ -549,6 +614,18 @@ class CAGroupIterator
   # (the shape a length-K result reshapes to). This is the classification the C
   # scatter kernel computes on the fly, materialised once so the order
   # statistics / iterate / sort_addr can hold each group's members together.
+  # Whether a payload folds with all / any is the core's call, not this
+  # engine's. The engine counts any non-zero numeric cell as true, which made
+  # the group the one member of the family that answered where CArray#all and
+  # every sibling refuse -- so `data.all` and `data[g].all(axis: :group)` on
+  # the same float array disagreed about whether the question was even
+  # askable. Asking a one-cell array of the same data type lets the core's own
+  # refusal through, unworded by us.
+  def boolean_payload! (op)
+    CArray.new(value.data_type, [1]).public_send(op)
+    nil
+  end
+
   def composite_layout
     gslots = spec.slot_meta.select { |m| m[:kind] == :group }
     bslots = spec.slot_meta.select { |m| m[:kind] == :band }

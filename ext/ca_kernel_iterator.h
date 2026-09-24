@@ -528,7 +528,24 @@ int  ca_iter_state_init_l2 (ca_iter_state    *st,
    source carries a mask (= ca_has_mask(src)), or NULL otherwise.
    The mask layout matches the value layout (= same iteration order
    and same n).  Step 6+: kernels use the CA_FOR_EACH_UNMASKED macro
-   family (carray.h) to skip masked cells. */
+   family (carray.h) to skip masked cells.
+
+   The mask is an input.  What it points at is a copy taken when the
+   walk began, so writing through it changes nothing -- not even under
+   CA_KERNEL_WRITE, where the value half of the same yield is often a
+   live alias.  It also cannot express the thing an author would most
+   want it for: an unmasked source yields NULL, so there is nowhere to
+   record that a cell has become undefined.  A kernel authors its
+   output mask on its own output array instead:
+
+       if ( op_mask == NULL ) {
+         ca_create_mask(co);
+         op_mask = (boolean8_t *) co->mask->ptr;
+       }
+       op_mask[out_i] = 1;
+
+   which is what every kernel in carray does (carray_hold.c, and the
+   reduction kernels mkkernel emits). */
 int  ca_iter_state_next_slab (ca_iter_state *st,
                               char         **out_ptr,
                               boolean8_t   **out_mask,
@@ -603,6 +620,13 @@ void ca_iter_state_sync_slab (ca_iter_state *st);
    exactly once after a successful init (either level). */
 void ca_iter_state_finish (ca_iter_state *st);
 
+/* Raise unless rc is CA_ITER_OK.  The block macros call this on the value
+   ca_iter_state_init_l1 / _l2 returned, so an author who never looks at a
+   return code still hears about a request the iterator would not serve.
+   Returns rc when there is nothing to report, so it composes inside the
+   macros' comma expressions. */
+int ca_iter_check_init (int rc);
+
 /* ---- Phase C C.3: kernel author block macros ------------------------
    (PROPOSAL_CAPSTONE_PHASE_C.md D3.1 (A) do/while/for + D3.2 (C) 2 kinds)
 
@@ -617,17 +641,24 @@ void ca_iter_state_finish (ca_iter_state *st);
      surrounding scope.
    - `flags` arg propagates to init_l2 (= CA_KERNEL_WRITE supported).
      `sync_slab` is called automatically after each iteration; it's a
-     no-op when WRITE flag is absent.
-   - Init failure (ca_iter_state_init_l2 returns CA_ITER_ERR_*) is
-     silently discarded: the body runs zero times and finish is still
-     called.  Production kernels that need explicit error messages
-     (e.g., sum_ki's rc=%d raise) should drop down to the raw API
-     instead of using this macro.
+     no-op when WRITE flag is absent.  The mask cursor is an input even
+     under WRITE -- see ca_iter_state_next_slab above for why, and for
+     where an output mask is written instead.
+   - Init failure (ca_iter_state_init_l2 returns CA_ITER_ERR_*) raises:
+     the macro passes the code to ca_iter_check_init, which reports what
+     the iterator declined to do.  The body does not run and finish is
+     not reached, which is safe because a failed init allocates nothing.
+     Kernels that want to handle a refusal rather than propagate it
+     should drop down to the raw API and read the code themselves.
    - `break;` from inside the body exits the loop AND triggers finish
      correctly (= outer for's "increment" clause runs once on natural
      exit; `break` from the inner while breaks both).  `return` inside
      the body LEAKS resources (scratch_ptr, parent attach) — drop to
-     raw API if early return is needed.
+     raw API if early return is needed.  A body that raises leaks the
+     same way: the engine releases what it holds when the walk itself
+     raises (a gather or a write-back through the source's slots), but
+     the body runs in the caller's frame, where it has no hold on it.
+     An object-lane body calling back into Ruby is the case to watch.
    - Macros are not statement-equivalent (= they expand to nested for
      constructs).  Don't follow them with `else` etc. */
 
@@ -760,8 +791,9 @@ void ca_iter_state_finish (ca_iter_state *st);
    always-constant argument).  CA_SLAB_AXES is still FROZEN, because
    raw-API kernels pass it to ca_iter_state_init_l2 directly. */
 #define CA_FOR_EACH_SLAB(st, ca, axes, naxes, flags, p, m)                    \
-  for ( int __caf_init = (ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,    \
-                                                (axes), (naxes), (flags)),    \
+  for ( int __caf_init = (ca_iter_check_init(                                 \
+                            ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,  \
+                                                  (axes), (naxes), (flags))), \
                           1);                                                 \
         __caf_init;                                                           \
         __caf_init = 0, ca_iter_state_finish(&(st)) )                         \
@@ -777,16 +809,18 @@ void ca_iter_state_finish (ca_iter_state *st);
    Shape mismatch between ca_in / ca_out is NOT validated by the macro
    — caller responsibility (= typically output is `rb_ca_template_with_type`
    of input, guaranteeing same shape).  Init failure on either iter
-   silently skips the body. */
+   raises — see CA_FOR_EACH_SLAB above. */
 /* Policy fixed to CA_SLAB_AXES internally — see CA_FOR_EACH_SLAB above. */
 #define CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,                  \
                                axes, naxes,                                   \
                                p_in, p_out, m_in, m_out)                      \
   for ( int __cafi_init = (                                                   \
-            ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,          \
-                                  (axes), (naxes), 0),                        \
-            ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,          \
-                                  (axes), (naxes), CA_KERNEL_WRITE),          \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
+                                    (axes), (naxes), 0)),                     \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+                                    (axes), (naxes), CA_KERNEL_WRITE)),       \
             1);                                                               \
         __cafi_init;                                                          \
         __cafi_init = 0,                                                      \
@@ -827,9 +861,10 @@ void ca_iter_state_finish (ca_iter_state *st);
 
 #define CA_FOR_EACH_FIBER(st, ca, axis, flags, p, n)                          \
   for ( int __cff_init = (                                                    \
-            ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,                  \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  (flags) | CA_KERNEL_FIBER_CONTIG),          \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,                \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cff_init;                                                           \
@@ -839,9 +874,10 @@ void ca_iter_state_finish (ca_iter_state *st);
 
 #define CA_FOR_EACH_FIBER_MASKED(st, ca, axis, flags, p, n, m)                \
   for ( int __cffm_init = (                                                   \
-            ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,                  \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  (flags) | CA_KERNEL_FIBER_CONTIG),          \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st), (ca), CA_SLAB_AXES,                \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cffm_init;                                                          \
@@ -864,13 +900,15 @@ void ca_iter_state_finish (ca_iter_state *st);
 #define CA_FOR_EACH_FIBER_INOUT(st_in, st_out, ca_in, ca_out, axis,           \
                                 flags, p_in, p_out, n)                        \
   for ( int __cffi_init = (                                                   \
-            ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,          \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  (flags) | CA_KERNEL_FIBER_CONTIG),          \
-            ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,          \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  ((flags) | CA_KERNEL_FIBER_CONTIG           \
-                                           | CA_KERNEL_WRITE)),               \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    ((flags) | CA_KERNEL_FIBER_CONTIG         \
+                                             | CA_KERNEL_WRITE))),            \
             (n) = (st_in).slab_dims[0],                                       \
             1);                                                               \
         __cffi_init;                                                          \
@@ -888,13 +926,15 @@ void ca_iter_state_finish (ca_iter_state *st);
 #define CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca_in, ca_out, axis,    \
                                        flags, p_in, p_out, n, m)              \
   for ( int __cffim_init = (                                                  \
-            ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,          \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  (flags) | CA_KERNEL_FIBER_CONTIG),          \
-            ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,          \
-                                  (int8_t[]){(int8_t)(axis)}, 1,              \
-                                  ((flags) | CA_KERNEL_FIBER_CONTIG           \
-                                           | CA_KERNEL_WRITE)),               \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    ((flags) | CA_KERNEL_FIBER_CONTIG         \
+                                             | CA_KERNEL_WRITE))),            \
             (n) = (st_in).slab_dims[0],                                       \
             1);                                                               \
         __cffim_init;                                                         \
@@ -908,6 +948,73 @@ void ca_iter_state_finish (ca_iter_state *st);
          && ca_iter_state_next_slab_axes(&(st_out), &(p_out), NULL);          \
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
+
+/* PAIR forms: two sources read together along the same axis.
+
+   The INOUT forms cover input + output.  These cover input + input, which
+   is what a routine taking two vectors of the same length wants -- a
+   correlation, a dot product, a distance.  Neither state gets
+   CA_KERNEL_WRITE, and `flags` must not carry it: use the INOUT forms to
+   write.
+
+   Both fibers are contig-delivered, so the pair may be handed straight to
+   a C routine that walks it itself.  The MASKED form yields BOTH mask
+   cursors: which cells a pair of fibers may be used at is a question about
+   both of them, and the INOUT forms answer only about the input.
+
+   Shape agreement is guarded the way the INOUT forms guard it (ndim,
+   elements, fiber length), and the body is skipped on mismatch.  The two
+   sources may be the same array. */
+
+#define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
+                               flags, p_a, p_b, n)                            \
+  for ( int __cffp_init = (                                                   \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            (n) = (st_a).slab_dims[0],                                        \
+            1);                                                               \
+        __cffp_init;                                                          \
+        __cffp_init = 0,                                                      \
+          ca_iter_state_finish(&(st_a)),                                      \
+          ca_iter_state_finish(&(st_b)) )                                     \
+    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
+         && (st_a).src->elements == (st_b).src->elements                      \
+         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
+         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
+         && ca_iter_state_next_slab_axes(&(st_b), &(p_b), NULL);              \
+            ca_iter_state_sync_slab(&(st_a)),                                 \
+            ca_iter_state_sync_slab(&(st_b)) )
+
+#define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
+                                      flags, p_a, p_b, n, m_a, m_b)           \
+  for ( int __cffpm_init = (                                                  \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            ca_iter_check_init(                                               \
+              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+                                    (int8_t[]){(int8_t)(axis)}, 1,            \
+                                    (flags) | CA_KERNEL_FIBER_CONTIG)),       \
+            (n) = (st_a).slab_dims[0],                                        \
+            1);                                                               \
+        __cffpm_init;                                                         \
+        __cffpm_init = 0,                                                     \
+          ca_iter_state_finish(&(st_a)),                                      \
+          ca_iter_state_finish(&(st_b)) )                                     \
+    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
+         && (st_a).src->elements == (st_b).src->elements                      \
+         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
+         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
+         && ca_iter_state_next_slab_axes(&(st_b), &(p_b), &(m_b));            \
+            ca_iter_state_sync_slab(&(st_a)),                                 \
+            ca_iter_state_sync_slab(&(st_b)) )
 
 /* ---- Phase D: per-data_type reduction macro suite ----------------------- */
 

@@ -61,6 +61,12 @@ g.count(axis: :group)        g.count_masked(axis: :group)     g.elements(axis: :
 g.min_addr(axis: :group)     g.max_addr(axis: :group)
 ```
 
+`count` also takes the two argument forms the family declares:
+`count(UNDEF, axis: :group)` for masked cells, `count(v, axis: :group)` for cells
+equal to `v`. And `g.shape` / `g.ndim` describe what a `axis: :group` reduction
+comes back in — a group slot contributes its category count, a band slot its
+length, in slot order.
+
 Each result matches the core `CArray` reduction over each group's members, so
 the empty / all-masked contract carries through: `sum` of an empty group is `0`
 (identity), `mean` / `median` of an empty group is a masked (`UNDEF`) cell.
@@ -70,7 +76,10 @@ join no group.
 `sum` folds in float64, as the core does. `accumulate` is the same fold kept in
 the source's own data type, wrapping at its width — the spelling for staying in
 the type, and the exact one for an integer payload wider than float64's mantissa
-(a boolean accumulate is XOR parity, again as in the core).
+(a boolean accumulate is XOR parity, again as in the core). `min` and `max`
+answer in the source's own data type — an extremum does not grow magnitude, so
+an int64 past float64's mantissa comes back exact — and a boolean source answers
+as its 0/1 numeric storage, as in the core.
 
 **Position: `min_addr` / `max_addr`, not `min_index`.** A group preserves source
 order, so a *within-group* index is weak; the group returns the **flat source

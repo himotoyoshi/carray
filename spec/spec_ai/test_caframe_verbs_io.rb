@@ -1,6 +1,7 @@
 require "test/unit"
 require "carray"
 require "tempfile"
+require "stringio"
 
 # CAFrame increments 2 (MEMO_DATAFRAME_ON_CARRAY.md):
 #   from_csv (§11.2/§6-2), column verbs (§11.4), each_row/to_ca (§11.9/§11.11),
@@ -67,18 +68,82 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     end
   end
 
-  def test_empty_unquoted_is_nil_quoted_is_empty_string
+  def test_empty_unquoted_is_missing_quoted_is_empty_string
     with_csv(%Q{a,b\np,\np,""\n}) do |path|
       df = CAFrame.from_csv(path)
-      assert_equal [nil, ""], df["b"].to_a
+      assert_equal [UNDEF, ""], df["b"].to_a
+      assert_equal [true, false], df["b"].mask.to_a
     end
+  end
+
+  #  A missing field reads the same whether or not the column is cast, so a
+  #  frame read without types: does not carry nil where the same frame read
+  #  with them carries UNDEF.
+  def test_missing_is_undef_with_and_without_a_cast
+    with_csv("a,b\n1,x\n,y\n3,\n") do |path|
+      plain = CAFrame.from_csv(path)
+      typed = CAFrame.from_csv(path, types: { "a" => :int32 })
+      assert_equal [false, true, false], plain["a"].mask.to_a
+      assert_equal [false, true, false], typed["a"].mask.to_a
+      assert_equal ["1", UNDEF, "3"], plain["a"].to_a
+      assert_equal [1, UNDEF, 3],     typed["a"].to_a
+      assert_equal ["x", "y", UNDEF], plain["b"].to_a
+    end
+  end
+
+  #  to_csv writes UNDEF as an empty field; from_csv has to read one back as
+  #  UNDEF for the mask to survive the trip.
+  def test_a_mask_round_trips_through_csv
+    df = CAFrame.new("s" => CArray.object(3) { |i| i.zero? ? UNDEF : "v" },
+                     "n" => CArray.int32(3) { |i| i })
+    df["n"][1] = UNDEF
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)),
+                            types: { "n" => :int32 })
+    assert_equal [true, false, false], back["s"].mask.to_a
+    assert_equal [false, true, false], back["n"].mask.to_a
+    assert_equal [UNDEF, "v", "v"],    back["s"].to_a
+    assert_equal [0, UNDEF, 2],        back["n"].to_a
+  end
+
+  # A single-column row whose only field is missing is written as a line with
+  # nothing on it. A blank line carries no separator, so it can only be a data
+  # row when the file has one column -- there it is the one spelling a missing
+  # single field has. With more columns a row carries at least one separator,
+  # so a blank line stays what it was: noise between records.
+  def test_a_mask_round_trips_through_a_single_column_csv
+    s = CA_OBJECT(["a", "b", "c"]); s[1] = UNDEF
+    df = CAFrame.new("s" => s)
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)))
+    assert_equal 3, back.nrow
+    assert_equal [false, true, false], back["s"].mask.to_a
+    assert_equal [UNDEF, "a", "c"].size, back.nrow
+    assert_equal ["a", UNDEF, "c"], back["s"].to_a
+  end
+
+  def test_a_mask_round_trips_through_an_index_only_csv
+    idx = CA_OBJECT(["x", "y", "z"]); idx[1] = UNDEF
+    df = CAFrame.new({}, index: idx, axis_name: "id")
+    back = CAFrame.from_csv(StringIO.new(df.to_csv))
+    assert_equal 3, back.nrow
+    assert_equal [false, true, false], back["id"].mask.to_a
+  end
+
+  def test_a_blank_line_between_records_is_still_skipped_with_two_columns
+    back = CAFrame.from_csv(StringIO.new("a,b\n1,2\n\n3,4\n"))
+    assert_equal 2, back.nrow
+  end
+
+  def test_a_blank_line_before_the_header_is_still_skipped
+    back = CAFrame.from_csv(StringIO.new("\ns\na\n"))
+    assert_equal ["s"], back.variable_names
+    assert_equal 1, back.nrow
   end
 
   def test_ragged_short_row_padded_long_row_raises
     with_csv("a,b,c\n1,2\n1,2,3\n") do |path|
       df = CAFrame.from_csv(path)
       assert_equal 2, df.nrow
-      assert_equal [nil, "3"], df["c"].to_a
+      assert_equal [UNDEF, "3"], df["c"].to_a
     end
     with_csv("a,b\n1,2,3\n") do |path|
       assert_raise(ArgumentError) { CAFrame.from_csv(path) }
@@ -165,6 +230,86 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
       assert_equal 28.5, df["temp"][0]
       assert_equal UNDEF, df["temp"][1]
     end
+  end
+end
+
+#  from_csv reads a path or an open IO.  CSV already in memory does not
+#  have to go to a temporary file first, which is the whole point.
+
+class TestCAFrameFromCsvSource < Test::Unit::TestCase
+  TEXT = "a,b,c\n1,2,3\n4,,6\n"
+
+  def with_csv(text)
+    Tempfile.create(["obs", ".csv"]) do |f|
+      f.write(text)
+      f.flush
+      yield f.path
+    end
+  end
+
+  def test_reads_a_stringio
+    df = CAFrame.from_csv(StringIO.new(TEXT))
+    assert_equal ["a", "b", "c"], df.variable_names
+    assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]], df.to_ca.to_a
+  end
+
+  def test_reads_an_open_file
+    with_csv(TEXT) do |path|
+      File.open(path) do |io|
+        assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]],
+                     CAFrame.from_csv(io).to_ca.to_a
+      end
+    end
+  end
+
+  #  One reader drives both, so a path and the same bytes in memory cannot
+  #  come to be read differently.
+  def test_a_path_and_an_io_agree
+    with_csv(TEXT) do |path|
+      assert_equal CAFrame.from_csv(path).to_ca.to_a,
+                   CAFrame.from_csv(StringIO.new(TEXT)).to_ca.to_a
+    end
+  end
+
+  #  The caller opened it, so the caller closes it.
+  def test_the_io_is_left_open
+    with_csv(TEXT) do |path|
+      io = File.open(path)
+      begin
+        CAFrame.from_csv(io)
+        assert_equal false, io.closed?
+      ensure
+        io.close
+      end
+    end
+  end
+
+  def test_the_reading_control_block_works_over_an_io
+    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { skip 1; body }
+    assert_equal ["c0", "c1"], df.variable_names
+    assert_equal [["1", "2"], ["3", "4"]], df.to_ca.to_a
+  end
+
+  def test_keywords_work_over_an_io
+    assert_equal ["a", "b"],
+                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";").variable_names
+    assert_equal :int32,
+                 CAFrame.from_csv(StringIO.new(TEXT), types: { "a" => :int32 })["a"].data_type
+    #  a blank cell is still UNDEF, not a filled-in number
+    assert_equal 1,
+                 CAFrame.from_csv(StringIO.new(TEXT), types: { "b" => :int32 })["b"].count_masked
+  end
+
+  #  A String is a path, always.  Guessing between a path and CSV text by
+  #  looking for a newline is right until it is not.
+  def test_a_string_is_a_path_not_content
+    assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n") }
+  end
+
+  def test_an_injected_parser_is_handed_the_source
+    seen = nil
+    CAFrame.from_csv(:whatever, parser: ->(src) { seen = src; [["a"], [["1"]]] })
+    assert_equal :whatever, seen
   end
 end
 
@@ -778,6 +923,23 @@ class TestCAFrameToTable < Test::Unit::TestCase
   def test_nd_column_shows_row_slice
     df = CAFrame.new("wind" => CA_FLOAT64([[1.0, 2.0], [3.0, 4.0]]))
     assert_equal "[1.0, 2.0]", df.to_table.split("\n")[2]
+  end
+
+  # The intersection of the two cases above: a masked element inside an N-D
+  # cell takes the same marker a masked scalar cell does. One table, one
+  # spelling of missing.
+  def test_masked_element_of_an_nd_cell_shows_underscore
+    w = CA_FLOAT64([[1.0, 2.0], [3.0, 4.0]])
+    w[0, 1] = UNDEF
+    df = CAFrame.new("wind" => w)
+    assert_equal "[1.0, _]", df.to_table.split("\n")[2]
+  end
+
+  def test_masked_element_of_a_nested_nd_cell_shows_underscore
+    t = CArray.float64(2, 2, 2) { |i, j, k| i * 4.0 + j * 2 + k }
+    t[0, 0, 1] = UNDEF
+    df = CAFrame.new("t" => t)
+    assert_equal "[[0.0, _], [2.0, 3.0]]", df.to_table.split("\n")[2]
   end
 
   def test_long_frame_truncates_with_ellipsis_row

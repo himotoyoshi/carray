@@ -901,41 +901,4 @@ class << CArray
     end
     CArray::FuseSource.evaluate(block)
   end
-
-  # @overload jit_for (*extents) { |i, j, ...| ... }
-  #   Runs a block over an index space, so that a cell may reach the ones
-  #   around it -- a recurrence, a stencil.  The block is compiled, and the
-  #   compiler is the carray-jit gem.
-  #   @raise [NotImplementedError] when that gem is not installed.
-  def jit_for (*extents, **options)
-    raise NotImplementedError, no_compiler("jit_for")
-  end
-
-  # @overload jit_each { ... }
-  #   Runs a block over the cells of arrays at once, naming each cell by the
-  #   array it came from, and writing what it computes into arrays of yours:
-  #   `CArray.jit_each { out = a + b * c }`.  The block is compiled, and the
-  #   compiler is the carray-jit gem.
-  #   @raise [NotImplementedError] when that gem is not installed.
-  def jit_each (&block)
-    raise NotImplementedError, no_compiler("jit_each")
-  end
-
-  # @overload jit_map { ... }
-  #   The same block with its value asked for: the last statement is what
-  #   every cell of the result gets, and the result comes back.  The block is
-  #   compiled, and the compiler is the carray-jit gem.
-  #   @raise [NotImplementedError] when that gem is not installed.
-  def jit_map (&block)
-    raise NotImplementedError, no_compiler("jit_map")
-  end
-
-  private
-
-  def no_compiler (name)
-    "CArray.#{name} compiles its block, and the compiler is the carray-jit " \
-    "gem, which is not installed.  An expression over whole arrays can be " \
-    "written as `CArray.fuse { ... }` instead, which needs no compiler; " \
-    "reaching a neighbouring cell, or writing the loop itself, does."
-  end
 end

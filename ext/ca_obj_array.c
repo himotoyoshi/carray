@@ -825,26 +825,17 @@ rb_ca_s_allocate (VALUE klass)
   return TypedData_Make_Struct(klass, CArray, &carray_data_type, ca);
 }
 
-/* @overload  initialize(data_type, dim, bytes=0) { ... }
+/* Reads the (data_type, dim, bytes: nil) argument list that CArray.new
+   and CArray.__empty__ share.  The two differ only in whether the buffer
+   is filled, so the rule for reading their arguments -- the optional
+   bytes for a fixlen, the refusal of a Class, the guess of the data type,
+   the demand that dim be an Array -- is written once here. */
 
-Constructs a new CArray object of <i>data_type</i>, which has the
-ndim and the dimensions specified by an <code>Array</code> of
-<code>Integer</code> or an argument list of <code>Integer</code>.
-The byte size of each element for the fixed length data type
-(<code>data_type == CA_FIXLEN</code>) is specified optional argument
-<i>bytes</i>. Otherwise, this optional argument has no
-effect. If the block is given, the new CArray
-object will be initialized by the value returned from the block.
-*/
-
-static VALUE
-rb_ca_initialize (int argc, VALUE *argv, VALUE self)
+static void
+ca_scan_construct_args (int argc, VALUE *argv, int8_t *data_type,
+                        ca_size_t *bytes, int8_t *ndim, ca_size_t *dim)
 {
   volatile VALUE rtype, rdim, ropt, rbytes = Qnil;
-  CArray *ca;
-  int8_t data_type, ndim;
-  ca_size_t dim[CA_RANK_MAX];
-  ca_size_t bytes;
   int8_t i;
 
   rb_scan_args(argc, argv, "21", (VALUE *)&rtype, (VALUE *) &rdim, (VALUE *) &ropt);
@@ -863,13 +854,36 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
              rtype, rtype, rtype);
   }
 
-  rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
+  rb_ca_guess_type_and_bytes(rtype, rbytes, data_type, bytes);
 
   Check_Type(rdim, T_ARRAY);
-  ndim = RARRAY_LEN(rdim);
-  for (i=0; i<ndim; i++) {
+  *ndim = RARRAY_LEN(rdim);
+  for (i=0; i<*ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
+}
+
+/* @overload  initialize(data_type, dim, bytes=0) { ... }
+
+Constructs a new CArray object of <i>data_type</i>, which has the
+ndim and the dimensions specified by an <code>Array</code> of
+<code>Integer</code> or an argument list of <code>Integer</code>.
+The byte size of each element for the fixed length data type
+(<code>data_type == CA_FIXLEN</code>) is specified optional argument
+<i>bytes</i>. Otherwise, this optional argument has no
+effect. If the block is given, the new CArray
+object will be initialized by the value returned from the block.
+*/
+
+static VALUE
+rb_ca_initialize (int argc, VALUE *argv, VALUE self)
+{
+  CArray *ca;
+  int8_t data_type, ndim;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t bytes;
+
+  ca_scan_construct_args(argc, argv, &data_type, &bytes, &ndim, dim);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_func[CA_OBJ_ARRAY].pool_init ) {
@@ -1438,6 +1452,33 @@ rb_ca_s_alloc_uninit (VALUE klass, VALUE rtype, VALUE rshape)
   return rb_carray_new(data_type, ndim, dim, bytes, NULL);
 }
 
+/* Internal primitive behind CArray.empty(data_type, dim, bytes: nil) in
+   lib/carray/construct.rb, which also routes the compatibility spelling
+   CArray.empty(*shape).  It is CArray.new with the fill left out: the
+   arguments are read by the same function, and the buffer comes from
+   rb_carray_new (= no MEMZERO) rather than rb_carray_new_safe.  A block
+   is refused -- filling is what CArray.new is for.  CA_OBJECT still
+   falls through to the zero-VALUE init inside carray_setup_i (= required
+   for GC), so any data_type is safe to ask for. */
+
+static VALUE
+rb_ca_s_empty (int argc, VALUE *argv, VALUE klass)
+{
+  int8_t data_type, ndim;
+  ca_size_t dim[CA_RANK_MAX];
+  ca_size_t bytes;
+
+  if ( rb_block_given_p() ) {
+    rb_raise(rb_eArgError,
+             "CArray.empty does not take a block "
+             "(its contents are left undefined); use CArray.new to fill.");
+  }
+
+  ca_scan_construct_args(argc, argv, &data_type, &bytes, &ndim, dim);
+
+  return rb_carray_new(data_type, ndim, dim, bytes, NULL);
+}
+
 void
 Init_ca_obj_array (void)
 {
@@ -1449,6 +1490,7 @@ Init_ca_obj_array (void)
   rb_define_method(rb_cCArray, "initialize", rb_ca_initialize, -1);
   rb_define_singleton_method(rb_cCArray, "__alloc_uninit__",
                              rb_ca_s_alloc_uninit, 2);
+  rb_define_singleton_method(rb_cCArray, "__empty__", rb_ca_s_empty, -1);
 
   rb_define_singleton_method(rb_cCArray, "fixlen", rb_ca_s_fixlen, -1);
   rb_define_singleton_method(rb_cCArray, "boolean", rb_ca_s_boolean, -1);

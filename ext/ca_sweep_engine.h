@@ -13,7 +13,7 @@
  *          OUTPUT (fsync=='1') -> ca_attach + use ca->ptr (sync on release)
  *          INPUT  (fsync=='0') alias-able -> ca_attach + use ca->ptr
  *          INPUT  (fsync=='0') non-alias  -> xmalloc + ca_xfer_all(GET)
- *    (2) broadcast shape check (scalar collapse + n_kernel agreement)
+ *    (2) operand pairing (scalar collapse; arrays must agree in shape)
  *    (3) mask OR across INPUT operands -> m0 (xmalloc, NULL if none)
  *    (4) mask propagate to OUTPUT operands (overwrite output->mask)
  *    (5) caller runs the per-cell loop using base[] + stride[]
@@ -84,20 +84,41 @@ typedef struct ca_sweep_state {
   ca_size_t       chunk_n_max;   /* max chunk size from ca_chunk_compute_n */
   ca_size_t       inner;         /* product of dims except outermost (= row
                                     size in elements for outer-axis chunking) */
-  int             chunked_state; /* 0=pre-init, 1=active, 2=done */
+  int             chunked_state; /* 0=pre-init, 1=active, 2=done,
+                                    3=aborted (a read raised; resources
+                                    already given back) */
   boolean8_t     *mask_scratch;  /* chunk-sized staging for the per-chunk
                                     mask OR; NULL when no INPUT is masked */
 } ca_sweep_state_t;
 
-/* Validate fsync length, acquire per-op buffers, compute broadcast shape +
- * strides, build mask m0, propagate mask to OUTPUTs.  May raise (fsync
- * length mismatch, shape mismatch). */
+/* Validate fsync length, pair the operands (shape), acquire per-op
+ * buffers, build mask m0, propagate mask to OUTPUTs.  May raise: refusals
+ * (fsync length, shape mismatch, masked INPUT in a NO_MASK form) before
+ * anything is held, and a raising operand read after -- in which case
+ * everything acquired so far is detached / freed before the raise
+ * propagates, so the caller must not call release.  The chunked path
+ * does the same for acquire_chunked and each ca_sweep_next_chunk. */
 void ca_sweep_acquire (ca_sweep_state_t *st);
 
 /* Reverse-order release: sync OUTPUTs, detach attached / xfree owned_buf,
  * xfree m0.  State is single-use; do not call acquire again on the same
  * state without re-initializing the caller-owned arrays. */
 void ca_sweep_release (ca_sweep_state_t *st);
+
+/* Run walk(arg) -- the caller's loop over the acquired state -- and then
+ * release.  If walk raises (a callback refusing a value), everything the
+ * engine holds is detached / freed without syncing before the raise
+ * propagates.  Use in place of calling ca_sweep_release /
+ * ca_sweep_release_chunked yourself whenever the loop can raise.  The
+ * chunked walk calls ca_sweep_next_chunk itself. */
+void ca_sweep_run         (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg);
+void ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg);
+
+/* Shape pairing shared with rb_ca_template_n: non-zero when a and b have
+ * the same ndim and dims; the refusal raises ArgumentError naming both
+ * shapes. */
+int  ca_sweep_same_shape (CArray *a, CArray *b);
+NORETURN(void ca_sweep_refuse_shapes (CArray *a, CArray *b));
 
 /* Strict full-shape equality check used by INOUT macros (AC5: silent-
  * corruption seam prevention).  Raises if ndim differs or any dim[k]

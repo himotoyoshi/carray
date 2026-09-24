@@ -520,8 +520,8 @@ Concretely, `ca_is_entity()` is checked ahead of the CAView branch in both
 classifier ([ch. 11](11_kernel_iterator.md)), so a `CA_REAL_ARRAY` source passes
 through the engine on the entity path and the parentless question never arises.
 
-**1 — The op table is yours, all of it.** Same as a standalone view: fifteen
-slots, `fold_stride = NULL` (a source is always a fold boundary — it *is* the
+**1 — The op table is yours, all of it.** Same as a standalone view: every slot,
+with `fold_stride = NULL` (a source is always a fold boundary — it *is* the
 root). Write the xfer slots against your own buffer rather than delegating to
 `ca_array_func_*`; the delegation would work for a contiguous buffer, but the
 point of a source is that its access pattern is its own business.

@@ -181,6 +181,146 @@ class TestCAObjectPartialFill < Test::Unit::TestCase
     assert_equal 1, o.log[:fill_block]
     assert_equal ref.to_a, o.buf.to_a
   end
+  # --- whole-extent fill takes the region slots too -------------------
+  #
+  # An author who wrote the region slots but not fill_data used to get the
+  # per-cell default for "fill everything" -- the one request that is easiest
+  # to batch -- while a strictly smaller region got one call.
+
+  class RegionOnly < CAObject
+    attr_reader :log
+    def initialize(buf)
+      @buf = buf
+      @log = Hash.new(0)
+      super(CA_INT32, buf.shape)
+    end
+
+    private
+
+    def fetch_addr(addr) = @buf[addr]
+    def store_addr(addr, val) = (@log[:store_addr] += 1; @buf[addr] = val)
+    def copy_data(data) = data[] = @buf
+    def sync_data(data) = @buf[] = data
+
+    def fill_block(starts, counts, steps, val)
+      @log[:fill_block] += 1
+      @buf[*starts.each_index.map { |k| [starts[k], counts[k], steps[k]] }] = val
+    end
+  end
+
+  def test_a_whole_fill_reaches_the_region_slot
+    o = RegionOnly.new(CArray.int32(8, 8))
+    o[] = 7
+    assert_equal 1, o.log[:fill_block]
+    assert_equal 0, o.log[:store_addr]
+    assert_equal [7] * 64, o.to_a.flatten
+  end
+
+  def test_a_whole_extent_region_request_reaches_it_as_well
+    o = RegionOnly.new(CArray.int32(8, 8))
+    o[0...8, 0...8] = 7
+    assert_equal 1, o.log[:fill_block]
+    assert_equal 0, o.log[:store_addr]
+  end
+
+  # A CAStride between a boolean selection and the backing used to turn one
+  # parent call into one per cell: CAStride carried fill_stride but no
+  # fill_addrs, so the selection fell to the per-cell default.
+
+  class AddrsOnly < CAObject
+    attr_reader :log
+    def initialize(buf)
+      @buf = buf
+      @log = Hash.new(0)
+      super(CA_INT32, buf.shape)
+    end
+
+    private
+
+    def fetch_addr(addr) = @buf[addr]
+    def store_addr(addr, val) = (@log[:store_addr] += 1; @buf[addr] = val)
+    def copy_data(data) = data[] = @buf
+    def sync_data(data) = @buf[] = data
+
+    def fill_addrs(addrs, val)
+      @log[:fill_addrs] += 1
+      @log[:cells] += addrs.elements
+      addrs.each { |a| @buf[a] = val }
+    end
+  end
+
+  def test_a_boolean_selection_through_a_slice_is_one_parent_call
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    v = o[0...32, nil]
+    m = CArray.boolean(32, 64) { |i| i % 4 == 0 }
+    v[m] = 7
+    assert_equal 1, o.log[:fill_addrs]
+    assert_equal 0, o.log[:store_addr]
+    assert_equal 512, o.log[:cells]
+  end
+
+  def test_the_selected_cells_are_the_ones_written
+    o = AddrsOnly.new(CArray.int32(8, 8))
+    v = o[0...4, nil]
+    m = CArray.boolean(4, 8) { |i| i % 4 == 0 }
+    v[m] = 7
+    expected = CArray.int32(8, 8) { 0 }
+    expected[0...4, nil] = CArray.int32(4, 8) { |i| i % 4 == 0 ? 7 : 0 }
+    assert_equal expected.to_a, o.to_a
+  end
+
+  # A gather view hands the parent one region per contiguous run of parent
+  # cells.  When the innermost selected axis picks individual indices, every
+  # run is one cell, so the parent got one call per cell -- for the same cell
+  # count that costs it eight calls when the selection is on the outer axis.
+
+  def test_a_column_selection_is_not_one_parent_call_per_cell
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    sel = CA_INT32([1, 5, 9, 13, 17, 21, 25, 29])
+    o[nil, sel] = 7
+    assert_equal 512, o.log[:cells]
+    assert o.log[:fill_addrs] <= 8,
+           "expected the column selection to be batched, got " +
+           o.log[:fill_addrs].to_s + " calls"
+  end
+
+  def test_a_row_selection_keeps_its_long_runs
+    o = AddrsOnly.new(CArray.int32(64, 64))
+    sel = CA_INT32([1, 5, 9, 13, 17, 21, 25, 29])
+    o[sel, nil] = 7
+    assert_equal 512, o.log[:cells]
+    assert_equal 8, o.log[:fill_addrs]
+  end
+
+  def test_the_column_selection_writes_the_right_cells
+    o = AddrsOnly.new(CArray.int32(8, 8))
+    sel = CA_INT32([1, 5])
+    o[nil, sel] = 7
+    expected = CArray.int32(8, 8) { 0 }
+    expected[nil, sel] = 7
+    assert_equal expected.to_a, o.to_a
+  end
+
+  def test_an_author_with_no_fill_slots_still_gets_the_per_cell_default
+    plain = Class.new(CAObject) do
+      attr_reader :log
+      define_method(:initialize) do |buf|
+        @buf = buf
+        @log = Hash.new(0)
+        super(CA_INT32, buf.shape)
+      end
+      private
+      define_method(:fetch_addr) { |addr| @buf[addr] }
+      define_method(:store_addr) { |addr, val| @log[:store_addr] += 1; @buf[addr] = val }
+      define_method(:copy_data)  { |data| data[] = @buf }
+      define_method(:sync_data)  { |data| @buf[] = data }
+    end
+    o = plain.new(CArray.int32(4, 4))
+    o[] = 3
+    assert_equal 16, o.log[:store_addr]
+    assert_equal [3] * 16, o.to_a.flatten
+  end
+
 end
 
 # A Face has the same layout as its parent, so a region of the Face is the

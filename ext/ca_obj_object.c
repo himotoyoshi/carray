@@ -738,6 +738,14 @@ ca_object_dispatch_fill (CAObject *ca, void *ptr)
     volatile VALUE rval = rb_ca_ptr2obj(ca->self, ptr);
     rb_funcall(ca->self, rb_intern("fill_data"), 1, rval);
   }
+  else if ( rb_obj_respond_to(ca->self, rb_intern("fill_block"), Qtrue)
+            || rb_obj_respond_to(ca->self, rb_intern("fill_addrs"), Qtrue) ) {
+    /* An author who wrote the region slots but not fill_data would otherwise
+       get the per-cell default for the one request that is easiest to batch.
+       Hand the whole extent to the region path, which reaches `fill_block` in
+       one call or `fill_addrs` in address windows. */
+    ca_fill_stride_whole(ca, ptr);
+  }
   else {
     ca_size_t addr;
     for ( addr = 0; addr < ca->elements; addr++ ) {

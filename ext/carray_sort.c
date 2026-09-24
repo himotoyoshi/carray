@@ -639,12 +639,20 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
  * fiber, no pair struct, no view layer.  This fast path is numeric-only
  * and mask-free (CA_KERNEL_NO_MASK below).
  *
- * CA_FIXLEN and masked input both delegate to {sort} + copy instead of
- * duplicating the fixlen dialect / mask-position split in this per-
- * fiber loop: masked_position: is forwarded unchanged.  Masked cells
- * keep their masked-ness (the view's remap gather carries the mask bit
- * through, and .copy materializes it), clustered at masked_position:
- * within each fiber -- same contract as {sort}.
+ * Everything the fast path does not cover -- any data_type outside
+ * CA_INT8..CA_FLOAT64 (fixlen, boolean, complex, object), and masked
+ * input of any type -- delegates to {sort} + copy rather than duplicate
+ * the fixlen dialect / the object comparator / the mask-position split
+ * in this per-fiber loop; masked_position: is forwarded unchanged.
+ * Masked cells keep their masked-ness (the view's remap gather carries
+ * the mask bit through, and .copy materializes it), clustered at
+ * masked_position: within each fiber -- same contract as {sort}.
+ *
+ * So sort_copy answers for exactly what sort answers for, which is what
+ * being its eager counterpart means.  It once refused everything the
+ * fast path could not take: object and boolean sorted through {sort}
+ * but not through this, and complex reported its refusal in two
+ * different ways depending on which of the pair was asked.
  */
 static VALUE
 rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
@@ -677,11 +685,12 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  /* CA_FIXLEN and masked input: the per-fiber path below covers
-     unmasked numeric data types only.  Delegate to {sort} (which handles
-     both the fixlen dialect and the masked_position split) + copy to
-     get the same shape/class contract as the fast path. */
-  if ( ca_is_fixlen_type(ca) || ca_has_mask(ca) ) {
+  /* The per-fiber path below covers unmasked CA_INT8..CA_FLOAT64 only.
+     Everything else goes to {sort} (which handles the fixlen dialect,
+     the object comparator and the masked_position split) + copy, for the
+     same shape/class contract as the fast path. */
+  if ( ca->data_type < CA_INT8 || ca->data_type > CA_FLOAT64
+       || ca_has_mask(ca) ) {
     VALUE sv_kw = rb_hash_new();
     if ( !NIL_P(vaxis) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("axis")), vaxis);
     if ( !NIL_P(vkind) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("kind")), vkind);
@@ -715,17 +724,6 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   if ( axis < 0 || axis >= cat->ndim ) {
     rb_raise(rb_eArgError, "sort_copy: axis %d out of range for ndim %d",
              NUM2INT(vaxis_use), cat->ndim);
-  }
-
-  /* data_type check: ALL_NUMERIC only (CA_INT8..CA_FLOAT64).
-     Complex / object are rejected here; CA_OBJECT goes through the
-     axis: lift in rb_ca_sorted_view, and complex sort semantics
-     differ enough that we do not pick a default. */
-  if ( cat->data_type < CA_INT8 || cat->data_type > CA_FLOAT64 ) {
-    rb_raise(rb_eCADataTypeError,
-             "sort_copy: data_type %d not supported "
-             "(expected one of: i8, u8, i16, u16, i32, u32, i64, u64, f32, f64)",
-             cat->data_type);
   }
 
   /* Allocate output: same shape and data_type as target

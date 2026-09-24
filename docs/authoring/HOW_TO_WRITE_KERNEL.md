@@ -771,6 +771,10 @@ Other constraints:
   inner while breaks both loops).
 - `return;` inside the block **leaks** scratch buffers and the parent
   attach. Drop to raw API if early return is needed.
+- A body that **raises** leaks the same way. When the walk itself raises
+  — a gather, or a write-back through the source's transfer slots — it
+  releases what it holds first; the body runs in the caller's frame,
+  where the engine has no hold on it.
 - The macros are NOT statement-equivalent — don't follow them with
   `else` etc.
 

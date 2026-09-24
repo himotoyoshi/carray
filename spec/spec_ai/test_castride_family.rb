@@ -219,6 +219,7 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
   # Contiguous strided views alias parent->ptr at attach time
   # instead of allocating + gathering.  Test correctness, not perf.
   def test_alias_write_through_to_parent
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     src = CArray.float64(1000).seq
     view = src.refer    # contig: should alias
     view.attach! do |v|
@@ -230,6 +231,7 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
   end
 
   def test_alias_block_row_slice
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # CABlock row slice is contiguous => alias path.
     src = CArray.float64(10, 10).seq
     row_blk = src[1..3, nil]
@@ -241,6 +243,7 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
   end
 
   def test_non_contig_attach_still_works
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Column slice is NOT contig -> gather/scatter path.
     src = CArray.float64(4, 4).seq
     col_blk = src[nil, 1..2]
@@ -251,6 +254,7 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
   end
 
   def test_alias_detach_no_double_free
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Repeated attach/detach cycles must not double-free the aliased
     # pointer.  If they did, this would crash quickly.
     src = CArray.float64(100).seq
@@ -261,6 +265,7 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
   end
 
   def test_byte_reinterpret_aliases_too
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     # Divided CARefer is contiguous in byte terms -> still aliases.
     u32 = CArray.uint32(2).tap { |__a| __a[] = [0x01020304, 0x05060708] }
     split = u32.refer(:uint8, [8])
@@ -421,7 +426,7 @@ class TestCABlockStepKernel < Test::Unit::TestCase
     blk = src[[0, 5, 2]]       # start=0 count=5 step=2 -> [0, 2, 4, 6, 8]
     assert_kind_of(CABlock, blk)
     assert_equal([2], blk.step)
-    assert_equal([5], blk.count)
+    assert_equal([5], blk.shape)
     assert_equal([0, 2, 4, 6, 8], blk.to_a)
   end
 
@@ -462,6 +467,7 @@ class TestCAStrideReentrantAttach < Test::Unit::TestCase
   # re-entrant attach on the same object (inner attach sees the
   # outer's buffer rather than allocating a new one).
   def test_nested_attach_bang
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     src = CArray.float64(5).seq
     src.attach! do
       src.attach! do
@@ -472,6 +478,7 @@ class TestCAStrideReentrantAttach < Test::Unit::TestCase
   end
 
   def test_nested_attach_bang_on_view
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     src = CArray.float64(10).seq
     view = src.refer
     view.attach! do

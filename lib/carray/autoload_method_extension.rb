@@ -32,6 +32,7 @@ module AutoloadMethodExtension
   private
 
   def autoload_define (target, name, library, original_spec)
+    stub = nil
     target.define_method(name) do |*args, **kwargs, &block|
       begin
         require library
@@ -39,7 +40,18 @@ module AutoloadMethodExtension
         raise "error in autoloading '#{library}' hooked by method " \
               "'#{original_spec}', check gem installation."
       end
+      # The require is supposed to have replaced this stub with the real
+      # definition. If it has not, the method does not exist anywhere, and
+      # forwarding would land straight back here and keep doing so until the
+      # stack gave out -- naming neither the method nor the library. Say
+      # which, once.
+      if target.instance_method(name) == stub
+        raise NoMethodError,
+              "'#{original_spec}' is registered for autoload from " \
+              "'#{library}', but that library defines no such method"
+      end
       send(name, *args, **kwargs, &block)
     end
+    stub = target.instance_method(name)
   end
 end

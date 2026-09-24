@@ -8,7 +8,8 @@ methods (`sum`, `mean`, `median`, `variance`, …) return one value per category
 The categorical carries the classification; `value` is just the data. A cell of
 `value` belongs to a category iff the corresponding cell of `cat` has that
 category. `value` and `cat` must have the same number of elements (both are read
-flat).
+flat) — the per-fiber form below relaxes this, accepting a classifier shaped
+for the reduce axis or for the kept cells instead.
 
 ```ruby
 require "carray"
@@ -74,6 +75,11 @@ The guiding rule is simple:
 So everything you know about how a reduction treats an ordinary array — how it
 skips masked cells, what it returns on a short or empty array — carries over
 unchanged to each group. The sections below spell out the consequences.
+
+A value that carries a [Face](CAFace.md) — a `CATime` column, say — answers in
+that Face, as the core does: `min`, `max` and `median` come back as a `CATime`
+of elements. Which reductions a Face defines at all stays the core's business,
+so one it does not (a sum of timestamps) refuses here too, in the core's words.
 
 ### Sorting within groups
 
@@ -228,6 +234,90 @@ grp  = vals.group_by_category(keys.categorize)
 grp.labels   #  => ["a", "b"]
 grp.sum      #  => [ 5.0, 5.0 ]     a = {(0,0), (1,1)}, b = {(0,1), (1,0)}
 ```
+
+## Reducing along an axis (`axis:`)
+
+Everything above reads both arrays flat and answers one value per category.
+Given `axis:`, the reduction is done **per fiber** instead: the value is cut into
+fibers along that axis, each fiber is grouped, and the axes that were not reduced
+are kept.
+
+```ruby
+temp = CA_DOUBLE([[10, 12, 14],          # 4 days x 3 stations
+                  [11, 13, 15],
+                  [20, 22, 24],
+                  [21, 23, 25]])
+day  = CA_OBJECT(%w[weekday weekday weekend weekend]).categorize
+
+grp = temp.group_by_category(day)
+grp.mean(axis: 0)   #  => [[10.5, 12.5, 14.5],     weekday, per station
+                    #      [20.5, 22.5, 24.5]]     weekend, per station
+```
+
+The result is shaped `[k, *value.shape without axis]` — the category axis first,
+then the axes that were kept. Above that is `[2, 3]`: two categories by three
+stations.
+
+### What the classifier may look like
+
+The classifier does not have to line up cell-for-cell with the value. Three
+shapes are accepted, told apart by shape:
+
+| `cat.shape` | one category per … |
+|---|---|
+| `[value.shape[axis]]` | position along the reduce axis — every fiber classified the same way (above) |
+| `value.shape` | cell — each fiber classified independently |
+| `value.shape` without `axis` | kept cell — the classification is a property of the position, not of the fiber |
+
+The second gives each fiber its own grouping:
+
+```ruby
+flag = CA_OBJECT([%w[ok bad ok],
+                  %w[ok ok bad],
+                  %w[bad ok ok],
+                  %w[ok ok ok]]).categorize
+temp.group_by_category(flag).mean(axis: 0)
+#  => [[14.0, 19.333…, 21.0],    "ok" cells of each station
+#      [20.0, 12.0,    15.0]]    "bad" cells of each station
+```
+
+The third classifies the kept cells, so each of them belongs to one category and
+a result row holds that category's cells and the identity elsewhere:
+
+```ruby
+site = CA_OBJECT(%w[north south south]).categorize   # one per station
+temp.group_by_category(site).sum(axis: 0)
+#  => [[62.0,  0.0,  0.0],       north: station 0 summed over the days
+#      [ 0.0, 70.0, 78.0]]       south: stations 1 and 2
+```
+
+When the first and the third shape are both possible — a square value makes that
+happen — the first is taken. A classifier fitting none of the three is refused,
+with all three named.
+
+### Which reductions take it
+
+`sum`, `mean`, `min`, `max`, `minmax`, `prod`, `accumulate`, `count`,
+`count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, and
+`wsum(w)` / `wmean(w)`.
+
+The order statistics — `median`, `percentile`, `quantile` — do not: each group of
+each fiber would need its own sort. They are available without `axis:`. So are
+`count(v)`, `count_masked`, `elements`, and the index and address members.
+
+`wsum` / `wmean` want a weight array of the value's shape exactly; broadcast it
+yourself before passing it.
+
+### When the values are read
+
+A reduction with `axis:` reads the value array when you call it, so a write
+through the source between two calls is visible to the second. The reductions
+without `axis:` work from a copy laid out when the iterator was built, and do not
+see such a write — build a new iterator for that.
+
+Asking for several `axis:` statistics runs the fused kernel once for each.
+Keep the result if you want to share one run; `minmax(axis:)` already takes both
+of its answers from a single run.
 
 ## Relationship to `axis_group`
 

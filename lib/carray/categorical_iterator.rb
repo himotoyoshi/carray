@@ -103,7 +103,7 @@ class CACategoricalIterator < CAIterator
       # index): offsets[c] = sum of counts[0...c]. Both come off the shared
       # plan, so the counting sort is not repeated here.
       @elements = cat.category_sizes.int64
-      nvalid    = @elements.sum
+      nvalid    = counts.sum
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
       # Group-major source indices = the valid prefix of the cached sort_addr.
       # With no classified cell the prefix is empty (and slicing a length-0
@@ -119,25 +119,30 @@ class CACategoricalIterator < CAIterator
       # range — so build the empty grouped buffer directly.
       @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
                              : CArray.new(value.data_type, [0])
-      @empty    = CArray.new(@grouped.data_type, [0])
+      @empty    = CArray.new(grouped.data_type, [0])
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
       # is unrecoverable (preserves the old strict check).  For higher-rank
       # value, defer validation to reduce time — check only that cat.ndim fits
       # one of the 3 axis: cases;
-      # any no-axis reduce called on this iterator will surface the mismatch
-      # because @grouped stays undefined.
+      # A no-axis reduce has no grouped buffer to work from. The reason is
+      # recorded here and raised from wherever one is asked for, so what
+      # surfaces names the mismatch instead of being whatever NoMethodError
+      # the nil produced first.
+      mismatch = "group_by_category: value.elements (#{value.elements}) != " \
+                 "cat.elements (#{cat.elements})"
       if value.ndim == 1 ||
          ! [1, value.ndim - 1, value.ndim].include?(cat.ndim)
         raise ArgumentError,
-              "group_by_category: value.elements (#{value.elements}) != " \
-              "cat.elements (#{cat.elements})" +
+              mismatch +
               (value.ndim == 1 ? "" :
                 ". For per-fiber reduce use `.sum(axis: k)`; cat.ndim=" \
                 "#{cat.ndim} must be 1 (case A), #{value.ndim} (case B), " \
                 "or #{value.ndim - 1} (band-only) for h.ndim=#{value.ndim}.")
       end
+      @no_flat = mismatch + ". This iterator answers only the per-fiber form, " \
+                 "`.<reduce>(axis: k)`."
     end
     self
   end
@@ -176,7 +181,12 @@ class CACategoricalIterator < CAIterator
   #   (structural, mask-independent) lifted per group.
   #   @return [CArray]
   def elements
-    @elements
+    # A copy, like every other member that reads off a memo: the memo is the
+    # iterator's own state, and handing out the array itself lets a caller
+    # write into it and change what the iterator answers from then on. This
+    # one invites it -- the docs point at its prefix sum for splitting a
+    # column apart, which reads as scratch.
+    counts.copy
   end
 
   # Group-vocabulary alias for {#elements}; reads naturally next to
@@ -189,8 +199,12 @@ class CACategoricalIterator < CAIterator
   #   internal grouped/value/codes buffers.
   #   @return [String]
   def inspect
-    "#<#{self.class} ngroups=#{@k} labels=#{@labels.inspect} " \
-    "elements=#{@elements.to_a.inspect}>"
+    # An iterator that answers only the per-fiber form has no per-category
+    # counts to show. Saying so beats both raising -- inspect is what you
+    # reach for when something is already puzzling -- and printing an empty
+    # list, which reads as a grouping that classified nothing.
+    tail = @elements ? "elements=#{@elements.to_a.inspect}" : "per-fiber only"
+    "#<#{self.class} ngroups=#{@k} labels=#{@labels.inspect} #{tail}>"
   end
 
   # @overload count_not_masked
@@ -205,9 +219,9 @@ class CACategoricalIterator < CAIterator
   #   @param axis [Integer]
   #   @return [CArray]
   def count_not_masked(axis: nil)
-    return axis_moments(axis)[:count] if axis
+    return axis_counts(axis) if axis
     m = moments
-    m ? m[:count] : per_category(CA_INT64) { |s| s.count_not_masked }
+    m ? m[:count].copy : per_category(CA_INT64) { |s| s.count_not_masked }
   end
 
   # @overload count(v = <none>)
@@ -253,7 +267,7 @@ class CACategoricalIterator < CAIterator
             "call it without axis:."
     end
     m = moments
-    m ? @elements - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
+    m ? counts - m[:count] : per_category(CA_INT64) { |s| s.count_masked }
   end
 
   # @overload sum
@@ -306,7 +320,7 @@ class CACategoricalIterator < CAIterator
   def max(axis: nil)
     return axis_moments(axis)[:max] if axis
     m = moments
-    m ? m[:max] : per_category(core_reduce_type(:max)) { |s| s.max }
+    m ? m[:max].copy : per_category(core_reduce_type(:max)) { |s| s.max }
   end
 
   # @overload min
@@ -320,7 +334,7 @@ class CACategoricalIterator < CAIterator
   def min(axis: nil)
     return axis_moments(axis)[:min] if axis
     m = moments
-    m ? m[:min] : per_category(core_reduce_type(:min)) { |s| s.min }
+    m ? m[:min].copy : per_category(core_reduce_type(:min)) { |s| s.min }
   end
 
   # @overload mean
@@ -357,11 +371,11 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray]
   def percentile (p, axis: nil)
     axis_order_stat_defer!(:percentile) if axis
-    unless MONOID_TYPES.include?(@grouped.data_type)
+    unless MONOID_TYPES.include?(grouped.data_type)
       return per_category(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
-    @grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
+    grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
     out
   end
 
@@ -372,11 +386,11 @@ class CACategoricalIterator < CAIterator
   #   MASKED. For a single fraction q in 0..1 use `percentile(q * 100)`.
   #   @return [Array<CArray>]
   def quantile
-    unless MONOID_TYPES.include?(@grouped.data_type)
+    unless MONOID_TYPES.include?(grouped.data_type)
       return [0, 25, 50, 75, 100].map { |p| percentile(p) }
     end
     outs = Array.new(5) { CArray.float64(@k) }
-    @grouped.send(:__reduceat_quantile__, @offsets, *outs)
+    grouped.send(:__reduceat_quantile__, @offsets, *outs)
     outs
   end
 
@@ -393,7 +407,7 @@ class CACategoricalIterator < CAIterator
     cnt   = m[:count]
     means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
     out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
-    @grouped.send(:__reduceat_variance__, @offsets, means, cnt, out)
+    grouped.send(:__reduceat_variance__, @offsets, means, cnt, out)
     out
   end
 
@@ -421,9 +435,9 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_category(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(@grouped.data_type)
+    return per_category(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
     out = CArray.float64(@k)
-    @grouped.send(:__reduceat_prod__, @offsets, out)
+    grouped.send(:__reduceat_prod__, @offsets, out)
     out
   end
 
@@ -452,15 +466,22 @@ class CACategoricalIterator < CAIterator
   # @overload minmax
   #   Returns the per-category `[min, max]` pair (each a length-k CArray in the
   #   value data type; empty categories MASKED), matching `CArray#minmax`. Both come
-  #   from the single cached moments pass.
+  #   from one moments pass.
   #   @return [Array<CArray>]
   # @overload minmax(axis:)
   #   Per-fiber `[min_ca, max_ca]` along `axis` (each shape [K, ...band], h's data type,
   #   empty group cells MASKED).  Ruby Array of two CArrays, not stacked.
+  #   Both come from one kernel run.
   #   @param axis [Integer]
   #   @return [Array<CArray>]
   def minmax(axis: nil)
-    return [min(axis: axis), max(axis: axis)] if axis
+    if axis
+      # take both off one pass rather than asking min and max separately,
+      # which would run the kernel twice now that nothing is kept between
+      # calls -- this is the "keep the result" the axis: family expects
+      m = axis_moments(axis)
+      return [m[:min], m[:max]]
+    end
     [min, max]
   end
 
@@ -502,7 +523,7 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64
   def min_index
     am = arg_minmax
-    am ? am[:min] : per_category(CA_INT64) { |s| s.min_index }
+    am ? am[:min].copy : per_category(CA_INT64) { |s| s.min_index }
   end
 
   # @overload max_index
@@ -510,7 +531,7 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] length-k int64
   def max_index
     am = arg_minmax
-    am ? am[:max] : per_category(CA_INT64) { |s| s.max_index }
+    am ? am[:max].copy : per_category(CA_INT64) { |s| s.max_index }
   end
 
   # @overload min_addr
@@ -549,14 +570,14 @@ class CACategoricalIterator < CAIterator
   #   {#min_addr} vs the skipped group-local min_index-into-source.
   #   @return [CArray] length-nvalid int64
   def sort_addr
-    out = CArray.int64(@grouped.elements)
+    out = CArray.int64(grouped.elements)
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
       next unless hi > lo
       # View-local sort order of the segment (0..size-1), lifted to grouped
       # slots, then mapped back to source addresses via perm.
-      out[lo...hi] = perm[@grouped[lo...hi].sort_addr + lo]
+      out[lo...hi] = perm[grouped[lo...hi].sort_addr + lo]
     end
     out
   end
@@ -580,7 +601,7 @@ class CACategoricalIterator < CAIterator
   def wsum (weights, axis: nil)
     return axis_wsum_wmean(weights, axis)[0] if axis
     wg = scatter_weights(weights)
-    return kernel_weighted(wg)[0] if MONOID_TYPES.include?(@grouped.data_type)
+    return kernel_weighted(wg)[0] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, 0.0) { |v, ws| v.wsum(ws) }
   end
 
@@ -600,7 +621,7 @@ class CACategoricalIterator < CAIterator
   def wmean (weights, axis: nil)
     return axis_wsum_wmean(weights, axis)[1] if axis
     wg = scatter_weights(weights)
-    return kernel_weighted(wg)[1] if MONOID_TYPES.include?(@grouped.data_type)
+    return kernel_weighted(wg)[1] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, UNDEF) { |v, ws| v.wmean(ws) }
   end
 
@@ -641,14 +662,14 @@ class CACategoricalIterator < CAIterator
   #   @return [CArray] shaped like the source value
   def map (data_type: nil)
     raise LocalJumpError, "no block given (yield)" unless block_given?
-    dt = data_type || @grouped.data_type
+    dt = data_type || grouped.data_type
     # Apply the block per category, assembled in grouped (category-contiguous)
     # order: a same-length result scatters cell for cell, a scalar broadcasts.
-    transformed = CArray.new(dt, [@grouped.elements])
+    transformed = CArray.new(dt, [grouped.elements])
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-      transformed[lo...hi] = yield(@grouped[lo...hi]) if hi > lo
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      transformed[lo...hi] = yield(grouped[lo...hi]) if hi > lo
     end
     # Scatter back to source positions via the permutation (grouped-order source
     # indices). Excluded cells are absent from perm and stay UNDEF.
@@ -676,19 +697,19 @@ class CACategoricalIterator < CAIterator
   # preserve the value data type, cumcount -> int64 (1-based within-category
   # ordinal); an object value data type is carried by the kernel's object branch.
 
-  # @overload cumsum
+  # @!method cumsum
   #   Per-category inclusive running sum (float64), source-shaped.
   #   @return [CArray]
-  # @overload cumprod
+  # @!method cumprod
   #   Per-category inclusive running product (float64), source-shaped.
   #   @return [CArray]
-  # @overload cummax
+  # @!method cummax
   #   Per-category inclusive running maximum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cummin
+  # @!method cummin
   #   Per-category inclusive running minimum (value data type), source-shaped.
   #   @return [CArray]
-  # @overload cumcount
+  # @!method cumcount
   #   Per-category 1-based within-category ordinal (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
@@ -697,16 +718,63 @@ class CACategoricalIterator < CAIterator
 
   private
 
-  # Axis-aware moments (count / sum / min / max) — computed once per axis via
-  # the fused per-fiber scatter-reduce C kernel and cached (matches the flat
-  # #moments caching in spirit: pay one kernel per {iterator, axis} pair, share
-  # across sum / mean / min / max / minmax / count* consumers).  Returns
+  # The category-major copy every no-axis reduction works from. It does not
+  # exist when the classifier does not line up cell-for-cell with the value;
+  # such an iterator answers the per-fiber form only, and says so here rather
+  # than letting a nil surface as whatever NoMethodError it reaches first.
+  def grouped
+    @grouped || raise(ArgumentError, @no_flat)
+  end
+
+  # Per-category cell counts, alongside #grouped and unavailable for the same
+  # reason.
+  def counts
+    @elements || raise(ArgumentError, @no_flat)
+  end
+
+  # Axis-aware count of present cells. Counting how many cells fall in a
+  # group does not look at what is in them, so it is taken from the codes and
+  # the value's mask rather than from the fused moments kernel, which is
+  # numeric-only and refused a complex, boolean or object payload for an
+  # answer that never depended on the payload.
+  def axis_counts (axis)
+    h = @value
+    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
+      raise ArgumentError,
+            "group_by_category.count(axis: #{axis.inspect}): axis must be an " \
+            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
+    end
+    full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
+    band    = h.shape.dup; band.delete_at(axis)
+    out     = CArray.int64(*([@k] + band))
+    present = h.has_mask? ? h.is_not_masked : nil
+    slot    = [nil] * (band.size + 1)
+    @k.times do |c|
+      # a masked code belongs to no group, and eq yields UNDEF there
+      belongs = full_c.eq(c)
+      belongs = belongs.strip_mask(false) if belongs.has_mask?
+      belongs = belongs & present if present
+      slot[0] = c
+      out[*slot] = belongs.int64.sum(axis: axis)
+    end
+    out
+  end
+
+  # Axis-aware moments (count / sum / min / max) via the fused per-fiber
+  # scatter-reduce C kernel.  Returns
   # `{count: <int64>, sum: <float64>, min: <h's type, masked>, max: <h's type, masked>}`,
   # all shape [K, ...band].
+  #
+  # Read fresh on every call, deliberately.  It used to be kept per axis, and
+  # since the rest of the axis: family (prod, the variance family, wsum /
+  # wmean) reads the source when asked, half of the family answered about the
+  # values as they were and half about the values as they are.  Writing
+  # through another view of the source between two calls got you a mean of 2.0
+  # beside a variance of 4704.5 for the same cell, which is not a pair any
+  # data can produce.  The axis: path materialises nothing else, so holding
+  # this one thing was the odd choice; a caller who wants a fused kernel's
+  # four answers shares them by keeping the result.
   def axis_moments (axis)
-    @axis_moments_cache ||= {}
-    cached = @axis_moments_cache[axis]
-    return cached if cached
     h = @value
     unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
       raise ArgumentError,
@@ -722,13 +790,13 @@ class CACategoricalIterator < CAIterator
     maxs          = CArray.new(h.data_type, out_shape)
     h.__send__(:__fiber_scatter_moments__, codes_h_shape, axis, @k,
                counts, sums, mins, maxs)
-    @axis_moments_cache[axis] = {count: counts, sum: sums, min: mins, max: maxs}
+    {count: counts, sum: sums, min: mins, max: maxs}
   end
 
   # Axis-aware sum: the moments sum is already the core fold in the core's own
   # type, so it is handed back as is (an empty group cell carries identity 0.0).
   def axis_sum (axis)
-    axis_moments(axis)[:sum].copy
+    axis_moments(axis)[:sum]
   end
 
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
@@ -831,22 +899,20 @@ class CACategoricalIterator < CAIterator
   def resolve_axis_codes (codes, h_shape, axis)
     ndim = h_shape.size
     band = h_shape.dup; band.delete_at(axis)
-    case codes.ndim
-    when 1
-      unless codes.shape == [h_shape[axis]]
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    # Chosen by shape, not by rank. For a 2-D source the case A shape and the
+    # band-only shape are both rank 1, so choosing by rank took case A every
+    # time and band-only could never be reached there -- while the refusal
+    # went on to list the very shape it was refusing among the ones it
+    # accepts. When both fit, which a square source makes possible, case A
+    # wins: classifying along the reduce axis is the reading that holds at
+    # every rank.
+    case
+    when codes.shape == [h_shape[axis]]                      # case A
       view_shape = Array.new(ndim, 1); view_shape[axis] = h_shape[axis]
       codes.reshape(*view_shape).broadcast_to(*h_shape)
-    when ndim
-      unless codes.shape == h_shape
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    when codes.shape == h_shape                              # case B
       codes
-    when ndim - 1
-      unless codes.shape == band
-        axis_shape_mismatch!(codes.shape, h_shape, axis, band)
-      end
+    when codes.shape == band                                 # band-only
       view_shape = h_shape.dup; view_shape[axis] = 1
       codes.reshape(*view_shape).broadcast_to(*h_shape)
     else
@@ -855,8 +921,11 @@ class CACategoricalIterator < CAIterator
   end
 
   def axis_shape_mismatch! (cat_shape, h_shape, axis, band)
+    # No method name: the one place that resolves this serves sum, mean, min,
+    # max, count and the rest alike, and naming one of them would be wrong for
+    # the others. The backtrace says which was called.
     raise ArgumentError,
-          "group_by_category.sum(axis: #{axis}): cat.shape=#{cat_shape.inspect} " \
+          "group_by_category (axis: #{axis}): cat.shape=#{cat_shape.inspect} " \
           "does not fit any of the 3 accepted forms for h.shape=#{h_shape.inspect}: " \
           "case A cat.shape=[#{h_shape[axis]}], " \
           "case B cat.shape=#{h_shape.inspect}, " \
@@ -875,9 +944,28 @@ class CACategoricalIterator < CAIterator
   # one grouped axis, the flat codes as the single bundle.  The kernel emits in
   # source order, so the flat result reshapes straight back to the source shape.
   def scan (op)
-    @value.reshape(@value.elements)
-          .__axis_group_scan__([0], [[@codes, @k, [0]]], op)
-          .reshape(*@src_shape)
+    scan_source.reshape(@value.elements)
+               .__axis_group_scan__([0], [[@codes, @k, [0]]], op)
+               .reshape(*@src_shape)
+  end
+
+  # The values as they were when the iterator was built, in source order.
+  # Every no-axis reduction works from the category-major copy taken then; the
+  # scans read @value, so a write through the source between two calls used to
+  # be visible to a cumsum and not to a sum, off one iterator.
+  #
+  # Rebuilt rather than copied a second time: @perm is exactly the classified
+  # cells and @grouped holds their values and their masks, which is everything
+  # a scan reads -- a cell classified by nothing is skipped on its code, before
+  # its value is looked at. So this costs nothing until a scan asks for it, and
+  # nothing at all for an iterator that never scans.
+  def scan_source
+    @scan_source ||=
+      begin
+        snap = @value.template
+        snap.reshape(snap.elements)[perm] = grouped
+        snap
+      end
   end
 
 
@@ -900,7 +988,7 @@ class CACategoricalIterator < CAIterator
             "value.elements (#{@codes.elements})"
     end
     wf = weights.float64
-    wg = CArray.float64(@grouped.elements)
+    wg = CArray.float64(grouped.elements)
     @codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
                 @offsets.copy, wg, @k)
     wg
@@ -925,7 +1013,7 @@ class CACategoricalIterator < CAIterator
   def kernel_weighted (wg)
     ws = CArray.float64(@k)
     wm = CArray.float64(@k)
-    @grouped.send(:__reduceat_wsum_wmean__, @offsets, wg, ws, wm)
+    grouped.send(:__reduceat_wsum_wmean__, @offsets, wg, ws, wm)
     [ws, wm]
   end
 
@@ -935,8 +1023,8 @@ class CACategoricalIterator < CAIterator
     out = CArray.float64(@k)
     @k.times do |c|
       lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-      out[c] = hi > lo ? yield(@grouped[lo...hi], wg[lo...hi]) : empty
+      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      out[c] = hi > lo ? yield(grouped[lo...hi], wg[lo...hi]) : empty
     end
     out
   end
@@ -947,8 +1035,8 @@ class CACategoricalIterator < CAIterator
   # contract we want (identity for sum, UNDEF for ratios).
   def group_slice (c)
     lo = @offsets[c]
-    hi = (c + 1 < @k) ? @offsets[c + 1] : @grouped.elements
-    hi > lo ? @grouped[lo...hi] : @empty
+    hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+    hi > lo ? grouped[lo...hi] : @empty
   end
 
   # Single-pass reduceat moments (count / sum / min / max per category), computed
@@ -964,13 +1052,13 @@ class CACategoricalIterator < CAIterator
   def moments
     return @moments if defined?(@moments)
     @moments =
-      if MONOID_TYPES.include?(@grouped.data_type)
-        dt     = @grouped.data_type
+      if MONOID_TYPES.include?(grouped.data_type)
+        dt     = grouped.data_type
         counts = CArray.int64(@k)
         sums   = CArray.float64(@k)
         mins   = CArray.new(dt, [@k])
         maxs   = CArray.new(dt, [@k])
-        @grouped.send(:__reduceat_moments__, @offsets, counts, sums, mins, maxs)
+        grouped.send(:__reduceat_moments__, @offsets, counts, sums, mins, maxs)
         { count: counts, sum: sums, min: mins, max: maxs }
       end
   end
@@ -980,10 +1068,10 @@ class CACategoricalIterator < CAIterator
   def arg_minmax
     return @arg_minmax if defined?(@arg_minmax)
     @arg_minmax =
-      if MONOID_TYPES.include?(@grouped.data_type)
+      if MONOID_TYPES.include?(grouped.data_type)
         mn = CArray.int64(@k)
         mx = CArray.int64(@k)
-        @grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
+        grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
         { min: mn, max: mx }
       end
   end
@@ -994,10 +1082,10 @@ class CACategoricalIterator < CAIterator
   def all_any
     return @all_any if defined?(@all_any)
     @all_any =
-      if @grouped.data_type == CA_BOOLEAN
+      if grouped.data_type == CA_BOOLEAN
         a = CArray.boolean(@k)
         o = CArray.boolean(@k)
-        @grouped.send(:__reduceat_all_any__, @offsets, a, o)
+        grouped.send(:__reduceat_all_any__, @offsets, a, o)
         { all: a, any: o }
       end
   end
@@ -1015,13 +1103,52 @@ class CACategoricalIterator < CAIterator
   # (`sum` on an integer promotes, `accumulate` stays, `min` / `max` keep the
   # type but a boolean widens, `prod` on an object stays an object).  A payload
   # the core refuses to fold this way raises here, with the core's own error.
+  # Probes the core with a one-cell array of the value's data type and takes
+  # the answer's. Asks @value rather than the grouped copy, which has the same
+  # data type but does not exist on an iterator that answers only the
+  # per-fiber form -- and `accumulate(axis:)`, the one axis: member that needs
+  # this, is exactly the case that would have found it missing.
   def core_reduce_type (op, *args)
     (@core_reduce_type ||= {})[[op, args]] ||=
-      CArray.new(@grouped.data_type, [1, 1]).public_send(op, *args, axis: 1).data_type
+      @value.face? && @value.elements.zero? ?
+        CA_OBJECT : core_probe.public_send(op, *args, axis: 1).data_type
+  end
+
+  # A one-cell array of the same kind as the values, so the core answers about
+  # the same thing the group slices will hand back. For a Face that is a view
+  # of the values themselves rather than a blank: a Face cannot be allocated
+  # from its surface data type alone, and a blank storage array is not a valid
+  # Face for every one of them -- a const string's record indexes a shared
+  # pool, so a zeroed record points nowhere.
+  def core_probe
+    return CArray.new(@value.data_type, [1, 1]) unless @value.face?
+    @value.reshape(@value.elements)[[0]].reshape(1, 1)
+  end
+
+  # Whether an output can be built by lifting one. A Face is filled by writing
+  # surface values into storage, so this needs a Face that can be written
+  # into; a read-only one -- a const string's records index a shared pool, a
+  # categorical's codes index a vocabulary -- has no blank form to fill.
+  def face_output?
+    @value.face? && ! @value.read_only?
   end
 
   def per_category (data_type)
-    out = CArray.new(data_type, [@k])
+    out = if ! @value.face? || data_type != @value.data_type
+            CArray.new(data_type, [@k])
+          elsif face_output?
+            # the core answered in the values' own Face, so the output is one
+            # too: CATime#min hands back a CATime::Element, which only a
+            # CATime has anywhere to put
+            CArray.new(@value.parent.data_type, [@k],
+                       bytes: @value.parent.bytes).face_lift(@value)
+          else
+            # a read-only Face cannot be filled, so its answers are collected
+            # as the surface objects they already are
+            CArray.new(CA_OBJECT, [@k])
+          end
+    # A member the core refuses for this Face still refuses: the group slice is
+    # the Face, so the refusal comes from there, in the core's own words.
     @k.times { |c| out[c] = yield(group_slice(c)) }
     out
   end

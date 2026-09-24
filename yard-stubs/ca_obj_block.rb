@@ -10,7 +10,8 @@ class CABlock
   # @overload size0
   #   Returns the parent dimension sizes that the block is carved
   #   from (one Integer per axis).  Distinct from `shape`, which is
-  #   the block's own shape (= `count` after step / stride logic).
+  #   the block's own shape (= what it exposes after step / stride
+  #   logic).
   #   @return [Array<Integer>]
   def size0; end
 
@@ -25,12 +26,6 @@ class CABlock
   #   block walks the parent with.
   #   @return [Array<Integer>]
   def step; end
-
-  # @overload count
-  #   Returns the per-axis number of elements the block exposes.
-  #   Same as `shape`.
-  #   @return [Array<Integer>]
-  def count; end
 
   # @overload offset
   #   Returns the block's base flat offset into the parent (in

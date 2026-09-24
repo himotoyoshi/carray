@@ -204,6 +204,7 @@ class TestCAObjectViewRegion < Test::Unit::TestCase
   # attach! hands the user a materialised buffer and commits it on exit; the
   # region is what gets fetched and what gets written back.
   def test_attach_bang_commits_the_region_only
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     before = @back.copy
     dst    = Writer.new(@back.copy)
 

@@ -52,6 +52,167 @@ class TestCACategoricalFace < Test::Unit::TestCase
     }
   end
 
+  # ---- from_codes validates and normalises what it receives ---------------
+  #
+  # from_codes is the one door an already-built encoding comes through, so it
+  # is the only place that can still check it — #initialize marks the codes
+  # read-only on the next line. The exclusion sentinel and the mask have
+  # different readers (the axis-group kernel classifies on the code byte, the
+  # materialising paths classify on the mask), so a categorical that carries
+  # only one of them answers membership two ways with nothing raised.
+
+  def test_from_codes_writes_the_sentinel_into_a_cell_that_arrived_masked
+    # An Arrow dictionary carries missingness in a validity bitmap with
+    # arbitrary code bytes — frequently a valid-looking 0 — so masked-only
+    # input is the ordinary import, not an edge case.
+    codes = CArray.uint8(4) { |i| [0, 1, 0, 1][i] }
+    codes[1] = UNDEF
+    cat = CACategorical.from_codes(codes, ["a", "b"])
+
+    assert_equal([false, true, false, false], cat.is_masked.to_a)
+    assert_equal([0, 255, 0, 1], cat.codes.value.to_a)   # sentinel, not the stale 1
+    # the documented byte-reinterpret export reads -1 at an excluded cell
+    assert_equal([0, -1, 0, 1],
+                 cat.codes.value.refer(CA_INT8, cat.codes.shape).to_a)
+  end
+
+  def test_from_codes_leaves_the_two_encodings_agreeing_for_every_reader
+    codes = CArray.uint8(4) { |i| [0, 1, 0, 1][i] }
+    codes.mask = CA_BOOLEAN([0, 0, 1, 0])
+    cat = CACategorical.from_codes(codes, ["a", "b"])
+    v = CArray.float64(4).seq!(1)
+    g = v.axis_group(cat)
+
+    # the byte reader (scatter kernel) and the mask reader (materialise) agree
+    assert_equal([1.0, 6.0], v[g].sum(axis: :group).to_a)
+    assert_equal([1, 2],     v[g].count(axis: :group).to_a)
+    assert_equal([1.0, 6.0], v.group_by_category(cat).sum.to_a)
+    assert_equal([1.0, 2.0, UNDEF, 6.0], v[g].cumsum(axis: :group).to_a)
+  end
+
+  def test_from_codes_refuses_a_vocabulary_too_large_for_the_codes_type
+    labels = (0...256).map { |i| "L#{i}" }
+    # uint8 spends its top value on the sentinel, so 255 labels is the limit
+    assert_raise(ArgumentError) {
+      CACategorical.from_codes(CArray.uint8(3) { |i| [0, 255, 1][i] }, labels)
+    }
+    # the boundary itself is fine, on both signs, and a wider type takes 256
+    assert_equal(["L0", "L254"],
+                 CACategorical.from_codes(CArray.uint8(2) { |i| [0, 254][i] },
+                                          labels[0, 255]).to_a)
+    assert_equal(["L0", "L127"],
+                 CACategorical.from_codes(CArray.int8(2) { |i| [0, 127][i] },
+                                          labels[0, 128]).to_a)
+    assert_equal(["L0", "L255", "L1"],
+                 CACategorical.from_codes(CArray.uint16(3) { |i| [0, 255, 1][i] },
+                                          labels).to_a)
+  end
+
+  def test_from_codes_refuses_duplicate_labels_as_categorize_does
+    # codes index into labels, so a repeated label makes the mapping
+    # non-injective and every label-space member disagrees with #to_a
+    assert_raise(ArgumentError) {
+      CACategorical.from_codes(CArray.uint8(4) { |i| [0, 1, 2, 0][i] }, ["a", "a", "b"])
+    }
+  end
+
+  def test_from_codes_refuses_an_unmasked_code_outside_the_vocabulary
+    assert_raise(ArgumentError) {
+      CACategorical.from_codes(CArray.uint8(4) { |i| [0, 7, 1, 200][i] }, ["a", "b"])
+    }
+    assert_raise(ArgumentError) {
+      CACategorical.from_codes(CArray.int8(3) { |i| [0, -2, 1][i] }, ["a", "b"])
+    }
+  end
+
+  def test_from_codes_accepts_the_sentinel_and_any_byte_under_a_mask
+    # the sentinel is missingness, not corruption, on either sign
+    assert_equal(["a", UNDEF, "b"],
+                 CACategorical.from_codes(CArray.uint8(3) { |i| [0, 255, 1][i] },
+                                          ["a", "b"]).to_a)
+    assert_equal(["a", UNDEF, "b"],
+                 CACategorical.from_codes(CArray.int8(3) { |i| [0, -1, 1][i] },
+                                          ["a", "b"]).to_a)
+    # a masked cell may hold any byte at all — that is the CArray contract --
+    # so it is normalised, never refused
+    codes = CArray.uint8(3) { |i| [0, 7, 1][i] }
+    codes[1] = UNDEF
+    cat = CACategorical.from_codes(codes, ["a", "b"])
+    assert_equal(["a", UNDEF, "b"], cat.to_a)
+    assert_equal([0, 255, 1], cat.codes.value.to_a)
+  end
+
+  def test_from_codes_copies_read_only_codes_instead_of_refusing_them
+    # a zero-copy import can hand over a read-only buffer; normalising it must
+    # not raise, and must not write through to the caller's array
+    src = CArray.uint8(3) { |i| [0, 255, 1][i] }
+    src.set_read_only_flag
+    cat = CACategorical.from_codes(src, ["a", "b"])
+    assert_equal(["a", UNDEF, "b"], cat.to_a)
+    assert_false(src.has_mask?)
+
+    pre = CArray.uint8(3) { |i| [0, 9, 1][i] }
+    pre[1] = UNDEF
+    pre.set_read_only_flag
+    cat2 = CACategorical.from_codes(pre, ["a", "b"])
+    assert_equal([0, 255, 1], cat2.codes.value.to_a)
+    assert_equal([0, 9, 1], pre.value.to_a)        # the caller's bytes stand
+  end
+
+  def test_from_codes_stays_zero_copy_when_nothing_needs_rewriting
+    # normalising is conditional: codes that already agree are adopted as-is,
+    # which is what keeps a wrapped memory view a view
+    src = CArray.uint8(3) { |i| [0, 1, 1][i] }
+    assert_same(src, CACategorical.from_codes(src, ["a", "b"]).codes)
+    sent = CArray.uint8(3) { |i| [0, 255, 1][i] }
+    assert_same(sent, CACategorical.from_codes(sent, ["a", "b"]).codes)
+  end
+
+  def test_from_codes_materialises_a_view_so_its_root_cannot_change_the_codes
+    # read-only is a per-object flag: setting it on a view stops
+    # `cat.codes[i] = x` but not `root[i] = x`, and the categorical (plus the
+    # grouping plan memoised against it) would move underneath a Face that is
+    # supposed to be immutable
+    root = CArray.uint8(6) { |i| [0, 1, 0, 2, 1, 0][i] }
+    cat  = CACategorical.from_codes(root[1..4], ["a", "b", "c"])
+    assert_true(cat.codes.entity?)
+    assert_equal(["b", "a", "c", "b"], cat.to_a)
+
+    root[1] = 200
+    assert_equal(["b", "a", "c", "b"], cat.to_a)
+    assert_equal([1, 0, 2, 1], cat.codes.value.to_a)
+    # the caller's array is not frozen as a side effect — taking ownership of a
+    # window must not freeze the bytes outside it
+    assert_false(root.read_only?)
+  end
+
+  def test_every_code_to_label_path_shares_one_decode
+    # #to_a guarded an out-of-range code and #unique did not, so the two
+    # contradicted each other on the same cell — and #unique could return a
+    # label twice, which is not what unique means. from_codes now refuses such
+    # codes, so this reaches the decoders directly: the point of the pin is that
+    # there is one rule, not two that can drift apart again.
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| [0, 1, 2, 0][i] },
+                                   ["a", "b", "c"])
+    assert_nil(cat.send(:label_at, -2))          # not "b", via Array#[] from the end
+    assert_nil(cat.send(:label_at, 9))
+    assert_equal("b", cat.send(:label_at, 1))
+    # the bulk path agrees with the per-cell path, code for code
+    assert_equal(["a", nil, "b", nil],
+                 cat.send(:labels_for, CA_INT32([0, -2, 1, 9])).to_a)
+    assert_equal([-2, 9, 1].map { |c| cat.send(:label_at, c) },
+                 cat.send(:labels_for, CA_INT32([-2, 9, 1])).to_a)
+  end
+
+  def test_from_codes_adopts_a_borrowed_entity_without_copying
+    # a CAWrap over a producer's buffer is an entity, so the zero-copy import
+    # stays zero-copy (that producer can still write its own buffer — the
+    # borrowed-buffer bargain, which this constructor does not pretend to close)
+    w = CArray.wrap_memory_view(CArray.uint8(3) { |i| [0, 1, 1][i] })
+    cat = CACategorical.from_codes(w, ["a", "b"])
+    assert_same(w, cat.codes)
+  end
+
   # ---- READONLY -----------------------------------------------------------
 
   def test_readonly

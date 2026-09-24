@@ -77,6 +77,23 @@ void    ca_lazy_arena_release (void *ptr);
 int     ca_gc_hold_push   (void *ptr, ca_size_t n_elements);
 void    ca_gc_hold_pop_to (int depth);
 
+/* ---- Attaching several parents (carray_core.c) ---------------------------
+
+   Attach all of list[0..n-1] or none: if one attach raises, those already
+   attached are detached before the raise propagates. */
+
+void    ca_attach_all (CArray **list, int32_t n);
+
+/* ---- Filling a result Ruby does not own yet (carray_copy.c) ---------------
+
+   A C builder that allocates its result with carray_new / ca_template and
+   then reads the source into it holds a struct no Ruby object owns until
+   ca_wrap_struct.  A read that raises (a lazy conversion) would leave it
+   behind.  ca_fill_or_free runs fill(arg) under rb_protect and, if it
+   raises, frees `co` before the raise propagates. */
+
+void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
+
 /* Non-zero iff the object is an element-wise lazy view (CAMonOp / CABinOp /
    CABinCmp / CAMonCmp / CALazyMarker).  The streaming branch of the
    mkkernel-generated reduction kernels tests this to decide whether it can

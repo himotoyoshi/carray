@@ -129,9 +129,9 @@ Bug reports and feature requests are welcome — please open an issue.
 
 ## Credits
 
-Up to version 2.0, CArray was authored by himotoyoshi.
+CArray is created and maintained by himotoyoshi.
 
-CArray 3.0 was designed and reviewed by a human developer; the implementation was produced in collaboration with AI coding tools.
+Versions up to 2.0 were written by the author. For version 3.0, the author provided the design, and most of the implementation was rewritten with AI coding tools; it has been verified primarily through the test suite and practical use.
 
 ## License
 

@@ -631,6 +631,283 @@ class TestCategoricalIterator < Test::Unit::TestCase
 
   # ---- Enumerable is not mixed in (no reduction-name leak) -------------------
 
+  # ---- NaN ---------------------------------------------------------------
+  #
+  # The contract above -- a group result equals CArray#<reduction> over the
+  # group's members -- has to hold when a member is NaN. It did not: the
+  # extremum kernels seeded the accumulator with the first present cell and
+  # then compared, so a NaN seed was never displaced (every comparison against
+  # it is false) and the answer depended on where in the segment the NaN sat.
+  # A reduction that is order-free stopped being order-free.
+
+  NAN = 0.0 / 0.0
+
+  def assert_same_float(expected, actual, what)
+    if expected.is_a?(Float) && expected.nan?
+      assert_true(actual.is_a?(Float) && actual.nan?, "#{what}: want NaN, got #{actual.inspect}")
+    else
+      assert_equal(expected, actual, what)
+    end
+  end
+
+  def test_a_nan_loses_every_contest_and_the_answer_does_not_move_with_it
+    [[NAN, 1.0, 5.0], [1.0, NAN, 5.0], [1.0, 5.0, NAN]].each do |vals|
+      grp = CA_DOUBLE(vals).group_by_category(CA_INT32([0, 0, 0]).categorize)
+      ref = CA_DOUBLE(vals)
+      assert_same_float(ref.min, grp.min[0], "min #{vals.inspect}")
+      assert_same_float(ref.max, grp.max[0], "max #{vals.inspect}")
+      assert_equal(ref.min_index, grp.min_index[0], "min_index #{vals.inspect}")
+      assert_same_float(ref.median, grp.median[0], "median #{vals.inspect}")
+    end
+  end
+
+  def test_a_group_of_nothing_but_nan
+    grp = CA_DOUBLE([NAN, NAN]).group_by_category(CA_INT32([0, 0]).categorize)
+    # the extremum is that NaN, as in the core; the position of it is UNDEF,
+    # the same answer the core gives for a group with no present cell at all
+    assert_true(grp.min[0].nan?)
+    assert_true(grp.max[0].nan?)
+    assert_true(grp.min_index.is_masked[0])
+    assert_true(grp.max_index.is_masked[0])
+  end
+
+  def test_an_order_statistic_puts_nan_last_and_clamps_its_neighbour
+    # NaN sorts last, so a position is picked out of [numbers..., NaN...];
+    # a position whose upper neighbour would be a NaN interpolates against
+    # itself rather than producing NaN
+    g2 = CA_DOUBLE([NAN, -9.0]).group_by_category(CA_INT32([0, 0]).categorize)
+    assert_equal(-9.0, g2.median[0])
+    assert_equal(-9.0, g2.percentile(75)[0])
+    g4 = CA_DOUBLE([NAN, 1.0, 7.0, -8.0]).group_by_category(CA_INT32([0] * 4).categorize)
+    assert_equal(4.0, g4.median[0])
+    assert_equal(7.0, g4.percentile(75)[0])
+  end
+
+  def test_nan_answers_match_the_core_across_shapes_and_data_types
+    # the strongest form of the contract: sweep random NaN patterns and check
+    # every member against CArray's own reduction over the same cells
+    srand(12345)
+    [CA_FLOAT64, CA_FLOAT32].each do |dt|
+      120.times do
+        n = 1 + rand(9)
+        k = 1 + rand(3)
+        vals  = Array.new(n) { rand < 0.35 ? NAN : (rand(20) - 10).to_f }
+        codes = Array.new(n) { rand(k) }
+        h = CArray.new(dt, [n]); h[] = CA_DOUBLE(vals)
+        grp = h.group_by_category(CA_INT32(codes).categorize(labels: (0...k).to_a))
+        got = { min: grp.min, max: grp.max, min_index: grp.min_index,
+                median: grp.median, p25: grp.percentile(25) }
+        (0...k).each do |c|
+          members = (0...n).select { |i| codes[i] == c }
+          next if members.empty?
+          ref = CArray.new(dt, [members.size])
+          ref[] = CA_DOUBLE(members.map { |i| vals[i] })
+          what = "#{CArray.data_type_name(dt)} #{members.map { |i| vals[i] }.inspect}"
+          assert_same_float(ref.min,       got[:min][c],       "min #{what}")
+          assert_same_float(ref.max,       got[:max][c],       "max #{what}")
+          assert_equal(ref.min_index,      got[:min_index][c], "min_index #{what}")
+          assert_same_float(ref.median,    got[:median][c],    "median #{what}")
+          assert_same_float(ref.percentile(25), got[:p25][c],  "p25 #{what}")
+        end
+      end
+    end
+  end
+
+  def test_the_axis_form_handles_nan_like_the_flat_one
+    rows  = [[NAN, 2.0], [1.0, NAN], [5.0, NAN], [NAN, NAN]]
+    codes = [0, 0, 1, 1]
+    grp = CA_DOUBLE(rows).group_by_category(CA_INT32(codes).categorize)
+    mn, mx = grp.min(axis: 0), grp.max(axis: 0)
+    2.times do |c|
+      2.times do |j|
+        members = (0...rows.size).select { |r| codes[r] == c }
+        ref = CA_DOUBLE(members.map { |r| rows[r][j] })
+        assert_same_float(ref.min, mn[c, j], "min at [#{c}, #{j}]")
+        assert_same_float(ref.max, mx[c, j], "max at [#{c}, #{j}]")
+      end
+    end
+    # the all-NaN cell is the one the seeding defect used to get wrong
+    assert_true(mx[1, 1].nan?)
+  end
+
+  # ---- a result is the caller's, not the iterator's ------------------------
+  #
+  # Several members are memoised: one fused kernel fills count / sum / min /
+  # max and every consumer reads off it. They handed back the memo itself, so
+  # writing into a result changed what the iterator answered from then on --
+  # permanently, and for every other member sharing that memo. #sum already
+  # copied; the rest did not.
+
+  FLAT_MEMBERS = [:sum, :min, :max, :count, :count_not_masked, :count_masked,
+                  :elements, :mean, :prod, :variance, :stddev, :median,
+                  :min_index, :max_index].freeze
+
+  def test_no_member_hands_back_the_memo_itself
+    grp = CA_DOUBLE([1.0, 2.0, 3.0, 4.0]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    FLAT_MEMBERS.each do |op|
+      a = grp.public_send(op)
+      next unless a.is_a?(CArray)
+      assert_not_same(a, grp.public_send(op), "#{op} hands out the same array twice")
+    end
+    lo1, hi1 = grp.minmax
+    lo2, hi2 = grp.minmax
+    assert_not_same(lo1, lo2, "minmax lower")
+    assert_not_same(hi1, hi2, "minmax upper")
+  end
+
+  def test_no_axis_member_hands_back_the_memo_itself
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    [:sum, :min, :max, :count, :count_not_masked, :mean, :prod, :variance].each do |op|
+      a = grp.public_send(op, axis: 0)
+      assert_not_same(a, grp.public_send(op, axis: 0),
+                      "#{op}(axis:) hands out the same array twice")
+    end
+  end
+
+  def test_writing_into_a_result_does_not_change_the_iterator
+    grp = CA_DOUBLE([1.0, 2.0, 3.0, 4.0]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    before = { max: grp.max.to_a, minmax: grp.minmax.map(&:to_a),
+               count: grp.count.to_a, elements: grp.elements.to_a }
+
+    grp.max[0]      = 999.0
+    grp.count[0]    = 77
+    grp.elements[0] = 42
+
+    assert_equal(before[:max],      grp.max.to_a)
+    assert_equal(before[:minmax],   grp.minmax.map(&:to_a))   # shares the memo
+    assert_equal(before[:count],    grp.count.to_a)
+    assert_equal(before[:elements], grp.elements.to_a)
+  end
+
+  # ---- an iterator that answers only the per-fiber form ---------------------
+  #
+  # When the classifier does not line up cell-for-cell with the value, there is
+  # no grouped copy to reduce, and only the axis: form can work. That was left
+  # implicit -- the ivar simply stayed nil -- so a no-axis reduction surfaced
+  # whatever NoMethodError the nil reached first, #elements answered nil, and
+  # #inspect printed an empty grouping that does not exist. accumulate(axis:)
+  # was collateral: it is the one axis: member that asks the core what type it
+  # folds into, and the probe was built from the missing buffer.
+
+  def deferred_iterator
+    CA_INT32([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+      .group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+  end
+
+  def test_a_no_axis_reduction_names_the_mismatch
+    grp = deferred_iterator
+    [:sum, :mean, :median, :prod, :count, :elements].each do |op|
+      e = assert_raise(ArgumentError, "#{op} should name the mismatch") {
+        grp.public_send(op)
+      }
+      assert_match(/value\.elements \(12\) != cat\.elements \(4\)/, e.message, op.to_s)
+      assert_match(/per-fiber/, e.message, op.to_s)
+    end
+  end
+
+  def test_inspect_says_so_instead_of_showing_an_empty_grouping
+    # inspect is what you reach for when something is already puzzling, so it
+    # neither raises nor claims a grouping that classified nothing
+    assert_match(/per-fiber only/, deferred_iterator.inspect)
+    ordinary = CA_INT32([1, 2, 3, 4]).group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    assert_match(/elements=\[2, 2\]/, ordinary.inspect)
+  end
+
+  def test_accumulate_along_an_axis_works_without_a_grouped_copy
+    assert_equal([[5, 7, 9], [17, 19, 21]], deferred_iterator.accumulate(axis: 0).to_a)
+  end
+
+  def test_accumulate_along_an_axis_keeps_the_value_data_type
+    grp = deferred_iterator
+    assert_equal(CA_INT32, grp.accumulate(axis: 0).data_type)
+  end
+
+  # ---- a payload that carries a Face ---------------------------------------
+  #
+  # The contract is that a group's answer equals the core's reduction over the
+  # group's members, and for a Face the core answers in that Face -- CATime#min
+  # is a CATime::Element. The output was built from the answer's data type
+  # alone, which a fixlen surface has no width from, so what came back was
+  # `rb_ca_new_reduced: bytes=0 invalid for data_type=0`: an internal message
+  # naming nothing the caller could act on, for members the core handles fine.
+
+  def time_group
+    t = CArray.time(["2020-01-03", "2020-01-01", "2020-01-05", "2020-01-02"], unit: :D)
+    [t, t.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)]
+  end
+
+  def test_a_face_payload_answers_in_its_own_face
+    t, grp = time_group
+    [:min, :max, :median].each do |op|
+      got = grp.public_send(op)
+      assert_kind_of(CATime, got, "#{op} comes back as the Face")
+      assert_equal(t[0..1].public_send(op), got[0], "#{op} group 0")
+      assert_equal(t[2..3].public_send(op), got[1], "#{op} group 1")
+    end
+  end
+
+  def test_a_payload_independent_member_stays_plain_for_a_face
+    _t, grp = time_group
+    assert_equal([2, 2], grp.count.to_a)
+    assert_equal(CA_INT64, grp.count.data_type)
+  end
+
+  def test_a_member_the_core_refuses_for_a_face_still_refuses_in_its_words
+    _t, grp = time_group
+    e = assert_raise(TypeError) { grp.sum }
+    assert_match(/CATime/, e.message)          # the core's own refusal
+    assert_not_match(/rb_ca_new_reduced/, e.message)
+  end
+
+  # ---- the no-axis surface is one snapshot ---------------------------------
+  #
+  # Every no-axis reduction works from the category-major copy taken when the
+  # iterator was built. The scans read the value array instead, so a write
+  # through the source between two calls was visible to a cumsum and not to a
+  # sum, off the same iterator. (The axis: form is live throughout, which is
+  # its own contract.)
+
+  SNAPSHOT_MEMBERS = [:sum, :mean, :min, :max, :median, :count, :elements,
+                      :cumsum, :cumprod, :cummax, :cummin, :cumcount].freeze
+
+  def test_a_write_through_the_source_reaches_no_member
+    h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+    before = SNAPSHOT_MEMBERS.to_h { |op| [op, grp.public_send(op).to_a] }
+
+    h[0] = 100.0
+
+    SNAPSHOT_MEMBERS.each do |op|
+      assert_equal(before[op], grp.public_send(op).to_a,
+                   "#{op} moved with a write through the source")
+    end
+  end
+
+  def test_a_fresh_iterator_sees_the_write
+    h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    h.group_by_category(cat).cumsum        # take the old snapshot
+    h[0] = 100.0
+    assert_equal([100.0, 102.0, 3.0, 7.0], h.group_by_category(cat).cumsum.to_a)
+    assert_equal([102.0, 7.0], h.group_by_category(cat).sum.to_a)
+  end
+
+  def test_the_scan_snapshot_carries_masks_and_exclusions
+    # it is rebuilt from the permutation and the grouped copy rather than
+    # copied again, so this pins that the rebuild is faithful
+    h = CA_DOUBLE([1, 2, 3, 4, 5, 6])
+    h[2] = UNDEF                                        # masked, still classified
+    codes = CArray.uint8(6) { |i| [0, 0, 0, 1, 1, 255][i] }   # cell 5 excluded
+    grp = h.group_by_category(CACategorical.from_codes(codes, %w[a b]))
+
+    assert_equal([1.0, 3.0, 3.0, 4.0, 9.0, UNDEF], grp.cumsum.to_a)
+    # the masked cell is classified, so the running count holds rather than
+    # breaking; only the excluded cell has no group to run in
+    assert_equal([1, 2, 2, 1, 2, UNDEF], grp.cumcount.to_a)
+    assert_equal([3.0, 9.0], grp.sum.to_a)
+  end
+
   def test_no_enumerable_leak
     grp = CA_INT32([1, 2, 3]).group_by_category(CA_OBJECT(%w[a b a]).categorize)
     assert_equal false, CAIterator.include?(Enumerable)

@@ -46,33 +46,34 @@ A typical internal use is attach → operate on the contiguous `ptr` → sync �
 detach. Both gather and scatter run through the unified `xfer_all` hook with
 `dir = CA_XFER_GET` / `CA_XFER_PUT` ([ch. 2](02_core_data_structures.md)).
 
-## The R1–R4 contract
+## The R1–R5 contract (from `ext/carray.h`)
 
-The lifecycle is ownership-based and **not transitive**. These four rules are the
-contract every piece of view code depends on:
+The lifecycle is ownership-based and **not transitive**. These five rules are the
+contract every piece of view code depends on. The canonical statement lives beside
+the `ca_attach` declaration in `ext/carray.h`; this section copies it.
 
-- **R1** — `ca_attach(x)` makes **`x.ptr` only** valid. It says nothing about any
-  other array.
-- **R2** — there is **no transitive guarantee**: attaching a child does *not*
-  attach its parent. (An implementation may attach the parent as a side effect,
-  but that is an internal optimisation, never something to rely on.)
-- **R3 (necessity)** — if you want to touch `ca->parent->ptr` directly, call
-  `ca_attach(ca->parent)` yourself. Do not assume the child's attach filled it
-  (that is just R2 restated).
-- **R4 (ordering)** — when attaching both parent and child, open parent → child
-  and close child → parent, with sync in the same order as attach:
+- **R1 (validity)** — `ca_attach(x)` makes **`x.ptr` only** valid. It says nothing
+  about any other array.
+- **R2 (no transit)** — attaching a child does *not* attach its parent. An
+  implementation may do so as an internal optimisation; never rely on it.
+- **R3 (necessity)** — to touch `ca->parent->ptr`, call `ca_attach(ca->parent)`
+  yourself.
+- **R4 (ordering)** — attaching both parent and child: open parent → child, close
+  child → parent, sync in attach order.
   ```c
   ca_attach(parent); ca_attach(child);
   /* … work … */
   ca_sync(child);    ca_sync(parent);
   ca_detach(child);  ca_detach(parent);
   ```
-  Symmetric nesting keeps things correct even if a view internally double-attaches
-  (attach/detach are idempotent via the `attach` refcount).
+  Symmetric nesting stays correct when a view double-attaches internally (views
+  carry an attach refcount; entities do not).
+- **R5 (traffic)** — attach hands you a buffer, not a live array. Use `x.ptr`; a
+  view derived from `x` composes past the buffer to the root.
 
 ### Reader and writer conventions
 
-Two conventions follow from R1–R4 for code that touches a parent's `ptr`:
+Two conventions follow from R1–R5 for code that touches a parent's `ptr`:
 
 - **Reader (opportunistic use of the parent buffer)** — guard with the marker,
   do not test the raw pointer:
@@ -111,20 +112,16 @@ that keeps a deep view chain as cheap as one gather. The `ca_fold_t` state, the
 `fold_stride` one-hop primitive, and the measured speedup are in "Compose-fold in
 detail" below.
 
-## The public `attach!` (and the internal forms)
+## No Ruby attach surface
 
-`attach!` is a block form that wraps attach + sync + detach in `rb_ensure`, so the
-sync/detach run even if the block raises. Mechanically the pattern it expresses is
-*one* materialise on entry, N operations against the now-contiguous `ptr`, then
-*one* sync on exit — the amortisation that makes a "materialise once, write into
-the buffer repeatedly, flush once" loop cheap.
-
-It is a minor convenience, not load-bearing: internally it is used in only a
-handful of places (`lib/carray/iterator.rb`) and is kept mainly as insurance. The
-real machinery is `ca_attach` / `ca_sync` / `ca_detach`.
-
-`__attach__` / `__sync__` / `__detach__` (double underscore) are **internal
-only** — never call them from user or ext code.
+The lifecycle has no user-facing Ruby form. `attach` / `attach!` and the
+`__attach__` / `__sync__` / `__detach__` trio are built only under
+`-DCARRAY_DEV_BUILD`, where the test suite drives them; released builds do not
+define them. Ruby has no raw pointer, so the only thing a block could do inside
+an attach window is call back into the array API — and R5 is invisible there:
+`v[0]` reads the attached buffer while `v[]` and `v[0..1]` compose past it to the
+root, and `v[]` writes the buffer while it reads the root. From C the two sides
+of R5 are different expressions; from Ruby they are the same operator.
 
 ## Why this is a thread-safety hazard
 
@@ -228,11 +225,13 @@ gather/scatter interface that replaces the historical `copy_data` /
 Every view implements (or inherits) the four `xfer_*` slots in `ca_func`
 (`xfer_index` / `xfer_addrs` / `xfer_stride` / `xfer_all` — the struct fields and
 their per-slot comments are in [ch. 2](02_core_data_structures.md), the operation
-table). Two dispatch details matter here: `xfer_stride` takes `strides[]` as the
-*destination* (caller-buffer) layout, which is what the kernel iterator's
-per-fiber fused path and the partial-materialise path use; `xfer_all` is the
-whole-view transfer the scratch path uses, and `ca_copy_data` / `ca_sync_data` are
-thin forwarders onto it.
+table). Two dispatch details matter here: `xfer_stride` describes its region in
+the **view's own** address space — `starts` / `counts` / `strides` all refer to
+the view, and `data` is the caller's buffer holding the selected cells packed
+row-major, *not* laid out with `strides[]` (the canonical wording is beside
+`xfer_stride` in `ext/carray.h`); `xfer_all` is the whole-view transfer the
+scratch path uses, and `ca_copy_data` / `ca_sync_data` are thin forwarders onto
+it.
 
 Five public entry points wrap the dispatch:
 
@@ -372,8 +371,8 @@ CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n) { /* writable, sync on exit */ }
 Both wrap attach / (sync) / detach in a `for` loop teardown clause —
 exception-safe across `break`, leaks across `return`. For the
 `rb_ensure`-protected function form, use `rb_ca_call_with_buffer`
-([ch. 13](13_sweep_author_surface.md)). The Ruby-surface counterpart is `attach!`
-("The public `attach!`" above).
+([ch. 13](13_sweep_author_surface.md)). There is no Ruby-surface counterpart
+("No Ruby attach surface" above).
 
 ## Where to go next
 

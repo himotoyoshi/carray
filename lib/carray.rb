@@ -16,6 +16,7 @@ end
 # interpolation, so compute programs that never print a CArray skip it.
 require 'carray/construct'
 require 'carray/data_type_extension'
+require 'carray/data_type_limits'  # MIN / MAX / TINY / EPSILON on the typed classes
 # carray/stack is loaded lazily via autoload_carray (entry-method stubs).
 # CAStack is C-defined so its constant is always present; only the Ruby
 # composition surface (stack/meld/montage/split/append) needs the file.
@@ -29,6 +30,7 @@ require 'carray/meld_reduce'    # CAMeld per-parent reduce fast path (sum/mean/m
 # carray/ordering CIFY (2026-06-21): translated to ext/carray_order.c
 
 require 'carray/math'
+require 'carray/rng'    # CArray::Rng: the generator its C is shared from
 # carray/clip_cast CIFY (2026-06-23): translated to ext/carray_cast.c
 require 'carray/complex' # real / imag accessors; MUST precede carray/lazy
                          # (lazy aliases real/imag at load time)

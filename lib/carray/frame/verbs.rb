@@ -230,7 +230,9 @@ class CAFrame
       return
     end
     yvalid = col.value.float64[present]
-    col[] = yvalid.linear_fetch(addr).to_type(col.data_type).mask_invalid   # write-through
+    # mask_invalid before the cast: linear_fetch marks out of range with NaN,
+    # and casting back to an integer column would turn it into a plausible 0.
+    col[] = yvalid.linear_fetch(addr).mask_invalid.to_type(col.data_type)  # write-through
   end
 
   private def cast_one(name, type)
@@ -267,16 +269,17 @@ class CAFrame
             "promote takes a data type Symbol (got #{type.class}); " \
             "class-shaped targets are not promotion destinations"
     end
-    @columns.each_key do |key|
-      col = @columns[key]
-      # A Face column answers for itself: :object is its surface values, a
-      # numeric target is whatever it declares in #to_numeric (and a TypeError
-      # naming that method when it declares nothing). result_type has nothing
-      # to say about a surface it cannot read, so the widening check -- which
-      # is about primitive promotion -- applies to plain columns only.
-      refuse_narrowing(key, col, type) unless col.face?
-      @columns[key] = col.to_type(type)
-    end
+    # Check every column before rebinding any. A column that would narrow
+    # rejects the whole promote, and rejecting part way through would leave the
+    # frame promoted in whichever columns happened to come first.
+    #
+    # A Face column answers for itself: :object is its surface values, a
+    # numeric target is whatever it declares in #to_numeric (and a TypeError
+    # naming that method when it declares nothing). result_type has nothing
+    # to say about a surface it cannot read, so the widening check -- which
+    # is about primitive promotion -- applies to plain columns only.
+    @columns.each { |key, col| refuse_narrowing(key, col, type) unless col.face? }
+    @columns.each_key { |key| @columns[key] = @columns[key].to_type(type) }
   end
 
   private def refuse_narrowing(key, col, type)

@@ -59,17 +59,29 @@ class CAFrame
   # native scalar column (nil -> UNDEF); anything else -> object column.
   def self.build_record_column(values, n)
     present = values.reject(&:nil?)
-    return CArray.object(n) { values } if present.empty?
+    return mask_missing(CArray.object(n) { values }) if present.empty?
 
     if present.all? { |v| v.is_a?(Array) || v.is_a?(CArray) }
       build_nd_column(values, present, n)
     else
       type = numeric_leaf_type(present)
       col = CArray.object(n) { values }
-      type ? col.to_type(type) : col
+      type ? col.to_type(type) : mask_missing(col)
     end
   end
   private_class_method :build_record_column
+
+  # A missing cell is UNDEF, not a Ruby nil sitting in a cell.  to_records
+  # writes a masked cell as nil, so nil on the way back in is the only
+  # spelling a missing cell has; to_type does this conversion for a numeric
+  # column, and an object column would otherwise keep the nil as a value --
+  # a row with no label coming back as a row labelled nil.  The CSV reader
+  # takes the same position (see build_frame in io.rb).
+  def self.mask_missing(col)
+    col[:eq, nil] = UNDEF
+    col
+  end
+  private_class_method :mask_missing
 
   # Stack equal-length array cells into an (N, L) column via an object 2-D fill
   # + to_type (nil rows -> UNDEF, int/float by leaf). Ragged lengths or
@@ -77,12 +89,14 @@ class CAFrame
   def self.build_nd_column(values, present, n)
     lengths = present.map { |v| v.is_a?(CArray) ? v.shape[0] : v.size }
     len = lengths.first
-    return CArray.object(n) { values } unless lengths.all? { |x| x == len }
+    unless lengths.all? { |x| x == len }
+      return mask_missing(CArray.object(n) { values })
+    end
 
     nested = values.map { |v| v.nil? ? Array.new(len) : (v.is_a?(CArray) ? v.to_a : v) }
     type = numeric_leaf_type(nested.flatten.compact)
     table = CArray.object(n, len) { nested }
-    type ? table.to_type(type) : table
+    type ? table.to_type(type) : mask_missing(table)
   end
   private_class_method :build_nd_column
 

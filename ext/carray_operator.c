@@ -633,7 +633,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   ca_size_t i1, i2, i3;
   int fast_path;
 
-  /* do implicit casting and resolving unbound repeat array */
+  /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
@@ -1030,7 +1030,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
 
   rb_ca_modify(self);
 
-  /* do implicit casting and resolving unbound repeat array */
+  /* do implicit casting */
   rb_ca_cast_other(&self, &other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
@@ -1572,7 +1572,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
      for fixlen-storage Faces (memcmp is already correct there). */
   ca_face_reconcile_comparison(&self, &other);
 
-  /* do implicit casting and resolving unbound repeat array */
+  /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
@@ -1804,7 +1804,7 @@ rb_ca_coerce (VALUE self, VALUE other)
     return rb_ca_coerce(self, rb_funcall(other,rb_intern("to_ca"),0));
   }
   else {
-    /* do implicit casting and resolving unbound repeat array */
+    /* do implicit casting */
     rb_ca_cast_self_or_other(&self, &other);
     return rb_assoc_new(other, self);
   }

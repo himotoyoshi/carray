@@ -54,6 +54,11 @@ spec/spec_ai/ext_cslab_smoke/*.bundle
 spec/spec_ai/ext_cslab_smoke/*.bundle.dSYM/
 spec/spec_ai/ext_cslab_smoke/*.o
 spec/spec_ai/ext_cslab_smoke/mkmf.log
+spec/spec_ai/ext_sweep_raw/Makefile
+spec/spec_ai/ext_sweep_raw/*.bundle
+spec/spec_ai/ext_sweep_raw/*.bundle.dSYM/
+spec/spec_ai/ext_sweep_raw/*.o
+spec/spec_ai/ext_sweep_raw/mkmf.log
 spec/spec_ai/ext_per_element_smoke/Makefile
 spec/spec_ai/ext_per_element_smoke/*.bundle
 spec/spec_ai/ext_per_element_smoke/*.bundle.dSYM/
@@ -73,6 +78,16 @@ spec/spec_ai/ext_iter_source_kind/Makefile
 spec/spec_ai/ext_iter_source_kind/*.bundle
 spec/spec_ai/ext_iter_source_kind/*.bundle.dSYM/
 spec/spec_ai/ext_iter_source_kind/*.o
+spec/spec_ai/ext_iter_write/Makefile
+spec/spec_ai/ext_iter_write/*.bundle
+spec/spec_ai/ext_iter_write/*.bundle.dSYM/
+spec/spec_ai/ext_iter_write/*.o
+spec/spec_ai/ext_iter_write/mkmf.log
+spec/spec_ai/ext_iter_pair/Makefile
+spec/spec_ai/ext_iter_pair/*.bundle
+spec/spec_ai/ext_iter_pair/*.bundle.dSYM/
+spec/spec_ai/ext_iter_pair/*.o
+spec/spec_ai/ext_iter_pair/mkmf.log
 spec/spec_ai/ext_iter_source_kind/mkmf.log
 
 # Generated PDF bundles (rake pdf:*)

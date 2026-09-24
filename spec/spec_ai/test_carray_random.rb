@@ -441,3 +441,216 @@ class TestRandomRangeSurface < Test::Unit::TestCase
   end
 
 end
+
+# CArray::Rng -- a generator with its own state, whose C is handed out.
+#
+# The state is a plain CA_INT64 array rather than something only this
+# extension can read, and the C is a file both this extension and carray-jit
+# compile.  Those two together are what let a sequence begin in `random!`
+# and continue inside a compiled kernel; what is checked here is the half
+# that lives on this side.
+class TestCArrayRng < Test::Unit::TestCase
+
+  def straight(seed, count)
+    rng = CArray::Rng.new(seed: seed)
+    Array.new(count) { rng.random }
+  end
+
+  def test_state_is_four_int64_cells
+    rng = CArray::Rng.new(seed: 4)
+    assert_equal :int64, rng.state.data_type
+    assert_equal 4, rng.state.elements
+    assert_equal :xoshiro256pp, rng.generator
+    assert_equal 4, rng.seed
+  end
+
+  # splitmix64's published output for seed 0, which is what the state is
+  # stretched through.  A transcription slip in the seeder would show here
+  # and nowhere else -- every later draw would still be self-consistent.
+  def test_seeding_matches_the_published_splitmix64_vector
+    rng = CArray::Rng.new(seed: 0)
+    expected = [0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4,
+                0x06C45D188009454F, 0xF88BB8A8724C81EC]
+    got = rng.state.to_a.map { |cell| cell & 0xFFFFFFFFFFFFFFFF }
+    assert_equal expected, got
+  end
+
+  def test_same_seed_repeats_and_different_seeds_differ
+    assert_equal straight(4, 20), straight(4, 20)
+    assert_not_equal straight(4, 20), straight(5, 20)
+  end
+
+  def test_no_seed_draws_one_so_two_generators_differ
+    assert_not_equal CArray::Rng.new.random, CArray::Rng.new.random
+  end
+
+  def test_reset_repeats_the_run
+    rng = CArray::Rng.new(seed: 4)
+    first = Array.new(5) { rng.random }
+    rng.reset
+    assert_equal first, Array.new(5) { rng.random }
+  end
+
+  def test_reset_with_a_seed_starts_a_different_run
+    rng = CArray::Rng.new(seed: 4)
+    rng.reset(7)
+    assert_equal 7, rng.seed
+    assert_equal straight(7, 5), Array.new(5) { rng.random }
+  end
+
+  # A seed wider than a word, and a negative one, are folded rather than
+  # refused -- which is what `&` does and what the seed is.
+  def test_a_wide_or_negative_seed_is_accepted
+    assert_equal CArray::Rng.new(seed: -1).random,
+                 CArray::Rng.new(seed: 0xFFFFFFFFFFFFFFFF).random
+    assert_kind_of Float, CArray::Rng.new(seed: 2**200 + 3).random
+  end
+
+  def test_draws_are_in_the_unit_interval
+    rng = CArray::Rng.new(seed: 11)
+    values = Array.new(2000) { rng.random }
+    assert(values.all? { |v| v >= 0.0 && v < 1.0 })
+  end
+
+  # 53 bits of mantissa: a million draws collide zero times.  A generator
+  # handing back 32 bits would collide about 116 times here.
+  def test_draws_use_the_whole_mantissa
+    rng = CArray::Rng.new(seed: 3)
+    values = Array.new(1_000_000) { rng.random }
+    assert_equal values.size, values.uniq.size
+  end
+
+  # --- random! through the generator ---
+
+  def test_random_bang_fills_from_the_generator
+    rng = CArray::Rng.new(seed: 4)
+    assert_equal straight(4, 10), CArray.float64(10).random!(rng: rng).to_a
+  end
+
+  # The state advances, so two fills are one sequence.  This is what a
+  # kernel picks up.
+  def test_two_fills_continue_one_sequence
+    rng = CArray::Rng.new(seed: 4)
+    first = CArray.float64(4).random!(rng: rng).to_a
+    second = CArray.float64(6).random!(rng: rng).to_a
+    assert_equal straight(4, 10), first + second
+  end
+
+  def test_a_fill_and_a_ruby_draw_continue_one_sequence
+    rng = CArray::Rng.new(seed: 4)
+    filled = CArray.float64(4).random!(rng: rng).to_a
+    assert_equal straight(4, 10), filled + Array.new(6) { rng.random }
+  end
+
+  def test_randomn_and_shuffle_take_the_generator_too
+    a = CArray.float64(100).randomn!(rng: CArray::Rng.new(seed: 5))
+    b = CArray.float64(100).randomn!(rng: CArray::Rng.new(seed: 5))
+    assert_equal a.to_a, b.to_a
+
+    c = CArray.int32(50).seq.shuffle(rng: CArray::Rng.new(seed: 5))
+    d = CArray.int32(50).seq.shuffle(rng: CArray::Rng.new(seed: 5))
+    assert_equal c.to_a, d.to_a
+    assert_equal (0...50).to_a, c.to_a.sort
+  end
+
+  def test_a_bounded_integer_fill_stays_in_range
+    rng = CArray::Rng.new(seed: 5)
+    values = CArray.int32(5000).random!(1..6, rng: rng).to_a
+    assert(values.all? { |v| v >= 1 && v <= 6 })
+    assert_equal [1, 2, 3, 4, 5, 6], values.uniq.sort
+  end
+
+  def test_an_unknown_generator_is_refused
+    assert_raise(ArgumentError) { CArray::Rng.new(:mersenne) }
+  end
+
+  # #bits is the generator's raw word, which is what the published sequences
+  # are given in.  The state is a plain array, so it can be set to the one
+  # those sequences start from rather than reached through a seed.
+  def test_bits_match_the_published_xoshiro_sequence
+    rng = CArray::Rng.new(seed: 1)
+    rng.state[] = [1, 2, 3, 4]
+    expected = [41943041, 58720359, 3588806011781223,
+                3591011842654386, 9228616714210784205]
+    assert_equal expected, Array.new(5) { rng.bits }
+  end
+
+  # And #rand is that word's top 53 bits, so the two are one draw seen twice
+  # rather than two sequences.
+  def test_rand_is_the_top_bits_of_the_same_word
+    a = CArray::Rng.new(seed: 4)
+    b = CArray::Rng.new(seed: 4)
+    assert_equal (b.bits >> 11) * 2.0**-53, a.random
+  end
+
+  # --- randomn ---
+
+  # One normal is two draws, always.  The classical Box-Muller gives two
+  # normals for two uniforms and this keeps one: the spare would have to
+  # live in the state between calls, and a fill and a kernel drawing
+  # afterwards would then have a second thing to keep in step.
+  def test_randomn_costs_exactly_two_draws
+    counted = CArray::Rng.new(seed: 4)
+    counted.randomn
+    after_one_normal = counted.random
+
+    uniform = CArray::Rng.new(seed: 4)
+    2.times { uniform.random }
+    assert_equal uniform.random, after_one_normal
+  end
+
+  def test_randomn_bang_is_that_draw_once_per_cell
+    filled = CArray.float64(7).randomn!(rng: CArray::Rng.new(seed: 4))
+    reference = CArray::Rng.new(seed: 4)
+    assert_equal Array.new(7) { reference.randomn }, filled.to_a
+  end
+
+  # Which is what makes two fills one sequence -- the paired form wastes a
+  # normal on an odd count, and this has no spare to waste.
+  def test_two_randomn_fills_continue_one_sequence
+    rng = CArray::Rng.new(seed: 4)
+    first = CArray.float64(3).randomn!(rng: rng).to_a
+    second = CArray.float64(4).randomn!(rng: rng).to_a
+    whole = CArray.float64(7).randomn!(rng: CArray::Rng.new(seed: 4))
+    assert_equal whole.to_a, first + second
+  end
+
+  def test_randomn_is_standard_normal
+    rng = CArray::Rng.new(seed: 1)
+    values = CArray.float64(200_000).randomn!(rng: rng).to_a
+    mean = values.sum / values.size
+    variance = values.sum { |v| (v - mean) ** 2 } / values.size
+    assert_in_delta 0.0, mean, 0.02
+    assert_in_delta 1.0, variance, 0.02
+  end
+
+  # A Ruby Random keeps the paired form: nothing there draws one at a time,
+  # so there is no second caller to agree with.
+  def test_a_ruby_random_still_fills_in_pairs
+    a = CArray.float64(50).randomn!(rng: Random.new(42))
+    b = CArray.float64(50).randomn!(rng: Random.new(42))
+    assert_equal a.to_a, b.to_a
+  end
+
+  # --- the source that is handed out ---
+
+  def test_the_source_is_the_file_the_extension_compiled
+    text = CArray::Rng::SOURCE.fetch(:xoshiro256pp)
+    assert_equal File.read(CArray::Rng::SOURCE_FILES[:xoshiro256pp]), text
+    CArray::Rng::DRAW_FUNCTIONS.fetch(:xoshiro256pp).each_value do |symbol|
+      assert(text.include?(symbol), "#{symbol} is not in the text handed out")
+    end
+
+  end
+
+  # It has to be pasteable into someone else's translation unit: no include
+  # guard (which would silence a second paste), no directives, and nothing
+  # from a header beyond <stdint.h>.
+  def test_the_source_is_pasteable
+    text = CArray::Rng::SOURCE.fetch(:xoshiro256pp)
+    directives = text.lines.grep(/^\s*#/)
+    assert_equal [], directives, "the source carries preprocessor directives"
+    assert(text.include?("static inline"))
+  end
+
+end

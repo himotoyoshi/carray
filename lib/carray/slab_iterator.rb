@@ -95,18 +95,63 @@ class CASlabIterator < CAIterator
   # the map / reduce block surface, these are mask-aware: they route through the
   # core reduction, which handles masked sources.)
 
-  # @overload sum
-  #   Per-slab sum, delegating to `reference.sum(axis: slab_axes)`.
-  #   @return [CArray] one value per slab (shape = self.dim minus the slab axes)
-  # @overload accumulate
+  # Each reduction below delegates to `reference.<op>(axis: slab_axes)`, so it
+  # inherits the core data type, mask, empty / all-masked and epsilon-close
+  # contracts unchanged.  See {CAIterator} for what each one computes.
+  #
+  # @!method sum
+  #   Per-slab sum.
+  #   @return [CArray] one value per slab (shape = {#shape}).
+  # @!method accumulate
   #   Per-slab sum kept in the source's own data type, wrapping at its width,
   #   as the core `accumulate` does -- `sum` answers in the type the core
   #   promotes to (float64 for integers).
   #   @return [CArray] one value per slab
-  # The rest are analogous: prod / mean / min / max, sample and population
-  # variance / stddev, all / any, fused minmax ([min, max] pair), the axis-local
-  # position min_index / max_index (index within the slab axes), and the flat
-  # source address min_addr / max_addr (which source cell holds the extremum).
+  # @!method prod
+  #   Per-slab product.
+  #   @return [CArray] one value per slab
+  # @!method mean
+  #   Per-slab arithmetic mean.
+  #   @return [CArray] one value per slab
+  # @!method min
+  #   Per-slab minimum.
+  #   @return [CArray] one value per slab
+  # @!method max
+  #   Per-slab maximum.
+  #   @return [CArray] one value per slab
+  # @!method variance
+  #   Per-slab sample variance (divisor `n - 1`).
+  #   @return [CArray] one value per slab
+  # @!method stddev
+  #   Per-slab sample standard deviation (divisor `n - 1`).
+  #   @return [CArray] one value per slab
+  # @!method variancep
+  #   Per-slab population variance (divisor `n`).
+  #   @return [CArray] one value per slab
+  # @!method stddevp
+  #   Per-slab population standard deviation (divisor `n`).
+  #   @return [CArray] one value per slab
+  # @!method all
+  #   Whether every cell of each slab is true.
+  #   @return [CArray] `:boolean`, one value per slab
+  # @!method any
+  #   Whether any cell of each slab is true.
+  #   @return [CArray] `:boolean`, one value per slab
+  # @!method minmax
+  #   Per-slab minimum and maximum, found in one pass.
+  #   @return [Array<CArray>] the pair `[min, max]`
+  # @!method min_index
+  #   Per-slab position of the minimum, local to the slab axes.
+  #   @return [CArray] one index per slab
+  # @!method max_index
+  #   Per-slab position of the maximum, local to the slab axes.
+  #   @return [CArray] one index per slab
+  # @!method min_addr
+  #   Per-slab flat source address of the minimum -- which source cell holds it.
+  #   @return [CArray] one flat address per slab
+  # @!method max_addr
+  #   Per-slab flat source address of the maximum.
+  #   @return [CArray] one flat address per slab
   [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp, :minmax, :min_index, :max_index,
    :min_addr, :max_addr].each do |op|
@@ -260,19 +305,19 @@ class CASlabIterator < CAIterator
   # multi-axis running accumulation is ambiguous), so a multi-axis slab raises --
   # scan one axis at a time, like the order surface.
 
-  # @overload cumsum
+  # @!method cumsum
   #   Per-slab inclusive running sum (float64), reference-shaped.
   #   @return [CArray]
-  # @overload cumprod
+  # @!method cumprod
   #   Per-slab inclusive running product (float64), reference-shaped.
   #   @return [CArray]
-  # @overload cummax
+  # @!method cummax
   #   Per-slab inclusive running maximum (reference data type), reference-shaped.
   #   @return [CArray]
-  # @overload cummin
+  # @!method cummin
   #   Per-slab inclusive running minimum (reference data type), reference-shaped.
   #   @return [CArray]
-  # @overload cumcount
+  # @!method cumcount
   #   Per-slab running count of present cells (int64), reference-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|

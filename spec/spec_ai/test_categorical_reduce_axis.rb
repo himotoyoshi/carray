@@ -150,39 +150,38 @@ module CategoricalReduceAxisRef
 
   # Broadcast codes CArray to `h_shape`, treating `axis` as the reduce direction.
   # Returns a fresh CArray of same dtype as codes, shape == h_shape. Resolves the
-  # three supported cases (§2.2 of PROPOSAL rev2):
-  #   case A       : codes.ndim == 1 and codes.shape == [h_shape[axis]]
-  #   case B       : codes.ndim == h_shape.size and codes.shape == h_shape
-  #   band-only    : codes.ndim == h_shape.size - 1 and codes.shape == h_shape without axis
+  # three supported cases:
+  #   case A       : codes.shape == [h_shape[axis]]
+  #   case B       : codes.shape == h_shape
+  #   band-only    : codes.shape == h_shape without axis
   # Preserves the codes mask under broadcast.
   def broadcast_codes(codes, h_shape, axis)
     ndim = h_shape.size
     out  = CArray.new(codes.data_type, h_shape)
     out.mask = 0 if codes.has_mask?
-    case codes.ndim
-    when 1
-      unless codes.shape == [h_shape[axis]]
-        raise ArgumentError, "codes shape #{codes.shape} does not match case A"
-      end
+    band_shape = h_shape.dup; band_shape.delete_at(axis)
+    # Chosen by shape, not by rank -- the same rule the implementation follows,
+    # and for the same reason: at ndim 2 the case A shape and the band-only
+    # shape are both rank 1, so a rank dispatch takes case A every time and
+    # band-only is unreachable. This reference carried that dispatch too, and
+    # every band-only case here used a 3-D source, so the oracle was blind to
+    # it in exactly the way the implementation was.
+    case
+    when codes.shape == [h_shape[axis]]                       # case A
       iter_fiber_coords(h_shape) do |full_ix|
         out[*full_ix] = codes[full_ix[axis]]
       end
-    when ndim
-      unless codes.shape == h_shape
-        raise ArgumentError, "codes shape #{codes.shape} != h shape #{h_shape} (case B needs exact match)"
-      end
+    when codes.shape == h_shape                               # case B
       out[] = codes
-    when ndim - 1
-      band_shape = h_shape.dup; band_shape.delete_at(axis)
-      unless codes.shape == band_shape
-        raise ArgumentError, "codes shape #{codes.shape} != h shape without axis #{band_shape}"
-      end
+    when codes.shape == band_shape                            # band-only
       iter_fiber_coords(h_shape) do |full_ix|
         band_ix = full_ix.dup; band_ix.delete_at(axis)
         out[*full_ix] = codes[*band_ix]
       end
     else
-      raise ArgumentError, "codes.ndim=#{codes.ndim} not in {1, #{ndim-1}, #{ndim}}"
+      raise ArgumentError,
+            "codes shape #{codes.shape} fits none of [#{h_shape[axis]}] (case A), " \
+            "#{h_shape} (case B), #{band_shape} (band-only)"
     end
     out
   end
@@ -191,7 +190,7 @@ module CategoricalReduceAxisRef
   # each output cell (K × band-coord), scans the reduce-axis fiber, accumulates
   # into out[c, band_coord]. Value dtype = h.data_type (like existing #sum).
   #
-  # Mask contract per PROPOSAL §2.4:
+  # Mask contract:
   #   - codes mask on cell → that cell contributes to no group (excluded)
   #   - value mask on cell → that cell not counted (skipped)
   #   - empty group cell → sum identity 0 (unmasked; ERI contract, no UNDEF for sum)
@@ -537,17 +536,46 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert err.message =~ /not implemented/i
   end
 
-  def test_moments_cache_hit_for_same_axis
-    # sum + mean + min + max at the same axis should share the moments cache
-    # (invisible for correctness; visible if we peek at internals).
-    h, cat = h_and_cat_case_B_with_gaps
+  # Replaces an earlier pin that asserted sum / mean / min / max shared a
+  # memoised moments hash per axis. They did, and the rest of the axis:
+  # family -- prod, the variance family, wsum / wmean -- did not: half the
+  # family answered about the values as they were when first asked and half
+  # about the values as they are. One iterator could report a mean of 2.0
+  # beside a variance of 4704.5 for the same cell. The memo went; the whole
+  # family reads the source when asked. Reading four members off one
+  # iterator now costs four kernel runs instead of one, which is the price.
+
+  def test_the_axis_family_answers_about_the_values_as_they_are
+    h = CA_DOUBLE([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
+    cat = CA_INT32([0, 0, 1, 1]).categorize
     grp = h.group_by_category(cat)
-    grp.sum(axis: 0)
-    cache1 = grp.instance_variable_get(:@axis_moments_cache)
+    members = [:sum, :mean, :min, :max, :count, :prod, :variance]
+
+    members.each { |op| grp.public_send(op, axis: 0) }   # fill anything cacheable
+    h[0, 0] = 100.0
+
+    fresh = h.group_by_category(cat)
+    members.each do |op|
+      assert_equal(fresh.public_send(op, axis: 0).to_a,
+                   grp.public_send(op, axis: 0).to_a,
+                   "#{op}(axis: 0) after a write through the source")
+    end
+  end
+
+  def test_the_axis_family_is_internally_consistent_after_a_write
+    h = CA_DOUBLE([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
+    grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
     grp.mean(axis: 0)
-    cache2 = grp.instance_variable_get(:@axis_moments_cache)
-    # Same object identity for axis 0 entry (not rebuilt)
-    assert_equal cache1[0].object_id, cache2[0].object_id
+    grp.variance(axis: 0)
+    h[0, 0] = 100.0
+
+    # a variance is the mean of the squared deviations from that same mean;
+    # if the two read different data the identity does not hold
+    mean = grp.mean(axis: 0)[0, 0]
+    var  = grp.variance(axis: 0)[0, 0]
+    members = [100.0, 3.0]
+    assert_in_delta(members.sum / 2, mean, 1e-9)
+    assert_in_delta(members.map { |v| (v - mean)**2 }.sum / (members.size - 1), var, 1e-9)
   end
 
   def test_axis_case_A_parity_family
@@ -713,5 +741,92 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
       diff = (a - b).abs.max
       assert diff < tol, "max abs diff #{diff} > #{tol}"
     end
+  end
+  # ---- counting does not look at what is being counted ----------------------
+
+  def test_count_along_an_axis_works_for_any_payload
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    rows = [[1, 2], [3, 4], [5, 6], [7, 8]]
+    [CA_OBJECT, CA_CMPLX128, CA_BOOLEAN, CA_INT32, CA_FLOAT64].each do |dt|
+      h = CArray.new(dt, [4, 2]) { |i, j| dt == CA_BOOLEAN ? rows[i][j] % 2 : rows[i][j] }
+      got = h.group_by_category(cat).count(axis: 0)
+      assert_equal([[2, 2], [2, 2]], got.to_a, CArray.data_type_name(dt))
+      assert_equal(CA_INT64, got.data_type, CArray.data_type_name(dt))
+    end
+  end
+
+  def test_count_along_an_axis_still_counts_present_cells_only
+    cat = CA_INT32([0, 0, 1, 1]).categorize
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    h[1, 1] = UNDEF
+    assert_equal([[2, 1], [2, 2]], h.group_by_category(cat).count_not_masked(axis: 0).to_a)
+
+    # and an object payload, where the old route refused before it could look
+    o = CArray.object(4, 2) { |i, j| i * 2 + j }
+    o[1, 1] = UNDEF
+    assert_equal([[2, 1], [2, 2]], o.group_by_category(cat).count_not_masked(axis: 0).to_a)
+  end
+
+  def test_a_masked_classifier_cell_belongs_to_no_group_when_counting
+    codes = CArray.uint8(4) { |i| i < 2 ? 0 : 1 }
+    codes[1] = UNDEF
+    cat = CACategorical.from_codes(codes, ["a", "b"])
+    h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
+    assert_equal([[1, 1], [2, 2]], h.group_by_category(cat).count(axis: 0).to_a)
+  end
+  # ---- band-only is reachable at every rank --------------------------------
+  #
+  # The three accepted classifier shapes were told apart by rank. For a 2-D
+  # source the case A shape and the band-only shape are both rank 1, so case A
+  # was taken every time and band-only could not be reached -- while the
+  # refusal went on to list the very shape it had just refused among the ones
+  # it accepts.
+
+  def test_band_only_works_on_a_two_dimensional_source
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])   # [4, 3]
+    cat = CA_INT32([0, 1, 1]).categorize                             # band = [3]
+    r = h.group_by_category(cat).sum(axis: 0)
+    assert_equal([2, 3], r.shape)
+    # column 0 is group "a"; columns 1 and 2 are group "b"
+    assert_equal([[22.0, 0.0, 0.0], [0.0, 26.0, 30.0]], r.to_a)
+  end
+
+  def test_case_a_wins_when_both_shapes_fit
+    # a square source makes case A and band-only both fit; classifying along
+    # the reduce axis is the reading that holds at every rank, so it wins
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    cat = CA_INT32([0, 0, 1]).categorize
+    assert_equal([[5.0, 7.0, 9.0], [7.0, 8.0, 9.0]],
+                 h.group_by_category(cat).sum(axis: 0).to_a)
+  end
+
+  def test_the_refusal_does_not_list_the_shape_it_is_refusing
+    h = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+    e = assert_raise(ArgumentError) {
+      h.group_by_category(CA_INT32([0, 1]).categorize).mean(axis: 0)
+    }
+    assert_match(/cat\.shape=\[2\]/, e.message)
+    # and it does not claim the caller asked for sum when they asked for mean
+    assert_not_match(/\.sum\(/, e.message)
+  end
+  # ---- the oracle covers band-only at rank 2 as well -----------------------
+  #
+  # Every band-only case above uses a 3-D source. At rank 2 the case A shape
+  # and the band-only shape are both rank 1, which is the pair the dispatch has
+  # to tell apart by shape; checking the kernel against the reference there is
+  # what makes this file able to catch a regression to the rank rule.
+
+  def test_band_only_at_rank_two_matches_the_reference
+    h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])   # [4, 3]
+    cat = CA_INT32([0, 1, 1]).categorize                               # band = [3]
+    assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
+                 h.group_by_category(cat).sum(axis: 0).to_a)
+  end
+
+  def test_case_a_at_rank_two_still_matches_the_reference
+    h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+    cat = CA_INT32([0, 0, 1, 1]).categorize                            # [4]
+    assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
+                 h.group_by_category(cat).sum(axis: 0).to_a)
   end
 end

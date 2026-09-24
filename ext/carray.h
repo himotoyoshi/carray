@@ -922,7 +922,6 @@ extern const rb_data_type_t careduce_data_type;
 extern const rb_data_type_t carefer_data_type;
 extern const rb_data_type_t caselect_data_type;
 extern const rb_data_type_t cashift_data_type;
-extern const rb_data_type_t caunboundrepeat_data_type;
 extern const rb_data_type_t cawindow_data_type;
 
 extern const rb_data_type_t carray_mask_data_type;
@@ -933,7 +932,6 @@ extern const rb_data_type_t careduce_mask_data_type;
 extern const rb_data_type_t carefer_mask_data_type;
 extern const rb_data_type_t caselect_mask_data_type;
 extern const rb_data_type_t cashift_mask_data_type;
-extern const rb_data_type_t caunboundrepeat_mask_data_type;
 extern const rb_data_type_t cawindow_mask_data_type;
 
 /* -------------------------------------------------------------------- */
@@ -1475,6 +1473,27 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
 #define ca_shape(ca) ((ca)->dim)
 
 /* API : allocate, attach, update, sync, detach */
+
+/* Attach lifecycle contract (R1-R5).  Ownership-based, and NOT transitive.
+   This block is the canonical statement of the contract; the other documents
+   copy it.  guides/devel/04_attach_lifecycle.md discusses it at length.
+
+     R1 (validity)   ca_attach(x) makes x->ptr only valid.  It says nothing
+                     about any other array.
+     R2 (no transit) Attaching a child does not attach its parent.  An
+                     implementation may do so as an internal optimisation;
+                     never rely on it.
+     R3 (necessity)  To touch ca->parent->ptr, call ca_attach(ca->parent)
+                     yourself.
+     R4 (ordering)   Attaching both parent and child: open parent -> child,
+                     close child -> parent, sync in attach order.  Symmetric
+                     nesting stays correct when a view double-attaches
+                     internally (views carry an attach refcount; entities do
+                     not).
+     R5 (traffic)    Attach hands you a buffer, not a live array.  Use x->ptr;
+                     a view derived from x composes past the buffer to the
+                     root.
+*/
 
 void    ca_allocate (void *ap);
 void    ca_attach (void *ca);

@@ -22,28 +22,138 @@
 #include "ca_for_buffer.h"
 #include <string.h>
 
+/* "[2, 3]" for an operand's shape. */
+static VALUE
+ca_sweep_shape_str (CArray *ca)
+{
+  volatile VALUE s = rb_str_new_cstr("[");
+  int k;
+  for (k = 0; k < ca->ndim; k++) {
+    if (k > 0) rb_str_cat_cstr(s, ", ");
+    rb_str_catf(s, "%lld", (long long) ca->dim[k]);
+  }
+  rb_str_cat_cstr(s, "]");
+  return s;
+}
+
 void
-ca_sweep_acquire (ca_sweep_state_t *st)
+ca_sweep_refuse_shapes (CArray *a, CArray *b)
+{
+  volatile VALUE sa = ca_sweep_shape_str(a);
+  volatile VALUE sb = ca_sweep_shape_str(b);
+  rb_raise(rb_eArgError,
+           "shape mismatch between operands (%s and %s); a scalar pairs "
+           "with any array, two arrays only when their shapes agree",
+           StringValueCStr(sa), StringValueCStr(sb));
+}
+
+int
+ca_sweep_same_shape (CArray *a, CArray *b)
+{
+  int k;
+  if (a->ndim != b->ndim) return 0;
+  for (k = 0; k < a->ndim; k++) {
+    if (a->dim[k] != b->dim[k]) return 0;
+  }
+  return 1;
+}
+
+/* Pair the operands: a scalar walks with stride 0, every other operand
+ * must have the shape of the first non-scalar one, which is returned (NULL
+ * when all operands are scalars).  Sets stride[] and n_kernel.  Allocates
+ * nothing, so it runs before any operand is acquired. */
+static CArray *
+ca_sweep_pair_operands (ca_sweep_state_t *st)
+{
+  CArray *donor = NULL;
+  int k_op;
+  st->n_kernel = 1;
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    CArray *ca = st->cx[k_op];
+    if (ca_is_scalar(ca)) {
+      st->stride[k_op] = 0;
+      continue;
+    }
+    st->stride[k_op] = ca->bytes;
+    if (!donor) {
+      donor        = ca;
+      st->n_kernel = ca->elements;
+    } else if (!ca_sweep_same_shape(donor, ca)) {
+      ca_sweep_refuse_shapes(donor, ca);
+    }
+  }
+  return donor;
+}
+
+/* Non-zero when any INPUT operand carries a mask.  Asks, allocates
+ * nothing. */
+static int
+ca_sweep_any_input_mask (ca_sweep_state_t *st)
 {
   int k_op;
-  int any_input_mask = 0;
-
-  if ((int) strlen(st->fsync) != st->n_ops) {
-    rb_raise(rb_eRuntimeError,
-             "[BUG] invalid length of fsync arg in %s (expected %d)",
-             st->src_label ? st->src_label : "ca_sweep_acquire",
-             st->n_ops);
-  }
-
   for (k_op = 0; k_op < st->n_ops; k_op++) {
-    st->base[k_op]      = NULL;
-    st->owned_buf[k_op] = NULL;
-    st->attached[k_op]  = 0;
+    if (st->fsync[k_op] == '0' && ca_has_mask(st->cx[k_op])) return 1;
   }
-  st->m0       = NULL;
-  st->n_kernel = 1;
-  /* CAREFUL: do not reset st->no_mask here — caller sets it before
-   * acquire and the NO_MASK guard below consumes it. */
+  return 0;
+}
+
+NORETURN(static void ca_sweep_refuse_masked_input (ca_sweep_state_t *st,
+                                                  const char *fallback));
+
+static void
+ca_sweep_refuse_masked_input (ca_sweep_state_t *st, const char *fallback)
+{
+  rb_raise(rb_eRuntimeError,
+           "%s: masked INPUT not allowed in NO_MASK form "
+           "(use the *_MASKED form to handle masked cells explicitly)",
+           st->src_label ? st->src_label : fallback);
+}
+
+/* Give back everything acquire has taken so far, without syncing: detach
+ * attached operands, free owned scratch (xmalloc on the whole-buffer path,
+ * arena on the chunked one) and the mask buffers.  Called when a read
+ * raises part way through, so that the raise leaves nothing attached or
+ * allocated behind it. */
+static void
+ca_sweep_abort (ca_sweep_state_t *st, int chunked)
+{
+  int k_op;
+  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
+    if (st->attached[k_op]) {
+      st->attached[k_op] = 0;
+      ca_detach(st->cx[k_op]);
+    } else if (st->owned_buf[k_op]) {
+      if (chunked) ca_lazy_arena_release(st->owned_buf[k_op]);
+      else         xfree(st->owned_buf[k_op]);
+    }
+    st->owned_buf[k_op] = NULL;
+  }
+  if (st->m0) {
+    if (chunked) ca_lazy_arena_release(st->m0);
+    else         xfree(st->m0);
+    st->m0 = NULL;
+  }
+  if (chunked && st->mask_scratch) {
+    ca_lazy_arena_release(st->mask_scratch);
+    st->mask_scratch = NULL;
+  }
+}
+
+typedef struct {
+  ca_sweep_state_t *st;
+  int               any_input_mask;
+  boolean8_t       *ms;          /* per-operand mask staging, whole path */
+} ca_sweep_acquire_ctx_t;
+
+/* The part of acquire that takes resources and reads operands, and so can
+ * raise holding them.  Runs under rb_protect; every buffer is recorded in
+ * the state (or the ctx) before the read that may raise. */
+static VALUE
+ca_sweep_acquire_body (VALUE arg)
+{
+  ca_sweep_acquire_ctx_t *ctx = (ca_sweep_acquire_ctx_t *) arg;
+  ca_sweep_state_t *st = ctx->st;
+  int k_op;
 
   /* Per-operand acquire:
    *   OUTPUT (fsync == '1')       -> ca_attach + base = ca->ptr
@@ -53,14 +163,10 @@ ca_sweep_acquire (ca_sweep_state_t *st)
    * copy carries the values into the kernel. */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
-    if (st->fsync[k_op] == '1') {
+    if (st->fsync[k_op] == '1' || ca_attach_is_alias(ca)) {
       ca_attach(ca);
-      st->base[k_op]     = (char *) ca->ptr;
       st->attached[k_op] = 1;
-    } else if (ca_attach_is_alias(ca)) {
-      ca_attach(ca);
       st->base[k_op]     = (char *) ca->ptr;
-      st->attached[k_op] = 1;
     } else {
       ca_size_t bytes_total = ca->elements * ca->bytes;
       st->owned_buf[k_op] = xmalloc(bytes_total);
@@ -69,36 +175,9 @@ ca_sweep_acquire (ca_sweep_state_t *st)
     }
   }
 
-  /* compute n_kernel (= broadcast shape) and per-cell strides */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    CArray *ca = st->cx[k_op];
-    if (ca_is_scalar(ca)) {
-      st->stride[k_op] = 0;
-    } else {
-      st->stride[k_op] = ca->bytes;
-      if (st->n_kernel == 1) {
-        st->n_kernel = ca->elements;
-      } else if (ca->elements != st->n_kernel) {
-        rb_raise(rb_eRuntimeError, "data size mismatch in operation");
-      }
-    }
-  }
-
   /* iter mask m0 = OR of INPUT operand masks, gathered via ca_xfer_all
      so no operand mask attach happens.  Stays NULL if no INPUT masks. */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    if (st->fsync[k_op] == '0' && ca_has_mask(st->cx[k_op])) {
-      any_input_mask = 1;
-      break;
-    }
-  }
-  if (any_input_mask && st->no_mask) {
-    rb_raise(rb_eRuntimeError,
-             "%s: masked INPUT not allowed in NO_MASK form "
-             "(use the *_MASKED form to handle masked cells explicitly)",
-             st->src_label ? st->src_label : "ca_sweep_acquire");
-  }
-  if (any_input_mask) {
+  if (ctx->any_input_mask) {
     st->m0 = xmalloc(st->n_kernel);
     memset(st->m0, 0, st->n_kernel);
     for (k_op = 0; k_op < st->n_ops; k_op++) {
@@ -111,11 +190,10 @@ ca_sweep_acquire (ca_sweep_state_t *st)
         ca_xfer_all(ca->mask, &bit, CA_XFER_GET);
         if (bit) memset(st->m0, 1, st->n_kernel);
       } else {
-        boolean8_t *ms = xmalloc(st->n_kernel);
         ca_size_t j;
-        ca_xfer_all(ca->mask, ms, CA_XFER_GET);
-        for (j = 0; j < st->n_kernel; j++) st->m0[j] |= ms[j];
-        xfree(ms);
+        if (!ctx->ms) ctx->ms = xmalloc(st->n_kernel);
+        ca_xfer_all(ca->mask, ctx->ms, CA_XFER_GET);
+        for (j = 0; j < st->n_kernel; j++) st->m0[j] |= ctx->ms[j];
       }
     }
   }
@@ -131,6 +209,75 @@ ca_sweep_acquire (ca_sweep_state_t *st)
       memcpy(ca->mask->ptr, st->m0, st->n_kernel);
     }
   }
+  return Qnil;
+}
+
+void
+ca_sweep_acquire (ca_sweep_state_t *st)
+{
+  ca_sweep_acquire_ctx_t ctx;
+  int k_op;
+  int tag = 0;
+
+  if ((int) strlen(st->fsync) != st->n_ops) {
+    rb_raise(rb_eRuntimeError,
+             "[BUG] invalid length of fsync arg in %s (expected %d)",
+             st->src_label ? st->src_label : "ca_sweep_acquire",
+             st->n_ops);
+  }
+
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    st->base[k_op]      = NULL;
+    st->owned_buf[k_op] = NULL;
+    st->attached[k_op]  = 0;
+  }
+  st->m0       = NULL;
+  /* CAREFUL: do not reset st->no_mask here — caller sets it before
+   * acquire and the NO_MASK guard below consumes it. */
+
+  /* Refusals come first, while nothing is held. */
+  ca_sweep_pair_operands(st);
+  ctx.st             = st;
+  ctx.ms             = NULL;
+  ctx.any_input_mask = ca_sweep_any_input_mask(st);
+  if (ctx.any_input_mask && st->no_mask) {
+    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire");
+  }
+
+  rb_protect(ca_sweep_acquire_body, (VALUE) &ctx, &tag);
+  if (ctx.ms) xfree(ctx.ms);
+  if (tag) {
+    ca_sweep_abort(st, 0);
+    rb_jump_tag(tag);
+  }
+}
+
+void
+ca_sweep_run (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(walk, arg, &tag);
+  if (tag) {
+    ca_sweep_abort(st, 0);
+    rb_jump_tag(tag);
+  }
+  ca_sweep_release(st);
+}
+
+void
+ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(walk, arg, &tag);
+  if (tag) {
+    /* a raise inside ca_sweep_next_chunk has already given back */
+    if (st->chunked_state != 3) {
+      ca_sweep_abort(st, 1);
+      st->chunked_state = 3;
+    }
+    rb_jump_tag(tag);
+  }
+  ca_sweep_release_chunked(st);
 }
 
 void
@@ -158,65 +305,12 @@ ca_sweep_release (ca_sweep_state_t *st)
 
 /* ===== Chunked path implementation ===== */
 
-void
-ca_sweep_acquire_chunked (ca_sweep_state_t *st)
+static VALUE
+ca_sweep_acquire_chunked_body (VALUE arg)
 {
+  ca_sweep_acquire_ctx_t *ctx = (ca_sweep_acquire_ctx_t *) arg;
+  ca_sweep_state_t *st = ctx->st;
   int k_op;
-  int any_input_mask = 0;
-  CArray *shape_donor = NULL;
-
-  if ((int) strlen(st->fsync) != st->n_ops) {
-    rb_raise(rb_eRuntimeError,
-             "[BUG] invalid length of fsync arg in %s (expected %d)",
-             st->src_label ? st->src_label : "ca_sweep_acquire_chunked",
-             st->n_ops);
-  }
-
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    st->base[k_op]      = NULL;
-    st->base_orig[k_op] = NULL;
-    st->owned_buf[k_op] = NULL;
-    st->attached[k_op]  = 0;
-  }
-  st->m0            = NULL;
-  st->mask_scratch  = NULL;
-  st->n_kernel      = 1;
-  st->chunk_off     = 0;
-  st->chunk_n       = 0;
-  st->chunk_n_max   = 0;
-  st->inner         = 1;
-  st->chunked_state = 0;
-
-  /* compute broadcast shape (n_kernel + strides) from operand shapes.
-   * scalar operands collapse to stride 0; non-scalar operands must agree
-   * on element count.  shape_donor is the first non-scalar operand and
-   * defines the chunking inner-axis size. */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    CArray *ca = st->cx[k_op];
-    if (ca_is_scalar(ca)) {
-      st->stride[k_op] = 0;
-    } else {
-      st->stride[k_op] = ca->bytes;
-      if (st->n_kernel == 1) {
-        st->n_kernel = ca->elements;
-        shape_donor  = ca;
-      } else if (ca->elements != st->n_kernel) {
-        rb_raise(rb_eRuntimeError, "data size mismatch in operation");
-      }
-    }
-  }
-
-  /* chunk-size policy: inner = donor's product of dims[1..]; chunk_n_max
-   * = compute_n on donor->bytes (= type-dependent 32KB target). */
-  if (shape_donor) {
-    st->inner = ca_chunk_inner_size(shape_donor);
-    st->chunk_n_max = ca_chunk_compute_n(st->n_kernel, st->inner,
-                                         shape_donor->bytes);
-  } else {
-    /* all-scalar: single 1-cell chunk */
-    st->inner       = 1;
-    st->chunk_n_max = 1;
-  }
 
   /* per-operand acquire:
    *   OUTPUT (fsync == '1') : ca_attach + base_orig = ca->ptr (legitimate)
@@ -226,14 +320,11 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
    */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
-    if (st->fsync[k_op] == '1') {
+    if (st->fsync[k_op] == '1' || ca_is_scalar(ca) ||
+        ca_attach_is_alias(ca)) {
       ca_attach(ca);
-      st->base_orig[k_op] = (char *) ca->ptr;
       st->attached[k_op]  = 1;
-    } else if (ca_is_scalar(ca) || ca_attach_is_alias(ca)) {
-      ca_attach(ca);
       st->base_orig[k_op] = (char *) ca->ptr;
-      st->attached[k_op]  = 1;
     } else {
       /* non-alias non-scalar INPUT: arena scratch sized for chunk_n_max */
       ca_size_t scratch_bytes = st->chunk_n_max * ca->bytes;
@@ -251,19 +342,7 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
    * scaling with the operand, which is the thing this path exists to avoid:
    * at 1 byte per cell it is an eighth of an f64 operand, but an eighth of
    * unbounded is still unbounded. */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    if (st->fsync[k_op] == '0' && ca_has_mask(st->cx[k_op])) {
-      any_input_mask = 1;
-      break;
-    }
-  }
-  if (any_input_mask && st->no_mask) {
-    rb_raise(rb_eRuntimeError,
-             "%s: masked INPUT not allowed in NO_MASK form "
-             "(use the *_MASKED form to handle masked cells explicitly)",
-             st->src_label ? st->src_label : "ca_sweep_acquire_chunked");
-  }
-  if (any_input_mask) {
+  if (ctx->any_input_mask) {
     st->m0           = (boolean8_t *) ca_lazy_arena_acquire(st->chunk_n_max);
     st->mask_scratch = (boolean8_t *) ca_lazy_arena_acquire(st->chunk_n_max);
     memset(st->m0, 0, st->chunk_n_max);
@@ -283,6 +362,68 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
    * once more in release), never at acquire.  Author per-cell m_out writes
    * land in m0 during the chunk loop and must be captured after that loop
    * has run, not before it. */
+  return Qnil;
+}
+
+void
+ca_sweep_acquire_chunked (ca_sweep_state_t *st)
+{
+  ca_sweep_acquire_ctx_t ctx;
+  int k_op;
+  int tag = 0;
+  CArray *shape_donor = NULL;
+
+  if ((int) strlen(st->fsync) != st->n_ops) {
+    rb_raise(rb_eRuntimeError,
+             "[BUG] invalid length of fsync arg in %s (expected %d)",
+             st->src_label ? st->src_label : "ca_sweep_acquire_chunked",
+             st->n_ops);
+  }
+
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    st->base[k_op]      = NULL;
+    st->base_orig[k_op] = NULL;
+    st->owned_buf[k_op] = NULL;
+    st->attached[k_op]  = 0;
+  }
+  st->m0            = NULL;
+  st->mask_scratch  = NULL;
+  st->chunk_off     = 0;
+  st->chunk_n       = 0;
+  st->chunk_n_max   = 0;
+  st->inner         = 1;
+  st->chunked_state = 0;
+
+  /* shape_donor is the first non-scalar operand and defines the chunking
+   * inner-axis size. */
+  shape_donor = ca_sweep_pair_operands(st);
+
+  /* chunk-size policy: inner = donor's product of dims[1..]; chunk_n_max
+   * = compute_n on donor->bytes (= type-dependent 32KB target). */
+  if (shape_donor) {
+    st->inner = ca_chunk_inner_size(shape_donor);
+    st->chunk_n_max = ca_chunk_compute_n(st->n_kernel, st->inner,
+                                         shape_donor->bytes);
+  } else {
+    /* all-scalar: single 1-cell chunk */
+    st->inner       = 1;
+    st->chunk_n_max = 1;
+  }
+
+  /* Refusals come first, while nothing is held. */
+  ctx.st             = st;
+  ctx.ms             = NULL;
+  ctx.any_input_mask = ca_sweep_any_input_mask(st);
+  if (ctx.any_input_mask && st->no_mask) {
+    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire_chunked");
+  }
+
+  rb_protect(ca_sweep_acquire_chunked_body, (VALUE) &ctx, &tag);
+  if (tag) {
+    ca_sweep_abort(st, 1);
+    st->chunked_state = 3;
+    rb_jump_tag(tag);
+  }
 }
 
 /* OR one INPUT operand's mask for the current chunk into m0.  Gathered via
@@ -329,11 +470,40 @@ ca_sweep_flush_chunk_mask (ca_sweep_state_t *st)
   }
 }
 
+/* Set up base[] for the chunk at chunk_off / chunk_n: gather each
+   non-alias INPUT into its arena scratch, then the chunk's mask. */
+static VALUE
+ca_sweep_next_chunk_body (VALUE arg)
+{
+  ca_sweep_state_t *st = (ca_sweep_state_t *) arg;
+  ca_size_t off = st->chunk_off;
+  ca_size_t n   = st->chunk_n;
+  int k_op;
+
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    CArray *ca = st->cx[k_op];
+    if (st->stride[k_op] == 0) {
+      /* scalar: stride 0, base is the single-cell ptr (base_orig) */
+      st->base[k_op] = st->base_orig[k_op];
+    } else if (st->base_orig[k_op]) {
+      /* alias INPUT or OUTPUT: walk through ca->ptr by chunk_off */
+      st->base[k_op] = st->base_orig[k_op] + off * st->stride[k_op];
+    } else {
+      /* non-alias INPUT: per-chunk gather into owned_buf (arena) */
+      ca_chunked_gather(ca, off, n, st->owned_buf[k_op]);
+      st->base[k_op] = st->owned_buf[k_op];
+    }
+  }
+
+  if (st->m0) ca_sweep_gather_chunk_mask(st, off, n);
+  return Qnil;
+}
+
 int
 ca_sweep_next_chunk (ca_sweep_state_t *st)
 {
-  int k_op;
   ca_size_t off, n;
+  int tag = 0;
 
   if (st->chunked_state == 0) {
     /* first chunk */
@@ -356,23 +526,15 @@ ca_sweep_next_chunk (ca_sweep_state_t *st)
   if (off + n > st->n_kernel) n = st->n_kernel - off;
   st->chunk_n = n;
 
-  /* set up base[] for the upcoming chunk */
-  for (k_op = 0; k_op < st->n_ops; k_op++) {
-    CArray *ca = st->cx[k_op];
-    if (st->stride[k_op] == 0) {
-      /* scalar: stride 0, base is the single-cell ptr (base_orig) */
-      st->base[k_op] = st->base_orig[k_op];
-    } else if (st->base_orig[k_op]) {
-      /* alias INPUT or OUTPUT: walk through ca->ptr by chunk_off */
-      st->base[k_op] = st->base_orig[k_op] + off * st->stride[k_op];
-    } else {
-      /* non-alias INPUT: per-chunk gather into owned_buf (arena) */
-      ca_chunked_gather(ca, off, n, st->owned_buf[k_op]);
-      st->base[k_op] = st->owned_buf[k_op];
-    }
+  /* The gathers read the operands and so can raise; a raise gives back
+     the walk's resources before it propagates, since the caller's release
+     is never reached. */
+  rb_protect(ca_sweep_next_chunk_body, (VALUE) st, &tag);
+  if (tag) {
+    ca_sweep_abort(st, 1);
+    st->chunked_state = 3;
+    rb_jump_tag(tag);
   }
-
-  if (st->m0) ca_sweep_gather_chunk_mask(st, off, n);
 
   return 1;
 }
@@ -381,6 +543,8 @@ void
 ca_sweep_release_chunked (ca_sweep_state_t *st)
 {
   int k_op;
+  /* a walk that raised has already given everything back */
+  if (st->chunked_state == 3) return;
   /* The final chunk has no next_chunk call to flush it, so it is flushed
    * here.  For INOUT_MASKED forms this is what captures the author's
    * per-cell m_out writes over that last chunk. */

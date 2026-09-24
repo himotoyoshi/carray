@@ -45,14 +45,21 @@ class CAFrame
     @columns   = {}
     @axis_name = axis_name || DEFAULT_AXIS_NAME
     @index     = nil
+    # The row axis name this frame had before set_index promoted a column over
+    # it, so reset_index can put it back.  A frame built with an index never
+    # had one, and neither does a frame derived from an indexed one: both are
+    # born indexed, so there is nothing to restore and the default stands.
+    @axis_name_before_index = nil
 
     n = nil
+    n_from = nil
     columns.each do |name, col|
       key = name.to_s
       ca  = coerce_column(col)
       len = ca.shape[0]
       if n.nil?
-        n = len
+        n      = len
+        n_from = key
       elsif len != n
         raise ArgumentError,
               "column #{key.inspect} has axis-0 length #{len}, expected #{n}"
@@ -67,8 +74,12 @@ class CAFrame
         raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"
       end
       if n && idx.shape[0] != n
+        # Name the column as well as the index: when the index is the frame's
+        # existing one and a column is the new arrival, blaming the index alone
+        # points at the side the caller cannot change.
         raise ArgumentError,
-              "index length #{idx.shape[0]} does not match nrow #{n}"
+              "column #{n_from.inspect} has axis-0 length #{n}, " \
+              "but the index has length #{idx.shape[0]}"
       end
       @index = idx
       @nrow  = idx.shape[0] if n.nil?
@@ -234,9 +245,10 @@ class CAFrame
     end
   end
 
-  # Bind +key+ to +column+, adding the name when it is new.  This is the one
-  # place a column enters an existing frame, so it is where the axis-0 length
-  # invariant is enforced (§12-A).  It is a replacement rather than an edit,
+  # Bind +key+ to +column+, adding the name when it is new.  This is where a
+  # column arriving from outside the frame has its axis-0 length checked
+  # (§12-A); the conversions in verbs.rb rebind +@columns+ directly and rely on
+  # being length-preserving instead.  It is a replacement rather than an edit,
   # which is what sets it apart from the rest: +fill+ / +mask_eq+ /
   # +df[rows] = UNDEF+ write to the shared column and are therefore visible
   # wherever it is held, while this binds the name to a different column and
@@ -307,6 +319,12 @@ class CAFrame
   # value kept, so the row stays identifiable), leaving a later, better-informed
   # pass to re-judge them. Definitely-true rows carry their values through
   # unchanged in both modes.
+  #
+  # The default is a view-frame. +keep_masked: true+ returns a **materialized**
+  # frame instead -- carrying the UNDEF forward means writing it into the
+  # result, which a view cannot do without masking the parent's rows. That holds
+  # whether or not the selector actually carries a masked cell, so the same call
+  # site does not switch between sharing and copying with the data.
   def filter(keep_masked: false)
     mask = yield(self)
     unless mask.is_a?(CArray) && mask.data_type == :boolean
@@ -330,7 +348,18 @@ class CAFrame
     unless idx.ndim == 1
       raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"
     end
+    # Only the name held before the frame had an index: a second set_index must
+    # not overwrite it with the first index's name.
+    @axis_name_before_index = @axis_name if @index.nil?
     @columns.delete(key)
+    if @index
+      # Re-indexing replaces the index, so the one being replaced goes back to
+      # being a column -- the same demotion reset_index performs, in the same
+      # position, which makes set_index over an existing index equivalent to
+      # reset_index followed by set_index.  Dropping it would lose the column it
+      # was made from.
+      @columns = { @axis_name => @index }.merge(@columns)
+    end
     @index     = idx
     @axis_name = key
     @nrow      = idx.shape[0]
@@ -344,7 +373,8 @@ class CAFrame
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)
     @index     = nil
-    @axis_name = DEFAULT_AXIS_NAME
+    @axis_name = @axis_name_before_index || DEFAULT_AXIS_NAME
+    @axis_name_before_index = nil
     self
   end
 
@@ -370,6 +400,17 @@ class CAFrame
   # multi-row, frame-returning path). Positional access is +df[i]+.
   def at(label)
     raise ArgumentError, "at requires an index (set one with set_index)" unless @index
+    # An index may hold a masked cell -- an outer join and align both build one
+    # -- but an undefined label identifies no row, and two undefined labels are
+    # not the same label. The addressing primitives already say this (a masked
+    # key matches nothing, not another masked key), so at says it too rather
+    # than answering through eq(UNDEF), which asks about the mask and not about
+    # the label at all.
+    if UNDEF.equal?(label)
+      raise ArgumentError,
+            "at(UNDEF): an undefined label identifies no row; " \
+            "use filter { |f| f.index.is_masked } for the rows with no label"
+    end
     pos = @index.eq(label).where
     case pos.elements
     when 0
@@ -483,6 +524,19 @@ class CAFrame
   # and index are untouched; the selected cells of every column go to UNDEF.
   # The selector is forwarded to the column indexer, which classifies it.
   private def mask_rows(selector)
+    # Decide before changing anything. A read-only column (a categorical, whose
+    # codes are read-only) refuses the write, and refusing half way through
+    # would leave the frame masked in whichever columns happened to come first.
+    refusing = @columns.find { |_, col| col.read_only? }
+    if refusing
+      raise "can not modify read-only array: column #{refusing[0].inspect} " \
+            "refuses the write, so no column was masked"
+    end
+    # The selector is classified by the column indexer, which is also what
+    # bound-checks it -- so with no column to forward it to, nothing would.
+    # Build the row mask purely to have the frame's own row axis refuse an
+    # out-of-range row, as every other row form does.
+    selected_row_mask(selector) if @columns.empty?
     @columns.each_value do |col|
       col[selector, *([nil] * (col.ndim - 1))] = UNDEF
     end
@@ -540,7 +594,16 @@ class CAFrame
     new_index = splice_index(other, lo, hi)
     @columns  = new_cols
     @index    = new_index
-    @nrow     = @nrow - (hi - lo) + other.nrow
+    # Read the new count off something the frame now holds, rather than
+    # computing it. For every column the pieces welded above are head (lo) +
+    # other's rows + tail (nrow - hi), so the arithmetic and the objects agree
+    # -- except when there is nothing to weld: a frame with no columns and no
+    # index would otherwise come away claiming rows that nothing backs.
+    @nrow = if (witness = new_cols.each_value.first || new_index)
+              witness.shape[0]
+            else
+              0
+            end
     self
   end
 
@@ -609,8 +672,11 @@ class CAFrame
   end
 
   private def select_rows(selector, keep_masked: false)
-    if keep_masked && selector.is_a?(CArray) &&
-       selector.data_type == :boolean && selector.has_mask?
+    if keep_masked && selector.is_a?(CArray) && selector.data_type == :boolean
+      # Not gated on selector.has_mask?: gating there would make the same call
+      # site return a view-frame or a materialized one depending on whether that
+      # run's data happened to produce an undetermined cell (the reason splice
+      # always snapshots -- see CAFrame.md section 3).
       return select_rows_keep_masked(selector)
     end
     cols = {}
@@ -631,7 +697,12 @@ class CAFrame
       g[undet_kept, *tail] = UNDEF
       cols[name] = g
     end
-    new_index = @index ? @index[keep] : nil
+    # The index is copied along with the columns. Its values are carried over
+    # unmasked (an undetermined row keeps its label, as mask_rows leaves the
+    # index alone), but a materialized frame has to be materialized whole: an
+    # aliased index would write through to the parent from a frame whose columns
+    # do not.
+    new_index = @index ? @index[keep].copy : nil
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
   end
 

@@ -256,6 +256,46 @@ class CArray
   TypeSymbol = nil
   # @!visibility private
   DataType   = nil
+
+  # @overload empty(data_type, dim, bytes: nil)
+  #   Returns a new CArray of `data_type` with the shape `dim`, whose
+  #   contents are **undefined**. This is {CArray.new} without the fill:
+  #   the arguments are read the same way, and the cost of zeroing the
+  #   buffer is not paid. Use it when every cell is written before it is
+  #   read; otherwise use `CArray.new`, which zero-fills.
+  #
+  #   `CA_OBJECT` is the exception: its cells are zero-initialised
+  #   anyway, because the garbage collector walks them.
+  #
+  #   @param data_type [Symbol, String, Integer] element type.
+  #   @param dim [Array<Integer>] shape of the new CArray.
+  #   @param bytes [Integer, nil] element width, for `:fixlen` only.
+  #   @return [CArray]
+  #   @raise [ArgumentError] if a block is given -- filling an array is
+  #     what `CArray.new` is for.
+  # @overload empty(*shape)
+  #   (Numo / NumPy compatibility) Returns an uninitialised CArray of
+  #   the given shape. The element type comes from the receiver, so
+  #   `CArray` itself gives `CA_FLOAT64`; see
+  #   {DataTypeExtension#empty}.
+  #   @param shape [Array<Integer>, Array<Array<Integer>>] shape.
+  #   @return [CArray]
+  def self.empty (*args, **options, &block)
+    if block
+      raise ArgumentError,
+            "CArray.empty does not take a block " \
+            "(its contents are left undefined); use CArray.new to fill."
+    end
+    if args.size == 2 and args[1].is_a?(Array)
+      return __empty__(*args, **options)
+    end
+    unless options.empty?
+      raise ArgumentError,
+            "CArray.empty(*shape) takes no options; bytes: belongs to " \
+            "CArray.empty(data_type, dim)"
+    end
+    super(*args)
+  end
 end
 
 class CArray

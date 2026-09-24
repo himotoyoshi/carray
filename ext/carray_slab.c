@@ -460,6 +460,19 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
     }
   }
 
+  /* The slab is a window onto the source when the fiber is contiguous and
+     a copy in the iterator's scratch when it is not, so writing through it
+     landed on one axis and vanished on the next.  Nothing in the surface
+     said which you would get.  Refuse the write on both instead: the block
+     forms that produce values (map_slab, reduce_slab) hand their result
+     back rather than writing into the slab, and an in-place walk belongs
+     to `ca[] = ...` or a C kernel with CA_KERNEL_WRITE. */
+  {
+    CArray *slab;
+    TypedData_Get_Struct(st->slab_view, CArray, &carray_data_type, slab);
+    ca_set_flag(slab, CA_FLAG_READ_ONLY);
+  }
+
   return in_alias;
 }
 

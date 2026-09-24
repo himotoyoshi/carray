@@ -178,8 +178,11 @@ class TestCASourceSubclass < Test::Unit::TestCase
     "copy"               => ->(s) { s.copy },
     "lazy chain"         => ->(s) { (s.lazy * 2).to_ca },
     "mask_eq"            => ->(s) { s.mask_eq(1) },
-    "attach!"            => ->(s) { s.attach! { } },
   }
+
+  # The Ruby attach surface exists only in development builds; the rest of the
+  # table runs either way.
+  PATHS["attach!"] = ->(s) { s.attach! { } } if CArray.method_defined?(:attach!)
 
   def test_the_array_is_cold_at_rest
     assert_false @src.attached?
@@ -231,6 +234,7 @@ class TestCASourceSubclass < Test::Unit::TestCase
   # hold counting an inner attach/detach pair would clear ptr under an
   # outer holder and its sync would fail.
   def test_overlapping_attach_windows
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     assert_equal 78, @src.attach! { @src.attach! { }; @src.sum }
     v = @src[1..2, nil]
     assert_equal [[5, 6, 7, 8], [9, 10, 11, 12]],
@@ -248,6 +252,7 @@ class TestCASourceSubclass < Test::Unit::TestCase
   # piece rather than a cell at a time fills in the slot; either way it is
   # never asked for the cells the caller did not name.
   def test_observed_attach_routing
+    omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
     counters = lambda do |&op|
       @src.reset_counters
       op.call
@@ -299,6 +304,43 @@ class TestCASourceSubclass < Test::Unit::TestCase
       assert_equal ca.entity?, CASmokeSource.entity_p(ca),
                    "disagreement for #{ca.class}"
     end
+  end
+
+  # --- xfer_stride region contract -----------------------------------
+  #
+  # starts / counts / strides all describe the region in the view's own
+  # address space, and `data` holds the selected cells packed row-major --
+  # it is not laid out with strides[].  A source that reads strides[] as the
+  # destination layout is right only for the whole-view request, where the two
+  # readings coincide.  These pin the requests where they do not.
+
+  def region_source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  def test_a_sub_box_read_selects_the_named_cells
+    assert_equal [[1, 2, 3], [5, 6, 7]], region_source[0..1, 0..2].copy.to_a
+  end
+
+  def test_a_sub_sampled_read_steps_by_the_request
+    assert_equal [[1, 3], [5, 7], [9, 11]], region_source[nil, [0, 2, 2]].copy.to_a
+  end
+
+  def test_a_transposed_read_returns_the_transpose
+    assert_equal [[1, 5, 9], [2, 6, 10], [3, 7, 11], [4, 8, 12]],
+                 region_source.transpose.copy.to_a
+  end
+
+  def test_a_sub_box_write_lands_in_the_named_cells
+    src = region_source
+    src[0..1, 0..2] = CA_UINT8([[90, 91, 92], [93, 94, 95]])
+    assert_equal [[90, 91, 92, 4], [93, 94, 95, 8], [9, 10, 11, 12]], src.to_a
+  end
+
+  def test_a_sub_sampled_write_lands_on_the_stepped_cells
+    src = region_source
+    src[nil, [0, 2, 2]] = CA_UINT8([[70, 71], [72, 73], [74, 75]])
+    assert_equal [[70, 2, 71, 4], [72, 6, 73, 8], [74, 10, 75, 12]], src.to_a
   end
 
 end

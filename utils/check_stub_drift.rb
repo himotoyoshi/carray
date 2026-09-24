@@ -23,9 +23,10 @@ TRACKED_CLASSES = %w[
   CA
   CArray CScalar CAWrap CAView CAStride CARefer CABlock CARepeat
   CATranspose CAFarray CAField CASelect CAObject CAReduce CAWindow
-  CAShift CAGrid CAMapping CAFake CABitarray CABitfield
+  CAShift CAGrid CAFake CABitarray CABitfield
   CATile CARoll CAByteSwap
-  CAUnboundRepeat CAStack CAMeld CARecord
+  CAStack CAMeld CARecord
+  CAMonOp CABinOp CATriOp CAMonCmp CABinCmp CALazyMarker
   UndefClass
   CAMath
 ]

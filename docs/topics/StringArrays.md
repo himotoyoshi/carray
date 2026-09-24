@@ -134,11 +134,11 @@ s.gsub("a", "@")
 #       encode force_encoding scrub extract(regexp, repl='\0')
 
 # predicates -> :boolean
-s.start_with?("B")   # => [0, 0, 1]
+s.start_with?("B")   # => [false, false, true]
 s.end_with?("Z")     # also: include?(sub), match?(regexp)
 
 # set membership -> :boolean  (marks EVERY matching cell)
-s.in?("bar", "BAZ")  # => [0, 1, 1]
+s.in?("bar", "BAZ")  # => [false, true, true]
 
 # lengths / positions -> :int      (str_ prefix where a bare name is an array op)
 s.str_len            # per-cell character length   (#length/#size = element count)
@@ -180,18 +180,34 @@ encoding — so it is faithful to sorting the Ruby strings.
 
 ```ruby
 a.sort         # sorted, same Face class  (CAConstString: a no-copy view)
-a.sort_copy    # sorted, standalone       (CAConstString only; owned + compacted)
-a.sort_index   # ascending permutation -> :int
-a.min / a.max  # byte-extremum element (skips masked; nil/UNDEF if all-masked)
+a.sort_copy    # sorted, standalone       (CAConstString: owned + compacted)
+a.sort_index   # per-fiber indices in sorted order -> :int64
+a.sort_addr    # view-flat addresses in sorted order -> :int64
+a.min / a.max  # byte-extremum element (skips masked; UNDEF if all-masked)
 
-ct.search("foo")            # CAConstString: flat index of the first match, or nil
-ct.find_value_index("foo")  #   (native; the (start,end)-pair + buffer storage can't use the kernels)
+a.search("foo")   # flat index of the first match, or nil
+a.count("foo")    # how many cells hold it
+a.bsearch("foo")  # same, on a sorted column, in log time (CAString / CAFixlenString)
 ```
 
-Works on all three Faces for `sort` / `sort_index` / `min` / `max`
-(`CAConstString` and raw fixlen via `memcmp`, `CAString` via `String#<=>`).
-`sort` on `CAConstString` is a view (the `(start,end)` pairs are gathered, bytes never move);
-`sort_copy` gives an owned, compacted column.
+The whole ordering family — `sort` / `sort_copy` / `sort_addr` / `sort_index` /
+`rank_index` / `order` / `min` / `max` / `minmax` / `min_index` / `max_index` /
+`partition_copy` / `partition_index` — works on all three Faces and takes
+`axis:` (`CAConstString` and raw fixlen order by `memcmp`, `CAString` by
+`String#<=>`; within one encoding the two agree). `sort` on `CAConstString` is
+a view (the `(start,end)` pairs are gathered, bytes never move); `sort_copy`
+gives an owned, compacted column.
+
+`search` and `count(v)` work on all three. `bsearch` has one gap:
+
+| | `search` | `count(v)` | `bsearch` |
+|---|---|---|---|
+| `CAString` | ✓ | ✓ | ✓ |
+| `CAFixlenString` | ✓ | ✓ | ✓ |
+| `CAConstString` | ✓ (native) | ✓ (native) | — its storage is byte ranges rather than bytes, so a query cannot be compared against it |
+
+`search_nearest` has no meaning for any of them: nearest needs a distance, and
+strings have none.
 
 ---
 

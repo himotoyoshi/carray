@@ -66,6 +66,7 @@ class TestAxisGroupSurface < Test::Unit::TestCase
         idx[k] += 1; break if idx[k] < shape[k]; idx[k] = 0
       end
     end
+    truthy = lambda { |x| x == true || (x.is_a?(Numeric) && x != 0) }
     reduce = lambda do |vals|
       # ERI: identity-bearing ops return their identity on empty (sum 0, prod 1,
       # count 0, all true, any false); ratios / extrema return nil (masked).
@@ -73,8 +74,10 @@ class TestAxisGroupSurface < Test::Unit::TestCase
       when :sum   then vals.sum(0.0)
       when :prod  then vals.inject(1.0) { |a, b| a * b }
       when :count then vals.size
-      when :all   then vals.all? { |x| x != 0 }
-      when :any   then vals.any? { |x| x != 0 }
+      # a boolean cell reads as Ruby true / false, and `false != 0` is true,
+      # so truth is asked for rather than inferred from inequality with zero
+      when :all   then vals.all? { |x| truthy.call(x) }
+      when :any   then vals.any? { |x| truthy.call(x) }
       when :mean  then vals.empty? ? nil : vals.sum(0.0) / vals.size
       when :min   then vals.empty? ? nil : vals.min.to_f
       when :max   then vals.empty? ? nil : vals.max.to_f
@@ -169,13 +172,32 @@ class TestAxisGroupSurface < Test::Unit::TestCase
     end
   end
 
+  # This asserted that all / any fold a float payload, counting a non-zero cell
+  # as true. They do -- the engine has always counted that way -- but the core
+  # and the other four engines refuse a payload that is not boolean, so the
+  # group was the one member of the family where `data.all` refused and
+  # `data[g].all(axis: :group)` answered. The engine is unchanged; the question
+  # is now asked of the core first, and this pins that.
   def test_boolean_reductions
-    tb = CArray.float64(6, 2, 3) { |i, j, k| (i + j + k).even? ? 0.0 : 1.0 }
+    tb = CArray.boolean(6, 2, 3) { |i, j, k| (i + j + k).odd? }
     [:all, :any].each do |op|
       r = tb[@mon, nil, nil].public_send(op, axis: :group)
       rb = r.to_a.flatten
       rf = ref(tb, [@mon, nil, nil], op).flatten.map { |x| x.nil? ? nil : !!x }
       assert_equal rf, rb, op.to_s
+    end
+  end
+
+  def test_all_and_any_want_a_boolean_payload_as_the_core_does
+    tf = CArray.float64(6, 2, 3) { |i, j, k| (i + j + k).even? ? 0.0 : 1.0 }
+    [:all, :any].each do |op|
+      assert_raise(CArray::DataTypeError, "group #{op} on a float payload") {
+        tf[@mon, nil, nil].public_send(op, axis: :group)
+      }
+      # which is what the core answers for the same payload
+      assert_raise(CArray::DataTypeError, "core #{op} on a float payload") {
+        tf.public_send(op)
+      }
     end
   end
 
@@ -778,5 +800,201 @@ class TestAxisGroupSurface < Test::Unit::TestCase
       assert_equal ref.send(op).is_masked.to_a,
                    g.send(op, axis: :group).is_masked.to_a, "#{op} mask"
     end
+  end
+  # ---- a zero-length group axis -------------------------------------------
+  #
+  # The output shape is [K, *band_dims] whatever the group axes are, so a
+  # zero-length group axis still has cells to fill -- every one of them a group
+  # with no member. It used to fill none of them: the band width was taken as
+  # src.elements / (product of group dims), which is 0/0 here, so the count of
+  # output cells came out as 0 while the array really had K x band of them.
+  # Every finalisation loop ran zero times and the zeroed buffer went back
+  # unmasked, reporting 0.0 as a mean, a min and a variance.
+
+  def test_a_zero_length_group_axis_gives_every_cell_the_empty_group_answer
+    z   = CArray.float64(0, 3)
+    cat = CACategorical.from_codes(CArray.uint8(0), ["a", "b"])
+    g   = z.axis_group(cat, nil)
+
+    identity = { sum: 0.0, prod: 1.0 }
+    identity.each do |op, want|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([want] * 6, r.to_a.flatten, "#{op} is its identity")
+      assert_equal([false], r.is_masked.to_a.flatten.uniq, "#{op} is not masked")
+    end
+
+    # all / any want a boolean payload, so they are asked of a boolean one
+    zb = CArray.boolean(0, 3)
+    gb = zb.axis_group(cat, nil)
+    { all: true, any: false }.each do |op, want|
+      r = zb[gb].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([want] * 6, r.to_a.flatten, "#{op} is its identity")
+    end
+
+    [:count, :count_not_masked].each do |op|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([0] * 6, r.to_a.flatten, "#{op} counts nothing")
+    end
+
+    # no identity to return, so UNDEF -- never a bare 0.0
+    [:mean, :min, :max, :variance, :stddev, :variancep, :stddevp,
+     :min_addr, :max_addr].each do |op|
+      r = z[g].public_send(op, axis: :group)
+      assert_equal([2, 3], r.shape, "#{op} shape")
+      assert_equal([true], r.is_masked.to_a.flatten.uniq, "#{op} is all UNDEF")
+    end
+  end
+
+  def test_a_zero_length_group_axis_answers_as_an_ordinary_empty_group_does
+    # the same answers a group that simply has no member gives, which is the
+    # contract this was measured against
+    z    = CArray.float64(0, 1)
+    zcat = CACategorical.from_codes(CArray.uint8(0), ["a", "b"])
+    v    = CArray.float64(2, 1).seq!(1)
+    # codes 0, 0 leaves category "b" with no member at all
+    vcat = CACategorical.from_codes(CArray.uint8(2) { 0 }, ["a", "b"])
+
+    [:sum, :prod, :mean, :min, :max, :variance].each do |op|
+      zero_len = z[z.axis_group(zcat, nil)].public_send(op, axis: :group)
+      no_member = v[v.axis_group(vcat, nil)].public_send(op, axis: :group)
+      assert_equal(no_member.is_masked[1, 0], zero_len.is_masked[0, 0],
+                   "#{op}: mask of a zero-length group axis vs an empty group")
+      unless no_member.is_masked[1, 0]
+        assert_equal(no_member[1, 0], zero_len[0, 0],
+                     "#{op}: value of a zero-length group axis vs an empty group")
+      end
+    end
+  end
+
+  def test_a_zero_length_band_axis_still_reduces_to_nothing
+    b   = CArray.float64(4, 0)
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i % 2 }, ["a", "b"])
+    r   = b[b.axis_group(cat, nil)].sum(axis: :group)
+    assert_equal([2, 0], r.shape)
+    assert_equal(0, r.elements)
+  end
+  # ---- the extremum family keeps the source data type ----------------------
+  #
+  # A reduction is meant to be the core's reduction lifted to the group, data
+  # type included. min / max widened every load to double and answered in
+  # float64, which rounded an int64 past 2^53 -- and left the accumulator's
+  # own sentinel (+/-HUGE_VAL) showing when a group held nothing but NaN.
+
+  def test_an_extremum_answers_in_the_source_data_type
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    {
+      CA_INT32   => [3, 1, 7, 2],
+      CA_INT64   => [3, 1, 7, 2],
+      CA_UINT8   => [3, 1, 7, 2],
+      CA_FLOAT32 => [3.5, 1.5, 7.5, 2.5],
+      CA_FLOAT64 => [3.5, 1.5, 7.5, 2.5],
+    }.each do |dt, vals|
+      a   = CArray.new(dt, [4, 1]) { |i, _| vals[i] }
+      ref = CArray.new(dt, [2, 1]) { |i, _| vals[i] }
+      [:min, :max].each do |op|
+        got  = a[a.axis_group(codes, nil)].public_send(op, axis: :group)
+        want = ref.public_send(op, axis: 0)
+        assert_equal(want.data_type, got.data_type,
+                     "#{CArray.data_type_name(dt)} #{op} data type")
+        assert_equal(want[0], got[0, 0], "#{CArray.data_type_name(dt)} #{op}")
+      end
+    end
+  end
+
+  def test_an_int64_extremum_past_the_float_mantissa_is_exact
+    big = 2**62
+    a = CArray.int64(4, 1) { |i, _| [big + 1, big + 3, 5, 7][i] }
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    r = a[a.axis_group(codes, nil)].max(axis: :group)
+    assert_equal(big + 3, r[0, 0])        # not 4.611686018427388e+18
+  end
+
+  def test_a_boolean_extremum_answers_as_its_numeric_storage
+    # what CArray#min / #max do with a boolean array; the boolean-returning
+    # twins are all / any
+    a = CA_BOOLEAN([[1], [0], [1], [1]])
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    r = a[a.axis_group(codes, nil)].min(axis: :group)
+    assert_equal(CA_UINT64, r.data_type)
+    assert_equal(0, r[0, 0])
+  end
+
+  def test_a_group_of_nothing_but_nan_answers_nan_and_no_position
+    nan = 0.0 / 0.0
+    a = CA_DOUBLE([[nan], [nan], [1.0], [5.0]])
+    codes = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    g = a.axis_group(codes, nil)
+
+    mn = a[g].min(axis: :group)
+    assert_true(mn[0, 0].nan?, "an all-NaN group answers NaN, not the sentinel")
+    assert_false(mn.is_masked[0, 0])
+    assert_equal(1.0, mn[1, 0])
+
+    # no cell won, so there is no position to report -- as the core answers
+    # UNDEF for min_index over the same values
+    ma = a[g].min_addr(axis: :group)
+    assert_true(ma.is_masked[0, 0])
+    assert_false(ma.is_masked[1, 0])
+  end
+
+  def test_a_nan_does_not_win_an_extremum_wherever_it_sits
+    nan = 0.0 / 0.0
+    codes = CACategorical.from_codes(CArray.uint8(3) { 0 }, ["a"])
+    [[nan, 1.0, 5.0], [1.0, nan, 5.0], [1.0, 5.0, nan]].each do |vals|
+      a = CA_DOUBLE(vals).reshape(3, 1)
+      g = a.axis_group(codes, nil)
+      assert_equal(1.0, a[g].min(axis: :group)[0, 0], vals.inspect)
+      assert_equal(5.0, a[g].max(axis: :group)[0, 0], vals.inspect)
+    end
+  end
+  # ---- the parts of the iterator surface the group was missing --------------
+  #
+  # The base declares these and the other four engines answer them. The group
+  # inherited the readers without anything setting them, so #shape and #ndim
+  # answered nil -- the base's own rule says a member it does not provide
+  # raises cleanly and never answers wrongly. #count took keywords only, so
+  # the value and UNDEF forms came back as "wrong number of arguments". And
+  # all / any answered for a numeric payload that CArray#all refuses.
+
+  def simple_group
+    t = CArray.float64(4, 2) { |i, j| i + j }
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    [t, t[t.axis_group(cat, nil)]]
+  end
+
+  def test_the_group_iterator_reports_its_shape
+    t, it = simple_group
+    assert_equal([2, 2], it.shape)
+    assert_equal([2, 2], it.dim)
+    assert_equal(2, it.ndim)
+    # and it is the shape a reduction actually comes back in
+    assert_equal(it.shape, t[t.axis_group(*[CACategorical.from_codes(
+      CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"]), nil])].sum(axis: :group).shape)
+  end
+
+  def test_the_group_shape_covers_fused_and_band_slots
+    t = CArray.float64(4, 2, 3) { |i, j, k| i + j + k }
+    g4 = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    g3 = CACategorical.from_codes(CArray.uint8(3) { |i| i.zero? ? 0 : 1 }, ["x", "y"])
+    [[g4, nil, nil], [g4, nil, g3], [nil, nil, g3]].each do |slots|
+      it = t[t.axis_group(*slots)]
+      assert_equal(it.shape, it.sum(axis: :group).shape, slots.map { |x| x ? "g" : "b" }.join)
+    end
+  end
+
+  def test_count_takes_the_value_and_undef_forms
+    t, it = simple_group
+    assert_equal([[2, 2], [2, 2]], it.count(axis: :group).to_a)
+    assert_equal([[1, 1], [0, 0]], it.count(1.0, axis: :group).to_a)
+
+    tm = t.copy
+    tm[0, 0] = UNDEF
+    cat = CACategorical.from_codes(CArray.uint8(4) { |i| i < 2 ? 0 : 1 }, ["a", "b"])
+    itm = tm[tm.axis_group(cat, nil)]
+    assert_equal([[1, 2], [2, 2]], itm.count(axis: :group).to_a)
+    assert_equal([[1, 0], [0, 0]], itm.count(UNDEF, axis: :group).to_a)
+    assert_equal(itm.count_masked(axis: :group).to_a, itm.count(UNDEF, axis: :group).to_a)
   end
 end

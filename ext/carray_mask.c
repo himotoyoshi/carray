@@ -660,32 +660,47 @@ ca_unmask (void *ap, char *fill_value)
   }
 }
 
-CArray *
-ca_unmask_copy (void *ap, char *fill_value)
-{
-  CArray *ca = (CArray *) ap;
+typedef struct {
+  CArray *ca;
   CArray *co;
+  char   *fill_value;
+} ca_unmask_copy_args_t;
+
+static VALUE
+ca_unmask_copy_fill (VALUE arg)
+{
+  ca_unmask_copy_args_t *a = (ca_unmask_copy_args_t *) arg;
+  CArray *ca = a->ca, *co = a->co;
   char *q;
   boolean8_t *m;
   ca_size_t i;
 
-  co = ca_template(ca);
   ca_copy_data(ca, co->ptr);
 
-  if ( fill_value && ca_has_mask(ca) ) {
+  if ( a->fill_value && ca_has_mask(ca) ) {
     ca_attach(ca);
     q = co->ptr;
     m = (boolean8_t *) ca->mask->ptr;
     for (i=0; i<ca->elements; i++) {
       if ( *m ) {
-        memcpy(q, fill_value, ca->bytes);
+        memcpy(q, a->fill_value, ca->bytes);
       }
       m++; q+=co->bytes;
     }
     ca_detach(ca);
   }
+  return Qnil;
+}
 
-  return co;
+CArray *
+ca_unmask_copy (void *ap, char *fill_value)
+{
+  ca_unmask_copy_args_t a;
+  a.ca         = (CArray *) ap;
+  a.co         = ca_template(a.ca);
+  a.fill_value = fill_value;
+  ca_fill_or_free(a.co, ca_unmask_copy_fill, (VALUE) &a);
+  return a.co;
 }
 
 void

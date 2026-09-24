@@ -67,6 +67,29 @@ CArray.int32(2, 3).seq
 
 Large arrays are abbreviated with `...` so the output stays readable — the display is a preview, not a dump.
 
+### The whole array: `inspect_full`
+
+When the array *is* what you came to look at, `inspect_full` renders the same thing with the eliding dropped:
+
+```ruby
+a = CArray.int32(8, 12).seq!
+
+a.inspect
+#  => <CArray.int32(8,12): elem=96 mem=384b
+#  [ [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ],
+#    [ 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 ],
+#    [ 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35 ],
+#    ... ... ...
+#    [ 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95 ] ]>
+
+puts a.inspect_full        #  all eight rows, and every value in each
+```
+
+The header, the layout and the `_` for a masked cell are `inspect`'s — only the abbreviation goes. So for an array small enough that `inspect` was not eliding anything, the two give the same string.
+
+It returns a String and holds the whole array in it, which is the cost: a line is as long as the last axis makes it, and nothing is streamed. There is no threshold to set — `inspect` always previews and `inspect_full` always doesn't, rather than one method whose behaviour depends on state set somewhere else.
+
+
 ### `to_s` is *not* a printable form
 
 One sharp edge worth knowing: `to_s` on a numeric array returns the **raw bytes** of the underlying storage as a binary `String`, not a human-readable rendering. It is the packed data, useful for writing bytes out, but not what you want to look at:
@@ -82,3 +105,5 @@ To get a readable string, use `inspect` (what `p` and `irb` call), or convert to
 CArray.int32(3).seq.to_a.to_s     #  => "[0, 1, 2]"
 CArray.int32(3).seq.inspect       #  => "<CArray.int32(3): ... [ 0, 1, 2 ]>"
 ```
+
+For a large array, `inspect_full` is the one that leaves nothing out.

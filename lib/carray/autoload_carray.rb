@@ -30,8 +30,9 @@
 
 class CArray
   inspect_rb = "carray/inspect"
-  autoload_method "inspect",     inspect_rb
-  autoload_method "source_code", inspect_rb
+  autoload_method "inspect",      inspect_rb
+  autoload_method "inspect_full", inspect_rb
+  autoload_method "source_code",  inspect_rb
 end
 
 # ---- Serializer / Marshal / dump / load ------------------------------------
@@ -42,7 +43,6 @@ class CArray
   autoload_method "self.save",           serialize_rb
   autoload_method "self.load",           serialize_rb
   autoload_method "self.dump",           serialize_rb
-  autoload_method "self.load_from_file", serialize_rb
   autoload_method "marshal_dump",        serialize_rb
   autoload_method "marshal_load",        serialize_rb
 end
@@ -201,11 +201,13 @@ class CArray
   autoload_method "self.meshgrid",  "carray/methods/meshgrid"
 
   autoload_method "bincount",       "carray/methods/bincount"
+  autoload_method "repeat",         "carray/methods/repeat"
   autoload_method "self.broadcast", "carray/methods/broadcast"
   autoload_method "gather_nd",      "carray/methods/gather_nd"
   autoload_method "put_nd",         "carray/methods/gather_nd"
   autoload_method "mask_duplicates", "carray/methods/mask_duplicates"
   autoload_method "unique",          "carray/methods/unique"
+  autoload_method "factorize",       "carray/methods/factorize"
   autoload_method "is_in",           "carray/methods/is_in"
   autoload_method "intersection",    "carray/methods/is_in"
   autoload_method "difference",      "carray/methods/is_in"

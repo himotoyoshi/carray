@@ -23,9 +23,9 @@
         (right-to-left axis pairing; see the docstring at the function).
 
   Case B (cross-ndim dim-prepending) is not handled by the implicit
-  helpers; users with cross-ndim operands keep using the explicit :*
-  form or #broadcast_to (which does accept cross-ndim with target axes
-  pinned to size 1).  See PROPOSAL_BROADCASTING_AND_UNBOUND.md.
+  helpers; a cross-ndim operand has to declare the axis itself, either
+  with the newaxis sigil (`a + c[:_, nil]`) or with #broadcast_to (which
+  does accept cross-ndim with target axes pinned to size 1).
 
 ---------------------------------------------------------------------------- */
 

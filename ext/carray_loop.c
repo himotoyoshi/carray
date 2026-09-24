@@ -120,6 +120,13 @@ rb_ca_index_walk (VALUE self, CArray *ca, int8_t level,
   volatile VALUE ret = Qnil;
   ca_size_t i;
   if ( level == ca->ndim - 1 ) {
+    /* One value-yield buffer for the whole innermost run.  It was once an
+       ALLOCA_N inside the loop, which never releases per iteration: the C
+       stack grew by (ndim + 1) VALUEs per cell and a long enough axis
+       raised SystemStackError (a 1-D each_with_index / map_with_index!
+       died around a million cells on the main stack, and far earlier on a
+       Thread's smaller one). */
+    VALUE argv[CA_RANK_MAX + 1];
     for (i=0; i<ca->dim[level]; i++) {
       volatile VALUE obj;
       idx[level] = i;
@@ -132,7 +139,6 @@ rb_ca_index_walk (VALUE self, CArray *ca, int8_t level,
          that want the whole subscript should write |*idx|. */
       if ( mode & CA_LOOP_WITH_VALUE ) {
         int argc = (int)ca->ndim + 1;
-        VALUE *argv = ALLOCA_N(VALUE, argc);
         argv[0] = rb_ca_fetch_index(self, idx);
         MEMCPY(argv + 1, RARRAY_CONST_PTR(ridx), VALUE, ca->ndim);
         obj = rb_yield_values2(argc, argv);

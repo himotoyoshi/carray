@@ -38,10 +38,10 @@
 typedef struct {
   /* === CAView prefix === */
   int16_t    obj_type;
-  int8_t     data_type;        /* CA_FIXLEN surface (numeric gate); storage is int64 */
+  int8_t     data_type;        /* CA_FIXLEN surface (numeric gate); storage is fixlen-16 */
   int8_t     ndim;
   int32_t    flags;            /* CA_FLAG_IS_FACE set */
-  ca_size_t  bytes;            /* sizeof(int64_t) = 8 (one offset per element) */
+  ca_size_t  bytes;            /* 2 * sizeof(int64_t) = 16 (one (start,end) pair per element) */
   ca_size_t  elements;
   ca_size_t *dim;
   char      *ptr;
@@ -299,6 +299,54 @@ rb_ca_const_string_wrap (VALUE parent_val, VALUE buffer, int encoding_id)
     rb_raise(rb_eTypeError, "CAConstString.wrap: buffer: must be a String");
   }
 
+  /* This is the one door through which already-built offsets enter, so it
+     validates rather than assumes.  Everything downstream -- the per-cell
+     decode, the native byte scans, the sort comparator -- reads `buf + start`
+     for `end - start` bytes on the strength of these pairs; an out-of-range
+     one is an out-of-bounds read of the heap, not a wrong answer.  Refuse it
+     here, while the input is still in the caller's hands, rather than letting
+     it surface as an IndexError from a decode or as a crash from a scan.
+
+     A masked cell is exempt: its bytes may be anything at all, that being the
+     CArray mask contract, and no reader dereferences them (the scan skips on
+     the mask before touching an offset; `.value`, the explicit strip, raises
+     from the decode). */
+  {
+    ca_size_t i, n;
+    int64_t *pair;
+    boolean8_t *m;
+
+    ca_attach(parent);
+    ca_update_mask(parent);
+    n    = parent->elements;
+    pair = (int64_t *) parent->ptr;
+    m    = parent->mask ? (boolean8_t *) parent->mask->ptr : NULL;
+    for ( i = 0; i < n; i++ ) {
+      int64_t start = pair[2 * i], end = pair[2 * i + 1];
+      if ( m && m[i] ) {
+        continue;
+      }
+      if ( start < 0 || end < start || end > (int64_t) RSTRING_LEN(buffer) ) {
+        ca_detach(parent);
+        rb_raise(rb_eArgError,
+                 "CAConstString.wrap: element %lld has range [%lld,%lld), "
+                 "outside the %ld-byte buffer",
+                 (long long) i, (long long) start, (long long) end,
+                 (long) RSTRING_LEN(buffer));
+      }
+    }
+    ca_detach(parent);
+  }
+
+  /* Take ownership of the offsets, the way CACategorical.from_codes takes
+     ownership of its codes.  Without this the Face is read-only but its
+     storage is not, so `cs.parent[i] = <anything>` walks straight past the
+     check above and back into an out-of-bounds read.  The flag rather than
+     #freeze, for the reason from_codes gives: freeze would propagate through
+     views and Faces.  A caller that wants to keep a mutable entity of its own
+     passes `.copy`. */
+  ca_set_flag(parent, CA_FLAG_READ_ONLY);
+
   ca  = ca_const_string_new(parent, rb_str_freeze(buffer), encoding_id);
   obj = TypedData_Wrap_Struct(rb_cCAConstString, &catext_data_type, ca);
   rb_ca_set_parent(obj, parent_val);   /* pin parent VALUE for GC */
@@ -397,10 +445,13 @@ rb_ca_const_string_encoding (VALUE self)
   return rb_enc_from_encoding(rb_enc_from_index(ca->encoding_id));
 }
 
-/* `CAConstString#buffer` — returns the frozen internal byte buffer
-   (length-prefix format).  Exposes the defining tail state for
-   introspection and the Arrow-boundary component-buffer export
-   path. */
+/* `CAConstString#buffer` — returns the frozen internal byte buffer: a pure
+   concatenation of the element bytes, with no per-record length prefix (=
+   the Arrow values buffer).  Exposes the defining tail state for
+   introspection and the Arrow-boundary component-buffer export path.  The
+   ranges that index it live in the storage, one (start,end) int64 pair per
+   element; `wrap` is where a hand-built pair array is checked against a
+   buffer. */
 static VALUE
 rb_ca_const_string_buffer (VALUE self)
 {
@@ -540,7 +591,7 @@ ca_const_string_scan_end (ca_const_string_scan_t *s)
    so element i occupies s->off[2*i] (start) .. s->off[2*i+1] (end).
    The buffer is a pure concatenation; length = end - start. */
 static inline int
-ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp, int32_t *plen)
+ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp, int64_t *plen)
 {
   int64_t start, end;
   if ( s->m && s->m[i] ) {
@@ -549,7 +600,7 @@ ca_const_string_record (ca_const_string_scan_t *s, ca_size_t i, const char **pp,
   start = s->off[2 * i];
   end   = s->off[2 * i + 1];
   *pp   = s->buf + start;
-  *plen = (int32_t) (end - start);
+  *plen = (int64_t) (end - start);
   return 1;
 }
 
@@ -598,7 +649,7 @@ rb_ca_const_string_byte_length (VALUE self)
   CArray *co;
   int64_t *op;
   const char *p;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
 
   ca_const_string_scan_begin(self, &s);
@@ -633,7 +684,7 @@ ca_const_string_predicate (VALUE self, VALUE query, int op)
   boolean8_t *out;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
 
   if ( TYPE(query) != T_STRING ) {
@@ -686,7 +737,7 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
        they are read only when both records are valid, but GCC cannot prove
        that -- initialize to keep -Wmaybe-uninitialized quiet and defensive. */
     const char *pa = NULL, *pb = NULL;
-    int32_t la = 0, lb = 0;
+    int64_t la = 0, lb = 0;
     ca_size_t i;
 
     ca_const_string_scan_begin(self, &a);
@@ -717,7 +768,7 @@ rb_ca_const_string_count (VALUE self, VALUE query)
   ca_const_string_scan_t s;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i, c = 0;
 
   if ( TYPE(query) != T_STRING ) {
@@ -747,7 +798,7 @@ rb_ca_const_string_search (VALUE self, VALUE query)
   ca_const_string_scan_t s;
   const char *qp, *p;
   long qlen;
-  int32_t len;
+  int64_t len;
   ca_size_t i;
   VALUE result = Qnil;
 
@@ -786,7 +837,7 @@ ca_const_string_byte_cmp (const void *a, const void *b)
   /* sort raises on masked input, so record() always sets these here; the
      initializers keep -Wmaybe-uninitialized quiet and stay defensive. */
   const char *pa = NULL, *pb = NULL;
-  int32_t la = 0, lb = 0;
+  int64_t la = 0, lb = 0;
   int c;
   ca_const_string_record(ca_const_string_sort_ctx, ia, &pa, &la);
   ca_const_string_record(ca_const_string_sort_ctx, ib, &pb, &lb);
@@ -836,9 +887,15 @@ rb_ca_const_string_sort_index (VALUE self)
   return vout;
 }
 
-/* CAConstString#sort is defined in Ruby (lib/carray/const_string.rb) as `self[sort_index]`,
-   i.e. a no-copy view over the offset source (buffer + offsets shared, only
-   the gather order changes) — consistent with CArray#sort being a view. */
+/* The ordering surface is defined in Ruby (lib/carray/const_string.rb) on
+   top of these three: a storage cell is a byte range, so storage order is
+   insertion order rather than string order, and every member has to read
+   the bytes.  What is native here is the flat form, which is the common one
+   for a string column and which a byte scan does an order of magnitude
+   faster than decoding a Ruby String per cell; the per-axis forms go
+   through #to_string.  These are spelled as internals because the public
+   names carry CArray's meanings: what the permutation below answers is
+   sort_addr (view-flat addresses in sorted order), not sort_index. */
 
 /* CAConstString#min / #max → the byte-min / byte-max element as a frozen String,
    skipping masked elements; nil if empty or all masked. */
@@ -847,7 +904,7 @@ ca_const_string_extremum (VALUE self, int want_max)
 {
   ca_const_string_scan_t s;
   const char *p, *bestp = NULL;
-  int32_t len, bestlen = 0;
+  int64_t len, bestlen = 0;
   ca_size_t i;
   int found = 0;
 
@@ -894,9 +951,9 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
   CAConstString *ca, *cs;
   TypedData_Get_Struct(self,  CAConstString, &catext_data_type, ca);
   TypedData_Get_Struct(other, CAConstString, &catext_data_type, cs);
-  /* T.0/T.1: shallow re-setup (shares buffer + offset-source).  T.3 will
-     replace this with compacting deep copy (rebased offsets + compacted
-     buffer + detach). */
+  /* Shallow re-setup: shares the buffer and the offset source, which is the
+     documented `dup` semantics for a view.  `copy` is the compacting deep
+     copy (rebased offsets, compacted buffer, detached). */
   if ( ca_func[CA_OBJ_CONST_STRING].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_CONST_STRING, cs->parent->ndim);
   }
@@ -949,11 +1006,13 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "search",           rb_ca_const_string_search, 1);
   rb_define_method(rb_cCAConstString, "find_value_index",  rb_ca_const_string_search, 1);
 
-  /* native sort_index / min / max (§3.7), byte-memcmp comparator.
-     sort / sort_copy are defined in Ruby on top of sort_index. */
-  rb_define_method(rb_cCAConstString, "sort_index", rb_ca_const_string_sort_index, 0);
-  rb_define_method(rb_cCAConstString, "min",        rb_ca_const_string_min, 0);
-  rb_define_method(rb_cCAConstString, "max",        rb_ca_const_string_max, 0);
+  /* Native flat sort permutation / min / max (§3.7), byte-memcmp
+     comparator.  The public ordering surface is built on these in
+     lib/carray/const_string.rb; see the comment above their definitions. */
+  rb_define_method(rb_cCAConstString, "__sort_addr_bytes__",
+                                      rb_ca_const_string_sort_index, 0);
+  rb_define_method(rb_cCAConstString, "__min_bytes__", rb_ca_const_string_min, 0);
+  rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
   ca_face_register_storage_to_scalar(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_scalar);

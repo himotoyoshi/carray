@@ -18,6 +18,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_all */
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"
 
@@ -740,10 +741,7 @@ static void
 ca_stack_func_allocate (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
-  int32_t k;
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_attach(ca->parents[k]);
-  }
+  ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
 }
 
@@ -751,10 +749,7 @@ static void
 ca_stack_func_attach (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
-  int32_t k;
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_attach(ca->parents[k]);
-  }
+  ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
   ca_stack_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
 }

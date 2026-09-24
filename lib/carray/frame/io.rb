@@ -11,12 +11,27 @@ class CAFrame
   # later. Broken cells fail to_type and become UNDEF automatically
   # (parse-mask, §6-2).
   #
+  # +source+ is a path, or an open IO -- anything answering +gets+, which a
+  # StringIO is. So CSV that is already in memory does not have to go to a
+  # temporary file first:
+  #
+  #   CAFrame.from_csv("obs.csv")                    # a path
+  #   CAFrame.from_csv(StringIO.new(body))           # text already in hand
+  #   File.open("obs.csv") { |io| CAFrame.from_csv(io) }
+  #
+  # A String is always read as a path, never as CSV text: guessing between the
+  # two by looking for a newline is the kind of guess that is right until it is
+  # not, and StringIO says which one you meant in six characters. An IO is read
+  # from where it is and left open -- the caller opened it and closes it.
+  #
   # Parsing uses the built-in fast tokenizer (CSVParser). Options:
   #   sep:      field separator (default ",")
   #   quote:    quote character (default '"')
   #   strip:    trim spaces from unquoted fields (default false, RFC spacing)
-  #   +encoding+: IO open-mode encoding (default "bom|utf-8", strips a BOM)
-  #   parser:   a callable path -> [headers, rows] to inject another parser
+  #   +encoding+: open-mode encoding for a path (default "bom|utf-8", strips a
+  #             BOM). It has nothing to open when +source+ is an IO, so there
+  #             the IO's own encoding governs and a BOM is the caller's.
+  #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
   #             sep/quote/strip/encoding and any block are that parser's concern.
   #
@@ -28,25 +43,25 @@ class CAFrame
   #     skip 2; header; skip 1; body
   #   end
   #
+  # A missing field -- an unquoted empty one, or a cell a short row never
+  # reached -- is UNDEF in the frame, whether or not the column is cast by
+  # +types:+. A quoted empty field ("") is the empty string, which is a value.
+  # So the mask +to_csv+ writes comes back as a mask.
+  #
   # Columns are handed to the frame as CABlock views over one backing object
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
-  def self.from_csv(path, types: nil,
+  def self.from_csv(source, types: nil,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     names, rows =
       if parser
-        parser.call(path)
+        parser.call(source)
+      elsif source.respond_to?(:gets)
+        read_csv(source, sep: sep, quote: quote, strip: strip, &block)
       else
-        File.open(path, "r:#{encoding}") do |io|
-          reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
-          if block
-            block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
-          else
-            reader.header
-            reader.body
-          end
-          reader.result
+        File.open(source, "r:#{encoding}") do |io|
+          read_csv(io, sep: sep, quote: quote, strip: strip, &block)
         end
       end
 
@@ -54,6 +69,22 @@ class CAFrame
     frame.cast(types) if types
     frame
   end
+
+  # Drive the reading-control DSL over one open IO and hand back
+  # [names, rows]. Shared by the path and the IO source, so the two cannot
+  # come to read a file differently.
+  def self.read_csv (io, sep:, quote:, strip:, &block)
+    reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
+    if block
+      block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
+    else
+      reader.header
+      reader.body
+    end
+    reader.result
+  end
+
+  private_class_method :read_csv
 
   # Build a frame from parsed [names, rows]. When names is nil (headerless and
   # no column_names) positional names "c0".."cN" are generated from the widest
@@ -159,7 +190,9 @@ class CAFrame
     parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
     idx = @index ? " index=#{@axis_name.inspect}" : ""
     head = "#<CAFrame nrow=#{@nrow} vars=[#{parts.join(', ')}]#{idx}>"
-    return head if @columns.empty?
+    # The table counts the index as a column, so a frame whose only data is its
+    # index has one to show.  Gate on the same thing render_table does.
+    return head if @columns.empty? && @index.nil?
     head + "\n" + render_table(head: 8, tail: 2, index: true, precision: 6,
                                footer: false)
   end
@@ -252,6 +285,15 @@ class CAFrame
     "#{n} #{noun}#{n == 1 ? '' : 's'}"
   end
 
+  # Render one N-D cell the way Array#inspect would, except that a masked
+  # element prints as the table's missing marker rather than as UNDEF.
+  private def format_nested_cell(v)
+    case v
+    when Array then "[" + v.map { |x| format_nested_cell(x) }.join(", ") + "]"
+    else UNDEF.equal?(v) || v.nil? ? "_" : v.inspect
+    end
+  end
+
   private def format_table_cell(col, i, precision)
     e = elem_at(col, i)
     if UNDEF.equal?(e) || e.nil?
@@ -262,7 +304,10 @@ class CAFrame
       # to read. precision: nil prints the value as Ruby renders it.
       e.round(precision).to_s
     elsif e.is_a?(CArray)
-      e.to_a.inspect
+      # An N-D cell renders its elements, and a masked element among them
+      # takes the same marker a masked scalar does -- UNDEF's own inspect
+      # would put a second spelling of "missing" in the same table.
+      format_nested_cell(e.to_a)
     elsif e.is_a?(String)
       e
     elsif e.respond_to?(:iso8601)
@@ -314,6 +359,13 @@ class CAFrame
       end
     end
     table = CArray.object(rows.size, ncol) { rows }
+    # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
+    # tokenizer says missing with nil (an unquoted empty field; a quoted
+    # one is the empty string and stays a value), and an object array will
+    # hold that nil quite happily -- so a column read without `types:` used
+    # to carry nil where the same column read with one carried UNDEF, and
+    # the mask a to_csv had written did not survive the trip back.
+    table[:eq, nil] = UNDEF
     names.each_with_index { |name, j| cols[name] = table[nil, j] }
     new(cols)
   end

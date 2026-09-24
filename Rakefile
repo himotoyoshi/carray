@@ -213,6 +213,7 @@ desc "Build spec_ai author-surface smoke fixtures (cfunc_r / per_element / with_
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
+  build_spec_ai_smoke("ext_sweep_raw",         "sweep_raw")
   build_spec_ai_smoke("ext_per_element_smoke", "per_element")
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
@@ -267,7 +268,12 @@ task :spec_ai => [:kernel_surface_check,
   # hiding on Mac.  This is what backs the rule that a view struct taken
   # from ALLOC() must have _pool set to NULL before its setup runs.
   ENV["MallocZeroOnFree"] ||= "0"
-  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/*.rb\"].sort.each{|f| require_relative f}'"
+  # test_*.rb, not every .rb: the fixture directories hold their own
+  # extconf.rb, and requiring one of those runs mkmf here -- compiler probes
+  # during the test run, and a Makefile / mkmf.log left at the repo root.
+  # Their helper (ext_xfer_smoke/load.rb) is pulled in by the tests that need
+  # it, so it does not want collecting either.
+  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
 end
 
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"

@@ -339,12 +339,26 @@ ca_axis_dispatch_scatter_cb (ca_size_t off, int oob, ca_size_t n, void *vctx)
 /* Callback context for fill_value (broadcast a single value).  parent is set
    when the value goes through the parent's own fill_stride instead of a
    buffer this side has attached. */
+/* Same size as the window ca_fill_stride_via_addrs collects into. */
+#define CA_AXIS_FILL_ADDR_WINDOW 1024
+
 typedef struct {
   const void *val;
   ca_size_t   bytes;
   char       *parent_ptr;
   CArray     *parent;
+  ca_size_t   window[CA_AXIS_FILL_ADDR_WINDOW];
+  ca_size_t   nw;
 } ca_axis_fill_ctx_t;
+
+static void
+ca_axis_dispatch_fill_flush (ca_axis_fill_ctx_t *c)
+{
+  if ( c->nw ) {
+    ca_fill_addrs(c->parent, c->nw, c->window, (void *) c->val);
+    c->nw = 0;
+  }
+}
 
 static void
 ca_axis_dispatch_fill_value_cb (ca_size_t off, int oob, ca_size_t n, void *vctx)
@@ -354,11 +368,25 @@ ca_axis_dispatch_fill_value_cb (ca_size_t off, int oob, ca_size_t n, void *vctx)
   if ( c->parent ) {
     /* One slab is one contiguous run of parent cells, which is a region the
        parent can fill for itself -- no borrowed buffer, so nothing outside
-       the run is read or written. */
+       the run is read or written.  A run of one cell is not worth a call of
+       its own, though: when the innermost selected axis picks individual
+       indices every run is one cell, and the same cell count that costs the
+       parent eight calls on an outer axis cost it one per cell here.  Collect
+       those and hand them over as a list.  The value is the same for every
+       cell and the walk visits each cell once, so batching cannot change
+       which cells are written. */
     ca_size_t count = n / c->bytes;
-    ca_size_t step  = 1;
-    ca_fill_stride(c->parent, off / c->bytes, 1, &count, &step,
-                   (void *) c->val);
+    if ( count == 1 ) {
+      c->window[c->nw++] = off / c->bytes;
+      if ( c->nw == CA_AXIS_FILL_ADDR_WINDOW ) {
+        ca_axis_dispatch_fill_flush(c);
+      }
+    }
+    else {
+      ca_size_t step = 1;
+      ca_fill_stride(c->parent, off / c->bytes, 1, &count, &step,
+                     (void *) c->val);
+    }
   }
   else {
     ca_axis_dispatch_fill_slab(c->parent_ptr + off, c->val, c->bytes, n);
@@ -895,6 +923,7 @@ ca_axis_dispatch_fill_value_via_parent (CArray          *parent,
   ca_axis_dispatch_for_each_slab(parent, parent_axis_dims, axes, ndim,
                                  bytes, total_elements,
                                  ca_axis_dispatch_fill_value_cb, &ctx);
+  ca_axis_dispatch_fill_flush(&ctx);
 }
 
 /* ==========================================================================

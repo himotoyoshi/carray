@@ -39,11 +39,12 @@ VALUE rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self);
      - v is a CArray             -> broadcast: count each v[k] and stack
                                     (rejected for boolean self; see below)
      - self is boolean, v scalar -> v must be true/false literal
-     - self is numeric, v scalar -> count_equal_ki (numeric equality)
+     - self is numeric or object, v scalar -> count_equal_ki (numeric ==
+                                    for a number, Ruby == for an object)
 
-   FIXLEN and OBJECT data_types raise CArray::DataTypeError (the
-   kernel-iterator helpers do not implement them).  Extend
-   count_equal_ki if demand returns. */
+     - self is fixlen, v scalar -> count_equal_ki (memcmp over the whole
+                                    cell; a short String query is padded
+                                    out to the cell width) */
 
 static VALUE
 rb_ca_count (int argc, VALUE *argv, VALUE self)
@@ -95,11 +96,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     }
     if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
       if ( ! query_was_scalar ) {
-        CArray *cv;
-        GetCArray(rval, cv);
-        if ( ca_is_face(cv) ) {
-          rval = rb_ca_strip_face_value(rval);
-        }
+        rval = ca_face_operand_descend(rval, "count(v)");
       }
     }
     else if ( rb_respond_to(self_ref, rb_intern("to_comparable")) ) {
@@ -290,7 +287,9 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
                rb_obj_classname(rval));
     }
   } else {
-    if ( rval == Qtrue || rval == Qfalse ) {
+    /* true / false are the boolean array's own domain, not a number --
+       except in an object array, where they are ordinary stored values. */
+    if ( ( rval == Qtrue || rval == Qfalse ) && src->data_type != CA_OBJECT ) {
       rb_raise(rb_eTypeError,
                "count(v) on numeric array: v must be numeric, got %s",
                rb_obj_classname(rval));

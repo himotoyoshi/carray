@@ -1655,6 +1655,18 @@ ca_allocate (void *ap)
   ca_allocate(ca->mask);
 }
 
+/* The first attach of a view: materialise through the type's slot, then
+   its mask.  Run under rb_protect by ca_attach. */
+static VALUE
+ca_attach_view_first (VALUE arg)
+{
+  CArray *ca = (CArray *) arg;
+  ca_func[ca->obj_type].attach(ca);
+  ca_update_mask(ca);
+  ca_attach(ca->mask);
+  return Qnil;
+}
+
 /* attach parent's data to ca->ptr */
 
 void
@@ -1668,14 +1680,30 @@ ca_attach (void *ap)
 
   if ( ca_is_view(ca) ) {  /* view array */
 
-    CAVIEW(ca)->attach += 1; /* increments attach level */
-    if ( CAVIEW(ca)->attach > CA_ATTACH_MAX ) {
+    if ( CAVIEW(ca)->attach >= CA_ATTACH_MAX ) {
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
+    CAVIEW(ca)->attach += 1; /* increments attach level */
 
     if ( ! ca->ptr ) {
-      ca_func[ca->obj_type].attach(ap);
+      /* A slot can raise part way (a conversion meeting a value it cannot
+         hold).  Undo the attach then, or the next attach finds ca->ptr
+         set, skips the slot and reads a half-filled buffer.  A slot that
+         got as far as publishing ca->ptr has also attached what its
+         detach slot releases; one that raised earlier has published
+         nothing and released its own parent attach on the way out. */
+      int tag = 0;
+      rb_protect(ca_attach_view_first, (VALUE) ca, &tag);
+      if ( tag ) {
+        if ( ca->ptr ) {
+          ca_func[ca->obj_type].detach(ca);
+          ca->ptr = NULL;
+        }
+        CAVIEW(ca)->attach -= 1;
+        rb_jump_tag(tag);
+      }
+      return;
     }
   }
   else {                      /* entity array */
@@ -1684,6 +1712,43 @@ ca_attach (void *ap)
 
   ca_update_mask(ca);
   ca_attach(ca->mask);
+}
+
+/* Attach every array in list[0..n-1], or, if one of those attaches
+   raises, none of them: the ones already attached are detached before the
+   raise propagates.  For views over several parents. */
+
+typedef struct {
+  CArray **list;
+  int32_t  n;
+  int32_t  done;
+} ca_attach_all_ctx_t;
+
+static VALUE
+ca_attach_all_body (VALUE arg)
+{
+  ca_attach_all_ctx_t *c = (ca_attach_all_ctx_t *) arg;
+  for ( ; c->done < c->n; c->done++ ) {
+    ca_attach(c->list[c->done]);
+  }
+  return Qnil;
+}
+
+void
+ca_attach_all (CArray **list, int32_t n)
+{
+  ca_attach_all_ctx_t c;
+  int tag = 0;
+  c.list = list;
+  c.n    = n;
+  c.done = 0;
+  rb_protect(ca_attach_all_body, (VALUE) &c, &tag);
+  if ( tag ) {
+    while ( c.done > 0 ) {
+      ca_detach(list[--c.done]);
+    }
+    rb_jump_tag(tag);
+  }
 }
 
 /* attach parent's data to ca->ptr */
@@ -2087,6 +2152,17 @@ ca_fill (void *ap, void *aptr)
 
 /* ------------------------------------------------------------------- */
 
+#ifdef CARRAY_DEV_BUILD
+
+/* The Ruby attach surface is built into development builds only.  Ruby has no
+   raw pointer, so the only thing a block can do inside an attach window is call
+   back into the array API -- and which door that takes is invisible in the
+   syntax: v[0] reads the attached buffer while v[] and v[0..1] compose past it
+   to the root (R5, see the contract beside ca_attach in carray.h).  Per-cell and
+   whole-array writes reach the buffer and survive the sync; a write through a
+   derived view is discarded.  The in-tree tests drive the healthy spellings, so
+   the surface stays reachable here and out of released builds. */
+
 /* subroutines for CArray.attach, CArray.attach!
                    CArray#attach, CArray#attach! */
 
@@ -2307,6 +2383,8 @@ rb_ca__detach__ (VALUE self)
   return self;
 }
 
+#endif /* CARRAY_DEV_BUILD */
+
 /* ------------------------------------------------------------------- */
 
 static ID id_decode, id_encode;
@@ -2515,6 +2593,7 @@ Init_carray_core (void)
 
   ca_init_obj_type();
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "attach", rb_ca_s_attach, -1);
   rb_define_singleton_method(rb_cCArray, "attach!", rb_ca_s_attach_bang, -1);
 
@@ -2524,6 +2603,7 @@ Init_carray_core (void)
   rb_define_method(rb_cCArray, "__attach__", rb_ca__attach__, 0);
   rb_define_method(rb_cCArray, "__sync__", rb_ca__sync__, 0);
   rb_define_method(rb_cCArray, "__detach__", rb_ca__detach__, 0);
+#endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);
 

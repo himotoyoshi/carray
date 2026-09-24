@@ -554,13 +554,54 @@ ca_iter_strip_storage_wrapper (CArray *src)
 }
 
 int
-ca_iter_state_init_l1 (ca_iter_state    *st,
+ca_iter_check_init (int rc)
+{
+  const char *why;
+
+  if ( rc == CA_ITER_OK ) return rc;
+
+  switch ( rc ) {
+  case CA_ITER_ERR_NOT_CHEAP:
+    why = "the source cannot be read without materialising it";
+    break;
+  case CA_ITER_ERR_POLICY:
+    why = "the slab policy or the axes given do not apply to this source";
+    break;
+  case CA_ITER_ERR_FLAGS:
+    why = "this flag combination is not supported for this source";
+    break;
+  case CA_ITER_ERR_READONLY:
+    why = "the array is read-only and the kernel asked to write";
+    break;
+  case CA_ITER_ERR_MASK:
+    why = "the source carries a mask";
+    break;
+  case CA_ITER_ERR_MASK_NOT_ALLOWED:
+    why = "the kernel declared CA_KERNEL_NO_MASK and the source carries a mask";
+    break;
+  default:
+    why = "the request was refused";
+    break;
+  }
+  rb_raise(rb_eRuntimeError, "kernel iterator: %s (rc=%d)", why, rc);
+  return rc;   /* not reached */
+}
+
+static int
+ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
                        struct _CArray   *src,
                        ca_slab_policy_t  policy,
                        int8_t           *axes,
                        int8_t            naxes,
                        uint32_t          flags)
 {
+  /* Leave the state defined before anything can return.  Every error
+     return below hands control back to a caller that may not look at the
+     code, so what it is left holding has to be a state that iterates zero
+     times rather than whatever its stack frame happened to contain. */
+  if ( st == NULL ) return CA_ITER_ERR_FLAGS;
+  memset(st, 0, sizeof(*st));
+
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 + PROPOSAL_LAZY_MARKER_LIFT Phase 0:
      storage-identical wrapper strip at entry (= same rationale as init_l2
      below).  Strip before validate_inputs.
@@ -586,7 +627,6 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
 
   uint8_t src_kind = ca_iter_classify_source(src);
 
-  memset(st, 0, sizeof(*st));
   st->src      = src;
   st->src_kind = src_kind;
   st->level    = 1;
@@ -740,14 +780,21 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
   return CA_ITER_OK;
 }
 
-int
-ca_iter_state_init_l2 (ca_iter_state    *st,
+static int
+ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                        struct _CArray   *src,
                        ca_slab_policy_t  policy,
                        int8_t           *axes,
                        int8_t            naxes,
                        uint32_t          flags)
 {
+  /* Leave the state defined before anything can return.  Every error
+     return below hands control back to a caller that may not look at the
+     code, so what it is left holding has to be a state that iterates zero
+     times rather than whatever its stack frame happened to contain. */
+  if ( st == NULL ) return CA_ITER_ERR_FLAGS;
+  memset(st, 0, sizeof(*st));
+
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 (= MEMO §3.5 kernel_iterator entry strip)
      + PROPOSAL_LAZY_MARKER_LIFT Phase 0.
 
@@ -828,7 +875,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
                                             row_byte_strides[fiber_ax],
                                             flags) ) {
-          memset(st, 0, sizeof(*st));
           st->src      = src;
           st->src_kind = src_kind;
           st->level    = 2;
@@ -922,7 +968,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
           return CA_ITER_ERR_FLAGS;
         }
 
-        memset(st, 0, sizeof(*st));
         st->src      = src;
         st->src_kind = CA_ITER_SRC_DESCRIPTOR;
         st->level    = 2;
@@ -1091,7 +1136,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
       }
 
       if ( outer_has_shift ) {
-        memset(st, 0, sizeof(*st));
         st->src      = src;
         st->src_kind = CA_ITER_SRC_DESCRIPTOR;
         st->level    = 2;
@@ -1185,7 +1229,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         return CA_ITER_OK;
       }
 
-      memset(st, 0, sizeof(*st));
       st->src      = src;
       st->src_kind = CA_ITER_SRC_DESCRIPTOR;  /* Phase B alias path */
       st->level    = 2;
@@ -1333,7 +1376,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
         in_slab[ax] = 1;
       }
 
-      memset(st, 0, sizeof(*st));
       st->src      = src;
       st->src_kind = CA_ITER_SRC_ATTACH;
       st->level    = 2;
@@ -1386,6 +1428,7 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
          k_axis..N-2]; either way outer_idx[m] = parent axis m). */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !ca_has_mask(src)
+           && !(flags & CA_KERNEL_WRITE)
            && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis ) {
         CAStack *stack = (CAStack *) src;
         int8_t   parent_ndim = src->ndim - 1;
@@ -1501,6 +1544,7 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
          s - 1); only the K stack axis (s == k_axis) has no parent
          counterpart. */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+           && !(flags & CA_KERNEL_WRITE)
            && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis] ) {
         CAStack *stack = (CAStack *) src;
         int8_t   k_axis = stack->k_axis;
@@ -1721,7 +1765,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
      / CATile / CARoll).  Same shape as L1 SRC_ATTACH: iterator-owns
      scratch + xfer_all GET/PUT.  Yield as one 1-D strided slab. */
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_ATTACH;
     st->level    = 2;
@@ -1773,7 +1816,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     int8_t  nd = raw_ndim;
     int8_t  k;
 
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE;
     st->level    = 2;
@@ -1864,7 +1906,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
     /* raw_descs / raw_pdims / raw_ndim were populated by route_source
        above so we skip the local describe_axes call.  Kept locals
        named raw_* to match the original code. */
-    memset(st, 0, sizeof(*st));
     st->src      = src;
     st->src_kind = CA_ITER_SRC_DESCRIPTOR;
     st->level    = 2;
@@ -1938,7 +1979,6 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
   }
 
   /* === CAStride / entity L2 path === */
-  memset(st, 0, sizeof(*st));
   st->src      = src;
   st->src_kind = CA_ITER_SRC_CASTRIDE;
   st->level    = 2;
@@ -2139,8 +2179,8 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
   return CA_ITER_OK;
 }
 
-int
-ca_iter_state_next_slab (ca_iter_state *st,
+static int
+ca_iter_state_next_slab_unprotected (ca_iter_state *st,
                          char         **out_ptr,
                          boolean8_t   **out_mask,
                          ca_size_t     *out_n)
@@ -2162,8 +2202,8 @@ ca_iter_state_next_slab (ca_iter_state *st,
   return 1;
 }
 
-int
-ca_iter_state_next_slab_strided (ca_iter_state *st,
+static int
+ca_iter_state_next_slab_strided_unprotected (ca_iter_state *st,
                                  char         **out_ptr,
                                  boolean8_t   **out_mask,
                                  ca_size_t     *out_n,
@@ -2231,8 +2271,8 @@ ca_iter_state_next_slab_strided (ca_iter_state *st,
   return 1;
 }
 
-int
-ca_iter_state_next_slab_axes (ca_iter_state *st,
+static int
+ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
                               char         **out_ptr,
                               boolean8_t   **out_mask)
 {
@@ -2742,38 +2782,22 @@ ca_iter_state_next_slab_axes (ca_iter_state *st,
   return 1;
 }
 
-void
-ca_iter_state_sync_slab (ca_iter_state *st)
+static void
+ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
 {
   /* READ walk: nothing to sync. */
   if ( st == NULL || !(st->flags & CA_KERNEL_WRITE) ) return;
 
-  /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2: STACK path is
-     READ-only in initial scope.  Kernel writes into scratch would not
-     be valid to scatter back via xfer_all PUT (= scratch is slab-sized
-     not whole-view), so the SRC_ATTACH PUT below would be a semantic
-     mismatch.  Per-slab scatter via direct per-parent memcpy is a
-     future extension once a WRITE-using kernel materialises. */
+  /* Neither stack mode can be reached with WRITE set: both are declined
+     at init, which sends a write destination down the generic SRC_ATTACH
+     path instead.  They cannot serve a write themselves -- ALIAS_STACK
+     hands out a tile cache that finish frees, and STACK_OUTER_K aliases
+     parents[k]->ptr, which is the attach buffer rather than the parent's
+     own memory whenever the parent is a view.  Scattering per parent
+     would let the fast paths carry writes too; until then this branch is
+     just the assertion that they are not asked to. */
   if ( st->alias_mode == CA_ITER_ALIAS_STACK
        || st->alias_mode == CA_ITER_ALIAS_STACK_OUTER_K ) {
-    /* STACK_OUTER_K (P.2 Case A) is READ-only scope: slabs are direct
-       aliases into parents[k]->ptr, kernel WRITE would scatter into
-       parent memory which is out of scope (see proposal R1).  Skip
-       sync. */
-    st->write_dirty = 0;
-    return;
-  }
-
-  /* SRC_ATTACH path (step 9 + 2026-05-31 refactor): kernel wrote into
-     iterator-owned scratch (= scratch_ptr).  Push back via xfer_all PUT
-     which routes through the view's xfer_all slot -- handles CAFake
-     (cast back), CAByteSwap (swap back), CABitfield/CABitarray (bit
-     pack back), CAReduce (broadcast across reduce window).  Inherits
-     transform-fused / partial materialise / etc. automatically. */
-  if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
-    if ( st->src->elements > 0 ) {
-      ca_xfer_all(st->src, st->scratch_ptr, CA_XFER_PUT);
-    }
     st->write_dirty = 0;
     return;
   }
@@ -2852,12 +2876,32 @@ ca_iter_state_sync_slab (ca_iter_state *st)
       ca_stride_scatter_run(dst, st->fiber_data_scratch,
                             bytes, n, data_step);
     }
-    /* Fall through to any subsequent src_kind scatter (= harmless: for
-       the alias paths reached here, scratch_ptr is NULL and the switch
-       below early-returns).  But for SRC_DESCRIPTOR / SRC_ATTACH that
-       use the per-slab materialise path, fiber_data_scratch stays NULL
-       (those paths use scratch_ptr and the PER_SLAB(_HOIST) yield), so
-       this block does not fire. */
+    /* Fall through.  The gather above is not specific to a src_kind --
+       it fires for any source whose fiber is not innermost-contig -- so
+       for SRC_ATTACH this has just written the fiber back into the
+       whole-view scratch, and the push-back below carries it to the
+       source.  For the alias paths scratch_ptr is NULL and the switch
+       below early-returns. */
+  }
+
+  /* SRC_ATTACH path (step 9 + 2026-05-31 refactor): kernel wrote into
+     iterator-owned scratch (= scratch_ptr).  Push back via xfer_all PUT
+     which routes through the view's xfer_all slot -- handles CAFake
+     (cast back), CAByteSwap (swap back), CABitfield/CABitarray (bit
+     pack back), CAReduce (broadcast across reduce window).  Inherits
+     transform-fused / partial materialise / etc. automatically.
+
+     This has to stay below the two per-fiber blocks: consulting
+     src_kind first would push back the whole-view buffer while the
+     fiber the author actually wrote sat unscattered in
+     fiber_data_scratch, and would push back a NULL one for
+     PER_FIBER_FUSED, which owns no whole-view buffer at all. */
+  if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
+    if ( st->src->elements > 0 ) {
+      ca_xfer_all(st->src, st->scratch_ptr, CA_XFER_PUT);
+    }
+    st->write_dirty = 0;
+    return;
   }
 
   /* alias path: kernel wrote through alias_ptr into parent directly
@@ -2994,6 +3038,228 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   st->src       = NULL;
   st->alias_ptr = NULL;
+}
+
+/* ---- Raise-safe entry points ----------------------------------------
+ *
+ * A walk reads its source, and a source that converts as it is read (a
+ * lazy view over an object array, say) raises when it meets a cell it
+ * cannot convert.  The caller's loop then never reaches
+ * ca_iter_state_finish -- the block macros put it in the `for`
+ * increment, which a raise jumps over, and it is past the raise in
+ * hand-written walks too.  So the walk finishes itself on the way out.
+ *
+ * Every entry point that can raise is called through rb_protect here,
+ * and ca_iter_state_finish is idempotent (it clears st->src), so the
+ * caller's own finish after an ordinary walk stays correct.
+ *
+ * Not covered: a kernel body that raises.  It runs in the caller's
+ * frame, between two calls of these functions, where the engine has no
+ * hold on it.  An object-lane kernel calling back into Ruby is the case
+ * to watch.
+ *
+ * init runs protected always -- once per walk, next to a materialise.
+ * next_slab / sync_slab are called once per slab, in walks whose whole
+ * per-fiber cost can be a few nanoseconds, so they are protected only
+ * when this walk can raise at all: when it gathers each fiber through
+ * the source's own transfer slots, or when it writes scratch back
+ * through them.  Every other shape hands out pointers into memory that
+ * init already materialised, and moves it with memcpy. */
+
+/* Private flags bit, kept in ca_iter_state.flags rather than a field of
+   its own: the state is stack-allocated by ext authors through the block
+   macros, so growing it would overrun states built against an older
+   header. */
+#define CA_ITER_FLAG_WALK_MAY_RAISE 0x80000000u
+
+typedef struct {
+  ca_iter_state    *st;
+  CArray           *src;
+  ca_slab_policy_t  policy;
+  int8_t           *axes;
+  int8_t            naxes;
+  uint32_t          flags;
+  char            **out_ptr;
+  boolean8_t      **out_mask;
+  ca_size_t        *out_n;
+  ca_size_t        *out_stride_bytes;
+  int               rc;
+} ca_iter_call_t;
+
+/* Whether next_slab / sync_slab on this walk need the protection. */
+static void
+ca_iter_mark_walk_may_raise (ca_iter_state *st)
+{
+  if ( st == NULL ) return;
+  if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
+    /* gathers each fiber through the source's xfer_stride slot */
+    st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
+  }
+  else if ( (st->flags & CA_KERNEL_WRITE)
+            && (st->scratch_ptr != NULL
+                || st->src_kind == CA_ITER_SRC_ATTACH) ) {
+    /* writes back out of iterator-owned scratch, through the source's
+       xfer_all / sync_data slot.  A write into aliased memory needs no
+       push-back at all: sync_slab returns at once. */
+    st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
+  }
+}
+
+static void
+ca_iter_protect (ca_iter_state *st, VALUE (*body)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(body, arg, &tag);
+  if ( tag ) {
+    ca_iter_state_finish(st);
+    rb_jump_tag(tag);
+  }
+}
+
+static VALUE
+ca_iter_call_init_l1 (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  c->rc = ca_iter_state_init_l1_unprotected(c->st, c->src, c->policy,
+                                            c->axes, c->naxes, c->flags);
+  return Qnil;
+}
+
+static VALUE
+ca_iter_call_init_l2 (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  c->rc = ca_iter_state_init_l2_unprotected(c->st, c->src, c->policy,
+                                            c->axes, c->naxes, c->flags);
+  return Qnil;
+}
+
+static VALUE
+ca_iter_call_next_slab (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  c->rc = ca_iter_state_next_slab_unprotected(c->st, c->out_ptr,
+                                              c->out_mask, c->out_n);
+  return Qnil;
+}
+
+static VALUE
+ca_iter_call_next_slab_strided (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  c->rc = ca_iter_state_next_slab_strided_unprotected(c->st, c->out_ptr,
+                                                      c->out_mask, c->out_n,
+                                                      c->out_stride_bytes);
+  return Qnil;
+}
+
+static VALUE
+ca_iter_call_next_slab_axes (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  c->rc = ca_iter_state_next_slab_axes_unprotected(c->st, c->out_ptr,
+                                                   c->out_mask);
+  return Qnil;
+}
+
+static VALUE
+ca_iter_call_sync_slab (VALUE arg)
+{
+  ca_iter_call_t *c = (ca_iter_call_t *) arg;
+  ca_iter_state_sync_slab_unprotected(c->st);
+  return Qnil;
+}
+
+int
+ca_iter_state_init_l1 (ca_iter_state    *st,
+                       struct _CArray   *src,
+                       ca_slab_policy_t  policy,
+                       int8_t           *axes,
+                       int8_t            naxes,
+                       uint32_t          flags)
+{
+  ca_iter_call_t c;
+  c.st = st; c.src = src; c.policy = policy;
+  c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  ca_iter_protect(st, ca_iter_call_init_l1, (VALUE) &c);
+  if ( c.rc == CA_ITER_OK ) ca_iter_mark_walk_may_raise(st);
+  return c.rc;
+}
+
+int
+ca_iter_state_init_l2 (ca_iter_state    *st,
+                       struct _CArray   *src,
+                       ca_slab_policy_t  policy,
+                       int8_t           *axes,
+                       int8_t            naxes,
+                       uint32_t          flags)
+{
+  ca_iter_call_t c;
+  c.st = st; c.src = src; c.policy = policy;
+  c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  ca_iter_protect(st, ca_iter_call_init_l2, (VALUE) &c);
+  if ( c.rc == CA_ITER_OK ) ca_iter_mark_walk_may_raise(st);
+  return c.rc;
+}
+
+int
+ca_iter_state_next_slab (ca_iter_state *st,
+                         char         **out_ptr,
+                         boolean8_t   **out_mask,
+                         ca_size_t     *out_n)
+{
+  ca_iter_call_t c;
+  if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
+    return ca_iter_state_next_slab_unprotected(st, out_ptr, out_mask, out_n);
+  }
+  c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.out_n = out_n;
+  c.rc = 0;
+  ca_iter_protect(st, ca_iter_call_next_slab, (VALUE) &c);
+  return c.rc;
+}
+
+int
+ca_iter_state_next_slab_strided (ca_iter_state *st,
+                                 char         **out_ptr,
+                                 boolean8_t   **out_mask,
+                                 ca_size_t     *out_n,
+                                 ca_size_t     *out_stride_bytes)
+{
+  ca_iter_call_t c;
+  if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
+    return ca_iter_state_next_slab_strided_unprotected(st, out_ptr, out_mask,
+                                                       out_n, out_stride_bytes);
+  }
+  c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.out_n = out_n;
+  c.out_stride_bytes = out_stride_bytes; c.rc = 0;
+  ca_iter_protect(st, ca_iter_call_next_slab_strided, (VALUE) &c);
+  return c.rc;
+}
+
+int
+ca_iter_state_next_slab_axes (ca_iter_state *st,
+                              char         **out_ptr,
+                              boolean8_t   **out_mask)
+{
+  ca_iter_call_t c;
+  if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
+    return ca_iter_state_next_slab_axes_unprotected(st, out_ptr, out_mask);
+  }
+  c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.rc = 0;
+  ca_iter_protect(st, ca_iter_call_next_slab_axes, (VALUE) &c);
+  return c.rc;
+}
+
+void
+ca_iter_state_sync_slab (ca_iter_state *st)
+{
+  ca_iter_call_t c;
+  if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
+    ca_iter_state_sync_slab_unprotected(st);
+    return;
+  }
+  c.st = st;
+  ca_iter_protect(st, ca_iter_call_sync_slab, (VALUE) &c);
 }
 
 #ifdef CARRAY_DEV_BUILD

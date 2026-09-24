@@ -178,18 +178,25 @@ typedef struct {
   size_t struct_size;
   size_t (*pool_bytes) (int8_t ndim);
   void   (*pool_init)  (void *ap, int8_t ndim);
+  /* partial fill */
+  void   (*fill_addrs) (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr);
+  void   (*fill_stride)(void *ap, ca_size_t base, int8_t ndim,
+                        ca_size_t *counts, ca_size_t *steps, void *ptr);
 } ca_operation_function_t;
 ```
 
 - **`free_object` / `clone` / `allocate`** — lifecycle of the C struct itself.
 - **`attach` / `sync` / `detach`** — the materialise / write-back / release
   lifecycle ([ch. 4](04_attach_lifecycle.md)).
-- **`fill_data`** — broadcast/fill a value across the array.
+- **`fill_data`** — broadcast/fill a value across the whole array;
+  **`fill_addrs` / `fill_stride`** do the same for part of it, so a partial fill
+  reaches the parent as a region instead of borrowing its pointer.
 - **`create_mask`** — build this type's mask sibling (so a CABlock yields a
   `CABlockMask`, not a generic mask — [ch. 5](05_mask_and_undef.md)).
 - **the `xfer_*` family** — the unifying transfer protocol. `xfer_all` is the
   whole-view gather/scatter that is replacing the historical `copy_data` /
-  `sync_data`; `xfer_stride` delivers one contiguous region (used for partial
+  `sync_data`; `xfer_stride` delivers one region — the region itself need not be
+  contiguous, only the buffer it is packed into (used for partial
   materialise); `fold_stride` is the one-hop compose-fold for non-CAStride
   participants; `xfer_index` / `xfer_addrs` move single elements / address lists.
   The `dir` argument is `CA_XFER_GET` (view → buffer) or `CA_XFER_PUT` (scatter).

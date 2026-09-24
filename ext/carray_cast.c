@@ -552,6 +552,77 @@ rb_ca_object_to_data_class (VALUE self, VALUE rtype, ca_size_t bytes)
   return obj;
 }
 
+typedef struct {
+  CArray     *ca;
+  CArray     *cb;
+  boolean8_t *scratch;
+} ca_to_type_ctx_t;
+
+/* The cast proper, with `ca` attached.  It can raise (a value the target
+   type cannot hold), so it runs under rb_ensure. */
+static VALUE
+ca_to_type_cast (VALUE arg)
+{
+  ca_to_type_ctx_t *c = (ca_to_type_ctx_t *) arg;
+  CArray *ca = c->ca, *cb = c->cb;
+
+  if ( ca->data_type == CA_OBJECT
+       && ( (cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64)
+            || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64 ) ) {
+    /* object -> int/float: give the cast a mask buffer so an unparseable
+       cell becomes UNDEF (see ext/carray_cast_func.rb).  Cast into a
+       scratch mask seeded from the source mask, then attach it to the
+       output only if some cell ended up masked -- an all-valid cast keeps
+       the mask-less result the legacy path produced. */
+    ca_size_t ne = cb->elements;
+    ca_size_t i;
+    boolean8_t any = 0;
+    boolean8_t *scratch;
+    c->scratch = scratch = ALLOC_N(boolean8_t, ne > 0 ? ne : 1);
+    if ( cb->mask ) {
+      memcpy(scratch, cb->mask->ptr, ne);   /* copy of source mask */
+    }
+    else {
+      memset(scratch, 0, ne);
+    }
+    ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
+    for (i=0; i<ne; i++) {
+      if ( scratch[i] ) {
+        any = 1;
+        break;
+      }
+    }
+    if ( any ) {
+      if ( ! cb->mask ) {
+        ca_create_mask(cb);
+      }
+      memcpy(cb->mask->ptr, scratch, ne);
+    }
+    xfree(scratch);
+    c->scratch = NULL;
+  }
+  else if ( ca_has_mask(ca) ) {
+    ca_cast_block_with_mask(cb->elements, ca, ca->ptr, cb, cb->ptr,
+                            (boolean8_t*)ca->mask->ptr);
+  }
+  else {
+    ca_cast_block(cb->elements, ca, ca->ptr, cb, cb->ptr);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_to_type_release (VALUE arg)
+{
+  ca_to_type_ctx_t *c = (ca_to_type_ctx_t *) arg;
+  if ( c->scratch ) {
+    xfree(c->scratch);
+    c->scratch = NULL;
+  }
+  ca_detach(c->ca);
+  return Qnil;
+}
+
 /* CArray#to_type(data_type, bytes:) -- eager copy of self converted to
    data_type (a new entity owning its storage).  User doc lives in
    yard-stubs/carray_cast.rb. */
@@ -561,6 +632,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
   CArray *ca, *cb;
+  ca_to_type_ctx_t ctx;
   int8_t data_type;
   ca_size_t bytes;
 
@@ -601,48 +673,11 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(obj, CArray, &carray_data_type, cb);
 
+  ctx.ca      = ca;
+  ctx.cb      = cb;
+  ctx.scratch = NULL;
   ca_attach(ca);
-  if ( ca->data_type == CA_OBJECT
-       && ( (data_type >= CA_INT8 && data_type <= CA_UINT64)
-            || data_type == CA_FLOAT32 || data_type == CA_FLOAT64 ) ) {
-    /* object -> int/float: give the cast a mask buffer so an unparseable
-       cell becomes UNDEF (see ext/carray_cast_func.rb).  Cast into a
-       scratch mask seeded from the source mask, then attach it to the
-       output only if some cell ended up masked -- an all-valid cast keeps
-       the mask-less result the legacy path produced. */
-    ca_size_t ne = cb->elements;
-    ca_size_t i;
-    boolean8_t any = 0;
-    boolean8_t *scratch = ALLOC_N(boolean8_t, ne > 0 ? ne : 1);
-    if ( cb->mask ) {
-      memcpy(scratch, cb->mask->ptr, ne);   /* copy of source mask */
-    }
-    else {
-      memset(scratch, 0, ne);
-    }
-    ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
-    for (i=0; i<ne; i++) {
-      if ( scratch[i] ) {
-        any = 1;
-        break;
-      }
-    }
-    if ( any ) {
-      if ( ! cb->mask ) {
-        ca_create_mask(cb);
-      }
-      memcpy(cb->mask->ptr, scratch, ne);
-    }
-    xfree(scratch);
-  }
-  else if ( ca_has_mask(ca) ) {
-    ca_cast_block_with_mask(cb->elements, ca, ca->ptr, cb, cb->ptr,
-                            (boolean8_t*)ca->mask->ptr);
-  }
-  else {
-    ca_cast_block(cb->elements, ca, ca->ptr, cb, cb->ptr);
-  }
-  ca_detach(ca);
+  rb_ensure(ca_to_type_cast, (VALUE) &ctx, ca_to_type_release, (VALUE) &ctx);
 
   /* When rtype is a data_class (e.g. CAStruct subclass), wrap the
      result in CARecord so the cast output carries data_class. */
@@ -1366,6 +1401,36 @@ rb_ca_cast (volatile VALUE self)
   return obj;
 }
 
+/* A String operand against a fixlen array is a value of that array's cell
+   width.  ca_value_to_data_type answers CA_OBJECT for a String, so without
+   this the operand became an object scalar and the comparison ran down the
+   object lane -- an rb_funcall of String#== per cell, against the cell's
+   NUL-padded text.  A fixlen array pads a short String on write
+   (`a[i] = "be"` stores "be\0\0\0"), so that answered that an array does
+   not equal the string it was written from, and did it 30x slower than the
+   memcmp lane the fixlen comparison bodies are there to provide.
+
+   Two fixlen *arrays* of different widths keep the variable-width byte
+   string semantics those bodies implement (min-width memcmp with a length
+   tiebreak); this is only about a scalar standing in for a cell. */
+static int
+ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
+{
+  CArray *cr;
+  /* A String is the only operand that means a cell value here.  A Regexp
+     (match) or any other object keeps its own coercion: those are asking
+     something about the bytes, not standing in for them. */
+  if ( ! RB_TYPE_P(*scalar, T_STRING) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( cr->data_type != CA_FIXLEN ) {
+    return 0;
+  }
+  *scalar = rb_cscalar_new_with_value(CA_FIXLEN, cr->bytes, *scalar);
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -1409,6 +1474,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
     }
 #endif
+    else if ( ca_fixlen_scalar_operand(self, *other) ) {
+      /* width taken from the fixlen reference; see the helper above */
+    }
     else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
     }
@@ -1437,6 +1505,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
     }
 #endif
+    else if ( ca_fixlen_scalar_operand(other, *self) ) {
+      /* width taken from the fixlen reference; see the helper above */
+    }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
     }
@@ -1823,6 +1894,9 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
+    }
+    else if ( ca_fixlen_scalar_operand(other, *self) ) {
+      return;   /* already the receiver's data_type and width */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);

@@ -172,6 +172,62 @@ rb_ca_xfer_stride_smoke (VALUE self, VALUE rca)
     }
   }
 
+  /* Pass 3: sub-sampled innermost axis (strides[k] a multiple of native[k],
+     counts[k] < dim[k]).  Passes 1 and 2 both keep counts == dim and
+     |strides| == native, so nothing before this asks a view to honour a step
+     the request chose. */
+  if ( ca->dim[ca->ndim - 1] >= 2 ) {
+    ca_size_t idx[CA_RANK_MAX], vidx[CA_RANK_MAX];
+    ca_size_t m = 1;
+    int8_t    last = ca->ndim - 1;
+    for ( k = 0; k < ca->ndim; k++ ) {
+      starts[k]  = 0;
+      counts[k]  = ca->dim[k];
+      strides[k] = native[k];
+    }
+    counts[last]  = ca->dim[last] / 2;
+    strides[last] = 2 * native[last];
+    for ( k = 0; k < ca->ndim; k++ ) m *= counts[k];
+    ca_xfer_stride(ca, starts, counts, strides, buf, CA_XFER_GET);
+    for ( k = 0; k < ca->ndim; k++ ) idx[k] = 0;
+    for ( i = 0; i < m; i++ ) {
+      for ( k = 0; k < ca->ndim; k++ ) vidx[k] = idx[k];
+      vidx[last] = idx[last] * 2;
+      ca_fetch_index(ca, vidx, ref);
+      if ( memcmp(buf + i * ca->bytes, ref, ca->bytes) != 0 ) mism++;
+      k = ca->ndim - 1;
+      while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+    }
+  }
+
+  /* Pass 4: permuted request -- request axis 0 walks view axis 1 and vice
+     versa, which is the shape a transposed read composes to.  Nothing in the
+     contract ties strides[k] to native[k], and a view that assumes it does
+     misreads this request while passing every pass above. */
+  if ( ca->ndim >= 2 ) {
+    ca_size_t idx[CA_RANK_MAX], vidx[CA_RANK_MAX];
+    for ( k = 0; k < ca->ndim; k++ ) {
+      starts[k]  = 0;
+      counts[k]  = ca->dim[k];
+      strides[k] = native[k];
+    }
+    counts[0]  = ca->dim[1];
+    counts[1]  = ca->dim[0];
+    strides[0] = native[1];
+    strides[1] = native[0];
+    ca_xfer_stride(ca, starts, counts, strides, buf, CA_XFER_GET);
+    for ( k = 0; k < ca->ndim; k++ ) idx[k] = 0;
+    for ( i = 0; i < n; i++ ) {
+      for ( k = 0; k < ca->ndim; k++ ) vidx[k] = idx[k];
+      vidx[0] = idx[1];
+      vidx[1] = idx[0];
+      ca_fetch_index(ca, vidx, ref);
+      if ( memcmp(buf + i * ca->bytes, ref, ca->bytes) != 0 ) mism++;
+      k = ca->ndim - 1;
+      while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+    }
+  }
+
   xfree(buf);
   xfree(ref);
   return LL2NUM(mism);

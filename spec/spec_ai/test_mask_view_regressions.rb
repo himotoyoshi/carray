@@ -16,12 +16,6 @@ require "carray"
 #      at the next GC pass.
 #
 #   3. CABitarray / CAFake — same wrong mask TypedData bug as (2).
-#
-#   4. CAUnboundRepeat infinite recursion — `ca_ubrep_setup` called
-#      `ca_stride_setup` (which dispatches `ca_create_mask` when the
-#      parent has a mask) BEFORE initialising the tail `rep_dim`.
-#      The dispatched `ca_ubrep_func_create_mask` then read uninitialised
-#      `rep_dim` and recursed.
 
 class TestMaskViewRegressions < Test::Unit::TestCase
 
@@ -85,7 +79,5 @@ class TestMaskViewRegressions < Test::Unit::TestCase
     GC.start
     assert_equal expected, ba.mask.to_a
   end
-
-  # --- CAUnboundRepeat construction over masked parent ------------------
 
 end

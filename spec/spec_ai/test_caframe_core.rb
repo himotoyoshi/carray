@@ -437,6 +437,37 @@ class TestCAFrameAtLabel < Test::Unit::TestCase
     df = CAFrame.new("v" => CA_INT32([1, 2, 3]))
     assert_raise(ArgumentError) { df.at(0) }
   end
+
+  # An index may carry a masked cell -- an outer join and align both produce
+  # one -- but an undefined label identifies no row, which is the same answer
+  # the addressing primitives give: a masked key matches nothing, not another
+  # masked key. Asking for it through at is a malformed question, so it is
+  # refused rather than answered.
+  def test_at_undef_is_refused
+    idx = CA_INT32([100, 200, 300])
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    e = assert_raise(ArgumentError) { df.at(UNDEF) }
+    assert_match(/is_masked/, e.message)
+  end
+
+  # Rows whose label is missing are still reachable, with mask vocabulary.
+  def test_rows_with_a_missing_label_are_reachable_through_filter
+    idx = CA_INT32([100, 0, 0])
+    idx[1] = UNDEF
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    sub = df.filter { |f| f.index.is_masked }
+    assert_equal [2.0, 3.0], sub["t"].to_a
+  end
+
+  # A real label whose row is masked is simply absent, not undetermined.
+  def test_at_a_label_whose_cell_is_masked_is_a_key_error
+    idx = CA_INT32([100, 200, 300])
+    idx[2] = UNDEF
+    df = CAFrame.new({ "t" => CA_FLOAT64([1, 2, 3]) }, index: idx, axis_name: "id")
+    assert_raise(KeyError) { df.at(300) }
+  end
 end
 
 class TestCAFrameFilterAndGather < Test::Unit::TestCase
@@ -521,6 +552,40 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     @df.filter(keep_masked: true) { |f| f["a"] > 15 }
     assert_equal [10, 20, nil, 40], @df["a"].to_a.map { |v| v == UNDEF ? nil : v }
     assert_equal [0.5, 1.5, 2.5, 3.5], @df["b"].to_a
+  end
+
+  # keep_masked: has to write the carried-forward UNDEF into the result, so the
+  # result is materialized -- and materialized means the index too, not just the
+  # columns. Writing the result must not reach the parent through either.
+  def test_keep_masked_result_index_is_independent
+    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
+                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
+    df["v"][2] = UNDEF
+    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
+    sub.index[0] = -1
+    assert_equal [100, 200, 300, 400], df.index.to_a
+  end
+
+  # The same call site must not switch between sharing and copying on whether
+  # that day's data happened to produce an undetermined cell (the reasoning
+  # CAFrame.md section 3 gives for splice always snapshotting).
+  def test_keep_masked_is_materialized_whether_or_not_the_selector_is_masked
+    cols = { "v" => CA_INT32([10, 20, 30, 40]) }
+    unmasked = CAFrame.new(cols.transform_values(&:copy),
+                           index: CA_INT32([100, 200, 300, 400]))
+    masked   = CAFrame.new(cols.transform_values(&:copy),
+                           index: CA_INT32([100, 200, 300, 400]))
+    masked["v"][2] = UNDEF
+
+    [unmasked, masked].each do |df|
+      before_v = df["v"].to_a
+      before_i = df.index.to_a
+      sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
+      sub["v"][0] = -1
+      sub.index[0] = -1
+      assert_equal before_v, df["v"].to_a
+      assert_equal before_i, df.index.to_a
+    end
   end
 
   def test_keep_masked_without_masked_selector_equals_drop
@@ -610,5 +675,173 @@ class TestCAFrameIndex < Test::Unit::TestCase
     ).set_index("t")
     assert_equal 1, df.index.ndim
     assert_equal [3], df.index.shape
+  end
+end
+
+# nrow is the frame's claim about its row axis. It has to be backed by
+# something the frame actually holds -- a column or the index -- and every row
+# form has to be able to refuse a row outside it, including on a frame that
+# holds no column to forward the selector to.
+class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
+  def test_a_splice_that_welds_nothing_claims_no_rows
+    df = CAFrame.new({})
+    df[0...0] = CAFrame.new({}, index: CA_INT32([1, 2, 3]))
+    assert_equal 0, df.nrow
+    assert_equal 0, df.copy.nrow          # the frame's own verbs agree with it
+    assert_equal 0, df.dup.nrow
+    assert_equal [], df.to_records
+  end
+
+  def test_a_normal_splice_still_counts_its_rows
+    df = CAFrame.new("a" => CA_INT32([1, 2, 3, 4]))
+    df[1..1] = CAFrame.new("a" => CA_INT32([9, 9, 9]))
+    assert_equal 6, df.nrow
+    assert_equal [1, 9, 9, 9, 3, 4], df["a"].to_a
+    assert_equal df["a"].shape[0], df.nrow
+  end
+
+  def test_a_splice_that_replaces_every_row_counts_them
+    df = CAFrame.new("a" => CA_INT32([1, 2, 3]))
+    df[0..2] = CAFrame.new("a" => CA_INT32([7, 8]))
+    assert_equal 2, df.nrow
+    assert_equal [7, 8], df["a"].to_a
+  end
+
+  def test_an_out_of_range_row_is_refused_with_no_columns_to_forward_to
+    [CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t"),
+     CAFrame.new({})].each do |f|
+      assert_raise(IndexError, "nrow=#{f.nrow} nvar=#{f.nvar}") { f[99] = UNDEF }
+    end
+  end
+
+  def test_masking_a_row_that_exists_is_still_a_no_op_with_no_columns
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    f[0] = UNDEF                            # a row that exists: nothing to mask
+    assert_equal [10, 20, 30], f.index.to_a
+    assert_equal false, f.index.has_mask?
+  end
+
+  # p on a frame whose only data is its index showed none of it: the gate was
+  # the column set, where the table itself counts the index as a column.
+  def test_inspect_shows_the_table_of_an_index_only_frame
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    assert_match(/^#<CAFrame nrow=3 vars=\[\] index="t">$/, f.inspect.lines.first.chomp)
+    assert_operator f.inspect.lines.size, :>, 1
+    assert_match(/10/, f.inspect)
+  end
+
+  def test_inspect_of_a_frame_with_nothing_in_it_is_the_summary_alone
+    assert_equal 1, CAFrame.new({}).inspect.lines.size
+  end
+
+  # The message has to name the side the caller can act on.
+  def test_a_wrong_length_column_is_blamed_not_the_index
+    f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
+    e = assert_raise(ArgumentError) { f.append("v", CA_FLOAT64([1, 2])) }
+    assert_match(/"v"/, e.message)
+  end
+end
+
+# set_index / reset_index are documented as each other's inverse, so the round
+# trip has to put the row axis name back. set_index overwrites it with the name
+# of the column it promotes, and that name is user-visible -- it is the CSV
+# header of the first column and the key of the index in a row Hash.
+class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
+  def frame(axis_name)
+    CAFrame.new({ "t" => CA_INT32([1, 2, 3]), "v" => CA_FLOAT64([1, 2, 3]) },
+                axis_name: axis_name)
+  end
+
+  def test_reset_index_restores_the_name_the_frame_had_before
+    df = frame("obs")
+    df.set_index("t")
+    assert_equal "t", df.axis_name
+    df.reset_index
+    assert_equal "obs", df.axis_name
+    assert_equal ["t", "v"], df.variable_names
+  end
+
+  def test_the_round_trip_is_the_identity_on_the_default_name
+    df = CAFrame.new("t" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]))
+    before = df.axis_name
+    df.set_index("t").reset_index
+    assert_equal before, df.axis_name
+  end
+
+  # Only the name held before the frame had an index is remembered, so a second
+  # set_index does not overwrite it with the first index's name.
+  def test_a_second_set_index_does_not_replace_the_remembered_name
+    df = CAFrame.new({ "a" => CA_INT32([1, 2]), "b" => CA_INT32([7, 8]),
+                       "v" => CA_FLOAT64([1, 2]) }, axis_name: "obs")
+    df.set_index("a")
+    df.set_index("b")
+    df.reset_index
+    assert_equal "obs", df.axis_name
+  end
+
+  # A frame born with an index never had a name before it, so there is nothing
+  # to restore and the default stands. A derived frame is born that way too.
+  def test_a_frame_born_with_an_index_resets_to_the_default
+    df = CAFrame.new({ "v" => CA_FLOAT64([1, 2]) },
+                     index: CA_INT32([9, 8]), axis_name: "obs")
+    df.reset_index
+    assert_equal CAFrame::DEFAULT_AXIS_NAME, df.axis_name
+    assert_equal ["obs", "v"], df.variable_names
+  end
+
+  def test_resetting_twice_is_harmless
+    df = frame("obs")
+    df.set_index("t").reset_index
+    assert_equal "obs", df.axis_name
+    df.reset_index
+    assert_equal "obs", df.axis_name
+  end
+end
+
+# reset_index demotes the index back to a column; set_index over an existing
+# index has to do the same with the one it replaces, or the column it was made
+# from disappears.
+class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
+  def frame
+    CAFrame.new({ "a" => CA_INT32([1, 2]), "b" => CA_INT32([7, 8]),
+                  "v" => CA_FLOAT64([10, 20]) }, axis_name: "obs")
+  end
+
+  def test_the_replaced_index_comes_back_as_a_column
+    df = frame.set_index("a")
+    df.set_index("b")
+    assert_equal [7, 8], df.index.to_a
+    assert_equal "b", df.axis_name
+    assert_includes df.variable_names, "a"
+    assert_equal [1, 2], df["a"].to_a
+  end
+
+  # Where it lands is the same place reset_index puts it: the front.
+  def test_reindexing_equals_reset_then_set
+    direct = frame.set_index("a")
+    direct.set_index("b")
+    composed = frame.set_index("a")
+    composed.reset_index
+    composed.set_index("b")
+    assert_equal composed.variable_names, direct.variable_names
+    assert_equal composed.axis_name, direct.axis_name
+    assert_equal composed.index.to_a, direct.index.to_a
+  end
+
+  def test_reindexing_does_not_change_the_row_count_or_lose_data
+    df = frame.set_index("a")
+    df.set_index("b")
+    assert_equal 2, df.nrow
+    assert_equal ["a", "v"], df.variable_names
+    assert_equal [10.0, 20.0], df["v"].to_a
+  end
+
+  # The remembered name is still the one held before any index was set.
+  def test_reindexing_then_resetting_restores_the_original_axis_name
+    df = frame.set_index("a")
+    df.set_index("b")
+    df.reset_index
+    assert_equal "obs", df.axis_name
+    assert_equal ["b", "a", "v"], df.variable_names
   end
 end

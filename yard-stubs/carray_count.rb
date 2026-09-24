@@ -40,7 +40,10 @@ class CArray
   #     stores 0/1, so `count(1)` == `count(true)`.  Any other value
   #     (`2`, `1.0`, `nil`, …) raises `TypeError`.
   #   - `self` is numeric, `v` is scalar: `v` must be numeric (true /
-  #     false are rejected).
+  #     false are rejected -- they are the boolean array's domain).
+  #   - `self.data_type == :object`, `v` is scalar: cells equal to `v`
+  #     by Ruby `==`, so `count(1)` and `count(1.0)` agree, and `true` /
+  #     `false` / `nil` are ordinary values to count.
   #
   #   When `axis` is `nil` (default), reduces over all axes and
   #   returns an `Integer`.  Otherwise reduces along the given
@@ -50,7 +53,9 @@ class CArray
   #   identity `0`, so the count over no cells is `0`, not `UNDEF`
   #   (pass `min_count:` to get `UNDEF` below a threshold instead).
   #
-  #   `:fixlen` and `:object` data types raise `CArray::DataTypeError`.
+  #   `:fixlen` compares the whole cell by `memcmp`, with a short String
+  #   query padded out to the cell width -- so a 4-byte cell holding
+  #   `"a\0\0\0"` is counted by `count("a")`.
   #
   #   A time array counts by its own values: `CATime` / `CATimedelta`
   #   descend to their storage and reconcile `v` into their unit, so `v`

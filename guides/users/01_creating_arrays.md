@@ -47,6 +47,24 @@ CArray.int32(3).data_type      #  => :int32
 CArray.boolean(3).data_type    #  => :boolean
 ```
 
+### Skipping the zero fill
+
+Zeroing an array costs something, and when every element is going to be written before anything reads it, that work is thrown away. `CArray.empty` allocates without the fill:
+
+```ruby
+a = CArray.empty(:float64, [3])
+a[] = CA_DOUBLE([1.0, 2.0, 3.0])
+#  => [ 1.0, 2.0, 3.0 ]
+```
+
+It takes the data type and the shape, the shape as an Array. `CArray.new(:float64, [3])` is the same spelling with the zeros put back, so the two read the same arguments; the width of a `:fixlen` element goes in `bytes:` for both.
+
+```ruby
+CArray.empty(:fixlen, [3], bytes: 8)
+```
+
+What is in such an array before you write to it is not defined, and nothing promises it is the same twice. Reading a cell before writing it is a bug — if the zeros are what you wanted, ask for `CArray.new`. Arrays of `:object` are the exception: their cells are set to zero whatever you ask, because the garbage collector walks them.
+
 ### Filling the whole array
 
 `fill` puts one value into every element and returns the array. It is a destructive method: it writes into the array it is called on, even though its name carries no `!`. Because the plain name is taken, the copying form is the one that had to be given a suffix — `fill_copy`, at the end of this chapter.
@@ -336,6 +354,43 @@ a.template(:float64) { |i, j| i + j * 0.5 }
 ```
 
 The receiver donates its shape and its data type, and nothing else — not its values, and not anything else it carries.
+
+## What a data type can hold
+
+Each numeric type names the ends of its own range, as constants on the class for that type:
+
+```ruby
+CArray::Int32::MIN         #  => -2147483648
+CArray::Int32::MAX         #  =>  2147483647
+CArray::UInt8::MAX         #  =>  255
+```
+
+Float types name two more: `TINY`, the smallest positive value the type represents without losing precision, and `EPSILON`, the step from `1.0` to the next value it can tell apart. `EPSILON` is what a tolerance is written against — "equal to within rounding" means within a few `EPSILON`, and the right one depends on the type:
+
+```ruby
+CArray::Float32::MIN       #  => -3.4028234663852886e+38
+CArray::Float32::MAX       #  =>  3.4028234663852886e+38
+CArray::Float32::TINY      #  =>  1.1754943508222875e-38
+CArray::Float32::EPSILON   #  =>  1.1920928955078125e-07
+
+CArray::Float64::EPSILON   #  =>  2.220446049250313e-16
+```
+
+A complex type is a pair of floats and answers its component's limits: `CArray::Complex64` gives float32's, `CArray::Complex128` gives float64's. `boolean`, `fixlen` and `object` have no numeric range and carry none of these constants, so asking raises a `NameError` rather than returning an invented answer.
+
+**`MIN` is the bottom of the range, which is not what Ruby's `Float::MIN` means.** Ruby names the smallest positive normal `Float::MIN`; here that value is `TINY`, and `MIN` is the most negative value the type holds. The point of the choice is that `MIN` and `MAX` bracket a type whether it is an integer or a float, so code that has to clamp or check a range reads the same for both:
+
+```ruby
+CArray::Float64::MIN       #  => -1.7976931348623157e+308
+Float::MIN                 #  =>  2.2250738585072014e-308   a different question
+```
+
+This is what the limits are usually for — knowing whether a cast will fit before making it:
+
+```ruby
+a = CArray.int64(4).seq!(2**30, 2**30)
+a.max <= CArray::Int32::MAX     #  => false, so a.int32 would wrap
+```
 
 ## Data type casting
 

@@ -11,6 +11,7 @@
 #include "carray.h"
 #include "ca_obj_face.h"   /* CA_FACE_LIFT_IF_FACE */
 #include "carray_internal.h"   /* ca_gc_hold_push / ca_gc_hold_pop_to */
+#include "ca_sweep_engine.h"   /* ca_sweep_same_shape / ca_sweep_refuse_shapes */
 #include <stdarg.h>
 
 /* ------------------------------------------------------------------- */
@@ -19,22 +20,27 @@
  * and bytes as `ca`, copies the element payload, and reproduces the
  * mask state.  Always copies even when `ca` is an entity; for view
  * sources the data path goes through `ca_copy_data`, otherwise a flat
- * memcpy of `ca_length(ca)` bytes.
+ * memcpy of `ca_length(ca)` bytes.  If reading the source raises, the
+ * copy is freed before the raise propagates.
  *
  * Backs `CArray#copy` and is also reachable as a C-level utility from
  * other ext files that need an owned snapshot. */
-CArray *
-ca_copy (void *ap)
+void
+ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg)
 {
-  CArray *ca = (CArray *) ap;
-  CArray *co;
+  int tag = 0;
+  rb_protect(fill, arg, &tag);
+  if ( tag ) {
+    ca_free(co);
+    rb_jump_tag(tag);
+  }
+}
 
-  if ( ca_is_scalar(ca) ) {
-    co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
-  }
-  else {
-    co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
-  }
+static VALUE
+ca_copy_fill (VALUE arg)
+{
+  CArray **pair = (CArray **) arg;
+  CArray *ca = pair[0], *co = pair[1];
 
   if ( ca_is_attached(ca) ) {
     memcpy(co->ptr, ca->ptr, ca_length(ca));
@@ -47,6 +53,26 @@ ca_copy (void *ap)
   if ( ca->mask ) {
     ca_copy_mask(co, ca);
   }
+  return Qnil;
+}
+
+CArray *
+ca_copy (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  CArray *co;
+  CArray *pair[2];
+
+  if ( ca_is_scalar(ca) ) {
+    co = (CArray *) cscalar_new(ca->data_type, ca->bytes, 0);
+  }
+  else {
+    co = carray_new(ca->data_type, ca->ndim, ca->dim, ca->bytes, 0);
+  }
+
+  pair[0] = ca;
+  pair[1] = co;
+  ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
 
   return co;
 }
@@ -272,16 +298,16 @@ rb_ca_template_with_type (VALUE self, VALUE rtype, VALUE rbytes)
   return rb_ca_template_method(2, args, self);
 }
 
-/* Picks the largest-shape CArray among `n` variadic CArray arguments
- * and returns `template(largest)`.  Used by `carray_call_cfunc.c` to
- * size the output of vectorised scalar C-function calls, where the
- * inputs may be a mix of scalars and arrays. */
+/* Returns `template` of the first non-scalar among `n` variadic CArray
+ * arguments (of the first argument when all are scalars).  Used by
+ * `carray_call_cfunc.c` to size the output of vectorised scalar
+ * C-function calls: a scalar pairs with any array, two arrays only when
+ * their shapes agree. */
 VALUE
 rb_ca_template_n (int n, ...)
 {
-  volatile VALUE varg, obj;
-  CArray *ca;
-  ca_size_t elements = -1;
+  volatile VALUE varg, obj = Qnil;
+  CArray *ca, *donor = NULL;
   va_list vargs;
   int i;
 
@@ -289,24 +315,23 @@ rb_ca_template_n (int n, ...)
   for (i=0; i<n; i++) {
     varg = va_arg(vargs, VALUE);
     if ( ! rb_obj_is_carray(varg) ) {
+      va_end(vargs);
       rb_raise(rb_eRuntimeError, "[BUG] not-carray object given to rb_ca_template_n");
     }
     TypedData_Get_Struct(varg, CArray, &carray_data_type, ca);
     if ( i == 0 ) {
       obj = varg;
-      elements = ca->elements;
     }
-    else {
-      if ( rb_obj_is_cscalar(varg) ) {
-        continue;
-      }
-      if ( rb_obj_is_cscalar(obj) ) {
-        obj = varg;
-        elements = ca->elements;
-      }
-      else if ( ca->elements != elements ) {
-        rb_raise(rb_eRuntimeError, "size mismatch");
-      }
+    if ( ca_is_scalar(ca) ) {
+      continue;
+    }
+    if ( ! donor ) {
+      donor = ca;
+      obj   = varg;
+    }
+    else if ( ! ca_sweep_same_shape(donor, ca) ) {
+      va_end(vargs);
+      ca_sweep_refuse_shapes(donor, ca);
     }
   }
   va_end(vargs);

@@ -13,7 +13,7 @@ class CAFrame
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
     cat  = grouping_categorical(keys)
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
-    GroupedFrame.new(self, cat, axis)
+    GroupedFrame.new(self, cat, axis, keys.grep(String))
   end
 
   # Number of rows currently selected — used by group per-group view-frames
@@ -28,7 +28,14 @@ class CAFrame
       # values, categorized by content (the codes are composed from the
       # per-column keys).
       n = nrow
-      CArray.object(n) { |i| cols.map { |c| c[i] } }.categorize
+      key = CArray.object(n) { |i| cols.map { |c| c[i] } }
+      # One undetermined component makes the whole tuple undetermined, the same
+      # answer a single masked key cell gets. Left as a value, the UNDEF inside
+      # the tuple would intern as an ordinary distinct key and the row would
+      # form a group of its own.
+      undetermined = CArray.boolean(n) { |i| key[i].any? { |v| UNDEF.equal?(v) } }
+      key[undetermined] = UNDEF if undetermined.any
+      key.categorize
     end
   end
 
@@ -56,10 +63,14 @@ end
 #   aggregate    -> declarative per-column reductions into a new frame
 #   table { |g| }-> cross-column Ruby escape, g is a per-group view-frame
 class GroupedFrame
-  def initialize(frame, cat, axis_name)
+  # +key_names+ are the frame columns the grouping was keyed on. They become
+  # the result's index, so the reduction shortcuts must not also return them as
+  # reduced columns; an external CArray key contributes no name.
+  def initialize(frame, cat, axis_name, key_names = [])
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
+    @key_names = key_names
     @labels    = cat.labels          # group values, in code order
   end
 
@@ -124,6 +135,23 @@ class GroupedFrame
 
   # Convenience reductions over every numeric scalar column (memo §6-4
   # "grp.mean"). Non-numeric / N-D columns are skipped.
+  #
+  # @!method sum
+  #   Returns a frame of the per-group sum of every numeric one-dimensional
+  #   column. Non-numeric and multi-dimensional columns are left out.
+  #   @return [CAFrame] one row per group, indexed by the group labels.
+  # @!method mean
+  #   Returns a frame of the per-group arithmetic mean of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method min
+  #   Returns a frame of the per-group minimum of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method max
+  #   Returns a frame of the per-group maximum of every numeric
+  #   one-dimensional column, as {#sum} does.
+  #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
     define_method(red) { reduce_numeric(red) }
   end
@@ -143,6 +171,11 @@ class GroupedFrame
   private def reduce_numeric(reduction)
     cols = {}
     @frame.variable_names.each do |name|
+      # A key column is the index here, not a result column. Filtering it out
+      # by name rather than by data type is what makes a numeric key behave
+      # like a string one: NON_NUMERIC is about which columns a reduction can
+      # apply to, which happened to cover string keys and nothing else.
+      next if @key_names.include?(name)
       col = @frame[name]
       next unless col.ndim == 1 && !NON_NUMERIC.include?(col.data_type)
       cols[name] = col.group_by_category(@cat).public_send(reduction)

@@ -127,6 +127,42 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
     assert_equal df["temp"].to_a, df2["temp"].to_a
   end
 
+  # to_records writes a masked cell as nil, so nil coming back in is the only
+  # spelling a masked cell has -- for every column type, not just the ones a
+  # numeric cast happens to convert. (The CSV reader already takes this
+  # position; see the note on `table[:eq, nil] = UNDEF` in io.rb.)
+  def test_round_trip_keeps_the_mask_on_a_string_column
+    v = CA_OBJECT(["a", "b", "c"]); v[1] = UNDEF
+    df2 = CAFrame.from_records(CAFrame.new("v" => v).to_records)
+    assert_equal [false, true, false], df2["v"].is_masked.to_a
+  end
+
+  def test_round_trip_keeps_the_mask_on_a_boolean_column
+    v = CA_BOOLEAN([1, 0, 1]); v[1] = UNDEF
+    df2 = CAFrame.from_records(CAFrame.new("v" => v).to_records)
+    assert_equal [false, true, false], df2["v"].is_masked.to_a
+  end
+
+  def test_round_trip_keeps_the_mask_on_an_all_masked_column
+    v = CA_OBJECT(["a", "b"]); v[0] = UNDEF; v[1] = UNDEF
+    df2 = CAFrame.from_records(CAFrame.new("v" => v).to_records)
+    assert_equal [true, true], df2["v"].is_masked.to_a
+  end
+
+  def test_round_trip_keeps_the_mask_on_a_non_numeric_nd_column
+    df2 = CAFrame.from_records([{ "w" => ["a", "b"] }, { "w" => nil }])
+    assert_equal [[false, false], [true, true]], df2["w"].is_masked.to_a
+  end
+
+  # The index travels as an ordinary key named after the row axis; a row with
+  # no label must not come back as a row labelled with the value nil.
+  def test_round_trip_keeps_the_mask_on_the_index_column
+    idx = CA_OBJECT(["x", "y", "z"]); idx[1] = UNDEF
+    df = CAFrame.new({ "v" => CA_INT32([1, 2, 3]) }, index: idx, axis_name: "id")
+    df2 = CAFrame.from_records(df.to_records)
+    assert_equal [false, true, false], df2["id"].is_masked.to_a
+  end
+
   def test_to_records_is_json_serializable
     require "json"
     df = CAFrame.from_records([{ "a" => 1, "b" => nil }])
