@@ -34,7 +34,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.2 (unreleased)
+## 3.0.2
 
 - New: `CArray::AddressBasis`, for a C extension whose code addresses cells
   itself rather than being handed them — a kernel generated from an
@@ -45,19 +45,57 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   a user API: what it lends is a raw machine address, so it is described in
   the developer's guide rather than in the user documentation.
 
-- Fix: `is_in`, `count(v)`, the set operations, `locate_addr`, `search`,
-  `bsearch` and `linear_section` no longer compare a Face operand by its
-  storage when that storage is not the value it shows. Passing a
-  `CAConstString` (whose cells are byte ranges) to one of these on another
-  Face used to answer from the byte ranges: where the two cell widths
-  coincided — a `CAConstString` cell is 16 bytes, and so is a
-  `CAFixlenString` cell whose column is 16 bytes wide — you got a wrong
-  answer with no error, and a set operation could return raw offset bytes as
-  its values. Such an operand now raises `ArgumentError`; convert it first,
-  with `#to_string` for a string Face, or pass `.parent` on both sides to work
-  in storage space. Plain operands, and Faces whose cells are their values
-  (`CAString`, `CAFixlenString`), are unaffected, as is the cross-unit
-  reconciliation `CATime` does through `to_comparable`.
+- New: a `CAString` column can be searched, not only sorted: `bsearch`,
+  `bsearch_addr`, `search` and `count(v)` answer where they used to raise
+  `ArgumentError`. A cell of one is the Ruby String it shows, so a String query
+  compares against it directly, with nothing to reconcile. Sorting, which
+  already worked, is unchanged, and so is `CAConstString`, which answers
+  `search` / `count(v)` natively and still has no `bsearch`.
+
+- New: `count(v)` counts an object or fixlen array, which used to raise
+  `CArray::DataTypeError`. An object array compares by Ruby `==`, so
+  `count(1)` and `count(1.0)` agree, and `true` / `false` / `nil` are values to
+  count rather than the boolean array's `true` / `false`. A fixlen array
+  compares the whole cell by `memcmp`, with a short String query padded out to
+  the cell width -- so a 4-byte cell holding `"a\0\0\0"` is counted by
+  `count("a")`.
+
+- New: `CArray.empty(data_type, dim, bytes: nil)` allocates without the zero
+  fill, for an array whose every cell is written before anything reads it. One
+  existing call changes: `CArray.empty(3, [4])` raised `TypeError` in 3.0.1
+  and now matches `CArray.new(3, [4])`.
+
+- New: `CAFrame.from_csv` reads an open IO as well as a path, so CSV already
+  in memory need not go through a temporary file first. A String argument is
+  still always a path, never CSV text.
+
+- New: `inspect_full` renders an array the way `inspect` does but without the
+  `...` abbreviation.
+
+- New: `repeat` lays each element of an array down several times --
+  `v.repeat(2)`, or `v.repeat([3, 1, 2])` for a count each. It is not `tile`,
+  which lays the whole array down again. The result is a view.
+
+- New: `unique`, `nunique` and `mask_duplicates` take `along: k`, comparing
+  whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the distinct
+  rows of a 2-D array. Giving both `along:` and `axis:` raises.
+
+- New: each numeric data type names its own limits on its class --
+  `CArray::Int32::MIN` / `MAX`, and `TINY` / `EPSILON` for float and complex
+  types. `MIN` is the bottom of the range, where Ruby's `Float::MIN` is what
+  is called `TINY` here.
+
+- New: `CArray::Rng` is a random number generator with its own state, which
+  `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
+  `Random`. Without `rng:`, or with a Ruby `Random`, nothing changes.
+
+- New: `CArray#factorize` answers `[codes, levels]` in one pass, for a caller
+  who wants the codes as storage rather than the `CACategorical` that
+  `categorize` builds from the same two.
+
+- New: C extensions only. `CA_FOR_EACH_FIBER_PAIR` and
+  `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one contiguous fiber from each of two
+  sources at the same position.
 
 - Change: `CArray.meld` (and `CAMeld.new`, and so `CAFrame.meld`) now treats a
   homogeneous list of Faces the way `CArray.stack` does: a Face whose state is
@@ -84,6 +122,144 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   numeric payload, counting a non-zero cell as true, so `data.all` refused and
   `data[g].all(axis: :group)` answered for the same float array. Convert first
   if you meant the old reading: `data.ne(0)[g].all(axis: :group)`.
+
+- Change: the `axis:` reductions on `group_by_category` now read the source
+  array when asked, rather than some of them answering from a result kept
+  from an earlier call. `sum`, `mean`, `min`, `max` and the counts shared a
+  kept result per axis while `prod`, the variance family and `wsum` / `wmean`
+  did not, so after a write through the source one iterator could report a
+  mean and a variance that no data can produce together. Reading several
+  members off one iterator now costs one kernel run each instead of one
+  shared run; keep the result if you want the old sharing. The no-axis
+  reductions are unchanged: they still work from the copy taken when the
+  iterator was built.
+
+- Change: `CAFrame#at(UNDEF)` now raises `ArgumentError` instead of returning a
+  row. An index can hold a masked cell -- an `:outer` / `:right` join and
+  `align` both produce one -- but a row with no label cannot be identified by
+  one, and two undefined labels are not the same label; the key matching behind
+  `join` and `align` already treats a masked key as matching nothing. Use
+  `df.filter { |f| f.index.is_masked }` for the rows with no label, which also
+  handles more than one of them. Asking for a real label whose cell is masked
+  still raises `KeyError`, unchanged.
+
+- Change: functions built on the C-extension bridge (`ca_call_cfunc_*`,
+  `ca_call_cslab_*`, and `CAMath.spherical_to_xyz` / `xyz_to_spherical`)
+  pair two array operands only when their shapes agree, and otherwise
+  raise `ArgumentError` naming both shapes. Arrays of the same size but
+  different shape, such as (2,3) and (3,2), used to be accepted and read
+  in flat order; reshape one of them first. Arrays of different sizes
+  raised `RuntimeError` before, so a `rescue` of that class needs
+  updating. A scalar still pairs with any array.
+
+- Change: `min`, `max`, `minmax`, `cummin` and `cummax` answer `NaN`, and
+  `min_index`, `max_index`, `min_addr` and `max_addr` answer `UNDEF`, when every
+  cell a float array contributes is `NaN`. They used to answer `Infinity`,
+  `-Infinity`, the interval `[Infinity, -Infinity]` and position `0`. A `NaN`
+  still loses to any number, so an array holding at least one number answers as
+  before, as does one holding only real infinities. Empty and all-masked still
+  answer `UNDEF`, and integer, boolean, fixlen and object arrays are unchanged
+  -- an object array already answered `NaN`. To have `NaN` counted as missing
+  rather than skipped, call `mask_invalid` first; `min_count:` and `fill_value:`
+  act on masked cells and do not reach `NaN` ones.
+
+- Change: the `CAConstString` ordering family takes `axis:` -- and `kind:` /
+  `masked_position:` / `keep_axis:` where CArray does -- across `min`, `max`,
+  `minmax`, `min_index`, `max_index`, `sort`, `sort_copy`, `sort_addr`,
+  `sort_index`, `rank_index`, `order`, `partition_copy` and `partition_index`.
+  Three answers move to CArray's: `sort_index` gives per-fiber indices where it
+  gave view-flat addresses (ask `sort_addr` for those); `sort` with no `axis:`
+  flattens first, where it kept the shape (a 1-D column is unaffected); and
+  `min` / `max` on an empty or wholly masked column give UNDEF, not nil.
+
+- Change: `CABlock#count` and `CAWindow#count` are gone. They gave back the
+  per-axis number of cells the view exposes -- which is what `shape` answers
+  -- and in doing so hid `CArray#count` on the two classes an indexing
+  expression lands on most: `a[2...8].count(true)` raised `ArgumentError`,
+  and `a[2...8].count` gave a shape rather than a population. Read the
+  geometry with `shape`. `size0` / `start` / `step` / `offset`, which say
+  where the view sits in its parent, are unchanged.
+
+- Change: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` are no
+  longer defined here; they arrive with `require "carray/jit"`. Without it a
+  call raises `NoMethodError` where 3.0.1 raised `NotImplementedError`, so
+  code that rescued that to fall back asks `CArray.respond_to?(:jit_each)`.
+
+- Change: the Ruby attach surface is gone from released builds:
+  `CArray.attach` / `.attach!`, `CArray#attach` / `#attach!`, and
+  `#__attach__` / `#__sync__` / `#__detach__`. Write through the array
+  directly instead. `CArray#attached?` and the C lifecycle are unchanged.
+
+- Change: `a[1, :_]` returns a view of the axes `:_` asked for instead of
+  raising `IndexError`. To keep an axis rather than drop it, index it with
+  something that is not a scalar -- `a[[1], :_]`.
+
+- Change: C extensions only. A kernel iterator init the engine refuses now
+  raises instead of returning a code the block macros discarded. To handle a
+  refusal rather than propagate it, call `ca_iter_state_init_l1` / `_l2`
+  directly and read the code.
+
+- Change: `CACategorical.from_codes` now materialises `codes` when it is a
+  view rather than an array of its own, so writing through the array the view
+  was taken from no longer changes the categorical underneath it. A wrapped
+  memory view is an array of its own and is still adopted without a copy, so a
+  zero-copy import stays zero-copy. The array you pass is never marked
+  read-only beyond what you handed over.
+
+- Change: `CACategorical.from_codes` now checks what it is handed and
+  normalises it. It raises `ArgumentError` for duplicate labels, for more
+  labels than the codes data type can carry once its top value is reserved as
+  the exclusion sentinel, and for an unmasked code outside `0...labels.size`
+  that is not the sentinel. A cell that arrives masked also gets the sentinel
+  written into its code byte, so the mask and the byte now agree for every
+  reader, a byte-reinterpret export included. Codes built by `categorize`
+  already satisfy all of this, so nothing changes for a categorical made that
+  way.
+
+- Change: `search_nearest` and `search_nearest_addr` work on an object array of
+  numbers, and say why when they cannot. They measured only with `#distance`,
+  and since `Numeric#distance` became an opt-in refinement -- which a C-level
+  call does not see -- that raised `NoMethodError` for an Integer as readily as
+  for a String. A number is now measured as `(query - cell).abs`, exactly for
+  Rational and BigDecimal; an object defining a real `#distance` still uses it;
+  anything else raises `CArray::DataTypeError` naming the query's class, and
+  points at `search` / `bsearch` for an exact match. Numeric arrays are
+  unaffected.
+
+- Change: `CAFrame.from_csv` reads a missing field as UNDEF in every column,
+  not only in one named by `types:`. An unquoted empty field, and a cell a
+  short row never reached, used to arrive as a Ruby `nil` sitting in an
+  uncast column, so a mask written by `to_csv` did not survive the trip back.
+  A quoted empty field (`""`) is still the empty string, which is a value.
+  Code that worked around this with `col[:eq, nil] = UNDEF` can drop the line.
+
+- Change: `CArray.time` reads a string array about eight times faster with an
+  explicit `format:`, and about three times faster letting it auto-detect --
+  so `CAFrame#parse_to_time`, which calls it, speeds up by the same amount.
+  Parsed values are unchanged.
+
+- Change: `window` accepts `bounds:` as a Symbol as well as a String, which is
+  the spelling `windows` already took. Strings keep working.
+
+- Change: C extensions only. A partial fill of an array backed by a CAObject
+  or CASource subclass takes the `fill_block` / `fill_addrs` slots where the
+  subclass defines them, instead of one `store_addr` per cell. Which cells are
+  written is unchanged, and a subclass defining no fill slot keeps the
+  per-cell path.
+
+- Fix: `is_in`, `count(v)`, the set operations, `locate_addr`, `search`,
+  `bsearch` and `linear_section` no longer compare a Face operand by its
+  storage when that storage is not the value it shows. Passing a
+  `CAConstString` (whose cells are byte ranges) to one of these on another
+  Face used to answer from the byte ranges: where the two cell widths
+  coincided — a `CAConstString` cell is 16 bytes, and so is a
+  `CAFixlenString` cell whose column is 16 bytes wide — you got a wrong
+  answer with no error, and a set operation could return raw offset bytes as
+  its values. Such an operand now raises `ArgumentError`; convert it first,
+  with `#to_string` for a string Face, or pass `.parent` on both sides to work
+  in storage space. Plain operands, and Faces whose cells are their values
+  (`CAString`, `CAFixlenString`), are unaffected, as is the cross-unit
+  reconciliation `CATime` does through `to_comparable`.
 
 - Fix: the reductions without `axis:` on `group_by_category` now agree with one
   another about which values they are reducing. `cumsum` and the other scans
@@ -137,17 +313,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   answering `nil`; and `inspect` says "per-fiber only" instead of printing an
   empty grouping. `accumulate(axis:)`, which failed outright on such an
   iterator, now works.
-
-- Change: the `axis:` reductions on `group_by_category` now read the source
-  array when asked, rather than some of them answering from a result kept
-  from an earlier call. `sum`, `mean`, `min`, `max` and the counts shared a
-  kept result per axis while `prod`, the variance family and `wsum` / `wmean`
-  did not, so after a write through the source one iterator could report a
-  mean and a variance that no data can produce together. Reading several
-  members off one iterator now costs one kernel run each instead of one
-  shared run; keep the result if you want the old sharing. The no-axis
-  reductions are unchanged: they still work from the copy taken when the
-  iterator was built.
 
 - Fix: a reduction from `group_by_category` now hands back an array of the
   caller's own. `min`, `max`, `minmax`, `count`, `count_not_masked`,
@@ -220,32 +385,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   selector was handed to and there was no column to hand it to. Masking a row
   that does exist on such a frame is still a no-op -- there are no data cells,
   and the index is left alone by design.
-
-- Change: `CACategorical.from_codes` now materialises `codes` when it is a
-  view rather than an array of its own, so writing through the array the view
-  was taken from no longer changes the categorical underneath it. A wrapped
-  memory view is an array of its own and is still adopted without a copy, so a
-  zero-copy import stays zero-copy. The array you pass is never marked
-  read-only beyond what you handed over.
-
-- Change: `CACategorical.from_codes` now checks what it is handed and
-  normalises it. It raises `ArgumentError` for duplicate labels, for more
-  labels than the codes data type can carry once its top value is reserved as
-  the exclusion sentinel, and for an unmasked code outside `0...labels.size`
-  that is not the sentinel. A cell that arrives masked also gets the sentinel
-  written into its code byte, so the mask and the byte now agree for every
-  reader, a byte-reinterpret export included. Codes built by `categorize`
-  already satisfy all of this, so nothing changes for a categorical made that
-  way.
-
-- Change: `CAFrame#at(UNDEF)` now raises `ArgumentError` instead of returning a
-  row. An index can hold a masked cell -- an `:outer` / `:right` join and
-  `align` both produce one -- but a row with no label cannot be identified by
-  one, and two undefined labels are not the same label; the key matching behind
-  `join` and `align` already treats a masked key as matching nothing. Use
-  `df.filter { |f| f.index.is_masked }` for the rows with no label, which also
-  handles more than one of them. Asking for a real label whose cell is masked
-  still raises `KeyError`, unchanged.
 
 - Fix: `CAFrame`'s `to_table` (and so `p` / `puts` / `to_s`) now prints a masked
   element inside an N-D cell as `_`, the marker it already used for a masked
@@ -349,26 +488,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   -- for example a float64 view of an object array holding a cell that is
   not a number. Nothing to change in calling code.
 
-- Change: functions built on the C-extension bridge (`ca_call_cfunc_*`,
-  `ca_call_cslab_*`, and `CAMath.spherical_to_xyz` / `xyz_to_spherical`)
-  pair two array operands only when their shapes agree, and otherwise
-  raise `ArgumentError` naming both shapes. Arrays of the same size but
-  different shape, such as (2,3) and (3,2), used to be accepted and read
-  in flat order; reshape one of them first. Arrays of different sizes
-  raised `RuntimeError` before, so a `rescue` of that class needs
-  updating. A scalar still pairs with any array.
-
-- Change: `min`, `max`, `minmax`, `cummin` and `cummax` answer `NaN`, and
-  `min_index`, `max_index`, `min_addr` and `max_addr` answer `UNDEF`, when every
-  cell a float array contributes is `NaN`. They used to answer `Infinity`,
-  `-Infinity`, the interval `[Infinity, -Infinity]` and position `0`. A `NaN`
-  still loses to any number, so an array holding at least one number answers as
-  before, as does one holding only real infinities. Empty and all-masked still
-  answer `UNDEF`, and integer, boolean, fixlen and object arrays are unchanged
-  -- an object array already answered `NaN`. To have `NaN` counted as missing
-  rather than skipped, call `mask_invalid` first; `min_count:` and `fill_value:`
-  act on masked cells and do not reach `NaN` ones.
-
 - Fix: `is_in`, `intersection`, `difference` and `union` take an Array or Range
   of Strings against a fixlen array, where every such call raised
   `CArray::DataTypeError` -- `CAFixlenString` included. The set is built at the
@@ -386,23 +505,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   arrays of different widths compare as before, as does a Regexp for `match`.
   `CAFixlenString` was never affected.
 
-- New: a `CAString` column can be searched, not only sorted: `bsearch`,
-  `bsearch_addr`, `search` and `count(v)` answer where they used to raise
-  `ArgumentError`. A cell of one is the Ruby String it shows, so a String query
-  compares against it directly, with nothing to reconcile. Sorting, which
-  already worked, is unchanged, and so is `CAConstString`, which answers
-  `search` / `count(v)` natively and still has no `bsearch`.
-
-- Change: `search_nearest` and `search_nearest_addr` work on an object array of
-  numbers, and say why when they cannot. They measured only with `#distance`,
-  and since `Numeric#distance` became an opt-in refinement -- which a C-level
-  call does not see -- that raised `NoMethodError` for an Integer as readily as
-  for a String. A number is now measured as `(query - cell).abs`, exactly for
-  Rational and BigDecimal; an object defining a real `#distance` still uses it;
-  anything else raises `CArray::DataTypeError` naming the query's class, and
-  points at `search` / `bsearch` for an exact match. Numeric arrays are
-  unaffected.
-
 - Fix: `percentile` and `median` no longer interpolate between objects that
   have no arithmetic. On a column of Strings `percentile(30)` quietly answered
   `""` and even-length `median` raised `NoMethodError` from inside a funcall;
@@ -411,14 +513,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   element (`percentile(50)` of five) still answers, as does an odd-length
   `median`. Numbers stored as objects -- Integer, Rational, BigDecimal -- are
   unaffected.
-
-- New: `count(v)` counts an object or fixlen array, which used to raise
-  `CArray::DataTypeError`. An object array compares by Ruby `==`, so
-  `count(1)` and `count(1.0)` agree, and `true` / `false` / `nil` are values to
-  count rather than the boolean array's `true` / `false`. A fixlen array
-  compares the whole cell by `memcmp`, with a short String query padded out to
-  the cell width -- so a 4-byte cell holding `"a\0\0\0"` is counted by
-  `count("a")`.
 
 - Fix: `sort_copy` takes whatever `sort` takes. It refused everything its own
   fast path could not handle, so an object or boolean array sorted through
@@ -434,34 +528,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `partition_copy` gave NUL bytes. `#minmax` answers instead of raising, and
   sorting a column with masked cells no longer raises.
 
-- Change: the `CAConstString` ordering family takes `axis:` -- and `kind:` /
-  `masked_position:` / `keep_axis:` where CArray does -- across `min`, `max`,
-  `minmax`, `min_index`, `max_index`, `sort`, `sort_copy`, `sort_addr`,
-  `sort_index`, `rank_index`, `order`, `partition_copy` and `partition_index`.
-  Three answers move to CArray's: `sort_index` gives per-fiber indices where it
-  gave view-flat addresses (ask `sort_addr` for those); `sort` with no `axis:`
-  flattens first, where it kept the shape (a 1-D column is unaffected); and
-  `min` / `max` on an empty or wholly masked column give UNDEF, not nil.
-
 - Fix: `to_const_string` gives an N-D source back with its shape instead of
   flattened, and `CAConstString#unique` / `#mode` / `#mask_duplicates` /
   `#intersection` / `#difference` / `#union` keep the column's encoding --
   on a column that was not UTF-8 they raised out of the builder's check.
-
-- Change: `CABlock#count` and `CAWindow#count` are gone. They gave back the
-  per-axis number of cells the view exposes -- which is what `shape` answers
-  -- and in doing so hid `CArray#count` on the two classes an indexing
-  expression lands on most: `a[2...8].count(true)` raised `ArgumentError`,
-  and `a[2...8].count` gave a shape rather than a population. Read the
-  geometry with `shape`. `size0` / `start` / `step` / `offset`, which say
-  where the view sits in its parent, are unchanged.
-
-- Change: `CAFrame.from_csv` reads a missing field as UNDEF in every column,
-  not only in one named by `types:`. An unquoted empty field, and a cell a
-  short row never reached, used to arrive as a Ruby `nil` sitting in an
-  uncast column, so a mask written by `to_csv` did not survive the trip back.
-  A quoted empty field (`""`) is still the empty string, which is a value.
-  Code that worked around this with `col[:eq, nil] = UNDEF` can drop the line.
 
 - Fix: `each_with_index` and `map_with_index!` no longer raise
   `SystemStackError` on a long array, and neither do `CArray#format` /
@@ -474,76 +544,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   raising `IndexError`. The piece contributes nothing and the remaining ones
   concatenate as before. `CArray#paste` likewise accepts a source covering no
   cell, and writes nothing.
-
-- Change: `CArray.time` reads a string array about eight times faster with an
-  explicit `format:`, and about three times faster letting it auto-detect --
-  so `CAFrame#parse_to_time`, which calls it, speeds up by the same amount.
-  Parsed values are unchanged.
-
-- New: `CArray.empty(data_type, dim, bytes: nil)` allocates without the zero
-  fill, for an array whose every cell is written before anything reads it. One
-  existing call changes: `CArray.empty(3, [4])` raised `TypeError` in 3.0.1
-  and now matches `CArray.new(3, [4])`.
-
-- Change: `CArray.jit_for`, `CArray.jit_each` and `CArray.jit_map` are no
-  longer defined here; they arrive with `require "carray/jit"`. Without it a
-  call raises `NoMethodError` where 3.0.1 raised `NotImplementedError`, so
-  code that rescued that to fall back asks `CArray.respond_to?(:jit_each)`.
-
-- Change: `window` accepts `bounds:` as a Symbol as well as a String, which is
-  the spelling `windows` already took. Strings keep working.
-
-- New: `CAFrame.from_csv` reads an open IO as well as a path, so CSV already
-  in memory need not go through a temporary file first. A String argument is
-  still always a path, never CSV text.
-
-- New: `inspect_full` renders an array the way `inspect` does but without the
-  `...` abbreviation.
-
-- New: `repeat` lays each element of an array down several times --
-  `v.repeat(2)`, or `v.repeat([3, 1, 2])` for a count each. It is not `tile`,
-  which lays the whole array down again. The result is a view.
-
-- New: `unique`, `nunique` and `mask_duplicates` take `along: k`, comparing
-  whole sub-arrays instead of cells -- `z.unique(along: 0)` gives the distinct
-  rows of a 2-D array. Giving both `along:` and `axis:` raises.
-
-- New: each numeric data type names its own limits on its class --
-  `CArray::Int32::MIN` / `MAX`, and `TINY` / `EPSILON` for float and complex
-  types. `MIN` is the bottom of the range, where Ruby's `Float::MIN` is what
-  is called `TINY` here.
-
-- New: `CArray::Rng` is a random number generator with its own state, which
-  `random!`, `randomn!` and `shuffle!` accept as `rng:` alongside a Ruby
-  `Random`. Without `rng:`, or with a Ruby `Random`, nothing changes.
-
-- New: `CArray#factorize` answers `[codes, levels]` in one pass, for a caller
-  who wants the codes as storage rather than the `CACategorical` that
-  `categorize` builds from the same two.
-
-- New: C extensions only. `CA_FOR_EACH_FIBER_PAIR` and
-  `CA_FOR_EACH_FIBER_PAIR_MASKED` yield one contiguous fiber from each of two
-  sources at the same position.
-
-- Change: C extensions only. A partial fill of an array backed by a CAObject
-  or CASource subclass takes the `fill_block` / `fill_addrs` slots where the
-  subclass defines them, instead of one `store_addr` per cell. Which cells are
-  written is unchanged, and a subclass defining no fill slot keeps the
-  per-cell path.
-
-- Change: the Ruby attach surface is gone from released builds:
-  `CArray.attach` / `.attach!`, `CArray#attach` / `#attach!`, and
-  `#__attach__` / `#__sync__` / `#__detach__`. Write through the array
-  directly instead. `CArray#attached?` and the C lifecycle are unchanged.
-
-- Change: `a[1, :_]` returns a view of the axes `:_` asked for instead of
-  raising `IndexError`. To keep an axis rather than drop it, index it with
-  something that is not a scalar -- `a[[1], :_]`.
-
-- Change: C extensions only. A kernel iterator init the engine refuses now
-  raises instead of returning a code the block macros discarded. To handle a
-  refusal rather than propagate it, call `ca_iter_state_init_l1` / `_l2`
-  directly and read the code.
 
 - Fix: C extensions only. A kernel writing into a view the caller supplied now
   reaches the array; writes were lost, or crashed, for several view kinds
