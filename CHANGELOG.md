@@ -34,6 +34,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
+## 3.0.3 (unreleased)
+
 ## 3.0.2
 
 - New: `CArray::AddressBasis`, for a C extension whose code addresses cells
