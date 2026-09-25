@@ -8,57 +8,75 @@
 # is a top-level function that coerces `obj` (a CArray, Array,
 # Numeric, or anything castable) into a CArray of the named element
 # type, equivalent to `obj.to_ca.as_type(:<type>)`.
+#
+# These are casts, not shape spellings: `CA_INT32(3, 3)` is not the
+# `(3, 3)` array that `CArray.int32(3, 3)` builds, and is refused.
+# A `Range` accepts one more argument, the step, and that is the only
+# two-argument form:
+#
+#     CA_INT32(0..6)        # => [ 0, 1, 2, 3, 4, 5, 6 ]
+#     CA_INT32(0..6, 2)     # => [ 0, 2, 4, 6 ]
+#     CA_INT32(0, 2)        # ArgumentError
+#
+# A step of `0` raises `RuntimeError`.  A step given for anything but a
+# `Range`, or a third argument, raises `ArgumentError`.  An
+# `Enumerator::ArithmeticSequence` already carries its own step, so
+# `CA_INT32((0..6).step(2))` needs no second argument.
+#
+# `CA_FIXLEN` takes `bytes:` instead of a step; see {#CA_FIXLEN}.
 module Kernel
   # @!group CArray cast shorthands
 
   # Coerces `obj` into a `:boolean` CArray. @return [CArray]
-  def CA_BOOLEAN(obj); end
+  def CA_BOOLEAN(obj = nil, step = nil); end
   # Coerces `obj` into an `:int8` CArray. @return [CArray]
-  def CA_INT8(obj); end
+  def CA_INT8(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint8` CArray. @return [CArray]
-  def CA_UINT8(obj); end
+  def CA_UINT8(obj = nil, step = nil); end
   # Coerces `obj` into an `:int16` CArray. @return [CArray]
-  def CA_INT16(obj); end
+  def CA_INT16(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint16` CArray. @return [CArray]
-  def CA_UINT16(obj); end
+  def CA_UINT16(obj = nil, step = nil); end
   # Coerces `obj` into an `:int32` CArray. @return [CArray]
-  def CA_INT32(obj); end
+  def CA_INT32(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint32` CArray. @return [CArray]
-  def CA_UINT32(obj); end
+  def CA_UINT32(obj = nil, step = nil); end
   # Coerces `obj` into an `:int64` CArray. @return [CArray]
-  def CA_INT64(obj); end
+  def CA_INT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint64` CArray. @return [CArray]
-  def CA_UINT64(obj); end
+  def CA_UINT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:float32` CArray. @return [CArray]
-  def CA_FLOAT32(obj); end
+  def CA_FLOAT32(obj = nil, step = nil); end
   # Coerces `obj` into a `:float64` CArray. @return [CArray]
-  def CA_FLOAT64(obj); end
+  def CA_FLOAT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:cmplx64` CArray. @return [CArray]
-  def CA_CMPLX64(obj); end
+  def CA_CMPLX64(obj = nil, step = nil); end
   # Coerces `obj` into a `:cmplx128` CArray. @return [CArray]
-  def CA_CMPLX128(obj); end
+  def CA_CMPLX128(obj = nil, step = nil); end
   # Coerces `obj` into an `:object` CArray. @return [CArray]
-  def CA_OBJECT(obj); end
+  def CA_OBJECT(obj = nil, step = nil); end
   # Coerces `obj` into a `CA_SIZE` (platform native size) CArray.
   # @return [CArray]
-  def CA_SIZE(obj); end
-  # Coerces `obj` into a `:fixlen` CArray. @return [CArray]
-  def CA_FIXLEN(obj); end
+  def CA_SIZE(obj = nil, step = nil); end
+  # Coerces `obj` into a `:fixlen` CArray.  `bytes` defaults to the
+  # longest top-level element of an `Array`, or `0` for `nil`.
+  # @return [CArray]
+  def CA_FIXLEN(obj, bytes: nil); end
 
   # Alias of {#CA_UINT8}. @return [CArray]
-  def CA_BYTE(obj); end
+  def CA_BYTE(obj = nil, step = nil); end
   # Alias of {#CA_INT16}. @return [CArray]
-  def CA_SHORT(obj); end
+  def CA_SHORT(obj = nil, step = nil); end
   # Alias of {#CA_INT32}. @return [CArray]
-  def CA_INT(obj); end
+  def CA_INT(obj = nil, step = nil); end
   # Alias of {#CA_FLOAT32}. @return [CArray]
-  def CA_FLOAT(obj); end
+  def CA_FLOAT(obj = nil, step = nil); end
   # Alias of {#CA_FLOAT64}. @return [CArray]
-  def CA_DOUBLE(obj); end
+  def CA_DOUBLE(obj = nil, step = nil); end
   # Alias of {#CA_CMPLX64}. @return [CArray]
-  def CA_COMPLEX(obj); end
+  def CA_COMPLEX(obj = nil, step = nil); end
   # Alias of {#CA_CMPLX128}. @return [CArray]
-  def CA_DCOMPLEX(obj); end
+  def CA_DCOMPLEX(obj = nil, step = nil); end
 
   # @!endgroup
 end
