@@ -2028,16 +2028,19 @@ rb_ca_clip_uint64 (VALUE self)
    Polymorphic cast (NOT a fresh allocator): `data` is coerced into a CArray
    of the target data_type, dispatching on its Ruby class:
 
-     Array   -> shape-guessed CArray, element-wise store         (C fast path)
-     CArray  -> copy if same data_type, else #to_type            (C fast path)
-     nil     -> empty CArray                                     (C fast path)
-     Range / String / Numeric / #to_ca responder                (Ruby fallback)
+     Array    -> shape-guessed CArray, element-wise store
+     CArray   -> copy if same data_type, else #to_type
+     nil      -> empty CArray
+     Range    -> arange; a second argument, if given, is the step
+     Numeric  -> CScalar, or #to_ca when the object answers it
+     String   -> the whitespace / `,` / `;` / `_`->UNDEF parser, which reads
+                 far more naturally in Ruby and so is the one branch that
+                 calls back out to it (CArray.__cast_string__ in
+                 carray/basics.rb, eager-loaded).  It receives the data_type
+                 as a Symbol.
 
-   The cold / Ruby-natural branches (arange arithmetic, the whitespace/`,`/`;`
-   string parser, generic coercion) stay in Ruby as `CArray.__cast_rest__`
-   (carray/basics.rb, eager-loaded).  `type` is passed to the fallback as the
-   data_type Symbol so the Ruby side keeps its original `type == CA_OBJECT`
-   style comparisons.
+   A second argument is meaningful only for Range, and a third never is;
+   anything else is refused.
    ------------------------------------------------------------------------ */
 
 static ID id_new_cast = 0, id_guess_array_shape_cast = 0, id_cast_string = 0,
@@ -2062,6 +2065,21 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
 {
   VALUE v = ( argc >= 1 ) ? argv[0] : Qnil;
   VALUE sym = ID2SYM(ca_data_type_sym[data_type]);
+
+  /* Only the Range branch below reads a second argument (the step), and
+     nothing reads a third.  The arity is -1 for the step's sake, so the count
+     is checked here; without it `CA_INT32(0, 2)`, which looks like the shape
+     spelling `CArray.int32(3, 3)`, casts the 0 and drops the 2. */
+  if ( argc > 2 ) {
+    rb_raise(rb_eArgError,
+             "wrong number of arguments (given %d, expected 0..2)", argc);
+  }
+  if ( argc == 2 && ! RTEST(rb_obj_is_kind_of(v, rb_cRange)) ) {
+    rb_raise(rb_eArgError,
+             "a step (the second argument) is only accepted "
+             "when the first argument is a Range (got %s)",
+             rb_obj_classname(v));
+  }
 
   if ( TYPE(v) == T_ARRAY ) {
     volatile VALUE shape, obj;

@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: the global `CA_<TYPE>()` cast shorthands refuse the argument lists
+  they used to ignore. `CA_INT32(0, 2)` reads like the shape spelling
+  `CArray.int32(3, 3)` but is a cast, and answered with the scalar `0`;
+  it now raises `ArgumentError`, as does a third argument and a second
+  argument after anything but a `Range`. The one two-argument form is a
+  `Range` and its step, `CA_INT32(0..6, 2)`, which is unchanged, and so is
+  every single-argument call. `CA_FIXLEN`, which takes `bytes:` rather than a
+  step, already checked its own arity and is untouched.
+
 ## 3.0.2
 
 - New: `CArray::AddressBasis`, for a C extension whose code addresses cells
