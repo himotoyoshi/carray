@@ -130,6 +130,7 @@ end
 
 autoload :CACategorical,          "carray/categorical"
 autoload :CACategoricalIterator,  "carray/categorical_iterator"
+autoload :CASegmentIterator,      "carray/segment_iterator"
 autoload :AxisGroup,              "carray/axis_group"
 autoload :GroupLabels,            "carray/axis_group"
 
