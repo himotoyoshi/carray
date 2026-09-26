@@ -182,6 +182,16 @@ class CACategoricalIterator < CASegmentIterator
 
   private
 
+  # Both are built with the grouping plan, and only on the flat path; the
+  # per-fiber form has neither and must not build a segment's.
+  def perm
+    @perm
+  end
+
+  def codes
+    @codes
+  end
+
   # Axis-aware count of present cells. Counting how many cells fall in a
   # group does not look at what is in them, so it is taken from the codes and
   # the value's mask rather than from the fused moments kernel, which is

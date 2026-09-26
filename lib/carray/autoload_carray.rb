@@ -126,6 +126,7 @@ class CArray
   categorical_iterator_rb = "carray/categorical_iterator"
   autoload_method "group_by_category", categorical_iterator_rb
   autoload_method "group_by_run", categorical_iterator_rb
+  autoload_method "segments", "carray/segment_iterator"
 end
 
 autoload :CACategorical,          "carray/categorical"

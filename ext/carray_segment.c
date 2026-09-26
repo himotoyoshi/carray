@@ -155,24 +155,24 @@ rb_ca_s_segment_offsets (int argc, VALUE *argv, VALUE klass)
   return ro;
 }
 
-/* CArray.segment_index(lengths: l)  -> int64[l.sum]
-   CArray.segment_index(offsets: o)  -> int64[o[-1] - o[0]] */
+/* The boundaries named by the one role keyword, as a validated int64 array
+   of k+1 elements that Ruby owns: lengths are summed, offsets are checked
+   to be non-empty and non-decreasing. */
 static VALUE
-rb_ca_s_segment_index (int argc, VALUE *argv, VALUE klass)
+segment_bounds (int argc, VALUE *argv, const char *name, CArray **out_co,
+                ca_size_t *out_k)
 {
-  const char *name = "segment_index";
   int is_lengths;
-  VALUE v, ro, rout;
-  CArray *co, *cout;
+  VALUE v, ro;
+  CArray *co;
   ca_size_t k, c;
-  int64_t *o, *q, base, total;
+  int64_t *o;
 
   v = segment_role(argc, argv, name, 1, &is_lengths);
 
   if ( is_lengths ) {
     ro = segment_read_int64(v, name, 1, 1, &co, &k);
-    o  = (int64_t *) co->ptr;
-    segment_prefix_sum(o, k, name);
+    segment_prefix_sum((int64_t *) co->ptr, k, name);
   }
   else {
     ro = segment_read_int64(v, name, 0, 0, &co, &k);
@@ -191,6 +191,23 @@ rb_ca_s_segment_index (int argc, VALUE *argv, VALUE klass)
     }
     k -= 1;                              /* k+1 boundaries -> k segments */
   }
+  *out_co = co;
+  *out_k  = k;
+  return ro;
+}
+
+/* CArray.segment_index(lengths: l)  -> int64[l.sum]
+   CArray.segment_index(offsets: o)  -> int64[o[-1] - o[0]] */
+static VALUE
+rb_ca_s_segment_index (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE ro, rout;
+  CArray *co, *cout;
+  ca_size_t k, c;
+  int64_t *o, *q, base, total;
+
+  ro = segment_bounds(argc, argv, "segment_index", &co, &k);
+  o  = (int64_t *) co->ptr;
 
   base  = o[0];
   total = o[k] - base;
@@ -211,6 +228,24 @@ rb_ca_s_segment_index (int argc, VALUE *argv, VALUE klass)
   return rout;
 }
 
+/* CArray.__segment_bounds__(name, lengths: l | offsets: o) -> int64[k+1]
+
+   Internal: the validated boundaries, for a Ruby caller that takes the same
+   two keywords (CArray#segments).  `name` heads the error messages. */
+static VALUE
+rb_ca_s_segment_bounds (int argc, VALUE *argv, VALUE klass)
+{
+  CArray *co;
+  ca_size_t k;
+  VALUE rname;
+  if ( argc < 1 ) {
+    rb_raise(rb_eArgError, "__segment_bounds__: the caller's name is required");
+  }
+  rname = argv[0];
+  StringValue(rname);
+  return segment_bounds(argc - 1, argv + 1, RSTRING_PTR(rname), &co, &k);
+}
+
 void
 Init_carray_segment (void)
 {
@@ -218,4 +253,5 @@ Init_carray_segment (void)
   id_offsets = rb_intern("offsets");
   rb_define_singleton_method(rb_cCArray, "segment_offsets", rb_ca_s_segment_offsets, -1);
   rb_define_singleton_method(rb_cCArray, "segment_index",   rb_ca_s_segment_index,   -1);
+  rb_define_singleton_method(rb_cCArray, "__segment_bounds__", rb_ca_s_segment_bounds, -1);
 }
