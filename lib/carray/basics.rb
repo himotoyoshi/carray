@@ -80,31 +80,31 @@ class CArray
         Array.new(flat.length, repeat)
       end
 
-  # Validate each value.  A positive Integer only; nil is not a valid
-  # per-axis repeat.
-  reps.each do |r|
-    unless r.is_a?(Integer)
-      raise ArgumentError,
-        "insert_axis: repeat must be a positive Integer, got #{r.inspect}"
+    # Validate each value.  A positive Integer only; nil is not a valid
+    # per-axis repeat.
+    reps.each do |r|
+      unless r.is_a?(Integer)
+        raise ArgumentError,
+          "insert_axis: repeat must be a positive Integer, got #{r.inspect}"
+      end
+      raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
     end
-    raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
+
+    # Final output layout: stable order by (gap, argument index) keeps
+    # same-gap axes in argument order; the k-th inserted axis lands at output
+    # position gap + k.  This output position only drives broadcast_to; the
+    # insertion itself always goes through the source-frame primitive.
+    order = (0...flat.length).sort_by { |i| [gaps[i], i] }
+    final = {}
+    order.each_with_index { |i, k| final[i] = gaps[i] + k }
+
+    inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
+    return inter unless order.any? { |i| reps[i] > 1 }
+
+    shp = inter.shape
+    order.each { |i| shp[final[i]] = reps[i] if reps[i] > 1 }
+    inter.broadcast_to(*shp)
   end
-
-  # Final output layout: stable order by (gap, argument index) keeps
-  # same-gap axes in argument order; the k-th inserted axis lands at output
-  # position gap + k.  This output position only drives broadcast_to; the
-  # insertion itself always goes through the source-frame primitive.
-  order = (0...flat.length).sort_by { |i| [gaps[i], i] }
-  final = {}
-  order.each_with_index { |i, k| final[i] = gaps[i] + k }
-
-  inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
-  return inter unless order.any? { |i| reps[i] > 1 }
-
-  shp = inter.shape
-  order.each { |i| shp[final[i]] = reps[i] if reps[i] > 1 }
-  inter.broadcast_to(*shp)
-end
 
   # @overload drop_axis
   #   Returns a view of `self` with every size-1 axis dropped.
