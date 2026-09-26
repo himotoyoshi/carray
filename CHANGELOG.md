@@ -57,7 +57,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `CArray.segment_index(lengths:)` / `CArray.segment_index(offsets:)`
   convert between the lengths of consecutive segments, their boundaries
   (`[0, ..., total]`, one more than the lengths) and the segment each
-  element belongs to. They count in int64, so a total beyond 2**53 stays
+  element belongs to. They count in int64, so a total beyond `2**53` stays
   exact, which a `cumsum` (float64) does not. Offsets need not start at 0.
 
 - Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!` and `scatter_replace!`
