@@ -8548,11 +8548,13 @@ end
 
 # expm1, log1p: float + object only (C99 doesn't standardise complex
 # variants).  Widening monfunc — integer input auto-casts to f64.
+# CAMath.expm1 / log1p are defined in lib/carray/math.rb instead: Ruby's
+# Math has neither, so the generated front-end could not take a Numeric.
 {
   expm1: "expm1",
   log1p: "log1p",
 }.each do |op, c_fn|
-  MkKernel.monfunc op,
+  MkKernel.monfunc op, cmath: false,
     source: MkKernel::FLOAT_DTYPES + [:object],
     expr:   {
       object: MkKernel.obj_float_math("#{c_fn}(<v>)", c_fn),

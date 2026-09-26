@@ -10,16 +10,24 @@ module CAMath
   # `arr.as_float64.hypot(...)`).
 
   # @overload expm1(x)
-  #   Returns `exp(x) - 1` element-wise as float64.
+  #   Returns `exp(x) - 1` element-wise.  A CArray answers in its own
+  #   `data_type` (integer input widens to float64, as {CArray#expm1}
+  #   does); any other value is taken as float64.
   #   @param x [CArray, Numeric] input value.
   #   @return [CArray]
-  def expm1(x);  CArray.wrap_readonly(x, :float64).expm1;  end
+  def expm1(x)
+    x.is_a?(CArray) ? x.expm1 : CArray.wrap_readonly(x, :float64).expm1
+  end
 
   # @overload log1p(x)
-  #   Returns `log(1 + x)` element-wise as float64.
+  #   Returns `log(1 + x)` element-wise.  A CArray answers in its own
+  #   `data_type` (integer input widens to float64, as {CArray#log1p}
+  #   does); any other value is taken as float64.
   #   @param x [CArray, Numeric] input value.
   #   @return [CArray]
-  def log1p(x);  CArray.wrap_readonly(x, :float64).log1p;  end
+  def log1p(x)
+    x.is_a?(CArray) ? x.log1p : CArray.wrap_readonly(x, :float64).log1p
+  end
 
   # @overload atan2(y, x)
   #   Returns the element-wise arc tangent of `y / x` with quadrant

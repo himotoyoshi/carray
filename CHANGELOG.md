@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAMath.expm1` and `CAMath.log1p` answer a CArray in its own
+  `data_type`, as `CArray#expm1` / `#log1p` do: float32 input stays float32
+  and object input stays object (they used to return float64). Integer
+  input still widens to float64, and a plain Numeric is still accepted.
+
 - New: `value.segments(offsets:)` / `value.segments(lengths:)` return a
   `CASegmentIterator`, the iterator-family member for consecutive runs of
   cells: one value per segment from the same reductions, scans, `map` and
