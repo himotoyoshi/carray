@@ -613,9 +613,15 @@ class CASegmentIterator < CAIterator
   # Drive a segment scan through the axis-group scan kernel: the whole value as
   # one grouped axis, the flat codes as the single bundle.  The kernel emits in
   # source order, so the flat result reshapes straight back to the source shape.
+  #
+  # With no segment at all the kernel has no group to size, so it is given
+  # one that no cell belongs to: every cell comes back UNDEF, as it does when
+  # there are segments and a cell is in none of them.
   def scan (op)
+    bundle = @k > 0 ? [codes, @k, [0]]
+                    : [CArray.int64(@value.elements).fill(-1), 1, [0]]
     scan_source.reshape(@value.elements)
-               .__axis_group_scan__([0], [[codes, @k, [0]]], op)
+               .__axis_group_scan__([0], [bundle], op)
                .reshape(*@src_shape)
   end
 
