@@ -913,4 +913,19 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_equal false, CAIterator.include?(Enumerable)
     assert_raise(NoMethodError) { grp.to_a }               # no Enumerable#to_a
   end
+
+  # With no category at all a running scan answers UNDEF for every cell, as
+  # it does when there are categories and a cell is in none of them; it used
+  # to raise from the scan kernel ("bundle k must be positive").
+  def test_scan_with_no_category
+    dry = CArray.float64(3)
+    dry[] = UNDEF
+    grp = dry.group_by_run
+    assert_equal(0, grp.ngroups)
+    %i[cumsum cumprod cummax cummin cumcount].each do |op|
+      assert_equal([UNDEF, UNDEF, UNDEF], grp.send(op).to_a, op.to_s)
+    end
+    assert_equal([], CArray.float64(0).group_by_category(CArray.int32(0).categorize).cumsum.to_a)
+  end
+
 end
