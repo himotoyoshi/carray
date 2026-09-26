@@ -544,10 +544,8 @@ class CACategorical < CAObject
     return @_sort_addr if @_sort_addr
     n      = elements
     k      = @labels.size
-    cs     = category_sizes                       # per-category counts
-    nvalid = cs.sum
-    cur    = CArray.int64(k > 0 ? k : 0)          # segment starts, consumed as cursor
-    cur[1..-1] = cs.cumsum.int64[0..-2] if k > 1
+    nvalid = category_sizes.sum
+    cur    = reduceat_index.copy                  # segment starts, consumed as cursor
     flat   = codes.reshape(n)
     seq    = CArray.int64(n).seq!                 # source indices, scattered as payload
     out    = CArray.int64(n)
@@ -582,16 +580,9 @@ class CACategorical < CAObject
   #   @return [CArray]
   def reduceat_index
     return @_reduceat_index if @_reduceat_index
-    k = @labels.size
-    out = CArray.int64(k > 0 ? k : 0)
-    if k > 1
-      out[0] = 0
-      out[1..-1] = category_sizes.cumsum.int64[0..-2]
-    elsif k == 1
-      out[0] = 0
-    end
-    @_reduceat_index = out
-    out
+    # Every boundary but the last; the copy makes it an entity the
+    # reduceat kernels can read directly.
+    @_reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
   end
 
   # @overload inspect

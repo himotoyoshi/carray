@@ -201,19 +201,14 @@ class GroupedFrame
   end
 
   private def group_address(k)
-    start = group_offsets[k]
-    group_perm[start...(start + group_sizes[k])]
+    group_perm[group_bounds[k]...group_bounds[k + 1]]
   end
 
   private def group_perm
     @group_perm ||= @cat.sort_addr
   end
 
-  private def group_offsets
-    @group_offsets ||= @cat.reduceat_index
-  end
-
-  private def group_sizes
-    @group_sizes ||= @cat.category_sizes
+  private def group_bounds
+    @group_bounds ||= CArray.segment_offsets(lengths: @cat.category_sizes)
   end
 end
