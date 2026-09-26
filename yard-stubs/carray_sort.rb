@@ -115,6 +115,42 @@ class CArray
   #     `:stable`.
   def sort_addr(axis: nil, kind: :quick, masked_position: :last); end
 
+  # @overload sort_index(axis: 0, kind: :quick, masked_position: :last)
+  #   Returns, for each fiber along `axis`, the positions within the
+  #   fiber that put it in ascending order: `:int64`, shaped like
+  #   `self`. For a 1-D array, `a[a.sort_index]` is `a` sorted.
+  #
+  #   Without `axis:` the fibers run along axis `0`. This differs
+  #   from {#sort}, which flattens `self` when `axis` is omitted; the
+  #   two agree on a 1-D array.
+  #
+  #   The sort is **stable**: cells that compare equal keep their
+  #   input order, whichever `kind:` is chosen, so sorting by one key
+  #   and then stably by another orders by the second key first and
+  #   the first within it. `kind:` is a performance characteristic
+  #   only:
+  #
+  #   - `:quick` (default) — introsort with mergesort escape.
+  #   - `:stable` — bottom-up mergesort.
+  #
+  #   NaN and masked cells cannot be compared with the rest and are
+  #   placed at one end of each fiber: NaN after the numbers, masked
+  #   cells at the end `masked_position:` names (`:last`, default, or
+  #   `:first`). Relative order within the masked cells is unspecified.
+  #
+  #   Takes numeric data types, boolean, `CA_FIXLEN` (byte order),
+  #   `CA_OBJECT` (`<=>` per pair), and an ordered Face such as
+  #   `CATime`. Complex values have no order.
+  #   @param axis [Integer] axis along which fibers run; negative
+  #     counts from the end.
+  #   @param kind [Symbol] `:quick` or `:stable`.
+  #   @param masked_position [Symbol] `:last` (default) or `:first`.
+  #   @return [CArray] `:int64` positions within each fiber.
+  #   @raise [ArgumentError] when `kind:` is neither `:quick` nor
+  #     `:stable`, or `axis` is out of range.
+  #   @raise [CArray::DataTypeError] for a complex `data_type`.
+  def sort_index(axis: 0, kind: :quick, masked_position: :last); end
+
   # @!group Index and address conversion
 
   # @overload axis2addr(indices, axis: 0)
