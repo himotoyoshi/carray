@@ -44,6 +44,7 @@ void Init_carray_access ();
 void Init_carray_index_classifier ();
 void Init_carray_element ();
 void Init_carray_scatter ();     /* scatter_*! family */
+void Init_carray_segment ();     /* segment lengths / offsets / index */
 void Init_ca_axis_group ();      /* devel/MEMO_AXIS_GROUP.md — axis-group reduction kernel */
 void Init_ca_group_iter ();      /* devel/MEMO_AXIS_GROUP.md — axis-group [] surface */
 void Init_carray_bincount ();    /* bincount dedicated kernel */
@@ -286,6 +287,7 @@ Init_carray_ext (void)
   Init_carray_index_classifier();
   Init_carray_element();
   Init_carray_scatter();
+  Init_carray_segment();
   Init_ca_axis_group();    /* devel/MEMO_AXIS_GROUP.md — axis-group reduction kernel */
   Init_carray_bincount();
   Init_carray_factorize();
