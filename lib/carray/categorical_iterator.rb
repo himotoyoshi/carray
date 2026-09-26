@@ -62,15 +62,14 @@
 require "carray"
 require "carray/segment_iterator"
 
-# A CAIterator over the categories of a CACategorical.  CAIterator is the
-# family base (the built-in iterators like CAWindowIterator / CABlockIterator
-# are defined in C); a Ruby `Foo < CAIterator` supplies its own behaviour and
-# does not lean on the base machinery.  Like CASlabIterator, this class defines
-# its own `each` (over the k categories, yielding each category's member slice),
-# which drives the inherited Enumerable surface; the reduction methods (sum /
-# mean / median / ...) aggregate the groups into length-k arrays.  The kernels
-# are per-category slices of an eager, category-contiguous grouped copy.  This
-# supersedes the older CAClassIterator.
+# A CAIterator over the categories of a CACategorical.  It is a
+# CASegmentIterator over a category-sorted copy of the value: construction
+# gathers the value through the categorical's cached grouping plan, so each
+# category is one contiguous segment, and every reduction without `axis:` is
+# the segment reduction over that copy (one value per category, in {#labels}
+# order).  This class adds the construction, the labels, and the per-fiber
+# form (`axis:`), which classifies each fiber along an axis and keeps the
+# other axes.
 class CACategoricalIterator < CASegmentIterator
 
   # value : the payload CArray to reduce, one cell per categorical cell.
@@ -179,6 +178,122 @@ class CACategoricalIterator < CASegmentIterator
     tail = @elements ? "elements=#{@elements.to_a.inspect}" : "per-fiber only"
     "#<#{self.class} ngroups=#{@k} labels=#{@labels.inspect} #{tail}>"
   end
+
+  # ---- the per-fiber form ---------------------------------------------------
+  #
+  # These reductions also take `axis:` on a categorical.  Without it each is
+  # the CASegmentIterator reduction of the same name, over the category-sorted
+  # copy: one value per category, in {#labels} order.
+  #
+  # @!method accumulate(axis: nil)
+  #   @overload accumulate
+  #     The per-category form: {CASegmentIterator#accumulate}, one value per category.
+  #   @overload accumulate(axis:)
+  #     Per-fiber per-category in-type sums along `axis`.  Output shape =
+  #     `[K, ...source.shape without axis]`.
+  #     @param axis [Integer] reduce axis of the source value.
+  #     @return [CArray]
+  # @!method count(*args, axis: nil)
+  #   @overload count
+  #     The per-category form: {CASegmentIterator#count}, one value per category.
+  #   @overload count(axis:)
+  #     No-arg + axis: = per-fiber per-category count_not_masked (shape [K, ...band]).
+  #     `count(v, axis:)` (value equality) and `count(UNDEF, axis:)` are not
+  #     implemented; use them without `axis:`.
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method count_masked(axis: nil)
+  #   @overload count_masked
+  #     The per-category form: {CASegmentIterator#count_masked}, one value per category.
+  #   @overload count_masked(axis:)
+  #     Not implemented; call it without `axis:`.
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method count_not_masked(axis: nil)
+  #   @overload count_not_masked
+  #     The per-category form: {CASegmentIterator#count_not_masked}, one value per category.
+  #   @overload count_not_masked(axis:)
+  #     Per-fiber per-category count of present (non-masked) values along `axis`
+  #     (int64, shape [K, ...band]).  Empty cells are `0`.
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method max(axis: nil)
+  #   @overload max
+  #     The per-category form: {CASegmentIterator#max}, one value per category.
+  #   @overload max(axis:)
+  #     Per-fiber per-category maxima along `axis` (h's data type, masked where empty).
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method mean(axis: nil)
+  #   @overload mean
+  #     The per-category form: {CASegmentIterator#mean}, one value per category.
+  #   @overload mean(axis:)
+  #     Per-fiber per-category means (float64, empty group cells MASKED).
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method min(axis: nil)
+  #   @overload min
+  #     The per-category form: {CASegmentIterator#min}, one value per category.
+  #   @overload min(axis:)
+  #     Per-fiber per-category minima along `axis` (h's data type, masked where empty).
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method minmax(axis: nil)
+  #   @overload minmax
+  #     The per-category form: {CASegmentIterator#minmax}, one value per category.
+  #   @overload minmax(axis:)
+  #     Per-fiber `[min_ca, max_ca]` along `axis` (each shape [K, ...band], h's data type,
+  #     empty group cells MASKED).  Ruby Array of two CArrays, not stacked.
+  #     Both come from one kernel run.
+  #     @param axis [Integer]
+  #     @return [Array<CArray>]
+  # @!method prod(axis: nil)
+  #   @overload prod
+  #     The per-category form: {CASegmentIterator#prod}, one value per category.
+  #   @overload prod(axis:)
+  #     Per-fiber per-category products (float64, shape [K, ...band]).  Empty
+  #     group cells `1.0` (identity).
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method stddevp(axis: nil)
+  #   @overload stddevp
+  #     The per-category form: {CASegmentIterator#stddevp}, one value per category.
+  #   @overload stddevp(axis:)
+  #     Per-fiber per-category population stddev (float64, empty group cells MASKED).
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method sum(axis: nil)
+  #   @overload sum
+  #     The per-category form: {CASegmentIterator#sum}, one value per category.
+  #   @overload sum(axis:)
+  #     Returns per-category sums per fiber along `axis`.  Cat may be 1-D (case
+  #     A, broadcasts across band axes), same rank as source (case B, per-fiber
+  #     independent classifier), or one rank less (band-only, constant along
+  #     reduce axis).  Output shape = `[K, ...source.shape without axis]`.
+  #     @param axis [Integer] reduce axis of the source value.
+  #     @return [CArray]
+  # @!method wmean(weights, axis: nil)
+  #   @overload wmean
+  #     The per-category form: {CASegmentIterator#wmean}, one value per category.
+  #   @overload wmean(weights, axis:)
+  #     Per-fiber per-category weighted mean along `axis`.  Same weights-shape
+  #     contract as {#wsum} (weights.shape == source.shape).  Empty cell → MASKED;
+  #     a present cell whose weights sum to zero → NaN (0/0 core contract).
+  #     @param weights [CArray]
+  #     @param axis [Integer]
+  #     @return [CArray]
+  # @!method wsum(weights, axis: nil)
+  #   @overload wsum
+  #     The per-category form: {CASegmentIterator#wsum}, one value per category.
+  #   @overload wsum(weights, axis:)
+  #     Per-fiber per-category weighted sum along `axis`.  `weights` must have
+  #     shape == source.shape (rev3 requires explicit broadcast; wrap 1-D or
+  #     band-shape weights via `.broadcast_to(*source.shape)` at the call site).
+  #     Empty group cell → `0.0` (identity).  Mask contract: cell contributes iff
+  #     value AND weight are present.
+  #     @param weights [CArray]
+  #     @param axis [Integer]
+  #     @return [CArray]
 
   private
 
