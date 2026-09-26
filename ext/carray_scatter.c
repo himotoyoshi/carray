@@ -9,10 +9,12 @@
     duplicates unbuffered (sequential) — collisions accumulate
     mask       pair skipped when any of addrs[i] / vals[i] / self[addrs[i]] is masked
     cast       vals silently cast to self.data_type
-    data type      arithmetic (add / sub / mul / min / max): numeric only
+    data type  add / sub / mul: numeric, complex included
+               min / max: real numeric only (complex has no order)
                (boolean / object / fixlen → CADataTypeError; the bang
                cannot widen self, same rationale as fma! / fms!)
                replace: numeric or boolean (assignment, no widening)
+    scalar     Integer / Float, and Complex when self is complex
 
 --------------------------------------------------------------------------- */
 
@@ -41,9 +43,17 @@
 #define OP_MIN_INT(qp, v) do { if ((v) < *(qp)) *(qp) = (v); } while (0)
 #define OP_MAX_INT(qp, v) do { if ((v) > *(qp)) *(qp) = (v); } while (0)
 
-#define LOOP_SCALAR(T, APPLY) do { \
+/* The scalar operand as T.  A complex self also takes a Ruby Complex
+   scalar, whose parts sit in vd / vi; an Integer or Float scalar leaves
+   vi at 0. */
+#define SCALAR_REAL(T)  ((T) (v_is_float ? (double)vd : (double)vl))
+#define SCALAR_CMPLX(T) ((T) ((v_is_float ? (double)vd : (double)vl) + vi * I))
+
+#define LOOP_SCALAR(T, APPLY) LOOP_SCALAR_V(T, APPLY, SCALAR_REAL(T))
+
+#define LOOP_SCALAR_V(T, APPLY, VS) do { \
   T *q = (T *) ca->ptr; \
-  T  vs = (T) (v_is_float ? (double)vd : (double)vl); \
+  T  vs = VS; \
   if ( mself ) { \
     for (i = 0; i < n; i++) { \
       if ( maddrs && maddrs[i] ) continue; \
@@ -96,9 +106,11 @@
    Scalar vals is always valid (Fixnum / Float), so scalar path just
    writes and clears target mask. */
 
-#define LOOP_SCALAR_REPLACE(T) do { \
+#define LOOP_SCALAR_REPLACE(T) LOOP_SCALAR_REPLACE_V(T, SCALAR_REAL(T))
+
+#define LOOP_SCALAR_REPLACE_V(T, VS) do { \
   T *q = (T *) ca->ptr; \
-  T  vs = (T) (v_is_float ? (double)vd : (double)vl); \
+  T  vs = VS; \
   for (i = 0; i < n; i++) { \
     if ( maddrs && maddrs[i] ) continue; \
     addr = p[i]; \
@@ -137,13 +149,13 @@
   case CA_UINT32:  if (vals_scalar) LOOP_SCALAR_REPLACE(uint32_t); else LOOP_VEC_REPLACE(uint32_t); break; \
   case CA_UINT16:  if (vals_scalar) LOOP_SCALAR_REPLACE(uint16_t); else LOOP_VEC_REPLACE(uint16_t); break; \
   case CA_UINT8:   if (vals_scalar) LOOP_SCALAR_REPLACE(uint8_t);  else LOOP_VEC_REPLACE(uint8_t);  break; \
+  CASES_CMPLX_REPLACE \
   default: \
     rb_bug("carray_scatter: unsupported data_type %d after numeric check", ca->data_type); \
   } \
 } while (0)
 
-#define DISPATCH_NUMERIC(APPLY_INT, APPLY_FLT) do { \
-  switch ( ca->data_type ) { \
+#define CASES_REAL(APPLY_INT, APPLY_FLT) \
   case CA_FLOAT64: if (vals_scalar) LOOP_SCALAR(double,   APPLY_FLT); else LOOP_VEC(double,   APPLY_FLT); break; \
   case CA_FLOAT32: if (vals_scalar) LOOP_SCALAR(float,    APPLY_FLT); else LOOP_VEC(float,    APPLY_FLT); break; \
   case CA_INT64:   if (vals_scalar) LOOP_SCALAR(int64_t,  APPLY_INT); else LOOP_VEC(int64_t,  APPLY_INT); break; \
@@ -153,9 +165,39 @@
   case CA_UINT64:  if (vals_scalar) LOOP_SCALAR(uint64_t, APPLY_INT); else LOOP_VEC(uint64_t, APPLY_INT); break; \
   case CA_UINT32:  if (vals_scalar) LOOP_SCALAR(uint32_t, APPLY_INT); else LOOP_VEC(uint32_t, APPLY_INT); break; \
   case CA_UINT16:  if (vals_scalar) LOOP_SCALAR(uint16_t, APPLY_INT); else LOOP_VEC(uint16_t, APPLY_INT); break; \
-  case CA_UINT8:   if (vals_scalar) LOOP_SCALAR(uint8_t,  APPLY_INT); else LOOP_VEC(uint8_t,  APPLY_INT); break; \
+  case CA_UINT8:   if (vals_scalar) LOOP_SCALAR(uint8_t,  APPLY_INT); else LOOP_VEC(uint8_t,  APPLY_INT); break;
+
+#ifdef HAVE_COMPLEX_H
+#define CASES_CMPLX(APPLY) \
+  case CA_CMPLX64:  if (vals_scalar) LOOP_SCALAR_V(cmplx64_t,  APPLY, SCALAR_CMPLX(cmplx64_t)); \
+                    else LOOP_VEC(cmplx64_t,  APPLY); break; \
+  case CA_CMPLX128: if (vals_scalar) LOOP_SCALAR_V(cmplx128_t, APPLY, SCALAR_CMPLX(cmplx128_t)); \
+                    else LOOP_VEC(cmplx128_t, APPLY); break;
+#define CASES_CMPLX_REPLACE \
+  case CA_CMPLX64:  if (vals_scalar) LOOP_SCALAR_REPLACE_V(cmplx64_t,  SCALAR_CMPLX(cmplx64_t)); \
+                    else LOOP_VEC_REPLACE(cmplx64_t);  break; \
+  case CA_CMPLX128: if (vals_scalar) LOOP_SCALAR_REPLACE_V(cmplx128_t, SCALAR_CMPLX(cmplx128_t)); \
+                    else LOOP_VEC_REPLACE(cmplx128_t); break;
+#else
+#define CASES_CMPLX(APPLY)
+#define CASES_CMPLX_REPLACE
+#endif
+
+/* add / sub / mul: every numeric type, complex included. */
+#define DISPATCH_ARITH(APPLY) do { \
+  switch ( ca->data_type ) { \
+  CASES_REAL(APPLY, APPLY) \
+  CASES_CMPLX(APPLY) \
   default: \
-    /* numeric check passed before dispatch; complex types fall through to bug */ \
+    rb_bug("carray_scatter: unsupported data_type %d after numeric check", ca->data_type); \
+  } \
+} while (0)
+
+/* min / max: real types only; the setup has already refused complex. */
+#define DISPATCH_ORDERED(APPLY_INT, APPLY_FLT) do { \
+  switch ( ca->data_type ) { \
+  CASES_REAL(APPLY_INT, APPLY_FLT) \
+  default: \
     rb_bug("carray_scatter: unsupported data_type %d after numeric check", ca->data_type); \
   } \
 } while (0)
@@ -179,9 +221,15 @@
   n = ci->elements; \
   if ( n == 0 ) return self; \
   vals_scalar = (RB_FLOAT_TYPE_P(rvals) || FIXNUM_P(rvals) \
-                 || ((allow_bool_scalar) && (rvals == Qtrue || rvals == Qfalse))); \
+                 || ((allow_bool_scalar) && (rvals == Qtrue || rvals == Qfalse)) \
+                 || (ca_is_complex_type(ca) && RB_TYPE_P(rvals, T_COMPLEX))); \
   if ( vals_scalar ) { \
-    if ( RB_FLOAT_TYPE_P(rvals) ) { vd = RFLOAT_VALUE(rvals); v_is_float = 1; } \
+    if ( RB_TYPE_P(rvals, T_COMPLEX) ) { \
+      vd = NUM2DBL(rb_complex_real(rvals)); \
+      vi = NUM2DBL(rb_complex_imag(rvals)); \
+      v_is_float = 1; \
+    } \
+    else if ( RB_FLOAT_TYPE_P(rvals) ) { vd = RFLOAT_VALUE(rvals); v_is_float = 1; } \
     else if ( FIXNUM_P(rvals) )   { vl = FIX2LONG(rvals);     v_is_float = 0; } \
     else                          { vl = (rvals == Qtrue) ? 1 : 0; v_is_float = 0; } \
   } \
@@ -202,19 +250,24 @@
   mself    = ca->mask ? (boolean8_t *) ca->mask->ptr : NULL; \
   elements = ca->elements;
 
-#define AT_SETUP_OR_RETURN(name) \
+#define AT_SETUP_OR_RETURN(name, ordered) \
   CArray  *ca, *ci, *cv = NULL; \
   ca_size_t i, n, addr, elements; \
   ca_size_t *p; \
   boolean8_t *maddrs, *mvals = NULL, *mself; \
   int vals_scalar, v_is_float = 0; \
-  double vd = 0.0; long vl = 0; \
+  double vd = 0.0, vi = 0.0; long vl = 0; \
   rb_ca_modify(self); \
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca); \
   if ( ! ca_is_numeric_type(ca) ) { \
     rb_raise(rb_eCADataTypeError, name " requires a numeric array"); \
   } \
-  AT_SETUP_BODY(name, 0)
+  if ( (ordered) && ca_is_complex_type(ca) ) { \
+    rb_raise(rb_eCADataTypeError, \
+      name " requires a real array (complex values have no order)"); \
+  } \
+  AT_SETUP_BODY(name, 0) \
+  (void) vi;
 
 /* replace variant: accepts boolean self (assignment, no widening) and
    Ruby true / false as scalar vals. */
@@ -224,7 +277,7 @@
   ca_size_t *p; \
   boolean8_t *maddrs, *mvals = NULL, *mself; \
   int vals_scalar, v_is_float = 0; \
-  double vd = 0.0; long vl = 0; \
+  double vd = 0.0, vi = 0.0; long vl = 0; \
   rb_ca_modify(self); \
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca); \
   if ( ! ca_is_numeric_type(ca) && ca->data_type != CA_BOOLEAN ) { \
@@ -247,8 +300,8 @@
 static VALUE
 rb_ca_scatter_add_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_add!");
-  DISPATCH_NUMERIC(OP_ADD, OP_ADD);
+  AT_SETUP_OR_RETURN("scatter_add!", 0);
+  DISPATCH_ARITH(OP_ADD);
   AT_TEARDOWN();
   return self;
 }
@@ -260,8 +313,8 @@ rb_ca_scatter_add_bang (VALUE self, VALUE raddrs, VALUE rvals)
 static VALUE
 rb_ca_scatter_sub_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_sub!");
-  DISPATCH_NUMERIC(OP_SUB, OP_SUB);
+  AT_SETUP_OR_RETURN("scatter_sub!", 0);
+  DISPATCH_ARITH(OP_SUB);
   AT_TEARDOWN();
   return self;
 }
@@ -275,8 +328,8 @@ rb_ca_scatter_sub_bang (VALUE self, VALUE raddrs, VALUE rvals)
 static VALUE
 rb_ca_scatter_mul_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_mul!");
-  DISPATCH_NUMERIC(OP_MUL, OP_MUL);
+  AT_SETUP_OR_RETURN("scatter_mul!", 0);
+  DISPATCH_ARITH(OP_MUL);
   AT_TEARDOWN();
   return self;
 }
@@ -290,8 +343,8 @@ rb_ca_scatter_mul_bang (VALUE self, VALUE raddrs, VALUE rvals)
 static VALUE
 rb_ca_scatter_min_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_min!");
-  DISPATCH_NUMERIC(OP_MIN_INT, OP_MIN_FLT);
+  AT_SETUP_OR_RETURN("scatter_min!", 1);
+  DISPATCH_ORDERED(OP_MIN_INT, OP_MIN_FLT);
   AT_TEARDOWN();
   return self;
 }
@@ -304,8 +357,8 @@ rb_ca_scatter_min_bang (VALUE self, VALUE raddrs, VALUE rvals)
 static VALUE
 rb_ca_scatter_max_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_max!");
-  DISPATCH_NUMERIC(OP_MAX_INT, OP_MAX_FLT);
+  AT_SETUP_OR_RETURN("scatter_max!", 1);
+  DISPATCH_ORDERED(OP_MAX_INT, OP_MAX_FLT);
   AT_TEARDOWN();
   return self;
 }
