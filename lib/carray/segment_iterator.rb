@@ -19,6 +19,45 @@ require "carray"
 
 class CASegmentIterator < CAIterator
 
+  # value   : the CArray whose segments are reduced, read in flatten order.
+  # offsets : the k+1 boundaries (segment c spans offsets[c]...offsets[c+1]),
+  # lengths : or the k lengths, the segments then starting at cell 0.
+  #
+  # Takes a copy of the cells the segments cover, so the reductions answer
+  # about the values as they were at construction.  Cells before offsets[0]
+  # or from offsets[-1] on belong to no segment.
+  def initialize (value, offsets: nil, lengths: nil)
+    kw = {}
+    kw[:offsets] = offsets unless offsets.nil?
+    kw[:lengths] = lengths unless lengths.nil?
+    bounds = CArray.__segment_bounds__("segments", **kw)
+    origin, finish = bounds[0], bounds[-1]
+    if origin < 0 || finish > value.elements
+      raise ArgumentError,
+            "segments: the segments span #{origin}...#{finish}, " \
+            "outside the #{value.elements} elements of the value"
+    end
+    @value     = value
+    @src_shape = value.shape
+    @k         = bounds.elements - 1
+    @ndim      = 1
+    @shape     = [@k]
+    @origin    = origin
+    @bounds    = bounds - origin                     # every boundary, from 0
+    @offsets   = @bounds[0...-1].copy                # the starts, for the kernels
+    @elements  = @k > 0 ? (@bounds[1..-1] - @bounds[0...-1]) : CArray.int64(0)
+    @grouped   = finish > origin ? value.reshape(value.elements)[origin...finish].copy
+                                 : CArray.new(value.data_type, [0])
+    @empty     = CArray.new(@grouped.data_type, [0])
+  end
+
+  # @overload inspect
+  #   Returns a one-line summary: the number of segments and their lengths.
+  #   @return [String]
+  def inspect
+    "#<#{self.class} segments=#{@k} elements=#{@elements.to_a.inspect}>"
+  end
+
   # @overload each { |members| ... }
   #   Yields each category's members (a CArray slice of the grouped copy, in
   #   {#labels} order; an empty category yields an empty array).  Without a
@@ -514,7 +553,7 @@ class CASegmentIterator < CAIterator
     # indices). Excluded cells are absent from perm and stay UNDEF.
     out = CArray.new(dt, @src_shape)
     out[] = UNDEF
-    out.reshape(@codes.elements)[perm] = transformed
+    out.reshape(codes.elements)[perm] = transformed
     out
   end
 
@@ -576,7 +615,7 @@ class CASegmentIterator < CAIterator
   # source order, so the flat result reshapes straight back to the source shape.
   def scan (op)
     scan_source.reshape(@value.elements)
-               .__axis_group_scan__([0], [[@codes, @k, [0]]], op)
+               .__axis_group_scan__([0], [[codes, @k, [0]]], op)
                .reshape(*@src_shape)
   end
 
@@ -605,7 +644,21 @@ class CASegmentIterator < CAIterator
   # at construction (the same counting sort that lays out @grouped), so #map /
   # #sort_addr / the *_addr reductions read it for free.
   def perm
-    @perm
+    @perm ||= CArray.int64(grouped.elements).seq!(@origin)
+  end
+
+  # The segment each source cell belongs to, -1 for a cell outside every
+  # segment.  Read by #map, the scans and the weighted reductions; built the
+  # first time one of them asks, since the reductions do not need it.
+  def codes
+    @codes ||= begin
+      c = CArray.int64(@value.elements).fill(-1)
+      if grouped.elements > 0
+        c[@origin...(@origin + grouped.elements)] =
+          CArray.segment_index(offsets: @bounds)
+      end
+      c
+    end
   end
 
   # Lay a per-cell weight array out in category-contiguous order (same layout as
@@ -613,14 +666,14 @@ class CASegmentIterator < CAIterator
   # Weights are coerced to float64; the same counting-sort scatter propagates
   # the weight mask and skips excluded cells, so wg lines up with @grouped.
   def scatter_weights (weights)
-    unless weights.elements == @codes.elements
+    unless weights.elements == codes.elements
       raise ArgumentError,
             "wsum/wmean: weights.elements (#{weights.elements}) != " \
-            "value.elements (#{@codes.elements})"
+            "value.elements (#{codes.elements})"
     end
     wf = weights.float64
     wg = CArray.float64(grouped.elements)
-    @codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
+    codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
                 @offsets.copy, wg, @k)
     wg
   end
@@ -816,4 +869,29 @@ class CASegmentIterator < CAIterator
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
+end
+
+
+class CArray
+  # @overload segments(offsets:)
+  #   Returns a {CASegmentIterator} that reduces `self` segment by segment,
+  #   segment `c` being the cells `offsets[c]...offsets[c + 1]` in flatten
+  #   order.  Cells outside `offsets[0]...offsets[-1]` belong to no segment.
+  #
+  #     data.segments(offsets: [0, 2, 2, 5]).sum   # one sum per segment
+  #
+  #   @param offsets [CArray, Array<Integer>] `k + 1` non-decreasing
+  #     boundaries within `0..elements`.
+  #   @return [CASegmentIterator]
+  # @overload segments(lengths:)
+  #   The same from the `k` segment lengths, the first segment starting at
+  #   cell 0.
+  #   @param lengths [CArray, Array<Integer>] one count per segment.
+  #   @return [CASegmentIterator]
+  # @raise [ArgumentError] for decreasing or empty offsets, a negative or
+  #   masked length, segments reaching outside `self`, or unless exactly one
+  #   of `offsets:` and `lengths:` is given.
+  def segments (offsets: nil, lengths: nil)
+    CASegmentIterator.new(self, offsets: offsets, lengths: lengths)
+  end
 end
