@@ -334,10 +334,21 @@ Both group a categorical, but they answer different needs:
   cheaply. Reach for it for a flat categorical, for order statistics, or when you
   want many statistics per group.
 
+## Relationship to `segments`
+
+`group_by_category` is a sort followed by a segment reduction. The sort gathers
+the value so that each category is one contiguous run of a copy; every reduction
+without `axis:` is then the [`CASegmentIterator`](CASegmentIterator.md) reduction
+over that copy, and `CACategoricalIterator` descends from `CASegmentIterator`.
+When the pieces are already contiguous in the value — rows of a sparse matrix,
+records of a ragged array — `value.segments(offsets: o)` gives the same
+reductions without the sort.
+
 ## See also
 
 - [`CACategorical`](../objects/CACategorical.md) — the classifier this consumes.
 - [`AxisGroup`](AxisGroup.md) — grid group-by along axes (the scatter path).
+- [`CASegmentIterator`](CASegmentIterator.md) — the same reductions over runs already contiguous in the value.
 - [Masks and missing values](../../guides/users/05_masks.md) — the mask contract the
   reductions follow.
 - [Reduction and statistics](../../guides/users/04_reduction_and_statistics.md) — the

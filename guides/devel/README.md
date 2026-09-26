@@ -102,8 +102,8 @@ that, the parts are independent; jump to whichever subsystem you are working on.
 - [16 Indexing and access](16_indexing_and_access.md) — `carray_access.c`, the
   indexer decision tree, which view each index form produces.
 - [16a The iterator family](16a_iterator_family.md) — the `CAIterator`
-  form-only base and its five engines (slab / window / block / categorical /
-  group): where each engine lives (Ruby composition vs dedicated C kernels),
+  form-only base and its six engines (slab / window / block / categorical /
+  group / segment): where each engine lives (Ruby composition vs dedicated C kernels),
   the counting-sort scatter, the axis-group compute kernel, the contract
   invariants.
 - [16b The `fz_hash` discovery engine](16b_fz_hash_discovery.md) — the

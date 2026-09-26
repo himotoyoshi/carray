@@ -1,10 +1,10 @@
 # The iterator family
 
-CArray 3.0 has a family of five **iterators** that all answer the same question — *"fold each piece of the array to a value"* — but disagree about what a *piece* is. A piece can be a fiber along an axis, a sliding window, a non-overlapping tile, the cells of one category, or a coordinate-classified group. Once you can read one member you can read all of them, because they share a single reduction surface: `mean`, `min`, `stddev`, `median`, `wsum`, and the rest are spelled the same way everywhere.
+CArray 3.0 has a family of six **iterators** that all answer the same question — *"fold each piece of the array to a value"* — but disagree about what a *piece* is. A piece can be a fiber along an axis, a sliding window, a non-overlapping tile, the cells of one category, a coordinate-classified group, or a run of consecutive cells. Once you can read one member you can read all of them, because they share a single reduction surface: `mean`, `min`, `stddev`, `median`, `wsum`, and the rest are spelled the same way everywhere.
 
 This chapter is the map. It shows the one shared question, the common surface, and where the members legitimately differ — then points you to the chapter that covers each member in full.
 
-## The five members
+## The six members
 
 Every member takes a source array, decides what a piece is, and lets you reduce each piece with the same method names. What changes from member to member is how you build the iterator and the shape of the result.
 
@@ -15,6 +15,7 @@ Every member takes a source array, decides what a piece is, and lets you reduce 
 | `CABlockIterator` | a non-overlapping tile | `a.blocks(2, 2)` | tile grid (ceil) | [23](23_block_iteration.md) |
 | `CACategoricalIterator` | the cells sharing one category | `value.group_by_category(cat)` | length-`k`, one per category | [24](24_categories_and_grouping.md) |
 | `CAGroupIterator` | a coordinate-classified group | `value[cat, nil]` | group slots × preserved band axes | [24](24_categories_and_grouping.md) |
+| `CASegmentIterator` | a run of consecutive cells between two offsets | `value.segments(offsets: o)` | length-`k`, one per segment | [24](24_categories_and_grouping.md) |
 
 The intuition to hold onto: **choose a member by what a piece should be**, then call the reduction you want. The engine underneath each member is different and tuned for its own layout, but you never see that — you see the same surface.
 
@@ -32,7 +33,7 @@ a.blocks(2, 2).sum       # block: sum of each (up-to) 2x2 tile
 
 ## The form-only base
 
-All five descend from `CAIterator`, a **form-only base**. It carries no engine of its own — each member supplies its own. What the base declares is only two things: the shared shape accessors (`shape` and `ndim`; `dim` is a legacy alias for `shape`) and the list of reduction names every member is expected to provide.
+All six descend from `CAIterator`, a **form-only base**. It carries no engine of its own — each member supplies its own. What the base declares is only two things: the shared shape accessors (`shape` and `ndim`; `dim` is a legacy alias for `shape`) and the list of reduction names every member is expected to provide.
 
 `CAIterator` deliberately does **not** `include Enumerable`. That is a design decision, not an oversight. `Enumerable` would inject `min`, `max`, `sum`, `count`, `to_a`, and friends — names that already mean something precise on this surface. If `Enumerable#min` leaked in, `it.min` might silently compare *pieces* against each other instead of folding *within* each piece, and you would get a plausible-looking wrong answer with no error. So the family spells out its whole surface explicitly and lets nothing slip in behind it.
 
@@ -157,7 +158,7 @@ Beyond the common surface, each member adds methods that only make sense for it:
 
 ## Calling conventions
 
-Four of the five members **bind the axis at construction time**. You choose the pieces when you build the iterator, so the reduction itself takes no `axis`:
+Five of the six members **bind the axis at construction time**. You choose the pieces when you build the iterator, so the reduction itself takes no `axis`:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -178,6 +179,9 @@ cat = CA_OBJECT(["a", "b", "a", "b", "a"]).categorize
 
 val.group_by_category(cat).mean    # categorical — the label array fixes the pieces
 #  => [ 30.0, 30.0 ]
+
+CA_DOUBLE([1, 2, 3, 4, 5]).segments(offsets: [0, 2, 5]).mean   # segment — the offsets fix the pieces
+#  => [ 1.5, 4.0 ]
 ```
 
 ### The group iterator is the exception
