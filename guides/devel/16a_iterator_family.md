@@ -18,7 +18,7 @@ on. Several family engines are themselves *built on* the kernel iterator (the
 axis-group compute kernel pins its slab axes with `CA_FOR_EACH_SLAB`), which
 is exactly the intended layering.
 
-## 16a.1 One surface, five engines
+## 16a.1 One surface, six engines
 
 | member | a *piece* is… | built by | output shape | engine lives in |
 |---|---|---|---|---|
@@ -27,11 +27,12 @@ is exactly the intended layering.
 | `CABlockIterator` | a non-overlapping tile | `a.blocks(3, 3)` | ceil tile grid | Ruby: block_view decomposition + core reduction (`lib/carray/block_iterator.rb`) |
 | `CACategoricalIterator` | the cells of one category | `value.group_by_category(cat)` | length-`k` | Ruby dispatch (`lib/carray/categorical_iterator.rb`) over C kernels (`ext/ca_categorical_iterator.c`) |
 | `CAGroupIterator` | a coordinate-classified group | `value[cat, nil, …]` | `[K, band…]` slot order | C class (`ext/ca_group_iter.c`) + C compute kernel (`ext/ca_axis_group.c`) + Ruby metadata (`lib/carray/axis_group.rb`) |
+| `CASegmentIterator` | a run of consecutive cells between two offsets | `value.segments(offsets: o)` | length-`k` | Ruby dispatch (`lib/carray/segment_iterator.rb`) over the same segment kernels (`ext/ca_categorical_iterator.c`) |
 
 Two structural facts explain most of the table:
 
-- **The partition members (slab / block / categorical / group) assign every
-  cell to exactly one piece.** That is what makes a per-cell running scan
+- **The partition members (slab / block / categorical / group / segment) assign every
+  cell to at most one piece.** That is what makes a per-cell running scan
   (`cumsum` …), a scatter-back `map`, and a per-piece `sort_addr` well-defined
   for them. The window's pieces overlap and its margin cells are padding with
   no source address, so those operations are structurally impossible there and
@@ -191,6 +192,20 @@ order statistics (median / percentile) cannot be computed from streaming
 accumulators — every value of a group must be held together. The engine
 therefore materialises **one category-contiguous grouped copy** and runs
 segment reductions over it.
+
+The two halves are two classes. `CASegmentIterator`
+(`lib/carray/segment_iterator.rb`) holds the segment half: a contiguous copy
+(`grouped`), its boundaries (`@bounds`, k+1, and `@offsets`, the k starts the
+kernels read), and every reduction without `axis:`, `map`, the scans and the
+address surface. `CACategoricalIterator` descends from it and supplies the
+other half — the counting-sort gather that builds `grouped`, the labels, and
+the per-fiber `axis:` form. A segment iterator built by `value.segments` copies
+the covered range as it is, so its permutation is a run of consecutive
+indices and its per-cell segment numbers come from `CArray.segment_index`;
+both are built only when `map`, a scan, a weighted reduction or an address
+asks for them. The flat reductions reach the `axis:` form through private
+hooks (`axis_sum`, `axis_moments`, …) that the segment class answers with
+`NotImplementedError` and the categorical class overrides.
 
 ### The grouping plan cache on CACategorical
 

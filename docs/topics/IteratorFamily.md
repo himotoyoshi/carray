@@ -1,4 +1,4 @@
-# The iterator family — one reduction surface, five engines
+# The iterator family — one reduction surface, six engines
 
 CArray 3.0 has a family of **iterators** that all answer the same question —
 *"fold each piece of the array to a value"* — but differ in what a *piece* is
@@ -12,6 +12,7 @@ once you know one, you can read the others; each supplies its own fast engine.
 | [`CABlockIterator`](CABlockIterator.md) | a non-overlapping tile | `a.blocks(3, 3)` | tile grid (ceil) |
 | [`CACategoricalIterator`](CACategoricalIterator.md) | the cells of one category | `value.group_by_category(cat)` | length-`k` (one per category) |
 | [`CAGroupIterator`](CAGroupIterator.md) | a coordinate-classified group | `value[cat, nil, …]` | slot order (group → `k`, band → length) |
+| [`CASegmentIterator`](CASegmentIterator.md) | a run of consecutive cells between two offsets | `value.segments(offsets: o)` | length-`k` (one per segment) |
 
 They descend from a **form-only base**, `CAIterator`, which carries no engine of
 its own — it only declares the shared shape accessors (`shape` / `ndim`; `dim`
@@ -54,16 +55,16 @@ e| … }` fiber-folds each piece.
 The differences are as meaningful as the common surface — they follow from what
 a piece *is*.
 
-| method | Slab | Window | Block | Categorical | Group |
-|---|:--:|:--:|:--:|:--:|:--:|
-| tier 1 / 2, `minmax`, `wsum` / `wmean` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `median` / `percentile` / `quantile` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ |
-| count family, `elements`, `each` / `reduce` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `min_index` / `max_index` (position **within** a piece) | ✓ | ✓ | ✓ | ✓ | — ² |
-| `min_addr` / `max_addr` (flat **source** address of the winner) | ✓ | ✓ ³ | ✓ | ✓ | ✓ |
-| `map` (per-piece transform, scattered back to the source) | ✓ | — ⁴ | ✓ | ✓ | ✓ |
-| `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ |
-| `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ |
+| method | Slab | Window | Block | Categorical | Group | Segment |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| tier 1 / 2, `minmax`, `wsum` / `wmean` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `median` / `percentile` / `quantile` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ |
+| count family, `elements`, `each` / `reduce` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `min_index` / `max_index` (position **within** a piece) | ✓ | ✓ | ✓ | ✓ | — ² | ✓ |
+| `min_addr` / `max_addr` (flat **source** address of the winner) | ✓ | ✓ ³ | ✓ | ✓ | ✓ | ✓ |
+| `map` (per-piece transform, scattered back to the source) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
+| `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
+| `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
 1. Window order statistics need an unmasked margin (`bounds: :nearest` or
    `:truncate`); the default `:skip` (UNDEF margin) raises with guidance.
@@ -86,7 +87,7 @@ a piece *is*.
 (output = the piece grid). `map` and the scans (`cumsum` …) instead write **one
 value per source cell** — their output is **source-shaped**. A running scan is
 single-valued only when every cell belongs to exactly one piece, which is why the
-partition members (slab / block / categorical / group) provide it and the
+partition members (slab / block / categorical / group / segment) provide it and the
 overlapping window does not.
 
 **Position — `_index` vs `_addr`.** `min_index` is the position of the minimum
@@ -103,16 +104,20 @@ exposes the within-piece index.
   `fill_value:` on every reduction for boundary strictness.
 - `CASlabIterator`: `sort_index` (within-axis rank, for `take_along_axis`).
 - `CAGroupIterator`: `labels` and the whole `axis_group` grouping machinery.
-- `CACategoricalIterator`: `labels`.
+- `CACategoricalIterator`: `labels`. A categorical iterator is a segment
+  iterator over a category-sorted copy of the value, so it descends from
+  `CASegmentIterator` and adds the labels and the `axis:` form.
 
 ## Calling conventions
 
-Three of the members bind the axis at construction, so a reduction takes no axis:
+Four of the members fix their pieces at construction, so a reduction takes no
+axis:
 
 ```ruby
 a[nil, :>].mean                 # slab
 a.windows(-1..1).mean           # window (rolling)
 a.blocks(2, 2).mean             # block (pooling)
+a.segments(offsets: o).mean     # segment
 ```
 
 **`CACategoricalIterator` takes either form.** With no axis it reads the value
@@ -153,3 +158,5 @@ See [`CAGroupIterator`](CAGroupIterator.md) for why, and for the grouping shapes
   (`value.group_by_category`).
 - **Group by axis coordinates** of a grid (month × region, a category map) →
   group (`value[cat, …]`).
+- **Consecutive runs** whose boundaries you already have (the rows of a sparse
+  matrix, the records of a ragged array) → segment (`value.segments`).

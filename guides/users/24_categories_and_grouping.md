@@ -529,6 +529,21 @@ grp.labels   #  => ["a", "b"]
 grp.sum      #  => [ 5.0, 5.0 ]     a = {(0,0), (1,1)}, b = {(0,1), (1,0)}
 ```
 
+### Consecutive segments — `segments`
+
+A categorical group-by sorts the value so that each category becomes one contiguous run, then reduces each run. When the pieces are already contiguous in the value — the rows of a sparse matrix, the records of a ragged array — you can skip the sort and name the runs directly, by their boundaries or by their lengths:
+
+```ruby
+v  = CA_DOUBLE([3, 1, 4, 1, 5, 9, 2, 6])
+it = v.segments(lengths: [3, 0, 5])     # the same as offsets: [0, 3, 3, 8]
+
+it.max        #  => [ 4.0, UNDEF, 9.0 ]    an empty segment has no maximum
+it.elements   #  => [ 3, 0, 5 ]
+it.cumsum     #  => [ 3.0, 4.0, 8.0, 1.0, 6.0, 15.0, 17.0, 23.0 ]
+```
+
+`value.segments(offsets: o)` takes the `k + 1` boundaries, segment `c` being the cells `o[c]...o[c + 1]` in flatten order; the offsets need not start at `0`, and cells outside `o[0]...o[-1]` belong to no segment. The result is a `CASegmentIterator` with the same reductions as a categorical group-by — in fact `CACategoricalIterator` is a `CASegmentIterator` over the sorted copy — without `labels` and without an `axis:` form. Like `group_by_category`, it answers about the values as they were when it was built.
+
 ---
 
 ## Axis-group — grouping a grid by its coordinates
