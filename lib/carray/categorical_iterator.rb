@@ -105,6 +105,7 @@ class CACategoricalIterator < CAIterator
       @elements = cat.category_sizes.int64
       nvalid    = counts.sum
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
+      @bounds   = CArray.segment_offsets(lengths: @elements)  # every boundary (int64[k+1])
       # Group-major source indices = the valid prefix of the cached sort_addr.
       # With no classified cell the prefix is empty (and slicing a length-0
       # sort_addr would be out of range), so take the empty permutation directly.
@@ -572,8 +573,7 @@ class CACategoricalIterator < CAIterator
   def sort_addr
     out = CArray.int64(grouped.elements)
     @k.times do |c|
-      lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      lo, hi = @bounds[c], @bounds[c + 1]
       next unless hi > lo
       # View-local sort order of the segment (0..size-1), lifted to grouped
       # slots, then mapped back to source addresses via perm.
@@ -667,8 +667,7 @@ class CACategoricalIterator < CAIterator
     # order: a same-length result scatters cell for cell, a scalar broadcasts.
     transformed = CArray.new(dt, [grouped.elements])
     @k.times do |c|
-      lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      lo, hi = @bounds[c], @bounds[c + 1]
       transformed[lo...hi] = yield(grouped[lo...hi]) if hi > lo
     end
     # Scatter back to source positions via the permutation (grouped-order source
@@ -1022,8 +1021,7 @@ class CACategoricalIterator < CAIterator
   def fold_weighted (wg, empty)
     out = CArray.float64(@k)
     @k.times do |c|
-      lo = @offsets[c]
-      hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+      lo, hi = @bounds[c], @bounds[c + 1]
       out[c] = hi > lo ? yield(grouped[lo...hi], wg[lo...hi]) : empty
     end
     out
@@ -1034,8 +1032,7 @@ class CACategoricalIterator < CAIterator
   # slice cannot be taken directly, and an empty array carries the same reduction
   # contract we want (identity for sum, UNDEF for ratios).
   def group_slice (c)
-    lo = @offsets[c]
-    hi = (c + 1 < @k) ? @offsets[c + 1] : grouped.elements
+    lo, hi = @bounds[c], @bounds[c + 1]
     hi > lo ? grouped[lo...hi] : @empty
   end
 
@@ -1195,10 +1192,8 @@ class CArray
     else
       present = is_not_masked
       edge    = present & present.shift(1).not   # rising edge = run start
-      # feed cumsum via a zero-copy int8 reinterpret of the 1-byte booleans
-      # rather than widening to int64; cumsum promotes to float64, so the
-      # running count never overflows int8.
-      code    = edge.refer(:int8).cumsum.int64 - 1   # 0-based run index per cell
+      # a boolean cumsum counts in uint64, exactly
+      code    = edge.cumsum.int64 - 1               # 0-based run index per cell
       code[present.not] = UNDEF                  # masked cells join no run
     end
     # categorize turns the dense run indices into the run categories: it derives
