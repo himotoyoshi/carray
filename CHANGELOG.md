@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!` and `scatter_replace!`
+  work on a complex array, and take a `Complex` scalar as `vals`. Before,
+  every `scatter_*!` method crashed the process on a complex array.
+  `scatter_min!` and `scatter_max!` now raise `CArray::DataTypeError` there,
+  since complex values have no order.
+
 - Fix: for C extension authors: `ca_for_each_element.h`, `ca_for_buffer.h`,
   `ca_sweep_engine.h` and `ca_triop_dispatch.h` are now installed with the
   gem. Before, the `CA_FOR_EACH_ELEMENT` and `CA_WITH_BUFFER` /

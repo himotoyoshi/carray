@@ -432,4 +432,53 @@ class TestAtFamily < Test::Unit::TestCase
     assert_equal([10, 20, 30], a.to_a)
   end
 
+
+  # ---- complex: add / sub / mul / replace work, min / max refuse ----
+  #
+  # A complex receiver passed the numeric check and then fell through the
+  # per-type dispatch into rb_bug, taking the process down.
+
+  def test_scatter_add_complex
+    [CA_CMPLX64, CA_CMPLX128].each do |dt|
+      a = CArray.new(dt, [3]).fill(0)
+      a.scatter_add!(CA_SIZE([0, 0, 2]), CA_CMPLX128([1+2i, 3, 1i]).to_type(dt))
+      assert_equal([4+2i, 0, 1i], a.to_a, "data type #{dt}")
+    end
+  end
+
+  def test_scatter_complex_scalar_broadcasts
+    a = CArray.cmplx128(3).fill(0)
+    a.scatter_add!(CA_SIZE([1, 1]), Complex(1, -1))
+    a.scatter_add!(CA_SIZE([2]), 5)
+    assert_equal([0, 2-2i, 5], a.to_a)
+  end
+
+  def test_scatter_sub_mul_complex
+    a = CArray.cmplx128(2).fill(1)
+    a.scatter_sub!(CA_SIZE([0]), 1i)
+    a.scatter_mul!(CA_SIZE([1, 1]), 1i)
+    assert_equal([1-1i, -1], a.to_a)
+  end
+
+  def test_scatter_replace_complex
+    a = CArray.cmplx64(3).fill(0)
+    a.scatter_replace!(CA_SIZE([0, 2]), Complex(4, 4))
+    assert_equal([4+4i, 0, 4+4i], a.to_a)
+  end
+
+  def test_scatter_add_complex_skips_masked_vals
+    vals = CA_CMPLX128([1, 2, 3])
+    vals[1] = UNDEF
+    a = CArray.cmplx128(1).fill(0)
+    a.scatter_add!(CA_SIZE([0, 0, 0]), vals)
+    assert_equal([4], a.to_a)
+  end
+
+  def test_scatter_min_max_complex_raise
+    %i[scatter_min! scatter_max!].each do |op|
+      a = CArray.cmplx128(2).fill(0)
+      assert_raise(CArray::DataTypeError, op.to_s) { a.send(op, CA_SIZE([0]), 1) }
+    end
+  end
+
 end
