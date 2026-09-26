@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extension authors: `ca_for_each_element.h`, `ca_for_buffer.h`,
+  `ca_sweep_engine.h` and `ca_triop_dispatch.h` are now installed with the
+  gem. Before, the `CA_FOR_EACH_ELEMENT` and `CA_WITH_BUFFER` /
+  `rb_ca_call_with_buffer` surface was exported by the library but could
+  not be included from a separately built gem, and the `fma` / `fms` /
+  `clip` dispatch tables were the one family missing from
+  `#include "carray.h"`.
+
 - Change: the global `CA_<TYPE>()` cast shorthands refuse the argument lists
   they used to ignore. `CA_INT32(0, 2)` reads like the shape spelling
   `CArray.int32(3, 3)` but is a cast, and answered with the scalar `0`;
