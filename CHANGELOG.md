@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `value.segments(offsets:)` / `value.segments(lengths:)` return a
+  `CASegmentIterator`, the iterator-family member for consecutive runs of
+  cells: one value per segment from the same reductions, scans, `map` and
+  addresses as the other members. `CACategoricalIterator` now descends from
+  it (a categorical group-by is a sort followed by a segment reduction),
+  which does not change what it answers.
+
+- Fix: a running scan (`cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`)
+  on a `group_by_category` or `group_by_run` iterator with no category
+  answers UNDEF for every cell instead of raising `ArgumentError`, as it
+  already did for cells in no category.
+
 - New: `CArray.segment_offsets(lengths:)` and
   `CArray.segment_index(lengths:)` / `CArray.segment_index(offsets:)`
   convert between the lengths of consecutive segments, their boundaries
