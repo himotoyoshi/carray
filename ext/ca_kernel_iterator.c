@@ -3287,8 +3287,10 @@ ca_iter_ensure (int32_t n, ca_iter_state *states,
   if ( n < 0 ) {
     rb_raise(rb_eArgError, "ca_iter_ensure: negative state count %d", (int) n);
   }
-  if ( n > 0 ) {
-    memset(states, 0, sizeof(ca_iter_state) * (size_t) n);
+  /* Unopened: finish returns at once on a state whose src is NULL, and
+     init clears the whole state before it takes anything. */
+  for ( int32_t i = 0; i < n; i++ ) {
+    states[i].src = NULL;
   }
   e.n      = n;
   e.states = states;

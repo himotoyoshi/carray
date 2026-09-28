@@ -642,9 +642,9 @@ int ca_iter_check_init (int rc);
    ca_iter_state_init_* or a block macro (`CA_FOR_EACH_SLAB(c->st, ...)`).
    A state declared inside the body is not covered.
 
-   The states are cleared before the body runs, so one the body never
-   opens costs nothing, and the body may finish a walk itself: finishing
-   is idempotent.  Returns what the body returns; a raise propagates
+   The states are marked unopened before the body runs, so one the body
+   never opens costs nothing, and the body may finish a walk itself:
+   finishing is idempotent.  Returns what the body returns; a raise propagates
    after the walks are finished. */
 VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                       VALUE (*body)(VALUE), VALUE arg);
