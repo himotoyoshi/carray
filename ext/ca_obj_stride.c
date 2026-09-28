@@ -1342,11 +1342,14 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     ca_stride_xfer_with_layout(ca, (dir == CA_XFER_PUT) ? 1 : 0,
                                root->ptr + composed_base, composed_strides);
     ca->ptr = ptr0;
+    /* Put root->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this frame
+       is. */
+    root->ptr = root_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       /* Push back scratch (modified by scatter) to root. */
       ca_xfer_all(root, root_scratch, CA_XFER_PUT);
     }
-    root->ptr = root_ptr_saved;
     ALLOCV_END(holder);
   }
 }

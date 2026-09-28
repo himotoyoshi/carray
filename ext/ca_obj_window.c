@@ -1137,12 +1137,14 @@ ca_window_func_xfer_all (void *ap, void *data, int dir)
 
     ca_window_func_run_fast_path(ca, (char *) data, dir);
 
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this
+       frame is. */
+    parent->ptr = parent_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       /* Push back scratch (modified by scatter) to parent. */
       ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
     }
-
-    parent->ptr = parent_ptr_saved;
     ALLOCV_END(holder);
   }
 }
