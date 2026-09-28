@@ -21,7 +21,8 @@ class CArray
   #   `self.data_type`), or a Numeric scalar broadcast to all
   #   addresses. A complex `self` also takes a Complex scalar.
   # - Out-of-range `addrs[i]` (`< 0` or `>= self.elements`) raises
-  #   `IndexError`.
+  #   `IndexError`.  The pairs before it stay applied, through a view
+  #   as well.
   # - `self.data_type` must be numeric. Complex is accepted by
   #   every variant except {#scatter_min!} and {#scatter_max!},
   #   since complex values have no order.

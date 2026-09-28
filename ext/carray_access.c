@@ -500,6 +500,110 @@ ca_id_expression_evaluator (void)
   return id;
 }
 
+/* `a[:sym, args] = v` computes the index by calling Ruby with self held
+   attached for the reads, then stores through it. */
+
+typedef struct {
+  VALUE  self;
+  ID     mid;
+  int    argc;
+  VALUE *argv;
+  VALUE  rval;
+} ca_store_method_call_ctx_t;
+
+static VALUE
+ca_store_method_call_body (VALUE arg)
+{
+  ca_store_method_call_ctx_t *c = (ca_store_method_call_ctx_t *) arg;
+  volatile VALUE idx = rb_funcall2(c->self, c->mid, c->argc, c->argv);
+  return rb_ca_store(c->self, idx, c->rval);
+}
+
+/* The casting stores below convert into the destination inside a window,
+   and a conversion from Ruby objects can raise part way.  Such a window
+   attaches rather than allocates: the cells converted before the raise
+   are then pushed back with the others left as they were -- what an
+   entity destination, which has no separate buffer, shows as well.  A
+   cast that cannot raise keeps the cheaper allocate. */
+
+typedef struct {
+  CArray         *ca;
+  CArray         *cv;        /* CArray source, delivered into scratch */
+  char           *scratch;
+  CArray         *ico;       /* Ruby Array source: an object descriptor */
+  volatile VALUE  list;
+  int             has_mask;
+} ca_store_all_ctx_t;
+
+static const char *
+ca_store_all_mode (CArray *cv)
+{
+  return ( cv->data_type == CA_OBJECT ) ? "w" : "a";
+}
+
+static VALUE
+ca_store_all_cast_body (VALUE arg)
+{
+  ca_store_all_ctx_t *c = (ca_store_all_ctx_t *) arg;
+  CArray *ca = c->ca;
+  ca_copy_mask_overwrite(ca, ca->elements, 1, c->cv);
+  if ( ca->mask ) {
+    ca_cast_block_with_mask(ca->elements, c->cv, c->scratch, ca, ca->ptr,
+                            (boolean8_t*)ca->mask->ptr);
+  }
+  else {
+    ca_cast_block(ca->elements, c->cv, c->scratch, ca, ca->ptr);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_store_all_list_body (VALUE arg)
+{
+  ca_store_all_ctx_t *c = (ca_store_all_ctx_t *) arg;
+  CArray *ca = c->ca;
+  VALUE   list = c->list;
+  ca_size_t i;
+  /* Face has surface != storage; the cast runs in the storage
+     data_type.  Passing ca directly makes the cast table see FIXLEN
+     and report non-implemented, so pass a shadow CArray (storage
+     data_type, ptr aliased to ca). */
+  CArray shadow;
+  CArray *cast_target = ca;
+  memset(&shadow, 0, sizeof(CArray));
+  if ( ca_is_face(ca) ) {
+    CArray *root = ca;
+    while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
+    if (root) {
+      shadow.data_type = root->data_type;
+      shadow.bytes     = ca->bytes;
+      shadow.elements  = ca->elements;
+      shadow.ptr       = ca->ptr;
+      cast_target = &shadow;
+    }
+  }
+  if ( c->has_mask ) {
+    boolean8_t *m;
+    m = (boolean8_t *)ca->mask->ptr;
+    for (i=0; i<ca->elements; i++) {
+      if ( rb_ary_entry(list,i) == CA_UNDEF ) {
+        *m = 1;
+      }
+      else {
+        *m = 0;
+      }
+      m++;
+    }
+    ca_cast_block_with_mask(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list),
+                            cast_target, ca->ptr,
+                            (boolean8_t*)ca->mask->ptr);
+  }
+  else {
+    ca_cast_block(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
+  }
+  return Qnil;
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -570,16 +674,12 @@ rb_ca_store_all (VALUE self, VALUE rval)
       ca_xfer_all(cv, scratch, CA_XFER_GET);
 
       if ( ca->data_type != cv->data_type ) {
-        ca_allocate(ca);
-        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
-        if ( ca->mask ) {
-          ca_cast_block_with_mask(ca->elements, cv, scratch, ca, ca->ptr,
-                                  (boolean8_t*)ca->mask->ptr);
-        }
-        else {
-          ca_cast_block(ca->elements, cv, scratch, ca, ca->ptr);
-        }
-        ca_sync_detach(ca);
+        ca_store_all_ctx_t c;
+        c.ca      = ca;
+        c.cv      = cv;
+        c.scratch = scratch;
+        ca_attach_window(1, &ca, ca_store_all_mode(cv), ca_store_all_cast_body,
+                         (VALUE) &c);
       }
       else {
         ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
@@ -611,53 +711,19 @@ rb_ca_store_all (VALUE self, VALUE rval)
           break;
         }
       }
-      /* Use ca_allocate() instead of ca_attach() here because rb_ca_store_all()
-         overwrites ALL elements of the array from a Ruby Array. There is no need
-         to copy parent data (which ca_attach would do), since every element will
-         be replaced. Mask handling is also safe: ca_create_mask() above and
-         ca_copy_mask_overwrite() handle mask allocation and propagation internally,
-         so ca_allocate()'s simpler path (no parent data copy) is sufficient. */
-      ca_allocate(ca);
+      /* Every element is replaced, so there would be no need to gather the
+         old values -- but converting a Ruby object can raise part way, and
+         then the cells already converted are pushed back with the rest
+         left as they were, which needs the old values in the buffer.  So
+         this window attaches (see ca_store_all_mode). */
       {
-        /* Face has surface != storage; the cast runs in the storage
-           data_type.  Passing ca directly makes the cast table see FIXLEN
-           and report non-implemented, so pass a shadow CArray (storage
-           data_type, ptr aliased to ca). */
-        CArray shadow;
-        CArray *cast_target = ca;
-        memset(&shadow, 0, sizeof(CArray));
-        if ( ca_is_face(ca) ) {
-          CArray *root = ca;
-          while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-          if (root) {
-            shadow.data_type = root->data_type;
-            shadow.bytes     = ca->bytes;
-            shadow.elements  = ca->elements;
-            shadow.ptr       = ca->ptr;
-            cast_target = &shadow;
-          }
-        }
-        if ( has_mask ) {
-          boolean8_t *m;
-          m = (boolean8_t *)ca->mask->ptr;
-          for (i=0; i<ca->elements; i++) {
-            if ( rb_ary_entry(list,i) == CA_UNDEF ) {
-              *m = 1;
-            }
-            else {
-              *m = 0;
-            }
-            m++;
-          }
-          ca_cast_block_with_mask(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list),
-                                  cast_target, ca->ptr,
-                                  (boolean8_t*)ca->mask->ptr);
-        }
-        else {
-          ca_cast_block(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
-        }
+        ca_store_all_ctx_t c;
+        c.ca       = ca;
+        c.ico      = &ico;
+        c.list     = list;
+        c.has_mask = has_mask;
+        ca_attach_window(1, &ca, "w", ca_store_all_list_body, (VALUE) &c);
       }
-      ca_sync_detach(ca);
     }
   }
   else if ( rb_respond_to(rval, id_to_ca) ) {
@@ -1542,12 +1608,14 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_METHOD_CALL: {
-    volatile VALUE idx;
+    ca_store_method_call_ctx_t c;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-    ca_attach(ca);
-    idx = rb_funcall2(self, SYM2ID(info.symbol), (int)(argc-1), argv+1);
-    obj = rb_ca_store(self, idx, rval);
-    ca_detach(ca);
+    c.self = self;
+    c.mid  = SYM2ID(info.symbol);
+    c.argc = (int)(argc-1);
+    c.argv = argv+1;
+    c.rval = rval;
+    obj = ca_attach_window(1, &ca, "r", ca_store_method_call_body, (VALUE) &c);
     break;
   }
   case CA_REG_MEMBER: {
@@ -1898,14 +1966,87 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
   }
 }
 
+/* The vector path of index2addr reads every index array inside one
+   window: an index out of range raises part way through. */
+
+typedef struct {
+  int        ndim;
+  ca_size_t *dim;
+  CArray   **cidx;
+  int        out_ndim;
+  ca_size_t *out_dim;
+  ca_size_t  out_elements;
+} ca_index2addr_ctx_t;
+
 static VALUE
-index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
+ca_index2addr_body (VALUE arg)
 {
+  ca_index2addr_ctx_t *c = (ca_index2addr_ctx_t *) arg;
+  int        ndim = c->ndim;
+  ca_size_t *dim  = c->dim;
+  CArray   **cidx = c->cidx;
+  ca_size_t  out_elements = c->out_elements;
   volatile VALUE obj;
-  CArray *co, *cidx[CA_RANK_MAX];
+  CArray *co;
   ca_size_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
   ca_size_t addr, k, n;
   boolean8_t *m;
+  int i;
+
+  for (i = 0; i < ndim; i++) {
+    ca_set_iterator(1, cidx[i], &p[i], &s[i]);
+  }
+
+  obj = rb_carray_new(CA_SIZE, c->out_ndim, c->out_dim, 0, NULL);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+
+  q = (ca_size_t *) co->ptr;
+
+  ca_copy_mask_overwrite_n(co, out_elements, ndim, cidx);
+  m = ( co->mask ) ? (boolean8_t *) co->mask->ptr : NULL;
+
+  if ( m ) {
+    n = out_elements;
+    while ( n-- ) {
+      if ( ! *m ) {
+        addr = 0;
+        for (i = 0; i < ndim; i++) {
+          k = *(p[i]);
+          p[i] += s[i];
+          CA_CHECK_INDEX(k, dim[i]);
+          addr = dim[i] * addr + k;
+        }
+        *q = addr;
+      }
+      else {
+        for (i = 0; i < ndim; i++) { p[i] += s[i]; }
+      }
+      m++; q++;
+    }
+  }
+  else {
+    n = out_elements;
+    while ( n-- ) {
+      addr = 0;
+      for (i = 0; i < ndim; i++) {
+        k = *(p[i]);
+        p[i] += s[i];
+        CA_CHECK_INDEX(k, dim[i]);
+        addr = dim[i] * addr + k;
+      }
+      *q = addr;
+      q++;
+    }
+  }
+
+  return obj;
+}
+
+static VALUE
+index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
+{
+  CArray *cidx[CA_RANK_MAX];
+  ca_size_t addr, k;
   int i, all_number = 1;
   int out_ndim = 1;
   ca_size_t out_dim[CA_RANK_MAX];
@@ -1967,56 +2108,19 @@ index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
     }
   }
 
-  for (i = 0; i < ndim; i++) {
-    ca_attach(cidx[i]);
-    ca_set_iterator(1, cidx[i], &p[i], &s[i]);
+  {
+    ca_index2addr_ctx_t c;
+    char modes[CA_RANK_MAX + 1];
+    memset(modes, 'r', (size_t) ndim);
+    modes[ndim] = '\0';
+    c.ndim         = ndim;
+    c.dim          = dim;
+    c.cidx         = cidx;
+    c.out_ndim     = out_ndim;
+    c.out_dim      = out_dim;
+    c.out_elements = out_elements;
+    return ca_attach_window(ndim, cidx, modes, ca_index2addr_body, (VALUE) &c);
   }
-
-  obj = rb_carray_new(CA_SIZE, out_ndim, out_dim, 0, NULL);
-  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
-
-  q = (ca_size_t *) co->ptr;
-
-  ca_copy_mask_overwrite_n(co, out_elements, ndim, cidx);
-  m = ( co->mask ) ? (boolean8_t *) co->mask->ptr : NULL;
-
-  if ( m ) {
-    n = out_elements;
-    while ( n-- ) {
-      if ( ! *m ) {
-        addr = 0;
-        for (i = 0; i < ndim; i++) {
-          k = *(p[i]);
-          p[i] += s[i];
-          CA_CHECK_INDEX(k, dim[i]);
-          addr = dim[i] * addr + k;
-        }
-        *q = addr;
-      }
-      else {
-        for (i = 0; i < ndim; i++) { p[i] += s[i]; }
-      }
-      m++; q++;
-    }
-  }
-  else {
-    n = out_elements;
-    while ( n-- ) {
-      addr = 0;
-      for (i = 0; i < ndim; i++) {
-        k = *(p[i]);
-        p[i] += s[i];
-        CA_CHECK_INDEX(k, dim[i]);
-        addr = dim[i] * addr + k;
-      }
-      *q = addr;
-      q++;
-    }
-  }
-
-  for (i = 0; i < ndim; i++) { ca_detach(cidx[i]); }
-
-  return obj;
 }
 
 VALUE

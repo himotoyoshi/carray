@@ -10,6 +10,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 static ID id_equal;
 static ID id_eql;
@@ -296,25 +297,20 @@ ca_eql[CA_NTYPE] = {
   eql_VALUE,
 };
 
-/* ca_compare_common(a, b, strict) — shared body of ca_equal (==) and
- * ca_eql_strict (eql?).  Returns 1 if arrays match under the selected
- * semantics, else 0.
- *
- * Common structure: metadata pre-check (scalar / data_type / bytes /
- * ndim / elements / dim), mask attach via ca_attach_n (recurses into
- * mask), unified loop over the four masked/unmasked combinations.
- *
- * The only difference is the per-element comparator:
- *   == : ca_eql[data_type] (type-specific, so float NaN != NaN)
- *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
- *
- * The unmasked-unmasked branch takes a bulk memcmp or per-cell
- * shortcut to amortise per-element function pointer dispatch. */
-static int
-ca_compare_common (void *ap, void *bp, int strict)
+typedef struct {
+  CArray *ca;
+  CArray *cb;
+  int     strict;
+  int     flag;
+} ca_compare_ctx_t;
+
+static VALUE
+ca_compare_body (VALUE arg)
 {
-  CArray *ca = (CArray *) ap;
-  CArray *cb = (CArray *) bp;
+  ca_compare_ctx_t *c = (ca_compare_ctx_t *) arg;
+  CArray *ca = c->ca;
+  CArray *cb = c->cb;
+  int strict = c->strict;
   int flag = 1;
   int masked_a, masked_b;
   boolean8_t *ma, *mb;
@@ -325,28 +321,6 @@ ca_compare_common (void *ap, void *bp, int strict)
   ca_eql_func eql = NULL;        /* used only when !strict */
   int is_object;
 
-  if ( ca_is_scalar(ca) ^ ca_is_scalar(cb) ) {
-    return 0;
-  }
-  if ( ca->data_type != cb->data_type ) {
-    return 0;
-  }
-  if ( ca->bytes != cb->bytes ) {
-    return 0;
-  }
-  if ( ca->ndim != cb->ndim ) {
-    return 0;
-  }
-  if ( ca->elements != cb->elements ) {
-    return 0;
-  }
-  for (i=0; i<ca->ndim; i++) {
-    if ( ca->dim[i] != cb->dim[i] ) {
-      return 0;
-    }
-  }
-
-  ca_attach_n(2, ca, cb);              /* recurses into ca->mask / cb->mask */
 
   masked_a = ca_is_any_masked(ca);
   masked_b = ca_is_any_masked(cb);
@@ -441,9 +415,66 @@ ca_compare_common (void *ap, void *bp, int strict)
     }
   }
 
-  ca_detach_n(2, ca, cb);
+  c->flag = flag;
+  return Qnil;
+}
 
-  return flag;
+/* ca_compare_common(a, b, strict) — shared body of ca_equal (==) and
+ * ca_eql_strict (eql?).  Returns 1 if arrays match under the selected
+ * semantics, else 0.
+ *
+ * Common structure: metadata pre-check (scalar / data_type / bytes /
+ * ndim / elements / dim), then ca_compare_body in a window over both
+ * arrays (attaching an array attaches its mask), a unified loop over the
+ * four masked/unmasked combinations.
+ *
+ * The only difference is the per-element comparator:
+ *   == : ca_eql[data_type] (type-specific, so float NaN != NaN)
+ *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
+ *
+ * The unmasked-unmasked branch takes a bulk memcmp or per-cell
+ * shortcut to amortise per-element function pointer dispatch. */
+static int
+ca_compare_common (void *ap, void *bp, int strict)
+{
+  CArray *ca = (CArray *) ap;
+  CArray *cb = (CArray *) bp;
+  int8_t i;
+
+  if ( ca_is_scalar(ca) ^ ca_is_scalar(cb) ) {
+    return 0;
+  }
+  if ( ca->data_type != cb->data_type ) {
+    return 0;
+  }
+  if ( ca->bytes != cb->bytes ) {
+    return 0;
+  }
+  if ( ca->ndim != cb->ndim ) {
+    return 0;
+  }
+  if ( ca->elements != cb->elements ) {
+    return 0;
+  }
+  for (i=0; i<ca->ndim; i++) {
+    if ( ca->dim[i] != cb->dim[i] ) {
+      return 0;
+    }
+  }
+
+  {
+    ca_compare_ctx_t c;
+    CArray *list[2];
+    c.ca     = ca;
+    c.cb     = cb;
+    c.strict = strict;
+    c.flag   = 1;
+    list[0]  = ca;
+    list[1]  = cb;
+    /* The object lane calls #== / #eql? with both arrays attached. */
+    ca_attach_window(2, list, "rr", ca_compare_body, (VALUE) &c);
+    return c.flag;
+  }
 }
 
 int
