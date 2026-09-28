@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: storing through a selection, grid, `roll`, `tile`, axis selection
+  or `window` of a `CAObject` whose `sync_data` raises no longer leaves the
+  parent broken. The exception reaches the caller as before, and the parent
+  stays readable; previously the next read could abort the process.
+
+- Fix: a lazy reduction or an operator on two gathered views that raises
+  (an object cell that does not add, an integer division by zero) no longer
+  leaks state across the process. After 32 such errors, every later lazy
+  expression, numeric ones included, used to fail with "all 32 slots in use".
+
 - Fix: `CAMath.expm1` and `CAMath.log1p` answer a CArray in its own
   `data_type`, as `CArray#expm1` / `#log1p` do: float32 input stays float32
   and object input stays object (they used to return float64). Integer
