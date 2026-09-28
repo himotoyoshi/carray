@@ -627,6 +627,28 @@ void ca_iter_state_finish (ca_iter_state *st);
    macros' comma expressions. */
 int ca_iter_check_init (int rc);
 
+/* Run body(arg) so that the walks in states[0..n) are finished however the
+   body leaves: by returning, by `break`, or by raising.
+
+   A walk releases what it holds in ca_iter_state_finish, and a body that
+   raises jumps over the finish -- the block macros put it in the `for`
+   increment, and a hand-written walk has it after the loop.  A body that
+   calls back into Ruby (an object-lane kernel) can raise at any cell, so
+   it runs through this function.
+
+   The states belong to the caller's frame, not to the body's: after a
+   raise, the body's frame is gone, and the cleanup runs where it was.
+   Pass them to the body inside `arg` and open each one there, with
+   ca_iter_state_init_* or a block macro (`CA_FOR_EACH_SLAB(c->st, ...)`).
+   A state declared inside the body is not covered.
+
+   The states are cleared before the body runs, so one the body never
+   opens costs nothing, and the body may finish a walk itself: finishing
+   is idempotent.  Returns what the body returns; a raise propagates
+   after the walks are finished. */
+VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
+                      VALUE (*body)(VALUE), VALUE arg);
+
 /* ---- Phase C C.3: kernel author block macros ------------------------
    (PROPOSAL_CAPSTONE_PHASE_C.md D3.1 (A) do/while/for + D3.2 (C) 2 kinds)
 
@@ -658,7 +680,9 @@ int ca_iter_check_init (int rc);
      same way: the engine releases what it holds when the walk itself
      raises (a gather or a write-back through the source's slots), but
      the body runs in the caller's frame, where it has no hold on it.
-     An object-lane body calling back into Ruby is the case to watch.
+     A body that can raise -- one that calls back into Ruby, as an
+     object-lane kernel does -- runs through ca_iter_ensure, with the
+     state in the caller's frame.
    - Macros are not statement-equivalent (= they expand to nested for
      constructs).  Don't follow them with `else` etc. */
 

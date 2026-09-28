@@ -3053,10 +3053,9 @@ ca_iter_state_finish (ca_iter_state *st)
  * and ca_iter_state_finish is idempotent (it clears st->src), so the
  * caller's own finish after an ordinary walk stays correct.
  *
- * Not covered: a kernel body that raises.  It runs in the caller's
+ * Not covered here: a kernel body that raises.  It runs in the caller's
  * frame, between two calls of these functions, where the engine has no
- * hold on it.  An object-lane kernel calling back into Ruby is the case
- * to watch.
+ * hold on it.  A body that can raise runs through ca_iter_ensure below.
  *
  * init runs protected always -- once per walk, next to a materialise.
  * next_slab / sync_slab are called once per slab, in walks whose whole
@@ -3260,6 +3259,40 @@ ca_iter_state_sync_slab (ca_iter_state *st)
   }
   c.st = st;
   ca_iter_protect(st, ca_iter_call_sync_slab, (VALUE) &c);
+}
+
+typedef struct {
+  int32_t        n;
+  ca_iter_state *states;
+} ca_iter_ensure_t;
+
+/* Finishes the walks in reverse order of their slots, as nested windows
+   close.  ca_iter_state_finish only detaches and frees, so it cannot
+   raise in turn. */
+static VALUE
+ca_iter_ensure_close (VALUE arg)
+{
+  ca_iter_ensure_t *e = (ca_iter_ensure_t *) arg;
+  for ( int32_t i = e->n - 1; i >= 0; i-- ) {
+    ca_iter_state_finish(&e->states[i]);
+  }
+  return Qnil;
+}
+
+VALUE
+ca_iter_ensure (int32_t n, ca_iter_state *states,
+                VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_iter_ensure_t e;
+  if ( n < 0 ) {
+    rb_raise(rb_eArgError, "ca_iter_ensure: negative state count %d", (int) n);
+  }
+  if ( n > 0 ) {
+    memset(states, 0, sizeof(ca_iter_state) * (size_t) n);
+  }
+  e.n      = n;
+  e.states = states;
+  return rb_ensure(body, arg, ca_iter_ensure_close, (VALUE) &e);
 }
 
 #ifdef CARRAY_DEV_BUILD

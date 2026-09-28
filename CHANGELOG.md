@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: for C extensions, `ca_iter_ensure` runs a kernel-iterator walk whose
+  body can raise (one that calls back into Ruby) and finishes the walk
+  however the body leaves. The walk states belong in the caller's frame and
+  reach the body through its argument. Walks whose body cannot raise need
+  no change.
+
 - Fix: an arithmetic or comparison operator that raises in the middle (an
   object element without the method, an integer division by zero) no
   longer leaves its operands attached. A bang form such as `add!` keeps the
