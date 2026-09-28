@@ -19,6 +19,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 /* ---------- common kernel macros ----------
 
@@ -202,14 +203,15 @@
   } \
 } while (0)
 
-/* Setup boilerplate: parse args, wrap addrs/vals, attach.
+/* Setup boilerplate: parse args and wrap addrs/vals.
 
    Outputs into caller's locals:
-     ca, ci, cv (CArray*), n, elements (ca_size_t),
-     p, maddrs, mvals, mself (pointers),
-     vals_scalar (int), v_is_float (int), vd (double), vl (long).
+     ca, ci, cv (CArray*), n (ca_size_t),
+     vals_scalar (int), v_is_float (int), vd, vi (double), vl (long).
 
-   Caller must `ca_sync(ca); ca_detach_n(...);` after kernel.
+   The kernel then runs through AT_RUN: self, the addresses and the
+   values are opened in one window, and an address out of range raising
+   part way still pushes back the cells already written.
 */
 /* Body shared by arithmetic and replace setups.  Caller precondition:
    the data_type gate has already run (arithmetic = numeric only, replace
@@ -241,22 +243,16 @@
         name ": vals length (%lld) doesn't match addrs length (%lld)", \
         (long long)cv->elements, (long long)n); \
     } \
-  } \
-  if ( vals_scalar ) ca_attach_n(2, ca, ci); \
-  else               ca_attach_n(3, ca, ci, cv); \
-  p        = (ca_size_t *) ci->ptr; \
-  maddrs   = ci->mask ? (boolean8_t *) ci->mask->ptr : NULL; \
-  mvals    = (cv && cv->mask) ? (boolean8_t *) cv->mask->ptr : NULL; \
-  mself    = ca->mask ? (boolean8_t *) ca->mask->ptr : NULL; \
-  elements = ca->elements;
+  }
+
+#define AT_SETUP_LOCALS \
+  CArray  *ca, *ci, *cv = NULL; \
+  ca_size_t n; \
+  int vals_scalar, v_is_float = 0; \
+  double vd = 0.0, vi = 0.0; long vl = 0;
 
 #define AT_SETUP_OR_RETURN(name, ordered) \
-  CArray  *ca, *ci, *cv = NULL; \
-  ca_size_t i, n, addr, elements; \
-  ca_size_t *p; \
-  boolean8_t *maddrs, *mvals = NULL, *mself; \
-  int vals_scalar, v_is_float = 0; \
-  double vd = 0.0, vi = 0.0; long vl = 0; \
+  AT_SETUP_LOCALS \
   rb_ca_modify(self); \
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca); \
   if ( ! ca_is_numeric_type(ca) ) { \
@@ -266,18 +262,12 @@
     rb_raise(rb_eCADataTypeError, \
       name " requires a real array (complex values have no order)"); \
   } \
-  AT_SETUP_BODY(name, 0) \
-  (void) vi;
+  AT_SETUP_BODY(name, 0)
 
 /* replace variant: accepts boolean self (assignment, no widening) and
    Ruby true / false as scalar vals. */
 #define AT_SETUP_OR_RETURN_REPLACE(name) \
-  CArray  *ca, *ci, *cv = NULL; \
-  ca_size_t i, n, addr, elements; \
-  ca_size_t *p; \
-  boolean8_t *maddrs, *mvals = NULL, *mself; \
-  int vals_scalar, v_is_float = 0; \
-  double vd = 0.0, vi = 0.0; long vl = 0; \
+  AT_SETUP_LOCALS \
   rb_ca_modify(self); \
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca); \
   if ( ! ca_is_numeric_type(ca) && ca->data_type != CA_BOOLEAN ) { \
@@ -286,13 +276,49 @@
   } \
   AT_SETUP_BODY(name, 1)
 
-#define AT_TEARDOWN() do { \
-  ca_sync(ca); \
-  if ( vals_scalar ) ca_detach_n(2, ca, ci); \
-  else               ca_detach_n(3, ca, ci, cv); \
+typedef struct {
+  CArray    *ca, *ci, *cv;
+  ca_size_t  n;
+  int        vals_scalar, v_is_float;
+  double     vd, vi;
+  long       vl;
+} ca_scatter_ctx_t;
+
+/* Defines fname, the window body running DISPATCH with the names the
+   loop macros expect. */
+#define AT_BODY(fname, DISPATCH) \
+static VALUE \
+fname (VALUE arg) \
+{ \
+  ca_scatter_ctx_t *c_ = (ca_scatter_ctx_t *) arg; \
+  CArray     *ca = c_->ca, *ci = c_->ci, *cv = c_->cv; \
+  ca_size_t   i, addr, n = c_->n, elements = ca->elements; \
+  ca_size_t  *p = (ca_size_t *) ci->ptr; \
+  boolean8_t *maddrs = ci->mask ? (boolean8_t *) ci->mask->ptr : NULL; \
+  boolean8_t *mvals  = (cv && cv->mask) ? (boolean8_t *) cv->mask->ptr : NULL; \
+  boolean8_t *mself  = ca->mask ? (boolean8_t *) ca->mask->ptr : NULL; \
+  int         vals_scalar = c_->vals_scalar, v_is_float = c_->v_is_float; \
+  double      vd = c_->vd, vi = c_->vi; \
+  long        vl = c_->vl; \
+  (void) cv; (void) mvals; (void) v_is_float; (void) vd; (void) vi; (void) vl; \
+  DISPATCH; \
+  return Qnil; \
+}
+
+/* Self is written ('w'); the addresses and the values are read ('r'). */
+#define AT_RUN(body) do { \
+  ca_scatter_ctx_t c_; \
+  CArray *list_[3]; \
+  c_.ca = ca; c_.ci = ci; c_.cv = cv; c_.n = n; \
+  c_.vals_scalar = vals_scalar; c_.v_is_float = v_is_float; \
+  c_.vd = vd; c_.vi = vi; c_.vl = vl; \
+  list_[0] = ca; list_[1] = ci; list_[2] = cv; \
+  ca_attach_window(vals_scalar ? 2 : 3, list_, "wrr", body, (VALUE) &c_); \
 } while (0)
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_add_body, DISPATCH_ARITH(OP_ADD))
 
 /* CArray#scatter_add!(addrs, vals) — for each i, self[addrs[i]] +=
  * vals[i] (or += vals when scalar).  Duplicate addrs accumulate
@@ -301,12 +327,13 @@ static VALUE
 rb_ca_scatter_add_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
   AT_SETUP_OR_RETURN("scatter_add!", 0);
-  DISPATCH_ARITH(OP_ADD);
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_add_body);
   return self;
 }
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_sub_body, DISPATCH_ARITH(OP_SUB))
 
 /* CArray#scatter_sub!(addrs, vals) — for each i, self[addrs[i]] -=
  * vals[i].  Same mask/cast/bounds policy as scatter_add!. */
@@ -314,12 +341,13 @@ static VALUE
 rb_ca_scatter_sub_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
   AT_SETUP_OR_RETURN("scatter_sub!", 0);
-  DISPATCH_ARITH(OP_SUB);
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_sub_body);
   return self;
 }
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_mul_body, DISPATCH_ARITH(OP_MUL))
 
 /* CArray#scatter_mul!(addrs, vals) — for each i, self[addrs[i]] *=
  * vals[i].  NaN/inf follow standard C arithmetic (no fmin-style
@@ -329,12 +357,13 @@ static VALUE
 rb_ca_scatter_mul_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
   AT_SETUP_OR_RETURN("scatter_mul!", 0);
-  DISPATCH_ARITH(OP_MUL);
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_mul_body);
   return self;
 }
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_min_body, DISPATCH_ORDERED(OP_MIN_INT, OP_MIN_FLT))
 
 /* CArray#scatter_min!(addrs, vals) — for each i, self[addrs[i]] =
  * min(self[addrs[i]], vals[i]).  Float types follow the fmin rule
@@ -344,12 +373,13 @@ static VALUE
 rb_ca_scatter_min_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
   AT_SETUP_OR_RETURN("scatter_min!", 1);
-  DISPATCH_ORDERED(OP_MIN_INT, OP_MIN_FLT);
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_min_body);
   return self;
 }
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_max_body, DISPATCH_ORDERED(OP_MAX_INT, OP_MAX_FLT))
 
 /* CArray#scatter_max!(addrs, vals) — for each i, self[addrs[i]] =
  * max(self[addrs[i]], vals[i]).  Float types follow the fmax rule.
@@ -358,12 +388,13 @@ static VALUE
 rb_ca_scatter_max_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
   AT_SETUP_OR_RETURN("scatter_max!", 1);
-  DISPATCH_ORDERED(OP_MAX_INT, OP_MAX_FLT);
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_max_body);
   return self;
 }
 
 /* --------------------------------------------------------------- */
+
+AT_BODY(ca_scatter_replace_body, DISPATCH_NUMERIC_REPLACE())
 
 /* CArray#scatter_replace!(addrs, vals) — for each i, self[addrs[i]] =
  * vals[i] (or = vals when scalar).  Semantically equivalent to
@@ -391,8 +422,7 @@ rb_ca_scatter_replace_bang (VALUE self, VALUE raddrs, VALUE rvals)
     }
   }
   AT_SETUP_OR_RETURN_REPLACE("scatter_replace!");
-  DISPATCH_NUMERIC_REPLACE();
-  AT_TEARDOWN();
+  AT_RUN(ca_scatter_replace_body);
   return self;
 }
 

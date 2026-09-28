@@ -53,7 +53,10 @@ class CArray
 
   # @overload map!
   #   Replaces each element of `self` with the block's return value.
-  #   Mutates `self`.
+  #   Mutates `self`.  When the block raises or breaks part way, or
+  #   returns a value that cannot be stored, the cells already replaced
+  #   stay replaced -- through a view as well, which writes them back to
+  #   its parent.  The same holds for every `map_*!` below.
   #   @yieldparam elem [Object]
   #   @yieldreturn [Object] new value for the cell.
   #   @return [self]

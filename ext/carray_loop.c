@@ -11,6 +11,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 static VALUE
 rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
@@ -176,26 +177,87 @@ rb_ca_each_index (VALUE self)
   return rb_ca_index_walk(self, ca, 0, idx, ridx, 0);
 }
 
+/* The map! family yields inside self's attach window and converts
+   what the block returns, so each loop runs through ca_attach_window:
+   a raise, a break or a throw out of the block still syncs the cells
+   already stored and detaches self. */
+
+typedef struct {
+  VALUE          self;
+  CArray        *ca;
+  volatile VALUE ridx;
+  int            mode;
+} ca_map_ctx_t;
+
+static VALUE
+ca_map_bang_body (VALUE arg)
+{
+  ca_map_ctx_t *c = (ca_map_ctx_t *) arg;
+  volatile VALUE obj;
+  ca_size_t i;
+  for (i=0; i<c->ca->elements; i++) {
+    obj = rb_yield(rb_ca_fetch_addr(c->self, i));
+    rb_ca_store_addr(c->self, i, obj);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_map_with_addr_bang_body (VALUE arg)
+{
+  ca_map_ctx_t *c = (ca_map_ctx_t *) arg;
+  volatile VALUE obj;
+  ca_size_t i;
+  for (i=0; i<c->ca->elements; i++) {
+    obj = rb_yield_values(2, rb_ca_fetch_addr(c->self, i), SIZE2NUM(i));
+    rb_ca_store_addr(c->self, i, obj);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_map_addr_bang_body (VALUE arg)
+{
+  ca_map_ctx_t *c = (ca_map_ctx_t *) arg;
+  volatile VALUE obj;
+  ca_size_t i;
+  for (i=0; i<c->ca->elements; i++) {
+    obj = rb_yield(SIZE2NUM(i));
+    rb_ca_store_addr(c->self, i, obj);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_map_index_walk_body (VALUE arg)
+{
+  ca_map_ctx_t *c = (ca_map_ctx_t *) arg;
+  ca_size_t idx[CA_RANK_MAX];
+  rb_ca_index_walk(c->self, c->ca, 0, idx, c->ridx, c->mode);
+  return Qnil;
+}
+
+/* Runs body over self in a write window.  mode is for the index walk. */
+static VALUE
+ca_map_bang_run (VALUE self, VALUE (*body)(VALUE), int mode)
+{
+  ca_map_ctx_t c;
+  rb_ca_modify(self);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, c.ca);
+  c.self = self;
+  c.ridx = rb_ary_new2(c.ca->ndim);
+  c.mode = mode;
+  ca_attach_window(1, &c.ca, "w", body, (VALUE) &c);
+  return self;
+}
+
 /* CArray#map! {|elem| ... } -- yield each cell value, store the
-   block's return back at the same flat address.  Mutates self;
-   attach / sync / detach around the loop for view-safety. */
+   block's return back at the same flat address.  Mutates self. */
 static VALUE
 rb_ca_map_bang (VALUE self)
 {
-  volatile VALUE obj;
-  CArray *ca;
-  ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
-  ca_size_t i;
   RETURN_ENUMERATOR(self, 0, 0);
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
-  for (i=0; i<elements; i++) {
-    obj = rb_yield(rb_ca_fetch_addr(self, i));
-    rb_ca_store_addr(self, i, obj);
-  }
-  ca_sync_detach(ca);
-  return self;
+  return ca_map_bang_run(self, ca_map_bang_body, 0);
 }
 
 /* CArray#each_with_index {|elem, i, j, ...| ... } -- yield each cell
@@ -220,17 +282,9 @@ rb_ca_each_with_index (VALUE self)
 static VALUE
 rb_ca_map_with_index_bang (VALUE self)
 {
-  CArray *ca;
-  ca_size_t idx[CA_RANK_MAX];
-  volatile VALUE ridx;
   RETURN_ENUMERATOR(self, 0, 0);
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
-  ridx = rb_ary_new2(ca->ndim);
-  rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_WITH_VALUE | CA_LOOP_STORE);
-  ca_sync_detach(ca);
-  return self;
+  return ca_map_bang_run(self, ca_map_index_walk_body,
+                         CA_LOOP_WITH_VALUE | CA_LOOP_STORE);
 }
 
 
@@ -240,17 +294,8 @@ rb_ca_map_with_index_bang (VALUE self)
 static VALUE
 rb_ca_map_index_bang (VALUE self)
 {
-  CArray *ca;
-  ca_size_t idx[CA_RANK_MAX];
-  volatile VALUE ridx;
   RETURN_ENUMERATOR(self, 0, 0);
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
-  ridx = rb_ary_new2(ca->ndim);
-  rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
-  ca_sync_detach(ca);
-  return self;
+  return ca_map_bang_run(self, ca_map_index_walk_body, CA_LOOP_STORE);
 }
 
 /* CArray#map_with_addr! {|elem, addr| ... } -- yield (value, flat
@@ -258,20 +303,8 @@ rb_ca_map_index_bang (VALUE self)
 static VALUE
 rb_ca_map_with_addr_bang (VALUE self)
 {
-  volatile VALUE obj;
-  CArray *ca;
-  ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
-  ca_size_t i;
   RETURN_ENUMERATOR(self, 0, 0);
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
-  for (i=0; i<elements; i++) {
-    obj = rb_yield_values(2, rb_ca_fetch_addr(self, i), SIZE2NUM(i));
-    rb_ca_store_addr(self, i, obj);
-  }
-  ca_sync_detach(ca);
-  return self;
+  return ca_map_bang_run(self, ca_map_with_addr_bang_body, 0);
 }
 
 
@@ -280,20 +313,8 @@ rb_ca_map_with_addr_bang (VALUE self)
 static VALUE
 rb_ca_map_addr_bang (VALUE self)
 {
-  volatile VALUE obj;
-  CArray *ca;
-  ca_size_t elements = NUM2SIZE(rb_ca_elements(self));
-  ca_size_t i;
   RETURN_ENUMERATOR(self, 0, 0);
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
-  for (i=0; i<elements; i++) {
-    obj = rb_yield(SIZE2NUM(i));
-    rb_ca_store_addr(self, i, obj);
-  }
-  ca_sync_detach(ca);
-  return self;
+  return ca_map_bang_run(self, ca_map_addr_bang_body, 0);
 }
 
 

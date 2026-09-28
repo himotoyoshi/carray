@@ -131,38 +131,38 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   # --- the block or the caller's value raises inside the window --------
 
   %w[map! collect! map_with_index! map_index! map_with_addr! map_addr!].each do |m|
-    pin_leak("#{m.delete('!')}_bang_block_raises", RuntimeError, [true, true]) do
+    releases("#{m.delete('!')}_bang_block_raises", RuntimeError) do
       s, t = int_select
       [[s, t], -> { s.send(m) { raise "block" } }]
     end
   end
 
-  pin_leak("map_bang_block_breaks", nil, [true, true]) do
+  releases("map_bang_block_breaks", nil) do
     s, t = int_select
     [[s, t], -> { s.map! { break } }]
   end
 
-  pin_leak("map_bang_block_returns_an_unstorable_value", ArgumentError, [true, true]) do
+  releases("map_bang_block_returns_an_unstorable_value", ArgumentError) do
     s, t = int_select
     [[s, t], -> { s.map! { "x" } }]
   end
 
-  pin_leak("convert_block_raises", RuntimeError, [true, true]) do
+  releases("convert_block_raises", RuntimeError) do
     s, t = int_select
     [[s, t], -> { s.convert { raise "block" } }]
   end
 
-  pin_leak("store_all_from_an_unconvertible_array", ArgumentError, [true, true]) do
+  releases("store_all_from_an_unconvertible_array", ArgumentError) do
     s, t = int_select
     [[s, t], -> { s[] = ["x"] * s.elements }]
   end
 
-  pin_leak("store_through_a_missing_method", NoMethodError, [true, true]) do
+  releases("store_through_a_missing_method", NoMethodError) do
     s, t = int_select
     [[s, t], -> { s[:no_such_method] = 1 }]
   end
 
-  pin_leak("seq_bang_with_an_unconvertible_start", TypeError, [true, true]) do
+  releases("seq_bang_with_an_unconvertible_start", TypeError) do
     s, t = int_select
     [[s, t], -> { s.seq!("x") }]
   end
@@ -170,39 +170,39 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   RAISING_RNG = Object.new
   def RAISING_RNG.rand (*) ; raise "rng" ; end
 
-  pin_leak("random_bang_generator_raises", RuntimeError, [true, true]) do
+  releases("random_bang_generator_raises", RuntimeError) do
     s, t = int_select(CA_FLOAT64)
     [[s, t], -> { s.random!(rng: RAISING_RNG) }]
   end
 
-  pin_leak("randomn_bang_generator_raises", RuntimeError, [true, true]) do
+  releases("randomn_bang_generator_raises", RuntimeError) do
     s, t = int_select(CA_FLOAT64)
     [[s, t], -> { s.randomn!(rng: RAISING_RNG) }]
   end
 
-  pin_leak("shuffle_bang_with_an_unconvertible_axis", TypeError, [true, true]) do
+  releases("shuffle_bang_with_an_unconvertible_axis", TypeError) do
     s, t = int_select
     [[s, t], -> { s.shuffle!(axis: "x") }]
   end
 
-  pin_leak("scatter_add_bang_index_out_of_range", IndexError, [true, true]) do
+  releases("scatter_add_bang_index_out_of_range", IndexError) do
     s, t = int_select
     [[s, t], -> { s.scatter_add!([100], 1) }]
   end
 
-  pin_leak("count_of_a_view_with_an_unconvertible_keyword", TypeError, [true, true]) do
+  releases("count_of_a_view_with_an_unconvertible_keyword", TypeError) do
     s, t = int_select
     [[s, t], -> { CArray.int32(s.elements).count(s, min_count: "x") }]
   end
 
-  pin_leak("index2addr_index_out_of_range", IndexError, [true]) do
+  releases("index2addr_index_out_of_range", IndexError) do
     i  = CArray.int64(5).seq
     iv = i[i > 1]                                  # 2, 3, 4 against a length of 3
     [[iv], -> { CArray.int32(3, 4).index2addr(iv, CArray.int64(3).seq) }]
   end
 
   # The caller's own index array is what stays attached.
-  pin_leak("grid_construction_index_out_of_range", IndexError, [true]) do
+  releases("grid_construction_index_out_of_range", IndexError) do
     i   = CArray.int64(4).seq
     idx = i[i < 2]
     a   = CArray.int32(4, 6).seq
@@ -212,7 +212,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   RAISING_EQ = Object.new
   def RAISING_EQ.== (_) ; raise "eq" ; end
 
-  pin_leak("equality_element_raises", RuntimeError, [true]) do
+  releases("equality_element_raises", RuntimeError) do
     o = CArray.object(4, 6).seq!
     o[1, 1] = RAISING_EQ
     v = o[nil, 0..4]
@@ -232,7 +232,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     assert_raise(ArgumentError) do
       a.map_slab(axis: 1) { res = CArray.object(2, 6) { "x" }[1, nil] }
     end
-    assert_broken res.attached?, true, "that the block's result is detached"
+    assert_equal false, res.attached?
   end
 
   pin_leak("axis_group_scan_element_does_not_add", TypeError, [true, false]) do

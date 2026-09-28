@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a block, a conversion or an index check that raises part way
+  through `map!` and its family, `convert`, `[]=`, `seq!`, `random!`,
+  `randomn!`, `shuffle!`, the `scatter_*!` methods, `index2addr`,
+  `count(v)`, `==`, `map_slab`, or building a view from index arrays no
+  longer leaves an array attached. The cells written before the raise stay
+  written, and a view now writes them back to its parent as an entity
+  keeps them; previously a view dropped them and could go on reading its
+  stale buffer.
+
 - New: for C extensions, `ca_sync_detach` closes an attach window and
   detaches even when the sync raises; written as `ca_sync` then
   `ca_detach`, a raising sync leaves the array attached. `ca_attach_n` and

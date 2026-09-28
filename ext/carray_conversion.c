@@ -12,6 +12,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 #include "ruby/io.h"
 
@@ -228,6 +229,90 @@ rb_ca_to_a (VALUE self)
 #undef TO_A_DISPATCH_LEAF
 #undef TO_A_DISPATCH_LEAF_MASKED
 
+/* convert yields inside the window over self and the output, so the loop
+   runs through ca_attach_window.  An output mask made part way (the first
+   UNDEF from the block) is attached inside the loop, and closed by an
+   ensure of its own. */
+
+typedef struct {
+  VALUE    self;
+  VALUE    obj;
+  CArray  *ca;
+  CArray  *co;
+  int      has_mask;
+  int      co_mask_attached;
+} ca_convert_ctx_t;
+
+static VALUE
+ca_convert_loop (VALUE arg)
+{
+  ca_convert_ctx_t *c = (ca_convert_ctx_t *) arg;
+  CArray *ca = c->ca, *co = c->co;
+  ca_size_t i, n = ca->elements;
+  ca_size_t sbytes = ca->bytes, dbytes = co->bytes;
+  const char *src_ptr = ca->ptr;
+  char *dst_ptr = co->ptr;
+  boolean8_t *dst_mask = NULL;
+
+  if ( c->has_mask ) {
+    const boolean8_t *src_mask = (const boolean8_t *) ca->mask->ptr;
+    dst_mask = (boolean8_t *) co->mask->ptr;
+    memset(dst_mask, 0, (size_t) n);
+    for (i = 0; i < n; i++) {
+      if ( ! src_mask[i] ) {
+        VALUE val = rb_ca_ptr2obj(c->self, (void *) (src_ptr + i * sbytes));
+        VALUE ret = rb_yield(val);
+        if ( ret == CA_UNDEF ) {
+          dst_mask[i] = 1;
+        }
+        else {
+          rb_ca_obj2ptr(c->obj, ret, dst_ptr + i * dbytes);
+        }
+      }
+      else {
+        dst_mask[i] = 1;
+      }
+    }
+  }
+  else {
+    for (i = 0; i < n; i++) {
+      VALUE val = rb_ca_ptr2obj(c->self, (void *) (src_ptr + i * sbytes));
+      VALUE ret = rb_yield(val);
+      if ( ret == CA_UNDEF ) {
+        if ( ! co->mask ) {
+          ca_create_mask(co);
+          ca_attach(co->mask);
+          c->co_mask_attached = 1;
+          dst_mask = (boolean8_t *) co->mask->ptr;
+          memset(dst_mask, 0, (size_t) n);
+        }
+        dst_mask[i] = 1;
+      }
+      else {
+        rb_ca_obj2ptr(c->obj, ret, dst_ptr + i * dbytes);
+      }
+    }
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_convert_close_mask (VALUE arg)
+{
+  ca_convert_ctx_t *c = (ca_convert_ctx_t *) arg;
+  if ( c->co_mask_attached ) {
+    c->co_mask_attached = 0;
+    ca_sync_detach(c->co->mask);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_convert_body (VALUE arg)
+{
+  return rb_ensure(ca_convert_loop, arg, ca_convert_close_mask, arg);
+}
+
 /* CArray#convert(data_type=nil, bytes: nil) { |elem| ... } — map every cell
  * through the block, into a new array whose data type is chosen by argv via
  * CArray#template (shape is inherited from self).
@@ -240,87 +325,29 @@ static VALUE
 rb_ca_convert (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
-  CArray *ca, *co;
-  ca_size_t i, n, sbytes, dbytes;
-  int has_mask;
-  const boolean8_t *src_mask = NULL;
-  boolean8_t *dst_mask = NULL;
-  const char *src_ptr;
-  char *dst_ptr;
+  ca_convert_ctx_t c;
+  CArray *list[2];
 
   rb_need_block();
 
   obj = rb_apply(self, rb_intern("template"), rb_ary_new4(argc, argv));
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, c.ca);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, c.co);
+  c.self             = self;
+  c.obj              = obj;
+  c.has_mask         = ca_has_mask(c.ca);
+  c.co_mask_attached = 0;
 
-  n = ca->elements;
-  has_mask = ca_has_mask(ca);
-  sbytes = ca->bytes;
-  dbytes = co->bytes;
-
-  /* Attach every storage touched by ptr (self, obj, and either side's
-     mask) — parent → child order per the R4 attach protocol. */
-  ca_attach(ca);
-  ca_attach(co);
-  if ( has_mask ) {
-    ca_attach(ca->mask);
-    if ( ! co->mask ) {
-      ca_create_mask(co);
-    }
-    ca_attach(co->mask);
-    src_mask = (const boolean8_t *) ca->mask->ptr;
-    dst_mask = (boolean8_t *) co->mask->ptr;
-    memset(dst_mask, 0, (size_t) n);
-  }
-  src_ptr = ca->ptr;
-  dst_ptr = co->ptr;
-
-  if ( has_mask ) {
-    for (i = 0; i < n; i++) {
-      if ( ! src_mask[i] ) {
-        VALUE val = rb_ca_ptr2obj(self, (void *) (src_ptr + i * sbytes));
-        VALUE ret = rb_yield(val);
-        if ( ret == CA_UNDEF ) {
-          dst_mask[i] = 1;
-        }
-        else {
-          rb_ca_obj2ptr(obj, ret, dst_ptr + i * dbytes);
-        }
-      }
-      else {
-        dst_mask[i] = 1;
-      }
-    }
-  }
-  else {
-    for (i = 0; i < n; i++) {
-      VALUE val = rb_ca_ptr2obj(self, (void *) (src_ptr + i * sbytes));
-      VALUE ret = rb_yield(val);
-      if ( ret == CA_UNDEF ) {
-        if ( ! co->mask ) {
-          ca_create_mask(co);
-          ca_attach(co->mask);
-          dst_mask = (boolean8_t *) co->mask->ptr;
-          memset(dst_mask, 0, (size_t) n);
-        }
-        dst_mask[i] = 1;
-      }
-      else {
-        rb_ca_obj2ptr(obj, ret, dst_ptr + i * dbytes);
-      }
-    }
+  /* Attaching an array attaches its mask, so the output's mask is made
+     before the window opens when the source already has one. */
+  if ( c.has_mask && ! c.co->mask ) {
+    ca_create_mask(c.co);
   }
 
-  if ( co->mask ) {
-    ca_sync_detach(co->mask);
-  }
-  if ( has_mask ) {
-    ca_detach(ca->mask);
-  }
-  ca_sync_detach(co);
-  ca_detach(ca);
+  list[0] = c.ca;
+  list[1] = c.co;
+  ca_attach_window(2, list, "rw", ca_convert_body, (VALUE) &c);
 
   return obj;
 }

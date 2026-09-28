@@ -9,6 +9,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 /* ----------------------------------------------------------------- */
 
@@ -208,22 +209,29 @@ ca_seq_geometry (CArray *ca, int axis,
   *outer = out;
 }
 
-static VALUE
-rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
-{
-  volatile VALUE rval, rmethod = Qnil;
+/* The object fill calls Ruby per cell (`+`, or the method given as the
+   step), which can raise part way, so it runs in a window that attaches:
+   the cells filled before the raise then reach the parent with the rest
+   left as they were, as they would for an entity. */
+
+typedef struct {
   CArray *ca;
+  VALUE   roffset;
+  VALUE   rstep;
+  VALUE   rmethod;
+  int     axis;
+} ca_seq_ctx_t;
+
+static VALUE
+ca_seq_bang_object_body (VALUE arg)
+{
+  ca_seq_ctx_t *c = (ca_seq_ctx_t *) arg;
+  CArray *ca = c->ca;
+  volatile VALUE rval;
+  VALUE roffset = c->roffset, rstep = c->rstep, rmethod = c->rmethod;
+  int axis = c->axis;
   VALUE *p;
   ca_size_t i;
-
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if ( TYPE(rstep) == T_SYMBOL ) {                /* e.g. a.seq("a", :succ) */
-    rmethod = rstep;
-    rstep = Qnil;
-  }
-
-  ca_allocate(ca);
 
   if ( ca_has_mask(ca) ) {
     ca_clear_mask(ca);                            /* clear all mask */
@@ -318,9 +326,52 @@ rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
     }
   }
 
-  ca_sync_detach(ca);
+  return Qnil;
+}
+
+static VALUE
+rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
+{
+  ca_seq_ctx_t c;
+
+  TypedData_Get_Struct(self, CArray, &carray_data_type, c.ca);
+
+  c.rmethod = Qnil;
+  if ( TYPE(rstep) == T_SYMBOL ) {                /* e.g. a.seq("a", :succ) */
+    c.rmethod = rstep;
+    rstep = Qnil;
+  }
+  c.roffset = roffset;
+  c.rstep   = rstep;
+  c.axis    = axis;
+
+  ca_attach_window(1, &c.ca, "w", ca_seq_bang_object_body, (VALUE) &c);
 
   return self;
+}
+
+/* The numeric fill converts offset and step before it writes a cell, so
+   a raise there leaves nothing to push back: an allocate window. */
+static VALUE
+ca_seq_bang_numeric_body (VALUE arg)
+{
+  ca_seq_ctx_t *c = (ca_seq_ctx_t *) arg;
+  CArray *ca = c->ca;
+  VALUE roffset = c->roffset, rstep = c->rstep;
+
+  if ( ca_has_mask(ca) ) {
+    ca_clear_mask(ca);              /* clear all mask */
+  }
+
+  if ( c->axis < 0 ) {
+    seq_bang_switch(proc_seq_bang);
+  }
+  else {
+    ca_size_t len, inner_size, outer_size;
+    ca_seq_geometry(ca, c->axis, &len, &inner_size, &outer_size);
+    seq_bang_switch(proc_seq_bang_axis);
+  }
+  return Qnil;
 }
 
 /* CArray#seq!(init_val=0, step=1, axis: nil) -- arithmetic-progression
@@ -352,22 +403,15 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
     return rb_ca_seq_bang_object(self, roffset, rstep, axis);
   }
 
-  ca_allocate(ca);
-
-  if ( ca_has_mask(ca) ) {
-    ca_clear_mask(ca);              /* clear all mask */
+  {
+    ca_seq_ctx_t c;
+    c.ca      = ca;
+    c.roffset = roffset;
+    c.rstep   = rstep;
+    c.rmethod = Qnil;
+    c.axis    = axis;
+    ca_attach_window(1, &ca, "a", ca_seq_bang_numeric_body, (VALUE) &c);
   }
-
-  if ( axis < 0 ) {
-    seq_bang_switch(proc_seq_bang);
-  }
-  else {
-    ca_size_t len, inner_size, outer_size;
-    ca_seq_geometry(ca, axis, &len, &inner_size, &outer_size);
-    seq_bang_switch(proc_seq_bang_axis);
-  }
-
-  ca_sync_detach(ca);
 
   return self;
 }

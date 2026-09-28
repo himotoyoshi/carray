@@ -18,6 +18,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
@@ -47,12 +48,12 @@ enum {
 typedef struct {
   int kind;
   VALUE rng;
-  CArray *state;       /* attached for CA_RNG_OWN, else NULL */
-  int64_t *cells;
+  CArray *state;       /* the CArray::Rng state for CA_RNG_OWN, else NULL */
+  int64_t *cells;      /* state->ptr, once the window has attached it */
 } ca_rng_t;
 
 static void
-ca_rng_open (VALUE rng, ca_rng_t *source)
+ca_rng_resolve (VALUE rng, ca_rng_t *source)
 {
   source->rng = rng;
   source->state = NULL;
@@ -64,26 +65,46 @@ ca_rng_open (VALUE rng, ca_rng_t *source)
     VALUE state = rb_ivar_get(rng, rb_intern("@state"));
     CArray *ca;
     TypedData_Get_Struct(state, CArray, &carray_data_type, ca);
-    ca_attach(ca);
     source->kind = CA_RNG_OWN;
     source->state = ca;
-    source->cells = (int64_t *) ca->ptr;
   }
   else {
     source->kind = CA_RNG_RUBY;
   }
 }
 
-/* Writes the advanced state back where it came from.  Safe to call twice,
-   which is what lets an error path close before it raises. */
+/* The fills below draw inside a window over the array and, for a
+   CArray::Rng, the generator's state.  A Ruby generator (rng: a
+   ::Random or anything with #rand) is called per draw and can raise part
+   way; the window then pushes back the cells drawn so far, and the state
+   they advanced, as it does when the fill completes. */
+
+typedef struct {
+  CArray        *ca;
+  ca_rng_t       source;
+  ca_size_t      n;
+  int            is_default;
+  double         low_dbl, high_dbl;
+  long           low_long;
+  unsigned long  limit;
+  int            axis;           /* shuffle!: -1 = all cells */
+} ca_random_ctx_t;
+
 static void
-ca_rng_close (ca_rng_t *source)
+ca_random_run (ca_random_ctx_t *c, VALUE rng, VALUE (*fill)(VALUE))
 {
-  if (source->state) {
-    ca_sync_detach(source->state);
-    source->state = NULL;
-    source->cells = NULL;
-  }
+  CArray *list[2];
+  ca_rng_resolve(rng, &c->source);
+  list[0] = c->ca;
+  list[1] = c->source.state;
+  ca_attach_window(2, list, "ww", fill, (VALUE) c);
+}
+
+/* The state is attached once the window is open. */
+static void
+ca_rng_bind (ca_rng_t *source)
+{
+  source->cells = source->state ? (int64_t *) source->state->ptr : NULL;
 }
 
 static inline double
@@ -128,6 +149,143 @@ ca_random_ulong_limited (ca_rng_t *source, unsigned long limit)
 
 /* ---- random! ----------------------------------------------------------- */
 
+static VALUE
+ca_random_bang_fill (VALUE arg)
+{
+  ca_random_ctx_t *c = (ca_random_ctx_t *) arg;
+  CArray *ca = c->ca;
+  ca_size_t i, n = c->n;
+  int is_default = c->is_default;
+  double low_dbl = c->low_dbl, high_dbl = c->high_dbl;
+  long low_long = c->low_long;
+  unsigned long limit = c->limit;
+
+  ca_rng_bind(&c->source);
+  switch (ca->data_type) {
+  case CA_FLOAT64: {
+    double *p = (double *)ca->ptr;
+    if (is_default) {
+      for (i = 0; i < n; i++)
+        p[i] = ca_random_real(&c->source);
+    } else {
+      double range = high_dbl - low_dbl;
+      for (i = 0; i < n; i++)
+        p[i] = low_dbl + ca_random_real(&c->source) * range;
+    }
+    break;
+  }
+  case CA_FLOAT32: {
+    float *p = (float *)ca->ptr;
+    if (is_default) {
+      for (i = 0; i < n; i++)
+        p[i] = (float)ca_random_real(&c->source);
+    } else {
+      double range = high_dbl - low_dbl;
+      for (i = 0; i < n; i++)
+        p[i] = (float)(low_dbl + ca_random_real(&c->source) * range);
+    }
+    break;
+  }
+  case CA_CMPLX128: {
+    double complex *p = (double complex *)ca->ptr;
+    if (is_default) {
+      for (i = 0; i < n; i++)
+        p[i] = ca_random_real(&c->source) + ca_random_real(&c->source) * I;
+    } else {
+      double range = high_dbl - low_dbl;
+      for (i = 0; i < n; i++)
+        p[i] = (low_dbl + ca_random_real(&c->source) * range)
+             + (low_dbl + ca_random_real(&c->source) * range) * I;
+    }
+    break;
+  }
+  case CA_CMPLX64: {
+    float complex *p = (float complex *)ca->ptr;
+    if (is_default) {
+      for (i = 0; i < n; i++)
+        p[i] = (float)ca_random_real(&c->source) + (float)ca_random_real(&c->source) * I;
+    } else {
+      double range = high_dbl - low_dbl;
+      for (i = 0; i < n; i++)
+        p[i] = (float)(low_dbl + ca_random_real(&c->source) * range)
+             + (float)(low_dbl + ca_random_real(&c->source) * range) * I;
+    }
+    break;
+  }
+  case CA_BOOLEAN: {
+    boolean8_t *p = (boolean8_t *)ca->ptr;
+    for (i = 0; i < n; i++)
+      p[i] = (ca_random_real(&c->source) < 0.5) ? 1 : 0;
+    break;
+  }
+  default: {
+    /* integer types: CA_INT8..CA_UINT64 */
+    if (is_default) {
+      rb_raise(rb_eArgError,
+               "random! on an integer array requires a range: "
+               "a.random!(high), a.random!(low, high), or "
+               "a.random!(low..high) / a.random!(low...high)");
+    }
+    switch (ca->data_type) {
+    case CA_INT8: {
+      int8_t *p = (int8_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (int8_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_UINT8: {
+      uint8_t *p = (uint8_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (uint8_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_INT16: {
+      int16_t *p = (int16_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (int16_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_UINT16: {
+      uint16_t *p = (uint16_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (uint16_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_INT32: {
+      int32_t *p = (int32_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (int32_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_UINT32: {
+      uint32_t *p = (uint32_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (uint32_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_INT64: {
+      int64_t *p = (int64_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (int64_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    case CA_UINT64: {
+      uint64_t *p = (uint64_t *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (uint64_t)(low_long + ca_random_ulong_limited(&c->source, limit));
+      break;
+    }
+    default:
+      rb_raise(rb_eCADataTypeError,
+               "random! is not supported for this data type");
+    }
+    break;
+  }
+  }
+
+  return Qnil;
+}
+
 /* CArray#random!([low,] [high], rng:) — fill self with uniform random
  * numbers in-place, returning self.  Range surface mirrors Numo/NumPy
  * (half-open [low, high) as the default) plus Ruby idiom (`..` closed,
@@ -156,9 +314,7 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
   double low_dbl = 0.0, high_dbl = 0.0;
   long low_long = 0, high_long = 0;
   unsigned long limit = 0;
-  ca_size_t i, n;
   VALUE rng = Qnil;
-  ca_rng_t source;
 
   rb_scan_args(argc, argv, "02:", &arg1, &arg2, &opts);
   rb_scan_options(opts, "rng", &rng);
@@ -225,138 +381,17 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
     }
   }
 
-  n = ca->elements;
-  ca_attach(ca);
-  ca_rng_open(rng, &source);
-
-  switch (ca->data_type) {
-  case CA_FLOAT64: {
-    double *p = (double *)ca->ptr;
-    if (is_default) {
-      for (i = 0; i < n; i++)
-        p[i] = ca_random_real(&source);
-    } else {
-      double range = high_dbl - low_dbl;
-      for (i = 0; i < n; i++)
-        p[i] = low_dbl + ca_random_real(&source) * range;
-    }
-    break;
+  {
+    ca_random_ctx_t c;
+    c.ca         = ca;
+    c.n          = ca->elements;
+    c.is_default = is_default;
+    c.low_dbl    = low_dbl;
+    c.high_dbl   = high_dbl;
+    c.low_long   = low_long;
+    c.limit      = limit;
+    ca_random_run(&c, rng, ca_random_bang_fill);
   }
-  case CA_FLOAT32: {
-    float *p = (float *)ca->ptr;
-    if (is_default) {
-      for (i = 0; i < n; i++)
-        p[i] = (float)ca_random_real(&source);
-    } else {
-      double range = high_dbl - low_dbl;
-      for (i = 0; i < n; i++)
-        p[i] = (float)(low_dbl + ca_random_real(&source) * range);
-    }
-    break;
-  }
-  case CA_CMPLX128: {
-    double complex *p = (double complex *)ca->ptr;
-    if (is_default) {
-      for (i = 0; i < n; i++)
-        p[i] = ca_random_real(&source) + ca_random_real(&source) * I;
-    } else {
-      double range = high_dbl - low_dbl;
-      for (i = 0; i < n; i++)
-        p[i] = (low_dbl + ca_random_real(&source) * range)
-             + (low_dbl + ca_random_real(&source) * range) * I;
-    }
-    break;
-  }
-  case CA_CMPLX64: {
-    float complex *p = (float complex *)ca->ptr;
-    if (is_default) {
-      for (i = 0; i < n; i++)
-        p[i] = (float)ca_random_real(&source) + (float)ca_random_real(&source) * I;
-    } else {
-      double range = high_dbl - low_dbl;
-      for (i = 0; i < n; i++)
-        p[i] = (float)(low_dbl + ca_random_real(&source) * range)
-             + (float)(low_dbl + ca_random_real(&source) * range) * I;
-    }
-    break;
-  }
-  case CA_BOOLEAN: {
-    boolean8_t *p = (boolean8_t *)ca->ptr;
-    for (i = 0; i < n; i++)
-      p[i] = (ca_random_real(&source) < 0.5) ? 1 : 0;
-    break;
-  }
-  default: {
-    /* integer types: CA_INT8..CA_UINT64 */
-    if (is_default) {
-      ca_rng_close(&source);
-      ca_sync_detach(ca);
-      rb_raise(rb_eArgError,
-               "random! on an integer array requires a range: "
-               "a.random!(high), a.random!(low, high), or "
-               "a.random!(low..high) / a.random!(low...high)");
-    }
-    switch (ca->data_type) {
-    case CA_INT8: {
-      int8_t *p = (int8_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (int8_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_UINT8: {
-      uint8_t *p = (uint8_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (uint8_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_INT16: {
-      int16_t *p = (int16_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (int16_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_UINT16: {
-      uint16_t *p = (uint16_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (uint16_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_INT32: {
-      int32_t *p = (int32_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (int32_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_UINT32: {
-      uint32_t *p = (uint32_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (uint32_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_INT64: {
-      int64_t *p = (int64_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (int64_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    case CA_UINT64: {
-      uint64_t *p = (uint64_t *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (uint64_t)(low_long + ca_random_ulong_limited(&source, limit));
-      break;
-    }
-    default:
-      ca_rng_close(&source);
-      ca_sync_detach(ca);
-      rb_raise(rb_eCADataTypeError,
-               "random! is not supported for this data type");
-    }
-    break;
-  }
-  }
-
-  ca_rng_close(&source);
-  ca_sync_detach(ca);
   return self;
 }
 
@@ -392,6 +427,114 @@ box_muller_pair(ca_rng_t *source, double *r1, double *r2)
   *r2 = r * sin(theta);
 }
 
+static VALUE
+ca_randomn_bang_fill (VALUE arg)
+{
+  ca_random_ctx_t *c = (ca_random_ctx_t *) arg;
+  CArray *ca = c->ca;
+  ca_size_t i, n = c->n;
+
+  ca_rng_bind(&c->source);
+  /* A CArray::Rng fills one cell per call rather than two, so that this
+     and a kernel drawing afterwards are the one sequence: both are
+     `ca_random_normal` run once per cell.  It costs a draw a cell over
+     the paired form, and what it buys is that where the generator
+     stands can be worked out rather than run. */
+  if (c->source.kind == CA_RNG_OWN) {
+    switch (ca->data_type) {
+    case CA_FLOAT64: {
+      double *p = (double *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = ca_random_normal(&c->source);
+      break;
+    }
+    case CA_FLOAT32: {
+      float *p = (float *)ca->ptr;
+      for (i = 0; i < n; i++)
+        p[i] = (float) ca_random_normal(&c->source);
+      break;
+    }
+    case CA_CMPLX128: {
+      double complex *p = (double complex *)ca->ptr;
+      for (i = 0; i < n; i++) {
+        /* Into locals first: C does not say which order a call's
+           arguments are evaluated in, and these two advance a state. */
+        double re = ca_random_normal(&c->source);
+        double im = ca_random_normal(&c->source);
+        p[i] = re + im * I;
+      }
+      break;
+    }
+    case CA_CMPLX64: {
+      float complex *p = (float complex *)ca->ptr;
+      for (i = 0; i < n; i++) {
+        double re = ca_random_normal(&c->source);
+        double im = ca_random_normal(&c->source);
+        p[i] = (float) re + (float) im * I;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+    return Qnil;
+  }
+
+  switch (ca->data_type) {
+  case CA_FLOAT64: {
+    double *p = (double *)ca->ptr;
+    ca_size_t pairs = n / 2;
+    for (i = 0; i < pairs; i++) {
+      box_muller_pair(&c->source, &p[2*i], &p[2*i+1]);
+    }
+    if (n % 2 == 1) {
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[n-1] = r1;
+    }
+    break;
+  }
+  case CA_FLOAT32: {
+    float *p = (float *)ca->ptr;
+    ca_size_t pairs = n / 2;
+    for (i = 0; i < pairs; i++) {
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[2*i]   = (float)r1;
+      p[2*i+1] = (float)r2;
+    }
+    if (n % 2 == 1) {
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[n-1] = (float)r1;
+    }
+    break;
+  }
+  case CA_CMPLX128: {
+    double complex *p = (double complex *)ca->ptr;
+    for (i = 0; i < n; i++) {
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[i] = r1 + r2 * I;
+    }
+    break;
+  }
+  case CA_CMPLX64: {
+    float complex *p = (float complex *)ca->ptr;
+    for (i = 0; i < n; i++) {
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[i] = (float)r1 + (float)r2 * I;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+
+  return Qnil;
+}
+
 /* CArray#randomn!(rng:) — fill self with standard normal N(0, 1)
  * samples in-place via Box-Muller, returning self.
  *
@@ -402,11 +545,9 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
   VALUE opts = Qnil;
-  ca_size_t i, n;
 
   rb_scan_args(argc, argv, "0:", &opts);
   VALUE rng = Qnil;
-  ca_rng_t source;
   rb_scan_options(opts, "rng", &rng);
 
   rb_ca_modify(self);
@@ -418,111 +559,12 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
              "randomn! requires float or complex array");
   }
 
-  n = ca->elements;
-  ca_attach(ca);
-  ca_rng_open(rng, &source);
-
-  /* A CArray::Rng fills one cell per call rather than two, so that this
-     and a kernel drawing afterwards are the one sequence: both are
-     `ca_random_normal` run once per cell.  It costs a draw a cell over
-     the paired form, and what it buys is that where the generator
-     stands can be worked out rather than run. */
-  if (source.kind == CA_RNG_OWN) {
-    switch (ca->data_type) {
-    case CA_FLOAT64: {
-      double *p = (double *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = ca_random_normal(&source);
-      break;
-    }
-    case CA_FLOAT32: {
-      float *p = (float *)ca->ptr;
-      for (i = 0; i < n; i++)
-        p[i] = (float) ca_random_normal(&source);
-      break;
-    }
-    case CA_CMPLX128: {
-      double complex *p = (double complex *)ca->ptr;
-      for (i = 0; i < n; i++) {
-        /* Into locals first: C does not say which order a call's
-           arguments are evaluated in, and these two advance a state. */
-        double re = ca_random_normal(&source);
-        double im = ca_random_normal(&source);
-        p[i] = re + im * I;
-      }
-      break;
-    }
-    case CA_CMPLX64: {
-      float complex *p = (float complex *)ca->ptr;
-      for (i = 0; i < n; i++) {
-        double re = ca_random_normal(&source);
-        double im = ca_random_normal(&source);
-        p[i] = (float) re + (float) im * I;
-      }
-      break;
-    }
-    default:
-      break;
-    }
-    ca_rng_close(&source);
-    ca_sync_detach(ca);
-    return self;
+  {
+    ca_random_ctx_t c;
+    c.ca = ca;
+    c.n  = ca->elements;
+    ca_random_run(&c, rng, ca_randomn_bang_fill);
   }
-
-  switch (ca->data_type) {
-  case CA_FLOAT64: {
-    double *p = (double *)ca->ptr;
-    ca_size_t pairs = n / 2;
-    for (i = 0; i < pairs; i++) {
-      box_muller_pair(&source, &p[2*i], &p[2*i+1]);
-    }
-    if (n % 2 == 1) {
-      double r1, r2;
-      box_muller_pair(&source, &r1, &r2);
-      p[n-1] = r1;
-    }
-    break;
-  }
-  case CA_FLOAT32: {
-    float *p = (float *)ca->ptr;
-    ca_size_t pairs = n / 2;
-    for (i = 0; i < pairs; i++) {
-      double r1, r2;
-      box_muller_pair(&source, &r1, &r2);
-      p[2*i]   = (float)r1;
-      p[2*i+1] = (float)r2;
-    }
-    if (n % 2 == 1) {
-      double r1, r2;
-      box_muller_pair(&source, &r1, &r2);
-      p[n-1] = (float)r1;
-    }
-    break;
-  }
-  case CA_CMPLX128: {
-    double complex *p = (double complex *)ca->ptr;
-    for (i = 0; i < n; i++) {
-      double r1, r2;
-      box_muller_pair(&source, &r1, &r2);
-      p[i] = r1 + r2 * I;
-    }
-    break;
-  }
-  case CA_CMPLX64: {
-    float complex *p = (float complex *)ca->ptr;
-    for (i = 0; i < n; i++) {
-      double r1, r2;
-      box_muller_pair(&source, &r1, &r2);
-      p[i] = (float)r1 + (float)r2 * I;
-    }
-    break;
-  }
-  default:
-    break;
-  }
-
-  ca_rng_close(&source);
-  ca_sync_detach(ca);
   return self;
 }
 
@@ -544,57 +586,35 @@ swap_chunks(char *a, char *b, ca_size_t chunk_bytes, char *tmp)
  * as a byte chunk and swapped whole, so multi-dim slices move
  * together). */
 static VALUE
-rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
+ca_shuffle_bang_fill (VALUE arg)
 {
-  CArray *ca;
-  VALUE opts = Qnil, v_axis = Qnil;
+  ca_random_ctx_t *c = (ca_random_ctx_t *) arg;
+  CArray *ca = c->ca;
   ca_size_t n;
-  int axis = -1;
 
-  rb_scan_args(argc, argv, "0:", &opts);
-  VALUE rng = Qnil;
-  ca_rng_t source;
-  rb_scan_options(opts, "rng,axis", &rng, &v_axis);
+  ca_rng_bind(&c->source);
 
-  rb_ca_modify(self);
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  if (ca->elements <= 1) return self;
-
-  ca_attach(ca);
-  ca_rng_open(rng, &source);
-
-  if (NIL_P(v_axis)) {
+  if (c->axis < 0) {
     /* shuffle all elements */
-    n = ca->elements;
+    volatile VALUE tmp_holder;
     ca_size_t elem_bytes = ca->bytes;
-    char *tmp = (char *)xmalloc(elem_bytes);
+    char *tmp = ALLOCV_N(char, tmp_holder, elem_bytes);
     char *p = ca->ptr;
 
+    n = ca->elements;
     for (ca_size_t i = n - 1; i > 0; i--) {
-      unsigned long j = ca_random_ulong_limited(&source, (unsigned long)i);
+      unsigned long j = ca_random_ulong_limited(&c->source, (unsigned long)i);
       if ((ca_size_t)j != i) {
         swap_chunks(p + i * elem_bytes, p + j * elem_bytes, elem_bytes, tmp);
       }
     }
-    xfree(tmp);
+    ALLOCV_END(tmp_holder);
   }
   else {
-    axis = NUM2INT(v_axis);
-    if (axis < 0) axis += ca->ndim;
-    if (axis < 0 || axis >= ca->ndim) {
-      ca_rng_close(&source);
-      ca_sync_detach(ca);
-      rb_raise(rb_eArgError,
-               "axis %d is out of range for ndim %d", axis, ca->ndim);
-    }
+    int axis = c->axis;
+    volatile VALUE tmp_holder;
 
     n = ca->dim[axis];
-    if (n <= 1) {
-      ca_rng_close(&source);
-      ca_sync_detach(ca);
-      return self;
-    }
 
     ca_size_t outer = 1;
     for (int d = 0; d < axis; d++)
@@ -606,12 +626,12 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
 
     ca_size_t chunk_bytes = inner * ca->bytes;
     ca_size_t stride = n * chunk_bytes;
-    char *tmp = (char *)xmalloc(chunk_bytes);
+    char *tmp = ALLOCV_N(char, tmp_holder, chunk_bytes);
 
     for (ca_size_t o = 0; o < outer; o++) {
       char *base = ca->ptr + o * stride;
       for (ca_size_t i = n - 1; i > 0; i--) {
-        unsigned long j = ca_random_ulong_limited(&source, (unsigned long)i);
+        unsigned long j = ca_random_ulong_limited(&c->source, (unsigned long)i);
         if ((ca_size_t)j != i) {
           swap_chunks(base + i * chunk_bytes,
                       base + j * chunk_bytes,
@@ -619,11 +639,43 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
         }
       }
     }
-    xfree(tmp);
+    ALLOCV_END(tmp_holder);
+  }
+  return Qnil;
+}
+
+static VALUE
+rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
+{
+  CArray *ca;
+  VALUE opts = Qnil, v_axis = Qnil;
+  int axis = -1;
+  ca_random_ctx_t c;
+
+  rb_scan_args(argc, argv, "0:", &opts);
+  VALUE rng = Qnil;
+  rb_scan_options(opts, "rng,axis", &rng, &v_axis);
+
+  rb_ca_modify(self);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+
+  if (ca->elements <= 1) return self;
+
+  if (!NIL_P(v_axis)) {
+    axis = NUM2INT(v_axis);
+    if (axis < 0) axis += ca->ndim;
+    if (axis < 0 || axis >= ca->ndim) {
+      rb_raise(rb_eArgError,
+               "axis %d is out of range for ndim %d", axis, ca->ndim);
+    }
+    if (ca->dim[axis] <= 1) {
+      return self;
+    }
   }
 
-  ca_rng_close(&source);
-  ca_sync_detach(ca);
+  c.ca   = ca;
+  c.axis = axis;
+  ca_random_run(&c, rng, ca_shuffle_bang_fill);
   return self;
 }
 

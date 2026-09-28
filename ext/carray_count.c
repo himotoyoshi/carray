@@ -12,6 +12,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 #include "ca_obj_face.h"
 #include <math.h>
 #include <float.h>
@@ -45,6 +46,83 @@ VALUE rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self);
      - self is fixlen, v scalar -> count_equal_ki (memcmp over the whole
                                     cell; a short String query is padded
                                     out to the cell width) */
+
+static VALUE rb_ca_count (int argc, VALUE *argv, VALUE self);
+
+/* count(v: CArray): the per-cell counts, run with v attached. */
+
+typedef struct {
+  VALUE          self;
+  VALUE          rval;
+  CArray        *cv;
+  CArray        *cout;
+  ca_size_t      base_elements;
+  int            inner_argc;
+  VALUE         *inner_axes;
+  volatile VALUE opt_hash;
+} ca_count_each_ctx_t;
+
+static VALUE
+ca_count_each_body (VALUE arg)
+{
+  ca_count_each_ctx_t *c = (ca_count_each_ctx_t *) arg;
+  CArray    *cout = c->cout;
+  int64_t   *out_ptr = (int64_t *) cout->ptr;
+  boolean8_t *out_mask = NULL;
+  ca_size_t  v_elements = c->cv->elements;
+  ca_size_t  base_elements = c->base_elements;
+  /* inner_argv layout: [vk_scalar, axis..., axis..., [opt_hash]]
+     inner_call_argc = 1 (vk) + inner_argc (axes) + (opt_hash ? 1 : 0). */
+  int inner_call_argc = 1 + c->inner_argc + (NIL_P(c->opt_hash) ? 0 : 1);
+  VALUE inner_argv[CA_RANK_MAX + 2];
+  for (int j = 0; j < c->inner_argc; j++) inner_argv[1 + j] = c->inner_axes[j];
+  if ( ! NIL_P(c->opt_hash) ) inner_argv[1 + c->inner_argc] = c->opt_hash;
+
+  for (ca_size_t k = 0; k < v_elements; k++) {
+    /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
+       takes a ca_size_t addr (not a Ruby VALUE). */
+    VALUE vk = rb_ca_fetch_addr(c->rval, k);
+    inner_argv[0] = vk;
+    VALUE sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+
+    /* Place sub into output[..., k] slot.
+       Output stride for v-axis = 1, base stride = v_elements. */
+    if ( sub == CA_UNDEF ) {
+      if ( ! out_mask ) {
+        ca_create_mask(cout);
+        out_mask = (boolean8_t *) cout->mask->ptr;
+      }
+      for (ca_size_t i = 0; i < base_elements; i++) {
+        out_ptr[i * v_elements + k] = 0;
+        out_mask[i * v_elements + k] = 1;
+      }
+    } else if ( rb_obj_is_kind_of(sub, rb_cInteger) ) {
+      /* Full reduction: sub is a single integer. */
+      out_ptr[k] = NUM2LL(sub);
+    } else if ( rb_obj_is_kind_of(sub, rb_cCArray) ) {
+      CArray *csub;
+      GetCArray(sub, csub);
+      ca_attach(csub);
+      int64_t *sub_ptr = (int64_t *) csub->ptr;
+      boolean8_t *sub_mask = (csub->mask) ? (boolean8_t *) csub->mask->ptr : NULL;
+      for (ca_size_t i = 0; i < base_elements; i++) {
+        out_ptr[i * v_elements + k] = sub_ptr[i];
+        if ( sub_mask && sub_mask[i] ) {
+          if ( ! out_mask ) {
+            ca_create_mask(cout);
+            out_mask = (boolean8_t *) cout->mask->ptr;
+          }
+          out_mask[i * v_elements + k] = 1;
+        }
+      }
+      ca_detach(csub);
+    } else {
+      rb_raise(rb_eRuntimeError,
+               "count(v: CArray): unexpected sub-result type");
+    }
+  }
+  return Qnil;
+}
 
 static VALUE
 rb_ca_count (int argc, VALUE *argv, VALUE self)
@@ -200,63 +278,20 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     GetCArray(vout, cout);
 
     /* Iterate v in flat order, call self.count(vk, *axes, **opts)
-       recursively, place result at output[..., k]. */
-    ca_attach(cv);
-    int64_t *out_ptr = (int64_t *) cout->ptr;
-    boolean8_t *out_mask = NULL;
-    ca_size_t v_elements = cv->elements;
-    /* inner_argv layout: [vk_scalar, axis..., axis..., [opt_hash]]
-       inner_call_argc = 1 (vk) + inner_argc (axes) + (opt_hash ? 1 : 0). */
-    int inner_call_argc = 1 + inner_argc + (NIL_P(opt_hash) ? 0 : 1);
-    VALUE inner_argv[CA_RANK_MAX + 2];
-    for (int j = 0; j < inner_argc; j++) inner_argv[1 + j] = inner_axes[j];
-    if ( ! NIL_P(opt_hash) ) inner_argv[1 + inner_argc] = opt_hash;
-
-    for (ca_size_t k = 0; k < v_elements; k++) {
-      /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
-         takes a ca_size_t addr (not a Ruby VALUE). */
-      VALUE vk = rb_ca_fetch_addr(rval, k);
-      inner_argv[0] = vk;
-      VALUE sub = rb_ca_count(inner_call_argc, inner_argv, self);
-
-      /* Place sub into output[..., k] slot.
-         Output stride for v-axis = 1, base stride = v_elements. */
-      if ( sub == CA_UNDEF ) {
-        if ( ! out_mask ) {
-          ca_create_mask(cout);
-          out_mask = (boolean8_t *) cout->mask->ptr;
-        }
-        for (ca_size_t i = 0; i < base_elements; i++) {
-          out_ptr[i * v_elements + k] = 0;
-          out_mask[i * v_elements + k] = 1;
-        }
-      } else if ( rb_obj_is_kind_of(sub, rb_cInteger) ) {
-        /* Full reduction: sub is a single integer. */
-        out_ptr[k] = NUM2LL(sub);
-      } else if ( rb_obj_is_kind_of(sub, rb_cCArray) ) {
-        CArray *csub;
-        GetCArray(sub, csub);
-        ca_attach(csub);
-        int64_t *sub_ptr = (int64_t *) csub->ptr;
-        boolean8_t *sub_mask = (csub->mask) ? (boolean8_t *) csub->mask->ptr : NULL;
-        for (ca_size_t i = 0; i < base_elements; i++) {
-          out_ptr[i * v_elements + k] = sub_ptr[i];
-          if ( sub_mask && sub_mask[i] ) {
-            if ( ! out_mask ) {
-              ca_create_mask(cout);
-              out_mask = (boolean8_t *) cout->mask->ptr;
-            }
-            out_mask[i * v_elements + k] = 1;
-          }
-        }
-        ca_detach(csub);
-      } else {
-        ca_detach(cv);
-        rb_raise(rb_eRuntimeError,
-                 "count(v: CArray): unexpected sub-result type");
-      }
+       recursively, place result at output[..., k].  v is held attached
+       for the fetches while Ruby runs, so the loop is a window body. */
+    {
+      ca_count_each_ctx_t c;
+      c.self          = self;
+      c.rval          = rval;
+      c.cv            = cv;
+      c.cout          = cout;
+      c.base_elements = base_elements;
+      c.inner_argc    = inner_argc;
+      c.inner_axes    = inner_axes;
+      c.opt_hash      = opt_hash;
+      ca_attach_window(1, &cv, "r", ca_count_each_body, (VALUE) &c);
     }
-    ca_detach(cv);
     return vout;
   }
 

@@ -28,6 +28,7 @@
   --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 #include "carray_slab.h"
 
 /* Forward declarations: per-form loop bodies are defined later in this
@@ -560,6 +561,42 @@ ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
   if ( scratch != buf ) xfree(scratch);
 }
 
+/* map_slab's cast-on-scatter: each cell of the block's result converted
+   into the output data type, with the result attached for the fetches. */
+
+typedef struct {
+  VALUE      result;
+  CArray    *res;
+  VALUE      output_view;
+  char      *write_target;
+  ca_size_t  out_bytes;
+  ca_size_t  slab_elements;
+} ca_map_slab_cast_ctx_t;
+
+static VALUE
+ca_map_slab_cast_body (VALUE arg)
+{
+  ca_map_slab_cast_ctx_t *c = (ca_map_slab_cast_ctx_t *) arg;
+  volatile VALUE holder;
+  char *scratch = ALLOCV_N(char, holder, c->out_bytes);
+  ca_size_t i;
+  for ( i = 0; i < c->slab_elements; i++ ) {
+    VALUE elem;
+    ca_size_t idx[CA_RANK_MAX] = { 0 };
+    ca_size_t flat = i;
+    int8_t k;
+    for ( k = c->res->ndim - 1; k >= 0; k-- ) {
+      idx[k] = flat % c->res->dim[k];
+      flat /= c->res->dim[k];
+    }
+    elem = rb_ca_fetch_index(c->result, idx);
+    rb_ca_obj2ptr(c->output_view, elem, scratch);
+    memcpy(c->write_target + i * c->out_bytes, scratch, c->out_bytes);
+  }
+  ALLOCV_END(holder);
+  return Qnil;
+}
+
 static VALUE
 ca_slab_run_map (ca_slab_iter_state_t *st)
 {
@@ -698,33 +735,20 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
                      (long long) slab_elements, (int) slab_cs->ndim);
           }
           if ( res->data_type == st->out_data_type && res->bytes == st->out_bytes ) {
-            ca_attach(res);
             ca_xfer_all(res, write_target, CA_XFER_GET);
-            ca_detach(res);
           }
           else {
             /* Cast-on-scatter via per-cell obj2ptr.  Writes to write_target
-               (= either p_out direct or own_out_scratch).               */
-            char buf[64];
-            char *scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
-                            ? buf : xmalloc(st->out_bytes);
-            ca_size_t i;
-            ca_attach(res);
-            for ( i = 0; i < slab_elements; i++ ) {
-              VALUE elem;
-              ca_size_t idx[CA_RANK_MAX] = { 0 };
-              ca_size_t flat = i;
-              int8_t k;
-              for ( k = res->ndim - 1; k >= 0; k-- ) {
-                idx[k] = flat % res->dim[k];
-                flat /= res->dim[k];
-              }
-              elem = rb_ca_fetch_index(result, idx);
-              rb_ca_obj2ptr(st->output_slab_view, elem, scratch);
-              memcpy(write_target + i * st->out_bytes, scratch, st->out_bytes);
-            }
-            ca_detach(res);
-            if ( scratch != buf ) xfree(scratch);
+               (= either p_out direct or own_out_scratch).  The conversion
+               can raise, so the result is read in a window. */
+            ca_map_slab_cast_ctx_t c;
+            c.result        = result;
+            c.res           = res;
+            c.output_view   = st->output_slab_view;
+            c.write_target  = write_target;
+            c.out_bytes     = st->out_bytes;
+            c.slab_elements = slab_elements;
+            ca_attach_window(1, &res, "r", ca_map_slab_cast_body, (VALUE) &c);
           }
         }
         else if ( rb_obj_is_kind_of(result, rb_cNumeric) ||

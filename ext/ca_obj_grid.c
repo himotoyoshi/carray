@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 /* Per-axis tagged kind.  Each axis is either STRIDE (start/step/count,
    no allocation) or INDEX (an owned ca_size_t index snapshot).  A Range
@@ -826,6 +827,63 @@ cag_range_to_stride (VALUE range, ca_size_t dim_size,
   return 1;
 }
 
+/* The INDEX axes of rb_ca_grid, read with their index arrays attached,
+   and the view built from them. */
+
+typedef struct {
+  VALUE        self;
+  CArray      *ca;
+  CArray     **ci;
+  cag_axis_t  *protos;
+} ca_grid_build_ctx_t;
+
+static VALUE
+ca_grid_build_body (VALUE arg)
+{
+  ca_grid_build_ctx_t *c = (ca_grid_build_ctx_t *) arg;
+  volatile VALUE holders[CA_RANK_MAX];
+  volatile VALUE obj;
+  int8_t i;
+
+  for (i = 0; i < c->ca->ndim; i++) {
+    CArray *ci = c->ci[i];
+    holders[i] = Qfalse;
+    if ( ! ci ) {
+      continue;
+    }
+    c->protos[i].kind = CAG_AXIS_INDEX;
+    if ( ca_is_any_masked(ci) ) {
+      /* mask-filtered snapshot: skip masked cells.  setup copies the
+         indices into its own buffer, so the snapshot only has to live
+         until ca_grid_new returns. */
+      ca_size_t gsize = ci->elements - ca_count_masked(ci);
+      ca_size_t *src  = (ca_size_t *) ci->ptr;
+      boolean8_t *m   = (boolean8_t *) ci->mask->ptr;
+      ca_size_t *tmp  = ALLOCV_N(ca_size_t, holders[i], gsize > 0 ? gsize : 1);
+      ca_size_t j, n = 0;
+      for (j = 0; j < ci->elements; j++) {
+        if ( ! m[j] ) tmp[n++] = src[j];
+      }
+      c->protos[i].count   = gsize;
+      c->protos[i].indices = tmp;
+    } else {
+      c->protos[i].count   = ci->elements;
+      c->protos[i].indices = (ca_size_t *) ci->ptr;
+    }
+    c->protos[i].start = 0;
+    c->protos[i].step  = 0;
+  }
+
+  obj = rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
+
+  for (i = 0; i < c->ca->ndim; i++) {
+    if ( c->ci[i] && holders[i] != Qfalse ) {
+      ALLOCV_END(holders[i]);
+    }
+  }
+  return obj;
+}
+
 VALUE
 rb_ca_grid (int argc, VALUE *argv, VALUE self)
 {
@@ -921,46 +979,26 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eRuntimeError, "not implemented for this index");
     }
 
-    /* INDEX axis */
+    /* INDEX axis: converted here, read once the window below opens */
     ci[i] = ca_wrap_readonly(rval, CA_SIZE);
     rb_ary_push(list, rval);
-    ca_attach(ci[i]);
-
-    protos[i].kind = CAG_AXIS_INDEX;
-    if ( ca_is_any_masked(ci[i]) ) {
-      /* mask-filtered snapshot: skip masked cells.  We point protos[i]
-         .indices at a temp buffer alloc'd here and freed after setup
-         copies it (setup snapshots into its own ALLOC).  Caller-side
-         lifetime: the temp lives until ca_grid_new returns. */
-      ca_size_t gsize = ci[i]->elements - ca_count_masked(ci[i]);
-      ca_size_t *src  = (ca_size_t *) ci[i]->ptr;
-      boolean8_t *m   = (boolean8_t *) ci[i]->mask->ptr;
-      ca_size_t *tmp  = ALLOC_N(ca_size_t, gsize > 0 ? gsize : 1);
-      ca_size_t j, n = 0;
-      for (j = 0; j < ci[i]->elements; j++) {
-        if ( ! m[j] ) tmp[n++] = src[j];
-      }
-      protos[i].count   = gsize;
-      protos[i].indices = tmp;
-    } else {
-      protos[i].count   = ci[i]->elements;
-      protos[i].indices = (ca_size_t *) ci[i]->ptr;
-    }
-    protos[i].start = 0;
-    protos[i].step  = 0;
   }
 
-  obj = rb_ca_grid_new(self, ca->ndim, protos);
-
-  /* Cleanup: detach CAWraps + free temp masked-snapshot buffers (setup
-     has already copied indices into its own ALLOC). */
-  for (i = 0; i < ca->ndim; i++) {
-    if ( ci[i] ) {
-      if ( ca_is_any_masked(ci[i]) ) {
-        xfree(protos[i].indices);
-      }
-      ca_detach(ci[i]);
-    }
+  /* The index arrays are read with all of them attached, and building
+     the view checks every index against the parent -- an index out of
+     range raises there.  So the reads and the build are a window body,
+     which detaches the caller's index arrays however it ends. */
+  {
+    ca_grid_build_ctx_t c;
+    char modes[CA_RANK_MAX + 1];
+    memset(modes, 'r', (size_t) ca->ndim);
+    modes[ca->ndim] = '\0';
+    c.self   = self;
+    c.ca     = ca;
+    c.ci     = ci;
+    c.protos = protos;
+    obj = ca_attach_window(ca->ndim, ci, modes, ca_grid_build_body,
+                           (VALUE) &c);
   }
 
   return obj;
