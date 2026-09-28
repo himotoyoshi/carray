@@ -2373,6 +2373,11 @@ The same discipline applies to any `xmalloc`ed scratch you hold across a
 possibly-raising call, and to output arrays you have attached — release
 them in the ensure handler too.
 
+A kernel-iterator walk is the same case: the walk holds its source until
+`ca_iter_state_finish`, and a body that raises jumps over it. Run such a
+body through `ca_iter_ensure`, which finishes the walks you hand it
+however the body leaves; the kernel-iterator chapter shows the shape.
+
 ### 17.3 Argument validation idioms
 
 Validate at the top of the method, before allocating or attaching, so a

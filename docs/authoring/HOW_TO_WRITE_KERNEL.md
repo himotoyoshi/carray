@@ -774,13 +774,61 @@ Other constraints:
 - A body that **raises** leaks the same way. When the walk itself raises
   — a gather, or a write-back through the source's transfer slots — it
   releases what it holds first; the body runs in the caller's frame,
-  where the engine has no hold on it.
+  where the engine has no hold on it. A body that can raise (one that
+  calls back into Ruby, as an object-lane kernel does) runs through
+  `ca_iter_ensure`, below.
 - The macros are NOT statement-equivalent — don't follow them with
   `else` etc.
 
 For new simple kernels (= no exotic error handling), prefer the macros.
 The reference `sum_ki` retains the raw API for backward-compatible error
 messages; new kernels are encouraged to start from the macro form.
+
+#### A body that can raise: `ca_iter_ensure`
+
+`ca_iter_ensure(n, states, body, arg)` runs `body(arg)` and finishes the
+walks in `states[0..n)` however the body leaves: by returning, by `break`,
+or by raising. The states live in the caller's frame, not the body's —
+after a raise the body's frame is gone, and the cleanup runs where it was
+— so pass them in `arg` and open them in the body. The block macros take
+the state as an lvalue, so `c->st` works where `st` did:
+
+```c
+typedef struct {
+  ca_iter_state st;          /* in the caller's frame, not the body's */
+  CArray       *ca;
+  int8_t        axis;
+  VALUE        *op;
+} sum_ctx;
+
+static VALUE
+sum_body (VALUE arg)
+{
+  sum_ctx    *c = (sum_ctx *) arg;
+  char       *p;
+  boolean8_t *m;
+  ca_size_t   n, out_i = 0;
+  CA_FOR_EACH_FIBER_MASKED(c->st, c->ca, c->axis, CA_KERNEL_READ, p, n, m) {
+    VALUE acc = INT2FIX(0);
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      if ( m && m[i] ) continue;
+      acc = rb_funcall(acc, rb_intern("+"), 1, ((VALUE *) p)[i]);  /* may raise */
+    }
+    c->op[out_i++] = acc;
+  }
+  return Qnil;
+}
+
+/* ... */
+sum_ctx c = { .ca = ca, .axis = axis, .op = (VALUE *) co->ptr };
+ca_iter_ensure(1, &c.st, sum_body, (VALUE) &c);
+```
+
+The states are cleared before the body runs; a state the body never opens
+costs nothing, and the body may still finish a walk itself (finishing is
+idempotent). A state declared inside the body is not covered. Keep
+scratch that lives across a Ruby call in `ALLOCV_N`, which the unwind
+collects.
 
 ### 6.5 Phase D macro suite: 1-expression reduction and map
 

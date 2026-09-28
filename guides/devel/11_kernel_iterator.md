@@ -685,13 +685,60 @@ Constraints (the same across the family):
 - A body that **raises** leaks the same way. The walk releases what it
   holds when the raise is its own (a gather, or a write-back through the
   source's transfer slots), but the body runs in the caller's frame,
-  where the engine has no hold on it — watch for an object-lane body
-  calling back into Ruby.
+  where the engine has no hold on it. A body that can raise — an
+  object-lane body calling back into Ruby — runs through `ca_iter_ensure`
+  (below).
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
 - INOUT macros runtime-assert strict full-shape equality (= same `ndim`
   and same `dim[axis]`); a mismatch silently skips the body. Authors that
   want broadcasting must drop to the raw API.
+
+### A body that can raise: `ca_iter_ensure`
+
+`ca_iter_ensure(n, states, body, arg)` runs `body(arg)` and finishes the
+walks in `states[0..n)` however the body leaves — by returning, by
+`break`, or by raising. The states belong to the caller's frame, not the
+body's: once the body raises, its frame is gone, and the cleanup runs
+where it was. So the body gets them through `arg` and opens them there,
+with the raw API or a block macro, which take the state as an lvalue:
+
+```c
+typedef struct {
+  ca_iter_state st;          /* in the caller's frame, not the body's */
+  CArray       *ca;
+  int8_t        axis;
+  VALUE        *op;
+} sum_ctx;
+
+static VALUE
+sum_body (VALUE arg)
+{
+  sum_ctx    *c = (sum_ctx *) arg;
+  char       *p;
+  boolean8_t *m;
+  ca_size_t   n, out_i = 0;
+  CA_FOR_EACH_FIBER_MASKED(c->st, c->ca, c->axis, CA_KERNEL_READ, p, n, m) {
+    VALUE acc = INT2FIX(0);
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      if ( m && m[i] ) continue;
+      acc = rb_funcall(acc, rb_intern("+"), 1, ((VALUE *) p)[i]);  /* may raise */
+    }
+    c->op[out_i++] = acc;
+  }
+  return Qnil;
+}
+
+/* ... */
+sum_ctx c = { .ca = ca, .axis = axis, .op = (VALUE *) co->ptr };
+ca_iter_ensure(1, &c.st, sum_body, (VALUE) &c);
+```
+
+The states are cleared before the body runs, so a state the body never
+opens costs nothing, and the body may finish a walk itself (finishing is
+idempotent). A state declared inside the body is not covered. Scratch the
+body allocates across a Ruby call belongs in `ALLOCV_N`, which the unwind
+collects.
 
 ## Where to go next
 
