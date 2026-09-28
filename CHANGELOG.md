@@ -42,6 +42,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   reach the body through its argument. Walks whose body cannot raise need
   no change.
 
+- Fix: a reduction, scan, sort or search that raises part way (an object
+  element without `+`, two object elements `<=>` cannot order, a search
+  query that does not convert to the array's type) no longer leaves the
+  array attached, and a sort of an object array no longer leaves its
+  working buffers behind. The same holds for the running statistics over
+  groups, such as `v[cat, nil].cumsum(axis: :group)`.
+
 - Fix: an arithmetic or comparison operator that raises in the middle (an
   object element without the method, an integer division by zero) no
   longer leaves its operands attached. A bang form such as `add!` keeps the

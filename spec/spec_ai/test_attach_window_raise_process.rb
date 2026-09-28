@@ -195,6 +195,52 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     assert_equal "false", out
   end
 
+  # --- buffers that a raise must not strand -------------------------------
+
+  # Bytes the malloc zone grows by per call of +expr+ after +setup+, or nil
+  # where the measurement is not available.
+  def malloc_growth_per_call (setup, expr)
+    status, out = run_child(<<~RUBY)
+      begin
+        require "fiddle"
+        stats = Fiddle::Function.new(
+          Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+      rescue LoadError, Fiddle::DLError
+        exit 2
+      end
+      in_use = -> {
+        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+        stats.call(nil, buf)
+        buf[8, 8].unpack1("Q")          # malloc_statistics_t#size_in_use
+      }
+      #{setup}
+      call = -> { (#{expr}) rescue nil }
+      50.times { call.() }
+      GC.start
+      before = in_use.()
+      200.times { call.() }
+      GC.start
+      print (in_use.() - before).fdiv(200)
+    RUBY
+    return nil if status.exitstatus == 2
+    assert status.success?, "child failed: #{expr}"
+    Float(out)
+  end
+
+  # The object lane of the sort kernels orders pairs with <=>; a pair that
+  # does not compare raises part way through, and the pair buffers go with
+  # the unwind.
+  def test_object_sort_frees_its_buffers_when_a_pair_does_not_compare
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
+    setup = "o = CArray.object(20_000) { |i| i }; o[19_999] = Object.new"
+    %w[o.sort_index o.rank_index o.partition_index(10_000)].each do |expr|
+      growth = malloc_growth_per_call(setup, expr)
+      omit "measurement unavailable" if growth.nil?
+      assert_operator growth, :<, 4096, expr
+    end
+  end
+
   # --- a block of scratch allocated before the arguments are checked ---
 
   def test_address_basis_open_frees_its_block_when_an_argument_is_refused

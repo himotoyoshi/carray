@@ -616,5 +616,69 @@ DEFINE_PARTITION_QUICK(uint64_t,  u64);
 DEFINE_PARTITION_QUICK(float32_t, f32);
 DEFINE_PARTITION_QUICK(double,    f64);
 
+/* ---------------------------------------------------------------------------
+   ca_sort_merge_pair_object: the pair mergesort above for object pairs,
+   which have no `<`: every comparison goes through cmp.  Same shape
+   (insertion pre-pass, ping-pong passes, sorted-skip), with a binary
+   insertion pre-pass.  Stable: a pair lands after every pair that does not
+   compare greater, and in a merge a pair of the right run is taken only
+   when it compares strictly less.
+   --------------------------------------------------------------------------- */
+
+void
+ca_sort_merge_pair_object (ca_pair_object *a, ca_pair_object *aux,
+                           ca_size_t n,
+                           int (*cmp)(const void *, const void *))
+{
+  if ( n <= 1 ) return;
+
+  /* A comparison is a call into Ruby and costs far more than a move, so
+     the pre-pass finds each insertion point by binary search: log2(k)
+     comparisons where the linear walk above takes k/2. */
+  for ( ca_size_t lo = 0; lo < n; lo += CA_SORT_INSERTION_THRESHOLD ) {
+    ca_size_t hi = lo + CA_SORT_INSERTION_THRESHOLD;
+    if ( hi > n ) hi = n;
+    for ( ca_size_t k = lo + 1; k < hi; k++ ) {
+      ca_pair_object v = a[k];
+      ca_size_t l = lo, r = k;
+      while ( l < r ) {
+        ca_size_t mid = l + (r - l) / 2;
+        if ( cmp(&a[mid], &v) > 0 ) r = mid;
+        else                        l = mid + 1;
+      }
+      if ( l < k ) {
+        memmove(a + l + 1, a + l, (size_t)(k - l) * sizeof(ca_pair_object));
+        a[l] = v;
+      }
+    }
+  }
+
+  ca_pair_object *cur  = a;
+  ca_pair_object *next = aux;
+  for ( ca_size_t width = CA_SORT_INSERTION_THRESHOLD; width < n; width <<= 1 ) {
+    for ( ca_size_t lo = 0; lo < n; lo += (width << 1) ) {
+      ca_size_t mid = lo + width;
+      ca_size_t hi  = lo + (width << 1);
+      if ( mid > n ) mid = n;
+      if ( hi  > n ) hi  = n;
+      if ( mid >= hi || cmp(&cur[mid - 1], &cur[mid]) <= 0 ) {
+        memcpy(next + lo, cur + lo, (size_t)(hi - lo) * sizeof(ca_pair_object));
+        continue;
+      }
+      ca_size_t i = lo, j = mid, k = lo;
+      while ( i < mid && j < hi ) {
+        if ( cmp(&cur[j], &cur[i]) < 0 ) next[k++] = cur[j++];
+        else                             next[k++] = cur[i++];
+      }
+      while ( i < mid ) next[k++] = cur[i++];
+      while ( j < hi  ) next[k++] = cur[j++];
+    }
+    { ca_pair_object *t = cur; cur = next; next = t; }
+  }
+  if ( cur != a ) {
+    memcpy(a, cur, (size_t) n * sizeof(ca_pair_object));
+  }
+}
+
 /* No Init function: this file exposes only C kernels (via ca_sort_kernels.h);
    it registers no Ruby methods. */
