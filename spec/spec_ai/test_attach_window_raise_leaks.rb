@@ -365,6 +365,42 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     [[s, t], -> { s.div!(0) }]
   end
 
+  # The value-hash discovery family keys an object cell on #hash and
+  # re-checks it with #eql?, both calls into Ruby inside the walk.
+  class NoHash
+    def hash ; raise "no hash" ; end
+  end
+
+  def self.discovery_victim
+    o = CArray.object(4, 6) { 1 }
+    o[1, 1] = NoHash.new
+    t = o.T
+    [t[1..4, nil], t]
+  end
+
+  {
+    "unique"          => ->(v) { v.unique },
+    "value_counts"    => ->(v) { v.value_counts },
+    "nunique"         => ->(v) { v.nunique },
+    "nunique_axis"    => ->(v) { v.nunique(axis: 1) },
+    "mask_duplicates" => ->(v) { v.mask_duplicates },
+    "is_mode"         => ->(v) { v.is_mode },
+    "mode"            => ->(v) { v.mode },
+    "is_in"           => ->(v) { v.is_in([1, 2]) },
+    "is_in_as_values" => ->(v) { CA_OBJECT([1, 2]).is_in(v) },
+    "intersection"    => ->(v) { v.intersection(CA_OBJECT([1, 2])) },
+    "difference"      => ->(v) { v.difference(CA_OBJECT([1, 2])) },
+    "union"           => ->(v) { v.union(CA_OBJECT([1, 2])) },
+    "locate_addr"     => ->(v) { v.locate_addr(CA_OBJECT([1, 2])) },
+    "locate_addr_as_reference" => ->(v) { CA_OBJECT([1, 2]).locate_addr(v) },
+    "categorize"      => ->(v) { v.categorize },
+  }.each do |name, op|
+    pin_leak("discovery_#{name}_hash_raises", RuntimeError, [true, false]) do
+      v, t = self.class.discovery_victim
+      [[v, t], -> { op.(v) }]
+    end
+  end
+
   # --- the core's own entry points -------------------------------------
 
   # ca_sync raises (the parent is read-only); the window is closed anyway.

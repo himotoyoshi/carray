@@ -241,6 +241,24 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     end
   end
 
+  # The value-hash discovery family keeps its hash table and its levels in
+  # memory it allocates itself; an element whose #hash raises strands both.
+  def test_discovery_frees_its_tables_when_hash_raises
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
+    setup = <<~SETUP
+      class NoHash ; def hash ; raise "no hash" ; end ; end
+      o = CArray.object(20_000) { |i| i }
+      o[19_999] = NoHash.new
+    SETUP
+    %w[o.unique o.value_counts o.nunique o.categorize
+       CA_OBJECT([1,2]).is_in(o)].each do |expr|
+      growth = malloc_growth_per_call(setup, expr)
+      omit "measurement unavailable" if growth.nil?
+      assert_broken growth > 4096, true,
+                    "that #{expr} grows the malloc zone by less than 4096 bytes per call"
+    end
+  end
+
   # --- a block of scratch allocated before the arguments are checked ---
 
   def test_address_basis_open_frees_its_block_when_an_argument_is_refused
