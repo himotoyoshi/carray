@@ -257,6 +257,212 @@ ca_chunked_run (ca_chunked_run_t *run)
                         (VALUE) run);
 }
 
+/* ---- Kernels that can raise -----------------------------------------
+
+   An operator kernel runs with its alias operands attached.  Most kernels
+   cannot raise and are called directly.  Three kinds can:
+
+   - an object lane, which calls Ruby for every cell
+   - an integer division by zero (div, mod, fmod, rcp, rcp_mul)
+   - a data type the operator has no kernel for (the not_implement slot)
+
+   Those run through ca_op_guarded, which releases the operands the call
+   holds if the kernel raises.  An operand the kernel writes in place (the
+   receiver of a bang form) is synced first, so the cells written reach
+   its parent as they would for an entity. */
+
+static int
+ca_op_is_integer (int8_t dt)
+{
+  return ( dt >= CA_INT8 && dt <= CA_UINT64 );
+}
+
+static int
+ca_monop_may_raise (ca_monop_func_t func[], int8_t dt)
+{
+  return dt == CA_OBJECT
+      || func[dt] == ca_monop_not_implement
+      || ( func == ca_monop_rcp && ca_op_is_integer(dt) );
+}
+
+static int
+ca_binop_may_raise (ca_binop_func_t func[], int8_t dt)
+{
+  return dt == CA_OBJECT
+      || func[dt] == ca_binop_not_implement
+      || ( ca_op_is_integer(dt) &&
+           ( func == ca_binop_div || func == ca_binop_mod ||
+             func == ca_binop_fmod || func == ca_binop_rcp_mul ) );
+}
+
+static int
+ca_triop_may_raise (ca_triop_func_t func[], int8_t dt)
+{
+  return dt == CA_OBJECT || func[dt] == ca_triop_not_implement;
+}
+
+static int
+ca_moncmp_may_raise (ca_moncmp_func_t func[], int8_t dt)
+{
+  return dt == CA_OBJECT || func[dt] == ca_moncmp_not_implement;
+}
+
+static int
+ca_bincmp_may_raise (ca_bincmp_func_t func[], int8_t dt)
+{
+  return dt == CA_OBJECT || func[dt] == ca_bincmp_not_implement;
+}
+
+/* One kernel call, packed so that it can run under rb_ensure. */
+
+typedef struct {
+  ca_monop_func_t f;
+  ca_size_t n; boolean8_t *m;
+  char *p1; ca_size_t i1;
+  char *p2; ca_size_t i2;
+} ca_monop_call_t;
+
+static VALUE
+ca_monop_call (VALUE arg)
+{
+  ca_monop_call_t *k = (ca_monop_call_t *) arg;
+  k->f(k->n, k->m, k->p1, k->i1, k->p2, k->i2);
+  return Qnil;
+}
+
+typedef struct {
+  ca_binop_func_t f;
+  ca_size_t n; boolean8_t *m;
+  char *p1; ca_size_t i1;
+  char *p2; ca_size_t i2;
+  char *p3; ca_size_t i3;
+} ca_binop_call_t;
+
+static VALUE
+ca_binop_call (VALUE arg)
+{
+  ca_binop_call_t *k = (ca_binop_call_t *) arg;
+  k->f(k->n, k->m, k->p1, k->i1, k->p2, k->i2, k->p3, k->i3);
+  return Qnil;
+}
+
+typedef struct {
+  ca_triop_func_t f;
+  ca_size_t n; boolean8_t *m;
+  char *p1; ca_size_t i1;
+  char *p2; ca_size_t i2;
+  char *p3; ca_size_t i3;
+  char *p4; ca_size_t i4;
+} ca_triop_call_t;
+
+static VALUE
+ca_triop_call (VALUE arg)
+{
+  ca_triop_call_t *k = (ca_triop_call_t *) arg;
+  k->f(k->n, k->m, k->p1, k->i1, k->p2, k->i2, k->p3, k->i3, k->p4, k->i4);
+  return Qnil;
+}
+
+typedef struct {
+  ca_moncmp_func_t f;
+  ca_size_t n; boolean8_t *m;
+  char *p1; ca_size_t i1;
+  boolean8_t *p2; ca_size_t i2;
+} ca_moncmp_call_t;
+
+static VALUE
+ca_moncmp_call (VALUE arg)
+{
+  ca_moncmp_call_t *k = (ca_moncmp_call_t *) arg;
+  k->f(k->n, k->m, k->p1, k->i1, k->p2, k->i2);
+  return Qnil;
+}
+
+typedef struct {
+  ca_bincmp_func_t f;
+  ca_size_t n; boolean8_t *m;
+  char *p1; ca_size_t b1; ca_size_t i1;
+  char *p2; ca_size_t b2; ca_size_t i2;
+  char *p3; ca_size_t b3; ca_size_t i3;
+  double tol;
+} ca_bincmp_call_t;
+
+static VALUE
+ca_bincmp_call (VALUE arg)
+{
+  ca_bincmp_call_t *k = (ca_bincmp_call_t *) arg;
+  k->f(k->n, k->m, k->p1, k->b1, k->i1, k->p2, k->b2, k->i2,
+       k->p3, k->b3, k->i3, k->tol);
+  return Qnil;
+}
+
+typedef struct {
+  VALUE    (*run)(VALUE);
+  VALUE      arg;
+  int        done;
+  int        n;
+  CArray   **held;
+  const char *mode;     /* per held array: 'r' read, 'w' written in place */
+} ca_op_guard_t;
+
+static VALUE
+ca_op_guard_body (VALUE varg)
+{
+  ca_op_guard_t *g = (ca_op_guard_t *) varg;
+  g->run(g->arg);
+  g->done = 1;
+  return Qnil;
+}
+
+static VALUE
+ca_op_guard_sync (VALUE varg)
+{
+  ca_sync((void *) varg);
+  return Qnil;
+}
+
+/* Runs only after a raise: the caller closes the operands itself when the
+   kernel returns.  rb_ensure keeps the kernel's exception across this, so
+   a sync failing in here is dropped rather than let replace it. */
+static VALUE
+ca_op_guard_release (VALUE varg)
+{
+  ca_op_guard_t *g = (ca_op_guard_t *) varg;
+  int k;
+  if ( g->done ) {
+    return Qnil;
+  }
+  for ( k = g->n - 1; k >= 0; k-- ) {
+    CArray *ca = g->held[k];
+    if ( ! ca || ! ca->ptr ) {
+      continue;
+    }
+    if ( g->mode[k] == 'w' ) {
+      int tag = 0;
+      rb_protect(ca_op_guard_sync, (VALUE) ca, &tag);
+      rb_set_errinfo(Qnil);
+    }
+    ca_detach(ca);
+  }
+  return Qnil;
+}
+
+/* Runs the kernel packed in `call` with `held` attached; see above.  NULL
+   entries in held are skipped. */
+static void
+ca_op_guarded (VALUE (*run)(VALUE), void *call,
+               int n, CArray **held, const char *mode)
+{
+  ca_op_guard_t g;
+  g.run  = run;
+  g.arg  = (VALUE) call;
+  g.done = 0;
+  g.n    = n;
+  g.held = held;
+  g.mode = mode;
+  rb_ensure(ca_op_guard_body, (VALUE) &g, ca_op_guard_release, (VALUE) &g);
+}
+
 /* Operand mask overlay without calling ca_attach on the operand masks.
 
    `ca_copy_mask_overlay` (carray_mask.c) attaches each operand mask via
@@ -360,11 +566,19 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
   ca_mask_overlay_safe(ca2, 1, ca1);
 
   if ( ca_attach_is_alias(ca1) ) {
+    ca_monop_call_t k;
+    k.f  = func[ca1->data_type];
+    k.n  = ca1->elements;
+    k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
+    k.p2 = ca2->ptr; k.i2 = 1;
     ca_attach(ca1);
-    func[ca1->data_type](ca1->elements,
-                         ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL,
-                         ca1->ptr, 1,
-                         ca2->ptr, 1);
+    k.p1 = ca1->ptr; k.i1 = 1;
+    if ( ca_monop_may_raise(func, ca1->data_type) ) {
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
+    }
+    else {
+      ca_monop_call((VALUE) &k);
+    }
     ca_detach(ca1);
   }
   else {
@@ -477,10 +691,20 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
 
   ca_attach(ca1);
-  func[ca1->data_type](ca1->elements,
-                       ( ca1->mask ) ? (boolean8_t *)ca1->mask->ptr : NULL,
-                       ca1->ptr, 1,
-                       ca1->ptr, 1);
+  {
+    ca_monop_call_t k;
+    k.f  = func[ca1->data_type];
+    k.n  = ca1->elements;
+    k.m  = ( ca1->mask ) ? (boolean8_t *)ca1->mask->ptr : NULL;
+    k.p1 = ca1->ptr; k.i1 = 1;
+    k.p2 = ca1->ptr; k.i2 = 1;
+    if ( ca_monop_may_raise(func, ca1->data_type) ) {
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "w");
+    }
+    else {
+      ca_monop_call((VALUE) &k);
+    }
+  }
   ca_sync_detach(ca1);
 
   return self;
@@ -516,11 +740,19 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
   ca_mask_overlay_safe(ca2, 1, ca1);
 
   if ( ca_attach_is_alias(ca1) ) {
+    ca_monop_call_t k;
+    k.f  = func[ca1->data_type];
+    k.n  = ca1->elements;
+    k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
+    k.p2 = ca2->ptr; k.i2 = 1;
     ca_attach(ca1);
-    func[ca1->data_type](ca1->elements,
-                         ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL,
-                         ca1->ptr, 1,
-                         ca2->ptr, 1);
+    k.p1 = ca1->ptr; k.i1 = 1;
+    if ( ca_monop_may_raise(func, ca1->data_type) ) {
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
+    }
+    else {
+      ca_monop_call((VALUE) &k);
+    }
     ca_detach(ca1);
   }
   else {
@@ -841,13 +1073,23 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   fast_path = ca_attach_is_alias(ca1) && ca_attach_is_alias(ca2);
 
   if ( fast_path ) {
-    /* FAST PATH: zero behavioral change for the hot case. */
+    /* FAST PATH: both operands alias. */
+    ca_binop_call_t k;
+    CArray *held[2];
+    k.f  = func[ca1->data_type];
+    k.n  = n_kernel;
+    k.m  = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
+    k.p3 = ca3->ptr; k.i3 = i3;
     ca_attach_n(2, ca1, ca2);
-    func[ca1->data_type](n_kernel,
-                         ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
-                         ca1->ptr, i1,
-                         ca2->ptr, i2,
-                         ca3->ptr, i3);
+    k.p1 = ca1->ptr; k.i1 = i1;
+    k.p2 = ca2->ptr; k.i2 = i2;
+    if ( ca_binop_may_raise(func, ca1->data_type) ) {
+      held[0] = ca1; held[1] = ca2;
+      ca_op_guarded(ca_binop_call, &k, 2, held, "rr");
+    }
+    else {
+      ca_binop_call((VALUE) &k);
+    }
     ca_detach_n(2, ca1, ca2);
   }
   else if ( ca1 == ca2 ) {
@@ -1033,24 +1275,40 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       int a1 = 0, a2 = 0;
       (void) h1; (void) h2;
 
-      if ( ca_attach_is_alias(ca1) ) {
-        ca_attach(ca1);  p1 = (char *) ca1->ptr;  a1 = 1;
-      } else {
+      /* Gathers first: a gather can raise, and nothing is attached yet. */
+      if ( ! ca_attach_is_alias(ca1) ) {
         p1 = ALLOCV_N(char, h1, ca1->elements * ca1->bytes);
         ca_xfer_all(ca1, p1, CA_XFER_GET);
       }
-      if ( ca_attach_is_alias(ca2) ) {
-        ca_attach(ca2);  p2 = (char *) ca2->ptr;  a2 = 1;
-      } else {
+      if ( ! ca_attach_is_alias(ca2) ) {
         p2 = ALLOCV_N(char, h2, ca2->elements * ca2->bytes);
         ca_xfer_all(ca2, p2, CA_XFER_GET);
       }
+      if ( ca_attach_is_alias(ca1) ) {
+        ca_attach(ca1);  p1 = (char *) ca1->ptr;  a1 = 1;
+      }
+      if ( ca_attach_is_alias(ca2) ) {
+        ca_attach(ca2);  p2 = (char *) ca2->ptr;  a2 = 1;
+      }
 
-      func[dt](n_kernel,
-               ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
-               p1, i1,
-               p2, i2,
-               ca3->ptr, i3);
+      {
+        ca_binop_call_t k;
+        CArray *held[2];
+        k.f  = func[dt];
+        k.n  = n_kernel;
+        k.m  = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
+        k.p1 = p1; k.i1 = i1;
+        k.p2 = p2; k.i2 = i2;
+        k.p3 = ca3->ptr; k.i3 = i3;
+        if ( ca_binop_may_raise(func, dt) ) {
+          held[0] = a1 ? ca1 : NULL;
+          held[1] = a2 ? ca2 : NULL;
+          ca_op_guarded(ca_binop_call, &k, 2, held, "rr");
+        }
+        else {
+          ca_binop_call((VALUE) &k);
+        }
+      }
 
       if ( a2 ) { ca_detach(ca2); } else { ALLOCV_END(h2); }
       if ( a1 ) { ca_detach(ca1); } else { ALLOCV_END(h1); }
@@ -1134,32 +1392,46 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   /* self IS the output (= write target).  Always attach + ca_sync
      (= legitimate per refined invariant; self can be view e.g.
      `arr[i,nil].add!(b)`, sync writes back to root). */
-  ca_attach(ca1);
-  ca_mask_overlay_safe(ca1, 2, ca1, ca2);
-
-  /* other is input only: fast path if alias-cheap, else materialise
-     via ca_xfer_all without ca_func[X].attach. */
-  if ( ca_attach_is_alias(ca2) ) {
-    ca_attach(ca2);
-    func[ca1->data_type](ca1->elements,
-                         ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
-                         ca1->ptr, i1,
-                         ca2->ptr, i2,
-                         ca1->ptr, i1);
-    ca_detach(ca2);
-  }
-  else {
+  {
     volatile VALUE h2 = Qnil;
-    char *p2;
+    char *p2 = NULL;
+    int   a2 = 0;
+    ca_binop_call_t k;
+    CArray *held[2];
     (void) h2;
-    p2 = ALLOCV_N(char, h2, ca2->elements * ca2->bytes);
-    ca_xfer_all(ca2, p2, CA_XFER_GET);
-    func[ca1->data_type](ca1->elements,
-                         ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
-                         ca1->ptr, i1,
-                         p2,       i2,
-                         ca1->ptr, i1);
-    ALLOCV_END(h2);
+
+    /* other is input only: materialised via ca_xfer_all when it is not
+       alias-cheap -- before self is attached, since a gather can raise. */
+    if ( ! ca_attach_is_alias(ca2) ) {
+      p2 = ALLOCV_N(char, h2, ca2->elements * ca2->bytes);
+      ca_xfer_all(ca2, p2, CA_XFER_GET);
+    }
+
+    ca_attach(ca1);
+    ca_mask_overlay_safe(ca1, 2, ca1, ca2);
+
+    if ( ca_attach_is_alias(ca2) ) {
+      ca_attach(ca2);
+      p2 = ca2->ptr;
+      a2 = 1;
+    }
+
+    k.f  = func[ca1->data_type];
+    k.n  = ca1->elements;
+    k.m  = ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL;
+    k.p1 = ca1->ptr; k.i1 = i1;
+    k.p2 = p2;       k.i2 = i2;
+    k.p3 = ca1->ptr; k.i3 = i1;
+    if ( ca_binop_may_raise(func, ca1->data_type) ) {
+      held[0] = ca1;
+      held[1] = a2 ? ca2 : NULL;
+      ca_op_guarded(ca_binop_call, &k, 2, held, "wr");
+    }
+    else {
+      ca_binop_call((VALUE) &k);
+    }
+
+    if ( a2 ) { ca_detach(ca2); } else { ALLOCV_END(h2); }
   }
 
   ca_sync_detach(ca1);
@@ -1202,18 +1474,24 @@ rb_ca_triop_select_template (VALUE self, VALUE other2, VALUE other3,
    - alias-cheap operand → ca_attach (= O(1)) + use ca->ptr directly
    - else → ALLOCV scratch + ca_xfer_all without ca_func[X].attach
 
-   Pair ACQUIRE / RELEASE; `h` must be a volatile VALUE declared by
-   caller (= ALLOCV_END requires it even on alias-cheap branch where
-   ALLOCV_N wasn't actually called, since holder stays Qnil = no-op). */
-#define EAGER_ACQUIRE_INPUT(ca_, p_, h_, attached_) do {              \
+   GATHER every operand before ATTACH-ing any: a gather can raise, and an
+   operand attached before it would be left attached.  Pair with RELEASE;
+   `h` must be a volatile VALUE declared by the caller (Qnil when nothing
+   was gathered, which ALLOCV_END takes as a no-op). */
+#define EAGER_GATHER_INPUT(ca_, p_, h_) do {                          \
+    if ( ! ca_attach_is_alias(ca_) ) {                                \
+      (p_) = ALLOCV_N(char, (h_), (ca_)->elements * (ca_)->bytes);    \
+      ca_xfer_all((ca_), (p_), CA_XFER_GET);                          \
+    }                                                                 \
+  } while (0)
+
+#define EAGER_ATTACH_INPUT(ca_, p_, attached_) do {                   \
     if ( ca_attach_is_alias(ca_) ) {                                  \
       ca_attach(ca_);                                                 \
       (p_) = (char *)(ca_)->ptr;                                      \
       (attached_) = 1;                                                \
     }                                                                 \
     else {                                                            \
-      (p_) = ALLOCV_N(char, (h_), (ca_)->elements * (ca_)->bytes);    \
-      ca_xfer_all((ca_), (p_), CA_XFER_GET);                          \
       (attached_) = 0;                                                \
     }                                                                 \
   } while (0)
@@ -1346,16 +1624,33 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
       int attached1, attached2, attached3;
       (void) h1; (void) h2; (void) h3;
 
-      EAGER_ACQUIRE_INPUT(ca1, p1, h1, attached1);
-      EAGER_ACQUIRE_INPUT(ca2, p2, h2, attached2);
-      EAGER_ACQUIRE_INPUT(ca3, p3, h3, attached3);
+      EAGER_GATHER_INPUT(ca1, p1, h1);
+      EAGER_GATHER_INPUT(ca2, p2, h2);
+      EAGER_GATHER_INPUT(ca3, p3, h3);
+      EAGER_ATTACH_INPUT(ca1, p1, attached1);
+      EAGER_ATTACH_INPUT(ca2, p2, attached2);
+      EAGER_ATTACH_INPUT(ca3, p3, attached3);
 
-      func[ca1->data_type](cao->elements,
-                           ( cao->mask ) ? (boolean8_t *) cao->mask->ptr : NULL,
-                           p1, s1,
-                           p2, s2,
-                           p3, s3,
-                           cao->ptr, 1);
+      {
+        ca_triop_call_t k;
+        CArray *held[3];
+        k.f  = func[ca1->data_type];
+        k.n  = cao->elements;
+        k.m  = ( cao->mask ) ? (boolean8_t *) cao->mask->ptr : NULL;
+        k.p1 = p1; k.i1 = s1;
+        k.p2 = p2; k.i2 = s2;
+        k.p3 = p3; k.i3 = s3;
+        k.p4 = cao->ptr; k.i4 = 1;
+        if ( ca_triop_may_raise(func, ca1->data_type) ) {
+          held[0] = attached1 ? ca1 : NULL;
+          held[1] = attached2 ? ca2 : NULL;
+          held[2] = attached3 ? ca3 : NULL;
+          ca_op_guarded(ca_triop_call, &k, 3, held, "rrr");
+        }
+        else {
+          ca_triop_call((VALUE) &k);
+        }
+      }
 
       EAGER_RELEASE_INPUT(ca3, h3, attached3);
       EAGER_RELEASE_INPUT(ca2, h2, attached2);
@@ -1408,6 +1703,13 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
 /* triop_bang (in-place) driver.  ca1 = self = output (write target,
    attach legit; keep ca_attach + ca_sync); ca2/ca3 = input only (fast/slow
    dispatch via EAGER_ACQUIRE/RELEASE). */
+static VALUE
+ca_triop_bang_chunked (VALUE arg)
+{
+  ca_chunked_run((ca_chunked_run_t *) arg);
+  return Qnil;
+}
+
 VALUE
 rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
                        ca_triop_func_t func[])
@@ -1434,10 +1736,6 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
     TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
   }
 
-  /* self IS the output (= write target; attach legit per refined invariant) */
-  ca_attach(ca1);
-  ca_mask_overlay_safe(ca1, 3, ca1, ca2, ca3);
-
   {
     ca_size_t s2 = rb_obj_is_cscalar(other2) ? 0 : 1;
     ca_size_t s3 = rb_obj_is_cscalar(other3) ? 0 : 1;
@@ -1455,52 +1753,79 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
       volatile VALUE h2 = Qnil, h3 = Qnil;
       char *p2, *p3;
       int attached2, attached3;
+      ca_triop_call_t k;
+      CArray *held[3];
       (void) h2; (void) h3;
 
-      EAGER_ACQUIRE_INPUT(ca2, p2, h2, attached2);
-      EAGER_ACQUIRE_INPUT(ca3, p3, h3, attached3);
+      /* The gathers can raise, so they run before self is attached. */
+      EAGER_GATHER_INPUT(ca2, p2, h2);
+      EAGER_GATHER_INPUT(ca3, p3, h3);
 
-      func[ca1->data_type](ca1->elements,
-                           ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL,
-                           ca1->ptr, 1,
-                           p2, s2,
-                           p3, s3,
-                           ca1->ptr, 1);
+      /* self IS the output (= write target; attach legit per refined
+         invariant) */
+      ca_attach(ca1);
+      ca_mask_overlay_safe(ca1, 3, ca1, ca2, ca3);
+
+      EAGER_ATTACH_INPUT(ca2, p2, attached2);
+      EAGER_ATTACH_INPUT(ca3, p3, attached3);
+
+      k.f  = func[ca1->data_type];
+      k.n  = ca1->elements;
+      k.m  = ( ca1->mask ) ? (boolean8_t *) ca1->mask->ptr : NULL;
+      k.p1 = ca1->ptr; k.i1 = 1;
+      k.p2 = p2;       k.i2 = s2;
+      k.p3 = p3;       k.i3 = s3;
+      k.p4 = ca1->ptr; k.i4 = 1;
+      if ( ca_triop_may_raise(func, ca1->data_type) ) {
+        held[0] = ca1;
+        held[1] = attached2 ? ca2 : NULL;
+        held[2] = attached3 ? ca3 : NULL;
+        ca_op_guarded(ca_triop_call, &k, 3, held, "wrr");
+      }
+      else {
+        ca_triop_call((VALUE) &k);
+      }
 
       EAGER_RELEASE_INPUT(ca3, h3, attached3);
       EAGER_RELEASE_INPUT(ca2, h2, attached2);
     }
     else {
       /* CHUNKED PATH: both ca2 and ca3 non-alias arrays.  ca1 (= self =
-         output) is already attached; its ptr is contig (= ca_attach
-         materialise + alias for entity, or full materialise for view).
-         Write to ca1->ptr + off*bytes in chunks; sync at end. */
-      int8_t dt = ca1->data_type;
-      ca_size_t chunk_n;
-      ca_size_t n_total = ca1->elements;
-
+         output) is attached; its ptr is contig (= ca_attach materialise +
+         alias for entity, or full materialise for view).  Write to
+         ca1->ptr + off*bytes in chunks; sync at end.  The run gathers
+         per chunk, and any gather can raise, so the run is guarded
+         whatever the kernel. */
+      ca_attach(ca1);
+      ca_mask_overlay_safe(ca1, 3, ca1, ca2, ca3);
       {
-        ca_size_t inner = ca_chunk_inner_size(ca1);
-        ca_size_t inn2 = ca_chunk_inner_size(ca2);
-        ca_size_t inn3 = ca_chunk_inner_size(ca3);
-        ca_size_t maxb = ca1->bytes;
-        if ( ca2->bytes > maxb ) maxb = ca2->bytes;
-        if ( ca3->bytes > maxb ) maxb = ca3->bytes;
-        if ( inn2 > inner ) inner = inn2;
-        if ( inn3 > inner ) inner = inn3;
-        chunk_n = ca_chunk_compute_n(n_total, inner, maxb);
-      }
+        int8_t dt = ca1->data_type;
+        ca_size_t chunk_n;
+        ca_size_t n_total = ca1->elements;
 
-      {
-        ca_triop_chunk_t d;
-        ca_chunked_run_t run;
-        d.func = func; d.dt = dt; d.out = ca1; d.in_place = 1;
-        ca_chunked_run_init(&run, n_total, chunk_n);
-        ca_chunked_run_add(&run, ca2, s2);
-        ca_chunked_run_add(&run, ca3, s3);
-        run.kernel = ca_triop_chunk_kernel;
-        run.data   = &d;
-        ca_chunked_run(&run);
+        {
+          ca_size_t inner = ca_chunk_inner_size(ca1);
+          ca_size_t inn2 = ca_chunk_inner_size(ca2);
+          ca_size_t inn3 = ca_chunk_inner_size(ca3);
+          ca_size_t maxb = ca1->bytes;
+          if ( ca2->bytes > maxb ) maxb = ca2->bytes;
+          if ( ca3->bytes > maxb ) maxb = ca3->bytes;
+          if ( inn2 > inner ) inner = inn2;
+          if ( inn3 > inner ) inner = inn3;
+          chunk_n = ca_chunk_compute_n(n_total, inner, maxb);
+        }
+
+        {
+          ca_triop_chunk_t d;
+          ca_chunked_run_t run;
+          d.func = func; d.dt = dt; d.out = ca1; d.in_place = 1;
+          ca_chunked_run_init(&run, n_total, chunk_n);
+          ca_chunked_run_add(&run, ca2, s2);
+          ca_chunked_run_add(&run, ca3, s3);
+          run.kernel = ca_triop_chunk_kernel;
+          run.data   = &d;
+          ca_op_guarded(ca_triop_bang_chunked, &run, 1, &ca1, "w");
+        }
       }
     }
   }
@@ -1545,11 +1870,20 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
     int attached1;
     (void) h1;
 
-    EAGER_ACQUIRE_INPUT(ca1, p1, h1, attached1);
-    func[ca1->data_type](ca1->elements,
-                         ( ca2->mask ) ? (boolean8_t *) ca2->mask->ptr : NULL,
-                         p1, 1,
-                         (boolean8_t *) ca2->ptr, 1);
+    ca_moncmp_call_t k;
+    EAGER_GATHER_INPUT(ca1, p1, h1);
+    EAGER_ATTACH_INPUT(ca1, p1, attached1);
+    k.f  = func[ca1->data_type];
+    k.n  = ca1->elements;
+    k.m  = ( ca2->mask ) ? (boolean8_t *) ca2->mask->ptr : NULL;
+    k.p1 = p1; k.i1 = 1;
+    k.p2 = (boolean8_t *) ca2->ptr; k.i2 = 1;
+    if ( attached1 && ca_moncmp_may_raise(func, ca1->data_type) ) {
+      ca_op_guarded(ca_moncmp_call, &k, 1, &ca1, "r");
+    }
+    else {
+      ca_moncmp_call((VALUE) &k);
+    }
     EAGER_RELEASE_INPUT(ca1, h1, attached1);
   }
 
@@ -1691,15 +2025,29 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
         int attached1, attached2;
         (void) h1; (void) h2;
 
-        EAGER_ACQUIRE_INPUT(ca1, p1, h1, attached1);
-        EAGER_ACQUIRE_INPUT(ca2, p2, h2, attached2);
+        ca_bincmp_call_t k;
+        CArray *held[2];
+        EAGER_GATHER_INPUT(ca1, p1, h1);
+        EAGER_GATHER_INPUT(ca2, p2, h2);
+        EAGER_ATTACH_INPUT(ca1, p1, attached1);
+        EAGER_ATTACH_INPUT(ca2, p2, attached2);
 
-        func[ca1->data_type](n_kernel,
-                             ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
-                             p1, ca1->bytes, i1,
-                             p2, ca2->bytes, i2,
-                             ca3->ptr, ca3->bytes, i3,
-                             tol);
+        k.f   = func[ca1->data_type];
+        k.n   = n_kernel;
+        k.m   = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
+        k.p1  = p1;       k.b1 = ca1->bytes; k.i1 = i1;
+        k.p2  = p2;       k.b2 = ca2->bytes; k.i2 = i2;
+        k.p3  = ca3->ptr; k.b3 = ca3->bytes; k.i3 = i3;
+        k.tol = tol;
+        if ( ( attached1 || attached2 ) &&
+             ca_bincmp_may_raise(func, ca1->data_type) ) {
+          held[0] = attached1 ? ca1 : NULL;
+          held[1] = attached2 ? ca2 : NULL;
+          ca_op_guarded(ca_bincmp_call, &k, 2, held, "rr");
+        }
+        else {
+          ca_bincmp_call((VALUE) &k);
+        }
 
         EAGER_RELEASE_INPUT(ca2, h2, attached2);
         EAGER_RELEASE_INPUT(ca1, h1, attached1);

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an arithmetic or comparison operator that raises in the middle (an
+  object element without the method, an integer division by zero) no
+  longer leaves its operands attached. A bang form such as `add!` keeps the
+  cells it wrote before the raise, through a view as well.
+
 - Fix: a block, a conversion or an index check that raises part way
   through `map!` and its family, `convert`, `[]=`, `seq!`, `random!`,
   `randomn!`, `shuffle!`, the `scatter_*!` methods, `index2addr`,

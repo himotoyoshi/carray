@@ -246,6 +246,8 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
 
   # --- the object lane of an operator or a generated kernel raises -----
 
+  # The operator drivers call the object lane with the block attached; a
+  # raise there releases it.
   {
     "negate"          => [NoMethodError, ->(v) { -v }],
     "floor"           => [NoMethodError, ->(v) { v.floor }],
@@ -254,6 +256,51 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     "fma"             => [NoMethodError, ->(v) { v.fma(1, 1) }],
     "fma_bang"        => [NoMethodError, ->(v) { v.fma!(1, 1) }],
     "clip"            => [NoMethodError, ->(v) { v.clip(0, 3) }],
+  }.each do |name, (error, op)|
+    releases("object_block_#{name}", error) do
+      v, t = object_block
+      [[v, t], -> { op.(v) }]
+    end
+  end
+
+  # The other operator paths: the bang forms, one operand gathered and the
+  # other attached, the chunked run of a bang triop, the comparisons, and
+  # an integer division by zero.
+  def self.select_all (a) ; a[a.convert(CA_BOOLEAN) { true }] ; end
+
+  {
+    "object_add_bang"            => [NoMethodError, ->(v) { v.add!(1) }],
+    "object_plus_a_gathered_operand" => [NoMethodError, ->(v) {
+      w = select_all(CArray.object(4, 6) { 1 })
+      v + w.reshape(6, 4)[1..4, nil]
+    }],
+    "object_fma_bang_chunked"    => [NoMethodError, ->(v) {
+      o = CArray.object(4, 6) { 1 }
+      a = select_all(o.T[1..4, nil].copy).reshape(4, 4)
+      b = select_all(o.T[1..4, nil].copy).reshape(4, 4)
+      v.fma!(a, b)
+    }],
+    "object_is_nan"              => [NoMethodError, ->(v) { v.is_nan }],
+    "object_le_an_attached_operand" => [NoMethodError, ->(v) { v.le(v.copy) }],
+  }.each do |name, (error, op)|
+    releases(name, error) do
+      v, t = object_block
+      [[v], -> { op.(v) }]
+    end
+  end
+
+  {
+    "integer_mod_zero"      => ->(v) { v % 0 },
+    "integer_mod_bang_zero" => ->(v) { v.mod!(0) },
+  }.each do |name, op|
+    releases(name, ZeroDivisionError) do
+      t = CArray.int32(4, 6).seq.T
+      v = t[1..4, nil]
+      [[v], -> { op.(v) }]
+    end
+  end
+
+  {
     "cumsum"          => [TypeError,     ->(v) { v.cumsum }],
     "sum"             => [TypeError,     ->(v) { v.sum }],
     "sum_axis"        => [TypeError,     ->(v) { v.sum(axis: 0) }],
@@ -295,12 +342,12 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     [[v1, v2], -> { CArray.stack([v1, v2]).sum(axis: 1) }]
   end
 
-  pin_leak("integer_division_by_zero", ZeroDivisionError, [true]) do
+  releases("integer_division_by_zero", ZeroDivisionError) do
     v = CArray.int32(4, 6).seq[1..2, nil]
     [[v], -> { v / 0 }]
   end
 
-  pin_leak("integer_div_bang_by_zero", ZeroDivisionError, [true, true]) do
+  releases("integer_div_bang_by_zero", ZeroDivisionError) do
     s, t = int_select
     [[s, t], -> { s.div!(0) }]
   end
