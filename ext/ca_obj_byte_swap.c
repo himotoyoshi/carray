@@ -523,8 +523,7 @@ ca_byte_swap_func_fill_data (void *ap, void *ptr)
         memcpy(ca->ptr + i * ca->bytes, ptr, ca->bytes);
       }
     }
-    ca_sync(ca);
-    ca_detach(ca);
+    ca_sync_detach(ca);
     if ( buf != v ) xfree(buf);
     return;
   }
@@ -734,8 +733,7 @@ rb_ca_swap_bytes_bang (VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_attach(ca);
   ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements, ca->ptr);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 

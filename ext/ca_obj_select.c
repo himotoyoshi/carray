@@ -534,8 +534,7 @@ ca_select_func_fill_data (void *ap, void *ptr)
   ca_select_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void

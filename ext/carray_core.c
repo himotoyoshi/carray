@@ -1615,6 +1615,37 @@ ca_xfer_all (void *ap, void *data, int dir)
 
 /* ------------------------------------------------------------------- */
 
+/* What follows the slot in ca_allocate: the object cells cleared, then the
+   mask.  Clearing the mask can create it, which for a CAObject calls Ruby. */
+static void
+ca_allocate_rest (CArray *ca)
+{
+  if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
+    volatile VALUE rzero = INT2NUM(0);
+    VALUE *p = (VALUE*)ca->ptr;
+    ca_size_t i;
+    for (i=0; i<ca->elements; i++) {
+      *p++ = rzero;
+    }
+  }
+
+  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
+  ca_allocate(ca->mask);
+}
+
+/* The view half of ca_allocate, after the attach level is taken.  Run
+   under rb_protect by ca_allocate. */
+static VALUE
+ca_allocate_view (VALUE arg)
+{
+  CArray *ca = (CArray *) arg;
+  if ( ! ca->ptr ) {
+    ca_func[ca->obj_type].allocate(ca);
+  }
+  ca_allocate_rest(ca);
+  return Qnil;
+}
+
 /* make ca->ptr to point the allocated memory block */
 
 void
@@ -1628,31 +1659,36 @@ ca_allocate (void *ap)
 
   if ( ca_is_view(ca) ) {  /* view array */
 
-    CAVIEW(ca)->attach += 1; /* increments attach level */
-    if ( CAVIEW(ca)->attach > CA_ATTACH_MAX ) {
+    if ( CAVIEW(ca)->attach >= CA_ATTACH_MAX ) {
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
+    CAVIEW(ca)->attach += 1; /* increments attach level */
 
-    if ( ! ca->ptr ) {
-      ca_func[ca->obj_type].allocate(ap);
+    /* Undo the level if the slot or the mask raises, as ca_attach does.
+       Left in place, the level is invisible while ptr is NULL, and the
+       next attach / detach pair then leaves the view attached for good.
+       A slot that got as far as publishing ca->ptr has taken what its
+       detach slot releases; one that raised earlier has published
+       nothing. */
+    {
+      char *ptr0 = ca->ptr;
+      int   tag  = 0;
+      rb_protect(ca_allocate_view, (VALUE) ca, &tag);
+      if ( tag ) {
+        if ( ! ptr0 && ca->ptr ) {
+          ca_func[ca->obj_type].detach(ca);
+          ca->ptr = NULL;
+        }
+        CAVIEW(ca)->attach -= 1;
+        rb_jump_tag(tag);
+      }
     }
   }
   else {                      /* entity array */
     ca_func[ca->obj_type].allocate(ap);
+    ca_allocate_rest(ca);
   }
-
-  if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
-    volatile VALUE rzero = INT2NUM(0);
-    VALUE *p = (VALUE*)ca->ptr;
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = rzero;
-    }
-  }
-
-  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
-  ca_allocate(ca->mask);
 }
 
 /* The first attach of a view: materialise through the type's slot, then
@@ -1813,6 +1849,42 @@ ca_sync (void *ap)
 
 }
 
+/* Sync ap and detach it -- the close of a window a frame opened with
+   ca_attach or ca_allocate.  The detach happens even when the sync raises
+   (a read-only array, a backing whose write fails); the sync's exception
+   then propagates.  Written as two calls, a raising sync skips the detach
+   and the window stays open.
+
+   Not a replacement for every ca_sync: a view's sync slot syncs its parent
+   without detaching it, because that attach belongs to the view and its
+   detach slot releases it. */
+
+static VALUE
+ca_sync_body (VALUE arg)
+{
+  ca_sync((void *) arg);
+  return Qnil;
+}
+
+void
+ca_sync_detach (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  int tag = 0;
+
+  if ( ! ca ) {
+    return;
+  }
+
+  rb_protect(ca_sync_body, (VALUE) ca, &tag);
+  if ( ca->ptr ) {
+    ca_detach(ca);
+  }
+  if ( tag ) {
+    rb_jump_tag(tag);
+  }
+}
+
 /* make ca->ptr to be detached */
 
 void
@@ -1845,26 +1917,69 @@ ca_detach (void *ap)
 
 /* multiple versions of ca_allocate, ca_attach, ca_sync, ca_detach */
 
+/* ca_allocate_n and ca_attach_n take all of their arrays or none: when
+   one raises, the ones already taken are detached before the raise
+   propagates. */
+
+typedef struct {
+  CArray **list;
+  int32_t  n;
+  int32_t  done;
+} ca_allocate_all_ctx_t;
+
+static VALUE
+ca_allocate_all_body (VALUE arg)
+{
+  ca_allocate_all_ctx_t *c = (ca_allocate_all_ctx_t *) arg;
+  for ( ; c->done < c->n; c->done++ ) {
+    ca_allocate(c->list[c->done]);
+  }
+  return Qnil;
+}
+
+static void
+ca_allocate_all (CArray **list, int32_t n)
+{
+  ca_allocate_all_ctx_t c;
+  int tag = 0;
+  c.list = list;
+  c.n    = n;
+  c.done = 0;
+  rb_protect(ca_allocate_all_body, (VALUE) &c, &tag);
+  if ( tag ) {
+    while ( c.done > 0 ) {
+      ca_detach(list[--c.done]);
+    }
+    rb_jump_tag(tag);
+  }
+}
+
 void
 ca_allocate_n (int n, ...)
 {
+  CArray **list = ALLOCA_N(CArray *, n > 0 ? n : 1);
   va_list args;
+  int i;
   va_start(args, n);
-  while ( n-- ) {
-    ca_allocate(va_arg(args, CArray *));
+  for ( i = 0; i < n; i++ ) {
+    list[i] = va_arg(args, CArray *);
   }
   va_end(args);
+  ca_allocate_all(list, n);
 }
 
 void
 ca_attach_n (int n, ...)
 {
+  CArray **list = ALLOCA_N(CArray *, n > 0 ? n : 1);
   va_list args;
+  int i;
   va_start(args, n);
-  while ( n-- ) {
-    ca_attach(va_arg(args, CArray *));
+  for ( i = 0; i < n; i++ ) {
+    list[i] = va_arg(args, CArray *);
   }
   va_end(args);
+  ca_attach_all(list, n);
 }
 
 void

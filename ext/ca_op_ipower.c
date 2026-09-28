@@ -264,8 +264,7 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
     rb_raise(rb_eRuntimeError, "invalid data type for ipower");
   }
 
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
 
   return self;
 }

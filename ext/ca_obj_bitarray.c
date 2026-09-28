@@ -478,8 +478,7 @@ ca_bitarray_func_fill_data (void *ap, void *ptr)
   CABitarray *ca = (CABitarray *) ap;
   ca_attach(ca->parent);
   ca_bitarray_fill(ca, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void

@@ -579,8 +579,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
         else {
           ca_cast_block(ca->elements, cv, scratch, ca, ca->ptr);
         }
-        ca_sync(ca);
-        ca_detach(ca);
+        ca_sync_detach(ca);
       }
       else {
         ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
@@ -658,8 +657,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
           ca_cast_block(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
         }
       }
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
     }
   }
   else if ( rb_respond_to(rval, id_to_ca) ) {

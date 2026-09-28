@@ -914,8 +914,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
       volatile VALUE ridx = rb_ary_new2(ca->ndim);
       ca_attach(ca);
       rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
     }
     else {
       /* 0-D safety net (rare from CArray.new path): yield no args. */

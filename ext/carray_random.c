@@ -80,8 +80,7 @@ static void
 ca_rng_close (ca_rng_t *source)
 {
   if (source->state) {
-    ca_sync(source->state);
-    ca_detach(source->state);
+    ca_sync_detach(source->state);
     source->state = NULL;
     source->cells = NULL;
   }
@@ -291,8 +290,7 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
     /* integer types: CA_INT8..CA_UINT64 */
     if (is_default) {
       ca_rng_close(&source);
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
       rb_raise(rb_eArgError,
                "random! on an integer array requires a range: "
                "a.random!(high), a.random!(low, high), or "
@@ -349,8 +347,7 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
     }
     default:
       ca_rng_close(&source);
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
       rb_raise(rb_eCADataTypeError,
                "random! is not supported for this data type");
     }
@@ -359,8 +356,7 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
   }
 
   ca_rng_close(&source);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -469,8 +465,7 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
       break;
     }
     ca_rng_close(&source);
-    ca_sync(ca);
-    ca_detach(ca);
+    ca_sync_detach(ca);
     return self;
   }
 
@@ -527,8 +522,7 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
   }
 
   ca_rng_close(&source);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -590,8 +584,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
     if (axis < 0) axis += ca->ndim;
     if (axis < 0 || axis >= ca->ndim) {
       ca_rng_close(&source);
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
       rb_raise(rb_eArgError,
                "axis %d is out of range for ndim %d", axis, ca->ndim);
     }
@@ -599,8 +592,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
     n = ca->dim[axis];
     if (n <= 1) {
       ca_rng_close(&source);
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
       return self;
     }
 
@@ -631,8 +623,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
   }
 
   ca_rng_close(&source);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -752,8 +743,7 @@ rb_ca_rng_reset (int argc, VALUE *argv, VALUE self)
 
   ca = ca_rng_cells(self, &cells);
   ca_xoshiro256pp_seed(cells, (uint64_t) NUM2ULL(masked));
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
 
   rb_ivar_set(self, rb_intern("@seed"), seed);
   return self;
@@ -779,8 +769,7 @@ rb_ca_rng_random (VALUE self)
 
   ca = ca_rng_cells(self, &cells);
   value = ca_xoshiro256pp_next_real(cells);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return rb_float_new(value);
 }
 
@@ -799,8 +788,7 @@ rb_ca_rng_bits (VALUE self)
 
   ca = ca_rng_cells(self, &cells);
   value = ca_xoshiro256pp_next(cells);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return ULL2NUM(value);
 }
 
@@ -823,8 +811,7 @@ rb_ca_rng_randomn (VALUE self)
   source.state = NULL;
   source.cells = cells;
   value = ca_random_normal(&source);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return rb_float_new(value);
 }
 

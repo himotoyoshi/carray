@@ -93,6 +93,14 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     end
   end
 
+  # The fixed form of pin_leak: the raise leaves no view attached.
+  def self.releases (name, error, &build)
+    define_method("test_#{name}") do
+      views, action = instance_exec(&build)
+      assert_equal views.map { false }, attached_after(views, error, &action)
+    end
+  end
+
   # --- victims ---------------------------------------------------------
 
   # A non-alias view (CASelect) over another view (CATranspose), so that
@@ -299,9 +307,8 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
 
   # --- the core's own entry points -------------------------------------
 
-  # ca_sync raises (the parent is read-only) and the detach after it is
-  # skipped.
-  pin_leak("pow_bang_on_a_view_of_a_frozen_array", RuntimeError, [true, true]) do
+  # ca_sync raises (the parent is read-only); the window is closed anyway.
+  releases("pow_bang_on_a_view_of_a_frozen_array", RuntimeError) do
     s, t = int_select(CA_FLOAT64)
     t.parent.freeze
     [[s, t], -> { s.pow!(2) }]
@@ -312,7 +319,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     "bits"     => ->(b) { b.bits },
     "bitfield" => ->(b) { b.bitfield(0..1, CA_INT8) },
   }.each do |name, mk|
-    pin_leak("#{name}_fill_parent_sync_raises", RuntimeError, [true]) do
+    releases("#{name}_fill_parent_sync_raises", RuntimeError) do
       b = FailingSync.new(8)
       v = mk.(b)
       b.fail_sync = true
@@ -320,10 +327,10 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     end
   end
 
-  # ca_allocate raises the view's count before calling the slot, and does
-  # not lower it again when the slot raises.  The count is invisible while
-  # ptr is NULL; the next attach and detach pair then leave the view
-  # attached, holding the source's pointer published.
+  # ca_allocate takes the view's attach level before calling the slot, and
+  # must give it back when the slot raises.  A level left behind would be
+  # invisible while ptr is NULL; the next attach and detach pair would then
+  # leave the view attached, holding the source's pointer published.
   def test_allocate_slot_raises
     omit "source_smoke not built" unless SOURCE_SMOKE_BUILT
     str = ("\0" * 12).dup
@@ -334,8 +341,14 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     assert_raise(RuntimeError) { v[] = [7] * 9 }
     str << "\0"                               # the owner is valid again
     assert_equal [[1, 2, 3], [5, 6, 7], [9, 10, 11]], v.to_a
-    assert_broken [v.attached?, src.hold_count], [true, 1],
-                  "that the view is detached and the source holds nothing"
+    assert_equal [false, 0], [v.attached?, src.hold_count]
+  end
+
+  # ca_attach_n takes all of its arrays or none: the values fail to
+  # convert after the array and the addresses were attached.
+  releases("scatter_add_bang_values_do_not_convert", ArgumentError) do
+    s, t = int_select
+    [[s, t], -> { s.scatter_add!([0, 1, 2], CArray.object(3) { "x" }) }]
   end
 
   # --- already right ----------------------------------------------------

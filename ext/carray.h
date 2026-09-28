@@ -1474,7 +1474,7 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
 
 /* API : allocate, attach, update, sync, detach */
 
-/* Attach lifecycle contract (R1-R5).  Ownership-based, and NOT transitive.
+/* Attach lifecycle contract (R1-R6).  Ownership-based, and NOT transitive.
    This block is the canonical statement of the contract; the other documents
    copy it.  guides/devel/04_attach_lifecycle.md discusses it at length.
 
@@ -1493,6 +1493,14 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
      R5 (traffic)    Attach hands you a buffer, not a live array.  Use x->ptr;
                      a view derived from x composes past the buffer to the
                      root.
+     R6 (raising)    ca_allocate and ca_attach that raise have taken
+                     nothing; ca_allocate_n and ca_attach_n take all of
+                     their arrays or none.  Close a window with
+                     ca_sync_detach, which detaches even when the sync
+                     raises -- ca_sync then ca_detach leaves the window open
+                     on a raise.  Anything between that can raise (Ruby
+                     called from inside the window) needs an ensure of its
+                     own.
 */
 
 void    ca_allocate (void *ap);
@@ -1500,6 +1508,7 @@ void    ca_attach (void *ca);
 void    ca_update (void *ca);
 void    ca_sync (void *ca);
 void    ca_detach (void *ca);
+void    ca_sync_detach (void *ca);
 
 void    ca_allocate_n (int n, ...);
 void    ca_attach_n (int n, ...);

@@ -740,8 +740,7 @@ ca_grid_func_fill_data (void *ap, void *ptr)
   ca_attach(ca->parent);
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -1124,8 +1123,7 @@ rb_ca_grid_dispatch_scatter_debug (VALUE self, VALUE in_str)
   ca_attach(ca->parent);
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, RSTRING_PTR(in_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 
@@ -1151,8 +1149,7 @@ rb_ca_grid_dispatch_fill_value_debug (VALUE self, VALUE val_str)
   ca_attach(ca->parent);
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, RSTRING_PTR(val_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 #endif /* CARRAY_DEV_BUILD */

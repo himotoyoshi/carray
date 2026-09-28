@@ -318,8 +318,7 @@ rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
     }
   }
 
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
 
   return self;
 }
@@ -368,8 +367,7 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
     seq_bang_switch(proc_seq_bang_axis);
   }
 
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
 
   return self;
 }

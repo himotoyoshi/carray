@@ -524,8 +524,7 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
       }
       ca_detach(cs->mask);
     }
-    ca_sync(ca->mask);
-    ca_detach(ca->mask);
+    ca_sync_detach(ca->mask);
   }
 }
 
@@ -682,8 +681,7 @@ ca_unmask (void *ap, char *fill_value)
       default: proc_fill_bang_bytes();         break;  /* cmplx128 (16) + fixlen */
       }
 
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
     }
   }
 }

@@ -194,8 +194,7 @@ rb_ca_map_bang (VALUE self)
     obj = rb_yield(rb_ca_fetch_addr(self, i));
     rb_ca_store_addr(self, i, obj);
   }
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -230,8 +229,7 @@ rb_ca_map_with_index_bang (VALUE self)
   ca_attach(ca);
   ridx = rb_ary_new2(ca->ndim);
   rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_WITH_VALUE | CA_LOOP_STORE);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -251,8 +249,7 @@ rb_ca_map_index_bang (VALUE self)
   ca_attach(ca);
   ridx = rb_ary_new2(ca->ndim);
   rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -273,8 +270,7 @@ rb_ca_map_with_addr_bang (VALUE self)
     obj = rb_yield_values(2, rb_ca_fetch_addr(self, i), SIZE2NUM(i));
     rb_ca_store_addr(self, i, obj);
   }
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
@@ -296,8 +292,7 @@ rb_ca_map_addr_bang (VALUE self)
     obj = rb_yield(SIZE2NUM(i));
     rb_ca_store_addr(self, i, obj);
   }
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 
