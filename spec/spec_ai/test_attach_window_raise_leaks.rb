@@ -111,7 +111,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   end
 
   # A block of a transposed object array with one cell that answers
-  # nothing.  Operators leave the block attached; the transpose is not.
+  # nothing.
   def object_block
     o = CArray.object(4, 6) { 1 }
     o[1, 1] = NOPE
@@ -119,8 +119,8 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     [t[1..4, nil], t]
   end
 
-  # The same object array, selected rather than blocked.  The generated
-  # reductions release the selection and leave its parent attached.
+  # The same object array, selected rather than blocked, so that a walk
+  # over it materialises a buffer of its own.
   def object_select
     o = CArray.object(4, 6) { 1 }
     o[1, 1] = NOPE
@@ -235,7 +235,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     assert_equal false, res.attached?
   end
 
-  pin_leak("axis_group_scan_element_does_not_add", TypeError, [true, false]) do
+  releases("axis_group_scan_element_does_not_add", TypeError) do
     o = CArray.object(3, 4) { 1 }
     o[1, 2] = NOPE
     t = o.T
@@ -300,13 +300,16 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     end
   end
 
+  # The object lane of a generated kernel calls Ruby for every cell; a raise
+  # there releases what the walk holds.
   {
     "cumsum"          => [TypeError,     ->(v) { v.cumsum }],
     "sum"             => [TypeError,     ->(v) { v.sum }],
     "sum_axis"        => [TypeError,     ->(v) { v.sum(axis: 0) }],
     "search_nearest"  => [TypeError,     ->(v) { v.search_nearest(1) }],
+    "search_nearest_array" => [TypeError, ->(v) { v.search_nearest(CA_OBJECT([1, 2])) }],
   }.each do |name, (error, op)|
-    pin_leak("object_block_#{name}", error, [true, false]) do
+    releases("object_block_#{name}", error) do
       v, t = object_block
       [[v, t], -> { op.(v) }]
     end
@@ -321,25 +324,35 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     "rank_index"      => [ArgumentError, ->(v) { v.rank_index }],
     "partition_index" => [ArgumentError, ->(v) { v.partition_index(1) }],
   }.each do |name, (error, op)|
-    pin_leak("object_select_#{name}", error, [false, true]) do
+    releases("object_select_#{name}", error) do
       v, t = object_select
       [[v, t], -> { op.(v) }]
     end
   end
 
-  pin_leak("object_reshape_tiled_sum_along_axis_0", TypeError, [true]) do
+  # Large enough that a numeric array takes the tiled reduction; the object
+  # lane walks the view instead.
+  releases("object_reshape_sum_along_axis_0", TypeError) do
     o = CArray.object(32 * 64).seq!
     o[5] = NOPE
-    r = o.reshape(32, 64)                   # large enough to take the tiled path
+    r = o.reshape(32, 64)
     [[r], -> { r.sum(axis: 0) }]
   end
 
-  pin_leak("object_stack_sum_along_axis_1", TypeError, [true, true]) do
+  releases("object_stack_sum_along_axis_1", TypeError) do
     o = CArray.object(4, 6).seq!
     o[1, 1] = NOPE
     v1 = o[nil, 0..4]
     v2 = o[nil, 1..5]
     [[v1, v2], -> { CArray.stack([v1, v2]).sum(axis: 1) }]
+  end
+
+  # A search with an array query attaches the source and the query together;
+  # a query that does not convert to the source's type raises in the second.
+  releases("search_query_does_not_convert", ArgumentError) do
+    t = CArray.int32(4, 6).seq.T
+    v = t[1..4, nil]
+    [[v, t], -> { v.search(CA_OBJECT([1, "x"])) }]
   end
 
   releases("integer_division_by_zero", ZeroDivisionError) do

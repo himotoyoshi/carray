@@ -1784,11 +1784,116 @@ module MkKernel
     base + HEADER_BLOCKS.join("\n")
   end
 
+  # Emits the native function of one source data type.  The object lane
+  # calls Ruby for every cell, so any cell can raise in the middle of a walk;
+  # its function is rebuilt around ca_iter_ensure (see guard_object_native).
+  # Every other lane is emitted as the emitter writes it.
+  def self.emit_native_for(io, k, src)
+    if src == :object
+      buf = StringIO.new
+      yield buf
+      io.print guard_object_native(buf.string, "#{k[:name]}_ki_native_object")
+    else
+      yield io
+    end
+  end
+
+  # Index of the brace that closes the one at text[open], skipping string
+  # and character literals and comments.
+  def self.matching_brace(text, open)
+    depth = 0
+    i = open
+    while i < text.length
+      c = text[i]
+      case c
+      when '"', "'"
+        i += 1
+        i += (text[i] == "\\") ? 2 : 1 while i < text.length && text[i] != c
+      when "/"
+        if text[i + 1] == "/"
+          i = text.index("\n", i) || text.length
+        elsif text[i + 1] == "*"
+          i = (text.index("*/", i + 2) || text.length) + 1
+        end
+      when "{"
+        depth += 1
+      when "}"
+        depth -= 1
+        return i if depth == 0
+      end
+      i += 1
+    end
+    raise "mkkernel: unbalanced braces"
+  end
+
+  # Rebuilds the native function +fn+ found in +text+ so that its walks are
+  # finished however it leaves.  The body moves into a function of its own
+  # that ca_iter_ensure runs; each `ca_iter_state` it declared becomes a
+  # slot of a frame kept by the caller, since a state in the body's own
+  # frame is gone once the body raises.  The body text is kept as written:
+  # the parameters are unpacked from the frame under their own names, and
+  # each state name is defined to its slot for the length of the body.
+  def self.guard_object_native(text, fn)
+    header = /^static VALUE\n#{fn} \(([^)]*)\)\n\{\n/
+    m = header.match(text) or raise "mkkernel: #{fn} not found"
+    close = matching_brace(text, m.end(0) - 2)
+    body  = text[m.end(0)...close]
+    rest  = text[(close + 1)..]
+
+    states = []
+    body = body.gsub(/^[ \t]*ca_iter_state[ \t]+(\w+(?:[ \t]*,[ \t]*\w+)*)[ \t]*;[ \t]*\n/) do
+      states.concat($1.split(/[ \t]*,[ \t]*/))
+      ""
+    end
+    states.uniq!
+    return text if states.empty?
+
+    params = m[1].split(",").map do |p|
+      pm = p.strip.match(/\A(.*?)(\w+)\z/) or raise "mkkernel: #{fn} parameter #{p}"
+      [pm[1].strip, pm[2]]
+    end
+    frame = "#{fn}_frame"
+
+    out = StringIO.new
+    out.print m.pre_match
+    out.puts "/* The object lane calls Ruby for every cell, so a walk can raise part"
+    out.puts "   way.  Its states live in the caller's frame, and ca_iter_ensure"
+    out.puts "   finishes them however the body leaves. */"
+    out.puts "typedef struct {"
+    out.puts "  ca_iter_state states[#{states.size}];"
+    params.each { |type, name| out.puts "  #{type} #{name};".sub(/\* /, "*") }
+    out.puts "} #{frame};"
+    out.puts
+    out.puts "static VALUE"
+    out.puts "#{fn}_body (VALUE arg)"
+    out.puts "{"
+    out.puts "  #{frame} *fr = (#{frame} *) arg;"
+    params.each do |type, name|
+      out.puts "  #{type} #{name} = fr->#{name};".sub(/\* /, "*")
+      out.puts "  (void) #{name};"
+    end
+    states.each_with_index { |s, i| out.puts "#define #{s} (fr->states[#{i}])" }
+    out.print body.sub(/[ \t]*\z/, "")
+    out.puts unless body.match?(/\n[ \t]*\z/)
+    states.each { |s| out.puts "#undef #{s}" }
+    out.puts "}"
+    out.puts
+    out.puts "static VALUE"
+    out.puts "#{fn} (#{m[1]})"
+    out.puts "{"
+    out.puts "  #{frame} fr;"
+    params.each { |_, name| out.puts "  fr.#{name} = #{name};" }
+    out.puts "  return ca_iter_ensure(#{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    out.puts "}"
+    out.print rest
+    out.string
+  end
+
   def self.emit_reduce(io, k)
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_reduce_native(io, k, src)
+      emit_native_for(io, k, src) { |o| emit_reduce_native(o, k, src) }
     end
     emit_reduce_dispatch(io, k)
   end
@@ -1921,7 +2026,11 @@ module MkKernel
     else
       mixed_buf = false
     end
-    li_eligible = !k[:array_arg] && !k[:value_arg] &&
+    # The object lane is left out: its cell is a Ruby call, so the
+    # interchange's contiguous SIMD loads buy nothing, and each output cell
+    # accumulates in the same order on the generic walk.
+    li_eligible = src != :object &&
+                  !k[:array_arg] && !k[:value_arg] &&
                   buf_count >= 1 && induction_count <= 1 && other_count == 0 &&
                   !mixed_buf
     if li_eligible
@@ -3743,7 +3852,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_scan_native(io, k, src)
+      emit_native_for(io, k, src) { |o| emit_scan_native(o, k, src) }
     end
     emit_scan_dispatch(io, k)
   end
@@ -3929,7 +4038,7 @@ module MkKernel
     k[:source].each do |src|
       emit_sort_cmp(io, k, src)
       emit_sort_quickselect(io, k, src) if k[:algorithm] == :partition
-      emit_sort_native(io, k, src)
+      emit_native_for(io, k, src) { |o| emit_sort_native(o, k, src) }
     end
     emit_sort_dispatch(io, k)
   end
@@ -4209,9 +4318,22 @@ module MkKernel
     io.puts "  }"
     io.puts
     io.puts "  ca_size_t fiber_n = st_in.slab_elements;"
-    io.puts "  #{name}_pair_#{src} *buf ="
-    io.puts "    xmalloc(sizeof(#{name}_pair_#{src}) * (size_t) fiber_n);"
-    if has_kind
+    if src == :object
+      # The object comparator calls <=>, so the sort can raise part way.
+      # ALLOCV frees these buffers whether the function returns or unwinds.
+      # A full sort also needs aux: ca_sort_merge_pair_object is a mergesort.
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
+      if partition
+        io.puts "  (void) haux;"
+      else
+        io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+      end
+    else
+      io.puts "  #{name}_pair_#{src} *buf ="
+      io.puts "    xmalloc(sizeof(#{name}_pair_#{src}) * (size_t) fiber_n);"
+    end
+    if has_kind && src != :object
       # PROPOSAL_PORTABLE_TEXTBOOK_SORT §9.5.2 Option γ: aux pair buffer
       # for ca_sort_merge_pair_<src> (= ping-pong bottom-up mergesort).
       # Allocated once outside the fiber loop, reused across fibers.
@@ -4356,16 +4478,15 @@ module MkKernel
         io.puts "     */"
       end
       if is_object
-        # PROPOSAL_MKKERNEL_OBJECT_DTYPE_BRANCH Phase 2: CA_OBJECT routes to
-        # libc qsort with the emitted _cmp_object (rb_funcall(<=>) based).
-        # qsort isn't stable, but our cmp tie-breaks on the original index,
-        # so the result is effectively stable.  do_stable is ignored: both
-        # paths use the same qsort + cmp here.  NaN partition is skipped
-        # (Ruby Float NaN handling deferred -- cells of type Float with NaN
-        # would compare via Float#<=> which returns nil for NaN, raising
-        # ArgumentError in the cmp helper).
-        io.puts "    (void) do_stable;   /* CA_OBJECT: qsort handles both stable / quick */"
-        io.puts "    qsort(#{buf_expr}, (size_t) #{sort_n_expr}, sizeof(#{name}_pair_#{src}), #{name}_cmp_#{src});"
+        # CA_OBJECT sorts with the emitted _cmp_object (rb_funcall(<=>)
+        # based) through ca_sort_merge_pair_object rather than libc qsort: the
+        # comparator raises on a pair that does not compare, and the raise
+        # must not unwind through libc's frames.  The cmp tie-breaks on the
+        # original index, so the order is the same for both kinds, and
+        # do_stable is ignored.  NaN partition is skipped (Float#<=> answers
+        # nil for NaN, which the comparator reports as ArgumentError).
+        io.puts "    (void) do_stable;   /* CA_OBJECT: one stable sort serves both kinds */"
+        io.puts "    ca_sort_merge_pair_object((ca_pair_object *) #{buf_expr}, (ca_pair_object *) aux, (ca_size_t) #{sort_n_expr}, #{name}_cmp_#{src});"
       elsif is_fixlen
         io.puts "    /* CA_FIXLEN: libc qsort with the memcmp comparator.  qsort isn't"
         io.puts "       stable, but #{name}_cmp_#{src} tie-breaks on the original index,"
@@ -4458,9 +4579,14 @@ module MkKernel
     end
 
     io.puts "  }"
-    io.puts "  xfree(buf);"
-    if has_kind
-      io.puts "  if ( aux ) xfree(aux);"
+    if src == :object
+      io.puts "  ALLOCV_END(hbuf);"
+      io.puts "  ALLOCV_END(haux);"
+    else
+      io.puts "  xfree(buf);"
+      if has_kind
+        io.puts "  if ( aux ) xfree(aux);"
+      end
     end
     io.puts "  ca_iter_state_finish(&st_in);"
     io.puts "  ca_iter_state_finish(&st_out);"
@@ -4911,7 +5037,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_search_native(io, k, src)
+      emit_native_for(io, k, src) { |o| emit_search_native(o, k, src) }
     end
     emit_search_dispatch(io, k)
   end
@@ -5002,6 +5128,26 @@ module MkKernel
                       "          rb_ca_obj2ptr(self, rval, &query_val_buf);\n" \
                       "          #{si[:c]} query_val = query_val_buf;"
                     end
+
+    # The object lane calls Ruby for every cell of the case B/C walk, which
+    # runs between a direct attach and detach of self and val; a raise there
+    # would leave both attached.  An entity holds no attach, so the lane
+    # reads an entity copy of whichever is a view.
+    entity_bc = if is_object
+                  <<~C.chomp
+                    volatile VALUE vca_entity = self;
+                            if ( ! ca_is_entity(ca) ) {
+                              vca_entity = rb_ca_copy(self);
+                              GetCArray(vca_entity, ca);
+                            }
+                            if ( ! ca_is_entity(cv) ) {
+                              vsrc_val = rb_ca_copy(vsrc_val);
+                              GetCArray(vsrc_val, cv);
+                            }
+                  C
+                else
+                  ""
+                end
 
     # case B/C query coercion.  numeric/object: wrap-readonly to self's
     # data_type when they differ.  fixlen: require a CA_FIXLEN query of the
@@ -5383,9 +5529,9 @@ module MkKernel
         #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
         #{op_mask_decl}
 
+        #{entity_bc}
         /* Attach self + val; rev4 uses raw row-major byte addressing. */
-        ca_attach(ca);
-        ca_attach(cv);
+        ca_attach_n(2, ca, cv);
 
         /* self_byte_stride[j] = bytes to advance along self axis j (row-major). */
         ca_size_t self_byte_stride[CA_RANK_MAX];

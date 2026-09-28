@@ -129,4 +129,13 @@ void ca_sort_merge_pair_u64 (ca_pair_u64 *a, ca_pair_u64 *aux, ca_size_t n);
 void ca_sort_merge_pair_f32 (ca_pair_f32 *a, ca_pair_f32 *aux, ca_size_t n);
 void ca_sort_merge_pair_f64 (ca_pair_f64 *a, ca_pair_f64 *aux, ca_size_t n);
 
+/* Stable bottom-up mergesort over (VALUE, index) pairs, ordered by cmp --
+   an object comparator that calls <=> and breaks ties on the index.  The
+   walk is this file's own code rather than libc qsort's, so cmp may raise:
+   the raise unwinds through frames that hold nothing.  aux holds n pairs. */
+typedef struct ca_pair_object { VALUE v; ca_size_t i; } ca_pair_object;
+void ca_sort_merge_pair_object (ca_pair_object *a, ca_pair_object *aux,
+                                ca_size_t n,
+                                int (*cmp)(const void *, const void *));
+
 #endif /* CA_SORT_KERNELS_H */
