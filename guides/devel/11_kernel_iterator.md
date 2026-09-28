@@ -734,8 +734,8 @@ sum_ctx c = { .ca = ca, .axis = axis, .op = (VALUE *) co->ptr };
 ca_iter_ensure(1, &c.st, sum_body, (VALUE) &c);
 ```
 
-The states are cleared before the body runs, so a state the body never
-opens costs nothing, and the body may finish a walk itself (finishing is
+The states are marked unopened before the body runs, so a state the body
+never opens costs nothing, and the body may finish a walk itself (finishing is
 idempotent). A state declared inside the body is not covered. Scratch the
 body allocates across a Ruby call belongs in `ALLOCV_N`, which the unwind
 collects.
