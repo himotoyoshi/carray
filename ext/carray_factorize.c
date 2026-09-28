@@ -181,10 +181,55 @@ typedef struct {
   char     *raw;    /* fixlen lane only: cap*esz bytes, the interned element bytes kept
                        for a memcmp re-check on a hash collision (NULL otherwise). */
   int       esz;    /* fixlen lane: element width in bytes (0 otherwise) */
+  int       has_val; /* object lane: val is kept (0 otherwise) */
   ca_size_t cap;    /* power of two */
   ca_size_t n;      /* distinct keys interned so far */
   int       shift;  /* 64 - log2(cap); the home slot is the top log2(cap) bits */
+  VALUE     hbuf;   /* owner of the tables, one block (fz_tmp_alloc) */
 } fz_hash;
+
+/* The tables live in buffers owned by hidden Ruby objects rather than bare
+   xmalloc.  The object lane calls #hash and #eql? for every cell, and a raise
+   there leaves the tables with nothing to free them; the owner is reclaimed
+   by the GC once the frame holding it is gone, and frees its buffer then.
+   The buffer is never scanned for VALUEs: the object lane's VALUEs are
+   elements of the live receiver. */
+static void
+fz_buffer_free (void *ptr)
+{
+  xfree(ptr);
+}
+
+static const rb_data_type_t fz_buffer_type = {
+  "carray_factorize_buffer",
+  { NULL, fz_buffer_free, NULL, },
+  NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static void *
+fz_tmp_alloc (VALUE *store, size_t bytes)
+{
+  *store = TypedData_Wrap_Struct(0, &fz_buffer_type, NULL);
+  DATA_PTR(*store) = xmalloc(bytes);
+  return DATA_PTR(*store);
+}
+
+static void *
+fz_tmp_realloc (VALUE store, size_t bytes)
+{
+  DATA_PTR(store) = xrealloc(DATA_PTR(store), bytes);
+  return DATA_PTR(store);
+}
+
+static void
+fz_tmp_free (VALUE *store)
+{
+  if ( *store ) {
+    xfree(DATA_PTR(*store));
+    DATA_PTR(*store) = NULL;
+    *store = 0;
+  }
+}
 
 /* Multiplicative hashing (Knuth, TAOCP vol. 3 sec. 6.4): multiply by
    2^64 / golden-ratio and take the TOP log2(cap) bits of the product -- the
@@ -195,19 +240,44 @@ typedef struct {
 #define FZ_GOLDEN 0x9E3779B97F4A7C15ULL
 #define FZ_HOME(h, key) ((ca_size_t) (((uint64_t)(key) * FZ_GOLDEN) >> (h)->shift))
 
+/* Points the tables of h at one new block for cap slots: key, then the
+   object lane's val, code, used, and the fixlen lane's raw bytes. */
+static void
+fz_hash_alloc (fz_hash *h, ca_size_t cap)
+{
+  int    has_val = h->has_val;
+  size_t nkey    = sizeof(uint64_t) * (size_t) cap;
+  size_t nval    = has_val ? sizeof(VALUE) * (size_t) cap : 0;
+  size_t ncode   = sizeof(int32_t) * (size_t) cap;
+  size_t nused   = sizeof(uint8_t) * (size_t) cap;
+  size_t nraw    = (size_t) cap * (size_t) h->esz;
+  char  *b = fz_tmp_alloc(&h->hbuf, nkey + nval + ncode + nused + nraw);
+  h->key  = (uint64_t *) b;                 b += nkey;
+  h->val  = has_val ? (VALUE *) b : NULL;   b += nval;
+  h->code = (int32_t *) b;                  b += ncode;
+  h->used = (uint8_t *) b;                  b += nused;
+  h->raw  = h->esz ? b : NULL;
+  h->cap  = cap;
+  MEMZERO(h->used, uint8_t, cap);
+}
+
+/* has_val: the object lane (a slot keeps its VALUE); esz > 0: the fixlen
+   lane (a slot keeps esz bytes). */
+static void
+fz_hash_setup (fz_hash *h, int has_val, int esz)
+{
+  h->shift = 64 - 10;   /* log2(1024) = 10 */
+  h->n     = 0;
+  h->hbuf  = 0;
+  h->has_val = has_val;
+  h->esz   = esz;
+  fz_hash_alloc(h, 1024);
+}
+
 static void
 fz_hash_init (fz_hash *h)
 {
-  h->cap   = 1024;
-  h->shift = 64 - 10;   /* log2(1024) = 10 */
-  h->n     = 0;
-  h->key   = ALLOC_N(uint64_t, h->cap);
-  h->code  = ALLOC_N(int32_t,  h->cap);
-  h->used  = ALLOC_N(uint8_t,  h->cap);
-  h->val   = NULL;      /* numeric lane: no VALUE re-check needed */
-  h->raw   = NULL;
-  h->esz   = 0;
-  MEMZERO(h->used, uint8_t, h->cap);
+  fz_hash_setup(h, 0, 0);   /* numeric lane: no re-check needed */
 }
 
 /* Object lane: the widened key is `rb_hash` (lossy), so a slot also stores the
@@ -216,8 +286,7 @@ fz_hash_init (fz_hash *h)
 static void
 fz_hash_init_obj (fz_hash *h)
 {
-  fz_hash_init(h);
-  h->val = ALLOC_N(VALUE, h->cap);
+  fz_hash_setup(h, 1, 0);
 }
 
 /* Fixlen lane: the key is a byte-hash of the esz-wide element (lossy), so a slot
@@ -227,19 +296,18 @@ fz_hash_init_obj (fz_hash *h)
 static void
 fz_hash_init_mem (fz_hash *h, int esz)
 {
-  fz_hash_init(h);
-  h->esz = esz;
-  h->raw = ALLOC_N(char, h->cap * esz);
+  fz_hash_setup(h, 0, esz);
 }
 
 static void
 fz_hash_free (fz_hash *h)
 {
-  if ( h->key )  { xfree(h->key);  h->key  = NULL; }
-  if ( h->code ) { xfree(h->code); h->code = NULL; }
-  if ( h->used ) { xfree(h->used); h->used = NULL; }
-  if ( h->val )  { xfree(h->val);  h->val  = NULL; }
-  if ( h->raw )  { xfree(h->raw);  h->raw  = NULL; }
+  fz_tmp_free(&h->hbuf);
+  h->key  = NULL;
+  h->code = NULL;
+  h->used = NULL;
+  h->val  = NULL;
+  h->raw  = NULL;
 }
 
 /* FNV-1a over esz bytes: a lossy 64-bit key for the fixlen lane. */
@@ -272,14 +340,10 @@ fz_hash_grow (fz_hash *h)
   VALUE    *ov = h->val;
   char     *orw = h->raw;
   int       esz = h->esz;
-  h->cap    = newcap;
-  h->shift -= 1;                 /* log2(cap) grew by one */
-  h->key    = ALLOC_N(uint64_t, newcap);
-  h->code   = ALLOC_N(int32_t,  newcap);
-  h->used   = ALLOC_N(uint8_t,  newcap);
-  if ( ov )  { h->val = ALLOC_N(VALUE, newcap); }
-  if ( orw ) { h->raw = ALLOC_N(char, newcap * esz); }
-  MEMZERO(h->used, uint8_t, newcap);
+  VALUE     hold = h->hbuf;   /* keeps the old block until it is freed below */
+  h->hbuf   = 0;
+  h->shift -= 1;              /* log2(cap) grew by one */
+  fz_hash_alloc(h, newcap);
   ca_size_t mask = newcap - 1;
   for ( ca_size_t s = 0; s < oldcap; s++ ) {
     if ( ! ou[s] ) { continue; }
@@ -291,9 +355,7 @@ fz_hash_grow (fz_hash *h)
     if ( ov )  { h->val[slot] = ov[s]; }
     if ( orw ) { memcpy(h->raw + slot * esz, orw + s * esz, esz); }
   }
-  xfree(ok); xfree(oc); xfree(ou);
-  if ( ov )  { xfree(ov); }
-  if ( orw ) { xfree(orw); }
+  fz_tmp_free(&hold);
 }
 
 /* True when v is a Float holding NaN (any bit pattern). */
@@ -452,6 +514,7 @@ typedef struct {
   ca_size_t cap;    /* capacity in elements */
   ca_size_t n;      /* elements stored */
   int       esz;    /* element bytes */
+  VALUE     hp;     /* owner of p (see fz_tmp_alloc) */
 } fz_levels;
 
 static void
@@ -460,7 +523,8 @@ fz_levels_init (fz_levels *l, int esz)
   l->esz = esz;
   l->cap = 16;
   l->n   = 0;
-  l->p   = ALLOC_N(char, l->cap * esz);
+  l->hp  = 0;
+  l->p   = fz_tmp_alloc(&l->hp, (size_t) l->cap * esz);
 }
 
 static void
@@ -468,7 +532,7 @@ fz_levels_push (fz_levels *l, const void *e)
 {
   if ( l->n == l->cap ) {
     l->cap <<= 1;
-    REALLOC_N(l->p, char, l->cap * l->esz);
+    l->p = fz_tmp_realloc(l->hp, (size_t) l->cap * l->esz);
   }
   memcpy(l->p + l->n * l->esz, e, l->esz);
   l->n++;
@@ -477,7 +541,35 @@ fz_levels_push (fz_levels *l, const void *e)
 static void
 fz_levels_free (fz_levels *l)
 {
-  if ( l->p ) { xfree(l->p); l->p = NULL; }
+  fz_tmp_free(&l->hp);
+  l->p = NULL;
+}
+
+/* ---- the frame a discovery method runs in ---------------------------------
+
+   The object lane calls #hash and #eql? for every cell, and either can raise
+   in the middle of a walk.  The walks' states live in this frame, outside the
+   method's body, and ca_iter_ensure finishes them however the body leaves;
+   the tables have owners the unwind collects (fz_tmp_alloc).  Slots 0
+   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all. */
+
+typedef struct {
+  ca_iter_state st[3];
+  VALUE         self;
+  VALUE         a;
+  VALUE         b;
+  int           i;
+} fz_frame;
+
+static VALUE
+fz_run (VALUE (*body)(VALUE), VALUE self, VALUE a, VALUE b, int i)
+{
+  fz_frame fr;
+  fr.self = self;
+  fr.a    = a;
+  fr.b    = b;
+  fr.i    = i;
+  return ca_iter_ensure(3, fr.st, body, (VALUE) &fr);
 }
 
 /* @overload __factorize_appearance__
@@ -497,8 +589,10 @@ fz_levels_free (fz_levels *l)
               (row-major flatten) order.
 */
 static VALUE
-rb_ca_factorize_appearance (VALUE self)
+fz_factorize_appearance_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "categorize");
@@ -536,7 +630,7 @@ rb_ca_factorize_appearance (VALUE self)
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber = row-major flatten */
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -615,7 +709,7 @@ rb_ca_factorize_appearance (VALUE self)
       }                                                                      \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cu32, axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cu32, axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     switch ( dt ) {
     case CA_INT8:   FZ_LOOP(int8_t,   (int64_t));  break;
@@ -686,6 +780,12 @@ rb_ca_factorize_appearance (VALUE self)
   return rb_ary_new3(2, vcodes, fz_face_relift(vlev, face));
 }
 
+static VALUE
+rb_ca_factorize_appearance (VALUE self)
+{
+  return fz_run(fz_factorize_appearance_body, self, Qnil, Qnil, 0);
+}
+
 /* @overload __mask_duplicates__(axis)
 
    INTERNAL (mask_duplicates). Mark each cell whose value duplicates an
@@ -706,8 +806,11 @@ rb_ca_factorize_appearance (VALUE self)
    value (so the second and later NaN are duplicates, as in the numeric lane).
 */
 static VALUE
-rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
+fz_mask_duplicates_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -741,7 +844,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -814,7 +917,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, (int8_t) axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, (int8_t) axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     fz_hash_reset(&h);   /* independent seen-set per fiber */
     switch ( dt ) {
@@ -841,6 +944,12 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
   return vout;
 }
 
+static VALUE
+rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_mask_duplicates_body, self, vaxis, Qnil, 0);
+}
+
 /* @overload __unique_flat__
 
    INTERNAL (CArray#unique). Collect the distinct values of self in
@@ -865,8 +974,10 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
    uniform-width binary cells the fixlen seen-set used.
 */
 static VALUE
-rb_ca_unique_flat (VALUE self)
+fz_unique_flat_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "unique");
@@ -897,7 +1008,7 @@ rb_ca_unique_flat (VALUE self)
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber; hash not reset =
                                               one seen-set over the whole array */
-  ca_iter_state st_in;
+  ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
   ca_size_t   n;
@@ -964,7 +1075,7 @@ rb_ca_unique_flat (VALUE self)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   UQ_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  UQ_LOOP(int16_t,  (int64_t));  break;
@@ -1002,6 +1113,12 @@ rb_ca_unique_flat (VALUE self)
   return fz_face_relift(vlev, face);   /* distinct *values*: give the Face back */
 }
 
+static VALUE
+rb_ca_unique_flat (VALUE self)
+{
+  return fz_run(fz_unique_flat_body, self, Qnil, Qnil, 0);
+}
+
 /* Intern every non-masked cell of cv into h, one seen-set over the whole array
    (the hash is not reset between fibers).  When lv is non-NULL, the first-seen
    raw element of each distinct value is pushed to it (appearance order), so the
@@ -1011,11 +1128,10 @@ rb_ca_unique_flat (VALUE self)
    fixlen byte-hash + memcmp.  Used to build the probe set (is_in, set relations)
    and to accumulate distinct values (union). */
 static void
-fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
+fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 {
   int8_t dt = cv->data_type;
   int8_t vaxis = (int8_t) (cv->ndim - 1);
-  ca_iter_state st_v;
   char       *p_v;
   boolean8_t *mv;
   ca_size_t   nv;
@@ -1075,7 +1191,7 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
+  CA_FOR_EACH_FIBER_MASKED(*st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
     switch ( dt ) {
     case CA_INT8:   FZ_IA(int8_t,   (int64_t));  break;
     case CA_INT16:  FZ_IA(int16_t,  (int64_t));  break;
@@ -1115,8 +1231,11 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
    fixlen byte equality (byte-hash + memcmp).
 */
 static VALUE
-rb_ca_is_in (VALUE self, VALUE rvalues)
+fz_is_in_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rvalues = fr->a;
   CArray *ca, *cv;
   volatile VALUE face;
   self     = fz_face_descend(self, &face, "is_in");
@@ -1164,14 +1283,14 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   else                        { fz_hash_init(&h); }
 
   /* ---- Phase 1: build the seen-set from every non-masked cell of `values`. */
-  fz_intern_all(&h, cv, NULL);
+  fz_intern_all(&fr->st[2], &h, cv, NULL);
 
   /* ---- Phase 2: probe every cell of self, writing the boolean membership. */
   VALUE vout = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
   CArray *cout;
   GetCArray(vout, cout);
   {
-    ca_iter_state st_in, st_out;
+    ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
     char       *p_in, *p_out;
     boolean8_t *m;
     ca_size_t   n;
@@ -1227,7 +1346,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, axis,
+    CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, axis,
                                    CA_KERNEL_READ, p_in, p_out, n, m) {
       switch ( dt ) {
       case CA_INT8:   IN_PROBE(int8_t,   (int64_t));  break;
@@ -1259,6 +1378,12 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   return vout;
 }
 
+static VALUE
+rb_ca_is_in (VALUE self, VALUE rvalues)
+{
+  return fz_run(fz_is_in_body, self, rvalues, Qnil, 0);
+}
+
 /* @overload __locate_addr__(ref)
 
    INTERNAL (CArray#locate_addr, exact hash lane). For each cell of self, the
@@ -1276,8 +1401,11 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
    appearance order (matching the discovery family); on a `ref` with duplicate
    values this is the earliest address, which can differ from the bsearch lane. */
 static VALUE
-rb_ca_locate_addr (VALUE self, VALUE rref)
+fz_locate_addr_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rref = fr->a;
   CArray *ca, *cr;
   /* Here the *reference* is the argument (self is the query being placed on
      rref), so the gate runs the other way round: rref reconciles self.  The
@@ -1329,7 +1457,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
 
   /* ---- Phase 1: build value -> first-address map from ref (row-major). ----- */
   {
-    ca_iter_state st_r;
+    ca_iter_state *st_r = &fr->st[0];
     char       *p_r;
     boolean8_t *mr;
     ca_size_t   nr;
@@ -1394,7 +1522,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_MASKED(st_r, cr, raxis, CA_KERNEL_READ, p_r, nr, mr) {
+    CA_FOR_EACH_FIBER_MASKED(*st_r, cr, raxis, CA_KERNEL_READ, p_r, nr, mr) {
       switch ( dt ) {
       case CA_INT8:   LOC_BUILD(int8_t,   (int64_t));  break;
       case CA_INT16:  LOC_BUILD(int16_t,  (int64_t));  break;
@@ -1422,10 +1550,11 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
   CArray *cout;
   GetCArray(vout, cout);
   int64_t    *out = (int64_t *) cout->ptr;
-  boolean8_t *um  = ALLOC_N(boolean8_t, ca->elements);   /* undef flags scratch */
+  volatile VALUE hum = 0;
+  boolean8_t *um  = ALLOCV_N(boolean8_t, hum, ca->elements);   /* undef flags scratch */
   ca_size_t   n_undef = 0;
   {
-    ca_iter_state st_in;
+    ca_iter_state *st_in = &fr->st[1];
     char       *p_in;
     boolean8_t *m;
     ca_size_t   n;
@@ -1494,7 +1623,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+    CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
       switch ( dt ) {
       case CA_INT8:   LOC_PROBE(int8_t,   (int64_t));  break;
       case CA_INT16:  LOC_PROBE(int16_t,  (int64_t));  break;
@@ -1526,9 +1655,15 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
     ca_create_mask(cout);
     memcpy(cout->mask->ptr, um, (size_t) ca->elements);
   }
-  xfree(um);
+  ALLOCV_END(hum);
 
   return vout;
+}
+
+static VALUE
+rb_ca_locate_addr (VALUE self, VALUE rref)
+{
+  return fz_run(fz_locate_addr_body, self, rref, Qnil, 0);
 }
 
 /* Shared body of __intersection__ (keep_when_hit = 1) and __difference__
@@ -1540,8 +1675,12 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
    lane (numeric `==` + NaN collapse + -0.0 == +0.0, object hash/eql? + NaN
    collapse, fixlen byte equality). */
 static VALUE
-fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
+fz_set_relation_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rother = fr->a;
+  int keep_when_hit = fr->i;
   CArray *ca, *co;
   volatile VALUE face;
   self   = fz_face_descend(self, &face, "set relation");
@@ -1597,12 +1736,12 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
   fz_levels_init(&lv, (int) ca->bytes);
 
   /* Build the probe set from every non-masked cell of other. */
-  fz_intern_all(&hoth, co, NULL);
+  fz_intern_all(&fr->st[2], &hoth, co, NULL);
 
   /* Walk self: hself dedups, so each distinct self value is decided once; keep
      it when its membership in other equals keep_when_hit. */
   int8_t axis = (int8_t) (ca->ndim - 1);
-  ca_iter_state st;
+  ca_iter_state *st = &fr->st[0];
   char       *p;
   boolean8_t *m;
   ca_size_t   n;
@@ -1670,7 +1809,7 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st, ca, axis, CA_KERNEL_READ, p, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st, ca, axis, CA_KERNEL_READ, p, n, m) {
     switch ( dt ) {
     case CA_INT8:   SR(int8_t,   (int64_t));  break;
     case CA_INT16:  SR(int16_t,  (int64_t));  break;
@@ -1708,6 +1847,12 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
   return fz_face_relift(vlev, face);   /* set *values*: give the Face back */
 }
 
+static VALUE
+fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
+{
+  return fz_run(fz_set_relation_body, self, rother, Qnil, keep_when_hit);
+}
+
 /* @overload __intersection__(other)
    INTERNAL (CArray#intersection). 1-D CArray of the distinct values present in
    both self and other, in self's first-appearance order. */
@@ -1733,8 +1878,11 @@ rb_ca_difference (VALUE self, VALUE rother)
    distinct values first, then other's not-yet-seen ones).  Masked cells of
    either array do not participate. */
 static VALUE
-rb_ca_set_union (VALUE self, VALUE rother)
+fz_set_union_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rother = fr->a;
   CArray *ca, *co;
   volatile VALUE face;
   self   = fz_face_descend(self, &face, "union");
@@ -1775,8 +1923,8 @@ rb_ca_set_union (VALUE self, VALUE rother)
   fz_levels lv;
   fz_levels_init(&lv, (int) ca->bytes);
 
-  fz_intern_all(&h, ca, &lv);   /* self's distinct values, appearance order */
-  fz_intern_all(&h, co, &lv);   /* + other's not-yet-seen distinct values   */
+  fz_intern_all(&fr->st[2], &h, ca, &lv);   /* self's distinct values, appearance order */
+  fz_intern_all(&fr->st[2], &h, co, &lv);   /* + other's not-yet-seen distinct values   */
 
   ca_size_t k = lv.n;
   fz_hash_free(&h);
@@ -1792,6 +1940,12 @@ rb_ca_set_union (VALUE self, VALUE rother)
   fz_levels_free(&lv);
 
   return fz_face_relift(vlev, face);   /* set *values*: give the Face back */
+}
+
+static VALUE
+rb_ca_set_union (VALUE self, VALUE rother)
+{
+  return fz_run(fz_set_union_body, self, rother, Qnil, 0);
 }
 
 /* @overload __value_counts_flat__
@@ -1810,8 +1964,10 @@ rb_ca_set_union (VALUE self, VALUE rother)
    collapses every Float NaN to one value (their counts add up, as numeric does).
 */
 static VALUE
-rb_ca_value_counts_flat (VALUE self)
+fz_value_counts_flat_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "value_counts");
@@ -1843,7 +1999,7 @@ rb_ca_value_counts_flat (VALUE self)
   fz_levels_init(&ct, (int) sizeof(int64_t));
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* one seen-set over the whole array */
-  ca_iter_state st_in;
+  ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
   ca_size_t   n;
@@ -1929,7 +2085,7 @@ rb_ca_value_counts_flat (VALUE self)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   VC_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  VC_LOOP(int16_t,  (int64_t));  break;
@@ -1973,6 +2129,12 @@ rb_ca_value_counts_flat (VALUE self)
   return rb_ary_new3(2, fz_face_relift(vlev, face), vcnt);
 }
 
+static VALUE
+rb_ca_value_counts_flat (VALUE self)
+{
+  return fz_run(fz_value_counts_flat_body, self, Qnil, Qnil, 0);
+}
+
 /* @overload __nunique__(axis, keep_axis)
 
    INTERNAL (CArray#nunique). Count the distinct values along axis, one linear
@@ -1985,8 +2147,12 @@ rb_ca_value_counts_flat (VALUE self)
    Ruby Hash distinctness; the object lane also collapses every Float NaN to one.
 */
 static VALUE
-rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
+fz_nunique_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
+  VALUE vkeep = fr->b;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -2023,8 +2189,8 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
 
-  ca_iter_state st;
-  int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  ca_iter_state *st = &fr->st[0];
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h);
     rb_raise(rb_eRuntimeError, "__nunique__: kernel_iterator init failed rc=%d", rc);
@@ -2062,43 +2228,43 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
      each esz-wide element via the fixlen lane. */
   #define NU_MEM_WALK                                                         \
     do {                                                                      \
-      int8_t K = st.slab_ndim;                                               \
+      int8_t K = st->slab_ndim;                                              \
       ca_size_t idx[CA_RANK_MAX] = { 0 };                                    \
-      ca_size_t total = st.slab_elements;                                    \
+      ca_size_t total = st->slab_elements;                                   \
       for ( ca_size_t e = 0; e < total; e++ ) {                             \
         ca_size_t doff = 0, moff = 0;                                        \
         for ( int8_t kk = 0; kk < K; kk++ ) {                               \
-          doff += idx[kk] * st.slab_strides[kk];                            \
-          moff += idx[kk] * st.slab_mask_strides[kk];                       \
+          doff += idx[kk] * st->slab_strides[kk];                           \
+          moff += idx[kk] * st->slab_mask_strides[kk];                      \
         }                                                                    \
         if ( ! (m && m[moff]) ) {                                           \
           int _n; fz_hash_intern_mem(&h, p + doff, &_n);                    \
         }                                                                    \
         for ( int8_t kk = (int8_t)(K - 1); kk >= 0; kk-- ) {               \
-          if ( ++idx[kk] < st.slab_dims[kk] ) break;                        \
+          if ( ++idx[kk] < st->slab_dims[kk] ) break;                       \
           idx[kk] = 0;                                                      \
         }                                                                    \
       }                                                                      \
     } while (0)
 
-  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+  while ( ca_iter_state_next_slab_axes(st, &p, &m) ) {
     fz_hash_reset(&h);   /* independent seen-set per fiber */
     switch ( dt ) {
-    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  st, p, m, dummy, 0, NU_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, NU_FLOAT(float,  uint32_t, 0x7fc00000ULL));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, st, p, m, dummy, 0, NU_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, NU_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
       break;
-    case CA_OBJECT: CA_SLAB_REDUCE_T(VALUE, st, p, m, dummy, 0, NU_OBJ); break;
+    case CA_OBJECT: CA_SLAB_REDUCE_T(VALUE, *st, p, m, dummy, 0, NU_OBJ); break;
     case CA_FIXLEN: NU_MEM_WALK;                                          break;
     }
     op[out_i++] = (int64_t) h.n;
@@ -2109,9 +2275,15 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
   #undef NU_MEM_WALK
   (void) dummy;
 
-  ca_iter_state_finish(&st);
+  ca_iter_state_finish(st);
   fz_hash_free(&h);
   return vout;
+}
+
+static VALUE
+rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
+{
+  return fz_run(fz_nunique_body, self, vaxis, vkeep, 0);
 }
 
 /* @overload __is_mode__(axis)
@@ -2132,8 +2304,11 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
    Callers pass flat input by flattening first (a single fiber over axis 0).
 */
 static VALUE
-rb_ca_is_mode (VALUE self, VALUE vaxis)
+fz_is_mode_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -2168,7 +2343,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
   else                        { fz_hash_init(&h); }
   fz_levels_init(&ct, (int) sizeof(int64_t));
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -2287,7 +2462,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, (int8_t) axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, (int8_t) axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     fz_hash_reset(&h);   /* independent frequency table per fiber */
     ct.n = 0;
@@ -2314,6 +2489,12 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
   fz_hash_free(&h);
   fz_levels_free(&ct);
   return vout;
+}
+
+static VALUE
+rb_ca_is_mode (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_is_mode_body, self, vaxis, Qnil, 0);
 }
 
 /* Ascending comparison for the modal-value sort, NaN ordered last so a
@@ -2349,8 +2530,11 @@ static int mode_gt_f64 (double a, double b) { if ( a != a ) return b == b; if ( 
    its sign), matching the discovery family.
 */
 static VALUE
-rb_ca_mode_axis (VALUE self, VALUE vaxis)
+fz_mode_axis_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "mode");
@@ -2392,15 +2576,16 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   fz_levels_init(&mod,  esz);
   fz_levels_init(&flat, esz);
 
-  ca_size_t *foff = ALLOC_N(ca_size_t, M + 1);   /* prefix offsets into flat */
+  volatile VALUE hfoff = 0;
+  ca_size_t *foff = ALLOCV_N(ca_size_t, hfoff, M + 1);   /* prefix offsets into flat */
   foff[0] = 0;
 
   int8_t ax = (int8_t) axis;
-  ca_iter_state st;
-  int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  ca_iter_state *st = &fr->st[0];
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h); fz_levels_free(&lv); fz_levels_free(&ct);
-    fz_levels_free(&mod); fz_levels_free(&flat); xfree(foff);
+    fz_levels_free(&mod); fz_levels_free(&flat); ALLOCV_END(hfoff);
     rb_raise(rb_eRuntimeError, "__mode_axis__: kernel_iterator init failed rc=%d", rc);
   }
 
@@ -2450,24 +2635,24 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
       for ( ca_size_t x = 0; x < cm; x++ ) { fz_levels_push(&flat, &dp[x]); } \
     } while (0)
 
-  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+  while ( ca_iter_state_next_slab_axes(st, &p, &m) ) {
     fz_hash_reset(&h);
     lv.n = 0; ct.n = 0; mod.n = 0;
 
     switch ( dt ) {
-    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  st, p, m, dummy, 0, MB_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, MB_FLOAT(float,  uint32_t, 0x7fc00000ULL));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, st, p, m, dummy, 0, MB_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, MB_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
       break;
     }
 
@@ -2499,7 +2684,7 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   #undef MODE_EMIT
   (void) dummy;
 
-  ca_iter_state_finish(&st);
+  ca_iter_state_finish(st);
   fz_hash_free(&h);
   fz_levels_free(&lv);
   fz_levels_free(&ct);
@@ -2529,8 +2714,14 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   }
 
   fz_levels_free(&flat);
-  xfree(foff);
+  ALLOCV_END(hfoff);
   return result;
+}
+
+static VALUE
+rb_ca_mode_axis (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_mode_axis_body, self, vaxis, Qnil, 0);
 }
 
 void

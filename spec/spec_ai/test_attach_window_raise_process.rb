@@ -199,6 +199,12 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
 
   # Bytes the malloc zone grows by per call of +expr+ after +setup+, or nil
   # where the measurement is not available.
+  #
+  # The buffers these cases strand are hundreds of kilobytes per call, while
+  # the Ruby heap's own growth reads as up to a few tens of kilobytes per
+  # call here, so the bound sits between the two.
+  STRANDED_BUFFER_BOUND = 64 * 1024
+
   def malloc_growth_per_call (setup, expr)
     status, out = run_child(<<~RUBY)
       begin
@@ -237,12 +243,13 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     %w[o.sort_index o.rank_index o.partition_index(10_000)].each do |expr|
       growth = malloc_growth_per_call(setup, expr)
       omit "measurement unavailable" if growth.nil?
-      assert_operator growth, :<, 4096, expr
+      assert_operator growth, :<, STRANDED_BUFFER_BOUND, expr
     end
   end
 
-  # The value-hash discovery family keeps its hash table and its levels in
-  # memory it allocates itself; an element whose #hash raises strands both.
+  # The value-hash discovery family keeps a hash table and its levels for
+  # the length of the walk; an element whose #hash raises must not strand
+  # them.
   def test_discovery_frees_its_tables_when_hash_raises
     omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = <<~SETUP
@@ -254,8 +261,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
        CA_OBJECT([1,2]).is_in(o)].each do |expr|
       growth = malloc_growth_per_call(setup, expr)
       omit "measurement unavailable" if growth.nil?
-      assert_broken growth > 4096, true,
-                    "that #{expr} grows the malloc zone by less than 4096 bytes per call"
+      assert_operator growth, :<, STRANDED_BUFFER_BOUND, expr
     end
   end
 

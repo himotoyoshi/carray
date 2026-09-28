@@ -395,7 +395,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     "locate_addr_as_reference" => ->(v) { CA_OBJECT([1, 2]).locate_addr(v) },
     "categorize"      => ->(v) { v.categorize },
   }.each do |name, op|
-    pin_leak("discovery_#{name}_hash_raises", RuntimeError, [true, false]) do
+    releases("discovery_#{name}_hash_raises", RuntimeError) do
       v, t = self.class.discovery_victim
       [[v, t], -> { op.(v) }]
     end
