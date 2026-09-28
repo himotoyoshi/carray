@@ -1787,6 +1787,134 @@ ca_attach_all (CArray **list, int32_t n)
   }
 }
 
+/* An attach window over list[0..n-1] that closes however body leaves.
+
+   modes holds one letter per array:
+     'r'  attach; detach on close
+     'w'  attach; sync, then detach on close
+     'a'  allocate (write only); sync, then detach on close
+
+   Opening takes all of the arrays or none.  Closing syncs the 'w' arrays
+   even when body raised or broke out -- the cells body wrote reach the
+   parent, as they would for an entity, which has no separate buffer.  An
+   'a' array is not synced after a raise: allocate did not gather, so its
+   cells body never wrote hold nothing faithful to push back.
+
+   Every array is detached, in reverse order, whatever happens.  body's
+   own exception wins over one raised by a sync; when body returned and a
+   sync raised, that exception propagates once everything is detached. */
+
+typedef struct {
+  int32_t      n;
+  CArray     **list;
+  const char  *modes;
+  int32_t      opened;
+  int          body_done;       /* body returned without raising */
+  int          sync_tag;
+  volatile VALUE sync_err;
+  VALUE      (*body)(VALUE);
+  VALUE        arg;
+} ca_window_ctx_t;
+
+static VALUE
+ca_attach_window_open (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  for ( ; w->opened < w->n; w->opened++ ) {
+    if ( w->modes[w->opened] == 'a' ) {
+      ca_allocate(w->list[w->opened]);
+    }
+    else {
+      ca_attach(w->list[w->opened]);
+    }
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_attach_window_body (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  VALUE result = w->body(w->arg);
+  w->body_done = 1;
+  return result;
+}
+
+static VALUE
+ca_attach_window_sync (VALUE varg)
+{
+  ca_sync((void *) varg);
+  return Qnil;
+}
+
+/* The ensure half.  rb_ensure keeps the exception body raised (or the
+   break it took) across this call, so a sync raising in here is caught
+   and set aside rather than let replace it. */
+static VALUE
+ca_attach_window_close (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  int32_t k;
+  for ( k = w->opened - 1; k >= 0; k-- ) {
+    CArray *ca   = w->list[k];
+    char    mode = w->modes[k];
+    if ( ! ca ) {
+      continue;
+    }
+    if ( ca->ptr && ( mode == 'w' || ( mode == 'a' && w->body_done ) ) ) {
+      int tag = 0;
+      rb_protect(ca_attach_window_sync, (VALUE) ca, &tag);
+      if ( tag && ! w->sync_tag ) {
+        w->sync_tag = tag;
+        w->sync_err = rb_errinfo();
+      }
+      rb_set_errinfo(Qnil);
+    }
+    if ( ca->ptr ) {
+      ca_detach(ca);
+    }
+  }
+  return Qnil;
+}
+
+VALUE
+ca_attach_window (int32_t n, CArray **list, const char *modes,
+                  VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_window_ctx_t w;
+  VALUE result;
+  int   tag = 0;
+
+  w.n         = n;
+  w.list      = list;
+  w.modes     = modes;
+  w.opened    = 0;
+  w.body_done = 0;
+  w.sync_tag  = 0;
+  w.sync_err  = Qnil;
+  w.body      = body;
+  w.arg       = arg;
+
+  rb_protect(ca_attach_window_open, (VALUE) &w, &tag);
+  if ( tag ) {
+    while ( w.opened > 0 ) {
+      w.opened--;
+      if ( w.list[w.opened] ) {
+        ca_detach(w.list[w.opened]);
+      }
+    }
+    rb_jump_tag(tag);
+  }
+
+  result = rb_ensure(ca_attach_window_body,  (VALUE) &w,
+                     ca_attach_window_close, (VALUE) &w);
+  if ( w.sync_tag && RB_TYPE_P(w.sync_err, T_OBJECT) &&
+       RTEST(rb_obj_is_kind_of(w.sync_err, rb_eException)) ) {
+    rb_exc_raise(w.sync_err);
+  }
+  return result;
+}
+
 /* attach parent's data to ca->ptr */
 
 void
