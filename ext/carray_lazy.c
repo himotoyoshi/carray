@@ -437,6 +437,57 @@ ca_lazy_arena_exit (void)
      from being collected in the first place. */
 }
 
+/* Runs body(arg) inside an enter / exit bracket that closes however body
+   leaves.  cleanup(arg), when given, runs first -- the place to release
+   the scratches and detach the arrays body acquired -- and the exit runs
+   after it.
+
+   A raise that skipped the exit would leave the depth above 0 for the
+   rest of the process: the depth-0 reset that recovers abandoned slots
+   would never fire again, and once 32 slots were abandoned every lazy
+   expression would fail. */
+
+typedef struct {
+  VALUE (*cleanup)(VALUE);
+  VALUE   arg;
+} ca_lazy_arena_ensure_t;
+
+static VALUE
+ca_lazy_arena_ensure (VALUE varg)
+{
+  ca_lazy_arena_ensure_t *e = (ca_lazy_arena_ensure_t *) varg;
+  if ( e->cleanup ) {
+    e->cleanup(e->arg);
+  }
+  ca_lazy_arena_exit();
+  return Qnil;
+}
+
+VALUE
+ca_lazy_arena_protect (VALUE (*body)(VALUE), VALUE (*cleanup)(VALUE),
+                       VALUE arg)
+{
+  ca_lazy_arena_ensure_t e;
+  e.cleanup = cleanup;
+  e.arg     = arg;
+  ca_lazy_arena_enter();
+  return rb_ensure(body, arg, ca_lazy_arena_ensure, (VALUE) &e);
+}
+
+/* A cleanup for ca_lazy_arena_protect when body holds one scratch: arg
+   points at a struct whose first member is that scratch (NULL until it
+   is acquired). */
+VALUE
+ca_lazy_arena_release_held (VALUE arg)
+{
+  void **held = (void **) arg;
+  if ( *held ) {
+    ca_lazy_arena_release(*held);
+    *held = NULL;
+  }
+  return Qnil;
+}
+
 void *
 ca_lazy_arena_acquire (ca_size_t bytes)
 {

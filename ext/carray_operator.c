@@ -133,6 +133,130 @@ ca_chunked_gather (CArray *ca, ca_size_t off, ca_size_t n, void *dest)
   ca_xfer_stride(ca, starts, counts, strides, dest, CA_XFER_GET);
 }
 
+/* The chunked kernel run shared by the binop / triop / bincmp drivers.
+
+   Each input operand is acquired once and read chunk by chunk:
+   - a scalar (step 0) is gathered once, or aliased
+   - an alias array is read through its own ptr at the chunk offset
+   - any other array is gathered into an arena scratch every chunk
+
+   The acquires, the gathers and the kernel itself can all raise (a view
+   that refuses the transfer, an object lane calling Ruby), so the run
+   goes through ca_lazy_arena_protect and the release -- scratches back to
+   the arena, aliases detached -- happens however it ends. */
+
+#define CA_CHUNKED_MAX_OPERANDS 3
+
+typedef struct ca_chunked_run {
+  int         n_op;
+  CArray     *ca[CA_CHUNKED_MAX_OPERANDS];
+  ca_size_t   step[CA_CHUNKED_MAX_OPERANDS];
+  char       *src[CA_CHUNKED_MAX_OPERANDS];
+  void       *scratch[CA_CHUNKED_MAX_OPERANDS];
+  int         per_chunk[CA_CHUNKED_MAX_OPERANDS];
+  int         attached[CA_CHUNKED_MAX_OPERANDS];
+  ca_size_t   n_total;
+  ca_size_t   chunk_n;
+  /* Calls the kernel on cells [off, off + n) with p[k] the chunk of
+     operand k. */
+  void      (*kernel)(struct ca_chunked_run *run, ca_size_t off, ca_size_t n,
+                      char **p);
+  void       *data;    /* the driver's kernel table and output */
+} ca_chunked_run_t;
+
+static void
+ca_chunked_run_init (ca_chunked_run_t *run, ca_size_t n_total,
+                     ca_size_t chunk_n)
+{
+  MEMZERO(run, ca_chunked_run_t, 1);
+  run->n_total = n_total;
+  run->chunk_n = chunk_n;
+}
+
+static void
+ca_chunked_run_add (ca_chunked_run_t *run, CArray *ca, ca_size_t step)
+{
+  run->ca[run->n_op]   = ca;
+  run->step[run->n_op] = step;
+  run->n_op++;
+}
+
+static void
+ca_chunked_run_acquire (ca_chunked_run_t *run, int k)
+{
+  CArray *ca = run->ca[k];
+  if ( ca_attach_is_alias(ca) ) {
+    ca_attach(ca);
+    run->attached[k] = 1;
+    run->src[k] = (char *) ca->ptr;
+  }
+  else if ( run->step[k] == 0 ) {
+    run->scratch[k] = ca_op_acquire_operand_scratch(ca, 1);
+    ca_xfer_all(ca, run->scratch[k], CA_XFER_GET);
+    run->src[k] = (char *) run->scratch[k];
+  }
+  else {
+    run->scratch[k] = ca_op_acquire_operand_scratch(ca, run->chunk_n);
+    run->src[k] = (char *) run->scratch[k];
+    run->per_chunk[k] = 1;
+  }
+}
+
+static VALUE
+ca_chunked_run_body (VALUE arg)
+{
+  ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
+  char     *p[CA_CHUNKED_MAX_OPERANDS];
+  ca_size_t off;
+  int k;
+
+  for ( k = 0; k < run->n_op; k++ ) {
+    ca_chunked_run_acquire(run, k);
+  }
+  for ( off = 0; off < run->n_total; off += run->chunk_n ) {
+    ca_size_t n = ( off + run->chunk_n > run->n_total )
+                  ? run->n_total - off : run->chunk_n;
+    for ( k = 0; k < run->n_op; k++ ) {
+      if ( run->per_chunk[k] ) {
+        ca_chunked_gather(run->ca[k], off, n, run->scratch[k]);
+        p[k] = run->src[k];
+      }
+      else {
+        p[k] = run->src[k] + ( run->step[k] ? off * run->ca[k]->bytes : 0 );
+      }
+    }
+    run->kernel(run, off, n, p);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_chunked_run_release (VALUE arg)
+{
+  ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
+  int k;
+  for ( k = run->n_op - 1; k >= 0; k-- ) {
+    if ( run->scratch[k] ) {
+      ca_lazy_arena_release(run->scratch[k]);
+      run->scratch[k] = NULL;
+    }
+  }
+  for ( k = run->n_op - 1; k >= 0; k-- ) {
+    if ( run->attached[k] ) {
+      ca_detach(run->ca[k]);
+      run->attached[k] = 0;
+    }
+  }
+  return Qnil;
+}
+
+static void
+ca_chunked_run (ca_chunked_run_t *run)
+{
+  ca_lazy_arena_protect(ca_chunked_run_body, ca_chunked_run_release,
+                        (VALUE) run);
+}
+
 /* Operand mask overlay without calling ca_attach on the operand masks.
 
    `ca_copy_mask_overlay` (carray_mask.c) attaches each operand mask via
@@ -622,6 +746,26 @@ ca_kleene_bool_fixup (VALUE vout, VALUE vself, VALUE vother, int is_or)
            CATile expansion, attach-hostile roots, and unattachable test
            fixtures working.
    Output `ca3` is always a new entity (write target, attach legitimate). */
+typedef struct {
+  ca_binop_func_t *func;
+  int8_t           dt;
+  CArray          *out;
+  ca_size_t        step_out;
+} ca_binop_chunk_t;
+
+static void
+ca_binop_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
+                       char **p)
+{
+  ca_binop_chunk_t *d = (ca_binop_chunk_t *) run->data;
+  ca_size_t o = d->step_out ? off : 0;
+  d->func[d->dt](n,
+                 d->out->mask ? ((boolean8_t *) d->out->mask->ptr) + o : NULL,
+                 p[0], run->step[0],
+                 p[1], run->step[1],
+                 (char *) d->out->ptr + o * d->out->bytes, d->step_out);
+}
+
 VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])
@@ -744,13 +888,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
        - both array & both non-alias (= mt + mt2) → CHUNKED (peak 2x win)
        - one non-alias array + one alias/scalar (= mt + 3.14, mt + entity)
          → 1-shot ALLOCV  */
-    char *p1_src = NULL, *p2_src = NULL;
-    void *s1_arena = NULL, *s2_arena = NULL;
-    int gather_per_chunk1 = 0, gather_per_chunk2 = 0;
-    int attached1 = 0, attached2 = 0;
     int8_t dt = ca1->data_type;
     ca_size_t chunk_n;
-    ca_size_t off;
     int nonalias_arrays;
     int use_chunked;
 
@@ -934,83 +1073,17 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       chunk_n = ca_chunk_compute_n(n_kernel, inner, maxb);
     }
 
-    ca_lazy_arena_enter();
-
-    /* ca1 acquire */
-    if ( i1 == 0 ) {
-      /* scalar: gather 1 element once, kernel re-reads with stride 0 */
-      if ( ca_attach_is_alias(ca1) ) {
-        ca_attach(ca1);
-        p1_src = (char *) ca1->ptr;
-        attached1 = 1;
-      } else {
-        s1_arena = ca_op_acquire_operand_scratch(ca1, 1);
-        ca_xfer_all(ca1, s1_arena, CA_XFER_GET);
-        p1_src = (char *) s1_arena;
-      }
-    } else if ( ca_attach_is_alias(ca1) ) {
-      ca_attach(ca1);
-      p1_src = (char *) ca1->ptr;
-      attached1 = 1;
-    } else {
-      s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
-      p1_src = (char *) s1_arena;
-      gather_per_chunk1 = 1;
+    {
+      ca_binop_chunk_t d;
+      ca_chunked_run_t run;
+      d.func = func; d.dt = dt; d.out = ca3; d.step_out = i3;
+      ca_chunked_run_init(&run, n_kernel, chunk_n);
+      ca_chunked_run_add(&run, ca1, i1);
+      ca_chunked_run_add(&run, ca2, i2);
+      run.kernel = ca_binop_chunk_kernel;
+      run.data   = &d;
+      ca_chunked_run(&run);
     }
-
-    /* ca2 acquire (mirror) */
-    if ( i2 == 0 ) {
-      if ( ca_attach_is_alias(ca2) ) {
-        ca_attach(ca2);
-        p2_src = (char *) ca2->ptr;
-        attached2 = 1;
-      } else {
-        s2_arena = ca_op_acquire_operand_scratch(ca2, 1);
-        ca_xfer_all(ca2, s2_arena, CA_XFER_GET);
-        p2_src = (char *) s2_arena;
-      }
-    } else if ( ca_attach_is_alias(ca2) ) {
-      ca_attach(ca2);
-      p2_src = (char *) ca2->ptr;
-      attached2 = 1;
-    } else {
-      s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
-      p2_src = (char *) s2_arena;
-      gather_per_chunk2 = 1;
-    }
-
-    /* chunk loop: walk n_kernel cells in chunk_n strides */
-    for ( off = 0; off < n_kernel; off += chunk_n ) {
-      ca_size_t n_done = (off + chunk_n > n_kernel) ? n_kernel - off : chunk_n;
-      char *p1, *p2;
-
-      if ( gather_per_chunk1 ) {
-        ca_chunked_gather(ca1, off, n_done, s1_arena);
-        p1 = (char *) s1_arena;
-      } else {
-        p1 = p1_src + (i1 ? off * ca1->bytes : 0);
-      }
-      if ( gather_per_chunk2 ) {
-        ca_chunked_gather(ca2, off, n_done, s2_arena);
-        p2 = (char *) s2_arena;
-      } else {
-        p2 = p2_src + (i2 ? off * ca2->bytes : 0);
-      }
-
-      func[dt](n_done,
-               ca3->mask ? ((boolean8_t *) ca3->mask->ptr) + (i3 ? off : 0)
-                         : NULL,
-               p1, i1,
-               p2, i2,
-               (char *) ca3->ptr + (i3 ? off * ca3->bytes : 0), i3);
-    }
-
-    if ( s2_arena ) ca_lazy_arena_release(s2_arena);
-    if ( s1_arena ) ca_lazy_arena_release(s1_arena);
-    if ( attached2 ) ca_detach(ca2);
-    if ( attached1 ) ca_detach(ca1);
-
-    ca_lazy_arena_exit();
   }
 
   return out;
@@ -1156,6 +1229,39 @@ rb_ca_triop_select_template (VALUE self, VALUE other2, VALUE other3,
    them); cao = new entity output (attach is legit).  Each input
    independently uses fast (= alias) or slow (= ALLOCV + ca_xfer_all)
    path. */
+/* The triop output is always a fresh array the size of the run; for the
+   bang form it is self, read and written in place. */
+typedef struct {
+  ca_triop_func_t *func;
+  int8_t           dt;
+  CArray          *out;
+  int              in_place;
+} ca_triop_chunk_t;
+
+static void
+ca_triop_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
+                       char **p)
+{
+  ca_triop_chunk_t *d = (ca_triop_chunk_t *) run->data;
+  char       *out = (char *) d->out->ptr + off * d->out->bytes;
+  boolean8_t *m   = d->out->mask ? ((boolean8_t *) d->out->mask->ptr) + off
+                                 : NULL;
+  if ( d->in_place ) {
+    d->func[d->dt](n, m,
+                   out,  1,
+                   p[0], run->step[0],
+                   p[1], run->step[1],
+                   out,  1);
+  }
+  else {
+    d->func[d->dt](n, m,
+                   p[0], run->step[0],
+                   p[1], run->step[1],
+                   p[2], run->step[2],
+                   out,  1);
+  }
+}
+
 VALUE
 rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
                   ca_triop_func_t func[])
@@ -1261,13 +1367,8 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
       /* CHUNKED PATH: per-operand decision matrix (the binop pattern
          extended to 3 inputs).  scalar/alias same as before; non-alias
          array goes through per-chunk gather. */
-      char *p1_src = NULL, *p2_src = NULL, *p3_src = NULL;
-      void *s1_arena = NULL, *s2_arena = NULL, *s3_arena = NULL;
-      int gpc1 = 0, gpc2 = 0, gpc3 = 0;  /* gather-per-chunk flags */
-      int att1 = 0, att2 = 0, att3 = 0;
       int8_t dt = ca1->data_type;
       ca_size_t chunk_n;
-      ca_size_t off;
       ca_size_t n_total = cao->elements;
 
       {
@@ -1288,86 +1389,18 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
         chunk_n = ca_chunk_compute_n(n_total, inner, maxb);
       }
 
-      ca_lazy_arena_enter();
-
-      /* ca1 acquire */
-      if ( s1 == 0 ) {
-        if ( ca_attach_is_alias(ca1) ) {
-          ca_attach(ca1);  p1_src = (char *) ca1->ptr;  att1 = 1;
-        } else {
-          s1_arena = ca_op_acquire_operand_scratch(ca1, 1);
-          ca_xfer_all(ca1, s1_arena, CA_XFER_GET);
-          p1_src = (char *) s1_arena;
-        }
-      } else if ( ca_attach_is_alias(ca1) ) {
-        ca_attach(ca1);  p1_src = (char *) ca1->ptr;  att1 = 1;
-      } else {
-        s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
-        p1_src = (char *) s1_arena;  gpc1 = 1;
+      {
+        ca_triop_chunk_t d;
+        ca_chunked_run_t run;
+        d.func = func; d.dt = dt; d.out = cao; d.in_place = 0;
+        ca_chunked_run_init(&run, n_total, chunk_n);
+        ca_chunked_run_add(&run, ca1, s1);
+        ca_chunked_run_add(&run, ca2, s2);
+        ca_chunked_run_add(&run, ca3, s3);
+        run.kernel = ca_triop_chunk_kernel;
+        run.data   = &d;
+        ca_chunked_run(&run);
       }
-      /* ca2 acquire (mirror) */
-      if ( s2 == 0 ) {
-        if ( ca_attach_is_alias(ca2) ) {
-          ca_attach(ca2);  p2_src = (char *) ca2->ptr;  att2 = 1;
-        } else {
-          s2_arena = ca_op_acquire_operand_scratch(ca2, 1);
-          ca_xfer_all(ca2, s2_arena, CA_XFER_GET);
-          p2_src = (char *) s2_arena;
-        }
-      } else if ( ca_attach_is_alias(ca2) ) {
-        ca_attach(ca2);  p2_src = (char *) ca2->ptr;  att2 = 1;
-      } else {
-        s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
-        p2_src = (char *) s2_arena;  gpc2 = 1;
-      }
-      /* ca3 acquire (mirror) */
-      if ( s3 == 0 ) {
-        if ( ca_attach_is_alias(ca3) ) {
-          ca_attach(ca3);  p3_src = (char *) ca3->ptr;  att3 = 1;
-        } else {
-          s3_arena = ca_op_acquire_operand_scratch(ca3, 1);
-          ca_xfer_all(ca3, s3_arena, CA_XFER_GET);
-          p3_src = (char *) s3_arena;
-        }
-      } else if ( ca_attach_is_alias(ca3) ) {
-        ca_attach(ca3);  p3_src = (char *) ca3->ptr;  att3 = 1;
-      } else {
-        s3_arena = ca_op_acquire_operand_scratch(ca3, chunk_n);
-        p3_src = (char *) s3_arena;  gpc3 = 1;
-      }
-
-      for ( off = 0; off < n_total; off += chunk_n ) {
-        ca_size_t n_done = (off + chunk_n > n_total) ? n_total - off
-                                                     : chunk_n;
-        char *p1, *p2, *p3;
-
-        if ( gpc1 ) { ca_chunked_gather(ca1, off, n_done, s1_arena);
-                      p1 = (char *) s1_arena; }
-        else        { p1 = p1_src + (s1 ? off * ca1->bytes : 0); }
-        if ( gpc2 ) { ca_chunked_gather(ca2, off, n_done, s2_arena);
-                      p2 = (char *) s2_arena; }
-        else        { p2 = p2_src + (s2 ? off * ca2->bytes : 0); }
-        if ( gpc3 ) { ca_chunked_gather(ca3, off, n_done, s3_arena);
-                      p3 = (char *) s3_arena; }
-        else        { p3 = p3_src + (s3 ? off * ca3->bytes : 0); }
-
-        func[dt](n_done,
-                 cao->mask ? ((boolean8_t *) cao->mask->ptr) + off
-                           : NULL,
-                 p1, s1,
-                 p2, s2,
-                 p3, s3,
-                 (char *) cao->ptr + off * cao->bytes, 1);
-      }
-
-      if ( s3_arena ) ca_lazy_arena_release(s3_arena);
-      if ( s2_arena ) ca_lazy_arena_release(s2_arena);
-      if ( s1_arena ) ca_lazy_arena_release(s1_arena);
-      if ( att3 ) ca_detach(ca3);
-      if ( att2 ) ca_detach(ca2);
-      if ( att1 ) ca_detach(ca1);
-
-      ca_lazy_arena_exit();
     }
   }
 
@@ -1444,10 +1477,8 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
          output) is already attached; its ptr is contig (= ca_attach
          materialise + alias for entity, or full materialise for view).
          Write to ca1->ptr + off*bytes in chunks; sync at end. */
-      void *s2_arena = NULL, *s3_arena = NULL;
       int8_t dt = ca1->data_type;
       ca_size_t chunk_n;
-      ca_size_t off;
       ca_size_t n_total = ca1->elements;
 
       {
@@ -1462,28 +1493,17 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
         chunk_n = ca_chunk_compute_n(n_total, inner, maxb);
       }
 
-      ca_lazy_arena_enter();
-      s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
-      s3_arena = ca_op_acquire_operand_scratch(ca3, chunk_n);
-
-      for ( off = 0; off < n_total; off += chunk_n ) {
-        ca_size_t n_done = (off + chunk_n > n_total) ? n_total - off
-                                                     : chunk_n;
-        ca_chunked_gather(ca2, off, n_done, s2_arena);
-        ca_chunked_gather(ca3, off, n_done, s3_arena);
-
-        func[dt](n_done,
-                 ca1->mask ? ((boolean8_t *) ca1->mask->ptr) + off
-                           : NULL,
-                 (char *) ca1->ptr + off * ca1->bytes, 1,
-                 (char *) s2_arena, s2,
-                 (char *) s3_arena, s3,
-                 (char *) ca1->ptr + off * ca1->bytes, 1);
+      {
+        ca_triop_chunk_t d;
+        ca_chunked_run_t run;
+        d.func = func; d.dt = dt; d.out = ca1; d.in_place = 1;
+        ca_chunked_run_init(&run, n_total, chunk_n);
+        ca_chunked_run_add(&run, ca2, s2);
+        ca_chunked_run_add(&run, ca3, s3);
+        run.kernel = ca_triop_chunk_kernel;
+        run.data   = &d;
+        ca_chunked_run(&run);
       }
-
-      ca_lazy_arena_release(s3_arena);
-      ca_lazy_arena_release(s2_arena);
-      ca_lazy_arena_exit();
     }
   }
 
@@ -1544,6 +1564,29 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
    ca_bincmp_dispatch.h, reached via the carray.h umbrella.  The
    UNDEF-comparison identity checks below cast to ca_bincmp_func_t
    explicitly. */
+
+typedef struct {
+  ca_bincmp_func_t *func;
+  int8_t            dt;
+  CArray           *out;
+  ca_size_t         step_out;
+  double            tol;
+} ca_bincmp_chunk_t;
+
+static void
+ca_bincmp_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
+                        char **p)
+{
+  ca_bincmp_chunk_t *d = (ca_bincmp_chunk_t *) run->data;
+  ca_size_t o = d->step_out ? off : 0;
+  d->func[d->dt](n,
+                 d->out->mask ? ((boolean8_t *) d->out->mask->ptr) + o : NULL,
+                 p[0], run->ca[0]->bytes, run->step[0],
+                 p[1], run->ca[1]->bytes, run->step[1],
+                 (char *) d->out->ptr + o * d->out->bytes, d->out->bytes,
+                 d->step_out,
+                 d->tol);
+}
 
 VALUE
 rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
@@ -1667,10 +1710,9 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       else {
         /* CHUNKED PATH (both operands non-alias array): per-chunk gather
            into arena scratch.  Mirrors the binop chunked branch. */
-        void *s1_arena = NULL, *s2_arena = NULL;
         ca_size_t b1 = ca1->bytes, b2 = ca2->bytes, b3 = ca3->bytes;
         int8_t dt = ca1->data_type;
-        ca_size_t chunk_n, off;
+        ca_size_t chunk_n;
 
         {
           ca_size_t inner1 = ca_chunk_inner_size(ca1);
@@ -1681,28 +1723,17 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
           chunk_n = ca_chunk_compute_n(n_kernel, inner, maxb);
         }
 
-        ca_lazy_arena_enter();
-        s1_arena = ca_op_acquire_operand_scratch(ca1, chunk_n);
-        s2_arena = ca_op_acquire_operand_scratch(ca2, chunk_n);
-
-        for ( off = 0; off < n_kernel; off += chunk_n ) {
-          ca_size_t n_done = (off + chunk_n > n_kernel) ? n_kernel - off
-                                                        : chunk_n;
-          ca_chunked_gather(ca1, off, n_done, s1_arena);
-          ca_chunked_gather(ca2, off, n_done, s2_arena);
-
-          func[dt](n_done,
-                   ca3->mask ? ((boolean8_t *) ca3->mask->ptr) + off
-                             : NULL,
-                   (char *) s1_arena, b1, i1,
-                   (char *) s2_arena, b2, i2,
-                   (char *) ca3->ptr + off * b3, b3, i3,
-                   tol);
+        {
+          ca_bincmp_chunk_t d;
+          ca_chunked_run_t run;
+          d.func = func; d.dt = dt; d.out = ca3; d.step_out = i3; d.tol = tol;
+          ca_chunked_run_init(&run, n_kernel, chunk_n);
+          ca_chunked_run_add(&run, ca1, i1);
+          ca_chunked_run_add(&run, ca2, i2);
+          run.kernel = ca_bincmp_chunk_kernel;
+          run.data   = &d;
+          ca_chunked_run(&run);
         }
-
-        ca_lazy_arena_release(s2_arena);
-        ca_lazy_arena_release(s1_arena);
-        ca_lazy_arena_exit();
       }
     }
   }

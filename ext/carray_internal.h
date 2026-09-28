@@ -54,13 +54,20 @@ void ca_bit_pack   (const boolean8_t *src, ca_size_t elements, ca_size_t pbytes,
    The pool is global static state, so this is single-owner by construction.
    Thread-safety is a non-goal: operating on one array family from more than
    one thread is the caller's responsibility, not something this pool guards
-   against. */
+   against.
+
+   A region that can raise -- one that transfers from a view, or calls Ruby
+   through an object lane -- goes through ca_lazy_arena_protect, never a
+   bare _enter / _exit pair: a skipped _exit is process-wide. */
 
 void    ca_lazy_arena_enter   (void);
 void    ca_lazy_arena_exit    (void);
 void   *ca_lazy_arena_acquire (ca_size_t bytes);
 void   *ca_lazy_arena_acquire_object (ca_size_t n_elements);
 void    ca_lazy_arena_release (void *ptr);
+VALUE   ca_lazy_arena_protect (VALUE (*body)(VALUE),
+                               VALUE (*cleanup)(VALUE), VALUE arg);
+VALUE   ca_lazy_arena_release_held (VALUE arg);
 
 /* ---- CA_OBJECT GC guard (carray_lazy.c) ----------------------------------
 
