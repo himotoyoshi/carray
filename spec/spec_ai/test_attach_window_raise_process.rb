@@ -1,25 +1,22 @@
-# A raise inside an attach window that damages more than the array.
+# A raise inside an attach window must not damage more than the array.
 #
-# Two kinds of state outlive the window when Ruby raises inside it:
+# Two kinds of state could outlive the window when Ruby raises inside it:
 #
 # - the lazy arena's depth.  The streaming reductions and the chunked
-#   operator drivers enter the arena without an ensure, so each raise
-#   leaves one level behind; after 32 of them every lazy expression in the
-#   process fails, numeric ones included.
+#   operator drivers enter the arena; a raise that skipped the exit left
+#   one level behind, and after 32 of them every lazy expression in the
+#   process failed, numeric ones included.
 #
 # - a cold parent's ptr.  The two-pass store of a gather view over a parent
-#   with no memory of its own points parent->ptr at a scratch buffer, calls
-#   the parent's PUT, and restores ptr afterwards.  When the PUT raises the
-#   restore is skipped, and the parent keeps a pointer into a buffer that
-#   is already gone.
+#   with no memory of its own points parent->ptr at a scratch buffer for
+#   the walk.  A PUT that raised with ptr still lent left the parent
+#   pointing into a buffer that was already gone.
 #
-# Both take the process down with them, so every case here runs in a child.
+# Either takes the process down with it, so every case here runs in a child.
 #
-# MOST OF THE ASSERTIONS BELOW PIN BEHAVIOUR THAT IS WRONG.  Each one goes
-# through assert_broken, which names the correct outcome.  When a fix makes
-# one fail, rewrite that test to assert the outcome it names rather than
-# deleting it.  Tests whose name begins with `test_sound_` pin behaviour
-# that is already right and must not change.
+# Assertions that go through assert_broken pin behaviour that is still
+# wrong, and name the correct outcome.  When a fix makes one fail, rewrite
+# that test to assert the outcome it names rather than deleting it.
 
 require "test/unit"
 require "rbconfig"
@@ -79,13 +76,26 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     "chunked_triop_bang"     => [CHUNKED, "sel(o).fma!(sel(o2), sel(o2))"],
     "chunked_bincmp"         => [CHUNKED, "sel(o) < sel(o2)"],
   }.each do |name, (setup, expr)|
-    define_method("test_#{name}_leaves_an_arena_level") do
-      assert_broken arena_levels_left(setup, expr), 1,
-                    "that the arena is back at its depth"
+    define_method("test_#{name}_restores_the_arena") do
+      assert_equal 0, arena_levels_left(setup, expr)
     end
   end
 
-  def test_leaked_levels_stop_every_lazy_expression
+  # The chunked run acquires an alias operand by attaching it; a raise in
+  # the kernel must still detach it.
+  def test_chunked_triop_detaches_an_alias_operand
+    status, out = run_child(<<~RUBY)
+      #{CHUNKED}
+      av = CArray.object(10) { 1 }[0..9]
+      d0 = CArray.__lazy_arena_depth__
+      begin; sel(o).fma(sel(o2), av); rescue TypeError; end
+      print av.attached?, " ", CArray.__lazy_arena_depth__ - d0
+    RUBY
+    assert status.success?
+    assert_equal "false 0", out
+  end
+
+  def test_raising_lazy_sums_leave_later_lazy_expressions_working
     status, out = run_child(<<~RUBY)
       #{OBJECT_WITH_A_STRING}
       40.times { o.lazy.sum rescue nil }
@@ -96,11 +106,10 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
       end
     RUBY
     assert status.success?
-    assert_broken out.include?("all 32 slots in use"), true,
-                  "that a numeric lazy sum still answers 9900.0"
+    assert_equal "9900.0", out
   end
 
-  def test_sound_lazy_materialise_restores_the_arena
+  def test_lazy_materialise_restores_the_arena
     %w[(o.lazy+1).copy o.lazy.sqrt.copy (o.lazy<3).copy].each do |expr|
       assert_equal 0, arena_levels_left(OBJECT_WITH_A_STRING, expr), expr
     end

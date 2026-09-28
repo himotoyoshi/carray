@@ -185,16 +185,67 @@ ca_mask_word_count (const boolean8_t *m, ca_size_t n)
 
 enum { CA_MASK_SCAN_ANY, CA_MASK_SCAN_ALL, CA_MASK_SCAN_COUNT };
 
+/* The block walk runs under ca_lazy_arena_protect: the transfer from a
+   virtual mask can raise, and the arena must be left however it ends. */
+typedef struct {
+  boolean8_t *scratch;     /* first: released by ca_lazy_arena_release_held */
+  CArray     *mask;
+  int         op;
+  ca_size_t   rows;
+  ca_size_t   inner;
+  ca_size_t  *native;
+  ca_size_t   result;
+} ca_mask_scan_t;
+
+static VALUE
+ca_mask_scan_virtual_body (VALUE arg)
+{
+  ca_mask_scan_t *sc   = (ca_mask_scan_t *) arg;
+  CArray         *mask = sc->mask;
+  int8_t          ndim = mask->ndim;
+  ca_size_t       outer = mask->dim[0];
+  ca_size_t       off;
+  int8_t          k;
+
+  sc->scratch = (boolean8_t *) ca_lazy_arena_acquire(sc->rows * sc->inner);
+
+  for (off = 0; off < outer; off += sc->rows) {
+    ca_size_t nrow = (outer - off < sc->rows) ? (outer - off) : sc->rows;
+    ca_size_t n    = nrow * sc->inner;
+    ca_size_t starts[CA_RANK_MAX] = {0};
+    ca_size_t counts[CA_RANK_MAX];
+
+    starts[0] = off;
+    counts[0] = nrow;
+    for (k = 1; k < ndim; k++) {
+      counts[k] = mask->dim[k];
+    }
+
+    ca_xfer_stride(mask, starts, counts, sc->native, sc->scratch, CA_XFER_GET);
+
+    if ( sc->op == CA_MASK_SCAN_ANY ) {
+      if ( ca_mask_word_any(sc->scratch, n) )     { sc->result = 1; break; }
+    }
+    else if ( sc->op == CA_MASK_SCAN_ALL ) {
+      if ( ! ca_mask_word_all_set(sc->scratch, n) ) { sc->result = 0; break; }
+    }
+    else {  /* CA_MASK_SCAN_COUNT — no early exit */
+      sc->result += ca_mask_word_count(sc->scratch, n);
+    }
+  }
+  return Qnil;
+}
+
 static ca_size_t
 ca_mask_scan_virtual (CArray *mask, int op)
 {
-  int8_t      ndim  = mask->ndim;
-  ca_size_t   outer = mask->dim[0];
-  ca_size_t   inner = 1;
-  ca_size_t   native[CA_RANK_MAX];
-  ca_size_t   rows, off, result = 0;
-  boolean8_t *scratch;
-  int8_t      k;
+  int8_t         ndim  = mask->ndim;
+  ca_size_t      outer = mask->dim[0];
+  ca_size_t      inner = 1;
+  ca_size_t      native[CA_RANK_MAX];
+  ca_size_t      rows;
+  ca_mask_scan_t sc;
+  int8_t         k;
 
   for (k = 1; k < ndim; k++) {
     inner *= mask->dim[k];
@@ -212,41 +263,18 @@ ca_mask_scan_virtual (CArray *mask, int op)
   if ( rows < 1 )     rows = 1;
   if ( rows > outer ) rows = outer;
 
-  if ( op == CA_MASK_SCAN_ALL ) {
-    result = 1;   /* vacuously all-set until a non-set cell is found */
-  }
+  sc.scratch = NULL;
+  sc.mask    = mask;
+  sc.op      = op;
+  sc.rows    = rows;
+  sc.inner   = inner;
+  sc.native  = native;
+  /* ALL is vacuously all-set until a non-set cell is found */
+  sc.result  = ( op == CA_MASK_SCAN_ALL ) ? 1 : 0;
 
-  ca_lazy_arena_enter();
-  scratch = (boolean8_t *) ca_lazy_arena_acquire(rows * inner);
-
-  for (off = 0; off < outer; off += rows) {
-    ca_size_t nrow = (outer - off < rows) ? (outer - off) : rows;
-    ca_size_t n    = nrow * inner;
-    ca_size_t starts[CA_RANK_MAX] = {0};
-    ca_size_t counts[CA_RANK_MAX];
-
-    starts[0] = off;
-    counts[0] = nrow;
-    for (k = 1; k < ndim; k++) {
-      counts[k] = mask->dim[k];
-    }
-
-    ca_xfer_stride(mask, starts, counts, native, scratch, CA_XFER_GET);
-
-    if ( op == CA_MASK_SCAN_ANY ) {
-      if ( ca_mask_word_any(scratch, n) )     { result = 1; break; }
-    }
-    else if ( op == CA_MASK_SCAN_ALL ) {
-      if ( ! ca_mask_word_all_set(scratch, n) ) { result = 0; break; }
-    }
-    else {  /* CA_MASK_SCAN_COUNT — no early exit */
-      result += ca_mask_word_count(scratch, n);
-    }
-  }
-
-  ca_lazy_arena_release(scratch);
-  ca_lazy_arena_exit();
-  return result;
+  ca_lazy_arena_protect(ca_mask_scan_virtual_body, ca_lazy_arena_release_held,
+                        (VALUE) &sc);
+  return sc.result;
 }
 
 boolean8_t *

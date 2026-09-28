@@ -1860,6 +1860,11 @@ module MkKernel
 
     view_flat = (k[:semantics] == :view_flat)
 
+    if streamable
+      emit_reduce_streaming(io, k, si, oi, ruby_wrap, acc_var, acc_init,
+                            decls, reduce_stmt, finish_expr, src)
+    end
+
     io.puts
     io.puts <<~C
       static VALUE
@@ -1868,8 +1873,7 @@ module MkKernel
     C
 
     if streamable
-      emit_reduce_streaming(io, k, si, oi, ruby_wrap, acc_var, acc_init,
-                            decls, reduce_stmt, finish_expr, extra_args, src)
+      emit_reduce_streaming_call(io, k, src)
     end
 
     # L.1 / L.3 / L.4 (PROPOSAL_REDUCTION_LOOP_INTERCHANGE):
@@ -3164,42 +3168,40 @@ module MkKernel
     io.puts "    }"
   end
 
-  # P.4.5.3b/c: streaming chunked reduce path emitter.  Generates an
-  # early-return branch at the top of name_ki_native_<src> that pulls
-  # the lazy view in fixed-size chunks via ca_xfer_stride instead of
-  # full-materialising via SRC_ATTACH.  Falls through to the existing
-  # path when conditions aren't met.
-  #
-  # Strategy: chunk along the outermost axis.  inner = prod(dim[1..]);
-  # rows_per_chunk = max(1, target_elems / inner).  1-D is the natural
-  # sub-case (inner == 1, rows = target_elems).
-  #
-  # Memory peak: O(max(target_elems, inner) * sizeof T) instead of O(N).
-  # For N-D, this drops the outermost dim from the materialised buffer,
-  # which is typically the dominant factor (e.g. 1000x10000 f64 reduction:
-  # 80MB -> 80KB).  Wall-clock perf at large N matches or beats
-  # SRC_ATTACH because each chunk fits in L1d (or L2 for wide last dims).
-  #
-  # Restrictions handled by short-circuit checks (= falls through to
-  # SRC_ATTACH path):
-  #   - axis kwarg (= partial reduction): naxes != ca->ndim
-  #     (structural blocker: CABinOp/CABinCmp xfer_stride rebuilds
-  #     right_strides from counts, so non-rectangular slab pulls
-  #     produce wrong values for the right operand.  See proposal
-  #     §future-work / partial streaming blocker.)
-  #   - non-lazy source: !ca_is_lazy_view(ca)
-  #   - mask present: ca_has_mask(ca)
+  # The walk of the streaming reduce (see emit_reduce_streaming_call).
   def self.emit_reduce_streaming(io, k, si, oi, ruby_wrap, acc_var,
                                   acc_init, decls, reduce_stmt,
-                                  finish_expr, extra_args, src)
+                                  finish_expr, src)
     name      = k[:name]
-    min_count = (k[:mask_policy] == :min_count)
     has_mp    = !k[:mask_policy].nil?
+    fn        = "#{name}_ki_stream_#{src}"
 
-    io.puts "    /* P.4.5.3b/c streaming chunked reduce: full reduction over lazy unmasked.  */"
-    io.puts "    /* P.4.5.3c (N-D): outer-axis chunking, 1-D is the natural sub-case.        */"
-    io.puts "    if ( naxes == ca->ndim && ca->ndim >= 1 && !keep_axis &&"
-    io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) ) {"
+    # The walk runs under ca_lazy_arena_protect: the transfer from the lazy
+    # source and the object lane's fold can both raise, and the arena must
+    # be left however the walk ends.  So it is a function of its own, with
+    # the native's arguments carried in a context whose first member is
+    # the chunk (released by ca_lazy_arena_release_held).
+    io.puts
+    io.puts "typedef struct {"
+    io.puts "  void      *chunk;"
+    io.puts "  CArray    *ca;"
+    io.puts "  #{si[:c]} value_arg;" if k[:value_arg]
+    io.puts "  ca_size_t  min_count;" if k[:mask_policy] == :min_count
+    io.puts "} #{fn}_t;"
+    io.puts
+    io.puts "static VALUE"
+    io.puts "#{fn} (VALUE arg)"
+    io.puts "{"
+    io.puts "      #{fn}_t *__ctx = (#{fn}_t *) arg;"
+    io.puts "      CArray *ca = __ctx->ca;"
+    if k[:value_arg]
+      io.puts "      #{si[:c]} value_arg = __ctx->value_arg;"
+      io.puts "      (void) value_arg;"
+    end
+    if k[:mask_policy] == :min_count
+      io.puts "      ca_size_t min_count = __ctx->min_count;"
+      io.puts "      (void) min_count;"
+    end
     io.puts "      ca_size_t __inner = 1;"
     io.puts "      int       __k;"
     io.puts "      for ( __k = 1; __k < ca->ndim; __k++ ) __inner *= ca->dim[__k];"
@@ -3237,7 +3239,6 @@ module MkKernel
       io.puts "      ca_size_t masked_cnt = 0;  /* unused on streaming (no mask) */"
       io.puts "      (void) masked_cnt;"
     end
-    io.puts "      ca_lazy_arena_enter();"
     if si[:c] == "VALUE"
       # Object lane: the chunk holds VALUEs pulled from the source, and
       # the fold below calls rb_funcall per cell.  A collection there
@@ -3247,6 +3248,7 @@ module MkKernel
     else
       io.puts "      #{si[:c]} *__chunk = (#{si[:c]} *) ca_lazy_arena_acquire(__chunk_elems * sizeof(#{si[:c]}));"
     end
+    io.puts "      __ctx->chunk = __chunk;"
     io.puts "      while ( __outer_off < __outer ) {"
     io.puts "        ca_size_t __r = (__outer - __outer_off < __rows) ? (__outer - __outer_off) : __rows;"
     io.puts "        ca_size_t __n = __r * __inner;"
@@ -3261,20 +3263,49 @@ module MkKernel
     io.puts "        }"
     io.puts "        __outer_off += __r;"
     io.puts "      }"
-    io.puts "      ca_lazy_arena_release(__chunk);"
-    io.puts "      ca_lazy_arena_exit();"
     if all_nan_stream
       io.puts "      if ( ! __anf_seen && ca->elements > 0 ) #{acc_var} = (#{si[:c]}) NAN;"
     end
-    if has_mp
-      # Streaming path has no mask source, so masked_cnt is 0; min_count
-      # / strict / all_masked triggers all evaluate to false except
-      # min_count when explicit > 0 is set on an all-clean source (= no
-      # trigger).  Output is the finish expression directly.
-      io.puts "      return #{ruby_wrap}((#{oi[:c]}) (#{finish_expr}));"
-    else
-      io.puts "      return #{ruby_wrap}((#{oi[:c]}) (#{finish_expr}));"
-    end
+    # Streaming has no mask source, so masked_cnt is 0 and none of the
+    # mask-policy triggers fire: the answer is the finish expression.
+    io.puts "      return #{ruby_wrap}((#{oi[:c]}) (#{finish_expr}));"
+    io.puts "}"
+  end
+
+  # The streaming branch at the top of name_ki_native_<src>: a flat
+  # reduction of an unmasked lazy view pulls the source in fixed-size
+  # chunks via ca_xfer_stride instead of materialising it whole.  Falls
+  # through to the existing path when the conditions are not met.
+  #
+  # Strategy: chunk along the outermost axis.  inner = prod(dim[1..]);
+  # rows_per_chunk = max(1, target_elems / inner).  1-D is the natural
+  # sub-case (inner == 1, rows = target_elems).
+  #
+  # Memory peak: O(max(target_elems, inner) * sizeof T) instead of O(N).
+  # For N-D, this drops the outermost dim from the materialised buffer,
+  # which is typically the dominant factor (e.g. 1000x10000 f64 reduction:
+  # 80MB -> 80KB).  Wall-clock perf at large N matches or beats
+  # SRC_ATTACH because each chunk fits in L1d (or L2 for wide last dims).
+  #
+  # Restrictions handled by short-circuit checks (= falls through to
+  # SRC_ATTACH path):
+  #   - axis kwarg (= partial reduction): naxes != ca->ndim
+  #     (structural blocker: CABinOp/CABinCmp xfer_stride rebuilds
+  #     right_strides from counts, so non-rectangular slab pulls
+  #     produce wrong values for the right operand.)
+  #   - non-lazy source: !ca_is_lazy_view(ca)
+  #   - mask present: ca_has_mask(ca)
+  def self.emit_reduce_streaming_call(io, k, src)
+    fn = "#{k[:name]}_ki_stream_#{src}"
+    io.puts "    if ( naxes == ca->ndim && ca->ndim >= 1 && !keep_axis &&"
+    io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) ) {"
+    io.puts "      #{fn}_t __ctx;"
+    io.puts "      __ctx.chunk = NULL;"
+    io.puts "      __ctx.ca    = ca;"
+    io.puts "      __ctx.value_arg = value_arg;" if k[:value_arg]
+    io.puts "      __ctx.min_count = min_count;" if k[:mask_policy] == :min_count
+    io.puts "      return ca_lazy_arena_protect(#{fn}, ca_lazy_arena_release_held,"
+    io.puts "                                   (VALUE) &__ctx);"
     io.puts "    }"
   end
 
