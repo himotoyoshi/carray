@@ -258,8 +258,7 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
         volatile VALUE ridx = rb_ary_new2(co->ndim);
         ca_attach(co);
         rb_ca_index_walk(obj, co, 0, idx, ridx, CA_LOOP_STORE);
-        ca_sync(co);
-        ca_detach(co);
+        ca_sync_detach(co);
       }
       else {
         volatile VALUE rval = rb_yield_values2(0, NULL);

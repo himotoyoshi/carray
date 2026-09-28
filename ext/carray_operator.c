@@ -481,8 +481,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
                        ( ca1->mask ) ? (boolean8_t *)ca1->mask->ptr : NULL,
                        ca1->ptr, 1,
                        ca1->ptr, 1);
-  ca_sync(ca1);
-  ca_detach(ca1);
+  ca_sync_detach(ca1);
 
   return self;
 }
@@ -1163,8 +1162,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
     ALLOCV_END(h2);
   }
 
-  ca_sync(ca1);
-  ca_detach(ca1);
+  ca_sync_detach(ca1);
 
   return self;
 }
@@ -1507,8 +1505,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
     }
   }
 
-  ca_sync(ca1);
-  ca_detach(ca1);
+  ca_sync_detach(ca1);
 
   return self;
 }

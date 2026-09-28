@@ -314,14 +314,12 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
   }
 
   if ( co->mask ) {
-    ca_sync(co->mask);
-    ca_detach(co->mask);
+    ca_sync_detach(co->mask);
   }
   if ( has_mask ) {
     ca_detach(ca->mask);
   }
-  ca_sync(co);
-  ca_detach(co);
+  ca_sync_detach(co);
   ca_detach(ca);
 
   return obj;
@@ -463,8 +461,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
           memcpy(ca->ptr + off, RSTRING_PTR(r), want);
           off += want;
         }
-        ca_sync(ca);
-        ca_detach(ca);
+        ca_sync_detach(ca);
       }
       else {
         /* ca_sync_data scatters in one pass, so buffer the full read

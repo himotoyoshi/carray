@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: for C extensions, `ca_sync_detach` closes an attach window and
+  detaches even when the sync raises; written as `ca_sync` then
+  `ca_detach`, a raising sync leaves the array attached. `ca_attach_n` and
+  `ca_allocate_n` now attach all of their arrays or none, and `ca_allocate`
+  that raises takes nothing. No change is needed where nothing raises.
+
+- Fix: an assignment or bang method that fails on the way out (a read-only
+  parent, a backing whose write fails, values that do not convert) no longer
+  leaves the view attached. A companion gem that checks its backing on each
+  attach, such as carray-rmagick after a resize, now sees every later write.
+
 - Fix: storing through a selection, grid, `roll`, `tile`, axis selection
   or `window` of a `CAObject` whose `sync_data` raises no longer leaves the
   parent broken. The exception reaches the caller as before, and the parent

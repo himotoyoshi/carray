@@ -510,8 +510,7 @@ ca_bitfield_func_fill_data (void *ap, void *ptr)
   CABitfield *ca = (CABitfield *) ap;
   ca_attach(ca->parent);
   ca_bitfield_fill(ca, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 

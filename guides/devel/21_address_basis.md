@@ -258,7 +258,7 @@ macOS only, omitted elsewhere).
 
 ## Related chapters
 
-- [ch. 04](04_attach_lifecycle.md) — `ca_attach` / `ca_detach` and the R1–R5
+- [ch. 04](04_attach_lifecycle.md) — `ca_attach` / `ca_detach` and the R1–R6
   contract this sits on.
 - [ch. 06](06_view_algebra_and_castride.md) — `ca_stride_compose_to_root`,
   which is the whole of tier 2.

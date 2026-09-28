@@ -80,7 +80,7 @@ layout.
 ```
 
 `ca_is_attached` is the structural property — `ca->ptr != NULL` — used as
-the lifecycle marker (see [ch. 4](04_attach_lifecycle.md), R1–R5 contract).
+the lifecycle marker (see [ch. 4](04_attach_lifecycle.md), R1–R6 contract).
 
 ## Allocation primitives
 
@@ -201,8 +201,9 @@ void ca_attach (void *ca);   /* materialise (gather) data into ca->ptr */
 void ca_update (void *ca);   /* re-gather without bumping attach count */
 void ca_sync   (void *ca);   /* scatter ca->ptr back to parent storage */
 void ca_detach (void *ca);   /* release; xfree if scratch, decrement count */
+void ca_sync_detach (void *ca);  /* sync, then detach even if the sync raises */
 
-void ca_attach_n (int n, ...);    /* attach N CArrays in nested order */
+void ca_attach_n (int n, ...);    /* attach N CArrays, all or none */
 void ca_sync_n   (int n, ...);
 void ca_detach_n (int n, ...);
 void ca_update_n (int n, ...);

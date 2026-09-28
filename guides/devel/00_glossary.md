@@ -83,7 +83,7 @@ separate-allocation path; the two coexist per-instance. See
 
 **attach** — make a view's `ptr` valid: allocate, then gather the parent's data
 into it. `ca_is_attached(ca)` is defined as `(ca->ptr != NULL)` and used as the
-ownership marker. The contract is R1–R5, stated in `ext/carray.h` and copied into
+ownership marker. The contract is R1–R6, stated in `ext/carray.h` and copied into
 [ch. 4](04_attach_lifecycle.md): attach is **not transitive** — attaching a child
 does not attach its parent — and it hands you a buffer, not a live array.
 

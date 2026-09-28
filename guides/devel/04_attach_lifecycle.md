@@ -46,9 +46,9 @@ A typical internal use is attach → operate on the contiguous `ptr` → sync �
 detach. Both gather and scatter run through the unified `xfer_all` hook with
 `dir = CA_XFER_GET` / `CA_XFER_PUT` ([ch. 2](02_core_data_structures.md)).
 
-## The R1–R5 contract (from `ext/carray.h`)
+## The R1–R6 contract (from `ext/carray.h`)
 
-The lifecycle is ownership-based and **not transitive**. These five rules are the
+The lifecycle is ownership-based and **not transitive**. These six rules are the
 contract every piece of view code depends on. The canonical statement lives beside
 the `ca_attach` declaration in `ext/carray.h`; this section copies it.
 
@@ -70,10 +70,21 @@ the `ca_attach` declaration in `ext/carray.h`; this section copies it.
   carry an attach refcount; entities do not).
 - **R5 (traffic)** — attach hands you a buffer, not a live array. Use `x.ptr`; a
   view derived from `x` composes past the buffer to the root.
+- **R6 (raising)** — `ca_allocate` and `ca_attach` that raise have taken nothing;
+  `ca_allocate_n` and `ca_attach_n` take all of their arrays or none. Close a
+  window with `ca_sync_detach`, which detaches even when the sync raises —
+  `ca_sync` then `ca_detach` leaves the window open on a raise.
+  ```c
+  ca_attach(ca);
+  /* … work that cannot raise … */
+  ca_sync_detach(ca);
+  ```
+  Anything between that can raise — Ruby called from inside the window, a
+  conversion of the caller's value — needs an ensure of its own.
 
 ### Reader and writer conventions
 
-Two conventions follow from R1–R5 for code that touches a parent's `ptr`:
+Two conventions follow from R1–R6 for code that touches a parent's `ptr`:
 
 - **Reader (opportunistic use of the parent buffer)** — guard with the marker,
   do not test the raw pointer:

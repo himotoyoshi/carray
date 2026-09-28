@@ -224,8 +224,7 @@ ca_reduce_func_sync (void *ap)
     ca_reduce_func_xfer_addrs(ca, 1, &i, p, CA_XFER_PUT);
     p++;
   }
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -264,8 +263,7 @@ ca_reduce_func_fill_data (void *ap, void *ptr)
   for (i=0; i<ca->elements; i++) {
     ca_reduce_func_xfer_addrs(ca, 1, &i, ptr, CA_XFER_PUT);
   }
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
