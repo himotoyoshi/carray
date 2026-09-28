@@ -122,6 +122,59 @@ ca_objmask_mask_data (void *ap)
                     rb_intern("mask"), 0);
 }
 
+/* Calls recv.mid(arg(ap)) with *slot pointing at a caller's buffer for
+   the duration, and puts *slot back however the call leaves.  The bulk
+   bridge lends the buffer this way so that copy_data / sync_data write
+   straight into it; a raise that skipped the restore would leave the
+   array pointing at a buffer its caller is about to free. */
+
+typedef struct {
+  char  **slot;
+  char   *saved;
+  VALUE   recv;
+  ID      mid;
+  VALUE (*arg)(void *);
+  void   *ap;
+} ca_object_lend_t;
+
+static VALUE
+ca_object_lend_body (VALUE varg)
+{
+  ca_object_lend_t *l = (ca_object_lend_t *) varg;
+  return rb_funcall(l->recv, l->mid, 1, l->arg(l->ap));
+}
+
+static VALUE
+ca_object_lend_restore (VALUE varg)
+{
+  ca_object_lend_t *l = (ca_object_lend_t *) varg;
+  *l->slot = l->saved;
+  return Qnil;
+}
+
+static void
+ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
+                        VALUE (*arg)(void *), void *ap)
+{
+  ca_object_lend_t l;
+  l.slot  = slot;
+  l.saved = *slot;
+  l.recv  = recv;
+  l.mid   = rb_intern(mid);
+  l.arg   = arg;
+  l.ap    = ap;
+  *slot = (char *) ptr;
+  rb_ensure(ca_object_lend_body, (VALUE) &l,
+            ca_object_lend_restore, (VALUE) &l);
+}
+
+static VALUE
+ca_object_data_of (void *ap)
+{
+  return rb_ivar_get(((CAObject *) ap)->self, rb_intern("__data__"));
+}
+
+
 static void *
 ca_objmask_func_clone (void *ap)
 {
@@ -250,11 +303,8 @@ ca_objmask_func_xfer_all (void *ap, void *data, int dir)
   CAObjectMask *ca = (CAObjectMask *) ap;
   if ( dir == CA_XFER_GET ) {
     if ( rb_obj_respond_to(ca->array, rb_intern("mask_copy_data"), Qtrue) ) {
-      char *ptr0 = ca->ptr;
-      ca->ptr = (char *) data;
-      rb_funcall(ca->array, rb_intern("mask_copy_data"),
-                            1, ca_objmask_mask_data(ca));
-      ca->ptr = ptr0;
+      ca_object_call_lending(&ca->ptr, data, ca->array, "mask_copy_data",
+                             ca_objmask_mask_data, ca);
     }
     else {
       ca_array_func_xfer_all(ca, data, CA_XFER_GET);
@@ -262,11 +312,8 @@ ca_objmask_func_xfer_all (void *ap, void *data, int dir)
   }
   else {
     if ( rb_obj_respond_to(ca->array, rb_intern("mask_copy_data"), Qtrue) ) {
-      char *ptr0 = ca->ptr;
-      ca->ptr = (char *) data;
-      rb_funcall(ca->array, rb_intern("mask_sync_data"),
-                            1, ca_objmask_mask_data(ca));
-      ca->ptr = ptr0;
+      ca_object_call_lending(&ca->ptr, data, ca->array, "mask_sync_data",
+                             ca_objmask_mask_data, ca);
     }
     else {
       ca_array_func_xfer_all(ca, data, CA_XFER_PUT);
@@ -697,11 +744,8 @@ static void
 ca_object_dispatch_copy (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("copy_data"), Qtrue) ) {
-    char *ptr0 = ca->data->ptr;
-    ca->data->ptr = ptr;
-    rb_funcall(ca->self, rb_intern("copy_data"),
-               1, rb_ivar_get(ca->self, rb_intern("__data__")));
-    ca->data->ptr = ptr0;
+    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "copy_data",
+                           ca_object_data_of, ca);
   }
   else {
     ca_size_t addr;
@@ -716,11 +760,8 @@ static void
 ca_object_dispatch_sync (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("sync_data"), Qtrue) ) {
-    char *ptr0 = ca->data->ptr;
-    ca->data->ptr = ptr;
-    rb_funcall(ca->self, rb_intern("sync_data"),
-               1, rb_ivar_get(ca->self, rb_intern("__data__")));
-    ca->data->ptr = ptr0;
+    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "sync_data",
+                           ca_object_data_of, ca);
   }
   else {
     ca_size_t addr;

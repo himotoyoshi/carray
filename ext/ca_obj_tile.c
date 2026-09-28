@@ -445,10 +445,13 @@ ca_tile_func_xfer_all (void *ap, void *data, int dir)
     parent->ptr = parent_scratch;
     if ( dir == CA_XFER_GET ) ca_tile_attach_into(ca, (char *) data);
     else                       ca_tile_sync_from(ca, (char *) data);
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this
+       frame is. */
+    parent->ptr = parent_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
     }
-    parent->ptr = parent_ptr_saved;
     ALLOCV_END(holder);
   }
 }

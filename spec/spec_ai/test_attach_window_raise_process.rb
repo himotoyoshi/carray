@@ -165,14 +165,14 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     "select_axis" => [[3, 4], "b[CArray.boolean(3) { [1, 0, 1] }, nil]"],
     "window"      => [[6],    "b.window(0..3)"],
   }.each do |name, (dim, view)|
-    define_method("test_#{name}_store_leaves_the_parent_on_a_freed_buffer") do
+    define_method("test_#{name}_store_leaves_the_parent_usable") do
       status, out = store_then_read(dim, view)
-      assert_broken [out, status.termsig], ["true ", Signal.list["ABRT"]],
-                    "that the parent reads back as 'false survived'"
+      assert status.success?, "the child died (signal #{status.termsig.inspect})"
+      assert_equal "false survived", out
     end
   end
 
-  def test_sound_views_that_store_cell_by_cell_leave_the_parent_usable
+  def test_views_that_store_cell_by_cell_leave_the_parent_usable
     { [6] => "b[0..4]", [3, 4] => "b.T" }.each do |dim, view|
       status, out = store_then_read(dim, view)
       assert status.success?, view
@@ -182,7 +182,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
 
   # The same two-pass store with no CAObject: the PUT that raises is the
   # conversion of the caller's value.
-  def test_object_fake_select_store_leaves_the_parent_attached
+  def test_object_fake_select_store_detaches_the_parent
     status, out = run_child(<<~RUBY)
       f = CArray.int32(6).seq.fake(CA_OBJECT)
       begin
@@ -192,7 +192,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
       print f.attached?
     RUBY
     assert status.success?
-    assert_broken out, "true", "that the fake view is detached"
+    assert_equal "false", out
   end
 
   # --- a block of scratch allocated before the arguments are checked ---
