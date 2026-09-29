@@ -576,7 +576,6 @@ ca_sweep_release_chunked (ca_sweep_state_t *st)
 
 typedef struct {
   CArray              *ca;
-  int                  writable;
   ca_with_buffer_body_fn body_fn;
   void                *user_data;
 } ca_with_buffer_ctx_t;
@@ -589,30 +588,16 @@ ca_with_buffer_body_trampoline (VALUE ctx_val)
   return Qnil;
 }
 
-static VALUE
-ca_with_buffer_ensure_trampoline (VALUE ctx_val)
-{
-  ca_with_buffer_ctx_t *ctx = (ca_with_buffer_ctx_t *) ctx_val;
-  if (ctx->writable) ca_sync(ctx->ca);
-  ca_detach(ctx->ca);
-  return Qnil;
-}
-
 void
 rb_ca_call_with_buffer (VALUE r_ca, int writable,
                    ca_with_buffer_body_fn body, void *user_data)
 {
   ca_with_buffer_ctx_t ctx;
   TypedData_Get_Struct(r_ca, CArray, &carray_data_type, ctx.ca);
-  /* CAREFUL: attach outside rb_ensure.  If attach raises, we are not
-   * yet inside the ensure scope, so the ensure trampoline will not
-   * fire on a not-attached ca (which would try to detach and crash). */
-  ca_attach(ctx.ca);
-  ctx.writable  = writable;
   ctx.body_fn   = body;
   ctx.user_data = user_data;
-  rb_ensure(ca_with_buffer_body_trampoline,    (VALUE) &ctx,
-            ca_with_buffer_ensure_trampoline,  (VALUE) &ctx);
+  ca_attach_window(1, &ctx.ca, writable ? "w" : "r",
+                   ca_with_buffer_body_trampoline, (VALUE) &ctx);
 }
 
 void

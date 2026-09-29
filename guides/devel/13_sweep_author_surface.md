@@ -232,23 +232,24 @@ CA_WITH_BUFFER(ca, T, ptr, n) {
      Read freely; no write-back on exit. */
 }
 
-/* writable; ca_sync runs on block exit */
+/* writable; written back on block exit */
 CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n) {
   fftw_execute_dft(plan, ptr, ptr);
 }
 ```
 
-The macros expand to a two-level `for` that does `ca_attach` →
-(body) → `ca_sync` (writable only) → `ca_detach`. The `_WRITABLE` form
-runs `ca_sync` before `ca_detach`; the read-only form skips the sync.
+The macros expand to a two-level `for` that does `ca_attach` → (body) →
+`ca_detach`. The `_WRITABLE` form closes with `ca_sync_detach` instead,
+which writes the buffer back and detaches even when the write-back
+raises; the read-only form skips the write-back.
 
 ### Exception safety: the function form
 
-The macros are `break`-safe but **leak on a non-local `return`** out of
-the block (the cleanup runs in the outer for's teardown, which `return`
-skips). For any body that may raise — calling into Ruby code, calling
-a fallible library with a Ruby exception path, etc. — use the function
-form instead:
+The macros are `break`-safe but **leak on a non-local `return` or a
+raise** out of the block: the cleanup runs in the outer for's teardown,
+which neither reaches. For any body that may raise — calling into Ruby
+code, converting a caller's value, calling a fallible library with a
+Ruby exception path — use the function form instead:
 
 ```c
 typedef void (*ca_with_buffer_body_fn) (void *user_data, void *ptr,
@@ -259,8 +260,10 @@ void rb_ca_call_with_buffer (VALUE r_ca, int writable,
                              void *user_data);
 ```
 
-`rb_ca_call_with_buffer` uses `rb_ensure` to guarantee `ca_sync` (if
-writable) and `ca_detach` run before any exception propagates. The
+`rb_ca_call_with_buffer` closes the array however the body is left: a
+writable array is written back first, so what the body wrote before
+raising arrives, and the array is detached even if that write-back
+raises. The body's exception is the one that propagates. The
 function's own return is `Qnil`; thread your result back via
 `user_data`. This is the right surface whenever the body might raise —
 which, in Ruby C-extension code, is most things.

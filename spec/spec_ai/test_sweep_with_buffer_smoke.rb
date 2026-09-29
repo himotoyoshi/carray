@@ -131,4 +131,36 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
     assert_equal 1.0, big[8]
     assert_equal 1.0, big[9]
   end
+
+  # ---------- a sync that raises ----------
+
+  # A CAObject whose sync fails, as a lazily backed array's does when its
+  # I/O fails.  The view is detached all the same.
+  class FailingSync < CAObject
+    def initialize (n)
+      @src = CArray.float64(n) { 1.0 }
+      super(CA_FLOAT64, [n])
+    end
+    def copy_data (d) ; d[] = @src ; end
+    def sync_data (d) ; raise "sync failed" ; end
+    def fetch_addr (a) ; @src[a] ; end
+    def store_addr (a, v) ; raise "sync failed" ; end
+  end
+
+  def test_writable_macro_detaches_when_the_sync_raises
+    arr = FailingSync.new(4)
+    assert_raise_message("sync failed") do
+      CArray.demo_with_buffer_scale_f64(arr, 2.0)
+    end
+    assert_equal false, arr.attached?
+  end
+
+  def test_call_with_buffer_detaches_when_the_sync_raises
+    arr = FailingSync.new(4)
+    # The body does not raise (index 100 is past the end); the sync does.
+    assert_raise_message("sync failed") do
+      CArray.demo_call_with_buffer_raise(arr, 100, true)
+    end
+    assert_equal false, arr.attached?
+  end
 end

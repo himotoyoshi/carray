@@ -379,9 +379,10 @@ CA_WITH_BUFFER(ca, T, ptr, n)         { /* read-only */ }
 CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n) { /* writable, sync on exit */ }
 ```
 
-Both wrap attach / (sync) / detach in a `for` loop teardown clause —
-exception-safe across `break`, leaks across `return`. For the
-`rb_ensure`-protected function form, use `rb_ca_call_with_buffer`
+Both wrap attach / (sync) / detach in a `for` loop teardown clause. A
+`break` runs the teardown; a `return` or a raise from the body skips it
+and leaves the array attached. When the body can raise, use the
+`rb_ensure`-protected function form `rb_ca_call_with_buffer`
 ([ch. 13](13_sweep_author_surface.md)). There is no Ruby-surface counterpart
 ("No Ruby attach surface" above).
 

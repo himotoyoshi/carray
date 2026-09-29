@@ -18,8 +18,8 @@
  *      otherwise).  n : ca->elements.  No write-back on exit.
  *
  *    CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n)
- *      Writable; same ptr/n semantics, plus ca_sync on block exit so
- *      author writes propagate back to the view's storage.
+ *      Writable; same ptr/n semantics, plus ca_sync_detach on block exit
+ *      so author writes propagate back to the view's storage.
  *
  *  Author pattern:
  *
@@ -33,11 +33,15 @@
  *    - `break;` from body exits cleanly (= outer for's advance clause
  *      runs ca_sync / ca_detach).
  *    - `return;` from body LEAKS the attach; restructure to break.
+ *    - A raise from body LEAKS the attach, and with it any buffer the
+ *      view materialised: the closing clause never runs.  Nothing inside
+ *      the block may raise -- no Ruby call, no conversion of a caller's
+ *      value, no rb_raise (record the error, break, raise after the
+ *      block).  When the body can raise, use the function form
+ *      `rb_ca_call_with_buffer`, which closes the view however the body
+ *      is left.
  *    - Macros are NOT statement-equivalent (= nested for); no trailing
  *      `else`.
- *    - For Ruby-exception-safe lifecycle (e.g. when calling Ruby code or
- *      anything that may raise from inside the body), use the function
- *      form `rb_ca_call_with_buffer` instead (= rb_ensure-protected).
  *
  *  --------------------------------------------------------------------------- */
 
@@ -61,11 +65,11 @@
           __cwv_once;                                                   \
           __cwv_once = 0 )
 
-/* Writable: same as above + ca_sync on block exit. */
+/* Writable: same as above, closed by ca_sync_detach on block exit. */
 #define CA_WITH_BUFFER_WRITABLE(_ca, T, _ptr, _n)                         \
   for ( CArray *__cwvw_ca = (CArray *)(_ca);                            \
         __cwvw_ca;                                                      \
-        ca_sync(__cwvw_ca), ca_detach(__cwvw_ca), __cwvw_ca = NULL )    \
+        ca_sync_detach(__cwvw_ca), __cwvw_ca = NULL )                   \
     for ( int __cwvw_once = (ca_attach(__cwvw_ca),                      \
                              (_ptr) = (T *)__cwvw_ca->ptr,              \
                              (_n)   = __cwvw_ca->elements,              \
@@ -77,9 +81,10 @@
  *
  * Use this when the body may raise a Ruby exception (= calling rb_funcall,
  * type-checking with rb_check_type, indirect Ruby code, etc.).  The
- * engine ca_attach's the view, runs body via rb_ensure, then guarantees
- * ca_sync (if writable) and ca_detach run before the exception
- * propagates.
+ * engine attaches the view, runs body, and closes the view however body
+ * is left: a writable view is synced first, so what body wrote before
+ * raising reaches the view's storage, and the view is detached even if
+ * that sync raises.  body's exception is the one that propagates.
  *
  *   body_fn(user_data, ptr, n_elements) -> may raise
  *
