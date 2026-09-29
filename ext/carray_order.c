@@ -120,7 +120,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
   CArray *co;
 
-  ca_attach_n(2, ca, ci); /* ATTACH */
+  ca_attach_n(2, ca, ci); /* window: nothing raises inside */
 
   co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
@@ -142,6 +142,7 @@ VALUE
 rb_ca_project (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, ridx, vlfval, vufval, vstorage;
+  volatile VALUE hlfval = 0, hufval = 0;
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
   int self_is_face;
@@ -158,8 +159,8 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
      surface->storage conversion: for a Face self it fires the scalar_to_storage
      write hook (a datetime scalar / Time is reconciled to the Face's unit),
      for a plain array it writes the storage bytes directly. */
-  lfval = xmalloc(ca->bytes);
-  ufval = xmalloc(ca->bytes);
+  lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */
+  ufval = ALLOCV_N(char, hufval, ca->bytes);   /* can raise; the unwind frees */
 
   if ( ! NIL_P(vlfval) ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
@@ -185,8 +186,8 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
                  ( ! NIL_P(vlfval) ) ? lfval : NULL,
                  ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
 
-  xfree(lfval);
-  xfree(ufval);
+  ALLOCV_END(hlfval);
+  ALLOCV_END(hufval);
 
   obj = ca_wrap_struct(co);
 

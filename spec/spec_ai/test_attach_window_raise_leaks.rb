@@ -54,6 +54,50 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     end
   end
 
+  # A CAObject over +src+ whose reads fail once told to, as a lazily backed
+  # array's do when its I/O fails.
+  class FailingRead < CAObject
+    attr_accessor :fail_read
+    def initialize (src)
+      @src = src
+      super(src.data_type, src.shape, bytes: src.bytes)
+    end
+    def copy_data (d)
+      raise "read failed" if @fail_read
+      d[] = @src
+    end
+    def fetch_addr (a)
+      raise "read failed" if @fail_read
+      @src[a]
+    end
+  end
+
+  # A CAObject whose values read but whose mask does not.
+  class FailingMask < CAObject
+    def initialize (n)
+      @src = CArray.int32(n).seq
+      super(CA_INT32, [n])
+      self.mask = 0
+    end
+    def create_mask ; end
+    def copy_data (d)      ; d[] = @src ; end
+    def fetch_addr (a)     ; @src[a] ; end
+    def mask_copy_data (d) ; raise "mask read failed" ; end
+  end
+
+  # A CAObject whose mask reads but cannot be written.
+  class FailingMaskSync < CAObject
+    def initialize (n)
+      @src = CArray.int32(n).seq
+      super(CA_INT32, [n])
+    end
+    def create_mask ; end
+    def copy_data (d)      ; d[] = @src ; end
+    def fetch_addr (a)     ; @src[a] ; end
+    def mask_copy_data (d) ; d[] = 0 ; end
+    def mask_sync_data (d) ; raise "mask write failed" ; end
+  end
+
   def setup
     @arena_depth = CArray.__lazy_arena_depth__
   end
@@ -399,6 +443,64 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
       v, t = self.class.discovery_victim
       [[v, t], -> { op.(v) }]
     end
+  end
+
+  # to_a reads each object, fixlen or Face cell through the fetch path,
+  # which decodes the cell and can raise.
+  releases("to_a_cell_does_not_decode", IndexError) do
+    pe = CArray.new(CA_FIXLEN, [2], :bytes => 16)
+    [[0, 3], [999, 1999]].each_with_index { |(s, e), i| pe[i] = [s, e].pack("q2") }
+    pe.mask = 0
+    pe.mask[1] = 1
+    v = CAConstString.wrap(pe, buffer: "abc").value
+    [[v, v.parent], -> { v.to_a }]
+  end
+
+  # A weighted reduction holds its weights attached for the call; an
+  # argument refused after they are taken must not leave them attached.
+  {
+    "positional_axis" => [ArgumentError, ->(a, w) { a.wsum(w, 1) }],
+    "complex_source"  => [CArray::DataTypeError, ->(a, w) {
+      CArray.cmplx128(4, 3) { Complex(1.0, 0.0) }.wmean(w)
+    }],
+  }.each do |name, (error, op)|
+    releases("weighted_reduction_#{name}", error) do
+      w = CArray.float64(4, 5).seq[nil, 0..2]
+      [[w], -> { op.(CArray.int32(4, 3).seq, w) }]
+    end
+  end
+
+  # histogram reads its edges before it walks the samples.
+  releases("histogram_samples_do_not_read", RuntimeError) do
+    edges = CArray.float64(30) { |i| i * 1.0 }[0..10]
+    samples = FailingRead.new(CArray.float64(5, 4).seq)
+    samples.fail_read = true
+    [[edges], -> { samples.histogram1d(edges: edges) }]
+  end
+
+  # An in-place operator makes its mask from the operands' masks after it
+  # has taken the destination.
+  releases("bang_op_operand_mask_does_not_read", RuntimeError) do
+    dst = CArray.int32(3, 4).seq.T[nil, 0]
+    [[dst], -> { dst.add!(FailingMask.new(4)) }]
+  end
+
+  # mask= holds the new mask attached while it writes the array's own.
+  releases("set_mask_write_raises", RuntimeError) do
+    o = FailingMaskSync.new(4)
+    mv = CArray.boolean(2, 4) { 0 }[0, nil]
+    [[mv], -> { o.mask = mv }]
+  end
+
+  # eq opens both strings before comparing them.
+  releases("const_string_eq_other_does_not_read", RuntimeError) do
+    pe = CArray.new(CA_FIXLEN, [2], :bytes => 16)
+    [[0, 2], [2, 4]].each_with_index { |(s, e), i| pe[i] = [s, e].pack("q2") }
+    a = CAConstString.wrap(pe.copy, buffer: "abcd")
+    other = FailingRead.new(pe.copy)
+    b = CAConstString.wrap(other, buffer: "abcd")
+    other.fail_read = true
+    [[a, b], -> { a.eq(b) }]
   end
 
   # --- the core's own entry points -------------------------------------

@@ -23,13 +23,15 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 #include <math.h>
 
-/* Resolve `redges` to a contiguous, attached, 1-D float64 CArray.
-   Returns the CArray* and (via out params) the data pointer + element
-   count.  Caller must ca_detach when done. */
+/* Resolve `redges` to a 1-D float64 CArray of at least two edges.  The
+   caller copies the edges out (ca_xfer_all into its own buffer) rather
+   than attaching them: the walk that follows reads the caller's array,
+   and a raise there must not leave the edges attached. */
 static CArray *
-histbin_attach_edges (VALUE self, VALUE redges, double **ep_out, ca_size_t *ne_out)
+histbin_resolve_edges (VALUE self, VALUE redges)
 {
   CArray *ce;
 
@@ -49,9 +51,6 @@ histbin_attach_edges (VALUE self, VALUE redges, double **ep_out, ca_size_t *ne_o
     rb_raise(rb_eArgError, "histbin_ki: edges needs at least 2 values");
   }
 
-  ca_attach(ce);
-  *ep_out = (double *) ce->ptr;
-  *ne_out = ce->elements;
   return ce;
 }
 
@@ -105,12 +104,13 @@ histbin_index (const histbin_axis_t *ax, double v)
 }
 
 static void
-histbin_axis_setup (histbin_axis_t *ax, CArray *ce, int include_max)
+histbin_axis_setup (histbin_axis_t *ax, const double *ep, ca_size_t ne,
+                    int include_max)
 {
-  ca_size_t ne = ce->elements, kk;
+  ca_size_t kk;
   double    dx, tol;
 
-  ax->ep = (const double *) ce->ptr;
+  ax->ep = ep;
   ax->n  = ne - 1;
   ax->lo = ax->ep[0];
   ax->hi = ax->ep[ne - 1];
@@ -129,8 +129,8 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
 {
   CArray         *ca, *co, *ce;
   VALUE           vout;
+  volatile VALUE  hedges = 0;
   double         *ep;
-  ca_size_t       ne;
   histbin_axis_t  ax;
 
   GetCArray(self, ca);
@@ -140,9 +140,10 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
              ca_type_name[ca->data_type]);
   }
 
-  ce = histbin_attach_edges(self, redges, &ep, &ne);
-  (void) ep; (void) ne;                  /* axis setup reads ce directly */
-  histbin_axis_setup(&ax, ce, RTEST(rinclude_max));
+  ce = histbin_resolve_edges(self, redges);
+  ep = ALLOCV_N(double, hedges, ce->elements);
+  ca_xfer_all(ce, ep, CA_XFER_GET);
+  histbin_axis_setup(&ax, ep, ce->elements, RTEST(rinclude_max));
 
   /* output: fresh contiguous int64, same shape as self. */
   vout = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
@@ -179,7 +180,7 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
     }
   }
 
-  ca_detach(ce);
+  ALLOCV_END(hedges);
 
   return vout;
 }
@@ -201,6 +202,125 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
        off = fiber_base + Σ_k histbin_index(axis_k, v_{a,k}) * ext_stride[k]
        counts[off] += 1  (or += weight when weighted)
    =========================================================================== */
+/* histogram_scatter_ki reads its edges inside an attach window and walks
+   the samples (and the weights) with two kernel iterators, whose states
+   live here, outside the walk: a sample view that raises as it is read --
+   a lazy source meeting a cell it cannot compute -- leaves neither the
+   edges nor the other walk open. */
+typedef struct {
+  ca_iter_state   states[2];      /* the samples, the weights */
+  CArray         *ca, *cc, *cw;
+  long            M, nf;
+  int             weighted;
+  CArray        **edge_ca;
+  VALUE           rincmax;
+  histbin_axis_t *axes;
+  ca_size_t      *ext_stride;
+  ca_size_t      *fiber_stride;
+} histogram_scatter_t;
+
+static VALUE
+histogram_scatter_walk (VALUE arg)
+{
+  histogram_scatter_t *c = (histogram_scatter_t *) arg;
+  CArray         *ca = c->ca, *cc = c->cc, *cw = c->cw;
+  long            M = c->M, k;
+  int             weighted = c->weighted;
+  histbin_axis_t *axes = c->axes;
+  ca_size_t      *ext_stride = c->ext_stride;
+  ca_size_t      *fiber_stride = c->fiber_stride;
+#define st  (c->states[0])
+#define stw (c->states[1])
+  int64_t      *cpi = (int64_t *) cc->ptr;   /* unweighted */
+  double       *cpd = (double *)  cc->ptr;   /* weighted   */
+  char         *p, *pw = NULL;
+  boolean8_t   *m, *mw = NULL;
+  ca_size_t     cur_outer_idx[CA_RANK_MAX];
+  int8_t        slab_axes[2] = { (int8_t)(ca->ndim - 2), (int8_t)(ca->ndim - 1) };
+  int8_t        w_slab_axes[1] = { (int8_t)(ca->ndim - 2) };  /* weights sample axis */
+  int8_t        mm;
+  int           rc;
+
+  rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, slab_axes, 2, 0);
+  if ( rc != CA_ITER_OK ) {
+    rb_raise(rb_eRuntimeError, "histogram_scatter_ki: iter init failed rc=%d", rc);
+  }
+  if ( weighted ) {
+    rc = ca_iter_state_init_l2(&stw, cw, CA_SLAB_AXES, w_slab_axes, 1, 0);
+    if ( rc != CA_ITER_OK ) {
+      rb_raise(rb_eRuntimeError, "histogram_scatter_ki: weights iter init failed rc=%d", rc);
+    }
+  }
+  for ( mm = 0; mm < st.outer_ndim; mm++ ) cur_outer_idx[mm] = 0;
+
+  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+    ca_size_t fiber_base = 0;
+    ca_size_t A, a, kk;
+    ca_size_t ss, cs, sms, cms, ws = 0, wms = 0;
+
+    if ( weighted && ! ca_iter_state_next_slab_axes(&stw, &pw, &mw) ) break;
+
+    for ( mm = 0; mm < st.outer_ndim; mm++ )
+      fiber_base += cur_outer_idx[mm] * fiber_stride[mm];
+
+    A   = st.slab_dims[0];               /* samples */
+    ss  = st.slab_strides[0];            /* sample byte stride */
+    cs  = st.slab_strides[1];            /* channel byte stride */
+    sms = st.slab_mask_strides[0];
+    cms = st.slab_mask_strides[1];
+    if ( weighted ) {
+      ws  = stw.slab_strides[0];
+      wms = stw.slab_mask_strides[0];
+    }
+
+    for ( a = 0; a < A; a++ ) {
+      ca_size_t off = fiber_base;
+      int       masked = 0;
+      for ( kk = 0; kk < (ca_size_t) M; kk++ ) {
+        double v = *(const double *)(p + a * ss + kk * cs);
+        if ( (m && m[a * sms + kk * cms]) || isnan(v) ) { masked = 1; break; }
+        off += histbin_index(&axes[kk], v) * ext_stride[kk];
+      }
+      if ( masked ) continue;
+      if ( weighted ) {
+        double w = *(const double *)(pw + a * ws);
+        if ( (mw && mw[a * wms]) || isnan(w) ) continue;  /* skip masked / NaN weight */
+        cpd[off] += w;
+      }
+      else {
+        cpi[off] += 1;
+      }
+    }
+
+    for ( mm = (int8_t)(st.outer_ndim - 1); mm >= 0; mm-- ) {
+      if ( ++cur_outer_idx[mm] < st.outer_dims[mm] ) break;
+      cur_outer_idx[mm] = 0;
+    }
+  }
+  ca_iter_state_finish(&st);
+  if ( weighted ) ca_iter_state_finish(&stw);
+#undef st
+#undef stw
+  (void) k;
+  return Qnil;
+}
+
+static VALUE
+histogram_scatter_edges (VALUE arg)
+{
+  histogram_scatter_t *c = (histogram_scatter_t *) arg;
+  long k;
+  for ( k = 0; k < c->M; k++ ) {
+    histbin_axis_setup(&c->axes[k], (const double *) c->edge_ca[k]->ptr,
+                       c->edge_ca[k]->elements,
+                       RTEST(RARRAY_AREF(c->rincmax, k)));
+  }
+  if ( c->ca->elements > 0 ) {
+    ca_iter_ensure(2, c->states, histogram_scatter_walk, arg);
+  }
+  return Qnil;
+}
+
 static VALUE
 rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
                             VALUE rincmax, VALUE rweights)
@@ -258,8 +378,6 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
   for ( k = 0; k < M; k++ ) {
     VALUE e = RARRAY_AREF(redges, k);
     GetCArray(e, edge_ca[k]);
-    ca_attach(edge_ca[k]);
-    histbin_axis_setup(&axes[k], edge_ca[k], RTEST(RARRAY_AREF(rincmax, k)));
   }
 
   /* ext strides (row-major within the trailing M bin axes of counts). */
@@ -275,82 +393,18 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
     s *= cc->dim[k];
   }
 
-  if ( ca->elements > 0 ) {
-    int64_t      *cpi = (int64_t *) cc->ptr;   /* unweighted */
-    double       *cpd = (double *)  cc->ptr;   /* weighted   */
-    ca_iter_state st, stw;
-    char         *p, *pw = NULL;
-    boolean8_t   *m, *mw = NULL;
-    ca_size_t     cur_outer_idx[CA_RANK_MAX];
-    int8_t        slab_axes[2] = { (int8_t)(ca->ndim - 2), (int8_t)(ca->ndim - 1) };
-    int8_t        w_slab_axes[1] = { (int8_t)(ca->ndim - 2) };  /* weights sample axis */
-    int8_t        mm;
-    int           rc;
-
-    rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, slab_axes, 2, 0);
-    if ( rc != CA_ITER_OK ) {
-      for ( k = 0; k < M; k++ ) ca_detach(edge_ca[k]);
-      rb_raise(rb_eRuntimeError, "histogram_scatter_ki: iter init failed rc=%d", rc);
-    }
-    if ( weighted ) {
-      rc = ca_iter_state_init_l2(&stw, cw, CA_SLAB_AXES, w_slab_axes, 1, 0);
-      if ( rc != CA_ITER_OK ) {
-        ca_iter_state_finish(&st);
-        for ( k = 0; k < M; k++ ) ca_detach(edge_ca[k]);
-        rb_raise(rb_eRuntimeError, "histogram_scatter_ki: weights iter init failed rc=%d", rc);
-      }
-    }
-    for ( mm = 0; mm < st.outer_ndim; mm++ ) cur_outer_idx[mm] = 0;
-
-    while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
-      ca_size_t fiber_base = 0;
-      ca_size_t A, a, kk;
-      ca_size_t ss, cs, sms, cms, ws = 0, wms = 0;
-
-      if ( weighted && ! ca_iter_state_next_slab_axes(&stw, &pw, &mw) ) break;
-
-      for ( mm = 0; mm < st.outer_ndim; mm++ )
-        fiber_base += cur_outer_idx[mm] * fiber_stride[mm];
-
-      A   = st.slab_dims[0];               /* samples */
-      ss  = st.slab_strides[0];            /* sample byte stride */
-      cs  = st.slab_strides[1];            /* channel byte stride */
-      sms = st.slab_mask_strides[0];
-      cms = st.slab_mask_strides[1];
-      if ( weighted ) {
-        ws  = stw.slab_strides[0];
-        wms = stw.slab_mask_strides[0];
-      }
-
-      for ( a = 0; a < A; a++ ) {
-        ca_size_t off = fiber_base;
-        int       masked = 0;
-        for ( kk = 0; kk < (ca_size_t) M; kk++ ) {
-          double v = *(const double *)(p + a * ss + kk * cs);
-          if ( (m && m[a * sms + kk * cms]) || isnan(v) ) { masked = 1; break; }
-          off += histbin_index(&axes[kk], v) * ext_stride[kk];
-        }
-        if ( masked ) continue;
-        if ( weighted ) {
-          double w = *(const double *)(pw + a * ws);
-          if ( (mw && mw[a * wms]) || isnan(w) ) continue;  /* skip masked / NaN weight */
-          cpd[off] += w;
-        }
-        else {
-          cpi[off] += 1;
-        }
-      }
-
-      for ( mm = (int8_t)(st.outer_ndim - 1); mm >= 0; mm-- ) {
-        if ( ++cur_outer_idx[mm] < st.outer_dims[mm] ) break;
-        cur_outer_idx[mm] = 0;
-      }
-    }
-    ca_iter_state_finish(&st);
-    if ( weighted ) ca_iter_state_finish(&stw);
+  {
+    histogram_scatter_t c;
+    char modes[CA_RANK_MAX + 1];
+    for ( k = 0; k < M; k++ ) modes[k] = 'r';
+    modes[M] = '\0';
+    c.ca = ca; c.cc = cc; c.cw = cw;
+    c.M = M; c.nf = nf; c.weighted = weighted;
+    c.edge_ca = edge_ca; c.rincmax = rincmax; c.axes = axes;
+    c.ext_stride = ext_stride; c.fiber_stride = fiber_stride;
+    ca_attach_window((int32_t) M, edge_ca, modes, histogram_scatter_edges,
+                     (VALUE) &c);
   }
-
-  for ( k = 0; k < M; k++ ) ca_detach(edge_ca[k]);
 
   return rcounts;
 }

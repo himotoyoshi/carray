@@ -82,8 +82,7 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
     rb_raise(rb_eArgError, "__categorical_scatter__: grouped/value data type mismatch");
   }
 
-  ca_attach(codes);
-  ca_attach(value);
+  ca_attach_n(2, codes, value);   /* window: detached before each raise inside */
   cmask = ca_mask_ptr(codes);
   vmask = ca_mask_ptr(value);
   cur   = (int64_t *) cursor->ptr;
@@ -1005,8 +1004,7 @@ rb_ca_fiber_scatter_moments (VALUE self, VALUE rcodes, VALUE raxis, VALUE rk,
   band_size  = outer_prod * inner_prod;
   total      = (ca_size_t)(K * band_size);
 
-  ca_attach(h);
-  ca_attach(codes);
+  ca_attach_n(2, h, codes);   /* window: detached before each raise inside */
   hm = ca_mask_ptr(h);
   cm = ca_mask_ptr(codes);
   countp = (int64_t *) counts->ptr;
@@ -1172,8 +1170,7 @@ rb_ca_fiber_scatter_prod (VALUE self, VALUE rcodes, VALUE raxis,
   band_size  = outer_prod * inner_prod;
   total      = (ca_size_t)(K * band_size);
 
-  ca_attach(h);
-  ca_attach(codes);
+  ca_attach_n(2, h, codes);   /* window: detached before each raise inside */
   hm   = ca_mask_ptr(h);
   cm   = ca_mask_ptr(codes);
   outp = (double *) out->ptr;
@@ -1281,6 +1278,7 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
   ca_size_t   ax, inn, outer, cell;
   ca_size_t   axis_size, inner_prod, outer_prod, band_size, total;
   double     *wp, *wsp, *wsw, *wmp;
+  volatile VALUE hwsw = 0, hcnt = 0;
   boolean8_t *hm, *cm, *wm, *wmm;
   int8_t      i, j;
   int64_t    *cnt_scratch = NULL;
@@ -1341,9 +1339,7 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
   band_size  = outer_prod * inner_prod;
   total      = (ca_size_t)(K * band_size);
 
-  ca_attach(h);
-  ca_attach(codes);
-  ca_attach(weights);
+  ca_attach_n(3, h, codes, weights);   /* window: detached before each raise inside */
   hm  = ca_mask_ptr(h);
   cm  = ca_mask_ptr(codes);
   wm  = ca_mask_ptr(weights);
@@ -1352,8 +1348,9 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
   wmp = (double *) wmean->ptr;   /* wmean output (temp = sum-of-weights, then divide) */
 
   /* Two auxiliary scratches: sum-of-weights (per cell) and present-pair count. */
-  wsw = (double *) xmalloc((size_t) total * sizeof(double));
-  cnt_scratch = (int64_t *) xmalloc((size_t) total * sizeof(int64_t));
+  /* ALLOCV, so a raise below (codes of the wrong type) leaves nothing. */
+  wsw = ALLOCV_N(double, hwsw, total);
+  cnt_scratch = ALLOCV_N(int64_t, hcnt, total);
 
   memset(wsp,         0, (size_t) total * sizeof(double));
   memset(wsw,         0, (size_t) total * sizeof(double));
@@ -1372,7 +1369,7 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
   case CA_FLOAT32: FIBER_SCATTER_WSUM_DISPATCH_C(float32_t); break;
   case CA_FLOAT64: FIBER_SCATTER_WSUM_DISPATCH_C(float64_t); break;
   default:
-    xfree(wsw); xfree(cnt_scratch);
+    ALLOCV_END(hwsw); ALLOCV_END(hcnt);
     ca_detach(h); ca_detach(codes); ca_detach(weights);
     rb_raise(rb_eCADataTypeError,
              "__fiber_scatter_wsum_wmean__: numeric value required (got %d)",
@@ -1391,8 +1388,8 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
     }
   }
 
-  xfree(wsw);
-  xfree(cnt_scratch);
+  ALLOCV_END(hwsw);
+  ALLOCV_END(hcnt);
   ca_detach(h);
   ca_detach(codes);
   ca_detach(weights);

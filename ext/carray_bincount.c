@@ -72,6 +72,34 @@
   } \
 } while (0)
 
+/* Checked before a window opens: the dispatches above raise on a type
+   they do not cover, which would leave the labels (and weights) attached. */
+static void
+bincount_check_types (CArray *cl, CArray *cw)
+{
+  switch ( cl->data_type ) {
+  case CA_INT8:  case CA_INT16:  case CA_INT32:  case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+    break;
+  default:
+    rb_raise(rb_eCADataTypeError,
+             "bincount: integer label array required (got %d)",
+             cl->data_type);
+  }
+  if ( ! cw ) {
+    return;
+  }
+  switch ( cw->data_type ) {
+  case CA_FLOAT64: case CA_FLOAT32:
+  case CA_INT8:  case CA_INT16:  case CA_INT32:  case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+    break;
+  default:
+    rb_raise(rb_eCADataTypeError,
+             "bincount: weights must be numeric (got %d)", cw->data_type);
+  }
+}
+
 /* __bincount_count__(length) -- count occurrences of each label in
    self.  Allocates a zero-filled UInt32 (or UInt64 if length >= 2^32)
    output of size `length`, then runs the 8-way label dispatch. */
@@ -104,7 +132,8 @@ rb_ca_bincount_count_kernel (VALUE self, VALUE rlength)
     return vout;
   }
 
-  ca_attach(cl);
+  bincount_check_types(cl, NULL);
+  ca_attach(cl);   /* window: nothing raises inside */
   n      = cl->elements;
   mlabel = cl->mask ? (boolean8_t *) cl->mask->ptr : NULL;
 
@@ -213,7 +242,8 @@ rb_ca_bincount_weighted_kernel (VALUE self, VALUE rweights, VALUE rlength)
     return vout;
   }
 
-  ca_attach_n(2, cl, cw);
+  bincount_check_types(cl, cw);
+  ca_attach_n(2, cl, cw);   /* window: nothing raises inside */
   n       = cl->elements;
   mlabel  = cl->mask ? (boolean8_t *) cl->mask->ptr : NULL;
   mweight = cw->mask ? (boolean8_t *) cw->mask->ptr : NULL;
