@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a boolean selection (`x[x > 2]`, `x[CA_BOOLEAN([1, 0, 1])]`) or a
+  `shift` of a masked array follows later changes to the array's mask.
+  Once read, it went on answering the mask as it was at that first read,
+  so cells masked or unmasked afterwards came out wrong.
+
 - Fix: `add!`, `map!`, `seq!` and the other in-place methods on a
   `CArray.stack` or `CArray.meld` whose parents are selections
   (`x[x > 2]`) or `CAObject`s now write their cells back to the parents;

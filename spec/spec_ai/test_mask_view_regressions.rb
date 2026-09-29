@@ -80,4 +80,31 @@ class TestMaskViewRegressions < Test::Unit::TestCase
     assert_equal expected, ba.mask.to_a
   end
 
+  # A view whose mask is made while the view is being attached keeps that
+  # mask at the view's own attach level, so the mask lets go when the view
+  # does.  One level too many left the mask of a selection attached, and it
+  # went on reading the buffer it held when the parent's mask changed.
+  def test_a_selection_follows_its_parents_mask_after_being_read
+    x = CA_INT32([1, 2, 3, 4])
+    x[1] = UNDEF
+    v = x[CA_BOOLEAN([1, 1, 0, 1])]
+    assert_equal [1, UNDEF, 4], v.to_a
+    assert_equal false, v.mask.attached?
+    x[3] = UNDEF
+    assert_equal [1, UNDEF, UNDEF], v.to_a
+    x.unmask
+    assert_equal [1, 2, 4], v.to_a
+  end
+
+  def test_a_shift_follows_its_parents_mask_after_being_read
+    x = CA_INT32([1, 2, 3, 4, 5, 6])
+    x[1] = UNDEF
+    v = x.shift(1)
+    assert_equal [0, 1, UNDEF, 3, 4, 5], v.to_a
+    x[4] = UNDEF
+    assert_equal [0, 1, UNDEF, 3, 4, UNDEF], v.to_a
+    x.unmask
+    assert_equal [0, 1, 2, 3, 4, 5], v.to_a
+  end
+
 end

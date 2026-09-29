@@ -1634,8 +1634,13 @@ ca_allocate_rest (CArray *ca)
     }
   }
 
-  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
-  ca_allocate(ca->mask);
+  {
+    CArray *mask0 = ca->mask;
+    ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
+    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+      ca_allocate(ca->mask);
+    }
+  }
 }
 
 /* The view half of ca_allocate, after the attach level is taken.  Run
@@ -1702,9 +1707,19 @@ static VALUE
 ca_attach_view_first (VALUE arg)
 {
   CArray *ca = (CArray *) arg;
+  CArray *mask0;
   ca_func[ca->obj_type].attach(ca);
+  /* The mask moves in step with its view: attach, allocate and detach
+     each take it one level with the view.  A mask ca_update_mask creates
+     here is already at the view's level -- ca_create_mask attaches a new
+     mask to match an attached view -- so only a mask that was there before
+     takes the step; stepping a new one too leaves it a level above the
+     view, still attached after the view's last detach. */
+  mask0 = ca->mask;
   ca_update_mask(ca);
-  ca_attach(ca->mask);
+  if ( ca->mask == mask0 ) {
+    ca_attach(ca->mask);
+  }
   return Qnil;
 }
 
@@ -1751,8 +1766,13 @@ ca_attach (void *ap)
     ca_func[ca->obj_type].attach(ap);
   }
 
-  ca_update_mask(ca);
-  ca_attach(ca->mask);
+  {
+    CArray *mask0 = ca->mask;
+    ca_update_mask(ca);
+    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+      ca_attach(ca->mask);
+    }
+  }
 }
 
 /* Attach every array in list[0..n-1], or, if one of those attaches
@@ -2078,8 +2098,13 @@ ca_detach (void *ap)
     ca_func[ca->obj_type].detach(ap);
   }
 
-  ca_update_mask(ca);
-  ca_detach(ca->mask);
+  {
+    CArray *mask0 = ca->mask;
+    ca_update_mask(ca);
+    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+      ca_detach(ca->mask);
+    }
+  }
 }
 
 /* multiple versions of ca_allocate, ca_attach, ca_sync, ca_detach */
