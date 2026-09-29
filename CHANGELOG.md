@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CArray#set_attrs(hash)` sets several attributes at once;
+  `b.set_attrs(a.attrs)` gives `b` the attributes `a` shows. Keys `b`
+  already has and the Hash does not name are kept.
+
+- Change: attributes set with `set_attr` now survive `copy` and `to_type`
+  (and its shorthands such as `int32`): the new array gets the attributes
+  the source shows, as its own. Arithmetic and reductions still start with
+  none. A lazy operation (`a.lazy + 1`, `a.lazy.sqrt`, …) no longer shows
+  the attributes of its left operand; `a.lazy` itself still shows `a`'s.
+
 - Fix: a `CAObject` that keeps its mask in Ruby (`mask_copy_data` /
   `mask_sync_data`, or `mask_fetch_addr` / `mask_store_addr`) is asked for
   every read of its mask and handed every write. Assigning a whole mask

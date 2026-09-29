@@ -34,6 +34,7 @@
 #include "ruby/memory_view.h"
 #include "ca_monop_dispatch.h"   /* CA_MONOP_CAST_BASE for as_type routing */
 #include "ca_obj_face.h"         /* ca_strip_face for write path lift */
+#include "carray_internal.h"      /* rb_ca_inherit_attr */
 
 boolean8_t
 OBJ2BOOL (VALUE v)
@@ -627,8 +628,20 @@ ca_to_type_release (VALUE arg)
    data_type (a new entity owning its storage).  User doc lives in
    yard-stubs/carray_cast.rb. */
 
+static VALUE rb_ca_to_type_convert (int argc, VALUE *argv, VALUE self);
+
+/* The converted array keeps self's attributes: the values are the same
+   values in another representation. */
 static VALUE
 rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
+{
+  VALUE obj = rb_ca_to_type_convert(argc, argv, self);
+  rb_ca_inherit_attr(obj, self);
+  return obj;
+}
+
+static VALUE
+rb_ca_to_type_convert (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
   CArray *ca, *cb;
@@ -657,8 +670,8 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
      Numeric Face is not routed here -- its surface *is* its storage, so the
      ordinary cast below is already right. */
   if ( ca_is_face(ca) && ca->data_type == CA_FIXLEN ) {
-    return rb_ca_to_type_internal(argc, argv,
-                                  rb_ca_face_numeric_projection(self, ca));
+    return rb_ca_to_type_convert(argc, argv,
+                                 rb_ca_face_numeric_projection(self, ca));
   }
 
   ca_update_mask(ca);

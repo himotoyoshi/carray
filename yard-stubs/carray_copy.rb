@@ -8,7 +8,8 @@ class CArray
   # @overload copy
   #   Returns a fresh entity CArray with the same shape, `data_type`,
   #   element values, and mask state as `self`. Always allocates and
-  #   copies, even when `self` is already an entity.
+  #   copies, even when `self` is already an entity. The copy gets the
+  #   attributes `self` shows (`attrs`) as its own.
   #
   #   Use `copy` when you need an array you own and can mutate
   #   without affecting any source.
