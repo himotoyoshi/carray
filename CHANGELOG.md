@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions: `CA_WITH_BUFFER_WRITABLE` and
+  `rb_ca_call_with_buffer` detach the array when writing it back raises;
+  they used to leave it attached. The macro changes once the extension is
+  rebuilt against this version. A raise from the body of `CA_WITH_BUFFER`
+  or `CA_WITH_BUFFER_WRITABLE` still leaves the array attached: use
+  `rb_ca_call_with_buffer` when the body can raise.
+
 - Fix: these no longer leave an array attached when they raise part way:
   `to_a` on an object, fixlen or Face array with a cell that cannot be
   decoded; `wsum` and `wmean` refusing an argument; `histogram`,

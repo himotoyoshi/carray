@@ -175,14 +175,16 @@ CA_WITH_BUFFER_WRITABLE(ca, double, ptr, n) {
 }
 ```
 
-Same as read-only, plus `ca_sync` on block exit propagates writes back
-to the view's storage. Author writes through a slice view land in the
+Same as read-only, plus a write-back on block exit (`ca_sync_detach`)
+propagates writes to the view's storage, detaching even if the
+write-back raises. Author writes through a slice view land in the
 parent.
 
-### `break`-safe, `return`-leaks
+### `break`-safe; `return` and raise leak
 
-Same convention as `CA_FOR_EACH_ELEMENT`. If your body must be safe
-against arbitrary Ruby exceptions, use the function form below.
+Same convention as `CA_FOR_EACH_ELEMENT`: a `return` or a raise from the
+body skips the closing clause and leaves the array attached. If your
+body can raise, use the function form below.
 
 ### Function form: `rb_ca_call_with_buffer` (rb_ensure-protected)
 
@@ -207,11 +209,11 @@ my_method (VALUE self, VALUE r_ca)
 }
 ```
 
-This wraps the `ca_attach` / body / `ca_sync` (writable) / `ca_detach`
-cycle in `rb_ensure`. If `body` raises a Ruby exception, `ca_sync` (if
-writable) still runs so any partial writes propagate, then `ca_detach`
-returns the attach, then the exception continues to unwind. Use this
-whenever the body calls Ruby code or anything that can raise.
+This closes the array however `body` is left. If `body` raises a Ruby
+exception, a writable array is still written back so any partial writes
+propagate, then detached (even if the write-back raises), and the
+exception continues to unwind. Use this whenever the body calls Ruby
+code or anything that can raise.
 
 ## Worked example: rewriting a typical ext gem call
 
