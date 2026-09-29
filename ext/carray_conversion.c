@@ -176,19 +176,34 @@ rb_ca_to_a_loop_universal (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
  * fast path, so all view kinds land in the data type-direct leaf loop when
  * the data type is numeric or boolean; CA_OBJECT / CA_FIXLEN fall through
  * to the universal fetch_index walk. */
+/* The universal walk reads each cell through the fetch path, which
+   decodes -- an object cell, a Face's element -- and can raise, so it runs
+   inside an attach window.  The fast path only copies numbers out. */
+typedef struct {
+  VALUE self;
+  VALUE ary;
+} ca_to_a_ctx_t;
+
+static VALUE
+ca_to_a_universal (VALUE arg)
+{
+  ca_to_a_ctx_t *c = (ca_to_a_ctx_t *) arg;
+  ca_size_t idx[CA_RANK_MAX];
+  rb_ca_to_a_loop_universal(c->self, 0, idx, c->ary);
+  return Qnil;
+}
+
 VALUE
 rb_ca_to_a (VALUE self)
 {
   volatile VALUE ary;
   CArray *ca;
-  ca_size_t idx[CA_RANK_MAX];
   int data_type, fast_eligible;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ary = rb_ca_is_empty(self) ? rb_ary_new() : rb_ary_new2(ca->dim[0]);
-  ca_attach(ca);
 
-  /* After ca_attach, ca->ptr is a contig row-major buffer (alias for
+  /* Once attached, ca->ptr is a contig row-major buffer (alias for
      contig views, materialised otherwise) and ca->mask matches, so the
      fast path handles every view kind.  CA_OBJECT / CA_FIXLEN stay on
      the universal path because their ptr is VALUE / byte string and
@@ -211,16 +226,21 @@ rb_ca_to_a (VALUE self)
                       || data_type == CA_BOOLEAN);
 
   if ( fast_eligible ) {
-    int has_mask = (ca->mask != NULL);
-    const boolean8_t *mask_base = has_mask
-        ? (const boolean8_t *) ca->mask->ptr : NULL;
+    int has_mask;
+    const boolean8_t *mask_base;
+    ca_attach(ca);   /* window: nothing raises inside */
+    has_mask  = (ca->mask != NULL);
+    mask_base = has_mask ? (const boolean8_t *) ca->mask->ptr : NULL;
     to_a_fast_recurse(ca, 0, ca->ptr, mask_base, ary,
                       data_type, ca->bytes, has_mask);
+    ca_detach(ca);
   }
   else if ( ca->elements > 0 ) {
-    rb_ca_to_a_loop_universal(self, 0, idx, ary);
+    ca_to_a_ctx_t c;
+    c.self = self;
+    c.ary  = ary;
+    ca_attach_window(1, &ca, "r", ca_to_a_universal, (VALUE) &c);
   }
-  ca_detach(ca);
   return ary;
 }
 
@@ -281,7 +301,7 @@ ca_convert_loop (VALUE arg)
       if ( ret == CA_UNDEF ) {
         if ( ! co->mask ) {
           ca_create_mask(co);
-          ca_attach(co->mask);
+          ca_attach(co->mask);   /* window: closed by the ensure in ca_convert_body */
           c->co_mask_attached = 1;
           dst_mask = (boolean8_t *) co->mask->ptr;
           memset(dst_mask, 0, (size_t) n);
@@ -472,7 +492,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
         const ca_size_t CHUNK = 65536;
         volatile VALUE scratch = rb_str_buf_new(CHUNK < total ? CHUNK : total);
         ca_size_t off = 0;
-        ca_allocate(ca);
+        ca_allocate(ca);   /* window: an entity, whose allocate holds nothing */
         while ( off < total ) {
           ca_size_t want = (total - off < CHUNK) ? (total - off) : CHUNK;
           VALUE r = rb_funcall(io, id_read, 2, SIZE2NUM(want), scratch);

@@ -186,7 +186,7 @@ ca_chunked_run_acquire (ca_chunked_run_t *run, int k)
 {
   CArray *ca = run->ca[k];
   if ( ca_attach_is_alias(ca) ) {
-    ca_attach(ca);
+    ca_attach(ca);   /* window: released by ca_chunked_run on the way out */
     run->attached[k] = 1;
     run->src[k] = (char *) ca->ptr;
   }
@@ -540,6 +540,47 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
   }
 }
 
+/* ca_mask_overlay_safe into a bang operation's self, which is attached:
+   reading an operand's mask can call Ruby (a CAObject's mask hooks) and
+   raise, and self is then detached before the raise goes on.  Nothing has
+   been written to self's data yet, so there is nothing to sync. */
+typedef struct {
+  CArray *out;
+  CArray *src[3];
+  int     n;
+} ca_overlay_args_t;
+
+static VALUE
+ca_overlay_attached_body (VALUE arg)
+{
+  ca_overlay_args_t *a = (ca_overlay_args_t *) arg;
+  if ( a->n == 2 ) {
+    ca_mask_overlay_safe(a->out, 2, a->src[0], a->src[1]);
+  }
+  else {
+    ca_mask_overlay_safe(a->out, 3, a->src[0], a->src[1], a->src[2]);
+  }
+  return Qnil;
+}
+
+static void
+ca_mask_overlay_attached (CArray *out, int n,
+                          CArray *s0, CArray *s1, CArray *s2)
+{
+  ca_overlay_args_t a;
+  int tag = 0;
+  a.out = out;
+  a.n   = n;
+  a.src[0] = s0;
+  a.src[1] = s1;
+  a.src[2] = s2;
+  rb_protect(ca_overlay_attached_body, (VALUE) &a, &tag);
+  if ( tag ) {
+    ca_detach(out);
+    rb_jump_tag(tag);
+  }
+}
+
 /* Monop driver.  ca1 is input-only (the driver does not attach it); ca2
    is the output (a new entity, attach legit).  fast = ca_attach_is_alias(ca1)
    → 1-shot; slow = ALLOCV + ca_xfer_all without ca_func[X].attach. */
@@ -571,7 +612,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     k.n  = ca1->elements;
     k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
     k.p2 = ca2->ptr; k.i2 = 1;
-    ca_attach(ca1);
+    ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
     k.p1 = ca1->ptr; k.i1 = 1;
     if ( ca_monop_may_raise(func, ca1->data_type) ) {
       ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
@@ -690,7 +731,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
 
-  ca_attach(ca1);
+  ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
   {
     ca_monop_call_t k;
     k.f  = func[ca1->data_type];
@@ -745,7 +786,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
     k.n  = ca1->elements;
     k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
     k.p2 = ca2->ptr; k.i2 = 1;
-    ca_attach(ca1);
+    ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
     k.p1 = ca1->ptr; k.i1 = 1;
     if ( ca_monop_may_raise(func, ca1->data_type) ) {
       ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
@@ -1080,7 +1121,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     k.n  = n_kernel;
     k.m  = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
     k.p3 = ca3->ptr; k.i3 = i3;
-    ca_attach_n(2, ca1, ca2);
+    ca_attach_n(2, ca1, ca2);   /* window: the kernel runs through ca_op_guarded when it can raise */
     k.p1 = ca1->ptr; k.i1 = i1;
     k.p2 = ca2->ptr; k.i2 = i2;
     if ( ca_binop_may_raise(func, ca1->data_type) ) {
@@ -1285,10 +1326,10 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
         ca_xfer_all(ca2, p2, CA_XFER_GET);
       }
       if ( ca_attach_is_alias(ca1) ) {
-        ca_attach(ca1);  p1 = (char *) ca1->ptr;  a1 = 1;
+        ca_attach(ca1);  p1 = (char *) ca1->ptr;  a1 = 1;   /* window: an alias attach, cannot raise */
       }
       if ( ca_attach_is_alias(ca2) ) {
-        ca_attach(ca2);  p2 = (char *) ca2->ptr;  a2 = 1;
+        ca_attach(ca2);  p2 = (char *) ca2->ptr;  a2 = 1;   /* window: as above */
       }
 
       {
@@ -1407,11 +1448,12 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
       ca_xfer_all(ca2, p2, CA_XFER_GET);
     }
 
-    ca_attach(ca1);
-    ca_mask_overlay_safe(ca1, 2, ca1, ca2);
+    ca_attach(ca1);   /* window: the overlay detaches it if it raises; the
+                         kernel runs through ca_op_guarded when it can */
+    ca_mask_overlay_attached(ca1, 2, ca1, ca2, NULL);
 
     if ( ca_attach_is_alias(ca2) ) {
-      ca_attach(ca2);
+      ca_attach(ca2);   /* window: an alias attach, which cannot raise */
       p2 = ca2->ptr;
       a2 = 1;
     }
@@ -1487,7 +1529,7 @@ rb_ca_triop_select_template (VALUE self, VALUE other2, VALUE other3,
 
 #define EAGER_ATTACH_INPUT(ca_, p_, attached_) do {                   \
     if ( ca_attach_is_alias(ca_) ) {                                  \
-      ca_attach(ca_);                                                 \
+      ca_attach(ca_);   /* window: an alias attach, cannot raise */   \
       (p_) = (char *)(ca_)->ptr;                                      \
       (attached_) = 1;                                                \
     }                                                                 \
@@ -1763,8 +1805,9 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
 
       /* self IS the output (= write target; attach legit per refined
          invariant) */
-      ca_attach(ca1);
-      ca_mask_overlay_safe(ca1, 3, ca1, ca2, ca3);
+      ca_attach(ca1);   /* window: the overlay detaches it if it raises; the
+                           kernel runs through ca_op_guarded */
+      ca_mask_overlay_attached(ca1, 3, ca1, ca2, ca3);
 
       EAGER_ATTACH_INPUT(ca2, p2, attached2);
       EAGER_ATTACH_INPUT(ca3, p3, attached3);
@@ -1796,8 +1839,9 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
          ca1->ptr + off*bytes in chunks; sync at end.  The run gathers
          per chunk, and any gather can raise, so the run is guarded
          whatever the kernel. */
-      ca_attach(ca1);
-      ca_mask_overlay_safe(ca1, 3, ca1, ca2, ca3);
+      ca_attach(ca1);   /* window: the overlay detaches it if it raises; the
+                           kernel runs through ca_op_guarded */
+      ca_mask_overlay_attached(ca1, 3, ca1, ca2, ca3);
       {
         int8_t dt = ca1->data_type;
         ca_size_t chunk_n;

@@ -316,8 +316,8 @@ rb_ca_const_string_wrap (VALUE parent_val, VALUE buffer, int encoding_id)
     int64_t *pair;
     boolean8_t *m;
 
-    ca_attach(parent);
     ca_update_mask(parent);
+    ca_attach(parent);   /* window: detached before its one raise */
     n    = parent->elements;
     pair = (int64_t *) parent->ptr;
     m    = parent->mask ? (boolean8_t *) parent->mask->ptr : NULL;
@@ -486,8 +486,8 @@ rb_ca_const_string_copy (VALUE self)
   TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
 
   /* materialize logical-order (start,end) pairs + mask */
-  ca_attach((CArray *) ca);
   ca_update_mask((CArray *) ca);
+  ca_attach((CArray *) ca);   /* window: detached before its one raise */
 
   n          = ca->elements;
   src_pair   = (int64_t *) ca->ptr;
@@ -567,12 +567,14 @@ typedef struct {
   ca_size_t   n;
 } ca_const_string_scan_t;
 
+/* Opens the scan's window; ca_const_string_scan_end closes it.  What runs
+   between them in this file reads bytes and raises only after closing. */
 static void
 ca_const_string_scan_begin (VALUE self, ca_const_string_scan_t *s)
 {
   TypedData_Get_Struct(self, CAConstString, &catext_data_type, s->ca);
-  ca_attach((CArray *) s->ca);
   ca_update_mask((CArray *) s->ca);
+  ca_attach((CArray *) s->ca);   /* window: closed by ca_const_string_scan_end */
   s->off    = (int64_t *) s->ca->ptr;
   s->m      = s->ca->mask ? (boolean8_t *) s->ca->mask->ptr : NULL;
   s->buf    = RSTRING_PTR(s->ca->buffer);
@@ -584,6 +586,37 @@ static void
 ca_const_string_scan_end (ca_const_string_scan_t *s)
 {
   ca_detach((CArray *) s->ca);
+}
+
+typedef struct {
+  VALUE                   self;
+  ca_const_string_scan_t *s;
+} ca_const_string_scan_arg_t;
+
+static VALUE
+ca_const_string_scan_begin_body (VALUE arg)
+{
+  ca_const_string_scan_arg_t *x = (ca_const_string_scan_arg_t *) arg;
+  ca_const_string_scan_begin(x->self, x->s);
+  return Qnil;
+}
+
+/* Begins the scans of two arrays, both or neither: when the second one's
+   attach raises, the first is closed before the raise goes on. */
+static void
+ca_const_string_scan_begin_pair (VALUE va, ca_const_string_scan_t *a,
+                                 VALUE vb, ca_const_string_scan_t *b)
+{
+  ca_const_string_scan_arg_t x;
+  int tag = 0;
+  ca_const_string_scan_begin(va, a);
+  x.self = vb;
+  x.s    = b;
+  rb_protect(ca_const_string_scan_begin_body, (VALUE) &x, &tag);
+  if ( tag ) {
+    ca_const_string_scan_end(a);
+    rb_jump_tag(tag);
+  }
 }
 
 /* Resolve element i to its record bytes; returns 0 if masked.
@@ -740,8 +773,7 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
     int64_t la = 0, lb = 0;
     ca_size_t i;
 
-    ca_const_string_scan_begin(self, &a);
-    ca_const_string_scan_begin(other, &b);
+    ca_const_string_scan_begin_pair(self, &a, other, &b);
     if ( a.n != b.n ) {
       ca_const_string_scan_end(&a);
       ca_const_string_scan_end(&b);

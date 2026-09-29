@@ -351,7 +351,7 @@ ca_is_any_masked (void *ap)
          non-zero word (the typical "all zero, no mask actually set" hot
          pattern).  An O(n) scan cache is not viable here: the mask is
          dynamic and a view chain can introduce a mask mid-chain. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       flag = ca_mask_word_any((boolean8_t *) ca->mask->ptr, ca->elements);
       ca_detach(ca->mask);
     }
@@ -378,7 +378,7 @@ ca_is_all_masked (void *ap)
       /* cheap mask: O(1) alias attach + word-level all_set with early exit.
          The word check uses (w == 0x0101...01ULL) under the {0,1}
          invariant; returns on the first non-fully-set word. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       flag = ca_mask_word_all_set((boolean8_t *) ca->mask->ptr, ca->elements);
       ca_detach(ca->mask);
     }
@@ -422,7 +422,8 @@ ca_create_mask (void *ap)
     ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
     if ( ca_is_view(ca) ) {
       if ( CAVIEW(ca)->attach ) {
-        ca_attach(ca->mask);
+        /* the new mask joins its view's level */
+        ca_attach(ca->mask);   /* window: released by the view's detach */
         if ( ca_is_view(ca->mask) ) {
           CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
         }
@@ -443,6 +444,20 @@ ca_clear_mask (void *ap)
   }
 }
 
+typedef struct {
+  CArray *ca;
+  CArray *mask;
+} ca_setup_mask_t;
+
+/* Pushing the cells into ca's mask can raise (a CAObject's mask hooks). */
+static VALUE
+ca_setup_mask_body (VALUE arg)
+{
+  ca_setup_mask_t *c = (ca_setup_mask_t *) arg;
+  ca_sync_data(c->ca->mask, c->mask->ptr);
+  return Qnil;
+}
+
 void
 ca_setup_mask (void *ap, CArray *mask)
 {
@@ -451,12 +466,13 @@ ca_setup_mask (void *ap, CArray *mask)
   ca_update_mask(ca);
 
   if ( mask ) {
+    ca_setup_mask_t c;
     if ( ! ca->mask ) {
       ca_create_mask(ca);
     }
-    ca_attach(mask);
-    ca_sync_data(ca->mask, mask->ptr);
-    ca_detach(mask);
+    c.ca   = ca;
+    c.mask = mask;
+    ca_attach_window(1, &c.mask, "r", ca_setup_mask_body, (VALUE) &c);
   }
   else if ( ca->mask ) {
     boolean8_t zero = 0;
@@ -471,12 +487,48 @@ ca_setup_mask (void *ap, CArray *mask)
 
  */
 
+/* The overlay reads each source's mask into the destination's.  A
+   source's mask can be made or read by calling Ruby (a CAObject's mask
+   hooks) and raise, so every mask is made first and the lot are read
+   inside one attach window. */
+typedef struct {
+  CArray   **list;      /* [0] the destination mask, then the sources' */
+  char      *scalar;    /* per entry: the source is a scalar */
+  int        k;
+  ca_size_t  elements;
+} ca_mask_overlay_t;
+
+static VALUE
+ca_mask_overlay_body (VALUE arg)
+{
+  ca_mask_overlay_t *o = (ca_mask_overlay_t *) arg;
+  boolean8_t *ma = (boolean8_t *) o->list[0]->ptr;
+  int i;
+  for (i=1; i<o->k; i++) {
+    boolean8_t *ms = (boolean8_t *) o->list[i]->ptr;
+    /* scalar masked source -> broadcast to all (memset); array source
+       -> pure word OR (ca_mask_word_or).  A defensive `if (*ms)` is
+       unnecessary: under the {0,1} invariant, `*ma |= *ms` equals
+       `if (*ms) *ma = 1`.  Post-condition: the mask byte stays in {0,1}. */
+    if ( o->scalar[i] ) {
+      if ( *ms ) {
+        memset(ma, 1, o->elements);
+      }
+    }
+    else {
+      ca_mask_word_or(ma, ms, o->elements);
+    }
+  }
+  return Qnil;
+}
+
 void
 ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
 {
   CArray *ca = (CArray *) ap;
   CArray *cs;
-  boolean8_t *ma, *ms;
+  ca_mask_overlay_t o;
+  char *modes;
   int i, some_has_mask = 0;
 
   for (i=0; i<n; i++) {
@@ -486,46 +538,42 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
     }
   }
 
-  if ( some_has_mask ) {
-
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
-
-    if ( elements > ca->elements ) {
-      elements = ca->elements;
-    }
-
-    ca_attach(ca->mask);
-    for (i=0; i<n; i++) {
-      cs = slist[i];
-      if ( ! cs ) {
-        continue;
-      }
-      ca_update_mask(cs);
-      if ( ! cs->mask ) {
-        continue;
-      }
-      ca_attach(cs->mask);
-      ma = (boolean8_t *) ca->mask->ptr;
-      ms = (boolean8_t *) cs->mask->ptr;
-      /* scalar masked source -> broadcast to all (memset); array source
-         -> pure word OR (ca_mask_word_or).  A defensive `if (*ms)` is
-         unnecessary: under the {0,1} invariant, `*ma |= *ms` equals
-         `if (*ms) *ma = 1`.  Post-condition: the mask byte stays in {0,1}. */
-      if ( ca_is_scalar(cs) ) {
-        if ( *ms ) {
-          memset(ma, 1, elements);
-        }
-      }
-      else {
-        ca_mask_word_or(ma, ms, elements);
-      }
-      ca_detach(cs->mask);
-    }
-    ca_sync_detach(ca->mask);
+  if ( ! some_has_mask ) {
+    return;
   }
+
+  ca_update_mask(ca);
+  if ( ! ca->mask ) {
+    ca_create_mask(ca);
+  }
+
+  if ( elements > ca->elements ) {
+    elements = ca->elements;
+  }
+
+  o.list     = ALLOCA_N(CArray *, n + 1);
+  o.scalar   = ALLOCA_N(char, n + 1);
+  modes      = ALLOCA_N(char, n + 2);
+  o.elements = elements;
+  o.k        = 0;
+  o.list[o.k]   = ca->mask;
+  o.scalar[o.k] = 0;
+  modes[o.k++]  = 'w';
+  for (i=0; i<n; i++) {
+    cs = slist[i];
+    if ( ! cs ) {
+      continue;
+    }
+    ca_update_mask(cs);
+    if ( ! cs->mask ) {
+      continue;
+    }
+    o.list[o.k]   = cs->mask;
+    o.scalar[o.k] = (char) ca_is_scalar(cs);
+    modes[o.k++]  = 'r';
+  }
+  modes[o.k] = '\0';
+  ca_attach_window(o.k, o.list, modes, ca_mask_overlay_body, (VALUE) &o);
 }
 
 void
@@ -609,7 +657,7 @@ ca_count_masked (void *ap)
   if ( ca->mask ) {
     if ( ca_attach_is_alias(ca->mask) ) {
       /* cheap mask: O(1) alias attach + word-bulk count. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       m = (boolean8_t *) ca->mask->ptr;
       count = ca_mask_word_count(m, ca->elements);
       ca_detach(ca->mask);
@@ -671,7 +719,7 @@ ca_unmask (void *ap, char *fill_value)
       ca_fill(ca->mask, &zero);
     }
     else {
-      ca_attach(ca);
+      ca_attach(ca);   /* window: nothing raises inside */
 
       switch ( ca->bytes ) {
       case 1:  proc_fill_bang_width(uint8_t);  break;
@@ -704,7 +752,7 @@ ca_unmask_copy_fill (VALUE arg)
   ca_copy_data(ca, co->ptr);
 
   if ( a->fill_value && ca_has_mask(ca) ) {
-    ca_attach(ca);
+    ca_attach(ca);   /* window: nothing raises inside */
     q = co->ptr;
     m = (boolean8_t *) ca->mask->ptr;
     for (i=0; i<ca->elements; i++) {
@@ -741,7 +789,7 @@ ca_invert_mask (void *ap)
     ca_create_mask(ca);
   }
 
-  ca_attach(ca->mask);
+  ca_attach(ca->mask);   /* window: nothing raises inside */
   m = (boolean8_t *) ca->mask->ptr;
   ca_mask_word_not(m, m, ca->elements);   /* in-place 1 - m, LSB-XOR word loop */
   ca_detach(ca->mask);
@@ -753,9 +801,10 @@ boolean8_t *
 ca_allocate_mask_iterator_n (int n, CArray **slist)
 {
   boolean8_t *m, *mp, *ms;
-  CArray *cs;
+  CArray *cs, **masks;
+  char *scalar;
   ca_size_t j, elements = -1;
-  int i, some_has_mask = 0;
+  int i, k = 0, some_has_mask = 0;
 
   for (i=0; i<n; i++) {
     if ( slist[i] ) {
@@ -784,13 +833,18 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
      (degenerate call); guard so the alloc/memset never see a negative size
      (which would wrap to a huge bound).  Also silences GCC's VRP warnings. */
   if ( elements < 0 ) elements = 0;
-  m = xmalloc(sizeof(boolean8_t)*elements);
-  memset(m, 0, elements);
 
   if ( ! some_has_mask ) {
+    m = xmalloc(sizeof(boolean8_t)*elements);
+    memset(m, 0, elements);
     return m;
   }
 
+  /* The sources' masks, made and attached before the result is allocated:
+     making or reading one can call Ruby (a CAObject's mask hooks) and
+     raise, and then nothing is left attached or allocated. */
+  masks  = ALLOCA_N(CArray *, n);
+  scalar = ALLOCA_N(char, n);
   for (i=0; i<n; i++) {
     cs = slist[i];
     if ( ! cs ) {
@@ -800,10 +854,17 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
     if ( ! cs->mask ) {
       continue;
     }
-    ca_attach(cs->mask);
-    ms = (boolean8_t *) cs->mask->ptr;
+    masks[k]    = cs->mask;
+    scalar[k++] = (char) ca_is_scalar(cs);
+  }
+  ca_attach_all(masks, k);   /* window: nothing raises inside */
+
+  m = xmalloc(sizeof(boolean8_t)*elements);
+  memset(m, 0, elements);
+  for (i=0; i<k; i++) {
+    ms = (boolean8_t *) masks[i]->ptr;
     mp = m;
-    if ( ca_is_scalar(cs) ) {
+    if ( scalar[i] ) {
       if ( *ms ) {
         for (j=0; j<elements; j++) {
           *mp = 1;
@@ -814,7 +875,9 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
     else {
       ca_mask_word_or(mp, ms, elements);   /* m[j] |= ms[j], word-bulk OR */
     }
-    ca_detach(cs->mask);
+  }
+  while ( k > 0 ) {
+    ca_detach(masks[--k]);
   }
   return m;
 }
@@ -1061,7 +1124,7 @@ with <code>self</code>. The returned array has 1 for the masked elements and
 VALUE
 rb_ca_is_masked (VALUE self)
 {
-  volatile VALUE mask;
+  volatile VALUE mask, out;
   CArray *ca, *cm, *co;
   boolean8_t zero = 0;
   boolean8_t *m, *p;
@@ -1070,11 +1133,12 @@ rb_ca_is_masked (VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);
   }
   else {
-    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
   }
+  out = ca_wrap_struct(co);   /* owned by Ruby before anything can raise */
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
@@ -1083,7 +1147,7 @@ rb_ca_is_masked (VALUE self)
   else {
     mask = rb_ca_mask_array(self);
     TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);
+    ca_attach(cm);   /* window: nothing raises inside */
     m = (boolean8_t *) cm->ptr;
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
@@ -1093,7 +1157,7 @@ rb_ca_is_masked (VALUE self)
     ca_detach(cm);
   }
 
-  return ca_wrap_struct(co);
+  return out;
 }
 
 /* @overload is_not_masked
@@ -1107,7 +1171,7 @@ The returned array has 0 for the masked elements and
 VALUE
 rb_ca_is_not_masked (VALUE self)
 {
-  volatile VALUE mask;
+  volatile VALUE mask, out;
   CArray *ca, *cm, *co;
   boolean8_t one = 1;
   boolean8_t *m, *p;
@@ -1116,11 +1180,12 @@ rb_ca_is_not_masked (VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = (CArray *) cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);
   }
   else {
-    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
   }
+  out = ca_wrap_struct(co);   /* owned by Ruby before anything can raise */
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
@@ -1129,7 +1194,7 @@ rb_ca_is_not_masked (VALUE self)
   else {
     mask = rb_ca_mask_array(self);
     TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);
+    ca_attach(cm);   /* window: nothing raises inside */
     m = (boolean8_t *) cm->ptr;
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
@@ -1139,7 +1204,7 @@ rb_ca_is_not_masked (VALUE self)
     ca_detach(cm);
   }
 
-  return ca_wrap_struct(co);
+  return out;
 }
 
 /* @overload unmask (fill_value = nil)

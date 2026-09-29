@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: these no longer leave an array attached when they raise part way:
+  `to_a` on an object, fixlen or Face array with a cell that cannot be
+  decoded; `wsum` and `wmean` refusing an argument; `histogram`,
+  `histogram1d` and `histogram2d` when the samples cannot be read; an
+  in-place operator such as `add!` when an operand's mask cannot be read;
+  `mask=` when writing the mask fails; and `CAConstString#eq` when the
+  other string cannot be read.
+
 - Fix: a boolean selection (`x[x > 2]`, `x[CA_BOOLEAN([1, 0, 1])]`) or a
   `shift` of a masked array follows later changes to the array's mask.
   Once read, it went on answering the mask as it was at that first read,

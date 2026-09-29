@@ -2788,7 +2788,7 @@ module MkKernel
             CArray *co;
             GetCArray(vout, co);
             #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
-            ca_attach(ca);                       /* O(1): entity no-op or alias attach */
+            ca_attach(ca);   /* window: numeric lanes only, nothing raises inside; O(1) alias attach */
             const #{si[:c]} *p_root = (const #{si[:c]} *) ca->ptr;
 
             /* Per-buffer stack accumulators (one per :plus state, sized
@@ -2852,7 +2852,7 @@ module MkKernel
             ca_size_t __li_parent_out  = __li_OUTER * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);
+              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               #{oi[:c]} *__li_op_k = op + (ca_size_t) __kk * __li_parent_out;
     #{core.call("p_root", "__li_op_k", "__li_OUTER")}
@@ -2946,7 +2946,7 @@ module MkKernel
             ca_size_t __li_plane_elems = __li_M * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);
+              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
@@ -3103,7 +3103,7 @@ module MkKernel
 
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);
+              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
@@ -3483,6 +3483,7 @@ module MkKernel
     io.puts "  int8_t slab_axes[CA_RANK_MAX];"
     io.puts "  int8_t naxes = rb_ca_parse_reduce_axes_kw(raxis, src, slab_axes);"
 
+    weights_io = nil
     if has_aarg
       # Weight storage type: :promote materializes weights at the f64
       # computation type (so a float weight against an int source is not
@@ -3510,98 +3511,103 @@ module MkKernel
       io.puts "      rweights = rb_funcall(rweights, rb_intern(\"[]\"), 1, INT2NUM(0));"
       io.puts "    }"
       io.puts "  }"
-      io.puts "  volatile VALUE vcw;"
-      io.puts "  CArray *cw;"
-      io.puts "  if ( ! rb_obj_is_carray(rweights) ) {"
-      io.puts "    /* W-A1: Ruby Numeric scalar -> full-shape constant weight CArray */"
-      io.puts "    vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
-      io.puts "    GetCArray(vcw, cw);"
-      io.puts "    ca_attach(cw);"
-      io.puts "    rb_ca_obj2ptr(vcw, rweights, cw->ptr);  /* fill first cell */"
-      io.puts "    /* broadcast first cell to all elements (= constant fill) */"
-      io.puts "    {"
-      io.puts "      char *p0 = cw->ptr;"
-      io.puts "      for ( ca_size_t i = 1; i < cw->elements; i++ ) {"
-      io.puts "        memcpy(cw->ptr + i * cw->bytes, p0, cw->bytes);"
-      io.puts "      }"
-      io.puts "    }"
-      io.puts "  }"
-      io.puts "  else {"
-      io.puts "    /* CArray val: coerce to the weight storage type (f64 for :promote, so a"
-      io.puts "       float weight against an int source is not truncated) */"
-      io.puts "    vcw = rb_ca_wrap_readonly(rweights, INT2NUM(#{waca}));"
-      io.puts "    CArray *cv;"
-      io.puts "    GetCArray(vcw, cv);"
-      io.puts ""
-      io.puts "    /* rev5 form detection: A3 (same ndim) -> A2 (1-D axis-broadcast) -> raise */"
-      io.puts "    if ( cv->ndim == src->ndim ) {"
-      io.puts "      /* W-A3 commit-or-raise: shape strict match */"
-      io.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
-      io.puts "        if ( cv->dim[i] != src->dim[i] ) {"
-      io.puts %Q[          rb_raise(rb_eArgError, "#{name}_ki: w shape mismatch (W-A3 candidate, dim[%d]=%ld != self.dim[%d]=%ld; expected scalar / [M=self.dim[axes[0]]] / self.shape)", (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
-      io.puts "        }"
-      io.puts "      }"
-      io.puts "      /* W-A3 path: use cv directly (= existing) */"
-      io.puts "      cw = cv;"
-      io.puts "      ca_attach(cw);"
-      io.puts "    }"
-      io.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
-      io.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape */"
-      io.puts "      ca_attach(cv);"
-      io.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
-      io.puts "      GetCArray(vcw, cw);"
-      io.puts "      ca_attach(cw);"
-      io.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
-      io.puts "      {"
-      io.puts "        int8_t baxis = slab_axes[0];"
-      io.puts "        ca_size_t inner_stride = 1;"
-      io.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      io.puts "        ca_size_t axis_n = src->dim[baxis];"
-      io.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
-      io.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      io.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      io.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      io.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      io.puts "              memcpy(cw->ptr + flat * cw->bytes, cv->ptr + a * cv->bytes, cw->bytes);"
-      io.puts "            }"
-      io.puts "          }"
-      io.puts "        }"
-      io.puts "      }"
-      io.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
-      io.puts "      if ( ca_has_mask(cv) ) {"
-      io.puts "        /* Allocate cw mask + broadcast cv mask along axis */"
-      io.puts "        ca_create_mask(cw);"
-      io.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
-      io.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
-      io.puts "        int8_t baxis = slab_axes[0];"
-      io.puts "        ca_size_t inner_stride = 1;"
-      io.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      io.puts "        ca_size_t axis_n = src->dim[baxis];"
-      io.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
-      io.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      io.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      io.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      io.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      io.puts "              cw_m[flat] = cv_m[a];"
-      io.puts "            }"
-      io.puts "          }"
-      io.puts "        }"
-      io.puts "      }"
-      io.puts "      ca_detach(cv);"
-      io.puts "    }"
-      io.puts "    else {"
-      io.puts %Q[      rb_raise(rb_eArgError, "#{name}_ki: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
-      io.puts "    }"
-      io.puts "  }"
+      # The weights are attached from here to the end of the call, so they
+      # are made only once every check that can raise has passed; see the
+      # data type check below.
+      wio = StringIO.new
+      wio.puts "  volatile VALUE vcw;"
+      wio.puts "  CArray *cw;"
+      wio.puts "  if ( ! rb_obj_is_carray(rweights) ) {"
+      wio.puts "    /* W-A1: Ruby Numeric scalar -> full-shape constant weight CArray */"
+      wio.puts "    vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
+      wio.puts "    GetCArray(vcw, cw);   /* a new entity: its ptr needs no attach */"
+      wio.puts "    rb_ca_obj2ptr(vcw, rweights, cw->ptr);  /* fill first cell */"
+      wio.puts "    /* broadcast first cell to all elements (= constant fill) */"
+      wio.puts "    {"
+      wio.puts "      char *p0 = cw->ptr;"
+      wio.puts "      for ( ca_size_t i = 1; i < cw->elements; i++ ) {"
+      wio.puts "        memcpy(cw->ptr + i * cw->bytes, p0, cw->bytes);"
+      wio.puts "      }"
+      wio.puts "    }"
+      wio.puts "  }"
+      wio.puts "  else {"
+      wio.puts "    /* CArray val: coerce to the weight storage type (f64 for :promote, so a"
+      wio.puts "       float weight against an int source is not truncated) */"
+      wio.puts "    vcw = rb_ca_wrap_readonly(rweights, INT2NUM(#{waca}));"
+      wio.puts "    CArray *cv;"
+      wio.puts "    GetCArray(vcw, cv);"
+      wio.puts ""
+      wio.puts "    /* rev5 form detection: A3 (same ndim) -> A2 (1-D axis-broadcast) -> raise */"
+      wio.puts "    if ( cv->ndim == src->ndim ) {"
+      wio.puts "      /* W-A3 commit-or-raise: shape strict match */"
+      wio.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
+      wio.puts "        if ( cv->dim[i] != src->dim[i] ) {"
+      wio.puts %Q[          rb_raise(rb_eArgError, "#{name}_ki: w shape mismatch (W-A3 candidate, dim[%d]=%ld != self.dim[%d]=%ld; expected scalar / [M=self.dim[axes[0]]] / self.shape)", (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
+      wio.puts "        }"
+      wio.puts "      }"
+      wio.puts "      /* W-A3 path: use cv directly (= existing) */"
+      wio.puts "      cw = cv;"
+      wio.puts "    }"
+      wio.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
+      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape */"
+      wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
+      wio.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
+      wio.puts "      GetCArray(vcw, cw);"
+      wio.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
+      wio.puts "      {"
+      wio.puts "        int8_t baxis = slab_axes[0];"
+      wio.puts "        ca_size_t inner_stride = 1;"
+      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
+      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
+      wio.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
+      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
+      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
+      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
+      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
+      wio.puts "              memcpy(cw->ptr + flat * cw->bytes, cv->ptr + a * cv->bytes, cw->bytes);"
+      wio.puts "            }"
+      wio.puts "          }"
+      wio.puts "        }"
+      wio.puts "      }"
+      wio.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
+      wio.puts "      if ( ca_has_mask(cv) ) {"
+      wio.puts "        /* Allocate cw mask + broadcast cv mask along axis */"
+      wio.puts "        ca_create_mask(cw);"
+      wio.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
+      wio.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
+      wio.puts "        int8_t baxis = slab_axes[0];"
+      wio.puts "        ca_size_t inner_stride = 1;"
+      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
+      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
+      wio.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
+      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
+      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
+      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
+      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
+      wio.puts "              cw_m[flat] = cv_m[a];"
+      wio.puts "            }"
+      wio.puts "          }"
+      wio.puts "        }"
+      wio.puts "      }"
+      wio.puts "      ca_detach(cv);"
+      wio.puts "    }"
+      wio.puts "    else {"
+      wio.puts %Q[      rb_raise(rb_eArgError, "#{name}_ki: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
+      wio.puts "    }"
+      wio.puts "  }"
       # Mask overlay (= legacy W-A3 path; if the materialized cw carries a mask, overlay it)
-      io.puts "  volatile VALUE __vsrc_keep = self;   /* GC guard */ (void) __vsrc_keep;"
-      io.puts "  if ( ca_has_mask(cw) ) {"
-      io.puts "    CArray *src_copy = ca_copy(src);"
-      io.puts "    VALUE vsrc_copy = ca_wrap_struct(src_copy);"
-      io.puts "    ca_copy_mask_overlay(src_copy, src_copy->elements, 1, cw);"
-      io.puts "    src = src_copy;"
-      io.puts "    self = vsrc_copy;"
-      io.puts "  }"
+      wio.puts "  volatile VALUE __vsrc_keep = self;   /* GC guard */ (void) __vsrc_keep;"
+      wio.puts "  if ( ca_has_mask(cw) ) {"
+      wio.puts "    CArray *src_copy = ca_copy(src);"
+      wio.puts "    VALUE vsrc_copy = ca_wrap_struct(src_copy);"
+      wio.puts "    ca_copy_mask_overlay(src_copy, src_copy->elements, 1, cw);"
+      wio.puts "    src = src_copy;"
+      wio.puts "    self = vsrc_copy;"
+      wio.puts "  }"
+      # Attached last, after the overlay's copy of the source (which can
+      # raise), and detached right after the switch.
+      wio.puts "  ca_attach(cw);   /* window: nothing raises inside; the kernels are numeric */"
+      weights_io = wio
     end
 
     if has_varg
@@ -3644,6 +3650,19 @@ module MkKernel
     io.puts "  if ( argc > 0 ) {"
     io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: positional axis arguments are no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0) or a.#{name}(axis: [0, 1])", argc);]
     io.puts "  }"
+
+    if weights_io
+      # Refuse an unsupported source before the weights are attached: the
+      # switch below would raise with them held.
+      if k[:fallback] == :raise
+        io.puts "  switch ( src->data_type ) {"
+        io.puts "  " + k[:source].map { |s| "case #{DTYPES[s][:ca]}:" }.join(" ") + " break;"
+        io.puts "  default:"
+        io.puts %Q[    rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+        io.puts "  }"
+      end
+      io.print weights_io.string
+    end
 
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
@@ -3707,6 +3726,12 @@ module MkKernel
     end
     io.puts "  }"
 
+    # array_arg cleanup: detach weights (paired with ca_attach above),
+    # ahead of the fill_value substitution, which can raise.
+    if has_aarg
+      io.puts "  ca_detach(cw);"
+    end
+
     if min_count
       # Apply fill_value substitution: CA_UNDEF (full reduction all-masked)
       # or per-axis CArray with mask bits.
@@ -3721,11 +3746,6 @@ module MkKernel
       io.puts "      }"
       io.puts "    }"
       io.puts "  }"
-    end
-
-    # array_arg cleanup: detach weights (paired with ca_attach above).
-    if has_aarg
-      io.puts "  ca_detach(cw);"
     end
 
     if k[:face_gate] == :relift
@@ -5531,7 +5551,7 @@ module MkKernel
 
         #{entity_bc}
         /* Attach self + val; rev4 uses raw row-major byte addressing. */
-        ca_attach_n(2, ca, cv);
+        ca_attach_n(2, ca, cv);   /* window: numeric bodies do not raise; the object lane reads entities */
 
         /* self_byte_stride[j] = bytes to advance along self axis j (row-major). */
         ca_size_t self_byte_stride[CA_RANK_MAX];

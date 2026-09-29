@@ -168,6 +168,19 @@ ca_ipower_cmplx128_t (ca_size_t n, boolean8_t *m,
     while (n--) { (*p2) = op_powi_cmplx128_t(*p1, ipow); p1++; p2++; }
 }
 
+/* The data types the ipower kernels cover; checked before any window
+   opens, so the switches inside cannot fall through to a raise. */
+static int
+ca_ipower_type_ok (CArray *ca)
+{
+  switch ( ca->data_type ) {
+  case CA_FLOAT32: case CA_FLOAT64: case CA_CMPLX64: case CA_CMPLX128:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
 /* Eager Float/Complex ** Integer producing a fresh entity output.
  * ca is input-only, co is the write target.  Mirrors rb_ca_call_monop
  * (see carray_math* / carray_kernels.c) so operand attach is elided:
@@ -189,6 +202,10 @@ rb_ca_ipower (VALUE self, VALUE other)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
+  if ( ! ca_ipower_type_ok(ca) ) {
+    rb_raise(rb_eCADataTypeError, "invalid data type for ipower");
+  }
+
   co = ca_has_mask(ca) ? ca_template_safe(ca) : ca_template(ca);
   obj = ca_wrap_struct(co);
 
@@ -196,7 +213,7 @@ rb_ca_ipower (VALUE self, VALUE other)
   m = ( co->mask ) ? (boolean8_t *)co->mask->ptr : NULL;
 
   if ( ca_attach_is_alias(ca) ) {
-    ca_attach(ca);
+    ca_attach(ca);   /* window: nothing raises inside */
     switch ( ca->data_type ) {
     case CA_FLOAT32:
       ca_ipower_float32_t(ca->elements, m, ca->ptr, ipow, co->ptr);  break;
@@ -206,8 +223,6 @@ rb_ca_ipower (VALUE self, VALUE other)
       ca_ipower_cmplx64_t(ca->elements, m, ca->ptr, ipow, co->ptr);  break;
     case CA_CMPLX128:
       ca_ipower_cmplx128_t(ca->elements, m, ca->ptr, ipow, co->ptr); break;
-    default:
-      rb_raise(rb_eCADataTypeError, "invalid data type for ipower");
     }
     ca_detach(ca);
   }
@@ -226,9 +241,6 @@ rb_ca_ipower (VALUE self, VALUE other)
       ca_ipower_cmplx64_t(ca->elements, m, p1, ipow, co->ptr);  break;
     case CA_CMPLX128:
       ca_ipower_cmplx128_t(ca->elements, m, p1, ipow, co->ptr); break;
-    default:
-      ALLOCV_END(h1);
-      rb_raise(rb_eCADataTypeError, "invalid data type for ipower");
     }
     ALLOCV_END(h1);
   }
@@ -247,7 +259,11 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  ca_attach(ca);
+  if ( ! ca_ipower_type_ok(ca) ) {
+    rb_raise(rb_eRuntimeError, "invalid data type for ipower");
+  }
+
+  ca_attach(ca);   /* window: nothing raises inside until ca_sync_detach */
 
   m = ( ca->mask ) ? (boolean8_t *)ca->mask->ptr : NULL;
 
@@ -260,8 +276,6 @@ rb_ca_ipower_bang (VALUE self, VALUE other)
     ca_ipower_cmplx64_t(ca->elements, m, ca->ptr, ipow, ca->ptr);  break;
   case CA_CMPLX128:
     ca_ipower_cmplx128_t(ca->elements, m, ca->ptr, ipow, ca->ptr); break;
-  default:
-    rb_raise(rb_eRuntimeError, "invalid data type for ipower");
   }
 
   ca_sync_detach(ca);
