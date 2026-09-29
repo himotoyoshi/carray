@@ -123,6 +123,28 @@ There are three, in two frameworks, and `rake test` runs all of them.
 - **`spec/UnitTest/`** — one `test/unit` file, also from 2.x, applying the same
   mixin to nine view classes. `rake spec_unit`.
 
+`rake spec_ai` does two more checks, both about attach windows (the
+stretch between `ca_attach` and `ca_detach`; [ch. 4](04_attach_lifecycle.md)).
+A raise inside a window skips the detach, and the test that caused it
+still passes, so nothing else would report it:
+
+- **`attach_window_check`** runs first. It finds every `ca_attach`,
+  `ca_allocate`, `ca_attach_n`, `ca_allocate_n`, `CA_WITH_BUFFER` and
+  `CA_WITH_BUFFER_WRITABLE` in `ext/*.c` and in the templates of
+  `ext/mkkernel.rb`, and wants each one to say why it cannot be left open,
+  in a comment of the form `/* window: nothing raises inside */` on the
+  same line or the line above. A window inside which Ruby can run does
+  not get a note; it goes through `ca_attach_window` or `ca_iter_ensure`,
+  which close it however it is left. The attach machinery itself
+  (`carray_core.c`, the kernel-iterator and sweep engines, the views'
+  operation-table slots) is exempt. `rake attach_window_check` runs it
+  alone.
+- **`spec/spec_ai/attach_balance.rb`** is loaded ahead of the tests. In a
+  development build, CArray counts the views that are attached, and this
+  checks that the count is the same after each test as before it. To get
+  the check on a single file run by hand, load it with
+  `-r ./spec/spec_ai/attach_balance.rb`.
+
 When you delete or change behaviour, run `rake test` rather than one suite — a
 unit pass alone has missed library-load failures and old-contract regressions
 before (memory: run-tests-after-deletion).

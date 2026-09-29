@@ -1919,7 +1919,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
     volatile VALUE objs[CA_RANK_MAX];
 
     cin = ca_wrap_readonly(raddr, CA_SIZE);
-    ca_attach(cin);
+    ca_attach(cin);   /* window: detached before its one raise */
 
     out = rb_ary_new2(ndim);
     for (i = 0; i < ndim; i++) {

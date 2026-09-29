@@ -493,7 +493,7 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
 
   ca_size_t       *idx_ptr;
   ca_size_t        n;
-  CA_WITH_BUFFER(idx_cast, ca_size_t, idx_ptr, n) {
+  CA_WITH_BUFFER(idx_cast, ca_size_t, idx_ptr, n) {   /* window: nothing raises inside */
     for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
     for ( ca_size_t k = 0; k < n; k++ ) {
       /* Negative normalize + OOB check (raises on out-of-bounds). */

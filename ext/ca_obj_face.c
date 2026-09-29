@@ -37,7 +37,7 @@ ca_face_attach (void *ap)
 {
   CAView *cav = (CAView *) ap;
   CArray    *ca  = (CArray *) ap;
-  ca_attach(cav->parent);
+  ca_attach(cav->parent);   /* window: a Face's attach slot; its detach slot releases */
   /* alias parent->ptr (Face has identical data layout, so copy is unneeded) */
   ca->ptr = cav->parent->ptr;
 }

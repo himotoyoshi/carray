@@ -256,7 +256,7 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
       if ( co->ndim > 0 ) {
         ca_size_t idx[CA_RANK_MAX];
         volatile VALUE ridx = rb_ary_new2(co->ndim);
-        ca_attach(co);
+        ca_attach(co);   /* window: a new entity, whose attach holds nothing */
         rb_ca_index_walk(obj, co, 0, idx, ridx, CA_LOOP_STORE);
         ca_sync_detach(co);
       }

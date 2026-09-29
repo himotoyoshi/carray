@@ -55,6 +55,11 @@ task :kernel_surface_check do
   ruby "utils/check_kernel_surface_freeze.rb" or exit($?.exitstatus)
 end
 
+desc "Check that every attach window opened by hand says why it is safe"
+task :attach_window_check do
+  ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
+end
+
 task :install do
   spec = eval File.read(GEMSPEC)
   version_h = `ruby ext/version.rb`.chomp
@@ -258,7 +263,7 @@ task :build_c_extension_examples => [
 ]
 
 desc "Run spec_ai tests (ruby -I ext -I lib)"
-task :spec_ai => [:kernel_surface_check,
+task :spec_ai => [:kernel_surface_check, :attach_window_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any
@@ -273,7 +278,9 @@ task :spec_ai => [:kernel_surface_check,
   # during the test run, and a Makefile / mkmf.log left at the repo root.
   # Their helper (ext_xfer_smoke/load.rb) is pulled in by the tests that need
   # it, so it does not want collecting either.
-  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
+  # attach_balance.rb checks around every test that no view was left
+  # attached (development builds only).
+  sh "ruby -I ext -I lib -r test/unit -r ./spec/spec_ai/attach_balance.rb -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
 end
 
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"

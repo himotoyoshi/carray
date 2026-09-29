@@ -1658,6 +1658,28 @@ ca_allocate_view (VALUE arg)
 
 /* make ca->ptr to point the allocated memory block */
 
+/* Steps a view's attach level by d.  A development build also counts the
+   views whose level is above zero, and the spec compares that count
+   before and after every test: a window left open shows as a view that
+   stays counted. */
+#ifdef CARRAY_DEV_BUILD
+static long ca_attached_views = 0;
+
+#define CA_VIEW_ATTACH_STEP(ca, d) do {                                       \
+    uint32_t attach_before_ = CAVIEW(ca)->attach;                             \
+    CAVIEW(ca)->attach += (d);                                                \
+    ca_attached_views += ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ); \
+  } while (0)
+
+static VALUE
+rb_ca_s_attached_views (VALUE klass)
+{
+  return LONG2NUM(ca_attached_views);
+}
+#else
+#define CA_VIEW_ATTACH_STEP(ca, d) ( CAVIEW(ca)->attach += (d) )
+#endif
+
 void
 ca_allocate (void *ap)
 {
@@ -1673,7 +1695,7 @@ ca_allocate (void *ap)
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
-    CAVIEW(ca)->attach += 1; /* increments attach level */
+    CA_VIEW_ATTACH_STEP(ca, 1); /* increments attach level */
 
     /* Undo the level if the slot or the mask raises, as ca_attach does.
        Left in place, the level is invisible while ptr is NULL, and the
@@ -1690,7 +1712,7 @@ ca_allocate (void *ap)
           ca_func[ca->obj_type].detach(ca);
           ca->ptr = NULL;
         }
-        CAVIEW(ca)->attach -= 1;
+        CA_VIEW_ATTACH_STEP(ca, -1);
         rb_jump_tag(tag);
       }
     }
@@ -1740,7 +1762,7 @@ ca_attach (void *ap)
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
-    CAVIEW(ca)->attach += 1; /* increments attach level */
+    CA_VIEW_ATTACH_STEP(ca, 1); /* increments attach level */
 
     if ( ! ca->ptr ) {
       /* A slot can raise part way (a conversion meeting a value it cannot
@@ -1756,7 +1778,7 @@ ca_attach (void *ap)
           ca_func[ca->obj_type].detach(ca);
           ca->ptr = NULL;
         }
-        CAVIEW(ca)->attach -= 1;
+        CA_VIEW_ATTACH_STEP(ca, -1);
         rb_jump_tag(tag);
       }
       return;
@@ -2092,7 +2114,7 @@ ca_detach (void *ap)
     if ( CAVIEW(ca)->attach == 1 ) {
       ca_func[ca->obj_type].detach(ap);
     }
-    CAVIEW(ca)->attach -= 1;
+    CA_VIEW_ATTACH_STEP(ca, -1);
   }
   else {                      /* entity array */
     ca_func[ca->obj_type].detach(ap);
@@ -2910,6 +2932,9 @@ Init_carray_core (void)
   rb_define_method(rb_cCArray, "__attach__", rb_ca__attach__, 0);
   rb_define_method(rb_cCArray, "__sync__", rb_ca__sync__, 0);
   rb_define_method(rb_cCArray, "__detach__", rb_ca__detach__, 0);
+
+  rb_define_singleton_method(rb_cCArray, "__attached_views__",
+                             rb_ca_s_attached_views, 0);
 #endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);

@@ -93,6 +93,12 @@ add to:
 
 Then, in the same pull request:
 
+- If you call `ca_attach` or `ca_allocate` in C, `rake test` asks for a
+  comment saying why nothing between it and the matching detach can
+  raise, and in a development build (`CARRAY_DEV=1`) it checks after
+  every test that nothing was left attached. The messages say what they
+  want; [the Developer's Guide, chapter
+  19](guides/devel/19_build_generators_testing.md) has the details.
 - If you touched `ext/*.c`, check the matching `yard-stubs/*.rb`. Those
   stubs are the source of the user-facing documentation, and a stub that
   disagrees with the code shows users something untrue. `rake stub_check`
