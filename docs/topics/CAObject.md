@@ -715,14 +715,20 @@ contract rules of their data-side counterparts described in
 when partial-region data is delivered by `copy_block` / `copy_addrs` and
 you also need mask bits to flow through the same chunked path.
 
+They are consulted the way the data-side hooks are. A read of the mask
+asks `mask_copy_data`, or else `mask_fetch_addr` / `mask_fetch_index`
+cell by cell. A write hands the cells to `mask_store_addr` /
+`mask_store_index`, or else the whole mask to `mask_sync_data` -- read
+in first, so that the cells not written go back as they were. That
+holds for every way a mask is written: `mask[...] = ...`, `mask =`,
+`self[...] = UNDEF`, `unmask`, and `mask.fill` (which asks
+`mask_fill_data` first). While an operation holds the array open, the
+mask is read once when it opens and handed back once when it closes.
+
 The same contract as on the data side applies: **all variants you
-implement must agree on the value for any given address**. The engine
-caches Ruby-callback results in the internal mask buffer (per-element
-fetches write through via the same address) and bulk paths read that
-buffer; if your fetchers return different values for the same address
-across calls, the cache will diverge from the function and bulk
-results will be wrong. As long as your callbacks are pure, the cache
-is a transparent memoisation layer.
+implement must agree on the value for any given address**. A fetcher
+that answers `UNDEF` also marks the cell, and the next read of the mask
+from your hooks decides what the mask is.
 
 This family is rarely used in practice. The examples under
 `examples/caobject/` do not define any of these. Reach for them only

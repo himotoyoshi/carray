@@ -1621,9 +1621,10 @@ ca_xfer_all (void *ap, void *data, int dir)
 /* ------------------------------------------------------------------- */
 
 /* What follows the slot in ca_allocate: the object cells cleared, then the
-   mask.  Clearing the mask can create it, which for a CAObject calls Ruby. */
+   mask.  Clearing the mask can create it, which for a CAObject calls Ruby.
+   mask0 is the mask the array had before; see ca_attach_view_first. */
 static void
-ca_allocate_rest (CArray *ca)
+ca_allocate_rest (CArray *ca, CArray *mask0)
 {
   if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
     volatile VALUE rzero = INT2NUM(0);
@@ -1634,12 +1635,9 @@ ca_allocate_rest (CArray *ca)
     }
   }
 
-  {
-    CArray *mask0 = ca->mask;
-    ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
-    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
-      ca_allocate(ca->mask);
-    }
+  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
+  if ( ca->mask == mask0 ) {
+    ca_allocate(ca->mask);
   }
 }
 
@@ -1648,11 +1646,12 @@ ca_allocate_rest (CArray *ca)
 static VALUE
 ca_allocate_view (VALUE arg)
 {
-  CArray *ca = (CArray *) arg;
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
   if ( ! ca->ptr ) {
     ca_func[ca->obj_type].allocate(ca);
   }
-  ca_allocate_rest(ca);
+  ca_allocate_rest(ca, mask0);
   return Qnil;
 }
 
@@ -1719,7 +1718,7 @@ ca_allocate (void *ap)
   }
   else {                      /* entity array */
     ca_func[ca->obj_type].allocate(ap);
-    ca_allocate_rest(ca);
+    ca_allocate_rest(ca, ca->mask);  /* an entity's new mask is not yet allocated */
   }
 }
 
@@ -1728,16 +1727,17 @@ ca_allocate (void *ap)
 static VALUE
 ca_attach_view_first (VALUE arg)
 {
-  CArray *ca = (CArray *) arg;
-  CArray *mask0;
-  ca_func[ca->obj_type].attach(ca);
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
   /* The mask moves in step with its view: attach, allocate and detach
-     each take it one level with the view.  A mask ca_update_mask creates
-     here is already at the view's level -- ca_create_mask attaches a new
-     mask to match an attached view -- so only a mask that was there before
-     takes the step; stepping a new one too leaves it a level above the
-     view, still attached after the view's last detach. */
-  mask0 = ca->mask;
+     each take it one level with the view.  A mask created here -- by the
+     slot (a CAObject makes its mask while it attaches) or by
+     ca_update_mask -- is already at the view's level, since
+     ca_create_mask attaches a new mask to match an attached view.  So
+     only a mask that was there before the slot takes the step; stepping a
+     new one too leaves it a level above the view, still attached after
+     the view's last detach. */
+  ca_func[ca->obj_type].attach(ca);
   ca_update_mask(ca);
   if ( ca->mask == mask0 ) {
     ca_attach(ca->mask);

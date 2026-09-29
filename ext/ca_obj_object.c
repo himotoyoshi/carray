@@ -82,11 +82,21 @@ ca_objectmask_dsize (const void *ap)
   return sizeof(CAObjectMask) + ca->ndim * sizeof(ca_size_t);
 }
 
+/* The mask reads and writes through its CAObject, and its cache is the
+   CAObject's; it keeps the CAObject alive. */
+static void
+ca_objmask_mark (void *ap)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  rb_gc_mark(ca->array);
+  ca_mark(ap);
+}
+
 const rb_data_type_t caobjectmask_data_type = {
     .parent = &carray_data_type,
     .wrap_struct_name = "CAObjectMask",
     .function = {
-        .dmark = ca_mark,
+        .dmark = ca_objmask_mark,
         .dfree = ca_free,
         .dsize = ca_objectmask_dsize,
         .dcompact = NULL
@@ -110,6 +120,8 @@ ca_objmask_new (VALUE array, int8_t ndim, ca_size_t *dim)
   ca_wrap_setup_null((CArray *)ca, CA_BOOLEAN, ndim, dim, 0, NULL);
   ca->obj_type = CA_OBJ_OBJECT_MASK;
   ca->array = array;
+  ca->cache = NULL;
+  ca->holds = 0;
 
   return ca;
 }
@@ -175,125 +187,243 @@ ca_object_data_of (void *ap)
 }
 
 
+/* Forward declaration: ca_object_wrap_transient (defined further down,
+   near the data-side xfer functions). */
+static VALUE
+ca_object_wrap_transient (int8_t data_type, ca_size_t bytes,
+                          int8_t ndim, ca_size_t *dim, void *data, int dir);
+
 static void *
 ca_objmask_func_clone (void *ap)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  return ca_objmask_new(ca->array, ca->ndim, ca->dim);
+  CAObjectMask *co = ca_objmask_new(ca->array, ca->ndim, ca->dim);
+  co->cache = ca->cache;
+  return co;
 }
 
-/* per-cell cores: objmask reads/writes its own CA_BOOLEAN bit storage
-   (a contiguous wrap over the shared mask bytes) AND mirrors through the
-   user's Ruby mask_fetch_* / mask_store_* callbacks.  Entity bit access
-   goes through ca_array_func_xfer_index / xfer_addrs.  GET/PUT
-   direction-unified; the slots below forward. */
-static void
-ca_objmask_xfer_addr_one (CAObjectMask *ca, ca_size_t addr, void *ptr, int dir)
+/* Whether the CAObject answers one of the mask hooks.  A copy made by dup
+   holds its own bits and answers none (array is nil). */
+static int
+ca_objmask_answers (CAObjectMask *ca, const char *mid)
 {
-  volatile VALUE ridx, raddr, rval;
+  return ! NIL_P(ca->array) && rb_obj_respond_to(ca->array, rb_intern(mid), Qtrue);
+}
+
+static VALUE
+ca_objmask_index_of (CAObjectMask *ca, ca_size_t addr)
+{
+  ca_size_t idx[CA_RANK_MAX];
+  VALUE ridx;
   int i;
-  if ( dir == CA_XFER_GET ) {
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_addr"), Qtrue) ) {
-      raddr = SIZE2NUM(addr);
-      rval = rb_funcall(ca->array, rb_intern("mask_fetch_addr"), 1, raddr);
-      *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
-      ca_array_func_xfer_addrs(ca, 1, &addr, ptr, CA_XFER_PUT);
-    }
-    else if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_index"), Qtrue) ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *)ca, addr, idx);
-      ridx = rb_ary_new2(ca->ndim);
-      for (i=0; i<ca->ndim; i++) {
-        rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
-      }
-      rval = rb_funcall(ca->array, rb_intern("mask_fetch_index"), 1, ridx);
-      *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
-      ca_array_func_xfer_index(ca, idx, ptr, CA_XFER_PUT);
-    }
-    else {
-      ca_array_func_xfer_addrs(ca, 1, &addr, ptr, CA_XFER_GET);
-    }
+  ca_addr2index((CArray *) ca, addr, idx);
+  ridx = rb_ary_new2(ca->ndim);
+  for (i=0; i<ca->ndim; i++) {
+    rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
+  }
+  return ridx;
+}
+
+/* The bit the per-cell hooks give for addr (1 / 0 / true / false), or -1
+   when the object has neither mask_fetch_addr nor mask_fetch_index. */
+static int
+ca_objmask_fetch_one (CAObjectMask *ca, ca_size_t addr)
+{
+  volatile VALUE rval;
+  if ( ca_objmask_answers(ca, "mask_fetch_addr") ) {
+    rval = rb_funcall(ca->array, rb_intern("mask_fetch_addr"), 1, SIZE2NUM(addr));
+  }
+  else if ( ca_objmask_answers(ca, "mask_fetch_index") ) {
+    rval = rb_funcall(ca->array, rb_intern("mask_fetch_index"), 1,
+                      ca_objmask_index_of(ca, addr));
   }
   else {
-    ca_array_func_xfer_addrs(ca, 1, &addr, ptr, CA_XFER_PUT);
-    rval = INT2NUM( *(uint8_t*)ptr );
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_addr"), Qtrue) ) {
-      raddr = SIZE2NUM(addr);
-      rb_funcall(ca->array, rb_intern("mask_store_addr"), 2, raddr, rval);
+    return -1;
+  }
+  if ( rval == Qtrue || rval == Qfalse ) {
+    return RTEST(rval);
+  }
+  return NUM2INT(rval) != 0;
+}
+
+/* Hands one bit to the per-cell hooks; 0 when the object has neither
+   mask_store_addr nor mask_store_index. */
+static int
+ca_objmask_store_one (CAObjectMask *ca, ca_size_t addr, boolean8_t bit)
+{
+  if ( ca_objmask_answers(ca, "mask_store_addr") ) {
+    rb_funcall(ca->array, rb_intern("mask_store_addr"), 2,
+               SIZE2NUM(addr), INT2NUM(bit ? 1 : 0));
+    return 1;
+  }
+  if ( ca_objmask_answers(ca, "mask_store_index") ) {
+    rb_funcall(ca->array, rb_intern("mask_store_index"), 2,
+               ca_objmask_index_of(ca, addr), INT2NUM(bit ? 1 : 0));
+    return 1;
+  }
+  return 0;
+}
+
+static int
+ca_objmask_stores_cells (CAObjectMask *ca)
+{
+  return ca_objmask_answers(ca, "mask_store_addr") ||
+         ca_objmask_answers(ca, "mask_store_index");
+}
+
+/* Brings the cache up to date from the hooks that give the mask: the bulk
+   one, else the per-cell one.  With neither, the cache is the mask. */
+static void
+ca_objmask_refresh (CAObjectMask *ca)
+{
+  boolean8_t *c = (boolean8_t *) ca->cache;
+  ca_size_t addr;
+  int bit;
+  if ( ca_objmask_answers(ca, "mask_copy_data") ) {
+    rb_funcall(ca->array, rb_intern("mask_copy_data"), 1,
+               ca_objmask_mask_data(ca));
+    return;
+  }
+  for ( addr = 0; addr < ca->elements; addr++ ) {
+    if ( ( bit = ca_objmask_fetch_one(ca, addr) ) < 0 ) {
+      return;
     }
-    else if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_index"), Qtrue) ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *)ca, addr, idx);
-      ridx = rb_ary_new2(ca->ndim);
-      for (i=0; i<ca->ndim; i++) {
-        rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
-      }
-      rb_funcall(ca->array, rb_intern("mask_store_index"), 2, ridx, rval);
+    c[addr] = (boolean8_t) bit;
+  }
+}
+
+/* Hands the whole cache to the hooks that take the mask: the bulk one,
+   else the per-cell one. */
+static void
+ca_objmask_push (CAObjectMask *ca)
+{
+  const boolean8_t *c = (const boolean8_t *) ca->cache;
+  ca_size_t addr;
+  if ( ca_objmask_answers(ca, "mask_sync_data") ) {
+    rb_funcall(ca->array, rb_intern("mask_sync_data"), 1,
+               ca_objmask_mask_data(ca));
+    return;
+  }
+  for ( addr = 0; addr < ca->elements; addr++ ) {
+    if ( ! ca_objmask_store_one(ca, addr, c[addr]) ) {
+      return;
     }
   }
 }
 
+/* Reads n bits at addrs while the mask is closed: mask_copy_addrs, else
+   the per-cell hooks, else the whole mask brought up to date. */
 static void
-ca_objmask_xfer_index_one (CAObjectMask *ca, ca_size_t *idx, void *ptr, int dir)
+ca_objmask_get_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
+                      boolean8_t *bits)
 {
-  volatile VALUE ridx, raddr, rval;
-  int i;
-  if ( dir == CA_XFER_GET ) {
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_index"), Qtrue) ) {
-      ridx = rb_ary_new2(ca->ndim);
-      for (i=0; i<ca->ndim; i++) {
-        rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
-      }
-      rval = rb_funcall(ca->array, rb_intern("mask_fetch_index"), 1, ridx);
-      *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
-      ca_array_func_xfer_index(ca, idx, ptr, CA_XFER_PUT);
-    }
-    else if ( rb_obj_respond_to(ca->array, rb_intern("mask_fetch_addr"), Qtrue) ) {
-      ca_size_t addr = ca_index2addr((CArray *)ca, idx);
-      raddr = SIZE2NUM(addr);
-      rval = rb_funcall(ca->array, rb_intern("mask_fetch_addr"), 1, raddr);
-      *(uint8_t*) ptr = NUM2INT(rval) == 0 ? 0 : 1;
-      ca_array_func_xfer_addrs(ca, 1, &addr, ptr, CA_XFER_PUT);
-    }
-    else {
-      ca_array_func_xfer_index(ca, idx, ptr, CA_XFER_GET);
-    }
+  boolean8_t *c = (boolean8_t *) ca->cache;
+  ca_size_t i;
+  int bit;
+  if ( n > 0 && ca_objmask_answers(ca, "mask_copy_addrs") ) {
+    volatile VALUE raddrs, rdata;
+    ca_size_t dim1[1] = { n };
+    raddrs = ca_object_wrap_transient(CA_SIZE, sizeof(ca_size_t),
+                                      1, dim1, addrs, CA_XFER_PUT);
+    rdata  = ca_object_wrap_transient(CA_BOOLEAN, 1, 1, dim1, bits,
+                                      CA_XFER_GET);
+    rb_funcall(ca->array, rb_intern("mask_copy_addrs"), 2, raddrs, rdata);
+    return;
   }
-  else {
-    ca_array_func_xfer_index(ca, idx, ptr, CA_XFER_PUT);
-    rval = INT2NUM( *(uint8_t*)ptr );
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_index"), Qtrue) ) {
-      ridx = rb_ary_new2(ca->ndim);
-      for (i=0; i<ca->ndim; i++) {
-        rb_ary_store(ridx, i, SIZE2NUM(idx[i]));
-      }
-      rb_funcall(ca->array, rb_intern("mask_store_index"), 2, ridx, rval);
+  if ( n > 0 && ( bit = ca_objmask_fetch_one(ca, addrs[0]) ) >= 0 ) {
+    c[addrs[0]] = bits[0] = (boolean8_t) bit;
+    for ( i = 1; i < n; i++ ) {
+      c[addrs[i]] = bits[i] = (boolean8_t) ca_objmask_fetch_one(ca, addrs[i]);
     }
-    else if ( rb_obj_respond_to(ca->array, rb_intern("mask_store_addr"), Qtrue) ) {
-      ca_size_t addr = ca_index2addr((CArray *)ca, idx);
-      raddr = SIZE2NUM(addr);
-      rb_funcall(ca->array, rb_intern("mask_store_addr"), 2, raddr, rval);
-    }
+    return;
   }
+  ca_objmask_refresh(ca);
+  for ( i = 0; i < n; i++ ) {
+    bits[i] = c[addrs[i]];
+  }
+}
+
+/* Writes n bits at addrs while the mask is closed, and hands them over:
+   one by one to the per-cell hooks, as a list to mask_sync_addrs, or else
+   the whole mask to mask_sync_data -- brought up to date first, so that
+   the cells not written go back as they were. */
+static void
+ca_objmask_put_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
+                      const boolean8_t *bits)
+{
+  boolean8_t *c = (boolean8_t *) ca->cache;
+  ca_size_t i;
+  if ( ca_objmask_stores_cells(ca) ) {
+    for ( i = 0; i < n; i++ ) {
+      c[addrs[i]] = bits[i] ? 1 : 0;
+      ca_objmask_store_one(ca, addrs[i], c[addrs[i]]);
+    }
+    return;
+  }
+  if ( n > 0 && ca_objmask_answers(ca, "mask_sync_addrs") ) {
+    volatile VALUE raddrs, rdata;
+    ca_size_t dim1[1] = { n };
+    for ( i = 0; i < n; i++ ) {
+      c[addrs[i]] = bits[i] ? 1 : 0;
+    }
+    raddrs = ca_object_wrap_transient(CA_SIZE, sizeof(ca_size_t),
+                                      1, dim1, addrs, CA_XFER_PUT);
+    rdata  = ca_object_wrap_transient(CA_BOOLEAN, 1, 1, dim1, (void *) bits,
+                                      CA_XFER_PUT);
+    rb_funcall(ca->array, rb_intern("mask_sync_addrs"), 2, raddrs, rdata);
+    return;
+  }
+  if ( ca_objmask_answers(ca, "mask_sync_data") ) {
+    ca_objmask_refresh(ca);
+  }
+  for ( i = 0; i < n; i++ ) {
+    c[addrs[i]] = bits[i] ? 1 : 0;
+  }
+  ca_objmask_push(ca);
+}
+
+/* Open: the cache is published in ptr, and it is the mask until the sync
+   hands it over.  The first attach reads the mask in; an allocate does
+   not, since whoever allocates writes every cell. */
+static void
+ca_objmask_open (CAObjectMask *ca, int refresh)
+{
+  if ( ca->holds == 0 ) {
+    if ( refresh ) {
+      ca_objmask_refresh(ca);
+    }
+    ca->ptr = ca->cache;
+  }
+  ca->holds++;
+}
+
+static void
+ca_objmask_func_allocate (void *ap)
+{
+  ca_objmask_open((CAObjectMask *) ap, 0);
 }
 
 static void
 ca_objmask_func_attach (void *ap)
 {
-  CAObjectMask *ca = (CAObjectMask *) ap;
-  if ( rb_obj_respond_to(ca->array, rb_intern("mask_copy_data"), Qtrue) ) {
-    rb_funcall(ca->array, rb_intern("mask_copy_data"), 
-                        1, ca_objmask_mask_data(ca));
-  }
+  ca_objmask_open((CAObjectMask *) ap, 1);
 }
 
-void
+static void
 ca_objmask_func_sync (void *ap)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  if ( rb_obj_respond_to(ca->array, rb_intern("mask_sync_data"), Qtrue) ) {
-    rb_funcall(ca->array, rb_intern("mask_sync_data"), 
-                          1, ca_objmask_mask_data(ca));
+  if ( ca->ptr ) {
+    ca_objmask_push(ca);
+  }
+}
+
+static void
+ca_objmask_func_detach (void *ap)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  if ( ca->holds > 0 && --ca->holds == 0 ) {
+    ca->ptr = NULL;
   }
 }
 
@@ -301,77 +431,76 @@ static void
 ca_objmask_func_xfer_all (void *ap, void *data, int dir)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
+  size_t len = (size_t) ca->elements * (size_t) ca->bytes;
   if ( dir == CA_XFER_GET ) {
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_copy_data"), Qtrue) ) {
-      ca_object_call_lending(&ca->ptr, data, ca->array, "mask_copy_data",
-                             ca_objmask_mask_data, ca);
+    if ( ! ca->ptr ) {
+      ca_objmask_refresh(ca);
     }
-    else {
-      ca_array_func_xfer_all(ca, data, CA_XFER_GET);
-    }
+    memcpy(data, ca->cache, len);
   }
   else {
-    if ( rb_obj_respond_to(ca->array, rb_intern("mask_copy_data"), Qtrue) ) {
-      ca_object_call_lending(&ca->ptr, data, ca->array, "mask_sync_data",
-                             ca_objmask_mask_data, ca);
-    }
-    else {
-      ca_array_func_xfer_all(ca, data, CA_XFER_PUT);
+    memcpy(ca->cache, data, len);
+    if ( ! ca->ptr ) {
+      ca_objmask_push(ca);
     }
   }
 }
 
-void
-ca_objmask_func_fill_data (void *ap, void *val)
+static void
+ca_objmask_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                            void *data, int dir)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  ca_array_func_fill_data(ca, val);
-  if ( rb_obj_respond_to(ca->array, rb_intern("mask_fill_data"), Qtrue) ) {
-    rb_funcall(ca->array, rb_intern("mask_fill_data"),
-                          1, INT2NUM(*(uint8_t*)val));
+  boolean8_t *c = (boolean8_t *) ca->cache;
+  boolean8_t *d = (boolean8_t *) data;
+  ca_size_t i;
+  if ( ca->ptr ) {
+    for ( i = 0; i < n; i++ ) {
+      if ( dir == CA_XFER_GET ) { d[i] = c[addrs[i]]; }
+      else                      { c[addrs[i]] = d[i] ? 1 : 0; }
+    }
+    return;
+  }
+  if ( dir == CA_XFER_GET ) {
+    ca_objmask_get_cells(ca, n, addrs, d);
+  }
+  else {
+    ca_objmask_put_cells(ca, n, addrs, d);
   }
 }
 
 static void
 ca_objmask_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
-  ca_objmask_xfer_index_one((CAObjectMask *) ap, idx, data, dir);
+  ca_size_t addr = ca_index2addr((CArray *) ap, idx);
+  ca_objmask_func_xfer_addrs(ap, 1, &addr, data, dir);
 }
 
-/* Forward declaration: ca_object_wrap_transient (defined further down,
-   near the data-side xfer functions). */
-static VALUE
-ca_object_wrap_transient (int8_t data_type, ca_size_t bytes,
-                          int8_t ndim, ca_size_t *dim, void *data, int dir);
-
-/* Mask parallel of the bulk-addrs path.  When `mask_copy_addrs` /
-   `mask_sync_addrs` is defined, 1-call bulk dispatch; else per-cell loop. */
 static void
-ca_objmask_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                            void *data, int dir)
+ca_objmask_func_fill_data (void *ap, void *val)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  ID         mid = (dir == CA_XFER_GET) ? rb_intern("mask_copy_addrs")
-                                        : rb_intern("mask_sync_addrs");
-
-  if ( n > 0 && rb_obj_respond_to(ca->array, mid, Qtrue) ) {
-    volatile VALUE raddrs, rdata;
-    ca_size_t dim1[1] = { n };
-    raddrs = ca_object_wrap_transient(CA_SIZE, sizeof(ca_size_t),
-                                      1, dim1, addrs, CA_XFER_PUT);
-    rdata  = ca_object_wrap_transient(ca->data_type, ca->bytes,
-                                      1, dim1, data, dir);
-    rb_funcall(ca->array, mid, 2, raddrs, rdata);
+  boolean8_t bit = *(boolean8_t *) val ? 1 : 0;
+  memset(ca->cache, bit, (size_t) ca->elements);
+  if ( ca->ptr ) {
     return;
   }
-
-  {
-    char     *d = (char *) data;
-    ca_size_t i;
-    for ( i = 0; i < n; i++ ) {
-      ca_objmask_xfer_addr_one(ca, addrs[i], d + i * ca->bytes, dir);
-    }
+  if ( ca_objmask_answers(ca, "mask_fill_data") ) {
+    rb_funcall(ca->array, rb_intern("mask_fill_data"), 1, INT2NUM(bit));
+    return;
   }
+  ca_objmask_push(ca);
+}
+
+static void
+ca_objmask_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *val)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  volatile VALUE hold = 0;
+  boolean8_t *bits = ALLOCV_N(boolean8_t, hold, n > 0 ? n : 1);
+  memset(bits, *(boolean8_t *) val ? 1 : 0, (size_t) n);
+  ca_objmask_func_xfer_addrs(ca, n, addrs, bits, CA_XFER_PUT);
+  ALLOCV_END(hold);
 }
 
 /* Mask parallel of the partial-region path.  Same per-axis index-step
@@ -398,7 +527,8 @@ ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   if ( n == 0 ) return;
 
-  if ( rb_obj_respond_to(ca->array, mid_block, Qtrue) ) {
+  if ( ! ca->ptr && ca_objmask_answers(ca, dir == CA_XFER_GET ? "mask_copy_block"
+                                                            : "mask_sync_block") ) {
     /* The request is over the view's addresses, so a transposed / flat
        request is legal; the per-axis copy_block dispatch below would
        misread it.  See ca_xfer_stride_request_is_axis_box (carray.h). */
@@ -437,15 +567,27 @@ ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   ALLOCV_END(holder);
 }
 
+/* A mask copied by dup holds its own bits, and frees them. */
+static void
+ca_objmask_free (void *ap)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  if ( ca != NULL && NIL_P(ca->array) && ca->cache ) {
+    xfree(ca->cache);
+    ca->cache = NULL;
+  }
+  free_ca_wrap(ap);
+}
+
 static ca_operation_function_t ca_objmask_func = {
   -1, /* CA_OBJ_OBJECT_MASK */
   CA_REAL_ARRAY,
-  free_ca_wrap,
+  ca_objmask_free,
   ca_objmask_func_clone,
-  ca_array_func_allocate,
+  ca_objmask_func_allocate,
   ca_objmask_func_attach,
   ca_objmask_func_sync,
-  ca_array_func_detach,
+  ca_objmask_func_detach,
   ca_objmask_func_fill_data,
   ca_array_func_create_mask,
   ca_objmask_func_xfer_index,
@@ -453,6 +595,7 @@ static ca_operation_function_t ca_objmask_func = {
   NULL,                       /* fold_stride: never-fold (callback boundary) */
   ca_objmask_func_xfer_stride,
   ca_objmask_func_xfer_all,
+  .fill_addrs = ca_objmask_func_fill_addrs,
 };
 
 static VALUE
@@ -470,9 +613,15 @@ rb_ca_objmask_initialize_copy (VALUE self, VALUE other)
   TypedData_Get_Struct(self,  CAObjectMask, &caobjectmask_data_type, ca);
   TypedData_Get_Struct(other, CAObjectMask, &caobjectmask_data_type, cs);
 
+  /* A copy of the mask as it reads now, with bits of its own: writing to
+     it does not reach the CAObject's hooks. */
   carray_setup((CArray *)ca, CA_BOOLEAN, cs->ndim, cs->dim, 0, NULL);
   ca->obj_type = CA_OBJ_OBJECT_MASK;
-  ca->array = cs->array;
+  ca->array = Qnil;
+  ca->cache = ca->ptr;
+  ca->holds = 0;
+  ca_copy_data((CArray *) cs, ca->cache);
+  ca->ptr = NULL;
 
   return self;
 }
@@ -566,6 +715,17 @@ ca_object_func_clone (void *ap)
 #define ca_object_func_ptr_at_addr ca_array_func_ptr_at_addr
 #define ca_object_func_ptr_at_index ca_array_func_ptr_at_index
 
+/* The bytes of this array's mask.  A fetcher that answers UNDEF marks the
+   cell there, whether or not the mask is open. */
+static boolean8_t *
+ca_object_mask_bytes (CAObject *ca)
+{
+  if ( ca->mask->obj_type == CA_OBJ_OBJECT_MASK ) {
+    return (boolean8_t *) ((CAObjectMask *) ca->mask)->cache;
+  }
+  return (boolean8_t *) ca->mask->ptr;
+}
+
 /* per-cell cores: the addr- and index-primary Ruby-callback bridge logic,
    direction-unified.  The fetch_* / store_* slots below are thin
    forwarders onto these. */
@@ -583,14 +743,14 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         if ( ! ca->mask ) {
           ca_create_mask(ca);
         }
-        *((boolean8_t*)ca->mask->ptr + addr) = 1;
+        ca_object_mask_bytes(ca)[addr] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
         }
       }
       else {
         if ( ca_has_mask(ca) ) {
-          *((boolean8_t*)ca->mask->ptr + addr) = 0;
+          ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
@@ -608,14 +768,14 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         if ( ! ca->mask ) {
           ca_create_mask(ca);
         }
-        *((boolean8_t*)ca->mask->ptr + ca_index2addr(ca->mask, idx)) = 1;
+        ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
         }
       }
       else {
         if ( ca_has_mask(ca) ) {
-          *((boolean8_t*)ca->mask->ptr + ca_index2addr(ca->mask, idx)) = 0;
+          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
@@ -657,14 +817,14 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         if ( ! ca->mask ) {
           ca_create_mask(ca);
         }
-        *((boolean8_t*)ca->mask->ptr + ca_index2addr(ca->mask, idx)) = 1;
+        ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
         }
       }
       else {
         if ( ca_has_mask(ca) ) {
-          *((boolean8_t*)ca->mask->ptr + ca_index2addr(ca->mask, idx)) = 0;
+          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
@@ -678,14 +838,14 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         if ( ! ca->mask ) {
           ca_create_mask(ca);
         }
-        *((boolean8_t*)ca->mask->ptr + addr) = 1;
+        ca_object_mask_bytes(ca)[addr] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
         }
       }
       else {
         if ( ca_has_mask(ca) ) {
-          *((boolean8_t*)ca->mask->ptr + addr) = 0;
+          ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
@@ -1170,10 +1330,20 @@ ca_object_func_create_mask (void *ap)
   if ( ! ca->data->mask ) {
     ca_create_mask(ca->data);
   }
-  ca->mask = (CArray*) ca_objmask_new(ca->self, ca->ndim, ca->dim);
-  ca->mask->ptr = ca->data->mask->ptr;
-  rmask = ca_wrap_struct(ca->mask);
-  rb_ivar_set(ca->self, rb_intern("mask"), rmask);
+  {
+    CAObjectMask *cm = ca_objmask_new(ca->self, ca->ndim, ca->dim);
+    cm->cache = ca->data->mask->ptr;
+    ca->mask = (CArray *) cm;
+    rmask = ca_wrap_struct(ca->mask);
+    rb_ivar_set(ca->self, rb_intern("mask"), rmask);
+    /* Made while this array is attached, the mask joins it at its level:
+       ca_create_mask attaches it once more when this returns. */
+    if ( ca->attach > 1 ) {
+      ca_objmask_refresh(cm);
+      cm->ptr   = cm->cache;
+      cm->holds = ca->attach - 1;
+    }
+  }
 }
 
 ca_operation_function_t ca_object_func = {

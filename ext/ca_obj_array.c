@@ -1116,7 +1116,14 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   }
   carray_setup(ca, cs->data_type, cs->ndim, cs->dim, cs->bytes, cs->mask);
 
-  memcpy(ca->ptr, cs->ptr, ca_length(cs));
+  if ( cs->ptr ) {
+    memcpy(ca->ptr, cs->ptr, ca_length(cs));
+  }
+  else {
+    /* An entity cold at rest (a CAObject's mask, a source) is read
+       through its slots. */
+    ca_copy_data(cs, ca->ptr);
+  }
 
   return self;
 }

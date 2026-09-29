@@ -786,9 +786,14 @@ typedef struct {
   VALUE     self;
 } CAObject;                /* 48 + 4*(ndim) (bytes) */
 
-/* 
-  CAObjectMask is an internal class 
-  used only as mask array of CAObject.
+/*
+  CAObjectMask is an internal class used only as the mask array of a
+  CAObject.  Its bits live in the CAObject's mask hooks (mask_copy_data,
+  mask_fetch_addr, ...) when it has them, and in `cache` -- the mask
+  buffer of the CAObject's internal data array -- always.  Like the mask
+  of any view it is cold at rest: ptr is NULL, and every read and write
+  goes through its slots to the hooks.  An attach publishes the cache in
+  ptr, and `holds` counts the attaches not yet detached.
 */
 
 typedef struct {
@@ -807,6 +812,8 @@ typedef struct {
                               ext/ca_array_pool.c. */
   /* -------------*/
   VALUE     array;
+  char     *cache;
+  long      holds;
 } CAObjectMask;
 
 /* CARepeat (Phase R migration): structurally identical to CAStride.
