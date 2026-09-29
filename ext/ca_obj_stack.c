@@ -18,7 +18,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_all */
+#include "carray_internal.h"   /* ca_attach_all / ca_sync_all */
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"
 
@@ -624,20 +624,30 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    - k_axis != 0: per-parent contiguous read into a temp buffer, then
      scattered-write to dst at view row-major positions.  This is the
      correctness path (per-parent contig-read / scattered-write), not a
-     perf-optimised one. */
+     perf-optimised one.
+
+   into_buffers (PUT only) writes each parent's cells into the buffer its
+   attach handed out, rather than through the parent to what is behind it:
+   the sync of an attached stack, which then syncs each parent.  Writing
+   past the buffer would leave it stale, and the parent's own sync would
+   push the stale buffer back over the cells just written. */
 static void
-ca_stack_func_xfer_all (void *ap, void *data, int dir)
+ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
 {
-  CAStack *ca = (CAStack *) ap;
   int8_t  k_axis = ca->k_axis;
   ca_size_t bytes = ca->bytes;
-  char *d = (char *) data;
   int32_t k;
 
   if ( k_axis == 0 ) {
     ca_size_t parent_bytes_total = ca->parents[0]->elements * bytes;
     for ( k = 0; k < ca->n_parents; k++ ) {
-      ca_xfer_all(ca->parents[k], d + k * parent_bytes_total, dir);
+      if ( into_buffers ) {
+        memcpy(ca->parents[k]->ptr, d + k * parent_bytes_total,
+               (size_t) parent_bytes_total);
+      }
+      else {
+        ca_xfer_all(ca->parents[k], d + k * parent_bytes_total, dir);
+      }
     }
     return;
   }
@@ -725,12 +735,23 @@ ca_stack_func_xfer_all (void *ap, void *data, int dir)
         }
 
         if ( dir == CA_XFER_PUT ) {
-          ca_xfer_all(ca->parents[k], buf, CA_XFER_PUT);
+          if ( into_buffers ) {
+            memcpy(ca->parents[k]->ptr, buf, (size_t) (parent_elements * bytes));
+          }
+          else {
+            ca_xfer_all(ca->parents[k], buf, CA_XFER_PUT);
+          }
         }
       }
     }
     ALLOCV_END(holder);
   }
+}
+
+static void
+ca_stack_func_xfer_all (void *ap, void *data, int dir)
+{
+  ca_stack_xfer_parents((CAStack *) ap, (char *) data, dir, 0);
 }
 
 /* ------------------------------------------------------------------- */
@@ -758,11 +779,8 @@ static void
 ca_stack_func_sync (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
-  int32_t k;
-  ca_stack_func_xfer_all(ca, ca->ptr, CA_XFER_PUT);
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_sync(ca->parents[k]);
-  }
+  ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
+  ca_sync_all(ca->parents, ca->n_parents);
 }
 
 static void

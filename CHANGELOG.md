@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `add!`, `map!`, `seq!` and the other in-place methods on a
+  `CArray.stack` or `CArray.meld` whose parents are selections
+  (`x[x > 2]`) or `CAObject`s now write their cells back to the parents;
+  the writes were silently discarded. Parents that are whole arrays or
+  blocks were not affected. A parent whose write-back raises no longer
+  keeps the others from receiving theirs.
+
 - Fix: after a store into an object array fails to convert the value, the
   array no longer answers every later access with "cyclic reference is not
   allowed in CArray".

@@ -39,7 +39,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_all */
+#include "carray_internal.h"   /* ca_attach_all / ca_sync_all */
 #include "ca_obj_face.h"       /* ca_face_state_portable */
 
 /* ------------------------------------------------------------------- */
@@ -652,15 +652,37 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 /* xfer_all                                                             */
 /* ------------------------------------------------------------------- */
 
+/* A parent's cells, delivered (PUT).  into_buffers writes them into the
+   buffer the parent's attach handed out, rather than through the parent to
+   what is behind it: the sync of an attached meld, which then syncs each
+   parent.  Writing past the buffer would leave it stale, and the parent's
+   own sync would push the stale buffer back over the cells just written. */
+static void
+ca_meld_put_parent (CArray *p, char *src, int into_buffers)
+{
+  if ( into_buffers ) {
+    memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
+  }
+  else {
+    ca_xfer_all(p, src, CA_XFER_PUT);
+  }
+}
+
 /* meld_axis == 0 best path: K contig xfer_all at prefix-sum offsets. */
 static void
-ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir)
+ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, int into_buffers)
 {
   ca_size_t tail_bytes = ca_meld_tail_elements(ca) * ca->bytes;
   char *d = (char *) data;
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_xfer_all(ca->parents[k], d + ca->seg_offset[k] * tail_bytes, dir);
+    char *seg = d + ca->seg_offset[k] * tail_bytes;
+    if ( dir == CA_XFER_PUT ) {
+      ca_meld_put_parent(ca->parents[k], seg, into_buffers);
+    }
+    else {
+      ca_xfer_all(ca->parents[k], seg, dir);
+    }
   }
 }
 
@@ -677,7 +699,8 @@ ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir)
    The naive per-cell odometer that this replaces cost ~2x eager on M2;
    chunked memcpy approaches memcpy bandwidth (eager parity target). */
 static void
-ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir)
+ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
+                              int into_buffers)
 {
   int8_t   ma = ca->meld_axis;
   int8_t   ndim = ca->ndim;
@@ -762,21 +785,26 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir)
     }
 
     if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(p, buf, CA_XFER_PUT);
+      ca_meld_put_parent(p, buf, into_buffers);
     }
     ALLOCV_END(holder);
   }
 }
 
 static void
+ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
+{
+  if ( ca->meld_axis == 0 ) {
+    ca_meld_xfer_all_ma0(ca, data, dir, into_buffers);
+  } else {
+    ca_meld_xfer_all_ma_internal(ca, data, dir, into_buffers);
+  }
+}
+
+static void
 ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
-  CAMeld *ca = (CAMeld *) ap;
-  if ( ca->meld_axis == 0 ) {
-    ca_meld_xfer_all_ma0(ca, data, dir);
-  } else {
-    ca_meld_xfer_all_ma_internal(ca, data, dir);
-  }
+  ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
 }
 
 /* ------------------------------------------------------------------- */
@@ -804,11 +832,8 @@ static void
 ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  int32_t k;
-  ca_meld_func_xfer_all(ca, ca->ptr, CA_XFER_PUT);
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_sync(ca->parents[k]);
-  }
+  ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
+  ca_sync_all(ca->parents, ca->n_parents);
 }
 
 static void

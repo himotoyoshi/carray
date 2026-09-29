@@ -685,4 +685,45 @@ class TestCAMeld < Test::Unit::TestCase
     assert_equal 15, v.reshape(3, 5).to_a.flatten.size
   end
 
+  # A bang operation opens the meld and writes its cells back on the way
+  # out.  A parent that is not an alias of its root -- a selection, a
+  # CAObject -- takes the cells into the buffer its attach handed out and
+  # pushes them on from there, once.
+  def test_bang_writes_reach_parents_that_are_selections
+    x = CArray.int32(6).seq
+    CArray.meld(x[x > 2], x[x < 3]).add!(100)
+    assert_equal [100, 101, 102, 103, 104, 105], x.to_a
+    x = CArray.int32(6).seq
+    CArray.meld(x[x > 2], x[x < 3]).seq!(50)
+    assert_equal [53, 54, 55, 50, 51, 52], x.to_a
+  end
+
+  def test_bang_writes_reach_selections_along_an_inner_axis
+    x = CArray.int32(2, 6).seq
+    CArray.meld(x[nil, x[0, nil] > 2], x[nil, x[0, nil] < 3], axis: 1).add!(100)
+    assert_equal (CArray.int32(2, 6).seq + 100).to_a, x.to_a
+  end
+
+  class PushCounter < CAObject
+    attr_reader :src, :pushes
+    def initialize (n)
+      @src = CArray.int32(n).seq
+      @pushes = []
+      super(CA_INT32, [n])
+    end
+    def copy_data (d)     ; d[] = @src ; end
+    def sync_data (d)     ; @pushes << d.to_a ; @src[] = d ; end
+    def fetch_addr (a)    ; @src[a] ; end
+    def store_addr (a, v) ; @src[a] = v ; end
+  end
+
+  def test_bang_writes_push_a_caobject_parent_once
+    a = PushCounter.new(3)
+    b = PushCounter.new(3)
+    CArray.meld(a, b).map! { |v| v + 10 }
+    assert_equal [10, 11, 12], a.src.to_a
+    assert_equal [[10, 11, 12]], a.pushes
+    assert_equal [10, 11, 12], b.src.to_a
+  end
+
 end

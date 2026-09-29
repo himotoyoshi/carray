@@ -89,12 +89,17 @@ void    ca_gc_hold_pop_to (int depth);
    ca_attach_all attaches all of list[0..n-1] or none: if one attach raises,
    those already attached are detached before the raise propagates.
 
+   ca_sync_all syncs every one of list[0..n-1], carrying on past one that
+   raises so that the others still receive what was written, and raises
+   the first exception once all have been tried.
+
    ca_attach_window opens list[0..n-1] ('r' attach, 'w' attach + sync,
    'a' allocate + sync), runs body(arg), and closes every array however body
    leaves.  Any window inside which Ruby runs or something raises goes
    through it; see the definition for what a raise does to 'w' and 'a'. */
 
 void    ca_attach_all (CArray **list, int32_t n);
+void    ca_sync_all   (CArray **list, int32_t n);
 VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
                           VALUE (*body)(VALUE), VALUE arg);
 

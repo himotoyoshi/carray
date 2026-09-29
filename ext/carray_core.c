@@ -1792,6 +1792,40 @@ ca_attach_all (CArray **list, int32_t n)
   }
 }
 
+static VALUE
+ca_sync_all_step (VALUE arg)
+{
+  ca_sync((void *) arg);
+  return Qnil;
+}
+
+/* Syncs every one of list[0..n-1] in turn, carrying on past one that
+   raises so that the others still receive what was written, then raises
+   the first exception.  A throw or break cannot wait, and goes at once. */
+void
+ca_sync_all (CArray **list, int32_t n)
+{
+  volatile VALUE error = Qnil;
+  int32_t k;
+  for ( k = 0; k < n; k++ ) {
+    int tag = 0;
+    rb_protect(ca_sync_all_step, (VALUE) list[k], &tag);
+    if ( tag ) {
+      VALUE err = rb_errinfo();
+      if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
+        rb_jump_tag(tag);
+      }
+      if ( NIL_P(error) ) {
+        error = err;
+      }
+      rb_set_errinfo(Qnil);
+    }
+  }
+  if ( ! NIL_P(error) ) {
+    rb_exc_raise(error);
+  }
+}
+
 /* An attach window over list[0..n-1] that closes however body leaves.
 
    modes holds one letter per array:
