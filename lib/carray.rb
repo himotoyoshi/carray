@@ -24,7 +24,7 @@ require 'carray/runtime'  # load-bearing Ruby support the core depends on
 require 'carray/basics'   # frequently-used convenience methods kept eager
 require 'carray/conditional'  # then_else / replace_where / conditional
 require 'carray/mask_gap_fill'  # unmask/strip_mask method: keyword (hold / linear gap-fill)
-require 'carray/attribute' # per-instance metadata Hash (#attribute / #has_attribute?)
+require 'carray/attribute' # per-instance metadata Hash (#attr / #set_attr / #attrs / #has_attr?)
 require 'carray/boolean_reduce' # all/any/none skip_masked: keyword (Kleene fold)
 require 'carray/meld_reduce'    # CAMeld per-parent reduce fast path (sum/mean/min/max along meld_axis)
 # carray/ordering CIFY (2026-06-21): translated to ext/carray_order.c

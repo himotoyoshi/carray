@@ -84,6 +84,9 @@ VALUE   ca_lazy_arena_release_held (VALUE arg);
 int     ca_gc_hold_push   (void *ptr, ca_size_t n_elements);
 void    ca_gc_hold_pop_to (int depth);
 
+/* Copy the attributes src shows onto dst (a new entity with src's values). */
+void    rb_ca_inherit_attr (VALUE dst, VALUE src);
+
 /* ---- Attaching several parents (carray_core.c) ---------------------------
 
    ca_attach_all attaches all of list[0..n-1] or none: if one attach raises,
