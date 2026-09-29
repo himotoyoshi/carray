@@ -107,4 +107,23 @@ class TestMaskViewRegressions < Test::Unit::TestCase
     assert_equal [0, 1, 2, 3, 4, 5], v.to_a
   end
 
+  # invert_mask on a view reaches the parent's mask, whether the view shares
+  # its parent's memory (a block) or not (a selection, a transpose).
+  def test_invert_mask_through_a_view_reaches_the_parent
+    x = CA_INT32([1, 2, 3, 4, 5, 6])
+    x[1] = UNDEF
+    x[CA_BOOLEAN([1, 1, 0, 1, 1, 1])].invert_mask
+    assert_equal [UNDEF, 2, 3, UNDEF, UNDEF, UNDEF], x.to_a
+
+    y = CArray.int32(2, 3).seq
+    y[0, 1] = UNDEF
+    y.T.invert_mask
+    assert_equal [[UNDEF, 1, UNDEF], [UNDEF, UNDEF, UNDEF]], y.to_a
+
+    z = CA_INT32([1, 2, 3, 4])
+    z[1] = UNDEF
+    z[1..2].invert_mask
+    assert_equal [1, 2, UNDEF, 4], z.to_a
+  end
+
 end
