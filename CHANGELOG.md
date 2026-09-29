@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CArray#set_attrs(hash)` sets several attributes at once;
+  `b.set_attrs(a.attrs)` gives `b` the attributes `a` shows. Keys `b`
+  already has and the Hash does not name are kept.
+
 - Change: attributes set with `set_attr` now survive `copy` and `to_type`
   (and its shorthands such as `int32`): the new array gets the attributes
   the source shows, as its own. Arithmetic and reductions still start with
