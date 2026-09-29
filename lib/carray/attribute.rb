@@ -4,6 +4,7 @@
 #  Surface:
 #    ca.attr(:unit)             # => getter; nil if absent
 #    ca.set_attr(:unit, "m/s")  # => setter; writes to self's @attr
+#    ca.set_attrs(other.attrs)  # => sets every key of a Hash at once
 #    ca.attrs                   # => frozen shallow clone of the full Hash
 #    ca.has_attr?               # => any attribute present?
 #    ca.has_attr?(:unit)        # => specific key present?
@@ -67,6 +68,30 @@ class CArray
   def set_attr (key, value)
     attr_validate_value(value)
     (@attr ||= {})[attr_normalize_key(key)] = attr_coerce_value(value)
+  end
+
+  # @overload set_attrs(hash)
+  #   Sets every key of `hash` on `self`, as {#set_attr} does one key.
+  #   Keys already on `self` and not in `hash` are kept. Every value is
+  #   validated before any is written, so a rejected value leaves `self`
+  #   unchanged. `b.set_attrs(a.attrs)` gives `b` the attributes `a`
+  #   shows.
+  #   @param hash [Hash{Symbol, String => Object}] attributes to set.
+  #   @return [CArray] self.
+  #   @raise [TypeError] when a key or a value is not accepted.
+  def set_attrs (hash)
+    unless hash.is_a?(Hash)
+      raise TypeError, "set_attrs takes a Hash (got #{hash.class})"
+    end
+    entries = hash.map do |key, value|
+      attr_validate_value(value)
+      [attr_normalize_key(key), attr_coerce_value(value)]
+    end
+    unless entries.empty?
+      h = (@attr ||= {})
+      entries.each { |k, v| h[k] = v }
+    end
+    self
   end
 
   # @overload attrs

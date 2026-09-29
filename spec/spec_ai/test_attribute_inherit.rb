@@ -60,4 +60,26 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_equal({}, @a.sum(axis: 0).attrs)
   end
 
+  def test_set_attrs_copies_what_another_array_shows
+    v = @a[0, nil]
+    v.set_attr(:slice, "row0")
+    c = CArray.int32(4)
+    assert_same c, c.set_attrs(v.attrs)
+    assert_equal({ "slice" => "row0", "units" => "m/s" }, c.attrs)
+    c.set_attr(:units, "K")
+    assert_equal "m/s", @a.attr(:units)
+  end
+
+  def test_set_attrs_merges_into_own_keys
+    @b.set_attr(:scale, 2)
+    @b.set_attrs(units: "m/s", tag: :x)
+    assert_equal({ "scale" => 2, "units" => "m/s", "tag" => "x" }, @b.attrs)
+  end
+
+  def test_set_attrs_rejects_before_writing
+    assert_raise(TypeError) { @b.set_attrs("tag" => "ok", "bad" => Object.new) }
+    assert_equal({ "units" => "K" }, @b.attrs)
+    assert_raise(TypeError) { @b.set_attrs([[:units, "m/s"]]) }
+  end
+
 end
