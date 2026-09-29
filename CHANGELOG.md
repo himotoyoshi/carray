@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: attributes set with `set_attr` now survive `copy` and `to_type`
+  (and its shorthands such as `int32`): the new array gets the attributes
+  the source shows, as its own. Arithmetic and reductions still start with
+  none. A lazy operation (`a.lazy + 1`, `a.lazy.sqrt`, …) no longer shows
+  the attributes of its left operand; `a.lazy` itself still shows `a`'s.
+
 - Fix: `CAMath.expm1` and `CAMath.log1p` answer a CArray in its own
   `data_type`, as `CArray#expm1` / `#log1p` do: float32 input stays float32
   and object input stays object (they used to return float64). Integer

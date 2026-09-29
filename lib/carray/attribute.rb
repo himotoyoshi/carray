@@ -27,6 +27,14 @@
 #    `attrs` returns the effective merged Hash (deeper writes
 #    override shallower ones), frozen.
 #    Setter side always writes to self's @attr.
+#    The walk stops at a lazy operation view (CAMonOp / CABinOp /
+#    CATriOp / CAMonCmp / CABinCmp): its cells are computed, not the
+#    parent's cells, so the parent's attributes do not describe them.
+#    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through.
+#
+#  Copies: `copy` and `to_type` give the new array the attributes the
+#  source shows, as its own Hash.  Arithmetic and reductions do not
+#  carry them -- the result is a different quantity.
 
 class CArray
 
@@ -114,11 +122,17 @@ class CArray
         h = ca.instance_variable_get(:@attr)
         yield(h) if h
       end
+      return nil if attr_computing_view?(ca)
       parent = ca.respond_to?(:parent) ? ca.parent : nil
       return nil if parent.nil? || parent.equal?(ca)
       ca = parent
     end
     nil
+  end
+
+  def attr_computing_view? (ca)
+    ca.is_a?(CAMonOp) || ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
+      ca.is_a?(CAMonCmp) || ca.is_a?(CABinCmp)
   end
 
   def attr_normalize_key (key)

@@ -89,8 +89,9 @@ class CArray
   # @overload to_type(data_type, bytes: nil)
   #   Returns a new entity holding the elements of `self` converted to
   #   `data_type` (an eager copy that owns its storage). Masked cells are
-  #   carried across. When `data_type` is a data_class (a CAStruct
-  #   subclass) the result is wrapped in CARecord.
+  #   carried across, and so are the attributes `self` shows (`attrs`).
+  #   When `data_type` is a data_class (a CAStruct subclass) the result
+  #   is wrapped in CARecord.
   #
   #   When `self` is an `:object` array and `data_type` is an integer or
   #   float type, each cell is parsed with Ruby `Integer()` / `Float()`

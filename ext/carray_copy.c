@@ -79,7 +79,7 @@ ca_copy (void *ap)
 
 /* Ruby entry for `CArray#copy`.  Wraps `ca_copy` and, when `self` is a
  * Face (e.g. CARecord), lifts the wrapped result so the derived class
- * identity is preserved on the copy. */
+ * identity is preserved on the copy.  The copy keeps self's attributes. */
 VALUE
 rb_ca_copy (VALUE self)
 {
@@ -97,6 +97,7 @@ rb_ca_copy (VALUE self)
   obj = ca_wrap_struct(co);
   ca_gc_hold_pop_to(guard);
   CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  rb_ca_inherit_attr(obj, self);
   return obj;
 }
 
