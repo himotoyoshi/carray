@@ -31,6 +31,10 @@
 # Ruby comment next to it).
 #
 # Run via `rake attach_window_check`, or `ruby utils/check_attach_windows.rb`.
+# Given paths (files, or directories searched for *.c), it checks those
+# instead -- a C extension built on carray can run it on its own sources:
+#
+#   ruby path/to/carray/utils/check_attach_windows.rb ext/
 
 ROOT = File.expand_path("..", __dir__)
 
@@ -110,13 +114,18 @@ def template_sites (path)
 end
 
 offenders = []
-Dir.chdir(ROOT) do
-  Dir["ext/*.c"].sort.each do |path|
-    next if path =~ %r{/carray_kernels_}
-    next if EXEMPT_FILES.include?(path)
-    c_sites(path).each { |site| offenders << [path, *site] }
+if ARGV.empty?
+  Dir.chdir(ROOT) do
+    Dir["ext/*.c"].sort.each do |path|
+      next if path =~ %r{/carray_kernels_}
+      next if EXEMPT_FILES.include?(path)
+      c_sites(path).each { |site| offenders << [path, *site] }
+    end
+    template_sites("ext/mkkernel.rb").each { |site| offenders << ["ext/mkkernel.rb", *site] }
   end
-  template_sites("ext/mkkernel.rb").each { |site| offenders << ["ext/mkkernel.rb", *site] }
+else
+  ARGV.flat_map { |arg| File.directory?(arg) ? Dir[File.join(arg, "**", "*.c")].sort : [arg] }
+      .each { |path| c_sites(path).each { |site| offenders << [path, *site] } }
 end
 
 if offenders.empty?
@@ -129,7 +138,8 @@ offenders.each do |path, line, owner, text|
 end
 puts
 puts "attach_window_check: #{offenders.size} window(s) opened without a note."
-puts "Run the body through ca_attach_window (or ca_iter_ensure for a kernel"
-puts "iterator walk), or, when nothing inside can raise, say so next to the"
-puts "call:  /* window: nothing raises inside */"
+puts "Run what can raise under rb_ensure, closing the window there (inside"
+puts "carray, ca_attach_window; a kernel iterator walk, ca_iter_ensure), or,"
+puts "when nothing inside can raise, say so next to the call:"
+puts "  /* window: nothing raises inside */"
 exit 1
