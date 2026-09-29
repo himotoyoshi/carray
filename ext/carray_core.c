@@ -866,6 +866,30 @@ ca_test_cyclic_check(void *ap, void *ptr)
   }
 }
 
+/* Runs body(arg) -- one transfer of an object cell or cells -- with ca's
+   cycle check set, and clears the check however body leaves.  Either
+   direction can call into Ruby: a GET through a CAObject slot or the
+   check of what it delivered, a PUT that converts the caller's value.  A
+   raise that skipped the clear would leave every later access to ca
+   reporting a cyclic reference.  A PUT into an entity only copies VALUEs
+   and cannot raise, so it runs unprotected. */
+static void
+ca_with_cyclic_check (CArray *ca, int dir, VALUE (*body)(VALUE), VALUE arg)
+{
+  int state = 0;
+  ca_set_cyclic_check(ca);
+  if ( dir == CA_XFER_PUT && ca_is_entity(ca) ) {
+    body(arg);
+  }
+  else {
+    rb_protect(body, arg, &state);
+  }
+  ca_clear_cyclic_check(ca);
+  if ( state ) {
+    rb_jump_tag(state);
+  }
+}
+
 /* ------------------------------------------------------------------- */
 /* CArray offers no per-cell ptr accessor (ca_ptr_at_addr /
    ca_ptr_at_index): such a slot is structurally unsafe -- CABitarray /
@@ -911,14 +935,17 @@ struct ca_xfer_index_args {
   CArray    *ca;
   ca_size_t *idx;
   char      *ptr;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_index_get_body (VALUE arg)
+ca_xfer_index_body (VALUE arg)
 {
   struct ca_xfer_index_args *d = (struct ca_xfer_index_args *) arg;
-  ca_xfer_index_dispatch(d->ca, d->idx, d->ptr, CA_XFER_GET);
-  ca_test_cyclic_check(d->ca, d->ptr);
+  ca_xfer_index_dispatch(d->ca, d->idx, d->ptr, d->dir);
+  if ( d->dir == CA_XFER_GET ) {
+    ca_test_cyclic_check(d->ca, d->ptr);
+  }
   return Qnil;
 }
 
@@ -937,24 +964,14 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     return;
   }
 
-  /* CA_OBJECT slow path: cyclic check (+ rb_protect on GET). */
-  if ( dir == CA_XFER_GET ) {
+  /* CA_OBJECT slow path: cyclic check. */
+  {
     struct ca_xfer_index_args args;
-    int state = 0;
     args.ca  = ca;
     args.idx = idx;
     args.ptr = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_index_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) {
-      rb_jump_tag(state);
-    }
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_index_dispatch(ca, idx, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.dir = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_index_body, (VALUE) &args);
   }
 }
 
@@ -1043,16 +1060,19 @@ struct ca_xfer_addrs_args {
   ca_size_t  n;
   ca_size_t *addrs;
   char      *data;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_addrs_get_body (VALUE arg)
+ca_xfer_addrs_body (VALUE arg)
 {
   struct ca_xfer_addrs_args *d = (struct ca_xfer_addrs_args *) arg;
   ca_size_t i;
-  ca_xfer_addrs_dispatch(d->ca, d->n, d->addrs, d->data, CA_XFER_GET);
-  for ( i = 0; i < d->n; i++ ) {
-    ca_test_cyclic_check(d->ca, d->data + i * d->ca->bytes);
+  ca_xfer_addrs_dispatch(d->ca, d->n, d->addrs, d->data, d->dir);
+  if ( d->dir == CA_XFER_GET ) {
+    for ( i = 0; i < d->n; i++ ) {
+      ca_test_cyclic_check(d->ca, d->data + i * d->ca->bytes);
+    }
   }
   return Qnil;
 }
@@ -1072,25 +1092,15 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
     return;
   }
 
-  /* CA_OBJECT slow path: cyclic check (+ rb_protect on GET). */
-  if ( dir == CA_XFER_GET ) {
+  /* CA_OBJECT slow path: cyclic check. */
+  {
     struct ca_xfer_addrs_args args;
-    int state = 0;
     args.ca    = ca;
     args.n     = n;
     args.addrs = addrs;
     args.data  = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_addrs_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) {
-      rb_jump_tag(state);
-    }
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_addrs_dispatch(ca, n, addrs, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.dir   = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_addrs_body, (VALUE) &args);
   }
 }
 
@@ -1481,16 +1491,20 @@ struct ca_xfer_stride_args {
   ca_size_t *counts;
   ca_size_t *strides;
   char      *data;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_stride_get_body (VALUE arg)
+ca_xfer_stride_body (VALUE arg)
 {
   struct ca_xfer_stride_args *a = (struct ca_xfer_stride_args *) arg;
   ca_size_t n = 1, i;
   int8_t k;
   ca_xfer_stride_dispatch(a->ca, a->starts, a->counts, a->strides, a->data,
-                          CA_XFER_GET);
+                          a->dir);
+  if ( a->dir != CA_XFER_GET ) {
+    return Qnil;
+  }
   /* cyclic check over the delivered cells (CA_OBJECT only).  dst is contiguous
      row-major over counts (semantics b), so cell i is at data + i*bytes. */
   for ( k = 0; k < a->ca->ndim; k++ ) n *= a->counts[k];
@@ -1515,20 +1529,11 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
-  if ( dir == CA_XFER_GET ) {
+  {
     struct ca_xfer_stride_args args;
-    int state = 0;
     args.ca = ca; args.starts = starts; args.counts = counts;
-    args.strides = strides; args.data = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_stride_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) rb_jump_tag(state);
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_stride_dispatch(ca, starts, counts, strides, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.strides = strides; args.data = (char *) data; args.dir = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_stride_body, (VALUE) &args);
   }
 }
 

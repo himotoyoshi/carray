@@ -79,6 +79,8 @@ typedef struct {
   VALUE      bases;
   VALUE      box_starts;      /* per array, per axis; nil for "all of it" */
   VALUE      box_counts;
+  int        body_done;       /* the block returned without raising */
+  volatile VALUE put_error;   /* the first write-back that raised, or nil */
 } open_state;
 
 /* The view's own row-major byte layout, which is the address space
@@ -350,10 +352,33 @@ open_body (VALUE argument)
     }
     rb_ary_push(state->bases, basis);
   }
-  return rb_yield(state->bases);
+  {
+    VALUE result = rb_yield(state->bases);
+    state->body_done = 1;
+    return result;
+  }
 }
 
-/* Closes in reverse order, and runs whether or not the kernel raised. */
+typedef struct {
+  CArray    *ca;
+  ca_size_t *start;
+  ca_size_t *count;
+  ca_size_t *steps;
+  char      *data;
+} write_back_args;
+
+static VALUE
+write_back (VALUE argument)
+{
+  write_back_args *w = (write_back_args *) argument;
+  ca_xfer_stride(w->ca, w->start, w->count, w->steps, w->data, CA_XFER_PUT);
+  return Qnil;
+}
+
+/* Closes in reverse order, and runs whether or not the kernel raised.  A
+   write-back that raises -- the array's own transfer slot failing -- is
+   set aside so that every other region is still written and freed and
+   every root detached; the block's own exception, if it raised, wins. */
 static VALUE
 open_ensure (VALUE argument)
 {
@@ -371,11 +396,22 @@ open_ensure (VALUE argument)
         elements *= state->region_count[i * CA_RANK_MAX + k];
       }
       if ( state->writable[i] && elements > 0 ) {
-        ca_size_t steps[CA_RANK_MAX];
+        ca_size_t       steps[CA_RANK_MAX];
+        write_back_args w;
+        int             tag = 0;
         native_steps(ca, steps);
-        ca_xfer_stride(ca, &state->region_start[i * CA_RANK_MAX],
-                       &state->region_count[i * CA_RANK_MAX],
-                       steps, state->region[i], CA_XFER_PUT);
+        w.ca    = ca;
+        w.start = &state->region_start[i * CA_RANK_MAX];
+        w.count = &state->region_count[i * CA_RANK_MAX];
+        w.steps = steps;
+        w.data  = state->region[i];
+        rb_protect(write_back, (VALUE) &w, &tag);
+        if ( tag ) {
+          if ( NIL_P(state->put_error) ) {
+            state->put_error = rb_errinfo();
+          }
+          rb_set_errinfo(Qnil);
+        }
       }
       xfree(state->region[i]);
     }
@@ -384,6 +420,10 @@ open_ensure (VALUE argument)
     }
   }
   xfree(state->block);
+  if ( state->body_done && RTEST(rb_obj_is_kind_of(state->put_error,
+                                                   rb_eException)) ) {
+    rb_exc_raise(state->put_error);
+  }
   return Qnil;
 }
 
@@ -451,7 +491,12 @@ packed_body (VALUE argument)
     }
   }
 
-  return rb_yield_values(4, pointers, strides, mask_pointers, mask_strides);
+  {
+    VALUE result = rb_yield_values(4, pointers, strides, mask_pointers,
+                                   mask_strides);
+    state->body_done = 1;
+    return result;
+  }
 }
 
 /*
@@ -489,6 +534,16 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     rb_raise(rb_eArgError, "one writable flag per array is required");
   }
 
+  /* Every argument is checked before the block below is allocated: a
+     refusal raises, and it must find nothing to free. */
+  for ( i = 0; i < (int) RARRAY_LEN(arrays); i++ ) {
+    VALUE   object = rb_ary_entry(arrays, i);
+    CArray *ca;
+    GetCArray(object, ca);
+    verify_usable(object, ca, RTEST(rb_ary_entry(writable_flags, i)));
+    verify_box(box_start, box_count, i, ca);
+  }
+
   state.count         = (int) RARRAY_LEN(arrays);
   state.slots         = state.count * 2;
   state.arrays        = arrays;
@@ -521,6 +576,8 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
   }
   state.box_starts    = box_start;
   state.box_counts    = box_count;
+  state.body_done     = 0;
+  state.put_error     = Qnil;
 
   for ( i = 0; i < state.count; i++ ) {
     VALUE   object = rb_ary_entry(arrays, i);
@@ -528,8 +585,6 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     GetCArray(object, ca);
     state.carrays[i]  = ca;
     state.writable[i] = RTEST(rb_ary_entry(writable_flags, i));
-    verify_usable(object, ca, state.writable[i]);
-    verify_box(box_start, box_count, i, ca);
     state.tier[i] = tier_for(ca);
 
     if ( ca->mask ) {

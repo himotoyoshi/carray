@@ -235,7 +235,7 @@ void kernel (char **pointers, int64_t *strides, int64_t *bounds,
 - A **tier-3** region is a buffer of its own. Closing sends it back with
   `ca_xfer_stride` — if the array was opened writable — and frees it.
 
-Two consequences worth stating, because a consumer will meet both.
+Three consequences worth stating, because a consumer will meet all of them.
 
 **A raise does not roll anything back.** The block leaving by an exception
 still runs the close, which still sends a writable region back. Whatever the
@@ -247,6 +247,13 @@ the caller's business.
 opened one at a time, and a later one can be refused — the reinterpret-plus-
 mask case above, for instance. The arrays already open at that point are
 closed on the way out.
+
+**One region failing to go back does not stop the others.** A write-back can
+raise — the array's own transfer failing, as a lazily backed source's does
+when its I/O fails. The close sets that exception aside, sends the remaining
+regions back, frees every buffer and detaches every root, and raises it
+afterwards — unless the block raised, in which case the block's exception is
+the one that propagates.
 
 ## What is pinned, and where
 

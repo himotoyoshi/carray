@@ -129,10 +129,71 @@ void ca_sort_merge_pair_u64 (ca_pair_u64 *a, ca_pair_u64 *aux, ca_size_t n);
 void ca_sort_merge_pair_f32 (ca_pair_f32 *a, ca_pair_f32 *aux, ca_size_t n);
 void ca_sort_merge_pair_f64 (ca_pair_f64 *a, ca_pair_f64 *aux, ca_size_t n);
 
-/* Stable bottom-up mergesort over (VALUE, index) pairs, ordered by cmp --
-   an object comparator that calls <=> and breaks ties on the index.  The
-   walk is this file's own code rather than libc qsort's, so cmp may raise:
-   the raise unwinds through frames that hold nothing.  aux holds n pairs. */
+/* Runs of this many elements are insertion-sorted before the merge passes. */
+#define CA_SORT_INSERTION_THRESHOLD 16
+
+/* The body of a stable bottom-up mergesort over TYPE, ordered by cmp alone
+   (the element type has no `<`), for a function taking
+     (TYPE *a, TYPE *aux, ca_size_t n, int (*cmp)(const void *, const void *))
+   aux holds n elements.  cmp may raise -- an object comparator calls <=> --
+   and the raise unwinds through this code's frames, which hold nothing;
+   libc's qsort / mergesort would have to be unwound instead.
+
+   A comparison is costly here (a call into Ruby) and a move is cheap, so
+   the runs are insertion-sorted with each insertion point found by binary
+   search: log2(k) comparisons where a linear walk takes k/2.  Merge passes
+   ping-pong between a and aux and skip a pair of runs already in order.
+   Stable: an element lands after every one that does not compare greater,
+   and a merge takes from the right run only on a strictly smaller one. */
+#define CA_SORT_MERGE_BY_CMP(TYPE)                                            \
+{                                                                             \
+  if ( n <= 1 ) return;                                                       \
+  for ( ca_size_t lo = 0; lo < n; lo += CA_SORT_INSERTION_THRESHOLD ) {       \
+    ca_size_t hi = lo + CA_SORT_INSERTION_THRESHOLD;                          \
+    if ( hi > n ) hi = n;                                                     \
+    for ( ca_size_t k = lo + 1; k < hi; k++ ) {                               \
+      TYPE v = a[k];                                                          \
+      ca_size_t l = lo, r = k;                                                \
+      while ( l < r ) {                                                       \
+        ca_size_t mid = l + (r - l) / 2;                                      \
+        if ( cmp(&a[mid], &v) > 0 ) r = mid;                                  \
+        else                        l = mid + 1;                              \
+      }                                                                       \
+      if ( l < k ) {                                                          \
+        memmove(a + l + 1, a + l, (size_t)(k - l) * sizeof(TYPE));            \
+        a[l] = v;                                                             \
+      }                                                                       \
+    }                                                                         \
+  }                                                                           \
+  TYPE *cur  = a;                                                             \
+  TYPE *next = aux;                                                           \
+  for ( ca_size_t width = CA_SORT_INSERTION_THRESHOLD; width < n;             \
+        width <<= 1 ) {                                                       \
+    for ( ca_size_t lo = 0; lo < n; lo += (width << 1) ) {                    \
+      ca_size_t mid = lo + width;                                             \
+      ca_size_t hi  = lo + (width << 1);                                      \
+      if ( mid > n ) mid = n;                                                 \
+      if ( hi  > n ) hi  = n;                                                 \
+      if ( mid >= hi || cmp(&cur[mid - 1], &cur[mid]) <= 0 ) {               \
+        memcpy(next + lo, cur + lo, (size_t)(hi - lo) * sizeof(TYPE));        \
+        continue;                                                             \
+      }                                                                       \
+      ca_size_t i = lo, j = mid, k = lo;                                      \
+      while ( i < mid && j < hi ) {                                           \
+        if ( cmp(&cur[j], &cur[i]) < 0 ) next[k++] = cur[j++];                \
+        else                             next[k++] = cur[i++];                \
+      }                                                                       \
+      while ( i < mid ) next[k++] = cur[i++];                                 \
+      while ( j < hi  ) next[k++] = cur[j++];                                 \
+    }                                                                         \
+    { TYPE *t = cur; cur = next; next = t; }                                  \
+  }                                                                           \
+  if ( cur != a ) {                                                           \
+    memcpy(a, cur, (size_t) n * sizeof(TYPE));                                \
+  }                                                                           \
+}
+
+/* (VALUE, index) pairs, as the object lane of the sort kernels holds them. */
 typedef struct ca_pair_object { VALUE v; ca_size_t i; } ca_pair_object;
 void ca_sort_merge_pair_object (ca_pair_object *a, ca_pair_object *aux,
                                 ca_size_t n,

@@ -265,6 +265,33 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     end
   end
 
+  # CArray.sort_addr orders its keys inside libc's sort; an object key that
+  # does not compare must not unwind through it, stranding its buffers.
+  def test_sort_addr_frees_its_buffers_when_keys_do_not_compare
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
+    setup = "o = CArray.object(20_000) { |i| i }; o[19_999] = 's'"
+    growth = malloc_growth_per_call(setup, "CArray.sort_addr(o)")
+    omit "measurement unavailable" if growth.nil?
+    assert_operator growth, :<, STRANDED_BUFFER_BOUND
+  end
+
+  # AddressBasis frees every region buffer when one region's write-back
+  # raises.
+  def test_address_basis_frees_its_regions_when_a_write_back_raises
+    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
+    setup = <<~SETUP
+      #{FAILING_SYNC}
+      a = FailingSync.new(20_000)
+      b = FailingSync.new(20_000)
+      arrays = [b[1..-2], a[1..-2]]
+    SETUP
+    expr = "(CArray::AddressBasis.open(arrays, [true, true]) { a.fail_sync = true }) " \
+           "rescue nil ; a.fail_sync = false"
+    growth = malloc_growth_per_call(setup, expr)
+    omit "measurement unavailable" if growth.nil?
+    assert_operator growth, :<, STRANDED_BUFFER_BOUND
+  end
+
   # --- a block of scratch allocated before the arguments are checked ---
 
   def test_address_basis_open_frees_its_block_when_an_argument_is_refused
@@ -295,8 +322,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
     RUBY
     omit "measurement unavailable" if status.exitstatus == 2
     assert status.success?
-    assert_broken Float(out) > 4096, true,
-                  "that the malloc zone grows by less than 4096 bytes per call"
+    assert_operator Float(out), :<, 4096
   end
 
 end

@@ -429,6 +429,8 @@ ca_triop_func_create_mask (void *ap)
   CArray *op2 = to->op2;
   CArray *op3 = to->op3;
   boolean8_t *dst, *m1, *m2, *m3;
+  CArray *read[3], *mask;
+  int32_t nread = 0;
   ca_size_t i, n;
   int has1, has2, has3;
 
@@ -448,15 +450,19 @@ ca_triop_func_create_mask (void *ap)
     }
   }
 
-  to->mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
-  dst = (boolean8_t *) to->mask->ptr;
-  n = to->elements;
-
   /* The masks are what is read here; attaching the operand instead
-     materialises the whole subexpression under it. */
-  if ( has1 ) ca_attach(op1->mask);
-  if ( has2 ) ca_attach(op2->mask);
-  if ( has3 ) ca_attach(op3->mask);
+     materialises the whole subexpression under it.  They are attached all
+     together before the mask is built, which is published only once it is
+     filled: an attach that raises leaves no mask half-made and no operand
+     attached. */
+  if ( has1 ) read[nread++] = op1->mask;
+  if ( has2 ) read[nread++] = op2->mask;
+  if ( has3 ) read[nread++] = op3->mask;
+  ca_attach_all(read, nread);
+
+  mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
+  dst = (boolean8_t *) mask->ptr;
+  n = to->elements;
 
   m1 = has1 ? (boolean8_t *) op1->mask->ptr : NULL;
   m2 = has2 ? (boolean8_t *) op2->mask->ptr : NULL;
@@ -471,9 +477,10 @@ ca_triop_func_create_mask (void *ap)
     dst[i] = (boolean8_t) ( a | b | c );
   }
 
-  if ( has3 ) ca_detach(op3->mask);
-  if ( has2 ) ca_detach(op2->mask);
-  if ( has1 ) ca_detach(op1->mask);
+  while ( nread > 0 ) {
+    ca_detach(read[--nread]);
+  }
+  to->mask = mask;
 }
 
 ca_operation_function_t ca_triop_func = {

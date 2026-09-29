@@ -399,12 +399,16 @@ ca_moncmp_func_create_mask (void *ap)
 {
   CAMonCmp *mc = (CAMonCmp *) ap;
   CArray *p = mc->parent;
+  CArray *mask;
   if ( ! ca_has_mask(p) ) return;
 
-  mc->mask = (CArray *) carray_new(CA_BOOLEAN, mc->ndim, mc->dim, 0, NULL);
+  /* Attached before the mask is built, which is published only once it
+     is filled: an attach that raises leaves no mask half-made. */
   ca_attach(p->mask);
-  memcpy(mc->mask->ptr, p->mask->ptr, mc->elements);
+  mask = (CArray *) carray_new(CA_BOOLEAN, mc->ndim, mc->dim, 0, NULL);
+  memcpy(mask->ptr, p->mask->ptr, mc->elements);
   ca_detach(p->mask);
+  mc->mask = mask;
 }
 
 ca_operation_function_t ca_moncmp_func = {
