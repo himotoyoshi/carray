@@ -51,16 +51,12 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 64) {
-      char v[64];
+    {
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_index(ca, idx, v);
-    }
-    else {
-      char *v = xmalloc(ca->bytes);
-      rb_ca_obj2ptr(self, rval, v);
-      ca_store_index(ca, idx, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
   }
 
@@ -79,16 +75,12 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 64) {
-    char v[64];
+  {
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_index(ca, idx, v);
     out = rb_ca_ptr2obj(self, v);
-  }
-  else {
-    char *v = xmalloc(ca->bytes);
-    ca_fetch_index(ca, idx, v);
-    out = rb_ca_ptr2obj(self, v);
-    xfree(v);
+    ALLOCV_END(holder);
   }
 
   /* check if the element is masked */
@@ -144,16 +136,12 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 64) {
-      char v[64];
+    {
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_addr(ca, addr, v);
-    }
-    else {
-      char *v = xmalloc(ca->bytes);
-      rb_ca_obj2ptr(self, rval, v);
-      ca_store_addr(ca, addr, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
   }
 
@@ -172,16 +160,12 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 64) {
-    char v[64];
+  {
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_addr(ca, addr, v);
     out = rb_ca_ptr2obj(self, v);
-  }
-  else {
-    char *v = xmalloc(ca->bytes);
-    ca_fetch_addr(ca, addr, v);
-    out = rb_ca_ptr2obj(self, v);
-    xfree(v);
+    ALLOCV_END(holder);
   }
 
   /* check if the element is masked */
@@ -227,14 +211,15 @@ rb_ca_fill (VALUE self, VALUE rval)
     ca_fill(ca->mask, &one);
   }
   else {
-    char *fval = xmalloc(ca->bytes);
+    volatile VALUE holder;
+    char *fval = ALLOCV_N(char, holder, ca->bytes);
     boolean8_t zero = 0;
     rb_ca_obj2ptr(self, rval, fval);
     if ( ca_has_mask(ca) ) {
       ca_fill(ca->mask, &zero);
     }
     ca_fill(ca, fval);
-    xfree(fval);
+    ALLOCV_END(holder);
   }
 
   return self;

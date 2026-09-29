@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `fill`, `[]=`, `elem_store`, `elem_swap` and `elem_copy` no longer
+  lose memory when they raise (a value of the wrong type, an index out of
+  range). Each call held one or two cells' worth, so it showed only on
+  wide cells, such as a large fixlen. Reads and writes through views that
+  raise on the way to their parent are covered the same way.
+
 - New: `CArray#set_attrs(hash)` sets several attributes at once;
   `b.set_attrs(a.attrs)` gives `b` the attributes `a` shows. Keys `b`
   already has and the Hash does not name are kept.

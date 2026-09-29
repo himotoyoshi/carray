@@ -581,10 +581,11 @@ ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray *);
@@ -593,7 +594,7 @@ ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
 
   ca_copy_mask_overlay_n(ca, elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 }
 
 void
@@ -615,10 +616,11 @@ ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray*)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray*);
@@ -633,7 +635,7 @@ ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...)
 
   ca_copy_mask_overlay_n(ca, elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 }
 
 void
@@ -887,10 +889,11 @@ ca_allocate_mask_iterator (int n, ...)
 {
   boolean8_t *m;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray *);
@@ -899,7 +902,7 @@ ca_allocate_mask_iterator (int n, ...)
 
   m = ca_allocate_mask_iterator_n(n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return m;
 }
@@ -1415,6 +1418,7 @@ static VALUE
 rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
 {
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
 
@@ -1422,7 +1426,7 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  slist = xmalloc(sizeof(CArray *)*argc);
+  slist = ALLOCV_N(CArray *, holder, argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
@@ -1434,7 +1438,7 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
   }
   ca_copy_mask_overlay_n(ca, ca->elements, argc, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1454,6 +1458,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
 {
   VALUE other;
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
   va_list rothers;
@@ -1463,7 +1468,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
@@ -1478,7 +1483,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
 
   ca_copy_mask_overlay_n(ca, ca->elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1494,6 +1499,7 @@ static VALUE
 rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
 {
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
 
@@ -1501,7 +1507,7 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  slist = xmalloc(sizeof(CArray *)*argc);
+  slist = ALLOCV_N(CArray *, holder, argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
@@ -1513,7 +1519,7 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
   }
   ca_copy_mask_overwrite_n(ca, ca->elements, argc, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1533,6 +1539,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 {
   VALUE other;
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
   va_list rothers;
@@ -1542,7 +1549,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
@@ -1557,7 +1564,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 
   ca_copy_mask_overwrite_n(ca, ca->elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }

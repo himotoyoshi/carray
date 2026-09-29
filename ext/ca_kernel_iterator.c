@@ -4537,7 +4537,8 @@ rb_caf_bench_per_fiber_xfer_sum_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   }
 
   /* Fiber-sized contig scratch. */
-  char *buf = (char *) xmalloc(fiber_n * src->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, fiber_n * src->bytes);
 
   for ( ca_size_t f = 0; f < total_fibers; f++ ) {
     /* Build region: counts = 1 on all non-axis, fiber_n on axis;
@@ -4565,7 +4566,7 @@ rb_caf_bench_per_fiber_xfer_sum_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
     }
   }
 
-  xfree(buf);
+  ALLOCV_END(holder);
   return rb_float_new(total);
 }
 

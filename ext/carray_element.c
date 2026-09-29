@@ -85,8 +85,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
   ca_size_t addr1 = 0, addr2 = 0;
   int     has_mask, has_index1, has_index2;
-  char   _val1[64], _val2[64];
-  char   *val1 = _val1, *val2 = _val2;
+  volatile VALUE holder1, holder2;
+  char   *val1, *val2;
   boolean8_t m1 = 0, m2 = 0;
 
   rb_ca_modify(self);
@@ -95,10 +95,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 
   has_mask = elem_probe_mask(ca);
 
-  if ( ca->bytes > 64 ) {
-    val1 = xmalloc(ca->bytes);
-    val2 = xmalloc(ca->bytes);
-  }
+  val1 = ALLOCV_N(char, holder1, ca->bytes);
+  val2 = ALLOCV_N(char, holder2, ca->bytes);
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     elem_parse_idx_array(ca, ridx1, idx1);
@@ -160,10 +158,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
 
-  if ( ca->bytes > 64 ) {
-    xfree(val1);
-    xfree(val2);
-  }
+  ALLOCV_END(holder2);
+  ALLOCV_END(holder1);
 
   return self;
 }
@@ -178,8 +174,8 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
   ca_size_t addr1 = 0, addr2 = 0;
   int     has_mask;
-  char   _val[64];
-  char   *val = _val;
+  volatile VALUE holder;
+  char   *val;
   boolean8_t m = 0;
 
   rb_ca_modify(self);
@@ -188,9 +184,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 
   has_mask = elem_probe_mask(ca);
 
-  if ( ca->bytes > 64 ) {
-    val = xmalloc(ca->bytes);
-  }
+  val = ALLOCV_N(char, holder, ca->bytes);
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     elem_parse_idx_array(ca, ridx1, idx1);
@@ -222,9 +216,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
 
-  if ( ca->bytes > 64 ) {
-    xfree(val);
-  }
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -380,10 +372,11 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       out = rb_ca_ptr2obj(self, v);
     }
     else {
-      char *v = xmalloc(ca->bytes);
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       ca_fetch_index(ca, idx, v);
       out = rb_ca_ptr2obj(self, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
 
     /* Mask check with inline skip for the entity+no-mask common case. */

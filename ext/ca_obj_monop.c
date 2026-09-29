@@ -284,11 +284,10 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_index PUT)");
     }
     {
-      char scratch[32];   /* max sizeof for any built-in numeric data_type */
+      volatile VALUE holder;
       ca_size_t bytes_per_cell = (ca_monop_is_cast(ca->op_id))
                                   ? ca->parent->bytes : ca->bytes;
-      char *p = (bytes_per_cell <= 32) ? scratch
-                                       : (char *) ALLOC_N(char, bytes_per_cell);
+      char *p = ALLOCV_N(char, holder, bytes_per_cell);
       if ( ca_monop_is_cast(ca->op_id) ) {
         /* Reverse-cast view-data_type `data` to parent data_type scratch, then
            store into parent at idx[].  */
@@ -301,7 +300,7 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
         ca_byte_swap_buffer(ca->data_type, ca->bytes, 1, p);
       }
       ca_store_index(ca->parent, idx, p);
-      if ( p != scratch ) xfree(p);
+      ALLOCV_END(holder);
     }
     return;
   }
@@ -810,9 +809,8 @@ ca_monop_func_fill_data (void *ap, void *ptr)
   {
     int is_cast = ca_monop_is_cast(ca->op_id);
     ca_size_t parent_bytes = is_cast ? ca->parent->bytes : ca->bytes;
-    char stack_v[32];
-    char *v = (parent_bytes <= 32) ? stack_v
-                                   : (char *) xmalloc(parent_bytes);
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, parent_bytes);
     if ( is_cast ) {
       ca_ptr2ptr((CArray *) ca, ptr, ca->parent, v);
     }
@@ -821,7 +819,7 @@ ca_monop_func_fill_data (void *ap, void *ptr)
       ca_byte_swap_buffer(ca->data_type, ca->bytes, 1, v);
     }
     ca_fill(ca->parent, v);
-    if ( v != stack_v ) xfree(v);
+    ALLOCV_END(holder);
   }
 }
 
