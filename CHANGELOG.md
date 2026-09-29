@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a `CAObject` that keeps its mask in Ruby (`mask_copy_data` /
+  `mask_sync_data`, or `mask_fetch_addr` / `mask_store_addr`) is asked for
+  every read of its mask and handed every write. Assigning a whole mask
+  (`mask[] =`, `mask =`) passed the old mask to `mask_sync_data`, a partial
+  write such as `obj[0..1] = UNDEF` sent back cells that had never been
+  read, and `unmask`, `mask.fill`, `mask[i] =` and `obj[i] = UNDEF` did not
+  reach the hooks at all. `obj + 1` and `mask.copy` now carry the mask the
+  hooks give. A `CAObject` without mask hooks is unchanged.
+
 - Fix: `invert_mask` on a selection (`x[x > 2]`) or a transpose (`x.T`)
   flips the parent's mask; it did nothing. A block (`x[1..3]`) already
   worked.
