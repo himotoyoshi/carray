@@ -827,7 +827,7 @@ ca_select_axis_func_fill_data (void *ap, void *val)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, val);
   ca_sync_detach(ca->parent);
@@ -1190,7 +1190,7 @@ rb_ca_select_axis_dispatch_attach_debug (VALUE self)
   TypedData_Get_Struct(self, CASelectAxis, &caselectaxis_data_type, ca);
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   buf = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                                 ca->elements, NULL);
   ca_detach(ca->parent);
@@ -1224,7 +1224,7 @@ rb_ca_select_axis_dispatch_scatter_debug (VALUE self, VALUE in_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, RSTRING_PTR(in_str));
   ca_sync_detach(ca->parent);
@@ -1251,7 +1251,7 @@ rb_ca_select_axis_dispatch_fill_value_debug (VALUE self, VALUE val_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, RSTRING_PTR(val_str));
   ca_sync_detach(ca->parent);

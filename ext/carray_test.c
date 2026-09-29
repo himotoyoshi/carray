@@ -588,7 +588,7 @@ ca_hash (CArray *ca)
   h ^= rb_memhash(&masked_flag, sizeof(masked_flag));
 
   if ( ! masked_flag && sample > 0 ) {
-    ca_attach(ca);
+    ca_attach(ca);   /* window: nothing raises inside */
     h ^= rb_memhash(ca->ptr, sample);
     ca_detach(ca);
   }

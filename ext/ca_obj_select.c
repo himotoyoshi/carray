@@ -95,7 +95,7 @@ ca_select_snapshot_masked (VALUE arg)
   CArray *select = pair[0], *snap = pair[1];
   boolean8_t *p, *q, *m;
   ca_size_t i;
-  ca_attach(select);
+  ca_attach(select);   /* window: nothing raises inside */
   q = (boolean8_t *) snap->ptr;
   p = (boolean8_t *) select->ptr;
   m = (boolean8_t *) select->mask->ptr;

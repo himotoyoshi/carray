@@ -393,7 +393,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
       VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
       rb_ary_push((VALUE) keep, vbuf);
-      ca_attach(bundle_ca[bi]);
+      ca_attach(bundle_ca[bi]);   /* window: nothing raises inside */
       memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
       ca_detach(bundle_ca[bi]);
       bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
@@ -1227,7 +1227,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
       VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
       rb_ary_push((VALUE) keep, vbuf);
-      ca_attach(bundle_ca[bi]);
+      ca_attach(bundle_ca[bi]);   /* window: nothing raises inside */
       memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
       ca_detach(bundle_ca[bi]);
       bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);

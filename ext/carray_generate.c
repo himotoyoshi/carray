@@ -33,7 +33,7 @@ rb_ca_where (VALUE self)
 
   TypedData_Get_Struct(bool0, CArray, &carray_data_type, ca);
 
-  ca_attach(ca);
+  ca_attach(ca);   /* window: nothing raises inside */
 
   /* calculate elements of output array */
   p = (boolean8_t *) ca->ptr;

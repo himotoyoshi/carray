@@ -102,7 +102,7 @@ ca_count_each_body (VALUE arg)
     } else if ( rb_obj_is_kind_of(sub, rb_cCArray) ) {
       CArray *csub;
       GetCArray(sub, csub);
-      ca_attach(csub);
+      ca_attach(csub);   /* window: the inner count answered an entity; nothing raises inside */
       int64_t *sub_ptr = (int64_t *) csub->ptr;
       boolean8_t *sub_mask = (csub->mask) ? (boolean8_t *) csub->mask->ptr : NULL;
       for (ca_size_t i = 0; i < base_elements; i++) {

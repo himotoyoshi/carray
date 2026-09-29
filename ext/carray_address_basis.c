@@ -241,7 +241,7 @@ acquire_basis (open_state *state, int index, ca_size_t *strides)
   switch ( state->tier[index] ) {
   case TIER_ENTITY: {
     CArray *root = ca;
-    ca_attach(root);
+    ca_attach(root);   /* window: released by open_ensure */
     state->roots[index] = root;
     state->attached_root[index] = 1;
     row_major_strides(ca, strides);
@@ -263,7 +263,7 @@ acquire_basis (open_state *state, int index, ca_size_t *strides)
                "its mask cells do not map one to one onto the parent's",
                rb_obj_class(rb_ary_entry(state->arrays, index)));
     }
-    ca_attach(root);
+    ca_attach(root);   /* window: released by open_ensure */
     state->roots[index] = root;
     state->attached_root[index] = 1;
     pointer = root->ptr + base;

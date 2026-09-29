@@ -741,7 +741,7 @@ ca_rng_cells (VALUE self, int64_t **cells)
   CArray *ca;
   VALUE state = rb_ivar_get(self, rb_intern("@state"));
   TypedData_Get_Struct(state, CArray, &carray_data_type, ca);
-  ca_attach(ca);
+  ca_attach(ca);   /* window: the state is an entity, whose attach holds nothing */
   *cells = (int64_t *) ca->ptr;
   return ca;
 }

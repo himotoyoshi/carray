@@ -731,7 +731,7 @@ rb_ca_swap_bytes_bang (VALUE self)
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
+  ca_attach(ca);   /* window: nothing raises inside */
   ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements, ca->ptr);
   ca_sync_detach(ca);
   return self;

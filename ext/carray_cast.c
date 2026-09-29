@@ -676,7 +676,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
   ctx.ca      = ca;
   ctx.cb      = cb;
   ctx.scratch = NULL;
-  ca_attach(ca);
+  ca_attach(ca);   /* window: released by ca_to_type_release under rb_ensure */
   rb_ensure(ca_to_type_cast, (VALUE) &ctx, ca_to_type_release, (VALUE) &ctx);
 
   /* When rtype is a data_class (e.g. CAStruct subclass), wrap the
@@ -2000,7 +2000,7 @@ rb_ca_clip_uint64 (VALUE self)
     volatile VALUE vout = rb_carray_new(CA_UINT64, ca->ndim, ca->dim, 0, NULL);
     CArray *out;
     GetCArray(vout, out);
-    ca_attach(src);
+    ca_attach(src);   /* window: nothing raises inside */
     double  *sp = (double  *) src->ptr;
     uint64_t *op = (uint64_t *) out->ptr;
     ca_size_t n = ca->elements;
