@@ -108,7 +108,7 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
     end
   end
 
-  # --- regions written back one by one --------------------------------
+  # --- a composite whose parents take the write-back one by one ---------
 
   # A CAObject whose write-back can be made to fail, as a lazily backed
   # array's does when its I/O fails.
@@ -128,6 +128,23 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
     def store_addr (a, v)
       raise "store failed" if @fail_sync
       @src[a] = v
+    end
+  end
+
+  # Closing a window over a stack or a meld writes back to every parent;
+  # one parent that refuses keeps no other from receiving its cells.
+  {
+    "stack" => ->(a, b) { CArray.stack([a, b]) },
+    "meld"  => ->(a, b) { CArray.meld(a, b) },
+  }.each do |name, build|
+    define_method("test_#{name}_writes_back_to_every_parent_when_one_refuses") do
+      a = FailingSync.new(3)
+      b = FailingSync.new(3)
+      view = build.(a, b)
+      a.fail_sync = true
+      assert_raise_message("sync failed") { view.map! { |v| v + 10 } }
+      assert_equal [10, 11, 12], b.src.to_a
+      assert_equal [false, false, false], [a, b, view].map(&:attached?)
     end
   end
 
