@@ -792,7 +792,7 @@ ca_invert_mask (void *ap)
   ca_attach(ca->mask);   /* window: nothing raises inside */
   m = (boolean8_t *) ca->mask->ptr;
   ca_mask_word_not(m, m, ca->elements);   /* in-place 1 - m, LSB-XOR word loop */
-  ca_detach(ca->mask);
+  ca_sync_detach(ca->mask);
 
   return;
 }

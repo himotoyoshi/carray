@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `invert_mask` on a selection (`x[x > 2]`) or a transpose (`x.T`)
+  flips the parent's mask; it did nothing. A block (`x[1..3]`) already
+  worked.
+
 - Fix: for C extensions: `CA_WITH_BUFFER_WRITABLE` and
   `rb_ca_call_with_buffer` detach the array when writing it back raises;
   they used to leave it attached. The macro changes once the extension is
