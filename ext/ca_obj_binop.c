@@ -539,6 +539,8 @@ ca_binop_func_create_mask (void *ap)
   ca_size_t i, n;
   int has_l, has_r, kleene, need_l, need_r, is_or;
   boolean8_t *lm, *rm, *lv, *rv;
+  CArray *read[2], *mask;
+  int32_t nread = 0;
 
   has_l = ca_has_mask(l);
   has_r = ca_has_mask(r);
@@ -561,25 +563,31 @@ ca_binop_func_create_mask (void *ap)
     }
   }
 
-  bo->mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
-  dst = (boolean8_t *) bo->mask->ptr;
-  n = bo->elements;
-
   /* Kleene needs operand values even where an operand is unmasked. */
   need_l = has_l || kleene;
   need_r = has_r || kleene;
   /* Only Kleene reads operand values.  Every other op reads the operand
      masks alone, and attaching the operand to reach its mask materialises
      the whole subexpression under it -- so a chain of k masked binops
-     evaluates its own subtree k times over.  Attach what is read. */
+     evaluates its own subtree k times over.  Attach what is read.
+
+     Reading an operand can raise (a lazy operand that does not convert),
+     so they are attached all together, before anything is built, and the
+     mask is published only once it is filled: a raise leaves no mask
+     half-made and no operand attached. */
   if ( kleene ) {
-    if ( need_l ) ca_attach(l);
-    if ( need_r ) ca_attach(r);
+    if ( need_l ) read[nread++] = l;
+    if ( need_r ) read[nread++] = r;
   }
   else {
-    if ( has_l ) ca_attach(l->mask);
-    if ( has_r ) ca_attach(r->mask);
+    if ( has_l ) read[nread++] = l->mask;
+    if ( has_r ) read[nread++] = r->mask;
   }
+  ca_attach_all(read, nread);
+
+  mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
+  dst = (boolean8_t *) mask->ptr;
+  n = bo->elements;
 
   lm = has_l ? (boolean8_t *) l->mask->ptr : NULL;
   rm = has_r ? (boolean8_t *) r->mask->ptr : NULL;
@@ -604,14 +612,10 @@ ca_binop_func_create_mask (void *ap)
     dst[i] = m;
   }
 
-  if ( kleene ) {
-    if ( need_r ) ca_detach(r);
-    if ( need_l ) ca_detach(l);
+  while ( nread > 0 ) {
+    ca_detach(read[--nread]);
   }
-  else {
-    if ( has_r ) ca_detach(r->mask);
-    if ( has_l ) ca_detach(l->mask);
-  }
+  bo->mask = mask;
 }
 
 ca_operation_function_t ca_binop_func = {

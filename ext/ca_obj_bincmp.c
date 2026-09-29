@@ -522,6 +522,8 @@ ca_bincmp_func_create_mask (void *ap)
   CArray *l = bc->parent;
   CArray *r = bc->right;
   CArray *lm = NULL, *rm = NULL;
+  CArray *read[2], *mask;
+  int32_t nread = 0;
   boolean8_t *dst;
   ca_size_t i, n;
   int has_l, has_r;
@@ -530,15 +532,17 @@ ca_bincmp_func_create_mask (void *ap)
   has_r = ca_has_mask(r);
   if ( ! has_l && ! has_r ) return;
 
-  if ( has_l ) lm = l->mask;
-  if ( has_r ) rm = r->mask;
+  if ( has_l ) lm = read[nread++] = l->mask;
+  if ( has_r ) rm = read[nread++] = r->mask;
 
-  bc->mask = (CArray *) carray_new(CA_BOOLEAN, bc->ndim, bc->dim, 0, NULL);
-  dst = (boolean8_t *) bc->mask->ptr;
+  /* Attached all together before the mask is built, which is published
+     only once it is filled: an attach that raises leaves no mask
+     half-made and no operand attached. */
+  ca_attach_all(read, nread);
+
+  mask = (CArray *) carray_new(CA_BOOLEAN, bc->ndim, bc->dim, 0, NULL);
+  dst = (boolean8_t *) mask->ptr;
   n = bc->elements;
-
-  if ( has_l ) ca_attach(lm);
-  if ( has_r ) ca_attach(rm);
 
   for ( i = 0; i < n; i++ ) {
     boolean8_t a = has_l ? ((boolean8_t *) lm->ptr)[i] : 0;
@@ -550,8 +554,10 @@ ca_bincmp_func_create_mask (void *ap)
     dst[i] = (boolean8_t)( a | b );
   }
 
-  if ( has_l ) ca_detach(lm);
-  if ( has_r ) ca_detach(rm);
+  while ( nread > 0 ) {
+    ca_detach(read[--nread]);
+  }
+  bc->mask = mask;
 }
 
 ca_operation_function_t ca_bincmp_func = {

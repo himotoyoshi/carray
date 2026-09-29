@@ -36,6 +36,22 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: after a store into an object array fails to convert the value, the
+  array no longer answers every later access with "cyclic reference is not
+  allowed in CArray".
+
+- Fix: `CArray.sort_addr` with an object key whose elements do not compare
+  raises without leaving the keys attached or leaking its working memory.
+
+- Fix: when an operand's mask cannot be read while a lazy expression builds
+  its own mask, the expression no longer keeps a half-built mask; asking
+  for the mask again builds it afresh.
+
+- Fix: `CArray::AddressBasis.open` (used by carray-jit) no longer leaks when
+  it refuses an argument, and a region whose write-back raises no longer
+  keeps the other regions from being written back. An exception raised by
+  the block takes precedence over one raised by a write-back.
+
 - New: for C extensions, `ca_iter_ensure` runs a kernel-iterator walk whose
   body can raise (one that calls back into Ruby) and finishes the walk
   however the body leaves. The walk states belong in the caller's frame and

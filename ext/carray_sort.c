@@ -13,6 +13,7 @@
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_sort_quick_* / ca_sort_merge_* / ca_partition_nan_* */
 #include "ca_compare.h"           /* ca_elem_cmp[] -- shared element comparators */
+#include "carray_internal.h"      /* ca_attach_window */
 #include <math.h>
 #include <float.h>
 
@@ -93,6 +94,40 @@ sort_addr_cmp (struct sort_addr_key *a, struct sort_addr_key *b)
   return ( ia > ib ) ? 1 : -1; /* for stable sort */
 }
 
+/* An object key compares through <=>, which can raise, and a raise must
+   not unwind through libc's mergesort / qsort.  Those keys sort with this
+   mergesort instead, whose frames hold nothing; the numeric ones keep
+   libc's, which their comparisons cannot leave. */
+static void
+sort_addr_merge (struct sort_addr_key *a, struct sort_addr_key *aux,
+                 ca_size_t n, int (*cmp)(const void *, const void *))
+CA_SORT_MERGE_BY_CMP(struct sort_addr_key)
+
+typedef struct {
+  struct sort_addr_key *data;
+  struct sort_addr_key *aux;     /* NULL: no object key, libc sorts */
+  ca_size_t             elements;
+} sort_addr_run_t;
+
+static VALUE
+sort_addr_run (VALUE arg)
+{
+  sort_addr_run_t *r = (sort_addr_run_t *) arg;
+  if ( r->aux ) {
+    sort_addr_merge(r->data, r->aux, r->elements,
+                    (int (*)(const void*,const void*)) sort_addr_cmp);
+    return Qnil;
+  }
+#ifdef HAVE_MERGESORT
+  mergesort(r->data, r->elements, sizeof(struct sort_addr_key),
+            (int (*)(const void*,const void*)) sort_addr_cmp);
+#else
+  qsort(r->data, r->elements, sizeof(struct sort_addr_key),
+            (int (*)(const void*,const void*)) sort_addr_cmp);
+#endif
+  return Qnil;
+}
+
 /* CArray.sort_addr(*args, masked_position: :last) — multi-key lex
  * sort.  Returns a 1-D CA_SIZE array of indices that sorts the
  * arguments in priority order (a > b > c):
@@ -108,8 +143,12 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE out;
   CArray *co;
-  struct cmp_base *base;
+  struct cmp_base base_s, *base = &base_s;
   struct sort_addr_key *data;
+  volatile VALUE hlist = 0, hdata = 0, haux = 0, hmodes = 0;
+  sort_addr_run_t run;
+  char *modes;
+  int has_object = 0;
   ca_size_t elements;
   ca_size_t *q;
   int j;
@@ -168,31 +207,30 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  base = xmalloc(sizeof(struct cmp_base));
+  /* Scratch the unwind collects: the keys are read inside an attach
+     window, and a comparison of object keys can raise. */
   base->n = argc;
   base->masked_last = masked_last;
-  base->ca = xmalloc(sizeof(CArray *)*base->n);
+  base->ca = ALLOCV_N(CArray *, hlist, base->n);
+  modes = ALLOCV_N(char, hmodes, argc + 1);
 
   for (j=0; j<argc; j++) {
-    CArray *ca;
-    TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca);
-    base->ca[j] = ca;
-    ca_attach(ca);
+    TypedData_Get_Struct(argv[j], CArray, &carray_data_type, base->ca[j]);
+    has_object |= ( base->ca[j]->data_type == CA_OBJECT );
+    modes[j] = 'r';
   }
+  modes[argc] = '\0';
 
-  data = xmalloc(sizeof(struct sort_addr_key)*elements);
+  data = ALLOCV_N(struct sort_addr_key, hdata, elements);
   for (i=0; i<elements; i++) {
     data[i].i = i;
     data[i].base = base;
   }
 
-#ifdef HAVE_MERGESORT
-  mergesort(data, elements, sizeof(struct sort_addr_key),
-            (int (*)(const void*,const void*)) sort_addr_cmp);
-#else
-  qsort(data, elements, sizeof(struct sort_addr_key),
-            (int (*)(const void*,const void*)) sort_addr_cmp);
-#endif
+  run.data     = data;
+  run.aux      = has_object ? ALLOCV_N(struct sort_addr_key, haux, elements) : NULL;
+  run.elements = elements;
+  ca_attach_window(argc, base->ca, modes, sort_addr_run, (VALUE) &run);
 
   out = rb_ca_template_with_type(argv[0], INT2NUM(CA_SIZE), INT2NUM(0));
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
@@ -203,13 +241,10 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
     q++;
   }
 
-  for (j=0; j<argc; j++) {
-    ca_detach(base->ca[j]);
-  }
-
-  xfree(data);
-  xfree(base->ca);  
-  xfree(base);        
+  ALLOCV_END(haux);
+  ALLOCV_END(hdata);
+  ALLOCV_END(hmodes);
+  ALLOCV_END(hlist);
 
   return out;
 }
