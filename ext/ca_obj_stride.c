@@ -512,8 +512,10 @@ ca_stride_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       ca_xfer_index(ca->parent, pidx, data, dir);
     }
     else {
-      char buf[64];  /* parent cell width <= 16 in practice */
-      char *scratch = (pbytes <= (ca_size_t) sizeof(buf)) ? buf : xmalloc(pbytes);
+      /* ALLOCV: the parent's fetch/store can raise (a CAObject parent runs
+         Ruby), and a raise must not leak the scratch. */
+      volatile VALUE holder;
+      char *scratch = ALLOCV_N(char, holder, pbytes);
       if (dir == CA_XFER_GET) {
         ca_fetch_addr(ca->parent, off / pbytes, scratch);
         memcpy(data, scratch + (off % pbytes), ca->bytes);
@@ -524,7 +526,7 @@ ca_stride_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
         memcpy(scratch + (off % pbytes), data, ca->bytes);
         ca_store_addr(ca->parent, off / pbytes, scratch);
       }
-      if (scratch != buf) xfree(scratch);
+      ALLOCV_END(holder);
     }
   }
 }

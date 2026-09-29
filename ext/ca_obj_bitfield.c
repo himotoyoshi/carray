@@ -293,7 +293,8 @@ static void
 ca_bitfield_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CABitfield *ca = (CABitfield *) ap;
-  char *v = xmalloc(ca->parent->bytes);
+  volatile VALUE holder;
+  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
   ca_fetch_index(ca->parent, idx, v);
   if ( dir == CA_XFER_GET ) {
     memset(data, 0, ca->bytes);
@@ -305,7 +306,7 @@ ca_bitfield_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
                    ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
     ca_store_index(ca->parent, idx, v);
   }
-  xfree(v);
+  ALLOCV_END(holder);
 }
 
 /* Batched gather / scatter.  CABitfield is a 1:1 view (each parent

@@ -319,12 +319,12 @@ ca_byte_swap_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_byte_swap_apply_one(ca, (char *) data);
   }
   else {
-    char v[32];
-    char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+    volatile VALUE holder;
+    char *buf = ALLOCV_N(char, holder, ca->bytes);
     memcpy(buf, data, ca->bytes);
     ca_byte_swap_apply_one(ca, buf);
     ca_store_index(ca->parent, idx, buf);
-    if ( buf != v ) xfree(buf);
+    ALLOCV_END(holder);
   }
 }
 
@@ -509,8 +509,8 @@ static void
 ca_byte_swap_func_fill_data (void *ap, void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( !ca_byte_swap_apply_one(ca, buf) ) {
     /* Bare CA_FIXLEN fill: broadcast the raw bytes into the view
@@ -524,11 +524,11 @@ ca_byte_swap_func_fill_data (void *ap, void *ptr)
       }
     }
     ca_sync_detach(ca);
-    if ( buf != v ) xfree(buf);
+    ALLOCV_END(holder);
     return;
   }
   ca_fill(ca->parent, buf);
-  if ( buf != v ) xfree(buf);
+  ALLOCV_END(holder);
 }
 
 /* fill_data with a region.  Swapping is per value, not per cell, so the one
@@ -542,8 +542,8 @@ ca_byte_swap_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                                ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( ca_byte_swap_apply_one(ca, buf) ) {
     ca_fill_stride(ca->parent, base, ndim, counts, steps, buf);
@@ -551,7 +551,7 @@ ca_byte_swap_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   else {
     ca_fill_stride_default(ca, base, ndim, counts, steps, ptr);
   }
-  if ( buf != v ) xfree(buf);
+  ALLOCV_END(holder);
 }
 
 static void
@@ -559,8 +559,8 @@ ca_byte_swap_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                               void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( ca_byte_swap_apply_one(ca, buf) ) {
     ca_fill_addrs(ca->parent, n, addrs, buf);
@@ -568,7 +568,7 @@ ca_byte_swap_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   else {
     ca_fill_addrs_default(ca, n, addrs, ptr);
   }
-  if ( buf != v ) xfree(buf);
+  ALLOCV_END(holder);
 }
 
 static void

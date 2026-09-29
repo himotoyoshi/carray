@@ -178,7 +178,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_size_t bytes  = ca->parent->bytes;
   ca_size_t offset = idx[ca->ndim-1];
   ca_size_t major, minor;
-  uint8_t sbuf[32];
+  volatile VALUE holder;
   uint8_t *v;
 
   if ( ca_endian == CA_BIG_ENDIAN &&
@@ -191,7 +191,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   }
   minor = offset % 8;
 
-  v = (ca->parent->bytes <= 32) ? sbuf : xmalloc(ca->parent->bytes);
+  v = ALLOCV_N(uint8_t, holder, ca->parent->bytes);
 
   if ( dir == CA_XFER_GET ) {
     ca_fetch_index(ca->parent, idx, v);
@@ -209,7 +209,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_store_index(ca->parent, idx, v);
   }
 
-  if ( v != sbuf ) xfree(v);
+  ALLOCV_END(holder);
 }
 
 /* Batched gather / scatter.
