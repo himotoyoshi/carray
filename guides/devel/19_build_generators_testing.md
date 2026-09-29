@@ -138,7 +138,9 @@ still passes, so nothing else would report it:
   which close it however it is left. The attach machinery itself
   (`carray_core.c`, the kernel-iterator and sweep engines, the views'
   operation-table slots) is exempt. `rake attach_window_check` runs it
-  alone.
+  alone. Given paths, it checks those instead, so a C extension built on
+  carray can run it over its own sources from a carray checkout:
+  `ruby path/to/carray/utils/check_attach_windows.rb ext/`.
 - **`spec/spec_ai/attach_balance.rb`** is loaded ahead of the tests. In a
   development build, CArray counts the views that are attached, and this
   checks that the count is the same after each test as before it. To get
