@@ -289,12 +289,19 @@ acquire_basis (open_state *state, int index, ca_size_t *strides)
       step *= counts[k];
     }
 
+    /* Recorded before the read: the read can raise, and open_ensure
+       frees what state->region holds.  The counts stay zero until the
+       read is done, so a buffer that was never filled is not written
+       back. */
     buffer = ALLOC_N(char, (elements > 0 ? elements : 1) * ca->bytes);
+    for ( k = 0; k < ca->ndim; k++ ) {
+      state->region_count[index * CA_RANK_MAX + k] = 0;
+    }
+    state->region[index] = buffer;
     if ( elements > 0 ) {
       ca_xfer_stride(ca, starts, counts, steps, buffer, CA_XFER_GET);
     }
 
-    state->region[index] = buffer;
     for ( k = 0; k < ca->ndim; k++ ) {
       state->region_start[index * CA_RANK_MAX + k] = starts[k];
       state->region_count[index * CA_RANK_MAX + k] = counts[k];

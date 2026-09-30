@@ -534,9 +534,6 @@ static void
 ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
                      int8_t out_data_type, ca_size_t out_bytes, VALUE val)
 {
-  char buf[64];
-  char *scratch = (out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                        : xmalloc(out_bytes);
   ca_size_t i;
   /* Use source's data_type-aware conversion (rb_ca_obj2ptr looks at the
      receiver's data_type).  Build a stand-in scalar buffer via the
@@ -547,18 +544,17 @@ ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
      conversion through the actual output entity (= we already have
      `source`-keyed obj2ptr in carray_cast.c).  Here we construct an
      ephemeral CScalar of the output data_type to anchor the cast.        */
-  VALUE cs_anchor =
+  volatile VALUE cs_anchor =
     rb_cscalar_new_with_value((int) out_data_type, (int) out_bytes, val);
   CScalar *anchor_ca;
   (void) source;
   TypedData_Get_Struct(cs_anchor, CScalar, &cscalar_data_type, anchor_ca);
   ca_attach(anchor_ca);   /* window: a scalar entity, whose attach holds nothing */
-  memcpy(scratch, anchor_ca->ptr, out_bytes);
-  ca_detach(anchor_ca);
   for ( i = 0; i < slab_elements; i++ ) {
-    memcpy(out_ptr + i * out_bytes, scratch, out_bytes);
+    memcpy(out_ptr + i * out_bytes, anchor_ca->ptr, out_bytes);
   }
-  if ( scratch != buf ) xfree(scratch);
+  ca_detach(anchor_ca);
+  RB_GC_GUARD(cs_anchor);
 }
 
 /* map_slab's cast-on-scatter: each cell of the block's result converted
@@ -887,6 +883,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
+  volatile VALUE scratch_holder = Qnil;
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
@@ -896,8 +893,10 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->carrier, CAWrap, &cawrap_data_type, carrier_cw);
   }
 
-  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                      : xmalloc(st->out_bytes);
+  /* The block and the conversion of its value can raise, so a scratch
+     too wide for buf is Ruby's temporary. */
+  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
+              ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE result;
@@ -916,7 +915,6 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     if ( rb_obj_is_kind_of(result, rb_cCArray) ) {
       CArray *res;
       TypedData_Get_Struct(result, CArray, &carray_data_type, res);
-      if ( scratch != buf ) xfree(scratch);
       rb_raise(rb_eArgError,
                "CArray#reduce_slab: per-slab block must return a scalar "
                "(got CArray with %lld element%s; use `slab[0]` or "
@@ -930,7 +928,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     out_idx++;
   }
 
-  if ( scratch != buf ) xfree(scratch);
+  ALLOCV_END(scratch_holder);
   return st->output;
 }
 
@@ -951,6 +949,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
+  volatile VALUE scratch_holder = Qnil;
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
@@ -960,8 +959,10 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->carrier, CAWrap, &cawrap_data_type, carrier_cw);
   }
 
-  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                      : xmalloc(st->out_bytes);
+  /* The block and the conversion of its value can raise, so a scratch
+     too wide for buf is Ruby's temporary. */
+  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
+              ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE acc;
@@ -996,7 +997,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
     out_idx++;
   }
 
-  if ( scratch != buf ) xfree(scratch);
+  ALLOCV_END(scratch_holder);
   return st->output;
 }
 

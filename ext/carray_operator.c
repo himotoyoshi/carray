@@ -958,7 +958,7 @@ VALUE
 ca_kleene_bool_fixup (VALUE vout, VALUE vself, VALUE vother, int is_or)
 {
   CArray *out, *a, *b;
-  volatile VALUE va, vb;
+  volatile VALUE va, vb, holder;
   boolean8_t *ov, *om, *av, *am, *bv, *bm;
   ca_size_t n, i;
 
@@ -978,9 +978,12 @@ ca_kleene_bool_fixup (VALUE vout, VALUE vself, VALUE vother, int is_or)
   TypedData_Get_Struct(va, CArray, &carray_data_type, a);
   TypedData_Get_Struct(vb, CArray, &carray_data_type, b);
 
+  /* One temporary of Ruby's for all four: reading an operand can raise. */
   n  = out->elements;
-  av = ALLOC_N(boolean8_t, n); am = ALLOC_N(boolean8_t, n);
-  bv = ALLOC_N(boolean8_t, n); bm = ALLOC_N(boolean8_t, n);
+  av = ALLOCV_N(boolean8_t, holder, 4 * (n > 0 ? n : 1));
+  am = av + n;
+  bv = am + n;
+  bm = bv + n;
   kleene_gather_bool(a, av, am, n);
   kleene_gather_bool(b, bv, bm, n);
 
@@ -1004,7 +1007,7 @@ ca_kleene_bool_fixup (VALUE vout, VALUE vself, VALUE vother, int is_or)
     }
   }
 
-  xfree(av); xfree(am); xfree(bv); xfree(bm);
+  ALLOCV_END(holder);
   return vout;
 }
 

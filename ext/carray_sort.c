@@ -784,8 +784,10 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
      the fiber loop and reused across fibers (all fibers share the
      same axis length and data_type). */
   void *aux = NULL;
+  volatile VALUE aux_holder = Qnil;
   if ( do_stable ) {
-    aux = xmalloc((size_t) cat->dim[axis] * (size_t) bytes);
+    aux = ALLOCV_N(char, aux_holder,
+                   (size_t) cat->dim[axis] * (size_t) bytes);
   }
   CA_FOR_EACH_FIBER_INOUT(st_in, st_out, cat, cao, (int8_t) axis,
                           CA_KERNEL_NO_MASK, pi, po, n) {
@@ -841,7 +843,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
       }
     }
   }
-  if ( aux ) xfree(aux);
+  ALLOCV_END(aux_holder);
 
   RB_GC_GUARD(target);
   return vout;
