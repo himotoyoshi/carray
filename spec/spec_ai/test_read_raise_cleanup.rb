@@ -127,6 +127,14 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
     assert_raise(TypeError) { v.partition_copy(1, axis: 1) }
   end
 
+  # A development-build helper that holds a fiber buffer across the walk.
+  def test_slab_bench_helper
+    omit "development build only" unless CArray.respond_to?(:caf_slab_bench_sort_copy_f64)
+    assert_raise(ArgumentError) { CArray.caf_slab_bench_sort_copy_f64(CArray.float64(4), 5) }
+    assert_leaves_nothing "CArray.caf_slab_bench_sort_copy_f64(a, 0)",
+      "a = NthRead.new(CArray.float64(1 << 18).seq, 1)", calls: 1000
+  end
+
   # --- CArray.stack: the hook's own exception reaches the caller ---------
 
   def stack_with_failing_parent (masked: false)
