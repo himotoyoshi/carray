@@ -2102,8 +2102,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     }
 
     if ( use_strided ) {
-      st->root       = root;
-      ca_attach(root);
+      ca_attach(root);            /* window: finish detaches st->root */
+      st->root       = root;      /* recorded once attached */
       st->alias_mode = CA_ITER_ALIAS_STRIDED;
       st->alias_ptr  = (char *) root->ptr;
     } else if ( use_view_scratch ) {
@@ -2156,8 +2156,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   st->chunk_size    = st->slab_n;
 
   if ( use_strided ) {
-    st->root = root;
-    ca_attach(root);
+    ca_attach(root);              /* window: finish detaches st->root */
+    st->root = root;              /* recorded once attached */
     st->alias_mode = CA_ITER_ALIAS_STRIDED;
     st->alias_ptr  = (char *) root->ptr;
   } else if ( use_view_scratch ) {
@@ -4497,9 +4497,13 @@ rb_caf_slab_bench_sort_copy_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   TypedData_Get_Struct(vout, CArray, &carray_data_type, out);
   slab_axes[0] = (int8_t) axis;
 
+  if ( axis < 0 || axis >= src->ndim ) {
+    rb_raise(rb_eArgError, "caf_slab_bench_sort_copy_f64: axis out of range");
+  }
   ca_size_t fiber_n = src->dim[axis];
   ca_size_t bytes   = sizeof(double);
-  char *buf = (char *) xmalloc(fiber_n * bytes);
+  volatile VALUE holder;        /* the walk can raise while buf is held */
+  char *buf = ALLOCV_N(char, holder, fiber_n * bytes);
 
   CA_FOR_EACH_SLAB_INOUT(st_in, st_out, src, out,
                          slab_axes, 1,
@@ -4531,7 +4535,7 @@ rb_caf_slab_bench_sort_copy_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
       }
     }
   }
-  xfree(buf);
+  ALLOCV_END(holder);
   return vout;
 }
 
