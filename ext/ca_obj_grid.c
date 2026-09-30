@@ -229,8 +229,11 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
         ca->axes[k].step    = 0;
         ca->axes[k].indices = ALLOC_N(ca_size_t,
                                       protos[k].count > 0 ? protos[k].count : 1);
-        memcpy(ca->axes[k].indices, protos[k].indices,
-               sizeof(ca_size_t) * protos[k].count);
+        ca_size_t j;
+        for (j = 0; j < protos[k].count; j++) {
+          ca_size_t v = protos[k].indices[j];
+          ca->axes[k].indices[j] = ( v < 0 ) ? v + parent->dim[k] : v;
+        }
       }
     }
   }
