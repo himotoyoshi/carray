@@ -1478,12 +1478,15 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
            guarantees uniform shape (MEMO §3.2) so one set of parent
            native byte strides covers all K (= parents[0]->dim is
            canonical). */
-        st->stack_n_parents = stack->n_parents;
+        /* stack_n_parents counts the parents attached so far: an attach
+           that raises leaves finish with exactly those to detach. */
+        st->stack_n_parents = 0;
         st->stack_parent_ptrs =
             (char **) xmalloc(stack->n_parents * sizeof(char *));
         for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-          ca_attach(stack->parents[kk]);
+          ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
           st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
+          st->stack_n_parents = kk + 1;
         }
         {
           ca_size_t s = src->bytes;
@@ -1626,12 +1629,15 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
 
         /* Attach K parents + cache ptr aliases.  Symmetric with rev3
            Case B; for entity parents attach is O(1). */
-        st->stack_n_parents = stack->n_parents;
+        /* stack_n_parents counts the parents attached so far: an attach
+           that raises leaves finish with exactly those to detach. */
+        st->stack_n_parents = 0;
         st->stack_parent_ptrs =
             (char **) xmalloc(stack->n_parents * sizeof(char *));
         for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-          ca_attach(stack->parents[kk]);
+          ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
           st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
+          st->stack_n_parents = kk + 1;
         }
 
         /* If CAStack carries mask (= horizontal propagation already
@@ -1639,10 +1645,14 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
            aliases.  next_slab_axes aliases parent->mask[k]->ptr +
            mask_off for the same slab. */
         if ( ca_has_mask(src) ) {
+          /* Zero-filled: a slot is set once its mask is attached, and
+             finish detaches the masks whose slot is set. */
           st->stack_parent_mask_ptrs =
               (boolean8_t **) xmalloc(stack->n_parents * sizeof(boolean8_t *));
+          memset(st->stack_parent_mask_ptrs, 0,
+                 stack->n_parents * sizeof(boolean8_t *));
           for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-            ca_attach(stack->parents[kk]->mask);
+            ca_attach(stack->parents[kk]->mask);   /* window: finish detaches the set slots */
             st->stack_parent_mask_ptrs[kk] =
                 (boolean8_t *) stack->parents[kk]->mask->ptr;
           }
@@ -3018,7 +3028,9 @@ ca_iter_state_finish (ca_iter_state *st)
   if ( st->stack_parent_mask_ptrs ) {
     CAStack *stack = (CAStack *) st->src;
     for ( int32_t kk = 0; kk < st->stack_n_parents; kk++ ) {
-      ca_detach(stack->parents[kk]->mask);
+      if ( st->stack_parent_mask_ptrs[kk] ) {
+        ca_detach(stack->parents[kk]->mask);
+      }
     }
     xfree(st->stack_parent_mask_ptrs);
     st->stack_parent_mask_ptrs = NULL;
