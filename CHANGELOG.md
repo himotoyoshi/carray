@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a masked cell of a boolean selector given for one axis
+  (`a[sel, nil]`) selects nothing, as it already did for a selector over
+  the whole array (`a[sel]`). It used to raise `ArgumentError`.
+
+- Fix: `bsearch`, `search`, `count(v)` and `partition_copy` on a fixlen
+  array whose cells are megabytes wide no longer raise `SystemStackError`.
+
 - Change: a fixlen array needs `bytes:` of 1 or more. `bytes: 0`, and
   leaving `bytes:` out, raise `RuntimeError`; they used to give an array
   of zero-width cells, which dropped the data written to it

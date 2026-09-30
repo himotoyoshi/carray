@@ -3674,7 +3674,10 @@ module MkKernel
                     # A fixlen query is a runtime-width byte blob with no
                     # scalar cast; pack it the way the search family does,
                     # which NUL-pads a short String to the cell width.
-                    "      char *value_arg = ALLOCA_N(char, src->bytes);\n" \
+                    # ALLOCV, not the stack: a cell can be wide.  The holder
+                    # keeps the buffer until the GC takes it.
+                    "      volatile VALUE value_arg_holder = 0;\n" \
+                    "      char *value_arg = ALLOCV_N(char, value_arg_holder, src->bytes);\n" \
                     "      rb_ca_obj2ptr(self, rval, value_arg);\n"
                   else
                     "      #{si[:c]} value_arg = (#{si[:c]}) #{si[:num2c]}(rval);\n"
@@ -5141,7 +5144,8 @@ module MkKernel
     # and let rb_ca_obj2ptr pack it; `query_val` is then a char* the memcmp
     # body reads (mirrors the legacy flat bsearch ALLOCA_N path).
     query_setup_a = if is_fixlen
-                      "char *query_val = ALLOCA_N(char, ca->bytes);\n" \
+                      "volatile VALUE query_val_holder = 0;\n" \
+                      "          char *query_val = ALLOCV_N(char, query_val_holder, ca->bytes);\n" \
                       "          rb_ca_obj2ptr(self, rval, query_val);"
                     else
                       "#{si[:c]} query_val_buf;\n" \
