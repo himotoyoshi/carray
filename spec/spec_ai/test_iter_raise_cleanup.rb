@@ -14,6 +14,7 @@
 
 require "test/unit"
 require "carray"
+require_relative "../../utils/measure_leak"
 
 class TestIterRaiseCleanup < Test::Unit::TestCase
 
@@ -42,31 +43,16 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
     Float(out)
   end
 
-  # Bytes added to the malloc zone per call, read through Fiddle.
+  # Bytes added to the malloc zone per call (utils/measure_leak.rb).
   def bytes_per_call (expr, setup = "")
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
-    measure(setup, <<~RUBY)
-      begin
-        require "fiddle"
-        stats = Fiddle::Function.new(
-          Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
-      rescue LoadError, Fiddle::DLError
-        exit 2
-      end
-      in_use = -> {
-        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
-        stats.call(nil, buf)
-        buf[8, 8].unpack1("Q")          # malloc_statistics_t#size_in_use
-      }
-      call = -> { (#{expr}) rescue nil }
-      50.times { call.() }
-      GC.start
-      before = in_use.()
-      200.times { call.() }
-      GC.start
-      puts (in_use.() - before).fdiv(200)
-    RUBY
+    prelude = <<~SETUP
+      o = CArray.object(#{N}) { 1.0 }
+      o[5] = Object.new
+      input = CArray.wrap_readonly(o, CA_FLOAT64)
+    SETUP
+    bytes = LeakMeter.bytes_per_call(expr, setup: prelude + setup)
+    omit "malloc zone statistics unavailable" if bytes.nil?
+    bytes
   end
 
   def assert_frees_scratch (expr, setup = "")

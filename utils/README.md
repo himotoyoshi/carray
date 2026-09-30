@@ -47,6 +47,32 @@ ruby utils/check_kernel_surface_freeze.rb
 
 ## Diagnostics (run by hand)
 
+### `measure_leak.rb`
+
+Measures how many bytes one call of a Ruby expression leaves in the
+malloc zone, in a fresh process, after a warm-up and a GC on each side.
+The expression's own raise is rescued, since the cases worth measuring are
+mostly the ones that raise. It sees C allocations that Ruby cannot see;
+the resident size is not used, since heap fragmentation moves it by more
+than a small leak. macOS only (it reads `malloc_zone_statistics` through
+Fiddle); exit status 2 elsewhere.
+
+It measures an expression you suspect; it does not find one. Make the
+buffer that would leak large (a wide cell, a long array) so a leak stands
+far above the few hundred bytes per call that Ruby's own bookkeeping
+moves.
+
+```sh
+ruby -I lib -I ext utils/measure_leak.rb \
+  -s 'a = CArray.fixlen(4, bytes: 1 << 17)' -t 4096 'a.fill(3.5)'
+```
+
+`-s` runs setup code once, `-n` / `-w` set the measured and warm-up calls
+(200 / 50), and `-t` exits 1 at or above a threshold. It also prints the
+`carray_ext` the child loaded, since a build missing from the load path
+falls back silently to an installed gem. The leak tests in `spec/spec_ai`
+call it as `LeakMeter.bytes_per_call(expr, setup: ...)`.
+
 ### `monkey_patch_methods.rb`
 
 Lists everything `require "carray"` adds to `Kernel`, `Object`,
