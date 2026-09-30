@@ -48,7 +48,6 @@ class CArray
   #     is passed (the block form was removed in 3.0), or when `bounds` is
   #     `"periodic"` / `"reflect"` (both removed in 3.0; use {#roll} for a
   #     cyclic shift).
-  #   @raise [IndexError] when a range selects zero cells.
   #   @raise [RuntimeError] when `bounds` conflicts with `fill_value: UNDEF`,
   #     or when `bounds` is not a recognised value.
   def window(*ranges, fill_value: 0, bounds: "fill"); end
