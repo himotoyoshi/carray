@@ -81,10 +81,6 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
       rb_raise(rb_eIndexError,
                "invalid reps for %d-th dimension (must be positive)", i);
     }
-    if ( parent->dim[i] <= 0 ) {
-      rb_raise(rb_eIndexError,
-               "invalid parent dim for %d-th dimension", i);
-    }
     elements *= parent->dim[i] * reps[i];
   }
 

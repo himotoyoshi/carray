@@ -90,9 +90,6 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
 
   elements = 1;
   for (i = 0; i < ndim; i++) {
-    if ( parent->dim[i] <= 0 ) {
-      rb_raise(rb_eIndexError, "invalid parent dim for %d-th dimension", i);
-    }
     elements *= parent->dim[i];
   }
 
@@ -120,8 +117,11 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
   for (i = 0; i < ndim; i++) {
     ca->dim[i] = parent->dim[i];
     /* Normalise: ((shift[i] % dim[i]) + dim[i]) % dim[i] ∈ [0, dim[i]). */
-    ca_size_t s = shift[i] % parent->dim[i];
-    if ( s < 0 ) s += parent->dim[i];
+    ca_size_t s = 0;                 /* an empty axis has nothing to roll */
+    if ( parent->dim[i] > 0 ) {
+      s = shift[i] % parent->dim[i];
+      if ( s < 0 ) s += parent->dim[i];
+    }
     ca->reps[i] = s;
   }
 
