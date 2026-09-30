@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New, for C extensions: `ca_iter_state_init_l2_paired` opens the second
+  state of a kernel that walks an input and an output together. The two
+  are finished together when either walk raises. The `_INOUT` macros use
+  it, so a kernel written with them gets this by recompiling.
+
+- Fix: `sort_copy(axis:)`, `partition_copy(axis:)` and the other methods
+  that read one array and write another fiber by fiber no longer leave
+  the result's walk open when reading the source raises.
+
 - Fix: a frozen fixlen array can be exported through MemoryView. The
   export used to raise `FrozenError`.
 
