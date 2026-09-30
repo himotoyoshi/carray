@@ -784,7 +784,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
      the fiber loop and reused across fibers (all fibers share the
      same axis length and data_type). */
   void *aux = NULL;
-  volatile VALUE aux_holder = Qnil;
+  volatile VALUE aux_holder = 0;      /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
   if ( do_stable ) {
     aux = ALLOCV_N(char, aux_holder,
                    (size_t) cat->dim[axis] * (size_t) bytes);

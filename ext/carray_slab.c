@@ -883,7 +883,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
-  volatile VALUE scratch_holder = Qnil;
+  volatile VALUE scratch_holder = 0;  /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
@@ -949,7 +949,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
-  volatile VALUE scratch_holder = Qnil;
+  volatile VALUE scratch_holder = 0;  /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
