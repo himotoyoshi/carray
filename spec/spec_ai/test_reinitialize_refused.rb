@@ -69,6 +69,33 @@ class TestReinitializeRefused < Test::Unit::TestCase
     end
   end
 
+  # An `initialize` that rejects its arguments leaves the object as
+  # allocated, so it can be initialized afterwards.
+  def test_initialize_after_a_rejected_one
+    ps = [CArray.int32(3), CArray.int32(3)]
+    [
+      [CArray.allocate,   [:int32, [-1]],   [:int32, [3]]],
+      [CArray.allocate,   [:int32, [1]*60], [:int32, [3]]],
+      [CArray.allocate,   [:nosuch, [3]],   [:int32, [3]]],
+      [CScalar.allocate,  [:nosuch],        [:int32]],
+      [CAStack.allocate,  [[CArray.int32(3), CArray.int32(4)]], [ps]],
+      [CAMeld.allocate,   [[CArray.int32(3, 2), CArray.int32(3, 3)]], [ps]],
+      [Class.new(CAObject).allocate, [:int32, [-1]], [:int32, [3]]],
+    ].each do |obj, bad, good|
+      assert_raise_kind_of(StandardError) { obj.send(:initialize, *bad) }
+      assert_nothing_raised(obj.class.to_s) { obj.send(:initialize, *good) }
+      assert_refused { obj.send(:initialize, *good) }
+    end
+  end
+
+  # A block that raises is past the setup: the array owns its buffer.
+  def test_initialize_whose_block_raised_is_initialized
+    a = CArray.allocate
+    assert_raise(RuntimeError) { a.send(:initialize, :int32, [3]) { raise "in block" } }
+    assert_refused { a.send(:initialize, :int32, [3]) }
+    assert_equal [3], a.shape
+  end
+
   def test_dup_and_clone_still_work
     a = CArray.int32(4).seq!
     assert_equal a.to_a, a.dup.to_a
