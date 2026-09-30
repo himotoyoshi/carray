@@ -39,6 +39,14 @@ class TestGridIndexOwnership < Test::Unit::TestCase
     assert_equal [0, 1, 2], v.to_a
   end
 
+  def test_negative_index_counts_from_the_end
+    a = CArray.int32(16).seq!
+    assert_equal [15, 14, 0], a[CA_INT64([-1, -2, 0])].to_a
+    b = CArray.int32(4, 4).seq!
+    assert_equal [15, 15], b.flatten[CA_INT64([-1, -1])].to_a
+    assert_equal [15, 14], b.flatten[CA_INT64([-1, -2])].dup.to_a
+  end
+
   def test_out_of_range_index_raises
     a = CArray.int32(4)
     i = CArray.int64(8) { 0 }
