@@ -974,6 +974,7 @@ rb_ca_meld_initialize_copy (VALUE self, VALUE other)
 {
   CAMeld *ca, *cs;
   TypedData_Get_Struct(self,  CAMeld, &cameld_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMeld, &cameld_data_type, cs);
   ca_meld_setup(ca, cs->n_parents, cs->parents, cs->meld_axis);
   return self;
@@ -1006,6 +1007,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
         NUM2LONG(axis_val), (int) ref->ndim, "CAMeld.new");
   }
   TypedData_Get_Struct(self, CAMeld, &cameld_data_type, ca);
+  ca_check_uninitialized(ca);
   parents = ALLOCV_N(CArray *, holder, n);
   for ( i = 0; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);

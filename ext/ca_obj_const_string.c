@@ -982,6 +982,7 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
 {
   CAConstString *ca, *cs;
   TypedData_Get_Struct(self,  CAConstString, &catext_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAConstString, &catext_data_type, cs);
   /* Shallow re-setup: shares the buffer and the offset source, which is the
      documented `dup` semantics for a view.  `copy` is the compacting deep

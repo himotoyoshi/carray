@@ -582,6 +582,7 @@ rb_ca_tile_initialize_copy (VALUE self, VALUE other)
 {
   CATile *ca, *cs;
   TypedData_Get_Struct(self,  CATile, &catile_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATile, &catile_data_type, cs);
   ca_tile_setup(ca, cs->parent, cs->reps);
   return self;

@@ -254,6 +254,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
 {
   CABlock *ca, *cs;
   TypedData_Get_Struct(self,  CABlock, &cablock_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABlock, &cablock_data_type, cs);
   /* `self` was created by rb_cb_s_allocate (TypedData_Make_Struct) with
      ca->_pool == NULL.  Wire up the pool before ca_block_setup so the

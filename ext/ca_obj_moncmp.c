@@ -539,6 +539,7 @@ rb_ca_moncmp_initialize_copy (VALUE self, VALUE other)
 {
   CAMonCmp *ca, *cs;
   TypedData_Get_Struct(self,  CAMonCmp, &camoncmp_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMonCmp, &camoncmp_data_type, cs);
   if ( ca_func[CA_OBJ_MONCMP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_MONCMP, cs->parent->ndim);

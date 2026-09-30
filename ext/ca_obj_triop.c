@@ -738,6 +738,7 @@ rb_ca_triop_initialize_copy (VALUE self, VALUE other)
 {
   CATriOp *ca, *cs;
   TypedData_Get_Struct(self,  CATriOp, &catriop_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATriOp, &catriop_data_type, cs);
   if ( ca_func[CA_OBJ_TRIOP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TRIOP, cs->parent->ndim);

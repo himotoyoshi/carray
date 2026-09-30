@@ -710,6 +710,7 @@ rb_ca_bitarray_initialize_copy (VALUE self, VALUE other)
   CABitarray *ca, *cs;
 
   TypedData_Get_Struct(self,  CABitarray, &cabitarray_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABitarray, &cabitarray_data_type, cs);
 
   if ( ca_func[CA_OBJ_BITARRAY].pool_init ) {

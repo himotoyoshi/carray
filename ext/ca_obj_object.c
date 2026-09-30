@@ -611,6 +611,7 @@ rb_ca_objmask_initialize_copy (VALUE self, VALUE other)
   CAObjectMask *ca, *cs;
 
   TypedData_Get_Struct(self,  CAObjectMask, &caobjectmask_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAObjectMask, &caobjectmask_data_type, cs);
 
   /* A copy of the mask as it reads now, with bits of its own: writing to
@@ -1382,6 +1383,7 @@ rb_ca_object_initialize_copy (VALUE self, VALUE other)
   CAObject *ca, *cs;
 
   TypedData_Get_Struct(self,  CAObject, &caobject_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAObject, &caobject_data_type, cs);
 
   if ( ca_func[CA_OBJ_OBJECT].pool_init ) {
@@ -1482,6 +1484,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   }
 
   TypedData_Get_Struct(self, CAObject, &caobject_data_type, ca);
+  ca_check_uninitialized(ca);
   ca_object_setup(ca, data_type, ndim, dim, bytes);
   ca->self = self;
 

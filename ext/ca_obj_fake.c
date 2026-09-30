@@ -504,6 +504,7 @@ rb_ca_fake_initialize_copy (VALUE self, VALUE other)
   CAFake *ca, *cs;
 
   TypedData_Get_Struct(self,  CAFake, &cafake_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAFake, &cafake_data_type, cs);
 
   if ( ca_func[CA_OBJ_FAKE].pool_init ) {

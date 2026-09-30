@@ -27,6 +27,20 @@ ca_check_type (void *ap, int8_t data_type)
   }
 }
 
+/* For `initialize` and `initialize_copy`: raises unless the struct is as
+   the allocator left it.  Setting up a struct that is already set up
+   would overwrite what it owns (its buffer, its shape arrays, its parent
+   list) without freeing it.  The allocators zero-fill, and every setup
+   gives the struct a dim, so dim tells the two apart. */
+void
+ca_check_uninitialized (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  if ( ca->dim != NULL ) {
+    rb_raise(rb_eTypeError, "already initialized array");
+  }
+}
+
 void
 ca_check_ndim (void *ap, int ndim)
 {

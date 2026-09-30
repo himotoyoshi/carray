@@ -880,6 +880,7 @@ rb_ca_select_axis_initialize_copy (VALUE self, VALUE other)
 {
   CASelectAxis *ca, *cs;
   TypedData_Get_Struct(self,  CASelectAxis, &caselectaxis_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CASelectAxis, &caselectaxis_data_type, cs);
   if ( ca_func[CA_OBJ_SELECT_AXIS].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_SELECT_AXIS, cs->parent->ndim);

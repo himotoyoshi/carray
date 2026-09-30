@@ -626,6 +626,7 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
   CASelect *ca, *cs;
 
   TypedData_Get_Struct(self,  CASelect, &caselect_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CASelect, &caselect_data_type, cs);
 
   /* Re-snapshot from the source's selector copy so the two views
