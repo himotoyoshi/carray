@@ -107,7 +107,7 @@ ca_select_snapshot_masked (VALUE arg)
   return Qnil;
 }
 
-static CArray *
+CArray *
 ca_select_snapshot (CArray *select)
 {
   if ( ! ca_is_boolean_type(select) ) {

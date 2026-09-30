@@ -12,12 +12,13 @@
     - single INDIRECT axis (boolean), other axes AP (nil/Integer/Range)
     - parent must be an entity CArray (no CAStride parent)
     - selector copied at construction (fully static, fragility-free)
-    - selector must not have a mask (hard reject)
+    - a masked selector cell selects nothing (same rule as CASelect)
     - slab copy uses straightforward nested-loop memcpy (no SIMD fast paths)
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_select_snapshot */
 
 typedef struct {
   /* CAView prefix (mirrors carray.h ca_virtual layout) */
@@ -175,12 +176,6 @@ ca_select_axis_setup (CASelectAxis *ca, CArray *parent, int8_t indirect_axis,
              (int) indirect_axis,
              (long long) parent->dim[indirect_axis]);
   }
-  if ( ca_has_mask(selector) ) {
-    rb_raise(rb_eArgError,
-             "CASelectAxis: selector boolean array must not have a mask. "
-             "Use `selector.strip_mask(false)` etc. to flatten first.");
-  }
-
   /* Validate AP axes */
   for ( k = 0; k < ndim; k++ ) {
     if ( k == indirect_axis ) continue;
@@ -222,8 +217,9 @@ ca_select_axis_setup (CASelectAxis *ca, CArray *parent, int8_t indirect_axis,
 
   /* Copy selector (view owns its own copy; immune to external mutation).
      The selector is small (1 axis length), so the copy cost is acceptable,
-     and it avoids the fragility CASelect has from live references. */
-  ca->selector = ca_copy(selector);
+     and it avoids the fragility CASelect has from live references.  A
+     masked selector cell selects nothing, as it does for CASelect. */
+  ca->selector = ca_select_snapshot(selector);
 
   /* Allocate dim and AP arrays (pool path: already wired by pool_init). */
   if ( ! ca->_pool ) {

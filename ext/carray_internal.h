@@ -151,6 +151,9 @@ void     ca_block_sync_base_offset (CABlock *cb);
 /* ca_obj_select.c */
 VALUE    rb_ca_select_new (VALUE cary, VALUE select);
 VALUE    rb_ca_select_new_share (VALUE cary, VALUE select);
+/* An owned, unmasked copy of a boolean selector: a masked cell becomes
+   false.  Shared by CASelect and CASelectAxis. */
+CArray  *ca_select_snapshot (CArray *select);
 
 /* ca_obj_mapping.c */
 VALUE    rb_ca_mapping_new (VALUE cary, CArray *mapper);
