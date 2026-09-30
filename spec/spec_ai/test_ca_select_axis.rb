@@ -9,7 +9,7 @@
 #   - 2-D and 3-D parent with mask + AP (nil / Integer / Range)
 #   - round-trip write-back through the view
 #   - mask propagation (parent mask -> view mask, view write -> parent mask)
-#   - masked selector reject (ArgumentError)
+#   - a masked selector cell selects nothing (as for a flat selector)
 #   - selector length / range bounds validation
 #   - edge cases: empty mask (all false), all-true, size-1 axes
 #   - CAGrid fallback for non-eligible patterns (mask not at axis 0, etc.)
@@ -258,11 +258,39 @@ class TestCASelectAxis < Test::Unit::TestCase
   # Validation / error paths
   # ---------------------------------------------------------------
 
-  def test_masked_selector_rejected
-    a = CArray.int(4, 3).seq
-    mm = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
-    mm[0] = UNDEF
-    assert_raise(ArgumentError) { a[mm, nil] }
+  # A masked selector cell selects nothing, the same as for a flat or a
+  # same-shape boolean selector.  (It used to be refused for the axis form
+  # only.)
+  def test_masked_selector_cell_selects_nothing
+    m = CArray.int32(3, 4).seq!
+    sel = CArray.boolean(3) { true }
+    sel[1] = UNDEF
+    v = m[sel, nil]
+    assert_kind_of CASelectAxis, v
+    assert_equal [[0, 1, 2, 3], [8, 9, 10, 11]], v.to_a
+    assert_equal v.to_a, m[sel.strip_mask(false), nil].to_a
+    assert_equal v.to_a, v.dup.to_a
+
+    col = CArray.boolean(4) { |i| i.odd? }
+    col[3] = UNDEF
+    assert_equal [[1], [5], [9]], m[nil, col].to_a
+
+    x = m.copy
+    x[sel, nil] = -1
+    assert_equal [[-1] * 4, [4, 5, 6, 7], [-1] * 4], x.to_a
+
+    none = CArray.boolean(3) { true }
+    none[] = UNDEF
+    assert_equal [0, 4], m[none, nil].shape
+
+    # the view keeps its own copy of the selector
+    sel[1] = true
+    assert_equal [[0, 1, 2, 3], [8, 9, 10, 11]], v.to_a
+
+    # agrees with the flat form
+    flat = CArray.boolean(12) { true }
+    flat[1] = UNDEF
+    assert_equal 11, m.flatten[flat].elements
   end
 
   def test_selector_length_mismatch_rejected
