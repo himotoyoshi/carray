@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `dup` and `clone` of `a.sort`, and of `a[i]` with an index array
+  of `a`'s own shape, return a copy of the view. They used to raise
+  `TypeError: allocator undefined for CARemap`.
+
 - Fix: evaluating lazy expressions of different sizes no longer keeps one
   scratch buffer per size. The buffers CArray keeps between evaluations
   are now one per buffer needed at the same time, each as large as the
