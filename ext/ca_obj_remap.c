@@ -282,7 +282,7 @@ ca_remap_func_create_mask (void *ap)
      2. ca_xfer_addrs(ca->idx, n, addrs, paddrs, GET)  — one batched
         read of the parent flat addresses through ca->idx's own
         xfer_addrs dispatcher (entity, view, view chain — all
-        transparent).
+        transparent), each address then checked against the parent.
      3. ca_xfer_addrs(ca->parent, n, paddrs, data, dir) — one batched
         gather/scatter of the user payload against parent.
 
@@ -295,13 +295,20 @@ ca_remap_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   CARemap   *ca = (CARemap *) ap;
   ca_size_t *paddrs;
+  ca_size_t  i;
   volatile VALUE holder;
 
   if ( n == 0 ) return;
 
   paddrs = ALLOCV_N(ca_size_t, holder, n);
-  ca_xfer_addrs(ca->idx,    n, addrs,  paddrs, CA_XFER_GET);
-  ca_xfer_addrs(ca->parent, n, paddrs, data,   dir);
+  ca_xfer_addrs(ca->idx, n, addrs, paddrs, CA_XFER_GET);
+  /* idx is read live, so its values are checked here, not at
+     construction: negative counts from the end, out of range raises
+     before the parent is touched. */
+  for ( i = 0; i < n; i++ ) {
+    CA_CHECK_INDEX(paddrs[i], ca->parent->elements);
+  }
+  ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
   ALLOCV_END(holder);
 }
 
