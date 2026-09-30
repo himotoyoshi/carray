@@ -3805,7 +3805,7 @@ module MkKernel
           rb_raise(rb_eRuntimeError,
                    "#{name}_ki: input init failed rc=%d", rc);
         }
-        rc = ca_iter_state_init_l2(&st_out, co, CA_SLAB_AXES,
+        rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
                                    slab_axes, naxes, CA_KERNEL_WRITE);
         if ( rc != CA_ITER_OK ) {
           ca_iter_state_finish(&st_in);
@@ -3945,7 +3945,7 @@ module MkKernel
           rb_raise(rb_eRuntimeError,
                    "#{name}_ki: input init failed rc=%d", rc);
         }
-        rc = ca_iter_state_init_l2(&st_out, co, CA_SLAB_AXES,
+        rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
                                    slab_axes, 1, CA_KERNEL_WRITE);
         if ( rc != CA_ITER_OK ) {
           ca_iter_state_finish(&st_in);
@@ -4330,7 +4330,7 @@ module MkKernel
     io.puts "  if ( rc != CA_ITER_OK ) {"
     io.puts %Q[    rb_raise(rb_eRuntimeError, "#{name}_ki: input init failed rc=%d", rc);]
     io.puts "  }"
-    io.puts "  rc = ca_iter_state_init_l2(&st_out, co, CA_SLAB_AXES,"
+    io.puts "  rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,"
     io.puts "                             slab_axes, 1, CA_KERNEL_WRITE);"
     io.puts "  if ( rc != CA_ITER_OK ) {"
     io.puts "    ca_iter_state_finish(&st_in);"

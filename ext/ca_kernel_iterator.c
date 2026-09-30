@@ -634,7 +634,6 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   st->ndim     = src->ndim;
   st->flags    = flags;
   st->bytes    = src->bytes;
-  st->axes     = axes;
   st->naxes    = naxes;
 
   st->slab_n        = src->elements;
@@ -882,7 +881,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           st->ndim     = src->ndim;
           st->flags    = flags;
           st->bytes    = src->bytes;
-          st->axes     = axes;
           st->naxes    = naxes;
 
           st->alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED;
@@ -975,7 +973,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         st->ndim     = src->ndim;
         st->flags    = flags;
         st->bytes    = src->bytes;
-        st->axes     = axes;
         st->naxes    = naxes;
 
         CArray *parent = CAVIEW(src)->parent;
@@ -1143,7 +1140,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         st->ndim     = src->ndim;
         st->flags    = flags;
         st->bytes    = src->bytes;
-        st->axes     = axes;
         st->naxes    = naxes;
 
         CArray *parent = CAVIEW(src)->parent;
@@ -1236,7 +1232,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->ndim     = src->ndim;
       st->flags    = flags;
       st->bytes    = src->bytes;
-      st->axes     = axes;
       st->naxes    = naxes;
 
       /* Parent row-major byte strides for offset computation. */
@@ -1383,7 +1378,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->ndim     = src->ndim;
       st->flags    = flags;
       st->bytes    = src->bytes;
-      st->axes     = axes;
       st->naxes    = naxes;
 
       /* Row-major byte / element strides on the attached view buffer.
@@ -1782,7 +1776,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->ndim     = 1;            /* logical 1-D L2 layout */
     st->flags    = flags;
     st->bytes    = src->bytes;
-    st->axes     = axes;
     st->naxes    = naxes;
 
     st->scratch_cap = (ca_size_t) src->elements * src->bytes;
@@ -1833,7 +1826,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->ndim     = nd;
     st->flags    = flags;
     st->bytes    = src->bytes;
-    st->axes     = axes;
     st->naxes    = naxes;
 
     /* Persist descs / parent_axis_dims in state; build parent row-major
@@ -1923,7 +1915,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->ndim     = src->ndim;
     st->flags    = flags;
     st->bytes    = src->bytes;
-    st->axes     = axes;
     st->naxes    = naxes;
 
     memcpy(st->parent_axis_dims, raw_pdims, raw_ndim * sizeof(ca_size_t));
@@ -1996,7 +1987,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   st->ndim   = src->ndim;
   st->flags  = flags;
   st->bytes  = src->bytes;
-  st->axes   = axes;
   st->naxes  = naxes;
 
   /* Compute composed strides + base.  For entity / CAStride contig we
@@ -3116,13 +3106,20 @@ ca_iter_mark_walk_may_raise (ca_iter_state *st)
   }
 }
 
+/* When body raises, finish st -- and the state it is paired with (see
+   ca_iter_state_init_l2_paired), which is open in the same frame and
+   would otherwise be jumped over. */
 static void
 ca_iter_protect (ca_iter_state *st, VALUE (*body)(VALUE), VALUE arg)
 {
   int tag = 0;
   rb_protect(body, arg, &tag);
   if ( tag ) {
+    ca_iter_state *pair = (ca_iter_state *) st->pair;
     ca_iter_state_finish(st);
+    if ( pair != NULL ) {
+      ca_iter_state_finish(pair);
+    }
     rb_jump_tag(tag);
   }
 }
@@ -3192,6 +3189,9 @@ ca_iter_state_init_l1 (ca_iter_state    *st,
   ca_iter_call_t c;
   c.st = st; c.src = src; c.policy = policy;
   c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  if ( st != NULL ) {
+    st->pair = NULL;       /* read by ca_iter_protect if the init raises */
+  }
   ca_iter_protect(st, ca_iter_call_init_l1, (VALUE) &c);
   if ( c.rc == CA_ITER_OK ) ca_iter_mark_walk_may_raise(st);
   return c.rc;
@@ -3208,6 +3208,9 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
   ca_iter_call_t c;
   c.st = st; c.src = src; c.policy = policy;
   c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  if ( st != NULL ) {
+    st->pair = NULL;       /* read by ca_iter_protect if the init raises */
+  }
   ca_iter_protect(st, ca_iter_call_init_l2, (VALUE) &c);
   if ( c.rc == CA_ITER_OK ) ca_iter_mark_walk_may_raise(st);
   return c.rc;
@@ -3271,6 +3274,35 @@ ca_iter_state_sync_slab (ca_iter_state *st)
   }
   c.st = st;
   ca_iter_protect(st, ca_iter_call_sync_slab, (VALUE) &c);
+}
+
+int
+ca_iter_state_init_l2_paired (ca_iter_state    *st,
+                              ca_iter_state    *first,
+                              struct _CArray   *src,
+                              ca_slab_policy_t  policy,
+                              int8_t           *axes,
+                              int8_t            naxes,
+                              uint32_t          flags)
+{
+  ca_iter_call_t c;
+  int tag = 0;
+  c.st = st; c.src = src; c.policy = policy;
+  c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  rb_protect(ca_iter_call_init_l2, (VALUE) &c, &tag);
+  if ( tag ) {
+    ca_iter_state_finish(st);
+    ca_iter_state_finish(first);
+    rb_jump_tag(tag);
+  }
+  if ( c.rc != CA_ITER_OK ) {
+    ca_iter_state_finish(first);
+    return c.rc;
+  }
+  ca_iter_mark_walk_may_raise(st);
+  st->pair    = first;
+  first->pair = st;
+  return c.rc;
 }
 
 typedef struct {

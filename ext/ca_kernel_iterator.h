@@ -257,7 +257,10 @@ typedef struct {
   ca_slab_policy_t  policy;
   int8_t            ndim;
   int8_t            naxes;             /* [step 5+] AXES policy axis count */
-  int8_t           *axes;              /* [step 5+] [naxes]                */
+  void             *pair;              /* the other state of a two-state
+                                          walk (ca_iter_state_init_l2_paired),
+                                          else NULL; finished with this one
+                                          when the walk raises */
   uint32_t          flags;
   ca_size_t         bytes;             /* element size                     */
 
@@ -620,6 +623,23 @@ void ca_iter_state_sync_slab (ca_iter_state *st);
    exactly once after a successful init (either level). */
 void ca_iter_state_finish (ca_iter_state *st);
 
+/* Open `st` as the second state of a walk whose first state is already
+   open -- an input and an output walked together.  Takes what
+   ca_iter_state_init_l2 takes, plus `first`.
+
+   The two are then finished together when either walk raises (a gather
+   or a write-back through a source's slots): each is open in the
+   caller's frame, and the raise would jump over the other's finish.  If
+   opening `st` raises, or is declined (the code is returned), `first` is
+   finished here, so the caller has nothing left to close. */
+int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
+                                   ca_iter_state    *first,
+                                   struct _CArray   *src,
+                                   ca_slab_policy_t  policy,
+                                   int8_t           *axes,
+                                   int8_t            naxes,
+                                   uint32_t          flags);
+
 /* Raise unless rc is CA_ITER_OK.  The block macros call this on the value
    ca_iter_state_init_l1 / _l2 returned, so an author who never looks at a
    return code still hears about a request the iterator would not serve.
@@ -843,7 +863,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (axes), (naxes), 0)),                     \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (axes), (naxes), CA_KERNEL_WRITE)),       \
             1);                                                               \
         __cafi_init;                                                          \
@@ -929,7 +950,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     ((flags) | CA_KERNEL_FIBER_CONTIG         \
                                              | CA_KERNEL_WRITE))),            \
@@ -955,7 +977,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     ((flags) | CA_KERNEL_FIBER_CONTIG         \
                                              | CA_KERNEL_WRITE))),            \

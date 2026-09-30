@@ -294,6 +294,29 @@ mandatory; calling it after a failed init (`init_l2` returned an
 `ERR_*`) is **not** required — the engine releases resources on the
 error path.
 
+### Two states walked together
+
+A kernel that reads one array and writes another holds two states in the
+same frame. Open the second one with `ca_iter_state_init_l2_paired`:
+
+```c
+int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
+                                   ca_iter_state    *first,
+                                   struct _CArray   *src,
+                                   ca_slab_policy_t  policy,
+                                   int8_t           *axes,
+                                   int8_t            naxes,
+                                   uint32_t          flags);
+```
+
+It takes what `init_l2` takes, plus the state already open. When either
+walk later raises (a gather or a write-back through a source's slots),
+the engine finishes both; with plain `init_l2` it would finish only the
+one that raised and jump over the other. If opening the second state
+raises or is declined, the first is finished before the function
+returns, so there is nothing left to close. The `_INOUT` macros open
+their states this way.
+
 ## The slab-delivery contract (frozen kernel-readable state)
 
 When `init_l2(... CA_SLAB_AXES ...)` succeeds, the kernel reads:

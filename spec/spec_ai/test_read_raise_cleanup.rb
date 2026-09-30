@@ -101,6 +101,32 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
     assert_leaves_nothing "a.map_slab(axis: 1) { |s| 3.5 }", SLAB
   end
 
+  # --- an input and an output walked together ----------------------------
+  #
+  # sort_copy(axis:) walks the source and the result fiber by fiber.  When
+  # reading a source fiber raises, the result's walk is closed as well: it
+  # held 8 bytes per outer axis (96 here) and its attach of the result.
+
+  PAIRED = <<~RUBY
+    o = CArray.object(*[2]*13) { 1.0 } ; o[*[0]*13] = Object.new
+    v = CArray.wrap_readonly(o, CA_FLOAT64)
+  RUBY
+
+  def test_paired_walk_closes_both
+    bytes = LeakMeter.bytes_per_call("v.sort_copy(axis: 12)", setup: PAIRED, calls: 20000)
+    omit "malloc zone statistics unavailable" if bytes.nil?
+    assert_operator bytes, :<, 50,
+                    "sort_copy(axis:): the malloc zone grew #{bytes.round(1)} bytes per call"
+  end
+
+  def test_paired_walk_raises_the_read_failure
+    o = CArray.object(2, 3) { 1.0 }
+    o[0, 0] = Object.new
+    v = CArray.wrap_readonly(o, CA_FLOAT64)
+    assert_raise(TypeError) { v.sort_copy(axis: 1) }
+    assert_raise(TypeError) { v.partition_copy(1, axis: 1) }
+  end
+
   # --- CArray.stack: the hook's own exception reaches the caller ---------
 
   def stack_with_failing_parent (masked: false)
