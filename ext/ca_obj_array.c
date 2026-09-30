@@ -898,6 +898,9 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_check_uninitialized(ca);
+  /* Checks first: a rejected argument leaves the struct as allocated, so
+     it takes no pool and can be initialized again. */
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, NULL);
   if ( ca_func[CA_OBJ_ARRAY].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_ARRAY, ndim);
   }

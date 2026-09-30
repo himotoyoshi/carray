@@ -30,8 +30,15 @@ ca_check_type (void *ap, int8_t data_type)
 /* For `initialize` and `initialize_copy`: raises unless the struct is as
    the allocator left it.  Setting up a struct that is already set up
    would overwrite what it owns (its buffer, its shape arrays, its parent
-   list) without freeing it.  The allocators zero-fill, and every setup
-   gives the struct a dim, so dim tells the two apart. */
+   list) without freeing it.
+
+   What is tested is dim: NULL means the struct owns nothing yet.  That
+   holds on three conditions, which a new array class has to keep:
+     - its allocator zero-fills the struct (TypedData_Make_Struct does);
+     - its setup gives the struct a dim (there is no array without one);
+     - its `initialize` runs the argument checks before it takes the pool
+       or anything else (ca_array_pool_alloc sets dim), so that a rejected
+       argument leaves dim NULL and the object can be initialized again. */
 void
 ca_check_uninitialized (void *ap)
 {
