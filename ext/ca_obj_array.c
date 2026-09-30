@@ -897,6 +897,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   ca_scan_construct_args(argc, argv, &data_type, &bytes, &ndim, dim);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  ca_check_uninitialized(ca);
   if ( ca_func[CA_OBJ_ARRAY].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_ARRAY, ndim);
   }
@@ -1119,6 +1120,7 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   rb_call_super(1, &other);
 
   TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
 
   ca_update_mask(cs);
@@ -1230,6 +1232,7 @@ rb_cs_initialize (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   TypedData_Get_Struct(self, CScalar, &cscalar_data_type, ca);
+  ca_check_uninitialized(ca);
   cscalar_setup(ca, data_type, bytes, NULL);
 
   if ( rb_block_given_p() ) {
@@ -1423,6 +1426,7 @@ rb_cs_initialize_copy (VALUE self, VALUE other)
   CScalar *ca, *cs;
 
   TypedData_Get_Struct(self,  CScalar, &cscalar_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CScalar, &cscalar_data_type, cs);
 
   cscalar_setup(ca, cs->data_type, cs->bytes, NULL);

@@ -1470,6 +1470,7 @@ int     ca_is_object_type (void *ap);
 
 void    ca_check_type (void *ap, int8_t data_type);
 #define ca_check_data_type(ap, data_type) ca_check_type(ap, data_type)
+void    ca_check_uninitialized (void *ap);  /* initialize / initialize_copy entry */
 void    ca_check_ndim (void *ap, int ndim);
 void    ca_check_shape (void *ap, int ndim, ca_size_t *dim);
 void    ca_check_same_data_type (void *ap1, void *ap2);

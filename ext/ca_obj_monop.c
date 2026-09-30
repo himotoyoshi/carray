@@ -1016,6 +1016,7 @@ rb_ca_monop_initialize_copy (VALUE self, VALUE other)
 {
   CAMonOp *ca, *cs;
   TypedData_Get_Struct(self,  CAMonOp, &camonop_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMonOp, &camonop_data_type, cs);
   if ( ca_func[CA_OBJ_MONOP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_MONOP, cs->parent->ndim);

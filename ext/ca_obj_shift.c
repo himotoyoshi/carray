@@ -372,6 +372,7 @@ rb_ca_shift_initialize_copy (VALUE self, VALUE other)
   int8_t k;
 
   TypedData_Get_Struct(self,  CAShift, &cashift_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAShift, &cashift_data_type, cs);
 
   /* Recover shift/roll/fill_mask from cs (same scheme as clone). */

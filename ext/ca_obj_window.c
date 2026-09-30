@@ -1500,6 +1500,7 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
   CAWindow *ca, *cs;
 
   TypedData_Get_Struct(self,  CAWindow, &cawindow_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAWindow, &cawindow_data_type, cs);
 
   /* `self` came from rb_ca_window_s_allocate (TypedData_Make_Struct,

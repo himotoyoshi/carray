@@ -312,6 +312,7 @@ rb_ca_reduce_initialize_copy (VALUE self, VALUE other)
   CAReduce *ca, *cs;
 
   TypedData_Get_Struct(self,  CAReduce, &careduce_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAReduce, &careduce_data_type, cs);
 
   ca_reduce_setup(ca, cs->parent, cs->count, cs->offset);

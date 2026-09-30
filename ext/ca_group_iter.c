@@ -40,10 +40,14 @@ static ID id_axis_group_reduce, id_reshape, id_transpose, id_labels;
 static VALUE
 rb_ca_register_axis_group_classes (VALUE klass, VALUE cat, VALUE ag)
 {
+  static int registered = 0;
   rb_cCategorical = cat;
   rb_cAxisGroup   = ag;
-  rb_gc_register_address(&rb_cCategorical);
-  rb_gc_register_address(&rb_cAxisGroup);
+  if ( ! registered ) {               /* one GC root per address, not per call */
+    rb_gc_register_address(&rb_cCategorical);
+    rb_gc_register_address(&rb_cAxisGroup);
+    registered = 1;
+  }
   return Qnil;
 }
 

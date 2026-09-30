@@ -1038,6 +1038,7 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   CAGrid *ca, *cs;
 
   TypedData_Get_Struct(self,  CAGrid, &cagrid_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAGrid, &cagrid_data_type, cs);
 
   if ( ca_func[CA_OBJ_GRID].pool_init ) {

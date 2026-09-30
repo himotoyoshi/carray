@@ -484,6 +484,7 @@ rb_ca_time_initialize_copy (VALUE self, VALUE other)
 {
   CATime *ca, *cs;
   TypedData_Get_Struct(self,  CATime, &catime_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATime, &catime_data_type, cs);
   if ( ca_func[CA_OBJ_TIME].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TIME, cs->parent->ndim);

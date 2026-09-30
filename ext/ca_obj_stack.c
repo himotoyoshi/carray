@@ -981,6 +981,7 @@ rb_ca_stack_initialize_copy (VALUE self, VALUE other)
 {
   CAStack *ca, *cs;
   TypedData_Get_Struct(self,  CAStack, &castack_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAStack, &castack_data_type, cs);
   ca_stack_setup_with_axis(ca, cs->n_parents, cs->parents, cs->k_axis);
   return self;
@@ -1023,6 +1024,7 @@ rb_ca_stack_initialize (int argc, VALUE *argv, VALUE self)
         NUM2LONG(axis_val), (int) ref->ndim + 1, "CAStack.new");
   }
   TypedData_Get_Struct(self, CAStack, &castack_data_type, ca);
+  ca_check_uninitialized(ca);
   parents = ALLOCV_N(CArray *, holder, n);
   for ( i = 0; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);

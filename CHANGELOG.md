@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: calling `initialize` or `initialize_copy` on an array that is
+  already set up (only possible through `send`) raises `TypeError`. It
+  used to set the array up again and lose the buffer it had. `new`, `dup`
+  and `clone` are unaffected. For C extensions: call
+  `ca_check_uninitialized(ca)` at the top of your own `initialize` /
+  `initialize_copy` for the same protection.
+
 - New, for C extensions: `ca_iter_state_init_l2_paired` opens the second
   state of a kernel that walks an input and an output together. The two
   are finished together when either walk raises. The `_INOUT` macros use

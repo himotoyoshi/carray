@@ -675,6 +675,7 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
   CABitfield *ca, *cs;
 
   TypedData_Get_Struct(self,  CABitfield, &cabitfield_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABitfield, &cabitfield_data_type, cs);
 
   if ( ca_func[CA_OBJ_BITFIELD].pool_init ) {

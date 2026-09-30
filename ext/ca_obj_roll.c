@@ -568,6 +568,7 @@ rb_ca_roll_initialize_copy (VALUE self, VALUE other)
 {
   CARoll *ca, *cs;
   TypedData_Get_Struct(self,  CARoll, &caroll_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CARoll, &caroll_data_type, cs);
   ca_roll_setup(ca, cs->parent, cs->reps);
   return self;

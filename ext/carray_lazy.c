@@ -738,6 +738,7 @@ rb_ca_lazy_marker_initialize_copy (VALUE self, VALUE other)
 {
   CALazyMarker *ca, *cs;
   TypedData_Get_Struct(self,  CALazyMarker, &calazy_marker_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CALazyMarker, &calazy_marker_data_type, cs);
   ca_lazy_marker_setup(ca, cs->parent);
   return self;
