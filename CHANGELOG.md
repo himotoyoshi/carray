@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `imag` of a real array returns a new array of zeros on each call,
+  as documented. It used to return the same array every time, so a value
+  written into it showed up in later calls.
+
 - Fix: after `b = a.dup` (or `clone`), `b.real = x` and `b.imag = x`
   write into `b`. If `a.real` or `a.imag` had been called before the
   copy, they used to write into `a` and leave `b` unchanged.

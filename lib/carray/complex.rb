@@ -52,16 +52,13 @@ class CArray
   # framework's read-only chain does not replace the CAField mutable view).
   # ---------------------------------------------------------------------------
 
-  # The views {#real} and {#imag} keep belong to the array they were made
-  # for.  `dup` and `clone` copy instance variables, so a copy arrives
-  # holding the original's views; they are dropped here, and the copy makes
-  # its own.
-  def forget_parts_of_another_array
-    return if @__parts_owner__.equal?(self)
-    @__real__ = @__imag__ = nil
-    @__parts_owner__ = self
+  # Whether a view kept by {#real} / {#imag} was made for this array.
+  # `dup` and `clone` copy instance variables, so a copy arrives holding the
+  # original's view, whose parent is the original; the copy makes its own.
+  def part_of_self? (view)
+    view && view.parent.equal?(self)
   end
-  private :forget_parts_of_another_array
+  private :part_of_self?
 
   # @overload real
   #   Returns the real part of `self` as a zero-copy view. For a
@@ -70,8 +67,7 @@ class CArray
   #   over `self`. Writing to the view updates `self` in place.
   #   @return [CArray]
   def real
-    forget_parts_of_another_array
-    if not @__real__
+    if not part_of_self?(@__real__)
       if complex?
         @__real__ = case data_type
                     when CA_CMPLX64
@@ -101,18 +97,16 @@ class CArray
   #   result is a fresh independent CArray filled with 0.
   #   @return [CArray]
   def imag
-    forget_parts_of_another_array
-    if not @__imag__
-      if complex?
-        @__imag__ = case data_type
-                    when CA_CMPLX64
-                      field(4, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(8, CA_FLOAT64)
-                    end
-      else
-        @__imag__ = self.template { 0 }
-      end
+    if not complex?
+      return self.template { 0 }
+    end
+    if not part_of_self?(@__imag__)
+      @__imag__ = case data_type
+                  when CA_CMPLX64
+                    field(4, CA_FLOAT32)
+                  when CA_CMPLX128
+                    field(8, CA_FLOAT64)
+                  end
     end
     return @__imag__
   end

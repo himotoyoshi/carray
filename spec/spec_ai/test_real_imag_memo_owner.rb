@@ -3,8 +3,11 @@
 # `real` and `imag` keep the view they return, so that repeated calls give
 # the same object.  `dup` and `clone` copy instance variables, so the copy
 # used to inherit the original's views: `b = a.dup; b.real = 100` wrote
-# into a and left b alone.  The kept views belong to the array they were
-# made for, and a copy makes its own.
+# into a and left b alone.  A kept view is used only by the array that is
+# its parent, so a copy makes its own.
+#
+# For a real array `imag` is a new array of zeros on every call, and is
+# not kept.
 
 require "test/unit"
 require "carray"
@@ -55,10 +58,25 @@ class TestRealImagMemoOwner < Test::Unit::TestCase
     x = CArray.float64(3).seq!
     x.real ; x.imag
     y = x.dup
-    assert_not_same x.imag, y.imag
     y.real[0] = 9.0
     assert_equal [0.0, 1.0, 2.0], x.to_a
     assert_equal [9.0, 1.0, 2.0], y.to_a
+  end
+
+  def test_imag_of_a_real_array_is_new_each_time
+    x = CArray.float64(3).seq!
+    i = x.imag
+    assert_not_same i, x.imag
+    i[0] = 9.0
+    assert_equal [0.0, 0.0, 0.0], x.imag.to_a
+    assert_equal :float64, x.imag.data_type
+  end
+
+  def test_no_bookkeeping_ivar
+    a = complex
+    a.real ; a.imag
+    assert_equal [:@__imag__, :@__real__], a.instance_variables.sort
+    assert_equal [], CArray.float64(3).tap(&:imag).instance_variables
   end
 
 end
