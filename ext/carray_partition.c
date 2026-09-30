@@ -193,8 +193,10 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
                                                    INT2NUM((int) fbytes));
     CArray *cao;
     TypedData_Get_Struct(vout, CArray, &carray_data_type, cao);
-    char *swap_tmp = ALLOCA_N(char, fbytes);
-    char *pivot    = ALLOCA_N(char, fbytes);
+    /* Two cells of scratch.  ALLOCV, not the stack: a cell can be wide. */
+    volatile VALUE scratch_holder = 0;
+    char *swap_tmp = ALLOCV_N(char, scratch_holder, 2 * (size_t) fbytes);
+    char *pivot    = swap_tmp + fbytes;
     ca_iter_state st_in, st_out;
     char       *pi, *po;
     ca_size_t   n;
@@ -205,6 +207,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
         ca_quickselect_bytes(po, 0, n - 1, kth, fbytes, NULL, swap_tmp, pivot);
       }
     }
+    ALLOCV_END(scratch_holder);
     return vout;
   }
 
