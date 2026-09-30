@@ -280,4 +280,32 @@ class TestSweepPerElementSmoke < Test::Unit::TestCase
     assert_equal one_chunk.mask.to_a, many_chunks.mask[0...small].to_a
     assert_equal one_chunk.to_a, many_chunks[0...small].to_a
   end
+
+  # An output whose write-back raises (a CAObject's store hook): the sweep
+  # still gives everything back -- the output is detached, not left
+  # attached behind the raise -- and the hook's own error propagates.
+  class FailingStore < CAObject
+    def initialize (n) ; super(CA_FLOAT64, [n]) ; end
+    def copy_data (data) ; data[] = 0.0 ; end
+    def fetch_addr (addr) ; 0.0 ; end
+    def sync_data (data) ; raise "store failed" ; end
+    def store_addr (addr, value) ; raise "store failed" ; end
+  end
+
+  def test_output_whose_write_back_raises_is_detached
+    n   = 1 << 12
+    out = FailingStore.new(n)
+    [CArray.float64(n).seq!,                                   # aliased input
+     CArray.wrap_readonly(CArray.object(n) { 1.0 }, CA_FLOAT64) # gathered input
+    ].each do |input|
+      e = assert_raise(RuntimeError) { CArray.demo_square_f64(input, out) }
+      assert_equal "store failed", e.message
+      assert_equal false, out.attached?
+      # an entity always reads as attached; only a view can be left open
+      assert_equal false, input.attached? unless input.instance_of?(CArray)
+    end
+    # the lazy arena the gathered input borrowed from is usable afterwards
+    40.times { CArray.demo_square_f64(CArray.wrap_readonly(CArray.object(n) { 1.0 }, CA_FLOAT64), out) rescue nil }
+    assert_equal [1.0, 1.0], (CArray.float64(2).lazy + 1).copy.to_a
+  end
 end

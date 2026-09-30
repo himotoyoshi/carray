@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix, for C extensions: a sweep (`CA_FOR_EACH_ELEMENT_INOUT`, `_OUT`,
+  `ca_call_cfunc_*`, `ca_call_cslab_*`) whose output raises while it is
+  written back (a `CAObject` store hook) now detaches its operands and
+  frees its buffers before the error propagates. The output used to stay
+  attached.
+
 - Change: calling `initialize` or `initialize_copy` on an array that is
   already set up (only possible through `send`) raises `TypeError`. It
   used to set the array up again and lose the buffer it had. `new`, `dup`

@@ -280,14 +280,60 @@ ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
   ca_sweep_release_chunked(st);
 }
 
+static VALUE
+ca_sweep_sync_one (VALUE arg)
+{
+  ca_sync((CArray *) arg);
+  return Qnil;
+}
+
+/* Sync the OUTPUTs (reverse order).  Writing back through a view's slots
+ * can raise (a CAObject's store hook); the raise is held so that release
+ * still detaches and frees everything, and ca_sweep_reraise propagates
+ * it afterwards.  An entity's sync does nothing that can raise, so it is
+ * called directly: the outputs this library allocates itself pay nothing. */
+static int
+ca_sweep_sync_outputs (ca_sweep_state_t *st, volatile VALUE *error)
+{
+  int k_op, first = 0;
+  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
+    CArray *ca = st->cx[k_op];
+    if (st->fsync[k_op] != '1') {
+      continue;
+    }
+    if (ca_is_entity(ca)) {
+      ca_sync(ca);
+    }
+    else {
+      int tag = 0;
+      rb_protect(ca_sweep_sync_one, (VALUE) ca, &tag);
+      if (tag) {
+        if (! first) {
+          first  = tag;
+          *error = rb_errinfo();
+        }
+        rb_set_errinfo(Qnil);
+      }
+    }
+  }
+  return first;
+}
+
+static void
+ca_sweep_reraise (int tag, VALUE error)
+{
+  if (tag) {
+    rb_set_errinfo(error);
+    rb_jump_tag(tag);
+  }
+}
+
 void
 ca_sweep_release (ca_sweep_state_t *st)
 {
   int k_op;
-  /* sync OUTPUTs (reverse order) */
-  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
-    if (st->fsync[k_op] == '1') ca_sync(st->cx[k_op]);
-  }
+  volatile VALUE error = Qnil;
+  int tag = ca_sweep_sync_outputs(st, &error);
   /* detach attached / xfree owned buffers (reverse order) */
   for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
     if (st->attached[k_op]) {
@@ -301,6 +347,7 @@ ca_sweep_release (ca_sweep_state_t *st)
     xfree(st->m0);
     st->m0 = NULL;
   }
+  ca_sweep_reraise(tag, error);
 }
 
 /* ===== Chunked path implementation ===== */
@@ -543,16 +590,16 @@ void
 ca_sweep_release_chunked (ca_sweep_state_t *st)
 {
   int k_op;
+  volatile VALUE error = Qnil;
+  int tag;
   /* a walk that raised has already given everything back */
   if (st->chunked_state == 3) return;
   /* The final chunk has no next_chunk call to flush it, so it is flushed
    * here.  For INOUT_MASKED forms this is what captures the author's
    * per-cell m_out writes over that last chunk. */
   ca_sweep_flush_chunk_mask(st);
-  /* sync OUTPUTs (reverse order, regardless of whether chunk loop ran) */
-  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
-    if (st->fsync[k_op] == '1') ca_sync(st->cx[k_op]);
-  }
+  /* sync OUTPUTs (regardless of whether chunk loop ran) */
+  tag = ca_sweep_sync_outputs(st, &error);
   /* detach attached / release arena scratch buffers (reverse order) */
   for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
     if (st->attached[k_op]) {
@@ -570,6 +617,10 @@ ca_sweep_release_chunked (ca_sweep_state_t *st)
     ca_lazy_arena_release(st->mask_scratch);
     st->mask_scratch = NULL;
   }
+  if (tag) {
+    st->chunked_state = 3;            /* everything has been given back */
+  }
+  ca_sweep_reraise(tag, error);
 }
 
 /* ===== WHOLE_BUFFER function form (rb_ensure-protected) ===== */
