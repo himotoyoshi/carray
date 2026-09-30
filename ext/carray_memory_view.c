@@ -657,6 +657,29 @@ ca_mv_available_p (VALUE obj)
   return ca_mv_check_alias_chain(ca, &rej);
 }
 
+/* "Ns" format for a plain CA_FIXLEN of N bytes.  The Strings are kept in
+   a table keyed by N for the life of the process, so the pointer stays
+   valid for any view, and a frozen array (which cannot take an ivar) is
+   exported like any other. */
+static VALUE ca_mv_fixlen_formats = Qnil;
+
+static VALUE
+ca_mv_fixlen_format (ca_size_t bytes)
+{
+  VALUE key = SIZE2NUM(bytes);
+  VALUE fmt;
+  if ( NIL_P(ca_mv_fixlen_formats) ) {
+    ca_mv_fixlen_formats = rb_hash_new();
+    rb_gc_register_mark_object(ca_mv_fixlen_formats);
+  }
+  fmt = rb_hash_lookup(ca_mv_fixlen_formats, key);
+  if ( NIL_P(fmt) ) {
+    fmt = rb_obj_freeze(rb_sprintf("%lds", (long) bytes));
+    rb_hash_aset(ca_mv_fixlen_formats, key, fmt);
+  }
+  return fmt;
+}
+
 static bool
 ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
 {
@@ -665,6 +688,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   ssize_t *shape = NULL;
   ssize_t *strides = NULL;
   void *data_ptr = NULL;
+  const char *format;
   int writable_request;
 
   if (! ca_mv_extract(obj, &ca)) return false;
@@ -705,6 +729,24 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
     }
   }
 
+  /* Format string, resolved before shape / strides are allocated since
+     building it can raise.  Primitive types use the top-level PEP 3118
+     table; CA_FIXLEN + data_class emits a PEP 3118 "T{...}" struct format
+     whose lifetime is bound to the class via @__mv_struct_format__, so
+     the pointer is stable until the class is GC'd. */
+  if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
+    VALUE klass = rb_ca_data_class(obj);
+    VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
+    format = RSTRING_PTR(fmt);
+  }
+  else if (ca->data_type == CA_FIXLEN) {
+    /* Plain CA_FIXLEN (no data_class): PEP 3118 "Ns" fixed-bytes. */
+    format = RSTRING_PTR(ca_mv_fixlen_format(ca->bytes));
+  }
+  else {
+    format = ca_mv_format_for(ca->data_type);
+  }
+
   strategy = ca_mv_strategy_for(ca->obj_type);
 
   switch (strategy) {
@@ -712,7 +754,9 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
     /* Entity / wrap / scalar: ca->ptr is the entity's own buffer, always
        valid.  No attach needed. */
     data_ptr = ca->ptr;
-    if (ca->ndim >= 1) {
+    /* A CScalar is exported with ndim 0 and no shape, so none is taken:
+       release frees only what the view carries. */
+    if (ca->ndim >= 1 && ca->obj_type != CA_OBJ_SCALAR) {
       shape = ca_mv_alloc_shape(ca);
       strides = ca_mv_alloc_strides_contiguous(ca, shape, true);
     }
@@ -770,33 +814,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
      views compute Σ (shape[k]-1)*|strides[k]| + item_size themselves. */
   view->byte_size = (ssize_t) ca_length(ca);
   view->readonly = ca_is_readonly(ca) ? true : false;
-  /* Format string: primitive types use the top-level PEP 3118 table;
-     CA_FIXLEN + data_class emits a PEP 3118 "T{...}" struct format
-     whose lifetime is bound to the class via @__mv_struct_format__,
-     so the view->format pointer is stable until the class is GC'd. */
-  if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
-    VALUE klass = rb_ca_data_class(obj);
-    VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
-    view->format = RSTRING_PTR(fmt);
-  }
-  else if (ca->data_type == CA_FIXLEN) {
-    /* Plain CA_FIXLEN (no data_class): emit PEP 3118 "Ns" fixed-bytes.
-       Cache the format String on the source object so RSTRING_PTR stays
-       stable for the view's lifetime; the source object is anchored as
-       view->obj. */
-    VALUE fmt_str = rb_attr_get(obj, rb_intern("__mv_fixlen_format__"));
-    if (NIL_P(fmt_str)) {
-      char fmt_buf[32];
-      snprintf(fmt_buf, sizeof(fmt_buf), "%lds", (long) ca->bytes);
-      fmt_str = rb_str_new_cstr(fmt_buf);
-      rb_obj_freeze(fmt_str);
-      rb_ivar_set(obj, rb_intern("__mv_fixlen_format__"), fmt_str);
-    }
-    view->format = RSTRING_PTR(fmt_str);
-  }
-  else {
-    view->format = ca_mv_format_for(ca->data_type);
-  }
+  view->format = format;
   view->item_size = (ssize_t) ca->bytes;
   view->item_desc.components = NULL;
   view->item_desc.length = 0;
@@ -1075,6 +1093,25 @@ ca_mv_extract_type_and_mask_kwargs (int argc, VALUE *argv,
   return data_type;
 }
 
+/* ca_mv_acquire_and_validate as an rb_protect body. */
+typedef struct {
+  VALUE             src;
+  rb_memory_view_t *view;
+  int8_t            explicit_data_type;
+  int8_t           *data_type;
+  int8_t           *ndim;
+  ca_size_t        *dim;
+} ca_mv_acquire_args_t;
+
+static VALUE
+ca_mv_acquire_body (VALUE arg)
+{
+  ca_mv_acquire_args_t *a = (ca_mv_acquire_args_t *) arg;
+  ca_mv_acquire_and_validate(a->src, a->view, a->explicit_data_type,
+                             a->data_type, a->ndim, a->dim);
+  return Qnil;
+}
+
 /* Acquire and validate a mask MemoryView against the data side's shape.
    Returns an allocated holder (caller owns; release via the imported
    holder TypedData dfree path) with view active on success.
@@ -1255,8 +1292,21 @@ rb_ca_s_wrap_memory_view (int argc, VALUE *argv, VALUE klass)
   holder = ALLOC(ca_mv_imported_holder_t);
   holder->valid = false;
 
-  ca_mv_acquire_and_validate(obj, &holder->view, explicit_data_type,
-                             &data_type, &ndim, dim);
+  /* Acquisition raises on a producer it cannot take (and releases the
+     view itself first); the holder is not a Ruby object yet, so it is
+     freed here. */
+  {
+    ca_mv_acquire_args_t a;
+    int tag = 0;
+    a.src = obj;  a.view = &holder->view;
+    a.explicit_data_type = explicit_data_type;
+    a.data_type = &data_type;  a.ndim = &ndim;  a.dim = dim;
+    rb_protect(ca_mv_acquire_body, (VALUE) &a, &tag);
+    if ( tag ) {
+      xfree(holder);
+      rb_jump_tag(tag);
+    }
+  }
   holder->valid = true;
   v = &holder->view;
 
@@ -1578,19 +1628,9 @@ rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
     return ca_mv_struct_format_for_data_class(rb_ca_data_class(obj));
   }
   if (ca->data_type == CA_FIXLEN) {
-    /* Plain CA_FIXLEN: emit "Ns" via the same caching scheme used by
-       the real producer (ca_mv_get).  Reusing the cache keeps the
-       returned String identity-equal to the one the producer hands out
-       via view->format, which test code may rely on. */
-    VALUE fmt_str = rb_attr_get(obj, rb_intern("__mv_fixlen_format__"));
-    if (NIL_P(fmt_str)) {
-      char fmt_buf[32];
-      snprintf(fmt_buf, sizeof(fmt_buf), "%lds", (long) ca->bytes);
-      fmt_str = rb_str_new_cstr(fmt_buf);
-      rb_obj_freeze(fmt_str);
-      rb_ivar_set(obj, rb_intern("__mv_fixlen_format__"), fmt_str);
-    }
-    return fmt_str;
+    /* Plain CA_FIXLEN: the same "Ns" String the producer (ca_mv_get)
+       hands out via view->format. */
+    return ca_mv_fixlen_format(ca->bytes);
   }
   const char *fmt = ca_mv_format_for(ca->data_type);
   return fmt ? rb_str_new_cstr(fmt) : Qnil;

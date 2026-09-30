@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a frozen fixlen array can be exported through MemoryView. The
+  export used to raise `FrozenError`.
+
+- Fix: exporting a `CScalar` through MemoryView no longer loses 32 bytes
+  on every export, and `CArray.wrap_memory_view` no longer loses its
+  holder when it rejects the source.
+
 - Fix: a shape with more than 16 entries given to `CArray.new`,
   `CArray.empty`, `CAObject.new` or `refer`, and more than 16 arguments
   to the repeat indexer (`a[3, :%]`), are rejected before they are copied.
