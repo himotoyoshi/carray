@@ -73,6 +73,10 @@ across `to_ca` calls:
   slots;
 - best-fit allocation keeps a small request (a mask scratch) from occupying a big
   slot;
+- a request larger than every free slot **grows the largest free slot**; a new
+  slot opens only while every warm one is in use, so the pool holds one buffer
+  per scratch held at the same time, each as large as the largest request it has
+  served;
 - release happens in LIFO order in practice (acquire data, recurse into the right
   operand, unwind), which maximises reuse, though the pool does not require LIFO
   semantically.

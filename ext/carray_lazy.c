@@ -374,11 +374,12 @@ static const rb_data_type_t ca_gc_guard_data_type = {
      best-fit allocation keeps small requests (mask scratch) out of
                          large data slots
 
-   Footprint: 32 slots × max observed size (up to 32 × max_slab_bytes;
-   e.g. N=1M f64, depth-8 chain = 8 × 8MB = 64MB kept resident).  When
-   the slot pool is exhausted the acquire raises: this signals a
-   programming error or a pathological chain rather than a graceful
-   fallback.
+   Footprint: one slot per scratch held at the same time, each as large
+   as the largest request it has served (e.g. N=1M f64, depth-8 chain =
+   8 × 8MB = 64MB kept resident).  A request no free slot can hold grows
+   a free slot; a new slot opens only while every warm one is in use.
+   When all 32 are in use the acquire raises: this signals a programming
+   error or a pathological chain rather than a graceful fallback.
 
    CAREFUL: single-thread only -- thread-safety across concurrent access
    is not a goal (see guides/devel/04_attach_lifecycle.md).  The arena is
@@ -522,7 +523,40 @@ ca_lazy_arena_acquire (ca_size_t bytes)
   }
 
 
-  /* Pass 2: empty slot — xmalloc a fresh buffer.  */
+  /* Pass 2: every free warm slot is too small.  Grow the largest of
+     them rather than open another slot: a slot that is free now was not
+     needed at the same time as this request, so the arena holds one
+     buffer per simultaneous acquire rather than one per size ever asked
+     for.  Taking the largest leaves the small slots to the small
+     requests (mask scratch next to data scratch).
+
+     The slot is emptied before the xmalloc so that a NoMemoryError
+     leaves it unallocated instead of pointing at freed memory. */
+  best = -1;
+  best_bytes = -1;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    if ( s->in_use || s->ptr == NULL ) continue;
+    if ( s->bytes > best_bytes ) {
+      best = i;
+      best_bytes = s->bytes;
+    }
+  }
+  if ( best >= 0 ) {
+    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[best];
+    void *old = s->ptr;
+    s->ptr   = NULL;
+    s->bytes = 0;
+    xfree(old);
+    s->ptr    = xmalloc(bytes);
+    s->bytes  = bytes;
+    s->in_use = 1;
+    s->object_elements = 0;
+    ca_lazy_arena.debug_xmalloc_count++;
+    return s->ptr;
+  }
+
+  /* Pass 3: every warm slot is in use.  Open an empty one. */
   empty = -1;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
     if ( ca_lazy_arena.slots[i].ptr == NULL ) {
@@ -537,21 +571,6 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     ca_lazy_arena.slots[empty].object_elements = 0;
     ca_lazy_arena.debug_xmalloc_count++;
     return ca_lazy_arena.slots[empty].ptr;
-  }
-
-  /* Pass 3: all slots have ptrs.  Find a non-in-use slot and grow it
-     (= xfree + xmalloc).  This pays a mmap roundtrip but only on
-     slot pool exhaustion (= unusual size request).  */
-  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ! ca_lazy_arena.slots[i].in_use ) {
-      xfree(ca_lazy_arena.slots[i].ptr);
-      ca_lazy_arena.slots[i].ptr    = xmalloc(bytes);
-      ca_lazy_arena.slots[i].bytes  = bytes;
-      ca_lazy_arena.slots[i].in_use = 1;
-      ca_lazy_arena.slots[i].object_elements = 0;
-      ca_lazy_arena.debug_xmalloc_count++;
-      return ca_lazy_arena.slots[i].ptr;
-    }
   }
 
   /* Pass 4: all CA_LAZY_ARENA_SLOTS in use simultaneously.  This is

@@ -138,7 +138,8 @@ buffers: `acquire`/`release` toggles an in-use flag rather than freeing, so a
 deep CABinOp chain holds stable pointers across nested acquires, and warm slots
 are reused on subsequent `to_ca` calls. Best-fit allocation keeps small requests
 (mask scratch) out of large data slots. The trade-off is a resident footprint
-(up to 32 × max slab bytes), and exhaustion *raises* rather than degrading —
+(one slot per scratch held at the same time, each grown to the largest request
+it has served), and exhaustion *raises* rather than degrading —
 treated as a programming error, per the single-thread contract. This is the
 allocation substrate the streaming reduce sits on.
 
