@@ -52,6 +52,17 @@ class CArray
   # framework's read-only chain does not replace the CAField mutable view).
   # ---------------------------------------------------------------------------
 
+  # The views {#real} and {#imag} keep belong to the array they were made
+  # for.  `dup` and `clone` copy instance variables, so a copy arrives
+  # holding the original's views; they are dropped here, and the copy makes
+  # its own.
+  def forget_parts_of_another_array
+    return if @__parts_owner__.equal?(self)
+    @__real__ = @__imag__ = nil
+    @__parts_owner__ = self
+  end
+  private :forget_parts_of_another_array
+
   # @overload real
   #   Returns the real part of `self` as a zero-copy view. For a
   #   complex array the view is a mutable {CAField} into the
@@ -59,6 +70,7 @@ class CArray
   #   over `self`. Writing to the view updates `self` in place.
   #   @return [CArray]
   def real
+    forget_parts_of_another_array
     if not @__real__
       if complex?
         @__real__ = case data_type
@@ -89,6 +101,7 @@ class CArray
   #   result is a fresh independent CArray filled with 0.
   #   @return [CArray]
   def imag
+    forget_parts_of_another_array
     if not @__imag__
       if complex?
         @__imag__ = case data_type
