@@ -463,6 +463,29 @@ ca_op_guarded (VALUE (*run)(VALUE), void *call,
   rb_ensure(ca_op_guard_body, (VALUE) &g, ca_op_guard_release, (VALUE) &g);
 }
 
+/* ORs one operand's mask into ma through an arena scratch.  The scratch
+   is acquired inside the bracket: the transfer below opens a bracket of
+   its own, and an entry from depth 0 treats every slot as free. */
+typedef struct {
+  void       *scratch;   /* first: released by ca_lazy_arena_release_held */
+  CArray     *mask;
+  boolean8_t *ma;
+  ca_size_t   elements;
+} ca_mask_overlay_or_t;
+
+static VALUE
+ca_mask_overlay_or_body (VALUE arg)
+{
+  ca_mask_overlay_or_t *o = (ca_mask_overlay_or_t *) arg;
+  boolean8_t *ms;
+  ca_size_t j;
+  o->scratch = ca_lazy_arena_acquire(o->elements);
+  ms = (boolean8_t *) o->scratch;
+  ca_xfer_all(o->mask, o->scratch, CA_XFER_GET);
+  for ( j = 0; j < o->elements; j++ ) o->ma[j] |= ms[j];
+  return Qnil;
+}
+
 /* Operand mask overlay without calling ca_attach on the operand masks.
 
    `ca_copy_mask_overlay` (carray_mask.c) attaches each operand mask via
@@ -510,7 +533,6 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
 
     boolean8_t *ma = (boolean8_t *) ca_out->mask->ptr;
     ca_size_t elements = ca_out->elements;
-    ca_size_t j;
 
     /* Fresh mask → zero-init.  Existing mask (= bang variant where
        ca_out IS one of the operands) → preserve as initial accumulator
@@ -530,11 +552,13 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
         ca_xfer_all(cs->mask, &bit, CA_XFER_GET);
         if ( bit ) memset(ma, 1, elements);
       } else {
-        void *scratch = ca_lazy_arena_acquire(elements);
-        boolean8_t *ms = (boolean8_t *) scratch;
-        ca_xfer_all(cs->mask, scratch, CA_XFER_GET);
-        for ( j = 0; j < elements; j++ ) ma[j] |= ms[j];
-        ca_lazy_arena_release(scratch);
+        ca_mask_overlay_or_t o;
+        o.scratch  = NULL;
+        o.mask     = cs->mask;
+        o.ma       = ma;
+        o.elements = elements;
+        ca_lazy_arena_protect(ca_mask_overlay_or_body,
+                              ca_lazy_arena_release_held, (VALUE) &o);
       }
     }
   }
