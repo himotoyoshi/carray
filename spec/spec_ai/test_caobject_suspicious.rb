@@ -12,7 +12,7 @@
 #   5. read_only / 書き込み禁止経路 (FrozenError 経路 + flag inheritance)
 #   6. dup の foot-gun (ivar 共有: Ruby Object#dup の標準動作だが要注意)
 #   7. bulk callback contract: copy_data は **必須** (fallback なし、未定義は NoMethodError)
-#   8. fixlen の bytes 検証は **無い** (silent に bytes=0)
+#   8. fixlen は bytes: 1 以上を要求する (省略と 0 は RuntimeError、3.0.3 から)
 #
 # 実行: ruby -Iext -Ilib spec_ai/test_caobject_suspicious.rb
 #
@@ -382,23 +382,24 @@ class TestBulkCallbackFallback < Test::Unit::TestCase
 end
 
 # ===========================================================================
-# 7. Constructor: CA_FIXLEN with bytes=0 is **intentionally accepted**
-# (= degenerate edge case の graceful 受容、`spec/Features/feature_extream_spec.rb:32`
-#  で正式に pin されている設計契約。CAObject も同じ規則に従う。
-#  意図的な対応: 0-byte fixlen は zero_length_dim 等と並ぶ degenerate-but-valid な
-#  edge case として受け入れる。実用上は :bytes を必ず明示するのが正しい運用)
+# 7. Constructor: a fixlen needs bytes: of 1 or more.  A zero-width cell has
+#    one possible value, and a strided view of it cannot tell its cells
+#    apart (its byte strides are all zero), so it is refused; leaving
+#    bytes: out is refused the same way instead of silently giving width 0.
 # ===========================================================================
 class TestConstructorFixlen < Test::Unit::TestCase
-  def test_fixlen_without_bytes_accepts_zero_degenerate_case
+  def test_fixlen_without_bytes_is_refused
     klass = Class.new(CAObject) {
       def initialize; super(CA_FIXLEN, [3]); end
       def fetch_addr(a); "x"; end
-      def copy_data(d); d.elements.times { |i| d[i] = "x" }; end
     }
-    a = klass.new
-    # bytes=0 は intentional degenerate case として accept される
-    # (= feature_extream_spec.rb と同じ契約)
-    assert_equal 0, a.bytes
+    e = assert_raise(RuntimeError) { klass.new }
+    assert_match(/bytes: of 1 or more/, e.message)
+    zero = Class.new(CAObject) {
+      def initialize; super(CA_FIXLEN, [3], bytes: 0); end
+      def fetch_addr(a); "x"; end
+    }
+    assert_raise(RuntimeError) { zero.new }
   end
 
   def test_fixlen_with_bytes_ok

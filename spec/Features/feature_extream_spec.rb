@@ -31,7 +31,10 @@ describe "TestCArrayExtream " do
 
   example "zero_length_fixlen" do
     # ---
-    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 0) }.not_to raise_error()
+    # a fixlen cell is at least one byte wide (3.0.3)
+    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 1) }.not_to raise_error()
+    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 0) }.to raise_error(RuntimeError)
+    expect { CArray.new(CA_FIXLEN, [3,3]) }.to raise_error(RuntimeError)
     expect { CArray.new(CA_FIXLEN, [3,3], :bytes => -1) }.to raise_error(RuntimeError)
   end
 

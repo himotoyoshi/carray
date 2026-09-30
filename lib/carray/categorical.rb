@@ -358,7 +358,7 @@ class CACategorical < CAObject
   def category_sizes
     return @_category_sizes if @_category_sizes
     bc  = codes.bincount
-    out = CArray.new(bc.data_type, [@labels.size])   # new zero-fills
+    out = CArray.new(bc.data_type, [@labels.size], bytes: bc.bytes)   # new zero-fills
     out[0...bc.elements] = bc if bc.elements > 0
     @_category_sizes = out
     out

@@ -622,7 +622,7 @@ class CAGroupIterator
   # askable. Asking a one-cell array of the same data type lets the core's own
   # refusal through, unworded by us.
   def boolean_payload! (op)
-    CArray.new(value.data_type, [1]).public_send(op)
+    CArray.new(value.data_type, [1], bytes: value.bytes).public_send(op)
     nil
   end
 

@@ -213,7 +213,7 @@ class CAWindowIterator < CAIterator
     nd    = src.ndim
     shape = src.shape
     pshape = nd.times.map { |i| shape[i] + lefts[i] + rights[i] }
-    pad    = CArray.new(src.data_type, pshape)
+    pad    = CArray.new(src.data_type, pshape, bytes: src.bytes)
 
     # Fill the whole buffer first, then overwrite the interior with the source.
     case mode
@@ -644,7 +644,7 @@ class CAWindowIterator < CAIterator
   def offset_fold_data_type (op)
     @offset_fold_data_type ||= {}
     @offset_fold_data_type[op] ||=
-      CArray.new(@source.data_type, [1, 1]).send(op, axis: [1]).data_type
+      CArray.new(@source.data_type, [1, 1], bytes: @source.bytes).send(op, axis: [1]).data_type
   end
 
   # Every offset within the window, as a list of per-axis positions into the

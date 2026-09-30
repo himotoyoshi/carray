@@ -58,8 +58,8 @@ class CASegmentIterator < CAIterator
     @offsets   = @bounds[0...-1].copy                # the starts, for the kernels
     @elements  = @k > 0 ? (@bounds[1..-1] - @bounds[0...-1]) : CArray.int64(0)
     @grouped   = finish > origin ? value.reshape(value.elements)[origin...finish].copy
-                                 : CArray.new(value.data_type, [0])
-    @empty     = CArray.new(@grouped.data_type, [0])
+                                 : CArray.new(value.data_type, [0], bytes: value.bytes)
+    @empty     = CArray.new(@grouped.data_type, [0], bytes: @grouped.bytes)
   end
 
   # @overload inspect
@@ -738,7 +738,7 @@ class CASegmentIterator < CAIterator
   # Face for every one of them -- a const string's record indexes a shared
   # pool, so a zeroed record points nowhere.
   def core_probe
-    return CArray.new(@value.data_type, [1, 1]) unless @value.face?
+    return CArray.new(@value.data_type, [1, 1], bytes: @value.bytes) unless @value.face?
     @value.reshape(@value.elements)[[0]].reshape(1, 1)
   end
 
