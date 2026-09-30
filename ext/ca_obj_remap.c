@@ -7,9 +7,9 @@
   Constraints:
   - ref.dim == idx.dim (same shape, same ndim, per-axis dim match)
   - idx.data_type == CA_SIZE (caller responsible)
-  - No public constructor — there is no `CArray#remap(idx)` or
-    `CARemap.new` surface; the class is only reachable via internal
-    helpers and the `ca[idx]` same-shape indexer fast path.
+  - No public constructor — there is no `CArray#remap(idx)` surface; a
+    view is built by internal helpers and the `ca[idx]` same-shape
+    indexer fast path.  `dup` / `clone` copy an existing one.
   - The CARemap Ruby class IS rb_define_class'd: visibility lets users
     see "this view came from a same-shape gather" when they inspect
     `.class`.  CA_OBJ_REMAP integer remains unexported as a Ruby
@@ -450,18 +450,47 @@ rb_ca_remap_mapper (VALUE self)
 }
 
 
+/* `dup` / `clone`.  CARemap has no allocator (Ruby cannot build one), so
+   Object#dup cannot copy it; these build the copy the way the indexer
+   does: a new view over the same parent and the same index array. */
+static VALUE
+rb_ca_remap_dup (VALUE self)
+{
+  return rb_ca_remap_new(rb_ca_parent(self),
+                         rb_ivar_get(self, rb_intern("remap_idx")));
+}
+
+static VALUE
+rb_ca_remap_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE opts = Qnil, vfreeze = Qnil;
+  volatile VALUE obj;
+  rb_scan_args(argc, argv, "0:", &opts);
+  if ( ! NIL_P(opts) ) {
+    vfreeze = rb_hash_lookup2(opts, ID2SYM(rb_intern("freeze")), Qnil);
+  }
+  obj = rb_ca_remap_dup(self);
+  if ( RTEST(vfreeze) || ( NIL_P(vfreeze) && OBJ_FROZEN(self) ) ) {
+    rb_obj_freeze(obj);
+  }
+  return obj;
+}
+
 void
 Init_ca_obj_remap (void)
 {
   /* CARemap is a proper Ruby class so users can see "this view is a
-     per-element gather" on .class.  No allocator, no initialize, no
-     `new` reachable from Ruby — construction is C-internal only.
-     CA_OBJ_REMAP integer remains unexported (it's an internal type
-     tag, not user-meaningful). */
+     per-element gather" on .class.  A view is built from C only (the
+     indexer and sort / partition): there is no allocator, and `dup` /
+     `clone` are defined here instead of going through one.  CA_OBJ_REMAP
+     integer remains unexported (it's an internal type tag, not
+     user-meaningful). */
   rb_cCARemap     = rb_define_class("CARemap",     rb_cCAView);
   rb_cCARemapMask = rb_define_class("CARemapMask", rb_cCARemap);
   rb_undef_alloc_func(rb_cCARemap);
   rb_undef_alloc_func(rb_cCARemapMask);
+  rb_define_method(rb_cCARemap, "dup",   rb_ca_remap_dup,    0);
+  rb_define_method(rb_cCARemap, "clone", rb_ca_remap_clone, -1);
 
   ca_remap_func.struct_size = sizeof(CARemap);
   ca_remap_func.pool_bytes  = ca_remap_pool_bytes;
