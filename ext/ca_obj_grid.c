@@ -123,53 +123,80 @@ static VALUE rb_cCAGridMask;
 
 static int8_t CA_OBJ_GRID;
 
-/* Setup: caller passes ndim + per-axis protos (cag_axis_t).  Copies the
-   fields and, for INDEX axes, snapshots the indices into an owned buffer.
-   The share path (share=1, from initialize_copy and create_mask) aliases
-   the caller's protos buffer instead, tying its lifetime to the source
-   CAGrid (free_ca_grid skips the xfree under CA_FLAG_SHARE_INDEX). */
-int
-ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
-               cag_axis_t *protos, int share)
+/* Raises when protos cannot describe a view of parent: an ndim that is
+   not parent's, a negative count, a byte length over the limit, or a
+   parent index out of range.  Nothing is allocated here, so the caller
+   runs it before taking memory. */
+static void
+ca_grid_check_protos (CArray *parent, int8_t ndim, const cag_axis_t *protos)
 {
   int8_t k;
-  int8_t data_type;
-  ca_size_t elements, bytes;
-  double  length;
-  ca_size_t *dim0;
+  ca_size_t j;
+  double length;
 
-  CA_ASSUME(ndim >= 0 && ndim <= CA_RANK_MAX);   /* bound loops/allocs over [CA_RANK_MAX] arrays */
-  data_type = parent->data_type;
-  bytes     = parent->bytes;
-  dim0      = parent->dim;
-
-  /* parent->ndim should equal ndim (= number of axes provided).
-     rb_ca_grid pads with nil when fewer args are given, so by the
-     time we get here ndim == parent->ndim. */
+  /* rb_ca_grid pads with nil when fewer args are given, so ndim ==
+     parent->ndim for every in-tree caller. */
   if ( ndim != parent->ndim ) {
     rb_raise(rb_eArgError,
              "CAGrid: ndim mismatch (%d args vs parent->ndim %d)",
              (int) ndim, (int) parent->ndim);
   }
 
-  elements = 1;
-  length = bytes;
+  length = parent->bytes;
   for (k = 0; k < ndim; k++) {
     if (protos[k].count < 0) {
       rb_raise(rb_eRuntimeError, "negative size for %d-th dimension", k);
     }
-    elements *= protos[k].count;
     length *= protos[k].count;
   }
   if (length > CA_LENGTH_MAX) {
     rb_raise(rb_eRuntimeError, "too large byte length");
   }
 
+  for (k = 0; k < ndim; k++) {
+    if ( protos[k].count <= 0 ) {
+      continue;
+    }
+    if (protos[k].kind == CAG_AXIS_STRIDE) {
+      ca_size_t first = protos[k].start;
+      ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
+      CA_CHECK_INDEX(first, parent->dim[k]);
+      if (protos[k].count > 1) CA_CHECK_INDEX(last, parent->dim[k]);
+    }
+    else {
+      for (j = 0; j < protos[k].count; j++) {
+        ca_size_t v = protos[k].indices[j];
+        CA_CHECK_INDEX(v, parent->dim[k]);
+      }
+    }
+  }
+}
+
+/* Setup: caller passes ndim + per-axis protos (cag_axis_t) that
+   ca_grid_check_protos has accepted.  Copies the fields and, for INDEX
+   axes, snapshots the indices into an owned buffer.  The share path
+   (share=1, used only by create_mask) aliases the caller's protos buffer
+   instead: the mask grid is owned and freed by the grid whose axes it
+   aliases (free_ca_grid skips the xfree under CA_FLAG_SHARE_INDEX). */
+static int
+ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
+               cag_axis_t *protos, int share)
+{
+  int8_t k;
+  ca_size_t elements;
+
+  CA_ASSUME(ndim >= 0 && ndim <= CA_RANK_MAX);   /* bound loops/allocs over [CA_RANK_MAX] arrays */
+
+  elements = 1;
+  for (k = 0; k < ndim; k++) {
+    elements *= protos[k].count;
+  }
+
   ca->obj_type  = CA_OBJ_GRID;
-  ca->data_type = data_type;
+  ca->data_type = parent->data_type;
   ca->flags     = 0;
   ca->ndim      = ndim;
-  ca->bytes     = bytes;
+  ca->bytes     = parent->bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
@@ -197,24 +224,13 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
         ca->axes[k].start   = protos[k].start;
         ca->axes[k].step    = protos[k].step;
         ca->axes[k].indices = NULL;
-        /* Bounds check: first and last parent index must be in range. */
-        if (protos[k].count > 0) {
-          ca_size_t first = protos[k].start;
-          ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
-          CA_CHECK_INDEX(first, dim0[k]);
-          if (protos[k].count > 1) CA_CHECK_INDEX(last, dim0[k]);
-        }
       } else {
         ca->axes[k].start   = 0;
         ca->axes[k].step    = 0;
         ca->axes[k].indices = ALLOC_N(ca_size_t,
                                       protos[k].count > 0 ? protos[k].count : 1);
-        ca_size_t j;
-        for (j = 0; j < protos[k].count; j++) {
-          ca_size_t v = protos[k].indices[j];
-          CA_CHECK_INDEX(v, dim0[k]);
-          ca->axes[k].indices[j] = v;
-        }
+        memcpy(ca->axes[k].indices, protos[k].indices,
+               sizeof(ca_size_t) * protos[k].count);
       }
     }
   }
@@ -229,7 +245,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
 CAGrid *
 ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
-  CAGrid *ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
+  CAGrid *ca;
+  ca_grid_check_protos(parent, ndim, protos);
+  ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 0);
   return ca;
 }
@@ -279,7 +297,7 @@ static void *
 ca_grid_func_clone (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  return ca_grid_new_share(ca->parent, ca->ndim, ca->axes);
+  return ca_grid_new(ca->parent, ca->ndim, ca->axes);
 }
 
 /* Per-axis parent-index lookup.  STRIDE = one multiply, INDEX = one
@@ -1022,9 +1040,8 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   if ( ca_func[CA_OBJ_GRID].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_GRID, cs->ndim);
   }
-  /* Share the source's axes buffer (CA_FLAG_SHARE_INDEX semantics:
-     source CAGrid owns the lifetime; clone aliases it). */
-  ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 1);
+  /* Copy the axes: the source may be collected before the copy. */
+  ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 0);
 
   return self;
 }

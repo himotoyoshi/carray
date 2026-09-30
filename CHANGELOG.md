@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `dup` of a view made by indexing with an index array (`a[i]`) no
+  longer reads freed memory once the original view is collected. It used
+  to return other values, or crash.
+
+- Fix: `a[i]` with an index out of range no longer loses a copy of the
+  index array when it raises.
+
 - Fix: `fill`, `[]=`, `elem_store`, `elem_swap` and `elem_copy` no longer
   lose memory when they raise (a value of the wrong type, an index out of
   range). Each call held one or two cells' worth, so it showed only on
