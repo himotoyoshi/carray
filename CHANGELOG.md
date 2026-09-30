@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a reduction over `CArray.stack(...)` whose parent fails to read
+  (a `CAObject` hook that raises) now raises that error. It used to raise
+  `[BUG] tried to detach a detached array` in its place.
+
+- Fix: these no longer lose their work buffer when reading the source or
+  running the block raises: `sort_copy(kind: :stable)`, `|` and `&` on
+  masked boolean arrays, `reduce_slab` and `map_slab` on cells wider than
+  64 bytes.
+
 - Fix: `sort_copy` without `axis:` on a `CAObject` no longer returns wrong
   values or crashes when a garbage collection runs during the sort.
 
