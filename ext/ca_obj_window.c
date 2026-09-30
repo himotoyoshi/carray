@@ -679,9 +679,9 @@ ca_window_setup (CAWindow *ca, CArray *parent,
 
   elements = 1;
   for (i=0; i<ndim; i++) {
-    if ( count[i] <= 0 ) {
+    if ( count[i] < 0 ) {            /* zero is an empty window */
       rb_raise(rb_eIndexError,
-               "invalid size for %i-th dimension (negative or zero)", i);
+               "invalid size for %i-th dimension (negative)", i);
     }
     elements *= count[i];
   }

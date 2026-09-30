@@ -16,7 +16,6 @@ require_relative "../../utils/measure_leak"
 class TestConstructorRaiseCleanup < Test::Unit::TestCase
 
   A16 = "a = CArray.int32(*[1]*16)"
-  Z16 = "a = CArray.int32(*[1]*15, 0)"
 
   CASES = {
     as_strided_negative_dim: ["a = CArray.int32(4)", "a.as_strided(shape: [1]*15+[-1], strides: [4]*16)"],
@@ -26,10 +25,7 @@ class TestConstructorRaiseCleanup < Test::Unit::TestCase
     refer_rank_over_limit:   ["a = CArray.int32(4)", "a.refer(:int32, [1]*40)"],
     repeat_ndim_mismatch:    ["a = CArray.int32(3)", "a[*[2]*15, :%, :%]"],
     repeat_rank_over_limit:  ["a = CArray.int32(3)", "a[*[2]*16, :%]"],
-    window_empty:            [A16, "a.window(*[0..0]*15, 0...0)"],
-    shift_empty_axis:        [Z16, "a.shift(*[1]*16)"],
     tile_zero_reps:          [A16, "a.tile(*[1]*15+[0])"],
-    roll_empty_axis:         [Z16, "a.roll(*[1]*16)"],
     bitfield_out_of_range:   ["a = CArray.int32(8)", "a.bitfield(100)"],
     bitarray_of_complex:     ["a = CArray.cmplx128(4)", "a.bitarray"],
     string_of_int:           ["a = CArray.int32(8)", "CAString.wrap(a)"],

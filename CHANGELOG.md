@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `shift`, `roll`, `tile` and `window` on an array with a
+  zero-length axis return an empty view, as `transpose` and a block
+  reference already did. They used to raise `IndexError`. A window may
+  also select nothing (`a.window(0...0)`).
+
 - Fix: `imag` of a real array returns a new array of zeros on each call,
   as documented. It used to return the same array every time, so a value
   written into it showed up in later calls.
