@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: evaluating lazy expressions of different sizes no longer keeps one
+  scratch buffer per size. The buffers CArray keeps between evaluations
+  are now one per buffer needed at the same time, each as large as the
+  largest evaluation so far; a program that evaluated arrays of growing
+  size used to keep up to 32 of them. They are still kept until the
+  process exits. Nothing to change.
+
 - Change: a masked cell of a boolean selector given for one axis
   (`a[sel, nil]`) selects nothing, as it already did for a selector over
   the whole array (`a[sel]`). It used to raise `ArgumentError`.

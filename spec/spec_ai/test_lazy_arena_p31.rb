@@ -183,4 +183,39 @@ class TestLazyArenaP31 < Test::Unit::TestCase
     assert_equal 0, CArray.__lazy_arena_slot_in_use_count__,
                  "R3 must reset in_use=0 at next depth==0 entry"
   end
+  # ------------------------------------------- footprint under growth --
+
+  # One scratch is held at a time here, so requests of growing size must
+  # grow a free slot instead of opening a new slot per size.
+  def test_growing_requests_do_not_open_new_slots
+    eval_at = lambda do |n|
+      a = CArray.float64(n).seq
+      b = CArray.float64(n).seq + 1
+      (a.lazy + b).copy
+    end
+    eval_at.call(1000)
+    before = CArray.__lazy_arena_slot_capacities__
+    biggest = before.max
+    sizes = (1..8).map { |k| biggest / 8 + k * 4096 }
+    sizes.each { |n| eval_at.call(n) }
+    after = CArray.__lazy_arena_slot_capacities__
+    assert_equal before.size, after.size,
+                 "a request larger than every free slot must grow one"
+    assert_operator after.max, :>=, sizes.last * 8
+    assert_equal before.sort[0...-1], after.sort[0...-1],
+                 "the largest free slot is the one that grows"
+  end
+
+  # The scratch that gathers an operand's mask stays held while that mask
+  # is read, including when reading it needs a larger scratch of its own.
+  def test_masked_operand_overlay_with_lazy_mask_source
+    n = 5000
+    a = CArray.float64(n).seq
+    m = CArray.float64(n).seq
+    m[(0...n).step(7)] = UNDEF
+    r = a + (m.lazy + 1)
+    assert_equal m.mask.to_a, r.mask.to_a
+    assert_equal 0, CArray.__lazy_arena_slot_in_use_count__
+  end
+
 end
