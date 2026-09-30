@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: after `b = a.dup` (or `clone`), `b.real = x` and `b.imag = x`
+  write into `b`. If `a.real` or `a.imag` had been called before the
+  copy, they used to write into `a` and leave `b` unchanged.
+
+- Fix: `window` and `shift` over an object array keep their `fill_value:`
+  alive. A garbage collection used to free it, and the out-of-range cells
+  then read some other object, or crashed.
+
 - Fix, for C extensions: a sweep (`CA_FOR_EACH_ELEMENT_INOUT`, `_OUT`,
   `ca_call_cfunc_*`, `ca_call_cslab_*`) whose output raises while it is
   written back (a `CAObject` store hook) now detaches its operands and
