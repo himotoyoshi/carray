@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `sort_copy` without `axis:` on a `CAObject` no longer returns wrong
+  values or crashes when a garbage collection runs during the sort.
+
 - Fix: `a[i]` with an index array of `a`'s own shape now checks the
   indices when it reads or writes. An index out of range raises
   `IndexError`; it used to read or write outside `a`, returning other

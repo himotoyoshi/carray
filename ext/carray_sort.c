@@ -635,7 +635,7 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
      before mask handling: rb_ca_flatten re-propagates the mask field
      from the parent, so any mask stripping must happen on the post-
      flatten target. */
-  VALUE target;
+  volatile VALUE target;   /* cat points into it; the walk can run a GC */
   VALUE vaxis_use;
   if ( NIL_P(vaxis) ) {
     target    = rb_ca_flatten(self);
@@ -740,7 +740,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   /* Build target view (flatten for no-arg, identity for axis: kwarg).
      Unmasked past this point (guarded above), so no mask handling is
      needed here -- see the analogous block in rb_ca_sorted_view. */
-  VALUE target;
+  volatile VALUE target;   /* cat points into it; the walk can run a GC */
   VALUE vaxis_use;
   if ( NIL_P(vaxis) ) {
     target    = rb_ca_flatten(self);
@@ -843,6 +843,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   }
   if ( aux ) xfree(aux);
 
+  RB_GC_GUARD(target);
   return vout;
 }
 
