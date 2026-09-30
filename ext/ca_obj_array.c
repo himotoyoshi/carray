@@ -173,6 +173,12 @@ carray_setup_i (CArray *ca,
              "cannot adopt a raw buffer as a CA_OBJECT array");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   /* set values to the struct members */
   if ( allocate || adopt_ptr ) {
     ca->obj_type = CA_OBJ_ARRAY;
@@ -274,7 +280,9 @@ CArray *
 carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca  = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
+  CArray *ca;
+  carray_setup(NULL, data_type, ndim, dim, bytes, mask);
+  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
@@ -283,7 +291,9 @@ CArray *
 carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca  = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
+  CArray *ca;
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, mask);
+  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_safe_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
@@ -857,6 +867,7 @@ ca_scan_construct_args (int argc, VALUE *argv, int8_t *data_type,
   rb_ca_guess_type_and_bytes(rtype, rbytes, data_type, bytes);
 
   Check_Type(rdim, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
   *ndim = RARRAY_LEN(rdim);
   for (i=0; i<*ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1150,6 +1161,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1453,6 +1465,7 @@ rb_ca_s_alloc_uninit (VALUE klass, VALUE rtype, VALUE rshape)
   int8_t i;
   rb_ca_guess_type_and_bytes(rtype, Qnil, &data_type, &bytes);
   Check_Type(rshape, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rshape));   /* before dim[] is filled */
   ndim = (int8_t) RARRAY_LEN(rshape);
   for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
   return rb_carray_new(data_type, ndim, dim, bytes, NULL);

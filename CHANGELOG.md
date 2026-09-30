@@ -36,6 +36,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a shape with more than 16 entries given to `CArray.new`,
+  `CArray.empty`, `CAObject.new` or `refer`, and more than 16 arguments
+  to the repeat indexer (`a[3, :%]`), are rejected before they are copied.
+  They used to be written past the end of a fixed-size work array before
+  the rank check raised.
+
+- Fix: constructors that reject their arguments no longer lose the
+  array's struct when they raise: `transpose`, `refer`, `field`,
+  `as_strided`, `window`, `shift`, `tile`, `roll`, `bitfield`, `bitarray`,
+  `endian`, the repeat indexer, `CArray.empty`, `template`, and `wrap` of
+  `CAString`, `CAFixlenString`, `CATime` and `CATimedelta`. Each call held
+  80 to 900 bytes.
+
+- New, for C extensions: `ca_stride_setup` called with `ca == NULL` runs
+  its checks and returns without writing, so a constructor can check
+  before it allocates (`ca_stride_new` does). Existing calls are
+  unaffected.
+
 - Fix: a reduction over `CArray.stack(...)` whose parent fails to read
   (a `CAObject` hook that raises) now raises that error. It used to raise
   `[BUG] tried to detach a detached array` in its place.

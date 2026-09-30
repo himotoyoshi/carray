@@ -1474,6 +1474,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
 
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {

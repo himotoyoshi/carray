@@ -96,6 +96,12 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
     elements *= parent->dim[i];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_ROLL;
   ca->data_type = parent->data_type;
   ca->flags     = 0;
@@ -129,7 +135,9 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
 CARoll *
 ca_roll_new (CArray *parent, ca_size_t *shift)
 {
-  CARoll *ca = ALLOC(CARoll);
+  CARoll *ca;
+  ca_roll_setup(NULL, parent, shift);
+  ca = ALLOC(CARoll);
   ca_roll_setup(ca, parent, shift);
   return ca;
 }

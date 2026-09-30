@@ -161,6 +161,12 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
              "CATimedelta requires int64 storage (parent.data_type != CA_INT64)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_TIMEDELTA;
   /* NonNumeric surface (the FIXLEN gate), like CATime: the storage is a
      count of `count x unit` ticks, and letting the numeric kernels read it
@@ -208,7 +214,9 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
 CATimedelta *
 ca_timedelta_new (CArray *parent, int8_t unit, int64_t count)
 {
-  CATimedelta *ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
+  CATimedelta *ca;
+  ca_timedelta_setup(NULL, parent, unit, count);
+  ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
   ca_timedelta_setup(ca, parent, unit, count);
   return ca;
 }

@@ -674,6 +674,12 @@ ca_window_setup (CAWindow *ca, CArray *parent,
     elements *= count[i];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_WINDOW;
   ca->data_type = data_type;
   ca->flags     = 0;
@@ -746,7 +752,9 @@ CAWindow *
 ca_window_new (CArray *parent,
                ca_size_t *start, ca_size_t *count, uint8_t *bounds, char *fill)
 {
-  CAWindow *ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
+  CAWindow *ca;
+  ca_window_setup(NULL, parent, start, count, bounds, fill);
+  ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
   ca_window_setup(ca, parent, start, count, bounds, fill);
   return ca;
 }

@@ -96,6 +96,12 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
     rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ndim     = parent->ndim + 1;
   bitlen   = 8 * parent->bytes;
   elements = bitlen * parent->elements;
@@ -132,7 +138,9 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
 CABitarray *
 ca_bitarray_new (CArray *parent)
 {
-  CABitarray *ca = (CABitarray *) ca_array_alloc(CA_OBJ_BITARRAY, parent->ndim + 1);
+  CABitarray *ca;
+  ca_bitarray_setup(NULL, parent);
+  ca = (CABitarray *) ca_array_alloc(CA_OBJ_BITARRAY, parent->ndim + 1);
   ca_bitarray_setup(ca, parent);
   return ca;
 }

@@ -114,6 +114,12 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   /* base_offset is in bytes: `offset` is in parent-element units. */
   base_offset = offset * parent_bytes;
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   /* CAREFUL: initialise mask0 before ca_stride_setup — the setup
      may dispatch to ca_refer_func_create_mask, which writes to
      mask0.  Leaving it uninitialised risks freeing a garbage
@@ -134,7 +140,9 @@ ca_refer_new (CArray *parent,
               int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
               ca_size_t offset)
 {
-  CARefer *ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
+  CARefer *ca;
+  ca_refer_setup(NULL, parent, data_type, ndim, dim, bytes, offset);
+  ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
   ca_refer_setup(ca, parent, data_type, ndim, dim, bytes, offset);
   return ca;
 }
@@ -440,6 +448,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
       }
     }
     Check_Type(rdim, T_ARRAY);
+    CA_CHECK_RANK(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
     for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);

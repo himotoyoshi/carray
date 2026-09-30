@@ -88,6 +88,12 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
     elements *= parent->dim[i] * reps[i];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_TILE;
   ca->data_type = data_type;
   ca->flags     = 0;
@@ -118,7 +124,9 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
 CATile *
 ca_tile_new (CArray *parent, ca_size_t *reps)
 {
-  CATile *ca = ALLOC(CATile);
+  CATile *ca;
+  ca_tile_setup(NULL, parent, reps);
+  ca = ALLOC(CATile);
   ca_tile_setup(ca, parent, reps);
   return ca;
 }

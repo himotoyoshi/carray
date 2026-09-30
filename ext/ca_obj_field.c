@@ -57,6 +57,12 @@ ca_field_setup (CAStride *ca, CArray *parent,
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_FIELD, parent,
                   data_type, bytes,
                   parent->ndim, parent->dim, strides, offset);
@@ -67,7 +73,9 @@ ca_field_setup (CAStride *ca, CArray *parent,
 CAStride *
 ca_field_new (CArray *parent, ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_FIELD, parent->ndim);
+  CAStride *ca;
+  ca_field_setup(NULL, parent, offset, data_type, bytes);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_FIELD, parent->ndim);
   ca_field_setup(ca, parent, offset, data_type, bytes);
   return ca;
 }

@@ -182,6 +182,12 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
              "CATime requires int64 storage (parent.data_type != CA_INT64)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_TIME;
   /* The surface data_type is CA_FIXLEN, not CA_INT64: this routes
      mkkernel dispatch onto the ca_*_not_implement stubs so numeric
@@ -227,7 +233,9 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 CATime *
 ca_time_new (CArray *parent, int8_t unit, int64_t count)
 {
-  CATime *ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
+  CATime *ca;
+  ca_time_setup(NULL, parent, unit, count);
+  ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
   ca_time_setup(ca, parent, unit, count);
   return ca;
 }

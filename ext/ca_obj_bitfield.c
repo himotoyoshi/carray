@@ -217,6 +217,12 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_BITFIELD;
   ca->data_type = data_type;
   ca->flags     = 0;
@@ -250,7 +256,9 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 CABitfield *
 ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen)
 {
-  CABitfield *ca = (CABitfield *) ca_array_alloc(CA_OBJ_BITFIELD, parent->ndim);
+  CABitfield *ca;
+  ca_bitfield_setup(NULL, parent, offset, bitlen);
+  ca = (CABitfield *) ca_array_alloc(CA_OBJ_BITFIELD, parent->ndim);
   ca_bitfield_setup(ca, parent, offset, bitlen);
   return ca;
 }
