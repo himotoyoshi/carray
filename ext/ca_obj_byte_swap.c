@@ -198,6 +198,12 @@ ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
     rb_raise(rb_eCADataTypeError, "object array can't be byte-swapped");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_BYTE_SWAP;
   ca->data_type = parent->data_type;
   ca->flags     = 0;
@@ -229,7 +235,9 @@ ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
 CAByteSwap *
 ca_byte_swap_new (CArray *parent, VALUE data_class)
 {
-  CAByteSwap *ca = (CAByteSwap *) ca_array_alloc(CA_OBJ_BYTE_SWAP, parent->ndim);
+  CAByteSwap *ca;
+  ca_byte_swap_setup(NULL, parent, data_class);
+  ca = (CAByteSwap *) ca_array_alloc(CA_OBJ_BYTE_SWAP, parent->ndim);
   ca_byte_swap_setup(ca, parent, data_class);
   return ca;
 }

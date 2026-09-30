@@ -58,6 +58,12 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
     strides[i] = parent_byte_stride[imap[i]];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_TRANSPOSE, parent,
                   parent->data_type, parent->bytes,
                   ndim, newdim, strides, 0);
@@ -67,7 +73,9 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
 CAStride *
 ca_trans_new (CArray *parent, ca_size_t *imap)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_TRANSPOSE, parent->ndim);
+  CAStride *ca;
+  ca_trans_setup(NULL, parent, imap);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_TRANSPOSE, parent->ndim);
   ca_trans_setup(ca, parent, imap);
   return ca;
 }

@@ -1300,6 +1300,10 @@ VALUE    rb_ca_farray (VALUE self);
 
 /* --- ca_obj_stride.c --- */
 
+/* ca_stride_setup with ca == NULL runs its checks and returns 0 without
+   writing.  ca_stride_new calls it that way before it allocates, so a
+   rejected argument leaves no struct behind; a subclass constructor can
+   do the same through its own setup function. */
 int       ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
                            int8_t data_type, ca_size_t bytes,
                            int8_t ndim, ca_size_t *dim,

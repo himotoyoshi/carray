@@ -105,6 +105,10 @@ ca_shift_setup (CAShift *ca, CArray *parent,
   /* Delegate to CAWindow setup. */
   ca_window_setup((CAWindow *) ca, parent, start, count, bounds, fill);
 
+  if ( ca == NULL ) {                /* checks only, see ca_window_setup */
+    return 0;
+  }
+
   /* Override obj_type so dispatch (ca_func[obj_type]) lands on the
      CAShift-specific table (which differs from CAWindow only in
      free / clone / create_mask, all forwarding to a CAShift-typed
@@ -118,7 +122,9 @@ CAShift *
 ca_shift_new (CArray *parent, ca_size_t *shift, char *fill, int8_t *roll,
               int fill_mask)
 {
-  CAShift *ca = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
+  CAShift *ca;
+  ca_shift_setup(NULL, parent, shift, fill, roll, fill_mask);
+  ca = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
   ca_shift_setup(ca, parent, shift, fill, roll, fill_mask);
   return ca;
 }

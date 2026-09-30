@@ -39,6 +39,9 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
   int8_t data_ndim = 0;
   int8_t i, j;
 
+  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
+  }
   for (i = 0; i < ndim; i++) {
     if (count[i] < 0) {
       rb_raise(rb_eRuntimeError,
@@ -77,6 +80,12 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_REPEAT, parent,
                   parent->data_type, parent->bytes,
                   ndim, newdim, strides, 0);
@@ -91,7 +100,9 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
 CAStride *
 ca_repeat_new (CArray *parent, int8_t ndim, ca_size_t *count)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
+  CAStride *ca;
+  ca_repeat_setup(NULL, parent, ndim, count);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
   ca_repeat_setup(ca, parent, ndim, count);
   return ca;
 }
@@ -206,6 +217,10 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
       }
     }
     return rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
+  }
+
+  if ( argc > CA_RANK_MAX ) {         /* count[] and dim[] hold CA_RANK_MAX */
+    rb_raise(rb_eArgError, "invalid ndim %d", argc);
   }
 
   repeat = 1;

@@ -88,6 +88,12 @@ ca_string_setup (CAString *ca, CArray *parent)
              "CAString requires object storage (parent.data_type != CA_OBJECT)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_STRING;
   ca->data_type = CA_OBJECT;
   /* ORDERABLE + COMPARABLE, and both hold by construction: a storage cell
@@ -130,7 +136,9 @@ ca_string_setup (CAString *ca, CArray *parent)
 CAString *
 ca_string_new (CArray *parent)
 {
-  CAString *ca = (CAString *) ca_array_alloc(CA_OBJ_STRING, parent->ndim);
+  CAString *ca;
+  ca_string_setup(NULL, parent);
+  ca = (CAString *) ca_array_alloc(CA_OBJ_STRING, parent->ndim);
   ca_string_setup(ca, parent);
   return ca;
 }

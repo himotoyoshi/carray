@@ -113,6 +113,12 @@ ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
     elements *= dim[i];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type     = obj_type;
   ca->data_type    = data_type;
   ca->flags        = 0;
@@ -151,7 +157,10 @@ ca_stride_new (int8_t obj_type, CArray *parent,
                int8_t ndim, ca_size_t *dim,
                ca_size_t *strides, ca_size_t base_offset)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(obj_type, ndim);
+  CAStride *ca;
+  ca_stride_setup(NULL, obj_type, parent,
+                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca = (CAStride *) ca_array_alloc(obj_type, ndim);
   ca_stride_setup(ca, obj_type, parent,
                   data_type, bytes, ndim, dim, strides, base_offset);
   return ca;

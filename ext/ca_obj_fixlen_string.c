@@ -89,6 +89,12 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
              "CAFixlenString requires fixlen storage (parent.data_type != CA_FIXLEN)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_FIXLEN_STRING;
   ca->data_type = CA_FIXLEN;
   /* ORDERABLE + COMPARABLE.  The descent is NOT the identity map -- the
@@ -148,8 +154,9 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
 CAFixlenString *
 ca_fixlen_string_new (CArray *parent)
 {
-  CAFixlenString *ca =
-      (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
+  CAFixlenString *ca;
+  ca_fixlen_string_setup(NULL, parent);
+  ca = (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
   ca_fixlen_string_setup(ca, parent);
   return ca;
 }
