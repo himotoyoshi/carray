@@ -82,11 +82,23 @@ ca_window_pool_init (void *ap, int8_t ndim)
   ca->dim                 = ca->count;   /* alias; ca_window_setup re-sets */
 }
 
+/* A window over an object array keeps its fill value, a VALUE, in a
+   buffer of its own, so it marks it; ca_mark covers only ca->ptr. */
+void
+ca_window_mark (void *ap)
+{
+  CAWindow *ca = (CAWindow *) ap;
+  ca_mark(ca);
+  if ( ca->fill != NULL && ca_is_object_type(ca) ) {
+    rb_gc_mark(*(VALUE *) ca->fill);
+  }
+}
+
 const rb_data_type_t cawindow_data_type = {
     .parent = &caview_data_type,
     .wrap_struct_name = "CAWindow",
     .function = {
-        .dmark = ca_mark,
+        .dmark = ca_window_mark,
         .dfree = ca_free,
         .dsize = ca_window_dsize,
         .dcompact = NULL

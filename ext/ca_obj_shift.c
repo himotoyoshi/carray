@@ -31,11 +31,13 @@ extern int ca_window_setup (CAWindow *ca, CArray *parent,
    (rb_data_type_t *) cast would write into .rodata and SIGBUS on macOS. */
 static size_t ca_shift_dsize (const void *ap);
 
+extern void ca_window_mark (void *ap);   /* ca_obj_window.c: marks the fill value */
+
 const rb_data_type_t cashift_data_type = {
     .parent = &caview_data_type,
     .wrap_struct_name = "CAShift",
     .function = {
-        .dmark = ca_mark,
+        .dmark = ca_window_mark,
         .dfree = ca_free,
         .dsize = ca_shift_dsize,
         .dcompact = NULL
