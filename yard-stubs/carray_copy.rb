@@ -60,7 +60,7 @@ class CArray
   #   @param data_type [Symbol] target element type
   #     (e.g. `:int32`, `:float64`, `:fixlen`).
   #   @param bytes [Integer] element byte size; required for
-  #     `:fixlen`, ignored for numeric types.
+  #     `:fixlen` (1 or more), ignored for numeric types.
   #   @return [CArray]
   # @overload template { value }
   #   With a 0-arity block, fills every element of the result with

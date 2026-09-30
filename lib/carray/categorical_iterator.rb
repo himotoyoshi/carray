@@ -119,8 +119,8 @@ class CACategoricalIterator < CASegmentIterator
       # is nothing to gather — an empty index into an empty source is out of
       # range — so build the empty grouped buffer directly.
       @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
-                             : CArray.new(value.data_type, [0])
-      @empty    = CArray.new(grouped.data_type, [0])
+                             : CArray.new(value.data_type, [0], bytes: value.bytes)
+      @empty    = CArray.new(grouped.data_type, [0], bytes: grouped.bytes)
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
@@ -361,8 +361,8 @@ class CACategoricalIterator < CASegmentIterator
     out_shape     = [@k] + band
     counts        = CArray.int64(*out_shape)
     sums          = CArray.float64(*out_shape)
-    mins          = CArray.new(h.data_type, out_shape)
-    maxs          = CArray.new(h.data_type, out_shape)
+    mins          = CArray.new(h.data_type, out_shape, bytes: h.bytes)
+    maxs          = CArray.new(h.data_type, out_shape, bytes: h.bytes)
     h.__send__(:__fiber_scatter_moments__, codes_h_shape, axis, @k,
                counts, sums, mins, maxs)
     {count: counts, sum: sums, min: mins, max: maxs}

@@ -107,7 +107,7 @@ class CArray
 
     if n == 1
       # Degenerate: every finite cell snaps to the only value.
-      out = CArray.new(ref.data_type, shape).fill(ref[0])
+      out = CArray.new(ref.data_type, shape, bytes: ref.bytes).fill(ref[0])
       out.mask = self.mask.to_ca if self.has_mask?
       if self.float?
         inv = self.is_invalid

@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a fixlen array needs `bytes:` of 1 or more. `bytes: 0`, and
+  leaving `bytes:` out, raise `RuntimeError`; they used to give an array
+  of zero-width cells, which dropped the data written to it
+  (`CArray.object(2) { "abc" }.to_type(:fixlen)` gave `["", ""]`) and
+  lost its mask through a view. `CA_FIXLEN(data)` without `bytes:` still
+  takes the width from the longest string, and now does so for a single
+  String as well; all-empty data gets a width of 1.
+
 - Change: `shift`, `roll`, `tile` and `window` on an array with a
   zero-length axis return an empty view, as `transpose` and a block
   reference already did. They used to raise `IndexError`. A window may

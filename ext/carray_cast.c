@@ -2237,7 +2237,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
         ca_size_t l = NUM2SIZE(rb_funcall(rb_ary_entry(v, i), id_length_cast, 0));
         if ( l > maxlen ) maxlen = l;
       }
-      bytes = maxlen;
+      bytes = ( maxlen > 0 ) ? maxlen : 1;   /* all empty: one NUL byte */
     } else {
       bytes = NUM2SIZE(bytes_v);
     }
@@ -2250,7 +2250,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
   }
   else if ( NIL_P(v) ) {
     ca_size_t dim0 = 0;
-    ca_size_t bytes = NIL_P(bytes_v) ? 0 : NUM2SIZE(bytes_v);
+    ca_size_t bytes = NIL_P(bytes_v) ? 1 : NUM2SIZE(bytes_v);
     return rb_carray_new(CA_FIXLEN, 1, &dim0, bytes, NULL);
   }
   else {
@@ -2262,7 +2262,16 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
                ? ca : ca_cast_to_fixlen(ca, fixlen_sym, bytes_v);
     }
     {
-      ca_size_t bytes = NIL_P(bytes_v) ? 0 : NUM2SIZE(bytes_v);
+      /* No bytes: given: a String is as wide as it is (one NUL byte when
+         empty).  Anything else has no width to infer, and the fixlen
+         check reports it. */
+      ca_size_t bytes = 0;
+      if ( ! NIL_P(bytes_v) ) {
+        bytes = NUM2SIZE(bytes_v);
+      }
+      else if ( RB_TYPE_P(v, T_STRING) ) {
+        bytes = ( RSTRING_LEN(v) > 0 ) ? RSTRING_LEN(v) : 1;
+      }
       return rb_cscalar_new_with_value(CA_FIXLEN, bytes, v);
     }
   }

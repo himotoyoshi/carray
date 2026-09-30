@@ -172,10 +172,10 @@ class CABlockIterator < CAIterator
       view = @source[*strip_ranges].block_view(*tiles)
       res  = yield(view, tiles)
       if res.is_a?(Array)
-        outs ||= res.map { |r| CArray.new(r.data_type, @shape) }
+        outs ||= res.map { |r| CArray.new(r.data_type, @shape, bytes: r.bytes) }
         res.each_index { |k| outs[k][*out_ranges] = res[k] }
       else
-        outs ||= CArray.new(res.data_type, @shape)
+        outs ||= CArray.new(res.data_type, @shape, bytes: res.bytes)
         outs[*out_ranges] = res
       end
     end
@@ -308,7 +308,7 @@ class CABlockIterator < CAIterator
       # block_view is a CAStride, so #count is not shadowed; dispatch
       # CArray#count explicitly anyway, matching the family regularity.
       red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes)
-      out ||= CArray.new(red.data_type, @shape)
+      out ||= CArray.new(red.data_type, @shape, bytes: red.bytes)
       out[*out_ranges] = red
     end
     out
@@ -585,7 +585,7 @@ class CABlockIterator < CAIterator
   #   @return [CArray, Enumerator] source-shaped
   def map
     return to_enum(:map) unless block_given?
-    pout = CArray.new(padded_source.data_type, padded_source.shape)
+    pout = CArray.new(padded_source.data_type, padded_source.shape, bytes: padded_source.bytes)
     pgv  = pout.block_view(*@sizes)
     tgv  = tile_grid_view
     nils = Array.new(@sndim, nil)
@@ -640,7 +640,7 @@ class CABlockIterator < CAIterator
       tile    = tgv[*g, *nils]
       scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
       unless pout
-        pout = CArray.new(scanned.data_type, padded_source.shape)
+        pout = CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
         pout[] = UNDEF
         pgv  = pout.block_view(*@sizes)
       end
@@ -659,7 +659,7 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = CArray.new(@source.data_type, pshape)
+        pad = CArray.new(@source.data_type, pshape, bytes: @source.bytes)
         pad[] = UNDEF
         pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
         pad

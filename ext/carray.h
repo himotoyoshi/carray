@@ -1019,10 +1019,14 @@ extern VALUE rb_cCArrayObject;
     } \
   }
 
+/* A fixlen cell is at least one byte wide.  A zero-width cell has one
+   possible value, and a strided view of it cannot say which cell is which:
+   its byte strides are all zero. */
 #define CA_CHECK_BYTES(data_type, bytes) \
   if ( data_type == CA_FIXLEN ) { \
-    if ( bytes < 0 ) {                             \
-      rb_raise(rb_eRuntimeError, "invalid bytes"); \
+    if ( bytes <= 0 ) {                            \
+      rb_raise(rb_eRuntimeError,                   \
+               "invalid bytes (a fixlen needs bytes: of 1 or more)"); \
     } \
   } \
   else { \

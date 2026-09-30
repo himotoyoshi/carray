@@ -66,7 +66,7 @@ class CArray
     #   @return [Class]
     # @overload fixlen(*shape, bytes:) { ... }
     #   Equivalent to `CArray.new(:fixlen, shape, bytes: bytes) { ... }`.
-    #   The `bytes:` keyword is required for `:fixlen`.
+    #   The `bytes:` keyword is required for `:fixlen`, and is 1 or more.
     #   @param shape [Array<Integer>]
     #   @param bytes [Integer]
     #   @return [CArray]
