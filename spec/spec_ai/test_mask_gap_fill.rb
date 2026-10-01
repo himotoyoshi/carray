@@ -109,6 +109,23 @@ class TestMaskGapFillHold < Test::Unit::TestCase
                  m.strip_mask(method: :forward, axis: -1).to_a)
   end
 
+  # A negative axis past -ndim is out of range, as everywhere else; it
+  # used to be wrapped twice and land on a real axis.
+  def test_negative_axis_out_of_range_raises
+    m = CA_INT32([[1, 0, 3], [0, 5, 0]]); m[1, 2] = UNDEF
+    [:forward, :backward].each do |meth|
+      [-3, -4, 2].each do |ax|
+        assert_raise(ArgumentError, "#{meth} axis #{ax}") {
+          m.strip_mask(method: meth, axis: ax)
+        }
+        assert_raise(ArgumentError, "#{meth} axis #{ax} in place") {
+          m.unmask(method: meth, axis: ax)
+        }
+      end
+    end
+    assert(m.is_masked[1, 2])
+  end
+
   # ---- dtype coverage -----------------------------------------------------
 
   def test_float_hold
