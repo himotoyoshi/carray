@@ -102,7 +102,7 @@ class CASegmentIterator < CAIterator
   #   so an empty segment is `0` (never masked).
   #   @return [CArray]
   def count_not_masked(axis: nil)
-    return axis_counts(axis) if axis
+    return axis_counts(axis, :count_not_masked) if axis
     m = moments
     m ? m[:count].copy : per_segment(CA_INT64) { |s| s.count_not_masked }
   end
@@ -175,7 +175,7 @@ class CASegmentIterator < CAIterator
   #   MASKED.
   #   @return [CArray]
   def max(axis: nil)
-    return axis_moments(axis)[:max] if axis
+    return axis_moments(axis, :max)[:max] if axis
     m = moments
     m ? m[:max].copy : per_segment(core_reduce_type(:max)) { |s| s.max }
   end
@@ -185,7 +185,7 @@ class CASegmentIterator < CAIterator
   #   MASKED.
   #   @return [CArray]
   def min(axis: nil)
-    return axis_moments(axis)[:min] if axis
+    return axis_moments(axis, :min)[:min] if axis
     m = moments
     m ? m[:min].copy : per_segment(core_reduce_type(:min)) { |s| s.min }
   end
@@ -317,7 +317,7 @@ class CASegmentIterator < CAIterator
       # take both off one pass rather than asking min and max separately,
       # which would run the kernel twice now that nothing is kept between
       # calls -- this is the "keep the result" the axis: family expects
-      m = axis_moments(axis)
+      m = axis_moments(axis, :minmax)
       return [m[:min], m[:max]]
     end
     [min, max]
@@ -421,7 +421,7 @@ class CASegmentIterator < CAIterator
   #   @param weights [CArray]
   #   @return [CArray]
   def wsum (weights, axis: nil)
-    return axis_wsum_wmean(weights, axis)[0] if axis
+    return axis_wsum_wmean(weights, axis, :wsum)[0] if axis
     wg = scatter_weights(weights)
     return kernel_weighted(wg)[0] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, 0.0) { |v, ws| v.wsum(ws) }
@@ -434,7 +434,7 @@ class CASegmentIterator < CAIterator
   #   @param weights [CArray]
   #   @return [CArray]
   def wmean (weights, axis: nil)
-    return axis_wsum_wmean(weights, axis)[1] if axis
+    return axis_wsum_wmean(weights, axis, :wmean)[1] if axis
     wg = scatter_weights(weights)
     return kernel_weighted(wg)[1] if MONOID_TYPES.include?(grouped.data_type)
     fold_weighted(wg, UNDEF) { |v, ws| v.wmean(ws) }

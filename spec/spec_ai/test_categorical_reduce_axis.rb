@@ -829,4 +829,19 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
                  h.group_by_category(cat).sum(axis: 0).to_a)
   end
+
+  # A negative axis counts from the end, as for every other axis: reduction.
+  def test_negative_axis_counts_from_the_end
+    h   = CArray.float64(3, 4).seq
+    cat = CArray.int32(3, 4).seq.mod(2).categorize
+    w   = CArray.float64(3, 4).seq
+    g   = h.group_by_category(cat)
+    %i[sum mean min max prod variance stddev accumulate count_not_masked].each do |op|
+      assert_equal g.send(op, axis: 1).to_a, g.send(op, axis: -1).to_a, op.to_s
+      assert_equal g.send(op, axis: 0).to_a, g.send(op, axis: -2).to_a, op.to_s
+    end
+    assert_equal g.wsum(w, axis: 1).to_a, g.wsum(w, axis: -1).to_a
+    err = assert_raise(ArgumentError) { g.sum(axis: -3) }
+    assert_equal "sum: axis -3 out of range for ndim 2", err.message
+  end
 end

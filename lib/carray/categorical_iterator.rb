@@ -312,13 +312,9 @@ class CACategoricalIterator < CASegmentIterator
   # the value's mask rather than from the fused moments kernel, which is
   # numeric-only and refused a complex, boolean or object payload for an
   # answer that never depended on the payload.
-  def axis_counts (axis)
+  def axis_counts (axis, op)
     h = @value
-    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
-      raise ArgumentError,
-            "group_by_category.count(axis: #{axis.inspect}): axis must be an " \
-            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
-    end
+    axis = checked_axis(axis, op)
     full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
     band    = h.shape.dup; band.delete_at(axis)
     out     = CArray.int64(*([@k] + band))
@@ -349,13 +345,9 @@ class CACategoricalIterator < CASegmentIterator
   # data can produce.  The axis: path materialises nothing else, so holding
   # this one thing was the odd choice; a caller who wants a fused kernel's
   # four answers shares them by keeping the result.
-  def axis_moments (axis)
+  def axis_moments (axis, op)
     h = @value
-    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
-      raise ArgumentError,
-            "group_by_category.<reduce>(axis: #{axis.inspect}): axis must be an " \
-            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
-    end
+    axis = checked_axis(axis, op)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)
     band          = h.shape.dup; band.delete_at(axis)
     out_shape     = [@k] + band
@@ -371,13 +363,13 @@ class CACategoricalIterator < CASegmentIterator
   # Axis-aware sum: the moments sum is already the core fold in the core's own
   # type, so it is handed back as is (an empty group cell carries identity 0.0).
   def axis_sum (axis)
-    axis_moments(axis)[:sum]
+    axis_moments(axis, :sum)[:sum]
   end
 
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
   # Matches flat #mean per fiber.
   def axis_mean (axis)
-    m   = axis_moments(axis)
+    m   = axis_moments(axis, :mean)
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN
     out[cnt.eq(0)] = UNDEF           # empty / all-masked -> MASKED
@@ -398,11 +390,7 @@ class CACategoricalIterator < CASegmentIterator
   # kernel is a natural follow-on if bench demands it.
   def axis_by_masked_copy (axis, op, out_data_type = CA_FLOAT64)
     h = @value
-    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
-      raise ArgumentError,
-            "group_by_category.#{op}(axis: #{axis.inspect}): axis must be an " \
-            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
-    end
+    axis = checked_axis(axis, op)
     full_c    = resolve_axis_codes(@cat.codes, h.shape, axis)
     band      = h.shape.dup; band.delete_at(axis)
     out       = CArray.new(out_data_type, [@k] + band)
@@ -428,16 +416,12 @@ class CACategoricalIterator < CASegmentIterator
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit
   # broadcast on the call site for 1-D or band-shape weights).  A cell
   # contributes iff its value AND its weight are present.
-  def axis_wsum_wmean (weights, axis)
+  def axis_wsum_wmean (weights, axis, op)
     h = @value
-    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
-      raise ArgumentError,
-            "group_by_category.wsum/wmean(axis: #{axis.inspect}): axis must " \
-            "be an Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
-    end
+    axis = checked_axis(axis, op)
     unless weights.is_a?(CArray) && weights.shape == h.shape
       raise ArgumentError,
-            "group_by_category.wsum/wmean(axis: #{axis}): weights.shape " \
+            "#{op}(axis: #{axis}): weights.shape " \
             "#{weights.respond_to?(:shape) ? weights.shape.inspect : weights.class} " \
             "must equal source.shape #{h.shape.inspect}. Wrap 1-D / band-shape " \
             "weights via `.broadcast_to(*source.shape)` before passing."
@@ -456,11 +440,7 @@ class CACategoricalIterator < CASegmentIterator
   # avoid conflating with sum's zero-identity memset).
   def axis_prod (axis)
     h = @value
-    unless axis.is_a?(Integer) && axis >= 0 && axis < h.ndim
-      raise ArgumentError,
-            "group_by_category.prod(axis: #{axis.inspect}): axis must be an " \
-            "Integer in [0, #{h.ndim}) for source h with shape #{h.shape}"
-    end
+    axis = checked_axis(axis, :prod)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)
     band          = h.shape.dup; band.delete_at(axis)
     out           = CArray.float64(*([@k] + band))
@@ -471,6 +451,15 @@ class CACategoricalIterator < CASegmentIterator
   # Broadcast `codes` to `h_shape` per PROPOSAL §2.2 3-case positional rule.
   # Returns a broadcast view of codes at h_shape (or codes itself for case B).
   # Raises ArgumentError with a message that enumerates all 3 accepted shapes.
+  # The axis of an axis: reduction, normalised against the source: a
+  # negative axis counts from the end, as everywhere else.
+  def checked_axis (axis, op)
+    unless axis.is_a?(Integer)
+      raise ArgumentError, "#{op}: axis must be an Integer (got #{axis.inspect})"
+    end
+    @value.normalize_axis(axis, op.to_s)
+  end
+
   def resolve_axis_codes (codes, h_shape, axis)
     ndim = h_shape.size
     band = h_shape.dup; band.delete_at(axis)
