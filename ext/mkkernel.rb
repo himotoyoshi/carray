@@ -3627,9 +3627,9 @@ module MkKernel
       # -> :all_masked semantics.
       io.puts "  ca_size_t min_count = -1;"
       io.puts "  if ( ! NIL_P(rmin_count) ) {"
-      io.puts "    ca_size_t mc_user = NUM2SIZE(rmin_count);"
+      io.puts "    ca_size_t mc_user = (ca_size_t) ca_integer_arg(rmin_count, \"min_count\", NULL);"
       io.puts "    if ( mc_user < 0 ) {"
-      io.puts %Q[      rb_raise(rb_eArgError, "#{name}_ki: :min_count must be non-negative, got %lld", (long long) mc_user);]
+      io.puts %Q[      rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %lld)", ca_calling_method_name(), (long long) mc_user);]
       io.puts "    }"
       io.puts "    /* :min_count = 0 collapses to legacy default (any 1 valid). */"
       io.puts "    if ( mc_user > 0 ) min_count = mc_user;"
@@ -4875,11 +4875,12 @@ module MkKernel
       io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
       io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
       io.puts "  }"
-      io.puts "  ca_size_t kth = NUM2SIZE(vkth);"
+      io.puts "  ca_size_t kth_raw = (ca_size_t) ca_integer_arg(vkth, \"kth\", NULL);"
+      io.puts "  ca_size_t kth = kth_raw;"
       io.puts "  ca_size_t axis_n = src->dim[axis];"
       io.puts "  if ( kth < 0 ) kth += axis_n;"
       io.puts "  if ( kth < 0 || kth >= axis_n ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: kth %lld out of range for axis size %lld", (long long) NUM2SIZE(vkth), (long long) axis_n);]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: kth %lld out of range for length %lld", ca_calling_method_name(), (long long) kth_raw, (long long) axis_n);]
       io.puts "  }"
       io.puts "  switch ( src->data_type ) {"
       k[:source].each do |s|

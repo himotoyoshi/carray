@@ -1,5 +1,6 @@
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_integer_arg */
 #include "ca_kernel_iterator.h"
 #include "ca_obj_face.h"
 #include <math.h>
@@ -612,7 +613,7 @@ rb_ca_topk_index (VALUE self, VALUE rn, VALUE raxis, int desc, const char *name)
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   long a = rb_ca_normalize_axis_value(self, raxis, name);
-  long n_val = NUM2LONG(rn);
+  long n_val = ca_integer_arg(rn, "n", name);
   long dim_a = (long) ca->dim[a];
   long cap = (n_val < dim_a) ? n_val : dim_a;
   if ( cap < 0 ) {

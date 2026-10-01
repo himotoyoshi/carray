@@ -286,7 +286,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     axes = win.instance_variable_get(:@window_axes)
     core = ->(op, mc) { win.send(:sliding_view).send(op, axis: axes, min_count: mc) }
     %i[sum prod min max mean].each do |op|
-      [-1, true, "2"].each do |mc|
+      [-1, 1.5, true, "2"].each do |mc|
         expected = begin
                      core.(op, mc)
                      nil
@@ -296,7 +296,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
         assert_not_nil expected, "the core accepted #{op} min_count: #{mc.inspect}"
         assert_raise(expected, "#{op} min_count: #{mc.inspect}") { win.send(op, min_count: mc) }
       end
-      [0, 1.5, 9].each do |mc|
+      [0, 2, 9].each do |mc|
         assert_equal core.(op, mc).to_a, win.send(op, min_count: mc).to_a, "#{op} min_count: #{mc}"
       end
     end

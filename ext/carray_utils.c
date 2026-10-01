@@ -508,17 +508,25 @@ ca_calling_method_name (void)
   return s;
 }
 
-/* The Integer value of an `axis` argument.  Anything else -- a Float
-   included, which NUM2LONG would truncate -- is a TypeError.  `name`
-   names the method in the message; NULL uses the method the user called. */
+/* The Integer value of an integer argument (`axis`, `kth`, `min_count`,
+   ...).  Anything else -- a Float included, which NUM2LONG would truncate
+   -- is a TypeError.  `arg` is the argument's name; `name` names the method
+   in the message, NULL for the method the user called. */
+long
+ca_integer_arg (VALUE v, const char *arg, const char *name)
+{
+  if ( ! RB_INTEGER_TYPE_P(v) ) {
+    rb_raise(rb_eTypeError, "%s: %s must be an Integer (got %"PRIsVALUE")",
+             name ? name : ca_calling_method_name(), arg, rb_obj_class(v));
+  }
+  return NUM2LONG(v);
+}
+
+/* ca_integer_arg for an `axis` argument. */
 long
 ca_axis_integer (VALUE raxis, const char *name)
 {
-  if ( ! RB_INTEGER_TYPE_P(raxis) ) {
-    rb_raise(rb_eTypeError, "%s: axis must be an Integer (got %"PRIsVALUE")",
-             name ? name : ca_calling_method_name(), rb_obj_class(raxis));
-  }
-  return NUM2LONG(raxis);
+  return ca_integer_arg(raxis, "axis", name);
 }
 
 /* Self-independent kernel: normalize `raw` against `ndim`, returning a

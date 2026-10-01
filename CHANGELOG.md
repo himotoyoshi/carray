@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `min_count:`, `kth` (`partition`, `partition_copy`,
+  `partition_index`) and `n` (`nlargest`, `nsmallest` and their `_index`
+  forms) take an Integer and nothing else, as `axis:` does: `1.5` raises
+  `TypeError` instead of being truncated to `1`. `min_count: nil` is the
+  same as leaving it out, for `median` and `percentile` too (it used to
+  raise there). Errors name the method you called, in one form:
+  `"<method>: min_count must be non-negative (got -1)"` and
+  `"<method>: kth 4 out of range for length 4"`.
+
 - Fix: the reductions of `windows` (`sum`, `prod`, `min`, `max`, `mean`,
   `all`, `any`, `accumulate`) refuse a `min_count:` that the core
   reductions refuse. `min_count: -1` or `min_count: true` used to be

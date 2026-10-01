@@ -41,6 +41,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_integer_arg, ca_calling_method_name */
 #include <math.h>
 
 /* Externals (link-time; kept out of carray.h to keep the header lean). */
@@ -792,9 +793,11 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "median: unsupported data_type %d", dt);
 
-  long min_count = NUM2LONG(rmin_count);
+  long min_count = NIL_P(rmin_count) ? 0
+                  : ca_integer_arg(rmin_count, "min_count", NULL);
   if ( min_count < 0 )
-    rb_raise(rb_eArgError, "min_count must be non-negative; got %ld", min_count);
+    rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
+             ca_calling_method_name(), min_count);
   int keep_axis = RTEST(rkeep);
 
   if ( !NIL_P(raxis) ) {
@@ -1210,9 +1213,11 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
 
-  long min_count = NUM2LONG(rmin_count);
+  long min_count = NIL_P(rmin_count) ? 0
+                  : ca_integer_arg(rmin_count, "min_count", NULL);
   if ( min_count < 0 )
-    rb_raise(rb_eArgError, "min_count must be non-negative; got %ld", min_count);
+    rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
+             ca_calling_method_name(), min_count);
 
   VALUE pers = pct_flatten_validate_pers(rb_ary_new_from_values(argc, argv));
   pct_validate_method(method);
