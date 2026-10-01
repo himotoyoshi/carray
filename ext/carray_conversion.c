@@ -467,6 +467,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
 {
   CArray *ca;
 
+  rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_object_type(ca) ) {
