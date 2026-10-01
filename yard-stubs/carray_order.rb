@@ -30,12 +30,15 @@ class CArray
   # sort / sort_copy stubs live in yard-stubs/carray_sort.rb (same
   # file split as ext/carray_sort.c <-> ext/carray_order.c).
 
-  # @overload partition(kth, axis: 0, masked_position: :last)
+  # @overload partition(kth, axis: nil, masked_position: :last)
   #   Returns a `CARemap` view of `self` permuted along `axis` so that
   #   the element at fiber-local position `kth` is in its final sorted
   #   place, every element before it is `<=` it, and every element
   #   after it is `>=` it. Order within the two regions is unspecified.
   #   Average `O(n)` per fiber via quickselect.
+  #
+  #   Without `axis:` (or with `axis: nil`) `self` is flattened and
+  #   treated as one fiber, as {#sort} does; the result is 1-D.
   #
   #   Negative `kth` counts from the end of the fiber
   #   (`-self.shape[axis] <= kth < self.shape[axis]`).
@@ -52,15 +55,16 @@ class CArray
   #   among unmasked values.
   #
   #   @param kth [Integer] target fiber-local position along `axis`.
-  #   @param axis [Integer]
+  #   @param axis [Integer, nil] `nil` partitions the whole array.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] `CARemap` view of `self`.
   #   @raise [ArgumentError] when `kth` is out of range.
-  def partition(kth, axis: 0, masked_position: :last); end
+  def partition(kth, axis: nil, masked_position: :last); end
 
-  # @overload partition_copy(kth, axis: 0, masked_position: :last)
-  #   Returns a fresh entity `CArray` with the same shape as `self`,
-  #   partitioned along `axis` by the same rule as {#partition}.
+  # @overload partition_copy(kth, axis: nil, masked_position: :last)
+  #   Returns a fresh entity `CArray` partitioned along `axis` by the
+  #   same rule as {#partition}: the shape of `self`, or 1-D when `axis`
+  #   is omitted.
   #   Bypasses the `CARemap` scatter layer for cases where an entity
   #   is wanted directly. Same dispatch (numeric / boolean / `CA_FIXLEN` /
   #   `CA_OBJECT`), same `kth` and `masked_position:` semantics.
@@ -71,11 +75,11 @@ class CArray
   #   finite cells; otherwise the kth cell is already NaN.
   #
   #   @param kth [Integer]
-  #   @param axis [Integer]
+  #   @param axis [Integer, nil] `nil` partitions the whole array.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] fresh entity.
   #   @raise [ArgumentError] same conditions as {#partition}.
-  def partition_copy(kth, axis: 0, masked_position: :last); end
+  def partition_copy(kth, axis: nil, masked_position: :last); end
 
   # @overload order(axis: nil, descending: false, method: :ordinal)
   #   Returns each cell's rank among the other cells along `axis`

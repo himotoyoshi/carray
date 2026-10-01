@@ -61,7 +61,7 @@ class TestIterSourceKindRegistered < Test::Unit::TestCase
   end
 
   def test_order_kernel
-    assert_equal [[0, 0, 0], [1, 1, 1]], @view.sort_index.to_a
+    assert_equal [[0, 0, 0], [1, 1, 1]], @view.sort_index(axis: 0).to_a
   end
 
   # A slice worked even before the hook (the CABlock is classified on its

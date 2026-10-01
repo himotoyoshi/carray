@@ -111,7 +111,7 @@ ca_quickselect_bytes (char *buf, ca_size_t lo, ca_size_t hi,
 #undef QSCMP
 }
 
-/* partition_copy(kth, axis: 0) — eager counterpart to `partition(kth,
+/* partition_copy(kth, axis:) — eager counterpart to `partition(kth,
  * axis:)`.  Returns a fresh entity CArray with the kth fiber-local
  * position holding the kth-smallest value.  Average O(n) per fiber via
  * quickselect.  Mask handling, axis kwarg, kth validation: identical to
@@ -310,15 +310,20 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   return obj;
 }
 
-/* Ruby entry: partition_copy(kth, axis: 0, masked_position: :last) */
+/* Ruby entry: partition_copy(kth, axis: nil, masked_position: :last).
+   No axis means the whole array, as for sort_copy: flatten first. */
 static VALUE
 rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
 {
   VALUE vkth, rkw = Qnil;
-  VALUE vaxis = INT2NUM(0);
+  VALUE vaxis = Qnil;
   VALUE vmasked_position = Qnil;
   rb_scan_args(argc, argv, "1:", &vkth, &rkw);
   rb_scan_options(rkw, "axis,masked_position", &vaxis, &vmasked_position);
+  if ( NIL_P(vaxis) ) {
+    self  = rb_ca_flatten(self);
+    vaxis = INT2NUM(0);
+  }
 
   int masked_last = 1;
   if ( !NIL_P(vmasked_position) ) {
@@ -337,7 +342,7 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
   return rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
 }
 
-/* partition(kth, axis: 0, masked_position: :last)
+/* partition(kth, axis: nil, masked_position: :last)
  *
  * Returns a CARemap view of +self+ partitioned along +axis+ such that
  * the cell at the kth fiber-local position contains the kth-smallest
@@ -347,7 +352,7 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
  * :partition).
  *
  * Signature mirrors rb_ca_sorted_view: positional kth + optional axis: /
- * masked_position: kwargs (default 0 / :last).  Mask handling mirrors
+ * masked_position: kwargs (default nil = whole array / :last).  Mask handling mirrors
  * {sort}: masked cells are an incomparable sentinel clustered at
  * masked_position:, excluded from the kth-selection; a kth landing in
  * the masked cluster needs no selection (unspecified order, same
@@ -359,7 +364,7 @@ static VALUE
 rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
 {
   VALUE vkth, rkw = Qnil;
-  VALUE vaxis = INT2NUM(0);
+  VALUE vaxis = Qnil;
   VALUE vmasked_position = Qnil;
 
   rb_scan_args(argc, argv, "1:", &vkth, &rkw);
@@ -384,8 +389,14 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* CA_FIXLEN flows through the same partition_addr_ki fixlen dialect
-     as numeric; masked_position: applies uniformly across data types. */
-  VALUE target = self;
+     as numeric; masked_position: applies uniformly across data types.
+     No axis means the whole array, as for sort: partition the flattened
+     view. */
+  volatile VALUE target = self;
+  if ( NIL_P(vaxis) ) {
+    target = rb_ca_flatten(self);
+    vaxis  = INT2NUM(0);
+  }
 
   /* partition_addr_ki_mp validates axis + kth, splits masked cells to
      masked_position:, and quickselects per fiber over the unmasked
