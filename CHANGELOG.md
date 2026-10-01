@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the reductions of `windows` (`sum`, `prod`, `min`, `max`, `mean`,
+  `all`, `any`, `accumulate`) refuse a `min_count:` that the core
+  reductions refuse. `min_count: -1` or `min_count: true` used to be
+  taken as no `min_count:` at all.
+
 - Change: an out-of-range axis raises `ArgumentError` everywhere. The
   reductions (`sum`, `mean`, `min_index`, `count`, `first`, ... with
   `axis:`), `normalize_axes`, `axis2addr` and `take_along_axis` raised

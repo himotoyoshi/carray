@@ -471,6 +471,9 @@ class CAWindowIterator < CAIterator
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
+    # Anything but a plain count goes to the core, which owns the rule for
+    # what min_count accepts; answering it here would be a second rule.
+    return nil unless min_count.nil? || (min_count.is_a?(Integer) && min_count >= 0)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
     return nil if neutral_value(op).nil?
 
