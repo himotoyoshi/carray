@@ -40,9 +40,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `Float()` reads it, and one that is not a number raises
   `ArgumentError`, as it already did for an integer array. `"x"` and
   `""` used to become `0.0` (through `[]=`, `fill`, `CA_FLOAT64([...])`,
-  `strip_mask` and casts from object arrays alike). `" 3 "`, `"1e3"`,
+  `strip_mask` and the lazy `as_type` alike). `" 3 "`, `"1e3"`,
   `"0x10"`, `"nan"` and `"inf"` still read as numbers, and a complex
-  array also takes `"1+2i"`.
+  array also takes `"1+2i"`. `to_type` from an object array is
+  unchanged: a cell it cannot read as a number becomes `UNDEF`.
 
 - Change: `strip_mask(UNDEF)` and `unmask(UNDEF)` leave the masked cells
   masked, as storing `UNDEF` does. They used to fill them with `0`.
