@@ -3,8 +3,7 @@
   Utility helpers shared across the `ext/` C files: iterator setup / loop count
   variadic helpers, Range parsing (`ca_parse_range` family), axis
   normalization primitives (`ca_normalize_axis*` + Ruby-facing
-  `normalize_axis` / `normalize_axes`), and text-scan helpers
-  (`_scan_float` / `_scan_int`) for the text I/O layer.
+  `normalize_axis` / `normalize_axes`).
 
   YARD signatures live in yard-stubs/carray_utils.rb; this file
   carries implementation-only prose.
@@ -699,67 +698,6 @@ rb_ca_normalize_axes (int argc, VALUE *argv, VALUE self)
   return out;
 }
 
-/* `CArray._scan_float(str, fill_value=nil)` — parses `str` as a
- * single double via `sscanf("%lf")`. Returns `fill_value` (or NaN
- * when `fill_value` is nil) if `str` is nil or unparseable. Internal
- * helper for text-format I/O readers. */
-
-static VALUE
-rb_ca_s_scan_float (int argc, VALUE *argv, VALUE self)
-{
-  volatile VALUE rstr, rfval;
-  double value;
-  int count;
-
-  rb_scan_args(argc, argv, "11", (VALUE *)&rstr, (VALUE *)&rfval);
-
-  if ( NIL_P(rstr) ) {
-    return ( NIL_P(rfval) ) ? rb_float_new(0.0/0.0) : rfval;
-  }
-
-  Check_Type(rstr, T_STRING);
-
-  count = sscanf(StringValuePtr(rstr), "%lf", &value);
-
-  if ( count == 1 ) {
-    return rb_float_new(value);
-  }
-  else {
-    return ( NIL_P(rfval) ) ? rb_float_new(0.0/0.0) : rfval;
-  }
-}
-
-/* `CArray._scan_int(str, fill_value=nil)` — parses `str` as a single
- * integer via `sscanf("%li")` (accepts `0x`, `0`, and decimal
- * prefixes). Returns `fill_value` (or 0 when `fill_value` is nil) if
- * `str` is nil or unparseable. Internal helper for text-format I/O
- * readers. */
-
-static VALUE
-rb_ca_s_scan_int (int argc, VALUE *argv, VALUE self)
-{
-  volatile VALUE rstr, rfval;
-  long value;
-  int count;
-
-  rb_scan_args(argc, argv, "11", (VALUE *) &rstr, (VALUE *) &rfval);
-
-  if ( NIL_P(rstr) ) {
-    return ( NIL_P(rfval) ) ? INT2NUM(0) : rfval;
-  }
-
-  Check_Type(rstr, T_STRING);
-
-  count = sscanf(StringValuePtr(rstr), "%li", &value);
-
-  if ( count == 1 ) {
-    return SIZE2NUM(value);
-  }
-  else {
-    return ( NIL_P(rfval) ) ? INT2NUM(0) : rfval;
-  }
-}
-
 static const struct {
   const char *name;
   int  data_type;
@@ -1045,11 +983,6 @@ Init_carray_utils (void)
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");
-
-  rb_define_singleton_method(rb_cCArray, "_scan_float",
-           rb_ca_s_scan_float, -1);
-  rb_define_singleton_method(rb_cCArray, "_scan_int",
-           rb_ca_s_scan_int, -1);
 
   rb_define_singleton_method(rb_cCArray, "guess_type_and_bytes",
                              rb_ca_s_guess_type_and_bytes, -1);

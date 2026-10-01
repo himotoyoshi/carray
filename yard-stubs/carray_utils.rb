@@ -67,31 +67,5 @@ class CArray
     def guess_type_and_bytes(type_spec, bytes = nil); end
 
     # @!endgroup
-
-    # @!group String scanning (internal)
-
-    # @overload _scan_float(str, fill_value = nil)
-    #   Parses `str` as a single double-precision float. Returns
-    #   `fill_value` (or `NaN` if `fill_value` is nil) when `str` is
-    #   `nil` or unparseable. Internal helper used by text-format I/O
-    #   readers; end users should prefer Ruby's `Float()` /
-    #   `String#to_f`.
-    #   @param str [String, nil]
-    #   @param fill_value [Float, nil]
-    #   @return [Float]
-    #   @api private
-    def _scan_float(str, fill_value = nil); end
-
-    # @overload _scan_int(str, fill_value = nil)
-    #   Parses `str` as a single integer. Returns `fill_value`
-    #   (or `0` if `fill_value` is nil) when `str` is `nil` or
-    #   unparseable. Internal helper used by text-format I/O readers.
-    #   @param str [String, nil]
-    #   @param fill_value [Integer, nil]
-    #   @return [Integer]
-    #   @api private
-    def _scan_int(str, fill_value = nil); end
-
-    # @!endgroup
   end
 end

@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray._scan_float` and `CArray._scan_int` are removed. They
+  were internal helpers (`@api private`) that nothing called. To parse a
+  number from a String, use `Float(str, exception: false)` or
+  `Integer(str, exception: false)`, which return `nil` where these
+  returned the fill value.
+
 - Change: a reduction's `fill_value:` is what storing it into the result
   would give, with or without `axis:`. Without `axis:` it used to come
   back as given: `uint8` `accumulate(min_count: 256, fill_value: -9999)`
