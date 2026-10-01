@@ -4919,10 +4919,10 @@ module MkKernel
     # wrapper).  When public_method: is set, emit a -1-argc
     # entry that parses `axis:` (and `kind:` for has_kind, and
     # `masked_position:` for mask_self: :sentinel, and `method:` for
-    # :rank) kwarg with default 0 / :quick / :last / :ordinal and
-    # dispatches to the appropriate positional entry.  For :partition
-    # algorithm, kth is accepted as a single positional argument
-    # before the kwarg.
+    # :rank) kwarg with default nil (= whole array) / :quick / :last /
+    # :ordinal and dispatches to the appropriate positional entry.
+    # For :partition algorithm, kth is accepted as a single positional
+    # argument before the kwarg.
     if k[:public_method]
       legacy_name = k[:public_method].to_s
       io.puts
@@ -4949,7 +4949,15 @@ module MkKernel
       scan_targets << "&rmasked_position" if mask_sentinel
       scan_targets << "&rmethod" if rank
       io.puts "  rb_scan_options(ropt, \"#{scan_keys.join(",")}\", #{scan_targets.join(", ")});"
-      io.puts "  if ( NIL_P(raxis) ) raxis = INT2NUM(0);   /* default axis */"
+      # No axis means the whole array, as for sort: flatten and walk the
+      # single fiber.  rank_index keeps self's shape (a rank belongs to a
+      # cell, as for order); the position lists keep the flat shape.
+      io.puts "  volatile VALUE whole_src = Qnil;" if rank
+      io.puts "  if ( NIL_P(raxis) ) {   /* no axis: the whole array */"
+      io.puts "    whole_src = self;" if rank
+      io.puts "    self  = rb_ca_flatten(self);"
+      io.puts "    raxis = INT2NUM(0);"
+      io.puts "  }"
       if rank
         # method: :ordinal (default) / :dense -> dense int.  :ordinal
         # assigns every cell a distinct rank (ties broken by original
@@ -4987,7 +4995,7 @@ module MkKernel
         io.puts "  }"
       end
       if partition
-        # partition_index(kth, axis: 0, masked_position: :last) -- kth
+        # partition_index(kth, axis: nil, masked_position: :last) -- kth
         # positional, axis/masked_position kwargs.
         io.puts "  if ( argc != 1 ) {"
         io.puts %Q[    rb_raise(rb_eArgError, "#{legacy_name}: wrong number of positional arguments (given %d, expected 1: kth)", argc);]
@@ -4998,7 +5006,7 @@ module MkKernel
           io.puts "  return rb_ca_#{name}_ki(self, raxis, argv[0]);"
         end
       else
-        # sort_index(axis: 0, kind: :quick, masked_position: :last) --
+        # sort_index(axis: nil, kind: :quick, masked_position: :last) --
         # no positional, kwargs only.
         io.puts "  if ( argc != 0 ) {"
         io.puts %Q[    rb_raise(rb_eArgError, "#{legacy_name}: positional args no longer accepted (given %d args); use axis:/kind: kwargs", argc);]
@@ -5019,7 +5027,17 @@ module MkKernel
         if mask_sentinel
           io.puts "  return #{name}_ki_dispatch(self, raxis, do_stable, masked_last);"
         elsif rank
-          io.puts "  return #{name}_ki_dispatch(self, raxis, do_stable, dense);"
+          io.puts "  VALUE out = #{name}_ki_dispatch(self, raxis, do_stable, dense);"
+          io.puts "  if ( ! NIL_P(whole_src) ) {"
+          io.puts "    CArray *src;"
+          io.puts "    VALUE shape_argv[CA_RANK_MAX];"
+          io.puts "    GetCArray(whole_src, src);"
+          io.puts "    for ( int k = 0; k < src->ndim; k++ ) {"
+          io.puts "      shape_argv[k] = SIZE2NUM(src->dim[k]);"
+          io.puts "    }"
+          io.puts "    out = rb_ca_reshape((int) src->ndim, shape_argv, out);"
+          io.puts "  }"
+          io.puts "  return out;"
         else
           io.puts "  return do_stable ? rb_ca_#{name}_ki_stable(self, raxis)"
           io.puts "                   : rb_ca_#{name}_ki_quick(self, raxis);"
@@ -7647,7 +7665,7 @@ MkKernel.sort :sort_index,
   nan_policy:      :end,
   fallback:        :raise,
   mask_self:       :sentinel,  # masked cells sort to masked_position: :first/:last (default :last)
-  public_method: :sort_index,  # binds public sort_index(axis: 0, masked_position: :last) via _kw trampoline
+  public_method: :sort_index,  # binds public sort_index(axis: nil, masked_position: :last) via _kw trampoline
   c_callable:      true          # extern linkage for carray_order.c (nlargest / order family)
 
 # sort_addr: per-axis argsort returning view-flat addresses (=
@@ -7682,7 +7700,7 @@ MkKernel.sort :partition_index,
   fallback:        :raise,
   algorithm:       :partition,
   mask_self:       :sentinel,  # masked cells sort to masked_position: :first/:last (default :last)
-  public_method: :partition_index, # binds partition_index(kth, axis: 0, masked_position: :last) via _kw trampoline
+  public_method: :partition_index, # binds partition_index(kth, axis: nil, masked_position: :last) via _kw trampoline
   c_callable:      true              # extern linkage for carray_order.c (nlargest / nsmallest)
 
 # partition_addr: view-flat-address variant of partition_index, parallel
@@ -7724,7 +7742,7 @@ MkKernel.sort :rank_index,
   fallback:        :raise,
   algorithm:       :rank,
   mask_self:       :skip,
-  public_method: :rank_index,  # binds public rank_index(axis: 0) via _kw trampoline
+  public_method: :rank_index,  # binds public rank_index(axis: nil) via _kw trampoline
   c_callable:      true          # extern linkage for carray_order.c (order method)
 
 # ---- search family ------------------------------------------------------

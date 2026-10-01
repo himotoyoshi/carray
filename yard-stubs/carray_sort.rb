@@ -115,14 +115,15 @@ class CArray
   #     `:stable`.
   def sort_addr(axis: nil, kind: :quick, masked_position: :last); end
 
-  # @overload sort_index(axis: 0, kind: :quick, masked_position: :last)
+  # @overload sort_index(axis: nil, kind: :quick, masked_position: :last)
   #   Returns, for each fiber along `axis`, the positions within the
   #   fiber that put it in ascending order: `:int64`, shaped like
   #   `self`. For a 1-D array, `a[a.sort_index]` is `a` sorted.
   #
-  #   Without `axis:` the fibers run along axis `0`. This differs
-  #   from {#sort}, which flattens `self` when `axis` is omitted; the
-  #   two agree on a 1-D array.
+  #   Without `axis:` (or with `axis: nil`) `self` is flattened and
+  #   treated as one fiber, as {#sort} does: the result is 1-D with
+  #   `self.elements` entries, and `a.flatten[a.sort_index]` is
+  #   `a.sort`.
   #
   #   The sort is **stable**: cells that compare equal keep their
   #   input order, whichever `kind:` is chosen, so sorting by one key
@@ -141,15 +142,15 @@ class CArray
   #   Takes numeric data types, boolean, `CA_FIXLEN` (byte order),
   #   `CA_OBJECT` (`<=>` per pair), and an ordered Face such as
   #   `CATime`. Complex values have no order.
-  #   @param axis [Integer] axis along which fibers run; negative
-  #     counts from the end.
+  #   @param axis [Integer, nil] axis along which fibers run; negative
+  #     counts from the end. `nil` sorts the whole array.
   #   @param kind [Symbol] `:quick` or `:stable`.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] `:int64` positions within each fiber.
   #   @raise [ArgumentError] when `kind:` is neither `:quick` nor
   #     `:stable`, or `axis` is out of range.
   #   @raise [CArray::DataTypeError] for a complex `data_type`.
-  def sort_index(axis: 0, kind: :quick, masked_position: :last); end
+  def sort_index(axis: nil, kind: :quick, masked_position: :last); end
 
   # @!group Index and address conversion
 

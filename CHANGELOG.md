@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `sort_index`, `rank_index`, `partition_index`, `partition` and
+  `partition_copy` without `axis:` (or with `axis: nil`) work on the
+  whole array, as `sort` and `order` already did. They used to work
+  along axis 0. On a 1-D array nothing changes. On an N-D array,
+  `sort_index` / `partition_index` / `partition` / `partition_copy`
+  return a 1-D result (`a.flatten[a.sort_index]` is `a.sort`) and
+  `rank_index` ranks every cell against the whole array, keeping the
+  shape. To keep the old result, pass `axis: 0`.
+
 - Fix: `unmask` and `strip_mask` with `method: :forward` or `:backward`
   raise `ArgumentError` for a negative `axis:` past `-ndim`. On a 2-D
   array, `axis: -3` filled along axis 1 and `axis: -4` along axis 0.
