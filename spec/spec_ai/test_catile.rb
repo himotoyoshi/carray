@@ -195,6 +195,7 @@ class TestCATile < Test::Unit::TestCase
   # ------------------------------------------------------------------
 
   def test_descriptor_1d
+    omit "requires CARRAY_DEV_BUILD" unless CATile.method_defined?(:_tile_descriptor)
     a = CArray.int32(5).seq
     v = a.tile(3)
     d = v._tile_descriptor
@@ -204,6 +205,7 @@ class TestCATile < Test::Unit::TestCase
   end
 
   def test_descriptor_2d
+    omit "requires CARRAY_DEV_BUILD" unless CATile.method_defined?(:_tile_descriptor)
     a = CArray.int32(2, 3).seq
     v = a.tile(4, 5)
     d = v._tile_descriptor

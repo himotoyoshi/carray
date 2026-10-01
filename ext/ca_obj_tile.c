@@ -584,6 +584,7 @@ rb_ca_tile_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only accessor returning the tile descriptor as a Hash.
    Naming: leading underscore signals internal use. */
 static VALUE
@@ -605,6 +606,7 @@ rb_ca_tile_descriptor (VALUE self)
   rb_hash_aset(hash, ID2SYM(rb_intern("ndim")), INT2NUM(ca->ndim));
   return hash;
 }
+#endif
 
 void
 Init_ca_obj_tile (void)
@@ -624,7 +626,9 @@ Init_ca_obj_tile (void)
   rb_define_method(rb_cCATile, "initialize_copy",
                                       rb_ca_tile_initialize_copy, 1);
 
+#ifdef CARRAY_DEV_BUILD
   /* Debug-only descriptor accessor. */
   rb_define_method(rb_cCATile, "_tile_descriptor",
                                       rb_ca_tile_descriptor, 0);
+#endif
 }

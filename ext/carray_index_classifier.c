@@ -886,6 +886,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
   }
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* -------------------------------------------------------------------- */
 /* Debug / test surface: CArray._scan_index_v2(dim_array, idx_array)
    returns a plain [type_int, index_array] pair rather than the
@@ -1011,11 +1012,14 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
 
   return rb_ary_new3(2, INT2NUM(info.type), rindex);
 }
+#endif
 
 void
 Init_carray_index_classifier (void)
 {
   ca_classifier_sym_cache_init();
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "_scan_index_v2",
                              rb_ca_s_scan_index_v2, 2);
+#endif
 }

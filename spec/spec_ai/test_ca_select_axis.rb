@@ -24,7 +24,7 @@ require_relative "../../lib/carray"
 class TestCASelectAxis < Test::Unit::TestCase
 
   def teardown
-    CArray._csa_bypass = false
+    CArray._csa_bypass = false if CArray.respond_to?(:_csa_bypass=)
   end
 
   # ---------------------------------------------------------------
@@ -125,21 +125,23 @@ class TestCASelectAxis < Test::Unit::TestCase
   # ---------------------------------------------------------------
 
   def test_csa_bypass_routes_to_cagrid
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:_csa_bypass=)
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     CArray._csa_bypass = true
     assert_equal CAGrid, a[m, nil].class
   ensure
-    CArray._csa_bypass = false
+    CArray._csa_bypass = false if CArray.respond_to?(:_csa_bypass=)
   end
 
   def test_csa_bypass_predicate
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:_csa_bypass=)
     CArray._csa_bypass = false
     assert_equal false, CArray._csa_bypass?
     CArray._csa_bypass = true
     assert_equal true, CArray._csa_bypass?
   ensure
-    CArray._csa_bypass = false
+    CArray._csa_bypass = false if CArray.respond_to?(:_csa_bypass=)
   end
 
   # ---------------------------------------------------------------
@@ -147,6 +149,7 @@ class TestCASelectAxis < Test::Unit::TestCase
   # ---------------------------------------------------------------
 
   def test_numerical_match_with_cagrid_2d
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:_csa_bypass=)
     a = CArray.int(8, 5).seq
     m = CArray.boolean(8).tap { |__a| __a[] = [1, 0, 1, 1, 0, 1, 0, 1] }
     # NOTE: negative-range endpoints (e.g. `1..-1`) intentionally excluded
@@ -171,6 +174,7 @@ class TestCASelectAxis < Test::Unit::TestCase
   end
 
   def test_numerical_match_with_cagrid_3d
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:_csa_bypass=)
     a = CArray.int(4, 3, 2).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     csa = a[m, 1..2, nil]
