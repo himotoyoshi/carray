@@ -112,6 +112,20 @@ ca_quickselect_bytes (char *buf, ca_size_t lo, ca_size_t hi,
 #undef QSCMP
 }
 
+/* The kth of a partition along a fiber of length n: an Integer in
+   -n <= kth < n, negative counting from the end. */
+static ca_size_t
+partition_kth (ca_size_t n, VALUE vkth)
+{
+  ca_size_t raw = (ca_size_t) ca_integer_arg(vkth, "kth", NULL);
+  ca_size_t kth = ( raw < 0 ) ? raw + n : raw;
+  if ( kth < 0 || kth >= n ) {
+    rb_raise(rb_eArgError, "%s: kth %lld out of range for length %lld",
+             ca_calling_method_name(), (long long) raw, (long long) n);
+  }
+  return kth;
+}
+
 /* partition_copy(kth, axis:) — eager counterpart to `partition(kth,
  * axis:)`.  Returns a fresh entity CArray with the kth fiber-local
  * position holding the kth-smallest value.  Average O(n) per fiber via
@@ -144,15 +158,8 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   /* Normalize axis. */
   int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL), cat->ndim, NULL);
 
-  /* Normalize kth (-dim[axis] <= kth < dim[axis], negative counts from end). */
   ca_size_t fiber_n = cat->dim[axis];
-  ca_size_t kth = (ca_size_t) NUM2SSIZET(vkth);
-  if ( kth < 0 ) kth += fiber_n;
-  if ( kth < 0 || kth >= fiber_n ) {
-    rb_raise(rb_eArgError,
-             "partition_copy: kth %ld out of range for axis %d (dim=%ld)",
-             (long) NUM2SSIZET(vkth), axis, (long) fiber_n);
-  }
+  ca_size_t kth = partition_kth(fiber_n, vkth);
 
   /* CA_OBJECT branch: partition_index_ki carries the rb_funcall(<=>)
    * comparator.  Build the entity via partition_index_ki ->
@@ -287,6 +294,13 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ! ca_has_mask(ca) ) {
     return rb_ca_partition_copy_c(self, vkth, vaxis);
+  }
+  /* Check axis and kth here, so a bad one is reported as partition_copy's
+     rather than as the partition this delegates to. */
+  {
+    int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL),
+                                             ca->ndim, NULL);
+    partition_kth(ca->dim[axis], vkth);
   }
   /* rb_ca_partitioned_view's rb_scan_args "1:" pattern needs call-frame
      keyword-splat state, only set by full Ruby method dispatch -- a raw
