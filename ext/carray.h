@@ -1081,6 +1081,10 @@ extern VALUE rb_cCArrayObject;
 #  endif
 #endif
 
+/* A string as a complex cell: a real number read as Float() reads it
+   (nan / inf included), else as Complex() does; anything else raises. */
+double complex ca_str_to_cmplx (VALUE str);
+
 static inline double complex
 rb_carray_num2cmplx (VALUE num)
 {
@@ -1089,6 +1093,9 @@ rb_carray_num2cmplx (VALUE num)
   }
   if ( RB_FLOAT_TYPE_P(num) || RB_INTEGER_TYPE_P(num) ) {
     return (double complex) NUM2DBL(num);
+  }
+  if ( RB_TYPE_P(num, T_STRING) ) {
+    return ca_str_to_cmplx(num);
   }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);

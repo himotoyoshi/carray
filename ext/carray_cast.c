@@ -109,7 +109,9 @@ OBJ2DBL (VALUE val)
     if ( ca_str_nonfinite(str, &d) ) {
       return d;
     }
-    return rb_cstr_to_dbl(str, 0);
+    /* As Float(): a string that is not a number raises, as storing one
+       into an integer array does through Integer(). */
+    return NUM2DBL(rb_Float(rstr));
   }
   default:
     return NUM2DBL(rb_Float(val));
@@ -129,6 +131,25 @@ static VALUE
 ca_kernel_integer (VALUE v)
 {
   return rb_Integer(v);
+}
+
+double complex
+ca_str_to_cmplx (VALUE str)
+{
+  volatile VALUE rstr = rb_funcall(str, rb_intern("strip"), 0);
+  volatile VALUE c;
+  double d;
+  int state = 0;
+  if ( ca_str_nonfinite(StringValuePtr(rstr), &d) ) {
+    return (double complex) d;
+  }
+  c = rb_protect(ca_kernel_float, rstr, &state);
+  if ( ! state ) {
+    return (double complex) NUM2DBL(c);
+  }
+  rb_set_errinfo(Qnil);
+  c = rb_funcall(rb_mKernel, rb_intern("Complex"), 1, rstr);
+  return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
 }
 
 /* Object -> double with parse-failure signalling.  Returns 1 and sets *out
