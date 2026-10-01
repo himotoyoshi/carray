@@ -8,7 +8,7 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "ca_for_buffer.h"        /* CA_WITH_BUFFER (scoped attach/detach) */
+#include "ca_for_buffer.h"        /* rb_ca_call_with_buffer */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT (sort_copy) */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_sort_quick_* / ca_sort_merge_* / ca_partition_nan_* */
@@ -367,6 +367,52 @@ rb_ca_sort_addr (int argc, VALUE *argv, VALUE self)
  * Returns: CArray of CA_SIZE, same shape as indices.
  */
 
+typedef struct {
+  CArray    *idx_ca;
+  ca_size_t *out_ptr;
+  ca_size_t *strides;
+  int        axis;
+  ca_size_t  axis_size;
+} axis2addr_ctx_t;
+
+/* Body of rb_ca_axis2addr_c: one flat address per index cell. */
+static void
+axis2addr_body (void *user_data, void *ptr, ca_size_t n)
+{
+  axis2addr_ctx_t *c       = (axis2addr_ctx_t *) user_data;
+  ca_size_t       *idx_ptr = (ca_size_t *) ptr;
+  int              ndim    = c->idx_ca->ndim;
+  ca_size_t        coord[CA_RANK_MAX];
+
+  for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
+  for ( ca_size_t k = 0; k < n; k++ ) {
+    /* Negative normalize + OOB check. */
+    ca_size_t raw  = idx_ptr[k];
+    ca_size_t norm = (raw < 0) ? (raw + c->axis_size) : raw;
+    if ( norm < 0 || norm >= c->axis_size ) {
+      rb_raise(rb_eRangeError,
+               "axis2addr: indices[%lld] = %lld out of range [0, %lld) "
+               "(after negative normalize)",
+               (long long) k, (long long) raw, (long long) c->axis_size);
+    }
+    /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
+    ca_size_t addr = 0;
+    for ( int8_t j = 0; j < ndim; j++ ) {
+      if ( j == c->axis ) {
+        addr += norm * c->strides[j];
+      } else {
+        addr += coord[j] * c->strides[j];
+      }
+    }
+    c->out_ptr[k] = addr;
+    /* Advance coord row-major (last axis ticks fastest). */
+    for ( int8_t j = (int8_t)(ndim - 1); j >= 0; j-- ) {
+      if ( ++coord[j] < c->idx_ca->dim[j] ) break;
+      coord[j] = 0;
+    }
+  }
+}
+
 /* C-callable entry: skip rb_scan_args (call-frame state dependency).
  * vaxis = Qnil treated as axis 0; Integer is taken as-is (negative
  * axis normalized internally).
@@ -440,57 +486,17 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
 
   /* out_ca is a freshly allocated entity (ptr already valid), so it needs
      no attach/sync/detach.  idx_cast may still be a view (CA_SIZE identity
-     branch above), so its contig buffer is delivered via CA_WITH_BUFFER,
-     which aliases when contig / materialises a view into scratch and scopes
-     the attach/detach to the block. */
-  ca_size_t *out_ptr = (ca_size_t *) out_ca->ptr;
+     branch above), so its contig buffer is delivered by
+     rb_ca_call_with_buffer, which aliases when contig, materialises a view
+     into scratch, and closes the view even when the body raises. */
+  axis2addr_ctx_t ctx;
+  ctx.idx_ca    = idx_cast;
+  ctx.out_ptr   = (ca_size_t *) out_ca->ptr;
+  ctx.strides   = strides;
+  ctx.axis      = axis;
+  ctx.axis_size = axis_size;
 
-  ca_size_t coord[CA_RANK_MAX];
-  int       ndim = idx_cast->ndim;
-
-  /* OOB is reported after the block: rb_raise from inside CA_WITH_BUFFER
-     would longjmp past the scoped ca_detach and leak the attach (= doc
-     constraint "restructure to break").  Record the offender, break, raise
-     once the buffer lifecycle has closed. */
-  ca_size_t  bad_k   = -1;
-  ca_size_t  bad_raw = 0;
-
-  ca_size_t       *idx_ptr;
-  ca_size_t        n;
-  CA_WITH_BUFFER(idx_cast, ca_size_t, idx_ptr, n) {   /* window: nothing raises inside */
-    for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
-    for ( ca_size_t k = 0; k < n; k++ ) {
-      /* Negative normalize + OOB check (raises on out-of-bounds). */
-      ca_size_t raw = idx_ptr[k];
-      ca_size_t norm = (raw < 0) ? (raw + axis_size) : raw;
-      if ( norm < 0 || norm >= axis_size ) {
-        bad_k = k; bad_raw = raw;
-        break;
-      }
-      /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
-      ca_size_t addr = 0;
-      for ( int8_t j = 0; j < ndim; j++ ) {
-        if ( j == axis ) {
-          addr += norm * strides[j];
-        } else {
-          addr += coord[j] * strides[j];
-        }
-      }
-      out_ptr[k] = addr;
-      /* Advance coord row-major (last axis ticks fastest). */
-      for ( int8_t j = (int8_t)(ndim - 1); j >= 0; j-- ) {
-        if ( ++coord[j] < idx_cast->dim[j] ) break;
-        coord[j] = 0;
-      }
-    }
-  }
-
-  if ( bad_k >= 0 ) {
-    rb_raise(rb_eRangeError,
-             "axis2addr: indices[%lld] = %lld out of range [0, %lld) "
-             "(after negative normalize)",
-             (long long) bad_k, (long long) bad_raw, (long long) axis_size);
-  }
+  rb_ca_call_with_buffer(vidx_cast, 0, axis2addr_body, &ctx);
 
   return vout;
 }

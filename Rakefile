@@ -214,12 +214,11 @@ def build_spec_ai_smoke (dirname, basename)
   end
 end
 
-desc "Build spec_ai author-surface smoke fixtures (cfunc_r / per_element / with_buffer / source / iter_source_kind)"
+desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind)"
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
   build_spec_ai_smoke("ext_sweep_raw",         "sweep_raw")
-  build_spec_ai_smoke("ext_per_element_smoke", "per_element")
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
@@ -248,9 +247,6 @@ task(:build_cfunc_r_example)       { build_c_extension_example("cfunc_r",     "c
 desc "Build examples/c-extensions/cslab/cslab (rebuild if source/header newer than bundle)"
 task(:build_cslab_example)         { build_c_extension_example("cslab",       "cslab") }
 
-desc "Build examples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
-task(:build_per_element_example)   { build_c_extension_example("per_element", "per_element") }
-
 desc "Build examples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
 task(:build_with_buffer_example)     { build_c_extension_example("with_buffer",   "with_buffer") }
 
@@ -258,7 +254,6 @@ desc "Build all examples/c-extensions/ examples"
 task :build_c_extension_examples => [
   :build_cfunc_r_example,
   :build_cslab_example,
-  :build_per_element_example,
   :build_with_buffer_example,
 ]
 

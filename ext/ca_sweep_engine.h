@@ -5,8 +5,7 @@
  *  Established in PROPOSAL_L0_AUTHOR_SURFACE L0.1 (2026-06-11).  Extracts
  *  the xfer_all-aware lifecycle template previously duplicated 7-times in
  *  ext/carray_call_cfunc.c (= one body per arity 1..7) into a single shared
- *  helper.  Same helper will back the forthcoming CA_FOR_EACH_ELEMENT macro
- *  family (L0.2a) and the WHOLE_BUFFER family (L0.2c).
+ *  helper, also used by the chunked slab family (ca_call_cslab_*).
  *
  *  Lifecycle template:
  *    (1) per-operand acquire
@@ -64,15 +63,10 @@ typedef struct ca_sweep_state {
   boolean8_t     *m0;
   ca_size_t       n_kernel;
   const char     *src_label;
-  /* no_mask: if non-zero, ca_sweep_acquire raises when any INPUT operand has
-   * a mask.  Used by the NO_MASK macro forms (CA_FOR_EACH_ELEMENT etc.) to
-   * implement Q3=(ii) runtime error policy.  Default 0 (= masked INPUT OK,
-   * m0 built as usual).  Caller sets before calling ca_sweep_acquire. */
-  int             no_mask;
 
   /* === chunked path fields (L0.1 chunk, PROPOSAL_L0_AUTHOR_SURFACE) === */
   /* Used by ca_sweep_acquire_chunked / ca_sweep_next_chunk / ca_sweep_release_chunked
-   * (= the sweep ELEMENT macro family).  Unused by the whole-materialise path
+   * (= the chunked slab family, ca_call_cslab_*).  Unused by the whole-materialise path
    * (ca_sweep_acquire / ca_sweep_release) — cfunc and other whole-buffer callers
    * leave these zero. */
   char          **base_orig;     /* per-op original ptr (= ca->ptr for
@@ -93,7 +87,7 @@ typedef struct ca_sweep_state {
 
 /* Validate fsync length, pair the operands (shape), acquire per-op
  * buffers, build mask m0, propagate mask to OUTPUTs.  May raise: refusals
- * (fsync length, shape mismatch, masked INPUT in a NO_MASK form) before
+ * (fsync length, shape mismatch) before
  * anything is held, and a raising operand read after -- in which case
  * everything acquired so far is detached / freed before the raise
  * propagates, so the caller must not call release.  The chunked path
@@ -120,13 +114,7 @@ void ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg
 int  ca_sweep_same_shape (CArray *a, CArray *b);
 NORETURN(void ca_sweep_refuse_shapes (CArray *a, CArray *b));
 
-/* Strict full-shape equality check used by INOUT macros (AC5: silent-
- * corruption seam prevention).  Raises if ndim differs or any dim[k]
- * differs.  Returns void; raises on mismatch. */
-void ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out,
-                             const char *src_label);
-
-/* ===== Chunked path API (sweep ELEMENT macro family, L0.1 chunk) =====
+/* ===== Chunked path API (ca_call_cslab_*) =====
  *
  * Unlike ca_sweep_acquire / ca_sweep_release (= whole-buffer materialise used
  * by cfunc), the chunked path keeps INPUT memory peak bounded to chunk
@@ -134,7 +122,7 @@ void ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out,
  * memory peak guarantee: shrinking views materialise into chunk scratch
  * sized to inner-axis multiples, not full operand size.
  *
- * Usage shape (inside a macro):
+ * Usage shape:
  *   ca_sweep_acquire_chunked(&st);
  *   while (ca_sweep_next_chunk(&st)) {
  *     for (k = 0; k < st.chunk_n; k++) {
@@ -162,9 +150,8 @@ void ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out,
  *   indexed within the chunk, NOT by the flat cell index.  (This differs
  *   from the whole-buffer path, where m0 spans n_kernel.)
  *
- *   An author may WRITE m0[k] during the chunk loop (= the INOUT_MASKED
- *   forms' m_out).  Those writes are flushed into the OUTPUT operands'
- *   masks when the chunk finishes -- at the top of the following
+ *   The chunk's m0 is flushed into the OUTPUT operands' masks when the
+ *   chunk finishes -- at the top of the following
  *   ca_sweep_next_chunk, and once more in ca_sweep_release_chunked for
  *   the last chunk -- so the OUTPUT masks are created up front in
  *   acquire_chunked rather than propagated in one go at release.

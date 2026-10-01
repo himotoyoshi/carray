@@ -130,9 +130,9 @@ Each fiber macro auto-sets `CA_KERNEL_FIBER_CONTIG`; the engine guarantees
 contig data delivery (gathers strided fibers into per-state scratch when
 needed). The INOUT macros runtime-assert strict full-shape equality and
 silently skip the body on mismatch (= same `ndim` and same `dim[axis]`). This
-is deliberately *unlike* the sweep INOUT family
-([ch. 13](13_sweep_author_surface.md)), which **raises** on a shape mismatch
-(`ca_sweep_check_same_shape`) — the two engines differ here by design.
+is deliberately *unlike* call_cfunc ([ch. 14](14_call_cfunc.md)), which
+**raises** on operands whose shapes do not pair — the two engines differ
+here by design.
 
 L2 inner-loop helpers — fast-path contig within a strided callback:
 

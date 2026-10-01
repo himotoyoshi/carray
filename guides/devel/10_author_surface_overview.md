@@ -21,8 +21,8 @@ most of the battle:
 |---|---|---|---|
 | **kernel iterator** ([ch. 11](11_kernel_iterator.md)) | `ext/ca_kernel_iterator.h` | the **default** — any per-element or per-axis kernel; receives all ~22 view kinds uniformly | `ca_iter_state` + `ca_axis_descriptor` + per-view xfer ops |
 | **mkkernel DSL** ([ch. 12](12_mkkernel_dsl.md)) | `ext/mkkernel.rb` → `ext/carray_kernels.c` | the **default landing for a new standard operation** — emits typed coverage for every data type at once | the kernel iterator macros |
-| **sweep author surface** ([ch. 13](13_sweep_author_surface.md)) | `ext/ca_for_each_element.h`, `ext/ca_for_buffer.h`, `ext/ca_sweep_engine.h` | flat element-wise loops; whole-buffer delivery to external libraries | `ca_sweep_state_t` engine; same `xfer_all` plumbing |
-| **call_cfunc** ([ch. 14](14_call_cfunc.md)) | `ext/carray_call_cfunc.h` (generated) | vectorising an existing scalar C function | `ca_sweep_state_t` engine (typed wrapper) |
+| **sweep author surface** ([ch. 13](13_sweep_author_surface.md)) | `ext/ca_for_buffer.h`, `ext/ca_sweep_engine.h` | whole-buffer delivery to external libraries; the engine under call_cfunc | `ca_sweep_state_t` engine; same `xfer_all` plumbing |
+| **call_cfunc** ([ch. 14](14_call_cfunc.md)) | `ext/carray_call_cfunc.h` (generated) | element-wise work: a per-cell C function, or a per-chunk loop | `ca_sweep_state_t` engine (typed wrapper) |
 
 Two non-surfaces, listed for the same reason they show up in conversations:
 
@@ -80,13 +80,13 @@ In words:
   write it directly on the **kernel iterator**
   ([ch. 11](11_kernel_iterator.md)) using `CA_FOR_EACH_SLAB` /
   `CA_FOR_EACH_FIBER` / `CA_SLAB_REDUCE_T*`.
-- **"I want to sweep every element of a contig buffer"** (element-wise,
-  no per-axis structure) → the **sweep ELEMENT family** in
-  [ch. 13](13_sweep_author_surface.md) (`CA_FOR_EACH_ELEMENT*`).
+- **"I want to sweep every element"** (element-wise, no per-axis
+  structure) → **call_cfunc** ([ch. 14](14_call_cfunc.md)):
+  `ca_call_cslab_*_r` for a per-chunk loop, `ca_call_cfunc_*_r` for a
+  per-cell function.
 - **"I want to hand the whole contig buffer to an external library"**
-  (FFTW, fitpack, BLAS) → sweep's **buffer family**
-  ([ch. 13](13_sweep_author_surface.md)),
-  `CA_WITH_BUFFER` / `rb_ca_call_with_buffer`.
+  (FFTW, fitpack, BLAS) → `rb_ca_call_with_buffer`
+  ([ch. 13](13_sweep_author_surface.md)).
 - **"I already have a scalar C function and just want it vectorised"** →
   **call_cfunc** ([ch. 14](14_call_cfunc.md)).
 - **"I need a primitive to gather / scatter / wrap / template /
@@ -100,14 +100,14 @@ A quick cross-cut so you can pick by property rather than by task:
 
 | Property | kernel iterator | mkkernel DSL | sweep | call_cfunc |
 |---|---|---|---|---|
-| Granularity | slab or fiber (axis-aware) | (delegates to iterator) | per-element or whole-buffer | per-element |
-| Layer | C macros + state machine | Ruby DSL → C generator | C macros + engine | typed C dispatcher |
+| Granularity | slab or fiber (axis-aware) | (delegates to iterator) | whole-buffer | per-element or per-chunk |
+| Layer | C macros + state machine | Ruby DSL → C generator | C function | C dispatcher on the sweep engine |
 | Per-axis (`axis:`) | yes (`CA_SLAB_AXES`) | yes (axes variadic) | no (flat) | no |
-| Mask propagation | by default (declare NO_MASK to opt out) | by default | by default | by default |
-| Auto data-type coverage | one type per kernel | all source types in one declaration | one type per macro instantiation | per-call (declared) |
+| Mask propagation | by default (declare NO_MASK to opt out) | by default | none (the buffer is the data) | by default |
+| Auto data-type coverage | one type per kernel | all source types in one declaration | one type per body | per-call (declared) |
 | Broadcast inputs | not directly | via `array_arg:` | no | yes |
-| External library hand-off | no (per-cell delivery) | no | **yes** (`CA_WITH_BUFFER`) | no (per-cell only) |
-| Reentrancy with outer state | manual | the `value_arg` / `array_arg` slots | manual | **yes** (`_r` variants) |
+| External library hand-off | no (per-cell delivery) | no | **yes** (`rb_ca_call_with_buffer`) | no (per-cell only) |
+| Reentrancy with outer state | manual | the `value_arg` / `array_arg` slots | `user_data` | **yes** (`_r` variants) |
 | Output allocation | author (`rb_ca_new_reduced`) | generator | author | generator |
 | Ruby method binding | author | generator | author | author |
 
@@ -186,7 +186,7 @@ of them:
 | `v` / `r` / `acc` / `w` / `idx` / `first` | reduce / map / scan body identifiers ([ch. 11](11_kernel_iterator.md)) |
 | `#1` / `#2` / `#3` | mkmath-style positional placeholders in monop / binop / triop / moncmp / bincmp bodies ([ch. 12](12_mkkernel_dsl.md)) |
 | `CA_KERNEL_*` / `CA_SLAB_*` / `CA_ITER_*` | frozen author-facing tokens you write literally |
-| `CA_FOR_EACH_*` / `CA_SLAB_REDUCE_T*` / `CA_L2_FOR_EACH` / `CA_WITH_BUFFER*` | the macro families |
+| `CA_FOR_EACH_*` / `CA_SLAB_REDUCE_T*` / `CA_L2_FOR_EACH` | the macro families |
 
 Anything *not* in this list (an `alias_mode`, a `src_kind`, a routing
 helper) is internal: refactor-free territory you should not read or write

@@ -335,7 +335,7 @@ function takes VALUEs.
 - **One scalar per call.** The bridge invokes the callback once per
   cell. For a kernel that needs the whole fiber at once (sort,
   search, FFT), use the kernel iterator's FIBER family or
-  `CA_WITH_BUFFER` ([ch. 13](13_sweep_author_surface.md)).
+  `rb_ca_call_with_buffer` ([ch. 13](13_sweep_author_surface.md)).
 
 ## See also
 

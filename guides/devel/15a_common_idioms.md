@@ -246,23 +246,22 @@ ca_detach_n(2, ca_in, ca_out);
 
 ### Block-scoped attach
 
-When the work is one self-contained chunk, prefer the block-form macro
-that handles attach / sync / detach automatically — it's the same
-discipline `attach!` enforces in Ruby, lifted to C:
+When the work is one self-contained chunk, prefer `rb_ca_call_with_buffer`,
+which handles attach / sync / detach for you — the same discipline
+`attach!` enforces in Ruby, lifted to C:
 
 ```c
-double   *p;
-ca_size_t n;
-CA_WITH_BUFFER_WRITABLE(ca, double, p, n) {
-  /* p, n are the contig buffer + element count;
-     ca_sync + ca_detach run on block exit */
-  fftw_execute_dft(plan, p, p);
+static void
+fft_body (void *user_data, void *ptr, ca_size_t n)
+{
+  fftw_execute_dft((fftw_plan) user_data, ptr, ptr);
 }
+
+rb_ca_call_with_buffer(r_ca, /*writable=*/1, fft_body, plan);
 ```
 
-If the body may raise a Ruby exception, use `rb_ca_call_with_buffer`
-(the `rb_ensure`-protected function form) instead —
-[ch. 13](13_sweep_author_surface.md).
+The array is synced and detached however the body is left, including when
+it raises ([ch. 13](13_sweep_author_surface.md)).
 
 **Never** call `ca_attach` at a kernel entry as a shortcut for "give me
 contig data". That is the materialise-everything anti-pattern the

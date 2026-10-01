@@ -97,18 +97,6 @@ ca_sweep_any_input_mask (ca_sweep_state_t *st)
   return 0;
 }
 
-NORETURN(static void ca_sweep_refuse_masked_input (ca_sweep_state_t *st,
-                                                  const char *fallback));
-
-static void
-ca_sweep_refuse_masked_input (ca_sweep_state_t *st, const char *fallback)
-{
-  rb_raise(rb_eRuntimeError,
-           "%s: masked INPUT not allowed in NO_MASK form "
-           "(use the *_MASKED form to handle masked cells explicitly)",
-           st->src_label ? st->src_label : fallback);
-}
-
 /* Give back everything acquire has taken so far, without syncing: detach
  * attached operands, free owned scratch (xmalloc on the whole-buffer path,
  * arena on the chunked one) and the mask buffers.  Called when a read
@@ -232,17 +220,12 @@ ca_sweep_acquire (ca_sweep_state_t *st)
     st->attached[k_op]  = 0;
   }
   st->m0       = NULL;
-  /* CAREFUL: do not reset st->no_mask here — caller sets it before
-   * acquire and the NO_MASK guard below consumes it. */
 
   /* Refusals come first, while nothing is held. */
   ca_sweep_pair_operands(st);
   ctx.st             = st;
   ctx.ms             = NULL;
   ctx.any_input_mask = ca_sweep_any_input_mask(st);
-  if (ctx.any_input_mask && st->no_mask) {
-    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire");
-  }
 
   rb_protect(ca_sweep_acquire_body, (VALUE) &ctx, &tag);
   if (ctx.ms) xfree(ctx.ms);
@@ -461,9 +444,6 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
   ctx.st             = st;
   ctx.ms             = NULL;
   ctx.any_input_mask = ca_sweep_any_input_mask(st);
-  if (ctx.any_input_mask && st->no_mask) {
-    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire_chunked");
-  }
 
   rb_protect(ca_sweep_acquire_chunked_body, (VALUE) &ctx, &tag);
   if (tag) {
@@ -501,9 +481,7 @@ ca_sweep_gather_chunk_mask (ca_sweep_state_t *st, ca_size_t off, ca_size_t n)
   }
 }
 
-/* Copy the chunk just finished out to every OUTPUT operand's mask.  Runs
- * after the author's loop over that chunk, so m_out writes into m0 are
- * carried through. */
+/* Copy the chunk just finished out to every OUTPUT operand's mask. */
 static void
 ca_sweep_flush_chunk_mask (ca_sweep_state_t *st)
 {
@@ -557,7 +535,6 @@ ca_sweep_next_chunk (ca_sweep_state_t *st)
     st->chunk_off     = 0;
     st->chunked_state = 1;
   } else {
-    /* the chunk that just finished is the author's last word on its mask */
     ca_sweep_flush_chunk_mask(st);
     /* advance */
     st->chunk_off += st->chunk_n;
@@ -595,8 +572,7 @@ ca_sweep_release_chunked (ca_sweep_state_t *st)
   /* a walk that raised has already given everything back */
   if (st->chunked_state == 3) return;
   /* The final chunk has no next_chunk call to flush it, so it is flushed
-   * here.  For INOUT_MASKED forms this is what captures the author's
-   * per-cell m_out writes over that last chunk. */
+   * here. */
   ca_sweep_flush_chunk_mask(st);
   /* sync OUTPUTs (regardless of whether chunk loop ran) */
   tag = ca_sweep_sync_outputs(st, &error);
@@ -651,23 +627,3 @@ rb_ca_call_with_buffer (VALUE r_ca, int writable,
                    ca_with_buffer_body_trampoline, (VALUE) &ctx);
 }
 
-void
-ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out, const char *src_label)
-{
-  int k;
-  const char *lbl = src_label ? src_label : "ca_sweep_check_same_shape";
-  if (ca_in->ndim != ca_out->ndim) {
-    rb_raise(rb_eRuntimeError,
-             "%s: shape mismatch (ndim %d vs %d)",
-             lbl, ca_in->ndim, ca_out->ndim);
-  }
-  for (k = 0; k < ca_in->ndim; k++) {
-    if (ca_in->dim[k] != ca_out->dim[k]) {
-      rb_raise(rb_eRuntimeError,
-               "%s: shape mismatch at dim[%d] (%lld vs %lld)",
-               lbl, k,
-               (long long) ca_in->dim[k],
-               (long long) ca_out->dim[k]);
-    }
-  }
-}

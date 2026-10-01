@@ -1,47 +1,33 @@
 /* ---------------------------------------------------------------------------
  *
- *  ca_for_buffer.h -- sweep WHOLE_BUFFER macro family (whole contig buffer
- *                    handed to author / third-party library)
+ *  ca_for_buffer.h -- whole contig buffer handed to author / third-party
+ *                     library
  *
- *  PROPOSAL_L0_AUTHOR_SURFACE L0.2c (2026-06-11).  C-side counterpart of
- *  Ruby's `ca.attach! { |a| ... }` block: scope the ca_attach + ca_sync +
- *  ca_detach lifecycle to a block, hand the author a contig buffer ptr
- *  and element count, let the author do whatever (typically pass the
- *  ptr to a third-party library: FFTW, akima init, fitpack surf1, ...).
+ *  C-side counterpart of Ruby's `ca.attach! { |a| ... }` block: the
+ *  attach / sync / detach lifecycle is scoped to a body function, which
+ *  receives a contig buffer ptr and element count and may do whatever
+ *  (typically pass the ptr to a third-party library: FFTW, akima init,
+ *  fitpack surf1, ...).
  *
- *  Two forms (Q8 = M1 alias-when-possible; non-contig source materialises
- *  into a transient buffer; writable form syncs back on exit):
+ *  The buffer aliases ca->ptr when the array is a contig entity and is a
+ *  materialised scratch otherwise.  A writable call syncs the buffer back
+ *  to the array's storage when the body returns.
  *
- *    CA_WITH_BUFFER(ca, T, ptr, n)
- *      Read-only access.  ptr : T const * pointing at native contig
- *      layout of `ca` (= ca->ptr alias when contig entity, scratch
- *      otherwise).  n : ca->elements.  No write-back on exit.
- *
- *    CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n)
- *      Writable; same ptr/n semantics, plus ca_sync_detach on block exit
- *      so author writes propagate back to the view's storage.
+ *  The body may raise.  The view is closed however the body is left: a
+ *  writable view is synced first, so what the body wrote before raising
+ *  reaches the view's storage, and the view is detached even if that sync
+ *  raises.  The body's exception is the one that propagates.
  *
  *  Author pattern:
  *
- *    double *ptr;
- *    ca_size_t n;
- *    CA_WITH_BUFFER_WRITABLE(ca, double, ptr, n) {
+ *    static void
+ *    fft_body (void *user_data, void *ptr, ca_size_t n)
+ *    {
+ *      fftw_plan plan = (fftw_plan) user_data;
  *      fftw_execute_dft(plan, ptr, ptr);
  *    }
  *
- *  Constraints (same as CA_FOR_EACH_FIBER family):
- *    - `break;` from body exits cleanly (= outer for's advance clause
- *      runs ca_sync / ca_detach).
- *    - `return;` from body LEAKS the attach; restructure to break.
- *    - A raise from body LEAKS the attach, and with it any buffer the
- *      view materialised: the closing clause never runs.  Nothing inside
- *      the block may raise -- no Ruby call, no conversion of a caller's
- *      value, no rb_raise (record the error, break, raise after the
- *      block).  When the body can raise, use the function form
- *      `rb_ca_call_with_buffer`, which closes the view however the body
- *      is left.
- *    - Macros are NOT statement-equivalent (= nested for); no trailing
- *      `else`.
+ *    rb_ca_call_with_buffer(rca, 1, fft_body, plan);
  *
  *  --------------------------------------------------------------------------- */
 
@@ -51,47 +37,9 @@
 #include "carray.h"
 #include "ca_sweep_engine.h"
 
-/* ---------- macro forms ---------- */
-
-/* Read-only: ca_attach (alias-when-possible) + author body + ca_detach. */
-#define CA_WITH_BUFFER(_ca, T, _ptr, _n)                                  \
-  for ( CArray *__cwv_ca = (CArray *)(_ca);                             \
-        __cwv_ca;                                                       \
-        ca_detach(__cwv_ca), __cwv_ca = NULL )                          \
-    for ( int __cwv_once = (ca_attach(__cwv_ca),                        \
-                            (_ptr) = (T *)__cwv_ca->ptr,                \
-                            (_n)   = __cwv_ca->elements,                \
-                            1);                                         \
-          __cwv_once;                                                   \
-          __cwv_once = 0 )
-
-/* Writable: same as above, closed by ca_sync_detach on block exit. */
-#define CA_WITH_BUFFER_WRITABLE(_ca, T, _ptr, _n)                         \
-  for ( CArray *__cwvw_ca = (CArray *)(_ca);                            \
-        __cwvw_ca;                                                      \
-        ca_sync_detach(__cwvw_ca), __cwvw_ca = NULL )                   \
-    for ( int __cwvw_once = (ca_attach(__cwvw_ca),                      \
-                             (_ptr) = (T *)__cwvw_ca->ptr,              \
-                             (_n)   = __cwvw_ca->elements,              \
-                             1);                                        \
-          __cwvw_once;                                                  \
-          __cwvw_once = 0 )
-
-/* ---------- function form (rb_ensure-protected, AC8) ----------
+/*   body_fn(user_data, ptr, n_elements) -> may raise
  *
- * Use this when the body may raise a Ruby exception (= calling rb_funcall,
- * type-checking with rb_check_type, indirect Ruby code, etc.).  The
- * engine attaches the view, runs body, and closes the view however body
- * is left: a writable view is synced first, so what body wrote before
- * raising reaches the view's storage, and the view is detached even if
- * that sync raises.  body's exception is the one that propagates.
- *
- *   body_fn(user_data, ptr, n_elements) -> may raise
- *
- * Returns whatever body_fn returns via its own propagation (= the
- * function itself returns Qnil since rb_ensure body must be VALUE).
- * For richer return semantics, box your result in user_data.
- */
+ * Returns nothing; box a result in user_data. */
 typedef void (*ca_with_buffer_body_fn) (void *user_data, void *ptr,
                                       ca_size_t n_elements);
 

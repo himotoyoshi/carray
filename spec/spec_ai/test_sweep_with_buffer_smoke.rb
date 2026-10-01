@@ -1,8 +1,7 @@
 # spec_ai/test_sweep_with_buffer_smoke.rb
 #
-# PROPOSAL_L0_AUTHOR_SURFACE L0.2c — formal regression pin for the
-# CA_WITH_BUFFER / CA_WITH_BUFFER_WRITABLE macros and the
-# rb_ca_call_with_buffer rb_ensure-protected function helper.
+# Regression pin for rb_ca_call_with_buffer: the whole array as one contig
+# buffer, closed however the body is left.
 
 require "test/unit"
 require "carray"
@@ -21,7 +20,7 @@ end
 
 class TestSweepWithViewSmoke < Test::Unit::TestCase
 
-  # ---------- CA_WITH_BUFFER (read-only) ----------
+  # ---------- read-only ----------
 
   def test_with_buffer_sum_contig
     arr = CArray.float64(5){|i| (i + 1).to_f}
@@ -31,8 +30,7 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
   def test_with_buffer_sum_slice_materialises
     big = CArray.float64(10){|i| (i + 1).to_f}
     slc = big[3..5]   # [4.0, 5.0, 6.0]
-    # Slice is a view; ca_attach materialises into scratch, ptr is the
-    # scratch base.  AC1 (view transparency).
+    # Slice is a view; it is materialised into scratch.
     assert_in_delta 15.0, CArray.demo_with_buffer_sum_f64(slc), 1e-12
   end
 
@@ -41,7 +39,7 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
     assert_in_delta 78.0, CArray.demo_with_buffer_sum_f64(mat.transpose), 1e-12
   end
 
-  # ---------- CA_WITH_BUFFER_WRITABLE ----------
+  # ---------- writable ----------
 
   def test_writable_scale_inplace
     arr = CArray.float64(4){|i| (i + 1).to_f}
@@ -63,47 +61,30 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
     assert_equal 10.0, big[9]
   end
 
-  # ---------- break safety (macro form, no leak via break) ----------
+  # ---------- a body that raises ----------
 
-  def test_macro_break_no_leak
-    arr = CArray.float64(10){|i| (i + 1).to_f}
-    partial = CArray.demo_with_buffer_break_after_k(arr, 3)
-    assert_in_delta 6.0, partial, 1e-12   # 1 + 2 + 3
-    # If the prior call leaked an attach, the second call would fail or
-    # double-attach.  Run the macro again to verify cleanup ran:
-    sum_again = CArray.demo_with_buffer_sum_f64(arr)
-    assert_in_delta 55.0, sum_again, 1e-12
-  end
-
-  # ---------- rb_ca_call_with_buffer (function form, rb_ensure) ----------
-
-  def test_call_with_buffer_sum
-    arr = CArray.float64(5){|i| (i + 1).to_f}
-    assert_in_delta 15.0, CArray.demo_call_with_buffer_sum_f64(arr), 1e-12
-  end
-
-  def test_call_with_buffer_raise_runs_ensure_readonly
-    # Body raises mid-iteration on a read-only view.  rb_ensure must
-    # run ca_detach so the array is still usable afterwards.  No writes
+  def test_raise_readonly_detaches
+    # Body raises mid-iteration on a read-only view.  The view must be
+    # detached so the array is still usable afterwards.  No writes
     # happen because writable=false; values are preserved.
     arr = CArray.float64(5){|i| 100.0 + i}
     assert_raise(RuntimeError) do
-      CArray.demo_call_with_buffer_raise(arr, 2, false)
+      CArray.demo_with_buffer_raise(arr, 2, false)
     end
     # Array still usable (= no attach leak from the raise path).
     assert_in_delta 510.0, CArray.demo_with_buffer_sum_f64(arr), 1e-9
     assert_equal [100.0, 101.0, 102.0, 103.0, 104.0], arr.to_a
   end
 
-  def test_call_with_buffer_raise_runs_ensure_writable_syncs_partial
-    # Body writes -1.0 to cells 0..raise_index then raises.  rb_ensure
-    # must call ca_sync FIRST, so the partial writes propagate back to
+  def test_raise_writable_syncs_partial
+    # Body writes -1.0 to cells 0..raise_index then raises.  The view
+    # is synced before it is detached, so the partial writes propagate back to
     # the view's storage even on raise.
     arr = CArray.float64(5){|i| 100.0 + i}
     assert_raise(RuntimeError) do
-      CArray.demo_call_with_buffer_raise(arr, 2, true)
+      CArray.demo_with_buffer_raise(arr, 2, true)
     end
-    # Cells 0, 1, 2 were written (-1.0) before raise; ensure synced them.
+    # Cells 0, 1, 2 were written (-1.0) before raise; they were synced.
     # Cells 3, 4 untouched.
     assert_equal -1.0,  arr[0]
     assert_equal -1.0,  arr[1]
@@ -114,16 +95,16 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
     assert_in_delta 204.0, CArray.demo_with_buffer_sum_f64(arr), 1e-9
   end
 
-  def test_call_with_buffer_raise_through_view
-    # AC8: rb_ensure path with a non-alias (slice) view.  Sync back must
+  def test_raise_through_view
+    # A non-alias (slice) view.  Sync back must
     # propagate partial writes to the parent.
     big = CArray.float64(10){|i| 1.0}
     slc = big[3..7]   # 5 cells
     assert_raise(RuntimeError) do
-      CArray.demo_call_with_buffer_raise(slc, 1, true)
+      CArray.demo_with_buffer_raise(slc, 1, true)
     end
     # Cells big[3], big[4] were written to -1.0 (raise at index 1 means
-    # i=0, i=1 done, then raise on i=1's check), ensure synced.
+    # i=0, i=1 done, then raise on i=1's check), synced.
     assert_equal -1.0, big[3]
     assert_equal -1.0, big[4]
     # Untouched cells remain 1.0.
@@ -147,19 +128,11 @@ class TestSweepWithViewSmoke < Test::Unit::TestCase
     def store_addr (a, v) ; raise "sync failed" ; end
   end
 
-  def test_writable_macro_detaches_when_the_sync_raises
-    arr = FailingSync.new(4)
-    assert_raise_message("sync failed") do
-      CArray.demo_with_buffer_scale_f64(arr, 2.0)
-    end
-    assert_equal false, arr.attached?
-  end
-
-  def test_call_with_buffer_detaches_when_the_sync_raises
+  def test_detaches_when_the_sync_raises
     arr = FailingSync.new(4)
     # The body does not raise (index 100 is past the end); the sync does.
     assert_raise_message("sync failed") do
-      CArray.demo_call_with_buffer_raise(arr, 100, true)
+      CArray.demo_with_buffer_raise(arr, 100, true)
     end
     assert_equal false, arr.attached?
   end

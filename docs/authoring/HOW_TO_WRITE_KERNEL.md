@@ -7,10 +7,10 @@ operations) using the kernel_iterator surface introduced in CArray 3.0.*
 > **Which author surface do I want?** This guide covers the **per-axis**
 > kernel_iterator surface (`CA_FOR_EACH_SLAB` / `CA_FOR_EACH_FIBER` +
 > `CA_SLAB_*` body helpers) — for reductions, scans, and per-axis loops.
-> If instead you want a **whole-array flat element loop**
-> (`CA_FOR_EACH_ELEMENT`) or to **hand a whole contiguous buffer to a
-> third-party C library** (`CA_WITH_BUFFER` / `rb_ca_call_with_buffer`,
-> e.g. FFTW / fitpack), see the **sweep author surface** in
+> If instead you want **flat element-wise work** (`ca_call_cfunc_*_r` /
+> `ca_call_cslab_*_r`) or to **hand a whole contiguous buffer to a
+> third-party C library** (`rb_ca_call_with_buffer`, e.g. FFTW / fitpack),
+> see the **sweep author surface** in
 > [`docs/Sweep_Author_Surface.md`](Sweep_Author_Surface.md).
 
 ## Table of Contents

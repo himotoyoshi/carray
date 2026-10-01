@@ -38,24 +38,13 @@ bundles, so `rake spec_ai` pins their behaviour automatically.
 
 ## Examples
 
-### `per_element/` — `CA_FOR_EACH_ELEMENT` macro family
+### `with_buffer/` — `rb_ca_call_with_buffer`
 
-Five iteration forms covering the cell-wise idioms:
-
-| macro | use |
-|---|---|
-| `CA_FOR_EACH_ELEMENT`             | read-only, no mask |
-| `CA_FOR_EACH_ELEMENT_MASKED`      | read-only with mask handling |
-| `CA_FOR_EACH_ELEMENT_INOUT`       | map input → output |
-| `CA_FOR_EACH_ELEMENT_INOUT_MASKED`| map with mask propagation |
-| `CA_FOR_EACH_ELEMENT_OUT`         | fill output only |
-
-### `with_buffer/` — `CA_WITH_BUFFER` / `rb_ca_call_with_buffer`
-
-Scoped attach/sync/detach for direct pointer access into a whole view.
-Macro form (`CA_WITH_BUFFER` / `CA_WITH_BUFFER_WRITABLE`) is convenient for
-short kernels; the function form (`rb_ca_call_with_buffer`) adds `rb_ensure`
-protection so the view detaches cleanly even if the body raises.
+The whole array as one contig buffer, for direct pointer access or to hand
+to a library that wants a plain pointer.  The array's own memory when it
+is a contig entity, a materialised scratch otherwise; a writable call
+syncs it back.  The view is closed however the body is left, including
+when it raises.
 
 ### `cfunc_r/` — `ca_call_cfunc_*_r` (reentrant cfunc family)
 
@@ -108,7 +97,7 @@ buys speed only where the per-chunk gather is not the dominant cost.
 
 ## Why these live outside `ext/`
 
-The macros and helpers demonstrated here have **no internal consumers**
+The helpers demonstrated here have **no internal consumers**
 inside CArray itself — they exist solely as the public author surface
 for third-party ext authors.  Keeping the examples outside `ext/` makes
 them:

@@ -129,8 +129,7 @@ A raise inside a window skips the detach, and the test that caused it
 still passes, so nothing else would report it:
 
 - **`attach_window_check`** runs first. It finds every `ca_attach`,
-  `ca_allocate`, `ca_attach_n`, `ca_allocate_n`, `CA_WITH_BUFFER` and
-  `CA_WITH_BUFFER_WRITABLE` in `ext/*.c` and in the templates of
+  `ca_allocate`, `ca_attach_n` and `ca_allocate_n` in `ext/*.c` and in the templates of
   `ext/mkkernel.rb`, and wants each one to say why it cannot be left open,
   in a comment of the form `/* window: nothing raises inside */` on the
   same line or the line above. A window inside which Ruby can run does

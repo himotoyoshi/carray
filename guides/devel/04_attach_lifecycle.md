@@ -372,18 +372,16 @@ void ca_bit_pack   (const boolean8_t *src, ca_size_t elements,
 Most ext code should never call `ca_attach` directly — the kernel
 iterator and sweep families own the lifecycle. The one case where you
 genuinely need it is "hand the whole contig buffer to a third-party
-library"; for that, use the sweep buffer macros:
+library"; for that, use `rb_ca_call_with_buffer`
+([ch. 13](13_sweep_author_surface.md)):
 
 ```c
-CA_WITH_BUFFER(ca, T, ptr, n)         { /* read-only */ }
-CA_WITH_BUFFER_WRITABLE(ca, T, ptr, n) { /* writable, sync on exit */ }
+rb_ca_call_with_buffer(r_ca, /*writable=*/1, body, user_data);
 ```
 
-Both wrap attach / (sync) / detach in a `for` loop teardown clause. A
-`break` runs the teardown; a `return` or a raise from the body skips it
-and leaves the array attached. When the body can raise, use the
-`rb_ensure`-protected function form `rb_ca_call_with_buffer`
-([ch. 13](13_sweep_author_surface.md)). There is no Ruby-surface counterpart
+It opens the array, runs `body(user_data, ptr, n)`, and closes the array
+however the body is left: a writable array is synced first, then detached,
+even when the body raises. There is no Ruby-surface counterpart
 ("No Ruby attach surface" above).
 
 ## Where to go next
