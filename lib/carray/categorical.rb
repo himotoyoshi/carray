@@ -356,11 +356,11 @@ class CACategorical < CAObject
   #   so `labels.zip(category_sizes.to_a)` always pairs up.
   #   @return [CArray]
   def category_sizes
-    return @_category_sizes if @_category_sizes
+    return @category_sizes if @category_sizes
     bc  = codes.bincount
     out = CArray.new(bc.data_type, [@labels.size], bytes: bc.bytes)   # new zero-fills
     out[0...bc.elements] = bc if bc.elements > 0
-    @_category_sizes = out
+    @category_sizes = out
     out
   end
 
@@ -541,7 +541,7 @@ class CACategorical < CAObject
   #   addresses that order the cells by category (excluded cells last).
   #   @return [CArray]
   def sort_addr
-    return @_sort_addr if @_sort_addr
+    return @sort_addr if @sort_addr
     n      = elements
     k      = @labels.size
     nvalid = category_sizes.sum
@@ -564,7 +564,7 @@ class CACategorical < CAObject
       excluded = excluded.or(flat.is_masked) if flat.has_mask?
       out[nvalid..-1] = seq[excluded]             # excluded cells, source order
     end
-    @_sort_addr = out
+    @sort_addr = out
     out
   end
 
@@ -579,10 +579,10 @@ class CACategorical < CAObject
   #   offsets aligned to {#labels}. Pair with {#category_sizes} for lengths.
   #   @return [CArray]
   def reduceat_index
-    return @_reduceat_index if @_reduceat_index
+    return @reduceat_index if @reduceat_index
     # Every boundary but the last; the copy makes it an entity the
     # reduceat kernels can read directly.
-    @_reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
+    @reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
   end
 
   # @overload inspect
