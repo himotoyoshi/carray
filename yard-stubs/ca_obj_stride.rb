@@ -148,8 +148,8 @@ class CArray
   # @overload flip(axis)
   # @overload flip(a0, a1, ...)
   # @overload flip([a0, a1, ...])
-  #   @param axis [Array<Integer>, Integer] axes to reverse; negative indices
-  #     count from the last axis.
+  #   @param axis [Array<Integer>, Integer, nil] axes to reverse; negative
+  #     indices count from the last axis. `flip(nil)` is the same as `flip`.
   #   @return [CAStride]
   #   @raise [ArgumentError] when an axis is out of range or repeated.
   def flip(*axis); end

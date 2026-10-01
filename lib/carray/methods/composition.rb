@@ -75,7 +75,8 @@ class CArray
   #   Use `CArray.meld` for the uniform-shape view-default counterpart.
   #
   #   @param list [Array<CArray>] pieces to concatenate.
-  #   @param axis [Integer] axis to concatenate along.
+  #   @param axis [Integer, nil] axis to concatenate along; `nil` is the
+  #     same as `0`.
   #   @param data_type [Symbol, Integer, nil] result `data_type`;
   #     inferred via `result_type` when `nil`.
   #   @return [CArray] fresh CArray with per-piece `axis` sizes summed.
@@ -83,6 +84,7 @@ class CArray
   #     inconsistent.
   def self.concatenate (list, axis: 0, data_type: nil)
     raise ArgumentError, "concatenate: list must not be empty" if list.empty?
+    axis = 0 if axis.nil?
     __ragged_paste(list, [list.size], axis, data_type)
   end
 

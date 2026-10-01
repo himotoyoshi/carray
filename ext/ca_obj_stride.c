@@ -2454,8 +2454,8 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
 
   for (i = 0; i < ndim; i++) flip[i] = 0;
 
-  if (nargs == 0) {
-    /* No args: flip every axis. */
+  if (nargs == 0 || (nargs == 1 && NIL_P(RARRAY_AREF(rposary, 0)))) {
+    /* No args, or a lone nil: flip every axis. */
     for (i = 0; i < ndim; i++) flip[i] = 1;
     n_axes = ndim;
   }
