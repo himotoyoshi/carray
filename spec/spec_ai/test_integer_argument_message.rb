@@ -31,13 +31,13 @@ class TestIntegerArgumentMessage < Test::Unit::TestCase
     "nsmallest_index" => ->(v) { A.nsmallest_index(v, axis: 1) },
   }
 
-  def method_name (label)
+  def called_name (label)
     label == "windows" ? "sum" : label.sub("masked ", "")
   end
 
   MIN_COUNT.each do |label, call|
     define_method("test_min_count_#{label}") do
-      name = method_name(label)
+      name = called_name(label)
       err = assert_raise(TypeError) { call.(1.5) }
       assert_equal "#{name}: min_count must be an Integer (got Float)", err.message
       err = assert_raise(ArgumentError) { call.(-1) }
@@ -48,7 +48,7 @@ class TestIntegerArgumentMessage < Test::Unit::TestCase
 
   KTH.each do |label, call|
     define_method("test_kth_#{label.tr(" ", "_")}") do
-      name = method_name(label)
+      name = called_name(label)
       err = assert_raise(TypeError) { call.(1.5) }
       assert_equal "#{name}: kth must be an Integer (got Float)", err.message
       [4, -5].each do |k|
@@ -65,6 +65,37 @@ class TestIntegerArgumentMessage < Test::Unit::TestCase
       err = assert_raise(ArgumentError) { call.(-1) }
       assert_equal "#{label}: n must be non-negative (got -1)", err.message
     end
+  end
+
+  # masked_position:, kind: and method: take one of two Symbols; anything
+  # else is a TypeError, another Symbol an ArgumentError, both naming the
+  # method called.
+  SYMBOL_CASES = {
+    "sort"            => [:masked_position, ->(kw) { A.sort(axis: 1, **kw) }],
+    "sort_copy"       => [:masked_position, ->(kw) { A.sort_copy(axis: 1, **kw) }],
+    "sort_index"      => [:kind,            ->(kw) { A.sort_index(axis: 1, **kw) }],
+    "sort_addr"       => [:kind,            ->(kw) { A.sort_addr(axis: 1, **kw) }],
+    "partition"       => [:masked_position, ->(kw) { A.partition(1, axis: 1, **kw) }],
+    "partition_copy"  => [:masked_position, ->(kw) { A.partition_copy(1, axis: 1, **kw) }],
+    "partition_index" => [:masked_position, ->(kw) { A.partition_index(1, axis: 1, **kw) }],
+    "rank_index"      => [:method,          ->(kw) { A.rank_index(axis: 1, **kw) }],
+    "order"           => [:kind,            ->(kw) { A.order(axis: 1, **kw) }],
+  }
+
+  SYMBOL_CASES.each do |name, (arg, call)|
+    define_method("test_symbol_#{name}_#{arg}") do
+      err = assert_raise(TypeError) { call.(arg => "x") }
+      assert_equal "#{name}: #{arg} must be a Symbol (got String)", err.message
+      err = assert_raise(ArgumentError) { call.(arg => :nope) }
+      assert_match(/\A#{name}: unknown #{arg} :nope \(expected :\w+ or :\w+\)\z/, err.message)
+    end
+  end
+
+  def test_order_takes_kind
+    m = A.copy
+    m[0, 0] = UNDEF
+    assert_equal m.order(axis: 1).to_a, m.order(axis: 1, kind: :stable).to_a
+    assert_equal m.rank_index(axis: 1, kind: :stable).to_a, m.order(axis: 1, kind: :stable).to_a
   end
 
 end

@@ -257,7 +257,7 @@ extern VALUE rb_ca_reshape                   (int argc, VALUE *argv, VALUE self)
  * through rb_funcall + kwarg hash construction. */
 extern VALUE rb_ca_sort_index_ki_quick       (VALUE self, VALUE vaxis);
 extern VALUE rb_ca_partition_index_ki        (VALUE self, VALUE vaxis, VALUE vkth);
-extern VALUE rb_ca_rank_index_ki_quick_dense (VALUE self, VALUE vaxis, int dense);
+extern VALUE rb_ca_rank_index_ki_kind_dense (VALUE self, VALUE vaxis, int stable, int dense);
 
 /* ---- no-axis (flat) search helper -----------------------------------
  *
@@ -715,29 +715,20 @@ static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
 {
   VALUE ropt = rb_pop_options(&argc, &argv);
-  VALUE raxis = Qnil, rdesc = Qfalse, rmethod = Qnil;
-  rb_scan_options(ropt, "axis,descending,method", &raxis, &rdesc, &rmethod);
+  VALUE raxis = Qnil, rdesc = Qfalse, rmethod = Qnil, rkind = Qnil;
+  rb_scan_options(ropt, "axis,descending,method,kind", &raxis, &rdesc, &rmethod, &rkind);
   rb_check_arity(argc, 0, 0);
 
-  int dense = 0;   /* default method: :ordinal */
-  if ( ! NIL_P(rmethod) ) {
-    static ID sym_ordinal = 0, sym_dense = 0;
-    if ( ! sym_ordinal ) sym_ordinal = rb_intern("ordinal");
-    if ( ! sym_dense )   sym_dense   = rb_intern("dense");
-    ID method_id = SYM2ID(rmethod);
-    if      ( method_id == sym_ordinal ) dense = 0;
-    else if ( method_id == sym_dense )   dense = 1;
-    else {
-      rb_raise(rb_eArgError, "order: unknown method %s (expected :ordinal or :dense)",
-               rb_id2name(method_id));
-    }
-  }
+  int dense = NIL_P(rmethod) ? 0
+    : ca_symbol_choice(rmethod, "method", "ordinal", "dense", NULL);
+  int do_stable = NIL_P(rkind) ? 0
+  : ca_symbol_choice(rkind, "kind", "quick", "stable", NULL);
 
   VALUE asc, n;
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
     /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
-    VALUE ranked = rb_ca_rank_index_ki_quick_dense(flat, INT2FIX(0), dense);
+    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, dense);
     /* reshape(*shape) */
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -752,7 +743,7 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
   } else {
     long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
     VALUE raxis_norm = LONG2NUM(axis_norm);
-    asc = rb_ca_rank_index_ki_quick_dense(self, raxis_norm, dense);
+    asc = rb_ca_rank_index_ki_kind_dense(self, raxis_norm, do_stable, dense);
     if ( RTEST(rb_ca_has_mask(self)) ) {
       n = rb_ca_count_not_masked_c(self, raxis_norm);
     } else {

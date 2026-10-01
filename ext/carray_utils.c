@@ -522,6 +522,33 @@ ca_integer_arg (VALUE v, const char *arg, const char *name)
   return NUM2LONG(v);
 }
 
+/* A keyword that names one of two Symbols (`masked_position: :first /
+   :last`, `kind: :quick / :stable`, `method: :ordinal / :dense`):
+   returns 0 for c0 and 1 for c1.  Anything but a Symbol is a TypeError,
+   another Symbol an ArgumentError, both naming the method (`name`, or the
+   method the user called when NULL). */
+int
+ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
+                  const char *name)
+{
+  const char *nm = name ? name : ca_calling_method_name();
+  ID id;
+  if ( ! SYMBOL_P(v) ) {
+    rb_raise(rb_eTypeError, "%s: %s must be a Symbol (got %"PRIsVALUE")",
+             nm, arg, rb_obj_class(v));
+  }
+  id = SYM2ID(v);
+  if ( id == rb_intern(c0) ) {
+    return 0;
+  }
+  if ( id == rb_intern(c1) ) {
+    return 1;
+  }
+  rb_raise(rb_eArgError, "%s: unknown %s :%s (expected :%s or :%s)",
+           nm, arg, rb_id2name(id), c0, c1);
+  return 0;
+}
+
 /* ca_integer_arg for an `axis` argument. */
 long
 ca_axis_integer (VALUE raxis, const char *name)
