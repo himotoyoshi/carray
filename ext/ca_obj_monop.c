@@ -315,38 +315,6 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_monop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_monop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CAMonOp *ca = (CAMonOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    /* PUT: only writable-view op_ids accept writes.  */
-    if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-      rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_addrs PUT)");
-    }
-    /* Per-cell loop: forward to xfer_index PUT (handles cast/byte_swap
-       branch internally).  */
-    for ( i = 0; i < n; i++ ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *)ca, addrs[i], idx);
-      ca_monop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_PUT);
-    }
-    return;
-  }
-
-  /* Naive per-addr loop: convert addr → idx, then xfer_index.  This path
-     is not optimised. */
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_monop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
-}
-
 /* ------------------------------------------------------------------- */
 /* In-place chain eval (scratch = 0)                                    */
 /* ------------------------------------------------------------------- */
@@ -433,38 +401,25 @@ typedef struct {
 static int8_t
 pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
                               int has_cast_at_leaf, int8_t out_bytes,
-                              ca_size_t slab_n,
-                              ca_size_t *starts, ca_size_t *counts,
-                              ca_size_t *strides, void *data)
+                              const ca_lazy_req_t *req, void *data)
 {
   ca_size_t leaf_bytes = leaf->bytes;
+  ca_size_t slab_n = req->n;
 
   /* Path 1: no size mismatch, no cast — direct pull.  */
   if ( leaf_bytes == out_bytes && ! has_cast_at_leaf ) {
-    ca_xfer_stride(leaf, starts, counts, strides, data, CA_XFER_GET);
+    ca_lazy_req_pull(leaf, req, data, CA_XFER_GET);
     return leaf->data_type;
   }
 
-  /* Paths 2 & 3 both need a leaf-sized scratch + leaf-byte strides
-     for the leaf pull.  */
-  ca_size_t parent_strides[CA_RANK_MAX];
+  /* Paths 2 & 3 both pull the leaf into a leaf-sized scratch.  */
   ca_size_t total_bytes = slab_n * leaf_bytes;
   void *scratch;
-  volatile VALUE holder;
-  int8_t k;
-  {
-    ca_size_t s = leaf_bytes;
-    for ( k = leaf->ndim - 1; k >= 0; k-- ) {
-      parent_strides[k] = s;
-      s *= counts[k];
-    }
-  }
-  (void) holder;
   scratch = ( leaf->data_type == CA_OBJECT )
               ? ca_lazy_arena_acquire_object(slab_n)
               : ca_lazy_arena_acquire(total_bytes);
   ca_monop_scratch_acquire_count++;
-  ca_xfer_stride(leaf, starts, counts, parent_strides, scratch, CA_XFER_GET);
+  ca_lazy_req_pull(leaf, req, scratch, CA_XFER_GET);
 
   int8_t result_dt;
   if ( has_cast_at_leaf ) {
@@ -485,16 +440,15 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
   return result_dt;
 }
 
+/* Evaluate (GET) or write (PUT, writable views only) the cells a request
+   names; `data` holds them packed. */
 static void
-ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                           ca_size_t *strides, void *data, int dir)
+ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
 {
-  CAMonOp *mo = (CAMonOp *) ap;
   uint16_t op_chain[CA_MAX_LAZY_DEPTH];
   int chain_len = 0;
   CArray  *leaf;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   int8_t    cur_dt;
   int       i;
   int       has_cast_at_leaf = 0;
@@ -509,21 +463,13 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      - byte_swap: same data_type → pstrides = strides; involution apply.  */
   if ( ca_monop_is_writable_view(mo->op_id) ) {
     int is_cast = ca_monop_is_cast(mo->op_id);
-    ca_size_t pstrides[CA_RANK_MAX];
-    ca_size_t n = 1;
+    ca_size_t n = slab_n;
     ca_size_t parent_bytes = is_cast ? mo->parent->bytes : mo->bytes;
-    int8_t    kk;
     char     *v;
     volatile VALUE holder;
-    for ( kk = 0; kk < mo->ndim; kk++ ) {
-      n *= counts[kk];
-      pstrides[kk] = is_cast
-                       ? (strides[kk] / mo->bytes * mo->parent->bytes)
-                       : strides[kk];
-    }
     v = ALLOCV_N(char, holder, n * parent_bytes);
     if ( dir == CA_XFER_GET ) {
-      ca_xfer_stride(mo->parent, starts, counts, pstrides, v, CA_XFER_GET);
+      ca_lazy_req_pull(mo->parent, req, v, CA_XFER_GET);
       if ( is_cast ) {
         ca_cast_block(n, mo->parent, v, (CArray *) mo, data);
       }
@@ -542,7 +488,7 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
         memcpy(v, data, n * mo->bytes);
         ca_byte_swap_buffer(mo->data_type, mo->bytes, n, v);
       }
-      ca_xfer_stride(mo->parent, starts, counts, pstrides, v, CA_XFER_PUT);
+      ca_lazy_req_pull(mo->parent, req, v, CA_XFER_PUT);
     }
     ALLOCV_END(holder);
     return;
@@ -585,16 +531,12 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   /* === 2. pull leaf into output buffer (with optional cast) === */
-  slab_n = 1;
-  for ( k = 0; k < mo->ndim; k++ ) {
-    slab_n *= counts[k];
-  }
   cur_dt = pull_leaf_with_optional_cast(
     leaf,
     has_cast_at_leaf ? op_chain[chain_len - 1] : 0,
     has_cast_at_leaf,
     (int8_t) mo->bytes,
-    slab_n, starts, counts, strides, data
+    req, data
   );
 
   /* === 3. apply remaining chain in reverse (leaf side → outermost) ===
@@ -629,6 +571,25 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
     }
   }
+}
+
+static void
+ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_monop_eval((CAMonOp *) ap, &req, data, dir);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_monop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_monop_eval((CAMonOp *) ap, &req, data, dir);
 }
 
 static void

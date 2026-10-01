@@ -123,6 +123,28 @@ void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
 int     ca_is_lazy_view (void *ap);
 
+/* A request to an element-wise lazy view (CAMonOp, CABinOp, CAMonCmp,
+   CABinCmp, CATriOp): either a region of the view's addresses -- the
+   xfer_stride form, strides in bytes of the view's cells -- or a list of
+   addresses.  The view answers either with one evaluation: it pulls each
+   operand over the same cells with ca_lazy_req_pull and runs its kernel
+   once over the n cells (carray_lazy.c). */
+
+typedef struct {
+  ca_size_t  n;
+  ca_size_t *addrs;                       /* list form when non-NULL */
+  ca_size_t *starts, *counts, *strides;   /* region form */
+  ca_size_t  bytes;                       /* cell width the strides use */
+  int8_t     ndim;
+} ca_lazy_req_t;
+
+void    ca_lazy_req_region (ca_lazy_req_t *req, void *view, ca_size_t *starts,
+                            ca_size_t *counts, ca_size_t *strides);
+void    ca_lazy_req_addrs  (ca_lazy_req_t *req, ca_size_t n, ca_size_t *addrs);
+int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
+void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
+                            void *buf, int dir);
+
 /* ---- per-obj_type view constructors --------------------------------------
 
    Constructors for view types that only carray itself builds.  Ruby-side

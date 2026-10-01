@@ -189,24 +189,6 @@ ca_moncmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_moncmp_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_moncmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                            void *data, int dir)
-{
-  CAMonCmp *ca = (CAMonCmp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_addrs PUT)");
-  }
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_moncmp_func_xfer_index(ca, idx, out + i, CA_XFER_GET);
-  }
-}
-
 ca_size_t ca_moncmp_scratch_acquire_count = 0;
 ca_size_t ca_moncmp_materialise_call_count = 0;
 ca_size_t ca_moncmp_leaf_inplace_count     = 0;
@@ -242,55 +224,30 @@ ca_moncmp_try_leaf_inplace (CArray *p,
   return 1;
 }
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                             ca_size_t *strides, void *data, int dir)
+ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
 {
-  CAMonCmp *mc = (CAMonCmp *) ap;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   void     *scratch;
   ca_size_t operand_bytes;
-  ca_size_t operand_strides[CA_RANK_MAX];
   int       is_contig;
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
-  }
   ca_moncmp_materialise_call_count++;
-
-  slab_n = 1;
-  for ( k = 0; k < mc->ndim; k++ ) slab_n *= counts[k];
 
   operand_bytes = mc->parent->bytes;
 
-  /* The operand's cell is operand_bytes wide where this view's is one byte
-     (CA_BOOLEAN), so the caller's strides have to be restated at the
-     operand's cell size before the pull; strides[k] / bytes is the index
-     step, which is what the two spaces share.
-
-     is_contig says the caller asked for the row-major slab that xfer_all
-     and attach send.  Only then does the parent's own buffer hold the
-     wanted cells in the packed order the kernel reads them in, so it is
-     also the only case the leaf in-place path is good for. */
-  {
-    ca_size_t native = mc->bytes;
-    is_contig = 1;
-    for ( k = mc->ndim - 1; k >= 0; k-- ) {
-      operand_strides[k] = strides[k] / mc->bytes * operand_bytes;
-      if ( strides[k] != native ) {
-        is_contig = 0;
-      }
-      native *= mc->dim[k];
-    }
-  }
+  /* The leaf in-place path reads the parent's own buffer, which holds the
+     wanted cells in the order the kernel reads them only for the row-major
+     slab that xfer_all and attach send. */
+  is_contig = ca_lazy_req_is_packed(req, mc);
 
   /* === 1. pull parent (leaf-opt or scratch) === */
   int scratch_is_inplace = 0;
   {
     char *inplace = NULL;
     if ( is_contig &&
-         ca_moncmp_try_leaf_inplace(mc->parent, starts, counts,
+         ca_moncmp_try_leaf_inplace(mc->parent, req->starts, req->counts,
                                      operand_bytes, &inplace) ) {
       scratch = inplace;
       scratch_is_inplace = 1;
@@ -301,8 +258,7 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                   ? ca_lazy_arena_acquire_object(slab_n)
                   : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_moncmp_scratch_acquire_count++;
-      ca_xfer_stride(mc->parent, starts, counts, operand_strides, scratch,
-                     CA_XFER_GET);
+      ca_lazy_req_pull(mc->parent, req, scratch, CA_XFER_GET);
     }
   }
 
@@ -330,6 +286,31 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   if ( ! scratch_is_inplace ) ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                            ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_moncmp_eval((CAMonCmp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_moncmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                           void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_moncmp_eval((CAMonCmp *) ap, &req, data);
 }
 
 static void

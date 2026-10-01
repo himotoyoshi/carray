@@ -806,3 +806,81 @@ Init_carray_lazy (void)
   rb_define_singleton_method(rb_cCArray, "__lazy_arena_slot_capacities__",
                              rb_ca_lazy_arena_s_slot_capacities, 0);
 }
+
+/* ---------------------------------------------------------------------------
+   Requests to the element-wise lazy views (ca_lazy_req_t, carray_internal.h).
+
+   An operand is pulled over the cells the request names.  In the region
+   form the strides address the view's cells, so they are restated at the
+   operand's cell width: strides[k] / bytes is the index step the two share.
+   (A packed stride over counts is not a substitute -- it walks cells 0, 1,
+   2 where the request asked for 0, 2, 4.)
+   --------------------------------------------------------------------------- */
+
+void
+ca_lazy_req_region (ca_lazy_req_t *req, void *view, ca_size_t *starts,
+                    ca_size_t *counts, ca_size_t *strides)
+{
+  CArray *ca = (CArray *) view;
+  int8_t  k;
+  req->n = 1;
+  for ( k = 0; k < ca->ndim; k++ ) {
+    req->n *= counts[k];
+  }
+  req->addrs   = NULL;
+  req->starts  = starts;
+  req->counts  = counts;
+  req->strides = strides;
+  req->bytes   = ca->bytes;
+  req->ndim    = ca->ndim;
+}
+
+void
+ca_lazy_req_addrs (ca_lazy_req_t *req, ca_size_t n, ca_size_t *addrs)
+{
+  req->n       = n;
+  req->addrs   = addrs;
+  req->starts  = NULL;
+  req->counts  = NULL;
+  req->strides = NULL;
+  req->bytes   = 0;
+  req->ndim    = 0;
+}
+
+/* Whether the request is a region walked in the view's own row-major
+   order -- the case in which an operand's buffer already holds the cells
+   in the order the kernel reads them. */
+int
+ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view)
+{
+  CArray   *ca = (CArray *) view;
+  ca_size_t native = ca->bytes;
+  int8_t    k;
+  if ( req->addrs ) {
+    return 0;
+  }
+  for ( k = ca->ndim - 1; k >= 0; k-- ) {
+    if ( req->strides[k] != native ) {
+      return 0;
+    }
+    native *= ca->dim[k];
+  }
+  return 1;
+}
+
+void
+ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
+{
+  CArray   *op = (CArray *) operand;
+  ca_size_t strides[CA_RANK_MAX];
+  int8_t    k;
+
+  if ( req->addrs ) {
+    ca_xfer_addrs(op, req->n, req->addrs, buf, dir);
+    return;
+  }
+  for ( k = 0; k < req->ndim; k++ ) {
+    strides[k] = req->strides[k] / req->bytes * op->bytes;
+  }
+  ca_xfer_stride(op, req->starts, req->counts, strides, buf, dir);
+}
