@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `nlargest`, `nsmallest` and their `_index` forms raise
+  `ArgumentError` for a negative `n`, as `Array#max(n)` does. They used to
+  return an empty result. An `n` past the length still gives the whole
+  fiber.
+
 - Change: `min_count:`, `kth` (`partition`, `partition_copy`,
   `partition_index`) and `n` (`nlargest`, `nsmallest` and their `_index`
   forms) take an Integer and nothing else, as `axis:` does: `1.5` raises

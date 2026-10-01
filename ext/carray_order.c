@@ -615,10 +615,12 @@ rb_ca_topk_index (VALUE self, VALUE rn, VALUE raxis, int desc, const char *name)
   long a = rb_ca_normalize_axis_value(self, raxis, name);
   long n_val = ca_integer_arg(rn, "n", name);
   long dim_a = (long) ca->dim[a];
-  long cap = (n_val < dim_a) ? n_val : dim_a;
-  if ( cap < 0 ) {
-    cap = 0;
+  /* As Array#max(n): a negative count is an error, one past the length
+     gives the whole fiber. */
+  if ( n_val < 0 ) {
+    rb_raise(rb_eArgError, "%s: n must be non-negative (got %ld)", name, n_val);
   }
+  long cap = (n_val < dim_a) ? n_val : dim_a;
   if ( cap == 0 ) {
     /* Return zero-along-axis int64 array via the C carray constructor. */
     ca_size_t out_dim[CA_RANK_MAX];

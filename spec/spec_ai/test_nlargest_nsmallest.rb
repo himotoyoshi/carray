@@ -173,4 +173,16 @@ class TestNlargestNsmallest < Test::Unit::TestCase
     assert_equal expected, r.to_a
   end
 
+  # A negative n is an error, as for Array#max(n); it used to give an
+  # empty result.
+  def test_negative_n_raises
+    a = CArray.float64(3, 4).seq
+    [->(n) { a.nlargest(n) }, ->(n) { a.nsmallest(n) },
+     ->(n) { a.nlargest(n, axis: 1) }, ->(n) { a.nsmallest(n, axis: 0) },
+     ->(n) { a.nlargest_index(n, axis: 1) }, ->(n) { a.nsmallest_index(n, axis: 1) }].each do |call|
+      err = assert_raise(ArgumentError) { call.(-1) }
+      assert_match(/\A\w+: n must be non-negative \(got -1\)\z/, err.message)
+    end
+  end
+
 end
