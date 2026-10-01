@@ -81,7 +81,7 @@ class CArray
   #   @raise [ArgumentError] same conditions as {#partition}.
   def partition_copy(kth, axis: nil, masked_position: :last); end
 
-  # @overload order(axis: nil, descending: false, method: :ordinal)
+  # @overload order(axis: nil, descending: false, method: :ordinal, kind: :quick)
   #   Returns each cell's rank among the other cells along `axis`
   #   (`0` = smallest). When `axis` is omitted, `self` is flattened
   #   first (global rank). Sugar over `rank_index` (built on the
@@ -109,9 +109,11 @@ class CArray
   #   @param axis [Integer, nil]
   #   @param descending [Boolean]
   #   @param method [Symbol] `:ordinal` (default) or `:dense`.
+  #   @param kind [Symbol] `:quick` (default) or `:stable`, as for
+  #     {#sort_index}; a performance choice only.
   #   @return [CArray] `:int64` ranks, shape == `self.shape`.
   #   @raise [ArgumentError] when `method:` is neither `:ordinal` nor `:dense`.
-  def order(axis: nil, descending: false, method: :ordinal); end
+  def order(axis: nil, descending: false, method: :ordinal, kind: :quick); end
 
   # @!endgroup
 

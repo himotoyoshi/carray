@@ -4836,16 +4836,16 @@ module MkKernel
       end
 
       if rank
-        # _quick_dense: explicit dense (0 :ordinal / 1 :dense), extern for
-        # carray_order.c's `order` method: kwarg (order is CA_INT64-family
-        # sugar over rank_index, defined in a different file, so it needs
+        # _kind_dense: explicit kind (0 :quick / 1 :stable) and dense
+        # (0 :ordinal / 1 :dense), extern for carray_order.c's `order`
+        # (sugar over rank_index, defined in a different file, so it needs
         # a non-static entry point the same way the mask_self: :sentinel
         # kernels' _mp twins do).
         io.puts
         io.puts "VALUE"
-        io.puts "rb_ca_#{name}_ki_quick_dense (VALUE self, VALUE vaxis, int dense)"
+        io.puts "rb_ca_#{name}_ki_kind_dense (VALUE self, VALUE vaxis, int stable, int dense)"
         io.puts "{"
-        io.puts "  return #{name}_ki_dispatch(self, vaxis, 0, dense);"
+        io.puts "  return #{name}_ki_dispatch(self, vaxis, stable, dense);"
         io.puts "}"
       end
     else
@@ -4963,34 +4963,12 @@ module MkKernel
         # the standard "dense rank" used to compose rank as a sort_addr
         # priority key without silently dropping lower-priority keys on
         # ties (see MASKED_POSITION's sibling proposal thread).
-        io.puts "  int dense = 0;   /* default method: :ordinal */"
-        io.puts "  if ( ! NIL_P(rmethod) ) {"
-        io.puts "    static ID sym_ordinal = 0, sym_dense = 0;"
-        io.puts "    if ( ! sym_ordinal ) sym_ordinal = rb_intern(\"ordinal\");"
-        io.puts "    if ( ! sym_dense )   sym_dense   = rb_intern(\"dense\");"
-        io.puts "    ID method_id = SYM2ID(rmethod);"
-        io.puts "    if      ( method_id == sym_ordinal ) dense = 0;"
-        io.puts "    else if ( method_id == sym_dense )   dense = 1;"
-        io.puts "    else {"
-        io.puts %Q[      rb_raise(rb_eArgError, "#{legacy_name}: unknown method %s (expected :ordinal or :dense)", rb_id2name(method_id));]
-        io.puts "    }"
-        io.puts "  }"
+        io.puts "  int dense = NIL_P(rmethod) ? 0 : ca_symbol_choice(rmethod, \"method\", \"ordinal\", \"dense\", NULL);"
       end
       if mask_sentinel
         # masked_position: :last (default) / :first -> masked_last int.
         # Shared by both the has_kind and :partition branches below.
-        io.puts "  int masked_last = 1;   /* default masked_position: :last */"
-        io.puts "  if ( ! NIL_P(rmasked_position) ) {"
-        io.puts "    static ID sym_first = 0, sym_last = 0;"
-        io.puts "    if ( ! sym_first ) sym_first = rb_intern(\"first\");"
-        io.puts "    if ( ! sym_last )  sym_last  = rb_intern(\"last\");"
-        io.puts "    ID mp_id = SYM2ID(rmasked_position);"
-        io.puts "    if      ( mp_id == sym_last )  masked_last = 1;"
-        io.puts "    else if ( mp_id == sym_first ) masked_last = 0;"
-        io.puts "    else {"
-        io.puts %Q[      rb_raise(rb_eArgError, "#{legacy_name}: unknown masked_position %s (expected :first or :last)", rb_id2name(mp_id));]
-        io.puts "    }"
-        io.puts "  }"
+        io.puts "  int masked_last = NIL_P(rmasked_position) ? 1 : ca_symbol_choice(rmasked_position, \"masked_position\", \"first\", \"last\", NULL);"
       end
       if partition
         # partition_index(kth, axis: nil, masked_position: :last) -- kth
@@ -5010,18 +4988,7 @@ module MkKernel
         io.puts %Q[    rb_raise(rb_eArgError, "#{legacy_name}: positional args no longer accepted (given %d args); use axis:/kind: kwargs", argc);]
         io.puts "  }"
         # kind: dispatch (:quick default, :stable optional).
-        io.puts "  int do_stable = 0;"
-        io.puts "  if ( ! NIL_P(rkind) ) {"
-        io.puts "    static ID sym_quick = 0, sym_stable = 0;"
-        io.puts "    if ( ! sym_quick )  sym_quick  = rb_intern(\"quick\");"
-        io.puts "    if ( ! sym_stable ) sym_stable = rb_intern(\"stable\");"
-        io.puts "    ID kind_id = SYM2ID(rkind);"
-        io.puts "    if      ( kind_id == sym_quick )  do_stable = 0;"
-        io.puts "    else if ( kind_id == sym_stable ) do_stable = 1;"
-        io.puts "    else {"
-        io.puts %Q[      rb_raise(rb_eArgError, "#{legacy_name}: unknown kind %s (expected :quick or :stable)", rb_id2name(kind_id));]
-        io.puts "    }"
-        io.puts "  }"
+        io.puts "  int do_stable = NIL_P(rkind) ? 0 : ca_symbol_choice(rkind, \"kind\", \"quick\", \"stable\", NULL);"
         if mask_sentinel
           io.puts "  return #{name}_ki_dispatch(self, raxis, do_stable, masked_last);"
         elsif rank

@@ -157,20 +157,8 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE vmasked_position = Qnil;
   rb_scan_options(ropt, "masked_position", &vmasked_position);
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   if ( argc <= 0 ) {
     rb_raise(rb_eArgError, "no arg given");
@@ -337,35 +325,11 @@ rb_ca_sort_addr (int argc, VALUE *argv, VALUE self)
   rb_scan_args(argc, argv, "0:", &opts);
   rb_scan_options(opts, "axis,kind,masked_position", &axis, &kind, &vmasked_position);
 
-  int do_stable = 0;
-  if ( ! NIL_P(kind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( ! sym_quick )  sym_quick  = rb_intern("quick");
-    if ( ! sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(kind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
-  }
+  int do_stable = NIL_P(kind) ? 0
+    : ca_symbol_choice(kind, "kind", "quick", "stable", NULL);
 
-  int masked_last = 1;
-  if ( ! NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   return rb_ca_sort_addr_c(self, axis, do_stable, masked_last);
 }
@@ -597,36 +561,12 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
   /* Resolve kind: -> do_stable.  :quick (default) = introsort; :stable
      = bottom-up mergesort.  Both share the same pair layout and produce
      identical orderings; only the algorithm differs. */
-  int do_stable = 0;
-  if ( !NIL_P(vkind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( !sym_quick )  sym_quick  = rb_intern("quick");
-    if ( !sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(vkind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
-  }
+  int do_stable = NIL_P(vkind) ? 0
+    : ca_symbol_choice(vkind, "kind", "quick", "stable", NULL);
 
   /* Resolve masked_position: -> masked_last.  :last (default) or :first. */
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -702,19 +642,12 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
 
   /* Resolve kind:: :quick (default) = portable textbook quicksort,
      :stable = portable textbook bottom-up mergesort. */
-  int do_stable = 0;
-  if ( !NIL_P(vkind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( !sym_quick )  sym_quick  = rb_intern("quick");
-    if ( !sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(vkind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_copy: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
+  int do_stable = NIL_P(vkind) ? 0
+    : ca_symbol_choice(vkind, "kind", "quick", "stable", NULL);
+  /* The unmasked path below has no use for masked_position:, but a value
+     sort would refuse is refused here too. */
+  if ( ! NIL_P(vmasked_position) ) {
+    ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
   }
 
   CArray *ca;

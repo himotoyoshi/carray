@@ -335,20 +335,8 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
     vaxis = INT2NUM(0);
   }
 
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "partition_copy: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
   return rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
 }
 
@@ -380,20 +368,8 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
   rb_scan_args(argc, argv, "1:", &vkth, &rkw);
   rb_scan_options(rkw, "axis,masked_position", &vaxis, &vmasked_position);
 
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "partition: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);

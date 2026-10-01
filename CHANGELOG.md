@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `order` takes `kind:` (`:quick` or `:stable`), as `rank_index`
+  does.
+
+- Fix: `masked_position:`, `kind:` and `method:` (`rank_index`, `order`)
+  report a value that is not a Symbol as `TypeError` naming the method
+  (`"sort: masked_position must be a Symbol (got String)"`), and an
+  unknown Symbol as `ArgumentError` naming the method you called
+  (`sort_copy` used to say `sort`). `sort_copy` on an unmasked numeric
+  array accepted any `masked_position:` without checking it.
+
 - Change: `nlargest`, `nsmallest` and their `_index` forms raise
   `ArgumentError` for a negative `n`, as `Array#max(n)` does. They used to
   return an empty result. An `n` past the length still gives the whole
