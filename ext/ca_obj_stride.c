@@ -748,13 +748,45 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     }
   }
 
+  /* A reshape over a 1-D cold root (ndim != root->ndim): the request has no
+     box in the root's single axis, but the root cells it touches lie in one
+     flat span.  Ask the root for that span once and walk the request over
+     it, as xfer_all does for the whole view.  A PUT reads the span first so
+     the cells between the requested ones go back unchanged. */
+  if (aligned && !root->ptr && ca_func[root->obj_type].xfer_stride
+       && ca->bytes == root->bytes && root->ndim == 1
+       && root_base % root->bytes == 0) {
+    ca_size_t span_lo = root_base;
+    ca_size_t span_hi = root_base + ca->bytes;
+    for (k = 0; k < ndim; k++) {
+      ca_size_t ext = (counts[k] - 1) * root_stride[k];
+      if ( root_stride[k] >= 0 ) span_hi += ext;
+      else                       span_lo += ext;
+    }
+    if ( span_lo >= 0 && span_hi <= root->elements * root->bytes ) {
+      volatile VALUE holder;
+      ca_size_t rlo    = span_lo / root->bytes;
+      ca_size_t rcount = (span_hi - span_lo) / root->bytes;
+      ca_size_t rstep  = root->bytes;
+      char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
+      ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
+      ca_xfer_strided_walk(scratch + (root_base - span_lo), ca->bytes, ndim,
+                           counts, root_stride, d, dir);
+      if ( dir == CA_XFER_PUT ) {
+        ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_PUT);
+      }
+      ALLOCV_END(holder);
+      return;
+    }
+  }
+
   /* Per-cell fallback (correct, no whole-view attach): byte-mismatch
      reinterpret (CAField), a region that is not a box over our axes (a
      transposed request onto a degenerate axis, a flat index over several
-     axes), or a cold non-entity root the branch above could not hand a
-     region to (its ndim differs from the view's -- e.g. a reshape over a
-     boundary -- or it has no region slot).  ca_stride_func_xfer_index
-     composes one hop and delegates to the parent. */
+     axes), or a cold non-entity root the branches above could not hand a
+     region to (a reshape over a root of two or more axes, or one with no
+     region slot).  ca_stride_func_xfer_index composes one hop and
+     delegates to the parent. */
   if (!aligned || !root->ptr) {
     ca_size_t idx[CA_RANK_MAX], doff = 0;
     for (k = 0; k < ndim; k++) idx[k] = 0;
