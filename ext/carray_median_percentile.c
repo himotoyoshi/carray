@@ -798,6 +798,14 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
   if ( min_count < 0 )
     rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
              ca_calling_method_name(), min_count);
+  /* fill_value: UNDEF leaves the result undefined; any other fill is what
+     a store into the float64 result would make of it. */
+  if ( fill_value == CA_UNDEF ) {
+    fill_value = Qnil;
+  }
+  else if ( ! NIL_P(fill_value) && ! is_obj ) {
+    fill_value = ca_fill_as(fill_value, CA_FLOAT64);
+  }
   int keep_axis = RTEST(rkeep);
 
   if ( !NIL_P(raxis) ) {
@@ -1218,6 +1226,14 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
   if ( min_count < 0 )
     rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
              ca_calling_method_name(), min_count);
+  /* fill_value: UNDEF leaves the result undefined; any other fill is what
+     a store into the float64 result would make of it. */
+  if ( fill_value == CA_UNDEF ) {
+    fill_value = Qnil;
+  }
+  else if ( ! NIL_P(fill_value) && ! is_obj ) {
+    fill_value = ca_fill_as(fill_value, CA_FLOAT64);
+  }
 
   VALUE pers = pct_flatten_validate_pers(rb_ary_new_from_values(argc, argv));
   pct_validate_method(method);

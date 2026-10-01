@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a reduction's `fill_value:` is what storing it into the result
+  would give, with or without `axis:`. Without `axis:` it used to come
+  back as given: `uint8` `accumulate(min_count: 256, fill_value: -9999)`
+  now returns `241`, as the per-axis result already held, and
+  `fill_value: "x"` on a float result is `0.0` either way. Pick a fill
+  the result's data type can hold. `fill_value: UNDEF` now leaves the
+  result undefined (it filled `0.0` on the per-axis path). `median` and
+  `percentile` take a fill the same way (they raised `TypeError` for
+  `UNDEF` and for anything not numeric), and `minmax` fills both
+  members (it ignored `fill_value:` per axis and returned a single value
+  without `axis:`).
+
 - New: `order` takes `kind:` (`:quick` or `:stable`), as `rank_index`
   does.
 

@@ -437,8 +437,9 @@ describe "Feature: Masking" do
     is_asserted_by { UNDEF == a.accumulate(:min_count => 256) }
     is_asserted_by { UNDEF == a.accumulate(:min_count => 255) }
     is_asserted_by { 254 == a.accumulate(:min_count => 0, :fill_value => -9999) }
-    is_asserted_by { -9999 == a.accumulate(:min_count => 256, :fill_value => -9999) }
-    is_asserted_by { -9999 == a.accumulate(:min_count => 255, :fill_value => -9999) }
+    # The fill goes into the uint8 result as a store would put it there.
+    is_asserted_by { (-9999 % 256) == a.accumulate(:min_count => 256, :fill_value => -9999) }
+    is_asserted_by { (-9999 % 256) == a.accumulate(:min_count => 255, :fill_value => -9999) }
   end
 
   example "variance" do
