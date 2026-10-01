@@ -237,4 +237,107 @@ class TestCAObjectViewRegion < Test::Unit::TestCase
                  lazy[[100, 80]].reshape(20, 4).sum(axis: 1).to_a
     assert_equal ref[[100, 40]].sum, lazy[[100, 40]].sum
   end
+
+  # --- index selection (CAGrid) over a root with no memory to lend ------
+
+  ROWS = CA_INT64([3, 10, 40])
+  COLS = CA_INT64([1, 5, 90])
+
+  def test_index_selection_reads_ask_only_for_the_selected_cells
+    view = @src[ROWS, COLS]
+    assert_equal CAGrid, view.class
+    { "sum"  => -> { assert_equal @back[ROWS, COLS].sum, view.sum },
+      "copy" => -> { assert_equal @back[ROWS, COLS].to_a, view.copy.to_a },
+      "mean(axis: 0)" => -> { assert_equal @back[ROWS, COLS].mean(axis: 0).to_a,
+                                           view.mean(axis: 0).to_a } }.each do |name, check|
+      @src.log.clear
+      check.()
+      assert_equal 9, @src.cells_requested, name
+    end
+  end
+
+  # Logs whole and by-address requests too.
+  class AddressWriter < Writer
+    private
+    def copy_data(data)
+      @log << [:copy_data, data.elements]
+      super
+    end
+    def sync_data(data)
+      @log << [:sync_data, data.elements]
+      super
+    end
+    def copy_addrs(addrs, data)
+      @log << [:copy_addrs, addrs.elements]
+      super
+    end
+    def sync_addrs(addrs, data)
+      @log << [:sync_addrs, addrs.elements]
+      super
+    end
+  end
+
+  def test_index_selection_writes_land_in_the_selected_cells_only
+    { "add!" => ->(v) { v.add!(1) },
+      "map!" => ->(v) { v.map! { |x| x + 1 } } }.each do |name, op|
+      dst = AddressWriter.new(@back.copy)
+      op.(dst[ROWS, COLS])
+      expected = @back.copy
+      expected[ROWS, COLS] = expected[ROWS, COLS] + 1
+      assert_equal expected.to_a, dst.buf.to_a, name
+      assert_equal [[:copy_addrs, 3]] * 3 + [[:sync_addrs, 3]] * 3, dst.log, name
+    end
+  end
+
+  # The other selections over the same root: a boolean selection
+  # (CASelect), a boolean selection along an axis (CASelectAxis) and a
+  # window with FILL bounds (CAWindow).
+  def other_selections
+    picked = CArray.boolean(*SHAPE) { 0 }
+    picked[3, 1] = 1
+    picked[10, 5] = 1
+    picked[40, 90] = 1
+    rows = CArray.boolean(SHAPE[0]) { 0 }
+    rows[3] = 1
+    rows[40] = 1
+    { "CASelect"     => [->(a) { a[picked] }, 3],
+      "CASelectAxis" => [->(a) { a[rows, nil] }, 2 * SHAPE[1]],
+      "CAWindow"     => [->(a) { a.window([-2, 4], [90, 10]) }, 2 * 6] }
+  end
+
+  def test_other_selections_read_only_the_selected_cells
+    other_selections.each do |name, (select, cells)|
+      view = select.(@src)
+      assert_equal name, view.class.name
+      assert_equal select.(@back).sum, view.sum, name
+      assert_equal cells, @src.cells_requested, name
+      @src.log.clear
+      assert_equal select.(@back).to_a, view.copy.to_a, name
+      assert_equal cells, @src.cells_requested, name
+      @src.log.clear
+    end
+  end
+
+  def test_other_selections_write_only_the_selected_cells
+    other_selections.each do |name, (select, _)|
+      dst = AddressWriter.new(@back.copy)
+      select.(dst).add!(1)
+      expected = @back.copy
+      select.(expected).add!(1)
+      assert_equal expected.to_a, dst.buf.to_a, name
+      assert_empty dst.log.select { |kind, _| kind == :copy_data || kind == :sync_data }, name
+    end
+  end
+
+  def test_index_selection_over_a_lazy_root
+    raw  = CArray.float64(40, 50) { |i| i * 0.5 }
+    raw[7, 3] = UNDEF
+    lazy = raw.lazy + 1.0
+    ref  = raw + 1.0
+    rows = CA_INT64([0, 7, 39])
+    cols = CA_INT64([3, 3, 49])
+    assert_equal ref[rows, cols].to_a, lazy[rows, cols].copy.to_a
+    assert_equal ref[rows, cols].sum, lazy[rows, cols].sum
+    assert_equal ref[rows, cols].sum(axis: 1).to_a, lazy[rows, cols].sum(axis: 1).to_a
+  end
 end

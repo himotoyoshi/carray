@@ -414,17 +414,21 @@ ca_select_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 }
 
+/* A parent with no memory to lend (ca_parent_lends_no_memory) is never
+   attached: the view owns its buffer, filled and drained through xfer_all,
+   which asks the parent for the selected cells only.  The predicate asks
+   what the parent is, not whether it is attached now, so attach, sync and
+   detach all take the same branch. */
+
 static void
 ca_select_func_allocate (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  ca_attach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_attach(ca->parent);
+  }
   ca->ptr = xmalloc(ca_length(ca));
 }
-
-/* Every attach / sync / xfer_all / xfer_stride / fill_data path
-   dispatches through the descriptor engine with the same shape
-   CASelectAxis uses: one axis over a flattened parent. */
 
 static void
 ca_select_func_attach (void *ap)
@@ -432,6 +436,12 @@ ca_select_func_attach (void *ap)
   CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
+
   ca_attach(ca->parent);
   ca_select_describe_axes(ca, desc, pdims);
   ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
@@ -444,6 +454,12 @@ ca_select_func_sync (void *ap)
   CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
+
   ca_select_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, ca->ptr);
@@ -454,16 +470,20 @@ static void
 ca_select_func_detach (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  xfree(ca->ptr);
-  ca->ptr = NULL;
-  ca_detach(ca->parent);
+  if ( ca->ptr ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+  }
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_detach(ca->parent);
+  }
 }
 
-/* Fast-path core used by xfer_all's attached-parent branch and the
-   cold-parent 2-pass scratch branch below. */
+/* The transfer against parent->ptr, for ca_axis_view_xfer_all. */
 static void
-ca_select_func_run_fast_path (CASelect *ca, char *data, int dir)
+ca_select_func_run_fast_path (void *ap, char *data, int dir)
 {
+  CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
   ca_select_describe_axes(ca, desc, pdims);
@@ -476,36 +496,10 @@ ca_select_func_run_fast_path (CASelect *ca, char *data, int dir)
   }
 }
 
-/* Cold parent is served by a 2-pass scratch (gather parent into a
-   local buffer, dispatch through the fast path against the buffer,
-   scatter back on PUT).  Deliberately avoids ca_attach(parent) so
-   that a silent transitive attach cannot re-enter through here. */
 static void
 ca_select_func_xfer_all (void *ap, void *data, int dir)
 {
-  CASelect *ca = (CASelect *) ap;
-  if ( ca->parent->ptr ) {
-    ca_select_func_run_fast_path(ca, (char *) data, dir);
-    return;
-  }
-  {
-    volatile VALUE holder;
-    CArray   *parent = ca->parent;
-    ca_size_t plen   = parent->elements * parent->bytes;
-    char     *parent_scratch = ALLOCV_N(char, holder, plen);
-    char     *parent_ptr_saved = parent->ptr;
-    ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
-    parent->ptr = parent_scratch;
-    ca_select_func_run_fast_path(ca, (char *) data, dir);
-    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
-       backing's sync failing), and the scratch is gone once this
-       frame is. */
-    parent->ptr = parent_ptr_saved;
-    if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
-    }
-    ALLOCV_END(holder);
-  }
+  ca_axis_view_xfer_all(ap, ca_select_func_run_fast_path, 1, data, dir);
 }
 
 static void

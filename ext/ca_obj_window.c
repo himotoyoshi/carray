@@ -30,6 +30,7 @@
 #include "carray.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE, used by rb_ca_window */
+#include "carray_internal.h"   /* ca_axis_view_attach_owned */
 
 /* should not be static variable as used by CAIteratorWindow */
 
@@ -972,13 +973,32 @@ ca_window_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ALLOCV_END(h1);
 }
 
+/* Whether this window over a parent with no memory to lend owns its buffer
+   rather than attaching the parent.  Only FILL / MASK bounds qualify: their
+   xfer_stride hands the parent one region per row, where the other bounds
+   go cell by cell -- for a Ruby-backed parent, a call per cell, which costs
+   more than producing the parent once.  Both inputs are fixed for the
+   life of the view, so attach, sync and detach take the same branch. */
+static int
+ca_window_owns_buffer (CAWindow *ca)
+{
+  int8_t k;
+  for ( k = 0; k < ca->ndim; k++ ) {
+    if ( ca->bounds[k] != CA_BOUNDS_FILL && ca->bounds[k] != CA_BOUNDS_MASK ) {
+      return 0;
+    }
+  }
+  return ca_parent_lends_no_memory(ca->parent);
+}
+
 static void
 ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
-  ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->ptr = xmalloc(ca_length(ca));  
+  if ( ! ca_window_owns_buffer(ca) ) {
+    ca_attach(ca->parent);
+  }
+  ca->ptr = xmalloc(ca_length(ca));
 }
 
 /* The engine paths below emit a per-axis descriptor (ca_window_describe_axes)
@@ -993,6 +1013,10 @@ static void
 ca_window_func_attach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
   ca_attach(ca->parent);
   if ( ca->embed_alias_eligible ) {
     /* Alias path: inner axes full + interior, so the embedded region is a
@@ -1025,6 +1049,10 @@ static void
 ca_window_func_sync (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
   if ( ca->embed_alias_eligible ) {
     /* Alias path: ca->ptr aliases the parent, so the writes already landed
        in parent storage.  Nothing to scatter back. */
@@ -1045,6 +1073,11 @@ static void
 ca_window_func_detach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+    return;
+  }
   /* Alias path: ca->ptr aliases parent storage; it is not ours to xfree. */
   if ( ! ca->embed_alias_eligible ) {
     xfree(ca->ptr);
@@ -1137,9 +1170,25 @@ ca_window_func_xfer_all (void *ap, void *data, int dir)
     }
   }
 
-  /* Cold parent with nothing to lend: materialise it into a scratch buffer
-     via ca_xfer_all, then run the normal fast path with the scratch standing
-     in for parent->ptr. */
+  /* A parent with no memory to lend is asked for the cells of the window
+     only, through xfer_stride over the whole view, when the bounds let that
+     go row by row (see ca_window_owns_buffer). */
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_size_t starts[CA_RANK_MAX], strides[CA_RANK_MAX], s;
+    int8_t    k;
+    s = ca->bytes;
+    for ( k = ca->ndim - 1; k >= 0; k-- ) {
+      starts[k]  = 0;
+      strides[k] = s;
+      s *= ca->dim[k];
+    }
+    ca_window_func_xfer_stride(ca, starts, ca->dim, strides, data, dir);
+    return;
+  }
+
+  /* Any other cold parent: materialise it into a scratch buffer via
+     ca_xfer_all, then run the normal fast path with the scratch standing in
+     for parent->ptr. */
   {
     volatile VALUE holder;
     CArray   *parent = ca->parent;
