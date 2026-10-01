@@ -1,8 +1,9 @@
 # 21 The address basis (`CArray::AddressBasis`)
 
 Every surface in Part III hands a kernel its *cells*: the kernel iterator
-delivers a slab or a fiber at a time, the sweep ELEMENT family delivers one
-element at a time, `call_cfunc` delivers the arguments of a scalar call.
+delivers a slab or a fiber at a time, `call_cfunc` delivers the arguments of
+a scalar call or a flat chunk, `rb_ca_call_with_buffer` delivers the whole
+array as one contiguous buffer.
 
 Some code does not want cells. A kernel generated from an expression writes
 its own loop — it reads `a[i-1]` and writes `a[i]`, or it reaches across two
@@ -33,8 +34,8 @@ own terms.
 | Surface | Why it does not fit |
 |---|---|
 | kernel iterator (ch. 11) | Delivers per cell or per slab, and has no N-ary form. A generated kernel with five operands and a stencil reach cannot be expressed as "here is the next slab". |
-| sweep ELEMENT family (ch. 13) | Flattens the array. A stencil needs the axis structure the flattening throws away. |
-| `CA_WITH_BUFFER` (ch. 13) | The closest relative — it also lends a buffer for the length of a block — but it materialises the whole view, one array at a time, and gives back a contiguous buffer rather than the view's own strides. |
+| call_cfunc (ch. 14) | Flattens the array. A stencil needs the axis structure the flattening throws away. |
+| `rb_ca_call_with_buffer` (ch. 13) | The closest relative — it also lends a buffer for the length of a block — but it materialises the whole view, one array at a time, and gives back a contiguous buffer rather than the view's own strides. |
 
 The shape of the surface follows from that: **N arrays at once**, **strides
 rather than contiguity**, and **only the region the caller says it will

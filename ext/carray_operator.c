@@ -52,8 +52,8 @@ ca_zerodiv (void)
 
    These three helpers (ca_chunk_inner_size / ca_chunk_compute_n /
    ca_chunked_gather) are extern so ca_sweep_engine.c can reuse the same
-   chunk policy + region-gather mechanism for the sweep ELEMENT macro
-   family without duplicating the implementation. */
+   chunk policy + region-gather mechanism for the chunked slab family
+   (ca_call_cslab_*) without duplicating the implementation. */
 
 #define CA_CHUNK_TARGET_ELEMENTS 4096
 

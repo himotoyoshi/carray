@@ -209,7 +209,6 @@ def emit_raw_common(n, r:)
       state.stride    = stride;
       state.owned_buf = owned_buf;
       state.attached  = attached;
-      state.no_mask   = 0;
       state.src_label = "#{name}";
 
       ca_sweep_acquire(&state);
@@ -412,7 +411,6 @@ def emit_slab_body(n, name, walker, userdata)
       state.stride    = stride;
       state.owned_buf = owned_buf;
       state.attached  = attached;
-      state.no_mask   = 0;
       state.src_label = "#{name}";
 
       ca_sweep_acquire_chunked(&state);

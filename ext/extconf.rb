@@ -257,9 +257,8 @@ $INSTALLFILES << ['carray_config.h', '$(archdir)']
 # (b) Not in the closure, but written for ext authors to include
 #     explicitly.  ca_obj_face.h is the Face authoring surface: an
 #     external gem defines its own Face by including it directly.
-#     ca_for_each_element.h and ca_for_buffer.h are the sweep author
-#     surface (per-element loops, whole-buffer delivery to an external
-#     library); both pull ca_sweep_engine.h.
+#     ca_for_buffer.h is whole-buffer delivery to an external library;
+#     it pulls ca_sweep_engine.h.
 #
 # A header that is neither is internal, however useful it looks in-tree.
 # ca_op_powi.h (op_powi_<type> helpers for the generated kernels) and
@@ -281,7 +280,6 @@ $INSTALLFILES << ['carray_config.h', '$(archdir)']
   ca_kernel_iterator.h
   ca_iter_substrate.h
   ca_obj_face.h
-  ca_for_each_element.h
   ca_for_buffer.h
   ca_sweep_engine.h
 ].each do |h|

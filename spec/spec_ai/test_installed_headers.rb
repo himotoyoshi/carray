@@ -5,7 +5,7 @@
 # compiles inside this tree -- the examples and the spec fixtures all build
 # with -I pointing at ext/ -- so nothing here notices until a downstream
 # gem's #include fails.  That is how the sweep surface (ca_for_buffer.h,
-# ca_for_each_element.h, ca_sweep_engine.h) and ca_triop_dispatch.h went
+# ca_sweep_engine.h) and ca_triop_dispatch.h went
 # out uninstalled.
 #
 # Three things are pinned here.

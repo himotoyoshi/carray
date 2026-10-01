@@ -8,8 +8,8 @@
   writes a[i] from its own loop, so what it needs from CArray is not element
   delivery but an addressing basis: a pointer, already shifted to cell zero,
   and one byte stride per axis.  That is why this does not sit on the kernel
-  iterator (per-cell / per-slab delivery, and no N-ary form) or on the sweep
-  ELEMENT family (which flattens the array and cannot recover the axis
+  iterator (per-cell / per-slab delivery, and no N-ary form) or on the
+  call_cfunc families (which flatten the array and cannot recover the axis
   structure a stencil needs).
 
   This is a runtime facility at the same layer as ca_attach, not a user

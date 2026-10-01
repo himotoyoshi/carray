@@ -9,10 +9,6 @@
 #
 #   ca_attach(  ca_allocate(  ca_attach_n(  ca_allocate_n(
 #
-# and the macros that open one around a block,
-#
-#   CA_WITH_BUFFER(  CA_WITH_BUFFER_WRITABLE(
-#
 # and requires each one outside the attach machinery itself to carry a
 # note, in a comment on the same line or the line above, of the form
 #
@@ -38,7 +34,7 @@
 
 ROOT = File.expand_path("..", __dir__)
 
-CALL = /\b(?:ca_(?:attach|allocate)(?:_n)?|CA_WITH_BUFFER(?:_WRITABLE)?)\s*\(/
+CALL = /\bca_(?:attach|allocate)(?:_n)?\s*\(/
 NOTE = /window:\s*\S/
 
 EXEMPT_FILES = %w[

@@ -146,7 +146,6 @@ ca_call_cfunc_1 (void (*func)(void *p0), const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_1";
 
   ca_sweep_acquire(&state);
@@ -218,7 +217,6 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_2";
 
   ca_sweep_acquire(&state);
@@ -291,7 +289,6 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_3";
 
   ca_sweep_acquire(&state);
@@ -365,7 +362,6 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_4";
 
   ca_sweep_acquire(&state);
@@ -440,7 +436,6 @@ ca_call_cfunc_5 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4),
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_5";
 
   ca_sweep_acquire(&state);
@@ -516,7 +511,6 @@ ca_call_cfunc_6 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_6";
 
   ca_sweep_acquire(&state);
@@ -593,7 +587,6 @@ ca_call_cfunc_7 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_7";
 
   ca_sweep_acquire(&state);
@@ -1054,7 +1047,6 @@ ca_call_cfunc_1_r (void (*func)(void *p0, void *userdata), const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_1_r";
 
   ca_sweep_acquire(&state);
@@ -1127,7 +1119,6 @@ ca_call_cfunc_2_r (void (*func)(void *p0, void *p1, void *userdata), const char 
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_2_r";
 
   ca_sweep_acquire(&state);
@@ -1201,7 +1192,6 @@ ca_call_cfunc_3_r (void (*func)(void *p0, void *p1, void *p2, void *userdata), c
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_3_r";
 
   ca_sweep_acquire(&state);
@@ -1276,7 +1266,6 @@ ca_call_cfunc_4_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *us
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_4_r";
 
   ca_sweep_acquire(&state);
@@ -1352,7 +1341,6 @@ ca_call_cfunc_5_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_5_r";
 
   ca_sweep_acquire(&state);
@@ -1429,7 +1417,6 @@ ca_call_cfunc_6_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_6_r";
 
   ca_sweep_acquire(&state);
@@ -1507,7 +1494,6 @@ ca_call_cfunc_7_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cfunc_7_r";
 
   ca_sweep_acquire(&state);
@@ -1934,7 +1920,6 @@ ca_call_cslab_1 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_1";
 
   ca_sweep_acquire_chunked(&state);
@@ -1978,7 +1963,6 @@ ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_2";
 
   ca_sweep_acquire_chunked(&state);
@@ -2023,7 +2007,6 @@ ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_3";
 
   ca_sweep_acquire_chunked(&state);
@@ -2069,7 +2052,6 @@ ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_4";
 
   ca_sweep_acquire_chunked(&state);
@@ -2116,7 +2098,6 @@ ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_5";
 
   ca_sweep_acquire_chunked(&state);
@@ -2164,7 +2145,6 @@ ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_6";
 
   ca_sweep_acquire_chunked(&state);
@@ -2213,7 +2193,6 @@ ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_7";
 
   ca_sweep_acquire_chunked(&state);
@@ -2257,7 +2236,6 @@ ca_call_cslab_1_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_1_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2302,7 +2280,6 @@ ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_2_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2348,7 +2325,6 @@ ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_3_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2395,7 +2371,6 @@ ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_4_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2443,7 +2418,6 @@ ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_5_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2492,7 +2466,6 @@ ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_6_r";
 
   ca_sweep_acquire_chunked(&state);
@@ -2542,7 +2515,6 @@ ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
   state.stride    = stride;
   state.owned_buf = owned_buf;
   state.attached  = attached;
-  state.no_mask   = 0;
   state.src_label = "ca_call_cslab_7_r";
 
   ca_sweep_acquire_chunked(&state);

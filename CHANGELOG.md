@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for C extensions, the `CA_FOR_EACH_ELEMENT` macros
+  (`ca_for_each_element.h`, with `ca_each_state_t` /
+  `ca_each_map_state_t`) and the `CA_WITH_BUFFER` /
+  `CA_WITH_BUFFER_WRITABLE` macros are removed. For element-wise work use
+  `ca_call_cslab_N_r` (a loop over each chunk) or `ca_call_cfunc_N_r` (a
+  function per cell); to hand the whole buffer to a library use
+  `rb_ca_call_with_buffer`, which also closes the array when the body
+  raises.
+
 - Change: storing `nil` into a numeric or boolean array raises, as
   `Float(nil)`, `Integer(nil)` and `Complex(nil)` do: `TypeError` for
   float and complex, `CArray::DataTypeError` for boolean (integer already
