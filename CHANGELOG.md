@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an out-of-range `axis:` is reported as
+  `"<method>: axis N out of range for ndim D"`, naming the method you
+  called and the value you passed. Messages used to name internal
+  functions (`rb_ca_parse_reduce_axes_kw`, `sort_addr_ki`, ...) or a
+  sibling method (`quantile` said `percentile`), and some reported the
+  axis after adding `ndim` (`axis: -3` came out as `-1`). The exception
+  classes are unchanged.
+
 - Fix: `axis: nil` is the same as leaving the axis out for `flip`
   (every axis), and for `meld`, `concatenate` and `stack` (axis 0). It
   used to raise `TypeError`. `split` still needs an axis, and now says

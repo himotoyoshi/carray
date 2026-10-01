@@ -424,23 +424,23 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
   if ( axis < 0 || axis >= ca->ndim ) {
     rb_raise(rb_eIndexError,
-             "axis2addr: axis %d out of range for ndim %d",
-             axis_raw, (int) ca->ndim);
+             "%s: axis %d out of range for ndim %d",
+             ca_calling_method_name(), axis_raw, (int) ca->ndim);
   }
 
   /* Shape rule: indices.ndim == self.ndim, dims match except at axis. */
   if ( idx_ca->ndim != ca->ndim ) {
     rb_raise(rb_eArgError,
-             "axis2addr: indices.ndim (%d) must equal self.ndim (%d)",
-             (int) idx_ca->ndim, (int) ca->ndim);
+             "%s: indices.ndim (%d) must equal self.ndim (%d)",
+             ca_calling_method_name(), (int) idx_ca->ndim, (int) ca->ndim);
   }
   for ( int8_t j = 0; j < ca->ndim; j++ ) {
     if ( j == axis ) continue;
     if ( idx_ca->dim[j] != ca->dim[j] ) {
       rb_raise(rb_eArgError,
-               "axis2addr: indices.dim[%d] (%lld) must equal "
+               "%s: indices.dim[%d] (%lld) must equal "
                "self.dim[%d] (%lld)",
-               (int) j, (long long) idx_ca->dim[j],
+               ca_calling_method_name(), (int) j, (long long) idx_ca->dim[j],
                (int) j, (long long) ca->dim[j]);
     }
   }
@@ -449,8 +449,8 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
      (zero-copy when already CA_SIZE via to_type identity). */
   if ( ! ca_is_integer_type(idx_ca) ) {
     rb_raise(rb_eArgError,
-             "axis2addr: indices data_type must be integer kind (got %d)",
-             (int) idx_ca->data_type);
+             "%s: indices data_type must be integer kind (got %d)",
+             ca_calling_method_name(), (int) idx_ca->data_type);
   }
   volatile VALUE vidx_cast = vindices;
   CArray         *idx_cast = idx_ca;

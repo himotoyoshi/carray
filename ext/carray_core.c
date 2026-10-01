@@ -598,8 +598,8 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
    to NUM2SIZE) of length `count`, normalises + range-checks + duplicate-
    checks, fills out_axes[] in input order.  Shared between the legacy
    variadic entry (rb_ca_parse_reduce_axes) and the kwarg entry
-   (rb_ca_parse_reduce_axes_kw).  ctx is a short label embedded in error
-   messages so callers can disambiguate which entry raised. */
+   (rb_ca_parse_reduce_axes_kw).  ctx names the method in error messages;
+   the two public entries pass the method the user called. */
 static int8_t
 parse_axes_items (const VALUE *items, int count, CArray *ca,
                   int8_t *out_axes, const char *ctx)
@@ -623,12 +623,12 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
   for ( i = 0; i < count; i++ ) {
-    ca_size_t a = NUM2SIZE(items[i]);
-    if ( a < 0 ) a += ca->ndim;
+    ca_size_t raw = NUM2SIZE(items[i]);
+    ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
     if ( a < 0 || a >= ca->ndim ) {
       rb_raise(rb_eIndexError,
-               "%s: axis %ld out of range [0, %d)",
-               ctx, (long) a, (int) ca->ndim);
+               "%s: axis %ld out of range for ndim %d",
+               ctx, (long) raw, (int) ca->ndim);
     }
     if ( seen[a] ) {
       rb_raise(rb_eArgError,
@@ -666,7 +666,7 @@ rb_ca_parse_reduce_axes (int argc, VALUE *argv, CArray *ca, int8_t *out_axes)
   }
 
   return parse_axes_items(items, count, ca, out_axes,
-                          "rb_ca_parse_reduce_axes");
+                          ca_calling_method_name());
 }
 
 /* Kwarg form of rb_ca_parse_reduce_axes — accepts the `axis:` value as
@@ -714,7 +714,7 @@ int8_t
 rb_ca_parse_reduce_axes_kw (VALUE axis_val, CArray *ca, int8_t *out_axes)
 {
   return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes,
-                                        "rb_ca_parse_reduce_axes_kw");
+                                        ca_calling_method_name());
 }
 
 /* ------------------------------------------------------------------- */

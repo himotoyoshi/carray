@@ -662,12 +662,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
   if (ca->elements <= 1) return self;
 
   if (!NIL_P(v_axis)) {
-    axis = NUM2INT(v_axis);
-    if (axis < 0) axis += ca->ndim;
-    if (axis < 0 || axis >= ca->ndim) {
-      rb_raise(rb_eArgError,
-               "axis %d is out of range for ndim %d", axis, ca->ndim);
-    }
+    axis = rb_ca_normalize_axis_for_ndim(NUM2LONG(v_axis), ca->ndim, NULL);
     if (ca->dim[axis] <= 1) {
       return self;
     }

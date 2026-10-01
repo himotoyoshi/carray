@@ -4029,7 +4029,7 @@ module MkKernel
     io.puts "  int axis = NUM2INT(raxis);"
     io.puts "  if ( axis < 0 ) axis += src->ndim;"
     io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis %d out of range for ndim %d", NUM2INT(raxis), src->ndim);]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]
     io.puts "  }"
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
@@ -4771,7 +4771,7 @@ module MkKernel
       io.puts "  int axis = NUM2INT(vaxis);"
       io.puts "  if ( axis < 0 ) axis += src->ndim;"
       io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis %d out of range for ndim %d", NUM2INT(vaxis), src->ndim);]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
       io.puts "  }"
       io.puts "  switch ( src->data_type ) {"
       k[:source].each do |s|
@@ -4876,7 +4876,7 @@ module MkKernel
       io.puts "  int axis = NUM2INT(vaxis);"
       io.puts "  if ( axis < 0 ) axis += src->ndim;"
       io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis %d out of range for ndim %d", NUM2INT(vaxis), src->ndim);]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
       io.puts "  }"
       io.puts "  ca_size_t kth = NUM2SIZE(vkth);"
       io.puts "  ca_size_t axis_n = src->dim[axis];"
@@ -5782,7 +5782,7 @@ module MkKernel
     io.puts "  int axis = NUM2INT(raxis);"
     io.puts "  if ( axis < 0 ) axis += src->ndim;"
     io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis %d out of range for ndim %d", NUM2INT(raxis), src->ndim);]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]
     io.puts "  }"
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|

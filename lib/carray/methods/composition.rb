@@ -85,7 +85,7 @@ class CArray
   def self.concatenate (list, axis: 0, data_type: nil)
     raise ArgumentError, "concatenate: list must not be empty" if list.empty?
     axis = 0 if axis.nil?
-    __ragged_paste(list, [list.size], axis, data_type)
+    __ragged_paste(list, [list.size], axis, data_type, "concatenate")
   end
 
   # @overload concatenate(*others, axis: 0, data_type: nil)
@@ -130,7 +130,7 @@ class CArray
       raise ArgumentError,
             "mosaic: tdim product (#{expected}) must equal list size (#{list.size})"
     end
-    __ragged_paste(list, tdim, axis, data_type)
+    __ragged_paste(list, tdim, axis, data_type, "mosaic")
   end
 
   # Shared eager paste-loop helper (= ex-`combine` paste implementation,
@@ -138,7 +138,7 @@ class CArray
   # shape obtained by tiling `list` over `tdim` starting at `axis`, with
   # per-piece dim sizes summed along each tile axis (= block-matrix
   # consistency required across rows / columns).
-  def self.__ragged_paste (list, tdim, axis, data_type)
+  def self.__ragged_paste (list, tdim, axis, data_type, name)
     list = CArray.promote_list(list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and
     # for Face elements: same Face class + portable + state-compatible).  So,
@@ -159,7 +159,7 @@ class CArray
     dim   = ref.shape
     ndim  = ref.ndim
     tndim = tdim.size
-    axis = CArray.normalize_axis(axis, ndim - tndim + 1, "concatenate/mosaic")
+    axis = CArray.normalize_axis(axis, ndim - tndim + 1, name)
 
     list = list.map do |x|
       if x.scalar?
@@ -192,7 +192,7 @@ class CArray
     block.each_with_index do |item, *tidx|
       unless item.ndim == ndim
         raise ArgumentError,
-              "concatenate/mosaic: piece at tile #{tidx.inspect} has ndim " \
+              "#{name}: piece at tile #{tidx.inspect} has ndim " \
               "#{item.ndim} (expected #{ndim})"
       end
       ndim.times do |d|
@@ -201,7 +201,7 @@ class CArray
         expected = on_tile ? tile_sizes[i][tidx[i]] : dim[d]
         unless item.shape[d] == expected
           raise ArgumentError,
-                "concatenate/mosaic: piece at tile #{tidx.inspect} has " \
+                "#{name}: piece at tile #{tidx.inspect} has " \
                 "#{on_tile ? 'tile' : 'non-tile'} axis #{d} size " \
                 "#{item.shape[d]} (expected #{expected}); pieces must agree " \
                 "on non-tile axes and be block-matrix consistent along tile axes"

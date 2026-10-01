@@ -1230,7 +1230,7 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
      flattened first and follows the same rule (length 1 unwraps). */
   VALUE result;
   if ( !NIL_P(raxis) ) {
-    long axis = rb_ca_normalize_axis_value(self, raxis, "percentile");
+    long axis = rb_ca_normalize_axis_value(self, raxis, NULL);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition/sort path assumes a
        uniform n.  These paths bake keep_axis into the reduced output. */
