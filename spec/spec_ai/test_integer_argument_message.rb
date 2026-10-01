@@ -62,6 +62,8 @@ class TestIntegerArgumentMessage < Test::Unit::TestCase
     define_method("test_n_#{label}") do
       err = assert_raise(TypeError) { call.(1.5) }
       assert_equal "#{label}: n must be an Integer (got Float)", err.message
+      err = assert_raise(ArgumentError) { call.(-1) }
+      assert_equal "#{label}: n must be non-negative (got -1)", err.message
     end
   end
 
