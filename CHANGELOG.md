@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a stepped or reversed slice of a lazy expression
+  (`a.lazy.sinh[(0...n).step(2)]`, `x[-1..0]`) returns the cells it
+  names. Previously an expression that converts its input -- an integer
+  array through `sinh`, the second and third operands of `fma` -- read
+  the first cells in order instead: `int16.lazy.sinh[(0...12).step(2)]`
+  gave sinh of 0, 1, 2, ... rather than of 0, 2, 4, ...
+
 - Fix: `load_binary` into a read-only array (for example one from
   `wrap_memory_view` over a frozen source) raises before reading.
   Previously it wrote the bytes into the source and then raised.

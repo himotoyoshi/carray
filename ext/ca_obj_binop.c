@@ -239,58 +239,30 @@ ca_binop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_binop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CABinOp *ca = (CABinOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
-  }
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_binop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
-}
-
-/* Test / observability counters bumped from the xfer_stride hot
-   path so specs can assert scratch acquisition (one per node,
-   independent of left-chain depth) and materialise vs
-   non-materialise behaviour without attaching the view. */
+/* Test / observability counters bumped from the evaluation hot path
+   so specs can assert scratch acquisition (one per node, independent
+   of left-chain depth) and materialise vs non-materialise behaviour
+   without attaching the view. */
 ca_size_t ca_binop_scratch_acquire_count = 0;
 ca_size_t ca_binop_materialise_call_count = 0;
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                            ca_size_t *strides, void *data, int dir)
+ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
 {
-  CABinOp *bo = (CABinOp *) ap;
-  ca_size_t slab_n;
+  ca_size_t slab_n = req->n;
   int8_t    k;
   void     *scratch;
   volatile VALUE holder;
   ca_size_t right_bytes;
   ca_size_t right_step;            /* element-stride for the kernel walk */
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
-  }
   ca_binop_materialise_call_count++;
 
-  slab_n = 1;
-  for ( k = 0; k < bo->ndim; k++ ) slab_n *= counts[k];
-
   /* === 1. Pull left into the output buffer ===
-     CAREFUL: left.data_type == output.data_type by the cast-before
-     invariant, so the caller's `strides` (output byte layout) is
-     also valid for left.  A mismatch would silently write past the
-     output row. */
-  ca_xfer_stride(bo->parent, starts, counts, strides, data, CA_XFER_GET);
+     left.data_type == output.data_type by the cast-before invariant,
+     so the output buffer holds left's cells as they are. */
+  ca_lazy_req_pull(bo->parent, req, data, CA_XFER_GET);
 
   /* === 2. Pull right into an arena scratch === */
   right_bytes = bo->right->bytes;
@@ -315,17 +287,12 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     right_step = 0;
   }
   else {
-    /* Same-shape right.  `strides` is the step through the operand, the
-       same one the left was pulled with -- recomputing a packed one here
-       reads the right operand's cells 0, 1, 2 against the left's 0, 2, 4.
-       right.bytes matches output.bytes because right.data_type ==
-       out.data_type by cast-before, so the same steps serve both. */
+    /* Same-shape right, pulled over the same cells as the left. */
     scratch = ( bo->data_type == CA_OBJECT )
                 ? ca_lazy_arena_acquire_object(slab_n)
                 : ca_lazy_arena_acquire(slab_n * right_bytes);
     ca_binop_scratch_acquire_count++;
-    ca_xfer_stride(bo->right, starts, counts, strides, scratch,
-                   CA_XFER_GET);
+    ca_lazy_req_pull(bo->right, req, scratch, CA_XFER_GET);
     right_step = 1;
   }
 
@@ -362,7 +329,6 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
          Pull each operand's mask (or fill with 0 if absent) into the
          output-shaped layout, then OR them in place.                */
       ca_size_t k_;
-      ca_size_t right_mask_strides[CA_RANK_MAX];
       (void) mholder;  /* Kept for stack-shape compatibility; arena
                           replaces the ALLOCV path here. */
 
@@ -370,13 +336,7 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       slab_mask = (boolean8_t *) mscratch;
 
       if ( ca_has_mask(bo->parent) ) {
-        ca_size_t mstrides[CA_RANK_MAX];
-        ca_size_t s = 1;
-        for ( k_ = bo->ndim - 1; k_ >= 0; k_-- ) {
-          mstrides[k_] = s; s *= counts[k_];
-        }
-        ca_xfer_stride(bo->parent->mask, starts, counts, mstrides,
-                       slab_mask, CA_XFER_GET);
+        ca_lazy_req_pull(bo->parent->mask, req, slab_mask, CA_XFER_GET);
       }
       else {
         memset(slab_mask, 0, slab_n);
@@ -402,16 +362,11 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
           }
         }
         else {
-          ca_size_t s = 1;
-          for ( k_ = bo->ndim - 1; k_ >= 0; k_-- ) {
-            right_mask_strides[k_] = s; s *= counts[k_];
-          }
-          /* Small mask-scratch for right; OR into slab_mask in
-             place to avoid a persistent second buffer. */
-          rm = (boolean8_t *) ALLOCA_N(boolean8_t, slab_n);
-          ca_xfer_stride(bo->right->mask, starts, counts,
-                         right_mask_strides, rm, CA_XFER_GET);
+          volatile VALUE rm_holder;
+          rm = ALLOCV_N(boolean8_t, rm_holder, slab_n);
+          ca_lazy_req_pull(bo->right->mask, req, rm, CA_XFER_GET);
           for ( i_ = 0; i_ < slab_n; i_++ ) slab_mask[i_] |= rm[i_];
+          ALLOCV_END(rm_holder);
         }
       }
     }
@@ -433,6 +388,32 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_binop_eval((CABinOp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass: each operand is gathered at
+   the same addresses and the kernel runs once over all of them. */
+static void
+ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_binop_eval((CABinOp *) ap, &req, data);
 }
 
 static void

@@ -222,25 +222,6 @@ ca_triop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_triop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_triop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CATriOp *ca = (CATriOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_addrs PUT)");
-  }
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_triop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
-}
-
 /* Test / observability counters (mirror CABinOp's counters).           */
 ca_size_t ca_triop_scratch_acquire_count = 0;
 ca_size_t ca_triop_materialise_call_count = 0;
@@ -249,8 +230,7 @@ ca_size_t ca_triop_materialise_call_count = 0;
    be broadcast at step=0).  Returns the scratch pointer; updates
    *step_out to 0 (scalar) or 1 (same-shape).                          */
 static void *
-pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
-              ca_size_t *counts, ca_size_t slab_n, int8_t ndim,
+pull_operand (CArray *op, int is_scalar, const ca_lazy_req_t *req,
               ca_size_t *step_out)
 {
   void *scratch;
@@ -274,50 +254,34 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
     *step_out = 0;
   }
   else {
-    ca_size_t op_strides[CA_RANK_MAX];
-    ca_size_t s = bytes;
-    for ( k = ndim - 1; k >= 0; k-- ) {
-      op_strides[k] = s;
-      s *= counts[k];
-    }
     scratch = ( op->data_type == CA_OBJECT )
-                ? ca_lazy_arena_acquire_object(slab_n)
-                : ca_lazy_arena_acquire(slab_n * bytes);
+                ? ca_lazy_arena_acquire_object(req->n)
+                : ca_lazy_arena_acquire(req->n * bytes);
     ca_triop_scratch_acquire_count++;
-    ca_xfer_stride(op, starts, counts, op_strides, scratch, CA_XFER_GET);
+    ca_lazy_req_pull(op, req, scratch, CA_XFER_GET);
     *step_out = 1;
   }
   return scratch;
 }
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                           ca_size_t *strides, void *data, int dir)
+ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
 {
-  CATriOp *to = (CATriOp *) ap;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   void     *scratch2, *scratch3;
   ca_size_t op2_step, op3_step;
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");
-  }
   ca_triop_materialise_call_count++;
 
-  slab_n = 1;
-  for ( k = 0; k < to->ndim; k++ ) slab_n *= counts[k];
-
   /* Step 1: pull op1 into the output buffer. */
-  ca_xfer_stride(to->parent, starts, counts, strides, data, CA_XFER_GET);
+  ca_lazy_req_pull(to->parent, req, data, CA_XFER_GET);
 
   /* Step 2: pull op2 into an arena scratch. */
-  scratch2 = pull_operand(to->op2, to->op2_is_scalar, starts, counts,
-                          slab_n, to->ndim, &op2_step);
+  scratch2 = pull_operand(to->op2, to->op2_is_scalar, req, &op2_step);
 
   /* Step 3: pull op3 into another arena scratch. */
-  scratch3 = pull_operand(to->op3, to->op3_is_scalar, starts, counts,
-                          slab_n, to->ndim, &op3_step);
+  scratch3 = pull_operand(to->op3, to->op3_is_scalar, req, &op3_step);
 
   /* Step 4: apply the kernel.  ptr1 == ptr4 (in-place op1); no
      currently-defined triop traps, so m=NULL. */
@@ -339,6 +303,31 @@ ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   ca_lazy_arena_release(scratch3);
   ca_lazy_arena_release(scratch2);
+}
+
+static void
+ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_triop_eval((CATriOp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_triop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_triop_eval((CATriOp *) ap, &req, data);
 }
 
 static void
