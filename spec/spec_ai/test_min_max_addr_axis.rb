@@ -76,9 +76,8 @@ class TestMinMaxAddrAxis < Test::Unit::TestCase
 
   def test_min_addr_axis_out_of_range_raises
     a = CA_FLOAT64([1, 2, 3])
-    # mkkernel-backed kernel raises IndexError via
-    # rb_ca_parse_reduce_axes_kw; same convention as min_index.
-    assert_raise(IndexError) { a.min_addr(axis: 5) }
+    # An out-of-range axis is an ArgumentError, as for every axis: method.
+    assert_raise(ArgumentError) { a.min_addr(axis: 5) }
   end
 
   def test_max_addr_axis_negative

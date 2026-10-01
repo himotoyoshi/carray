@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an out-of-range axis raises `ArgumentError` everywhere. The
+  reductions (`sum`, `mean`, `min_index`, `count`, `first`, ... with
+  `axis:`), `normalize_axes`, `axis2addr` and `take_along_axis` raised
+  `IndexError`, every other method `ArgumentError`. Code that rescues
+  `IndexError` for a bad axis should rescue `ArgumentError`.
+
 - Change: an axis that is not an Integer raises `TypeError` everywhere
   (`"<method>: axis must be an Integer (got Float)"`). `median`, `sort`,
   `flip`, `meld`, `split`, `insert_axis`, `diagonal` and others used to

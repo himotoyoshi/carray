@@ -81,8 +81,8 @@ class TestAxis2Addr < Test::Unit::TestCase
 
   def test_axis_out_of_range_raises
     a = CA_FLOAT64([1, 2, 3])
-    assert_raise(IndexError) { a.axis2addr(CA_INT([0]), axis: 5) }
-    assert_raise(IndexError) { a.axis2addr(CA_INT([0]), axis: -5) }
+    assert_raise(ArgumentError) { a.axis2addr(CA_INT([0]), axis: 5) }
+    assert_raise(ArgumentError) { a.axis2addr(CA_INT([0]), axis: -5) }
   end
 
   def test_ndim_mismatch_raises

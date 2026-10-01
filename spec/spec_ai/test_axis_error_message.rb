@@ -34,7 +34,7 @@ class TestAxisErrorMessage < Test::Unit::TestCase
   CASES.each do |name, call|
     define_method("test_#{name}") do
       [2, -3].each do |ax|
-        err = assert_raise(ArgumentError, IndexError) { call.(ax) }
+        err = assert_raise(ArgumentError) { call.(ax) }
         assert_equal "#{name}: axis #{ax} out of range for ndim 2", err.message
       end
     end
