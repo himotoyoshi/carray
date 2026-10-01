@@ -40,6 +40,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `wrap_memory_view` over a frozen source) raises before reading.
   Previously it wrote the bytes into the source and then raised.
 
+- Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!`, `scatter_min!`,
+  `scatter_max!` and `scatter_replace!` on a view that converts its
+  values (such as `fake`) write only the cells the addresses name.
+  Previously every cell of the view was converted and written back, so
+  cells the conversion could not hold exactly changed: `int32` values
+  above 2^24 seen through `fake(CA_FLOAT32)`, for example.
+
 - Change: for C extensions, the `CA_FOR_EACH_ELEMENT` macros
   (`ca_for_each_element.h`, with `ca_each_state_t` /
   `ca_each_map_state_t`) and the `CA_WITH_BUFFER` /

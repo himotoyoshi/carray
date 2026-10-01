@@ -481,4 +481,41 @@ class TestAtFamily < Test::Unit::TestCase
     end
   end
 
+  # ---- a self that does not lend its memory ----
+
+  OPS = %i[scatter_add! scatter_sub! scatter_mul!
+           scatter_min! scatter_max! scatter_replace!]
+
+  # Only the cells the addresses name are written back.  The other cells
+  # of a converting view do not round-trip through the conversion.
+  def test_scatter_through_a_converting_view_leaves_other_cells
+    OPS.each do |op|
+      a = CA_INT32([16777217, 16777219, 5])
+      a.fake(CA_FLOAT32).send(op, CA_SIZE([2]), 1.0)
+      assert_equal [16777217, 16777219], a[0..1].to_a, op.to_s
+    end
+  end
+
+  # A selection answers as the entity it selects, duplicates, masks and
+  # negative addresses included.
+  def test_scatter_through_a_selection_matches_the_entity
+    srand(7)
+    OPS.each do |op|
+      50.times do
+        base = CArray.float64(10) { |i| rand(10).to_f }
+        base[rand(10)] = UNDEF
+        addrs = CA_SIZE(Array.new(6) { rand(-10...10) })
+        addrs[rand(6)] = UNDEF
+        vals = CArray.float64(6) { |i| rand(5).to_f }
+        vals[rand(6)] = UNDEF
+        entity = base.copy
+        entity.send(op, addrs, vals)
+        parent = base.copy
+        parent[CArray.boolean(10).fill(true)].send(op, addrs, vals)
+        assert_equal entity.to_a, parent.to_a, op.to_s
+        assert_equal entity.is_masked.to_a, parent.is_masked.to_a, op.to_s
+      end
+    end
+  end
+
 end
