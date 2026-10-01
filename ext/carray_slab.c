@@ -28,7 +28,7 @@
   --------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name */
+#include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name, ca_axis_integer */
 #include "carray_slab.h"
 
 /* Forward declarations: per-form loop bodies are defined later in this
@@ -73,7 +73,7 @@ ca_slab_parse_axes (ca_slab_iter_state_t *st, VALUE axis_arg, int8_t src_ndim)
   }
 
   for ( i = 0; i < n; i++ ) {
-    int k = NUM2INT(rb_ary_entry(arr, i));
+    int k = (int) ca_axis_integer(rb_ary_entry(arr, i), NULL);
     if ( k < 0 ) k += src_ndim;
     if ( k < 0 || k >= src_ndim ) {
       rb_raise(rb_eArgError,

@@ -508,6 +508,19 @@ ca_calling_method_name (void)
   return s;
 }
 
+/* The Integer value of an `axis` argument.  Anything else -- a Float
+   included, which NUM2LONG would truncate -- is a TypeError.  `name`
+   names the method in the message; NULL uses the method the user called. */
+long
+ca_axis_integer (VALUE raxis, const char *name)
+{
+  if ( ! RB_INTEGER_TYPE_P(raxis) ) {
+    rb_raise(rb_eTypeError, "%s: axis must be an Integer (got %"PRIsVALUE")",
+             name ? name : ca_calling_method_name(), rb_obj_class(raxis));
+  }
+  return NUM2LONG(raxis);
+}
+
 /* Self-independent kernel: normalize `raw` against `ndim`, returning a
    canonical non-negative axis in [0, ndim) as int.  Accepts negative
    values (Python/Ruby convention: -1 => ndim-1).  Raises ArgumentError
@@ -538,7 +551,7 @@ rb_ca_normalize_axis_value (VALUE self, VALUE raxis, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
-  return rb_ca_normalize_axis_for_ndim(NUM2LONG(raxis), (int) ca->ndim, name);
+  return rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), (int) ca->ndim, name);
 }
 
 /* Ruby-facing `CArray#normalize_axis(axis, name=nil)` — returns the
@@ -573,7 +586,7 @@ rb_ca_s_normalize_axis (int argc, VALUE *argv, VALUE klass)
   int k;
   rb_scan_args(argc, argv, "21", &raxis, &rndim, &rname);
   name = NIL_P(rname) ? NULL : StringValueCStr(rname);
-  k = rb_ca_normalize_axis_for_ndim(NUM2LONG(raxis), NUM2INT(rndim), name);
+  k = rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), NUM2INT(rndim), name);
   return INT2NUM(k);
 }
 

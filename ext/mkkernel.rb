@@ -4017,16 +4017,13 @@ module MkKernel
       io.puts "  }"
     else
       io.puts "  if ( NIL_P(raxis) ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis: kwarg is required (single axis Integer; multi-axis scan is semantically ambiguous)");]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: axis: is required (a single Integer; a scan over several axes is ambiguous)", ca_calling_method_name());]
       io.puts "  }"
     end
     io.puts "  if ( TYPE(raxis) == T_ARRAY ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: axis: must be Integer (got Array); multi-axis scan is semantically ambiguous, chain explicitly: a.#{name}(axis: 0).#{name}(axis: 1)");]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: axis must be a single Integer (got Array); a scan over several axes is ambiguous, chain explicitly: a.#{name}(axis: 0).#{name}(axis: 1)", ca_calling_method_name());]
     io.puts "  }"
-    io.puts "  if ( ! rb_obj_is_kind_of(raxis, rb_cInteger) ) {"
-    io.puts %Q[    rb_raise(rb_eTypeError, "#{name}_ki: axis: must be Integer (got %"PRIsVALUE")", rb_obj_class(raxis));]
-    io.puts "  }"
-    io.puts "  int axis = NUM2INT(raxis);"
+    io.puts "  int axis = (int) ca_axis_integer(raxis, NULL);"
     io.puts "  if ( axis < 0 ) axis += src->ndim;"
     io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
     io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]
@@ -4768,7 +4765,7 @@ module MkKernel
         io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: masked input not supported (use ca.value or ca.strip_mask(fill))");]
         io.puts "  }"
       end
-      io.puts "  int axis = NUM2INT(vaxis);"
+      io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
       io.puts "  if ( axis < 0 ) axis += src->ndim;"
       io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
       io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
@@ -4873,7 +4870,7 @@ module MkKernel
         io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: masked input not supported (use ca.value or ca.strip_mask(fill))");]
         io.puts "  }"
       end
-      io.puts "  int axis = NUM2INT(vaxis);"
+      io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
       io.puts "  if ( axis < 0 ) axis += src->ndim;"
       io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
       io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
@@ -5779,7 +5776,7 @@ module MkKernel
       # body handles mask_in or ignores it
     end
 
-    io.puts "  int axis = NUM2INT(raxis);"
+    io.puts "  int axis = (int) ca_axis_integer(raxis, NULL);"
     io.puts "  if ( axis < 0 ) axis += src->ndim;"
     io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
     io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]

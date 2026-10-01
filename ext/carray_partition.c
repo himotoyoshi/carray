@@ -14,6 +14,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_axis_integer */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_partition_quick_* / ca_partition_nan_* */
@@ -141,12 +142,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   }
 
   /* Normalize axis. */
-  int axis = NUM2INT(vaxis);
-  if ( axis < 0 ) axis += cat->ndim;
-  if ( axis < 0 || axis >= cat->ndim ) {
-    rb_raise(rb_eArgError, "partition_copy: axis %d out of range for ndim %d",
-             NUM2INT(vaxis), cat->ndim);
-  }
+  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL), cat->ndim, NULL);
 
   /* Normalize kth (-dim[axis] <= kth < dim[axis], negative counts from end). */
   ca_size_t fiber_n = cat->dim[axis];
