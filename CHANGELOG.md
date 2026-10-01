@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `load_binary` into a read-only array (for example one from
+  `wrap_memory_view` over a frozen source) raises before reading.
+  Previously it wrote the bytes into the source and then raised.
+
 - Change: for C extensions, the `CA_FOR_EACH_ELEMENT` macros
   (`ca_for_each_element.h`, with `ca_each_state_t` /
   `ca_each_map_state_t`) and the `CA_WITH_BUFFER` /
