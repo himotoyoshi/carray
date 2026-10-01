@@ -481,7 +481,9 @@ class CAWindowIterator < CAIterator
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
     folded = apply_min_count(folded, min_count)
     # A `fill_value:` on the call replaces a result that came out undefined.
-    folded = folded.strip_mask(fill_value) if !fill_value.nil? && folded.has_mask?
+    if !fill_value.nil? && !fill_value.equal?(UNDEF) && folded.has_mask?
+      folded = folded.strip_mask(fill_value)
+    end
     folded
   end
 

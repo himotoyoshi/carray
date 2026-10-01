@@ -549,6 +549,45 @@ ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
   return 0;
 }
 
+/* `fill` as a cell of `data_type` holds it: the value a store of `fill`
+   into such an array would leave. */
+VALUE
+ca_fill_as (VALUE fill, int8_t data_type)
+{
+  ca_size_t dim[1] = { 1 };
+  VALUE cell = rb_carray_new(data_type, 1, dim, 0, NULL);
+  rb_ca_store_all(cell, fill);
+  return rb_ca_fetch_addr(cell, 0);
+}
+
+/* The `fill_value:` of a reduction, applied to its result: the masked
+   cells of a CArray result are filled as a store would fill them, each
+   member of a two-array result (minmax) alike.  `whole` says the result
+   was computed with every axis kept for a full reduction; its one cell
+   is then returned as the scalar the caller asked for.  A caller passes
+   no fill for `fill_value: UNDEF`, which leaves the cells undefined. */
+VALUE
+ca_reduce_fill (VALUE result, VALUE fill, int whole)
+{
+  if ( RB_TYPE_P(result, T_ARRAY) ) {
+    long i, n = RARRAY_LEN(result);
+    VALUE out = rb_ary_new_capa(n);
+    for ( i = 0; i < n; i++ ) {
+      rb_ary_push(out, ca_reduce_fill(RARRAY_AREF(result, i), fill, whole));
+    }
+    return out;
+  }
+  if ( rb_obj_is_kind_of(result, rb_cCArray) ) {
+    CArray *cr;
+    GetCArray(result, cr);
+    if ( ca_has_mask(cr) ) {
+      result = rb_ca_mask_fill_copy(result, fill);
+    }
+    return whole ? rb_ca_fetch_addr(result, 0) : result;
+  }
+  return ( result == CA_UNDEF ) ? fill : result;
+}
+
 /* ca_integer_arg for an `axis` argument. */
 long
 ca_axis_integer (VALUE raxis, const char *name)

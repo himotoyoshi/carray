@@ -3634,6 +3634,15 @@ module MkKernel
       io.puts "    /* :min_count = 0 collapses to legacy default (any 1 valid). */"
       io.puts "    if ( mc_user > 0 ) min_count = mc_user;"
       io.puts "  }"
+      # fill_value: UNDEF leaves the result undefined, as no fill_value does.
+      # A full reduction with a fill keeps its axes so the fill goes into a
+      # typed cell, as it does per axis; ca_reduce_fill takes the cell out.
+      io.puts "  if ( rfval == CA_UNDEF ) rfval = Qnil;"
+      io.puts "  int fill_whole = 0;"
+      io.puts "  if ( ! NIL_P(rfval) && naxes == src->ndim && ! keep_axis ) {"
+      io.puts "    keep_axis  = 1;"
+      io.puts "    fill_whole = 1;"
+      io.puts "  }"
       io.puts "  VALUE result;"
     elsif has_aarg
       # array_arg without min_count: still need a single exit so we can
@@ -3736,18 +3745,9 @@ module MkKernel
     end
 
     if min_count
-      # Apply fill_value substitution: CA_UNDEF (full reduction all-masked)
-      # or per-axis CArray with mask bits.
+      # Apply fill_value through the one rule the per-axis result uses.
       io.puts "  if ( ! NIL_P(rfval) ) {"
-      io.puts "    if ( result == CA_UNDEF ) {"
-      io.puts "      result = rfval;"
-      io.puts "    } else if ( TYPE(result) != T_FLOAT && rb_obj_is_kind_of(result, rb_cCArray) ) {"
-      io.puts "      CArray *cr;"
-      io.puts "      GetCArray(result, cr);"
-      io.puts "      if ( ca_has_mask(cr) ) {"
-      io.puts "        result = rb_ca_mask_fill_copy(result, rfval);"
-      io.puts "      }"
-      io.puts "    }"
+      io.puts "    result = ca_reduce_fill(result, rfval, fill_whole);"
       io.puts "  }"
     end
 

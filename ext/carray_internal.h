@@ -179,6 +179,8 @@ void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
 const char *ca_calling_method_name (void);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 long        ca_axis_integer (VALUE raxis, const char *name);
+VALUE       ca_fill_as (VALUE fill, int8_t data_type);
+VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);
 
