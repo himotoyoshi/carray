@@ -51,13 +51,15 @@ class CArray
   #   `data_type` and re-wraps homogeneous Face inputs via
   #   `face_lift`. Output `ndim` is one greater than each piece.
   #   @param list [Array<CArray>] pieces to stack; must not be empty.
-  #   @param axis [Integer] position of the new K axis.
+  #   @param axis [Integer, nil] position of the new K axis; `nil` is
+  #     the same as `0`.
   #   @param data_type [Symbol, Integer, nil] result `data_type`;
   #     inferred when `nil`.
   #   @return [CArray] CAStack view.
   #   @raise [ArgumentError] when `list` is empty.
   def self.stack (list, axis: 0, data_type: nil)
     raise ArgumentError, "stack: list must not be empty" if list.empty?
+    axis = 0 if axis.nil?
     list = CArray.promote_list(list, data_type: data_type)
     axis = CArray.normalize_axis(axis, list[0].ndim + 1, "stack")
     CAStack.new(list, axis: axis)                # CAStack.new does Face lift internally
@@ -80,8 +82,9 @@ class CArray
   #   Convenience form: a single Array argument is treated as the list.
   #   @param arrays [Array<CArray>] pieces to weld.  A single Array
   #     argument is accepted for compatibility with older callers.
-  #   @param axis [Integer] existing axis to extend (normalises negative
-  #     values against the reference ndim).
+  #   @param axis [Integer, nil] existing axis to extend (normalises
+  #     negative values against the reference ndim); `nil` is the same
+  #     as `0`.
   #   @return [CAMeld] view over the welded pieces.
   #   @raise [ArgumentError] when the list is empty, ndim mismatch,
   #     data_type mismatch, or non-axis dim mismatch across pieces
@@ -91,6 +94,7 @@ class CArray
       arrays = arrays[0]
     end
     raise ArgumentError, "meld: list must not be empty" if arrays.empty?
+    axis = 0 if axis.nil?
     first = arrays[0]
     unless first.is_a?(CArray)
       raise ArgumentError, "meld: entries must be CArray (got #{first.class})"
@@ -247,8 +251,10 @@ class CArray
   #   entities.
   #   @param axis [Integer] axis to split along.
   #   @return [Array<CArray>] one slice per index along `axis`.
-  #   @raise [ArgumentError] when `axis` is not a single Integer.
+  #   @raise [ArgumentError] when `axis` is not a single Integer
+  #     (including `nil`).
   def split (axis:)
+    raise ArgumentError, "split: axis: is required" if axis.nil?
     if axis.is_a?(Array)
       raise ArgumentError, "split: axis must be a single Integer"
     end

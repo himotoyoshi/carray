@@ -65,4 +65,8 @@ class TestSplitAxis < Test::Unit::TestCase
       assert_equal @a.to_a, CArray.stack(@a.split(axis: k), axis: k).to_a
     end
   end
+
+  def test_nil_axis_raises_argument_error
+    assert_raise(ArgumentError) { @a.split(axis: nil) }
+  end
 end

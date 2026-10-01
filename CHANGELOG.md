@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `axis: nil` is the same as leaving the axis out for `flip`
+  (every axis), and for `meld`, `concatenate` and `stack` (axis 0). It
+  used to raise `TypeError`. `split` still needs an axis, and now says
+  so with `ArgumentError`.
+
 - Change: `sort_index`, `rank_index`, `partition_index`, `partition` and
   `partition_copy` without `axis:` (or with `axis: nil`) work on the
   whole array, as `sort` and `order` already did. They used to work
