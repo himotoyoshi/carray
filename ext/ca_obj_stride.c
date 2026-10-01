@@ -1057,6 +1057,27 @@ ca_root_lends_no_memory (void *ap)
   return ca_func[root->obj_type].xfer_stride != NULL;
 }
 
+/* The same question for the parent of a view that is not itself in the
+   CAStride family (CAGrid, ...): whether the array its cells come from --
+   the parent, or the root a CAStride parent folds to -- has no memory to
+   lend.  Like ca_root_lends_no_memory it asks only what those arrays are,
+   so the lifecycle slots can rely on getting the same answer from attach
+   to detach. */
+int
+ca_parent_lends_no_memory (void *ap)
+{
+  CArray *parent = (CArray *) ap;
+
+  if ( ca_is_stride_family(parent) ) {
+    CArray   *root;
+    ca_size_t cs[CA_RANK_MAX];
+    ca_size_t base;
+    ca_stride_compose_to_root((CAStride *) parent, &root, cs, &base);
+    return ca_root_lends_no_memory(root);
+  }
+  return ca_root_lends_no_memory(parent);
+}
+
 /* ca_attach_is_alias asks the same question from carray_core.c: a view whose
    attach owns its buffer does not alias its parent, so writes through
    ca->ptr need a ca_sync and callers must not assume otherwise. */

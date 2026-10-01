@@ -145,6 +145,31 @@ int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
 void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
                             void *buf, int dir);
 
+/* Non-zero iff the array a view's cells come from -- the parent, or the
+   root a CAStride-family parent folds to -- computes them rather than
+   lending memory (ca_obj_stride.c).  Depends only on what the arrays are,
+   never on whether they are attached, so the attach / sync / detach slots
+   of one view all take the same branch. */
+
+int     ca_parent_lends_no_memory (void *ap);
+
+/* Transfers of the descriptor views (CAGrid, CASelect, CASelectAxis,
+   CAWindow) whose parent holds no ptr (ca_axis_dispatch.c).
+
+   ca_axis_view_xfer_all serves an xfer_all slot: `fast` is the view's
+   transfer against parent->ptr, and region_ok says whether the view's
+   xfer_stride answers a whole-view request without going cell by cell.
+   ca_axis_view_attach_owned / ca_axis_view_sync_owned are the attach and
+   sync of such a view over a parent with no memory to lend: the view owns
+   its buffer and the parent is never attached. */
+
+typedef void (*ca_axis_view_fast_t) (void *ap, char *data, int dir);
+
+void    ca_axis_view_xfer_all     (void *ap, ca_axis_view_fast_t fast,
+                                   int region_ok, void *data, int dir);
+void    ca_axis_view_attach_owned (void *ap);
+void    ca_axis_view_sync_owned   (void *ap);
+
 /* ---- per-obj_type view constructors --------------------------------------
 
    Constructors for view types that only carray itself builds.  Ruby-side

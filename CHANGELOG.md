@@ -43,6 +43,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   the first cells in order instead: `int16.lazy.sinh[(0...12).step(2)]`
   gave sinh of 0, 1, 2, ... rather than of 0, 2, 4, ...
 
+- Fix: selecting from an array that computes its values -- a lazy
+  expression or a `CAObject` -- by index arrays (`a[[0, 10, 20]]`,
+  `a[rows, cols]`), by a boolean mask, by a boolean mask along an axis,
+  or through `window` with filled bounds reads and writes only the
+  selected cells. Previously `copy`, the reductions and the bang methods
+  on such a selection produced every cell of the source first, so their
+  cost followed the source's size.
+
 - Fix: `load_binary` into a read-only array (for example one from
   `wrap_memory_view` over a frozen source) raises before reading.
   Previously it wrote the bytes into the source and then raised.

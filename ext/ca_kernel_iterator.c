@@ -270,6 +270,18 @@ ca_iter_route_source (CArray         *src,
   uint8_t kind = ca_iter_classify_source(src);
   if ( kind != CA_ITER_SRC_DESCRIPTOR ) return kind;
 
+  /* The descriptor walk reads the parent's memory, which such a parent
+     only has after a whole materialise -- however few cells the view
+     selects.  Deliver through the view's own transfer instead: SRC_ATTACH
+     gathers the view into scratch with ca_xfer_all, and the view asks its
+     parent for the selected cells alone. */
+  {
+    CArray *parent = ((CAView *) src)->parent;
+    if ( ! parent->ptr && ca_parent_lends_no_memory(parent) ) {
+      return CA_ITER_SRC_ATTACH;
+    }
+  }
+
   /* Descriptor source: describe_axes + inspect innermost. */
   ca_iter_describe_axes(src, out_descs, out_parent_dims, out_ndim);
   if ( ca_axis_dispatch_is_innermost_stride(out_descs, *out_ndim) ) {

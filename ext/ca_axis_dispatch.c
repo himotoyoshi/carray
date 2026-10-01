@@ -42,6 +42,7 @@
 #include "carray.h"
 #include "ca_iter_substrate.h"
 #include "ca_composite_dispatch.h"
+#include "carray_internal.h"   /* ca_parent_lends_no_memory */
 
 #include <string.h>
 
@@ -950,4 +951,118 @@ ca_axis_dispatch_outer_has_shift (const ca_axis_desc_t *descs,
     if ( descs[k].kind == CA_AXIS_KIND_SHIFT ) return 1;
   }
   return 0;
+}
+
+/* ==========================================================================
+   Transfers of a descriptor view (CAGrid, CASelect, CASelectAxis, CAWindow)
+   whose parent holds no ptr.
+
+   The engine above walks parent->ptr.  A cold parent is handled by what it
+   is:
+
+     - one ca_attach_is_alias accepts already has the memory: borrow it;
+     - one with no memory to lend (ca_parent_lends_no_memory) is asked for
+       the selected cells only, through the view's own xfer_stride over the
+       whole view -- producing every cell of the parent to serve a selection
+       would make the cost follow the parent's size;
+     - anything else is gathered into a parent-shaped scratch that stands in
+       for parent->ptr, and pushed back for PUT.
+   ========================================================================== */
+
+/* The whole view as one region request to its own xfer_stride slot. */
+static void
+ca_axis_view_xfer_region (CArray *ca, void *data, int dir)
+{
+  ca_size_t starts[CA_RANK_MAX], strides[CA_RANK_MAX], s;
+  int8_t    k;
+
+  s = ca->bytes;
+  for ( k = ca->ndim - 1; k >= 0; k-- ) {
+    starts[k]  = 0;
+    strides[k] = s;
+    s *= ca->dim[k];
+  }
+  ca_func[ca->obj_type].xfer_stride(ca, starts, ca->dim, strides, data, dir);
+}
+
+void
+ca_axis_view_xfer_all (void *ap, ca_axis_view_fast_t fast, int region_ok,
+                       void *data, int dir)
+{
+  CArray *ca     = (CArray *) ap;
+  CArray *parent = ((CAView *) ca)->parent;
+
+  if ( parent->ptr ) {
+    fast(ca, (char *) data, dir);
+    return;
+  }
+
+  if ( ca_attach_is_alias(parent) ) {
+    ca_attach(parent);   /* window: an alias attach, cannot raise */
+    fast(ca, (char *) data, dir);
+    ca_detach(parent);
+    return;
+  }
+
+  if ( region_ok && ca_parent_lends_no_memory(parent) ) {
+    ca_axis_view_xfer_region(ca, data, dir);
+    return;
+  }
+
+  {
+    volatile VALUE holder;
+    ca_size_t plen   = parent->elements * parent->bytes;
+    char     *parent_scratch = ALLOCV_N(char, holder, plen);
+    ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
+    parent->ptr = parent_scratch;
+    fast(ca, (char *) data, dir);
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this frame
+       is. */
+    parent->ptr = NULL;
+    if ( dir == CA_XFER_PUT ) {
+      ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
+    }
+    ALLOCV_END(holder);
+  }
+}
+
+/* The attach of such a view when its parent has no memory to lend: the
+   view owns its buffer, filled through its xfer_all, and the parent is
+   never attached.  The buffer is published only once filled -- a view with
+   a live ptr makes the per-cell dispatchers bypass the transfer slots --
+   and a raise while filling frees it. */
+
+static VALUE
+ca_axis_view_fill_owned (VALUE arg)
+{
+  void **args = (void **) arg;
+  CArray *ca = (CArray *) args[0];
+  ca_func[ca->obj_type].xfer_all(ca, args[1], CA_XFER_GET);
+  return Qnil;
+}
+
+void
+ca_axis_view_attach_owned (void *ap)
+{
+  CArray *ca  = (CArray *) ap;
+  char   *buf = xmalloc(ca_length(ca) > 0 ? ca_length(ca) : 1);
+  void   *args[2];
+  int     tag = 0;
+
+  args[0] = ca;
+  args[1] = buf;
+  rb_protect(ca_axis_view_fill_owned, (VALUE) args, &tag);
+  if ( tag ) {
+    xfree(buf);
+    rb_jump_tag(tag);
+  }
+  ca->ptr = buf;
+}
+
+void
+ca_axis_view_sync_owned (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  ca_func[ca->obj_type].xfer_all(ca, ca->ptr, CA_XFER_PUT);
 }
