@@ -1233,6 +1233,11 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
     rfval = argv[0];
   }
 
+  /* Filling with UNDEF leaves the cells undefined, as storing UNDEF does. */
+  if ( rfval == CA_UNDEF ) {
+    return self;
+  }
+
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
@@ -1288,6 +1293,12 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
 
   if ( argc >= 1 ) {
     rfval = argv[0];
+  }
+
+  /* Filling with UNDEF leaves the cells undefined, as storing UNDEF does:
+     the copy keeps the mask. */
+  if ( rfval == CA_UNDEF ) {
+    return rb_ca_copy(self);
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);

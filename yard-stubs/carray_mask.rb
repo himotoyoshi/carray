@@ -74,7 +74,8 @@ class CArray
   #   Clears the mask state and overwrites the data at previously
   #   masked positions with `fill_value`. Mutates `self`.
   #   @param fill_value [Object] value to store at each previously
-  #     masked position. Cast to `self.data_type`.
+  #     masked position, converted as a store into `self` converts it.
+  #     `UNDEF` leaves the masked cells masked.
   #   @return [self]
   # @overload unmask(method:, axis: nil)
   #   Fills masked cells in place from neighbouring valid cells along
@@ -106,7 +107,8 @@ class CArray
   #
   #   Replaces the removed `unmask_copy(fill)` from 2.x.
   #   @param fill_value [Object] value to substitute at masked
-  #     positions. Cast to `self.data_type`.
+  #     positions, converted as a store into `self` converts it.
+  #     `UNDEF` leaves them masked (the copy keeps the mask).
   #   @return [CArray]
   # @overload strip_mask(method:, axis: nil)
   #   Returns a new array with masked cells filled from neighbouring

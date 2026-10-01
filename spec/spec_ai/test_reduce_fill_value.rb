@@ -38,7 +38,9 @@ class TestReduceFillValue < Test::Unit::TestCase
   def test_median_takes_a_fill_as_a_store_would
     assert_equal 9.9, @f.median(min_count: 100, fill_value: 9.9)
     assert_equal 9.9, @f.median(axis: 1, min_count: 3, fill_value: 9.9)[0]
-    assert_equal @f.sum(min_count: 100, fill_value: "x"), @f.median(min_count: 100, fill_value: "x")
+    # A fill a float array cannot hold is refused by both, as a store is.
+    assert_raise(ArgumentError) { @f.sum(min_count: 100, fill_value: "x") }
+    assert_raise(ArgumentError) { @f.median(min_count: 100, fill_value: "x") }
   end
 
 end
