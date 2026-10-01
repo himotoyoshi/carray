@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `unmask` and `strip_mask` with `method: :forward` or `:backward`
+  raise `ArgumentError` for a negative `axis:` past `-ndim`. On a 2-D
+  array, `axis: -3` filled along axis 1 and `axis: -4` along axis 0.
+
 - Fix: `dup` and `clone` of `a.sort`, and of `a[i]` with an index array
   of `a`'s own shape, return a copy of the view. They used to raise
   `TypeError: allocator undefined for CARemap`.

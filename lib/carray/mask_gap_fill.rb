@@ -111,7 +111,7 @@ class CArray
       held = held.reverse if backward
       held.reshape(*shape)
     else
-      ax = axis < 0 ? axis + ndim : axis
+      ax = normalize_axis(axis, "unmask/strip_mask")
       if backward
         flip(ax).send(:__hold__, ax).flip(ax)
       else
