@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the `axis:` reductions of `group_by_category` accept a negative
+  axis, counting from the end as every other `axis:` does. `axis: -1`
+  used to raise `ArgumentError`.
+
 - Change: an out-of-range `axis:` is reported as
   `"<method>: axis N out of range for ndim D"`, naming the method you
   called and the value you passed. Messages used to name internal
