@@ -39,7 +39,7 @@
 boolean8_t
 OBJ2BOOL (VALUE v)
 {
-  if ( v == Qfalse || v == Qnil ) {
+  if ( v == Qfalse ) {
     return 0;
   }
   else if ( v == Qtrue ) {
@@ -100,8 +100,6 @@ OBJ2DBL (VALUE val)
   switch ( TYPE(val) ) {
   case T_FLOAT:
     return NUM2DBL(val);
-  case T_NIL:
-    return 0.0/0.0;
   case T_STRING: {
     double d;
     volatile VALUE rstr = rb_funcall(val, rb_intern("strip"), 0);
@@ -156,8 +154,11 @@ ca_str_to_cmplx (VALUE str)
    on success; returns 0 when the cell cannot be parsed, in which case the
    caller writes UNDEF (mask) for that cell.  nil and unparseable
    strings/objects fail; already-numeric values and explicit nan/inf
-   literals succeed.  Strictness mirrors Ruby Float() (whitespace strip,
-   "1e3" ok, ...) but a bad token masks instead of raising. */
+   literals succeed.  This is the reading path of to_type from an object
+   array, where a cell with no number in it is a missing value; a store
+   (OBJ2DBL) raises for nil instead.  Strictness mirrors Ruby Float()
+   (whitespace strip, "1e3" ok, ...) but a bad token masks instead of
+   raising. */
 int
 ca_obj2dbl_ok (VALUE val, double *out)
 {
@@ -184,6 +185,33 @@ ca_obj2dbl_ok (VALUE val, double *out)
     *out = NUM2DBL(r);
     return 1;
   }
+}
+
+/* Object -> complex with parse-failure signalling: the complex sibling of
+   ca_obj2dbl_ok.  A cell is read as a store reads it (a real as Float(),
+   the rest as Complex()); nil and a cell that does not read fail. */
+static VALUE
+ca_cmplx_cell_body (VALUE v)
+{
+  double complex z = rb_carray_num2cmplx(v);
+  return rb_dbl_complex_new(creal(z), cimag(z));
+}
+
+int
+ca_obj2cmplx_ok (VALUE val, double complex *out)
+{
+  int state = 0;
+  volatile VALUE r;
+  if ( NIL_P(val) ) {
+    return 0;
+  }
+  r = rb_protect(ca_cmplx_cell_body, val, &state);
+  if ( state ) {
+    rb_set_errinfo(Qnil);
+    return 0;
+  }
+  *out = CMPLX(NUM2DBL(rb_complex_real(r)), NUM2DBL(rb_complex_imag(r)));
+  return 1;
 }
 
 /* Object -> integer with parse-failure signalling (int/long lane).  Same
@@ -289,7 +317,7 @@ rb_obj2long (VALUE val)
   case T_BIGNUM:
     return (long) NUM2LL(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
   default:
     return NUM2LONG(rb_Integer(val));
@@ -305,7 +333,7 @@ rb_obj2ulong (VALUE val)
   case T_BIGNUM:
     return (unsigned long) rb_num2ull(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
   default:
     return NUM2ULONG(rb_Integer(val));
@@ -319,7 +347,7 @@ rb_obj2ll (VALUE val)
   case T_FIXNUM:
     return NUM2LONG(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
   default:
     return NUM2LL(rb_Integer(val));
@@ -333,7 +361,7 @@ rb_obj2ull (VALUE val)
   case T_FIXNUM:
     return NUM2ULONG(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
   default:
     return rb_num2ull(rb_Integer(val));
@@ -590,8 +618,9 @@ ca_to_type_cast (VALUE arg)
 
   if ( ca->data_type == CA_OBJECT
        && ( (cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64)
-            || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64 ) ) {
-    /* object -> int/float: give the cast a mask buffer so an unparseable
+            || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64
+            || cb->data_type == CA_CMPLX64 || cb->data_type == CA_CMPLX128 ) ) {
+    /* object -> int/float/complex: give the cast a mask buffer so an unparseable
        cell becomes UNDEF (see ext/carray_cast_func.rb).  Cast into a
        scratch mask seeded from the source mask, then attach it to the
        output only if some cell ended up masked -- an all-valid cast keeps

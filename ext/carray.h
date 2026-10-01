@@ -1097,6 +1097,9 @@ rb_carray_num2cmplx (VALUE num)
   if ( RB_TYPE_P(num, T_STRING) ) {
     return ca_str_to_cmplx(num);
   }
+  if ( NIL_P(num) ) {
+    rb_raise(rb_eTypeError, "can't convert nil into Complex");
+  }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);
     return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
@@ -1143,6 +1146,7 @@ double    OBJ2DBL (VALUE v);
    object->int/float cast loop so an unparseable cell becomes UNDEF instead
    of a silent 0.0 (float) or a raise (int).  See ext/carray_cast.c. */
 int   ca_obj2dbl_ok   (VALUE v, double *out);
+int   ca_obj2cmplx_ok (VALUE v, double complex *out);
 int   rb_obj2long_ok  (VALUE v, long *out);
 int   rb_obj2ulong_ok (VALUE v, unsigned long *out);
 int   rb_obj2ll_ok    (VALUE v, long long *out);
