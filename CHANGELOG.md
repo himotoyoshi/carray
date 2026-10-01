@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an axis that is not an Integer raises `TypeError` everywhere
+  (`"<method>: axis must be an Integer (got Float)"`). `median`, `sort`,
+  `flip`, `meld`, `split`, `insert_axis`, `diagonal` and others used to
+  truncate `axis: 1.5` to `1`, while `sum` and `cumsum` refused it; the
+  `axis:` reductions of `group_by_category` raised `ArgumentError`. Pass
+  an Integer.
+
 - Fix: the `axis:` reductions of `group_by_category` accept a negative
   axis, counting from the end as every other `axis:` does. `axis: -1`
   used to raise `ArgumentError`.

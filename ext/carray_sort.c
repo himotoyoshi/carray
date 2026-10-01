@@ -420,7 +420,7 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   TypedData_Get_Struct(vindices, CArray, &carray_data_type, idx_ca);
 
   /* axis normalization + range check. */
-  int axis_raw = NIL_P(vaxis) ? 0 : NUM2INT(vaxis);
+  int axis_raw = NIL_P(vaxis) ? 0 : (int) ca_axis_integer(vaxis, NULL);
   int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
   if ( axis < 0 || axis >= ca->ndim ) {
     rb_raise(rb_eIndexError,
@@ -754,12 +754,8 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(target, CArray, &carray_data_type, cat);
 
   /* Normalize axis (negative -> +ndim, range check). */
-  int axis = NUM2INT(vaxis_use);
-  if ( axis < 0 ) axis += cat->ndim;
-  if ( axis < 0 || axis >= cat->ndim ) {
-    rb_raise(rb_eArgError, "sort_copy: axis %d out of range for ndim %d",
-             NUM2INT(vaxis_use), cat->ndim);
-  }
+  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis_use, NULL),
+                                           cat->ndim, NULL);
 
   /* Allocate output: same shape and data_type as target
      (bytes=0 = preserve native bytes). */

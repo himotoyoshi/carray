@@ -454,9 +454,6 @@ class CACategoricalIterator < CASegmentIterator
   # The axis of an axis: reduction, normalised against the source: a
   # negative axis counts from the end, as everywhere else.
   def checked_axis (axis, op)
-    unless axis.is_a?(Integer)
-      raise ArgumentError, "#{op}: axis must be an Integer (got #{axis.inspect})"
-    end
     @value.normalize_axis(axis, op.to_s)
   end
 

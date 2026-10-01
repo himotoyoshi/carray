@@ -9,7 +9,7 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_window */
+#include "carray_internal.h"   /* ca_attach_window, ca_axis_integer */
 
 /* ----------------------------------------------------------------- */
 
@@ -180,16 +180,10 @@ ca_seq_resolve_axis (CArray *ca, VALUE raxis)
   }
   if ( TYPE(raxis) == T_ARRAY ) {
     rb_raise(rb_eArgError,
-             "seq axis must be a single integer (multi-axis seq is not supported)");
+             "%s: axis must be a single Integer (a seq over several axes is not supported)",
+             ca_calling_method_name());
   }
-  axis = NUM2INT(raxis);
-  if ( axis < 0 ) {
-    axis += ca->ndim;
-  }
-  if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError,
-             "axis out of range for seq (0...%d)", ca->ndim);
-  }
+  axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, NULL), ca->ndim, NULL);
   return axis;
 }
 

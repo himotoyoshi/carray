@@ -662,7 +662,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
   if (ca->elements <= 1) return self;
 
   if (!NIL_P(v_axis)) {
-    axis = rb_ca_normalize_axis_for_ndim(NUM2LONG(v_axis), ca->ndim, NULL);
+    axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(v_axis, NULL), ca->ndim, NULL);
     if (ca->dim[axis] <= 1) {
       return self;
     }

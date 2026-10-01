@@ -40,4 +40,28 @@ class TestAxisErrorMessage < Test::Unit::TestCase
     end
   end
 
+  # A Float axis is refused rather than truncated, on every path.
+  FLOAT_CASES = CASES.merge(
+    "sort_copy"         => ->(ax) { A.sort_copy(axis: ax) },
+    "flip"              => ->(ax) { A.flip(ax) },
+    "diagonal"          => ->(ax) { CArray.float64(3, 3).diagonal(axis: [0, ax]) },
+    "insert_axis"       => ->(ax) { A.insert_axis(ax) },
+    "seq!"              => ->(ax) { CArray.float64(3, 4).seq!(axis: ax) },
+    "meld"              => ->(ax) { CArray.meld(A, A, axis: ax) },
+    "split"             => ->(ax) { A.split(axis: ax) },
+    "median"            => ->(ax) { A.median(axis: ax) },
+    "group_by_category" => ->(ax) {
+      A.group_by_category(CArray.int32(3, 4).seq.mod(2).categorize).sum(axis: ax)
+    },
+  )
+
+  FLOAT_CASES.each do |name, call|
+    define_method("test_float_axis_#{name.delete("!")}") do
+      err = assert_raise(TypeError) { call.(1.5) }
+      label = (name == "group_by_category") ? "sum" : name
+      assert_match(/\A#{Regexp.escape(label)}: axis must be (nil, )?an Integer.* \(got Float\)\z/,
+                   err.message)
+    end
+  end
+
 end

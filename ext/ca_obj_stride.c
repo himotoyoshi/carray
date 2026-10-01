@@ -20,6 +20,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_axis_integer */
 #include "ca_iter_substrate.h"
 #include "ca_obj_face.h"  /* ca_is_face, used by the compose-fold walk */
 
@@ -2315,7 +2316,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
                (int) n_iter, (int) ndim);
     }
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = NUM2SIZE(RARRAY_AREF(aary, i));
+      iter_axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
     }
   }
   else if (nargs >= 1) {
@@ -2326,7 +2327,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
     }
     n_iter = (int8_t) nargs;
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = NUM2SIZE(RARRAY_AREF(rposary, i));
+      iter_axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
     }
   }
   else {
@@ -2469,7 +2470,7 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
                  (int) n_axes, (int) ndim);
       }
       for (i = 0; i < n_axes; i++) {
-        axes[i] = NUM2SIZE(RARRAY_AREF(aary, i));
+        axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
       }
     }
     else {
@@ -2480,7 +2481,7 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
       }
       n_axes = (int8_t) nargs;
       for (i = 0; i < n_axes; i++) {
-        axes[i] = NUM2SIZE(RARRAY_AREF(rposary, i));
+        axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
       }
     }
 
@@ -2565,8 +2566,8 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eArgError,
                "diagonal: axis: must be an Array of 2 integers");
     }
-    ai = NUM2SIZE(RARRAY_AREF(raxis, 0));
-    aj = NUM2SIZE(RARRAY_AREF(raxis, 1));
+    ai = ca_axis_integer(RARRAY_AREF(raxis, 0), NULL);
+    aj = ca_axis_integer(RARRAY_AREF(raxis, 1), NULL);
     if (ai < 0) ai += ndim;
     if (aj < 0) aj += ndim;
     if (ai < 0 || ai >= ndim) {

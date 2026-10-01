@@ -623,7 +623,7 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
   for ( i = 0; i < count; i++ ) {
-    ca_size_t raw = NUM2SIZE(items[i]);
+    ca_size_t raw = ca_axis_integer(items[i], NULL);
     ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
     if ( a < 0 || a >= ca->ndim ) {
       rb_raise(rb_eIndexError,
@@ -705,8 +705,8 @@ rb_ca_parse_reduce_axes_kw_ctx (VALUE axis_val, CArray *ca, int8_t *out_axes,
   }
 
   rb_raise(rb_eTypeError,
-           "%s: axis: must be nil, Integer, or "
-           "Array of Integer (got %"PRIsVALUE")",
+           "%s: axis must be nil, an Integer or an Array of Integer "
+           "(got %"PRIsVALUE")",
            ctx, rb_obj_class(axis_val));
 }
 
