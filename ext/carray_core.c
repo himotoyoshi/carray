@@ -626,7 +626,7 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
     ca_size_t raw = ca_axis_integer(items[i], NULL);
     ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
     if ( a < 0 || a >= ca->ndim ) {
-      rb_raise(rb_eIndexError,
+      rb_raise(rb_eArgError,
                "%s: axis %ld out of range for ndim %d",
                ctx, (long) raw, (int) ca->ndim);
     }

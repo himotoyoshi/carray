@@ -99,10 +99,9 @@ class TestTakeAlongAxis < Test::Unit::TestCase
 
   def test_axis_out_of_range_raises
     a = CA_FLOAT64([1,2,3])
-    # axis2addr (= C side) raises IndexError, same convention as
-    # min_addr / min_index / sort_addr (= per-axis kernel family).
-    assert_raise(IndexError) { a.take_along_axis(CA_INT([0]), axis: 5) }
-    assert_raise(IndexError) { a.take_along_axis(CA_INT([0]), axis: -5) }
+    # An out-of-range axis is an ArgumentError, as for every axis: method.
+    assert_raise(ArgumentError) { a.take_along_axis(CA_INT([0]), axis: 5) }
+    assert_raise(ArgumentError) { a.take_along_axis(CA_INT([0]), axis: -5) }
   end
 
   # ---- OOB (Q2 raise) ----------------------------------------------------

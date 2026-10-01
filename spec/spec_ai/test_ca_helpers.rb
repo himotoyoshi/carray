@@ -194,10 +194,10 @@ class TestCAHelpers < Test::Unit::TestCase
 
   def test_parse_axes_reject_out_of_range
     ca = CArray.float64(2, 3)
-    assert_raise(IndexError) do
+    assert_raise(ArgumentError) do
       CArray.t1_test_parse_reduce_axes(ca, 5)
     end
-    assert_raise(IndexError) do
+    assert_raise(ArgumentError) do
       CArray.t1_test_parse_reduce_axes(ca, -3)  # -3 + 2 = -1, out of range
     end
   end

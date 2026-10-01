@@ -423,7 +423,7 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   int axis_raw = NIL_P(vaxis) ? 0 : (int) ca_axis_integer(vaxis, NULL);
   int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
   if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eIndexError,
+    rb_raise(rb_eArgError,
              "%s: axis %d out of range for ndim %d",
              ca_calling_method_name(), axis_raw, (int) ca->ndim);
   }
