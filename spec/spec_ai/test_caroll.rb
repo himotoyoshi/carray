@@ -149,6 +149,7 @@ class TestCARoll < Test::Unit::TestCase
   # ------------------------------------------------------------------
 
   def test_descriptor_1d_normalised
+    omit "requires CARRAY_DEV_BUILD" unless CARoll.method_defined?(:_roll_descriptor)
     a = CArray.int32(5).seq
     # roll(7) normalised to 2
     d = a.roll(7)._roll_descriptor
@@ -158,6 +159,7 @@ class TestCARoll < Test::Unit::TestCase
   end
 
   def test_descriptor_2d_n_regions_4
+    omit "requires CARRAY_DEV_BUILD" unless CARoll.method_defined?(:_roll_descriptor)
     a = CArray.int32(3, 4).seq
     d = a.roll(1, 2)._roll_descriptor
     assert_equal [1, 2], d[:shifts]
@@ -165,6 +167,7 @@ class TestCARoll < Test::Unit::TestCase
   end
 
   def test_descriptor_partial_shift_n_regions_2
+    omit "requires CARRAY_DEV_BUILD" unless CARoll.method_defined?(:_roll_descriptor)
     a = CArray.int32(3, 4).seq
     d = a.roll(0, 2)._roll_descriptor  # only axis 1 shifted
     assert_equal [0, 2], d[:shifts]
@@ -172,6 +175,7 @@ class TestCARoll < Test::Unit::TestCase
   end
 
   def test_descriptor_zero_shift_n_regions_1
+    omit "requires CARRAY_DEV_BUILD" unless CARoll.method_defined?(:_roll_descriptor)
     a = CArray.int32(5).seq
     d = a.roll(0)._roll_descriptor
     assert_equal [0], d[:shifts]

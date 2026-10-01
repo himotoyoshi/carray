@@ -574,6 +574,7 @@ rb_ca_roll_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only accessor returning the roll descriptor as a Hash
    (`shifts`, `n_regions`, `ndim`).  Not part of the public surface. */
 static VALUE
@@ -595,6 +596,7 @@ rb_ca_roll_descriptor (VALUE self)
   rb_hash_aset(hash, ID2SYM(rb_intern("ndim")), INT2NUM(ca->ndim));
   return hash;
 }
+#endif
 
 void
 Init_ca_obj_roll (void)
@@ -630,7 +632,9 @@ Init_ca_obj_roll (void)
   rb_define_method(rb_cCARoll, "initialize_copy",
                                       rb_ca_roll_initialize_copy, 1);
 
+#ifdef CARRAY_DEV_BUILD
   /* Debug accessor, not part of the public surface. */
   rb_define_method(rb_cCARoll, "_roll_descriptor",
                                       rb_ca_roll_descriptor, 0);
+#endif
 }

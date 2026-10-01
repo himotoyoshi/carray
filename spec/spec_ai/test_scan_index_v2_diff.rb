@@ -13,6 +13,12 @@ $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "carray"
 require "test/unit"
 
+# `_scan_index_v2` is defined only in development builds (-DCARRAY_DEV_BUILD).
+unless CArray.respond_to?(:_scan_index_v2)
+  warn "skipping #{File.basename(__FILE__)}: requires CARRAY_DEV_BUILD"
+  return
+end
+
 class TestScanIndexV2Diff < Test::Unit::TestCase
   def cmp(dim, idx, label: nil)
     label ||= "dim=#{dim.inspect} idx=#{idx.inspect}"

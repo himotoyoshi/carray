@@ -113,9 +113,11 @@ static int8_t CA_OBJ_SELECT_AXIS;
 
 /* Benchmark-only bypass flag: when non-zero, rb_ca_grid skips the
    CASelectAxis dispatch hook and falls through to the pre-CSA CAGrid path.
-   Exposed to Ruby as CArray._csa_bypass=.  Production code never touches it. */
+   Exposed to Ruby as CArray._csa_bypass= in development builds.
+   Production code never touches it. */
 int ca_csa_dispatch_bypass = 0;
 
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_s_csa_bypass_eq (VALUE klass, VALUE val)
 {
@@ -130,6 +132,7 @@ rb_ca_s_csa_bypass_p (VALUE klass)
   (void) klass;
   return ca_csa_dispatch_bypass ? Qtrue : Qfalse;
 }
+#endif
 
 static VALUE rb_cCASelectAxis;
 static VALUE rb_cCASelectAxisMask;
@@ -886,6 +889,7 @@ rb_ca_select_axis_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only Ruby ctor:
    CASelectAxis._new_debug(parent, indirect_axis, selector,
                             ap_start_arr, ap_count_arr, ap_step_arr)
@@ -936,6 +940,7 @@ rb_ca_select_axis_s_new_debug (VALUE klass, VALUE rparent, VALUE rindirect,
   rb_ivar_set(obj, rb_intern("_selector"), rselector);
   return obj;
 }
+#endif
 
 /* ------------------------------------------------------------------- */
 /* Indexer dispatch hook: called from rb_ca_grid                       */
@@ -1278,9 +1283,11 @@ Init_ca_obj_select_axis (void)
   rb_define_alloc_func(rb_cCASelectAxis, rb_ca_select_axis_s_allocate);
   rb_define_method(rb_cCASelectAxis, "initialize_copy",
                                      rb_ca_select_axis_initialize_copy, 1);
+#ifdef CARRAY_DEV_BUILD
   /* Debug-only ctor for testing; not part of the public API. */
   rb_define_singleton_method(rb_cCASelectAxis, "_new_debug",
                              rb_ca_select_axis_s_new_debug, 6);
+#endif
 
 #ifdef CARRAY_DEV_BUILD
   /* debug accessors (dev-only, stripped in release).
@@ -1297,7 +1304,9 @@ Init_ca_obj_select_axis (void)
                    rb_ca_select_axis_dispatch_fill_value_debug, 1);
 #endif
 
+#ifdef CARRAY_DEV_BUILD
   /* Benchmark-only bypass setter on CArray class. */
   rb_define_singleton_method(rb_cCArray, "_csa_bypass=", rb_ca_s_csa_bypass_eq, 1);
   rb_define_singleton_method(rb_cCArray, "_csa_bypass?", rb_ca_s_csa_bypass_p, 0);
+#endif
 }
