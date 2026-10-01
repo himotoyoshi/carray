@@ -107,8 +107,8 @@ FLOAT = [
   CA_FLOAT64  ,
 ]
 
-# object -> int/float cast: a parse failure masks the output cell (UNDEF)
-# instead of a silent 0.0 (float) or a raise (int).  These parsers report
+# object -> int/float/complex cast: a parse failure masks the output cell
+# (UNDEF) instead of raising.  These parsers report
 # failure through an out-param whose C type is `oktype`.
 obj2cval_ok = {
   CA_INT8     => "rb_obj2long_ok",
@@ -121,6 +121,8 @@ obj2cval_ok = {
   CA_UINT64   => "rb_obj2ull_ok",
   CA_FLOAT32  => "ca_obj2dbl_ok",
   CA_FLOAT64  => "ca_obj2dbl_ok",
+  CA_CMPLX64  => "ca_obj2cmplx_ok",
+  CA_CMPLX128 => "ca_obj2cmplx_ok",
 }
 
 oktype = {
@@ -134,6 +136,8 @@ oktype = {
   CA_UINT64   => "unsigned long long",
   CA_FLOAT32  => "double",
   CA_FLOAT64  => "double",
+  CA_CMPLX64  => "double complex",
+  CA_CMPLX128 => "double complex",
 }
 
 BOOLEAN = [
@@ -456,14 +460,12 @@ OBJECT.each do |type1|
     ctype1 = ctype[type1]
     ctype2 = ctype[type2]
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
-    if (INTEGER+FLOAT).include?(type2)
-      # object -> int/float: parse failure -> masked (UNDEF) output cell.
-      # The mask-aware loop runs only when a mask buffer is supplied (m);
-      # #to_type always supplies one for these targets so the whole
-      # user-facing object->numeric surface gets the masking semantics.
-      # With no mask buffer (internal single-cell / view paths) the legacy
-      # value parser keeps its old behaviour (lenient 0.0 float / raising
-      # int), leaving those paths byte-identical.
+    if (INTEGER+FLOAT+[CA_CMPLX64, CA_CMPLX128]).include?(type2)
+      # object -> int/float/complex: parse failure -> masked (UNDEF) output
+      # cell.  The mask-aware loop runs only when a mask buffer is supplied
+      # (m); #to_type always supplies one for these targets.  With no mask
+      # buffer (a store, single-cell and view paths) the value parser
+      # raises for a cell it cannot read.
       conv_ok = obj2cval_ok[type2]
       conv    = obj2cval[type2]
       oktype2 = oktype[type2]

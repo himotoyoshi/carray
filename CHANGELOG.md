@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: storing `nil` into a numeric or boolean array raises, as
+  `Float(nil)`, `Integer(nil)` and `Complex(nil)` do: `TypeError` for
+  float and complex, `CArray::DataTypeError` for boolean (integer already
+  raised). It used to become NaN (float), 0+0i (complex) or false
+  (boolean). Store `Float::NAN` or `UNDEF` for what you mean. `to_type`
+  from an object array still reads `nil` as `UNDEF`, and now does so for
+  complex too, along with any cell it cannot read as a number (it raised
+  for complex).
+
 - Change: a string stored into a float or complex array is read as
   `Float()` reads it, and one that is not a number raises
   `ArgumentError`, as it already did for an integer array. `"x"` and
