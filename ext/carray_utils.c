@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_calling_method_name */
 
 #include "ruby/st.h"
 
@@ -482,11 +483,37 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
   }
 }
 
+/* The name of the method the user called, for error messages.  A C
+   entry reached directly from C (no rb_funcall) reports the method that
+   was entered from Ruby, which is the one the user wrote.  The internal
+   `_ki` twin of a public method is reported under the public name.
+   Falls back to "axis" when there is no method frame. */
+const char *
+ca_calling_method_name (void)
+{
+  ID id = rb_frame_this_func();
+  const char *s;
+  size_t n;
+  if ( ! id ) {
+    return "axis";
+  }
+  s = rb_id2name(id);
+  if ( ! s ) {
+    return "axis";
+  }
+  n = strlen(s);
+  if ( n > 3 && strcmp(s + n - 3, "_ki") == 0 ) {
+    return rb_id2name(rb_intern2(s, (long) (n - 3)));
+  }
+  return s;
+}
+
 /* Self-independent kernel: normalize `raw` against `ndim`, returning a
    canonical non-negative axis in [0, ndim) as int.  Accepts negative
    values (Python/Ruby convention: -1 => ndim-1).  Raises ArgumentError
    if out of range.  `name` is used in the error message (e.g.
-   "mask_duplicates", "sum", "merge"); pass NULL to default to "axis".
+   "mask_duplicates", "sum", "merge"); pass NULL to use the name of the
+   method the user called.
 
    For an insertion position (= valid range [0, old_ndim] inclusive),
    pass `old_ndim + 1` as `ndim` so the half-open [0, ndim) check
@@ -498,7 +525,7 @@ rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
   if ( axis < 0 || axis >= ndim ) {
     rb_raise(rb_eArgError,
              "%s: axis %ld out of range for ndim %d",
-             name ? name : "axis", raw, ndim);
+             name ? name : ca_calling_method_name(), raw, ndim);
   }
   return (int) axis;
 }
@@ -566,7 +593,7 @@ rb_ca_normalize_axes (int argc, VALUE *argv, VALUE self)
   const char *name;
 
   rb_scan_args(argc, argv, "11", &raxes, &rname);
-  name = NIL_P(rname) ? "axes" : StringValueCStr(rname);
+  name = NIL_P(rname) ? ca_calling_method_name() : StringValueCStr(rname);
   GetCArray(self, ca);
 
   if ( NIL_P(raxes) ) {

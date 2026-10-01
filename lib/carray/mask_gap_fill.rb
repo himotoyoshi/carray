@@ -46,7 +46,7 @@ class CArray
         raise ArgumentError,
               "unmask: pass either a constant fill value or method:, not both"
       end
-      held = __gap_fill__(method, axis)
+      held = __gap_fill__(method, axis, "unmask")
       # Copy the filled values in place.  A Face writes through its storage: a
       # bulk store into its surface would try to cast the storage values to the
       # surface type (int64 ticks to fixlen, for a time array).
@@ -71,7 +71,7 @@ class CArray
         raise ArgumentError,
               "strip_mask: pass either a constant fill value or method:, not both"
       end
-      return __gap_fill__(method, axis)
+      return __gap_fill__(method, axis, "strip_mask")
     end
     if fill.equal?(MASK_FILL_UNSET)
       raise ArgumentError, "strip_mask: a fill value is required (or method:)"
@@ -85,7 +85,8 @@ class CArray
   # unfillable cells stay masked; a fully filled result carries no mask
   # (hold allocates the output mask only when a leading run goes UNDEF;
   # :linear masks only the exterior via mask_invalid).
-  def __gap_fill__ (method, axis)
+  def __gap_fill__ (method, axis, name)
+    axis = normalize_axis(axis, name) unless axis.nil?
     case method
     when :forward, :ffill
       __hold_axis__(axis, false)
@@ -100,8 +101,8 @@ class CArray
     end
   end
 
-  # Forward (backward = false) or backward (true) hold along `axis`
-  # (axis nil = flatten).  Backward reuses the forward primitive on the
+  # Forward (backward = false) or backward (true) hold along `axis`, already
+  # normalised by __gap_fill__ (axis nil = flatten).  Backward reuses the forward primitive on the
   # reversed view; flatten flattens, holds axis 0, reshapes back.
   def __hold_axis__ (axis, backward)
     if axis.nil?
@@ -111,11 +112,10 @@ class CArray
       held = held.reverse if backward
       held.reshape(*shape)
     else
-      ax = normalize_axis(axis, "unmask/strip_mask")
       if backward
-        flip(ax).send(:__hold__, ax).flip(ax)
+        flip(axis).send(:__hold__, axis).flip(axis)
       else
-        send(:__hold__, ax)
+        send(:__hold__, axis)
       end
     end
   end
@@ -135,10 +135,7 @@ class CArray
     if axis.nil?
       return __linear_fiber__(flatten).reshape(*shape)
     end
-    ax = axis < 0 ? axis + ndim : axis
-    if ax < 0 || ax >= ndim
-      raise ArgumentError, "axis #{axis} out of range for ndim #{ndim}"
-    end
+    ax = axis
     # A Face assembles in storage space -- its linear_fetch has already rounded
     # to the grid, so there is nothing left to hold in float64.  A numeric
     # array assembles in float64 and casts back once at the end.
