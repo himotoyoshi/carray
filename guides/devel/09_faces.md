@@ -156,10 +156,11 @@ an external gem add a Face without recompiling the core.
 extern uint8_t face_state_portable_table[CA_OBJ_TYPE_MAX];
 ```
 
-`face_state_portable_table[obj_type] == 1` means the Face's state can cross a
-process or parent boundary — Marshal, MemoryView producer, and multi-parent
-constructors (CAStack, `concatenate`, `stack`, `meld`). A `0` means the state is
-tied to a specific parent buffer and those constructors must reject it.
+`face_state_portable_table[obj_type] == 1` means the Face's state can be carried
+over several parents — the multi-parent constructors (CAStack, `concatenate`,
+`stack`, `meld`) read it, and nothing else does. A `0` means the state is tied to
+a specific parent buffer and those constructors must reject it. A `CAString` is
+`1`: its cells are the Strings themselves.
 
 The canonical `0` is **CAConstString**: its backing buffer is per-parent (a
 pure-concat UTF-8 byte pool indexed by fixlen-16 `(start, end)` pairs), so a

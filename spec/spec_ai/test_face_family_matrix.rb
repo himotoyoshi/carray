@@ -123,11 +123,9 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       unique:       -> { %w[ab cd] },
       cross:        nil,
       integer_storage: false,
-      # code order is the vocabulary's, not the labels', so it is not ORDERABLE;
-      # and its codes are read-only, which the self-shaped members cannot take
+      # code order is the vocabulary's, not the labels', so it is not ORDERABLE
       raises:       { "sort"            => ArgumentError,
                       "min"             => ArgumentError,
-                      "mask_duplicates" => RuntimeError,
                       "linear_fetch"    => ArgumentError }.merge(
                       TestFaceFamilyMatrix::NO_REDUCTIONS) },
   ]

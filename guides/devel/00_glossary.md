@@ -183,9 +183,9 @@ a runtime-installed obj_type. CATime, CATimedelta, CARecord, CAConstString
 are Faces. See [ch. 9](09_faces.md).
 
 **portable table** — `face_state_portable_table[obj_type]`: whether a Face's
-state can cross process/parent boundaries (Marshal, MemoryView, multi-parent
-constructors). CAConstString is `0` (its buffer is per-parent), which is why it
-is rejected by CAStack et al.
+state can be carried over several parents (the multi-parent constructors).
+CAConstString is `0` (its buffer is per-parent), which is why it is rejected by
+CAStack et al.
 
 ## C conventions at a glance
 

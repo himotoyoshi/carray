@@ -22,11 +22,13 @@ class TestMeldFace < Test::Unit::TestCase
     assert_match(/not portable/, err.message)
   end
 
-  def test_meld_refuses_a_string_face_as_stack_does
+  def test_meld_takes_a_string_face_as_stack_does
     a = CArray.string(%w[p q])
     b = CArray.string(%w[r s])
-    assert_raise(ArgumentError) { CArray.meld(a, b) }
-    assert_raise(ArgumentError) { CArray.stack([a, b]) }
+    assert_kind_of CAString, CArray.meld(a, b)
+    assert_equal %w[p q r s], CArray.meld(a, b).to_a
+    assert_kind_of CAString, CArray.stack([a, b])
+    assert_equal [%w[p q], %w[r s]], CArray.stack([a, b]).to_a
   end
 
   def test_the_refusal_names_the_way_out
