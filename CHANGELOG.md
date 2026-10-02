@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: for whoever registers a `CArray.expression_evaluator`: the plan it
+  is handed now describes comparisons (`eq`, `lt`, `is_nan`, ...) as
+  operations and `CArray#shift` of an array as that array read at an
+  offset (`CArray::Fusion::Shifted`).  An evaluator that does not know
+  the new node can decline the plan, and CArray computes it as before.
 - Fix: `start`, `size0`, `bounds` and the other methods a `CAShift`
   inherits from `CAWindow` raised `TypeError`; they now answer for the
   shift.

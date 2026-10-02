@@ -1659,6 +1659,34 @@ rb_ca_window_get_bounds (VALUE self)
   return SIZE2NUM(cw->bounds[0]);
 }
 
+/* The boundary rule on each axis, one Symbol per axis.  `bounds` answers
+   for axis 0 only, which is all CArray#window sets; a shift with `roll:`
+   on some axes sets them one by one. */
+static VALUE
+rb_ca_window_axis_bounds (VALUE self)
+{
+  volatile VALUE ary;
+  CAWindow *cw;
+  const char *name;
+  int8_t i;
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
+  ary = rb_ary_new2(cw->ndim);
+  for (i=0; i<cw->ndim; i++) {
+    switch ( cw->bounds[i] ) {
+    case CA_BOUNDS_RUBY:     name = "ruby";     break;
+    case CA_BOUNDS_STRICT:   name = "strict";   break;
+    case CA_BOUNDS_NEAREST:  name = "nearest";  break;
+    case CA_BOUNDS_PERIODIC: name = "periodic"; break;
+    case CA_BOUNDS_REFLECT:  name = "reflect";  break;
+    case CA_BOUNDS_FILL:     name = "fill";     break;
+    case CA_BOUNDS_MASK:     name = "mask";     break;
+    default:                 name = "unknown";  break;
+    }
+    rb_ary_store(ary, i, ID2SYM(rb_intern(name)));
+  }
+  return ary;
+}
+
 #define rb_cw_get_attr_ary(name)    \
   rb_cw_## name (VALUE self)        \
   {                                 \
@@ -1759,6 +1787,7 @@ Init_ca_obj_window (void)
   /* No `count` accessor: the per-axis window widths are what `shape`
      already answers, and the name belongs to CArray#count. */
   rb_define_method(rb_cCAWindow, "start",  rb_cw_start, 0);
+  rb_define_method(rb_cCAWindow, "__axis_bounds__", rb_ca_window_axis_bounds, 0);
   rb_define_method(rb_cCAWindow, "size0",  rb_cw_size0, 0);
 
 #ifdef CARRAY_DEV_BUILD

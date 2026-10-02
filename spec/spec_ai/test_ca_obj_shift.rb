@@ -66,6 +66,8 @@ class TestCAShift < Test::Unit::TestCase
     assert_equal [-1, 2], s.start
     assert_equal [3, 4], s.size0
     assert_equal 5, s.fill_value
+    assert_equal [:fill, :fill], s.__axis_bounds__
+    assert_equal [:mask, :mask], g.shift(1, 0, fill_value: UNDEF).__axis_bounds__
   end
 
 end
