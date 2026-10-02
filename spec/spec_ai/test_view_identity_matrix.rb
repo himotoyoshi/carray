@@ -229,6 +229,9 @@ class TestViewIdentityMatrix < Test::Unit::TestCase
     "CAReduce" => "built only inside C (the mask of a byte-reinterpreting " \
                   "CARefer, and kernel_iterator scratch); never wrapped " \
                   "into a Ruby object",
+    "CAMaskOfOperands" => "built only inside C as the mask of a lazy " \
+                          "operation over several operands; read from Ruby " \
+                          "as a CArrayMask, never wrapped as itself",
   }.freeze
 
   # spec_ai is required into one process and several files define view

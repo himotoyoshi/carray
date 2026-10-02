@@ -493,51 +493,12 @@ ca_bincmp_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CABinCmp is read-only (fill_data)");
 }
 
-/* mask = left.mask | right.mask, materialised as boolean8_t.
-   Mirrors CABinOp's create_mask policy. */
+/* mask = left.mask | right.mask, computed on each read (CAMaskOfOperands). */
 static void
 ca_bincmp_func_create_mask (void *ap)
 {
   CABinCmp *bc = (CABinCmp *) ap;
-  CArray *l = bc->parent;
-  CArray *r = bc->right;
-  CArray *lm = NULL, *rm = NULL;
-  CArray *read[2], *mask;
-  int32_t nread = 0;
-  boolean8_t *dst;
-  ca_size_t i, n;
-  int has_l, has_r;
-
-  has_l = ca_has_mask(l);
-  has_r = ca_has_mask(r);
-  if ( ! has_l && ! has_r ) return;
-
-  if ( has_l ) lm = read[nread++] = l->mask;
-  if ( has_r ) rm = read[nread++] = r->mask;
-
-  /* Attached all together before the mask is built, which is published
-     only once it is filled: an attach that raises leaves no mask
-     half-made and no operand attached. */
-  ca_attach_all(read, nread);
-
-  mask = (CArray *) carray_new(CA_BOOLEAN, bc->ndim, bc->dim, 0, NULL);
-  dst = (boolean8_t *) mask->ptr;
-  n = bc->elements;
-
-  for ( i = 0; i < n; i++ ) {
-    boolean8_t a = has_l ? ((boolean8_t *) lm->ptr)[i] : 0;
-    boolean8_t b = 0;
-    if ( has_r ) {
-      ca_size_t ri = bc->right_is_scalar ? 0 : i;
-      b = ((boolean8_t *) rm->ptr)[ri];
-    }
-    dst[i] = (boolean8_t)( a | b );
-  }
-
-  while ( nread > 0 ) {
-    ca_detach(read[--nread]);
-  }
-  bc->mask = mask;
+  bc->mask = ca_lazy_operation_mask((CArray *) bc, CA_LAZY_MASK_OR);
 }
 
 ca_operation_function_t ca_bincmp_func = {

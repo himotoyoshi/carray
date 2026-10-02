@@ -376,21 +376,16 @@ ca_moncmp_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (fill_data)");
 }
 
+/* The parent's mask cell for cell, read-only as the comparison is. */
 static void
 ca_moncmp_func_create_mask (void *ap)
 {
   CAMonCmp *mc = (CAMonCmp *) ap;
   CArray *p = mc->parent;
-  CArray *mask;
   if ( ! ca_has_mask(p) ) return;
-
-  /* Attached before the mask is built, which is published only once it
-     is filled: an attach that raises leaves no mask half-made. */
-  ca_attach(p->mask);
-  mask = (CArray *) carray_new(CA_BOOLEAN, mc->ndim, mc->dim, 0, NULL);
-  memcpy(mask->ptr, p->mask->ptr, mc->elements);
-  ca_detach(p->mask);
-  mc->mask = mask;
+  mc->mask = (CArray *) ca_refer_new(p->mask, CA_BOOLEAN,
+                                     mc->ndim, mc->dim, 0, 0);
+  ca_set_flag(mc->mask, CA_FLAG_READ_ONLY);
 }
 
 ca_operation_function_t ca_moncmp_func = {

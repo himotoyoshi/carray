@@ -88,9 +88,9 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
     end
   end
 
-  # A lazy node builds its mask from its operands' masks when first asked.
-  # When reading one of those raises, no mask is kept: the next request
-  # builds it again, rather than finding a half-made one.
+  # A lazy node reads its operands' masks each time its mask is read.  When
+  # reading one of those raises, nothing is kept: the next read reads them
+  # again, rather than finding a half-made answer.
   {
     "binop"  => [->(x, y) { x.lazy + y.lazy },              [true, false, true, true]],
     "bincmp" => [->(x, y) { x.lazy < y.lazy },              [true, false, true, true]],
@@ -102,7 +102,7 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
       y = FlakyMask.new([0, 0, 1, 0])
       node = build.(x, y)
       x.fail_mask = true
-      assert_raise_message("mask copy failed") { node.mask }
+      assert_raise_message("mask copy failed") { node.mask.to_a }
       x.fail_mask = false
       assert_equal mask, node.mask.to_a
     end

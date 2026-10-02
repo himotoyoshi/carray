@@ -123,6 +123,19 @@ void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
 int     ca_is_lazy_view (void *ap);
 
+/* The mask of an element-wise lazy operation over several operands
+   (CABinOp, CABinCmp, CATriOp), computed from the operands' masks on each
+   read so that it follows them as the values do; NULL when no operand has
+   a mask yet.  `mode` is CA_LAZY_MASK_OR, or one of the KLEENE modes for
+   the boolean `|` and `&`, whose masked cells an unmasked operand can
+   decide (carray_lazy.c). */
+
+#define CA_LAZY_MASK_OR           0
+#define CA_LAZY_MASK_KLEENE_OR    1
+#define CA_LAZY_MASK_KLEENE_AND   2
+
+CArray *ca_lazy_operation_mask (CArray *operation, int mode);
+
 /* The registered expression evaluator's answer for a lazy expression the
    caller is about to compute whole, or Qnil to go on with self (see
    carray_lazy.c). */
