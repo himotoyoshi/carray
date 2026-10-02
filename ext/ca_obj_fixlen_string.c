@@ -22,6 +22,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"
 
 typedef struct {
   /* === CAView prefix === */
@@ -324,6 +325,9 @@ Init_ca_obj_fixlen_string (void)
 
   /* CA_FIXLEN is portable storage (fixed-width bytes, no per-process VALUE
      or per-parent buffer), so the Face can be carried across multi-parent
-     constructions like CAStack / Marshal / MemoryView. */
+     constructions like CAStack. */
   ca_face_register_state_portable(CA_OBJ_FIXLEN_STRING, 1);
+
+  /* The bytes are the strings: a MemoryView consumer reads them as "Ns". */
+  ca_face_register_memory_view(CA_OBJ_FIXLEN_STRING, 1);
 }

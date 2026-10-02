@@ -26,6 +26,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"   /* ca_strip_face for Face producers */
+#include "carray_internal.h"
 #include "ruby/memory_view.h"
 #include <string.h>
 
@@ -55,12 +56,10 @@ typedef struct {
 
 /* ---------------- obj_type strategy ---------------- */
 
-/* Strategy = label only; ca_mv_get is alias-only and all CAStride-family
-   strategies share the same code path (compose-to-root + entity->ptr +
-   composed_strides).  The labels are kept for ca_mv_runtime_types[]
-   readability and reject diagnostics.  CA_MV_ATTACH stays defined but is
-   structurally unreachable -- ca_mv_check_alias_chain rejects every
-   obj_type that maps to it. */
+/* Strategy = label only.  The export is alias-only and is decided by
+   ca_mv_compose_to_entity alone; the labels say which classes get a
+   MemoryView registration and keep ca_mv_runtime_types[] readable.
+   Every class labelled CA_MV_ATTACH is refused by that resolver. */
 typedef enum {
   CA_MV_REJECT,
   CA_MV_DIRECT,   /* entity / wrap / scalar; ca->ptr valid as-is */
@@ -72,9 +71,8 @@ typedef enum {
   CA_MV_ATTACH,   /* unreachable: rejected by alias-chain check */
 } ca_mv_strategy_t;
 
-/* Resolved at Init_carray_memory_view.  The order is the same as
-   ca_mv_runtime_types[] below.  Runtime obj_type ids are stored here so
-   ca_mv_strategy_for can match them with a simple linear scan. */
+/* Resolved at Init_carray_memory_view.  Runtime obj_type ids are stored
+   here so ca_mv_reject_reason_for can name the class it refuses. */
 static ca_mv_runtime_type_t ca_mv_runtime_types[CA_MV_NUM_RUNTIME_OBJ_TYPES] = {
   { "CAFarray",    "CA_OBJ_FARRAY",    -1, Qnil, /* CA_MV_FARRAY  */ 4 },
   { "CATranspose", "CA_OBJ_TRANSPOSE", -1, Qnil, /* CA_MV_TRANS   */ 5 },
@@ -424,35 +422,6 @@ ca_mv_carray_bytes_for (int8_t data_type, ssize_t item_size)
                                   : (ca_size_t) ca_sizeof[data_type];
 }
 
-/* ---------------- strategy lookup ---------------- */
-
-static ca_mv_strategy_t
-ca_mv_strategy_for (int16_t obj_type)
-{
-  /* compile-time enum members */
-  if (obj_type == CA_OBJ_ARRAY ||
-      obj_type == CA_OBJ_ARRAY_WRAP ||
-      obj_type == CA_OBJ_SCALAR) return CA_MV_DIRECT;
-  if (obj_type == CA_OBJ_REFER)  return CA_MV_REFER;
-  if (obj_type == CA_OBJ_BLOCK)  return CA_MV_BLOCK;
-  if (obj_type == CA_OBJ_SELECT) return CA_MV_ATTACH;
-  if (obj_type == CA_OBJ_REPEAT) return CA_MV_REPEAT;
-  if (obj_type == CA_OBJ_OBJECT) return CA_MV_REJECT;
-  /* Plain CAStride (created via #as_strided, or wrap_memory_view from
-     a strided producer).  Reuse the CA_MV_TRANS handler since it
-     already reads strides[] / base_offset directly from the CAStride
-     layout -- no CATranspose-specific code in that path anymore. */
-  if (obj_type == CA_OBJ_STRIDE) return CA_MV_TRANS;
-
-  /* runtime-assigned obj_types */
-  for (int i = 0; i < CA_MV_NUM_RUNTIME_OBJ_TYPES; i++) {
-    if (ca_mv_runtime_types[i].id == obj_type) {
-      return (ca_mv_strategy_t) ca_mv_runtime_types[i].strategy;
-    }
-  }
-  return CA_MV_REJECT;
-}
-
 /* ---------------- helpers ---------------- */
 
 static int
@@ -507,6 +476,8 @@ typedef struct {
   int          depth;        /* 0 = the view itself, 1 = parent, 2 = grand-, ... */
   const char  *class_name;   /* class name of the offending link */
   const char  *reason;       /* short explanation */
+  int          face;         /* refused because it is a Face: a copy is
+                                refused too, so no copy is suggested */
 } ca_mv_reject_t;
 
 static bool ca_mv_stride_is_contig (CAStride *ca);   /* defined below */
@@ -551,6 +522,18 @@ ca_mv_reject_reason_for (CArray *ca)
   return "this kind of view is not alias-capable";
 }
 
+/* The entities whose bytes the producer exports: CArray, CAWrap and
+   CScalar.  An entity installed from outside the core (ca_install_obj_type,
+   e.g. a CASource subclass) may hold its bytes elsewhere (cold at rest),
+   so neither it nor a view onto it is exported. */
+static inline bool
+ca_mv_is_core_entity (CArray *ca)
+{
+  return ca->obj_type == CA_OBJ_ARRAY ||
+         ca->obj_type == CA_OBJ_ARRAY_WRAP ||
+         ca->obj_type == CA_OBJ_SCALAR;
+}
+
 /* Resolve ca to an (entity, composed_strides, composed_base) triple
    suitable for zero-copy strided export.  Uses ca_stride_compose_to_root
    to fold the CAStride parent chain (alias-eligible OR not, as long
@@ -569,15 +552,31 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
                          ca_size_t *out_strides,
                          ca_size_t *out_base)
 {
-  /* Face (= CARecord etc.) is a 1:1 alias of parent->ptr, so
-     storage-layer-wise it is identical to the parent's entity / castride
-     layer.  Strip Face, descend to parent, and feed the subsequent
-     compose.  data_class / format come separately from the Face tail via
-     rb_ca_data_class universal dispatch. */
+  rej->face = 0;
+  /* A Face is a 1:1 alias of its storage, so it is exported as that
+     storage -- but only a Face that registered its bytes as carrying its
+     values (ca_face_register_memory_view).  The format comes from the Face
+     (data_class for a CARecord); the layout from the storage below. */
   if (ca_is_face(ca)) {
+    if (! ca_face_memory_view_exportable(ca)) {
+      rej->depth = 0;
+      rej->class_name = ca_mv_class_name_of(ca);
+      rej->reason = "a Face whose storage bytes do not carry its values "
+                    "without the Face; export its storage instead "
+                    "(e.g. .ticks, .codes)";
+      rej->face = 1;
+      return false;
+    }
     ca = ca_strip_face(ca);
   }
   if (ca_is_entity(ca)) {
+    if (! ca_mv_is_core_entity(ca)) {
+      rej->depth = 0;
+      rej->class_name = ca_mv_class_name_of(ca);
+      rej->reason = "installed outside the core; its bytes are not "
+                    "exported";
+      return false;
+    }
     *out_entity = ca;
     *out_base = 0;
     return true;
@@ -599,6 +598,12 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
     } else {
       rej->reason = ca_mv_reject_reason_for(root);
     }
+    return false;
+  }
+  if (! ca_mv_is_core_entity(root)) {
+    rej->depth = -1;
+    rej->class_name = ca_mv_class_name_of(root);
+    rej->reason = "installed outside the core; its bytes are not exported";
     return false;
   }
   *out_entity = root;
@@ -641,17 +646,9 @@ ca_mv_available_p (VALUE obj)
   if (! ca_mv_extract(obj, &ca)) return false;
   if (! ca_mv_ca_exportable(ca, obj)) return false;
   if (ca_has_mask(ca)) return false;
-  /* An entity whose obj_type has no strategy of its own is one installed
-     from outside the core (ca_install_obj_type).  It reaches this callback
-     only because it inherits CArray's MemoryView registration, and
-     ca_mv_get would then reject it — say so here rather than advertising
-     an export that cannot be produced.  Built-in entities (CArray /
-     CAWrap / CScalar) map to DIRECT and are unaffected. */
-  if (ca_is_entity(ca) && ca_mv_strategy_for(ca->obj_type) == CA_MV_REJECT) {
-    return false;
-  }
-  /* Wrap-via-MV exports are zero-copy: require an alias chain to
-     entity.  Non-alias views (CASelect, CAFake, etc.) and CAStride
+  /* The same resolver decides the export in ca_mv_get, so what this
+     says is what the export does.  Wrap-via-MV exports are zero-copy:
+     require an alias chain to a core entity.  Non-alias views (CASelect, CAFake, etc.) and CAStride
      chains broken by a non-contig link cannot be wrapped without a
      snapshot, which has wrong semantics for MV consumers. */
   return ca_mv_check_alias_chain(ca, &rej);
@@ -684,7 +681,7 @@ static bool
 ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
 {
   CArray *ca;
-  ca_mv_strategy_t strategy;
+  CArray *storage;
   ssize_t *shape = NULL;
   ssize_t *strides = NULL;
   void *data_ptr = NULL;
@@ -702,11 +699,10 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
      Object#freeze on a subclass). */
   if (writable_request && OBJ_FROZEN(obj)) return false;
 
-  /* Resolve the chain to (entity, composed_strides, composed_base).
-     If ca isn't a CAStride family member, only entity-class is
-     accepted here.  The CAStride-family case below uses composed_strides
-     / composed_base directly; the DIRECT case ignores them (entity owns
-     ca->ptr already, no compose needed). */
+  /* Resolve the chain to (entity, composed_strides, composed_base) with
+     the resolver available_p uses, so the two cannot disagree.  The
+     layout is the storage's: a Face that got through is a 1:1 alias of
+     it. */
   CArray *resolved_entity = NULL;
   ca_size_t composed_strides[CA_RANK_MAX];
   ca_size_t composed_base = 0;
@@ -717,14 +713,15 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
       return false;
     }
   }
+  storage = ca_is_face(ca) ? ca_strip_face(ca) : ca;
 
   /* SIMPLE consumer on non-contig view would need a snapshot -- not
      offered (consumers wanting a snapshot use from_memory_view). */
   {
     int wants_strides_early = (flags & RUBY_MEMORY_VIEW_STRIDES) ? 1 : 0;
     if (!wants_strides_early &&
-        ca_mv_is_castride_family(ca) &&
-        !ca_mv_stride_is_contig((CAStride *) ca)) {
+        ca_mv_is_castride_family(storage) &&
+        !ca_mv_stride_is_contig((CAStride *) storage)) {
       return false;
     }
   }
@@ -747,63 +744,36 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
     format = ca_mv_format_for(ca->data_type);
   }
 
-  strategy = ca_mv_strategy_for(ca->obj_type);
-
-  switch (strategy) {
-  case CA_MV_DIRECT:
-    /* Entity / wrap / scalar: ca->ptr is the entity's own buffer, always
-       valid.  No attach needed. */
-    data_ptr = ca->ptr;
-    /* A CScalar is exported with ndim 0 and no shape, so none is taken:
-       release frees only what the view carries. */
-    if (ca->ndim >= 1 && ca->obj_type != CA_OBJ_SCALAR) {
+  if (ca_is_entity(storage)) {
+    /* Entity / wrap / scalar: its own buffer, always valid.  No attach
+       needed.  A CScalar is exported with ndim 0 and no shape, so none is
+       taken: release frees only what the view carries. */
+    data_ptr = storage->ptr;
+    if (ca->ndim >= 1 && storage->obj_type != CA_OBJ_SCALAR) {
       shape = ca_mv_alloc_shape(ca);
       strides = ca_mv_alloc_strides_contiguous(ca, shape, true);
     }
-    break;
+  }
+  else {
+    /* A CAStride-family view (CARefer / CABlock / CAFarray / CATranspose
+       / CARepeat / CAField / plain CAStride) composed to an entity.
+       Expose `entity->ptr + composed_base` as data_ptr and
+       composed_strides as strides, both in entity byte space.  The entity
+       owns its bytes (always valid via view->obj's parent chain while the
+       consumer holds the view).
 
-  /* All CAStride-family views (CARefer / CABlock / CAFarray / CATranspose
-     / CARepeat / plain CAStride) reach this point only after
-     ca_mv_compose_to_entity succeeded -- the producer is alias-only by
-     ca_mv_available_p contract.  Expose `entity->ptr + composed_base` as
-     data_ptr and composed_strides as strides, both in entity byte space.
-     The entity owns its bytes (always valid via view->obj's parent chain
-     while the consumer holds the view).
-
-     CAREFUL: do not ca_attach the view here (nor ca_sync / ca_detach at
-     release).  Exposure is alias-only: the consumer writes directly into
-     root bytes, so a sync would scatter bytes back to root as a no-op
-     chain -- and that chain triggers ca_update_mask / ca_sync(mask)
-     recursion that can raise on an invariant violation.  Raising from a
-     release callback is fatal during GC sweep (newobj_of during sweep ->
-     BUG). */
-  case CA_MV_REFER:
-  case CA_MV_BLOCK:
-  case CA_MV_FARRAY:
-  case CA_MV_TRANS:
-  case CA_MV_REPEAT: {
+       CAREFUL: do not ca_attach the view here (nor ca_sync / ca_detach at
+       release).  Exposure is alias-only: the consumer writes directly into
+       root bytes, so a sync would scatter bytes back to root as a no-op
+       chain -- and that chain triggers ca_update_mask / ca_sync(mask)
+       recursion that can raise on an invariant violation.  Raising from a
+       release callback is fatal during GC sweep (newobj_of during sweep ->
+       BUG). */
     int8_t k;
     shape = ca_mv_alloc_shape(ca);
     strides = (ssize_t *) xmalloc(sizeof(ssize_t) * ca->ndim);
     for (k = 0; k < ca->ndim; k++) strides[k] = (ssize_t) composed_strides[k];
     data_ptr = resolved_entity->ptr + composed_base;
-    break;
-  }
-
-  case CA_MV_ATTACH:
-    /* Should be unreachable: ca_mv_check_alias_chain rejects every
-       obj_type that maps to ATTACH (CASelect / CAMapping / CAGrid /
-       CAShift / CAWindow / CAFake / CAReduce).  Materialise is no
-       longer offered via wrap_memory_view; from_memory_view gives a
-       snapshot copy instead. */
-    rb_raise(rb_eRuntimeError,
-             "[BUG] ATTACH strategy reached in ca_mv_get for %s; "
-             "alias-chain check should have rejected it",
-             ca_mv_class_name_of(ca));
-
-  case CA_MV_REJECT:
-  default:
-    return false;
   }
 
   view->obj = obj;
@@ -818,7 +788,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   view->item_size = (ssize_t) ca->bytes;
   view->item_desc.components = NULL;
   view->item_desc.length = 0;
-  view->ndim = (ca->obj_type == CA_OBJ_SCALAR) ? 0 : (ssize_t) ca->ndim;
+  view->ndim = (storage->obj_type == CA_OBJ_SCALAR) ? 0 : (ssize_t) ca->ndim;
   view->shape = (view->ndim == 0) ? NULL : shape;
   view->strides = (view->ndim == 0) ? NULL : strides;
   view->sub_offsets = NULL;
@@ -1580,17 +1550,18 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
   }
   if (! ca_mv_check_alias_chain(ca, &rej)) {
     const char *where;
-    if      (rej.depth == 0) where = "this view";
+    if      (rej.depth <  0) where = "the root";
+    else if (rej.depth == 0) where = "this view";
     else if (rej.depth == 1) where = "parent";
     else                     where = NULL;   /* ancestor[N] */
     if (where) {
-      return rb_sprintf("%s is %s (%s); zero-copy wrap not possible. "
-                        "Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot.",
-                        where, rej.class_name, rej.reason);
+      return rb_sprintf("%s is %s (%s); zero-copy wrap not possible.%s",
+                        where, rej.class_name, rej.reason,
+                        rej.face ? "" : " Export arr.copy for a snapshot.");
     } else {
-      return rb_sprintf("ancestor[%d] is %s (%s); zero-copy wrap not possible. "
-                        "Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot.",
-                        rej.depth - 1, rej.class_name, rej.reason);
+      return rb_sprintf("ancestor[%d] is %s (%s); zero-copy wrap not possible.%s",
+                        rej.depth - 1, rej.class_name, rej.reason,
+                        rej.face ? "" : " Export arr.copy for a snapshot.");
     }
   }
   return Qnil;
