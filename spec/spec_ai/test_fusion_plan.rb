@@ -94,6 +94,68 @@ class TestFusionPlan < Test::Unit::TestCase
     end
   end
 
+  def test_every_comparison_can_be_planned
+    x = CArray.float64(8) { |i| i - 3.0 }
+    y = CArray.float64(8) { |i| (i % 3) - 1.0 }
+    missing = []
+    CArray::LAZY_MONCMP_OP_IDS.each_key do |m|
+      missing << m unless CArray::Fusion.plan(CArray.fuse { x.send(m) })
+    end
+    CArray::LAZY_BINCMP_OP_IDS.each_key do |m|
+      next if m == :feq     # its body is written against its type and an epsilon
+      missing << m unless CArray::Fusion.plan(CArray.fuse { x.send(m, y) })
+    end
+    assert_equal [], missing
+  end
+
+  def test_a_comparison_carries_the_body_for_what_it_compares
+    ints = CArray.int32(8) { |i| i }
+    op = plan_for(CArray.fuse { ints.lt(3) }).nodes.last
+    assert_equal [:bincmp, :lt, :boolean], [op.kind, op.name, op.data_type]
+    assert_equal CArray.__kernel_body__(:bincmp, :lt, :int32), op.body
+    op = plan_for(CArray.fuse { @a.is_nan }).nodes.last
+    assert_equal CArray.__kernel_body__(:moncmp, :is_nan, :float64), op.body
+  end
+
+  def test_a_comparison_is_an_operation_not_a_leaf
+    plan = plan_for(CArray.fuse { (@a + @b).gt(3.0) & @a.lt(5.0) })
+    assert_equal [@a, @b], plan.leaves
+  end
+
+  # -- shifted reads ----------------------------------------------------
+
+  def test_a_shift_is_its_array_read_elsewhere
+    g = CArray.float64(4, 5) { |i, j| i * 10 + j }
+    plan = plan_for(CArray.fuse { g.shift(1, -2, fill_value: 7.0) + g })
+    assert_equal [g], plan.leaves, "the shift and the array are one leaf"
+    shifted = plan.nodes.grep(CArray::Fusion::Shifted).first
+    assert_equal 0, shifted.index
+    assert_equal [-1, 2], shifted.offset, "cell (i, j) reads (i - 1, j + 2)"
+    assert_equal [:fill, :fill], shifted.bounds
+    assert_equal 7.0, shifted.fill
+    assert_false plan.masked
+  end
+
+  def test_a_fill_of_undef_masks
+    g = CArray.float64(4, 5)
+    plan = plan_for(CArray.fuse { g.shift(1, 0, fill_value: UNDEF) + g })
+    assert_equal [:mask, :mask], plan.nodes.grep(CArray::Fusion::Shifted).first.bounds
+    assert_true plan.masked
+  end
+
+  def test_a_shift_of_an_expression_is_taken_whole
+    plan = plan_for(CArray.fuse { @a + (@a + @b).shift(1, fill_value: 0) })
+    assert_empty plan.nodes.grep(CArray::Fusion::Shifted)
+    assert_kind_of CAShift, plan.leaves.last
+  end
+
+  def test_how_far_it_shifts_is_part_of_the_signature
+    g = CArray.float64(4, 5)
+    one = plan_for(CArray.fuse { g.shift(1, 0) + g })
+    two = plan_for(CArray.fuse { g.shift(0, 1) + g })
+    assert_not_equal one.signature, two.signature
+  end
+
   # -- masks ------------------------------------------------------------
 
   def test_a_view_over_one_array_is_masked_where_that_array_is

@@ -6534,6 +6534,9 @@ module MkKernel
   # caller substitutes its own operands.  Object-lane bodies are left out,
   # since they call back into the interpreter and cannot be compiled apart
   # from it.
+  #
+  # A comparison is keyed by the data type it compares, not by what it
+  # answers, which is always boolean.
   # ---------------------------------------------------------------------
 
   BODY_TABLE_DTYPES = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
@@ -6542,7 +6545,7 @@ module MkKernel
   def self.body_table_rows
     rows = []
     KERNELS.each do |k|
-      next unless %i[monop binop triop].include?(k[:kind])
+      next unless %i[monop binop triop moncmp bincmp].include?(k[:kind])
       BODY_TABLE_DTYPES.each do |src|
         body = monop_expr_for(k, src)
         next unless body.is_a?(String)

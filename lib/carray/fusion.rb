@@ -17,12 +17,26 @@ class CArray
 
     # One value per node, in evaluation order; the last is the result.
     #
-    #   Op    an operation, reading the nodes named in `args`
-    #   Leaf  an array, the `index`-th of plan.leaves
-    #   Const a scalar written into the expression
-    Op    = Struct.new(:kind, :name, :data_type, :args, :body, :mask, :trapping)
-    Leaf  = Struct.new(:index, :data_type, :masked)
-    Const = Struct.new(:value, :data_type)
+    #   Op      an operation, reading the nodes named in `args`
+    #   Leaf    an array, the `index`-th of plan.leaves, read at the cell
+    #           being computed
+    #   Shifted the same, read `offset` cells away along each axis -- what
+    #           CArray#shift makes.  A cell that falls outside the array is
+    #           `fill` where `bounds` says :fill and masked where it says
+    #           :mask.  `masked` says whether the array itself has a mask.
+    #   Const   a scalar written into the expression
+    #
+    # A Shifted node reads cells other than the one being computed, so an
+    # evaluator that writes its output over one of the plan's leaves must
+    # not compute one that is read shifted: a cell it reads may already
+    # have been written.
+    #
+    # A comparison's body is the one for the data type it compares; what it
+    # answers is boolean, which is the node's data_type.
+    Op      = Struct.new(:kind, :name, :data_type, :args, :body, :mask, :trapping)
+    Leaf    = Struct.new(:index, :data_type, :masked)
+    Shifted = Struct.new(:index, :data_type, :masked, :offset, :bounds, :fill)
+    Const   = Struct.new(:value, :data_type)
 
     Plan  = Struct.new(:nodes, :leaves, :data_type, :dim, :masked, :signature)
 
@@ -42,6 +56,11 @@ class CArray
     MONOP_BY_ID = CArray::LAZY_MONOP_OP_IDS.invert.freeze
     BINOP_BY_ID = CArray::LAZY_BINOP_OP_IDS.invert.freeze
     TRIOP_BY_ID = CArray::LAZY_TRIOP_OP_IDS.invert.freeze
+    MONCMP_BY_ID = CArray::LAZY_MONCMP_OP_IDS.invert.freeze
+    # The table holds both spellings of each comparison (`lt` and `<`); the
+    # kernels are named by the word.
+    BINCMP_BY_ID = CArray::LAZY_BINCMP_OP_IDS
+                     .select { |name, _| name.to_s.match?(/\A[a-z]/) }.invert.freeze
 
     # Integer division and its relatives raise on a zero divisor, so a cell
     # the mask excludes must not be computed at all -- the divisor there is
@@ -115,8 +134,9 @@ class CArray
       raise Refused, "not a lazy expression" unless lazy?(view)
       w = Walk.new
       w.visit(view)
-      Plan.new(w.nodes, w.leaves, view.data_type, view.dim,
-               w.leaves.any? { |a| a.has_mask? }, w.signature)
+      masked = w.leaves.any? { |a| a.has_mask? } ||
+               w.nodes.any? { |n| n.is_a?(Shifted) && n.bounds.include?(:mask) }
+      Plan.new(w.nodes, w.leaves, view.data_type, view.dim, masked, w.signature)
     end
 
     def self.lazy? (x)
@@ -131,6 +151,7 @@ class CArray
       def initialize
         @nodes = []
         @leaves = []
+        @leaf_index = {}
         @seen = {}
         @signature = +""
       end
@@ -147,6 +168,9 @@ class CArray
         when CAMonOp      then unary(n)
         when CABinOp      then binary(n)
         when CATriOp      then ternary(n)
+        when CAMonCmp     then unary_comparison(n)
+        when CABinCmp     then binary_comparison(n)
+        when CAShift      then shifted(n)
         when CScalar      then constant(n)
         when CArray       then leaf(n)
         else raise Refused, "#{n.class} in an expression"
@@ -179,6 +203,39 @@ class CArray
         op(:triop, name, n.data_type, args, :union)
       end
 
+      # A comparison is masked where its operands are (ca_obj_moncmp.c,
+      # ca_obj_bincmp.c): there is no three-valued comparison.
+      def unary_comparison (n)
+        name = spell(MONCMP_BY_ID, n.__op_id__, {})
+        operand = n.parent
+        args = [visit(operand)]
+        comparison(:moncmp, name, operand.data_type, args, :pass)
+      end
+
+      def binary_comparison (n)
+        name = spell(BINCMP_BY_ID, n.__op_id__, {})
+        right = n.__bincmp_right__
+        # Both sides are already of the type compared (CABinCmp casts one
+        # to the other); a pair that is not has no single body.
+        unless n.parent.data_type == right.data_type
+          raise Refused, "#{name} between #{n.parent.data_type} and #{right.data_type}"
+        end
+        args = [visit(n.parent), visit(right)]
+        comparison(:bincmp, name, n.parent.data_type, args, :union)
+      end
+
+      def comparison (kind, name, compared, args, mask)
+        body = CArray.__kernel_body__(kind, name, compared) or
+          raise Refused, "#{kind} #{name} has no body at #{compared}"
+        # A body written against its compared type or a tolerance (`feq`)
+        # needs more than its operands substituted.
+        if body.match?(/<\w+>|\btol\b/)
+          raise Refused, "#{kind} #{name} needs more than its operands"
+        end
+        note(kind.to_s[0..3], name, compared)
+        push Op.new(kind, name, :boolean, args, body, mask, false)
+      end
+
       def op (kind, name, type, args, mask)
         body = CArray.__kernel_body__(kind, name, type) or
           raise Refused, "#{kind} #{name} has no body at #{type}"
@@ -189,8 +246,32 @@ class CArray
 
       def leaf (n)
         note("a", n.data_type, n.has_mask? ? 1 : 0)
-        @leaves << n
-        push Leaf.new(@leaves.size - 1, n.data_type, n.has_mask?)
+        push Leaf.new(leaf_index(n), n.data_type, n.has_mask?)
+      end
+
+      # A shift of an array is that array read elsewhere, so it is the
+      # array that becomes a leaf.  A shift of anything else -- an
+      # expression, say -- has no array to read and is taken as a whole.
+      def shifted (n)
+        array = n.parent
+        bounds = n.__axis_bounds__
+        if Fusion.lazy?(array) || array.dim != n.dim ||
+           ! bounds.all? { |b| b == :fill || b == :mask }
+          return leaf(n)
+        end
+        offset = n.start
+        fill = bounds.include?(:fill) ? n.fill_value : nil
+        note("s", array.data_type, array.has_mask? ? 1 : 0,
+             offset.join(","), bounds.join(","), fill)
+        push Shifted.new(leaf_index(array), array.data_type, array.has_mask?,
+                         offset, bounds, fill)
+      end
+
+      def leaf_index (array)
+        @leaf_index.fetch(array.object_id) do
+          @leaves << array
+          @leaf_index[array.object_id] = @leaves.size - 1
+        end
       end
 
       def constant (n)
