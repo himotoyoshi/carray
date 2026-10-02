@@ -550,11 +550,9 @@ ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
   CScalar *anchor_ca;
   (void) source;
   TypedData_Get_Struct(cs_anchor, CScalar, &cscalar_data_type, anchor_ca);
-  ca_attach(anchor_ca);   /* window: a scalar entity, whose attach holds nothing */
   for ( i = 0; i < slab_elements; i++ ) {
     memcpy(out_ptr + i * out_bytes, anchor_ca->ptr, out_bytes);
   }
-  ca_detach(anchor_ca);
   RB_GC_GUARD(cs_anchor);
 }
 
@@ -616,8 +614,6 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
   st->output = rb_carray_new(st->out_data_type, src->ndim, src->dim,
                              st->out_bytes, NULL);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
-  /* entity ptr usable as both read + write target */
-  ca_allocate(out);   /* window: a new entity, whose allocate holds nothing */
 
   /* Step 2: T1 init on both sides.  FIBER_CONTIG is naxes==1 only;
      multi-axis omits it.  Output side gets CA_KERNEL_WRITE.            */
@@ -842,7 +838,6 @@ ca_slab_reduce_setup (ca_slab_iter_state_t *st, CArray **out_src,
   st->output = rb_carray_new(st->out_data_type, out_ndim, out_dim,
                              st->out_bytes, NULL);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
-  ca_allocate(out);   /* window: a new entity, whose allocate holds nothing */
 
   /* FIBER_CONTIG is naxes==1 only (T1 substrate contract).  Multi-axis
      omits the flag and uses bare CA_SLAB_AXES; T1 picks an in-src
