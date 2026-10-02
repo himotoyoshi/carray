@@ -161,10 +161,11 @@ class TestMemoryView < Test::Unit::TestCase
     refute(CArray.memory_view_available?(sel))
     copy = CArray.from_memory_view(sel) rescue nil
     # from_memory_view requires the source to BE a MV producer, which
-    # CASelect isn't anymore -- so this path also rejects.  The
-    # honest answer is: use sel.to_ca for a snapshot.
-    snap = sel.to_ca
-    assert_equal(sel.to_a, snap.to_a)
+    # CASelect isn't -- so this path also rejects.  A snapshot is a copy.
+    assert_nil(copy)
+    snap = sel.copy
+    assert_true(CArray.memory_view_available?(snap))
+    assert_equal(sel.to_a, CArray.wrap_memory_view(snap).to_a)
   end
 
   # ----- still rejected -----

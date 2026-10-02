@@ -22,13 +22,15 @@
     storage_to_element /    per-obj_type dispatch for element decode (read)
       element_to_storage    and encode (write) between surface and storage
     state-compatible /     homogeneity + portability registries used by
-      state-portable       promote_list / CAStack / MV producer
+      state-portable       promote_list / CAStack
+    memory_view            which Faces the MemoryView producer exports
 
 ---------------------------------------------------------------------------- */
 
 #include "ruby.h"
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"
 
 /* ---- shared op helpers (thin-forward) ---- */
 
@@ -522,6 +524,31 @@ rb_ca_face_state_compatible_p (VALUE self, VALUE other)
              "face_state_compatible?: must be the same Face class");
   }
   return ca_face_state_compatible(self, a, other, b) ? Qtrue : Qfalse;
+}
+
+/* -- Face MemoryView export -- */
+
+/* A Face is exported through MemoryView only when its storage bytes carry
+   its values without the Face (a struct record, fixed-width bytes).  Zero
+   (the default) refuses the export: the consumer would see the storage
+   with nothing to say what it means. */
+static int8_t ca_face_memory_view_table[CA_OBJ_TYPE_MAX];
+
+void
+ca_face_register_memory_view (int obj_type, int exportable)
+{
+  if ( obj_type < 0 || obj_type >= CA_OBJ_TYPE_MAX ) {
+    rb_raise(rb_eArgError,
+             "ca_face_register_memory_view: obj_type %d out of range",
+             obj_type);
+  }
+  ca_face_memory_view_table[obj_type] = exportable ? 1 : 0;
+}
+
+int
+ca_face_memory_view_exportable (CArray *ca)
+{
+  return ca_face_memory_view_table[ca->obj_type] == 1;
 }
 
 /* -- Face state portability -- */

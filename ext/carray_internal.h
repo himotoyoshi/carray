@@ -233,6 +233,15 @@ const char *ca_calling_method_name (void);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 long        ca_axis_integer (VALUE raxis, const char *name);
 VALUE       ca_fill_as (VALUE fill, int8_t data_type);
+/* ---- Face MemoryView export (ca_obj_face.c) -------------------------------
+
+   A Face registers 1 when its storage bytes carry its values without the
+   Face (CARecord, CAFixlenString); the MemoryView producer refuses every
+   other Face.  Unregistered Faces are refused. */
+
+void    ca_face_register_memory_view (int obj_type, int exportable);
+int     ca_face_memory_view_exportable (CArray *ca);
+
 VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);

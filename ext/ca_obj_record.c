@@ -20,6 +20,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"
 
 typedef struct {
   /* === CAView prefix === */
@@ -454,6 +455,10 @@ Init_ca_obj_record (void)
      instance. */
   ca_face_register_state_compatible(CA_OBJ_RECORD,
                                     ca_record_state_compatible);
+
+  /* The record's bytes are its members: a MemoryView consumer reads them
+     through the T{...} struct format built from the data_class. */
+  ca_face_register_memory_view(CA_OBJ_RECORD, 1);
 
   rb_define_alloc_func(rb_cCARecord, rb_ca_record_s_allocate);
   rb_define_method(rb_cCARecord, "initialize_copy",

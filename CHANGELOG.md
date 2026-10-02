@@ -36,6 +36,23 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for C extensions, a view onto an entity installed with
+  `ca_install_obj_type` (a `CASource` subclass, say) is no longer exported
+  through MemoryView, as the entity itself already was not: its bytes need
+  not be in memory. Export a `copy`.
+- Fix: `memory_view_reject_reason` tells you to export `arr.copy`. It
+  suggested `CArray.from_memory_view(arr)` and `arr.to_ca`, and neither
+  gives a snapshot: the first refuses the same arrays, the second returns
+  the view itself.
+- Fix: a `CATime`, `CATimedelta`, `CACategorical` or `CAConstString` is
+  refused by `memory_view_available?`, with a reason. It answered `true`
+  and then could not be exported. Export its storage instead (`.ticks`,
+  `.codes`); a copy is still the Face and is refused too.
+- Fix: a `CARecord` is exported through MemoryView as its `T{...}` struct
+  (it raised a `RuntimeError`), and a `CAFixlenString` as `Ns` bytes (it
+  could not be exported). `wrap_memory_view` and `from_memory_view` do not
+  read `T{...}` yet.
+
 - Fix: `group_by_category(cat).sum(axis:)`, `mean`, `min`, `max`, `minmax`
   and `count` are several times faster when `cat` has the source's shape
   without the reduce axis (one category per fiber, such as a class per
