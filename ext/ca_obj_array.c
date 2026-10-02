@@ -927,9 +927,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
     else if ( ca->ndim > 0 ) {
       ca_size_t idx[CA_RANK_MAX];
       volatile VALUE ridx = rb_ary_new2(ca->ndim);
-      ca_attach(ca);   /* window: a new entity, whose attach holds nothing */
       rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
-      ca_sync_detach(ca);
     }
     else {
       /* 0-D safety net (rare from CArray.new path): yield no args. */
