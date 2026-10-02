@@ -166,4 +166,32 @@ class TestLazyEagerParity < Test::Unit::TestCase
     end
   end
 
+  # ---- cells that would raise are skipped where masked ----
+
+  def test_integer_ops_skip_a_masked_zero
+    a = CA_INT32([2, 0, 3])
+    a[1] = UNDEF
+    e = CA_INT32([1, -1, 2])
+    assert_parity(a ** e,          a.lazy ** e.lazy)
+    assert_parity(a ** -3,         a.lazy ** -3)
+    assert_parity(a.rcp_mul(e),    a.lazy.rcp_mul(e.lazy))
+    assert_parity(a.rcp,           a.lazy.rcp)
+    assert_parity(CA_INT8([2, 0, 3]).tap { |x| x[1] = UNDEF } ** CA_INT8([1, -1, 2]),
+                  CA_INT8([2, 0, 3]).tap { |x| x[1] = UNDEF }.lazy ** CA_INT8([1, -1, 2]).lazy)
+  end
+
+  def test_object_ops_skip_masked_cells
+    o = CA_OBJECT([1, 0, 2])
+    o[1] = UNDEF
+    four = CA_OBJECT([4, 4, 4])
+    assert_parity(four / o,  four.lazy / o.lazy)
+    assert_parity(four % o,  four.lazy % o.lazy)
+    assert_parity(o.rcp,     o.lazy.rcp)
+    s = CA_OBJECT(["a", nil, "c"])
+    s[1] = UNDEF
+    assert_parity(s + "x",   s.lazy + "x")
+    assert_parity(s > "b",   s.lazy > "b")
+    assert_parity(s.pmax("b"), s.lazy.pmax("b"))
+  end
+
 end

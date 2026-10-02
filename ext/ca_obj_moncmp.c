@@ -268,10 +268,12 @@ ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
    *   fn(n, m, ptr1, i1, ptr2, i2)
    *   where ptr2 is boolean8_t*
    *
-   * Non-trapping: m=NULL (= SIMD fast path).  Per-data_type kernel handles
-   * integer is_nan etc. internally.
+   * m=NULL (= SIMD fast path) except for an object parent, whose cells
+   * call Ruby: those skip the masked cells, as the eager method does.
+   * Per-data_type kernel handles integer is_nan etc. internally.
    */
   {
+    boolean8_t *slab_mask = NULL;
     ca_moncmp_func_t fn = ca_moncmp_kernel_lookup(mc->op_id,
                                                    mc->parent->data_type);
     if ( fn == NULL ) {
@@ -280,9 +282,13 @@ ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
                "CAMonCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) mc->op_id, (int) mc->parent->data_type);
     }
-    fn(slab_n, NULL,
+    if ( mc->parent->data_type == CA_OBJECT ) {
+      slab_mask = ca_lazy_req_mask(req, 1, &mc->parent);
+    }
+    fn(slab_n, slab_mask,
        (char *) scratch,    1,
        (boolean8_t *) data, 1);
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
   if ( ! scratch_is_inplace ) ca_lazy_arena_release(scratch);

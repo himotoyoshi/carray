@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a lazy expression skips its masked cells where computing them could
+  raise, as the eager operators do. Previously it computed them, so
+  `int.lazy ** e` with a masked `0 ** -1`, integer `rcp` and `rcp_mul`
+  over a masked zero, and any object expression over a masked `nil` or
+  zero raised where the eager expression gave an answer.
+
+- Fix: the mask of a lazy expression is read-only, as the expression is.
+  Previously, where only one operand was masked, the expression's mask
+  was that operand's, and `expr.mask[i] = 1` masked the cell in the
+  operand.
+
 - Fix: storing into an array a value that reads from that same array
   keeps the value's masked cells masked: `c[] = c.flip(0)`,
   `c[0..2] = c[1..3]`, `c[] = c.lazy + 1` and `c[] = (c.lazy > 1)`.

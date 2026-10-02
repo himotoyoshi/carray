@@ -384,10 +384,12 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
    * sizeof(T) and ignore them; the fixlen kernels step and compare by
    * them.
    *
-   * Non-trapping: m=NULL (= SIMD fast path).  Mask propagation handled
-   * by create_mask at view construction time.
+   * m=NULL (= SIMD fast path) except for object operands, whose cells
+   * call Ruby: those skip the masked cells, as the eager comparison
+   * does.  The output mask comes from create_mask.
    */
   {
+    boolean8_t *slab_mask = NULL;
     ca_bincmp_func_t fn = ca_bincmp_kernel_lookup(bc->op_id, bc->common_dt);
     if ( fn == NULL ) {
       if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);
@@ -396,11 +398,15 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
                "CABinCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) bc->op_id, (int) bc->common_dt);
     }
-    fn(slab_n, NULL,
+    if ( bc->common_dt == CA_OBJECT ) {
+      slab_mask = ca_lazy_req_mask(req, 2, bc->operands);
+    }
+    fn(slab_n, slab_mask,
        (char *) left_scratch,  left_bytes,  1,
        (char *) right_scratch, right_bytes, right_step,
        (char *) data,          1,           1,
        bc->eps);   /* Runtime tolerance for IS_CLOSE / IS_EQUIV. */
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
   if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);

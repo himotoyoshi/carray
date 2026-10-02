@@ -303,8 +303,9 @@ ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
    * Mask handling:
    *   - non-trapping op → m = NULL (SIMD fast path; garbage compute
    *     on masked cells is allowed).
-   *   - trapping op with any operand mask → build a per-slab OR
-   *     mask from the operand-side masks.
+   *   - trapping op (one that can raise on a cell, or an object cell)
+   *     with any operand mask → the cells either operand masks
+   *     (ca_lazy_req_mask), which the kernel skips.
    *
    * CAREFUL: the trapping-op mask is built from left.mask and
    * right.mask directly, NOT from out->mask.  The output's mask
@@ -319,55 +320,13 @@ ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
   {
     boolean8_t *slab_mask = NULL;
     void *mscratch = NULL;
-    volatile VALUE mholder = Qnil;
-    int is_trapping = ca_binop_is_trapping(bo->op_id, bo->data_type);
 
-    if ( is_trapping && ( ca_has_mask(bo->parent) ||
-                          ca_has_mask(bo->right) ) ) {
-      /* Build a slab-shaped mask = left.slab_mask | right.slab_mask.
-         Pull each operand's mask (or fill with 0 if absent) into the
-         output-shaped layout, then OR them in place.                */
-      ca_size_t k_;
-      (void) mholder;  /* Kept for stack-shape compatibility; arena
-                          replaces the ALLOCV path here. */
-
-      mscratch = ca_lazy_arena_acquire(slab_n);
-      slab_mask = (boolean8_t *) mscratch;
-
-      if ( ca_has_mask(bo->parent) ) {
-        ca_lazy_req_pull(bo->parent->mask, req, slab_mask, CA_XFER_GET);
-      }
-      else {
-        memset(slab_mask, 0, slab_n);
-      }
-
-      if ( ca_has_mask(bo->right) ) {
-        boolean8_t *rm = NULL;
-        ca_size_t i_;
-        if ( bo->right_is_scalar ) {
-          /* CScalar right: pull the single mask bit and broadcast OR. */
-          ca_size_t one_starts[CA_RANK_MAX] = {0};
-          ca_size_t one_counts[CA_RANK_MAX];
-          ca_size_t one_strides[CA_RANK_MAX];
-          boolean8_t one_bit = 0;
-          for ( k_ = 0; k_ < bo->right->ndim; k_++ ) {
-            one_counts[k_]  = 1;
-            one_strides[k_] = 1;
-          }
-          ca_xfer_stride(bo->right->mask, one_starts, one_counts,
-                         one_strides, &one_bit, CA_XFER_GET);
-          if ( one_bit ) {
-            for ( i_ = 0; i_ < slab_n; i_++ ) slab_mask[i_] = 1;
-          }
-        }
-        else {
-          volatile VALUE rm_holder;
-          rm = ALLOCV_N(boolean8_t, rm_holder, slab_n);
-          ca_lazy_req_pull(bo->right->mask, req, rm, CA_XFER_GET);
-          for ( i_ = 0; i_ < slab_n; i_++ ) slab_mask[i_] |= rm[i_];
-          ALLOCV_END(rm_holder);
-        }
-      }
+    if ( ca_binop_is_trapping(bo->op_id, bo->data_type) ) {
+      CArray *ops[2];
+      ops[0] = bo->parent;
+      ops[1] = bo->right;
+      slab_mask = ca_lazy_req_mask(req, 2, ops);
+      mscratch  = slab_mask;
     }
 
     ca_binop_func_t fn = ca_binop_kernel_lookup_vv(bo->op_id, bo->data_type);
