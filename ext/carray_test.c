@@ -576,8 +576,11 @@ rb_ca_eql (VALUE self, VALUE other)
 
 /* ca_hash(ca) — cheap Hash key for CArray.  Mixes metadata (data_type,
  * ndim, bytes, elements, scalar-ness, shape, mask presence) and, for
- * unmasked arrays only, samples the leading CA_HASH_SAMPLE_BYTES of
- * data.  Masked arrays skip the data sample entirely — otherwise
+ * unmasked arrays only, samples the leading cells (CA_HASH_SAMPLE_BYTES
+ * of data, at least one cell), read by address so a view is not
+ * materialised for them.  An object array samples the #hash of those
+ * cells, matching eql?, which compares them with #eql?.  Masked arrays
+ * skip the data sample entirely — otherwise
  * masked positions would have to be zeroed in the sample to preserve
  * the eql?→hash invariant, and masked CArrays are rare as Hash keys.
  * The collision rate cost buys no ca->mask->ptr access and no
@@ -609,9 +612,36 @@ ca_hash (CArray *ca)
   h ^= rb_memhash(&masked_flag, sizeof(masked_flag));
 
   if ( ! masked_flag && sample > 0 ) {
-    ca_attach(ca);   /* window: nothing raises inside */
-    h ^= rb_memhash(ca->ptr, sample);
-    ca_detach(ca);
+    ca_size_t addrs[CA_HASH_SAMPLE_BYTES];
+    ca_size_t ncell = sample / ca->bytes;
+    ca_size_t i;
+    if ( ncell < 1 ) {
+      ncell = 1;
+    }
+    if ( ncell > ca->elements ) {
+      ncell = ca->elements;
+    }
+    for (i = 0; i < ncell; i++) {
+      addrs[i] = i;
+    }
+    if ( ca_is_object_type(ca) ) {
+      /* eql? compares object cells with #eql?, so the sample is their
+         #hash, not the VALUE bits.  The cells sit on the stack, where the
+         GC sees them while #hash runs. */
+      VALUE cells[CA_HASH_SAMPLE_BYTES / sizeof(VALUE)];
+      ca_xfer_addrs(ca, ncell, addrs, cells, CA_XFER_GET);
+      for (i = 0; i < ncell; i++) {
+        h = rb_hash_uint(h, (st_index_t) NUM2LONG(rb_hash(cells[i])));
+      }
+      RB_GC_GUARD(cells[0]);
+    }
+    else {
+      volatile VALUE holder;
+      char *buf = ALLOCV_N(char, holder, ncell * ca->bytes);
+      ca_xfer_addrs(ca, ncell, addrs, buf, CA_XFER_GET);
+      h ^= rb_memhash(buf, ncell * ca->bytes);
+      ALLOCV_END(holder);
+    }
   }
 
   return h;

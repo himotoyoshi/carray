@@ -47,6 +47,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `[BUG] tried to sync data to detached array` and left the array
   attached.
 
+- Fix: `hash` of an object array agrees with `eql?`, so arrays with equal
+  elements find each other as Hash keys. Previously two such arrays had
+  different hashes unless they held the very same objects.
+
 - Fix: a stepped or reversed slice of a lazy expression
   (`a.lazy.sinh[(0...n).step(2)]`, `x[-1..0]`) returns the cells it
   names. Previously an expression that converts its input -- an integer
