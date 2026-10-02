@@ -10,7 +10,8 @@
 
   Dispatch by data_type:
     numeric (i8..f64, +complex) -> ca_bincmp_<op>_<type> kernel
-    boolean / fixlen / object   -> not implemented (raise)
+    fixlen                      -> ca_bincmp_<op>_fixlen (memcmp)
+    object                      -> ca_bincmp_<op>_VALUE
 
   CAREFUL: the binop in-place trick (= pull left into the output
   buffer) is structurally unavailable here — the output is
@@ -284,7 +285,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
   ca_size_t slab_n = req->n;
   int8_t    k;
   void     *left_scratch, *right_scratch;
-  ca_size_t operand_bytes;
+  ca_size_t left_bytes, right_bytes;
   ca_size_t right_step;
   int       is_contig;
   int       left_is_inplace  = 0;   /* skip release for leaf-opt path */
@@ -292,7 +293,10 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
 
   ca_bincmp_materialise_call_count++;
 
-  operand_bytes = ca_sizeof[bc->common_dt];
+  /* An operand's own bytes, not ca_sizeof[common_dt]: a fixlen cell has no
+     width in ca_sizeof, and the two fixlen operands may differ in width. */
+  left_bytes  = bc->parent->bytes;
+  right_bytes = bc->right->bytes;
 
   /* The leaf in-place path reads an operand's own buffer, which holds the
      wanted cells in the order the kernel reads them only for the row-major
@@ -304,7 +308,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     char *left_inplace = NULL;
     if ( is_contig &&
          ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
-                                     req->starts, req->counts, operand_bytes,
+                                     req->starts, req->counts, left_bytes,
                                      &left_inplace) ) {
       /* Leaf-opt path: use parent->ptr + byte_offset directly. */
       left_scratch = left_inplace;
@@ -314,7 +318,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     else {
       left_scratch = ( bc->common_dt == CA_OBJECT )
                        ? ca_lazy_arena_acquire_object(slab_n)
-                       : ca_lazy_arena_acquire(slab_n * operand_bytes);
+                       : ca_lazy_arena_acquire(slab_n * left_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_lazy_req_pull(bc->parent, req, left_scratch, CA_XFER_GET);
     }
@@ -333,7 +337,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     for ( k = 0; k < bc->right->ndim; k++ ) one_counts[k] = 1;
 
     if ( ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
-                                     one_starts, one_counts, operand_bytes,
+                                     one_starts, one_counts, right_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
       right_is_inplace = 1;
@@ -341,10 +345,10 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     }
     else {
       ca_size_t one_strides[CA_RANK_MAX];
-      for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = operand_bytes;
+      for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = right_bytes;
       right_scratch = ( bc->common_dt == CA_OBJECT )
                         ? ca_lazy_arena_acquire_object(1)
-                        : ca_lazy_arena_acquire(operand_bytes);
+                        : ca_lazy_arena_acquire(right_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->right, one_starts, one_counts, one_strides,
                      right_scratch, CA_XFER_GET);
@@ -356,7 +360,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     char *right_inplace = NULL;
     if ( is_contig &&
          ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
-                                     req->starts, req->counts, operand_bytes,
+                                     req->starts, req->counts, right_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
       right_is_inplace = 1;
@@ -365,7 +369,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     else {
       right_scratch = ( bc->common_dt == CA_OBJECT )
                         ? ca_lazy_arena_acquire_object(slab_n)
-                        : ca_lazy_arena_acquire(slab_n * operand_bytes);
+                        : ca_lazy_arena_acquire(slab_n * right_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_lazy_req_pull(bc->right, req, right_scratch, CA_XFER_GET);
     }
@@ -377,9 +381,9 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
    * Kernel signature (ext/carray.h):
    *   fn(n, m, ptr1, b1, i1, ptr2, b2, i2, ptr3, b3, i3)
    *
-   * Per inspection of generated ca_bincmp_<op>_<data_type>, the `b*` args
-   * are declared but unused (kernel computes ptr + k*i*sizeof(T)).  We
-   * pass 0 for the base arguments.
+   * The `b*` args are the cell widths.  The typed kernels step by
+   * sizeof(T) and ignore them; the fixlen kernels step and compare by
+   * them.
    *
    * Non-trapping: m=NULL (= SIMD fast path).  Mask propagation handled
    * by create_mask at view construction time.
@@ -394,9 +398,9 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
                (unsigned) bc->op_id, (int) bc->common_dt);
     }
     fn(slab_n, NULL,
-       (char *) left_scratch,  0, 1,
-       (char *) right_scratch, 0, right_step,
-       (char *) data,          0, 1,
+       (char *) left_scratch,  left_bytes,  1,
+       (char *) right_scratch, right_bytes, right_step,
+       (char *) data,          1,           1,
        bc->eps);   /* Runtime tolerance for IS_CLOSE / IS_EQUIV. */
   }
 
