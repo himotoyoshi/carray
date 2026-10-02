@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `dup` and `clone` of a `CAWrap`, including a subclass made with
+  `wrap_memory_view`, return a plain `CArray`, as `copy` does.  They
+  returned an array that owned its memory but kept the wrap's class, so a
+  subclass named for what it borrows named an array that borrowed nothing.
+
 - Change: a `CAString` can be put through `CArray.stack`, `concatenate`
   and `meld`, and comes back a `CAString`; they raised.  A
   `CAConstString` is still refused, since each array's cells point into
