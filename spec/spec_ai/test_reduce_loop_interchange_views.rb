@@ -86,4 +86,24 @@ class TestReduceLoopInterchangeViews < Test::Unit::TestCase
     tr  = big.transpose(2, 0, 1)
     assert_reduce_parity(tr, 1, "transpose")
   end
+  # ---- parents whose mask is not built yet ----
+
+  # A lazy parent reports its mask before it has built one, so the fast
+  # path asks whether a mask exists rather than looking for the array.
+  def test_castack_of_lazy_parents_honours_their_masks
+    a = CArray.float64(6, 200, 100) { |i| (i % 7).to_f + 1 }
+    a[0, 3, 5]   = UNDEF
+    a[2, 10, 50] = UNDEF
+    [0, 1].each do |k_axis|
+      eager = CArray.stack([a + 0.0, a * 1.0], axis: k_axis)
+      %i[sum min max].each do |op|
+        (1..3).each do |axis|
+          lazy = CArray.stack([a.lazy + 0.0, a.lazy * 1.0], axis: k_axis)
+          assert_equal eager.send(op, axis: axis).to_a,
+                       lazy.send(op, axis: axis).to_a,
+                       "k_axis #{k_axis} #{op}(axis: #{axis})"
+        end
+      end
+    end
+  end
 end
