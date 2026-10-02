@@ -308,12 +308,14 @@ class CACategoricalIterator < CASegmentIterator
   end
 
   # Axis-aware count of present cells. Counting how many cells fall in a
-  # group does not look at what is in them, so it is taken from the codes and
-  # the value's mask rather than from the fused moments kernel, which is
-  # numeric-only and refused a complex, boolean or object payload for an
-  # answer that never depended on the payload.
+  # group does not look at what is in them. An integer or float payload goes
+  # through the fused moments kernel, which counts in the same pass that
+  # sums. Any other payload -- complex, boolean, object, a Face -- the kernel
+  # refuses, for an answer that never depended on the payload, so it is
+  # counted from the codes and the value's mask, one group at a time.
   def axis_counts (axis, op)
     h = @value
+    return axis_moments(axis, op)[:count] if h.integer? || h.float?
     axis = checked_axis(axis, op)
     full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
     band    = h.shape.dup; band.delete_at(axis)
@@ -326,7 +328,8 @@ class CACategoricalIterator < CASegmentIterator
       belongs = belongs.strip_mask(false) if belongs.has_mask?
       belongs = belongs & present if present
       slot[0] = c
-      out[*slot] = belongs.int64.sum(axis: axis)
+      # a boolean sums to a count without widening the whole array first
+      out[*slot] = belongs.sum(axis: axis)
     end
     out
   end
