@@ -282,9 +282,11 @@ ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
   /* Step 3: pull op3 into another arena scratch. */
   scratch3 = pull_operand(to->op3, to->op3_is_scalar, req, &op3_step);
 
-  /* Step 4: apply the kernel.  ptr1 == ptr4 (in-place op1); no
-     currently-defined triop traps, so m=NULL. */
+  /* Step 4: apply the kernel.  ptr1 == ptr4 (in-place op1).  No numeric
+     triop traps, so m=NULL; object cells call Ruby, and skip the masked
+     cells as the eager triop does. */
   {
+    boolean8_t *slab_mask = NULL;
     ca_triop_func_t fn = ca_triop_kernel_lookup_vvv(to->op_id, to->data_type);
     if ( fn == NULL ) {
       ca_lazy_arena_release(scratch3);
@@ -293,11 +295,19 @@ ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
                "CATriOp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) to->op_id, (int) to->data_type);
     }
-    fn(slab_n, NULL,
+    if ( to->data_type == CA_OBJECT ) {
+      CArray *ops[3];
+      ops[0] = to->parent;
+      ops[1] = to->op2;
+      ops[2] = to->op3;
+      slab_mask = ca_lazy_req_mask(req, 3, ops);
+    }
+    fn(slab_n, slab_mask,
        (char *)data,     1,              /* src1 == dst (op1, in-place) */
        (char *)scratch2, op2_step,       /* src2 (op2) */
        (char *)scratch3, op3_step,       /* src3 (op3) */
        (char *)data,     1);             /* dst */
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
   ca_lazy_arena_release(scratch3);

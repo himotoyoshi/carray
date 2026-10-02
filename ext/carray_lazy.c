@@ -852,6 +852,53 @@ ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view)
   return 1;
 }
 
+/* The cells of a request that any of `ops` masks, as a packed boolean
+   slab in arena scratch, or NULL when none of them is masked.  An operand
+   of one cell masks every cell or none.  Kernels that can raise on a cell,
+   or that call Ruby for it, take this to skip the masked cells, as the
+   eager operators do.  Release with ca_lazy_arena_release. */
+boolean8_t *
+ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops)
+{
+  boolean8_t *m = NULL;
+  ca_size_t   j;
+  int         i;
+  int8_t      k;
+
+  for ( i = 0; i < n; i++ ) {
+    CArray *op = ops[i];
+    if ( ! op || ! ca_has_mask(op) ) {
+      continue;
+    }
+    if ( ! m ) {
+      m = (boolean8_t *) ca_lazy_arena_acquire(req->n);
+      memset(m, 0, req->n);
+    }
+    if ( op->elements == 1 ) {
+      ca_size_t  starts[CA_RANK_MAX], counts[CA_RANK_MAX];
+      ca_size_t  strides[CA_RANK_MAX];
+      boolean8_t bit = 0;
+      for ( k = 0; k < op->ndim; k++ ) {
+        starts[k] = 0; counts[k] = 1; strides[k] = 1;
+      }
+      ca_xfer_stride(op->mask, starts, counts, strides, &bit, CA_XFER_GET);
+      if ( bit ) {
+        memset(m, 1, req->n);
+      }
+    }
+    else {
+      volatile VALUE holder;
+      boolean8_t *om = ALLOCV_N(boolean8_t, holder, req->n);
+      ca_lazy_req_pull(op->mask, req, om, CA_XFER_GET);
+      for ( j = 0; j < req->n; j++ ) {
+        m[j] |= om[j];
+      }
+      ALLOCV_END(holder);
+    }
+  }
+  return m;
+}
+
 void
 ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
 {

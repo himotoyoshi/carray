@@ -336,27 +336,30 @@ ca_size_t ca_monop_materialise_call_count = 0;
 #define CA_MAX_LAZY_DEPTH 256
 #endif
 
+/* Whether an op can raise on a cell, so that a masked cell must be
+   skipped rather than computed: any op on an object cell (it calls Ruby),
+   and an integer reciprocal (zero raises). */
+static int
+ca_monop_is_trapping (uint16_t op_id, int8_t dt)
+{
+  if ( dt == CA_OBJECT ) {
+    return 1;
+  }
+  return ( op_id == CA_MONOP_RCP && dt >= CA_INT8 && dt <= CA_UINT64 );
+}
+
 /* Apply a single op in-place on `data` (src == dst, unit element stride).
    Raises if the kernel is not implemented for the given input data_type.
 
-   Unmask fast path:
-   We always pass `mask == NULL` to the kernel, which selects the SIMD-
-   friendly "no mask" branch in the existing eager kernels (see e.g.
-   ca_monop_sqrt_float64_t in carray_math.c — `if (m) { ... } else
-   { ...SIMD loop... }`).  Mask cells contain garbage after evaluation,
-   but they are unobservable: the output mask is built separately via
-   the attach lifecycle (ca_monop_func_create_mask + parent.mask
-   CARefer), so reads of masked cells return UNDEF regardless of byte
-   contents.  The mask marks cells as undefined; it does not guard their
-   bytes, so writing garbage into a masked cell is licensed.
-
-   A "partial mask slow path" (= a cell-wise branch to skip masked-cell
-   compute) is a possible future micro-optimisation; it is not done
-   because masked-cell compute does not affect correctness and the SIMD
-   path is faster overall for typical mask densities.  */
+   `mask` is NULL except for an op that can raise on a cell: the kernel
+   then takes the SIMD-friendly "no mask" branch and computes the masked
+   cells too.  Their bytes are unobservable -- the output mask is the
+   parent's (ca_monop_func_create_mask) -- and the mask marks cells as
+   undefined rather than guarding their bytes, so writing anything into a
+   masked cell is licensed.  */
 static void
 apply_monop_in_place (uint16_t op_id, int8_t cur_dt,
-                      ca_size_t slab_n, void *data)
+                      ca_size_t slab_n, void *data, boolean8_t *mask)
 {
   ca_monop_func_t fn = ca_monop_kernel_lookup(op_id, cur_dt);
   if ( fn == NULL ) {
@@ -364,7 +367,7 @@ apply_monop_in_place (uint16_t op_id, int8_t cur_dt,
              "CAMonOp: kernel not implemented (op_id=%u data_type=%d)",
              (unsigned) op_id, (int) cur_dt);
   }
-  fn(slab_n, NULL, (char *) data, 1, (char *) data, 1);
+  fn(slab_n, mask, (char *) data, 1, (char *) data, 1);
 }
 
 /* Minimal CArray-shaped stub used as ca_cast_block's data_type-only carrier.
@@ -453,6 +456,8 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   int       i;
   int       has_cast_at_leaf = 0;
   int       chain_apply_count;
+  boolean8_t *slab_mask = NULL;
+  int       mask_taken = 0;
 
   /* Writable-view op_ids (cast / byte_swap) use CAFake-style xfer_stride
      for both GET and PUT.  This avoids the chain-materialise inline path
@@ -567,9 +572,17 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
       ca_lazy_arena_release(scratch);
       cur_dt = target_dt;
     } else {
-      apply_monop_in_place(op_id, cur_dt, slab_n, data);
+      if ( ! mask_taken && ca_monop_is_trapping(op_id, cur_dt) ) {
+        slab_mask  = ca_lazy_req_mask(req, 1, &leaf);
+        mask_taken = 1;
+      }
+      apply_monop_in_place(op_id, cur_dt, slab_n, data,
+                           ca_monop_is_trapping(op_id, cur_dt) ? slab_mask : NULL);
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
     }
+  }
+  if ( slab_mask ) {
+    ca_lazy_arena_release(slab_mask);
   }
 }
 
