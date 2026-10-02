@@ -473,6 +473,7 @@ static void
 ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAGrid   *g = (CAGrid *) ap;
   CArray   *parent = g->parent;
   int8_t    ndim = g->ndim;

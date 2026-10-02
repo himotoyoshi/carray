@@ -355,6 +355,7 @@ static void
 ca_select_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CASelect  *ca = (CASelect *) ap;
   CArray    *parent = ca->parent;
   ca_size_t  n = counts[0];

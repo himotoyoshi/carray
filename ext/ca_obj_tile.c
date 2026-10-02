@@ -16,6 +16,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE */
 
@@ -200,6 +201,7 @@ static void
 ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CATile   *ca = (CATile *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;

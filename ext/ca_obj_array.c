@@ -9,6 +9,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 
 /* -------------------------------------------------------------------- */
 
@@ -592,6 +593,8 @@ ca_fill_stride_buffer (char *dst, ca_size_t bytes, ca_size_t base, int8_t ndim,
   ca_size_t idx[CA_RANK_MAX];
   ca_size_t inner_count, inner_step;
   int8_t    outer_ndim, k;
+
+  if ( ca_region_is_empty(ndim, counts) ) return;
 
   if ( ndim <= 0 ) {
     memcpy(dst + base * bytes, ptr, bytes);

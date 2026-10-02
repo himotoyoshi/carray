@@ -577,6 +577,7 @@ static void
 ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_monop_eval((CAMonOp *) ap, &req, data, dir);

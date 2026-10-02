@@ -1345,6 +1345,8 @@ ca_xfer_strided_walk (char            *src_base,
   ca_size_t doff = 0;
   int8_t    k;
 
+  if ( ca_region_is_empty(ndim, counts) ) return;
+
   /* slab merge -- scan innermost contig run (src_strides[k] equals the
      accumulated slab byte size).  This collapses per-cell memcpy(_,_,
      bytes) loops into per-slab memcpy when the source region is row-major
@@ -1524,6 +1526,8 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     rb_raise(rb_eRuntimeError, "can not store data to read-only array");
   }
 
+  if ( ca_region_is_empty(ca->ndim, counts) ) return;
+
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_stride_dispatch(ca, starts, counts, strides, data, dir);
     return;
@@ -1584,6 +1588,10 @@ ca_xfer_all (void *ap, void *data, int dir)
     rb_raise(rb_eRuntimeError,
              "[BUG] xfer_all not defined for object type <%i>",
              ca->obj_type);
+  }
+  /* An empty view moves nothing; see ca_xfer_stride. */
+  if ( ca->elements == 0 ) {
+    return;
   }
   /* Universal arena lifetime hook.  ca_xfer_all is the single universal
      entry for materialise (to_ca -> ca_copy -> ca_copy_data ->
@@ -2323,15 +2331,12 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                 ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
   CArray *ca = (CArray *) ap;
-  int8_t  k;
 
   if ( ca_is_readonly(ca) ) {
     rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
   }
 
-  for ( k = 0; k < ndim; k++ ) {
-    if ( counts[k] <= 0 ) return;
-  }
+  if ( ca_region_is_empty(ndim, counts) ) return;
 
   if ( ca_func[ca->obj_type].fill_stride ) {
     ca_func[ca->obj_type].fill_stride(ap, base, ndim, counts, steps, ptr);

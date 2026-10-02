@@ -13,6 +13,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_iter_substrate.h"  /* ca_xfer_stride_transform_fused */
 #include "ca_monop_dispatch.h"  /* CA_MONOP_BYTE_SWAP dispatch id */
 #include "ca_obj_face.h"        /* CA_FACE_LIFT_IF_FACE for CARecord parent */
@@ -413,6 +414,7 @@ static void
 ca_byte_swap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                                ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAByteSwap *ca = (CAByteSwap *) ap;
   char      *d = (char *) data;
   int        is_struct = ( ca->data_type == CA_FIXLEN && RTEST(ca->data_class) );

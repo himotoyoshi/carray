@@ -398,6 +398,7 @@ static void
 ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAStack *ca = (CAStack *) ap;
   int8_t   k_axis = ca->k_axis;
   int8_t   pndim = ca->ndim - 1;

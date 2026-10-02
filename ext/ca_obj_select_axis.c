@@ -185,10 +185,12 @@ ca_select_axis_setup (CASelectAxis *ca, CArray *parent, int8_t indirect_axis,
     if ( ap_step[k] == 0 ) {
       rb_raise(rb_eArgError, "CASelectAxis: ap_step[%d] is 0", (int) k);
     }
-    if ( ap_count[k] <= 0 ) {
-      rb_raise(rb_eArgError, "CASelectAxis: ap_count[%d] must be positive", (int) k);
+    if ( ap_count[k] < 0 ) {
+      rb_raise(rb_eArgError, "CASelectAxis: ap_count[%d] is negative", (int) k);
     }
-    {
+    /* A zero count (an axis of length zero) selects no cells: the view is
+       empty and there is no first or last index to check. */
+    if ( ap_count[k] > 0 ) {
       ca_size_t start_v = ap_start[k];
       ca_size_t last_v  = ap_start[k] + (ap_count[k] - 1) * ap_step[k];
       if ( start_v < 0 || start_v >= parent->dim[k] ) {
@@ -547,6 +549,7 @@ static void
 ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                                  ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CASelectAxis *ca = (CASelectAxis *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;

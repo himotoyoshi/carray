@@ -309,6 +309,7 @@ static void
 ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
     rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");

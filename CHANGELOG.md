@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a view with no cells (an axis of length zero) can be copied, read,
+  summed and written. Some views corrupted memory, and over a `CAObject`
+  some raised `IndexError`.
+- Fix: a lazy operation or comparison between an empty array and a scalar
+  (`CArray.float64(0).lazy + 1`) works as the eager one does; it raised
+  `ArgumentError`.
+- Fix: selecting along one axis with a boolean array keeps another axis
+  of length zero (`CArray.float64(4, 0)[bool, nil]`); it raised
+  `ArgumentError`.
 - Change: for C extensions, a view onto an entity installed with
   `ca_install_obj_type` (a `CASource` subclass, say) is no longer exported
   through MemoryView, as the entity itself already was not: its bytes need

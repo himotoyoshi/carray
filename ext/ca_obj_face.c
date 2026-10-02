@@ -102,6 +102,7 @@ void
 ca_face_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAView *cav = (CAView *) ap;
   ca_xfer_stride(cav->parent, starts, counts, strides, data, dir);
 }

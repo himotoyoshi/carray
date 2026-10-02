@@ -394,6 +394,7 @@ static void
 ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
     rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
@@ -742,11 +743,11 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
            shape so the kernel sees matched shapes; cost is N
            reads of the scalar cell with stride 0. */
   if ( l->elements != r->elements ) {
-    if ( r->elements == 1 && l->elements > 1 ) {
+    if ( r->elements == 1 ) {
       /* CScalar-vs-array, right.  xfer_stride handles this with
          right_step = 0. */
     }
-    else if ( l->elements == 1 && r->elements > 1 ) {
+    else if ( l->elements == 1 ) {
       int commutes = ( op_id == CA_BINOP_ADD     ||
                        op_id == CA_BINOP_MUL     ||
                        op_id == CA_BINOP_BIT_AND ||
