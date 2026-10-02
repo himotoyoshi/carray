@@ -318,18 +318,23 @@ a.count_masked               #  => 1
 a.mask.to_a                  #  => [false, false, true, false, false]
 ```
 
-### Ordering — by bytes, not by field values
+### Ordering — by the members you name
 
-`CARecord` sorts and searches by the **raw record bytes** (`memcmp`), not by any per-field comparison. Because floating-point fields are not byte-order comparable, memcmp ordering of a record generally does *not* match the numeric ordering of any single field:
+A record's bytes are no order of its values, so a record array has an order only when its struct names one with `order_by:`. The members are compared in the order given, NaN after every number:
 
 ```ruby
-a = CARecord.new(GeoCoord, 3)
-a["lat"][] = [3.0, 1.0, 2.0]
-a["lng"][] = [0.0, 0.0, 0.0]
-a.sort_index.to_a            #  => [1, 2, 0]   byte order — not numeric lat order
+Site = CArray.struct(order_by: [:lat, :lng]) { float64 :lat; float64 :lng }
+a = CARecord.new(Site, 3)
+a["lat"][] = [3.0, 1.0, 1.0]
+a["lng"][] = [0.0, 5.0, 2.0]
+a.sort_index.to_a            #  => [2, 1, 0]   by lat, then lng
+a.min.values                 #  => [1.0, 2.0]
+a[1] < a[0]                  #  => true
 ```
 
-To sort by a field's value, sort **that field's projection** and gather the records by the resulting index:
+The sort family, `min` / `max`, `partition_copy` and the comparison operators all follow it. Without `order_by:` they raise.
+
+To sort by one field without declaring an order, sort **that field's projection** and gather the records by the resulting index:
 
 ```ruby
 order = a["lat"].sort_index  #  sort by lat numerically
@@ -358,4 +363,4 @@ The record bytes travel: `CArray.save` / `CArray.load` (see [Input and output](1
 - `CAString` for general-purpose Ruby strings, `CAFixlenString` for bounded-width portable columns, `CAConstString` for large read-mostly label / key columns, raw `CA_FIXLEN` for actual byte blobs.
 - The three Faces share one string-operation surface (transforms / predicates / lengths / positions), converting freely between them with `to_string` / `to_fixlen_string` / `to_const_string`.
 - Ordering is by bytes (`memcmp`); numeric kernels are gated off; numbers → strings is always the explicit `#format`.
-- `CARecord` reads K bytes as a struct with named fields; `a["field"]` is a live projection you can compute on, `a[i]` decodes to a struct instance, and sorting must go through a field projection because the whole-record sort is by raw bytes.
+- `CARecord` reads K bytes as a struct with named fields; `a["field"]` is a live projection you can compute on, `a[i]` decodes to a struct instance, and a record array sorts by the members its struct names in `order_by:` (or through a field projection when it names none).

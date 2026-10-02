@@ -308,7 +308,29 @@ class CAStruct::Builder  # :nodoc:
     @align_max  = 1          ### maximum of alignment among members
     @size       = opt[:size] ### user defined struct size
     @bit_offset = 0          ### 0..7, sub-byte position for bitfield accumulator
+    @order_by   = opt[:order_by] ### member names the records are ordered by
   end
+
+  # The `order_by:` members, as member names.  Each has to be a member of
+  # this struct, and one that holds a value rather than a nested record.
+  def order_keys (table)
+    keys = Array(@order_by).map(&:to_s)
+    if keys.empty?
+      raise CAStruct::DefinitionError, "order_by: names no member"
+    end
+    keys.each do |key|
+      unless table.key?(key)
+        raise CAStruct::DefinitionError, "order_by: #{key.inspect} is not a member"
+      end
+      type = table[key][1]
+      if type.is_a?(Class) && type <= CAStruct
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is a nested record; order by its members instead"
+      end
+    end
+    keys.freeze
+  end
+  private :order_keys
 
   # Round up the byte cursor if the bitfield accumulator is mid-byte.
   # Called before placing a non-bit member so the byte member starts
@@ -406,6 +428,7 @@ class CAStruct::Builder  # :nodoc:
     names.freeze
     klass.const_set(:MEMBER_TABLE, table)   ### required element as data class
     klass.const_set(:MEMBERS, names)
+    klass.const_set(:ORDER_BY, order_keys(table)) if @order_by
     # ---
     # Step 3 dispatch table: precompute a per-member [reader, writer]
     # Proc pair so `record[name]` is one Hash lookup + one Proc call,

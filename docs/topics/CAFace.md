@@ -1114,7 +1114,7 @@ precedent:
 | `CAConstString` | **no** — storage is a byte range, not the bytes | — | — | own overrides via `#to_string` (§6.3) |
 | `CACategorical` | **no** — code order is the vocabulary's | — | — | own overrides in label space (§6.3) |
 | `CAFixlenString` | yes | yes | no (one space) | ride the gate. Both flags hold, but *not* because the descent is the identity map — it strips trailing NUL. See the note below |
-| `CARecord` | no | — | — | not wired; `memcmp` is the sort default and field-order ordering is still future work |
+| `CARecord` | no | — | — | own ordering members, ranked by the struct's `order_by:` members (none declared → raise); discovery not wired |
 
 `CAFixlenString` is the case worth knowing about, because the flags are right
 and the tempting reason for them is wrong. Its surface is *not* its storage

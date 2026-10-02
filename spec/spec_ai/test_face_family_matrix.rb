@@ -458,7 +458,8 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
   # Faces in tree that the matrix does not exercise, with the reason.  Naming
   # one here is a claim that has to be paid off, not a way to stay quiet.
   DOCUMENTED_OMISSIONS = {
-    "CARecord" => "ordering / discovery wiring is still future work",
+    "CARecord" => "discovery wiring is still future work; its ordering is " \
+                  "its own (test_record_order.rb)",
   }
 
   # CAObject subclasses that are not Faces (they never opt in).
