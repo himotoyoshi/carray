@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a Ruby Float, Complex, `true` or String beside a lazy expression
+  takes the data_type the eager operator gives it. Previously it took the
+  array's: `int32.lazy * 0.5` and `CArray.fuse { a * 0.5 }` truncated to
+  integers, `int32.lazy >= 2.5` compared against 2, `clip(-1.5, 1.5)`
+  and `fma(0.5, 0.25)` truncated their bounds, and `+ Complex(...)`,
+  `+ true` and `fixlen.lazy.eq("text")` raised.
+
 - Fix: a lazy comparison read over part of an array -- a column, or an
   inner box such as `(a.lazy < b)[nil, 2]` or `x.lazy.signbit[0..1, 1..2]`
   -- returns the cells it names. Previously it read the same number of

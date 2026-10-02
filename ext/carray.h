@@ -869,7 +869,7 @@ int8_t ca_promote_type (int8_t a, int8_t b);
 /* Infer a data_type code from a Ruby *value* (literal Numeric, true/false,
    Complex, etc.) — distinct from rb_ca_guess_type which interprets the
    object as a data_type *representation* (e.g. T_FIXNUM as a data_type code).
-   Used by then_else and by ca_lazy_wrap_scalar's bool-self corner case.
+   Used by rb_ca_cast_self_or_other.
    CArray is not accepted (callers should use ca->data_type directly). */
 int8_t ca_value_to_data_type (VALUE obj);
 

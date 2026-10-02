@@ -715,38 +715,6 @@ rb_ca_lazy_arena_s_slot_capacities (VALUE klass)
 
 /* ------------------------------------------------------------------- */
 
-/* ca_lazy_wrap_scalar(other, self_ca) — wrap a non-CArray Ruby value
- * as a 1-element CScalar whose data_type follows the array's family,
- * mirroring the array+scalar branch of rb_ca_cast_self_or_other.  The
- * scalar takes on self's data_type so binops preserve self's
- * precision (`f32_array + 2.5` stays f32).
- *
- * CA_OBJECT self    -> CA_OBJECT
- * CA_BOOLEAN self   -> derive from other's Ruby type via
- *                       ca_value_to_data_type (bool arithmetic is a
- *                       corner case; eager widens the array, so we
- *                       just let the scalar choose)
- * numeric self      -> self_ca->data_type
- *
- * Callers broadcast against the array via stride 0 in xfer_stride. */
-VALUE
-ca_lazy_wrap_scalar (VALUE other, CArray *self_ca)
-{
-  int8_t dt;
-
-  if ( ca_is_object_type(self_ca) ) {
-    dt = CA_OBJECT;
-  }
-  else if ( self_ca->data_type == CA_BOOLEAN ) {
-    dt = ca_value_to_data_type(other);
-  }
-  else {
-    dt = self_ca->data_type;
-  }
-
-  return rb_cscalar_new_with_value(dt, 0, other);
-}
-
 static VALUE
 rb_ca_lazy_marker_s_allocate (VALUE klass)
 {

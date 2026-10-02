@@ -41,7 +41,6 @@ int8_t CA_OBJ_TRIOP;
 VALUE rb_cCATriOp;
 
 extern int8_t CA_OBJ_LAZY_MARKER;
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 
 /* ------------------------------------------------------------------- */
 /* CATriOp struct                                                       */
@@ -516,21 +515,17 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   r2 = collapse_marker(cary2);
   r3 = collapse_marker(cary3);
 
-  /* Promote non-CArray Ruby values (e.g. clip's Numeric bounds) to
-     CScalars carrying an existing operand's data_type. */
+  /* Ruby values among the operands (e.g. clip's Numeric bounds) are
+     wrapped and promoted pairwise in the order the eager triop uses. */
   if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ) {
-    /* Find an anchor CArray for scalar promotion. */
-    CArray *anchor = NULL;
-    if ( rb_obj_is_carray(r1) ) TypedData_Get_Struct(r1, CArray, &carray_data_type, anchor);
-    else if ( rb_obj_is_carray(r2) ) TypedData_Get_Struct(r2, CArray, &carray_data_type, anchor);
-    else if ( rb_obj_is_carray(r3) ) TypedData_Get_Struct(r3, CArray, &carray_data_type, anchor);
-    if ( anchor == NULL ) {
+    if ( ! rb_obj_is_carray(r1) ) {
       rb_raise(rb_eArgError,
-               "CATriOp: at least one operand must be a CArray");
+               "CATriOp: the first operand must be a CArray");
     }
-    if ( ! rb_obj_is_carray(r1) ) r1 = ca_lazy_wrap_scalar(r1, anchor);
-    if ( ! rb_obj_is_carray(r2) ) r2 = ca_lazy_wrap_scalar(r2, anchor);
-    if ( ! rb_obj_is_carray(r3) ) r3 = ca_lazy_wrap_scalar(r3, anchor);
+    rb_ca_cast_self_or_other(&r1, &r2);
+    rb_ca_cast_self_or_other(&r1, &r3);
+    rb_ca_cast_self_or_other(&r2, &r3);
+    rb_ca_cast_self_or_other(&r1, &r2);
   }
 
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
