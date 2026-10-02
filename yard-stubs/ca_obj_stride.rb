@@ -93,13 +93,14 @@ class CArray
   # tile size: nothing is truncated and no cell is aliased twice.  Reduce over
   # the trailing `ndim` axes (e.g. `v.mean(-1, -2)` for a 2-D parent) for
   # per-tile statistics such as pooling or block-wise aggregation.  Memory is
-  # shared with the parent.
+  # shared with the parent, and a Face parent stays the Face.
   #
   # @overload block_view(block)
   # @overload block_view(b0, b1, ...)
   #   @param block [Array<Integer>, Integer] tile length per axis, one per
   #     dimension, as an Array or as variadic arguments.
-  #   @return [CAStride] of rank `2 * ndim`.
+  #   @return [CAStride] of rank `2 * ndim` (the parent's Face class when
+  #     the parent is a Face).
   #   @raise [ArgumentError] when the tile count does not equal `ndim`, when
   #     a tile length is not positive, when an axis is not divisible by its
   #     tile length, or when `2 * ndim` exceeds `CA_RANK_MAX`.

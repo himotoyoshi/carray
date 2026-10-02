@@ -315,6 +315,32 @@ class CAConstString
     to_string.categorize(labels: labels, sort_labels: sort_labels)
   end
 
+  # ---- comparison operators ---------------------------------------------
+  #
+  # The core operators compare storage, and a storage cell is a byte range:
+  # `x < "dd"` compared where each string sits in the buffer and answered
+  # true everywhere.  They read the strings here instead.  `eq` has a native
+  # byte scan and stays; `<=>` composes from `>` and `<`, so it follows.
+
+  # @!method ne(other)
+  #   @return [CArray] boolean, true where the strings differ.
+  # @!method lt(other)
+  #   @return [CArray] boolean, true where self sorts before `other`.
+  # @!method le(other)
+  #   @return [CArray] boolean, true where self sorts before or equals `other`.
+  # @!method gt(other)
+  #   @return [CArray] boolean, true where self sorts after `other`.
+  # @!method ge(other)
+  #   @return [CArray] boolean, true where self sorts after or equals `other`.
+  [:ne, :lt, :le, :gt, :ge].each do |op|
+    define_method(op) { |other| to_string.public_send(op, string_operand(other)) }
+  end
+
+  alias <  lt
+  alias <= le
+  alias >  gt
+  alias >= ge
+
   # A CAConstString operand has to be decoded too; anything else (a CAString,
   # an object array, an Array) already compares as strings.
   private def string_operand (other)

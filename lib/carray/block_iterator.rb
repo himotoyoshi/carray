@@ -286,12 +286,22 @@ class CABlockIterator < CAIterator
   [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
+      if FACE_WINNER_INDEX.key?(op) && @source.face?
+        return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
+      end
       kw = {}
       kw[:min_count]  = min_count  unless min_count.nil?
       kw[:fill_value] = fill_value unless fill_value.nil?
       fold(op, **kw)
     end
   end
+
+  # A Face's minimum and maximum are cells of the Face, so they are gathered
+  # from the source by the winner's address.  Assembling the per-region results
+  # instead copies the Face's storage into an array that no longer knows it is
+  # one: a CATime came back as 8-byte strings.
+  FACE_WINNER_INDEX = { min: :min_index, max: :max_index }.freeze
+  private_constant :FACE_WINNER_INDEX
 
   # ---- count family and elements ----------------------------------------
 
@@ -349,6 +359,10 @@ class CABlockIterator < CAIterator
   #   Per-tile `[min, max]` (two tile-grid-shaped CArrays, a single fused pass).
   #   @return [Array<CArray>]
   def minmax (min_count: nil, fill_value: nil)
+    if @source.face?
+      return [min(min_count: min_count, fill_value: fill_value),
+              max(min_count: min_count, fill_value: fill_value)]
+    end
     kw = {}
     kw[:min_count]  = min_count  unless min_count.nil?
     kw[:fill_value] = fill_value unless fill_value.nil?
@@ -384,6 +398,29 @@ class CABlockIterator < CAIterator
   def max_addr; winner_addr(:max_index); end
 
   private
+
+  # Per-tile minimum or maximum of a Face source, gathered from the source by
+  # the winner's address so the result is the Face itself.  An all-masked tile,
+  # and with `min_count` a tile with too few present cells, is a masked cell.
+  def face_winner (idx_op, min_count, fill_value)
+    addr = winner_addr(idx_op)
+    if min_count
+      addr[count_not_masked.lt(min_count)] = UNDEF
+    end
+    src   = @source.reshape(@source.elements)
+    empty = addr.is_masked
+    return src[addr].copy unless empty.any
+    # A masked index drops the cell rather than masking it, so an empty tile
+    # needs a placeholder address.  Pointing it at a masked cell of the source
+    # carries the mask through the gather, which a read-only Face (whose copy
+    # cannot be written) needs.  Otherwise mask the placeholder afterwards.
+    if fill_value.nil? && src.has_mask? && (hole = src.is_masked.where).elements > 0
+      return src[addr.strip_mask(hole[0])].copy
+    end
+    out = src[addr.strip_mask(0)].copy
+    out[empty] = fill_value.nil? ? UNDEF : fill_value
+    out
+  end
 
   # Per-tile source address of the winner. The tile-local flat index (min_index /
   # max_index) is looked up in a source-address companion tiled the same way, so

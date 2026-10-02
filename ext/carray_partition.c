@@ -337,7 +337,49 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
 
   int masked_last = NIL_P(vmasked_position) ? 1
     : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
-  return rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
+
+  /* Face gate, the same policy as the sort family's: a fixlen storage
+     partitions by memcmp, a numeric storage only when ORDERABLE (its order
+     is the surface order).  The selection runs on the storage and the Face
+     is put back on the result.  Without this the surface fixlen bytes were
+     selected by memcmp, which is not the order of a little-endian integer
+     (CATime) and not the label order of a code (CACategorical). */
+  volatile VALUE face = Qnil;
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_face(ca) ) {
+      VALUE st = rb_ca_strip_face_value(self);
+      CArray *sc;
+      TypedData_Get_Struct(st, CArray, &carray_data_type, sc);
+      if ( sc->data_type != CA_FIXLEN
+           && ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+        rb_raise(rb_eArgError,
+                 "partition_copy: Face-typed input (%s) is not orderable "
+                 "by storage; use ca.parent to descend to storage",
+                 rb_obj_classname(self));
+      }
+      face = self;
+      self = st;
+    }
+  }
+
+  VALUE out = rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
+
+  if ( face != Qnil ) {
+    CArray *oc, *lc;
+    VALUE lifted;
+    TypedData_Get_Struct(out, CArray, &carray_data_type, oc);
+    lifted = rb_ca_face_template(face, oc, oc->dim);
+    rb_ca_set_parent(lifted, out);   /* pin the storage result */
+    if ( ca_has_mask(oc) ) {
+      /* rb_ca_face_template resets the mask; carry the result's. */
+      TypedData_Get_Struct(lifted, CArray, &carray_data_type, lc);
+      ca_copy_mask(lc, oc);
+    }
+    out = lifted;
+  }
+  return out;
 }
 
 /* partition(kth, axis: nil, masked_position: :last)
