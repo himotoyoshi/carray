@@ -165,4 +165,11 @@ class TestJoin < Test::Unit::TestCase
     assert_equal ["a,b,c", "d,e,f"], r.to_a
   end
 
+  # An empty fiber joins to "", and there is one per cell of the other axes.
+  def test_join_along_a_zero_length_axis
+    assert_equal ["", "", "", ""], CArray.int32(4, 0).join(",", axis: 1).to_a
+    assert_equal [], CArray.int32(4, 0).join(",", axis: 0).to_a
+    assert_equal [""] * 6, CArray.int32(0, 6).join(axis: 0).to_a
+  end
+
 end
