@@ -237,17 +237,28 @@ class CArray::Serializer   # :nodoc:
 
     ca = CArray.new(data_type, dim, :bytes => bytes)
     ca.load_binary(@io)
-    ca[] = ca.swap_bytes if swap
 
+    mask = nil
     if h[:has_mask] != 0
-      ca.mask = 0
-      ca.mask.load_binary(@io)
+      mask = CArray.boolean(*dim)
+      mask.load_binary(@io)
     end
 
     if h[:trailer_bytes] > 0
       trailer_raw = @io.read(h[:trailer_bytes])
       trailer = decode_trailer(trailer_raw)
       ca = apply_trailer(ca, trailer)
+    end
+
+    # Swap once the trailer is applied and before the mask is: a record is
+    # swapped member by member, as the writer swapped it, and only its
+    # data_class says where the members are.  Swapping the bare fixlen
+    # first reversed the whole record.
+    ca[] = ca.swap_bytes if swap
+
+    if mask
+      ca.mask = 0
+      ca.mask[] = mask
     end
 
     return ca
@@ -533,6 +544,11 @@ class CArray
   #   @param data [Array] Marshal payload.
   #   @return [void]
   def marshal_load (data)
+    initialize_copy(CArray.send(:array_from_marshal_payload, data))
+  end
+
+  # The array a {#marshal_dump} payload describes.
+  def self.array_from_marshal_payload (data)
     tag, *rest = data
     case tag
     when "object"
@@ -543,13 +559,75 @@ class CArray
         ca.mask = 0
         ca.mask[] = mask
       end
-      initialize_copy(ca)
+      ca
     when "portable"
-      ca = CArray.load(StringIO.new(rest[0]))
-      initialize_copy(ca)
+      CArray.load(StringIO.new(rest[0]))
     else
       raise TypeError, "unrecognised CArray Marshal payload"
     end
+  end
+  private_class_method :array_from_marshal_payload
+
+end
+
+# Marshal of a view and a scalar: the {CArray#marshal_dump} payload, loaded
+# back by the class method rather than into an empty instance.  A view comes
+# back as a plain array (a copy owns its memory, as #copy gives); a scalar
+# comes back a scalar.  A wrap is refused below.
+[CAView, CAWrap, CScalar].each do |klass|
+  klass.class_eval do
+    # A Face other than a record is refused: the payload would carry its
+    # storage without what makes it the Face (a unit, labels), and load
+    # could not put that back.
+    # @return [String]
+    def _dump (_level)
+      if face?
+        raise TypeError,
+              "Marshal cannot carry a #{self.class} yet (its Face would be lost); " \
+              "dump its storage with .parent"
+      end
+      Marshal.dump(CArray.instance_method(:marshal_dump).bind_call(self))
+    end
+  end
+end
+
+class CAView
+  # @return [CArray] the plain array a {#_dump} string describes.
+  def self._load (str)
+    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  end
+end
+
+class CAWrap
+  # A wrap borrows memory, which Marshal cannot carry to another process;
+  # Ruby would also try to write the objects that keep the borrowed memory
+  # alive.  Its copy owns its memory and marshals.
+  def _dump (_level)
+    raise TypeError,
+          "Marshal cannot carry a #{self.class}: it borrows its memory; " \
+          "dump .copy instead"
+  end
+
+  def self._load (str)
+    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  end
+end
+
+class CScalar
+  # @return [CScalar] the scalar a {#_dump} string describes.
+  def self._load (str)
+    a = CArray.send(:array_from_marshal_payload, Marshal.load(str))
+    s = CScalar.new(a.data_type, bytes: a.bytes)
+    s[0] = a[0]
+    s
+  end
+end
+
+class CARecord
+
+  # A record array keeps marshal_dump: it round-trips with its class.
+  def marshal_dump
+    CArray.instance_method(:marshal_dump).bind_call(self)
   end
 
 end

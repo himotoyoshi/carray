@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `Marshal.load` of a view (a slice, a transpose, a lazy expression)
+  or a `CScalar` raised `TypeError`; a view comes back a plain `CArray`
+  and a scalar a `CScalar`.  A Face other than `CARecord`, and a `CAWrap`,
+  are now refused by `Marshal.dump` with a message, where they were dumped
+  and then failed to load; dump `.parent` or `.copy`.
+- Fix: a record array saved in the other byte order (`endian:`) came back
+  with each record reversed whole.  It is swapped member by member, as it
+  is written.
+
 - Fix: `strip_mask(fill)` on an array that computes its values -- a lazy
   expression or a `CAObject` -- reads those values once. Previously it
   read them a second time to find the masked cells.

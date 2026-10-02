@@ -240,8 +240,9 @@ write).  A reader decides once, for the whole file:
    decides: `0x01` = big-endian file, `0x04` = little-endian file.
    Anything else means the file is corrupt or not `_CARRAY3`.
 2. If the file's order differs from the host, byte-swap every header
-   integer *and* every data element on read.  The int8 mask is never
-   swapped.
+   integer *and* every data element on read.  A record (a `fixlen`
+   element with a `data_class` in the trailer) is swapped member by
+   member, each by its own type.  The int8 mask is never swapped.
 
 Besides fixing the byte order, `endian_marker` doubles as a header
 corruption cross-check: a valid file always reads it back as
