@@ -70,6 +70,11 @@ class CArray
   #   `CA_OBJECT`), same `kth` and `masked_position:` semantics.
   #   Masked input delegates to {#partition} + copy.
   #
+  #   A Face partitions in its surface order and comes back as the same
+  #   Face: one whose storage order is its surface order is selected on its
+  #   storage, a fixlen storage by byte order. A Face whose storage order is
+  #   not its surface order (e.g. {CACategorical}) raises.
+  #
   #   Float NaN policy: NaN cells are pre-partitioned to the tail. If
   #   `kth` falls within the finite slice, quickselect runs over the
   #   finite cells; otherwise the kth cell is already NaN.
@@ -78,7 +83,8 @@ class CArray
   #   @param axis [Integer, nil] `nil` partitions the whole array.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] fresh entity.
-  #   @raise [ArgumentError] same conditions as {#partition}.
+  #   @raise [ArgumentError] same conditions as {#partition}, or a Face that
+  #     is not orderable by its storage.
   def partition_copy(kth, axis: nil, masked_position: :last); end
 
   # @overload order(axis: nil, descending: false, method: :ordinal, kind: :quick)

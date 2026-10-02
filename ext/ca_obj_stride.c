@@ -2327,8 +2327,12 @@ rb_ca_block_view (int argc, VALUE *argv, VALUE self)
     outstrides[ndim + i] = parent_byte_stride[i];
   }
 
-  return rb_ca_stride_new(self, parent->data_type, parent->bytes,
-                          (int8_t)(2 * ndim), outdim, outstrides, 0);
+  VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
+                               (int8_t)(2 * ndim), outdim, outstrides, 0);
+  /* The Face stays on top, as for every view: a tile reduction over a
+     bare block_view compared the Face's surface bytes. */
+  CA_WRAPPER_LIFT(obj, self, parent);
+  return obj;
 }
 
 /* defined in ca_obj_transpose.c */

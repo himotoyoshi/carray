@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `blocks(...).min`, `.max` and `.minmax` over a Face answer in the
+  Face's own order and come back as the Face; a `CATime` or
+  `CATimedelta` result was 8-byte strings, and a `CAConstString` tile
+  was compared by where its strings sat in the buffer.  `block_view` of
+  a Face is now the Face.  A `CACategorical` raises, as `min` does.
+- Fix: `partition_copy` of a `CATime` or `CATimedelta` selects in time
+  order and returns the same class; it compared the bytes of the ticks,
+  which is not their order once a value passes 255.  A `CACategorical`
+  raises, as `sort_index` does.
+- Fix: the comparison operators `<`, `<=`, `>`, `>=`, `ne` (and so `<=>`)
+  on a `CAConstString` compare the strings.  They compared where each
+  string sat in the column's buffer, so `x < "dd"` was true everywhere.
+
 - New: for whoever registers a `CArray.expression_evaluator`: the plan it
   is handed now describes comparisons (`eq`, `lt`, `is_nan`, ...) as
   operations and `CArray#shift` of an array as that array read at an
