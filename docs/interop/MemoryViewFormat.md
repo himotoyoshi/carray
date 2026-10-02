@@ -52,9 +52,10 @@ data type:
 | complex64   | `Zf`     | 8           |
 | complex128  | `Zd`     | 16          |
 
+A plain `CA_FIXLEN` of N bytes is emitted as `Ns`.
+
 Not emitted (no MV format):
 
-- `CA_FIXLEN` — variable-byte payload, CArray-specific
 - `CA_OBJECT` — VALUE column, protocol-level limit
 - bitarray / bitfield — sub-byte, MV protocol does not represent
 

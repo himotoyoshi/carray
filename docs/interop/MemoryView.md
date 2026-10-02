@@ -6,8 +6,7 @@ libraries (Numo::NArray, Apache Arrow, OpenCV, Fiddle, NetCDF, …).
 
 This document is the user-facing reference. The canonical `format`
 string specification is in
-[`MEMORYVIEW_FORMAT.md`](MEMORYVIEW_FORMAT.md) (PEP 3118 first,
-co-ratified with `numo-narray-memoryview` and `bulk-memory-view`).
+[`MemoryViewFormat.md`](MemoryViewFormat.md).
 
 ---
 
@@ -99,7 +98,7 @@ ca = CArray.int32(3, 4).seq
 CArray.memory_view_reject_reason(ca[ca > 5])
 # => "this view is CASelect (boolean-mask selection (positions
 #     not expressible as strides)); zero-copy wrap not possible.
-#     Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot."
+#     Export arr.copy for a snapshot."
 ```
 
 ### `CArray.from_memory_view(obj, data_type: nil) → CArray`
@@ -237,40 +236,52 @@ reversal (negative stride), and anything else expressible as
 
 ## 6. Export side — which CArray views are exportable
 
-### 6.1 `from_memory_view`-style consumers
+### 6.1 Which arrays are exported
 
-Any consumer that uses `rb_memory_view_get(obj, &view, flags)` and
-accepts strided views can read **any** CArray of a supported
-data_type, including all virtual array types — strided ones are
-exported zero-copy with computed strides, and the rest
-materialise on attach.
+The export is **zero-copy only**: a consumer gets a view onto bytes that
+already exist. Nothing is materialised for it — a materialised snapshot
+would not see later writes, and writes into it would not reach the
+array.
 
-The full export matrix:
+An array is exported when it is
 
-| obj_type | Strategy | Strides |
-|---|---|---|
-| `CA_OBJ_ARRAY` / `CA_OBJ_ARRAY_WRAP` / `CA_OBJ_SCALAR` | direct | contiguous |
-| `CA_OBJ_REFER` (reshape) | direct/attach | contiguous |
-| `CA_OBJ_BLOCK` / `CA_OBJ_FARRAY` / `CA_OBJ_TRANSPOSE` / `CA_OBJ_REPEAT` / `CA_OBJ_STRIDE` / `CA_OBJ_FIELD` | strided | computed |
-| `CA_OBJ_SELECT` / `CA_OBJ_MAPPING` / `CA_OBJ_GRID` / `CA_OBJ_SHIFT` / `CA_OBJ_WINDOW` / `CA_OBJ_FAKE` / `CA_OBJ_BYTE_SWAP` / `CA_OBJ_REDUCE` | attach | contiguous |
-| `CA_OBJ_BITARRAY` / `CA_OBJ_BITFIELD` / `CA_OBJ_OBJECT` | reject | — |
-| any obj_type installed by an extension (`ca_install_obj_type`) | reject | — |
+- an **entity** (`CArray`, `CAWrap`, `CScalar`), or
+- a **strided view** (`CARefer`, `CABlock`, `CATranspose`, `CAFarray`,
+  `CARepeat`, `CAField`, `CAStride`) whose chain of parents composes into
+  byte strides over an entity, or
+- a **Face** whose storage bytes carry its values on their own — a
+  `CARecord` (exported as a `T{...}` struct, §7.6) or a `CAFixlenString`
+  (exported as `Ns` bytes) — over one of the above,
 
-The strategy table is keyed by class name with no registration hook, so a
-class defined outside the core — a `CASource` subclass, say — cannot
-declare a strategy and is rejected. `memory_view_available?` reports
-`false` for it; pass `obj.copy` to a consumer that needs a MemoryView.
+and it has no mask and an exportable data type (§7). A strided view is
+exported with its strides; a consumer that asks for a contiguous view
+(as `Fiddle::MemoryView` does) gets one only when the view is contiguous.
+
+Everything else is refused:
+
+| array | why |
+|---|---|
+| `CASelect`, `CAGrid`, `CASelectAxis`, `CARemap` | positions not expressible as strides |
+| `CAShift`, `CARoll`, `CAWindow`, `CATile` | cells outside the parent or repeated out of order |
+| `CAStack`, `CAMeld` | more than one parent buffer |
+| lazy expressions (`CAMonOp`, `CABinOp`, …, including `as_type` and `swap_bytes`) | the values do not exist yet |
+| `CABitarray`, `CABitfield` | sub-byte addressing |
+| `CATime`, `CATimedelta`, `CACategorical`, `CAConstString` | the storage bytes do not say what they mean without the Face |
+| a `CA_OBJECT` array | Ruby objects, not bytes |
+| an array or view onto an entity installed outside the core (`ca_install_obj_type`, e.g. a `CASource` subclass) | its bytes need not be in memory |
+
+`memory_view_available?` and `memory_view_reject_reason` answer from the
+same rule, so an array they accept is exported and one they refuse is
+explained. To hand a refused array to a consumer, export a copy
+(`arr.copy`); for a refused Face, export its storage (`.ticks`, `.codes`)
+— a copy of a Face is still the Face.
 
 ### 6.2 `wrap_memory_view` (zero-copy)
 
-`wrap_memory_view` is stricter than the general export path
-because the resulting view must alias the same memory as some
-underlying entity — that's what "zero copy" actually requires.
-The rule:
-
-> The view, and every link in its parent chain, must be an entity
-> or a *contiguous* `CAStride`-family member; the chain must
-> terminate at an entity.
+`wrap_memory_view` on a CArray accepts exactly what §6.1 exports:
+the result aliases the same memory as the underlying entity, which
+is what "zero copy" requires. A strided view stays strided (a
+`CAStride` over the entity).
 
 What this means concretely:
 
@@ -283,10 +294,14 @@ What this means concretely:
 | `ca.farray` (CAFarray) | yes |
 | `ca.reshape(...)` (CARefer, byte-compatible) | yes |
 | `ca.refer(:data_type, dim)` (CARefer, byte reinterpretation) | yes (when parent is contiguous) |
+| `ca.field(...)` (CAField) | yes |
+| a `CARecord` / `CAFixlenString` over any of the above | yes |
 | `ca[bool_array]` (CASelect) | no |
-| `ca[int_array]` (CAMapping / CAGrid) | no |
-| `ca.shift(...)` / `ca.window(...)` / `ca.field(...)` / `ca.reduce(...)` | no |
-| `ca.as_type(:data_type)` (CAFake; lazy cast) | no |
+| `ca[int_array]` (CAGrid) | no |
+| `ca.shift(...)` / `ca.roll(...)` / `ca.window(...)` / `ca.tile(...)` | no |
+| `CArray.stack(...)` / `CArray.meld(...)` | no |
+| `ca.as_type(:data_type)` / any lazy expression | no |
+| `CATime` / `CATimedelta` / `CACategorical` / `CAConstString` | no |
 | `bit_or_object_typed_carray` | no |
 
 For rejected views, the diagnostic message from
@@ -296,11 +311,13 @@ If you need to hand a rejected view to a consumer, take a
 snapshot first:
 
 ```ruby
-snap = ca[ca > 5].to_ca               # CASelect -> entity
+snap = ca[ca > 5].copy                # CASelect -> entity
 CArray.wrap_memory_view(snap)         # OK
-# or shorter:
-CArray.from_memory_view(ca[ca > 5])   # gather-copy
 ```
+
+`to_ca` does not take a snapshot (it returns a view as it is), and
+`from_memory_view` reads only arrays that are exported, so neither
+replaces `copy` here.
 
 ---
 
@@ -316,18 +333,19 @@ table:
 | `CA_UINT8` | `"C"` | 1 |
 | `CA_INT16` | `"s"` | 2 |
 | `CA_UINT16` | `"S"` | 2 |
-| `CA_INT32` | `"l"` | 4 |
-| `CA_UINT32` | `"L"` | 4 |
+| `CA_INT32` | `"i"` | 4 |
+| `CA_UINT32` | `"I"` | 4 |
 | `CA_INT64` | `"q"` | 8 |
 | `CA_UINT64` | `"Q"` | 8 |
 | `CA_FLOAT32` | `"f"` | 4 |
 | `CA_FLOAT64` | `"d"` | 8 |
 | `CA_CMPLX64` | `"Zf"` | 8 |
 | `CA_CMPLX128` | `"Zd"` | 16 |
+| `CA_FIXLEN` (`bytes` = N) | `"Ns"` | N |
 
 The importer is permissive: it accepts v1.0/v1.1 synonyms (`"C"`
 for boolean, `"ff"` / `"dd"` for complex, `i`/`i!`/`l!`/`s!` etc.)
-and disambiguates by `item_size`. See [`MEMORYVIEW_FORMAT.md`](MEMORYVIEW_FORMAT.md)
+and disambiguates by `item_size`. See [`MemoryViewFormat.md`](MemoryViewFormat.md)
 for the full producer/consumer convention.
 
 ### 7.6 PEP 3118 struct format for CAStruct (`T{...}`)
@@ -348,13 +366,10 @@ zero-copy receive CAStruct arrays.
 Importing `T{...}` on the consumer side is reserved for a future
 phase; today CArray emits but does not parse struct format.
 
-See [`MEMORYVIEW_FORMAT.md`](MEMORYVIEW_FORMAT.md) §6 for the normative spec.
+See [`MemoryViewFormat.md`](MemoryViewFormat.md) for the normative spec.
 
 **Not exportable / not importable**:
 
-- `CA_FIXLEN` — variable-width payload, no canonical specifier
-  (exception: CAStruct-backed `CA_FIXLEN` arrays are exported as a
-  PEP 3118 struct format `T{...}`; see §7.6)
 - `CA_OBJECT` — VALUE column, not raw memory
 
 `CA_FLOAT128` / `CA_CMPLX256` are reserved enum values but disabled
@@ -372,8 +387,7 @@ protocol. The policy:
   `wrap_memory_view` is **rejected** with `ArgumentError`.
 - Use `.value` to export the raw value layer (mask ignored).
 - Use `.mask` to export the mask itself as a boolean CArray.
-- Use `.unmask_copy(fill)` to materialise with masked positions
-  filled.
+- Use `.strip_mask(fill)` for a copy with masked positions filled.
 
 ```ruby
 ca = CArray.int32(3, 4).seq
@@ -383,7 +397,7 @@ ca.mask[0, 0] = 1
 CArray.wrap_memory_view(ca)                  # raises
 CArray.wrap_memory_view(ca.value)            # OK (CARefer, value layer)
 CArray.wrap_memory_view(ca.mask)             # OK (boolean carray)
-CArray.from_memory_view(ca.unmask_copy(-1))  # OK (filled snapshot)
+CArray.wrap_memory_view(ca.strip_mask(-1))   # OK (filled copy)
 ```
 
 The rejection is intentional: masked positions hold unspecified
@@ -587,16 +601,16 @@ in memory.
 ## 13. Limitations
 
 - `CA_OBJECT` is not exported or imported (VALUE column, not raw
-  memory). `CA_FIXLEN` is not exported as a plain buffer either,
-  but CAStruct-backed `CA_FIXLEN` arrays do export as a PEP 3118
-  `T{...}` struct format (§7.6). `CA_FLOAT128` / `CA_CMPLX256`
-  are disabled in 3.0 and cannot appear on a live CArray.
+  memory). `CA_FIXLEN` is exported as `Ns` bytes, or as a `T{...}`
+  struct when it is a `CARecord` (§7.6); `T{...}` is not imported.
+  `CA_FLOAT128` / `CA_CMPLX256` are disabled in 3.0 and cannot
+  appear on a live CArray.
 - Cross-endian byte-swap is out of scope for v1.2; producers
   must emit data in host order and consumers reject views with
   the opposite byte-order prefix. See
-  [`MEMORYVIEW_FORMAT.md`](MEMORYVIEW_FORMAT.md) §1.3.
-- The wrap path requires alias-chain to entity (§6.2). Snapshot
-  paths (`from_memory_view`, `to_ca`) have no such restriction.
+  [`MemoryViewFormat.md`](MemoryViewFormat.md).
+- Only arrays that alias an entity are exported (§6). Export a
+  `copy` of anything else.
 
 ---
 
