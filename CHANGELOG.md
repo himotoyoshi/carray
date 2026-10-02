@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `invert_mask` raises on a frozen array, a view of one, and a lazy
+  expression, and changes nothing. It inverted the mask first, and on a
+  lazy expression inverted the operand's mask without raising.
 - Fix: an object array viewed through `sort(axis:)`, `CArray.stack`,
   `CArray.meld` or a selection, over a `CAObject` whose hooks call Ruby
   (`copy_addrs`, `copy_block`, ...), no longer crashes in a garbage
