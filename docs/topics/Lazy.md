@@ -208,101 +208,79 @@ Both give back an expression, so what forces it is the same either way.
 
 ---
 
-## 6. Performance — when fuse wins, when eager wins
+## 6. Performance — what each path costs
 
-`fuse` is not unconditionally faster.  Whether `fuse` beats the
-equivalent eager expression depends on three independent axes:
+An expression can be computed three ways:
 
-1. **Source count** in the expression (= number of CArray operands
-   read per output cell).  Eager scales as `O(sources × element-wise
-   contig pass)`, each pass auto-vectorised.  `fuse` scales as
-   `O(cells × sources)` in a single scalar dispatch loop.  Eager
-   prefers many sources; `fuse` prefers few.
-2. **Element width** (= SIMD lane count per 128-bit register).  Eager
-   auto-vectorisation processes 16 `uint8`s, 8 `uint16`s, 4 `uint32`s,
-   or 2 `uint64` / `float64` per SIMD iteration.  Wider elements
-   shrink eager's vectorisation lead.  `fuse`'s per-cell dispatch cost
-   is largely width-insensitive.
-3. **Per-cell compute density** and **intermediate buffer pressure**.
-   Eager allocates one contig buffer per binop; deep chains over
-   large `float64` arrays spill out of L2 and pay memory traffic for
-   every intermediate.  `fuse` writes only the final result.  Heavy
-   per-cell arithmetic (transcendentals, branchy bool rules) amortises
-   `fuse`'s dispatch overhead.
+| path | what it does |
+|---|---|
+| **eager** | one pass per operation, each making a new array |
+| **walk** | `.lazy` / `fuse` with nothing registered: CArray computes the expression itself, with no array for the steps along the way |
+| **compiled** | `.lazy` / `fuse` with an evaluator registered (the `carray-jit` gem): the whole expression becomes one loop |
 
-### Measured break-even (M2, 512², `CARRAY_DEV=1`)
+The compiled path is asked only for an expression of 10,000 cells or more,
+and only when it is computed into an array — `to_ca`, `copy`, or
+`out[] = expr`.  A reduction over an expression is walked.
 
-Conway's Life rule (`(n==3) | (a & n==2)` over 8 neighbour shifts =
-9-source chain) across `uintN` widths, eager vs `CArray.fuse`:
+### Measured (Apple M2 Max, 512 × 512, milliseconds per call)
 
-| type     | SIMD lane | eager ms/step | fuse ms/step | fuse/eager |
-|----------|----------:|--------------:|-------------:|-----------:|
-| `uint8`  |        16 |          0.69 |         2.27 |      3.30x |
-| `uint16` |         8 |          0.99 |         2.44 |      2.46x |
-| `uint32` |         4 |          1.71 |         2.84 |      1.66x |
-| `uint64` |         2 |          3.79 |         3.74 |      0.99x |
+Conway's Life rule — eight shifted neighbours summed, then
+`n.eq(3) | (alive & n.eq(2))`:
 
-Eager scales linearly with element width (memory-bandwidth-bound).
-`fuse` stays nearly flat (per-cell dispatch dominates, width-
-insensitive).  They cross at `uint64` / `float64` SIMD width.
+| type | eager | walk | compiled | walk / eager | compiled / eager |
+|---|---:|---:|---:|---:|---:|
+| `uint8`   | 0.67 | 0.58 | 0.26 | 0.87x | 0.39x |
+| `uint16`  | 0.91 | 0.76 | 0.27 | 0.83x | 0.30x |
+| `uint32`  | 1.36 | 1.09 | 0.33 | 0.80x | 0.24x |
+| `uint64`  | 2.84 | 1.93 | 0.34 | 0.68x | 0.12x |
+| `float64` | 2.48 | 2.00 | 0.33 | 0.81x | 0.13x |
 
-5-point Laplacian (`a.roll(1,0) + a.roll(-1,0) + a.roll(0,1) +
-a.roll(0,-1) - 4*a`, 5-source f64):
+Five-point Laplacian, `float64`
+(`u.shift(1,0) + u.shift(-1,0) + u.shift(0,1) + u.shift(0,-1) - u * 4.0`):
 
-| variant | ms/iter | vs eager |
-|---------|--------:|---------:|
-| eager   |    1.65 |    1.00x |
-| fuse    |    1.15 |    0.70x (= **fuse 1.4x faster**) |
+| eager | walk | compiled | walk / eager | compiled / eager |
+|---:|---:|---:|---:|---:|
+| 1.45 | 0.82 | 0.28 | 0.56x | 0.19x |
 
-### Decision guide
+A chain of `^` over eight `uint64` sources, `.lazy`, walk / eager:
 
-Reach for `fuse` when **any** of:
-- the data type is `float64` / `complex128` (= 2-lane SIMD)
-- chain has heavy per-cell math (`exp`, `log`, `sqrt`, transcendentals)
-- intermediate buffers are large (= each binop spills L2, > a few MB)
-- source count is small (1–4)
+| cells (one buffer) | depth 4 | depth 16 | depth 64 | depth 256 |
+|---:|---:|---:|---:|---:|
+| 4,096 (32 KB)     | 0.57 | 0.46 | 0.42 | 0.41 |
+| 65,536 (512 KB)   | 0.54 | 0.40 | 0.37 | 0.41 |
+| 1,048,576 (8 MB)  | 0.71 | 0.39 | 0.48 | 0.40 |
 
-Stay with eager when **all** of:
-- the data type is narrow (`uint8` / `int16` / `float32`, 4+ lanes)
-- per-cell op is light (add / cmp / bitwise / cast)
-- source count is high (5+)
-- intermediate buffers fit comfortably in L2
+In every case measured the walk is no slower than eager, at every type,
+size and depth; it saves the arrays eager makes for each step.  The
+compiled path is faster again by a wide margin.
 
-Chained eager `+` on roll views is fast (the chained intermediates
-stay hot in cache).  `add!` on a view source pays a per-call attach
-cost; for accumulation patterns prefer chained `+` unless you have
-profiled.
+### The fixed cost of `fuse`
 
-### Chain depth × buffer size — the "small N, deep chain" cliff
+`fuse` reads its block's source on every call, which costs about 60 µs
+whatever the size of the arrays.  `.lazy` has no such cost:
 
-For light-op chains (uint64 bitwise, integer add), the fuse/eager
-ratio depends on **both** chain depth and per-buffer size relative
-to cache hierarchy.  Eager allocates one intermediate per binop; if
-all intermediates fit L1 (or L2), eager's vectorised passes are
-cheap and fuse loses despite the chain being fused.  Once
-intermediates spill, eager pays memory traffic per binop and fuse
-wins decisively.
+| cells | eager | `.lazy` | `fuse` |
+|---:|---:|---:|---:|
+| 16     |   0.9 µs |  1.8 µs | 62.0 µs |
+| 4,096  |   7.8 µs |  5.9 µs | 63.8 µs |
+| 65,536 | 104.6 µs | 66.8 µs | 137.7 µs |
 
-Measured uint64 XOR chain over 8 sources:
+For small arrays computed over and over in a loop, write `.lazy` on the
+operands, or stay eager.
 
-| N (cells) | per-buffer | depth 4 | depth 16 | depth 64 | depth 256 |
-|----------:|-----------:|--------:|---------:|---------:|----------:|
-|     4,096 |      32 KB |    1.32 |     0.92 |     1.54 |    18.48  |
-|    65,536 |     512 KB |    0.97 |     0.65 |     0.70 |     1.85  |
-| 1,048,576 |       8 MB |    0.96 |     0.76 |     0.72 |     0.75  |
+### What the compiled path does not take
 
-(values are `fuse / eager`; < 1.00 = fuse wins)
+The expression is still computed — by the walk — when the compiled path
+cannot describe it:
 
-At N=4K (intermediates fit L1), eager dominates and a depth-256
-chain triggers a catastrophic fuse degradation (cache eviction on
-the lazy arena).  At N=1M, all depths sit in fuse's favour —
-intermediate-buffer memory traffic for eager grows linearly with
-depth, while fuse stays in one pass.
+- an object array, or a comparison with a tolerance (`feq`, `is_close`)
+- a reduction over the expression
+- an expression smaller than 10,000 cells
 
-So "many ops favours fuse" is true **conditional on buffer size**.
-For scientific-data sizes (≥ ~64K cells) the win is robust across
-chain depths.  For tiny intermediate buffers (< L1), prefer eager
-even for deep chains.
+A `shift` of an expression (rather than of an array), a `roll` or a
+`window` is handed over as an array the evaluator has to copy whole
+before reading, which can make it slower than the walk.  Shift the
+arrays the expression is built from instead.
 
 ### Cast at the chain tail — `as_<type>`, not `.<type>`
 
