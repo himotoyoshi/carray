@@ -41,6 +41,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   expressions. Previously they could count them, unless the mask had been
   read before the reduction.
 
+- Fix: a mask made inside `map!` or another block that writes an array,
+  whose reading raises (a `CAObject` whose mask callback fails), raises
+  that error and leaves the array closed. Previously it raised
+  `[BUG] tried to sync data to detached array` and left the array
+  attached.
+
 - Fix: a stepped or reversed slice of a lazy expression
   (`a.lazy.sinh[(0...n).step(2)]`, `x[-1..0]`) returns the cells it
   names. Previously an expression that converts its input -- an integer

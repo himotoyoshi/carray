@@ -2044,8 +2044,13 @@ ca_sync (void *ap)
              "can not modify read-only array");
   }
 
-  ca_update_mask(ca);
-  ca_sync(ca->mask);
+  /* Only a mask that exists can hold writes: one made inside the window
+     is attached with the view (ca_create_mask).  Making one here would
+     read the parent's mask while the window closes, and a parent that
+     cannot answer would leave the window open. */
+  if ( ca->mask ) {
+    ca_sync(ca->mask);
+  }
 
   if ( ca_is_view(ca) ) {  /* view array */
     if ( ! CAVIEW(ca)->nosync ) { /* FIXME : */
@@ -2120,12 +2125,12 @@ ca_detach (void *ap)
     ca_func[ca->obj_type].detach(ap);
   }
 
-  {
-    CArray *mask0 = ca->mask;
-    ca_update_mask(ca);
-    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
-      ca_detach(ca->mask);
-    }
+  /* The mask, if there is one, is at the view's level (see
+     ca_attach_view_first).  A mask that does not exist yet is not made
+     here: it would be made unattached, and making it reads the parent's
+     mask, which may raise with the view half detached. */
+  if ( ca->mask ) {
+    ca_detach(ca->mask);
   }
 }
 
