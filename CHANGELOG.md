@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.fuse` reads a block's source the first time the block is
+  called and keeps what it made of it, so a later call costs about 3 µs
+  rather than about 60 µs.  A block that assigns to a local outside it, or
+  yields, is still run in its own frame, at about 12 µs a call.
+
 - Change: a `CARecord` orders only by the members its struct names in the
   new `order_by:` option of `CArray.struct`; without it `sort`, `min`,
   `max`, `partition_copy`, their index forms and the comparison operators

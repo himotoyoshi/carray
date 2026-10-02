@@ -256,17 +256,18 @@ compiled path is faster again by a wide margin.
 
 ### The fixed cost of `fuse`
 
-`fuse` reads its block's source on every call, which costs about 60 µs
-whatever the size of the arrays.  `.lazy` has no such cost:
+`fuse` reads a block's source the first time that block is called, which
+takes a fraction of a millisecond, and keeps what it made of it.  Each
+call after that costs about a microsecond more than writing `.lazy`:
 
 | cells | eager | `.lazy` | `fuse` |
 |---:|---:|---:|---:|
-| 16     |   0.9 µs |  1.8 µs | 62.0 µs |
-| 4,096  |   7.8 µs |  5.9 µs | 63.8 µs |
-| 65,536 | 104.6 µs | 66.8 µs | 137.7 µs |
+| 16     |   1.0 µs |  2.1 µs |  3.1 µs |
+| 4,096  |   7.3 µs |  5.9 µs |  7.6 µs |
+| 65,536 | 105.7 µs | 57.6 µs | 59.3 µs |
 
-For small arrays computed over and over in a loop, write `.lazy` on the
-operands, or stay eager.
+A block that assigns to a local outside it, or yields to the method's
+block, has to be run in its own frame, and costs about 12 µs a call.
 
 ### What the compiled path does not take
 

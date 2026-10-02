@@ -11,6 +11,12 @@
 #  shadows back -- `fuse(a, b) { |x, y| ... }` -- which names each of them
 #  twice.  Julia writes `@.` for the same reason and does the same thing to
 #  the expression underneath.
+#
+#  Reading and rewriting a block gives the same text every time it is
+#  called, so it is done once per block -- per place in the source -- and
+#  kept.  What is kept is a lambda that takes the block's free locals as
+#  arguments and is run with the block's `self`; a call only reads the
+#  locals.
 # ---------------------------------------------------------------------------
 
 require "prism"
@@ -26,11 +32,108 @@ class CArray
     end
 
     def self.evaluate (block)
-      result = eval(rewrite(body_source(block)), block.binding,
-                    *block.source_location)
+      result = compiled(block).call(block)
       # An expression that is just an array is that array; the shadow put
       # around it has nothing to fuse.
       result.is_a?(CALazyMarker) ? result.parent : result
+    end
+
+    # -- one compiled form per block --------------------------------------
+
+    # Keyed by the block's instruction sequence, which is the same object
+    # every time the same block is called and a different one for each
+    # block, even two on one line.  Where Ruby has weak keys, a block whose
+    # code is unloaded takes its entry with it.
+    SITES = defined?(ObjectSpace::WeakKeyMap) ? ObjectSpace::WeakKeyMap.new
+                                              : {}.compare_by_identity
+
+    def self.compiled (block)
+      site = RubyVM::InstructionSequence.of(block)
+      return compile(block) unless site
+      SITES[site] || (SITES[site] = compile(block))
+    end
+
+    # The block's free locals, handed to a lambda that was compiled without
+    # them.  `self` is the block's own, so instance variables and methods
+    # are what they were.
+    Compiled = Struct.new(:locals, :lambda) do
+      def call (block)
+        scope = block.binding
+        values = locals.map { |name| scope.local_variable_get(name) }
+        scope.receiver.instance_exec(*values, &lambda)
+      end
+    end
+
+    # A block that needs its own frame -- it assigns to a local outside it,
+    # or yields, or asks for its binding -- is evaluated there every time;
+    # only the rewrite is kept.
+    InFrame = Struct.new(:text, :file, :line) do
+      def call (block)
+        eval(text, block.binding, file, line)
+      end
+    end
+
+    # Calls that mean something only in the frame they are made from.
+    FRAME_BOUND = %i[binding local_variables block_given? __method__ __dir__
+                     eval].freeze
+
+    FRAME_BOUND_NODES = [Prism::YieldNode, Prism::SuperNode,
+                         Prism::ForwardingSuperNode, Prism::ReturnNode,
+                         Prism::BreakNode, Prism::NextNode,
+                         Prism::RedoNode].freeze
+
+    def self.compile (block)
+      body = body_source(block)
+      text = rewrite(body)
+      file, line = block.source_location
+      scope = block.binding
+      locals, needs_frame = free_locals(body, scope.local_variables)
+      return InFrame.new(text, file, line) if needs_frame
+      Compiled.new(locals, compile_lambda(text, locals, scope, file, line))
+    end
+
+    # Read on its own, a body names a local from outside as a call with no
+    # receiver and no arguments, so every one of them is found this way.  A
+    # body that assigns to one has to keep its frame.
+    def self.free_locals (body, outer)
+      reads = []
+      needs_frame = false
+      Prism.parse(body).value.breadth_first_search do |node|
+        case node
+        when Prism::CallNode
+          reads << node.name if node.variable_call? && outer.include?(node.name)
+          needs_frame = true if node.receiver.nil? && FRAME_BOUND.include?(node.name)
+        when *FRAME_BOUND_NODES
+          needs_frame = true
+        else
+          if node.class.name.match?(/\APrism::LocalVariable\w*(Write|Target)Node\z/) &&
+             outer.include?(node.name)
+            needs_frame = true
+          end
+        end
+        false
+      end
+      [reads.uniq, needs_frame]
+    end
+
+    # Constants resolve as they do where the block was written: each module
+    # it sits in is reopened around the lambda, outermost first.  The
+    # refinements active there are activated again.  None of it sees the
+    # frame of the call that compiles it.
+    def self.compile_lambda (text, locals, scope, file, line)
+      nesting = scope.eval("Module.nesting").reverse
+      refinements = scope.eval("Module.used_modules")
+      Thread.current[:__carray_fuse_scope__] = [nesting, refinements]
+      code = refinements.each_index.map { |i|
+        "using Thread.current[:__carray_fuse_scope__][1][#{i}];"
+      }.join + "lambda { |#{locals.join(", ")}| #{text}\n}"
+      (nesting.size - 1).downto(0) do |i|
+        code = "Thread.current[:__carray_fuse_scope__][0][#{i}]" \
+               ".module_eval(#{code.dump}, #{file.dump}, #{line})"
+      end
+      EMPTY_SCOPE.call.eval(code, file, line)
+    ensure
+      Thread.current[:__carray_fuse_scope__] = nil
     end
 
     # -- the block's own text ---------------------------------------------
@@ -121,3 +224,9 @@ class CArray
     end
   end
 end
+
+# A scope with no locals and no refinements in it, for compiling a block's
+# expression where it can neither see nor hold on to the frame of the call
+# that happens to compile it.  Both are true only of the top of a file.
+CArray::FuseSource::EMPTY_SCOPE = -> { binding }
+CArray::FuseSource.private_constant :EMPTY_SCOPE
