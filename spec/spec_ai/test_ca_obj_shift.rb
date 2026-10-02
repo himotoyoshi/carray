@@ -59,4 +59,13 @@ class TestCAShift < Test::Unit::TestCase
     assert_operator ObjectSpace.memsize_of(@sh), :>, 0
   end
 
+  # A shift is a window: the window's accessors answer for it.
+  def test_it_answers_as_a_window
+    g = CArray.int32(3, 4)
+    s = g.shift(1, -2, fill_value: 5)
+    assert_equal [-1, 2], s.start
+    assert_equal [3, 4], s.size0
+    assert_equal 5, s.fill_value
+  end
+
 end

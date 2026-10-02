@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `start`, `size0`, `bounds` and the other methods a `CAShift`
+  inherits from `CAWindow` raised `TypeError`; they now answer for the
+  shift.
+
 - Fix: `sum`, `min`, `max` and the other reductions along an inner axis
   of `CArray.stack` over lazy expressions skip the masked cells of those
   expressions. Previously they could count them, unless the mask had been
