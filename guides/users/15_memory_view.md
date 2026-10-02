@@ -123,10 +123,10 @@ You have three explicit ways to proceed:
 ```ruby
 CArray.wrap_memory_view(m.value)             #  raw value layer, mask ignored
 CArray.wrap_memory_view(m.mask)              #  the mask itself as boolean
-CArray.from_memory_view(m.unmask_copy(-1))   #  filled snapshot
+CArray.wrap_memory_view(m.strip_mask(-1))    #  filled copy
 ```
 
-See [Masks and missing values](05_masks.md) for `value`, `mask`, and `unmask_copy`.
+See [Masks and missing values](05_masks.md) for `value`, `mask`, and `strip_mask`.
 
 ## When a wrap is rejected: diagnosing why
 
@@ -142,7 +142,7 @@ CArray.memory_view_reject_reason(ca)
 CArray.memory_view_reject_reason(ca[ca > 5])
 #  => "this view is CASelect (boolean-mask selection (positions
 #      not expressible as strides)); zero-copy wrap not possible.
-#      Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot."
+#      Export arr.copy for a snapshot."
 ```
 
 When the diagnostic tells you to take a snapshot, the idiom is:
@@ -151,9 +151,9 @@ When the diagnostic tells you to take a snapshot, the idiom is:
 sel  = ca[ca > 5]
 snap = sel.copy                         #  CASelect → entity
 CArray.wrap_memory_view(snap)           #  OK now
-# or, in one step:
-CArray.from_memory_view(sel)            #  gather-copy
 ```
+
+`to_ca` is not a snapshot (it hands the view back as it is), and `from_memory_view` reads only arrays that are exported, so `copy` is the one to use.
 
 ## CArray as producer
 
@@ -161,9 +161,9 @@ The interesting direction in practice is also the easy one: **you pass a CArray 
 
 The strategy depends on the view class on CArray's side:
 
-* **Entities and strided views** (`CArray`, `CAWrap`, `CAScalar`, `CABlock`, `CARefer`, `CAStride`, `CATranspose`, `CAFarray`, `CARepeat`, `CAField`) are exported with the appropriate byte strides — **zero-copy**.
-* **Scatter / window / cast views** (`CASelect`, `CAMapping`, `CAGrid`, `CAShift`, `CAWindow`, `CAFake`, `CAReduce`, ...) cannot be addressed by strides over the parent buffer. CArray transparently *materialises* them into a contiguous staging buffer and exports that. The cost is one O(N) copy per export.
-* **Sub-byte and Ruby-object arrays** (`CABitarray`, `CABitfield`, `CA_OBJECT`) are **rejected** — they have no plain-bytes representation.
+* **Entities and strided views** (`CArray`, `CAWrap`, `CScalar`, `CABlock`, `CARefer`, `CAStride`, `CATranspose`, `CAFarray`, `CARepeat`, `CAField`) are exported with the appropriate byte strides — **zero-copy**.
+* **Faces whose bytes are their values** (`CARecord` as a `T{...}` struct, `CAFixlenString` as `Ns` bytes) are exported the same way.
+* **Everything else is refused**: views whose cells cannot be addressed by strides over one buffer (`CASelect`, `CAGrid`, `CAShift`, `CARoll`, `CAWindow`, `CATile`, `CAStack`, `CAMeld`, ...), lazy expressions, sub-byte and Ruby-object arrays, and Faces whose storage means nothing without the Face (`CATime`, `CATimedelta`, `CACategorical`, `CAConstString`). Nothing is materialised behind your back: hand the consumer a `copy`, or for one of those Faces its storage (`.ticks`, `.codes`).
 
 For the full export matrix (which obj_type uses which strategy, and the exact PEP 3118 format strings emitted), see `MemoryView.md` §6 and §7.
 
