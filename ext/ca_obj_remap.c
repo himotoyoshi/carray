@@ -217,9 +217,7 @@ ca_remap_func_allocate (void *ap)
 static void
 ca_remap_func_attach (void *ap)
 {
-  CARemap *ca = (CARemap *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
-  ca_remap_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  ca_axis_view_attach_owned(ap);
 }
 
 static void

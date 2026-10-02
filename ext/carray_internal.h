@@ -167,7 +167,9 @@ int     ca_parent_lends_no_memory (void *ap);
    xfer_stride answers a whole-view request without going cell by cell.
    ca_axis_view_attach_owned / ca_axis_view_sync_owned are the attach and
    sync of such a view over a parent with no memory to lend: the view owns
-   its buffer and the parent is never attached. */
+   its buffer and the parent is never attached.  attach_owned also serves
+   any view that owns its buffer and fills it through its own transfers
+   (CARemap, CAStack, CAMeld): it publishes the buffer only once filled. */
 
 typedef void (*ca_axis_view_fast_t) (void *ap, char *data, int dir);
 

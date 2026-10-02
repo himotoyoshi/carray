@@ -1030,18 +1030,20 @@ ca_axis_view_xfer_all (void *ap, ca_axis_view_fast_t fast, int region_ok,
   }
 }
 
-/* The attach of such a view when its parent has no memory to lend: the
-   view owns its buffer, filled through its xfer_all, and the parent is
-   never attached.  The buffer is published only once filled -- a view with
-   a live ptr makes the per-cell dispatchers bypass the transfer slots --
-   and a raise while filling frees it. */
+/* The attach of a view that owns its buffer and fills it through its own
+   transfers (a descriptor view whose parent has no memory to lend, CARemap,
+   CAStack, CAMeld).  The buffer is published only once filled -- a view
+   with a live ptr makes the per-cell dispatchers bypass the transfer slots,
+   and for CA_OBJECT the garbage cells of an unfilled buffer would be marked
+   -- and a raise while filling frees it.  The fill goes through ca_xfer_all,
+   which holds the object cells against a collection while the transfers
+   call Ruby. */
 
 static VALUE
 ca_axis_view_fill_owned (VALUE arg)
 {
   void **args = (void **) arg;
-  CArray *ca = (CArray *) args[0];
-  ca_func[ca->obj_type].xfer_all(ca, args[1], CA_XFER_GET);
+  ca_xfer_all((CArray *) args[0], args[1], CA_XFER_GET);
   return Qnil;
 }
 
