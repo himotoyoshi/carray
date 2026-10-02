@@ -15,6 +15,71 @@ it meant; the eager and lazy paths sit side by side.
 
 ---
 
+## Where lazy sits in CArray
+
+### A view that changes values
+
+CArray's views come in two kinds:
+
+| kind | what it changes | examples |
+|---|---|---|
+| positional | which cell is read | `[]`, `transpose`, `reshape`, `shift`, `window`, selection |
+| value | what the cell read becomes | `fake` (a cast on read), the lazy views |
+
+A lazy view is the general form of the second kind.  `fake` changes a
+value's type as it is read; a lazy view does the same with arithmetic,
+mathematical functions and comparisons.  Neither holds data: each makes its
+cells from its parent when they are read, and everything that reads a view
+reads these the same way.
+
+So lazy is not a separate engine or mode.  It is the view algebra carried
+from positions over to values.  The two kinds compose on the operands: a
+positional view of a marked array stays marked (§4), so
+`a.lazy.shift(1) + a.lazy` is still one expression.  Choose positions on
+the operands — a positional view taken of an expression already built is a
+view of an array, and the next operation on it is computed eagerly.
+
+### The same meaning as eager, computed at a different time
+
+- **Eager is the default.**  `a + b` computes now; only `.lazy` and `fuse`
+  build an expression instead.
+- **The answer is the same.**  A lazy expression computes exactly what the
+  eager one would; where the two differ, that is a defect.
+- **So the choice is about speed only** — whether to make an array for
+  each step or to make one pass.  §6 is the guide.
+
+### The one array that is an answer not yet computed
+
+Having no data of its own gives a lazy view properties no other array has:
+
+- it is **read-only** — there is nowhere for a write to land
+- **`to_ca` does work here and nowhere else.**  On any other array `to_ca`
+  returns the array itself; a lazy view has no cells until they are
+  computed, so `to_ca` computes them into a new array
+- it **cannot be exported through MemoryView** — there is no buffer to hand
+  over yet
+
+### An expression another evaluator can compute
+
+A lazy expression is a closed graph with a data type on every node, so it
+is the one form in which CArray can hand *what to compute* to something
+else as plain data.
+
+- CArray decides what the answer is: the operations, the mask rules, the
+  types.
+- A lazy expression carries that, not yet computed.
+- An evaluator registered with CArray may compute it another way.  The
+  `carray-jit` gem registers one that compiles the expression; without it,
+  CArray walks the expression itself, and the answer is the same either way.
+
+CArray keeps the decision: it asks the evaluator only for expressions large
+enough to be worth it, the evaluator may decline, and one that raises is
+dropped and the walk takes over.  It is asked when an expression is
+computed into an array — `to_ca`, `copy`, or `out[] = expr` — while a
+reduction over an expression still walks it.
+
+---
+
 ## 1. `.lazy` — marking an array
 
 ```ruby
