@@ -66,7 +66,7 @@ class CArray
       t = transpose(*order)
     end
     inner = t.shape[-1]
-    outer_n = t.elements / inner  # 1 when ndim == 1
+    outer_n = t.shape[0...-1].inject(1, :*)  # 1 when ndim == 1
     flat = t.reshape(outer_n, inner)
 
     strings = Array.new(outer_n) { |i| flat[i, nil].to_a.join(sep_str) }
