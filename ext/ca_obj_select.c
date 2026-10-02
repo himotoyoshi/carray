@@ -93,17 +93,20 @@ ca_select_snapshot_masked (VALUE arg)
 {
   CArray **pair = (CArray **) arg;
   CArray *select = pair[0], *snap = pair[1];
-  boolean8_t *p, *q, *m;
+  boolean8_t *q, *m;
   ca_size_t i;
-  ca_attach(select);   /* window: nothing raises inside */
+  volatile VALUE holder = 0;
+  ca_copy_data(select, snap->ptr);
+  ca_update_mask(select);
+  m = ALLOCV_N(boolean8_t, holder, select->elements);
+  ca_copy_data(select->mask, (char *) m);
   q = (boolean8_t *) snap->ptr;
-  p = (boolean8_t *) select->ptr;
-  m = (boolean8_t *) select->mask->ptr;
   for (i = 0; i < select->elements; i++) {
-    *q = ( *m ) ? 0 : *p;
-    q++; p++; m++;
+    if ( m[i] ) {
+      q[i] = 0;
+    }
   }
-  ca_detach(select);
+  ALLOCV_END(holder);
   return Qnil;
 }
 

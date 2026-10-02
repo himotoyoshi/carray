@@ -340,4 +340,41 @@ class TestCAObjectViewRegion < Test::Unit::TestCase
     assert_equal ref[rows, cols].sum, lazy[rows, cols].sum
     assert_equal ref[rows, cols].sum(axis: 1).to_a, lazy[rows, cols].sum(axis: 1).to_a
   end
+
+  # --- filling the masked cells ------------------------------------------
+
+  # Counts whole reads of its values; its mask comes from a callback.
+  class MaskedCounter < CAObject
+    attr_accessor :reads
+    def initialize(src, bits)
+      @src   = src
+      @bits  = bits
+      @reads = 0
+      super(CA_FLOAT64, src.shape)
+      self.mask = 0
+    end
+    def create_mask ; end
+    def copy_data(d)
+      @reads += 1
+      d[] = @src
+    end
+    def fetch_addr(a)      = @src[a]
+    def mask_copy_data(d)  = d[] = @bits
+  end
+
+  # strip_mask(fill) reads the values once; the mask is read on its own.
+  def test_strip_mask_with_a_fill_reads_the_values_once
+    src = MaskedCounter.new(CArray.float64(6).seq, CA_BOOLEAN([0, 0, 1, 0, 0, 1]))
+    src.reads = 0
+    assert_equal [0.0, 1.0, 9.0, 3.0, 4.0, 9.0], src.strip_mask(9.0).to_a
+    assert_equal 1, src.reads
+  end
+
+  def test_is_masked_reads_only_the_mask
+    src = MaskedCounter.new(CArray.float64(6).seq, CA_BOOLEAN([0, 0, 1, 0, 0, 1]))
+    src.reads = 0
+    assert_equal [false, false, true, false, false, true], src.is_masked.to_a
+    assert_equal [true, true, false, true, true, false], src.is_not_masked.to_a
+    assert_equal 0, src.reads
+  end
 end

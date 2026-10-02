@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `strip_mask(fill)` on an array that computes its values -- a lazy
+  expression or a `CAObject` -- reads those values once. Previously it
+  read them a second time to find the masked cells.
+
 - Change: `CArray.fuse` reads a block's source the first time the block is
   called and keeps what it made of it, so a later call costs about 3 µs
   rather than about 60 µs.  A block that assigns to a local outside it, or
