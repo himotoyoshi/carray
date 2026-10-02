@@ -36,6 +36,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `join(axis:)` along an axis of length zero gives one `""` for each
+  cell of the other axes; it raised `ZeroDivisionError`.
 - Fix: the mask of a lazy expression (`a.lazy + b`, `a.lazy.gt(3)`,
   `a.lazy.fma(b, c)`, the boolean `&` and `|`) follows its operands on
   every read, as its values do. Before, it was fixed when first read, so
