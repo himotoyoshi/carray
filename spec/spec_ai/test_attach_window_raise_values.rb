@@ -169,4 +169,48 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
     a.fail_sync = false
   end
 
+  # --- a mask made inside a window from a parent that cannot answer ------
+
+  # A CAObject that has no mask until one is made, and whose mask reads
+  # fail until told otherwise.
+  class LateMask < CAObject
+    attr_accessor :fail_mask
+    def initialize (n)
+      @src  = CArray.int32(n).seq
+      @bits = CArray.boolean(n) { 0 }
+      super(CA_INT32, [n])
+    end
+    def create_mask ; end
+    def copy_data (d)     ; d[] = @src ; end
+    def sync_data (d)     ; @src[] = d ; end
+    def fetch_addr (a)    ; @src[a] ; end
+    def store_addr (a, v) ; @src[a] = v ; end
+    def mask_copy_data (d)
+      raise "mask copy failed" if @fail_mask
+      d[] = @bits
+    end
+    def mask_sync_data (d) ; @bits[] = d ; end
+  end
+
+  # The mask a store makes in the window is taken off again when its read
+  # fails, so the window closes with that error, whether the parent
+  # recovers or keeps failing.
+  [true, false].each do |keeps_failing|
+    define_method("test_failed_mask_inside_a_window_closes_it_#{keeps_failing ? "while_failing" : "after_one_failure"}") do
+      src  = LateMask.new(8)
+      view = src[1..4]
+      assert_raise_message("mask copy failed") do
+        view.map! do |x|
+          src.fail_mask = true
+          view[0] = UNDEF
+          x
+        end
+      end
+      src.fail_mask = false unless keeps_failing
+      assert_false view.attached?
+      src.fail_mask = false
+      view.map! { |x| x * 10 }
+      assert_equal [0, 10, 20, 30, 40, 5, 6, 7], src.to_a
+    end
+  end
 end

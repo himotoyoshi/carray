@@ -402,6 +402,13 @@ ca_update_mask (void *ap)
   }
 }
 
+static VALUE
+ca_create_mask_attach (VALUE arg)
+{
+  ca_attach((CArray *) arg);   /* window: released by the view's detach */
+  return Qnil;
+}
+
 void
 ca_create_mask (void *ap)
 {
@@ -422,8 +429,18 @@ ca_create_mask (void *ap)
     ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
     if ( ca_is_view(ca) ) {
       if ( CAVIEW(ca)->attach ) {
-        /* the new mask joins its view's level */
-        ca_attach(ca->mask);   /* window: released by the view's detach */
+        /* The new mask joins its view's level.  Its attach reads the
+           parent's mask, which can raise (a Ruby-backed parent); the mask
+           then comes off again, since the view's sync and detach would
+           find it attached to nothing. */
+        int tag = 0;
+        rb_protect(ca_create_mask_attach, (VALUE) ca->mask, &tag);
+        if ( tag ) {
+          CArray *mask = ca->mask;
+          ca->mask = NULL;
+          ca_free(mask);
+          rb_jump_tag(tag);
+        }
         if ( ca_is_view(ca->mask) ) {
           CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
         }
