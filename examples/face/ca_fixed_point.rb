@@ -60,7 +60,7 @@ class CAFixedPoint < CAObject
     @frac_digits = src.frac_digits
   end
 
-  def storage_to_scalar(raw)
+  def storage_to_element(raw)
     int_val = raw.is_a?(String) ? raw.unpack1('q') : raw
     Scalar.new(int_val, @scale)
   end

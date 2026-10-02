@@ -110,12 +110,12 @@ class CArray::Inspector  # :nodoc:
   end
 
   def get_formatter
-    # A Face that defines storage_to_scalar decodes each cell into a surface
+    # A Face that defines storage_to_element decodes each cell into a surface
     # value (CATime::Element, a String, a category label, ...) that has nothing
     # to do with the storage data_type, so the formatter must follow the decoded
     # value, not the storage.  Faces without the hook (CAString) hand back the
     # stored value itself and fall through to the storage formatters below.
-    if @carray.face? and @carray.respond_to?(:storage_to_scalar)
+    if @carray.face? and @carray.respond_to?(:storage_to_element)
       return lambda { |x| x.inspect }
     end
     case @carray.data_type

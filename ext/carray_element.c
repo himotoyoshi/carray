@@ -394,7 +394,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       }
     }
 
-    CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+    CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
     return out;
   }
   else {

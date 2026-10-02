@@ -93,8 +93,8 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
     }
   }
 
-  /* Face scalar decode (invoked if the subclass defines storage_to_scalar(raw)) */
-  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+  /* Face scalar decode (invoked if the subclass defines storage_to_element(raw)) */
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false, not Integer 0/1.  Bulk paths
      (to_a / cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
@@ -179,7 +179,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   }
 
   /* Face scalar decode */
-  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false (see rb_ca_fetch_index). */
   if ( ca->data_type == CA_BOOLEAN &&
@@ -1452,7 +1452,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
      of letting the storage cast truncate it, and the bulk path must not be
      the looser door.
    - an Array is mapped structure-preserving (leaves converted),
-   - a scalar goes through the write hook (ca_face_scalar_to_storage), which
+   - a scalar goes through the write hook (ca_face_element_to_storage), which
      leaves a bare Integer / String unchanged.
 
    Idempotent: an already-converted Integer passes through, so re-running on
@@ -1464,7 +1464,7 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     CArray *cval;
     GetCArray(val, cval);
     /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
-       the scalar path (ca_face_scalar_to_storage) for a bulk CArray source.
+       the scalar path (ca_face_element_to_storage) for a bulk CArray source.
        Guarded on self having to_comparable so a Face without a reconcile
        algebra (e.g. a fixlen-storage Face, whose same-storage store already
        takes the storage xfer branch) is left to the existing store path. */
@@ -1494,7 +1494,7 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     }
     return out;
   }
-  return ca_face_scalar_to_storage(self, ca, val);
+  return ca_face_element_to_storage(self, ca, val);
 }
 
 static VALUE

@@ -81,7 +81,7 @@ class TestFaceDoubleLift < Test::Unit::TestCase
       def initialize (parent)
         super(CA_FIXLEN, parent.dim, bytes: 8, parent: parent, face: true)
       end
-      def storage_to_scalar (raw) ; raw.unpack1("q") ; end
+      def storage_to_element (raw) ; raw.unpack1("q") ; end
     end.new(td)
     v = tag[1..2]
     assert v.face?,               "top Tag Face lost"

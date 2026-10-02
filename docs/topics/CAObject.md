@@ -449,7 +449,7 @@ single antecedent.
 identity layered on top of a storage CArray. The `face: true` option
 sets the `CA_FLAG_IS_FACE` bit, which makes the instance participate
 in all of CArray's Face-aware machinery (view-creating methods
-preserve the class, `storage_to_scalar` is consulted on scalar return,
+preserve the class, `storage_to_element` is consulted on scalar return,
 `kernel_iterator` strips at entry, etc.). See
 [`CAFace.md`](CAFace.md) for the full Face substrate.
 
@@ -461,8 +461,8 @@ callbacks entirely. The storage lives in the parent CArray, so
 are **all bypassed**; the `ca_face_*` thin-forward helpers in
 `ext/ca_obj_face.c` route every storage op directly to the parent.
 A complete Face subclass therefore needs only `initialize`,
-optionally `copy_state`, optionally `storage_to_scalar` /
-`scalar_to_storage` (scalar read/write conversion), plus whatever
+optionally `copy_state`, optionally `storage_to_element` /
+`element_to_storage` (scalar read/write conversion), plus whatever
 domain methods you want — zero storage-callback boilerplate. See
 `examples/face/ca_circular.rb` and `examples/face/ca_fixed_point.rb`:
 both define a fully functional Face without a single `fetch_*` /

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for whoever writes a Face: the read and write hooks are renamed
+  `storage_to_element` and `element_to_storage` (they were
+  `storage_to_scalar` and `scalar_to_storage`), and so are the C
+  registration functions and macros built on them
+  (`ca_face_register_storage_to_element`, ...).  The old names are gone;
+  rename the methods a Face defines.
+
 - Change: `dup` and `clone` of a `CAWrap`, including a subclass made with
   `wrap_memory_view`, return a plain `CArray`, as `copy` does.  They
   returned an array that owned its memory but kept the wrap's class, so a

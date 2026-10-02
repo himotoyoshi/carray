@@ -406,7 +406,7 @@ module MkKernel
     #            only, output (an axis-local index) needs no re-lift.
     # :relift -- value-returning kernels (min/max): descend, then re-lift the
     #            output back into the Face -- a full-reduction scalar via the
-    #            registered storage_to_scalar hook, a per-axis CArray via
+    #            registered storage_to_element hook, a per-axis CArray via
     #            rb_ca_face_template (carries the subclass tail, e.g. unit).
     raise "reduce: unknown face_gate #{face_gate} (expected nil, :strip, or :relift)" \
       unless [nil, :strip, :relift].include?(face_gate)
@@ -4697,7 +4697,7 @@ module MkKernel
   end
 
   # Re-lift a value-returning reduction result back into the Face captured by
-  # emit_reduce_face_gate.  Full-reduction scalar -> storage_to_scalar hook;
+  # emit_reduce_face_gate.  Full-reduction scalar -> storage_to_element hook;
   # per-axis CArray -> rb_ca_face_template (carries the subclass tail).
   # All-masked full reductions leave CA_UNDEF untouched.
   def self.emit_reduce_face_relift(io)
@@ -4722,7 +4722,7 @@ module MkKernel
     io.puts "      /* full reduction: decode the scalar via the registered hook. */"
     io.puts "      CArray *_fca;"
     io.puts "      GetCArray(_reduce_face, _fca);"
-    io.puts "      CA_FACE_STORAGE_TO_SCALAR_IF_FACE(result, _reduce_face, _fca);"
+    io.puts "      CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(result, _reduce_face, _fca);"
     io.puts "    }"
     io.puts "  }"
   end
@@ -6871,7 +6871,7 @@ MkKernel.reduce :min,
   fallback:        :raise,
   mask_policy:     :min_count,   # Phase E
   # An ORDERABLE Face descends to numeric storage, then the result is
-  # re-lifted into the Face (scalar via storage_to_scalar, per-axis via
+  # re-lifted into the Face (scalar via storage_to_element, per-axis via
   # rb_ca_face_template).  This replaces per-Face lib overrides.
   face_gate:       :relift,
   public_method: true          # Phase E: rebind "min" -> rb_ca_min_ki

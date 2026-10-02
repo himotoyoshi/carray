@@ -243,7 +243,7 @@ the ~100× overhead of a Ruby-callback per cell.  From this point
 on, the author only writes what is *new* about their type: domain
 methods (`#convert_to`, `#total`, …), operator overrides where the
 semantics differ from raw storage arithmetic, and optional
-`copy_state` / `storage_to_scalar` hooks.
+`copy_state` / `storage_to_element` hooks.
 
 This is what makes external-gem Faces (`carray-text`,
 `carray-categorical`, `carray-money`, `carray-sparse`, …) tractable
@@ -452,7 +452,7 @@ correctly.
 ### 4.6 Ruby surface
 
 The class itself is now defined. Ruby-side method additions (`unit`,
-operator overrides, `storage_to_scalar` for scalar fetch, helpers like
+operator overrides, `storage_to_element` for scalar fetch, helpers like
 `CArray.time_series`) live in `lib/carray/time.rb`. They are
 ordinary Ruby methods on the registered class; nothing about the
 Ruby surface is special-cased for Face.
@@ -688,25 +688,25 @@ only three things subclass authors need to be aware of:
 - New view-creating methods need one line of `CA_FACE_LIFT_IF_FACE`
   at the return path.
 
-### 6.1 Scalar return — `storage_to_scalar`
+### 6.1 Element return — `storage_to_element`
 
 Per-cell access (`ca[i]`, `ca.fetch_index(...)`, `ca.to_a[k]`, …)
 returns a Ruby scalar, not a CArray. The lift mechanism cannot apply
 here; instead a parallel hook reads the Face's storage value and
 hands it to a wrapper. The hook prefers a C function pointer
-registered via `ca_face_register_storage_to_scalar` and falls back to a
-Ruby method named `storage_to_scalar` if none is registered:
+registered via `ca_face_register_storage_to_element` and falls back to a
+Ruby method named `storage_to_element` if none is registered:
 
 ```c
-#define CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca) do {                       \
+#define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                       \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                   \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                          \
-    ca_face_storage_to_scalar_fn _fn = ca_face_storage_to_scalar_table[(ca)->obj_type]; \
+    ca_face_storage_to_element_fn _fn = ca_face_storage_to_element_table[(ca)->obj_type]; \
     if ( _fn != NULL ) {                                                      \
       (obj) = _fn((self), (obj));                /* C fast path */             \
     } else {                                                                  \
       static ID id_w = 0;                                                     \
-      if ( id_w == 0 ) id_w = rb_intern("storage_to_scalar");                    \
+      if ( id_w == 0 ) id_w = rb_intern("storage_to_element");                    \
       if ( rb_respond_to((self), id_w) )                                      \
         (obj) = rb_funcall((self), id_w, 1, (obj));                           \
     }                                                                         \
@@ -717,17 +717,17 @@ Ruby method named `storage_to_scalar` if none is registered:
 In-core Faces register a C function at `Init_` time:
 
 ```c
-ca_face_register_storage_to_scalar(CA_OBJ_TIME,
-                                rb_ca_time_storage_to_scalar);
+ca_face_register_storage_to_element(CA_OBJ_TIME,
+                                rb_ca_time_storage_to_element);
 ```
 
-The Ruby class still defines `storage_to_scalar` (via `rb_define_method`
+The Ruby class still defines `storage_to_element` (via `rb_define_method`
 on the C function), so Ruby callers can use
-`dt.storage_to_scalar(raw)` directly — the Ruby method is a thin
+`dt.storage_to_element(raw)` directly — the Ruby method is a thin
 ergonomic wrapper around the same C function. The "C-as-core,
 Ruby-as-thin-surface" direction is intentional: external-gem Faces
-that omit `ca_face_register_storage_to_scalar` still work via the
-`rb_funcall` fallback by defining `def storage_to_scalar` in Ruby.
+that omit `ca_face_register_storage_to_element` still work via the
+`rb_funcall` fallback by defining `def storage_to_element` in Ruby.
 
 For NonNumericFace (FIXLEN surface), the per-cell fetch delivers an
 8-byte raw `String` to the wrapper; the wrapper decodes it as the
@@ -735,7 +735,7 @@ parent storage type:
 
 ```c
 static VALUE
-rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_time_storage_to_element (VALUE self, VALUE raw)
 {
   CATime *ca; CATimeElement *s;
   int64_t epoch;
@@ -765,9 +765,9 @@ The macro is a no-op for non-Face arrays, for `UNDEF` (masked
 elements), and for sub-array fetches (those go through the lift
 macro).
 
-Naming: `storage_to_scalar` is a decode — it copies the storage value
+Naming: `storage_to_element` is a decode — it copies the storage value
 out and constructs a fresh surface value object (not a zero-copy wrap of
-the parent bytes). Its write counterpart is `scalar_to_storage`
+the parent bytes). Its write counterpart is `element_to_storage`
 (§6.2); the two form a matched directional pair.
 
 **Bulk paths take the same route.** Anything that hands a Face's cells
@@ -796,14 +796,14 @@ The storage stays reachable, deliberately and explicitly, through
 `.parent` — `td.parent.to_a` gives the serials, and it keeps the fast
 path. Reaching the storage should be something the caller wrote down.
 
-### 6.2 Scalar store — `scalar_to_storage`
+### 6.2 Element store — `element_to_storage`
 
 The read hook has a write counterpart: storing a surface value object
 into a Face cell (`dt[i] = other_instant`) must convert *back* to the
 Face's storage domain, or the raw store would ignore the unit. The
-hook is the mirror of `storage_to_scalar`: it prefers a C function
-registered via `ca_face_register_scalar_to_storage` and falls back to
-a Ruby method `scalar_to_storage(surface)`.
+hook is the mirror of `storage_to_element`: it prefers a C function
+registered via `ca_face_register_element_to_storage` and falls back to
+a Ruby method `element_to_storage(surface)`.
 
 Unlike the read hook, the write hook is not placed at each return
 site. It fires in one place, `rb_ca_obj2ptr` — the single funnel every
@@ -811,12 +811,12 @@ surface-value store passes through — just before the storage cast:
 
 ```c
 if ( ca_face_safe_check(ca) ) {
-  obj = ca_face_scalar_to_storage(self, ca, obj);   /* surface -> storage-domain */
+  obj = ca_face_element_to_storage(self, ca, obj);   /* surface -> storage-domain */
   convert_type = ca_storage_type_of(ca);
 }
 ```
 
-`ca_face_scalar_to_storage` returns `obj` unchanged for a non-Face `ca`
+`ca_face_element_to_storage` returns `obj` unchanged for a non-Face `ca`
 (so the non-Face store path is untouched), consults the C table first,
 then the Ruby fallback. The contract of the hook:
 
@@ -883,7 +883,7 @@ Every gap found so far is one of these. The middle one is the dangerous one.
 | family | covered by the flags? | your part |
 |---|---|---|
 | view-creating (`[]`, `reshape`, `sort`, `flip`, …) | yes (lift macro, §6) | nothing |
-| scalar read / store | — | `storage_to_scalar` / `scalar_to_storage` (6.1 / 6.2) |
+| scalar read / store | — | `storage_to_element` / `element_to_storage` (6.1 / 6.2) |
 | `min` / `max` / sort / partition / rank | ORDERABLE | nothing (`minmax` has no core gate: re-lift the pair in Ruby) |
 | search / `linear_section` / `count(v)` | ORDERABLE + (COMPARABLE or `to_comparable`) | the one `to_comparable` |
 | value-hash discovery (`unique`, `value_counts`, `mode`, `is_in`, set operations, `locate_addr`, `categorize`) | ORDERABLE + same | nothing |
@@ -987,35 +987,35 @@ CArray *ca_strip_face       (CArray *src);
 
 ```c
 CA_FACE_LIFT_IF_FACE(obj, self, ca)
-CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca)
+CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca)
 ```
 
 The convention is: place the macro just before the `return` of a
-view-creating method (LIFT) or a scalar-fetch method (STORAGE_TO_SCALAR).
+view-creating method (LIFT) or a scalar-fetch method (STORAGE_TO_ELEMENT).
 `obj` is the result being returned; the macro mutates it in place if
 the receiver is a Face.
 
-The write counterpart, `scalar_to_storage` (§6.2), is *not* a
+The write counterpart, `element_to_storage` (§6.2), is *not* a
 return-path macro. It fires inside `rb_ca_obj2ptr` (the single
 surface-value store funnel), so a Face's store conversion applies to
 every store path without the author placing a macro at each call site.
 
-### 7.3a Face-local dispatch tables for `storage_to_scalar` / `scalar_to_storage`
+### 7.3a Face-local dispatch tables for `storage_to_element` / `element_to_storage`
 
 ```c
 /* read: storage -> surface scalar */
-typedef VALUE (*ca_face_storage_to_scalar_fn)(VALUE self, VALUE raw);
-extern ca_face_storage_to_scalar_fn ca_face_storage_to_scalar_table[CA_OBJ_TYPE_MAX];
+typedef VALUE (*ca_face_storage_to_element_fn)(VALUE self, VALUE raw);
+extern ca_face_storage_to_element_fn ca_face_storage_to_element_table[CA_OBJ_TYPE_MAX];
 
-void ca_face_register_storage_to_scalar (int obj_type,
-                                      ca_face_storage_to_scalar_fn fn);
+void ca_face_register_storage_to_element (int obj_type,
+                                      ca_face_storage_to_element_fn fn);
 
 /* write: surface scalar -> storage */
-typedef VALUE (*ca_face_scalar_to_storage_fn)(VALUE self, VALUE surface);
-extern ca_face_scalar_to_storage_fn ca_face_scalar_to_storage_table[CA_OBJ_TYPE_MAX];
+typedef VALUE (*ca_face_element_to_storage_fn)(VALUE self, VALUE surface);
+extern ca_face_element_to_storage_fn ca_face_element_to_storage_table[CA_OBJ_TYPE_MAX];
 
-void ca_face_register_scalar_to_storage (int obj_type,
-                                      ca_face_scalar_to_storage_fn fn);
+void ca_face_register_element_to_storage (int obj_type,
+                                      ca_face_element_to_storage_fn fn);
 ```
 
 A Face subclass that wants the per-cell scalar fetch/store hot path to
@@ -1024,7 +1024,7 @@ skip `rb_funcall` registers its C function in the matching table at
 *not* the same as `ca_operation_function_t`, so extending them does not
 require modifying the global op table or any other subsystem.
 Unregistered obj_types fall through to `rb_funcall` of the Ruby
-`storage_to_scalar` / `scalar_to_storage` method (= the
+`storage_to_element` / `element_to_storage` method (= the
 external-gem-friendly fallback). Registering neither is valid too: a
 Face whose surface value already equals its storage value (no unit or
 encoding to apply) leaves both tables NULL and stores/reads raw.
@@ -1069,7 +1069,7 @@ allowed to assume them.
    search kernels run on storage; the Face-or-not decision is the
    caller's (does the result get re-lifted?), not the kernel's.
 6. **Both legs.** Face is a two-leg mask: reads return the parent's
-   value (optionally re-wrapped by `storage_to_scalar` for scalars and
+   value (optionally re-wrapped by `storage_to_element` for scalars and
    by `ca_face_lift` for view-returning paths); writes accept Ruby
    values (optionally translated by an explicit setter the subclass
    defines) and store them through to the parent. Read-only Face is

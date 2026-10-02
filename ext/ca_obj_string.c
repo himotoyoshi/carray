@@ -11,7 +11,7 @@
 
   Surface data_type is CA_OBJECT (== storage): unlike the NonNumeric Faces
   (CATime etc.) there is no CA_FIXLEN gate.  Per-cell fetch returns
-  the stored String VALUE directly (no storage_to_scalar decode).  Numeric
+  the stored String VALUE directly (no storage_to_element decode).  Numeric
   dispatch lands on the :object kernels, so String-meaningful ops (+, sort
   via <=>) work and nonsensical ones raise at the Ruby method call.
 

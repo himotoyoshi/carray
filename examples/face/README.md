@@ -170,9 +170,9 @@ Both kinds:
 
 - expose semantic state with `attr_reader`
 - override `copy_state(src)` so ivars carry, and state survives a sliced view
-- override `storage_to_scalar(raw)` to control what `cc[i]` wraps into
+- override `storage_to_element(raw)` to control what `cc[i]` wraps into
   (optional; for a hot path you want in C there is also
-  `ca_face_register_storage_to_scalar`)
+  `ca_face_register_storage_to_element`)
 - no value conversion happens — Face mode bypasses the callbacks
 - add whatever semantic methods you like
 

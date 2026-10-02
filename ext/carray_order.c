@@ -157,7 +157,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   ci = ca_wrap_readonly(ridx, CA_SIZE);
 
   /* The fill args arrive as surface values.  rb_ca_obj2ptr owns the
-     surface->storage conversion: for a Face self it fires the scalar_to_storage
+     surface->storage conversion: for a Face self it fires the element_to_storage
      write hook (a datetime scalar / Time is reconciled to the Face's unit),
      for a plain array it writes the storage bytes directly. */
   lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */

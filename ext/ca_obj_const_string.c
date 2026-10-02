@@ -26,7 +26,7 @@
   bytes once in logical order, without offset-sharing dedup.
 
   Sibling of ca_obj_record.c (Face + VALUE tail + custom dmark) and
-  ca_obj_time.c (int64 Face + storage_to_scalar fast path).
+  ca_obj_time.c (int64 Face + storage_to_element fast path).
 
 --------------------------------------------------------------------------- */
 
@@ -255,12 +255,12 @@ ca_const_string_decode (CAConstString *ca, int64_t start, int64_t end)
   return rb_str_freeze(s);
 }
 
-/* storage_to_scalar in C (= skip rb_funcall on the per-cell fetch hot
+/* storage_to_element in C (= skip rb_funcall on the per-cell fetch hot
    path).  Since the Face surface is CA_FIXLEN (16 bytes), fetch delivers a
    16-byte raw String = the (start,end) int64 pair.  Decode the buffer slice
    → frozen Ruby String (plain frozen String, no Scalar wrapper). */
 static VALUE
-rb_ca_const_string_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_const_string_storage_to_element (VALUE self, VALUE raw)
 {
   CAConstString *ca;
   int64_t pair[2];
@@ -269,7 +269,7 @@ rb_ca_const_string_storage_to_scalar (VALUE self, VALUE raw)
 
   if ( TYPE(raw) != T_STRING || RSTRING_LEN(raw) != (long) sizeof(pair) ) {
     rb_raise(rb_eArgError,
-             "CAConstString#storage_to_scalar: expected a %lu-byte (start,end) cell",
+             "CAConstString#storage_to_element: expected a %lu-byte (start,end) cell",
              (unsigned long) sizeof(pair));
   }
   memcpy(pair, RSTRING_PTR(raw), sizeof(pair));
@@ -1018,8 +1018,8 @@ Init_ca_obj_const_string (void)
   rb_define_singleton_method(rb_cCAConstString, "__build__", rb_ca_const_string_build, 2);
   rb_define_method(rb_cCAConstString, "encoding", rb_ca_const_string_encoding, 0);
   rb_define_method(rb_cCAConstString, "buffer",   rb_ca_const_string_buffer, 0);
-  rb_define_method(rb_cCAConstString, "storage_to_scalar",
-                               rb_ca_const_string_storage_to_scalar, 1);
+  rb_define_method(rb_cCAConstString, "storage_to_element",
+                               rb_ca_const_string_storage_to_element, 1);
 
   /* copy = compacting deep copy; to_ca is the same descent point. */
   rb_define_method(rb_cCAConstString, "copy",  rb_ca_const_string_copy, 0);
@@ -1048,7 +1048,7 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
-  ca_face_register_storage_to_scalar(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_element);
 
   /* F.S1: CAConstString's `buffer` field is per-parent (= each CAConstString holds its
      own frozen byte String; cell offsets index into THIS instance's

@@ -3,7 +3,7 @@
 # Inspecting a Face array.
 #
 # The formatter has to follow what a cell decodes to, not the storage
-# data_type.  A Face with a storage_to_scalar hook hands back a surface value
+# data_type.  A Face with a storage_to_element hook hands back a surface value
 # -- an Element, a String, a category label -- which the storage formatter
 # cannot render: an int64-backed CATimedelta used to raise TypeError out of
 # the "%i" formatter.  Faces without the hook (CAString) store their surface

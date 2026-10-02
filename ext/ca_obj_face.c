@@ -19,8 +19,8 @@
     ca_face_lift           re-wrap a view as a Face when the source was
     ca_strip_face          walk down through Face parents to storage
     CAFace abstract class  organisational relay in the class hierarchy
-    storage_to_scalar /    per-obj_type dispatch for element decode (read)
-      scalar_to_storage    and encode (write) between surface and storage
+    storage_to_element /    per-obj_type dispatch for element decode (read)
+      element_to_storage    and encode (write) between surface and storage
     state-compatible /     homogeneity + portability registries used by
       state-portable       promote_list / CAStack / MV producer
 
@@ -419,37 +419,37 @@ rb_ca_face_s_allocate_forbidden (VALUE klass)
            "(CATime / CATimedelta / ...)");
 }
 
-/* Face-local C dispatch table for storage_to_scalar (the read/decode
+/* Face-local C dispatch table for storage_to_element (the read/decode
    direction).  Sized to CA_OBJ_TYPE_MAX so any registered obj_type can be
    indexed directly; file-scope zero-init leaves unregistered slots NULL. */
-ca_face_storage_to_scalar_fn ca_face_storage_to_scalar_table[CA_OBJ_TYPE_MAX];
+ca_face_storage_to_element_fn ca_face_storage_to_element_table[CA_OBJ_TYPE_MAX];
 
 void
-ca_face_register_storage_to_scalar (int obj_type, ca_face_storage_to_scalar_fn fn)
+ca_face_register_storage_to_element (int obj_type, ca_face_storage_to_element_fn fn)
 {
   if ( obj_type < 0 || obj_type >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eArgError,
-             "ca_face_register_storage_to_scalar: obj_type %d out of range",
+             "ca_face_register_storage_to_element: obj_type %d out of range",
              obj_type);
   }
-  ca_face_storage_to_scalar_table[obj_type] = fn;
+  ca_face_storage_to_element_table[obj_type] = fn;
 }
 
-/* Face-local C dispatch table for scalar_to_storage (the write/encode
+/* Face-local C dispatch table for element_to_storage (the write/encode
    direction), the mirror of the decode table above.  Unregistered slots
    stay NULL; a Face without a C fast path relies on the Ruby fallback in
-   ca_face_scalar_to_storage (carray_cast.c). */
-ca_face_scalar_to_storage_fn ca_face_scalar_to_storage_table[CA_OBJ_TYPE_MAX];
+   ca_face_element_to_storage (carray_cast.c). */
+ca_face_element_to_storage_fn ca_face_element_to_storage_table[CA_OBJ_TYPE_MAX];
 
 void
-ca_face_register_scalar_to_storage (int obj_type, ca_face_scalar_to_storage_fn fn)
+ca_face_register_element_to_storage (int obj_type, ca_face_element_to_storage_fn fn)
 {
   if ( obj_type < 0 || obj_type >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eArgError,
-             "ca_face_register_scalar_to_storage: obj_type %d out of range",
+             "ca_face_register_element_to_storage: obj_type %d out of range",
              obj_type);
   }
-  ca_face_scalar_to_storage_table[obj_type] = fn;
+  ca_face_element_to_storage_table[obj_type] = fn;
 }
 
 /* -- Face state homogeneity check -- */

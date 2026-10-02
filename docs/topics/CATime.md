@@ -1331,7 +1331,7 @@ UNDEF.
 These are the mechanisms behind the scalar surface and the raw storage —
 most code never needs them.
 
-### 16.1 The `storage_to_scalar` / `scalar_to_storage` convention
+### 16.1 The `storage_to_element` / `element_to_storage` convention
 
 Reading a cell decodes the storage integer into a `Element`; storing a
 cell encodes a surface instant back into the storage unit. Both happen
@@ -1340,20 +1340,20 @@ through a matched pair of methods on the Face class (see
 
 ```ruby
 class CATime
-  def storage_to_scalar(raw)      # read:  storage int -> Element
+  def storage_to_element(raw)      # read:  storage int -> Element
     Element.new(raw, unit)
   end
-  def scalar_to_storage(surface)  # write: instant -> storage int (this unit)
+  def element_to_storage(surface)  # write: instant -> storage int (this unit)
     to_comparable(surface).parent[0]
   end
 end
 ```
 
-`storage_to_scalar` covers every scalar-returning path — `dt[i, j, k]`,
+`storage_to_element` covers every scalar-returning path — `dt[i, j, k]`,
 `dt.fetch_index`, `dt.fetch_addr`, `dt.to_a`, and so on — without
 overriding `[]` in Ruby.
 
-`scalar_to_storage` covers the store paths — `dt[i] = instant`,
+`element_to_storage` covers the store paths — `dt[i] = instant`,
 `dt[mask] = instant`, `dt[i..j] = instant`, `dt.fill(instant)` — so a
 `Element` / `Time` / `DateTime` is converted into this Face's unit
 before it lands in storage (a `Time` at 02:00 stored into a `:h` axis
