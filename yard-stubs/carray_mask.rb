@@ -153,6 +153,8 @@ class CArray
   #   Flips the mask state of every element of `self` in place
   #   (masked ↔ not masked). Mutates `self`.
   #   @return [self]
+  #   @raise [FrozenError] if `self` is frozen or a view of a frozen array.
+  #   @raise [RuntimeError] if `self` is read-only (a lazy expression, for one).
   def invert_mask; end
 
   # @overload inherit_mask(*others)

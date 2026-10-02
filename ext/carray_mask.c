@@ -1361,6 +1361,7 @@ VALUE
 rb_ca_invert_mask (VALUE self)
 {
   CArray *ca;
+  rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_invert_mask(ca);
   return self;
