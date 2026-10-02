@@ -515,6 +515,7 @@ typedef struct {
   CArray         *ca;
   CArray         *cv;        /* CArray source, delivered into scratch */
   char           *scratch;
+  boolean8_t     *mscratch;  /* cv's mask, or NULL when it has none */
   CArray         *ico;       /* Ruby Array source: an object descriptor */
   volatile VALUE  list;
   int             has_mask;
@@ -526,12 +527,22 @@ ca_store_all_mode (CArray *cv)
   return ( cv->data_type == CA_OBJECT ) ? "w" : "a";
 }
 
+/* The window has attached ca's mask, and the one created here joins it,
+   so the mask is written in its buffer. */
 static VALUE
 ca_store_all_cast_body (VALUE arg)
 {
   ca_store_all_ctx_t *c = (ca_store_all_ctx_t *) arg;
   CArray *ca = c->ca;
-  ca_copy_mask_overwrite(ca, ca->elements, 1, c->cv);
+  if ( c->mscratch ) {
+    if ( ! ca->mask ) {
+      ca_create_mask(ca);
+    }
+    memcpy(ca->mask->ptr, c->mscratch, ca->elements);
+  }
+  else if ( ca->mask ) {
+    memset(ca->mask->ptr, 0, ca->elements);
+  }
   if ( ca->mask ) {
     ca_cast_block_with_mask(ca->elements, c->cv, c->scratch, ca, ca->ptr,
                             (boolean8_t*)ca->mask->ptr);
@@ -653,24 +664,50 @@ rb_ca_store_all (VALUE self, VALUE rval)
        scales with the view, not the root.  (The dst-side ca_sync_data is
        already an xfer_all PUT.) */
     {
-      volatile VALUE scratch_holder;
+      volatile VALUE scratch_holder, mscratch_holder = 0;
       ca_size_t      cv_bytes = cv->bytes * cv->elements;
       char          *scratch  = ALLOCV_N(char, scratch_holder, cv_bytes);
+      boolean8_t    *mscratch = NULL;
       ca_xfer_all(cv, scratch, CA_XFER_GET);
+
+      /* The source's mask is taken now as well, before anything is
+         written: the source may read through to the destination's mask
+         (`c[] = c.flip(0)`, or a lazy expression over c whose mask is
+         built from c's on demand), and the writes below clear it. */
+      if ( ca_has_mask(cv) ) {
+        mscratch = ALLOCV_N(boolean8_t, mscratch_holder, cv->elements);
+        ca_xfer_all(cv->mask, mscratch, CA_XFER_GET);
+      }
 
       if ( ca->data_type != cv->data_type ) {
         ca_store_all_ctx_t c;
-        c.ca      = ca;
-        c.cv      = cv;
-        c.scratch = scratch;
+        c.ca       = ca;
+        c.cv       = cv;
+        c.scratch  = scratch;
+        c.mscratch = mscratch;
         ca_attach_window(1, &ca, ca_store_all_mode(cv), ca_store_all_cast_body,
                          (VALUE) &c);
       }
       else {
-        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
+        if ( mscratch ) {
+          if ( ! ca->mask ) {
+            ca_create_mask(ca);
+          }
+          ca_sync_data(ca->mask, (char *) mscratch);
+        }
+        else {
+          ca_update_mask(ca);
+          if ( ca->mask ) {
+            boolean8_t zero = 0;
+            ca_fill(ca->mask, &zero);
+          }
+        }
         ca_sync_data(ca, scratch);
       }
 
+      if ( mscratch ) {
+        ALLOCV_END(mscratch_holder);
+      }
       ALLOCV_END(scratch_holder);
     }
   }
