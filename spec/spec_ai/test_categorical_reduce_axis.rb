@@ -844,6 +844,33 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
                  h.group_by_category(cat).sum(axis: 0).to_a)
   end
 
+  # A band-only classifier puts each fiber in one group whole, so its answers
+  # come from the core reductions along the axis. They must agree with the
+  # same codes broadcast to the full shape (case B, the fused kernel): NaN
+  # cells, masked cells, a fiber masked throughout, a masked code, and a
+  # group no fiber falls in.
+  def test_band_only_agrees_with_the_same_codes_broadcast
+    n = Float::NAN
+    h = CA_DOUBLE([[1, n, 3, 4], [5, 6, n, 8], [9, 10, 11, n]])   # [3, 4], reduce axis 0
+    h[1, 0] = UNDEF
+    h[nil, 3] = UNDEF                                             # fiber 3 masked throughout
+    codes = CA_UINT8([0, 2, 0, 2])                                # group 1 is empty
+    codes[1] = UNDEF                                              # fiber 1 belongs to no group
+    labels = ["a", "b", "c"]
+    band = CACategorical.from_codes(codes, labels)
+    full = CACategorical.from_codes(band.codes.reshape(1, 4).broadcast_to(3, 4).copy, labels)
+    gb = h.group_by_category(band)
+    gf = h.group_by_category(full)
+    %i[sum mean min max count count_not_masked].each do |op|
+      a = gb.send(op, axis: 0)
+      b = gf.send(op, axis: 0)
+      assert_equal b.data_type, a.data_type, op.to_s
+      assert_equal b.is_masked.to_a, a.is_masked.to_a, op.to_s
+      assert_equal b.to_a.to_s, a.to_a.to_s, op.to_s   # to_s so that NaN compares equal
+    end
+    assert_equal gf.minmax(axis: 0).map { |x| x.to_a.to_s }, gb.minmax(axis: 0).map { |x| x.to_a.to_s }
+  end
+
   def test_case_a_at_rank_two_still_matches_the_reference
     h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
     cat = CA_INT32([0, 0, 1, 1]).categorize                            # [4]

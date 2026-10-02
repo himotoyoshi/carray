@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `group_by_category(cat).sum(axis:)`, `mean`, `min`, `max`, `minmax`
+  and `count` are several times faster when `cat` has the source's shape
+  without the reduce axis (one category per fiber, such as a class per
+  pixel reduced over time): each fiber is reduced whole along the axis.
+  The sums can differ from earlier releases in the last bits.
+
 - Fix: `group_by_category(...).count(axis:)` and `count_not_masked(axis:)`
   count in one pass over an integer or float array, and without a widened
   copy for any other payload. Previously they built a full-size int64 array
