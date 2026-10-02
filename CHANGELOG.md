@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `group_by_category(...).count(axis:)` and `count_not_masked(axis:)`
+  count in one pass over an integer or float array, and without a widened
+  copy for any other payload. Previously they built a full-size int64 array
+  once per category, about five times the cost of `sum`.
+
 - Change: a reduction along an axis, a reduction of a masked expression,
   `variance`, `min_index`, `cumsum`, `sort_index`, `median` and
   `percentile` over a `CArray.fuse` / `.lazy` expression ask the

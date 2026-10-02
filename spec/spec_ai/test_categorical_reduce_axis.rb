@@ -774,6 +774,27 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
     assert_equal([[1, 1], [2, 2]], h.group_by_category(cat).count(axis: 0).to_a)
   end
+
+  # An integer or float payload is counted by the fused kernel, any other by
+  # walking the codes. Both count a NaN cell as present and leave out masked
+  # values and masked codes, for each of the three classifier shapes.
+  def test_count_agrees_between_a_numeric_and_any_other_payload
+    h = CA_DOUBLE([[1, Float::NAN, 3], [4, 5, 6], [7, 8, Float::NAN], [10, 11, 12]])
+    h[2, 0] = UNDEF
+    c = h.to_type(CA_CMPLX128)
+    c[2, 0] = UNDEF
+    { "case A"    => [[0, 1, 1, 0], 0],
+      "case B"    => [[[0, 1, 1], [1, 0, 1], [1, 1, 0], [0, 0, 1]], 0],
+      "band-only" => [[0, 1, 1], 0] }.each do |name, (rows, axis)|
+      codes = CA_UINT8(rows)
+      codes[*[0] * codes.ndim] = UNDEF
+      cat = CACategorical.from_codes(codes, ["a", "b"])
+      numeric = h.group_by_category(cat).count(axis: axis)
+      other   = c.group_by_category(cat).count(axis: axis)
+      assert_equal other.to_a, numeric.to_a, name
+      assert_equal CA_INT64, numeric.data_type, name
+    end
+  end
   # ---- band-only is reachable at every rank --------------------------------
   #
   # The three accepted classifier shapes were told apart by rank. For a 2-D
