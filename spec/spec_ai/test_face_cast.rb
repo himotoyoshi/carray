@@ -101,7 +101,7 @@ class TestFaceObjectCast < Test::Unit::TestCase
   # Numeric Face takes.
   class Halved < CAObject
     def initialize(parent); super(CA_FLOAT64, parent.dim, parent: parent, face: true); end
-    def storage_to_scalar(raw); raw / 2.0; end
+    def storage_to_element(raw); raw / 2.0; end
   end
 
   def test_to_a_of_a_numeric_storage_face_decodes
@@ -141,7 +141,7 @@ class TestFaceNumericCast < Test::Unit::TestCase
     end
     attr_reader :scale
     def copy_state(src); @scale = src.scale; end
-    def storage_to_scalar(raw)
+    def storage_to_element(raw)
       (raw.is_a?(String) ? raw.unpack1("q") : raw) / @scale.to_f
     end
     def to_numeric; parent.float64 / @scale.to_f; end

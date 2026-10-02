@@ -37,7 +37,7 @@ require 'carray/complex' # real / imag accessors; MUST precede carray/lazy
 require 'carray/lazy'   # the lazy elementwise view layer
 # carray/face.rb was deleted (the Phase 1 skeleton CArray::Face module
 # became dead weight, replaced by C-layer macro deploy +
-# copy_state/storage_to_scalar convention).
+# copy_state/storage_to_element convention).
 require 'carray/time'  # CATime / CATimedelta
 # carray/methods/* (bincount / broadcast / gather_nd+put_nd) are small
 # single-feature method files, loaded lazily via autoload_carray.

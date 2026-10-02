@@ -483,7 +483,7 @@ ca_val2val (int8_t data_type1, void *ptr1, int8_t data_type2, void *ptr2)
 /* Cast to CA_OBJECT for an array whose cells mean something other than their
    storage bytes: a data_class array (CARecord / CAStruct) or a Face (CATime,
    CAConstString, CACategorical, ...).  Both decode per cell -- rb_ca_fetch_addr
-   goes through the data_class decode and CA_FACE_STORAGE_TO_SCALAR_IF_FACE --
+   goes through the data_class decode and CA_FACE_STORAGE_TO_ELEMENT_IF_FACE --
    so the object array holds the *surface* values (labels, not codes;
    CATime::Element, not serials; the string, not the descriptor bytes).  Reading
    the storage instead is `.parent`, which stays available and explicit.  Mask
@@ -1144,30 +1144,30 @@ rb_ca_ptr2obj (VALUE self, void *ptr)
 }
 
 /* Surface -> storage-domain conversion for a Face store (mirror of the
-   storage_to_scalar read hook).  Non-Face `ca` returns `obj` unchanged, so
+   storage_to_element read hook).  Non-Face `ca` returns `obj` unchanged, so
    the non-Face store path is untouched.  For a Face, the per-obj_type C
    table is consulted first (fast path); if none is registered, the Ruby
-   `scalar_to_storage` method is called when defined.  A Face that recognizes
+   `element_to_storage` method is called when defined.  A Face that recognizes
    `obj` returns a storage-domain value (e.g. an Integer in its unit); a bare
    Integer / String falls through unchanged to the storage cast. */
 VALUE
-ca_face_scalar_to_storage (VALUE self, CArray *ca, VALUE obj)
+ca_face_element_to_storage (VALUE self, CArray *ca, VALUE obj)
 {
-  ca_face_scalar_to_storage_fn fn;
+  ca_face_element_to_storage_fn fn;
   if ( ! ca_face_safe_check(ca) || obj == CA_UNDEF ) {
     return obj;
   }
-  fn = ca_face_scalar_to_storage_table[ca->obj_type];
+  fn = ca_face_element_to_storage_table[ca->obj_type];
   if ( fn != NULL ) {
     return fn(self, obj);
   }
   else {
-    static ID id_scalar_to_storage = 0;
-    if ( id_scalar_to_storage == 0 ) {
-      id_scalar_to_storage = rb_intern("scalar_to_storage");
+    static ID id_element_to_storage = 0;
+    if ( id_element_to_storage == 0 ) {
+      id_element_to_storage = rb_intern("element_to_storage");
     }
-    if ( rb_respond_to(self, id_scalar_to_storage) ) {
-      return rb_funcall(self, id_scalar_to_storage, 1, obj);
+    if ( rb_respond_to(self, id_element_to_storage) ) {
+      return rb_funcall(self, id_element_to_storage, 1, obj);
     }
   }
   return obj;
@@ -1190,7 +1190,7 @@ rb_ca_obj2ptr (VALUE self, VALUE obj, void *ptr)
     if ( ca_face_safe_check(ca) ) {
       /* Face write hook: turn a surface value object (Scalar / Time /
          DateTime) into a storage-domain value the cast below consumes. */
-      obj = ca_face_scalar_to_storage(self, ca, obj);
+      obj = ca_face_element_to_storage(self, ca, obj);
       convert_type = ca_storage_type_of(ca);
     }
     if ( convert_type == CA_FIXLEN ) {

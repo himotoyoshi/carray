@@ -347,12 +347,12 @@ rb_ca_timedelta_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* storage_to_scalar implemented in C to avoid per-cell Ruby method dispatch
+/* storage_to_element implemented in C to avoid per-cell Ruby method dispatch
    on the fetch hot path.  Accepts either an Integer (INT64 surface fetch)
    or an 8-byte String (FIXLEN surface fetch); decodes the parent int64
    and constructs CATimedelta::Element(value, unit). */
 static VALUE
-rb_ca_timedelta_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_timedelta_storage_to_element (VALUE self, VALUE raw)
 {
   CATimedelta *ca;
   CATimedeltaElement *s;
@@ -364,7 +364,7 @@ rb_ca_timedelta_storage_to_scalar (VALUE self, VALUE raw)
   if ( TYPE(raw) == T_STRING ) {
     if ( RSTRING_LEN(raw) != (long) sizeof(int64_t) ) {
       rb_raise(rb_eArgError,
-               "CATimedelta#storage_to_scalar: expected %lu bytes, got %ld",
+               "CATimedelta#storage_to_element: expected %lu bytes, got %ld",
                (unsigned long) sizeof(int64_t), RSTRING_LEN(raw));
     }
     memcpy(&value, RSTRING_PTR(raw), sizeof(int64_t));
@@ -417,17 +417,17 @@ Init_ca_obj_timedelta (void)
   rb_define_singleton_method(rb_cCATimedelta, "__wrap__",
                                     rb_ca_timedelta_wrap_method, 2);
   rb_define_method(rb_cCATimedelta, "unit", rb_ca_timedelta_unit, 0);
-  rb_define_method(rb_cCATimedelta, "storage_to_scalar",
-                                    rb_ca_timedelta_storage_to_scalar, 1);
-  /* Registers the state-compatibility predicate so CA_FACE_STORAGE_TO_SCALAR_IF_FACE
+  rb_define_method(rb_cCATimedelta, "storage_to_element",
+                                    rb_ca_timedelta_storage_to_element, 1);
+  /* Registers the state-compatibility predicate so CA_FACE_STORAGE_TO_ELEMENT_IF_FACE
      can skip rb_funcall on the hot path. */
   ca_face_register_state_compatible(CA_OBJ_TIMEDELTA,
                                     ca_timedelta_state_compatible);
   /* unit is pure metadata, no per-parent buffer; multi-parent Face lift
      is safe (portable = 1). */
   ca_face_register_state_portable(CA_OBJ_TIMEDELTA, 1);
-  ca_face_register_storage_to_scalar(CA_OBJ_TIMEDELTA,
-                                     rb_ca_timedelta_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_TIMEDELTA,
+                                     rb_ca_timedelta_storage_to_element);
 
   /* CATimedelta::Element as a C-backed TypedData class.  The Ruby-side
      definition in lib/carray/time.rb keeps Comparable + to_seconds /

@@ -858,11 +858,11 @@ class CATime
   # base CArray#<=> composed from the (gated) > and <.
 
   # Element decode convention via the C-layer macro
-  # `CA_FACE_STORAGE_TO_SCALAR_IF_FACE`: no Ruby `[]` override is needed, a
+  # `CA_FACE_STORAGE_TO_ELEMENT_IF_FACE`: no Ruby `[]` override is needed, a
   # scalar auto-decodes on all scalar-return paths such as `ca[i,j,k]` /
-  # `ca[k]`.  storage_to_scalar itself lives in C (ext/ca_obj_datetime.c)
+  # `ca[k]`.  storage_to_element itself lives in C (ext/ca_obj_datetime.c)
   # so the hot path stays off Ruby method dispatch.  Its write counterpart
-  # is scalar_to_storage (below, surface -> storage on store).
+  # is element_to_storage (below, surface -> storage on store).
 
   # @!group Reductions
 
@@ -1025,8 +1025,8 @@ class CATime
     end
   end
 
-  # @overload scalar_to_storage(surface)
-  #   Write-direction counterpart of storage_to_scalar (the store hook fired
+  # @overload element_to_storage(surface)
+  #   Write-direction counterpart of storage_to_element (the store hook fired
   #   from rb_ca_obj2ptr): brings a surface value object into this Face's
   #   int64 storage (count in self's unit since the Unix epoch) so a scalar
   #   store round-trips with a fetch.  A {Element} / `Time` / `DateTime` is
@@ -1039,7 +1039,7 @@ class CATime
   #   @return [Integer, Object] the storage-domain value, or `surface`
   #     unchanged for a pass-through type.
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
-  def scalar_to_storage (surface)
+  def element_to_storage (surface)
     case surface
     when Integer, String
       surface
@@ -1551,8 +1551,8 @@ class CATimedelta
     end
   end
 
-  # @overload scalar_to_storage(surface)
-  #   Write-direction counterpart of storage_to_scalar: brings a surface
+  # @overload element_to_storage(surface)
+  #   Write-direction counterpart of storage_to_element: brings a surface
   #   value object into this Face's int64 storage (count in self's unit) so a
   #   scalar store round-trips with a fetch.  A {Element} is reconciled to
   #   self's unit via {#to_comparable} (lossless discipline; a `Time` /
@@ -1563,7 +1563,7 @@ class CATimedelta
   #   @return [Integer, Object] the storage-domain value, or `surface`
   #     unchanged for a pass-through type.
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
-  def scalar_to_storage (surface)
+  def element_to_storage (surface)
     case surface
     when Integer, String
       surface

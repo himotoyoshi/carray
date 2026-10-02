@@ -260,7 +260,7 @@ rb_ca_fixlen_string_wrap_method (VALUE klass, VALUE raw)
    search / MemoryView still see the raw padded bytes.  Genuine trailing NULs
    cannot survive here; use a raw CA_FIXLEN array for binary blobs. */
 static VALUE
-rb_ca_fixlen_string_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_fixlen_string_storage_to_element (VALUE self, VALUE raw)
 {
   (void) self;
   if ( TYPE(raw) == T_STRING ) {
@@ -317,10 +317,10 @@ Init_ca_obj_fixlen_string (void)
                                        rb_ca_fixlen_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAFixlenString, "wrap",
                                        rb_ca_fixlen_string_wrap_method, 1);
-  rb_define_method(rb_cCAFixlenString, "storage_to_scalar",
-                                       rb_ca_fixlen_string_storage_to_scalar, 1);
-  ca_face_register_storage_to_scalar(CA_OBJ_FIXLEN_STRING,
-                                     rb_ca_fixlen_string_storage_to_scalar);
+  rb_define_method(rb_cCAFixlenString, "storage_to_element",
+                                       rb_ca_fixlen_string_storage_to_element, 1);
+  ca_face_register_storage_to_element(CA_OBJ_FIXLEN_STRING,
+                                     rb_ca_fixlen_string_storage_to_element);
 
   /* CA_FIXLEN is portable storage (fixed-width bytes, no per-process VALUE
      or per-parent buffer), so the Face can be carried across multi-parent

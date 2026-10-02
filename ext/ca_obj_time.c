@@ -430,16 +430,16 @@ rb_ca_time_unit (VALUE self)
   return ca_time_resolution(ca->count, ca->unit);
 }
 
-/* storage_to_scalar implemented in C to avoid per-cell Ruby method dispatch
-   on the fetch hot path.  CAREFUL: there must be no Ruby `storage_to_scalar`
+/* storage_to_element implemented in C to avoid per-cell Ruby method dispatch
+   on the fetch hot path.  CAREFUL: there must be no Ruby `storage_to_element`
    def in lib/carray/time.rb — require order would let a Ruby version
-   shadow this C method (the Ruby `scalar_to_storage` write hook is a
+   shadow this C method (the Ruby `element_to_storage` write hook is a
    distinct method and does not collide).
    Since the Face surface is CA_FIXLEN, fetch delivers an 8-byte raw
    String.  Decode it as the parent int64 (= storage), then construct
    CATime::Element(epoch, unit). */
 static VALUE
-rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_time_storage_to_element (VALUE self, VALUE raw)
 {
   CATime *ca;
   CATimeElement *s;
@@ -451,7 +451,7 @@ rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
   if ( TYPE(raw) == T_STRING ) {
     if ( RSTRING_LEN(raw) != (long) sizeof(int64_t) ) {
       rb_raise(rb_eArgError,
-               "CATime#storage_to_scalar: expected %lu bytes, got %ld",
+               "CATime#storage_to_element: expected %lu bytes, got %ld",
                (unsigned long) sizeof(int64_t), RSTRING_LEN(raw));
     }
     memcpy(&epoch, RSTRING_PTR(raw), sizeof(int64_t));
@@ -526,12 +526,12 @@ Init_ca_obj_time (void)
   rb_define_singleton_method(rb_cCATime, "__wrap__",
                                      rb_ca_time_wrap_method, 2);
   rb_define_method(rb_cCATime, "unit", rb_ca_time_unit, 0);
-  rb_define_method(rb_cCATime, "storage_to_scalar",
-                                     rb_ca_time_storage_to_scalar, 1);
-  /* Registers the C-level fast path so CA_FACE_STORAGE_TO_SCALAR_IF_FACE can
+  rb_define_method(rb_cCATime, "storage_to_element",
+                                     rb_ca_time_storage_to_element, 1);
+  /* Registers the C-level fast path so CA_FACE_STORAGE_TO_ELEMENT_IF_FACE can
      skip rb_funcall on the hot path. */
-  ca_face_register_storage_to_scalar(CA_OBJ_TIME,
-                                     rb_ca_time_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_TIME,
+                                     rb_ca_time_storage_to_element);
   ca_face_register_state_compatible(CA_OBJ_TIME,
                                     ca_time_state_compatible);
   /* unit is pure metadata (= no per-parent buffer), so the Face wrap can

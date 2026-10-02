@@ -130,31 +130,31 @@ class TestCAFacePhase3 < Test::Unit::TestCase
     assert_in_delta 3*Math::PI/4, chain.to_a[0], 1e-6
   end
 
-  # ---- F.3.4: storage_to_scalar convention ----
+  # ---- F.3.4: storage_to_element convention ----
 
-  def test_storage_to_scalar_decode_via_c_macro
-    # CATime has storage_to_scalar defined → ca[i] decodes to Element
+  def test_storage_to_element_decode_via_c_macro
+    # CATime has storage_to_element defined → ca[i] decodes to Element
     dt = CArray.int64(5) {|i| i*100}.time(unit: :s)
     s = dt[2]
     assert_kind_of CATime::Element, s
     assert_equal 200, s.value
   end
 
-  def test_storage_to_scalar_no_override_returns_raw
-    # CAObject Face without storage_to_scalar override → returns raw
+  def test_storage_to_element_no_override_returns_raw
+    # CAObject Face without storage_to_element override → returns raw
     raw = CArray.int64(5) {|i| i * 10}
     f = TestFaceObj.new(raw)
     assert_kind_of Integer, f[2]
     assert_equal 20, f[2]
   end
 
-  def test_storage_to_scalar_decode_in_chain
-    # sliced view (= chain) でも storage_to_scalar 発火
+  def test_storage_to_element_decode_in_chain
+    # sliced view (= chain) でも storage_to_element 発火
     raw = CArray.float64(5)
     [0.0, Math::PI/4, Math::PI/2, 3*Math::PI/4, Math::PI].each_with_index {|v, i| raw[i] = v}
     cc = TestCACircular.new(raw, range: :rad)
     s_via_chain = cc[1..3][1]   # cc -> sliced -> scalar
-    # TestCACircular doesn't define storage_to_scalar, so passes through as Float
+    # TestCACircular doesn't define storage_to_element, so passes through as Float
     assert_kind_of Float, s_via_chain
     assert_in_delta Math::PI/2, s_via_chain, 1e-6
   end

@@ -32,7 +32,7 @@ class TestCAFacePhase1 < Test::Unit::TestCase
 
   # ---- F.1.2: CArray::Face module (= 削除済)
   # Phase 1 で起稿された CArray::Face module + WRAP_METHODS / STRIP_METHODS
-  # は C 層 macro deploy (= F.2.13 以降) + copy_state / storage_to_scalar
+  # は C 層 macro deploy (= F.2.13 以降) + copy_state / storage_to_element
   # convention (= F.3.x) で代替され dead weight 化、本 turn で削除。
   # face? predicate と他 Face mechanism は無関係に動作する。
 

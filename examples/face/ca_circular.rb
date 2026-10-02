@@ -43,7 +43,7 @@ class CACircular < CAObject
   end
 
   # Face callback — what `cc[i]` wraps into (optional)
-  def storage_to_scalar(raw)
+  def storage_to_element(raw)
     Scalar.new(raw, @range)
   end
 

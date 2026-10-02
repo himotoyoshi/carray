@@ -2,7 +2,7 @@ require "carray"
 require "test/unit"
 
 # Tests for the Face surface-scalar -> storage WRITE dispatch
-# (scalar_to_storage, 2026-07-08).  The read hook (storage_to_scalar) decodes
+# (element_to_storage, 2026-07-08).  The read hook (storage_to_element) decodes
 # a fetched cell to a surface Scalar; this write hook is its mirror, bringing
 # a surface value object (Element / Time / DateTime) back into the Face's
 # storage (self's unit) on store, so a fetched cell round-trips.
