@@ -277,7 +277,8 @@ Init_ca_obj_string (void)
                                  rb_ca_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAString, "wrap", rb_ca_string_wrap_method, 1);
 
-  /* VALUE storage is per-process, so the Face cannot be carried across
-     multi-parent constructions (CAStack / Marshal / MemoryView). */
-  ca_face_register_state_portable(CA_OBJ_STRING, 0);
+  /* A cell is the String itself, so the Face is the same over any parent:
+     CAStack / CAMeld / concatenate can carry it (unlike CAConstString, whose
+     cells point into one parent's buffer). */
+  ca_face_register_state_portable(CA_OBJ_STRING, 1);
 }

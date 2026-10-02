@@ -9,14 +9,14 @@ trade-off, not a different API.
 
 | type | storage | mutable | portable¹ | when to use |
 |---|---|---|---|---|
-| **`CAString`** | `CA_OBJECT` (Ruby `String` per cell) | yes | no | general-purpose, arbitrary length / encoding |
+| **`CAString`** | `CA_OBJECT` (Ruby `String` per cell) | yes | yes | general-purpose, arbitrary length / encoding |
 | **`CAFixlenString`** | `CA_FIXLEN` (K bytes/cell) | yes | **yes** | bounded-width columns; interchange / on-disk / stacking |
 | **`CAConstString`** | `int64` `(start,end)` pairs + one byte buffer | **no** | no | large, read-mostly label / key columns (sort / group / join) |
 | raw `CA_FIXLEN` | `CA_FIXLEN` (K bytes/cell) | yes | yes | the untyped storage — bytes, not "strings" (see below) |
 
 ¹ *portable* = the Face survives multi-parent constructions (`CArray.stack`,
-`Marshal`, MemoryView).  `CA_FIXLEN` bytes are self-contained; a `CA_OBJECT`
-`VALUE` and a `CAConstString`'s shared buffer are per-process.
+`CArray.concatenate`, `CArray.meld`).  A `CA_FIXLEN` cell and a `String` cell
+are self-contained; a `CAConstString` cell points into its own array's buffer.
 
 The three Faces vs. raw `CA_FIXLEN`: a raw fixlen array is *K-byte blobs* with
 no string meaning, so it returns the raw padded bytes.  `CAFixlenString` is the
@@ -275,13 +275,14 @@ the explicit `#format` / `CArray.format` above — never a silent conversion.
 
 ## Interop and portability
 
-- **`CAFixlenString`** is portable: its fixed-width bytes survive `CArray.stack`,
-  `Marshal`, and MemoryView export.  This is the type to reach for when the
-  strings must cross a boundary as a single contiguous block.
-- **`CAConstString`** and **`CAString`** are per-process (a shared buffer / Ruby
-  `VALUE`s), so they do not participate in those multi-parent constructions.
-  `copy` gives an independent column; `to_fixlen_string(bytes: K)` gives a
-  portable one.
+- **`CAFixlenString`** survives `CArray.stack` and MemoryView export: its
+  fixed-width bytes are one contiguous block.  This is the type to reach for
+  when the strings must cross a process boundary.
+- **`CAString`** stacks and concatenates, but its cells are Ruby `String`s, so
+  it has no MemoryView of the strings.
+- **`CAConstString`** does not participate in multi-parent constructions: each
+  array's cells point into its own buffer.  `copy` gives an independent column;
+  `to_fixlen_string(bytes: K)` or `to_string` gives one that stacks.
 
 > **Variable-length + MemoryView.** MemoryView (PEP 3118) is fixed-itemsize and
 > cannot represent a variable-length column in a single view.  A

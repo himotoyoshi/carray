@@ -1396,13 +1396,44 @@ rb_ca_s_guard_undef(int argc, VALUE *argv, VALUE klass)
 
 /* mask_eq(v) — return form of "mask cells equal to v".
    Equivalent to: obj = copy; obj[:eq, v] = UNDEF; obj */
+/* Masks a copy of self at the cells the store key `argv` selects.  A
+   read-only Face (CAConstString, CACategorical) copies read-only, so the
+   mask goes on a copy of its storage and the Face is put back; a predicate
+   key (`:eq, v`) is evaluated on the Face, where it compares values rather
+   than storage. */
+static VALUE
+ca_mask_copy_where (VALUE self, int argc, VALUE *argv)
+{
+  CArray *ca;
+  volatile VALUE obj;
+  VALUE *all_args = ALLOCA_N(VALUE, argc + 1);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_face(ca) && ca_is_readonly(ca) ) {
+    obj = rb_ca_copy(rb_ca_strip_face_value(self));
+    if ( argc >= 1 && SYMBOL_P(argv[0]) ) {
+      all_args[0] = rb_funcallv(self, SYM2ID(argv[0]), argc - 1, argv + 1);
+      all_args[1] = CA_UNDEF;
+      rb_funcallv(obj, rb_intern("[]="), 2, all_args);
+    }
+    else {
+      memcpy(all_args, argv, argc * sizeof(VALUE));
+      all_args[argc] = CA_UNDEF;
+      rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
+    }
+    return rb_funcall(obj, rb_intern("face_lift"), 1, self);
+  }
+  obj = rb_ca_copy(self);
+  memcpy(all_args, argv, argc * sizeof(VALUE));
+  all_args[argc] = CA_UNDEF;
+  rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
+  return obj;
+}
+
 static VALUE
 rb_ca_mask_eq (VALUE self, VALUE v)
 {
-  volatile VALUE obj = rb_ca_copy(self);
-  rb_funcall(obj, rb_intern("[]="), 3,
-             ID2SYM(rb_intern("eq")), v, CA_UNDEF);
-  return obj;
+  VALUE args[2] = { ID2SYM(rb_intern("eq")), v };
+  return ca_mask_copy_where(self, 2, args);
 }
 
 /* mask_invalid — return form of "mask NaN/Inf cells".
@@ -1410,10 +1441,8 @@ rb_ca_mask_eq (VALUE self, VALUE v)
 static VALUE
 rb_ca_mask_invalid (VALUE self)
 {
-  volatile VALUE obj = rb_ca_copy(self);
-  rb_funcall(obj, rb_intern("[]="), 2,
-             ID2SYM(rb_intern("is_invalid")), CA_UNDEF);
-  return obj;
+  VALUE args[1] = { ID2SYM(rb_intern("is_invalid")) };
+  return ca_mask_copy_where(self, 1, args);
 }
 
 /* mask_where(*args) — generic return form predicate masking.
@@ -1422,17 +1451,10 @@ rb_ca_mask_invalid (VALUE self)
 static VALUE
 rb_ca_mask_where (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj;
-  VALUE *all_args;
   if (argc == 0) {
     rb_raise(rb_eArgError, "mask_where requires at least 1 argument");
   }
-  obj = rb_ca_copy(self);
-  all_args = ALLOCA_N(VALUE, argc + 1);
-  memcpy(all_args, argv, argc * sizeof(VALUE));
-  all_args[argc] = CA_UNDEF;
-  rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
-  return obj;
+  return ca_mask_copy_where(self, argc, argv);
 }
 
 /* @overload inherit_mask (*others):

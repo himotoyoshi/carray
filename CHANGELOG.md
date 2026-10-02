@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CAString` can be put through `CArray.stack`, `concatenate`
+  and `meld`, and comes back a `CAString`; they raised.  A
+  `CAConstString` is still refused, since each array's cells point into
+  its own buffer.
+- Fix: `mask_eq`, `mask_where` and `mask_invalid` on a `CAConstString` or
+  `CACategorical` return the masked array, of the same class; they raised
+  because the copy they mask is read-only.  The receiver is not changed.
+- Fix: `unmask` / `strip_mask` with `method: :linear` on a Face that does
+  not interpolate (the string Faces) raises an `ArgumentError` that says
+  so and names `:forward` / `:backward`, instead of an error from inside
+  `linear_fetch` or a failed cast.
+
 - Fix: `cond.then_else(x, y)` with a Face branch returns that Face; a
   `CATime` branch came back as a mix of 8-byte strings and elements, and
   two `CATime` branches raised.  A `CACategorical` branch, which cannot be

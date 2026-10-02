@@ -123,11 +123,18 @@ class CArray
   # Linear-by-index gap fill: interpolate each masked cell from the two
   # bracketing valid cells, x = cell index along the axis.  Cells outside the
   # valid range (leading/trailing) stay masked.  A Face goes through its own
-  # linear_fetch, which keeps its unit and rounds to its grid; whether that
-  # means anything is the Face's call (an ORDERABLE numeric one answers, the
-  # rest raise from there), so this gate only asks that it be one.
+  # linear_fetch, which keeps its unit and rounds to its grid.  Defining one
+  # is how a Face says it interpolates: without it, the core linear_fetch
+  # reads the Face's storage and fails from inside.
   def __gap_fill_linear__ (axis)
-    unless numeric? || face?
+    if face?
+      unless self.class.instance_method(:linear_fetch).owner != CArray
+        raise ArgumentError,
+              "unmask/strip_mask(method: :linear): #{self.class} does not " \
+              "interpolate (it defines no linear_fetch of its own); " \
+              "use method: :forward or :backward"
+      end
+    elsif ! numeric?
       raise ArgumentError,
             "unmask/strip_mask(method: :linear): numeric or time data_type " \
             "required (got #{data_type_name})"
