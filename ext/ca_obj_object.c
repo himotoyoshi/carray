@@ -181,6 +181,58 @@ ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
             ca_object_lend_restore, (VALUE) &l);
 }
 
+/* Calls recv.mid(*argv), where some of argv are transient wraps of a
+   caller's buffer (ca_object_wrap_transient), and takes the buffer back
+   from each of them however the call leaves.  The caller frees its buffer
+   when it returns, and a wrap outlives the call: the collector scans the
+   machine stack conservatively and still finds it there, and an object
+   wrap is marked cell by cell -- through a buffer that is gone.  A wrap
+   taken back points at nothing; a hook that kept it holds an empty
+   handle, not a stale one. */
+
+typedef struct {
+  VALUE        recv;
+  ID           mid;
+  int          argc;
+  const VALUE *argv;
+  int          ntrans;
+  const VALUE *trans;
+} ca_object_hook_t;
+
+static VALUE
+ca_object_hook_body (VALUE varg)
+{
+  ca_object_hook_t *h = (ca_object_hook_t *) varg;
+  return rb_funcallv(h->recv, h->mid, h->argc, h->argv);
+}
+
+static VALUE
+ca_object_hook_release (VALUE varg)
+{
+  ca_object_hook_t *h = (ca_object_hook_t *) varg;
+  int i;
+  for ( i = 0; i < h->ntrans; i++ ) {
+    ((CArray *) DATA_PTR(h->trans[i]))->ptr = NULL;
+  }
+  return Qnil;
+}
+
+static void
+ca_object_call_transient (VALUE recv, const char *mid,
+                          int argc, const VALUE *argv,
+                          int ntrans, const VALUE *trans)
+{
+  ca_object_hook_t h;
+  h.recv   = recv;
+  h.mid    = rb_intern(mid);
+  h.argc   = argc;
+  h.argv   = argv;
+  h.ntrans = ntrans;
+  h.trans  = trans;
+  rb_ensure(ca_object_hook_body, (VALUE) &h,
+            ca_object_hook_release, (VALUE) &h);
+}
+
 static VALUE
 ca_object_data_of (void *ap)
 {
@@ -328,7 +380,12 @@ ca_objmask_get_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
                                       1, dim1, addrs, CA_XFER_PUT);
     rdata  = ca_object_wrap_transient(CA_BOOLEAN, 1, 1, dim1, bits,
                                       CA_XFER_GET);
-    rb_funcall(ca->array, rb_intern("mask_copy_addrs"), 2, raddrs, rdata);
+    {
+      VALUE args[2];
+      args[0] = raddrs;
+      args[1] = rdata;
+      ca_object_call_transient(ca->array, "mask_copy_addrs", 2, args, 2, args);
+    }
     return;
   }
   if ( n > 0 && ( bit = ca_objmask_fetch_one(ca, addrs[0]) ) >= 0 ) {
@@ -371,7 +428,12 @@ ca_objmask_put_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
                                       1, dim1, addrs, CA_XFER_PUT);
     rdata  = ca_object_wrap_transient(CA_BOOLEAN, 1, 1, dim1, (void *) bits,
                                       CA_XFER_PUT);
-    rb_funcall(ca->array, rb_intern("mask_sync_addrs"), 2, raddrs, rdata);
+    {
+      VALUE args[2];
+      args[0] = raddrs;
+      args[1] = rdata;
+      ca_object_call_transient(ca->array, "mask_sync_addrs", 2, args, 2, args);
+    }
     return;
   }
   if ( ca_objmask_answers(ca, "mask_sync_data") ) {
@@ -551,7 +613,15 @@ ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       }
       rdata = ca_object_wrap_transient(ca->data_type, ca->bytes,
                                        ndim, counts, data, dir);
-      rb_funcall(ca->array, mid_block, 4, rstarts, rcounts, rsteps, rdata);
+      {
+        VALUE args[4];
+        args[0] = rstarts;
+        args[1] = rcounts;
+        args[2] = rsteps;
+        args[3] = rdata;
+        ca_object_call_transient(ca->array, rb_id2name(mid_block),
+                                 4, args, 1, args + 3);
+      }
       return;
     }
   }
@@ -1026,7 +1096,8 @@ ca_object_func_detach (void *ap)
    [n] for addrs) before invoking copy_block / sync_block / copy_addrs /
    sync_addrs.  Lifecycle: buffer is owned by the slot caller; the wrapper
    installs free_ca_wrap as dfree, so the underlying ptr is NOT freed when
-   the wrapper is GC'd.
+   the wrapper is GC'd.  Call the hook through ca_object_call_transient,
+   which takes the buffer back from the wrapper when the hook returns.
 
    Object data_type GC safety: for GET (dir == CA_XFER_GET) the buffer may be
    uninitialized garbage on entry, so we INT2NUM(0) zero-fill before
@@ -1084,7 +1155,12 @@ ca_object_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                                       1, dim1, addrs, CA_XFER_PUT);
     rdata  = ca_object_wrap_transient(ca->data_type, ca->bytes,
                                       1, dim1, data, dir);
-    rb_funcall(ca->self, mid, 2, raddrs, rdata);
+    {
+      VALUE args[2];
+      args[0] = raddrs;
+      args[1] = rdata;
+      ca_object_call_transient(ca->self, rb_id2name(mid), 2, args, 2, args);
+    }
     return;
   }
 
@@ -1174,7 +1250,15 @@ ca_object_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       }
       rdata = ca_object_wrap_transient(ca->data_type, ca->bytes,
                                        ndim, counts, data, dir);
-      rb_funcall(ca->self, mid_block, 4, rstarts, rcounts, rsteps, rdata);
+      {
+        VALUE args[4];
+        args[0] = rstarts;
+        args[1] = rcounts;
+        args[2] = rsteps;
+        args[3] = rdata;
+        ca_object_call_transient(ca->self, rb_id2name(mid_block),
+                                 4, args, 1, args + 3);
+      }
       return;
     }
   }
@@ -1245,7 +1329,12 @@ ca_object_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
     raddrs = ca_object_wrap_transient(CA_SIZE, sizeof(ca_size_t),
                                       1, dim1, addrs, CA_XFER_PUT);
     rval = rb_ca_ptr2obj(ca->self, ptr);
-    rb_funcall(ca->self, mid, 2, raddrs, rval);
+    {
+      VALUE args[2];
+      args[0] = raddrs;
+      args[1] = rval;
+      ca_object_call_transient(ca->self, rb_id2name(mid), 2, args, 1, args);
+    }
     return;
   }
 

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an object array viewed through `sort(axis:)`, `CArray.stack`,
+  `CArray.meld` or a selection, over a `CAObject` whose hooks call Ruby
+  (`copy_addrs`, `copy_block`, ...), no longer crashes in a garbage
+  collection. The array a hook receives is taken back from the caller's
+  buffer when the hook returns; a hook that keeps it holds an empty array.
 - Fix: a view with no cells (an axis of length zero) can be copied, read,
   summed and written. Some views corrupted memory, and over a `CAObject`
   some raised `IndexError`.
