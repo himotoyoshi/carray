@@ -351,8 +351,9 @@ class CACategoricalIterator < CASegmentIterator
   def axis_moments (axis, op)
     h = @value
     axis = checked_axis(axis, op)
+    band = h.shape.dup; band.delete_at(axis)
+    return band_only_moments(h, axis, band, op) if band_only?(@cat.codes, h.shape, axis)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)
-    band          = h.shape.dup; band.delete_at(axis)
     out_shape     = [@k] + band
     counts        = CArray.int64(*out_shape)
     sums          = CArray.float64(*out_shape)
@@ -361,6 +362,51 @@ class CACategoricalIterator < CASegmentIterator
     h.__send__(:__fiber_scatter_moments__, codes_h_shape, axis, @k,
                counts, sums, mins, maxs)
     {count: counts, sum: sums, min: mins, max: maxs}
+  end
+
+  # The classifier is band-only, as resolve_axis_codes decides it (case A
+  # wins when both shapes fit).
+  def band_only? (codes, h_shape, axis)
+    band = h_shape.dup; band.delete_at(axis)
+    !band.empty? && codes.shape == band && codes.shape != [h_shape[axis]]
+  end
+
+  # Moments for a band-only classifier. Every cell of a fiber has the same
+  # code, so a fiber falls into one group whole: the core's own reductions
+  # along the axis answer for it, and each answer is placed in its code's
+  # row. A fiber whose code is masked belongs to no group. A group no fiber
+  # falls in, or one whose fibers are all masked, has count 0, sum 0.0 and
+  # masked min and max, as the fused kernel leaves it. Only the answers the
+  # caller reads are computed; each is a pass of its own here, where the
+  # kernel had all four from one.
+  BAND_ONLY_KEYS = { sum: [:sum], mean: [:sum, :count], min: [:min],
+                     max: [:max], minmax: [:min, :max] }.freeze
+  private_constant :BAND_ONLY_KEYS
+
+  def band_only_moments (h, axis, band, op)
+    nb      = band.inject(1, :*)
+    shape   = [@k] + band
+    codes   = @cat.codes
+    valid   = codes.lt(@k).flatten
+    valid   = valid.strip_mask(false) if valid.has_mask?
+    addr    = (codes.value.int64.flatten * nb + CArray.int64(nb).seq)[valid]
+    out     = {}
+    BAND_ONLY_KEYS.fetch(op, [:count]).each do |key|
+      res = case key
+            when :count then CArray.int64(*shape)
+            when :sum   then CArray.float64(*shape)
+            else             CArray.new(h.data_type, shape, bytes: h.bytes).tap { |a| a[] = UNDEF }
+            end
+      per_fiber = case key
+                  when :count then h.count_not_masked(axis: axis)
+                  when :sum   then h.sum(axis: axis)
+                  when :min   then h.min(axis: axis)
+                  when :max   then h.max(axis: axis)
+                  end
+      res.reshape(@k * nb)[addr] = per_fiber.flatten[valid]
+      out[key] = res
+    end
+    out
   end
 
   # Axis-aware sum: the moments sum is already the core fold in the core's own
