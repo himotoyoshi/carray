@@ -138,31 +138,36 @@ a.count_masked              # => 1
 a.mask.to_a                 # => [0, 0, 1, 0, 0]
 ```
 
-## Ordering — memcmp, not field-semantic
+## Ordering — by the members the struct declares
 
-`CARecord` sorts and searches by the **raw record bytes** (`memcmp`), not by any
-per-field comparison. For records this means the byte order of the whole
-fixed-width blob decides the sort:
+A record's bytes are no order of its values (a negative integer, a
+little-endian float), so a record array has an order only when its struct
+names one with `order_by:`.  The members are compared in the order given:
 
 ```ruby
-a = CARecord.new(GeoCoord, 3)
-a["lat"][] = [3.0, 1.0, 2.0]
-a["lng"][] = [0.0, 0.0, 0.0]
-a.sort_index.to_a           # => [2, 0, 1]   (byte order, NOT numeric lat order)
+Site = CArray.struct(order_by: [:lat, :lng]) { float64 :lat; float64 :lng }
+a = CARecord.new(Site, 3)
+a["lat"][] = [3.0, 1.0, 1.0]
+a["lng"][] = [0.0, 5.0, 2.0]
+a.sort_index.to_a           # => [2, 1, 0]   by lat, then lng
+a.min.values                # => [1.0, 2.0]
+a < a[0]                    # boolean, compared by the same order
+a[1] < a[0]                 # => true   (the records compare too)
 ```
 
-Because floating-point fields are not byte-order-comparable, memcmp ordering of
-a record generally does **not** match the numeric ordering of its fields. If you
-want to sort by a field's value, sort that field's projection instead:
+`sort`, `sort_copy`, `sort_addr`, `sort_index`, `rank_index`, `order`, `min`,
+`max`, `minmax`, `min_index`, `max_index`, `partition_copy`, `partition_index`
+and the comparison operators follow it.  NaN sorts after every number, and a
+masked record stays masked.  `order_by:` names members that hold values; a
+nested record is not one (order by its members instead).
+
+A struct declared without `order_by:` has no order: those methods raise.  To
+sort by one field without declaring an order, sort that field's projection:
 
 ```ruby
 order = a["lat"].sort_index         # sort by lat numerically
 a[order]                            # records in lat order
 ```
-
-A future opt-out flag (`CA_FLAG_FACE_ORDER_AS_OBJECT`) to sort records through
-their struct `<=>` is designed but not yet implemented; see
-[FaceOrderingSearch](../authoring/FaceOrderingSearch.md).
 
 ## Serialization
 

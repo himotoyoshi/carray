@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CARecord` orders only by the members its struct names in the
+  new `order_by:` option of `CArray.struct`; without it `sort`, `min`,
+  `max`, `partition_copy`, their index forms and the comparison operators
+  raise.  They ordered by the record bytes, which for a float or a negative
+  integer is no order of the values.  Declare
+  `CArray.struct(order_by: [:a, :b]) { ... }`, or sort a field's projection
+  (`rec[rec["a"].sort_index]`).
+- New: `CArray.struct(order_by: [...])` gives the records `<=>` and the
+  comparison operators, comparing the named members in order (NaN after
+  every number), and gives a `CARecord` of them the sort family, `min` /
+  `max` / `minmax` and `partition_copy`.  `==` is unchanged.
+
 - Change: for whoever writes a Face: the read and write hooks are renamed
   `storage_to_element` and `element_to_storage` (they were
   `storage_to_scalar` and `scalar_to_storage`), and so are the C

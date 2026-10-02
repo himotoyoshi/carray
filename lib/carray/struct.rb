@@ -217,6 +217,14 @@ class CAStruct
       return self::MEMBERS
     end
 
+    # @overload order_by
+    #   Returns the members the records are ordered by (`order_by:` of
+    #   {CArray.struct}), or nil when the struct declares no order.
+    #   @return [Array<String>, nil]
+    def order_by
+      const_defined?(:ORDER_BY) ? self::ORDER_BY : nil
+    end
+
     # @overload fields
     #   Returns the struct's members as {CAStruct::Field} objects
     #   in declaration order. Cached on the class.
@@ -444,6 +452,49 @@ class CAStruct
     end
   end
 
+  # Order against a record of the same class, by the members the struct
+  # was declared with in `order_by:`, compared in that order.  NaN sorts
+  # after every number.  nil when the other is not a record of this class,
+  # or when the struct declares no order.
+  # @return [Integer, nil]
+  def <=> (other)
+    keys = self.class.order_by
+    return nil unless keys && other.class.equal?(self.class)
+    keys.each do |key|
+      c = CAStruct.compare_key(self[key], other[key])
+      return c unless c == 0
+    end
+    0
+  end
+
+  # @!method <(other)
+  #   @raise [ArgumentError] when the struct declares no `order_by:`, or
+  #     `other` is not a record of the same class.
+  # @!method <=(other)
+  # @!method >(other)
+  # @!method >=(other)
+  { :< => ->(c) { c < 0 }, :<= => ->(c) { c <= 0 },
+    :> => ->(c) { c > 0 }, :>= => ->(c) { c >= 0 } }.each do |op, test|
+    define_method(op) do |other|
+      c = (self <=> other)
+      if c.nil?
+        raise ArgumentError,
+              "comparison of #{self.class.inspect} with #{other.class.inspect} failed" +
+              (self.class.order_by ? "" : " (the struct declares no order_by:)")
+      end
+      test.call(c)
+    end
+  end
+
+  # One member of {#<=>}: NaN after every number, as a numeric array sorts.
+  def self.compare_key (a, b)
+    a_nan = a.is_a?(Float) && a.nan?
+    b_nan = b.is_a?(Float) && b.nan?
+    return (a_nan ? 0 : -1) if b_nan
+    return 1 if a_nan
+    a <=> b
+  end
+
   # Byte-level identity.  Two CAStruct instances are eql? iff they are
   # of exactly the same class and their binary representations match.
   # Lets struct records work as Hash keys / Set members.
@@ -527,9 +578,19 @@ class CArray
   #   Returns a new {CAStruct} subclass defined by the block via
   #   {CAStruct::Builder}. Options control alignment, packing, and
   #   endianness.
-  #   @param opt [Hash]
+  #
+  #   `order_by:` names the members records are ordered by, compared in
+  #   that order (`order_by: [:lat, :id]` sorts by `lat`, then `id` among
+  #   equal `lat`).  It gives the records `<=>` and the comparison
+  #   operators, and gives a {CARecord} of them `sort`, `min`, `max`,
+  #   `partition_copy` and their index forms.  A struct without it has no
+  #   order, and those raise.  NaN sorts after every number, as in a
+  #   numeric array.
+  #   @param opt [Hash] `pack:`, `size:`, `order_by:`.
   #   @yield DSL calls in {CAStruct::Builder}.
   #   @return [Class] anonymous {CAStruct} subclass.
+  #   @raise [CAStruct::DefinitionError] when `order_by:` names something
+  #     that is not a member, or a nested record.
   def self.struct (opt={}, &block)
     return CAStruct::Builder.new(:struct, opt).define(&block)
   end
@@ -641,4 +702,4 @@ if CArray.respond_to?(:__install_castruct_methods__)
   CArray.__install_castruct_methods__(CAStruct)
 end
 
-
+require 'carray/record_order'
