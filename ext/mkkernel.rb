@@ -3426,6 +3426,32 @@ module MkKernel
     io.puts "    }"
   end
 
+  # Where the source is a lazy expression the kernel is about to compute
+  # whole, a registered expression evaluator may compute it instead; the
+  # dispatcher then goes on with that array.  `unless_streaming` is the C
+  # condition under which the reduction streams the expression in chunks
+  # rather than making it whole -- there it is left to stream, since asking
+  # would make it whole and take that much more memory.
+  def self.emit_lazy_evaluated(io, unless_streaming: nil)
+    cond = "ca_is_lazy_view(src)"
+    cond += " && ! ( #{unless_streaming} )" if unless_streaming
+    io.puts "  if ( #{cond} ) {"
+    io.puts "    volatile VALUE evaluated = ca_lazy_evaluated(self);"
+    io.puts "    if ( ! NIL_P(evaluated) ) {"
+    io.puts "      self = evaluated;"
+    io.puts "      GetCArray(self, src);"
+    io.puts "    }"
+    io.puts "  }"
+  end
+
+  # Whether a reduction's native walk has the streaming branch
+  # (emit_reduce_streaming_call): the conditions emit_reduce_native checks
+  # before it emits one.
+  def self.reduce_streams?(k)
+    k[:outputs] != 2 && k[:algorithm] != :two_pass_centred &&
+      !k[:array_arg] && !k[:reduce].to_s.include?("idx")
+  end
+
   def self.emit_reduce_dispatch(io, k)
     name       = k[:name]
     min_count  = (k[:mask_policy] == :min_count)
@@ -3490,6 +3516,8 @@ module MkKernel
     io.puts "  int keep_axis = RTEST(rkeep_axis);"
     io.puts "  int8_t slab_axes[CA_RANK_MAX];"
     io.puts "  int8_t naxes = rb_ca_parse_reduce_axes_kw(raxis, src, slab_axes);"
+    emit_lazy_evaluated(io, unless_streaming:
+      reduce_streams?(k) ? "naxes == src->ndim && src->ndim >= 1 && ! keep_axis && ! ca_has_mask(src)" : nil)
 
     weights_io = nil
     if has_aarg
@@ -4012,6 +4040,7 @@ module MkKernel
     io.puts "{"
     io.puts "  CArray *src;"
     io.puts "  GetCArray(self, src);"
+    emit_lazy_evaluated(io)
     io.puts "  volatile VALUE ropt = rb_pop_options(&argc, &argv);"
     io.puts "  volatile VALUE raxis = Qnil;"
     io.puts "  rb_scan_options(ropt, \"axis\", &raxis);"
@@ -4782,6 +4811,7 @@ module MkKernel
       io.puts "{"
       io.puts "  CArray *src;"
       io.puts "  GetCArray(self, src);"
+      emit_lazy_evaluated(io)
       io.puts "  /* Face gate: descend to storage (fixlen -> memcmp default,"
       io.puts "     numeric -> ORDERABLE required).  The strip also makes the"
       io.puts "     switch below and every index/addr template output build on"
@@ -4889,6 +4919,7 @@ module MkKernel
       io.puts "{"
       io.puts "  CArray *src;"
       io.puts "  GetCArray(self, src);"
+      emit_lazy_evaluated(io)
       io.puts "  /* Face gate (partition): same as the sort dispatcher --"
       io.puts "     fixlen -> memcmp default, numeric -> ORDERABLE required. */"
       emit_sort_face_gate(io, name)
@@ -4982,6 +5013,12 @@ module MkKernel
       io.puts "  volatile VALUE whole_src = Qnil;" if rank
       io.puts "  if ( NIL_P(raxis) ) {   /* no axis: the whole array */"
       io.puts "    whole_src = self;" if rank
+      # The flattened view of a lazy expression is not one itself, so the
+      # dispatcher would not see an expression to hand over: ask here.
+      io.puts "    {"
+      io.puts "      volatile VALUE evaluated = ca_lazy_evaluated(self);"
+      io.puts "      if ( ! NIL_P(evaluated) ) self = evaluated;"
+      io.puts "    }"
       io.puts "    self  = rb_ca_flatten(self);"
       io.puts "    raxis = INT2NUM(0);"
       io.puts "  }"
@@ -5698,6 +5735,7 @@ module MkKernel
     io.puts "  int self_face_comparable = 0;"
     io.puts "  int self_was_face = 0;"
     io.puts "  GetCArray(self, src);"
+    emit_lazy_evaluated(io)
     io.puts "  /* Face gate (self): descend a Face reference to storage so the"
     io.puts "     search runs on the numeric storage.  ORDERABLE licenses the"
     io.puts "     ordered/searchable descent; COMPARABLE additionally licenses"

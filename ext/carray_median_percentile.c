@@ -777,6 +777,15 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
 
   CArray *ca;
   GetCArray(self, ca);
+  /* A lazy expression is computed whole here, so a registered evaluator
+     may compute it instead. */
+  {
+    volatile VALUE evaluated = ca_lazy_evaluated(self);
+    if ( ! NIL_P(evaluated) ) {
+      self = evaluated;
+      GetCArray(self, ca);
+    }
+  }
   /* Boolean rides the f64 lane: 0/1 -> 0.0/1.0, so median interpolates and
      returns a float (a 2-element median averages to 0.5), matching how the
      numeric lane treats integer input. */
@@ -1207,6 +1216,15 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
 
   CArray *ca;
   GetCArray(self, ca);
+  /* A lazy expression is computed whole here, so a registered evaluator
+     may compute it instead. */
+  {
+    volatile VALUE evaluated = ca_lazy_evaluated(self);
+    if ( ! NIL_P(evaluated) ) {
+      self = evaluated;
+      GetCArray(self, ca);
+    }
+  }
   /* Boolean rides the f64 lane (0/1 -> 0.0/1.0), so percentile / quantile
      interpolate and return a float, matching the integer lane. */
   if ( ca->data_type == CA_BOOLEAN ) {

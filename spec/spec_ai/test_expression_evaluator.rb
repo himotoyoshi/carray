@@ -208,6 +208,83 @@ class TestExpressionEvaluator < Test::Unit::TestCase
     assert_empty @asked
   end
 
+  # -- an expression something else computes whole ---------------------
+  #
+  # A reduction along an axis, a sort, a scan or a median makes the whole
+  # expression before it starts, so the evaluator is asked for it there.  A
+  # reduction of the whole array streams the expression in chunks instead,
+  # and is left to: asking would make it whole, which is that much more
+  # memory.
+
+  def grid (k)
+    CArray.float64(200, 100) { |i, j| (i * 100 + j + k) * 0.5 }
+  end
+
+  def test_a_reduction_along_an_axis_asks
+    g, h = grid(0), grid(1)
+    CArray.expression_evaluator = answering(-1.0)
+    assert_equal [-100.0] * 200, CArray.fuse { g + h }.sum(axis: 1).to_a
+    assert_equal 1, @asked.size
+  end
+
+  def test_a_reduction_of_the_whole_array_streams_and_does_not_ask
+    CArray.expression_evaluator = answering(-1.0)
+    %i[sum mean min max].each do |m|
+      assert_equal (@a + @b).send(m), CArray.fuse { @a + @b }.send(m), m
+    end
+    assert_empty @asked
+  end
+
+  def test_a_masked_expression_does_not_stream_and_asks
+    masked = @a.copy
+    masked[1] = UNDEF
+    CArray.expression_evaluator = answering(-1.0)
+    assert_equal(-BIG.to_f, CArray.fuse { masked + @b }.sum)
+    assert_equal 1, @asked.size
+  end
+
+  def test_a_reduction_that_never_streams_asks
+    CArray.expression_evaluator = answering(-1.0)
+    assert_equal 0.0, CArray.fuse { @a + @b }.variance
+    assert_equal 0, CArray.fuse { @a + @b }.min_index
+    assert_equal 2, @asked.size
+  end
+
+  def test_a_scan_a_sort_and_a_median_ask
+    CArray.expression_evaluator = answering(-1.0)
+    assert_equal(-BIG.to_f, CArray.fuse { @a + @b }.cumsum[-1])
+    assert_equal BIG, CArray.fuse { @a + @b }.sort_index.elements
+    assert_equal(-1.0, CArray.fuse { @a + @b }.median)
+    assert_equal(-1.0, CArray.fuse { @a + @b }.percentile(50))
+    assert_equal 4, @asked.size
+  end
+
+  def test_declining_leaves_the_reduction_to_the_walk
+    g, h = grid(0), grid(1)
+    CArray.expression_evaluator = declining
+    assert_equal (g + h).sum(axis: 1).to_a, CArray.fuse { g + h }.sum(axis: 1).to_a
+    assert_equal 1, @asked.size
+  end
+
+  def test_one_that_raises_inside_a_reduction_is_dropped_and_the_walk_answers
+    g, h = grid(0), grid(1)
+    raiser = Object.new
+    raiser.define_singleton_method(:call) { |plan, out| raise "boom" }
+    CArray.expression_evaluator = raiser
+    warned = with_stderr { @result = CArray.fuse { g + h }.sum(axis: 1) }
+    assert_match(/RuntimeError: boom/, warned)
+    assert_equal (g + h).sum(axis: 1).to_a, @result.to_a
+    assert_nil CArray.expression_evaluator
+  end
+
+  def test_a_small_reduction_is_walked
+    small = CArray.float64(10, 10) { |i, j| i + j * 1.0 }
+    CArray.expression_evaluator = answering(-1.0)
+    assert_equal (small + small).sum(axis: 1).to_a,
+                 CArray.fuse { small + small }.sum(axis: 1).to_a
+    assert_empty @asked
+  end
+
   # -- masks --------------------------------------------------------------
 
   def test_a_masked_expression_arrives_with_somewhere_to_put_the_mask

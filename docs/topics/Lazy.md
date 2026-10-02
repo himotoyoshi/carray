@@ -74,9 +74,10 @@ else as plain data.
 
 CArray keeps the decision: it asks the evaluator only for expressions large
 enough to be worth it, the evaluator may decline, and one that raises is
-dropped and the walk takes over.  It is asked when an expression is
-computed into an array — `to_ca`, `copy`, or `out[] = expr` — while a
-reduction over an expression still walks it.
+dropped and the walk takes over.  It is asked wherever the expression is
+made whole: `to_ca`, `copy`, `out[] = expr`, and a reduction, scan, sort
+or median that makes it whole before it starts (§6).  A reduction of the
+whole array streams the expression in chunks instead, and is left to.
 
 ---
 
@@ -219,8 +220,17 @@ An expression can be computed three ways:
 | **compiled** | `.lazy` / `fuse` with an evaluator registered (the `carray-jit` gem): the whole expression becomes one loop |
 
 The compiled path is asked only for an expression of 10,000 cells or more,
-and only when it is computed into an array — `to_ca`, `copy`, or
-`out[] = expr`.  A reduction over an expression is walked.
+and only where the whole expression is made into an array:
+
+- `to_ca`, `copy`, and `out[] = expr`
+- a reduction along an axis (`sum(axis: 1)`), of a masked expression, or
+  one that never streams (`variance`, `min_index`, `wsum`)
+- a scan (`cumsum`), a sort (`sort_index`), `median` and `percentile`
+
+A reduction of the whole array with no mask (`sum`, `mean`, `min`, `max`)
+streams the expression in small chunks instead of making it whole, and is
+walked: handing it over would cost the memory of the whole
+expression.
 
 ### Measured (Apple M2 Max, 512 × 512, milliseconds per call)
 
@@ -275,7 +285,7 @@ The expression is still computed — by the walk — when the compiled path
 cannot describe it:
 
 - an object array, or a comparison with a tolerance (`feq`, `is_close`)
-- a reduction over the expression
+- a reduction of the whole array with no mask, which streams (above)
 - an expression smaller than 10,000 cells
 
 A `shift` of an expression (rather than of an array), a `roll` or a

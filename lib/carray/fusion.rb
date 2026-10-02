@@ -93,29 +93,44 @@ class CArray
 
     # Returns the array, or nil where nothing computed it.
     def self.evaluate (view)
-      return nil unless askable?(view)
+      plan = worth_asking(view) or return nil
       out = CArray.__alloc_uninit__(view.data_type, view.dim)
-      evaluate_into(view, out) ? out : nil
+      ask(plan, out) ? out : nil
     end
 
     # Fills an array the caller already has.  Called from the store as well,
     # where making one and copying it over would be most of the work.
     # Returns true when something computed it.
     def self.evaluate_into (view, out)
+      plan = worth_asking(view) or return false
+      ask(plan, out)
+    end
+
+    # The plan to hand over, or nil.  A marker over an array, or anything
+    # else with nothing to compute, is not worth handing over.
+    def self.worth_asking (view)
+      return nil unless askable?(view)
+      plan = plan(view) or return nil
+      plan.nodes.any? { |n| n.is_a?(Op) } ? plan : nil
+    rescue StandardError => error
+      retire(error)
+      nil
+    end
+
+    def self.ask (plan, out)
       evaluator = CArray.expression_evaluator or return false
-      return false unless askable?(view)
-      plan = plan(view) or return false
-      # A marker over an array, or anything else with nothing to compute,
-      # is not worth handing over.
-      return false unless plan.nodes.any? { |n| n.is_a?(Op) }
       out.mask = 0 if plan.masked && ! out.has_mask?
       evaluator.call(plan, out) ? true : false
     rescue StandardError => error
+      retire(error)
+      false
+    end
+
+    def self.retire (error)
       CArray.expression_evaluator = nil
       warn "CArray: the registered expression evaluator raised " \
            "(#{error.class}: #{error.message}); expressions will be walked " \
            "from here on"
-      false
     end
 
     def self.askable? (view)
