@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a reduction along an axis, a reduction of a masked expression,
+  `variance`, `min_index`, `cumsum`, `sort_index`, `median` and
+  `percentile` over a `CArray.fuse` / `.lazy` expression ask the
+  registered `CArray.expression_evaluator` (the `carray-jit` gem) to
+  compute it, as `to_ca` does.  A reduction of the whole array with no
+  mask still streams the expression and is not asked.  The answer is the
+  same either way.
+
 - Fix: `Marshal.load` of a view (a slice, a transpose, a lazy expression)
   or a `CScalar` raised `TypeError`; a view comes back a plain `CArray`
   and a scalar a `CScalar`.  A Face other than `CARecord`, and a `CAWrap`,

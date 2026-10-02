@@ -884,3 +884,34 @@ ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
   }
   ca_xfer_stride(op, req->starts, req->counts, strides, buf, dir);
 }
+
+/* An expression the caller is about to compute whole -- a reduction along
+   an axis, a sort, a median -- computed by the registered expression
+   evaluator instead, when there is one and it takes the expression.
+   Returns the array it made, or Qnil where nothing is registered, self is
+   not a lazy expression, or the evaluator declined (CArray::Fusion.evaluate
+   decides, and asks only above its size threshold).  The caller goes on
+   with that array in place of self, or with self as before.
+
+   Only where the expression would be made whole anyway: a reduction that
+   streams the expression in chunks keeps doing so, since asking here would
+   make it whole and take that much more memory. */
+VALUE
+ca_lazy_evaluated (VALUE self)
+{
+  static ID id_evaluator = 0, id_fusion, id_evaluate;
+  CArray *ca;
+  if ( ! id_evaluator ) {
+    id_evaluator = rb_intern("@expression_evaluator");
+    id_fusion    = rb_intern("Fusion");
+    id_evaluate  = rb_intern("evaluate");
+  }
+  GetCArray(self, ca);
+  if ( ! ca_is_lazy_view(ca) ) {
+    return Qnil;
+  }
+  if ( ! RTEST(rb_attr_get(rb_cCArray, id_evaluator)) ) {
+    return Qnil;
+  }
+  return rb_funcall(rb_const_get(rb_cCArray, id_fusion), id_evaluate, 1, self);
+}

@@ -123,6 +123,12 @@ void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
 int     ca_is_lazy_view (void *ap);
 
+/* The registered expression evaluator's answer for a lazy expression the
+   caller is about to compute whole, or Qnil to go on with self (see
+   carray_lazy.c). */
+
+VALUE   ca_lazy_evaluated (VALUE self);
+
 /* A request to an element-wise lazy view (CAMonOp, CABinOp, CAMonCmp,
    CABinCmp, CATriOp): either a region of the view's addresses -- the
    xfer_stride form, strides in bytes of the view's cells -- or a list of
