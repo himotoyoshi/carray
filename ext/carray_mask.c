@@ -770,17 +770,21 @@ ca_unmask_copy_fill (VALUE arg)
 
   ca_copy_data(ca, co->ptr);
 
+  /* Only the mask is needed now that the values are in co, so read the
+     mask alone rather than producing the view's cells a second time. */
   if ( a->fill_value && ca_has_mask(ca) ) {
-    ca_attach(ca);   /* window: nothing raises inside */
+    volatile VALUE holder = 0;
+    ca_update_mask(ca);
+    m = ALLOCV_N(boolean8_t, holder, ca->elements);
+    ca_copy_data(ca->mask, (char *) m);
     q = co->ptr;
-    m = (boolean8_t *) ca->mask->ptr;
     for (i=0; i<ca->elements; i++) {
-      if ( *m ) {
+      if ( m[i] ) {
         memcpy(q, a->fill_value, ca->bytes);
       }
-      m++; q+=co->bytes;
+      q+=co->bytes;
     }
-    ca_detach(ca);
+    ALLOCV_END(holder);
   }
   return Qnil;
 }
@@ -1144,10 +1148,10 @@ with <code>self</code>. The returned array has 1 for the masked elements and
 VALUE
 rb_ca_is_masked (VALUE self)
 {
-  volatile VALUE mask, out;
-  CArray *ca, *cm, *co;
+  volatile VALUE out;
+  CArray *ca, *co;
   boolean8_t zero = 0;
-  boolean8_t *m, *p;
+  boolean8_t *p;
   ca_size_t i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -1165,16 +1169,12 @@ rb_ca_is_masked (VALUE self)
     ca_fill(co, &zero);
   }
   else {
-    mask = rb_ca_mask_array(self);
-    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);   /* window: nothing raises inside */
-    m = (boolean8_t *) cm->ptr;
+    /* Copied straight into the result, then normalised in place. */
+    ca_copy_data(ca->mask, co->ptr);
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
-      *p = ( *m ) ? 1 : 0;
-      m++; p++;
+      p[i] = ( p[i] ) ? 1 : 0;
     }
-    ca_detach(cm);
   }
 
   return out;
@@ -1191,10 +1191,10 @@ The returned array has 0 for the masked elements and
 VALUE
 rb_ca_is_not_masked (VALUE self)
 {
-  volatile VALUE mask, out;
-  CArray *ca, *cm, *co;
+  volatile VALUE out;
+  CArray *ca, *co;
   boolean8_t one = 1;
-  boolean8_t *m, *p;
+  boolean8_t *p;
   ca_size_t i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -1212,16 +1212,12 @@ rb_ca_is_not_masked (VALUE self)
     ca_fill(co, &one);
   }
   else {
-    mask = rb_ca_mask_array(self);
-    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);   /* window: nothing raises inside */
-    m = (boolean8_t *) cm->ptr;
+    /* Copied straight into the result, then normalised in place. */
+    ca_copy_data(ca->mask, co->ptr);
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
-      *p = ( *m ) ? 0 : 1;
-      m++; p++;
+      p[i] = ( p[i] ) ? 0 : 1;
     }
-    ca_detach(cm);
   }
 
   return out;

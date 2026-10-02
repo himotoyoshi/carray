@@ -484,11 +484,10 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
     rb_ca_template_with_type(vidx_cast, INT2NUM(CA_SIZE), INT2NUM(0));
   TypedData_Get_Struct(vout, CArray, &carray_data_type, out_ca);
 
-  /* out_ca is a freshly allocated entity (ptr already valid), so it needs
-     no attach/sync/detach.  idx_cast may still be a view (CA_SIZE identity
-     branch above), so its contig buffer is delivered by
-     rb_ca_call_with_buffer, which aliases when contig, materialises a view
-     into scratch, and closes the view even when the body raises. */
+  /* out_ca is a freshly allocated entity of the indices' shape and cell
+     width, so the indices are copied into it (a view is gathered without
+     being attached) and turned into addresses in place: cell k is read
+     before it is written. */
   axis2addr_ctx_t ctx;
   ctx.idx_ca    = idx_cast;
   ctx.out_ptr   = (ca_size_t *) out_ca->ptr;
@@ -496,7 +495,8 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   ctx.axis      = axis;
   ctx.axis_size = axis_size;
 
-  rb_ca_call_with_buffer(vidx_cast, 0, axis2addr_body, &ctx);
+  ca_copy_data(idx_cast, out_ca->ptr);
+  axis2addr_body(&ctx, out_ca->ptr, out_ca->elements);
 
   return vout;
 }
