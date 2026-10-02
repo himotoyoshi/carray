@@ -36,6 +36,25 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `cond.then_else(x, y)` with a Face branch returns that Face; a
+  `CATime` branch came back as a mix of 8-byte strings and elements, and
+  two `CATime` branches raised.  A `CACategorical` branch, which cannot be
+  written, answers with an object array of its labels.
+- Fix: the reductions of `windows(...)` and `blocks(...)` over a Face come
+  back as the Face (`mean`, `median`, `sum`, `stddev`, `percentile`, `min`,
+  `max`); a `CATime` raised in `windows` and came back as 8-byte strings
+  in `blocks`, and a `CAString` lost its class.  `sliding_windows`,
+  `unfold` and `as_strided` of a Face are the Face.  `windows` with
+  `bounds: :nearest` no longer raises on a fixlen array.
+- Fix: `cummax` and `cummin` of a `CATime` or `CATimedelta` run in time
+  order and return the same class; they raised.  A `CAString` keeps its
+  class, and a `CACategorical` raises, as `min` does.
+- Fix: assigning a `CATime` or `CATimedelta` array to one, through `[]=`
+  on the whole array, a boolean selection or an index array, raised
+  `DataTypeError`; only a range worked.  It now stores, converting the
+  unit as a range store does, and a bare `int64` array is taken as raw
+  storage as documented.
+
 - Fix: `blocks(...).min`, `.max` and `.minmax` over a Face answer in the
   Face's own order and come back as the Face; a `CATime` or
   `CATimedelta` result was 8-byte strings, and a `CAConstString` tile

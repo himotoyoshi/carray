@@ -167,19 +167,35 @@ class CABlockIterator < CAIterator
   # below a full tile, so `min_count:` marks them UNDEF with no masking.  The
   # output data type is seeded from the first region (all regions share it).
   def assemble
-    outs = nil
+    grids = nil
+    faces = nil
+    single = true
     each_region do |strip_ranges, tiles, out_ranges|
       view = @source[*strip_ranges].block_view(*tiles)
       res  = yield(view, tiles)
-      if res.is_a?(Array)
-        outs ||= res.map { |r| CArray.new(r.data_type, @shape, bytes: r.bytes) }
-        res.each_index { |k| outs[k][*out_ranges] = res[k] }
-      else
-        outs ||= CArray.new(res.data_type, @shape, bytes: res.bytes)
-        outs[*out_ranges] = res
-      end
+      single = false if res.is_a?(Array)
+      res  = [res] unless res.is_a?(Array)
+      faces ||= res.map { |r| r.face? ? r : nil }
+      parts = res.map { |r| r.face? ? face_grid_part(r) : r }
+      grids ||= parts.map { |r| CArray.new(r.data_type, @shape, bytes: r.bytes) }
+      parts.each_index { |k| grids[k][*out_ranges] = parts[k] }
     end
-    outs
+    outs = grids.each_index.map { |k| faces[k] ? face_grid(grids[k], faces[k]) : grids[k] }
+    single ? outs[0] : outs
+  end
+
+  # A region result that is a Face (a CATime mean, a CATimedelta stddev) is
+  # assembled on its storage and the Face is put back on the whole grid;
+  # assembling the Face itself would copy its surface bytes into an array that
+  # no longer knows it is one.  A CAConstString's storage points into its own
+  # buffer, which the regions do not share, so it is assembled as strings.
+  def face_grid_part (r)
+    r.is_a?(CAConstString) ? r.to_string.parent : r.parent
+  end
+
+  def face_grid (grid, face)
+    return CArray.const_string(grid, encoding: face.encoding) if face.is_a?(CAConstString)
+    grid.face_lift(face)
   end
 
   # Fold every region with a single core reduction `op` (the tier-1 shape).
