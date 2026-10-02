@@ -2773,7 +2773,7 @@ module MkKernel
            exposes ca->ptr as that buffer at O(1) cost (no materialise). */
         if ( naxes == 1
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
-             && ca->mask == NULL
+             && ! ca_has_mask(ca)
              && ca_attach_is_alias(ca) ) {
           int8_t    __li_ax    = slab_axes[0];
           ca_size_t __li_M     = ca->dim[__li_ax];
@@ -2822,7 +2822,7 @@ module MkKernel
         if ( naxes == 1
              && slab_axes[0] >= 1
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
-             && ca->mask == NULL
+             && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis == 0 ) {
           CAStack  *__li_st    = (CAStack *) ca;
@@ -2837,7 +2837,7 @@ module MkKernel
              core reads parent->ptr without mask awareness). */
           int __li_ok = 1;
           for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-            if ( __li_st->parents[__kk]->mask != NULL ) { __li_ok = 0; break; }
+            if ( ca_has_mask(__li_st->parents[__kk]) ) { __li_ok = 0; break; }
           }
 
           if ( __li_ok && __li_INNER >= 64 && __li_M * __li_INNER >= 1024 ) {
@@ -2885,7 +2885,7 @@ module MkKernel
         if ( naxes == 1
              && slab_axes[0] >= 1
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
-             && ca->mask == NULL
+             && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis > 0
              && ( slab_axes[0] > ((CAStack *) ca)->k_axis
@@ -2905,7 +2905,7 @@ module MkKernel
           /* Bail to the generic path if any parent carries a mask. */
           int __li_ok = 1;
           for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-            if ( __li_st->parents[__kk]->mask != NULL ) { __li_ok = 0; break; }
+            if ( ca_has_mask(__li_st->parents[__kk]) ) { __li_ok = 0; break; }
           }
 
           if ( __li_ok && __li_INNER >= 64 && __li_M * __li_INNER >= 1024 ) {
@@ -3028,7 +3028,7 @@ module MkKernel
         if ( naxes == 1
              && slab_axes[0] >= 1
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
-             && ca->mask == NULL
+             && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis > 0
              && slab_axes[0] + 1 < ((CAStack *) ca)->k_axis ) {
@@ -3049,7 +3049,7 @@ module MkKernel
           /* Bail to the generic path if any parent carries a mask. */
           int __li_ok = 1;
           for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-            if ( __li_st->parents[__kk]->mask != NULL ) { __li_ok = 0; break; }
+            if ( ca_has_mask(__li_st->parents[__kk]) ) { __li_ok = 0; break; }
           }
 
           if ( __li_ok && __li_eff_INNER >= 32 && __li_M * __li_eff_INNER >= 1024 ) {
