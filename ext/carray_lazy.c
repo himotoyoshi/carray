@@ -854,14 +854,17 @@ ca_lazy_req_addrs (ca_lazy_req_t *req, ca_size_t n, ca_size_t *addrs)
   req->ndim    = 0;
 }
 
-/* Whether the request is a region walked in the view's own row-major
-   order -- the case in which an operand's buffer already holds the cells
-   in the order the kernel reads them. */
+/* Whether the request names one contiguous run of the view's cells, in
+   the view's own row-major order -- the case in which an operand's buffer
+   already holds the cells in the order the kernel reads them.  The strides
+   must be the native row-major ones, and the box must be whole on every
+   axis inside the outermost one it does not span with a count of 1. */
 int
 ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view)
 {
   CArray   *ca = (CArray *) view;
   ca_size_t native = ca->bytes;
+  int       partial = 0;
   int8_t    k;
   if ( req->addrs ) {
     return 0;
@@ -869,6 +872,12 @@ ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view)
   for ( k = ca->ndim - 1; k >= 0; k-- ) {
     if ( req->strides[k] != native ) {
       return 0;
+    }
+    if ( partial && req->counts[k] != 1 ) {
+      return 0;
+    }
+    if ( req->counts[k] != ca->dim[k] ) {
+      partial = 1;
     }
     native *= ca->dim[k];
   }

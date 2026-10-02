@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a lazy comparison read over part of an array -- a column, or an
+  inner box such as `(a.lazy < b)[nil, 2]` or `x.lazy.signbit[0..1, 1..2]`
+  -- returns the cells it names. Previously it read the same number of
+  cells straight on from the first one.
+
 - Fix: comparing two fixlen arrays lazily (`x.lazy.eq(y.lazy)`, and
   `<`, `>` and the rest) gives the eager answer. Previously it wrote
   every cell's result into the first one and ran past its scratch
