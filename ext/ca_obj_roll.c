@@ -17,6 +17,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"
 
@@ -222,6 +223,7 @@ static void
 ca_roll_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CARoll   *ca = (CARoll *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;

@@ -408,6 +408,7 @@ static void
 ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
     rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_stride PUT)");
@@ -640,10 +641,10 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
 
   if ( l->elements != r->elements ) {
-    if ( r->elements == 1 && l->elements > 1 ) {
+    if ( r->elements == 1 ) {
       /* CScalar right: handled via right_is_scalar */
     }
-    else if ( l->elements == 1 && r->elements > 1 ) {
+    else if ( l->elements == 1 ) {
       /* Comparison ops commute under negation (LT/GT/LE/GE flip to
          their counterpart, EQ/NE are commutative), but here we
          broadcast the left scalar up instead of swapping, so op_id

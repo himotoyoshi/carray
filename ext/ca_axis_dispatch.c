@@ -976,6 +976,9 @@ ca_axis_view_xfer_region (CArray *ca, void *data, int dir)
   ca_size_t starts[CA_RANK_MAX], strides[CA_RANK_MAX], s;
   int8_t    k;
 
+  /* The slot is called directly, past ca_xfer_stride's empty-region check. */
+  if ( ca->elements == 0 ) return;
+
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) {
     starts[k]  = 0;

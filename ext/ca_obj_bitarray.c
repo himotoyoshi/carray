@@ -323,6 +323,7 @@ static void
 ca_bitarray_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                               ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CABitarray *ca = (CABitarray *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];

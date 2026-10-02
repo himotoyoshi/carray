@@ -12,6 +12,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 
 typedef struct {
   int16_t   obj_type;
@@ -391,6 +392,7 @@ static void
 ca_bitfield_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                               ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CABitfield *ca = (CABitfield *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];

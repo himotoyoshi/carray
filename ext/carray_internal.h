@@ -242,6 +242,23 @@ VALUE       ca_fill_as (VALUE fill, int8_t data_type);
 void    ca_face_register_memory_view (int obj_type, int exportable);
 int     ca_face_memory_view_exportable (CArray *ca);
 
+/* ---- Empty regions ---------------------------------------------------------
+
+   A region with a zero count on some axis has no cells.  The per-cell walks
+   visit their first cell before they test the counts, so every region
+   transfer returns on an empty region before it walks: a zero-cell caller
+   buffer has no room for that first cell. */
+
+static inline int
+ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
+{
+  int8_t k;
+  for ( k = 0; k < ndim; k++ ) {
+    if ( counts[k] <= 0 ) return 1;
+  }
+  return 0;
+}
+
 VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);

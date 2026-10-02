@@ -34,6 +34,7 @@
  */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"  /* ca_face_* helpers for Face mode shortcuts */
 
 static size_t
@@ -511,6 +512,7 @@ static void
 ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                              ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAObjectMask *ca = (CAObjectMask *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], steps[CA_RANK_MAX], idx[CA_RANK_MAX];
@@ -1119,6 +1121,7 @@ static void
 ca_object_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAObject  *ca = (CAObject *) ap;
   int8_t     ndim;
   ca_size_t  native[CA_RANK_MAX], steps[CA_RANK_MAX], idx[CA_RANK_MAX];
