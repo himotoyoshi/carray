@@ -1144,6 +1144,33 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+/* A wrap borrows memory it does not own.  Object#dup would give the copy
+   the wrap's class over memory the copy owns, so a subclass that names what
+   it borrows (a libvips image's pixels) would name an array that borrows
+   nothing.  The copy is a plain CArray, as #copy is: the name goes with
+   what is borrowed. */
+static VALUE
+rb_ca_wrap_dup (VALUE self)
+{
+  return rb_ca_copy(self);
+}
+
+static VALUE
+rb_ca_wrap_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE opt = Qnil, rfreeze = Qnil;
+  volatile VALUE obj;
+  rb_scan_args(argc, argv, "0:", &opt);
+  if ( ! NIL_P(opt) ) {
+    rfreeze = rb_hash_lookup2(opt, ID2SYM(rb_intern("freeze")), Qnil);
+  }
+  obj = rb_ca_copy(self);
+  if ( RTEST(rfreeze) || ( NIL_P(rfreeze) && OBJ_FROZEN(self) ) ) {
+    rb_obj_freeze(obj);
+  }
+  return obj;
+}
+
 /* @overload wrap (data_type, dim, bytes=0) { target }
 
 [TBD] (Construction)
@@ -1547,6 +1574,8 @@ Init_ca_obj_array (void)
 #endif
 
   rb_define_method(rb_cCArray, "initialize_copy", rb_ca_initialize_copy, 1);
+  rb_define_method(rb_cCAWrap, "dup",   rb_ca_wrap_dup, 0);
+  rb_define_method(rb_cCAWrap, "clone", rb_ca_wrap_clone, -1);
   rb_define_singleton_method(rb_cCArray, "wrap", rb_ca_s_wrap, -1);
 
   /* ------------------------------------------------------------------- */
