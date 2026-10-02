@@ -113,4 +113,45 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_kind_of(CABinOp, 2.5 * a.lazy)
   end
 
+  # ---- storing into an array the source reads from ----
+
+  def masked_array
+    c = CA_FLOAT64([1, 2, 3, 4])
+    c[1] = UNDEF
+    c
+  end
+
+  def test_self_store_keeps_the_source_mask
+    one = CA_FLOAT64([1, 1, 1, 1])
+    [
+      [->(c) { c[] = c.lazy + one.lazy }, ->(c) { c[] = c + one }],
+      [->(c) { c[] = c.lazy.sqrt },       ->(c) { c[] = c.sqrt }],
+      [->(c) { c[] = (c.lazy > 1) },      ->(c) { c[] = (c > 1) }],
+      [->(c) { c[0..2] = c[1..3].lazy + one[0..2].lazy },
+       ->(c) { c[0..2] = c[1..3] + one[0..2] }],
+    ].each do |lazy, eager|
+      e = masked_array; eager.(e)
+      l = masked_array; lazy.(l)
+      assert_equal(e.to_a, l.to_a)
+    end
+  end
+
+  def test_self_store_through_a_view_keeps_the_mask
+    c = masked_array
+    c[] = c.flip(0)
+    assert_equal([4.0, 3.0, UNDEF, 1.0], c.to_a)
+    c = masked_array
+    c[0..2] = c[1..3]
+    assert_equal([UNDEF, 3.0, 4.0, 4.0], c.to_a)
+  end
+
+  def test_store_without_mask_clears_the_destination_mask
+    c = masked_array
+    c[] = CA_FLOAT64([5, 6, 7, 8])
+    assert_equal([false] * 4, c.is_masked.to_a)
+    c = masked_array
+    c[] = CA_INT32([5, 6, 7, 8])
+    assert_equal([5.0, 6.0, 7.0, 8.0], c.to_a)
+  end
+
 end
