@@ -48,7 +48,6 @@ extern int8_t CA_OBJ_LAZY_MARKER;
 
 /* Defined in carray_lazy.c: wrap a non-CArray Ruby value as a
    CScalar carrying the other operand's natural data_type. */
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 
 /* ------------------------------------------------------------------- */
 /* CABinOp struct                                                       */
@@ -607,17 +606,10 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
-  /* Promote a non-CArray Ruby value to a CScalar carrying the
-     other side's natural data_type. */
-  if ( ! rb_obj_is_carray(l_resolved) ) {
-    rb_check_carray_object(r_resolved);
-    TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
-    l_resolved = ca_lazy_wrap_scalar(l_resolved, r);
-  }
-  if ( ! rb_obj_is_carray(r_resolved) ) {
-    rb_check_carray_object(l_resolved);
-    TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
-    r_resolved = ca_lazy_wrap_scalar(r_resolved, l);
+  /* A Ruby value beside the array takes the data_type the eager binop
+     gives it, and the pair is promoted as the eager binop promotes it. */
+  if ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ) {
+    rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
   }
 
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);

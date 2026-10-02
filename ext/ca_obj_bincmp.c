@@ -34,7 +34,6 @@
 
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
                                 ca_size_t *target_dim);
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 extern void *ca_lazy_arena_acquire (ca_size_t bytes);
 extern void  ca_lazy_arena_release (void *ptr);
 
@@ -566,16 +565,10 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
-  /* Scalar wrap — same policy as CABinOp. */
-  if ( ! rb_obj_is_carray(l_resolved) ) {
-    rb_check_carray_object(r_resolved);
-    TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
-    l_resolved = ca_lazy_wrap_scalar(l_resolved, r);
-  }
-  if ( ! rb_obj_is_carray(r_resolved) ) {
-    rb_check_carray_object(l_resolved);
-    TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
-    r_resolved = ca_lazy_wrap_scalar(r_resolved, l);
+  /* A Ruby value beside the array is wrapped and promoted as the eager
+     comparison does it. */
+  if ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ) {
+    rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
   }
 
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);

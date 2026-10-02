@@ -235,8 +235,7 @@ class CArray
   #
   # Both paths keep the operand's float / complex width (f32 → f32,
   # cmplx64 → f32), and both send integers to f64 since pi does not fit
-  # an integer slot.  That agrees with the general lazy-substrate rule
-  # "scalar keeps operand's precision" (see ca_lazy_wrap_scalar header).
+  # an integer slot.
   # ---------------------------------------------------------------------------
 
   # @private
@@ -529,22 +528,14 @@ class CArray
     end
   end
 
+  # A lazy receiver takes the scalar the eager coerce makes, and stays
+  # lazy itself: the builder promotes the pair as the eager operator does.
   # @!visibility private
   alias_method :__coerce_eager__, :coerce
   coerce_um = instance_method(:__coerce_eager__)
   define_method(:coerce) do |other|
-    if __lazy_view__?
-      dt_name = data_type_name
-      if CScalar.respond_to?(dt_name)
-        s = CScalar.public_send(dt_name)
-        s[0] = other
-        [s, self]
-      else
-        coerce_um.bind_call(self, other)
-      end
-    else
-      coerce_um.bind_call(self, other)
-    end
+    scalar, receiver = coerce_um.bind_call(self, other)
+    __lazy_view__? ? [scalar, self] : [scalar, receiver]
   end
 end
 

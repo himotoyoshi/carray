@@ -69,4 +69,48 @@ class TestLazyEagerParity < Test::Unit::TestCase
     end
   end
 
+  # ---- a Ruby scalar beside the array ----
+
+  def assert_same_result (eager, lazy)
+    assert_equal([eager.data_type, eager.to_a], [lazy.data_type, lazy.to_a])
+  end
+
+  def test_scalar_promotes_as_eager
+    a = CA_INT32([1, 2, 3])
+    f = CA_FLOAT32([1, 2, 3])
+    u = CA_UINT8([1, 2, 3])
+    assert_same_result(a * 0.5,              a.lazy * 0.5)
+    assert_same_result(a * 0.5,              CArray.fuse { a * 0.5 })
+    assert_same_result(a + Complex(1, 2),    a.lazy + Complex(1, 2))
+    assert_same_result(a + true,             a.lazy + true)
+    assert_same_result(f + 2.5,              f.lazy + 2.5)
+    assert_same_result(u + 300,              u.lazy + 300)
+    assert_same_result(CA_FLOAT64([1, 2]) + Complex(0, 1),
+                       CA_FLOAT64([1, 2]).lazy + Complex(0, 1))
+  end
+
+  def test_scalar_in_comparison_promotes_as_eager
+    a = CA_INT32([1, 2, 3])
+    assert_same_result(a >= 2.5,   a.lazy >= 2.5)
+    assert_same_result(a.eq(2.5),  a.lazy.eq(2.5))
+    assert_same_result(a > true,   a.lazy > true)
+    x = fixlen(%w[aaaaaaaa bbbbbbbb cccccccc])
+    assert_same_result(x.eq("bbbbbbbb"), x.lazy.eq("bbbbbbbb"))
+  end
+
+  def test_scalar_in_triop_promotes_as_eager
+    a = CA_INT32([1, 2, 3])
+    assert_same_result(a.clip(-1.5, 1.5),  a.lazy.clip(-1.5, 1.5))
+    assert_same_result(a.fma(0.5, 0.25),   a.lazy.fma(0.5, 0.25))
+  end
+
+  def test_scalar_on_the_left_promotes_as_eager_and_stays_lazy
+    a = CA_INT32([1, 2, 3])
+    f = CA_FLOAT32([1, 2, 3])
+    assert_same_result(2.5 * a, 2.5 * a.lazy)
+    assert_same_result(2.5 - a, 2.5 - a.lazy)
+    assert_same_result(2 * f,   2 * f.lazy)
+    assert_kind_of(CABinOp, 2.5 * a.lazy)
+  end
+
 end
