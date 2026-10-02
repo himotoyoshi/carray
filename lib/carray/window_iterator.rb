@@ -210,6 +210,7 @@ class CAWindowIterator < CAIterator
   # One allocation, the source copied into the interior region, then the
   # margins filled per mode.
   def pad_source (src, lefts, rights, mode, value)
+    return pad_face(src, lefts, rights, mode, value) if src.face?
     nd    = src.ndim
     shape = src.shape
     pshape = nd.times.map { |i| shape[i] + lefts[i] + rights[i] }
@@ -222,8 +223,8 @@ class CAWindowIterator < CAIterator
     when :masked
       pad[] = UNDEF
     when :edge
-      # Provisional fill; the edge margins are written below from the source.
-      pad[] = 0
+      # Nothing to fill: every margin cell is written from the source below
+      # (a provisional 0 cannot be stored in a fixlen buffer).
     end
 
     interior = nd.times.map { |i| lefts[i]...(lefts[i] + shape[i]) }
@@ -232,6 +233,23 @@ class CAWindowIterator < CAIterator
     replicate_edges(pad, lefts, rights, shape) if mode == :edge
 
     pad
+  end
+
+  # A Face is padded on its storage and put back on at the end, so the margins
+  # hold storage -- UNDEF, a copy of an edge cell, or a `:constant` value the
+  # Face has turned into storage -- and the reductions over the windows are
+  # the Face's own.  A buffer of the Face's surface type could not take the
+  # margin values at all.
+  def pad_face (src, lefts, rights, mode, value)
+    storage = src.parent
+    if mode == :constant && !value.nil?
+      cell = CArray.new(storage.data_type, [1], bytes: storage.bytes).face_lift(src)
+      cell[0] = value
+      padded = pad_source(storage, lefts, rights, :constant, cell.parent[0])
+    else
+      padded = pad_source(storage, lefts, rights, mode, value)
+    end
+    padded.face_lift(src)
   end
 
   # Edge-replicate the margins of a padded buffer whose interior already holds
@@ -471,6 +489,8 @@ class CAWindowIterator < CAIterator
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
+    # The elementwise kernels act on a Face's storage; its reductions are its own.
+    return nil if @source.face?
     # Anything but a plain count goes to the core, which owns the rule for
     # what min_count accepts; answering it here would be a second rule.
     return nil unless min_count.nil? || (min_count.is_a?(Integer) && min_count >= 0)

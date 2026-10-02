@@ -2008,8 +2008,10 @@ rb_ca_as_strided (int argc, VALUE *argv, VALUE self)
     base_offset = NUM2SIZE(roffset);
   }
 
-  return rb_ca_stride_new(self, parent->data_type, parent->bytes,
-                          ndim, shape, strides, base_offset);
+  VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
+                               ndim, shape, strides, base_offset);
+  CA_WRAPPER_LIFT(obj, self, parent);
+  return obj;
 }
 
 /* sliding_windows(*window, step: nil) -- overlapping-window view over every
@@ -2120,8 +2122,10 @@ rb_ca_sliding_windows (int argc, VALUE *argv, VALUE self)
     outstrides[ndim + i] = parent_byte_stride[i];
   }
 
-  return rb_ca_stride_new(self, parent->data_type, parent->bytes,
-                          (int8_t)(2 * ndim), outdim, outstrides, 0);
+  VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
+                               (int8_t)(2 * ndim), outdim, outstrides, 0);
+  CA_WRAPPER_LIFT(obj, self, parent);
+  return obj;
 }
 
 /* unfold(*window, step: nil) -- sliding_windows over the leading `S` axes
@@ -2242,8 +2246,10 @@ rb_ca_unfold (int argc, VALUE *argv, VALUE self)
     outstrides[2 * nspatial + i] = parent_byte_stride[nspatial + i];
   }
 
-  return rb_ca_stride_new(self, parent->data_type, parent->bytes,
-                          (int8_t) outrank, outdim, outstrides, 0);
+  VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
+                               (int8_t) outrank, outdim, outstrides, 0);
+  CA_WRAPPER_LIFT(obj, self, parent);
+  return obj;
 }
 
 /* block_view(*block) -- non-overlapping tile view.  Parent [d0..dN-1]

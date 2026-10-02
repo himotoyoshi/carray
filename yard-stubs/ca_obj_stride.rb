@@ -20,7 +20,8 @@ class CArray
 
   # Returns a {CAStride} view of `self` with the given byte strides and
   # starting byte offset, inheriting the receiver's data type and element
-  # size.  Memory is shared with the receiver.
+  # size.  Memory is shared with the receiver, and a Face receiver stays the
+  # Face.
   #
   # This is a low-level escape hatch: the strides and offset are **not**
   # bounds-checked against the receiver's memory, so a combination that
@@ -46,7 +47,8 @@ class CArray
   #
   # Truncate mode: a trailing partial window is dropped rather than padded.
   # Memory is shared with the parent, and because windows overlap, one parent
-  # cell is visible from several positions of the view.
+  # cell is visible from several positions of the view.  A Face parent stays
+  # the Face.
   #
   # Reduce over the trailing `ndim` axes for a rolling statistic.
   #
@@ -70,7 +72,7 @@ class CArray
   # The window axes are inserted before the trailing axes, so the result rank
   # is `ndim + S`.  With `S == ndim` there are no trailing axes and the
   # result is identical to {#sliding_windows}.  Truncate mode; memory is
-  # shared with the parent.
+  # shared with the parent, and a Face parent stays the Face.
   #
   # @overload unfold(window, step: nil)
   # @overload unfold(w0, w1, ..., step: nil)

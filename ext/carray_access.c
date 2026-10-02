@@ -1518,6 +1518,20 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
      the Face to storage, so this is the only point that sees it. */
   if ( ca_is_face(ca) ) {
     rval = ca_face_convert_store_rval(self, ca, rval);
+    /* A CArray source is storage now, so the destination has to be too.
+       A block store descends on its own (its view is built on the storage);
+       a whole, boolean or address store kept the Face and cast the storage
+       to the Face's surface type, which an int64 tick cannot become.  A Face
+       whose surface type is its storage's (a string or record Face) needs
+       no descent, and keeps its own index forms (a record's field name). */
+    if ( rb_obj_is_carray(rval) ) {
+      CArray *cr;
+      GetCArray(rval, cr);
+      if ( ! ca_is_face(cr) && ca_strip_face(ca)->data_type != ca->data_type ) {
+        self = rb_ca_strip_face_value(self);
+        TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+      }
+    }
   }
 
   /* newaxis (:_) interception on store.  Build the newaxis view (a

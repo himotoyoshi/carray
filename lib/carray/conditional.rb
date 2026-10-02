@@ -38,6 +38,8 @@ class CArray
       raise ArgumentError,
             "then_else: receiver must be a boolean CArray (data_type == CA_BOOLEAN), got #{self.data_type}"
     end
+    face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
+    return face_then_else(x, y, face) if face
     # Promote data_type from both branches via CArray.result_type
     # (a CScalar contributes its own data_type, so CA_INT32(0) keeps int32
     # where a bare Ruby Integer would widen to int64).
@@ -57,6 +59,39 @@ class CArray
     if self.has_mask?
       result[self.is_masked] = UNDEF
     end
+    result
+  end
+
+  private def face_then_else (x, y, face)
+    # A Face branch decides the result: the other branch is written into a
+    # copy of it through the Face's own store, so an instant stays an instant.
+    # Promoting the two branches to a common data type would compare a Face's
+    # surface type with its storage's.  A CAConstString cannot be written, so
+    # it selects among its strings and packs them again.
+    if face.is_a?(CAConstString)
+      sx = x.is_a?(CAConstString) ? x.to_string : x
+      sy = y.is_a?(CAConstString) ? y.to_string : y
+      return CArray.const_string(then_else(sx, sy), encoding: face.encoding)
+    end
+    x_full = x.is_a?(CArray) && !x.scalar?
+    y_full = y.is_a?(CArray) && !y.scalar?
+    base   = y_full ? y : x
+    if base.read_only?
+      # No store to write through (a CACategorical's codes): select among
+      # the values themselves.
+      result = CArray.object(*shape)
+      result[] = y_full ? y.to_type(CA_OBJECT) : y
+      result[self] = x_full ? x.to_type(CA_OBJECT)[self] : x
+      result[self.is_masked] = UNDEF if self.has_mask?
+      return result
+    end
+    result = base.copy
+    if y_full
+      result[self] = x_full ? x[self] : x
+    else
+      result[self.not] = y.is_a?(CArray) ? y[0] : y
+    end
+    result[self.is_masked] = UNDEF if self.has_mask?
     result
   end
 

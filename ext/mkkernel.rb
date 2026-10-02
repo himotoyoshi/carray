@@ -738,7 +738,7 @@ module MkKernel
   #                    the reduction contract (empty max / min = UNDEF, no
   #                    identity) and the axis-group scan family.
   def self.scan(name, source:, output:, init:, step:, fallback: :raise,
-                acc_type: nil, axis_default: nil, empty: nil)
+                acc_type: nil, axis_default: nil, empty: nil, face_gate: nil)
     raise "duplicate kernel #{name}" if KERNELS.any? { |k| k[:name] == name }
     source.each do |s|
       raise "unknown source data_type #{s}" unless DTYPES.key?(s)
@@ -760,6 +760,13 @@ module MkKernel
     if empty == :undef && acc_type == :load_type
       raise "#{name}: empty: :undef is not supported with acc_type: :load_type"
     end
+    # face_gate: :relift descends an ORDERABLE Face to its storage, scans
+    # the storage and puts the Face back on the result (the reduce family's
+    # policy).  Only a scan whose output is the source's own values may take
+    # it: a running sum of instants is not an instant.
+    unless face_gate.nil? || face_gate == :relift
+      raise "#{name}: unknown face_gate #{face_gate.inspect} (nil | :relift)"
+    end
 
     KERNELS << {
       kind:         :scan,
@@ -772,6 +779,7 @@ module MkKernel
       acc_type:     acc_type,
       axis_default: axis_default,
       empty:        empty,
+      face_gate:    face_gate,
     }
   end
 
@@ -3978,8 +3986,29 @@ module MkKernel
     # multi-axis scan is semantically ambiguous (flatten-and-cumsum vs
     # 2D prefix sum); users must chain explicitly.  Arity flips from 1
     # (positional Integer axis) to -1 (kwarg dispatcher).
-    io.puts "static VALUE"
-    io.puts "rb_ca_#{name}_ki (int argc, VALUE *argv, VALUE self)"
+    if k[:face_gate]
+      # The scan proper runs on the storage; the bound entry below gates the
+      # Face and re-lifts the result.
+      io.puts "static VALUE rb_ca_#{name}_ki_storage (int argc, VALUE *argv, VALUE self);"
+      io.puts
+      io.puts "static VALUE"
+      io.puts "rb_ca_#{name}_ki (int argc, VALUE *argv, VALUE self)"
+      io.puts "{"
+      io.puts "  CArray *src;"
+      io.puts "  VALUE result;"
+      io.puts "  GetCArray(self, src);"
+      emit_reduce_face_gate(io, name, true)
+      io.puts "  result = rb_ca_#{name}_ki_storage(argc, argv, self);"
+      emit_reduce_face_relift(io)
+      io.puts "  return result;"
+      io.puts "}"
+      io.puts
+      io.puts "static VALUE"
+      io.puts "rb_ca_#{name}_ki_storage (int argc, VALUE *argv, VALUE self)"
+    else
+      io.puts "static VALUE"
+      io.puts "rb_ca_#{name}_ki (int argc, VALUE *argv, VALUE self)"
+    end
     io.puts "{"
     io.puts "  CArray *src;"
     io.puts "  GetCArray(self, src);"
@@ -7547,6 +7576,7 @@ MkKernel.scan :cumprod,
 # so the f32 lane needs no narrowing.  Integer and boolean have no NaN
 # and keep the limit init and the plain compare.
 MkKernel.scan :cummax,
+  face_gate:    :relift,
   source:       MkKernel::ALL_NUMERIC + [:bool, :object],
   output:       { bool: :u64, default: :preserve },
   init:         { float: "NAN", numeric: "T_LIMIT_LO", bool: "T_LIMIT_LO", object: "Qnil" },
@@ -7566,6 +7596,7 @@ MkKernel.scan :cummax,
 # so the f32 lane needs no narrowing.  Integer and boolean have no NaN
 # and keep the limit init and the plain compare.
 MkKernel.scan :cummin,
+  face_gate:    :relift,
   source:       MkKernel::ALL_NUMERIC + [:bool, :object],
   output:       { bool: :u64, default: :preserve },
   init:         { float: "NAN", numeric: "T_LIMIT_HI", bool: "T_LIMIT_HI", object: "Qnil" },
