@@ -496,108 +496,25 @@ ca_binop_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CABinOp is read-only (fill_data)");
 }
 
-/* Build out.mask.  When either parent has a mask, materialise a
-   freshly-allocated boolean8_t buffer.  For most ops this is the blind
-   OR `left.mask | right.mask`.
+/* Build out.mask: the operands' masks ORed on each read (CAMaskOfOperands), so
+   that it follows them as the values do.
 
    Boolean AND / OR are three-valued (Kleene): a masked cell is resolved by
    the *known* side (`unknown | true = true`, `unknown & false = false`), so
-   it is NOT masked in the result.  This needs operand VALUES, not just
-   masks, so both operands are attached; the blind value the value kernel
-   later writes is already correct on a resolved cell because the absorbing
-   element (true for OR, false for AND) dominates whatever garbage sits on
-   the masked side.  Nested trees compose: an inner boolean `&`/`|` node's
-   mask is already Kleene-resolved by the time an outer node reads it.
-
-   Not memory-optimal (a CARepeat-like view would share pages), but correct
-   and decoupled from xfer_stride ordering. */
+   it is NOT masked in the result.  The blind value the value kernel writes
+   is already correct on a resolved cell because the absorbing element (true
+   for OR, false for AND) dominates whatever sits on the masked side. */
 static void
 ca_binop_func_create_mask (void *ap)
 {
   CABinOp *bo = (CABinOp *) ap;
-  CArray *l = bo->parent;
-  CArray *r = bo->right;
-  boolean8_t *dst;
-  ca_size_t i, n;
-  int has_l, has_r, kleene, need_l, need_r, is_or;
-  boolean8_t *lm, *rm, *lv, *rv;
-  CArray *read[2], *mask;
-  int32_t nread = 0;
+  int mode = CA_LAZY_MASK_OR;
 
-  has_l = ca_has_mask(l);
-  has_r = ca_has_mask(r);
-  if ( ! has_l && ! has_r ) return;
-
-  kleene = ( bo->data_type == CA_BOOLEAN &&
-             ( bo->op_id == CA_BINOP_BIT_AND || bo->op_id == CA_BINOP_BIT_OR ) );
-  is_or  = ( bo->op_id == CA_BINOP_BIT_OR );
-
-  /* One masked operand and no Kleene resolution: the answer is that
-     operand's mask, cell for cell.  Share it the way CAMonOp shares its
-     parent's, rather than allocating a copy per node -- a chain of k
-     binops over one masked array then holds one boolean array, not k. */
-  if ( ! kleene && ( has_l != has_r ) ) {
-    CArray *src = has_l ? l : r;
-    if ( src->elements == bo->elements ) {
-      bo->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
-                                         bo->ndim, bo->dim, 0, 0);
-      return;
-    }
+  if ( bo->data_type == CA_BOOLEAN ) {
+    if ( bo->op_id == CA_BINOP_BIT_OR )  mode = CA_LAZY_MASK_KLEENE_OR;
+    if ( bo->op_id == CA_BINOP_BIT_AND ) mode = CA_LAZY_MASK_KLEENE_AND;
   }
-
-  /* Kleene needs operand values even where an operand is unmasked. */
-  need_l = has_l || kleene;
-  need_r = has_r || kleene;
-  /* Only Kleene reads operand values.  Every other op reads the operand
-     masks alone, and attaching the operand to reach its mask materialises
-     the whole subexpression under it -- so a chain of k masked binops
-     evaluates its own subtree k times over.  Attach what is read.
-
-     Reading an operand can raise (a lazy operand that does not convert),
-     so they are attached all together, before anything is built, and the
-     mask is published only once it is filled: a raise leaves no mask
-     half-made and no operand attached. */
-  if ( kleene ) {
-    if ( need_l ) read[nread++] = l;
-    if ( need_r ) read[nread++] = r;
-  }
-  else {
-    if ( has_l ) read[nread++] = l->mask;
-    if ( has_r ) read[nread++] = r->mask;
-  }
-  ca_attach_all(read, nread);
-
-  mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
-  dst = (boolean8_t *) mask->ptr;
-  n = bo->elements;
-
-  lm = has_l ? (boolean8_t *) l->mask->ptr : NULL;
-  rm = has_r ? (boolean8_t *) r->mask->ptr : NULL;
-  lv = kleene ? (boolean8_t *) l->ptr : NULL;
-  rv = kleene ? (boolean8_t *) r->ptr : NULL;
-
-  for ( i = 0; i < n; i++ ) {
-    /* right broadcast: repeat element 0 when right was a scalar. */
-    ca_size_t ri = bo->right_is_scalar ? 0 : i;
-    boolean8_t am = lm ? lm[i]  : 0;
-    boolean8_t bm = rm ? rm[ri] : 0;
-    boolean8_t m  = (boolean8_t)( am | bm );
-    if ( kleene && m ) {
-      boolean8_t av = lv[i], bv = rv[ri];
-      if ( is_or ) {
-        if ( ( ! am && av ) || ( ! bm && bv ) ) m = 0;      /* known TRUE */
-      }
-      else {
-        if ( ( ! am && ! av ) || ( ! bm && ! bv ) ) m = 0;  /* known FALSE */
-      }
-    }
-    dst[i] = m;
-  }
-
-  while ( nread > 0 ) {
-    ca_detach(read[--nread]);
-  }
-  bo->mask = mask;
+  bo->mask = ca_lazy_operation_mask((CArray *) bo, mode);
 }
 
 ca_operation_function_t ca_binop_func = {

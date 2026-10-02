@@ -409,68 +409,13 @@ ca_triop_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CATriOp is read-only (fill_data)");
 }
 
-/* Build out.mask.  Blind OR of the three operand masks — none of the
-   currently-defined triops carry a Kleene 3-valued fixup. */
+/* Build out.mask: the three operands' masks ORed on each read
+   (CAMaskOfOperands).  None of the triops resolves a masked cell from values. */
 static void
 ca_triop_func_create_mask (void *ap)
 {
   CATriOp *to = (CATriOp *) ap;
-  CArray *op1 = to->parent;
-  CArray *op2 = to->op2;
-  CArray *op3 = to->op3;
-  boolean8_t *dst, *m1, *m2, *m3;
-  CArray *read[3], *mask;
-  int32_t nread = 0;
-  ca_size_t i, n;
-  int has1, has2, has3;
-
-  has1 = ca_has_mask(op1);
-  has2 = ca_has_mask(op2);
-  has3 = ca_has_mask(op3);
-  if ( ! has1 && ! has2 && ! has3 ) return;
-
-  /* Exactly one masked operand: the answer is that operand's mask, cell
-     for cell.  Share it rather than allocating a copy per node. */
-  if ( has1 + has2 + has3 == 1 ) {
-    CArray *src = has1 ? op1 : ( has2 ? op2 : op3 );
-    if ( src->elements == to->elements ) {
-      to->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
-                                         to->ndim, to->dim, 0, 0);
-      return;
-    }
-  }
-
-  /* The masks are what is read here; attaching the operand instead
-     materialises the whole subexpression under it.  They are attached all
-     together before the mask is built, which is published only once it is
-     filled: an attach that raises leaves no mask half-made and no operand
-     attached. */
-  if ( has1 ) read[nread++] = op1->mask;
-  if ( has2 ) read[nread++] = op2->mask;
-  if ( has3 ) read[nread++] = op3->mask;
-  ca_attach_all(read, nread);
-
-  mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
-  dst = (boolean8_t *) mask->ptr;
-  n = to->elements;
-
-  m1 = has1 ? (boolean8_t *) op1->mask->ptr : NULL;
-  m2 = has2 ? (boolean8_t *) op2->mask->ptr : NULL;
-  m3 = has3 ? (boolean8_t *) op3->mask->ptr : NULL;
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t i2 = to->op2_is_scalar ? 0 : i;
-    ca_size_t i3 = to->op3_is_scalar ? 0 : i;
-    boolean8_t a = m1 ? m1[i]  : 0;
-    boolean8_t b = m2 ? m2[i2] : 0;
-    boolean8_t c = m3 ? m3[i3] : 0;
-    dst[i] = (boolean8_t) ( a | b | c );
-  }
-
-  while ( nread > 0 ) {
-    ca_detach(read[--nread]);
-  }
-  to->mask = mask;
+  to->mask = ca_lazy_operation_mask((CArray *) to, CA_LAZY_MASK_OR);
 }
 
 ca_operation_function_t ca_triop_func = {

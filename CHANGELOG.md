@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the mask of a lazy expression (`a.lazy + b`, `a.lazy.gt(3)`,
+  `a.lazy.fma(b, c)`, the boolean `&` and `|`) follows its operands on
+  every read, as its values do. Before, it was fixed when first read, so
+  a cell masked in an operand afterwards read back as a value. Reading the
+  mask no longer gives an operand a mask it did not have.
+- Fix: the mask of a read-only lazy expression (`a.lazy.sqrt.mask`) is
+  read-only. Writing to it changed the operand's mask.
 - Fix: `invert_mask` raises on a frozen array, a view of one, and a lazy
   expression, and changes nothing. It inverted the mask first, and on a
   lazy expression inverted the operand's mask without raising.

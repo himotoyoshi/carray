@@ -19,6 +19,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_*, ca_is_lazy_view */
+#include "ca_kernel_iterator.h" /* ca_iter_register_source_kind */
 
 int8_t CA_OBJ_LAZY_MARKER;
 VALUE rb_cCALazyMarker;
@@ -213,6 +214,7 @@ ca_lazy_marker_func_create_mask (void *ap)
   ca->mask =
     (CArray *) ca_refer_new(ca->parent->mask,
                             CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
 }
 
 ca_operation_function_t ca_lazy_marker_func = {
@@ -764,6 +766,8 @@ rb_ca_lazy_marker_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+static void Init_ca_mask_of_operands (void);
+
 void
 Init_carray_lazy (void)
 {
@@ -806,6 +810,8 @@ Init_carray_lazy (void)
                              rb_ca_lazy_arena_s_slot_in_use_count, 0);
   rb_define_singleton_method(rb_cCArray, "__lazy_arena_slot_capacities__",
                              rb_ca_lazy_arena_s_slot_capacities, 0);
+
+  Init_ca_mask_of_operands();
 }
 
 /* ---------------------------------------------------------------------------
@@ -915,4 +921,363 @@ ca_lazy_evaluated (VALUE self)
     return Qnil;
   }
   return rb_funcall(rb_const_get(rb_cCArray, id_fusion), id_evaluate, 1, self);
+}
+
+/* ---------------------------------------------------------------------------
+   CAMaskOfOperands: the mask of an element-wise lazy operation over several
+   operands (CABinOp, CABinCmp, CATriOp).
+
+   The operation computes its values each time it is read, so its mask is
+   computed the same way: a request pulls each operand's mask over the cells
+   it names and ORs them.  An operand with no mask reads as all false, so an
+   operand that is given a mask after the expression was first read is seen
+   on the next read -- and reading the mask never gives an operand one.
+
+   For the boolean `|` and `&` (three-valued) a masked cell is not masked in
+   the result when an unmasked operand already decides it: true for `|`,
+   false for `&`.  The operands' values are pulled for that.
+
+   The view is read-only and has no mask of its own (CA_FLAG_VALUE_ARRAY),
+   so nothing above it asks for one.  Its parent is the operation, which
+   owns it as its mask; the operands are read through the operation's
+   parents[].
+   --------------------------------------------------------------------------- */
+
+int8_t CA_OBJ_MASK_OF_OPERANDS;
+VALUE rb_cCAMaskOfOperands;
+
+typedef struct CAMaskOfOperands {
+  int16_t   obj_type;
+  int8_t    data_type;
+  int8_t    ndim;
+  int32_t   flags;
+  ca_size_t bytes;
+  ca_size_t elements;
+  ca_size_t *dim;
+  char     *ptr;
+  CArray   *mask;
+  char     *_pool;
+  CArray   *parent;
+  uint32_t  attach;
+  uint8_t   nosync;
+  int8_t    mode;          /* CA_LAZY_MASK_OR / _KLEENE_OR / _KLEENE_AND */
+} CAMaskOfOperands;
+
+static size_t
+ca_mask_of_operands_dsize (const void *ap)
+{
+  const CAMaskOfOperands *ca = (const CAMaskOfOperands *) ap;
+  return sizeof(CAMaskOfOperands) + ca->ndim * sizeof(ca_size_t);
+}
+
+const rb_data_type_t camask_of_operands_data_type = {
+    .parent = &caview_data_type,
+    .wrap_struct_name = "CAMaskOfOperands",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = ca_mask_of_operands_dsize,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+CArray *
+ca_mask_of_operands_new (CArray *operation, int mode)
+{
+  CAMaskOfOperands *ca = ALLOC(CAMaskOfOperands);
+  ca->_pool     = NULL;
+  ca->obj_type  = CA_OBJ_MASK_OF_OPERANDS;
+  ca->data_type = CA_BOOLEAN;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_VALUE_ARRAY;
+  ca->ndim      = operation->ndim;
+  ca->bytes     = 1;
+  ca->elements  = operation->elements;
+  ca->dim       = ALLOC_N(ca_size_t, operation->ndim);
+  ca->ptr       = NULL;
+  ca->mask      = NULL;
+  ca->parent    = operation;
+  ca->attach    = 0;
+  ca->nosync    = 0;
+  ca->mode      = (int8_t) mode;
+  memcpy(ca->dim, operation->dim, operation->ndim * sizeof(ca_size_t));
+  if ( ca_is_scalar(operation) ) {
+    ca_set_flag(ca, CA_FLAG_SCALAR);
+  }
+  return (CArray *) ca;
+}
+
+static void
+free_ca_mask_of_operands (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  if ( ca != NULL ) {
+    xfree(ca->ptr);
+    xfree(ca->dim);
+    xfree(ca);
+  }
+}
+
+static void *
+ca_mask_of_operands_func_clone (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  return ca_mask_of_operands_new(ca->parent, ca->mode);
+}
+
+/* An operand of one cell beside a larger operation is broadcast: its one
+   cell stands for every cell of the request. */
+static int
+ca_mask_of_operands_operand_is_scalar (CAMaskOfOperands *lm, CArray *op)
+{
+  return ( op->elements == 1 && lm->elements > 1 );
+}
+
+static void
+ca_mask_of_operands_pull (CAMaskOfOperands *lm, CArray *src, const ca_lazy_req_t *req,
+                   boolean8_t *buf)
+{
+  if ( ca_mask_of_operands_operand_is_scalar(lm, src) ) {
+    boolean8_t one;
+    ca_xfer_all(src, &one, CA_XFER_GET);
+    memset(buf, one ? 1 : 0, req->n);
+  }
+  else {
+    ca_lazy_req_pull(src, req, buf, CA_XFER_GET);
+  }
+}
+
+static void
+ca_mask_of_operands_eval (CAMaskOfOperands *lm, const ca_lazy_req_t *req, boolean8_t *dst)
+{
+  CAMultiParent *mp = (CAMultiParent *) lm->parent;
+  int kleene = ( lm->mode != CA_LAZY_MASK_OR );
+  boolean8_t absorbing = ( lm->mode == CA_LAZY_MASK_KLEENE_OR ) ? 1 : 0;
+  volatile VALUE h_mask, h_value, h_known;
+  boolean8_t *m, *v = NULL, *known = NULL;
+  ca_size_t n = req->n, i;
+  int32_t k;
+
+  memset(dst, 0, n);
+  m = ALLOCV_N(boolean8_t, h_mask, n);
+  if ( kleene ) {
+    v     = ALLOCV_N(boolean8_t, h_value, n);
+    known = ALLOCV_N(boolean8_t, h_known, n);
+    memset(known, 0, n);
+  }
+
+  for ( k = 0; k < mp->n_parents; k++ ) {
+    CArray *op = mp->parents[k];
+    if ( ca_has_mask(op) ) {
+      ca_mask_of_operands_pull(lm, op->mask, req, m);
+      for ( i = 0; i < n; i++ ) dst[i] |= m[i];
+    }
+    else {
+      memset(m, 0, n);
+    }
+    if ( kleene ) {
+      ca_mask_of_operands_pull(lm, op, req, v);
+      for ( i = 0; i < n; i++ ) {
+        if ( ! m[i] && ( v[i] ? 1 : 0 ) == absorbing ) known[i] = 1;
+      }
+    }
+  }
+
+  if ( kleene ) {
+    for ( i = 0; i < n; i++ ) {
+      if ( known[i] ) dst[i] = 0;
+    }
+    ALLOCV_END(h_known);
+    ALLOCV_END(h_value);
+  }
+  ALLOCV_END(h_mask);
+}
+
+NORETURN(static void ca_mask_of_operands_read_only (void));
+static void
+ca_mask_of_operands_read_only (void)
+{
+  rb_raise(rb_eRuntimeError, "the mask of a lazy operation is read-only");
+}
+
+static void
+ca_mask_of_operands_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                               ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_mask_of_operands_eval((CAMaskOfOperands *) ap, &req, (boolean8_t *) data);
+}
+
+static void
+ca_mask_of_operands_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                              void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_mask_of_operands_eval((CAMaskOfOperands *) ap, &req, (boolean8_t *) data);
+}
+
+static void
+ca_mask_of_operands_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t addr = 0;
+  int8_t    k;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  for ( k = 0; k < ca->ndim; k++ ) {
+    addr = addr * ca->dim[k] + idx[k];
+  }
+  ca_mask_of_operands_func_xfer_addrs(ap, 1, &addr, data, dir);
+}
+
+static void
+ca_mask_of_operands_func_xfer_all (void *ap, void *data, int dir)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t starts[CA_RANK_MAX];
+  ca_size_t native[CA_RANK_MAX];
+  ca_size_t s = 1;
+  int8_t    k;
+  for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
+  for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  ca_mask_of_operands_func_xfer_stride(ap, starts, ca->dim, native, data, dir);
+}
+
+static VALUE
+ca_mask_of_operands_fill_buffer (VALUE arg)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) arg;
+  ca_mask_of_operands_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  return Qnil;
+}
+
+/* The buffer is published only once it is filled: a read that raises
+   frees it and leaves the view unattached. */
+static void
+ca_mask_of_operands_func_attach (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  int tag = 0;
+  ca->ptr = xmalloc(ca->elements);
+  rb_protect(ca_mask_of_operands_fill_buffer, (VALUE) ca, &tag);
+  if ( tag ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+    rb_jump_tag(tag);
+  }
+}
+
+static void
+ca_mask_of_operands_func_allocate (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  ca->ptr = xmalloc(ca->elements);
+  memset(ca->ptr, 0, ca->elements);
+}
+
+static void
+ca_mask_of_operands_func_sync (void *ap)
+{
+  /* read-only */
+}
+
+static void
+ca_mask_of_operands_func_detach (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  xfree(ca->ptr);
+  ca->ptr = NULL;
+}
+
+NORETURN(static void ca_mask_of_operands_func_fill_data (void *ap, void *ptr));
+static void
+ca_mask_of_operands_func_fill_data (void *ap, void *ptr)
+{
+  ca_mask_of_operands_read_only();
+}
+
+NORETURN(static void ca_mask_of_operands_func_create_mask (void *ap));
+static void
+ca_mask_of_operands_func_create_mask (void *ap)
+{
+  rb_raise(rb_eRuntimeError, "can not create mask array for the mask array");
+}
+
+ca_operation_function_t ca_mask_of_operands_func = {
+  -1, /* CA_OBJ_MASK_OF_OPERANDS, set at install time */
+  CA_VIEW_ARRAY,
+  free_ca_mask_of_operands,
+  ca_mask_of_operands_func_clone,
+  ca_mask_of_operands_func_allocate,
+  ca_mask_of_operands_func_attach,
+  ca_mask_of_operands_func_sync,
+  ca_mask_of_operands_func_detach,
+  ca_mask_of_operands_func_fill_data,
+  ca_mask_of_operands_func_create_mask,
+  ca_mask_of_operands_func_xfer_index,
+  ca_mask_of_operands_func_xfer_addrs,
+  NULL,                       /* fold_stride: computed, never folds */
+  ca_mask_of_operands_func_xfer_stride,
+  ca_mask_of_operands_func_xfer_all,
+};
+
+static void
+Init_ca_mask_of_operands (void)
+{
+  rb_cCAMaskOfOperands = rb_define_class("CAMaskOfOperands", rb_cCAView);
+  CA_OBJ_MASK_OF_OPERANDS = ca_install_obj_type(rb_cCAMaskOfOperands,
+                                         &camask_of_operands_data_type,
+                                         rb_cCArrayMask,
+                                         &carray_mask_data_type,
+                                         &ca_mask_of_operands_func,
+                                         sizeof(ca_mask_of_operands_func));
+  rb_undef_alloc_func(rb_cCAMaskOfOperands);
+  ca_iter_register_source_kind(CA_OBJ_MASK_OF_OPERANDS, CA_ITER_SRC_ATTACH);
+}
+
+/* The mask of a lazy operation over several operands: shared with the one
+   masked operand when no other operand can ever be given a mask, computed
+   from all of them on each read otherwise (CAMaskOfOperands above).
+
+   An operand can be given a mask later unless it is broadcast from one
+   cell (a scalar the expression made from a literal), a value array, or a
+   read-only entity.  The shared mask is read-only, as the operation is. */
+CArray *
+ca_lazy_operation_mask (CArray *operation, int mode)
+{
+  CAMultiParent *mp = (CAMultiParent *) operation;
+  CArray *masked = NULL;
+  int32_t k, n_masked = 0, n_open = 0;
+
+  for ( k = 0; k < mp->n_parents; k++ ) {
+    CArray *op = mp->parents[k];
+    if ( ca_has_mask(op) ) {
+      masked = op;
+      n_masked++;
+    }
+    else if ( ! ( op->elements == 1 && operation->elements > 1 )
+              && ! ca_is_value_array(op)
+              && ! ( ca_is_entity(op) && ca_is_readonly(op) ) ) {
+      n_open++;
+    }
+  }
+
+  if ( n_masked == 0 ) {
+    return NULL;
+  }
+
+  if ( mode == CA_LAZY_MASK_OR && n_masked == 1 && n_open == 0
+       && masked->elements == operation->elements ) {
+    CArray *shared = (CArray *) ca_refer_new(masked->mask, CA_BOOLEAN,
+                                             operation->ndim, operation->dim,
+                                             0, 0);
+    ca_set_flag(shared, CA_FLAG_READ_ONLY);
+    return shared;
+  }
+
+  return ca_mask_of_operands_new(operation, mode);
 }
