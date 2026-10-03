@@ -992,12 +992,32 @@ ca_window_owns_buffer (CAWindow *ca)
   return ca_parent_lends_no_memory(ca->parent);
 }
 
+/* The parent's storage the alias path points into: inner axes full and
+   interior, so the window is one contiguous run of the attached parent. */
+static char *
+ca_window_alias_ptr (CAWindow *ca)
+{
+  ca_size_t parent_row_stride = ca->bytes;
+  int8_t k;
+  for (k = ca->ndim - 1; k >= 1; k--) parent_row_stride *= ca->parent->dim[k];
+  return ca->parent->ptr + ca->start[0] * parent_row_stride;
+}
+
+/* Agrees with attach on the alias path: sync has nothing to write back
+   and detach frees nothing there, so a buffer of our own would take the
+   writes and be dropped. */
 static void
 ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
-  if ( ! ca_window_owns_buffer(ca) ) {
-    ca_attach(ca->parent);
+  if ( ca_window_owns_buffer(ca) ) {
+    ca->ptr = xmalloc(ca_length(ca));
+    return;
+  }
+  ca_attach(ca->parent);
+  if ( ca->embed_alias_eligible ) {
+    ca->ptr = ca_window_alias_ptr(ca);
+    return;
   }
   ca->ptr = xmalloc(ca_length(ca));
 }
@@ -1026,10 +1046,7 @@ ca_window_func_attach (void *ap)
        CAREFUL: sync and detach must agree with this — sync has nothing to
        scatter back (the writes already landed in the parent) and detach must
        not xfree a pointer it does not own. */
-    ca_size_t parent_row_stride = ca->bytes;
-    int8_t k;
-    for (k = ca->ndim - 1; k >= 1; k--) parent_row_stride *= ca->parent->dim[k];
-    ca->ptr = ca->parent->ptr + ca->start[0] * parent_row_stride;
+    ca->ptr = ca_window_alias_ptr(ca);
   } else if ( ca->embed_eligible ) {
     /* Embed path: allocate, then 1 fill + 1 strided memcpy. */
     ca_size_t out_len = ca->elements * ca->bytes;
