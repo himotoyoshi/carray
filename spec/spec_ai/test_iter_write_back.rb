@@ -142,6 +142,26 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # The mask cursor of a READ walk is the walk's own copy: writing to it
+  # reaches nothing.  A CAStack walked along a parent's own axis used to
+  # hand out its parents' live masks.
+  def test_a_read_walks_mask_cursor_is_its_own
+    {
+      "entity" => ->(a, b) { a },
+      "stack"  => ->(a, b) { CArray.stack([a, b]) },
+    }.each do |name, mk|
+      a = base
+      a[2, 3] = UNDEF
+      b = base
+      b[2, 3] = UNDEF
+      src = mk.call(a, b)
+      (0...src.ndim).each do |axis|
+        assert_equal true, CArray.iw_read_poke_mask(src, axis), "#{name} axis #{axis}"
+        assert_equal [1, 1], [a.count_masked, b.count_masked], "#{name} axis #{axis}"
+      end
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

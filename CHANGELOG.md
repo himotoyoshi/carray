@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions, the mask cursor a read walk over a `CArray.stack`
+  hands out is the walk's own copy, as it is for every other source.
+  Writing to it changed the stacked arrays' masks.
+
 - Fix: for C extensions, `CA_FOR_EACH_FIBER_PAIR` and its `_MASKED` form
   close the first source when the second is refused or raises partway.
   The first was left open: its scratch leaked and a view passed as the
