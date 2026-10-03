@@ -52,8 +52,8 @@ keeps the author surface stable across engine refactors.
 |---|---|---|---|
 | `CA_FOR_EACH_SLAB` | per-slab strided delivery (general purpose, peak efficiency) | per-axis reduction / map / sort / any per-slab loop kernel | ✓ Landed (§6.1) |
 | `CA_FOR_EACH_SLAB_INOUT` | per-slab strided delivery, input + output in parallel | element-wise transform with input / output in distinct views | ✓ Landed (§6.2) |
-| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, NO_MASK only | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, NO_MASK only | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) |
+| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, no mask cursor | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) |
+| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) |
 | `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) |
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) |
 
@@ -62,10 +62,12 @@ buffers — data, mask (MASKED forms), and output (INOUT forms). Author
 uses `p[i]` / `m[i]` / `p_out[i]` with no stride arithmetic. The engine
 handles alias selection (zero-copy when fiber stride permits) and
 per-fiber materialise (including per-fiber mask gather for non-innermost
-axes) transparently. INOUT forms require **strict full shape equality**
-of input and output views (= same ndim, same `elements`, same
-`dim[axis]`); mismatched pairs are silently skipped (= body does not
-run) to plug the rev4 silent-corruption seam.
+axes) transparently. INOUT forms require input and output views of
+**the same shape** (same ndim, same `dim[k]` on every axis) and raise
+`ArgumentError` before opening either walk when they differ. The forms
+without MASKED in the name hand out no mask cursor: a masked source is
+walked with its masked cells read as values unless the flags include
+`CA_KERNEL_NO_MASK`, which refuses it.
 | `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) |
 | `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) |
 | `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) |
@@ -737,14 +739,12 @@ Contract / constraints:
   on `p[i]`). If the body just reads through a stride into its own buffer
   or returns a scalar, the gather is wasted work — use `CA_FOR_EACH_SLAB`
   instead (see §0.2 "How to pick").
-- **INOUT requires strict full shape equality** of `ca_in` / `ca_out`
-  (same ndim, same `elements`, same `dim[axis]`). The macro runtime-
-  asserts this in the loop condition and **silently skips** the body on
-  mismatch (= plugs the silent-corruption seam where two iterators would
-  otherwise short-circuit on the shorter fiber count). Broadcasting needs
-  the raw API.
+- **INOUT requires the same shape** for `ca_in` / `ca_out` (same ndim,
+  same `dim[k]` on every axis), and raises `ArgumentError` before opening
+  either walk when they differ. Broadcasting needs the raw API.
 - Same lifecycle constraints as the SLAB family (§6.4): `break;` exits
-  cleanly (finish runs); `return;` from the body **leaks** scratch +
+  cleanly (finish runs, and a write walk writes back the fiber it was
+  in); `return;` from the body **leaks** scratch +
   parent attach (drop to the raw API); the macros are not statement-
   equivalent (no trailing `else`).
 - Single-axis only. For multiple slab axes or K-D slab geometry, use
@@ -752,10 +752,10 @@ Contract / constraints:
 
 ### 6.4 When the macros are NOT appropriate
 
-The macros silently discard init errors (= body runs zero times, `finish`
-called as if init succeeded). For production kernels that need explicit
-error reporting like `sum_ki` raising `"rc=%d"`, drop down to the raw
-API:
+The macros raise `RuntimeError` on an init error (`kernel iterator: ...
+(rc=N)`), and neither the body nor `finish` runs. For a kernel that wants
+to handle the code itself — a different message, a fallback — drop down
+to the raw API:
 
 ```c
 int rc = ca_iter_state_init_l2(&st, ca, policy, axes, naxes, flags);
@@ -1337,7 +1337,8 @@ gathers strided fibers into a per-state contig scratch when needed
 argument**.
 
 The catalog has four forms (= §0.1): plain `CA_FOR_EACH_FIBER` (single
-input, NO_MASK), `_INOUT` (input + same-shape output, NO_MASK), and
+input, no mask cursor), `_INOUT` (input + same-shape output, no mask
+cursor), and
 `_MASKED` / `_INOUT_MASKED` variants where the engine also delivers a
 contig boolean mask `m`.
 
@@ -1423,11 +1424,9 @@ NULL-checks first.
 
 #### 7.5.3 Shape requirement for INOUT forms
 
-`CA_FOR_EACH_FIBER_INOUT` / `_INOUT_MASKED` require **strict full
-shape equality** between input and output (= same `ndim`, same total
-`elements`, same `dim[axis]`). The macros runtime-assert this in the
-inner `for` condition; mismatched pairs are silently skipped (body
-never executes).
+`CA_FOR_EACH_FIBER_INOUT` / `_INOUT_MASKED` require **the same shape**
+for input and output (same `ndim`, same `dim[k]` on every axis), and
+raise `ArgumentError` before opening either walk when they differ.
 
 This is intentional. Without the check, the two iterators walk the
 prefix axes independently and `&&`-short-circuit on the shorter of

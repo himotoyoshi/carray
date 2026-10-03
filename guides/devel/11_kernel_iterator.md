@@ -75,7 +75,7 @@ output operand:
 
 | Form | What it delivers |
 |------|------------------|
-| `CA_FOR_EACH_FIBER` | contig data (`p[i]`); NO_MASK only |
+| `CA_FOR_EACH_FIBER` | contig data (`p[i]`); no mask cursor (masked cells read as values; add `CA_KERNEL_NO_MASK` to refuse a masked source) |
 | `CA_FOR_EACH_FIBER_INOUT` | + a parallel contig output (`p_out[i]`) |
 | `CA_FOR_EACH_FIBER_MASKED` | + contig mask (`m[i]`) |
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | + both |
@@ -128,11 +128,9 @@ a question about both fibers.
 
 Each fiber macro auto-sets `CA_KERNEL_FIBER_CONTIG`; the engine guarantees
 contig data delivery (gathers strided fibers into per-state scratch when
-needed). The INOUT macros runtime-assert strict full-shape equality and
-silently skip the body on mismatch (= same `ndim` and same `dim[axis]`). This
-is deliberately *unlike* call_cfunc ([ch. 14](14_call_cfunc.md)), which
-**raises** on operands whose shapes do not pair — the two engines differ
-here by design.
+needed). The INOUT macros require the input and the output to have the
+same shape (`ndim` and every `dim[k]`) and raise `ArgumentError` before
+opening either walk when they do not.
 
 L2 inner-loop helpers — fast-path contig within a strided callback:
 
@@ -406,8 +404,9 @@ Choose them based on what the kernel needs:
   rejected with `CA_ITER_ERR_READONLY`.
 - A kernel that genuinely cannot accept a masked source declares
   `CA_KERNEL_NO_MASK`; the engine then rejects a masked source rather
-  than silently dropping the mask. The `_FIBER` (non-masked) forms are
-  NO_MASK by construction.
+  than silently dropping the mask. The `_FIBER` forms without MASKED in
+  the name hand out no mask cursor; without `CA_KERNEL_NO_MASK` a masked
+  source is walked with its masked cells read as values.
 - `CA_KERNEL_FIBER_CONTIG` is set internally by the FIBER macros — direct
   callers leave it clear to get the legacy L2-strided semantic.
 
@@ -426,9 +425,10 @@ Choose them based on what the kernel needs:
 ```
 
 On error the engine releases anything it claimed; `finish` is not
-required. Production kernels typically raise on any non-OK code; the
-block-form macros silently skip the body and run `finish` (= no exception
-path is needed for the common case).
+required. The block-form macros raise `RuntimeError` naming the code
+(`kernel iterator: ... (rc=N)`), and neither the body nor `finish` runs.
+A kernel that wants to handle a refusal itself reads the code from the
+raw API.
 
 ## The body-macro suite
 
@@ -586,13 +586,16 @@ level.
 
 ## Masks: propagated by default
 
-A kernel receives mask-aware iteration *by default* — masked input cells
-produce masked output, automatically ([ch. 5](05_mask_and_undef.md)). The
-`m` pointer in the body is the per-slab mask base (or `NULL` when the
-source has no mask). To opt out — for a kernel that genuinely cannot
-accept a masked source — declare `CA_KERNEL_NO_MASK`; the engine then
-rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The `_FIBER`
-(non-masked) forms are NO_MASK by construction.
+A kernel receives the source's mask *by default*: the `m` pointer in the
+body is the per-slab mask base (or `NULL` when the source has no mask).
+What a masked cell means for the output is the kernel's to decide — the
+engine does not mask the output for it; a kernel that should mask its
+output where its input is masked writes that mask itself
+([ch. 5](05_mask_and_undef.md)). To opt out — for a kernel that genuinely
+cannot accept a masked source — declare `CA_KERNEL_NO_MASK`; the engine
+then rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The
+`_FIBER` forms without MASKED in the name hand out no mask cursor, so
+without `CA_KERNEL_NO_MASK` they read masked cells as values.
 
 ### Mask helper macros
 
@@ -702,7 +705,8 @@ Constraints (the same across the family):
   does not allow two different-typed declarations in a `for` init clause,
   so they live in the surrounding scope.
 - `break;` from the body exits cleanly (= the outer for's teardown clause
-  runs `finish`).
+  runs `finish`). In a write walk `finish` writes back the slab the body
+  was in.
 - `return;` from the body LEAKS resources (scratch, parent attach). If
   you need early return, drop to the raw API.
 - A body that **raises** leaks the same way. The walk releases what it
@@ -713,9 +717,10 @@ Constraints (the same across the family):
   (below).
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
-- INOUT macros runtime-assert strict full-shape equality (= same `ndim`
-  and same `dim[axis]`); a mismatch silently skips the body. Authors that
-  want broadcasting must drop to the raw API.
+- INOUT macros require the same shape for input and output (`ndim` and
+  every `dim[k]`) and raise `ArgumentError` before opening either walk
+  when they differ. Authors that want broadcasting must drop to the raw
+  API.
 
 ### A body that can raise: `ca_iter_ensure`
 
