@@ -526,17 +526,22 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   r2 = collapse_marker(cary2);
   r3 = collapse_marker(cary3);
 
-  /* Ruby values among the operands (e.g. clip's Numeric bounds) are
-     wrapped and promoted pairwise in the order the eager triop uses. */
-  if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ) {
+  /* Scalar operands (clip's Numeric bounds, a CScalar) are wrapped and
+     promoted pairwise in the order the eager triop uses. */
+  if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
+       rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
     if ( ! rb_obj_is_carray(r1) ) {
       rb_raise(rb_eArgError,
                "CATriOp: the first operand must be a CArray");
     }
+    int r2_scalar = ! rb_obj_is_carray(r2) || rb_obj_is_cscalar(r2);
+    int r3_scalar = ! rb_obj_is_carray(r3) || rb_obj_is_cscalar(r3);
     rb_ca_cast_self_or_other(&r1, &r2);
     rb_ca_cast_self_or_other(&r1, &r3);
     rb_ca_cast_self_or_other(&r2, &r3);
     rb_ca_cast_self_or_other(&r1, &r2);
+    r2 = ca_lazy_settle_scalar(r2, r2_scalar);
+    r3 = ca_lazy_settle_scalar(r3, r3_scalar);
   }
 
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);

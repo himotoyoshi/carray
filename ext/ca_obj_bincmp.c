@@ -571,10 +571,15 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
-  /* A Ruby value beside the array is wrapped and promoted as the eager
-     comparison does it. */
-  if ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ) {
+  /* A scalar beside the array (a Ruby value or a CScalar) is wrapped and
+     promoted as the eager comparison does it. */
+  if ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ||
+       rb_obj_is_cscalar(l_resolved) || rb_obj_is_cscalar(r_resolved) ) {
+    int l_scalar = ! rb_obj_is_carray(l_resolved) || rb_obj_is_cscalar(l_resolved);
+    int r_scalar = ! rb_obj_is_carray(r_resolved) || rb_obj_is_cscalar(r_resolved);
     rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
+    l_resolved = ca_lazy_settle_scalar(l_resolved, l_scalar);
+    r_resolved = ca_lazy_settle_scalar(r_resolved, r_scalar);
   }
 
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
