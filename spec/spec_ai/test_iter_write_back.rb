@@ -124,6 +124,24 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A shifted view walked with its shift axis outside the slab: the walk
+  # gathers the whole view, and has to scatter all of it back.
+  def test_a_shifted_view_receives_the_write_along_its_other_axis
+    {
+      "shift"     => [->(b) { b.shift(1, 0) }, 1],
+      "window"    => [->(b) { b.window(0..2, -1..2) }, 0],
+      "shift of transpose" => [->(b) { b.transpose.shift(1, 0) }, 1],
+    }.each do |name, (mk, axis)|
+      %i[iw_fiber_fill iw_slab_fill].each do |entry|
+        b = base
+        CArray.send(entry, mk.call(b), axis, -1.0)
+        want = base
+        mk.call(want)[] = -1.0
+        assert_equal want.to_a, b.to_a, "#{name} #{entry} axis #{axis}"
+      end
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

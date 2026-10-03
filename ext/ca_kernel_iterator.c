@@ -1205,6 +1205,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                                                   src->bytes, src->elements,
                                                   bound_fill);
         ki_data_hold(parent->data_type, st->scratch_ptr, src->elements);
+        /* sync_slab scatters the whole scratch back by this count. */
+        st->total_elements = src->elements;
         st->alias_mode = CA_ITER_ALIAS_NONE;
         st->alias_ptr  = st->scratch_ptr;
 
