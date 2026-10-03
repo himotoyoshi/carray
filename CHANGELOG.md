@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: writing through a window that covers whole inner axes
+  (`b.window(1..2, 0..3)`) reaches the parent for `seq!` and for a store
+  of an array of another data type (`w[] = int32_array`). Both were
+  dropped.
+
 - Fix: an object array whose cells are computed -- a `CAObject` with a
   Ruby `fetch_index`, a lazy expression over object arrays, or a view of
   either -- no longer crashes or returns wrong values when a garbage
