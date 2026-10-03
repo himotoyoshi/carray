@@ -245,8 +245,9 @@ int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */
   yielded by `ca_iter_state_next_slab` with stride implicit at `bytes`.
   Source routing: entity / CAStride-contig → alias; CAStride non-contig →
   scratch path (`ca_copy_data` compose-fold gathers into a malloc'd
-  buffer); other sources → `CA_ITER_ERR_NOT_CHEAP` in step 1, extended in
-  later phases.
+  buffer); descriptor views and `CA_ITER_SRC_ATTACH` views → scratch;
+  a source the classifier does not recognise → `CA_ITER_ERR_NOT_CHEAP`.
+  `init_l1` takes `CA_SLAB_WHOLE` only.
 - **`init_l2`** prepares an **L2 strided** walk. The kernel sees per-slab
   pointers with an explicit byte stride argument. Source routing covers
   entity / CAStride contig (alias, stride = `bytes`), CAStride non-contig
@@ -370,7 +371,7 @@ the same walk in three lines.
 
 ```c
 typedef enum {
-  CA_SLAB_FREE  = 0,    /* engine-chosen chunk; reserved, step 2+ */
+  CA_SLAB_FREE  = 0,    /* engine-chosen chunk; reserved */
   CA_SLAB_AXES  = 1,    /* user-pinned slab axes (the default) */
   CA_SLAB_WHOLE = 2     /* whole array in one slab */
 } ca_slab_policy_t;
@@ -379,7 +380,7 @@ typedef enum {
 `CA_SLAB_AXES` is the workhorse — it is what gives reductions / scans /
 maps their per-axis semantics. `CA_SLAB_WHOLE` is the L1 entry point for
 "give me everything as one contig run". `CA_SLAB_FREE` is reserved for
-the future T2 chunk-hinted walk.
+a chunk-hinted walk; init returns `CA_ITER_ERR_POLICY` for it.
 
 ## Kernel flags
 
@@ -418,9 +419,9 @@ Choose them based on what the kernel needs:
 #define CA_ITER_OK                     0
 #define CA_ITER_ERR_NOT_CHEAP          1   /* src needs materialize */
 #define CA_ITER_ERR_POLICY             2   /* policy not implemented */
-#define CA_ITER_ERR_FLAGS              3   /* flag combination invalid */
+#define CA_ITER_ERR_FLAGS              3   /* flag combination invalid; also NULL st / src */
 #define CA_ITER_ERR_READONLY           4   /* WRITE on read-only view */
-#define CA_ITER_ERR_MASK               5   /* masked src on path that lacks it */
+#define CA_ITER_ERR_MASK               5   /* reserved: never returned */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED   6   /* NO_MASK + masked src */
 ```
 
@@ -639,15 +640,16 @@ cumsum is semantically ambiguous — the user chains
 goal of opening per-axis capability to every stat method, while keeping
 the flatten (no-arg) form.
 
-## The one place `ca_attach` is right
+## CAObject and Faces need no special path
 
-The deliver principle says `ca_attach` is the last resort — but there is
-one legitimate routine use: a **`CA_OBJECT` per-cell Ruby callback**
-(CAObject). The iterator cannot transparently deliver a per-cell
-`rb_funcall`, so CAObject kernels take the dedicated attach path.
-Everything else goes through the iterator. Likewise, Faces are stripped on
-entry (`ca_strip_face`) and re-lifted on the result, so a kernel never
-sees a Face ([ch. 9](09_faces.md)).
+The deliver principle says `ca_attach` is the last resort, and a kernel
+does not need it for a CAObject (a view whose cells come from a Ruby
+callback) either: the classifier sends it through `CA_ITER_SRC_ATTACH`
+like the other views that compute their cells, and the iterator gathers
+the slab through the view's own transfer slots; a write walk is written
+back through the same slots, and one over a read-only CAObject is refused
+with `CA_ITER_ERR_READONLY`. Faces are stripped on entry and re-lifted on the
+result, so a kernel never sees a Face ([ch. 9](09_faces.md)).
 
 ## Internal routing (free-to-refactor)
 
@@ -657,10 +659,12 @@ INTERNAL routing keys you might see in the engine and in `ca_iter_state`:
 `src_kind`:
 
 ```c
-CA_ITER_SRC_CASTRIDE             /* entity, CAStride family, CAUbrep */
+CA_ITER_SRC_CASTRIDE             /* entity, CAStride family */
 CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA */
 CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE
-CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce */
+CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce /
+                                    CAObject / CATile / CARoll / CAStack / CAMeld / CARemap /
+                                    lazy views */
 ```
 
 The classifier reads these off the source's op table, which only works for the
@@ -675,10 +679,9 @@ standalone view", step 6.
 `alias_mode`:
 
 ```c
-CA_ITER_ALIAS_NONE              /* scratch materialise */
+CA_ITER_ALIAS_NONE              /* scratch materialise (SRC_ATTACH walks use this) */
 CA_ITER_ALIAS_CONTIG            /* parent.ptr+offset, stride implicit */
 CA_ITER_ALIAS_STRIDED           /* L2 stride-aware */
-CA_ITER_ALIAS_ATTACH            /* view's own ca_attach materialised */
 CA_ITER_ALIAS_PER_SLAB          /* T3 fallback via axis-dispatch gather */
 CA_ITER_ALIAS_PER_SLAB_HOIST    /* T3 STRIDE-innermost specialisation */
 CA_ITER_ALIAS_STACK             /* CAStack K-axis slab direct ptr access */

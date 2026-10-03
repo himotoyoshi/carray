@@ -42,21 +42,6 @@
   devel/MEMO_KERNEL_ITERATOR_OOP_PATH.vev4.md for the planned engine
   overhaul this contract insulates against.)
 
-  Step 1 scope (this commit):
-    - struct definition (subset used by step 1; chunk_pos / scratch /
-      descs / outer_idx fields are present but unused, reserved for
-      later steps per proposal §3.1)
-    - CA_SLAB_WHOLE policy only (single slab = whole array)
-    - alias path only: ca_attach_is_alias(src) must hold, else init
-      returns CA_ITER_ERR_NOT_CHEAP (renamed from ca_attach_is_cheap
-      in T1 step 9.4a)
-    - READ-only, no mask handling, no WRITE sync
-
-  Later steps will fill in scratch materialize (step 2), L2 strided
-  (step 3), WRITE + sync_slab (step 4), descriptor 6-view connection
-  via P3 ca_axis_dispatch_for_each_slab (step 5), mask + macros
-  (step 6), NO_MASK enforcement (step 7).
-
   --------------------------------------------------------------------------- */
 
 #ifndef CA_KERNEL_ITERATOR_H
@@ -67,9 +52,10 @@
 
 /* ---- slab policy (proposal §2.2) ------------------------------------- */
 typedef enum {
-  CA_SLAB_FREE  = 0,    /* engine-chosen chunk (S1 max merge). step 2+. */
-  CA_SLAB_AXES  = 1,    /* user-pinned axes inside the slab. step 5+.  */
-  CA_SLAB_WHOLE = 2     /* whole array in one slab. step 1 default.    */
+  CA_SLAB_FREE  = 0,    /* engine-chosen chunk.  Not implemented:
+                           init returns CA_ITER_ERR_POLICY.          */
+  CA_SLAB_AXES  = 1,    /* user-pinned axes inside the slab (init_l2) */
+  CA_SLAB_WHOLE = 2     /* whole array in one slab                    */
 } ca_slab_policy_t;
 
 /* ---- kernel flags (proposal §2.2) ------------------------------------ */
@@ -94,9 +80,11 @@ typedef enum {
 #define CA_ITER_ALIAS_NONE     0     /* scratch materialize. step 2+.   */
 #define CA_ITER_ALIAS_CONTIG   1     /* parent.ptr+offset direct slab.   */
 #define CA_ITER_ALIAS_STRIDED  2     /* L2 stride-aware. step 3+.        */
-#define CA_ITER_ALIAS_ATTACH   3     /* SRC_ATTACH path: view's own
-                                        ca_attach materialised src->ptr,
-                                        sync via ca_sync(src). step 9+.  */
+#define CA_ITER_ALIAS_ATTACH   3     /* Not set by the engine.  A
+                                        SRC_ATTACH walk runs with
+                                        CA_ITER_ALIAS_NONE over an
+                                        iterator-owned scratch filled and
+                                        written back with ca_xfer_all.  */
 #define CA_ITER_ALIAS_PER_SLAB 4     /* Phase C T3 fallback: per-slab
                                         materialise via ca_axis_dispatch_gather
                                         with subset descriptor (= caller-built
@@ -195,10 +183,13 @@ typedef enum {
 #define CA_ITER_OK              0
 #define CA_ITER_ERR_NOT_CHEAP   1    /* src needs materialize, step 2+   */
 #define CA_ITER_ERR_POLICY      2    /* policy not implemented yet       */
-#define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported     */
+#define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported;
+                                        also returned for a NULL state
+                                        or source                       */
 #define CA_ITER_ERR_READONLY    4    /* WRITE on readonly view (CARepeat etc.) */
-#define CA_ITER_ERR_MASK        5    /* masked source — step 4-5 only, lifted in step 6 */
-#define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source (step 7) */
+#define CA_ITER_ERR_MASK        5    /* reserved: no entry point returns
+                                        it (masked sources are accepted) */
+#define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source */
 /* ---- source kind (step 5+, internal routing) ------------------------- */
 #define CA_ITER_SRC_NONE       0
 #define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
@@ -485,19 +476,21 @@ int  ca_iter_can_alias (void *ap, int level);
        src->ptr, stride implicit = bytes)
      - CAStride family non-contig: scratch path (ca_copy_data
        compose-fold gather into a malloc'd buffer)
-     - other sources: CA_ITER_ERR_NOT_CHEAP
+     - descriptor views (CAGrid / CASelect / CAMapping / CAWindow /
+       CAShift / CASelectAxis): gathered into a scratch buffer
+     - SRC_ATTACH views (overlays, lazy views, CAObject, CAStack, ...):
+       iterator-owned scratch filled through ca_xfer_all
+     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
 
-   policy: only CA_SLAB_WHOLE accepted in step 1-3.
-   flags:  must be 0 (READ) until step 4 / 7.
+   policy: CA_SLAB_WHOLE only (CA_SLAB_AXES and CA_SLAB_FREE return
+           CA_ITER_ERR_POLICY).
+   flags:  any of CA_KERNEL_WRITE / CA_KERNEL_NO_MASK /
+           CA_KERNEL_FIBER_CONTIG; other bits return CA_ITER_ERR_FLAGS.
 
    On success returns CA_ITER_OK; on error returns CA_ITER_ERR_*
    without claiming resources (finish need not be called).
 
-   Pair with ca_iter_state_next_slab.  Step 3 split init into
-   level-specific entry points so each setup path stays focused
-   (proposal §3.2 rev: original single-init was relaxed when L2 setup
-   diverged enough to warrant its own state initialiser; see
-   ROADMAP/CHANGELOG rev). */
+   Pair with ca_iter_state_next_slab. */
 int  ca_iter_state_init_l1 (ca_iter_state    *st,
                             struct _CArray   *src,
                             ca_slab_policy_t  policy,
@@ -513,9 +506,23 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
      - CAStride non-contig: alias_mode = STRIDED, multi-slab walk over
        prefix axes, each yield carries native inner stride_bytes. No
        scratch.
-     - other sources: CA_ITER_ERR_NOT_CHEAP
+     - descriptor views: aliased when the innermost axis is a STRIDE
+       axis, otherwise gathered into scratch (per slab under
+       CA_SLAB_AXES when a slab axis is an INDEX or SHIFT axis)
+     - SRC_ATTACH views: iterator-owned scratch filled through
+       ca_xfer_all and written back the same way
+     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
 
-   Other args match init_l1.  Pair with ca_iter_state_next_slab_strided. */
+   policy: CA_SLAB_WHOLE or CA_SLAB_AXES (CA_SLAB_FREE returns
+           CA_ITER_ERR_POLICY, as do out-of-range or duplicate axes, and
+           CA_SLAB_AXES over a descriptor view whose descriptor rank
+           differs from the view's rank).
+   flags:  as init_l1.  CA_KERNEL_WRITE is refused with
+           CA_ITER_ERR_FLAGS when a CA_SLAB_AXES slab axis is an INDEX
+           or SHIFT axis of a descriptor view.
+
+   Pair with ca_iter_state_next_slab_strided (CA_SLAB_WHOLE) or
+   ca_iter_state_next_slab_axes (CA_SLAB_AXES). */
 int  ca_iter_state_init_l2 (ca_iter_state    *st,
                             struct _CArray   *src,
                             ca_slab_policy_t  policy,
@@ -559,12 +566,9 @@ int  ca_iter_state_next_slab (ca_iter_state *st,
    *out_mask / *out_n / *out_stride_bytes when a slab is yielded;
    returns 0 when the walk is complete.  The kernel walks `*out_n`
    elements by stepping `*out_stride_bytes` between consecutive
-   elements starting at `*out_ptr`; the mask uses the **same stride
-   semantics** when non-NULL (= each mask byte at offset i * stride is
-   conceptually paired with the value at ptr + i * stride_bytes, but
-   since mask is boolean8_t == 1 byte, mask stride is 1 byte when the
-   value stride is bytes, and proportional otherwise).  Only valid
-   when init_l2 was used. */
+   elements starting at `*out_ptr`.  The mask, when non-NULL, is
+   contiguous whatever the value stride: mask[i] pairs with the value
+   at ptr + i * stride_bytes.  Only valid when init_l2 was used. */
 int  ca_iter_state_next_slab_strided (ca_iter_state *st,
                                       char         **out_ptr,
                                       boolean8_t   **out_mask,
@@ -610,18 +614,20 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
    next_slab_strided + kernel invocation; the alias_mode branch lives
    inside the state machine so the caller never has to inspect it.
 
-   Behaviour (proposal PROPOSAL_T1_WRITE_SEMANTICS.md §(b)):
+   Behaviour:
      - !(flags & CA_KERNEL_WRITE): no-op (READ walk)
+     - per-fiber gather (CA_KERNEL_FIBER_CONTIG on a strided fiber):
+       the fiber is scattered back from its scratch first
      - alias path (scratch_ptr == NULL): no-op — kernel wrote to
-       parent directly through alias_ptr (case A semantics)
-     - scratch path (L1 only by step-4 invariant): scatter back via
-       ca_sync_data(src, scratch). L2 scratch is structurally
-       unreachable in step 4 (CAStride only) and is guarded by an
-       assert; step 5 re-evaluation noted in the proposal. */
+       parent directly through alias_ptr
+     - scratch path, at L1 or L2: written back through the source —
+       ca_xfer_all for SRC_ATTACH, ca_sync_data for CAStride, the
+       descriptor scatter for descriptor views */
 void ca_iter_state_sync_slab (ca_iter_state *st);
 
-/* Release any resources held by `st` and detach parent.  Safe to call
-   exactly once after a successful init (either level). */
+/* Release any resources held by `st` and detach parent.  Idempotent:
+   a second call is a no-op.  Also safe after a failed init, which holds
+   nothing to release (the call is then not required). */
 void ca_iter_state_finish (ca_iter_state *st);
 
 /* Open `st` as the second state of a walk whose first state is already
