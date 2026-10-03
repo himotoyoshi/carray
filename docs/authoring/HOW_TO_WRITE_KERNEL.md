@@ -249,7 +249,7 @@ rb_my_kernel (int argc, VALUE *argv, VALUE self)
 
   /* === Block 2: output — allocate result array ==================== */
   /* fill slab_axes[] from argv, then: */
-  VALUE vout = rb_ca_new_reduced(self, slab_axes, naxes, OUT_DTYPE);
+  VALUE vout = rb_ca_new_reduced(self, slab_axes, naxes, OUT_DTYPE, 0);
   GetCArray(vout, co);
 
   /* === Block 3: iter init — open the slab walk ==================== */
@@ -314,7 +314,7 @@ rb_ca_sum_one_axis (VALUE self, VALUE vaxis)
   slab_axes[0] = (int8_t) NUM2INT(vaxis);
 
   /* Block 2: output */
-  VALUE vout = rb_ca_new_reduced(self, slab_axes, 1, CA_FLOAT64);
+  VALUE vout = rb_ca_new_reduced(self, slab_axes, 1, CA_FLOAT64, 0);
   GetCArray(vout, co);
 
   /* Block 3: iter init */
@@ -718,16 +718,20 @@ Four forms (worked examples in §7.5):
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | `(st_in, st_out, ca_in, ca_out, axis, flags, p_in, p_out, n, m)` | + contig input mask `m` |
 
 `n` is set to the fiber length (`= slab_dims[0]`, constant for the walk).
-`axis` and the `ca` operands are each evaluated once at init.
+`axis` and the `ca` operands may be evaluated more than once, so pass
+variables rather than expressions with side effects. The data cursors are
+`char *`, as in every other block macro; cast to the element type inside
+the body.
 
 ```c
 ca_iter_state st;
-double     *p;
+char       *p;
 boolean8_t *m;
 ca_size_t   n;
 CA_FOR_EACH_FIBER_MASKED(st, ca, axis, 0, p, n, m) {
+  double *d = (double *) p;
   for ( ca_size_t i = 0; i < n; i++ ) {
-    if ( !m || !m[i] ) { /* p[i] is contig — no stride math */ }
+    if ( !m || !m[i] ) { /* d[i] is contig — no stride math */ }
   }
 }
 ```
@@ -1162,8 +1166,8 @@ The five patterns:
 |---|---|---|---|
 | 1 | Reduction | `CA_FOR_EACH_SLAB` / `CA_SLAB_REDUCE_T` | §7.1 |
 | 2 | Map (element-wise) | `CA_FOR_EACH_SLAB_INOUT` / `CA_SLAB_MAP_T` | §7.2 |
-| 3 | Convolve (windowed) | `CA_FOR_EACH_SLAB` on CAWindow source | §7.3 |
-| 4 | Sort (in-place WRITE) | `CA_FOR_EACH_SLAB` with WRITE flag | §7.4 |
+| 3 | Convolve (windowed) | `CA_FOR_EACH_SLAB` on a sliding-window view | §7.3 |
+| 4 | Sort (in-place WRITE) | `CA_FOR_EACH_FIBER` with WRITE flag | §7.4 |
 | 5 | Per-axis fiber (contig) | `CA_FOR_EACH_FIBER` family (4 forms) | §7.5 |
 
 ### 7.1 Reduction
@@ -1203,12 +1207,13 @@ Key structural points:
 
 ### 7.3 Convolve (windowed reduction)
 
-A convolve kernel uses a `CAWindow` view to gather per-cell neighborhoods,
-then reduces each neighborhood to a single output cell. The view algebra
-handles boundary cells via `bound_fill`; your kernel sees a clean
-neighborhood slab per output cell.
+A convolve kernel walks a view that lays a neighborhood on every cell,
+then reduces each neighborhood to a single output cell. `window` pads the
+array (out-of-range cells take its `fill_value:`) and `sliding_windows`
+turns the padded array into one neighborhood per cell; your kernel sees
+one neighborhood slab per output cell.
 
-Example: 5-point 2-D Laplacian (`(L[i,j] = a[i-1,j] + a[i+1,j] +
+Example: 5-point 2-D Laplacian (`L[i,j] = a[i-1,j] + a[i+1,j] +
 a[i,j-1] + a[i,j+1] - 4*a[i,j]`) using a 3×3 window centered on each
 cell.
 
@@ -1222,11 +1227,15 @@ rb_ca_laplacian (VALUE self)
     rb_raise(rb_eRuntimeError, "laplacian: 2-D float64 only");
   }
 
-  /* Window: 3×3 centered, with FILL bound policy (default 0.0).  The
-     window's outer axes match the input shape; inner axes are the
-     3×3 neighborhood for each output cell.  This is a 4-D virtual
-     view of shape (H, W, 3, 3). */
-  VALUE vwin = /* ... a.window(-1..1, -1..1, fill_value: 0.0) ... */;
+  /* Pad by one cell on every side (out-of-range cells read 0.0), then lay
+     a 3×3 window on every cell: a view of shape (H, W, 3, 3) whose inner
+     two axes are the neighborhood of output cell (i, j).  In Ruby:
+     a.window(-1..H, -1..W).sliding_windows(3, 3) */
+  VALUE vrows = rb_range_new(INT2NUM(-1), SIZE2NUM(ca->dim[0]), 0);
+  VALUE vcols = rb_range_new(INT2NUM(-1), SIZE2NUM(ca->dim[1]), 0);
+  VALUE vpad  = rb_funcall(self, rb_intern("window"), 2, vrows, vcols);
+  VALUE vwin  = rb_funcall(vpad, rb_intern("sliding_windows"), 2,
+                           INT2NUM(3), INT2NUM(3));
   CArray *win;
   GetCArray(vwin, win);
 
@@ -1243,31 +1252,39 @@ rb_ca_laplacian (VALUE self)
   char       *p;
   boolean8_t *m;
   CA_FOR_EACH_SLAB(st, win, slab_axes, 2, 0, p, m) {
-    /* p points at a 3×3 slab.  Row-major: p[0..8] are the 9 cells.
-       For a 5-point Laplacian we use indices 1, 3, 4, 5, 7. */
-    double *cells = (double *) p;
-    op[out_i++] = cells[1] + cells[3] + cells[5] + cells[7]
-                - 4.0 * cells[4];
+    /* p is the slab base.  The slab is not promised to be contiguous:
+       cell (r, c) of the neighborhood is at
+       p + r * slab_strides[0] + c * slab_strides[1]. */
+    ca_size_t sr = st.slab_strides[0];
+    ca_size_t sc = st.slab_strides[1];
+#define CELL(r, c) (*(double *)(p + (r) * sr + (c) * sc))
+    op[out_i++] = CELL(0, 1) + CELL(1, 0) + CELL(1, 2) + CELL(2, 1)
+                - 4.0 * CELL(1, 1);
+#undef CELL
+    (void) m;  /* a masked input would need the mask cursor here */
   }
   return vout;
 }
 ```
 
 Key structural points:
-- The `CAWindow` view contributes K_window slab axes (= dimensions of
-  the neighborhood); these are the user-visible "innermost" axes of
-  the window view. Slab over them yields one neighborhood per output
-  cell.
-- Boundary cells appear with `bound_fill` already substituted at the
-  appropriate positions — your kernel reads them as ordinary data.
-- For Phase C T3 SHIFT slab (= window with negative range slab),
-  the iterator routes through the T3 fallback path automatically.
-  The kernel body is unchanged.
+- `sliding_windows` contributes the neighborhood axes as the innermost
+  axes of the view. Slab over them yields one neighborhood per output
+  cell, in the row-major order of the outer axes, which is the order of
+  the output.
+- `CA_FOR_EACH_SLAB` hands out a base pointer and the per-axis byte
+  strides in `st.slab_strides[]`; address the slab through them. Use the
+  `CA_FOR_EACH_FIBER` family (§6.3) when the body needs a contiguous
+  buffer.
+- Boundary cells appear with the window's fill value already substituted
+  at the appropriate positions — your kernel reads them as ordinary data.
+- The same body works whatever view the window is laid over (a transpose,
+  a slice); the iterator delivers the slabs.
 
 ### 7.4 Sort (in-place WRITE per slab)
 
 A sort kernel applies an in-place permutation to each slab. The
-canonical example is per-row sort: `a.sort_along_axis(-1)`.
+canonical example sorts each row along the last axis in place.
 
 ```c
 static int
@@ -1287,44 +1304,34 @@ rb_ca_sort_rows (VALUE self)
     rb_raise(rb_eRuntimeError, "sort_rows: float64 only");
   }
   /* Innermost axis = the row to sort. */
-  int8_t slab_axes[] = { (int8_t) (ca->ndim - 1) };
+  int axis = ca->ndim - 1;
 
   ca_iter_state st;
   char       *p;
-  boolean8_t *m;
-  /* WRITE flag enables in-place modification; sync_slab handles
-     write-back when iter chose materialise (= for descriptor views
-     where the slab isn't a parent.ptr alias). */
-  CA_FOR_EACH_SLAB(st, ca, slab_axes, 1,
-                   CA_KERNEL_WRITE, p, m) {
-    /* Inner stride must equal sizeof(double) for qsort to work
-       (= the row is contig in scratch when iter materialised, OR a
-       contig run in parent when alias).  For the data_type/view
-       combinations where qsort's contig assumption holds, the
-       below works directly.  Other cases would need a strided sort
-       implementation, or use the CA_FOR_EACH_FIBER family (§6.3 / §7.5)
-       which delivers a contig buffer regardless of axis position. */
-    qsort(p, st.slab_dims[0], sizeof(double), cmp_double);
-    (void) m;  /* sort doesn't propagate mask — UNDEF cells are
-                  sorted by their raw value, which may not be
-                  meaningful; production kernels should reject
-                  masked input or filter UNDEF first. */
+  ca_size_t   n;
+  /* CA_KERNEL_WRITE writes each row back after the body.  The FIBER form
+     hands out the row as a contiguous double[n] even when it is strided
+     in the source (a transposed view, a column slice), which is what
+     qsort needs. */
+  CA_FOR_EACH_FIBER(st, ca, axis, CA_KERNEL_WRITE, p, n) {
+    qsort(p, n, sizeof(double), cmp_double);
   }
   return self;
 }
 ```
 
 Key structural points:
-- `CA_KERNEL_WRITE` flag enables write-back; `sync_slab` (auto in macro)
-  handles scatter when the iter materialised instead of aliasing parent.
-- For descriptor views (e.g., a CSA slice), the iterator may materialise
-  the row into scratch and scatter back on sync — your kernel doesn't
-  see the difference.
-- Phase C T3 INDEX/SHIFT slab + WRITE is currently NOT supported (=
-  init_l2 returns `CA_ITER_ERR_FLAGS`). WRITE on T3 fallback / HOIST
-  paths is a future sub-step (= per-slab scatter-back semantics need
-  design). For C.1 scope, sort kernels run on Phase A/B accept patterns
-  only.
+- `CA_KERNEL_WRITE` enables write-back; `sync_slab` (auto in macro)
+  writes the row back to the source when the iterator gathered it
+  instead of aliasing the source memory. Writing to a read-only source
+  raises (`CA_ITER_ERR_READONLY`).
+- `CA_FOR_EACH_SLAB` would hand out the row with its stride in
+  `st.slab_strides[0]`. qsort cannot take a stride, so a slab form of
+  this kernel is only correct when that stride equals `sizeof(double)`;
+  on a transposed source it would sort bytes that belong to other rows.
+- Mask: this form has no mask cursor, and a masked cell is sorted by its
+  stored value, which may not be meaningful. Pass `CA_KERNEL_NO_MASK` to
+  have a masked source refused, or use `CA_FOR_EACH_FIBER_MASKED`.
 
 ### 7.5 Per-axis fiber (contig-guaranteed) — `CA_FOR_EACH_FIBER`
 
@@ -1367,7 +1374,7 @@ rb_ca_sort_along (VALUE self, VALUE vaxis)
   GetCArray(vout, out);
 
   ca_iter_state st_in, st_out;
-  double       *p_in, *p_out;
+  char         *p_in, *p_out;
   ca_size_t     n;
 
   CA_FOR_EACH_FIBER_INOUT(st_in, st_out, src, out, axis,
@@ -1399,17 +1406,21 @@ rb_ca_unmasked_sum_along (VALUE self, VALUE vaxis)
 {
   CArray *src;
   GetCArray(self, src);
+  if ( src->data_type != CA_FLOAT64 ) {
+    rb_raise(rb_eRuntimeError, "unmasked_sum_along: float64 only");
+  }
   int axis = NUM2INT(vaxis);
 
   ca_iter_state st;
-  double       *p;
+  char         *p;
   boolean8_t   *m;        /* contig boolean8_t per fiber, OR NULL */
   ca_size_t     n;
   double        total = 0.0;
 
   CA_FOR_EACH_FIBER_MASKED(st, src, axis, 0, p, n, m) {
+    double *d = (double *) p;
     for ( ca_size_t i = 0; i < n; i++ ) {
-      if ( !m || !m[i] ) total += p[i];   /* m == NULL = no-mask source */
+      if ( !m || !m[i] ) total += d[i];   /* m == NULL = no-mask source */
     }
   }
   return rb_float_new(total);
@@ -1600,7 +1611,14 @@ new manual dispatchers use the `_kw` form.
 (Carried over from Phase A.) Allocates a CArray whose shape is the
 input shape with `slab_axes` removed in ascending order, collapsing
 to shape `[1]` for full reduction. Mask = NULL. data_type = your choice
-(commonly `CA_FLOAT64` for accumulator-style reductions).
+(commonly `CA_FLOAT64` for accumulator-style reductions). The last
+argument, `keep_axis`, keeps each reduced axis as a length-1 axis when
+non-zero; the element count and order are the same either way.
+
+```c
+VALUE rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes,
+                         int32_t data_type, int keep_axis);
+```
 
 ### 10.4 `rb_ca_template_with_type` — map output allocator
 
@@ -1629,7 +1647,7 @@ volatile VALUE raxis = Qnil;
 rb_scan_options(ropt, "axis", &raxis);
 int8_t slab_axes[CA_RANK_MAX];
 int8_t naxes = rb_ca_parse_reduce_axes_kw(raxis, ca, slab_axes);
-VALUE vout = rb_ca_new_reduced(vsrc, slab_axes, naxes, CA_FLOAT64);
+VALUE vout = rb_ca_new_reduced(vsrc, slab_axes, naxes, CA_FLOAT64, 0);
 GetCArray(vout, co);
 /* ... init_l2 + per-slab kernel ... */
 ```

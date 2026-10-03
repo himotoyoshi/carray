@@ -533,12 +533,9 @@ ca_iter_validate_inputs (ca_iter_state    *st,
   if ( policy != CA_SLAB_WHOLE && policy != CA_SLAB_AXES )
     return CA_ITER_ERR_POLICY;
 
-  /* Step 6: accept CA_KERNEL_WRITE and CA_KERNEL_NO_MASK.
-     CA_KERNEL_CHUNK_HINT is reserved for T2 — still rejected.
-     NO_MASK enforcement (= reject masked source if NO_MASK is set)
-     lands in step 7; step 6 accepts the flag but does not enforce.
-     CA_KERNEL_FIBER_CONTIG (PROPOSAL_FIBER_DELIVERY F.1a) accepted —
-     activates per-fiber contig delivery for naxes==1 in next_slab_axes. */
+  /* Accepted: CA_KERNEL_WRITE, CA_KERNEL_NO_MASK (enforced below) and
+     CA_KERNEL_FIBER_CONTIG (per-fiber contig delivery for naxes==1 in
+     next_slab_axes).  CA_KERNEL_CHUNK_HINT is reserved and rejected. */
   const uint32_t accepted = CA_KERNEL_WRITE | CA_KERNEL_NO_MASK
                           | CA_KERNEL_FIBER_CONTIG;
   if ( flags & ~accepted ) return CA_ITER_ERR_FLAGS;
@@ -550,22 +547,19 @@ ca_iter_validate_inputs (ca_iter_state    *st,
     return CA_ITER_ERR_READONLY;
   }
 
-  /* Step 6: mask is default-borne (bakeoff #5).  The step-4
-     CA_ITER_ERR_MASK gate is lifted (= masked sources are accepted).
-     Step 7: enforce CA_KERNEL_NO_MASK as an explicit kernel-character
-     declaration — if a kernel says "I cannot handle mask" and a
-     masked source is handed in, reject with a dedicated error code
-     so the caller can decide whether to peel via .value /
-     .strip_mask(fill) or pick a mask-aware kernel. */
+  /* Masked sources are accepted; the mask travels with the slab, so
+     nothing returns CA_ITER_ERR_MASK.  CA_KERNEL_NO_MASK is the kernel
+     declaring it cannot handle a mask: a masked source is then refused
+     with a dedicated code, so the caller can decide whether to peel via
+     .value / .strip_mask(fill) or pick a mask-aware kernel. */
   if ( (flags & CA_KERNEL_NO_MASK) && ca_has_mask(src) ) {
     return CA_ITER_ERR_MASK_NOT_ALLOWED;
   }
 
-  /* Gate: classify source.  sub-step 5.1 routing accepts entity +
-     CAStride family (step 1-4) and CSA + CAGrid (step 5.1). Other
-     descriptor views (CASelect / CAMapping / CAWindow / CAShift)
-     and overlay views (CAFake / ...) still reject — handled in
-     5.2 and Phase 2 respectively. */
+  /* Gate: classify source.  Entity, CAStride family, descriptor views
+     and SRC_ATTACH views are accepted; a source the classifier does not
+     recognise (an externally installed view that has not registered a
+     kind) is refused. */
   if ( ca_iter_classify_source(src) == CA_ITER_SRC_NONE ) {
     return CA_ITER_ERR_NOT_CHEAP;
   }

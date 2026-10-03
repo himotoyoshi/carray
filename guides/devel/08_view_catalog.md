@@ -108,7 +108,7 @@ Combine multiple parents. **MV: attach (verify per type).**
 
 | Kind | obj_type | File | MV | Represents |
 |------|----------|------|----|------------|
-| CAObject | `CA_OBJ_OBJECT` | `ca_obj_object.c` | reject | per-cell Ruby callback; the one place `ca_attach` / `rb_funcall` is the right tool ([ch. 11](11_kernel_iterator.md)) |
+| CAObject | `CA_OBJ_OBJECT` | `ca_obj_object.c` | reject | per-cell Ruby callback; a kernel reads it through the iterator like any computed view ([ch. 11](11_kernel_iterator.md)) |
 
 ## Lazy operation views
 
