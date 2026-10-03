@@ -908,6 +908,26 @@ ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops)
   return m;
 }
 
+/* A scalar operand (a Ruby value or a CScalar) that the eager promotion
+   has cast to the array's data_type comes back as a cast view over a
+   CScalar.  Fix it as the CScalar the cast gives, so the expression holds
+   a plain value leaf. */
+VALUE
+ca_lazy_settle_scalar (VALUE operand, int was_scalar)
+{
+  CArray *ca;
+  if ( ! was_scalar ) {
+    return operand;
+  }
+  /* rb_obj_is_cscalar is true for any view carrying the scalar flag, the
+     cast view included; the obj_type says whether it is a CScalar. */
+  TypedData_Get_Struct(operand, CArray, &carray_data_type, ca);
+  if ( ca->obj_type != CA_OBJ_SCALAR ) {
+    return rb_ca_copy(operand);
+  }
+  return operand;
+}
+
 void
 ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
 {

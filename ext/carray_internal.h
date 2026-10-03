@@ -164,6 +164,7 @@ int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
 void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
                             void *buf, int dir);
 boolean8_t *ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops);
+VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
 
 /* Non-zero iff the array a view's cells come from -- the parent, or the
    root a CAStride-family parent folds to -- computes them rather than
