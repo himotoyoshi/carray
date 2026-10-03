@@ -137,6 +137,7 @@ extern ca_operation_function_t ca_monop_func;
 extern ca_operation_function_t ca_binop_func;
 extern ca_operation_function_t ca_bincmp_func;
 extern ca_operation_function_t ca_moncmp_func;
+extern ca_operation_function_t ca_triop_func;
 extern CArray *ca_remap_new (CArray *ref, CArray *idx);
 
 /* ca_reduce_new is declared in carray.h; rb_cCAReduce defined in
@@ -270,6 +271,7 @@ ca_iter_classify_source (CArray *src)
   if ( attach == ca_binop_func.attach       ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bincmp_func.attach      ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_moncmp_func.attach      ) return CA_ITER_SRC_ATTACH;
+  if ( attach == ca_triop_func.attach       ) return CA_ITER_SRC_ATTACH;
 
   return CA_ITER_SRC_NONE;
 }

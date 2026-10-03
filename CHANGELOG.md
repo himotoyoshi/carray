@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a lazy `clip`, `fma` or `fms` (`a.lazy.clip(lo, hi)`, or the same
+  inside `CArray.fuse`) can be reduced, scanned or sorted along an axis,
+  and passed to `median`, `unique` and their kin. These raised
+  `kernel_iterator init failed rc=1`.
+
 - Fix: for C extensions, `ca_iter_state_next_slab_strided` hands out the
   mask cursor of an entity or a strided view such as a block or a
   transpose; it gave `NULL` for them, so masked cells read as values.
