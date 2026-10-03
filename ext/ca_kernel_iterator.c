@@ -1685,20 +1685,25 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         }
 
         /* If CAStack carries mask (= horizontal propagation already
-           applied at create_mask), attach K parent masks + cache ptr
-           aliases.  next_slab_axes aliases parent->mask[k]->ptr +
-           mask_off for the same slab. */
+           applied at create_mask), copy the K parent masks as they are
+           at the start of the walk; next_slab_axes points into the copy
+           of parent k at mask_off.  A copy, as on every other path: the
+           cursor is the walk's own, and a write to it reaches nothing. */
         if ( ca_has_mask(src) ) {
-          /* Zero-filled: a slot is set once its mask is attached, and
-             finish detaches the masks whose slot is set. */
+          /* Zero-filled: a slot is set once its copy is made, and finish
+             frees the copies whose slot is set. */
           st->stack_parent_mask_ptrs =
               (boolean8_t **) xmalloc(stack->n_parents * sizeof(boolean8_t *));
           memset(st->stack_parent_mask_ptrs, 0,
                  stack->n_parents * sizeof(boolean8_t *));
           for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-            ca_attach(stack->parents[kk]->mask);   /* window: finish detaches the set slots */
-            st->stack_parent_mask_ptrs[kk] =
-                (boolean8_t *) stack->parents[kk]->mask->ptr;
+            CArray    *pm = stack->parents[kk]->mask;
+            ca_size_t  n  = pm->elements;
+            boolean8_t *copy = (boolean8_t *) xmalloc(n > 0 ? n : 1);
+            st->stack_parent_mask_ptrs[kk] = copy;
+            ca_attach(pm);   /* window: only a memcpy before the detach */
+            memcpy(copy, pm->ptr, n);
+            ca_detach(pm);
           }
         } else {
           st->stack_parent_mask_ptrs = NULL;
@@ -3065,10 +3070,9 @@ ca_iter_state_finish (ca_iter_state *st)
     st->stack_tile_have  = 0;
   }
   if ( st->stack_parent_mask_ptrs ) {
-    CAStack *stack = (CAStack *) st->src;
     for ( int32_t kk = 0; kk < st->stack_n_parents; kk++ ) {
       if ( st->stack_parent_mask_ptrs[kk] ) {
-        ca_detach(stack->parents[kk]->mask);
+        xfree(st->stack_parent_mask_ptrs[kk]);
       }
     }
     xfree(st->stack_parent_mask_ptrs);

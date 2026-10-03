@@ -91,6 +91,34 @@ iw_slab_fill_mask (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
   return mask_seen ? Qtrue : Qfalse;
 }
 
+/* A READ walk that writes into the mask cursor it is handed.  The cursor
+   is the walk's own copy, so the source's mask must not change.  Returns
+   whether a mask cursor was yielded. */
+static VALUE
+iw_read_poke_mask (VALUE klass, VALUE vsrc, VALUE vaxis)
+{
+  CArray       *src;
+  int8_t        ax[1];
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  int           mask_seen = 0;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  ax[0] = (int8_t) NUM2INT(vaxis);
+
+  CA_FOR_EACH_SLAB(st, src, ax, 1, 0, p, m) {
+    ca_size_t n  = st.slab_dims[0];
+    ca_size_t ms = st.slab_mask_strides[0];
+    (void) p;
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      if ( m ) { m[i * ms] = 1; mask_seen = 1; }
+    }
+  }
+  return mask_seen ? Qtrue : Qfalse;
+}
+
 /* The return code init_l2 gives for (dst, axis, flags), without iterating.
    The block macros discard this value; this entry point is how the test
    sees what they discarded. */
@@ -147,5 +175,6 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill", iw_slab_fill, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_mask", iw_slab_fill_mask, 3);
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
 }
