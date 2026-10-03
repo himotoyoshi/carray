@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `float32.lazy.arg` gives the eager answer; it returned pi one ulp
+  low.
+
 - Change: a lazy expression over a boolean array follows the eager rules.
   Arithmetic reads the 0/1 values as int64 (`b.lazy + b.lazy`, `-b.lazy`,
   `b.lazy.fma(...)`), where it raised before. A math function raises and

@@ -229,4 +229,11 @@ class TestLazyEagerParity < Test::Unit::TestCase
     end
   end
 
+  # ---- small ones ----
+
+  def test_float32_arg_is_rounded_as_eager
+    f = CA_FLOAT32([-1.5, 2.0, -0.0])
+    assert_parity(f.arg, f.lazy.arg)
+  end
+
 end
