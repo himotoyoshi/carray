@@ -151,4 +151,24 @@ class TestIterFiberPair < Test::Unit::TestCase
                  (0...ref.elements).any? { |k| (ref[k] - raw[k]).abs > 1e-9 },
                  "the raw walk was expected to differ here"
   end
+
+  # The second walk is opened paired with the first, so when it is refused
+  # or raises partway, the first is closed too: a contiguous view as the
+  # first source is not left attached.
+  def test_a_refused_or_raising_second_source_closes_the_first
+    omit "development build only" unless CArray.respond_to?(:__attached_views__)
+    e = CArray.float64(8, 6).seq!
+    o = CArray.object(4, 6) { 1.0 }
+    o[3, 5] = Object.new
+    raising = CArray.wrap_readonly(o, CA_FLOAT64)
+    [[e[1..4, nil], CArray.float64(6).seq!, 1],   # refused: no axis 1
+     [e[2..5, nil], raising, 1],                   # raises in a later fiber
+     [e[2..5, nil], raising, 0]].each do |a, b, axis|
+      before = CArray.__attached_views__
+      assert_raise(RuntimeError, TypeError) { IterPair.dot(a, b, axis) }
+      assert_equal before, CArray.__attached_views__
+      assert_equal false, a.attached?
+    end
+  end
+
 end
