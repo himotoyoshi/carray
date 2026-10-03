@@ -101,6 +101,29 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A view whose cells are picked per axis (CAGrid, CASelectAxis, CAWindow)
+  # over a parent that is itself a view: the walk writes into the parent's
+  # attach buffer, which is the parent only for an entity, so the walk
+  # syncs it before letting go.  Only the axes along which these views
+  # take a write are walked (an index axis in the slab is refused).
+  DESCRIPTOR_OVER_VIEW = {
+    "grid of transpose"        => [->(b) { b.transpose[CA_SIZE([0, 2, 3]), nil] }, [1]],
+    "select_axis of transpose" => [->(b) { b.transpose[CA_BOOLEAN([1, 0, 1, 1]), nil] }, [1]],
+    "window of block"          => [->(b) { b[nil, 1..3].window(0..1, 0..1) }, [0, 1]],
+    "grid of fake"             => [->(b) { b.fake(:float64)[CA_SIZE([0, 2]), nil] }, [0, 1]],
+  }
+
+  def test_a_view_picking_cells_of_a_view_receives_the_write
+    DESCRIPTOR_OVER_VIEW.each do |name, (mk, axes)|
+      n = mk.call(base).elements
+      axes.each do |axis|
+        %i[iw_fiber_fill iw_slab_fill].each do |entry|
+          assert_equal n, cells_reached(mk, entry, axis), "#{name} #{entry} axis #{axis}"
+        end
+      end
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

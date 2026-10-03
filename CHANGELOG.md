@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions, a kernel that writes through `CA_FOR_EACH_SLAB`
+  or `CA_FOR_EACH_FIBER` into a `CAGrid`, `CASelectAxis`, `CAWindow` or
+  `CAShift` whose parent is itself a view (a transpose, a non-contiguous
+  block) reaches the array. The writes were dropped.
+
 - Fix: writing through a window that covers whole inner axes
   (`b.window(1..2, 0..3)`) reaches the parent for `seq!` and for a store
   of an array of another data type (`w[] = int32_array`). Both were
