@@ -243,4 +243,23 @@ class TestFusionPlan < Test::Unit::TestCase
     objs = CArray.object(4) { |i| i }
     assert_nil CArray::Fusion.plan(CArray.fuse { objs + 1 })
   end
+
+  # -- which operations skip masked cells -------------------------------
+
+  # A plan carries the rule each lazy view's own kernel follows, read from
+  # the view rather than written down a second time.
+  def test_an_operation_that_can_raise_on_a_cell_is_marked_trapping
+    i = CArray.int32(4) { |k| k + 1 }
+    f = CArray.float64(4) { |k| k + 1.0 }
+    ops = ->(view) {
+      plan_for(view).nodes.select { |n| n.is_a?(CArray::Fusion::Op) }
+                    .map { |n| [n.name, n.trapping] }
+    }
+    assert_equal [[:div, true]],   ops.(i.lazy / i.lazy)
+    assert_equal [[:power, true]], ops.(i.lazy ** i.lazy)
+    assert_equal [[:rcp, true]],   ops.(i.lazy.rcp)
+    assert_equal [[:div, false]],  ops.(f.lazy / f.lazy)
+    assert_equal [[:add, false]],  ops.(i.lazy + i.lazy)
+  end
+
 end

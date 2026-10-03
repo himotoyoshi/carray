@@ -696,6 +696,17 @@ rb_ca_binop_s_build (VALUE klass, VALUE l_cary, VALUE r_cary, VALUE op_id_val)
 }
 
 /* op_id accessor for inspect / dump_tree consumers in Ruby. */
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_binop_trapping (VALUE self)
+{
+  CABinOp *bo;
+  TypedData_Get_Struct(self, CABinOp, &cabinop_data_type, bo);
+  return ca_binop_is_trapping(bo->op_id, bo->data_type) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_binop_op_id (VALUE self)
 {
@@ -814,6 +825,7 @@ Init_ca_obj_binop (void)
 
   rb_define_method(rb_cCABinOp, "__op_id__",
                                 rb_ca_binop_op_id, 0);
+  rb_define_method(rb_cCABinOp, "__trapping__", rb_ca_binop_trapping, 0);
   rb_define_method(rb_cCABinOp, "__binop_right__",
                                 rb_ca_binop_right, 0);
 

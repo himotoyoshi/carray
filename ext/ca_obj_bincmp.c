@@ -653,6 +653,17 @@ rb_ca_bincmp_s_build (int argc, VALUE *argv, VALUE klass)
   return rb_ca_bincmp_build(l_cary, r_cary, op_id, eps);
 }
 
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: object cells, which call Ruby.  CArray::Fusion
+   reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_bincmp_trapping (VALUE self)
+{
+  CABinCmp *bc;
+  TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
+  return ( bc->common_dt == CA_OBJECT ) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_bincmp_op_id (VALUE self)
 {
@@ -776,6 +787,7 @@ Init_ca_obj_bincmp (void)
                              rb_ca_bincmp_s_build, -1);
 
   rb_define_method(rb_cCABinCmp, "__op_id__",     rb_ca_bincmp_op_id, 0);
+  rb_define_method(rb_cCABinCmp, "__trapping__", rb_ca_bincmp_trapping, 0);
   rb_define_method(rb_cCABinCmp, "__bincmp_right__",
                                   rb_ca_bincmp_right, 0);
   rb_define_method(rb_cCABinCmp, "__eps__",       rb_ca_bincmp_eps, 0);

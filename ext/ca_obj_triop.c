@@ -634,6 +634,17 @@ rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
   return rb_ca_triop_build(cary1, cary2, cary3, op_id);
 }
 
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_triop_trapping (VALUE self)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  return ( ca->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_triop_op_id (VALUE self)
 {
@@ -735,6 +746,7 @@ Init_ca_obj_triop (void)
 
   rb_define_method(rb_cCATriOp, "__op_id__",
                                 rb_ca_triop_op_id, 0);
+  rb_define_method(rb_cCATriOp, "__trapping__", rb_ca_triop_trapping, 0);
   rb_define_method(rb_cCATriOp, "__triop_op2__",
                                 rb_ca_triop_op2, 0);
   rb_define_method(rb_cCATriOp, "__triop_op3__",

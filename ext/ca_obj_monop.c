@@ -970,6 +970,19 @@ rb_ca_is_lazy_view_p (VALUE self)
 }
 
 /* Read CAMonOp's op_id for inspect/dump_tree consumers in Ruby.  */
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_monop_trapping (VALUE self)
+{
+  CAMonOp *mo;
+  TypedData_Get_Struct(self, CAMonOp, &camonop_data_type, mo);
+  return ( ! ca_monop_is_cast(mo->op_id)
+           && ca_monop_is_trapping(mo->op_id, mo->parent->data_type) )
+         ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_monop_op_id (VALUE self)
 {
@@ -1117,6 +1130,7 @@ Init_ca_obj_monop (void)
   /* op_id accessor for inspect / dump_tree consumers in Ruby.  */
   rb_define_method(rb_cCAMonOp, "__op_id__",
                    rb_ca_monop_op_id, 0);
+  rb_define_method(rb_cCAMonOp, "__trapping__", rb_ca_monop_trapping, 0);
 
   /* Test instrumentation (not user-facing API).  */
   rb_define_singleton_method(rb_cCAMonOp, "__reset_scratch_counter__",
