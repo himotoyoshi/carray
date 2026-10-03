@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions, `ca_iter_state_next_slab_strided` hands out the
+  mask cursor of an entity or a strided view such as a block or a
+  transpose; it gave `NULL` for them, so masked cells read as values.
+
 - Fix: for C extensions, the mask cursor a read walk over a `CArray.stack`
   hands out is the walk's own copy, as it is for every other source.
   Writing to it changed the stacked arrays' masks.

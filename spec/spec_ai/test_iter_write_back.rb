@@ -162,6 +162,23 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # next_slab_strided hands out the mask on every source the WHOLE walk
+  # takes; on an entity and a CAStride it used to give none.
+  def test_a_strided_walk_hands_out_the_mask
+    {
+      "entity"    => ->(b) { b },
+      "block"     => ->(b) { b[0..1, nil] },
+      "transpose" => ->(b) { b.transpose },
+      "select"    => ->(b) { b[CA_SIZE([0, 2]), nil] },
+    }.each do |name, mk|
+      b = base
+      b[0, 1] = UNDEF
+      v = mk.call(b)
+      want = v.is_masked.to_a.flatten.map { |x| x ? 1 : 0 }
+      assert_equal want, CArray.iw_strided_mask(v), name
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

@@ -2230,6 +2230,17 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->alias_mode = CA_ITER_ALIAS_CONTIG;
     st->alias_ptr  = (char *) src->ptr;
   }
+
+  /* Mask: gathered in view row-major order, as on the AXES path above;
+     next_slab_strided hands out alias_mask + slab * slab_n. */
+  if ( ca_has_mask(src) ) {
+    ca_size_t mcap = src->elements > 0 ? src->elements : 1;
+    st->scratch_mask = (boolean8_t *) xmalloc(mcap);
+    if ( src->elements > 0 ) {
+      ca_copy_data(src->mask, (char *) st->scratch_mask);
+    }
+    st->alias_mask = st->scratch_mask;
+  }
   return CA_ITER_OK;
 }
 
