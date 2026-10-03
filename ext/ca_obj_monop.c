@@ -930,6 +930,17 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
 
   kernel_in_dt = ca_monop_kernel_input_data_type(op_id, parent_dt);
 
+  /* No kernel for the parent, nor one a cast could reach (a fixlen cell
+     converts to nothing numeric): raise as the eager monop does, before
+     a view is built over it. */
+  if ( ! ca_monop_is_writable_view(op_id) &&
+       ( ca_monop_kernel_lookup(op_id, kernel_in_dt) == ca_monop_not_implement ||
+         ( parent_dt == CA_FIXLEN &&
+           ca_monop_kernel_lookup(op_id, CA_FIXLEN) == ca_monop_not_implement ) ) ) {
+    rb_raise(rb_eCADataTypeError,
+             "invalid data type for monop (not implemented)");
+  }
+
   /* Insert cast node if the kernel wants a different input data_type.  */
   if ( kernel_in_dt != parent_dt ) {
     uint16_t cast_op_id = CA_MONOP_CAST_BASE + (uint16_t) kernel_in_dt;

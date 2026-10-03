@@ -236,4 +236,14 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_parity(f.arg, f.lazy.arg)
   end
 
+  def test_fixlen_arithmetic_raises_as_eager
+    x = fixlen(%w[abcd abcd abcd])
+    assert_raise(CArray::DataTypeError) { x + x }
+    assert_raise(CArray::DataTypeError) { x.lazy + x.lazy }
+    assert_raise(CArray::DataTypeError) { -x }
+    assert_raise(CArray::DataTypeError) { -x.lazy }
+    assert_raise(CArray::DataTypeError) { x.lazy.sqrt }
+    assert_raise(CArray::DataTypeError) { x.lazy.fma(x.lazy, x.lazy) }
+  end
+
 end
