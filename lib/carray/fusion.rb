@@ -113,11 +113,49 @@ class CArray
 
     def self.ask (plan, out)
       evaluator = CArray.expression_evaluator or return false
-      out.mask = 0 if plan.masked && ! out.has_mask?
+      return false if overlaps?(plan, out)
+      # The walk leaves the destination masked where the expression is, so
+      # a destination that arrives masked loses its mask to an expression
+      # that has none.
+      if plan.masked
+        out.mask = 0 unless out.has_mask?
+      elsif out.has_mask?
+        out.mask = 0
+      end
       evaluator.call(plan, out) ? true : false
     rescue StandardError => error
       retire(error)
       false
+    end
+
+    # Whether the destination shares storage with a leaf it would read.  An
+    # evaluator computes cell by cell, so writing a cell another leaf reads
+    # later -- `z[] = y + y` with z and y overlapping slices of one array --
+    # reads what it has just written.  The walk reads every operand before
+    # it writes.  The destination itself as a leaf is fine as long as it is
+    # read at the cell being written, not shifted.
+    def self.overlaps? (plan, out)
+      mine = storages(out)
+      shifted = plan.nodes.grep(Shifted).map(&:index)
+      plan.leaves.each_with_index.any? do |leaf, index|
+        if leaf.equal?(out)
+          shifted.include?(index)
+        else
+          storages(leaf).any? { |r| mine.any? { |m| m.equal?(r) } }
+        end
+      end
+    end
+
+    # The arrays that hold an array's cells: its root, or each parent's
+    # where a view stands over several.
+    def self.storages (array, found = [])
+      root = array.root_array
+      if ! root.entity? && root.respond_to?(:parents)
+        root.parents.each { |parent| storages(parent, found) }
+      else
+        found << root
+      end
+      found
     end
 
     def self.retire (error)
@@ -244,20 +282,21 @@ class CArray
         if body.match?(/<\w+>|\btol\b/)
           raise Refused, "#{kind} #{name} needs more than its operands"
         end
-        note(kind.to_s[0..3], name, compared)
+        note(kind.to_s[0..3], name, compared, args.join(","))
         push Op.new(kind, name, :boolean, args, body, mask, trapping)
       end
 
       def op (kind, name, type, args, mask, trapping)
         body = CArray.__kernel_body__(kind, name, type) or
           raise Refused, "#{kind} #{name} has no body at #{type}"
-        note(kind.to_s[0], name, type)
+        note(kind.to_s[0], name, type, args.join(","))
         push Op.new(kind, name, type, args, body, mask, trapping)
       end
 
       def leaf (n)
-        note("a", n.data_type, n.has_mask? ? 1 : 0)
-        push Leaf.new(leaf_index(n), n.data_type, n.has_mask?)
+        index = leaf_index(n)
+        note("a", index, n.data_type, n.has_mask? ? 1 : 0)
+        push Leaf.new(index, n.data_type, n.has_mask?)
       end
 
       # A shift of an array is that array read elsewhere, so it is the
@@ -271,10 +310,13 @@ class CArray
           return leaf(n)
         end
         offset = n.start
-        fill = bounds.include?(:fill) ? n.fill_value : nil
-        note("s", array.data_type, array.has_mask? ? 1 : 0,
-             offset.join(","), bounds.join(","), fill)
-        push Shifted.new(leaf_index(array), array.data_type, array.has_mask?,
+        # The fill as a cell of the array holds it: a boolean array is
+        # filled with true or false, not with the Integer it was given.
+        fill = bounds.include?(:fill) ? as_cell(n.fill_value, array.data_type) : nil
+        index = leaf_index(array)
+        note("s", index, array.data_type, array.has_mask? ? 1 : 0,
+             offset.join(","), bounds.join(","), fill.inspect)
+        push Shifted.new(index, array.data_type, array.has_mask?,
                          offset, bounds, fill)
       end
 
@@ -285,9 +327,18 @@ class CArray
         end
       end
 
+      # A masked scalar has no value to write into the expression.
       def constant (n)
-        note("k", n[0], n.data_type)
-        push Const.new(n[0], n.data_type)
+        raise Refused, "a masked scalar" if n.has_mask? && n.is_masked[0]
+        value = n[0]
+        note("k", value.inspect, n.data_type)
+        push Const.new(value, n.data_type)
+      end
+
+      def as_cell (value, data_type)
+        cell = CScalar.new(data_type)
+        cell[0] = value
+        cell[0]
       end
 
       def push (node)
@@ -302,6 +353,8 @@ class CArray
 
       # Two expressions of the same shape compute alike, whatever arrays
       # they are over, so a consumer can keep one compiled kernel for both.
+      # The shape includes which node each operation reads and which leaf
+      # each read is: `(a - b) - b` and `(a - b) - a` differ only there.
       def note (*parts)
         @signature << parts.join(":") << ";"
       end
