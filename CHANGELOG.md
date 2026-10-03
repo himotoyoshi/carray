@@ -36,6 +36,25 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for code that opens arrays through `CArray::AddressBasis` (as
+  carray-jit does), a writable view that converts its cells -- a float64
+  array seen through `fake(CA_INT32)` -- no longer rewrites the cells the
+  kernel left alone (1.75 came back as 1.0); only changed cells are sent
+  back. A region whose start and count overflow when added, or given as
+  Floats, is refused; a mask added to the parent after the view was made
+  is opened; the arrays stay alive while open even if the caller's Array
+  is emptied.
+- Fix: with an expression evaluator registered (carray-jit), two
+  expressions that differ only in which operand an operation reads --
+  `(a - b) - b` and `(a - b) - a` -- no longer share a compiled kernel and
+  each other's answers. A store whose destination overlaps an operand, or
+  reads itself shifted, is computed by CArray; a masked destination
+  assigned an unmasked expression is left unmasked, as without the
+  evaluator; a boolean shift filled with `0` is filled with false.
+- Fix: an integer raised to a negative power is decided by its base:
+  `2 ** -64` is 0 rather than `ZeroDivisionError`, and a power of
+  `-2**63` no longer recurses without end. 0 to a negative power still
+  raises `ZeroDivisionError`.
 - Change: for C extensions, `CA_FOR_EACH_FIBER_INOUT` and its `_MASKED`
   form raise `ArgumentError` when the input and the output differ in
   shape. They checked only the rank, the element count and the walked
