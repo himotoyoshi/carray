@@ -150,21 +150,27 @@ class TestAttachWindowRaiseValues < Test::Unit::TestCase
 
   # AddressBasis writes each region back when the block ends; a region
   # whose write-back raises keeps no other region from being written, and
-  # an exception the block raised is the one that propagates.
+  # an exception the block raised is the one that propagates.  Only cells
+  # the block changed are written back, so the block changes one in each.
   def test_address_basis_writes_back_every_region_when_one_refuses
+    require "fiddle"
     a = FailingSync.new(6)
     b = FailingSync.new(6)
     written = []
     b.define_singleton_method(:sync_data) { |d| written << d.to_a ; super(d) }
     b.define_singleton_method(:store_addr) { |i, v| written << [i, v] ; super(i, v) }
     arrays = [b[1..3], a[1..3]]              # closed last to first: a first
+    poke = ->(bases) {
+      bases.each { |basis| Fiddle::Pointer.new(basis[:pointer], 4)[0, 4] = [99].pack("l") }
+    }
     assert_raise_message("store failed") do
-      CArray::AddressBasis.open(arrays, [true, true]) { a.fail_sync = true }
+      CArray::AddressBasis.open(arrays, [true, true]) { |bases| poke.(bases) ; a.fail_sync = true }
     end
     a.fail_sync = false
     assert_not_empty written
+    assert_equal 99, b.src[1]
     assert_raise_message("block") do
-      CArray::AddressBasis.open(arrays, [true, true]) { a.fail_sync = true ; raise "block" }
+      CArray::AddressBasis.open(arrays, [true, true]) { |bases| poke.(bases) ; a.fail_sync = true ; raise "block" }
     end
     a.fail_sync = false
   end
