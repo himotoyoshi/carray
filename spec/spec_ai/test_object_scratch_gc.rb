@@ -58,4 +58,16 @@ class TestObjectScratchGC < Test::Unit::TestCase
     end
   end
 
+  # ---- copy of a masked lazy expression ----
+
+  def test_copy_of_a_masked_lazy_object_expression
+    o = thirds
+    o[1, 1] = UNDEF
+    want = (o * 2).to_a
+    got = under_stress { (o.lazy * 2).copy.to_a }
+    assert_equal(want, got)
+    got = under_stress { (o.lazy + o.lazy).to_a }
+    assert_equal((o + o).to_a, got)
+  end
+
 end

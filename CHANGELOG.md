@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an object array whose cells are computed -- a `CAObject` with a
+  Ruby `fetch_index`, a lazy expression over object arrays, or a view of
+  either -- no longer crashes or returns wrong values when a garbage
+  collection runs in the middle of a reduction along an axis, `unique`
+  and its family, or `copy` of a masked lazy expression.
+
 - Fix: `abs` of an object array calls each cell's `abs`; it raised
   `CArray::DataTypeError`.
 
