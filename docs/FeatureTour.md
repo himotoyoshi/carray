@@ -75,9 +75,9 @@ a.reduce_slab(axis: -1) { |row| row.median }     #  the axis collapses
 
 `each_slab` is the third of the set, for when you only want the side effect. Beside them are four more iterators built on the same surface — over rolling windows, over non-overlapping tiles, over categories, and over grid groups.
 
-## Faces — domain meaning over unchanged storage
+## Faces — new types that are still CArrays
 
-A Face is a view that changes what the elements *mean* without touching how they are stored. `CATime` is the worked example: the storage stays integer ticks on a grid you name, while the array reads and writes instants, and subtracting two of them answers a duration rather than a number.
+A Face gives an array an element type of its own, with behavior to match, while everything a CArray does still works on it. `CATime` is the worked example: the array reads and writes instants, and subtracting two of them answers a duration rather than a number. Underneath, it is integer ticks on a grid you name.
 
 ```ruby
 t = CArray.time(["2026-01-01", "2026-01-08", "2026-01-15"], unit: :D)
@@ -86,7 +86,7 @@ t[2] - t[0]                #  => #<CATimedelta::Element 14D>
 t.ticks                    #  => [ 20454, 20461, 20468 ]   the storage, untouched
 ```
 
-Because the meaning rides on a view, it survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a quantity carrying units — are written the same way.
+Because a Face is a view, its type survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a price stored as integer cents — are written the same way.
 
 ## Array classes written in Ruby
 
