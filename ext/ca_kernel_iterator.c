@@ -601,6 +601,28 @@ ca_iter_strip_storage_wrapper (CArray *src)
   return src;
 }
 
+/* Raise unless a and b have the same shape.  The INOUT fiber macros call
+   it before opening either walk, so a refusal leaves nothing to close. */
+int
+ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b)
+{
+  int8_t k;
+  int    same = ( a->ndim == b->ndim );
+  for ( k = 0; same && k < a->ndim; k++ ) {
+    if ( a->dim[k] != b->dim[k] ) same = 0;
+  }
+  if ( ! same ) {
+    VALUE sa = rb_ary_new(), sb = rb_ary_new();
+    for ( k = 0; k < a->ndim; k++ ) rb_ary_push(sa, SIZE2NUM(a->dim[k]));
+    for ( k = 0; k < b->ndim; k++ ) rb_ary_push(sb, SIZE2NUM(b->dim[k]));
+    rb_raise(rb_eArgError,
+             "kernel iterator: the input and the output of an INOUT walk "
+             "differ in shape (%"PRIsVALUE" vs %"PRIsVALUE")",
+             rb_inspect(sa), rb_inspect(sb));
+  }
+  return 0;
+}
+
 int
 ca_iter_check_init (int rc)
 {
@@ -3022,12 +3044,17 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
   st->write_dirty = 0;
 }
 
+static VALUE ca_iter_finish_sync (VALUE arg);
+
 void
 ca_iter_state_finish (ca_iter_state *st)
 {
   if ( st == NULL || st->src == NULL ) {
     return;
   }
+  /* A slab still handed out is dropped: finish abandons it.  The block
+     macros close with ca_iter_state_close, which writes it back first. */
+  st->write_dirty = 0;
   /* composed_strides is inline — no free needed.  outer_idx is heap
      for L2 multi-d sources (NULL on L1 paths and on L2 0/1-d). */
   if ( st->outer_idx ) {
@@ -3115,6 +3142,23 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   st->src       = NULL;
   st->alias_ptr = NULL;
+}
+
+/* Finish a walk the way the block macros leave it: a slab of a write walk
+   still handed out -- the body left with `break` -- is written back
+   first.  A raise from the write-back is passed on once the walk is
+   finished. */
+void
+ca_iter_state_close (ca_iter_state *st)
+{
+  int tag = 0;
+  if ( st != NULL && st->src != NULL && st->write_dirty ) {
+    rb_protect(ca_iter_finish_sync, (VALUE) st, &tag);
+  }
+  ca_iter_state_finish(st);
+  if ( tag ) {
+    rb_jump_tag(tag);
+  }
 }
 
 /* ---- Raise-safe entry points ----------------------------------------
@@ -3291,6 +3335,24 @@ ca_iter_state_init_l2 (ca_iter_state    *st,
   return c.rc;
 }
 
+/* A slab handed out by a write walk is dirty until sync_slab writes it
+   back; finish writes back one the caller left with `break`. */
+static int
+ca_iter_mark_dirty (ca_iter_state *st, int rc)
+{
+  if ( rc && st != NULL && (st->flags & CA_KERNEL_WRITE) ) {
+    st->write_dirty = 1;
+  }
+  return rc;
+}
+
+static VALUE
+ca_iter_finish_sync (VALUE arg)
+{
+  ca_iter_state_sync_slab_unprotected((ca_iter_state *) arg);
+  return Qnil;
+}
+
 int
 ca_iter_state_next_slab (ca_iter_state *st,
                          char         **out_ptr,
@@ -3299,12 +3361,13 @@ ca_iter_state_next_slab (ca_iter_state *st,
 {
   ca_iter_call_t c;
   if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
-    return ca_iter_state_next_slab_unprotected(st, out_ptr, out_mask, out_n);
+    return ca_iter_mark_dirty(st,
+             ca_iter_state_next_slab_unprotected(st, out_ptr, out_mask, out_n));
   }
   c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.out_n = out_n;
   c.rc = 0;
   ca_iter_protect(st, ca_iter_call_next_slab, (VALUE) &c);
-  return c.rc;
+  return ca_iter_mark_dirty(st, c.rc);
 }
 
 int
@@ -3316,13 +3379,14 @@ ca_iter_state_next_slab_strided (ca_iter_state *st,
 {
   ca_iter_call_t c;
   if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
-    return ca_iter_state_next_slab_strided_unprotected(st, out_ptr, out_mask,
-                                                       out_n, out_stride_bytes);
+    return ca_iter_mark_dirty(st,
+             ca_iter_state_next_slab_strided_unprotected(st, out_ptr, out_mask,
+                                                         out_n, out_stride_bytes));
   }
   c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.out_n = out_n;
   c.out_stride_bytes = out_stride_bytes; c.rc = 0;
   ca_iter_protect(st, ca_iter_call_next_slab_strided, (VALUE) &c);
-  return c.rc;
+  return ca_iter_mark_dirty(st, c.rc);
 }
 
 int
@@ -3332,11 +3396,12 @@ ca_iter_state_next_slab_axes (ca_iter_state *st,
 {
   ca_iter_call_t c;
   if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
-    return ca_iter_state_next_slab_axes_unprotected(st, out_ptr, out_mask);
+    return ca_iter_mark_dirty(st,
+             ca_iter_state_next_slab_axes_unprotected(st, out_ptr, out_mask));
   }
   c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.rc = 0;
   ca_iter_protect(st, ca_iter_call_next_slab_axes, (VALUE) &c);
-  return c.rc;
+  return ca_iter_mark_dirty(st, c.rc);
 }
 
 void
