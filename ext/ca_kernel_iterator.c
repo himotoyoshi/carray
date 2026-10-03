@@ -3074,8 +3074,17 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   st->stack_n_parents = 0;
   if ( st->root ) {
-    ca_detach(st->root);
+    /* A write walk wrote into the root's attach buffer, which is the root
+       itself only for an entity: a view root (a transpose, a non-contig
+       block, a view lending no memory) gave a buffer of its own. */
+    CArray *root = st->root;
     st->root = NULL;
+    if ( st->flags & CA_KERNEL_WRITE ) {
+      ca_sync_detach(root);
+    }
+    else {
+      ca_detach(root);
+    }
   } else if ( st->alias_mode == CA_ITER_ALIAS_CONTIG
               || st->alias_mode == CA_ITER_ALIAS_STRIDED ) {
     /* alias path (CONTIG/STRIDED for CAStride family): we attached
