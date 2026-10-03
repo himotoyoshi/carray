@@ -34,6 +34,7 @@
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_binop_dispatch.h"
 #include "ca_monop_dispatch.h"  /* CA_MONOP_CAST_BASE */
+#include "carray_math_kernel.h" /* ca_binop_not_implement */
 
 /* carray_broadcast.c */
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
@@ -578,6 +579,16 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
      broadcast so the cast acts on the smallest element count. */
   ca_binop_kernel_input_data_types(op_id, l->data_type, r->data_type,
                                 &l_in_dt, &r_in_dt);
+
+  /* A boolean operand of an op with no boolean kernel (arithmetic) is
+     read as its 0/1 storage in int64, as rb_ca_call_binop does. */
+  if ( l_in_dt == CA_BOOLEAN &&
+       ca_binop_kernel_lookup_vv(op_id, CA_BOOLEAN) == ca_binop_not_implement ) {
+    l_in_dt = CA_INT64;
+    if ( r_in_dt == CA_BOOLEAN ) {
+      r_in_dt = CA_INT64;
+    }
+  }
 
   if ( l_in_dt != l->data_type ) {
     VALUE cast_op = INT2NUM(CA_MONOP_CAST_BASE + l_in_dt);

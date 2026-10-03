@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a lazy expression over a boolean array follows the eager rules.
+  Arithmetic reads the 0/1 values as int64 (`b.lazy + b.lazy`, `-b.lazy`,
+  `b.lazy.fma(...)`), where it raised before. A math function raises and
+  wants an explicit cast (`b.lazy.to_type(:float64).sqrt`), where it
+  quietly widened to float64 before; `abs` and `arg` raise as well, and
+  `imag` stays boolean.
+
 - Fix: a lazy expression skips its masked cells where computing them could
   raise, as the eager operators do. Previously it computed them, so
   `int.lazy ** e` with a masked `0 ** -1`, integer `rcp` and `rcp_mul`

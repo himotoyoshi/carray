@@ -194,4 +194,39 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_parity(s.pmax("b"), s.lazy.pmax("b"))
   end
 
+  # ---- boolean as 0/1 numeric ----
+
+  def test_boolean_arithmetic_reads_as_int64
+    b = CA_BOOLEAN([1, 0, 1])
+    c = CA_BOOLEAN([1, 1, 0])
+    %i[+ - * ** pmax pmin].each do |op|
+      assert_parity(b.send(op, c), b.lazy.send(op, c.lazy))
+    end
+    one = CA_BOOLEAN([1, 1, 1])
+    %i[/ % fmod].each do |op|
+      assert_parity(b.send(op, one), b.lazy.send(op, one.lazy))
+    end
+    assert_parity(b + true,  b.lazy + true)
+    assert_parity(-b,        -b.lazy)
+    assert_parity(b.floor,   b.lazy.floor)
+    assert_parity(b.square,  b.lazy.square)
+    assert_parity(b.imag,    b.lazy.imag)
+    assert_parity(b.fma(c, b), b.lazy.fma(c.lazy, b.lazy))
+  end
+
+  def test_boolean_logic_stays_boolean
+    b = CA_BOOLEAN([1, 0, 1])
+    c = CA_BOOLEAN([1, 1, 0])
+    assert_parity(b & c, b.lazy & c.lazy)
+    assert_parity(b ^ c, b.lazy ^ c.lazy)
+  end
+
+  def test_boolean_math_function_wants_a_cast
+    b = CA_BOOLEAN([1, 0, 1])
+    %i[sqrt sin exp log abs arg].each do |op|
+      assert_raise(CArray::DataTypeError, op.to_s) { b.send(op) }
+      assert_raise(CArray::DataTypeError, op.to_s) { b.lazy.send(op) }
+    end
+  end
+
 end

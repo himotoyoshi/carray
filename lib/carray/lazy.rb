@@ -133,6 +133,10 @@ class CArray
   __abs_eager_um__ = instance_method(:__abs_eager__)
   define_method(:abs) do
     if __lazy_view__?
+      # A boolean has no absolute value to change type for, as eager says.
+      raise CArray::DataTypeError,
+            "data_type-changing monop not implemented for input data_type " \
+            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
       abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
       if complex?
         # float_dt is a Symbol; convert via data_type_code so the cast
@@ -206,7 +210,11 @@ class CArray
   define_method(:imag) do
     if __lazy_view__?
       imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
-      if complex?
+      if boolean?
+        # imag_i reads a boolean as int64; the eager imag stays boolean.
+        CAMonOp.__build__(imag_i_node,
+                          CAMonOp::CAST_BASE + CArray.data_type_code(CA_BOOLEAN))
+      elsif complex?
         float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
         # float_dt is a Symbol; convert via data_type_code for kernel
         # op_id arithmetic.
@@ -243,8 +251,11 @@ class CArray
   __arg_eager_um__ = instance_method(:__arg_eager__)
   define_method(:arg) do
     if __lazy_view__?
+      raise CArray::DataTypeError,
+            "data_type-changing monop not implemented for input data_type " \
+            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
       parent = self
-      if integer? || boolean?
+      if integer?
         parent = CAMonOp.__build__(parent,
                                    CAMonOp::CAST_BASE +
                                    CArray.data_type_code(CA_FLOAT64))

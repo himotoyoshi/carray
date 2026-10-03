@@ -33,6 +33,7 @@
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_triop_dispatch.h"
 #include "ca_monop_dispatch.h"  /* CA_MONOP_CAST_BASE */
+#include "carray_math_kernel.h" /* ca_triop_not_implement */
 
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
                                 ca_size_t *target_dim);
@@ -546,6 +547,13 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   ca_triop_kernel_input_data_types(op_id,
                                    op1->data_type, op2->data_type, op3->data_type,
                                    &dt1, &dt2, &dt3);
+
+  /* All boolean, and no boolean kernel (fma / fms): read the operands as
+     their 0/1 storage in int64, as rb_ca_call_triop does. */
+  if ( dt1 == CA_BOOLEAN &&
+       ca_triop_kernel_lookup_vvv(op_id, CA_BOOLEAN) == ca_triop_not_implement ) {
+    dt1 = dt2 = dt3 = CA_INT64;
+  }
   r1 = insert_cast(r1, dt1, &op1);
   r2 = insert_cast(r2, dt2, &op2);
   r3 = insert_cast(r3, dt3, &op3);
