@@ -136,6 +136,13 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_false plan.masked
   end
 
+  # The fill as the array would hold it.
+  def test_a_fill_is_a_cell_of_the_array
+    g = CArray.boolean(4, 5)
+    plan = plan_for(CArray.fuse { g.shift(1, 0, fill_value: 0) & g })
+    assert_equal false, plan.nodes.grep(CArray::Fusion::Shifted).first.fill
+  end
+
   def test_a_fill_of_undef_masks
     g = CArray.float64(4, 5)
     plan = plan_for(CArray.fuse { g.shift(1, 0, fill_value: UNDEF) + g })
@@ -214,6 +221,14 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_not_equal one.signature, two.signature
   end
 
+  # Which node an operation reads, and which leaf a read is, is part of
+  # the shape: these two differ only there.
+  def test_the_wiring_is_part_of_it
+    one = plan_for(CArray.fuse { (@a - @b) - @a })
+    two = plan_for(CArray.fuse { (@a - @b) - @b })
+    assert_not_equal one.signature, two.signature
+  end
+
   def test_a_mask_or_a_data_type_changes_it
     masked = @a.copy
     masked[1] = UNDEF
@@ -236,6 +251,12 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_nil CArray::Fusion.plan(@a)
     assert_nil CArray::Fusion.plan(3.0)
     assert_nil CArray::Fusion.plan(nil)
+  end
+
+  def test_a_masked_scalar_has_no_plan
+    s = CScalar.float64
+    s[0] = UNDEF
+    assert_nil CArray::Fusion.plan(@a.lazy + s)
   end
 
   def test_an_object_array_has_no_plan

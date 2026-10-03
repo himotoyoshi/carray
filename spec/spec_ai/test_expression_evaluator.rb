@@ -183,6 +183,46 @@ class TestExpressionEvaluator < Test::Unit::TestCase
     assert_empty @asked
   end
 
+  # The walk leaves the destination masked where the expression is, and an
+  # expression with no mask leaves none.
+  def test_a_masked_destination_loses_its_mask_to_an_unmasked_expression
+    out = CArray.float64(BIG)
+    out[0..9] = UNDEF
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { @a + @b }
+    assert_equal 1, @asked.size
+    assert_equal 0, out.count_masked
+  end
+
+  # Cell by cell, a destination that overlaps a leaf would read what it has
+  # just written; the walk reads every operand first.
+  def test_a_destination_that_overlaps_a_leaf_is_left_to_the_walk
+    x = CArray.float64(BIG + 3) { |i| i.to_f }
+    y = x[0..-4]
+    z = x[3..-1]
+    want = (y + y).to_a
+    CArray.expression_evaluator = answering(-1.0)
+    z[] = CArray.fuse { y + y }
+    assert_empty @asked
+    assert_equal want, z.to_a
+  end
+
+  def test_the_destination_as_a_leaf_read_in_place_is_asked
+    out = @a.copy
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { out + @b }
+    assert_equal 1, @asked.size
+  end
+
+  def test_the_destination_read_shifted_is_left_to_the_walk
+    out = @a.copy
+    want = (out.shift(1, fill_value: 0.0) + @b).to_a
+    CArray.expression_evaluator = answering(-1.0)
+    out[] = CArray.fuse { out.shift(1, fill_value: 0.0) + @b }
+    assert_empty @asked
+    assert_equal want, out.to_a
+  end
+
   def test_a_store_that_would_have_to_cast_is_left_to_the_walk
     out = CArray.int32(BIG)
     CArray.expression_evaluator = answering(-1.0)
