@@ -154,4 +154,16 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_equal([5.0, 6.0, 7.0, 8.0], c.to_a)
   end
 
+  # ---- a lazy result's mask ----
+
+  def test_lazy_result_mask_does_not_write_into_the_operand
+    a = CA_FLOAT64([1, 2, 3, 4])
+    a[1] = UNDEF
+    b = CA_FLOAT64([10, 20, 30, 40])
+    [a.lazy + b.lazy, a.lazy.sqrt, a.lazy.fma(1.0, 1.0), a.lazy].each do |r|
+      assert_raise(RuntimeError) { r.mask[2] = 1 }
+      assert_equal([false, true, false, false], a.is_masked.to_a)
+    end
+  end
+
 end
