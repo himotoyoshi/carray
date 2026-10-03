@@ -194,6 +194,10 @@ ca_monop_func_t ca_monop_kernel_lookup (uint16_t op_id, int8_t in_data_type);
 /* Returns true iff op_id encodes a cast operation.  */
 int ca_monop_is_cast (uint16_t op_id);
 
+/* Returns true iff op_id widens an integer parent to CA_FLOAT64 (the
+   math functions: sqrt, sin, exp, ...).  */
+int ca_monop_is_widening (uint16_t op_id);
+
 /* Phase 6 P.6.3: returns true iff op_id is a "writable view" op
    (= cast or byte_swap).  These ops:
      - support writable view lifecycle (CA_FLAG_READ_ONLY not set)

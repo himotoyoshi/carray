@@ -117,11 +117,11 @@ ca_monop_kernel_lookup (uint16_t op_id, int8_t in_data_type)
 /* op category predicates                                               */
 /* ------------------------------------------------------------------- */
 
-/* True if op widens integer / boolean parent to CA_FLOAT64.  False for
+/* True if op widens an integer parent to CA_FLOAT64.  False for
    preserve ops and cast ops.  Widening ops are enumerated explicitly
    because they were added in multiple groups outside the original
    contiguous WIDENING_BEGIN..WIDENING_END range. */
-static int
+int
 ca_monop_is_widening (uint16_t op_id)
 {
   if ( op_id >= CA_MONOP_WIDENING_BEGIN && op_id < CA_MONOP_WIDENING_END ) {
@@ -170,8 +170,8 @@ ca_lazy_promote_monop (uint16_t op_id, int8_t in_data_type)
     return (int8_t)(op_id - CA_MONOP_CAST_BASE);
   }
   if ( ca_monop_is_widening(op_id) ) {
-    /* integer → f64, else preserve.  Boolean (CA_BOOLEAN = 1) is also
-       widened to f64 (existing eager behaviour via wrap_readonly).  */
+    /* integer → f64, else preserve.  A boolean parent never reaches a
+       widening op: the builder refuses it, as the eager monop does. */
     if ( in_data_type < CA_FLOAT32 ) return CA_FLOAT64;
     return in_data_type;
   }

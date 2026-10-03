@@ -33,6 +33,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_*, ca_is_lazy_view */
 #include "ca_monop_dispatch.h"
+#include "carray_math_kernel.h" /* ca_monop_not_implement */
 
 /* ca_cast_block (carray_cast.c) */
 extern void ca_cast_block (ca_size_t n, void *ap1, void *ptr1,
@@ -911,6 +912,22 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
   }
 
   parent_dt    = parent->data_type;
+
+  /* A boolean parent, as rb_ca_call_monop and the data_type-changing
+     monops treat it: a math function wants an explicit cast, and an op
+     with no boolean kernel reads the 0/1 storage in int64. */
+  if ( parent_dt == CA_BOOLEAN && ! ca_monop_is_writable_view(op_id) ) {
+    if ( ca_monop_is_widening(op_id) ) {
+      rb_raise(rb_eCADataTypeError,
+               "invalid data type for monop (not implemented)");
+    }
+    if ( ca_monop_kernel_lookup(op_id, CA_BOOLEAN) == ca_monop_not_implement ) {
+      target = rb_ca_monop_new(target, CA_MONOP_CAST_BASE + CA_INT64);
+      TypedData_Get_Struct(target, CArray, &carray_data_type, parent);
+      parent_dt = CA_INT64;
+    }
+  }
+
   kernel_in_dt = ca_monop_kernel_input_data_type(op_id, parent_dt);
 
   /* Insert cast node if the kernel wants a different input data_type.  */
