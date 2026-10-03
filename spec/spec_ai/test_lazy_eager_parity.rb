@@ -246,4 +246,25 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { x.lazy.fma(x.lazy, x.lazy) }
   end
 
+  # ---- a Face stays eager ----
+
+  def test_face_lazy_returns_self
+    t = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"], unit: :D)
+    assert_same(t, t.lazy)
+    a = CA_FLOAT64([1, 2, 3])
+    assert_kind_of(CALazyMarker, a.lazy)
+  end
+
+  def test_face_expressions_written_lazily_give_the_eager_answer
+    t = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"], unit: :D)
+    h = CArray.time(["2024-01-01 00:00", "2024-01-02 00:00",
+                     "2024-01-03 12:00"], unit: :h)
+    assert_equal((t - t).class, (t.lazy - t.lazy).class)
+    assert_equal((t > t[0]).to_a, (t.lazy > t[0]).to_a)
+    assert_equal(t.eq(t).to_a, t.lazy.eq(t.lazy).to_a)
+    assert_equal((t - t).class, CArray.fuse { t - t }.class)
+    assert_raise(ArgumentError) { t < h }
+    assert_raise(ArgumentError) { t.lazy < h.lazy }
+  end
+
 end

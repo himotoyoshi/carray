@@ -253,10 +253,19 @@ rb_ca_lazy_marker_new (VALUE cary)
 
 /* CArray#lazy — return a zero-cost CALazyMarker wrapping self.  Subsequent
  * element-wise ops (.sqrt / .sin / .+ / ...) build a lazy CAMonOp / CABinOp
- * tree instead of evaluating eagerly; `.to_ca` materialises. */
+ * tree instead of evaluating eagerly; `.to_ca` materialises.
+ *
+ * A Face returns itself: a lazy tree computes on storage and would lose
+ * the Face's meaning (units, labels, string surface), so its operations
+ * stay eager. */
 VALUE
 rb_ca_lazy (VALUE self)
 {
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_face(ca) ) {
+    return self;
+  }
   return rb_ca_lazy_marker_new(self);
 }
 
