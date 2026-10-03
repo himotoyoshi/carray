@@ -176,8 +176,9 @@ typedef struct {
   VALUE    *val;    /* object lane only: the interned VALUE, kept for an eql? re-check
                        on a hash collision (NULL in the numeric lane, where the widened
                        key is lossless so a key match already proves value equality).
-                       Its VALUEs are always elements of the live receiver, so the GC
-                       reaches them through `self`; this array is not separately marked. */
+                       A receiver that computes its cells (a CAObject, a lazy
+                       expression) hands each fiber over in a scratch that is refilled,
+                       so the owner marks this array (fz_tmp_values). */
   char     *raw;    /* fixlen lane only: cap*esz bytes, the interned element bytes kept
                        for a memcmp re-check on a hash collision (NULL otherwise). */
   int       esz;    /* fixlen lane: element width in bytes (0 otherwise) */
@@ -192,41 +193,74 @@ typedef struct {
    xmalloc.  The object lane calls #hash and #eql? for every cell, and a raise
    there leaves the tables with nothing to free them; the owner is reclaimed
    by the GC once the frame holding it is gone, and frees its buffer then.
-   The buffer is never scanned for VALUEs: the object lane's VALUEs are
-   elements of the live receiver. */
+   An owner whose buffer keeps VALUEs (fz_tmp_values) marks them: the object
+   lane's cells come from a scratch the walk refills, not only from the
+   receiver, so nothing else holds the ones already interned. */
+typedef struct {
+  char      *buf;
+  ca_size_t  voff;    /* byte offset of the VALUE run in buf */
+  ca_size_t  nvals;   /* VALUEs in the run (0: nothing to mark) */
+} fz_buffer;
+
+static void
+fz_buffer_mark (void *ptr)
+{
+  fz_buffer *b = (fz_buffer *) ptr;
+  if ( b->buf && b->nvals > 0 ) {
+    VALUE    *v = (VALUE *) (b->buf + b->voff);
+    ca_size_t i;
+    for ( i = 0; i < b->nvals; i++ ) rb_gc_mark(v[i]);
+  }
+}
+
 static void
 fz_buffer_free (void *ptr)
 {
-  xfree(ptr);
+  fz_buffer *b = (fz_buffer *) ptr;
+  xfree(b->buf);
+  xfree(b);
 }
 
 static const rb_data_type_t fz_buffer_type = {
   "carray_factorize_buffer",
-  { NULL, fz_buffer_free, NULL, },
+  { fz_buffer_mark, fz_buffer_free, NULL, },
   NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
 static void *
 fz_tmp_alloc (VALUE *store, size_t bytes)
 {
-  *store = TypedData_Wrap_Struct(0, &fz_buffer_type, NULL);
-  DATA_PTR(*store) = xmalloc(bytes);
-  return DATA_PTR(*store);
+  fz_buffer *b;
+  *store = TypedData_Make_Struct(0, fz_buffer, &fz_buffer_type, b);
+  b->buf = (char *) xmalloc(bytes);
+  return b->buf;
 }
 
 static void *
 fz_tmp_realloc (VALUE store, size_t bytes)
 {
-  DATA_PTR(store) = xrealloc(DATA_PTR(store), bytes);
-  return DATA_PTR(store);
+  fz_buffer *b = (fz_buffer *) DATA_PTR(store);
+  b->buf = (char *) xrealloc(b->buf, bytes);
+  return b->buf;
+}
+
+/* Mark the n VALUEs at vals (inside store's buffer); they must be valid. */
+static void
+fz_tmp_values (VALUE store, void *vals, ca_size_t n)
+{
+  fz_buffer *b = (fz_buffer *) DATA_PTR(store);
+  b->voff  = (ca_size_t) ((char *) vals - b->buf);
+  b->nvals = n;
 }
 
 static void
 fz_tmp_free (VALUE *store)
 {
   if ( *store ) {
-    xfree(DATA_PTR(*store));
-    DATA_PTR(*store) = NULL;
+    fz_buffer *b = (fz_buffer *) DATA_PTR(*store);
+    b->nvals = 0;
+    xfree(b->buf);
+    b->buf = NULL;
     *store = 0;
   }
 }
@@ -259,6 +293,11 @@ fz_hash_alloc (fz_hash *h, ca_size_t cap)
   h->raw  = h->esz ? b : NULL;
   h->cap  = cap;
   MEMZERO(h->used, uint8_t, cap);
+  if ( has_val ) {
+    ca_size_t i;
+    for ( i = 0; i < cap; i++ ) h->val[i] = Qnil;
+    fz_tmp_values(h->hbuf, h->val, cap);
+  }
 }
 
 /* has_val: the object lane (a slot keeps its VALUE); esz > 0: the fixlen
@@ -515,24 +554,43 @@ typedef struct {
   ca_size_t n;      /* elements stored */
   int       esz;    /* element bytes */
   VALUE     hp;     /* owner of p (see fz_tmp_alloc) */
+  int       obj;    /* p holds VALUEs, marked by hp */
 } fz_levels;
 
+/* Fill the VALUE slots from..cap with Qnil and mark all cap of them. */
 static void
-fz_levels_init (fz_levels *l, int esz)
+fz_levels_values (fz_levels *l, ca_size_t from)
+{
+  VALUE    *v = (VALUE *) l->p;
+  ca_size_t i;
+  for ( i = from; i < l->cap; i++ ) v[i] = Qnil;
+  fz_tmp_values(l->hp, l->p, l->cap);
+}
+
+static void
+fz_levels_init (fz_levels *l, int esz, int obj)
 {
   l->esz = esz;
   l->cap = 16;
   l->n   = 0;
   l->hp  = 0;
+  l->obj = obj;
   l->p   = fz_tmp_alloc(&l->hp, (size_t) l->cap * esz);
+  if ( obj ) {
+    fz_levels_values(l, 0);
+  }
 }
 
 static void
 fz_levels_push (fz_levels *l, const void *e)
 {
   if ( l->n == l->cap ) {
+    ca_size_t old = l->cap;
     l->cap <<= 1;
     l->p = fz_tmp_realloc(l->hp, (size_t) l->cap * l->esz);
+    if ( l->obj ) {
+      fz_levels_values(l, old);
+    }
   }
   memcpy(l->p + l->n * l->esz, e, l->esz);
   l->n++;
@@ -626,7 +684,7 @@ fz_factorize_appearance_body (VALUE arg)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber = row-major flatten */
 
@@ -1004,7 +1062,7 @@ fz_unique_flat_body (VALUE arg)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber; hash not reset =
                                               one seen-set over the whole array */
@@ -1453,7 +1511,7 @@ fz_locate_addr_body (VALUE arg)
      the ref value carrying dense code `code`.  Codes are assigned 0,1,2,... in
      insertion order, so pushing on is_new fills addr.p in code order. */
   fz_levels addr;
-  fz_levels_init(&addr, (int) sizeof(int64_t));
+  fz_levels_init(&addr, (int) sizeof(int64_t), 0);
 
   /* ---- Phase 1: build value -> first-address map from ref (row-major). ----- */
   {
@@ -1733,7 +1791,7 @@ fz_set_relation_body (VALUE arg)
   }
 
   fz_levels lv;
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   /* Build the probe set from every non-masked cell of other. */
   fz_intern_all(&fr->st[2], &hoth, co, NULL);
@@ -1921,7 +1979,7 @@ fz_set_union_body (VALUE arg)
   else                        { fz_hash_init(&h); }
 
   fz_levels lv;
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   fz_intern_all(&fr->st[2], &h, ca, &lv);   /* self's distinct values, appearance order */
   fz_intern_all(&fr->st[2], &h, co, &lv);   /* + other's not-yet-seen distinct values   */
@@ -1995,8 +2053,8 @@ fz_value_counts_flat_body (VALUE arg)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
-  fz_levels_init(&ct, (int) sizeof(int64_t));
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
+  fz_levels_init(&ct, (int) sizeof(int64_t), 0);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* one seen-set over the whole array */
   ca_iter_state *st_in = &fr->st[0];
@@ -2341,7 +2399,7 @@ fz_is_mode_body (VALUE arg)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&ct, (int) sizeof(int64_t));
+  fz_levels_init(&ct, (int) sizeof(int64_t), 0);
 
   ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
@@ -2571,10 +2629,10 @@ fz_mode_axis_body (VALUE arg)
   fz_levels mod;    /* per-fiber modal values, collected then sorted (reset) */
   fz_levels flat;   /* all fibers' modal values concatenated, fiber order */
   fz_hash_init(&h);
-  fz_levels_init(&lv,   esz);
-  fz_levels_init(&ct,   (int) sizeof(int64_t));
-  fz_levels_init(&mod,  esz);
-  fz_levels_init(&flat, esz);
+  fz_levels_init(&lv,   esz, 0);
+  fz_levels_init(&ct,   (int) sizeof(int64_t), 0);
+  fz_levels_init(&mod,  esz, 0);
+  fz_levels_init(&flat, esz, 0);
 
   volatile VALUE hfoff = 0;
   ca_size_t *foff = ALLOCV_N(ca_size_t, hfoff, M + 1);   /* prefix offsets into flat */

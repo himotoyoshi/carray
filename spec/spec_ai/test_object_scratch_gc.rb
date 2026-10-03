@@ -49,4 +49,13 @@ class TestObjectScratchGC < Test::Unit::TestCase
     end
   end
 
+  # ---- the tables of unique and its family ----
+
+  def test_unique_over_a_computing_view
+    [Thirds.new(3, 4), Thirds.new(3, 4)[1..2, nil], thirds.lazy + 1].each do |v|
+      assert_same_under_stress(v) { |x| x.unique.to_a }
+      assert_same_under_stress(v) { |x| x.value_counts.to_a }
+    end
+  end
+
 end
