@@ -72,7 +72,25 @@ ca_copy (void *ap)
 
   pair[0] = ca;
   pair[1] = co;
-  ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
+
+  /* Object cells read from a view that computes them exist only in
+     co->ptr, and copying the mask afterwards can build it -- a lazy
+     expression's mask is computed from its operands -- which allocates.
+     Hold them until the copy is complete.  carray_new has filled the
+     cells with valid VALUEs. */
+  if ( ca_is_object_type(co) ) {
+    int tag = 0;
+    int guard = ca_gc_hold_push(co->ptr, co->elements);
+    rb_protect(ca_copy_fill, (VALUE) pair, &tag);
+    ca_gc_hold_pop_to(guard);
+    if ( tag ) {
+      ca_free(co);
+      rb_jump_tag(tag);
+    }
+  }
+  else {
+    ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
+  }
 
   return co;
 }
