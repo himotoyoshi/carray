@@ -84,6 +84,15 @@ VALUE   ca_lazy_arena_release_held (VALUE arg);
 int     ca_gc_hold_push   (void *ptr, ca_size_t n_elements);
 void    ca_gc_hold_pop_to (int depth);
 
+/* A buffer of object cells whose lifetime is not nested in the others' --
+   a kernel iterator's scratch lives from init to finish, and two walks
+   opened together may close in either order.  Registered buffers are
+   marked until released, in any order; releasing one that was never
+   registered does nothing.  The cells must be valid VALUEs when it is
+   registered. */
+void    ca_gc_hold_buffer    (void *ptr, ca_size_t n_elements);
+void    ca_gc_release_buffer (void *ptr);
+
 /* Copy the attributes src shows onto dst (a new entity with src's values). */
 void    rb_ca_inherit_attr (VALUE dst, VALUE src);
 

@@ -337,6 +337,47 @@ ca_gc_hold_pop_to (int depth)
   }
 }
 
+/* Buffers held until released, in any order (ca_gc_hold_buffer).  The
+   table is grown with the C allocator so that a collection cannot run
+   while it is half moved. */
+static ca_gc_hold_t *ca_gc_buffers     = NULL;
+static int           ca_gc_buffer_n    = 0;
+static int           ca_gc_buffer_cap  = 0;
+
+void
+ca_gc_hold_buffer (void *ptr, ca_size_t n_elements)
+{
+  if ( ptr == NULL || n_elements <= 0 ) {
+    return;
+  }
+  if ( ca_gc_buffer_n == ca_gc_buffer_cap ) {
+    int cap = ca_gc_buffer_cap ? ca_gc_buffer_cap * 2 : 16;
+    ca_gc_hold_t *grown = (ca_gc_hold_t *) realloc(ca_gc_buffers,
+                                                   cap * sizeof(ca_gc_hold_t));
+    if ( grown == NULL ) {
+      rb_memerror();
+    }
+    ca_gc_buffers    = grown;
+    ca_gc_buffer_cap = cap;
+  }
+  ca_gc_buffers[ca_gc_buffer_n].ptr      = (VALUE *) ptr;
+  ca_gc_buffers[ca_gc_buffer_n].elements = n_elements;
+  ca_gc_buffer_n++;
+}
+
+void
+ca_gc_release_buffer (void *ptr)
+{
+  int i;
+  for ( i = ca_gc_buffer_n - 1; i >= 0; i-- ) {
+    if ( ca_gc_buffers[i].ptr == (VALUE *) ptr ) {
+      ca_gc_buffers[i] = ca_gc_buffers[ca_gc_buffer_n - 1];
+      ca_gc_buffer_n--;
+      return;
+    }
+  }
+}
+
 static VALUE ca_gc_guard = Qnil;
 
 /* The wrapped pointer must be non-NULL: Ruby's GC skips the mark
@@ -351,6 +392,11 @@ ca_gc_guard_mark (void *ptr)
   for ( i = 0; i < ca_gc_hold_depth; i++ ) {
     VALUE    *p = ca_gc_holds[i].ptr;
     ca_size_t n = ca_gc_holds[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+  for ( i = 0; i < ca_gc_buffer_n; i++ ) {
+    VALUE    *p = ca_gc_buffers[i].ptr;
+    ca_size_t n = ca_gc_buffers[i].elements;
     while ( n-- ) rb_gc_mark(*p++);
   }
   ca_lazy_arena_mark_object_slots();

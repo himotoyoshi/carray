@@ -31,6 +31,40 @@
 #include <assert.h>
 #include <string.h>
 
+/* Data scratch.  A scratch of object cells holds VALUEs no Ruby object
+   owns while the kernel calls Ruby for each cell, so it is filled with
+   Qnil and held for the GC until finish releases it. */
+static void *
+ki_data_alloc (int8_t data_type, ca_size_t bytes)
+{
+  void *p = xmalloc(bytes > 0 ? bytes : 1);
+  if ( data_type == CA_OBJECT ) {
+    VALUE    *v = (VALUE *) p;
+    ca_size_t n = bytes / (ca_size_t) sizeof(VALUE);
+    ca_size_t i;
+    for ( i = 0; i < n; i++ ) v[i] = Qnil;
+    ca_gc_hold_buffer(p, n);
+  }
+  return p;
+}
+
+/* A scratch filled by someone else (ca_axis_dispatch_attach) with cells
+   copied from an attached parent. */
+static void
+ki_data_hold (int8_t data_type, void *p, ca_size_t elements)
+{
+  if ( data_type == CA_OBJECT ) {
+    ca_gc_hold_buffer(p, elements);
+  }
+}
+
+static void
+ki_data_free (void *p)
+{
+  ca_gc_release_buffer(p);
+  xfree(p);
+}
+
 /* Defined in carray_core.c. (ca_is_readonly / ca_has_mask /
    ca_sync_data are already declared in carray.h.) */
 extern int  ca_attach_is_alias (void *ap);
@@ -664,7 +698,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
        and inherits xfer reform improvements (transform-fused, etc.)
        automatically. */
     st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0 ? st->scratch_cap : 1);
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
     if ( src->elements > 0 ) {
       ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
     }
@@ -734,6 +768,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
                                               src->bytes,
                                               st->total_elements,
                                               bound_fill);
+    ki_data_hold(parent->data_type, st->scratch_ptr, st->total_elements);
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
 
@@ -765,7 +800,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
        view materialise. */
     ca_size_t cap = src->elements * src->bytes;
     st->scratch_cap = cap;
-    st->scratch_ptr = xmalloc(cap > 0 ? cap : 1);
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, cap);
     if ( cap > 0 ) {
       ca_copy_data(src, st->scratch_ptr);
     }
@@ -1084,7 +1119,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
            full-view materialise). */
         ca_size_t slab_bytes = st->slab_elements * src->bytes;
         st->scratch_cap = slab_bytes > 0 ? slab_bytes : 1;
-        st->scratch_ptr = (char *) xmalloc(st->scratch_cap);
+        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
         st->alias_ptr   = st->scratch_ptr;  /* refilled per slab in next_slab_axes */
 
         /* Specialisation (B-1b, C.1b): if innermost slab axis is STRIDE
@@ -1169,6 +1204,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                                                   local_descs, src->ndim,
                                                   src->bytes, src->elements,
                                                   bound_fill);
+        ki_data_hold(parent->data_type, st->scratch_ptr, src->elements);
         st->alias_mode = CA_ITER_ALIAS_NONE;
         st->alias_ptr  = st->scratch_ptr;
 
@@ -1504,7 +1540,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
 
         /* Slab-sized scratch (= K * bytes for slab_axes == [0]). */
         st->scratch_cap = (ca_size_t) st->slab_elements * src->bytes;
-        st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0 ? st->scratch_cap : 1);
+        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
 
         /* Tile cache (pilot/castack-axis0-loop-interchange): refill TILE
            fibers per K parent reads, serve next TILE-1 fibers from L1d.
@@ -1519,7 +1555,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           st->stack_tile_cap   = tile;
           st->stack_tile_pos   = 0;
           st->stack_tile_have  = 0;     /* force refill on first call */
-          st->stack_tile_cache = (char *) xmalloc(K * tile * bytes);
+          st->stack_tile_cache = (char *) ki_data_alloc(src->data_type, K * tile * bytes);
         }
 
         st->alias_mode  = CA_ITER_ALIAS_STACK;
@@ -1699,7 +1735,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         /* 2026-05-31 refactor: iter-owns scratch via ca_xfer_all (was
            ca_attach(src) + alias src->ptr). */
         st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-        st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0 ? st->scratch_cap : 1);
+        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
         if ( src->elements > 0 ) {
           ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
         }
@@ -1791,7 +1827,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->naxes    = naxes;
 
     st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0 ? st->scratch_cap : 1);
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
     if ( src->elements > 0 ) {
       ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
     }
@@ -1959,6 +1995,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                                               src->bytes,
                                               st->total_elements,
                                               bound_fill);
+    ki_data_hold(parent->data_type, st->scratch_ptr, st->total_elements);
 
     /* Lay out as a single 1-D L2 strided slab: ptr = scratch,
        n = total_elements, stride = bytes.  next_slab_strided reads
@@ -2121,8 +2158,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     } else if ( use_view_scratch ) {
       st->root        = NULL;
       st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-      st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0
-                                         ? st->scratch_cap : 1);
+      st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
       if ( src->elements > 0 ) {
         ca_copy_data(src, st->scratch_ptr);
       }
@@ -2175,8 +2211,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   } else if ( use_view_scratch ) {
     st->root        = NULL;
     st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) xmalloc(st->scratch_cap > 0
-                                       ? st->scratch_cap : 1);
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
     if ( src->elements > 0 ) {
       ca_copy_data(src, st->scratch_ptr);
     }
@@ -2634,8 +2669,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     ca_size_t  counts[CA_RANK_MAX];
 
     if ( st->fiber_data_scratch_cap < need ) {
-      if ( st->fiber_data_scratch ) xfree(st->fiber_data_scratch);
-      st->fiber_data_scratch     = (char *) xmalloc(need > 0 ? need : 1);
+      if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
+      st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
       st->fiber_data_scratch_cap = need;
     }
 
@@ -2736,8 +2771,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
          walk → single alloc in practice). */
       ca_size_t need = n * bytes;
       if ( st->fiber_data_scratch_cap < need ) {
-        if ( st->fiber_data_scratch ) xfree(st->fiber_data_scratch);
-        st->fiber_data_scratch     = (char *) xmalloc(need);
+        if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
+        st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
         st->fiber_data_scratch_cap = need;
       }
       ca_stride_gather_run(st->fiber_data_scratch, src_data,
@@ -2989,7 +3024,7 @@ ca_iter_state_finish (ca_iter_state *st)
          ca_detach.
        - else (alias paths): src was attached at init, detach. */
   if ( st->scratch_ptr ) {
-    xfree(st->scratch_ptr);
+    ki_data_free(st->scratch_ptr);
     st->scratch_ptr = NULL;
     st->scratch_cap = 0;
   }
@@ -2999,7 +3034,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* PROPOSAL_FIBER_DELIVERY F.1a/F.1b: per-fiber scratch lifecycle. */
   if ( st->fiber_data_scratch ) {
-    xfree(st->fiber_data_scratch);
+    ki_data_free(st->fiber_data_scratch);
     st->fiber_data_scratch     = NULL;
     st->fiber_data_scratch_cap = 0;
   }
@@ -3021,7 +3056,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* pilot/castack-axis0-loop-interchange: free tile cache. */
   if ( st->stack_tile_cache ) {
-    xfree(st->stack_tile_cache);
+    ki_data_free(st->stack_tile_cache);
     st->stack_tile_cache = NULL;
     st->stack_tile_cap   = 0;
     st->stack_tile_pos   = 0;
