@@ -457,6 +457,17 @@ rb_ca_moncmp_s_build (VALUE klass, VALUE p_cary, VALUE op_id_val)
   return rb_ca_moncmp_build(p_cary, op_id);
 }
 
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: object cells, which call Ruby.  CArray::Fusion
+   reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_moncmp_trapping (VALUE self)
+{
+  CAMonCmp *mc;
+  TypedData_Get_Struct(self, CAMonCmp, &camoncmp_data_type, mc);
+  return ( mc->parent->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_moncmp_op_id (VALUE self)
 {
@@ -560,6 +571,7 @@ Init_ca_obj_moncmp (void)
                              rb_ca_moncmp_s_build, 2);
 
   rb_define_method(rb_cCAMonCmp, "__op_id__", rb_ca_moncmp_op_id, 0);
+  rb_define_method(rb_cCAMonCmp, "__trapping__", rb_ca_moncmp_trapping, 0);
 
   rb_define_singleton_method(rb_cCAMonCmp, "__reset_scratch_counter__",
                              rb_ca_moncmp_s_reset_scratch_counter, 0);

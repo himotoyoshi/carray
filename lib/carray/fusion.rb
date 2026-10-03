@@ -62,12 +62,6 @@ class CArray
     BINCMP_BY_ID = CArray::LAZY_BINCMP_OP_IDS
                      .select { |name, _| name.to_s.match?(/\A[a-z]/) }.invert.freeze
 
-    # Integer division and its relatives raise on a zero divisor, so a cell
-    # the mask excludes must not be computed at all -- the divisor there is
-    # nobody's business (ca_binop_dispatch.c).
-    TRAPPING = %i[div mod quo_i fmod].freeze
-    INTEGERS = %i[int8 int16 int32 int64 uint8 uint16 uint32 uint64].freeze
-
     class Refused < StandardError; end
 
     # ---- who computes a plan --------------------------------------------
@@ -197,7 +191,7 @@ class CArray
         args = [visit(n.parent)]
         # A view over one array is masked exactly where that array is
         # (ca_obj_monop.c).
-        op(:monop, name, n.data_type, args, :pass)
+        op(:monop, name, n.data_type, args, :pass, n.__trapping__)
       end
 
       def binary (n)
@@ -209,13 +203,13 @@ class CArray
                elsif n.data_type == :boolean && name == :bit_and_i then :kleene_and
                else :union
                end
-        op(:binop, name, n.data_type, args, rule)
+        op(:binop, name, n.data_type, args, rule, n.__trapping__)
       end
 
       def ternary (n)
         name = spell(TRIOP_BY_ID, n.__op_id__, TRIOP_NAMES)
         args = [visit(n.parent), visit(n.__triop_op2__), visit(n.__triop_op3__)]
-        op(:triop, name, n.data_type, args, :union)
+        op(:triop, name, n.data_type, args, :union, n.__trapping__)
       end
 
       # A comparison is masked where its operands are (ca_obj_moncmp.c,
@@ -224,7 +218,7 @@ class CArray
         name = spell(MONCMP_BY_ID, n.__op_id__, {})
         operand = n.parent
         args = [visit(operand)]
-        comparison(:moncmp, name, operand.data_type, args, :pass)
+        comparison(:moncmp, name, operand.data_type, args, :pass, n.__trapping__)
       end
 
       def binary_comparison (n)
@@ -236,10 +230,13 @@ class CArray
           raise Refused, "#{name} between #{n.parent.data_type} and #{right.data_type}"
         end
         args = [visit(n.parent), visit(right)]
-        comparison(:bincmp, name, n.parent.data_type, args, :union)
+        comparison(:bincmp, name, n.parent.data_type, args, :union, n.__trapping__)
       end
 
-      def comparison (kind, name, compared, args, mask)
+      # `trapping`: the node skips the cells its operands mask rather than
+      # computing them -- one that can raise on a cell or calls Ruby for it.
+      # Each lazy view answers it from the rule its own kernel follows.
+      def comparison (kind, name, compared, args, mask, trapping)
         body = CArray.__kernel_body__(kind, name, compared) or
           raise Refused, "#{kind} #{name} has no body at #{compared}"
         # A body written against its compared type or a tolerance (`feq`)
@@ -248,15 +245,14 @@ class CArray
           raise Refused, "#{kind} #{name} needs more than its operands"
         end
         note(kind.to_s[0..3], name, compared)
-        push Op.new(kind, name, :boolean, args, body, mask, false)
+        push Op.new(kind, name, :boolean, args, body, mask, trapping)
       end
 
-      def op (kind, name, type, args, mask)
+      def op (kind, name, type, args, mask, trapping)
         body = CArray.__kernel_body__(kind, name, type) or
           raise Refused, "#{kind} #{name} has no body at #{type}"
         note(kind.to_s[0], name, type)
-        push Op.new(kind, name, type, args, body, mask,
-                    TRAPPING.include?(name) && INTEGERS.include?(type))
+        push Op.new(kind, name, type, args, body, mask, trapping)
       end
 
       def leaf (n)
