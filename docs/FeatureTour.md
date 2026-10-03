@@ -58,6 +58,29 @@ mv.format                  #  => "d"
 mv[1, 2]                   #  => 5.0
 ```
 
+## Array classes written in Ruby
+
+Subclass `CAObject`, say what shape and data type you present, and answer elements when asked. What you get back is a full array: reductions, views, masks and arithmetic all work on it, and it can be built on by other views.
+
+```ruby
+class Countdown < CAObject
+  def initialize(n)
+    super(CA_INT32, [n])
+  end
+
+  private
+
+  def fetch_index(idx)
+    100 - idx[0]
+  end
+end
+
+c = Countdown.new(5)       #  => [ 100, 99, 98, 97, 96 ]
+c[1..3]                    #  => [ 99, 98, 97 ]
+```
+
+Values can come from anywhere — a computation, a file, a remote store — and only the elements actually asked for are produced.
+
 ## Kernel-style iteration
 
 When a reduction you want is not among the built-ins, you can write it as a Ruby block and have CArray run it over each sub-array along the axes you choose. The block sees an ordinary CArray, so everything CArray offers is available inside it.
@@ -87,44 +110,6 @@ t.ticks                    #  => [ 20454, 20461, 20468 ]   the storage, untouche
 ```
 
 Because a Face is a view, its type survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a price stored as integer cents — are written the same way.
-
-## Array classes written in Ruby
-
-Subclass `CAObject`, say what shape and data type you present, and answer elements when asked. What you get back is a full array: reductions, views, masks and arithmetic all work on it, and it can be built on by other views.
-
-```ruby
-class Countdown < CAObject
-  def initialize(n)
-    super(CA_INT32, [n])
-  end
-
-  private
-
-  def fetch_index(idx)
-    100 - idx[0]
-  end
-end
-
-c = Countdown.new(5)       #  => [ 100, 99, 98, 97, 96 ]
-c[1..3]                    #  => [ 99, 98, 97 ]
-```
-
-Values can come from anywhere — a computation, a file, a remote store — and only the elements actually asked for are produced.
-
-## Record elements
-
-An element can hold several named values packed into one fixed-width record. The array stays a single block of memory; a field is reached as a view onto the bytes, so it can be computed on like any other array.
-
-```ruby
-GeoCoord = CArray.struct { float64 :lat; float64 :lng }
-
-g = CARecord.new(GeoCoord, 3)
-g["lat"][] = [35.7, 34.7, 43.1]
-g["lng"][] = [139.7, 135.5, 141.3]
-
-g[0]                       #  => #<GeoCoord "lat" => 35.7, "lng" => 139.7>
-g["lat"].mean              #  => 37.833333333333336
-```
 
 ## A DataFrame whose columns are arrays
 
