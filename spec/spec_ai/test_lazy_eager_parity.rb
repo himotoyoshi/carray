@@ -267,4 +267,20 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_raise(ArgumentError) { t.lazy < h.lazy }
   end
 
+  # ---- imag of a non-complex array ----
+
+  def test_imag_keeps_the_mask
+    [CA_FLOAT64([1, 2, 3]), CA_INT32([1, -2, 3])].each do |a|
+      a[1] = UNDEF
+      assert_equal([false, true, false], a.imag.is_masked.to_a)
+      assert_parity(a.imag, a.lazy.imag)
+    end
+  end
+
+  def test_imag_of_object_takes_each_imaginary
+    o = CA_OBJECT([Complex(1, 2), 3, Rational(1, 2)])
+    assert_equal([2, 0, 0], o.imag.to_a)
+    assert_parity(o.imag, o.lazy.imag)
+  end
+
 end

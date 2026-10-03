@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `imag` of a real array keeps its masked cells masked, and `imag`
+  of an object array returns each cell's `imaginary` (it returned zeros,
+  so `CA_OBJECT([Complex(1, 2)]).imag` was `[0]`).
+
 - Change: `.lazy` on a Face (`CATime`, `CATimedelta`, `CACategorical`,
   string arrays) returns the array itself, and its operations run eagerly,
   inside `CArray.fuse` too. Previously the lazy expression dropped the

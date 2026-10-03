@@ -93,12 +93,18 @@ class CArray
   # @overload imag
   #   Returns the imaginary part of `self`. For a complex array the
   #   result is a mutable {CAField} view of the imaginary slot;
-  #   writing to it updates `self` in place. For a real array the
-  #   result is a fresh independent CArray filled with 0.
+  #   writing to it updates `self` in place. For an object array each
+  #   cell's `imaginary`; for a real array a fresh independent CArray
+  #   filled with 0. Masked cells stay masked.
   #   @return [CArray]
   def imag
+    if object?
+      return imag_i
+    end
     if not complex?
-      return self.template { 0 }
+      zero = template { 0 }
+      zero[is_masked] = UNDEF if has_mask?
+      return zero
     end
     if not part_of_self?(@__imag__)
       @__imag__ = case data_type
