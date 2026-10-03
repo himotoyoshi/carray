@@ -8521,9 +8521,10 @@ MkKernel.monop :abs_i,
 # (= used by .real chain composition); abs is the user-facing op that
 # returns the real-valued magnitude entity.
 MkKernel.monop :abs,
-  source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output: { numeric: :preserve, complex: :real_of_source },
+  source: MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES + [:object],
+  output: { numeric: :preserve, complex: :real_of_source, object: :preserve },
   expr:   {
+    [:object]                   => '(#2) = rb_funcall((#1), rb_intern("abs"), 0);',
     MkKernel::SINT_SMALL_DTYPES => "(#2) = abs(#1);",
     MkKernel::SINT64_DTYPES     => "(#2) = llabs(#1);",
     MkKernel::UINT_DTYPES       => "(#2) = (#1);",
