@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions, `CA_FOR_EACH_FIBER_PAIR` and its `_MASKED` form
+  close the first source when the second is refused or raises partway.
+  The first was left open: its scratch leaked and a view passed as the
+  first source stayed attached. Rebuild the extension to take the fix.
+
 - Fix: for C extensions, a kernel that writes through `CA_FOR_EACH_SLAB`
   or `CA_FOR_EACH_FIBER` into a `CAGrid`, `CASelectAxis`, `CAWindow` or
   `CAShift` reaches the array when the view's parent is itself a view (a

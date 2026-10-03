@@ -1011,7 +1011,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 
    Shape agreement is guarded the way the INOUT forms guard it (ndim,
    elements, fiber length), and the body is skipped on mismatch.  The two
-   sources may be the same array. */
+   sources may be the same array.  The second state is opened paired with
+   the first, so a refusal or a raise on either side closes both. */
 
 #define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
                                flags, p_a, p_b, n)                            \
@@ -1021,7 +1022,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+              ca_iter_state_init_l2_paired(&(st_b), &(st_a), (ca_b),          \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st_a).slab_dims[0],                                        \
@@ -1046,7 +1048,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+              ca_iter_state_init_l2_paired(&(st_b), &(st_a), (ca_b),          \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st_a).slab_dims[0],                                        \
