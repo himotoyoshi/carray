@@ -125,4 +125,17 @@ class TestLazyPowIpower < Test::Unit::TestCase
     # Sanity: eager dispatch still works (not lazy).
     assert_equal [4.0, 9.0, 16.0, 25.0], (@f64 ** 2).to_a
   end
+
+  # An integer to a negative power is decided by the base alone, so a power
+  # whose magnitude overflows does not wrap into a zero divisor, and the
+  # magnitude of INT64_MIN is not negated into itself.
+  def test_integer_negative_power_does_not_overflow
+    base = CA_INT64([2, 1, -1, 3, -1])
+    p    = CA_INT64([-64, -5, -3, -2**63, -2**63])
+    want = [0, 1, -1, 0, 1]
+    assert_equal want, (base ** p).to_a
+    assert_equal want, (base.lazy ** p).to_a
+    assert_equal [1, 0, 0], (CA_UINT8([1, 2, 255]) ** CA_INT64([-1, -1, -1])).to_a
+    assert_raise(ZeroDivisionError) { CA_INT32([0]) ** -1 }
+  end
 end
