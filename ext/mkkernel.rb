@@ -8639,7 +8639,9 @@ MkKernel.monop :imag_i,
 MkKernel.monop :arg_i,
   source: MkKernel::FLOAT_DTYPES + MkKernel::CMPLX_DTYPES,
   expr:   {
-    [:f32]      => "(#2) = cargf((cmplx64_t)(#1));",
+    # A real cell's argument is 0, pi or NaN.  Taken in double and rounded,
+    # as the eager arg does; cargf returns pi one ulp low.
+    [:f32]      => "(#2) = carg((cmplx128_t)(#1));",
     [:f64]      => "(#2) = carg((cmplx128_t)(#1));",
     [:cmplx64]  => "(#2) = cargf(#1);",
     [:cmplx128] => "(#2) = carg(#1);",
