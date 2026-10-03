@@ -241,12 +241,12 @@ class CArray
   #
   #   A numeric array keeps its `data_type`; a complex array returns the
   #   real magnitude at that complex type's own width, so a `:cmplx64`
-  #   yields `:float32` just as {#real} and {#imag} do. For the form
-  #   that keeps a complex array complex (magnitude with a zero
-  #   imaginary part) use {#abs_i}, which also accepts `:object`.
-  #   @return [CArray] `self`'s `data_type` for numeric input; the real
-  #     component type for complex input.
-  #   @raise [CArray::DataTypeError] for a boolean or `:object` array.
+  #   yields `:float32` just as {#real} and {#imag} do. An `:object`
+  #   array calls each cell's `abs`. For the form that keeps a complex
+  #   array complex (magnitude with a zero imaginary part) use {#abs_i}.
+  #   @return [CArray] `self`'s `data_type` for numeric and `:object`
+  #     input; the real component type for complex input.
+  #   @raise [CArray::DataTypeError] for a boolean array.
   #   @example
   #     CA_CMPLX64([Complex(3, 4)]).abs      # => [ 5.0 ]  (:float32)
   def abs; end

@@ -283,4 +283,10 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_parity(o.imag, o.lazy.imag)
   end
 
+  def test_abs_of_object_calls_each_abs
+    o = CA_OBJECT([1, -2.5, Rational(-1, 2)])
+    assert_equal([1, 2.5, Rational(1, 2)], o.abs.to_a)
+    assert_parity(o.abs, o.lazy.abs)
+  end
+
 end
