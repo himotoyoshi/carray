@@ -119,6 +119,34 @@ iw_read_poke_mask (VALUE klass, VALUE vsrc, VALUE vaxis)
   return mask_seen ? Qtrue : Qfalse;
 }
 
+/* The mask an L2 CA_SLAB_WHOLE walk hands out through
+   ca_iter_state_next_slab_strided, flattened in walk order; nil when no
+   mask cursor is given. */
+static VALUE
+iw_strided_mask (VALUE klass, VALUE vsrc)
+{
+  CArray       *src;
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s;
+  VALUE         out = rb_ary_new();
+  int           seen = 0;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  ca_iter_check_init(ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE,
+                                           NULL, 0, 0));
+  while ( ca_iter_state_next_slab_strided(&st, &p, &m, &n, &s) ) {
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      rb_ary_push(out, m ? INT2FIX(m[i]) : Qnil);
+      if ( m ) seen = 1;
+    }
+  }
+  ca_iter_state_finish(&st);
+  return seen ? out : Qnil;
+}
+
 /* The return code init_l2 gives for (dst, axis, flags), without iterating.
    The block macros discard this value; this entry point is how the test
    sees what they discarded. */
@@ -176,5 +204,6 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_mask", iw_slab_fill_mask, 3);
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
+  rb_define_singleton_method(rb_cCArray, "iw_strided_mask", iw_strided_mask, 1);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
 }
