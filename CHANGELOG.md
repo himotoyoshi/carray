@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: arithmetic on a fixlen array raises `CArray::DataTypeError` when
+  the expression is lazy too, as it does eagerly. Previously the lazy
+  expression raised `RuntimeError` ("invalid bytes").
+
 - Fix: `float32.lazy.arg` gives the eager answer; it returned pi one ulp
   low.
 
