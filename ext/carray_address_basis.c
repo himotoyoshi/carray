@@ -1,4 +1,5 @@
 #include "carray.h"
+#include "carray_internal.h"
 
 /* ---------------------------------------------------------------------------
 
@@ -96,6 +97,15 @@ native_steps (CArray *ca, ca_size_t *steps)
   }
 }
 
+/* Whether [start, start + count) leaves [0, dim).  Written so that no sum
+   is formed: a start and a count near the top of the integer range add up
+   to a negative number, which `start + count > dim` lets through. */
+static int
+outside_axis (ca_size_t start, ca_size_t count, ca_size_t dim)
+{
+  return start < 0 || count < 0 || start > dim || count > dim - start;
+}
+
 /* Checks one array's box description, all of it: that it is one start and one
    count per axis, that they are numbers, and that the box they describe is
    inside the array.
@@ -126,9 +136,11 @@ verify_box (VALUE box_starts, VALUE box_counts, int index, CArray *ca)
              "this array has %d", (int) ca->ndim);
   }
   for ( k = 0; k < ca->ndim; k++ ) {
-    ca_size_t start = NUM2LL(rb_ary_entry(starts, k));
-    ca_size_t count = NUM2LL(rb_ary_entry(counts, k));
-    if ( start < 0 || count < 0 || start + count > ca->dim[k] ) {
+    ca_size_t start = ca_integer_arg(rb_ary_entry(starts, k), "a region start",
+                                     "CArray::AddressBasis.open");
+    ca_size_t count = ca_integer_arg(rb_ary_entry(counts, k), "a region count",
+                                     "CArray::AddressBasis.open");
+    if ( outside_axis(start, count, ca->dim[k]) ) {
       rb_raise(rb_eArgError,
                "the requested region falls outside the array on axis %d", (int) k);
     }
@@ -158,7 +170,7 @@ read_box (open_state *state, int index, CArray *ca,
       starts[k] = NUM2LL(rb_ary_entry(per_array_start, k));
       counts[k] = NUM2LL(rb_ary_entry(per_array_count, k));
     }
-    if ( starts[k] < 0 || counts[k] < 0 || starts[k] + counts[k] > ca->dim[k] ) {
+    if ( outside_axis(starts[k], counts[k], ca->dim[k]) ) {
       rb_raise(rb_eArgError,
                "the requested region falls outside the array on axis %d", (int) k);
     }
@@ -219,6 +231,28 @@ folds_to_an_entity (CArray *ca)
   return ca_is_entity(root);
 }
 
+/* A view that reinterprets the element size -- refer(CA_INT32, ...) over
+   a float64 array -- gets a mask of its own shape, but one mask cell of it
+   covers a fraction of a parent cell, so writing cell i's mask also marks
+   its neighbour.  A per-cell kernel writes cells independently and cannot
+   express that.  Checked for every tier: a box transfer moves the same
+   mask, and the neighbour is marked when it is written back. */
+static void
+verify_mask_cells (VALUE object, CArray *ca)
+{
+  CArray   *root;
+  ca_size_t strides[CA_RANK_MAX];
+  ca_size_t base = 0;
+  if ( ! ca->mask || ! ca_is_stride_family(ca) ) return;
+  ca_stride_compose_to_root((CAStride *) ca, &root, strides, &base);
+  if ( ca->bytes != root->bytes ) {
+    rb_raise(rb_eArgError,
+             "%"PRIsVALUE" reinterprets the element size and carries a mask; "
+             "its mask cells do not map one to one onto the parent's",
+             rb_obj_class(object));
+  }
+}
+
 static int
 tier_for (CArray *ca)
 {
@@ -252,17 +286,6 @@ acquire_basis (open_state *state, int index, ca_size_t *strides)
   case TIER_STRIDE: {
     CArray *root;
     ca_stride_compose_to_root((CAStride *) ca, &root, strides, &base);
-    /* A view that reinterprets the element size -- refer(CA_INT32, ...) over
-       a float64 array -- gets a mask of its own shape, but one mask cell of
-       it covers a fraction of a parent cell, so writing cell i's mask also
-       marks its neighbour.  A per-cell kernel writes cells independently and
-       cannot express that. */
-    if ( ca->mask && ca->bytes != root->bytes ) {
-      rb_raise(rb_eArgError,
-               "%"PRIsVALUE" reinterprets the element size and carries a mask; "
-               "its mask cells do not map one to one onto the parent's",
-               rb_obj_class(rb_ary_entry(state->arrays, index)));
-    }
     ca_attach(root);   /* window: released by open_ensure */
     state->roots[index] = root;
     state->attached_root[index] = 1;
@@ -293,13 +316,20 @@ acquire_basis (open_state *state, int index, ca_size_t *strides)
        frees what state->region holds.  The counts stay zero until the
        read is done, so a buffer that was never filled is not written
        back. */
-    buffer = ALLOC_N(char, (elements > 0 ? elements : 1) * ca->bytes);
+    /* A writable box keeps a second copy of what it read, so that the
+       write-back can send only the cells the kernel changed (see
+       put_changed). */
+    buffer = ALLOC_N(char, (state->writable[index] ? 2 : 1)
+                           * (elements > 0 ? elements : 1) * ca->bytes);
     for ( k = 0; k < ca->ndim; k++ ) {
       state->region_count[index * CA_RANK_MAX + k] = 0;
     }
     state->region[index] = buffer;
     if ( elements > 0 ) {
       ca_xfer_stride(ca, starts, counts, steps, buffer, CA_XFER_GET);
+      if ( state->writable[index] ) {
+        memcpy(buffer + elements * ca->bytes, buffer, elements * ca->bytes);
+      }
     }
 
     for ( k = 0; k < ca->ndim; k++ ) {
@@ -372,13 +402,53 @@ typedef struct {
   ca_size_t *count;
   ca_size_t *steps;
   char      *data;
+  char      *read;      /* the box as it was read */
 } write_back_args;
 
+/* Sends back the cells whose bytes differ from what was read, one run
+   along the last axis at a time.  Sending the whole box would also send the
+   cells the kernel never wrote, and those do not come back unchanged
+   through a view that converts -- a float64 array seen through an int32
+   view reads 1.75 as 1 and would be left holding 1.0.  It would also
+   overwrite what the kernel wrote to the same cells through another basis
+   that addresses them in place. */
 static VALUE
 write_back (VALUE argument)
 {
   write_back_args *w = (write_back_args *) argument;
-  ca_xfer_stride(w->ca, w->start, w->count, w->steps, w->data, CA_XFER_PUT);
+  CArray   *ca    = w->ca;
+  int8_t    nd    = ca->ndim;
+  size_t    bytes = ca->bytes;
+  ca_size_t inner = w->count[nd - 1];
+  ca_size_t outer = 1;
+  ca_size_t idx[CA_RANK_MAX], start[CA_RANK_MAX], count[CA_RANK_MAX];
+  ca_size_t o, j, e;
+  int8_t    k;
+
+  for ( k = 0; k < nd - 1; k++ ) {
+    outer *= w->count[k];
+    idx[k] = 0;
+    count[k] = 1;
+  }
+  for ( o = 0; o < outer; o++ ) {
+    char *row  = w->data + o * inner * bytes;
+    char *read = w->read + o * inner * bytes;
+    for ( k = 0; k < nd - 1; k++ ) start[k] = w->start[k] + idx[k];
+    j = 0;
+    while ( j < inner ) {
+      if ( ! memcmp(row + j * bytes, read + j * bytes, bytes) ) { j++; continue; }
+      e = j + 1;
+      while ( e < inner && memcmp(row + e * bytes, read + e * bytes, bytes) ) e++;
+      start[nd - 1] = w->start[nd - 1] + j;
+      count[nd - 1] = e - j;
+      ca_xfer_stride(ca, start, count, w->steps, row + j * bytes, CA_XFER_PUT);
+      j = e;
+    }
+    for ( k = nd - 2; k >= 0; k-- ) {
+      if ( ++idx[k] < w->count[k] ) break;
+      idx[k] = 0;
+    }
+  }
   return Qnil;
 }
 
@@ -412,6 +482,7 @@ open_ensure (VALUE argument)
         w.count = &state->region_count[i * CA_RANK_MAX];
         w.steps = steps;
         w.data  = state->region[i];
+        w.read  = state->region[i] + elements * ca->bytes;
         rb_protect(write_back, (VALUE) &w, &tag);
         if ( tag ) {
           if ( NIL_P(state->put_error) ) {
@@ -547,13 +618,19 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     VALUE   object = rb_ary_entry(arrays, i);
     CArray *ca;
     GetCArray(object, ca);
+    /* A view takes its mask from its parent when first asked for it; one
+       added to the parent after the view was made is not on ca->mask yet. */
+    ca_update_mask(ca);
     verify_usable(object, ca, RTEST(rb_ary_entry(writable_flags, i)));
+    verify_mask_cells(object, ca);
     verify_box(box_start, box_count, i, ca);
   }
 
   state.count         = (int) RARRAY_LEN(arrays);
   state.slots         = state.count * 2;
-  state.arrays        = arrays;
+  /* Our own copy: the caller's Array can be emptied inside the block, and
+     the arrays it held are attached until open_ensure has run. */
+  state.arrays        = rb_ary_dup(arrays);
   state.bases         = rb_ary_new_capa(state.count);
   /* One allocation, carved up, rather than eight.  Every array here is the
      same length in slots and lives exactly as long as the open, so there is
@@ -587,7 +664,7 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
   state.put_error     = Qnil;
 
   for ( i = 0; i < state.count; i++ ) {
-    VALUE   object = rb_ary_entry(arrays, i);
+    VALUE   object = rb_ary_entry(state.arrays, i);
     CArray *ca;
     GetCArray(object, ca);
     state.carrays[i]  = ca;
@@ -602,10 +679,12 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     }
   }
 
-  if ( RTEST(packed) ) {
-    return rb_ensure(packed_body, (VALUE) &state, open_ensure, (VALUE) &state);
-  } else {
-    return rb_ensure(open_body, (VALUE) &state, open_ensure, (VALUE) &state);
+  {
+    VALUE result = RTEST(packed)
+      ? rb_ensure(packed_body, (VALUE) &state, open_ensure, (VALUE) &state)
+      : rb_ensure(open_body, (VALUE) &state, open_ensure, (VALUE) &state);
+    RB_GC_GUARD(state.arrays);
+    return result;
   }
 }
 

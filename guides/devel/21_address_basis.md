@@ -56,12 +56,14 @@ CArray::AddressBasis.classify(array)   #=> Hash
 form. `classify` reports how an array *would* be opened without opening it,
 which is what a caller uses to decide whether a fast path applies.
 
-Both refuse the same two things up front:
+`classify` refuses nothing. `open` refuses, before it opens any array:
 
 - an array whose `data_type` is `CA_OBJECT`, because its cells are `VALUE`s
   and a generated kernel computes on numbers (`ArgumentError`);
 - an array that is read-only, when the matching `writable` flag is true
-  (`RuntimeError`).
+  (`RuntimeError`);
+- a masked view that reinterprets the element size (see *Masks* below,
+  `ArgumentError`).
 
 ## The three tiers
 
@@ -124,7 +126,8 @@ Two things about how the region lands:
 The region is only *used* by tier 3 — tiers 1 and 2 address the whole array,
 which already covers any box inside it. It is **checked** for every array all
 the same, before any of them is opened: one start and one count per axis, both
-numbers, and the box inside the array. A region that is wrong is refused the
+Integers (a Float is a `TypeError`, not truncated), and the box inside the
+array. A region that is wrong is refused the
 same way whatever the arrays turn out to be, rather than being noticed only
 once the same call is handed a gather view.
 
@@ -139,7 +142,12 @@ One refusal is specific to masks. A view that reinterprets the element size
 shape, but one cell of that mask covers a fraction of a parent cell, so
 writing cell *i*'s mask also marks its neighbour. A per-cell kernel writes
 cells independently and cannot express that, so opening such a view with a
-mask raises `ArgumentError` rather than marking a neighbour quietly.
+mask raises `ArgumentError` rather than marking a neighbour quietly. This
+holds in every tier: a view that lands in tier 3 moves the same mask, and the
+neighbour would be marked on the way back.
+
+A mask added to a parent after a view of it was made is not on the view
+until the view is asked for it. `open` asks, so such a mask is opened.
 
 Note that a mask slot carries no region of its own: when the data is boxed,
 the mask is still transferred whole. That is consistent rather than wrong —
@@ -233,8 +241,15 @@ void kernel (char **pointers, int64_t *strides, int64_t *bounds,
 
 - A **tier-1 or tier-2** basis addresses the root's own memory, so a write is
   already where it belongs. Closing detaches the root, and nothing else.
-- A **tier-3** region is a buffer of its own. Closing sends it back with
-  `ca_xfer_stride` — if the array was opened writable — and frees it.
+- A **tier-3** region is a buffer of its own. If the array was opened
+  writable, closing sends back **the cells whose bytes the kernel changed**,
+  a run along the last axis at a time, and frees the buffer. Sending the
+  whole box would also send the cells the kernel left alone, and those do
+  not come back unchanged through a view that converts: a `float64` read
+  through an `int32` view as 1 would be written back as 1.0. It would also
+  overwrite a write the kernel made to the same cells through another
+  basis that addresses them in place. A kernel that writes the very value
+  it read leaves the cell as it was.
 
 Three consequences worth stating, because a consumer will meet all of them.
 
@@ -244,10 +259,10 @@ kernel managed to write before it gave up is in the array. That is the same
 promise `attach!` makes (ch. 4): the close is guaranteed, the *contents* are
 the caller's business.
 
-**A refusal part way through still closes what was already open.** Arrays are
-opened one at a time, and a later one can be refused — the reinterpret-plus-
-mask case above, for instance. The arrays already open at that point are
-closed on the way out.
+**A failure part way through still closes what was already open.** Arrays
+are opened one at a time, and opening a later one can raise — a tier-3 read
+whose own transfer fails, for instance. The arrays already open at that
+point are closed on the way out.
 
 **One region failing to go back does not stop the others.** A write-back can
 raise — the array's own transfer failing, as a lazily backed source's does
