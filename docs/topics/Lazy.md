@@ -95,6 +95,9 @@ y.to_ca               # computed here, in one pass, with no intermediates
 - nothing is computed until something asks: `to_ca`, or a store, or a
   reduction such as `sum` (see §4)
 - the marker, and the tree over it, is **read-only**: `m[0] = v` raises
+- a Face (`CATime`, `CACategorical`, a string array, ...) returns itself
+  from `.lazy`: a lazy tree computes on storage and would drop what the
+  Face means, so its operations stay eager -- inside `CArray.fuse` too
 
 ---
 

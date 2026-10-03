@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `.lazy` on a Face (`CATime`, `CATimedelta`, `CACategorical`,
+  string arrays) returns the array itself, and its operations run eagerly,
+  inside `CArray.fuse` too. Previously the lazy expression dropped the
+  Face and computed on storage: `t.lazy - t.lazy` raised, and comparing
+  times of different units returned `false` instead of raising.
+
 - Fix: arithmetic on a fixlen array raises `CArray::DataTypeError` when
   the expression is lazy too, as it does eagerly. Previously the lazy
   expression raised `RuntimeError` ("invalid bytes").
