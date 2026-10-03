@@ -196,6 +196,25 @@ class TestAddressBasis < Test::Unit::TestCase
     end
   end
 
+  # A start and a count near the top of the integer range add up to a
+  # negative number; the check must not form that sum.
+  def test_a_region_too_large_to_add_up_is_refused
+    {
+      entity: entity,
+      xfer:   xfer_view,
+    }.each do |tier, array|
+      assert_raise(ArgumentError, tier.to_s) do
+        AB.open([array], [false], [[2**62, 0]], [[2**62, 1]]) { }
+      end
+    end
+  end
+
+  def test_a_region_given_as_floats_is_refused
+    assert_raise(TypeError) do
+      AB.open([entity], [false], [[1.9, 0]], [[2, 2]]) { }
+    end
+  end
+
   # Every array's region is checked before any array is opened, so a region
   # that is wrong about the second one refuses the call without the first
   # having been touched.
@@ -263,6 +282,61 @@ class TestAddressBasis < Test::Unit::TestCase
     end
   end
 
+  # A view takes its mask from its parent when the mask is first asked for;
+  # one added to the parent after the view was made is still opened.
+  def test_a_mask_added_to_the_parent_after_the_view_is_opened
+    a = entity
+    view = a[1..2, nil]
+    a[1, 1] = UNDEF
+    AB.open([view], [false]) do |bases|
+      assert_not_nil bases.first[:mask_pointer]
+    end
+  end
+
+  # The same refusal when the view's fold stops short of an entity: the
+  # box transfer moves the same mask and marks the neighbour on the way back.
+  def test_a_reinterpreting_view_with_a_mask_is_refused_in_the_box_tier
+    f = CArray.float64(4).seq!
+    f[1] = UNDEF
+    view = f[f.value.ge(0)].refer(CA_INT32, [8])
+    assert_equal AB::TIER_XFER, AB.classify(view)[:tier]
+    assert_raise(ArgumentError) { AB.open([view], [true]) { } }
+  end
+
+  # --- what is sent back ------------------------------------------------
+
+  # Through a view that converts, a cell does not come back unchanged: a
+  # float64 read through an int32 view as 1 is written back as 1.0.  Only
+  # the cells the kernel changed are sent back.
+  def test_a_box_sends_back_only_the_cells_that_changed
+    f = CArray.float64(4) { 1.75 }
+    AB.open([f.fake(CA_INT32)], [true]) do |(basis)|
+      write_int32(basis, [2], 9)
+    end
+    assert_equal [1.75, 1.75, 9.0, 1.75], f.to_a
+  end
+
+  # A write through an in-place basis is not overwritten by a box over the
+  # same cells that the kernel left alone.
+  def test_a_box_does_not_overwrite_a_write_made_in_place
+    a = CArray.int32(6).seq!
+    AB.open([a, a[a.ge(0)]], [true, true]) do |(in_place, _box)|
+      write_int32(in_place, [2], 77)
+    end
+    assert_equal [0, 1, 77, 3, 4, 5], a.to_a
+  end
+
+  # The arrays stay alive while they are open, whatever the caller does
+  # with the Array it passed.
+  def test_arrays_are_kept_alive_while_open
+    list = [stride_view, xfer_view]
+    AB.open(list, [true, true]) do |bases|
+      list.clear
+      3.times { GC.start; Array.new(20_000) { CArray.int32(10) } }
+      write_int32(bases[1], [3, 3], 5)
+    end
+  end
+
   # --- what is refused --------------------------------------------------
 
   def test_object_arrays_are_refused
@@ -305,16 +379,26 @@ class TestAddressBasis < Test::Unit::TestCase
     assert_equal AB::TIER_XFER, AB.classify(view)[:tier]   # still usable
   end
 
-  # Opening happens array by array, so a refusal part way through has to
+  # A source whose own read fails, the way a lazily backed one does when
+  # its I/O fails.
+  FAILING_READ = <<~RUBY
+    class FailingRead < CAObject
+      def initialize; super(CA_FLOAT64, [4]); end
+      private
+      def fetch_addr (addr) = raise(IOError, "the backing store failed")
+      def create_mask; end
+    end
+  RUBY
+  eval(FAILING_READ)
+
+  # Opening happens array by array, so a failure part way through has to
   # close the ones already open.  The first array here is a tier-3 view
-  # with a region buffer; the second is refused while being opened.
-  def test_a_refusal_part_way_through_closes_what_was_opened
+  # with a region buffer; reading the second raises while it is opened.
+  def test_a_failure_part_way_through_closes_what_was_opened
     a = entity
     view = xfer_view(a)
-    f = CArray.float64(4).seq!
-    f[1] = UNDEF
-    assert_raise(ArgumentError) do
-      AB.open([view, f.refer(CA_INT32, [8])], [true, false]) { }
+    assert_raise(IOError) do
+      AB.open([view, FailingRead.new], [true, false]) { }
     end
     # the first array is intact and can be opened again
     AB.open([view], [false]) do |bases|
@@ -355,14 +439,11 @@ class TestAddressBasis < Test::Unit::TestCase
     assert_frees_the_region("AB.open([view], [false]) { raise 'boom' }")
   end
 
-  # The refusal part way through, measured: the region opened for the first
+  # The failure part way through, measured: the region opened for the first
   # array is freed even though the second array never opened.
-  def test_a_refusal_part_way_through_frees_the_region
-    assert_frees_the_region("AB.open([view, bad], [false, false]) { }", <<~SETUP)
-      f = CArray.float64(4).seq!
-      f[1] = UNDEF
-      bad = f.refer(CA_INT32, [8])
-    SETUP
+  def test_a_failure_part_way_through_frees_the_region
+    assert_frees_the_region("AB.open([view, bad], [false, false]) { } rescue nil",
+                            FAILING_READ + "bad = FailingRead.new\n")
   end
 
   # --- the packed form --------------------------------------------------
