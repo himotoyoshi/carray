@@ -289,4 +289,20 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_parity(o.abs, o.lazy.abs)
   end
 
+  # ---- a three-operand expression through the kernel iterator ----
+
+  def test_triop_reduces_along_an_axis
+    a = CArray.float64(3, 4).seq!
+    [[a.lazy.clip(2.0, 8.0), a.clip(2.0, 8.0)],
+     [CArray.fuse { a.fma(a, a) }, a.fma(a, a)]].each do |l, e|
+      [0, 1].each do |axis|
+        assert_parity(e.sum(axis: axis), l.sum(axis: axis))
+        assert_parity(e.cumsum(axis: axis), l.cumsum(axis: axis))
+        assert_parity(e.sort_index(axis: axis), l.sort_index(axis: axis))
+        assert_parity(e.median(axis: axis), l.median(axis: axis))
+      end
+      assert_equal(e.unique.to_a, l.unique.to_a)
+    end
+  end
+
 end
