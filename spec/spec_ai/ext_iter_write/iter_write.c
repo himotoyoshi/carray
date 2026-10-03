@@ -147,6 +147,49 @@ iw_strided_mask (VALUE klass, VALUE vsrc)
   return seen ? out : Qnil;
 }
 
+/* Copy src into dst fiber by fiber along `axis` with the INOUT form. */
+static VALUE
+iw_inout_copy (VALUE klass, VALUE vsrc, VALUE vdst, VALUE vaxis)
+{
+  CArray       *src, *dst;
+  int           axis = NUM2INT(vaxis);
+  ca_iter_state st_in, st_out;
+  char         *p_in, *p_out;
+  ca_size_t     n;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  CA_FOR_EACH_FIBER_INOUT(st_in, st_out, src, dst, axis, CA_KERNEL_NO_MASK,
+                          p_in, p_out, n) {
+    memcpy(p_out, p_in, n * sizeof(double));
+  }
+  return Qnil;
+}
+
+/* Fill the first fiber along `axis` and leave the walk with `break`. */
+static VALUE
+iw_fiber_fill_break (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
+{
+  CArray       *dst;
+  double        v    = NUM2DBL(vval);
+  int           axis = NUM2INT(vaxis);
+  ca_iter_state st;
+  char         *p;
+  ca_size_t     n;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  CA_FOR_EACH_FIBER(st, dst, axis, CA_KERNEL_WRITE | CA_KERNEL_NO_MASK, p, n) {
+    double *d = (double *) p;
+    for ( ca_size_t i = 0; i < n; i++ ) d[i] = v;
+    break;
+  }
+  return Qnil;
+}
+
 /* The return code init_l2 gives for (dst, axis, flags), without iterating.
    The block macros discard this value; this entry point is how the test
    sees what they discarded. */
@@ -205,5 +248,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
   rb_define_singleton_method(rb_cCArray, "iw_strided_mask", iw_strided_mask, 1);
+  rb_define_singleton_method(rb_cCArray, "iw_inout_copy", iw_inout_copy, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_fiber_fill_break", iw_fiber_fill_break, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
 }

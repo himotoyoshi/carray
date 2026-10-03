@@ -179,6 +179,31 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # The INOUT forms refuse a pair of different shapes before walking.
+  def test_inout_refuses_a_shape_mismatch
+    a = CArray.float64(2, 3, 4).seq!
+    [CArray.float64(2, 4, 3), CArray.float64(2, 3, 5), CArray.float64(24)].each do |out|
+      before = out.to_a
+      assert_raise(ArgumentError) { CArray.iw_inout_copy(a, out, 0) }
+      assert_equal before, out.to_a
+    end
+    out = CArray.float64(2, 3, 4)
+    CArray.iw_inout_copy(a, out, 1)
+    assert_equal a.to_a, out.to_a
+  end
+
+  # The fiber a body leaves with `break` is written back, whether the
+  # walk hands out the destination's own memory or a gathered copy.
+  def test_the_fiber_left_with_break_is_written_back
+    [[->(b) { b }, 1], [->(b) { b }, 0], [->(b) { b.transpose }, 1],
+     [->(b) { b.fake(:float64) }, 0]].each do |mk, axis|
+      b = base
+      CArray.iw_fiber_fill_break(mk.call(b), axis, -1.0)
+      assert_equal mk.call(base).shape[axis],
+                   b.to_a.flatten.count(-1.0), "axis #{axis}"
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

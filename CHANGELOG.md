@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for C extensions, `CA_FOR_EACH_FIBER_INOUT` and its `_MASKED`
+  form raise `ArgumentError` when the input and the output differ in
+  shape. They checked only the rank, the element count and the walked
+  axis, and a pair that passed walked mismatched fibers (`(2,3,4)` into
+  `(2,4,3)`); one that failed skipped the body without a word. Rebuild
+  the extension to take the check.
+- Fix: for C extensions, a write walk through the block macros
+  (`CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER` and their kin) left with
+  `break` writes back the slab the body was in. Whether it was kept
+  depended on the source. Rebuild the extension to take the fix.
+
 - Fix: a lazy `clip`, `fma` or `fms` (`a.lazy.clip(lo, hi)`, or the same
   inside `CArray.fuse`) can be reduced, scanned or sorted along an axis,
   and passed to `median`, `unique` and their kin. These raised

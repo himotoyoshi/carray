@@ -15,7 +15,8 @@
         CA_SLAB_REDUCE_* / _MAP_* / _SCAN_* suites, CA_L2_FOR_EACH,
         CA_*_UNMASKED helpers)
       - the raw-API entry points the macros expand to: ca_iter_state_
-        init_l2 / next_slab_axes / sync_slab / finish
+        init_l2 / init_l2_paired / next_slab_axes / sync_slab / finish /
+        close, ca_iter_check_init, ca_iter_check_same_shape
       - the enum/status tokens authors write literally: CA_SLAB_AXES,
         CA_KERNEL_WRITE, CA_KERNEL_NO_MASK, CA_ITER_OK, CA_ITER_ERR_*
       - the slab-delivery representation = the ca_iter_state fields a
@@ -640,12 +641,21 @@ int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
                                    int8_t            naxes,
                                    uint32_t          flags);
 
+/* Finish a walk as the block macros leave it: when the body left a write
+   walk with `break`, the slab it was in is written back before the walk is
+   finished.  ca_iter_state_finish itself abandons such a slab. */
+void ca_iter_state_close (ca_iter_state *st);
+
 /* Raise unless rc is CA_ITER_OK.  The block macros call this on the value
    ca_iter_state_init_l1 / _l2 returned, so an author who never looks at a
    return code still hears about a request the iterator would not serve.
    Returns rc when there is nothing to report, so it composes inside the
    macros' comma expressions. */
 int ca_iter_check_init (int rc);
+
+/* Raise ArgumentError unless the two arrays have the same shape.  The
+   INOUT fiber macros call this before opening either walk. */
+int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
 
 /* Run body(arg) so that the walks in states[0..n) are finished however the
    body leaves: by returning, by `break`, or by raising.
@@ -694,7 +704,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
      should drop down to the raw API and read the code themselves.
    - `break;` from inside the body exits the loop AND triggers finish
      correctly (= outer for's "increment" clause runs once on natural
-     exit; `break` from the inner while breaks both).  `return` inside
+     exit; `break` from the inner while breaks both).  In a write walk
+     finish writes back the slab the body was in.  `return` inside
      the body LEAKS resources (scratch_ptr, parent attach) — drop to
      raw API if early return is needed.  A body that raises leaks the
      same way: the engine releases what it holds when the walk itself
@@ -840,7 +851,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                                                   (axes), (naxes), (flags))), \
                           1);                                                 \
         __caf_init;                                                           \
-        __caf_init = 0, ca_iter_state_finish(&(st)) )                         \
+        __caf_init = 0, ca_iter_state_close(&(st)) )                          \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), &(m));                  \
             ca_iter_state_sync_slab(&(st)) )
 
@@ -869,8 +880,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             1);                                                               \
         __cafi_init;                                                          \
         __cafi_init = 0,                                                      \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
     for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m_in)) &&     \
             ca_iter_state_next_slab_axes(&(st_out), &(p_out), &(m_out));      \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -888,21 +899,25 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    The CA_KERNEL_FIBER_CONTIG flag is auto-set; engine gathers strided
    fibers into per-state scratch when slab_strides[0] != bytes (= F.1a/b).
 
-   `axis` is evaluated ONCE into a stack-local int8 buffer of static
-   storage scope; `ca`/`ca_in`/`ca_out` are evaluated ONCE in init.
-   `n` is set to the fiber length (= slab_dims[0], constant per walk).
+   `axis`, `ca`, `ca_in` and `ca_out` may be evaluated more than once:
+   pass variables, not expressions with side effects.  `n` is set to the
+   fiber length (= slab_dims[0], constant per walk).
+
+   The forms without MASKED in the name hand out no mask cursor: a masked
+   source is walked with its masked cells read as values.  Pass
+   CA_KERNEL_NO_MASK to have a masked source refused, or use a MASKED
+   form to see the mask.
 
    Same constraints as CA_FOR_EACH_SLAB family:
-     - `break;` from body exits cleanly (finish runs).
+     - `break;` from body exits cleanly (finish runs, and a write walk
+       writes back the fiber it was in).
      - `return;` from body LEAKS scratch / parent attach -- use raw API.
      - Macros are NOT statement-equivalent (nested for); no trailing else.
 
-   INOUT forms (form 2 / 4) require STRICT FULL SHAPE EQUALITY of
-   `ca_in` and `ca_out` (= ndim + every dim[k] match).  Mismatch is a
-   silent-corruption seam (= short-circuit fiber-count drop, k-th
-   pairing corruption); init_l2 does not validate it itself, so the
-   macros runtime-assert shape equality and skip body on mismatch.
-   Authors that need broadcasting must drop to raw API. */
+   INOUT forms (form 2 / 4) require `ca_in` and `ca_out` to have the same
+   shape (ndim and every dim[k]), and raise ArgumentError before opening
+   either walk when they do not.  Authors that need broadcasting must
+   drop to raw API. */
 
 #define CA_FOR_EACH_FIBER(st, ca, axis, flags, p, n)                          \
   for ( int __cff_init = (                                                    \
@@ -913,7 +928,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cff_init;                                                           \
-        __cff_init = 0, ca_iter_state_finish(&(st)) )                         \
+        __cff_init = 0, ca_iter_state_close(&(st)) )                          \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), NULL);                  \
             ca_iter_state_sync_slab(&(st)) )
 
@@ -926,25 +941,16 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cffm_init;                                                          \
-        __cffm_init = 0, ca_iter_state_finish(&(st)) )                        \
+        __cffm_init = 0, ca_iter_state_close(&(st)) )                         \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), &(m));                  \
             ca_iter_state_sync_slab(&(st)) )
 
-/* INOUT form 2 (NO_MASK).  Output gets CA_KERNEL_WRITE auto-set.
-
-   STRICT FULL SHAPE EQUALITY (rev4 §2.3): the inner for-condition
-   re-evaluates ca_in->ndim == ca_out->ndim and dim[axis] equality (=
-   minimal seam coverage given the macro can't loop over k).  Full
-   per-axis equality lives one level up in the init-time short-circuit
-   below: we compare elements + ndim + axis dim, which catches the
-   common silent-corruption seam (= e.g. (3,5) vs (4,5) axis=1 with
-   matching fiber length but different fiber count).  Comprehensive
-   per-dim check is the caller's responsibility for now (= simpler than
-   building a per-dim k loop into a macro; ext authors can drop to raw
-   API for arbitrary broadcasting designs). */
+/* INOUT form 2.  Output gets CA_KERNEL_WRITE auto-set.  The shapes are
+   checked first (ca_iter_check_same_shape). */
 #define CA_FOR_EACH_FIBER_INOUT(st_in, st_out, ca_in, ca_out, axis,           \
                                 flags, p_in, p_out, n)                        \
   for ( int __cffi_init = (                                                   \
+            ca_iter_check_same_shape((ca_in), (ca_out)),                      \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
@@ -959,12 +965,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             1);                                                               \
         __cffi_init;                                                          \
         __cffi_init = 0,                                                      \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
-    for ( ; (st_in).src->ndim == (st_out).src->ndim                           \
-         && (st_in).src->elements == (st_out).src->elements                   \
-         && (st_in).slab_dims[0] == (st_out).slab_dims[0]                     \
-         && ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  NULL)           \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
+    for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  NULL)           \
          && ca_iter_state_next_slab_axes(&(st_out), &(p_out), NULL);          \
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -972,6 +975,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca_in, ca_out, axis,    \
                                        flags, p_in, p_out, n, m)              \
   for ( int __cffim_init = (                                                  \
+            ca_iter_check_same_shape((ca_in), (ca_out)),                      \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
@@ -986,12 +990,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             1);                                                               \
         __cffim_init;                                                         \
         __cffim_init = 0,                                                     \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
-    for ( ; (st_in).src->ndim == (st_out).src->ndim                           \
-         && (st_in).src->elements == (st_out).src->elements                   \
-         && (st_in).slab_dims[0] == (st_out).slab_dims[0]                     \
-         && ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m))           \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
+    for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m))           \
          && ca_iter_state_next_slab_axes(&(st_out), &(p_out), NULL);          \
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -1030,8 +1031,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             1);                                                               \
         __cffp_init;                                                          \
         __cffp_init = 0,                                                      \
-          ca_iter_state_finish(&(st_a)),                                      \
-          ca_iter_state_finish(&(st_b)) )                                     \
+          ca_iter_state_close(&(st_a)),                                       \
+          ca_iter_state_close(&(st_b)) )                                      \
     for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
          && (st_a).src->elements == (st_b).src->elements                      \
          && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
@@ -1056,8 +1057,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             1);                                                               \
         __cffpm_init;                                                         \
         __cffpm_init = 0,                                                     \
-          ca_iter_state_finish(&(st_a)),                                      \
-          ca_iter_state_finish(&(st_b)) )                                     \
+          ca_iter_state_close(&(st_a)),                                       \
+          ca_iter_state_close(&(st_b)) )                                      \
     for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
          && (st_a).src->elements == (st_b).src->elements                      \
          && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
