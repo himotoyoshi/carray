@@ -151,4 +151,10 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal [], CA_INT32(0...0, 1).to_a
     assert_equal 4, CA_FLOAT64(0.0...1.0, 0.3).elements
   end
+
+  # The kernels are built so that signed overflow wraps, and the flag is
+  # recorded for anything (carray-jit) that compiles the same bodies.
+  def test_signed_overflow_wraps_in_the_recorded_build_flags
+    assert_include CArray::BUILD_FLAGS.split, "-fwrapv"
+  end
 end

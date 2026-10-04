@@ -107,6 +107,17 @@ if enable_config("dev-build", false)
   $stderr.puts "carray: CARRAY_DEV_BUILD enabled (smoke surface available)"
 end
 
+# --- signed overflow wraps (`-fwrapv`)
+#
+# An integer kernel that overflows answers modulo 2^N.  C leaves signed
+# overflow undefined, and a compiler that sees several operations at once
+# rewrites them as if it could not happen -- `(x + 1) > x` becomes true --
+# which carray-jit's fused expressions, built with these flags, would show.
+if try_compile("int main(void) { return 0; }", "-fwrapv")
+  $CFLAGS += " -fwrapv"
+  $carray_build_flags << "-fwrapv"
+end
+
 # --- probe for `-fopenmp-simd` (SL.1.0, PROPOSAL_REDUCTION_SIMD_LICENSE)
 #
 # `-fopenmp-simd` enables `#pragma omp simd` (and its `reduction(+:acc)`

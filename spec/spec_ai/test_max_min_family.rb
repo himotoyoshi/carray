@@ -178,4 +178,15 @@ class TestMaxMinFamily < Test::Unit::TestCase
     refute CArray.method_defined?(:fmax!)
     refute CArray.method_defined?(:fmin!)
   end
+
+  # Of two zeros, maximum is +0 and minimum is -0, whichever comes first.
+  def test_maximum_and_minimum_of_two_zeros_do_not_depend_on_order
+    z = CA_FLOAT64([-0.0])
+    o = CA_FLOAT64([0.0])
+    [[z, o], [o, z]].each do |a, b|
+      assert_equal 1, (1.0 / a.maximum(b)[0]).infinite?
+      assert_equal(-1, (1.0 / a.minimum(b)[0]).infinite?)
+      assert_equal(-1, (1.0 / a.lazy.minimum(b).to_a[0]).infinite?)
+    end
+  end
 end

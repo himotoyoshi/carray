@@ -9024,12 +9024,14 @@ MkKernel.binop :pmin,
 
 # NaN-propagate variants.  Float
 # branch tests both operands for NaN and short-circuits to NaN; non-
-# float branches reuse the comparison form.
+# float branches reuse the comparison form.  Of two zeros, maximum is +0
+# and minimum is -0 in either order: a bare comparison would answer with
+# whichever came second.
 MkKernel.binop :maximum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : (isnan(#2) ? (#2) : ((#1) > (#2) ? (#1) : (#2)));",
+    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);',
   }
 
@@ -9037,7 +9039,7 @@ MkKernel.binop :minimum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : (isnan(#2) ? (#2) : ((#1) < (#2) ? (#1) : (#2)));",
+    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
   }
 
