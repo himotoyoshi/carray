@@ -250,6 +250,31 @@ class CArray
 
   # @!endgroup
 
+  # An Integer shift count on an integer array means what it means to
+  # Integer#<< and #>>: negative shifts the other way, and a count past the
+  # width shifts every bit out.  The kernels do that for a count of the
+  # array's own type; this brings a count the type cannot hold -- -1 for a
+  # uint8 array, 300 for an int8 one -- to one it can.
+  module IntegerShiftCount
+    UNSIGNED = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].freeze
+
+    def << (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return self >> -other if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
+
+    def >> (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return self << -other if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
+  end
+  # Prepended by carray/lazy, after it has wrapped << and >>: prepended
+  # here, the method lazy aliases as the eager form would be this one.
+
   # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
   #   Returns `self` with every element clamped to `[min, max]`.
   #

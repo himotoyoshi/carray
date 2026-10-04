@@ -89,4 +89,54 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal (1 / c).to_a, c.rcp.to_a
     assert_equal [1, 0, 0], CA_UINT8([1, 2, 3]).rcp.to_a
   end
+
+  # -- an Integer operand the array's type cannot hold ------------------
+
+  def test_an_integer_operand_that_does_not_fit_is_refused
+    assert_raise(RangeError) { CA_UINT8([0, 1]).eq(256) }
+    assert_raise(RangeError) { CA_UINT8([0, 200]) > -1 }
+    assert_raise(RangeError) { CA_INT32([5]) * 2**32 }
+    assert_raise(RangeError) { CA_UINT8([0]).lazy + 256 }
+    assert_raise(RangeError) { CA_UINT8([0, 0, 1]).count(256) }
+    assert_raise(RangeError) { CA_INT32([0, 5, 10]).search(2**40) }
+    assert_equal [2**63 + 1], (CA_UINT64([1]) + 2**63).to_a
+    assert_equal [-2**63 + 1], (CA_INT64([1]) + -2**63).to_a
+    assert_equal [1], (2 - CA_UINT8([1])).to_a
+    assert_equal [3.5], (CA_UINT8([3]) + 0.5).to_a
+  end
+
+  # -- shift counts -----------------------------------------------------
+
+  # A count means what it means to Integer#<< and #>>: negative shifts the
+  # other way, and a count past the width shifts every bit out.
+  def test_shift_counts_mean_what_they_mean_to_integer
+    x = CA_INT64([3, -3])
+    assert_equal [0, 0], (x << 64).to_a
+    assert_equal [0, -1], (x >> 64).to_a
+    assert_equal [3 << -1, -3 << -1], (x << -1).to_a
+    assert_equal [3 >> -1, -3 >> -1], (x >> -1).to_a
+    assert_equal [4], (CA_UINT8([8]) << -1).to_a
+    assert_equal [0], (CA_UINT8([8]) >> 300).to_a
+    assert_equal [-2], (CA_INT8([-1]) << 1).to_a
+    assert_equal [1, 0], (CA_INT32([3, -3]) << CA_INT32([-1, 40])).to_a
+    assert_equal [0], (CA_INT64([3]).lazy << 64).to_a
+    assert_equal [4], CA_UINT8([8]).bit_lshift(-1).to_a
+  end
+
+  # -- float to integer -------------------------------------------------
+
+  # A NaN has no integer: to_type masks it.  A finite value outside the
+  # integer type is converted as the machine's C converts it, which is
+  # not pinned here because it differs between machines.
+  def test_to_type_masks_nan_on_the_way_to_an_integer
+    r = CA_FLOAT64([1.5, Float::NAN, -2.5]).to_type(:int32)
+    assert_equal [1, UNDEF, -2], r.to_a
+    f = CA_FLOAT64([1.5, Float::NAN])
+    f[0] = UNDEF
+    assert_equal [UNDEF, UNDEF], f.to_type(:int64).to_a
+    assert_equal [true, false], f.mask.to_a, "the source's mask is left alone"
+    assert_equal [1, UNDEF],
+                 CA_CMPLX128([Complex(1, 0), Complex(0, Float::NAN)]).to_type(:int16).to_a
+    assert_false CA_FLOAT64([1.5, 2.5]).to_type(:int32).has_mask?
+  end
 end

@@ -608,6 +608,33 @@ typedef struct {
   boolean8_t *scratch;
 } ca_to_type_ctx_t;
 
+/* Marks in `m` the cells of a float or complex array that hold NaN (in
+   either part).  A NaN has no integer, and C leaves its conversion
+   undefined. */
+static void
+ca_mark_nan (CArray *ca, boolean8_t *m)
+{
+  ca_size_t i, n = ca->elements;
+  switch ( ca->data_type ) {
+  case CA_FLOAT32: { float32_t *p = (float32_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    break; }
+  case CA_FLOAT64: { float64_t *p = (float64_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    break; }
+#ifdef HAVE_COMPLEX_H
+  case CA_CMPLX64: { cmplx64_t *p = (cmplx64_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(crealf(p[i])) || isnan(cimagf(p[i])) ) m[i] = 1;
+    break; }
+  case CA_CMPLX128: { cmplx128_t *p = (cmplx128_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(creal(p[i])) || isnan(cimag(p[i])) ) m[i] = 1;
+    break; }
+#endif
+  default:
+    break;
+  }
+}
+
 /* The cast proper, with `ca` attached.  It can raise (a value the target
    type cannot hold), so it runs under rb_ensure. */
 static VALUE
@@ -615,11 +642,15 @@ ca_to_type_cast (VALUE arg)
 {
   ca_to_type_ctx_t *c = (ca_to_type_ctx_t *) arg;
   CArray *ca = c->ca, *cb = c->cb;
+  int to_integer = ( cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64 );
+  int from_float = ( ca->data_type == CA_FLOAT32 || ca->data_type == CA_FLOAT64
+                     || ca->data_type == CA_CMPLX64 || ca->data_type == CA_CMPLX128 );
 
-  if ( ca->data_type == CA_OBJECT
-       && ( (cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64)
-            || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64
-            || cb->data_type == CA_CMPLX64 || cb->data_type == CA_CMPLX128 ) ) {
+  if ( ( ca->data_type == CA_OBJECT
+         && ( to_integer
+              || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64
+              || cb->data_type == CA_CMPLX64 || cb->data_type == CA_CMPLX128 ) )
+       || ( from_float && to_integer ) ) {
     /* object -> int/float/complex: give the cast a mask buffer so an unparseable
        cell becomes UNDEF (see ext/carray_cast_func.rb).  Cast into a
        scratch mask seeded from the source mask, then attach it to the
@@ -635,6 +666,13 @@ ca_to_type_cast (VALUE arg)
     }
     else {
       memset(scratch, 0, ne);
+    }
+    /* float -> integer: a NaN cell becomes UNDEF, as an unparseable object
+       cell does.  A finite value outside the integer type is converted the
+       way the machine's C converts it, which differs between machines. */
+    if ( from_float ) {
+      ca_mark_nan(ca, scratch);
+      memset(cb->ptr, 0, ne * cb->bytes);
     }
     ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
     for (i=0; i<ne; i++) {
@@ -1494,6 +1532,52 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
   return 1;
 }
 
+/* Refuses a Ruby Integer that does not fit integer data type `dt`.  Taken
+   modulo the type, 256 against a uint8 array would be 0 and compare equal
+   to it.  Anything but an Integer, and a non-integer `dt`, pass. */
+void
+ca_check_integer_fits (VALUE v, int8_t dt)
+{
+  VALUE lo, hi;
+  if ( ! RB_INTEGER_TYPE_P(v) ) return;
+  switch ( dt ) {
+  case CA_INT8:   lo = INT2FIX(INT8_MIN);   hi = INT2FIX(INT8_MAX);    break;
+  case CA_UINT8:  lo = INT2FIX(0);          hi = INT2FIX(UINT8_MAX);   break;
+  case CA_INT16:  lo = INT2FIX(INT16_MIN);  hi = INT2FIX(INT16_MAX);   break;
+  case CA_UINT16: lo = INT2FIX(0);          hi = INT2FIX(UINT16_MAX);  break;
+  case CA_INT32:  lo = LL2NUM(INT32_MIN);   hi = LL2NUM(INT32_MAX);    break;
+  case CA_UINT32: lo = INT2FIX(0);          hi = ULL2NUM(UINT32_MAX);  break;
+  case CA_INT64:  lo = LL2NUM(INT64_MIN);   hi = LL2NUM(INT64_MAX);    break;
+  case CA_UINT64: lo = INT2FIX(0);          hi = ULL2NUM(UINT64_MAX);  break;
+  default: return;
+  }
+  if ( RTEST(rb_funcall(v, rb_intern("<"), 1, lo)) ||
+       RTEST(rb_funcall(v, rb_intern(">"), 1, hi)) ) {
+    rb_raise(rb_eRangeError, "%"PRIsVALUE" is out of range for %s",
+             rb_inspect(v), ca_type_name[dt]);
+  }
+}
+
+/* A Ruby Integer operand against an integer array is taken in the array's
+   own data type, refused when it does not fit (ca_check_integer_fits).
+   Widening instead would make the result's type depend on a scalar's
+   value.  A Float, a Face and an object array keep the coercion below. */
+static int
+ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
+{
+  CArray *cr;
+  if ( ! RB_INTEGER_TYPE_P(*scalar) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( ! ca_is_integer_type(cr) || ca_is_face(cr) ) {
+    return 0;
+  }
+  ca_check_integer_fits(*scalar, cr->data_type);
+  *scalar = rb_cscalar_new_with_value(cr->data_type, 0, *scalar);
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -1540,6 +1624,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     else if ( ca_fixlen_scalar_operand(self, *other) ) {
       /* width taken from the fixlen reference; see the helper above */
     }
+    else if ( ca_integer_scalar_operand(self, *other) ) {
+      /* the array's own integer type; see the helper above */
+    }
     else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
     }
@@ -1570,6 +1657,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 #endif
     else if ( ca_fixlen_scalar_operand(other, *self) ) {
       /* width taken from the fixlen reference; see the helper above */
+    }
+    else if ( ca_integer_scalar_operand(other, *self) ) {
+      /* the array's own integer type; see the helper above */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);

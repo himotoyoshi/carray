@@ -336,6 +336,10 @@ class CArray
     end
   end
 
+  # The shift count of an Integer is brought into the array's type before
+  # either form sees it (see CArray::IntegerShiftCount).
+  prepend IntegerShiftCount
+
   # Binop word aliases (`add` -> `+`, `mul` -> `*`, `bit_and` -> `&`, …) were
   # installed by rb_define_alias at Init time (see MkKernel.alias_binop in
   # ext/carray_kernels_*.c) BEFORE the redefinitions above.  The C alias

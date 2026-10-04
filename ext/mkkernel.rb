@@ -3724,6 +3724,9 @@ module MkKernel
                     "      volatile VALUE value_arg_holder = 0;\n" \
                     "      char *value_arg = ALLOCV_N(char, value_arg_holder, src->bytes);\n" \
                     "      rb_ca_obj2ptr(self, rval, value_arg);\n"
+                  elsif INT_DTYPES.include?(s)
+                    "      ca_check_integer_fits(rval, #{si[:ca]});\n" \
+                    "      #{si[:c]} value_arg = (#{si[:c]}) #{si[:num2c]}(rval);\n"
                   else
                     "      #{si[:c]} value_arg = (#{si[:c]}) #{si[:num2c]}(rval);\n"
                   end
@@ -5197,6 +5200,7 @@ module MkKernel
                       "          char *query_val = ALLOCV_N(char, query_val_holder, ca->bytes);\n" \
                       "          rb_ca_obj2ptr(self, rval, query_val);"
                     else
+                      (INT_DTYPES.include?(src) ? "ca_check_integer_fits(rval, #{si[:ca]});\n          " : "") +
                       "#{si[:c]} query_val_buf;\n" \
                       "          rb_ca_obj2ptr(self, rval, &query_val_buf);\n" \
                       "          #{si[:c]} query_val = query_val_buf;"
@@ -9213,11 +9217,29 @@ MkKernel.binop :bit_xor_i,
     object: '(#3) = rb_funcall((#1), rb_intern("^"), 1, (#2));',
   }
 
+# Shifts take the meaning Integer#<< and #>> give them: a negative count
+# shifts the other way, and a count of the width or more shifts every bit
+# out (0, or -1 for a negative value shifted right).  C leaves both, and a
+# left shift of a negative value, undefined.  The value is widened to 64
+# bits and shifted there -- unsigned for a left shift -- and the result
+# narrowed back, which keeps the low bits a shift within the width gives.
+# The bodies are self-contained, since carray-jit compiles them as they are.
 MkKernel.binop :bit_lshift,
   op:     "<<",
   source: MkKernel::INT_DTYPES + [:object],
   expr:   {
-    int:    "(#3) = (#1) << (#2);",
+    MkKernel::UINT_DTYPES => "(#3) = ((uint64_t) (#2) >= 8 * sizeof(<type>)) ? 0 : (<type>) ((uint64_t) (#1) << (#2));",
+    int:    %{
+      {
+        int64_t _x = (int64_t) (#1), _n = (int64_t) (#2), _r;
+        const int64_t _w = (int64_t) (8 * sizeof(<type>));
+        if ( _n >= _w )       _r = 0;
+        else if ( _n <= -_w ) _r = _x < 0 ? -1 : 0;
+        else if ( _n < 0 )    _r = _x >> -_n;
+        else                  _r = (int64_t) ((uint64_t) _x << _n);
+        (#3) = (<type>) _r;
+      }
+    },
     object: '(#3) = rb_funcall((#1), rb_intern("<<"), 1, (#2));',
   }
 
@@ -9225,7 +9247,18 @@ MkKernel.binop :bit_rshift,
   op:     ">>",
   source: MkKernel::INT_DTYPES + [:object],
   expr:   {
-    int:    "(#3) = (#1) >> (#2);",
+    MkKernel::UINT_DTYPES => "(#3) = ((uint64_t) (#2) >= 8 * sizeof(<type>)) ? 0 : (<type>) ((uint64_t) (#1) >> (#2));",
+    int:    %{
+      {
+        int64_t _x = (int64_t) (#1), _n = (int64_t) (#2), _r;
+        const int64_t _w = (int64_t) (8 * sizeof(<type>));
+        if ( _n >= _w )       _r = _x < 0 ? -1 : 0;
+        else if ( _n <= -_w ) _r = 0;
+        else if ( _n < 0 )    _r = (int64_t) ((uint64_t) _x << -_n);
+        else                  _r = _x >> _n;
+        (#3) = (<type>) _r;
+      }
+    },
     object: '(#3) = rb_funcall((#1), rb_intern(">>"), 1, (#2));',
   }
 
