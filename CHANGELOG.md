@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `maximum` and `minimum` of two zeros no longer depend on the
+  order of their arguments: `maximum` is `0.0` and `minimum` is `-0.0`,
+  as `pmax` and `pmin` give.
+- Change: for C extensions, the kernels are built with `-fwrapv`, and
+  `CArray::BUILD_FLAGS` says so. Signed integer overflow wraps modulo 2^N
+  in every kernel, as it already did one operation at a time; carray-jit,
+  which compiles the same kernel bodies with these flags, now wraps the
+  same way across a whole expression (`(x + 1).gt(x)` was true at the
+  maximum).
 - Fix: an arange from a Range that excludes its end keeps every step that
   starts before the end: `CA_INT32(0...5, 2)` is `[0, 2, 4]`, not
   `[0, 2]`.
