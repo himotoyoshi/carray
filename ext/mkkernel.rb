@@ -8698,7 +8698,9 @@ MkKernel.monfunc :round,
 MkKernel.monfunc :rcp,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
-    int:     "if ((#1)==0) {ca_zerodiv();}; (#2) = 1/(#1);",
+    MkKernel::UINT_DTYPES => "if ((#1)==0) {ca_zerodiv();}; (#2) = 1/(#1);",
+    # 1 / x floored: 1 for 1, -1 for every negative x, 0 otherwise.
+    int:     "if ((#1)==0) {ca_zerodiv();}; (#2) = ((#1)==1) ? 1 : ((#1) < 0) ? -1 : 0;",
     float:   "(#2) = 1/(#1);",
     [:cmplx64]  => "(#2) = op_crcp_cmplx64(#1);",
     [:cmplx128] => "(#2) = 1/(#1);",
@@ -9073,6 +9075,11 @@ MkKernel.binop :mul,
 # sign, so they keep the bare C form.  Float `/` is true division and is
 # unchanged (matching Ruby `Float#/`); the identity above therefore holds
 # for integers only, exactly as in Ruby.
+#
+# A signed divisor of -1 is taken apart from C's `/`: MIN / -1 does not
+# fit, and the hardware's answer to it differs (x86 traps, ARM returns
+# MIN).  The quotient is the negation wrapped like any other overflow, so
+# MIN / -1 is MIN and MIN % -1 is 0 on every machine.
 MkKernel.binop :div,
   op:     "/",
   source: MkKernel::MATH_NUMERIC + [:object],
@@ -9080,7 +9087,8 @@ MkKernel.binop :div,
     MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) / (#2);",
     int:     %{
       if ((#2)==0) {ca_zerodiv();};
-      {
+      if ((#2)==-1) { (#3) = (<type>) (0 - (uint64_t) (#1)); }
+      else {
         <type> _q = (#1) / (#2);
         if ( (#1) % (#2) != 0 && (((#1) < 0) != ((#2) < 0)) ) { _q -= 1; }
         (#3) = _q;
@@ -9106,11 +9114,21 @@ MkKernel.binop :quo_i,
     object: '(#3) = rb_funcall((#1), rb_intern("quo"), 1, (#2));',
   }
 
+# rcp_mul: `a.rcp_mul(b)` is `b / a`, and divides as `/` does.
 MkKernel.binop :rcp_mul,
   op:     "rcp_mul",
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
-    int:     "if ((#1)==0) {ca_zerodiv();}; (#3) = (#2) / (#1);",
+    MkKernel::UINT_DTYPES => "if ((#1)==0) {ca_zerodiv();}; (#3) = (#2) / (#1);",
+    int:     %{
+      if ((#1)==0) {ca_zerodiv();};
+      if ((#1)==-1) { (#3) = (<type>) (0 - (uint64_t) (#2)); }
+      else {
+        <type> _q = (#2) / (#1);
+        if ( (#2) % (#1) != 0 && (((#2) < 0) != ((#1) < 0)) ) { _q -= 1; }
+        (#3) = _q;
+      }
+    },
     float:   "(#3) = (#2) / (#1);",
     [:cmplx64]  => "(#3) = op_cdiv_cmplx64((#2), (#1));",
     [:cmplx128] => "(#3) = (#2) / (#1);",
@@ -9132,7 +9150,8 @@ MkKernel.binop :mod,
     MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
     int:    %{
       if ((#2)==0) {ca_zerodiv();};
-      {
+      if ((#2)==-1) { (#3) = 0; }
+      else {
         <type> _r = (#1) % (#2);
         if ( _r != 0 && ((_r < 0) != ((#2) < 0)) ) { _r += (#2); }
         (#3) = _r;
@@ -9160,7 +9179,8 @@ MkKernel.binop :mod,
 MkKernel.binop :fmod,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
-    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+    MkKernel::UINT_DTYPES => "if ((#2)==0) {ca_zerodiv();}; (#3) = (#1) % (#2);",
+    int:    "if ((#2)==0) {ca_zerodiv();}; (#3) = ((#2)==-1) ? 0 : (#1) % (#2);",
     object: '(#3) = rb_funcall((#1), rb_intern("remainder"), 1, (#2));',
   }.merge(MkKernel.float_widths("(#3) = fmod<f>((#1), (#2));"))
 

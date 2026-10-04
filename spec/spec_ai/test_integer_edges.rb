@@ -65,4 +65,28 @@ class TestIntegerEdges < Test::Unit::TestCase
     thin = CA_FLOAT64([1.5e-320]).histogram1d(edges: CA_FLOAT64([0, 1e-320, 2e-320]))
     assert_equal [0, 1], thin.counts.to_a
   end
+
+  # -- the signed minimum divided by -1 ---------------------------------
+
+  # The quotient does not fit; x86 traps on it and ARM returns the
+  # minimum.  CArray answers as the wrapped negation on every machine.
+  def test_the_minimum_divided_by_minus_one_wraps
+    x = CA_INT64([-2**63, 5, -7])
+    assert_equal [-2**63, -5, 7], (x / -1).to_a
+    assert_equal [0, 0, 0], (x % -1).to_a
+    assert_equal [0, 0, 0], x.fmod(-1).to_a
+    assert_equal [-2**63, -5, 7], (x.lazy / -1).to_a
+    assert_equal [-2**31], CA_INT32([-1]).rcp_mul(CA_INT32([-2**31])).to_a
+    assert_equal [-128], (CA_INT8([-128]) / -1).to_a
+  end
+
+  # rcp_mul and rcp divide as `/` does, rounding toward minus infinity.
+  def test_rcp_and_rcp_mul_floor_like_div
+    a = CA_INT32([2, 2, -2])
+    b = CA_INT32([-7, 7, 7])
+    assert_equal (b / a).to_a, a.rcp_mul(b).to_a
+    c = CA_INT32([-2, -1, 1, 2, 5])
+    assert_equal (1 / c).to_a, c.rcp.to_a
+    assert_equal [1, 0, 0], CA_UINT8([1, 2, 3]).rcp.to_a
+  end
 end
