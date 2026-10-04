@@ -1729,15 +1729,13 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   Check_Type(rdim, T_ARRAY);
   Check_Type(ridx, T_ARRAY);
 
-  elements = 1;
   ndim = (int) RARRAY_LEN(rdim);
+  CA_CHECK_RANK(ndim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
-    elements *= dim[i];
   }
-
-  CA_CHECK_RANK(ndim);
   CA_CHECK_DIM(ndim, dim);
+  elements = ca_shape_elements(ndim, dim, 1);
 
   info.range_check = 1;
   rb_ca_scan_index(ndim, dim, elements,
@@ -1916,8 +1914,8 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
       rb_raise(rb_eArgError, "negative dim %" PRId64 " at axis %d",
                (ca_size_t) dim[i], i);
     }
-    elements *= dim[i];
   }
+  elements = ca_shape_elements(ndim, dim, 1);
   *out_ndim = ndim;
   *out_elements = elements;
 }
@@ -1954,6 +1952,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
     ca_size_t j, n;
     volatile VALUE objs[CA_RANK_MAX];
 
+    ca_check_index_array(raddr);
     cin = ca_wrap_readonly(raddr, CA_SIZE);
     ca_attach(cin);   /* window: detached before its one raise */
 
@@ -2116,6 +2115,7 @@ index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
    * the first non-scalar CArray input; other non-scalar inputs must
    * match that shape. */
   for (i = 0; i < ndim; i++) {
+    ca_check_index_array(argv[i]);
     cidx[i] = ca_wrap_readonly(argv[i], CA_SIZE);
     if ( ! ca_is_scalar(cidx[i]) ) {
       if ( shape_from < 0 ) {

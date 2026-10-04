@@ -76,13 +76,18 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
   ndim      = parent->ndim;
   bytes     = parent->bytes;
 
-  elements = 1;
-  for (i = 0; i < ndim; i++) {
-    if ( reps[i] <= 0 ) {
-      rb_raise(rb_eIndexError,
-               "invalid reps for %d-th dimension (must be positive)", i);
+  {
+    ca_size_t tiled[CA_RANK_MAX];
+    for (i = 0; i < ndim; i++) {
+      if ( reps[i] <= 0 ) {
+        rb_raise(rb_eIndexError,
+                 "invalid reps for %d-th dimension (must be positive)", i);
+      }
+      if ( __builtin_mul_overflow(parent->dim[i], reps[i], &tiled[i]) ) {
+        rb_raise(rb_eRuntimeError, "too large byte length");
+      }
     }
-    elements *= parent->dim[i] * reps[i];
+    elements = ca_shape_elements(ndim, tiled, bytes);
   }
 
   /* ca == NULL asks for the checks above only, so that a constructor can

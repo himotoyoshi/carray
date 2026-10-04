@@ -154,6 +154,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   self_is_face = ca_is_face(ca);
 
   rb_check_carray_object(ridx);
+  ca_check_index_array(ridx);
   ci = ca_wrap_readonly(ridx, CA_SIZE);
 
   /* The fill args arrive as surface values.  rb_ca_obj2ptr owns the

@@ -257,6 +257,8 @@ void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
 /* carray_utils.c */
 const char *ca_calling_method_name (void);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
+ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
+void        ca_check_index_array (VALUE v);
 long        ca_axis_integer (VALUE raxis, const char *name);
 VALUE       ca_fill_as (VALUE fill, int8_t data_type);
 /* ---- Face MemoryView export (ca_obj_face.c) -------------------------------

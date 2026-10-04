@@ -116,8 +116,12 @@ histbin_axis_setup (histbin_axis_t *ax, const double *ep, ca_size_t ne,
   ax->hi = ax->ep[ne - 1];
   dx     = (ax->hi - ax->lo) / (double) ax->n;
   tol    = fabs(dx) * 1e-9 + 1e-12;
-  ax->uniform = 1;
-  for ( kk = 0; kk <= ax->n; kk++ ) {
+  /* The linearised index needs a width and its reciprocal that are both
+     finite and nonzero: edges spanning more than a double holds make the
+     width infinite, and a subnormal width makes the reciprocal infinite.
+     Either turns the position into NaN, which has no integer. */
+  ax->uniform = isfinite(dx) && dx != 0.0 && isfinite(1.0 / dx);
+  for ( kk = 0; ax->uniform && kk <= ax->n; kk++ ) {
     if ( fabs(ax->ep[kk] - (ax->lo + (double) kk * dx)) > tol ) { ax->uniform = 0; break; }
   }
   ax->inv_dx      = (dx != 0.0) ? 1.0 / dx : 0.0;

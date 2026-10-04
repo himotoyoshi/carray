@@ -307,11 +307,18 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
              "index %" PRId64 " is out of range (0..%" PRId64 ") at %i-dim",
              (ca_size_t) last, (ca_size_t) (dim - 1), axis);
   }
-  if ( (last - start) * (long long) step < 0 ) {
+  /* start and last are both inside the axis, so their distance fits; the
+     step is taken by magnitude unsigned, since -step overflows at its
+     minimum.  (count - 1) * step below is then at most that distance. */
+  if ( (last > start && step < 0) || (last < start && step > 0) ) {
     count = 1;
   }
   else {
-    count = llabs(last - start) / llabs((long long) step) + 1;
+    unsigned long long span  = (unsigned long long)
+                               (last >= start ? last - start : start - last);
+    unsigned long long ustep = step < 0 ? 0ULL - (unsigned long long) step
+                                        : (unsigned long long) step;
+    count = (ca_size_t) (span / ustep) + 1;
   }
   bound = start + (count - 1) * step;
   if ( bound < 0 ) bound += dim;  /* CA_CHECK_INDEX_AT signature */
@@ -426,11 +433,15 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
                  "index %" PRId64 " is out of range (0..%" PRId64 ") at %i-dim",
                  (ca_size_t) last, (ca_size_t) (dim - 1), axis);
       }
-      if ( (last - start) * (long long) step < 0 ) {
+      if ( (last > start && step < 0) || (last < start && step > 0) ) {
         count = 1;
       }
       else {
-        count = llabs(last - start) / llabs((long long) step) + 1;
+        unsigned long long span  = (unsigned long long)
+                                   (last >= start ? last - start : start - last);
+        unsigned long long ustep = step < 0 ? 0ULL - (unsigned long long) step
+                                            : (unsigned long long) step;
+        count = (ca_size_t) (span / ustep) + 1;
       }
       bound = start + (count - 1) * step;
       if ( bound < 0 ) bound += dim;
@@ -450,7 +461,11 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       ca_size_t start, count, bound;
       start = NUM2SIZE(a0);
       count = NUM2SIZE(a1);
-      bound = start + (count - 1);
+      if ( __builtin_add_overflow(start, count - 1, &bound) ) {
+        rb_raise(rb_eIndexError,
+                 "index out of range at %i-dim ( [%" PRId64 ", %" PRId64 "] <=> 0..%" PRId64 " )",
+                 axis, (ca_size_t) start, (ca_size_t) count, (ca_size_t) (dim - 1));
+      }
       if ( start < 0 ) start += dim;
       if ( start < 0 || start >= dim ) {
         rb_raise(rb_eIndexError,
@@ -479,7 +494,15 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       rb_raise(rb_eRuntimeError,
                "step in index equals to 0 in block reference");
     }
-    bound = start + (count - 1) * step;
+    /* A count and a step whose last cell lies past the range of an index
+       are out of range, not a wrapped bound that lands back inside. */
+    if ( __builtin_mul_overflow(count - 1, step, &bound) ||
+         __builtin_add_overflow(start, bound, &bound) ) {
+      rb_raise(rb_eIndexError,
+               "index out of range at %i-dim ( [%" PRId64 ", %" PRId64 ", %" PRId64 "] <=> 0..%" PRId64 " )",
+               axis, (ca_size_t) start, (ca_size_t) count, (ca_size_t) step,
+               (ca_size_t) (dim - 1));
+    }
     if ( start < 0 ) start += dim;
     if ( start < 0 || start >= dim ) {
       rb_raise(rb_eIndexError,

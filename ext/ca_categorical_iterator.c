@@ -334,6 +334,11 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
   GetCArray(roffsets, offsets);
   GetCArray(rout,     out);
   p = NUM2DBL(rp);
+  if ( !(p >= 0.0 && p <= 100.0) ) {
+    rb_raise(rb_eArgError,
+             "percentile: p must be Numeric in [0,100] (got %"PRIsVALUE")",
+             rb_inspect(rp));
+  }
   k = (int64_t) offsets->elements;
   n = grouped->elements;
   if ( offsets->data_type != CA_INT64 || out->data_type != CA_FLOAT64 ||

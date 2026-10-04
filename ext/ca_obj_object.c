@@ -706,7 +706,6 @@ ca_object_setup (CAObject *ca,
                int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes)
 {
   ca_size_t elements;
-  double  length;
   int8_t i;
 
   /* check arguments */
@@ -718,16 +717,7 @@ ca_object_setup (CAObject *ca,
 
   /* calculate total number of elements */
 
-  elements = 1;
-  length = bytes;
-  for (i=0; i<ndim; i++) {
-    elements *= dim[i];
-    length   *= dim[i];
-  }
-  
-  if ( length > CA_LENGTH_MAX ) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
-  }
+  elements = ca_shape_elements(ndim, dim, bytes);
 
   ca->obj_type  = CA_OBJ_OBJECT;
   ca->data_type = data_type;

@@ -187,9 +187,10 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
 
   CA_ASSUME(ndim >= 0 && ndim <= CA_RANK_MAX);   /* bound loops/allocs over [CA_RANK_MAX] arrays */
 
-  elements = 1;
-  for (k = 0; k < ndim; k++) {
-    elements *= protos[k].count;
+  {
+    ca_size_t counts[CA_RANK_MAX];
+    for (k = 0; k < ndim; k++) counts[k] = protos[k].count;
+    elements = ca_shape_elements(ndim, counts, parent->bytes);
   }
 
   ca->obj_type  = CA_OBJ_GRID;
@@ -1000,6 +1001,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
     }
 
     /* INDEX axis: converted here, read once the window below opens */
+    ca_check_index_array(rval);
     ci[i] = ca_wrap_readonly(rval, CA_SIZE);
     rb_ary_push(list, rval);
   }

@@ -138,7 +138,6 @@ carray_setup_i (CArray *ca,
                 CArray *mask, int allocate, int use_calloc, char *adopt_ptr)
 {
   ca_size_t elements;
-  double  length;
   int8_t i;
   ca_size_t k;
 
@@ -148,21 +147,7 @@ carray_setup_i (CArray *ca,
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
-  /* calculate total byte length using double to detect overflow */
-  length = bytes;
-  for (i=0; i<ndim; i++) {
-    length *= dim[i];
-  }
-
-  if ( length > CA_LENGTH_MAX ) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
-  }
-
-  /* calculate total number of elements (safe after length check above) */
-  elements = 1;
-  for (i=0; i<ndim; i++) {
-    elements *= dim[i];
-  }
+  elements = ca_shape_elements(ndim, dim, bytes);
 
   /* An adopted buffer produces an owning entity (CA_OBJ_ARRAY), not a
      wrap: free_carray xfree()s ca->ptr, so the caller's buffer must be

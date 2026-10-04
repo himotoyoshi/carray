@@ -685,8 +685,8 @@ ca_window_setup (CAWindow *ca, CArray *parent,
       rb_raise(rb_eIndexError,
                "invalid size for %i-th dimension (negative)", i);
     }
-    elements *= count[i];
   }
+  elements = ca_shape_elements(ndim, count, bytes);
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */

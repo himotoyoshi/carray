@@ -97,8 +97,11 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   if (offset < 0) {
     rb_raise(rb_eRuntimeError, "negative offset is not permitted for CARefer");
   }
-  elements = 1;
-  for (i = 0; i < ndim; i++) elements *= dim[i];
+  elements = ca_shape_elements(ndim, dim, bytes);
+  if (offset > parent->elements) {
+    rb_raise(rb_eRuntimeError,
+             "data size of reference array must not exceed that of referent");
+  }
   if ((bytes * elements + parent_bytes * offset) >
       (parent_bytes * parent->elements)) {
     rb_raise(rb_eRuntimeError,
@@ -545,6 +548,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
   CARefer *cr;
   ca_size_t new_dim[CA_RANK_MAX];
   ca_size_t prod = 1;
+  int overflow = 0, zero = 0;
   int placeholder_idx = -1;     /* axis with `-1` or `:~` infer placeholder */
   int i;
   volatile VALUE obj;
@@ -596,7 +600,21 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     else {
       new_dim[i] = NUM2SIZE(argv[i]);
     }
-    prod *= new_dim[i];
+    /* A product too large to count cannot equal the element count; an
+       extent of zero anywhere makes it zero whatever it overflowed to. */
+    if ( __builtin_mul_overflow(prod, new_dim[i], &prod) ) {
+      overflow = 1;
+    }
+    if ( new_dim[i] == 0 ) {
+      zero = 1;
+    }
+  }
+  if ( zero ) {
+    prod = 0;
+  }
+  else if ( overflow ) {
+    rb_raise(rb_eRuntimeError,
+             "reshape: the shape has more elements than an array can hold");
   }
 
   /* Resolve placeholder dim from the leftover total. */

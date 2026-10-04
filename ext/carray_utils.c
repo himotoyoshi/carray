@@ -511,6 +511,49 @@ ca_calling_method_name (void)
    ...).  Anything else -- a Float included, which NUM2LONG would truncate
    -- is a TypeError.  `arg` is the argument's name; `name` names the method
    in the message, NULL for the method the user called. */
+/* The number of cells in a shape.  A shape whose cell count, or whose size
+   at `bytes` a cell, does not fit ca_size_t is refused: wrapped, the count
+   would describe a smaller array than the view addresses, and every read
+   and write past it would leave the buffer.  Negative extents are the
+   caller's to refuse, with its own message. */
+ca_size_t
+ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes)
+{
+  ca_size_t elements = 1, total;
+  int8_t i;
+  for ( i = 0; i < ndim; i++ ) {
+    if ( dim[i] == 0 ) return 0;     /* empty, whatever the other extents */
+  }
+  for ( i = 0; i < ndim; i++ ) {
+    if ( __builtin_mul_overflow(elements, dim[i], &elements) ) {
+      rb_raise(rb_eRuntimeError, "too large byte length");
+    }
+  }
+  if ( __builtin_mul_overflow(elements, (bytes > 0 ? bytes : 1), &total) ) {
+    rb_raise(rb_eRuntimeError, "too large byte length");
+  }
+  return elements;
+}
+
+/* An index array is read as ca_size_t.  A uint64 one holding 2**63 or more
+   would turn negative on the way and count from the end of the axis, so it
+   is refused here as the out-of-range index it is. */
+void
+ca_check_index_array (VALUE v)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(v) ) return;
+  GetCArray(v, ca);
+  if ( ca->data_type != CA_UINT64 || ca->elements == 0 ) return;
+  {
+    VALUE max = rb_funcall(v, rb_intern("max"), 0);
+    if ( rb_obj_is_kind_of(max, rb_cInteger) &&
+         RTEST(rb_funcall(max, rb_intern(">"), 1, LL2NUM(CA_LENGTH_MAX))) ) {
+      rb_raise(rb_eIndexError, "index %"PRIsVALUE" is out of range", max);
+    }
+  }
+}
+
 long
 ca_integer_arg (VALUE v, const char *arg, const char *name)
 {

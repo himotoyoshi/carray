@@ -1194,7 +1194,10 @@ pct_flatten_validate_pers (VALUE pers)
     rb_raise(rb_eArgError, "percentile: at least one p value required");
   for ( long i = 0; i < len; i++ ) {
     VALUE p = rb_ary_entry(pers, i);
-    if ( !rb_obj_is_kind_of(p, rb_cNumeric) || NUM2DBL(p) < 0.0 || NUM2DBL(p) > 100.0 )
+    /* Written as "inside", so that NaN -- which fails every comparison --
+       is refused rather than let through. */
+    if ( !rb_obj_is_kind_of(p, rb_cNumeric) ||
+         !(NUM2DBL(p) >= 0.0 && NUM2DBL(p) <= 100.0) )
       rb_raise(rb_eArgError,
                "percentile: p must be Numeric in [0,100] (got %"PRIsVALUE")",
                rb_inspect(p));

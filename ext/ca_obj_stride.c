@@ -105,14 +105,13 @@ ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
   if (ndim < 0 || ndim > CA_RANK_MAX) {
     rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
   }
-  elements = 1;
   for (i = 0; i < ndim; i++) {
     if (dim[i] < 0) {
       rb_raise(rb_eIndexError,
                "invalid size for %i-th dimension (negative)", i);
     }
-    elements *= dim[i];
   }
+  elements = ca_shape_elements(ndim, dim, bytes);
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
