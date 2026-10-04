@@ -84,7 +84,9 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_same_result(a + Complex(1, 2),    a.lazy + Complex(1, 2))
     assert_same_result(a + true,             a.lazy + true)
     assert_same_result(f + 2.5,              f.lazy + 2.5)
-    assert_same_result(u + 300,              u.lazy + 300)
+    assert_same_result(u + 255,              u.lazy + 255)
+    assert_raise(RangeError) { u + 300 }
+    assert_raise(RangeError) { u.lazy + 300 }
     assert_same_result(CA_FLOAT64([1, 2]) + Complex(0, 1),
                        CA_FLOAT64([1, 2]).lazy + Complex(0, 1))
   end
