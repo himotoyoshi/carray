@@ -36,6 +36,36 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an arange from a Range that excludes its end keeps every step that
+  starts before the end: `CA_INT32(0...5, 2)` is `[0, 2, 4]`, not
+  `[0, 2]`.
+- Change: `to_type` from a float or complex array to an integer type
+  makes a NaN cell UNDEF. A finite value outside the integer type is still
+  converted as the machine's C converts it, so the result can differ
+  between machines (ARM saturates, x86 gives the minimum). `as_type` and
+  storing a float array into an integer one are unchanged.
+- Change: a shift count means what it means to `Integer#<<` and `#>>`. A
+  negative count shifts the other way and a count of the width or more
+  shifts every bit out: `CA_INT64([3]) << 64` is `[0]`, `CA_UINT8([8]) <<
+  -1` is `[4]`. Before, the result depended on the machine.
+- Change: an Integer operand that the array's type cannot hold raises
+  `RangeError` in arithmetic, comparisons, `count` and the `search`
+  family: `CA_UINT8([0]).eq(256)` used to answer `[true]` and
+  `CA_INT32([5]) * 2**32` `[0]`. A uint64 array accepts operands up to
+  `2**64 - 1`. Float operands are unchanged.
+- Change: on signed integers, `rcp_mul` and `rcp` round toward minus
+  infinity as `/` does: `CA_INT32([2]).rcp_mul(CA_INT32([-7]))` is `[-4]`,
+  and `rcp` of a negative integer is `-1`.
+- Fix: the signed minimum divided by -1 no longer crashes Linux on x86.
+  `MIN / -1` is `MIN` and `MIN % -1` is `0` on every machine, for `/`,
+  `%`, `fmod`, `rcp_mul` and `divmod`.
+- Fix: shapes, block indices and positions whose integer arithmetic
+  overflows are refused rather than reading or writing outside the
+  buffer: a `reshape` / `refer` / `tile` whose cell count overflows, a
+  block index `[start, count, step]` whose last cell overflows, a uint64
+  index of `2**63` or more, and `percentile(NaN)`. The group-wise
+  `percentile` now checks that p is in `[0, 100]`. A uniform `histogram`
+  whose edges span more than a double holds bins by the edges.
 - Fix: for code that opens arrays through `CArray::AddressBasis` (as
   carray-jit does), a writable view that converts its cells -- a float64
   array seen through `fake(CA_INT32)` -- no longer rewrites the cells the
