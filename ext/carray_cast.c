@@ -2254,8 +2254,9 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     return rb_carray_new(data_type, 1, &dim0, 0, NULL);
   }
   else if ( RTEST(rb_obj_is_kind_of(v, rb_cRange)) ) {
-    /* arange: n = ((end - begin).abs / step).floor (+1 unless exclude_end),
-       then seq(begin, sign * step.abs). */
+    /* arange: n = ((end - begin).abs / step).floor + 1, or for an excluded
+       end ((end - begin).abs.quo(step)).ceil -- the steps that start before
+       the end -- then seq(begin, sign * step.abs). */
     volatile VALUE vbeg, vend, step, n;
     int sign;
     ca_size_t dn;
@@ -2274,9 +2275,13 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     if ( !RTEST(step) ) step = INT2FIX(1);
     n = rb_funcall(vend, id_op_minus, 1, vbeg);
     n = rb_funcall(n, id_abs_cast, 0);
-    n = rb_funcall(n, id_op_div, 1, step);
-    n = rb_funcall(n, id_floor_cast, 0);
-    if ( !RTEST(rb_funcall(v, id_exclude_end_p_cast, 0)) ) {
+    if ( RTEST(rb_funcall(v, id_exclude_end_p_cast, 0)) ) {
+      n = rb_funcall(n, rb_intern("quo"), 1, rb_funcall(step, id_abs_cast, 0));
+      n = rb_funcall(n, rb_intern("ceil"), 0);
+    }
+    else {
+      n = rb_funcall(n, id_op_div, 1, step);
+      n = rb_funcall(n, id_floor_cast, 0);
       n = rb_funcall(n, id_op_plus, 1, INT2FIX(1));
     }
     sign = RTEST(rb_funcall(vbeg, id_op_le, 1, vend)) ? 1 : -1;

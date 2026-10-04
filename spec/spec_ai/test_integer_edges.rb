@@ -139,4 +139,16 @@ class TestIntegerEdges < Test::Unit::TestCase
                  CA_CMPLX128([Complex(1, 0), Complex(0, Float::NAN)]).to_type(:int16).to_a
     assert_false CA_FLOAT64([1.5, 2.5]).to_type(:int32).has_mask?
   end
+
+  # -- a Range with an excluded end ------------------------------------
+
+  # The cells are the steps that start before the end, whether or not the
+  # step divides the span.
+  def test_an_excluded_end_keeps_every_step_that_starts_before_it
+    assert_equal [0, 2, 4], CA_INT32(0...5, 2).to_a
+    assert_equal [5, 3, 1], CA_INT32(5...0, 2).to_a
+    assert_equal [0, 2], CA_INT32(0...4, 2).to_a
+    assert_equal [], CA_INT32(0...0, 1).to_a
+    assert_equal 4, CA_FLOAT64(0.0...1.0, 0.3).elements
+  end
 end
