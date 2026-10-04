@@ -93,8 +93,6 @@ class TestIntegerEdges < Test::Unit::TestCase
   # -- an Integer operand the array's type cannot hold ------------------
 
   def test_an_integer_operand_that_does_not_fit_is_refused
-    assert_raise(RangeError) { CA_UINT8([0, 1]).eq(256) }
-    assert_raise(RangeError) { CA_UINT8([0, 200]) > -1 }
     assert_raise(RangeError) { CA_INT32([5]) * 2**32 }
     assert_raise(RangeError) { CA_UINT8([0]).lazy + 256 }
     assert_raise(RangeError) { CA_UINT8([0, 0, 1]).count(256) }
@@ -103,6 +101,61 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal [-2**63 + 1], (CA_INT64([1]) + -2**63).to_a
     assert_equal [1], (2 - CA_UINT8([1])).to_a
     assert_equal [3.5], (CA_UINT8([3]) + 0.5).to_a
+  end
+
+  # -- comparisons answer by value -------------------------------------
+
+  OPS = { lt: :<, le: :<=, gt: :>, ge: :>=, eq: :==, ne: :!= }
+
+  def answers (a, b, op)
+    a.to_a.zip(b.to_a).map { |x, y| x.send(OPS[op], y) }
+  end
+
+  # Promotion takes uint64 beside int64 to uint64, where -7 would be
+  # 2**64 - 7.  The comparison answers as the Integers would.
+  def test_unsigned_and_signed_integers_compare_by_value
+    pairs = [
+      [CA_UINT64([7, 0, 5, 2**64 - 1]), CA_INT64([-7, 0, 9, -1])],
+      [CA_UINT8([7, 200, 0]),           CA_INT8([-7, 100, -128])],
+      [CA_UINT32([7, 2**32 - 1]),       CA_INT16([-7, 3])],
+    ]
+    pairs.each do |u, s|
+      OPS.each_key do |op|
+        assert_equal answers(u, s, op), u.send(op, s).to_a, "#{u.data_type_name} #{op}"
+        assert_equal answers(s, u, op), s.send(op, u).to_a, "#{s.data_type_name} #{op}"
+        assert_equal answers(u, s, op), u.lazy.send(op, s.lazy).to_a
+        assert_equal answers(s, u, op), s.lazy.send(op, u).to_a
+      end
+    end
+  end
+
+  def test_a_mixed_signedness_comparison_keeps_masks_and_broadcasts
+    u = CA_UINT64([7, 7])
+    u[1] = UNDEF
+    s = CA_INT64([-1, -1])
+    assert_equal [true, UNDEF], (u > s).to_a
+    assert_equal [true, UNDEF], u.lazy.gt(s).to_a
+    a = CA_UINT64([[1, 2], [3, 4]])
+    b = CA_INT64([[-1], [5]])
+    assert_equal [[true, true], [false, false]], a.gt(b).to_a
+    assert_equal [[true, true], [false, false]], a.lazy.gt(b).to_a
+  end
+
+  # An Integer outside the array's type lies beyond every cell, so the
+  # answer is the same at every cell that is not masked.
+  def test_an_integer_outside_the_type_compares_by_value
+    u = CA_UINT8([0, 200, 7])
+    u[2] = UNDEF
+    assert_equal [true, true, UNDEF], (u > -1).to_a
+    assert_equal [false, false, UNDEF], u.eq(256).to_a
+    assert_equal [true, true, UNDEF], u.lt(256).to_a
+    assert_equal [true, true, UNDEF], u.lazy.ne(-1).to_a
+    assert_equal [false, false, UNDEF], (-1 > u).to_a
+    assert_equal [true, true, UNDEF], (300 >= u.lazy).to_a
+    assert_raise(RangeError) { -1 + u }
+    assert_equal [true, true], CA_INT8([5, -3]).lt(300).to_a
+    assert_equal [false], CA_UINT64([2**64 - 1]).eq(2**64).to_a
+    assert_equal [true], CA_INT64([-2**63]).gt(-2**64).to_a
   end
 
   # -- shift counts -----------------------------------------------------

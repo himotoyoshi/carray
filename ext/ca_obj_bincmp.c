@@ -78,6 +78,11 @@ typedef struct CABinCmp {
                                 `eps` name is retained to keep the
                                 `__eps__` Ruby accessor stable across
                                 the dual purpose. */
+  int8_t    sign_fix;        /* 0, or the side (1 left, 2 right) of an
+                                int64 operand compared with a uint64 one:
+                                the kernel compares both as uint64 and
+                                the cells where it is negative are
+                                answered after */
   CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinCmp;
 
@@ -143,6 +148,15 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
+  ca->sign_fix  = 0;
+  if ( left->data_type == CA_INT64 && right->data_type == CA_UINT64 ) {
+    ca->common_dt = CA_UINT64;
+    ca->sign_fix  = 1;
+  }
+  else if ( left->data_type == CA_UINT64 && right->data_type == CA_INT64 ) {
+    ca->common_dt = CA_UINT64;
+    ca->sign_fix  = 2;
+  }
   ca->eps       = eps;
   ca->operands[0] = left;
   ca->operands[1] = right;
@@ -409,6 +423,18 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
     if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
+  if ( bc->sign_fix ) {
+    const int64_t *sp = (const int64_t *)
+                        ( bc->sign_fix == 1 ? left_scratch : right_scratch );
+    ca_size_t step = ( bc->sign_fix == 1 ) ? 1 : right_step;
+    boolean8_t answer =
+      (boolean8_t) ca_bincmp_answer_when_negative(bc->op_id, bc->sign_fix);
+    ca_size_t i;
+    for ( i = 0; i < slab_n; i++ ) {
+      if ( sp[i * step] < 0 ) ((boolean8_t *) data)[i] = answer;
+    }
+  }
+
   if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);
   if ( ! left_is_inplace  ) ca_lazy_arena_release(left_scratch);
 }
@@ -561,15 +587,46 @@ rb_ca_bincmp_new (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   return obj;
 }
 
+/* An operand taken to data type dt: a scalar by value, an array through a
+   cast view so the expression stays lazy. */
+static VALUE
+ca_bincmp_cast_operand (VALUE v, int8_t dt)
+{
+  CArray *ca;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  if ( ca->data_type == dt ) return v;
+  if ( rb_obj_is_cscalar(v) ) {
+    return rb_funcall(v, rb_intern("to_type"), 1, INT2NUM(dt));
+  }
+  return rb_funcall(rb_const_get(rb_cObject, rb_intern("CAMonOp")),
+                    rb_intern("__build__"), 2,
+                    v, INT2NUM(CA_MONOP_CAST_BASE + dt));
+}
+
 VALUE
 rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     signed_side = 0;
   volatile VALUE l_resolved, r_resolved;
 
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
+
+  switch ( ca_bincmp_integer_prepare(&l_resolved, &r_resolved, op_id,
+                                     &signed_side) ) {
+  case 1: return rb_ca_bincmp_build(l_resolved, l_resolved, CA_BINCMP_EQ, eps);
+  case 2: return rb_ca_bincmp_build(l_resolved, l_resolved, CA_BINCMP_NE, eps);
+  case 3:
+    /* The unsigned operand goes to uint64 and the signed one to int64;
+       ca_bincmp_setup reads that pair as a comparison to correct. */
+    l_resolved = ca_bincmp_cast_operand(l_resolved,
+                     ( signed_side == 1 ) ? CA_INT64 : CA_UINT64);
+    r_resolved = ca_bincmp_cast_operand(r_resolved,
+                     ( signed_side == 2 ) ? CA_INT64 : CA_UINT64);
+    break;
+  }
 
   /* A scalar beside the array (a Ruby value or a CScalar) is wrapped and
      promoted as the eager comparison does it. */
@@ -577,7 +634,9 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
        rb_obj_is_cscalar(l_resolved) || rb_obj_is_cscalar(r_resolved) ) {
     int l_scalar = ! rb_obj_is_carray(l_resolved) || rb_obj_is_cscalar(l_resolved);
     int r_scalar = ! rb_obj_is_carray(r_resolved) || rb_obj_is_cscalar(r_resolved);
-    rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
+    if ( ! signed_side ) {
+      rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
+    }
     l_resolved = ca_lazy_settle_scalar(l_resolved, l_scalar);
     r_resolved = ca_lazy_settle_scalar(r_resolved, r_scalar);
   }
@@ -588,6 +647,10 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   /* Cast both operands to the common data_type. */
   ca_bincmp_kernel_input_data_types(op_id, l->data_type, r->data_type,
                                  &l_in_dt, &r_in_dt);
+  if ( signed_side ) {
+    l_in_dt = l->data_type;
+    r_in_dt = r->data_type;
+  }
 
   if ( l_in_dt != l->data_type ) {
     VALUE cast_op = INT2NUM(CA_MONOP_CAST_BASE + l_in_dt);

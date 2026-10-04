@@ -549,9 +549,42 @@ class CArray
   alias_method :__coerce_eager__, :coerce
   coerce_um = instance_method(:__coerce_eager__)
   define_method(:coerce) do |other|
-    scalar, receiver = coerce_um.bind_call(self, other)
+    begin
+      scalar, receiver = coerce_um.bind_call(self, other)
+    rescue RangeError => e
+      raise unless other.is_a?(Integer)
+      return [OutOfRangeInteger.new(other, self, e), self]
+    end
     __lazy_view__? ? [scalar, self] : [scalar, receiver]
   end
+
+  # An Integer the array's type cannot hold, on the left of an operator.
+  # A comparison is answered from the array's side, where it compares by
+  # value; any other operator refuses the Integer as the array would.
+  class OutOfRangeInteger
+    def initialize (value, array, error)
+      @value, @array, @error = value, array, error
+    end
+
+    def <  (other) = flip(other, :>)
+    def <= (other) = flip(other, :>=)
+    def >  (other) = flip(other, :<)
+    def >= (other) = flip(other, :<=)
+
+    def method_missing (*)
+      raise @error
+    end
+
+    def respond_to_missing? (*) = false
+
+    private
+
+    def flip (other, op)
+      raise @error unless other.equal?(@array)
+      @array.send(op, @value)
+    end
+  end
+  private_constant :OutOfRangeInteger
 end
 
 # ---------------------------------------------------------------------------

@@ -741,7 +741,8 @@ class CArray
   #   comparison) and `:object` (Ruby `==`) `data_type`. A masked
   #   element yields a masked result rather than `false`. Floating
   #   point equality is exact here; for a tolerant comparison see
-  #   {#is_close} (absolute) or {#is_equiv} (relative).
+  #   {#is_close} (absolute) or {#is_equiv} (relative). Integers compare
+  #   by value, as for {#<}.
   #   @param other [CArray, Numeric, Object] comparand, broadcast to
   #     `self.shape`.
   #   @return [CArray] `:boolean`, same shape as `self`.
@@ -763,6 +764,11 @@ class CArray
   #   Accepts numeric, boolean, `:fixlen` (byte order, shorter first on
   #   a common prefix) and `:object` (Ruby `<`) `data_type`s. Complex
   #   arrays have no ordering and raise.
+  #
+  #   Integers compare by value: an unsigned array against a signed one
+  #   answers as the Integers would (`CA_UINT64([7]) < CA_INT64([-7])`
+  #   is false), and so does an Integer the array's type cannot hold
+  #   (`CA_UINT8([0]) > -1` is true).
   #   @param other [CArray, Numeric, Object] comparand, broadcast to
   #     `self.shape`.
   #   @return [CArray] `:boolean`, same shape as `self`.

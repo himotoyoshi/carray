@@ -1532,14 +1532,14 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
   return 1;
 }
 
-/* Refuses a Ruby Integer that does not fit integer data type `dt`.  Taken
-   modulo the type, 256 against a uint8 array would be 0 and compare equal
-   to it.  Anything but an Integer, and a non-integer `dt`, pass. */
-void
-ca_check_integer_fits (VALUE v, int8_t dt)
+/* Where a Ruby Integer falls against the range of integer data type `dt`:
+   -1 below it, 1 above it, 0 inside.  Anything but an Integer, and a
+   non-integer `dt`, answer 0. */
+int
+ca_integer_range_side (VALUE v, int8_t dt)
 {
   VALUE lo, hi;
-  if ( ! RB_INTEGER_TYPE_P(v) ) return;
+  if ( ! RB_INTEGER_TYPE_P(v) ) return 0;
   switch ( dt ) {
   case CA_INT8:   lo = INT2FIX(INT8_MIN);   hi = INT2FIX(INT8_MAX);    break;
   case CA_UINT8:  lo = INT2FIX(0);          hi = INT2FIX(UINT8_MAX);   break;
@@ -1549,10 +1549,20 @@ ca_check_integer_fits (VALUE v, int8_t dt)
   case CA_UINT32: lo = INT2FIX(0);          hi = ULL2NUM(UINT32_MAX);  break;
   case CA_INT64:  lo = LL2NUM(INT64_MIN);   hi = LL2NUM(INT64_MAX);    break;
   case CA_UINT64: lo = INT2FIX(0);          hi = ULL2NUM(UINT64_MAX);  break;
-  default: return;
+  default: return 0;
   }
-  if ( RTEST(rb_funcall(v, rb_intern("<"), 1, lo)) ||
-       RTEST(rb_funcall(v, rb_intern(">"), 1, hi)) ) {
+  if ( RTEST(rb_funcall(v, rb_intern("<"), 1, lo)) ) return -1;
+  if ( RTEST(rb_funcall(v, rb_intern(">"), 1, hi)) ) return 1;
+  return 0;
+}
+
+/* Refuses a Ruby Integer that does not fit integer data type `dt`.  Taken
+   modulo the type, 256 against a uint8 array would be 0 and compare equal
+   to it. */
+void
+ca_check_integer_fits (VALUE v, int8_t dt)
+{
+  if ( ca_integer_range_side(v, dt) != 0 ) {
     rb_raise(rb_eRangeError, "%"PRIsVALUE" is out of range for %s",
              rb_inspect(v), ca_type_name[dt]);
   }

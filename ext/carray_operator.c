@@ -1990,6 +1990,157 @@ ca_bincmp_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
                  d->tol);
 }
 
+/* The six comparisons answer by value between integers.  Promotion takes
+   uint64 against int64 (and uint8 against int8, ...) to the unsigned type,
+   where -7 is 2**64 - 7 and 7 < -7 would be true; and an Integer outside an
+   array's type has no cell of that type to stand in for it. */
+
+static int
+ca_is_unsigned_integer_dt (int8_t dt)
+{
+  return dt == CA_UINT8 || dt == CA_UINT16 || dt == CA_UINT32 ||
+         dt == CA_UINT64;
+}
+
+static int
+ca_is_signed_integer_dt (int8_t dt)
+{
+  return dt == CA_INT8 || dt == CA_INT16 || dt == CA_INT32 ||
+         dt == CA_INT64;
+}
+
+/* The answer of `left op right` when every right is greater than every
+   left (right_greater = 1), or every left greater than every right. */
+static int
+ca_bincmp_ordered_answer (int op_id, int right_greater)
+{
+  switch ( op_id ) {
+  case CA_BINCMP_LT: case CA_BINCMP_LE: return right_greater;
+  case CA_BINCMP_GT: case CA_BINCMP_GE: return ! right_greater;
+  case CA_BINCMP_EQ: return 0;
+  default:           return 1;   /* CA_BINCMP_NE */
+  }
+}
+
+/* The answer at a cell whose signed operand is negative: the unsigned
+   operand is then the greater.  signed_side is 1 (left) or 2 (right). */
+int
+ca_bincmp_answer_when_negative (int op_id, int signed_side)
+{
+  return ca_bincmp_ordered_answer(op_id, signed_side == 1);
+}
+
+static int
+ca_bincmp_plain_integer_array (VALUE v, int8_t *dt)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(v) ) return 0;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  if ( ca_is_face(ca) ) return 0;
+  *dt = ca->data_type;
+  return ca_is_unsigned_integer_dt(*dt) || ca_is_signed_integer_dt(*dt);
+}
+
+/* Prepares the operands of comparison op_id (CA_BINCMP_*).  Returns
+     0  nothing to do,
+     1  every cell answers true,  2  every cell answers false
+        (*self and *other are then both the array, whose mask the answer
+        keeps),
+     3  the operands are integers of mixed signedness that promote to the
+        unsigned type; *signed_side is 1 or 2 for the signed one. */
+int
+ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
+                           int op_id, int *signed_side)
+{
+  int8_t dt1, dt2;
+  int side;
+
+  if ( op_id < CA_BINCMP_LT || op_id > CA_BINCMP_NE ) return 0;
+
+  if ( RB_INTEGER_TYPE_P(*other) &&
+       ca_bincmp_plain_integer_array(*self, &dt1) ) {
+    side = ca_integer_range_side(*other, dt1);
+    if ( side == 0 ) return 0;
+    *other = *self;
+    return ca_bincmp_ordered_answer(op_id, side > 0) ? 1 : 2;
+  }
+  if ( RB_INTEGER_TYPE_P(*self) &&
+       ca_bincmp_plain_integer_array(*other, &dt2) ) {
+    side = ca_integer_range_side(*self, dt2);
+    if ( side == 0 ) return 0;
+    *self = *other;
+    return ca_bincmp_ordered_answer(op_id, side < 0) ? 1 : 2;
+  }
+
+  if ( ! ca_bincmp_plain_integer_array(*self, &dt1) ||
+       ! ca_bincmp_plain_integer_array(*other, &dt2) ) {
+    return 0;
+  }
+  if ( ca_is_unsigned_integer_dt(dt1) == ca_is_unsigned_integer_dt(dt2) ) {
+    return 0;
+  }
+  if ( ! ca_is_unsigned_integer_dt(ca_promote_type(dt1, dt2)) ) {
+    return 0;
+  }
+  *signed_side = ca_is_signed_integer_dt(dt1) ? 1 : 2;
+  return 3;
+}
+
+static int
+ca_bincmp_op_id_of (ca_bincmp_func_t *func)
+{
+  if ( func == ca_bincmp_lt ) return CA_BINCMP_LT;
+  if ( func == ca_bincmp_gt ) return CA_BINCMP_GT;
+  if ( func == ca_bincmp_le ) return CA_BINCMP_LE;
+  if ( func == ca_bincmp_ge ) return CA_BINCMP_GE;
+  if ( func == ca_bincmp_eq ) return CA_BINCMP_EQ;
+  if ( func == ca_bincmp_ne ) return CA_BINCMP_NE;
+  return -1;
+}
+
+/* Compares the unsigned operand as uint64 with the signed one taken to
+   uint64 modulo 2**64, then answers the cells where the signed operand is
+   negative. */
+static VALUE
+ca_bincmp_mixed_sign (VALUE self, VALUE other, ca_bincmp_func_t func[],
+                      int op_id, int signed_side)
+{
+  volatile VALUE l, r, su, out;
+  CArray *cs, *co;
+  int64_t *sp;
+  boolean8_t *op, *m;
+  ca_size_t i, step;
+  int answer = ca_bincmp_answer_when_negative(op_id, signed_side);
+
+  l = rb_funcall(self,  rb_intern("to_type"), 1,
+                 INT2NUM(( signed_side == 1 ) ? CA_INT64 : CA_UINT64));
+  r = rb_funcall(other, rb_intern("to_type"), 1,
+                 INT2NUM(( signed_side == 2 ) ? CA_INT64 : CA_UINT64));
+  ca_broadcast_pair(&l, &r);
+
+  /* A fresh uint64 entity holding the signed operand modulo 2**64; read
+     as int64 it still says which cells are negative. */
+  su = rb_funcall(( signed_side == 1 ) ? l : r, rb_intern("to_type"), 1,
+                  INT2NUM(CA_UINT64));
+  out = ( signed_side == 1 ) ? rb_ca_call_bincmp(su, r, func, 0.0)
+                             : rb_ca_call_bincmp(l, su, func, 0.0);
+
+  TypedData_Get_Struct(su,  CArray, &carray_data_type, cs);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  sp   = (int64_t *) cs->ptr;
+  op   = (boolean8_t *) co->ptr;
+  m    = co->mask ? (boolean8_t *) co->mask->ptr : NULL;
+  step = ( cs->elements == 1 ) ? 0 : 1;
+  for ( i = 0; i < co->elements; i++ ) {
+    if ( ( ! m || ! m[i] ) && sp[i * step] < 0 ) {
+      op[i] = (boolean8_t) answer;
+    }
+  }
+  RB_GC_GUARD(l);
+  RB_GC_GUARD(r);
+  return out;
+}
+
 VALUE
 rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
                                     ca_bincmp_func_t func[],
@@ -2016,6 +2167,16 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
      via to_comparable (e.g. unit alignment).  No-op for non-Face self and
      for fixlen-storage Faces (memcmp is already correct there). */
   ca_face_reconcile_comparison(&self, &other);
+
+  {
+    int op_id = ca_bincmp_op_id_of(func);
+    int signed_side = 0;
+    switch ( ca_bincmp_integer_prepare(&self, &other, op_id, &signed_side) ) {
+    case 1: return rb_ca_call_bincmp(self, self, ca_bincmp_eq, 0.0);
+    case 2: return rb_ca_call_bincmp(self, self, ca_bincmp_ne, 0.0);
+    case 3: return ca_bincmp_mixed_sign(self, other, func, op_id, signed_side);
+    }
+  }
 
   /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `eq`, `ne`, `lt`, `gt`, `le`, `ge` (and `<` `>` `<=` `>=`) between
+  an unsigned and a signed integer array compare by value, eager and lazy:
+  `CA_UINT64([7]).lt(CA_INT64([-7]))` is `[false]`, where the negative
+  operand was read as a large unsigned number. An Integer the array's type
+  cannot hold, on either side, compares by value too. Arithmetic between
+  the two types still promotes to the unsigned type.
+
 - Change: `maximum` and `minimum` of two zeros no longer depend on the
   order of their arguments: `maximum` is `0.0` and `minimum` is `-0.0`,
   as `pmax` and `pmin` give.
@@ -58,10 +65,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   shifts every bit out: `CA_INT64([3]) << 64` is `[0]`, `CA_UINT8([8]) <<
   -1` is `[4]`. Before, the result depended on the machine.
 - Change: an Integer operand that the array's type cannot hold raises
-  `RangeError` in arithmetic, comparisons, `count` and the `search`
-  family: `CA_UINT8([0]).eq(256)` used to answer `[true]` and
-  `CA_INT32([5]) * 2**32` `[0]`. A uint64 array accepts operands up to
-  `2**64 - 1`. Float operands are unchanged.
+  `RangeError` in arithmetic, `count` and the `search` family:
+  `CA_INT32([5]) * 2**32` used to answer `[0]`. A uint64 array accepts
+  operands up to `2**64 - 1`. Float operands are unchanged. The six
+  comparisons answer by value instead (`CA_UINT8([0]).eq(256)` is
+  `[false]`, `CA_UINT8([0]) > -1` is `[true]`).
 - Change: on signed integers, `rcp_mul` and `rcp` round toward minus
   infinity as `/` does: `CA_INT32([2]).rcp_mul(CA_INT32([-7]))` is `[-4]`,
   and `rcp` of a negative integer is `-1`.
