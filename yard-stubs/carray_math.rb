@@ -25,12 +25,15 @@ class CArray
   #   division is true division, as Ruby's `Float#/` is, so that
   #   identity is an integer one. Boolean arrays participate as their
   #   0/1 storage. Masked elements stay masked, and a masked cell is
-  #   never divided.
+  #   never divided. The signed minimum divided by `-1` does not fit and
+  #   is answered as the wrapped negation: `MIN / -1` is `MIN`.
   #   @param other [CArray, Numeric] divisor, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands.
   #   @raise [ZeroDivisionError] when an integer divisor is `0`. Float
   #     division returns `Infinity` or `NaN` instead.
+  #   @raise [RangeError] when an Integer `other` does not fit the
+  #     integer `data_type` of `self`.
   #   @example
   #     CA_INT32([-7, -1, 7]) / 3      # => [ -3, -1, 2 ]
   #     CA_DOUBLE([-7.0]) / 3.0        # => [ -2.3333333333333335 ]
@@ -215,7 +218,7 @@ class CArray
   # @overload rcp_mul(other)
   #   Returns `other` divided element-wise by `self` -- the reciprocal
   #   of {#/} in operand order, so that scaling a constant by an array
-  #   needs no temporary.
+  #   needs no temporary. Integer division floors, as {#/} does.
   #   @param other [CArray, Numeric] dividend, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands.
