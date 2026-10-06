@@ -211,9 +211,12 @@ ca_refer_func_create_mask (void *ap)
     ca->mask0 =
       (CArray *) ca_repeat_new(ca->parent->mask, ca->parent->ndim + 1, count);
     ca_unset_flag(ca->mask0, CA_FLAG_READ_ONLY);
+    /* mask0 has ratio cells per parent element, so the offset is counted
+       in those. */
     ca->mask =
       (CArray *) ca_refer_new(ca->mask0,
-                              CA_BOOLEAN, ca->ndim, ca->dim, 0, parent_offset);
+                              CA_BOOLEAN, ca->ndim, ca->dim, 0,
+                              parent_offset * ratio);
   }
   else {
     /* Spanned reinterpret: ratio = bytes / parent_bytes parent
