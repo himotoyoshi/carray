@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `sort` of a lazy expression (`(a.lazy * 2).sort(axis: 1)`)
+  returns a read-only sorted view over the expression, where it returned
+  a sorted view over a copy. A write to it raises, as a write to the
+  expression does, instead of landing in the copy; its cells follow later
+  changes of the operands. Call `copy` first to keep sorting a snapshot.
+
 - Fix: an array stored through a grid, boolean selection or `select_axis`
   on a `reshape` over a `transpose`, `flip` or block now reaches the
   original array; it was dropped without an error. A scalar fill, `map!`

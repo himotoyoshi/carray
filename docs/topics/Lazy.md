@@ -191,7 +191,8 @@ That always works, and it is what `fuse` writes for you.
 | positional view | `[]`, `.shift`, `.roll`, `.flip` / `.reverse`, `.transpose` / `.T`, `.reshape`, `.flatten`, `.window`, `.diagonal`, `.tile`, `.refer` | keeps the lazy wrapper on top of the view; no materialise. The rule is the category, not the list: a view method whose shape is fixed when it is built and which only moves positions keeps the chain. The deliberate exceptions are anything that owns its data (`copy`), reorders values (`sort`, `partition`) or changes what the mask means (`value`, `strip_mask`) |
 | cast | `.fake(:int32)`, data_type widening | adds cast node to tree; no materialise |
 | reduction | `sum`, `mean`, `min`, `max`, `variance`, `argmin`, ... | materialises and reduces in one pass |
-| Enumerable | `each`, `to_a`, `map`, `sort`, ... on the lazy view | materialises first, then delegates to entity |
+| Enumerable | `each`, `to_a`, `map`, ... on the lazy view | materialises first, then delegates to entity |
+| `sort` | `lazy_view.sort`, `lazy_view.sort(axis: k)` | a read-only sorted view over the expression, as a sort of an array is a view over the array: the order is fixed when it is made, its cells read the expression and follow later changes of the operands, and it refuses writes like the expression |
 | `[]=` | `lazy_view[i] = v` | **raises** (`CA_FLAG_READ_ONLY`) |
 | per-cell `[]` | `lazy_view[i]` | works (one-cell `xfer_index`); for hot loops, snapshot `.to_ca` first |
 | MV export | passing a lazy view to a `MemoryView` consumer (Arrow, Numo, bulk-memory-view) | **raises** `TypeError` with hint to call `.to_ca` first |

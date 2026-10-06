@@ -657,14 +657,6 @@ class CAMonOp
     to_ca.to_a
   end
 
-  # @overload sort(*args, **kwargs)
-  #   Materialises `self` into a copy and returns
-  #   `entity.sort(*args, **kwargs)`.
-  #   @return [CArray]
-  def sort(*args, **kwargs)
-    copy.sort(*args, **kwargs)
-  end
-
   # --- MemoryView export → TypeError + .copy recommendation -----------
 
   # bulk-memory-view / Numo / Apache Arrow consumers go through the MV
@@ -751,13 +743,6 @@ class CABinOp
   #   @return [Array]
   def to_a
     to_ca.to_a
-  end
-
-  # @overload sort(*args, **kwargs)
-  #   Materialises `self` and sorts the resulting entity.
-  #   @return [CArray]
-  def sort(*args, **kwargs)
-    to_ca.sort(*args, **kwargs)
   end
 
   # @overload to_memory_view

@@ -121,4 +121,17 @@ class TestViewWriteChain < Test::Unit::TestCase
     v = a.refer(:int8, [8], offset: 2)
     assert_equal [false] * 4 + [true] * 4, v.mask.to_a
   end
+
+  # A sort of a lazy expression is a view over the expression, as a sort of
+  # an array is a view over the array: it refuses writes as the expression
+  # does, and its cells follow the operands in the order fixed when it was
+  # made.
+  def test_sort_of_lazy_expression_is_read_only
+    r = CArray.int32(2, 3).seq!
+    v = (r.lazy * 2).sort(axis: 1)
+    assert_raise(RuntimeError) { v[0, 0] = 99 }
+    assert_raise(RuntimeError) { v[] = 0 }
+    r[0, 0] = 10
+    assert_equal [[20, 2, 4], [6, 8, 10]], v.to_a
+  end
 end
