@@ -1400,6 +1400,34 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     return;
   }
 
+  /* A request the bridges above could not express as a region goes to the
+     root as the list of its cells.  A write never makes a round trip of
+     the whole root: a root that repeats its cells (CATile) would have the
+     stale copies the caller never wrote land after the written ones, and a
+     root that converts on the way would bring the unwritten cells back
+     changed.  A read does not make the root produce cells it was not asked
+     for, unless it is asked for as many as it has.  The root's addresses
+     are whole elements here, as in the region hand-off above. */
+  if ( ( dir == CA_XFER_PUT || ca->elements < root->elements )
+       && ca->bytes == root->bytes && composed_base % root->bytes == 0 ) {
+    volatile VALUE holder;
+    ca_size_t *addrs = ALLOCV_N(ca_size_t, holder, ca->elements);
+    ca_size_t  idx[CA_RANK_MAX], n = 0;
+    int8_t     k;
+    for (k = 0; k < ca->ndim; k++) idx[k] = 0;
+    while (1) {
+      ca_size_t off = composed_base;
+      for (k = 0; k < ca->ndim; k++) off += idx[k] * composed_strides[k];
+      addrs[n++] = off / root->bytes;
+      k = ca->ndim - 1;
+      while (k >= 0) { if (++idx[k] < ca->dim[k]) break; idx[k] = 0; k--; }
+      if (k < 0) break;
+    }
+    ca_xfer_addrs(root, n, addrs, ptr, dir);
+    ALLOCV_END(holder);
+    return;
+  }
+
   /* Cold root without an xfer_stride slot, or an ndim mismatch the bridges
      above could not express: materialise the root into scratch via
      ca_xfer_all and run the direct strided gather/scatter against that.
