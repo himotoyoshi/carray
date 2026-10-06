@@ -425,7 +425,6 @@ ca_attach_is_alias (void *ap)
   CArray *ca = (CArray *) ap;
   extern ca_operation_function_t ca_stride_func;
   extern ca_operation_function_t ca_lazy_marker_func;
-  extern int ca_stride_is_contiguous (CAStride *ca);
   extern int ca_stride_attach_aliases_root (CAStride *ca);
 
   if ( ca == NULL ) return 0;
@@ -440,21 +439,13 @@ ca_attach_is_alias (void *ap)
     return ca_attach_is_alias(((CAView *) ca)->parent);
   }
 
-  /* CAStride family share ca_stride_func.attach (= ca_stride_func_attach).
-     The alias-attach fast path is taken iff composed strides are
-     row-major contiguous.  ca_stride_is_contiguous checks the leaf
-     view's own strides, which is what we want — the compose-fold to
-     root happens during attach itself; if leaf is contig and parent
-     chain is too (transitively, since each CAStride's strides are
-     composed against parent's), the alias path fires.
-
-     ...and iff there is parent memory to alias at the end of that fold.
-     A non-entity root has none to lend, so attach builds its own buffer
-     and writes through ca->ptr reach the root only via ca_sync.  Saying
-     "alias" there would let a caller write and skip the sync. */
+  /* CAStride family share ca_stride_func.attach, which aliases the root's
+     memory iff the strides composed to the root are row-major contiguous
+     and the root has memory to lend.  Otherwise attach builds its own
+     buffer and writes through ca->ptr reach the root only via ca_sync, so
+     saying "alias" would let a caller write and skip the sync. */
   if ( ca_func[ca->obj_type].attach == ca_stride_func.attach ) {
-    return ca_stride_is_contiguous((CAStride *) ca)
-           && ca_stride_attach_aliases_root((CAStride *) ca);
+    return ca_stride_attach_aliases_root((CAStride *) ca);
   }
   return 0;
 }

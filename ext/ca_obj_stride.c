@@ -986,6 +986,8 @@ ca_stride_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
 }
 
 extern int ca_stride_is_contiguous (CAStride *ca);   /* defined below; non-static for Tier A */
+static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
+                                   const ca_size_t *strides, ca_size_t bytes);
 
 /* Alias fast path:
    When the view's strides describe a contiguous row-major run, the
@@ -1097,7 +1099,16 @@ ca_stride_attach_aliases_root (CAStride *ca)
     return 1;
   }
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
-  return !ca_root_lends_no_memory(root);
+  /* The same test ca_stride_func_attach makes, and then the same question of
+     the fold boundary.  The leaf's own strides are in its parent's address
+     space -- a block over a flip is contiguous there and not in the root --
+     and a boundary that is itself a CAStride (a reshape over a transpose
+     stops the fold) is one whose attach may build a buffer of its own, which
+     this view would then alias without reaching the memory below it. */
+  return !ca_root_lends_no_memory(root)
+         && ca_layout_is_contiguous(ca->ndim, ca->dim, composed_strides,
+                                    ca->bytes)
+         && ca_attach_is_alias(root);
 }
 
 static void
