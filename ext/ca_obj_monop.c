@@ -749,10 +749,12 @@ ca_monop_func_sync (void *ap)
     }
   }
   else {
-    /* byte_swap (involution): apply on ca.ptr in place (re-swap), then
-       memcpy ca.ptr → parent.ptr.  Mirrors CAByteSwap sync.  */
-    ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements, ca->ptr);
+    /* byte_swap (involution): swap a copy back to the parent's byte order.
+       Not ca.ptr in place -- the window stays open after a sync, and a
+       second sync (a stack holding this view twice) would swap it again. */
     memcpy(ca->parent->ptr, ca->ptr, ca_length(ca));
+    ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements,
+                        ca->parent->ptr);
   }
   ca_sync(ca->parent);
 }

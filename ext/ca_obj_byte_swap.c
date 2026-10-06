@@ -481,10 +481,17 @@ static void
 ca_byte_swap_func_sync (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  /* Swap is involutive, so applying it once to the view buffer
-     restores the parent byte order before the copy-back. */
-  ca_byte_swap_apply(ca, ca->ptr);
-  memcpy(ca->parent->ptr, ca->ptr, ca_length(ca));
+  /* Swap is involutive, so applying it once to a copy of the view buffer
+     restores the parent byte order.  Not the view buffer in place: the
+     window stays open after a sync, and a second sync (a stack holding
+     this view twice) would swap it again.  The swap of a record calls
+     Ruby, so it runs on the copy and reaches the parent only whole. */
+  volatile VALUE holder;
+  char *tmp = ALLOCV_N(char, holder, ca_length(ca));
+  memcpy(tmp, ca->ptr, ca_length(ca));
+  ca_byte_swap_apply(ca, tmp);
+  memcpy(ca->parent->ptr, tmp, ca_length(ca));
+  ALLOCV_END(holder);
   ca_sync(ca->parent);
 }
 
