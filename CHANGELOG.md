@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an array stored through a grid, boolean selection or `select_axis`
+  on a `reshape` over a `transpose`, `flip` or block now reaches the
+  original array; it was dropped without an error. A scalar fill, `map!`
+  and `add!` were not affected.
+- Fix: a partial write through a `reshape` over a `tile` keeps every value
+  written, where a copy of a cell that was not written could overwrite it.
+  Over a `CAObject`, a partial read or write through such a view calls the
+  hooks for those cells only, not for every cell of the object.
+- Fix: a `swap_bytes` view held twice by `CArray.stack` or `CArray.meld`
+  writes byte-swapped values back, where an assignment of another data
+  type wrote them unswapped.
+- Fix: `refer` to a narrower data type with `offset:` reads and writes the
+  mask of the cells it shows; it used the mask of cells nearer the start.
+
 - Fix: `eq`, `ne`, `lt`, `gt`, `le`, `ge` (and `<` `>` `<=` `>=`) between
   an unsigned and a signed integer array compare by value, eager and lazy:
   `CA_UINT64([7]).lt(CA_INT64([-7]))` is `[false]`, where the negative
