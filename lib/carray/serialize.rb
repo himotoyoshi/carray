@@ -125,7 +125,6 @@ class CArray::Serializer   # :nodoc:
             "(arbitrary Ruby objects have no portable representation); " \
             "use Marshal.dump(ca) for a Ruby-only round-trip"
     end
-
     file_endian = opt[:endian] || CArray.endian
     swap        = (file_endian != CArray.endian)
 
@@ -224,6 +223,7 @@ class CArray::Serializer   # :nodoc:
     if h[:data_bytes] != h[:elements] * h[:element_bytes]
       raise "corrupt CArray binary data (data_bytes cross-check failed)"
     end
+    check_header(h)
 
     swap      = (file_endian != CArray.endian)
     data_type = h[:data_type_code]
@@ -246,7 +246,13 @@ class CArray::Serializer   # :nodoc:
 
     if h[:trailer_bytes] > 0
       trailer_raw = @io.read(h[:trailer_bytes])
+      unless trailer_raw && trailer_raw.bytesize == h[:trailer_bytes]
+        raise "corrupt CArray binary data (truncated trailer)"
+      end
       trailer = decode_trailer(trailer_raw)
+      unless trailer.is_a?(Hash)
+        raise "corrupt CArray binary data (trailer is not a mapping)"
+      end
       ca = apply_trailer(ca, trailer)
     end
 
@@ -265,6 +271,40 @@ class CArray::Serializer   # :nodoc:
   end
 
   private
+
+  # The header fields that describe the same array have to agree, and a
+  # source whose size is known has to hold what the header declares --
+  # checked before the array is allocated, so a short file cannot make
+  # the reader allocate what it declares.
+  def check_header (h)
+    ndim = h[:ndim]
+    unless ndim >= 1 && ndim <= CA_RANK_MAX
+      raise "corrupt CArray binary data (ndim #{ndim} out of 1..#{CA_RANK_MAX})"
+    end
+    dim = h[:shape][0, ndim]
+    if dim.any?(&:negative?) || dim.inject(:*) != h[:elements]
+      raise "corrupt CArray binary data (shape #{dim.inspect} does not " \
+            "hold #{h[:elements]} elements)"
+    end
+    fixlen = CArray.data_type_code(CA_FIXLEN)
+    if h[:data_type_code] != fixlen &&
+       h[:data_type_code] <= CArray.data_type_code(CA_OBJECT) &&
+       h[:element_bytes] != CArray.sizeof(h[:data_type_code])
+      raise "corrupt CArray binary data (element_bytes #{h[:element_bytes]} " \
+            "for data type #{CArray.data_type_name(h[:data_type_code]) rescue h[:data_type_code]})"
+    end
+    mask_bytes = (h[:has_mask] != 0) ? h[:elements] : 0
+    if h[:mask_bytes] != mask_bytes
+      raise "corrupt CArray binary data (mask_bytes cross-check failed)"
+    end
+    if @io.respond_to?(:size) && @io.respond_to?(:pos)
+      declared = h[:data_bytes] + mask_bytes + h[:trailer_bytes]
+      if @io.size - @io.pos < declared
+        raise "corrupt CArray binary data (declares #{declared} bytes after " \
+              "the header, the source holds #{@io.size - @io.pos})"
+      end
+    end
+  end
 
   # Build the trailer mapping (String-keyed) from the array's
   # attributes and data_class.  Returns {} when there is nothing to
@@ -331,6 +371,12 @@ class CArray::Serializer   # :nodoc:
   # synthesise an anonymous struct from the Layer 1 members[], else
   # leave the raw CA_FIXLEN array untouched.
   def wrap_data_class (ca, schema)
+    members = schema.is_a?(Hash) ? schema["members"] : nil
+    unless schema.is_a?(Hash) &&
+           (members.nil? || members.is_a?(Array) && members.all?(Hash))
+      raise "corrupt CArray binary data (data_class schema is not a " \
+            "mapping with a list of member mappings)"
+    end
     name = schema["name"]
     if name
       begin
