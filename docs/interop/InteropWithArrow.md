@@ -198,7 +198,7 @@ A nested `FixedSizeList(FixedSizeList(K), N)` just adds another trailing axis
 object, not a column) is the mirror of §9.1's Tensor export. Unlike
 the FixedSizeList column path, `Arrow::Tensor` does not implement the
 MemoryView protocol on the producer side (verified: `from_memory_view`
-rejects it — a red-arrow-side gap, the same one §9.7 hits on export). The
+rejects it — a red-arrow-side gap). The
 recipe uses `load_binary` directly on the tensor's underlying byte
 buffer:
 
@@ -804,10 +804,10 @@ buffer, and a **validity bitmap** built from the mask. Values export
 as raw bytes; the mask packs into bits with the byte-domain idiom of
 §4.4 read backwards.
 
-There is no export-side counterpart to `from_memory_view`:
-`Arrow::Buffer.new` accepts a byte string or a `GLib::Bytes`, not a
-MemoryView producer, so the values buffer is one `dump_binary` copy of
-`n` bytes (§9.6). Everything else fits with existing primitives.
+There is no export-side counterpart to `wrap_memory_view`, and none is
+needed: the values go across as one `dump_binary` copy (§9.2), which
+is what an Arrow buffer should be. Everything else fits with existing
+primitives.
 
 ### 9.1 Which CArray shapes an Arrow array can hold
 
@@ -897,11 +897,11 @@ binary string — the same layout Arrow's values buffer expects. When
 materialises the values first, so the resulting Arrow array owns its
 data.
 
-The copy is unavoidable today because `Arrow::Buffer.new` does not
-accept a MemoryView producer (§9.6). CArray *does* export MemoryView,
-so once red-arrow's `Arrow::Buffer.new` learns to accept an MV producer
-the copy would disappear; until then, one `dump_binary` per column is
-the cost.
+The copy is the right behaviour, not a cost to remove. An Arrow buffer
+is immutable by contract; handing Arrow the CArray's own memory would
+let any later write to the CArray show through the Arrow array. Zero
+copy pays only on import (§6), where the Arrow side is already
+immutable.
 
 ### 9.3 Boolean values
 
@@ -1012,21 +1012,6 @@ Arrow::ChunkedArray.new(chunks.map { |c| arrow_from_carray(c) })
 Reverse-mirror of §6: on the import side CAMeld is the way to *avoid*
 Arrow's combine copy; on the export side it is the way to *preserve*
 the chunk structure without materialising the whole column first.
-
-### 9.7 Acquisition gap (values buffer)
-
-`Arrow::Buffer.new` accepts only `uint8` byte arrays (typically Ruby
-`String` with `BINARY` encoding) or `GLib::Bytes`; it does not accept
-MemoryView producers. So the values buffer costs one `dump_binary`
-copy of `n` bytes on every export, even though CArray exports
-MemoryView. It is the same missing capability §3.1's Tensor note hits
-on import — red-arrow neither consumes nor produces MemoryView for its
-buffers — and it is unrelated to §8, which is a contract CArray holds
-deliberately rather than a capability anyone is missing.
-
-A red-arrow patch teaching `Arrow::Buffer.new` (or a companion
-`Arrow::Buffer.from_memory_view`) to accept an MV producer would close
-it. Until then, one `dump_binary` per column is the cost on export.
 
 ---
 
