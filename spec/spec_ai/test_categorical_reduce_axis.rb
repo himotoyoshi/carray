@@ -608,7 +608,7 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
           var_ref[c, *band_ix]  = UNDEF
           varp_ref[c, *band_ix] = UNDEF
         elsif n == 1
-          var_ref[c, *band_ix]  = 0.0
+          var_ref[c, *band_ix]  = UNDEF
           varp_ref[c, *band_ix] = 0.0
         else
           mean = vs.sum(0.0) / n
@@ -629,7 +629,8 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
   end
 
   def test_variance_axis_empty_and_single_cell_contracts
-    # Empty group → UNDEF (both variance and variancep); single cell → 0.0.
+    # Empty group → UNDEF (both variance and variancep); single cell → UNDEF
+    # for the sample variance, 0.0 for the population one.
     h = CArray.float64(6, 2, 3) { |i, y, x| (i + 1).to_f }
     # Set codes so group 2 has 1 cell at (0,0) and 0 cells at (0,1)
     codes = CArray.int32(6, 2, 3) { |i, y, x|
@@ -642,7 +643,8 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     cat = CACategorical.from_codes(codes, [:a, :b, :c])
     grp = h.group_by_category(cat)
     var = grp.variance(axis: 0)
-    assert_in_delta 0.0, var[2, 0, 0], 1e-12,           "single-cell → 0.0"
+    assert var.mask[2, 0, 0],                           "single-cell → UNDEF"
+    assert_in_delta 0.0, grp.variancep(axis: 0)[2, 0, 0], 1e-12, "single-cell variancep → 0.0"
     assert var.has_mask? && var.mask[2, 0, 1],          "empty → UNDEF"
   end
 

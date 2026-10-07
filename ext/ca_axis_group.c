@@ -310,7 +310,7 @@ group_op_code (VALUE vop)
    Empty / all-masked groups follow the CArray zero-contribution contract: an
    identity-bearing op returns its identity (sum 0, prod 1, count 0, all true,
    any false), a ratio / extremum returns UNDEF.  Sample variance / stddev:
-   n == 0 UNDEF, n == 1 -> 0.0, n >= 2 the formula.
+   n < 2 UNDEF, n >= 2 the formula.
 */
 static VALUE
 rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
@@ -616,8 +616,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* Empty / all-masked groups follow the same zero-contribution contract as
      CArray reductions (ERI, matching the categorical sibling): an identity-
      bearing op returns its identity (sum 0, prod 1, count 0, all true, any
-     false), a ratio / extremum returns UNDEF. Sample variance/stddev: n==0
-     UNDEF, n==1 -> 0.0 (the n=1 contract), n>=2 the formula. */
+     false), a ratio / extremum returns UNDEF. Sample variance/stddev: n<2
+     UNDEF (n-1 is zero), n>=2 the formula. */
   if ( op == GR_COUNT ) {
     int64_t *out = (int64_t *) co->ptr;
     for ( ca_size_t o = 0; o < nout; o++ ) out[o] = (int64_t) cnt[o];
@@ -662,8 +662,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
         break;
       case GR_VARIANCE:
       case GR_STDDEV:
-        if ( cnt[o] == 0 ) { out[o] = 0.0; MARK_UNDEF(o); }
-        else if ( cnt[o] == 1 ) { out[o] = 0.0; }         /* n=1 contract */
+        if ( cnt[o] < 2 ) { out[o] = 0.0; MARK_UNDEF(o); }
         else { double var = sumsq[o] / ( (double) cnt[o] - 1.0 );
                out[o] = ( op == GR_STDDEV ) ? sqrt(var) : var; }
         break;

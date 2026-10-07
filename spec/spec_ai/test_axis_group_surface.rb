@@ -82,8 +82,7 @@ class TestAxisGroupSurface < Test::Unit::TestCase
       when :min   then vals.empty? ? nil : vals.min.to_f
       when :max   then vals.empty? ? nil : vals.max.to_f
       when :variance, :stddev
-        next nil if vals.empty?
-        next 0.0 if vals.size == 1                    # n=1 contract
+        next nil if vals.size < 2                     # n-1 is zero
         m = vals.sum(0.0) / vals.size
         var = vals.sum(0.0) { |x| (x - m)**2 } / (vals.size - 1)
         op == :stddev ? Math.sqrt(var) : var

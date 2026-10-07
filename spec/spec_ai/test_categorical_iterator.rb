@@ -36,8 +36,7 @@ class TestCategoricalIterator < Test::Unit::TestCase
   # n==1 -> 0.0, n>=2 -> sample (ddof=1).
   def ref_variance(a)
     n = a.size
-    return :masked if n == 0
-    return 0.0 if n == 1
+    return :masked if n < 2                    # n-1 is zero
     m = a.sum.to_f / n
     a.sum { |x| (x - m)**2 } / (n - 1)
   end
@@ -94,7 +93,7 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_group grp.min,      labels.map { |l| ref[l].min.to_f }
     assert_group grp.mean,     labels.map { |l| ref[l].sum.to_f / ref[l].size }
     assert_group grp.median,   labels.map { |l| ref_median(ref[l]) }
-    # group 'c' is a singleton -> variance/stddev 0.0 (not masked)
+    # group 'c' is a singleton -> variance/stddev masked
     assert_group grp.variance, labels.map { |l| ref_variance(ref[l]) }
     assert_group grp.stddev,   labels.map { |l| ref_stddev(ref[l]) }
   end
@@ -203,17 +202,18 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_in_delta values.variance, grp.variance[0], 1e-12
   end
 
-  # ---- single-value group: variance/stddev 0.0 (matches CArray n=1) ---------
+  # ---- single-value group: sample variance/stddev masked (matches CArray n=1) -
 
-  def test_single_value_group_variance_is_zero
-    # 'a' has 1 element -> 0.0 (not masked); 'b' has 2 -> defined; empty -> masked
+  def test_single_value_group_variance_is_masked
+    # 'a' has 1 element -> masked (n-1 is zero); 'b' has 2 -> defined; empty -> masked
     cat = CA_OBJECT(%w[a b b]).categorize(labels: %w[a b c])
     grp = CA_DOUBLE([5, 10, 20]).group_by_category(cat)
-    assert_group grp.variance, [0.0, ref_variance([10, 20]), :masked]
-    assert_group grp.stddev,   [0.0, ref_stddev([10, 20]),   :masked]
+    assert_group grp.variance, [:masked, ref_variance([10, 20]), :masked]
+    assert_group grp.stddev,   [:masked, ref_stddev([10, 20]),   :masked]
+    assert_group grp.variancep, [0.0, 25.0, :masked]
     # matches flat CArray on the singleton
-    assert_equal false, grp.variance.is_masked[0]
-    assert_in_delta CA_DOUBLE([5]).variance, grp.variance[0], 1e-12
+    assert_same UNDEF, CA_DOUBLE([5]).variance
+    assert_same UNDEF, grp.variance[0]
   end
 
   # ---- value carries a mask: elements vs count_not_masked, mean denominator ----

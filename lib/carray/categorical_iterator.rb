@@ -35,8 +35,8 @@
 #      max / min                    -> value data type, empty/all-masked = MASKED
 #      mean                         -> float64,     empty/all-masked = MASKED
 #      median / percentile          -> float64,     empty/all-masked = MASKED
-#      variance / stddev (sample, ddof=1) -> float64, empty/all-masked = MASKED,
-#                                                   single value = 0.0 (n=1 contract)
+#      variance / stddev (sample, ddof=1) -> float64, fewer than two present
+#                                                   values = MASKED
 #      all / any                    -> boolean (boolean value data type only)
 #      labels                       -> cat.labels
 #

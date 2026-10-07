@@ -245,9 +245,8 @@ class CASegmentIterator < CAIterator
 
   # @overload variance
   #   Returns per-segment SAMPLE variance (ddof=1) as float64.  Matches
-  #   `CArray#variance` per segment: an empty or fully-masked segment is MASKED,
-  #   a single-value segment is `0.0` (CArray's n=1 contract), n>=2 is the
-  #   sample variance.
+  #   `CArray#variance` per segment: a segment with fewer than two present
+  #   values is MASKED, n>=2 is the sample variance.
   #   @return [CArray]
   def variance(axis: nil)
     return axis_by_masked_copy(axis, :variance) if axis
@@ -262,14 +261,14 @@ class CASegmentIterator < CAIterator
 
   # @overload stddev
   #   Returns per-segment SAMPLE standard deviation (ddof=1) as float64.
-  #   Matches `CArray#stddev` per segment (empty / all-masked MASKED,
-  #   single-value `0.0`).
+  #   Matches `CArray#stddev` per segment (fewer than two present values
+  #   MASKED).
   #   @return [CArray]
   def stddev(axis: nil)
     return axis_by_masked_copy(axis, :stddev) if axis
     m = moments
     return per_segment(core_reduce_type(:stddev)) { |s| s.stddev } unless m
-    variance.sqrt                    # sqrt propagates the n=0 mask
+    variance.sqrt                    # sqrt propagates the n<2 mask
   end
 
   # @overload prod
@@ -335,7 +334,7 @@ class CASegmentIterator < CAIterator
     return per_segment(core_reduce_type(:variancep)) { |s| s.variancep } unless m
     cnt = m[:count]
     vp  = variance * (cnt - 1).float64 / cnt.float64
-    vp[cnt.eq(0)] = UNDEF                 # empty / all-masked stays masked
+    vp[cnt.eq(1)] = 0.0                   # one value: defined, unlike variance
     vp
   end
 

@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `variance` and `stddev` (the sample statistics, dividing by one
+  less than the count) answer `UNDEF` when fewer than two values are
+  present, instead of `0.0`: the sample variance of a single value is not
+  defined. This holds for `CArray`, along an axis, and for every iterator
+  (`group_by_category`, `axis_group`, `windows`, `blocks`). `variancep` and
+  `stddevp` still answer `0.0` for a single value. To get the old answer,
+  pass `fill_value: 0.0`.
+
 - Fix: in an object array, a Float NaN loses every comparison in `min`,
   `max`, `minmax`, `min_index`, `max_index`, `min_addr`, `max_addr`,
   `cummin` and `cummax`, as it does in a float array:

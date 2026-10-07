@@ -470,12 +470,13 @@ grp.mean.is_masked[2]   #  => 1       empty mean is undefined (masked)
 
 Because the empty slot is a genuine masked cell — not a magic `NaN` — a downstream calculation propagates the missing-ness through the mask.
 
-A single-value group is not empty: its sample variance is `0.0`, matching `CArray#variance` on a one-element array:
+The sample variance divides by n − 1, so a single-value group has none and is masked, matching `CArray#variance` on a one-element array. Its population variance is `0.0`:
 
 ```ruby
 cat = CA_OBJECT(%w[a b b]).categorize
 grp = CA_DOUBLE([5, 10, 20]).group_by_category(cat)
-grp.variance   #  => [ 0.0, 50.0 ]     'a' has one value -> 0.0, not masked
+grp.variance    #  => [ UNDEF, 50.0 ]   'a' has one value
+grp.variancep   #  => [ 0.0, 25.0 ]
 ```
 
 ### Sorting within groups — `sort_addr`
@@ -836,7 +837,7 @@ Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless not
 | `min` / `max` | as `CArray#min` / `#max` | the value's own type (a boolean widens to uint64); empty / all-masked = `UNDEF` |
 | `minmax` | `[min, max]` | pair of length-`k` arrays |
 | `mean` | as `CArray#mean` | float64 for an integer value, exact for an object one; empty / all-masked = `UNDEF` |
-| `variance` / `stddev` | as `CArray#variance` / `#stddev` | sample (ddof = 1); single value = `0.0` |
+| `variance` / `stddev` | as `CArray#variance` / `#stddev` | sample (ddof = 1); fewer than two values = masked |
 | `variancep` / `stddevp` | as `CArray#variancep` / `#stddevp` | population (ddof = 0) |
 | `median` | as `CArray#median` | = `percentile(50)` |
 | `percentile(p)` | as `CArray#percentile` | `p` in `0..100` |

@@ -142,11 +142,10 @@ class TestObjectVariance < Test::Unit::TestCase
 
   def test_variance_single_element
     a = CA_OBJECT([5])
-    # sample variance: cnt < 2 -> INT2FIX(0) (the object-VALUE zero, not
-    # a mis-emitted Qfalse).
-    assert_equal(0, a.variance)
+    # sample variance: cnt < 2 -> UNDEF (n-1 is zero)
+    assert_same(UNDEF, a.variance)
     assert_equal(0, a.variancep)  # population of one point = 0
-    assert_equal(0.0, a.stddev)
+    assert_same(UNDEF, a.stddev)
     assert_equal(0.0, a.stddevp)
   end
 
@@ -154,7 +153,7 @@ class TestObjectVariance < Test::Unit::TestCase
     # Guard against the INT2FIX(0)-vs-C-literal-0 trap: a bad emit would
     # return Qfalse, which is != 0 in Ruby.
     a = CA_OBJECT([42])
-    assert_not_equal(false, a.variance)
-    assert_equal(0, a.variance)
+    assert_not_equal(false, a.variancep)
+    assert_equal(0, a.variancep)
   end
 end

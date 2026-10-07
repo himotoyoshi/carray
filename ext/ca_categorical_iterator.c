@@ -388,7 +388,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
   accumulates the per-segment centred sum of squares; variance = SS / (n-1).
   Centred (not the one-pass sum-of-squares) so the ε-close contract holds — a
   one-pass formula cancels catastrophically.  Matches CArray#variance per group:
-  count 0 -> masked (undefined), count 1 -> 0.0 (the n=1 contract), count >= 2 ->
+  count 0 or 1 -> masked (the sample variance is undefined), count >= 2 ->
   SS / (count-1).
 
   Surface (private): grouped.__reduceat_variance__(offsets, means, counts, out)
@@ -396,7 +396,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
     offsets = int64[k] segment STARTS
     means   = float64[k] per-segment mean (ignored where count < 2)
     counts  = int64[k]   per-segment present count
-    out     = float64[k] output: variance; count 0 masked, count 1 -> 0.0
+    out     = float64[k] output: variance; count 0 or 1 masked
 
 --------------------------------------------------------------------------- */
 
@@ -405,8 +405,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
     const T *gp = (const T *) grouped->ptr;                                     \
     for ( c = 0; c < k; c++ ) {                                                 \
       int64_t cnt = countp[c];                                                  \
-      if ( cnt == 0 ) { outp[c] = 0.0; outm[c] = 1; continue; } /* -> masked */ \
-      if ( cnt == 1 ) { outp[c] = 0.0; continue; }  /* n=1 contract: 0.0 */     \
+      if ( cnt < 2 ) { outp[c] = 0.0; outm[c] = 1; continue; }  /* undefined */ \
       { double mean = meanp[c], ss = 0.0;                                       \
         ca_size_t lo = (ca_size_t) offs[c];                                     \
         ca_size_t hi = (c + 1 < k) ? (ca_size_t) offs[c+1] : n, j;              \

@@ -2409,9 +2409,10 @@ module MkKernel
   #   Pass 1: sum = Σ x_i   via CA_SLAB_REDUCE_T_PLUS_EX (SIMD :plus)
   #           masked_cnt is populated as a side effect.
   #   mask trigger:
-  #     min_count < 0  (default) -> UNDEF iff all-masked, OR (for
-  #                                 :n_minus_1 divisor) if n_valid < 2.
+  #     min_count < 0  (default) -> UNDEF iff all-masked.
   #     min_count >= 0           -> UNDEF iff n_valid < min_count.
+  #     either way               -> UNDEF iff n_valid < 2 for the
+  #                                 :n_minus_1 divisor.
   #   Pass 2: M2 = Σ (x_i - mean)²  via the same macro with a centred
   #           REDUCE stmt.
   #   Finish: variance = M2 / DIVISOR (n or n-1); stddev variant applies
@@ -2549,11 +2550,9 @@ module MkKernel
     extra_args = ", ca_size_t min_count"
 
     # The default (min_count < 0) trigger fires when all cells are
-    # masked; for sample-variance/stddev we also need n_valid >= 2 to
-    # avoid division by zero, but the legacy behaviour returned 0
-    # (not UNDEF) for n_valid < required_min.  Preserve that: the
-    # default trigger only checks the all-masked case; the sub-required
-    # case falls through to the "return zero" branch below.
+    # masked.  Independently of min_count, fewer than required_min valid
+    # cells (2 for the n-1 divisor) leave the statistic undefined, so the
+    # cell is UNDEF: the sample variance of one value is 0/0.
     default_trigger = "masked_cnt == st.slab_elements"
 
     # Reduce-call plumbing.  :object keeps the scalar rb_funcall loop
@@ -2607,18 +2606,14 @@ module MkKernel
           ca_size_t masked_cnt = 0;
           #{p1_reduce_call}
           ca_size_t n_valid = st.slab_elements - masked_cnt;
-          int __trigger = (min_count < 0 ? #{default_trigger} : n_valid < min_count);
+          int __trigger = (min_count < 0 ? #{default_trigger} : n_valid < min_count)
+                          || n_valid < #{required_min};
           if ( __trigger ) {
             if ( ! op_mask ) {
               ca_create_mask(co);
               op_mask = (boolean8_t *) co->mask->ptr;
             }
             op_mask[out_i] = 1;
-            op[out_i++] = (#{out_c}) #{out_zero_typed};
-          } else if ( n_valid < #{required_min} ) {
-            /* Legacy degenerate case (e.g. sample variance with 1 unmasked
-               cell): return zero rather than UNDEF, matching pre-migration
-               behaviour of `cnt > 1 ? formula : 0`. */
             op[out_i++] = (#{out_c}) #{out_zero_typed};
           } else {
             #{mean_setup}

@@ -181,13 +181,15 @@ missing-ness through the mask.
 
 ### A single-value category
 
-Sample variance of one value is `0.0` — the same as `CArray#variance` on a
-one-element array. A single-value category is therefore `0.0`, not masked:
+The sample variance divides by n − 1, so it has no value for a single value:
+a single-value category is masked, the same as `CArray#variance` on a
+one-element array. The population variance of one value is `0.0`:
 
 ```ruby
 cat = CA_OBJECT(%w[a b b]).categorize
 grp = CA_DOUBLE([5, 10, 20]).group_by_category(cat)
-grp.variance   #  => [ 0.0, 50.0 ]     'a' has one value -> 0.0
+grp.variance    #  => [ UNDEF, 50.0 ]   'a' has one value
+grp.variancep   #  => [ 0.0, 25.0 ]
 ```
 
 ## Iterating the categories

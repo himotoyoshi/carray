@@ -329,11 +329,12 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
     assert_in_delta(4.333333333333333, a.variance(axis: 0), 1e-9)
   end
 
-  def test_variance_ki_one_element_returns_zero
-    # Sample variance with n=1: denominator (n-1)=0, guarded to 0.
+  def test_variance_ki_one_element_is_undef
+    # Sample variance with n=1: denominator (n-1)=0, no value.
     a = CArray.float64(1)
     a[0] = 5.0
-    assert_in_delta(0.0, a.variance(axis: 0), 1e-12)
+    assert_same(UNDEF, a.variance(axis: 0))
+    assert_in_delta(0.0, a.variancep(axis: 0), 1e-12)
   end
 
   # stddev_ki / stddevp_ki -- sqrt of variance forms.
