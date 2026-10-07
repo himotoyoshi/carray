@@ -394,6 +394,100 @@ ca_axis_dispatch_fill_value_cb (ca_size_t off, int oob, ca_size_t n, void *vctx)
   }
 }
 
+/* Rows whose innermost axis is a step-1 SHIFT axis.  View cell i of the row
+   reads parent cell start + i, so the cells with 0 <= start + i < size0 form
+   one run and go to cb together.  The cells before and after it are out of
+   range: under FILL / MASK every one of them is (cb gets each side as one
+   oob slab), under the other policies each maps to a cell of its own. */
+static void
+ca_axis_dispatch_shift_cell (const ca_axis_desc_t *ax, ca_size_t pstride,
+                             ca_size_t row_off, ca_size_t i, ca_size_t bytes,
+                             ca_slab_cb_t cb, void *ctx)
+{
+  ca_size_t pi = ca_bounds_normalize_index(ax->policy, ax->size0,
+                                           ax->start + i);
+  if ( pi < 0 || pi >= ax->size0 ) {
+    cb(row_off, 1, bytes, ctx);
+  }
+  else {
+    cb(row_off + pi * pstride, 0, bytes, ctx);
+  }
+}
+
+static void
+ca_axis_dispatch_for_each_shift_row (ca_axis_desc_t  *laxes,
+                                     const ca_size_t *pstrides,
+                                     int8_t           lndim,
+                                     ca_size_t        bytes,
+                                     ca_size_t        total_elements,
+                                     ca_slab_cb_t     cb,
+                                     void            *ctx)
+{
+  int8_t               inner   = lndim - 1;
+  const ca_axis_desc_t *ax     = &laxes[inner];
+  ca_size_t            pstride = pstrides[inner];
+  ca_size_t            count   = ax->count;
+  int                  coalesce = ( ax->policy == CA_BOUNDS_FILL
+                                    || ax->policy == CA_BOUNDS_MASK );
+  ca_op_prefix_axis_t  prefix[CA_RANK_MAX];
+  ca_size_t            idx[CA_RANK_MAX];
+  ca_size_t            lo, hi, n_rows, r, i;
+  int8_t               k;
+
+  /* In-range view cells: lo <= i < hi. */
+  lo = -ax->start;
+  if ( lo < 0 )     lo = 0;
+  if ( lo > count ) lo = count;
+  hi = ax->size0 - ax->start;
+  if ( hi > count ) hi = count;
+  if ( hi < lo )    hi = lo;
+
+  ca_axis_dispatch_classify_prefix(laxes, pstrides, inner, prefix);
+  for ( k = 0; k < inner; k++ ) idx[k] = 0;
+
+  n_rows = total_elements / count;
+  for ( r = 0; r < n_rows; r++ ) {
+    int oob;
+    ca_size_t row_off = ca_axis_dispatch_prefix_offset(prefix, idx, inner,
+                                                       &oob);
+    if ( oob ) {
+      cb(row_off, 1, count * bytes, ctx);
+    }
+    else {
+      if ( lo > 0 ) {
+        if ( coalesce ) {
+          cb(row_off, 1, lo * bytes, ctx);
+        }
+        else {
+          for ( i = 0; i < lo; i++ ) {
+            ca_axis_dispatch_shift_cell(ax, pstride, row_off, i, bytes,
+                                        cb, ctx);
+          }
+        }
+      }
+      if ( hi > lo ) {
+        cb(row_off + (ax->start + lo) * pstride, 0, (hi - lo) * bytes, ctx);
+      }
+      if ( hi < count ) {
+        if ( coalesce ) {
+          cb(row_off, 1, (count - hi) * bytes, ctx);
+        }
+        else {
+          for ( i = hi; i < count; i++ ) {
+            ca_axis_dispatch_shift_cell(ax, pstride, row_off, i, bytes,
+                                        cb, ctx);
+          }
+        }
+      }
+    }
+
+    for ( k = inner - 1; k >= 0; k-- ) {
+      if ( ++idx[k] < prefix[k].count ) break;
+      idx[k] = 0;
+    }
+  }
+}
+
 /* Generic per-slab driver.  Walks the (post-merge / post-layout)
    prefix axes row-major and invokes `cb` once per slab iteration.
    The all-slab case degenerates to a single `cb` invocation with
@@ -435,6 +529,17 @@ ca_axis_dispatch_for_each_slab (CArray          *parent,
      oob = 0 is guaranteed. */
   if ( slab_start == 0 ) {
     cb(slab_base, 0, slab_bytes, ctx);
+    return;
+  }
+
+  /* Innermost SHIFT axis with step 1: the in-range part of each row is one
+     contiguous run of parent cells, so it goes to cb as one slab instead of
+     one cell at a time. */
+  if ( slab_start == lndim
+       && laxes[lndim - 1].kind == CA_AXIS_KIND_SHIFT
+       && laxes[lndim - 1].step == 1 ) {
+    ca_axis_dispatch_for_each_shift_row(laxes, pstrides, lndim, bytes,
+                                        total_elements, cb, ctx);
     return;
   }
 
