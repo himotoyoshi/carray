@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `offset:` on a struct member places it or is refused, where it
+  was dropped. A nested `struct` or `array` member takes its `offset:`
+  in a packed struct; in an aligned struct (no `pack:`) and for a union
+  member other than at 0, `offset:` raises `CAStruct::DefinitionError`.
+
 - Change: `CArray.save` / `CArray.dump` refuse a Face other than a
   record (`CATime`, `CATimedelta`, string arrays, categoricals) with
   `TypeError`, as `Marshal.dump` does. The file kept the storage without

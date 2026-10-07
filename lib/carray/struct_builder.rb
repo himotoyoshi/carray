@@ -534,6 +534,10 @@ class CAStruct::Builder  # :nodoc:
     when :struct                           ### struct
       case @align
       when nil                             ### -- aligned
+        if opt[:offset]
+          raise CAStruct::DefinitionError,
+                "offset: places a member only in a packed struct (pass pack:)"
+        end
         @offset = alignment(@offset, data_type, opt)
         opt[:offset] = @offset
       else                                 ### -- packed
@@ -548,6 +552,10 @@ class CAStruct::Builder  # :nodoc:
       @offset += mem.byte_length
       @extent = @offset if @offset > @extent
     when :union                            ### union
+      if opt[:offset] && opt[:offset] != 0
+        raise CAStruct::DefinitionError,
+              "a union member is always at offset 0 (got offset: #{opt[:offset]})"
+      end
       alignment(0, data_type, opt)
       opt[:offset] = 0
       mem = Member.new(id, data_type, opt)
@@ -577,8 +585,9 @@ class CAStruct::Builder  # :nodoc:
       raise CAStruct::DefinitionError,
             "no type given for nested struct member (pass a block or :type)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(st, arg)
+      member(st, arg, place)
     end
     return st
   end
@@ -602,8 +611,9 @@ class CAStruct::Builder  # :nodoc:
       raise CAStruct::DefinitionError,
             "no type given for nested union member (pass a block or :type)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(st, arg)
+      member(st, arg, place)
     end
     return st
   end
@@ -620,8 +630,9 @@ class CAStruct::Builder  # :nodoc:
       raise CAStruct::DefinitionError,
             "no :type given for array member (expected a CArray template)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(opt[:type], arg)
+      member(opt[:type], arg, place)
     end
   end
 
