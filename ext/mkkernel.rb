@@ -2161,6 +2161,11 @@ module MkKernel
         if k[:all_nan_result] == :undef && FLOAT_DTYPES.include?(src)
           all_nan_flag = "__anf_all_nan"
           io.puts "      int #{all_nan_flag} = 0;"
+        elsif k[:all_nan_result] == :undef && src == :object
+          # The object body takes no NaN cell, so a slab of present NaN
+          # cells leaves the position unset.
+          all_nan_flag = "__anf_all_nan"
+          io.puts "      int #{all_nan_flag} = ( masked_cnt < st.slab_elements && (#{finish_expr}) < 0 );"
         end
         emit_all_nan_fixup(io, k, src, si, pairs,
                            "masked_cnt < st.slab_elements",
@@ -6959,7 +6964,7 @@ MkKernel.reduce :min,
                      # bool acc is u64 (numeric output); cast the boolean8_t
                      # load to match and avoid a signed/unsigned compare.
                      bool:    "acc = ((uint64_t) v < acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (RTEST(rb_funcall(v, rb_intern("<"), 1, acc))) acc = v;' },
+                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v;' },
   reduction_kind:  :min,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic min (byte order == the fixlen sort
@@ -6984,7 +6989,7 @@ MkKernel.reduce :max,
   # 0/1); the boolean-returning twin is `any` (= bool max).
   reduce:          { numeric: "acc = (v > acc) ? v : acc",
                      bool:    "acc = ((uint64_t) v > acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (RTEST(rb_funcall(v, rb_intern(">"), 1, acc))) acc = v;' },
+                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v;' },
   reduction_kind:  :max,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic max (byte order == the fixlen sort order).
@@ -7013,6 +7018,17 @@ MkKernel.reduce :max,
 # modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
 # or mostly-true `any`) a profile-driven early-break variant can be
 # added later as a separate kernel.
+MkKernel.header_block <<~C
+  /* CA_OBJ_ISNAN: a stored Float NaN in an object cell.  The object lanes
+     of min / max / minmax / argmin / argmax / cummin / cummax let a NaN
+     lose every comparison, as the float lanes do: it never displaces
+     another value, and a run of nothing but NaN answers NaN (UNDEF for a
+     position).  */
+  #ifndef CA_OBJ_ISNAN
+  #define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
+  #endif
+C
+
 MkKernel.header_block <<~C
   /* BOOL2VAL: bool -> Ruby (Qtrue/Qfalse).  Used as ruby_scalar wrapper
      for the all/any flat-reduction Ruby surface so `a.all` / `a.any`
@@ -7196,7 +7212,7 @@ MkKernel.reduce :minmax,
                      # CA_OBJECT minmax via Qundef sentinel + first-cell-init.
                      # One sentinel guards both lo + hi (they go Qundef
                      # together on init, get set together on first reduce).
-                     object:  'if (lo == Qundef) { lo = v; hi = v; } else { if (RTEST(rb_funcall(v, rb_intern("<"), 1, lo))) lo = v; if (RTEST(rb_funcall(v, rb_intern(">"), 1, hi))) hi = v; }' },
+                     object:  'if (lo == Qundef) { lo = v; hi = v; } else if (!CA_OBJ_ISNAN(v)) { if (CA_OBJ_ISNAN(lo) || RTEST(rb_funcall(v, rb_intern("<"), 1, lo))) lo = v; if (CA_OBJ_ISNAN(hi) || RTEST(rb_funcall(v, rb_intern(">"), 1, hi))) hi = v; }' },
   outputs:         2,
   all_nan_result:  :nan,
   finish:          { min: "lo", max: "hi" },
@@ -7240,7 +7256,7 @@ MkKernel.reduce :argmin,
                      best_i: "-1" },
   reduce:          { numeric: "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      bool:    "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
-                     object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern("<"), 1, best_v))) { best_v = v; best_i = idx; }' },
+                     object:  'if (!CA_OBJ_ISNAN(v) && (best_v == Qundef || RTEST(rb_funcall(v, rb_intern("<"), 1, best_v)))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   # CA_FIXLEN: position of the memcmp-lexicographic min (first-wins on ties).
   fixlen:          :argmin,
@@ -7261,7 +7277,7 @@ MkKernel.reduce :argmax,
                      best_i: "-1" },
   reduce:          { numeric: "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      bool:    "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
-                     object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern(">"), 1, best_v))) { best_v = v; best_i = idx; }' },
+                     object:  'if (!CA_OBJ_ISNAN(v) && (best_v == Qundef || RTEST(rb_funcall(v, rb_intern(">"), 1, best_v)))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   # CA_FIXLEN: position of the memcmp-lexicographic max (first-wins on ties).
   fixlen:          :argmax,
@@ -7306,7 +7322,7 @@ MkKernel.reduce :argmin_addr,
                      best_i: "-1" },
   reduce:          { numeric: "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      bool:    "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
-                     object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern("<"), 1, best_v))) { best_v = v; best_i = idx; }' },
+                     object:  'if (!CA_OBJ_ISNAN(v) && (best_v == Qundef || RTEST(rb_funcall(v, rb_intern("<"), 1, best_v)))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   source:          MkKernel::ALL_NUMERIC + [:bool, :object],
   output:          :i64,
@@ -7324,7 +7340,7 @@ MkKernel.reduce :argmax_addr,
                      best_i: "-1" },
   reduce:          { numeric: "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      bool:    "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
-                     object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern(">"), 1, best_v))) { best_v = v; best_i = idx; }' },
+                     object:  'if (!CA_OBJ_ISNAN(v) && (best_v == Qundef || RTEST(rb_funcall(v, rb_intern(">"), 1, best_v)))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   source:          MkKernel::ALL_NUMERIC + [:bool, :object],
   output:          :i64,
@@ -7645,7 +7661,7 @@ MkKernel.scan :cummax,
   step:         { float: "acc = fmax(acc, v); r = acc",
                   numeric: "if (v > acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v > acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (RTEST(rb_funcall(v, rb_intern(">"), 1, acc))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
@@ -7665,7 +7681,7 @@ MkKernel.scan :cummin,
   step:         { float: "acc = fmin(acc, v); r = acc",
                   numeric: "if (v < acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v < acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (RTEST(rb_funcall(v, rb_intern("<"), 1, acc))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef

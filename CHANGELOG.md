@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: in an object array, a Float NaN loses every comparison in `min`,
+  `max`, `minmax`, `min_index`, `max_index`, `min_addr`, `max_addr`,
+  `cummin` and `cummax`, as it does in a float array:
+  `CA_OBJECT([NaN, 1.0, 2.0]).min` is `1.0` (was `NaN`). A run of nothing
+  but NaN still answers NaN, and its position is UNDEF.
+
 - Fix: `sum`, `mean`, `min`, `max`, `prod`, `accumulate` and `count` along
   one axis honour `min_count:` (and `fill_value:`) when the array is large
   and contiguous; above a size threshold they ignored it and returned the
