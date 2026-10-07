@@ -53,7 +53,10 @@ arr = chunked_array.combine   # => one Arrow::Array, offset 0, one buffer pair
 
 `combine` gives a fresh contiguous array (`offset == 0`, one values
 buffer, one validity bitmap), which makes the import a single pass with
-no per-chunk bookkeeping.
+no per-chunk bookkeeping. The `offset == 0` matters for correctness, not
+only convenience: red-arrow hands a sliced array's values over MemoryView
+from the wrong starting point (§3), so every recipe below expects an
+array at offset 0.
 
 `combine` copies the chunks into one new buffer, so the import owns its
 data from here on. That is what you want: the result is a plain,
@@ -78,6 +81,26 @@ value = CArray.from_memory_view(arr)   # int32 Arrow array -> CA_INT32 CArray
 
 The returned CArray owns its buffer (a copy). Null slots hold whatever
 Arrow left there (typically `0`); the mask built next marks them.
+
+**A sliced array must be combined first.** An `Arrow::Array` produced by
+`slice` shares its parent's buffers and records where it starts in
+`offset`. red-arrow's MemoryView export (checked with red-arrow 25.0.1)
+advances the values pointer by `offset` *bytes* instead of `offset`
+*elements*, so for any type wider than one byte the values arrive
+shifted and wrong — no error is raised. `Int32Array.new([0, 1, 2, 3, 4])
+.slice(1, 3)` reads back as `[16777216, 33554432, 50331648]`, not
+`[1, 2, 3]`. CArray reads what it is given; the shift happens before it.
+A column that went through `combine` (§2) is always at offset 0. For a
+single `Arrow::Array` that may be a slice, combine it on its own:
+
+```ruby
+arr = Arrow::ChunkedArray.new([arr]).combine if arr.offset > 0
+```
+
+This applies to every recipe in this chapter that reads values through
+MemoryView: the numeric import above, and the categorical and record
+imports in §3.1. The string import in §3.1 does not use MemoryView but
+also assumes offset 0, so it carries the same line.
 
 ### 3.1 Which Arrow types a CArray can hold
 
@@ -222,6 +245,7 @@ column's storage. Combine first (§2) so the array is a single buffer at offset 
 ```ruby
 # An Arrow utf8 / large_utf8 array -> an owned CAConstString.
 def const_string_from_arrow(arr)
+  arr    = Arrow::ChunkedArray.new([arr]).combine if arr.offset > 0   # §3
   n      = arr.length
   large  = arr.is_a?(Arrow::LargeStringArray)   # int64 offsets vs int32
   values = arr.data_buffer.data.to_s            # the concatenated bytes (one copy)
@@ -265,6 +289,7 @@ the dictionary through the string recipe above — assembled with
 ```ruby
 # An Arrow DictionaryArray (string dictionary) -> a CACategorical.
 def categorical_from_arrow(dict)
+  dict   = Arrow::ChunkedArray.new([dict]).combine if dict.offset > 0  # §3
   codes  = CArray.from_memory_view(dict.indices)     # the N codes (bulk, no boxing)
   labels = const_string_from_arrow(dict.dictionary)  # the small value vocabulary
 
@@ -307,6 +332,7 @@ ARROW_TO_CA = {
 }
 
 def record_from_arrow(st)
+  st     = Arrow::ChunkedArray.new([st]).combine if st.offset > 0      # §3
   fields = st.value_data_type.fields
 
   # Mirror the Arrow schema as a CAStruct data class (name + fixed-width type).
@@ -503,8 +529,10 @@ counts at all. The next section separates the two.)
      leading bits that belong to earlier elements. This has nothing to do
      with odd bit counts — it is purely "this view begins partway into a
      shared buffer." Use `[arr.offset...]`, not `[0...]`. After `combine`
-     the offset is `0`, but writing `arr.offset` keeps the code correct
-     for un-combined arrays too.
+     the offset is `0`, so the term costs nothing there. It is still
+     written out so the mask follows the bitmap's own layout, but it does
+     not make a sliced array safe to import: the *values* of a sliced
+     array come through MemoryView shifted (§3), so combine it first.
    - **Upper end `arr.offset + n` — trim the surplus bits.** `~bytes`
      and `.bitarray` work in whole bytes, so when `n` is not a multiple
      of 8 the last byte carries a few extra high bits past the real data.
@@ -549,7 +577,8 @@ c2 = Arrow::Int32Array.new([nil, 5])
 column = Arrow::ChunkedArray.new([c1, c2])
 
 carray_from_arrow_column(column)
-# => <CArray.int32(5): mask=2  [ 1, _, 3, _, 5 ]>
+# => <CArray.int32(5): elem=5 mask=2 mem=20b
+#    [ 1, _, 3, _, 5 ]>
 ```
 
 ---
@@ -588,10 +617,10 @@ def caview_from_arrow_column(column)
   chunks = column.chunks.map do |arr|
     n = arr.length
 
-    # NOTE: wrap_memory_view currently does not honor arr.offset > 0
-    # (verified against Arrow::Int32Array.slice); a sliced chunk falls back
-    # to a per-chunk combine before wrapping. Un-sliced chunks (the common
-    # case for a freshly built ChunkedArray) take the zero-copy path.
+    # A sliced chunk (offset > 0) reaches MemoryView from the wrong
+    # starting point (§3), so it is combined on its own before wrapping.
+    # Un-sliced chunks (the common case for a freshly built ChunkedArray)
+    # take the zero-copy path.
     src = (arr.offset == 0) ? arr : Arrow::ChunkedArray.new([arr]).combine
     v   = CArray.wrap_memory_view(src)      # read-only CAWrap, zero-copy
 
@@ -616,13 +645,15 @@ c2 = Arrow::Int32Array.new([nil, 5])
 column = Arrow::ChunkedArray.new([c1, c2])
 
 view = caview_from_arrow_column(column)
-# => <CAMeld.int32(5): mask=2 ro [ 1, _, 3, _, 5 ]>
+# => <CAMeld.int32(5): elem=5 mask=2 mem=20b ro
+#    [ 1, _, 3, _, 5 ]>
 view.sum      # => 9.0   (skipna; per-parent decompose fast path)
 view.read_only?   # => true
 
 # When you actually need an owned, writable copy:
 owned = view.copy
-# => <CArray.int32(5): mask=2 [ 1, _, 3, _, 5 ]>
+# => <CArray.int32(5): elem=5 mask=2 mem=20b
+#    [ 1, _, 3, _, 5 ]>
 ```
 
 ### 6.2 When to use which
@@ -673,12 +704,12 @@ code still writes the same three idioms above through it.
   above. The recipe belongs in a bridge / library / class, not in
   ordinary user code — see [MemoryView.md §8.1](MemoryView.md#81-attaching-a-mask-onto-a-read-only-wrap-library--class-author-only).
   Non-nullable chunks need no escape.
-- **Sliced chunks (`arr.offset > 0`) are not honored** by
-  `wrap_memory_view` / `from_memory_view` today (verified: a
-  `Arrow::Int32Array.slice(3, 4)` wrapped through MemoryView returns
-  garbage). The recipe above falls back to a per-chunk `combine` in that
-  case, which still avoids the full-column combine of §2 but costs one
-  chunk's worth of copy per sliced chunk. Freshly built ChunkedArrays
+- **Sliced chunks (`arr.offset > 0`) cost a copy.** red-arrow exports a
+  sliced array's values over MemoryView from the wrong starting point
+  (§3), so a sliced chunk cannot be wrapped zero-copy. The recipe above
+  combines such a chunk on its own first, which still avoids the
+  full-column combine of §2 but costs one chunk's worth of copy per
+  sliced chunk. Freshly built ChunkedArrays
   usually have `offset == 0` on every chunk; slicing is what introduces
   the offset.
 - **Mask cost per chunk = §4 unchanged.** The bitmap unpack is still
