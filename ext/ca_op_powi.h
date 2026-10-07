@@ -23,6 +23,14 @@
 #include "carray.h"
 #include <stdint.h>
 
+/* The text between the two markers below is also handed, as it stands, to
+   an evaluator that compiles a kernel body calling op_powi_<type>
+   (CArray.__kernel_helpers__, written into the build by mkkernel.rb).  It
+   may use only <stdint.h>, float32_t / float64_t and ca_zerodiv: what such
+   an evaluator's C declares.  The complex instantiations stay outside. */
+
+/* BEGIN kernel helpers */
+
 /* x raised to a non-negative power, by binary exponentiation.  The power
    is unsigned so that the magnitude of INT64_MIN is representable. */
 #define op_powi_magnitude(type) \
@@ -98,6 +106,9 @@ op_powi(int64_t)
 op_powi_u(uint64_t)
 op_powi_fc(float32_t)
 op_powi_fc(float64_t)
+
+/* END kernel helpers */
+
 op_powi_fc(cmplx64_t)
 op_powi_fc(cmplx128_t)
 

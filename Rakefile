@@ -97,10 +97,13 @@ task :build_ext do
   # fires and mkkernel runs, so regeneration is transparent.  A bare
   # `cd ext && make` is the caller's responsibility -- run extconf explicitly
   # after touching mkkernel.rb.
+  # ca_op_powi.h is an input too: the generator copies part of it into the
+  # build (CArray.__kernel_helpers__).
   kernels_stamp = "ext/carray_kernels.stamp"
+  kernels_inputs = %w[ext/mkkernel.rb ext/ca_op_powi.h]
   kernels_stale = File.exist?("ext/mkkernel.rb") && (
     !File.exist?(kernels_stamp) ||
-    File.stat("ext/mkkernel.rb").mtime > File.stat(kernels_stamp).mtime
+    kernels_inputs.any? { |f| File.stat(f).mtime > File.stat(kernels_stamp).mtime }
   )
   need_extconf = !File.exist?("ext/Makefile") || prev != curr || kernels_stale
   Dir.chdir("ext") do

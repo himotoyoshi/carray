@@ -340,11 +340,14 @@ end
 # compiling static sources, which is one pass with no race.
 #
 # carray_kernels.stamp is the mtime witness:
-#   - here: regenerate and touch it when mkkernel.rb is newer
+#   - here: regenerate and touch it when mkkernel.rb or ca_op_powi.h (whose
+#     helper text the generator copies) is newer
 #   - in the Rakefile (rake build_ext): the same stamp triggers need_extconf
 CARRAY_KERNELS_STAMP = "carray_kernels.stamp"
 if ( not File.exist?(CARRAY_KERNELS_STAMP) ) or
-    File.stat("mkkernel.rb").mtime > File.stat(CARRAY_KERNELS_STAMP).mtime
+    %w[mkkernel.rb ca_op_powi.h].any? { |f|
+      File.stat(f).mtime > File.stat(CARRAY_KERNELS_STAMP).mtime
+    }
   # passing "." makes the generator write the split files into ext/
   unless system("ruby mkkernel.rb .")
     raise "mkkernel.rb failed to generate split kernel files"

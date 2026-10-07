@@ -6633,8 +6633,24 @@ module MkKernel
   BODY_TABLE_DTYPES = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
                          bool cmplx64 cmplx128].freeze
 
+  # Kernels written outside this generator that a lazy expression can still
+  # hold.  A Float or Complex array to an Integer power is CABinOp's ipow
+  # (ext/ca_op_ipower.c, which applies op_powi_<type> cell by cell); its
+  # body is that call.
+  EXTRA_BODY_ROWS = %w[float32 float64 cmplx64 cmplx128].map { |t|
+    ["binop", "ipow", t, "(#3) = op_powi_<type>((#1), (#2));"]
+  }.freeze
+
+  # The helpers the bodies call that are not in the C standard library:
+  # the part of ca_op_powi.h between its markers, as it stands.
+  def self.kernel_helpers
+    text = File.read(File.join(__dir__, "ca_op_powi.h"))
+    text[%r{/\* BEGIN kernel helpers \*/\n(.*)/\* END kernel helpers \*/}m, 1] or
+      raise "ca_op_powi.h: kernel helper markers not found"
+  end
+
   def self.body_table_rows
-    rows = []
+    rows = EXTRA_BODY_ROWS.map(&:dup)
     KERNELS.each do |k|
       next unless %i[monop binop triop moncmp bincmp].include?(k[:kind])
       BODY_TABLE_DTYPES.each do |src|
@@ -6700,6 +6716,17 @@ module MkKernel
         }
         return Qnil;
       }
+
+      /* CArray.__kernel_helpers__ -> String: the C a body above may call
+         beyond the standard library, for the caller to put ahead of it. */
+      static const char ca_kernel_helpers[] =
+        #{c_string_literal(kernel_helpers)};
+
+      static VALUE
+      rb_ca_s_kernel_helpers (VALUE klass)
+      {
+        return rb_str_new_cstr(ca_kernel_helpers);
+      }
     C
   end
 
@@ -6721,6 +6748,8 @@ module MkKernel
     end
     io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
     io.puts "                             rb_ca_s_kernel_body, 3);"
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_helpers__\","
+    io.puts "                             rb_ca_s_kernel_helpers, 0);"
     io.puts "}"
   end
 
@@ -6735,6 +6764,8 @@ module MkKernel
     KERNELS.each { |k| emit_init_line(io, k) }
     io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_body__\","
     io.puts "                             rb_ca_s_kernel_body, 3);"
+    io.puts "  rb_define_singleton_method(rb_cCArray, \"__kernel_helpers__\","
+    io.puts "                             rb_ca_s_kernel_helpers, 0);"
     io.puts "}"
   end
 

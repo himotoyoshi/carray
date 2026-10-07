@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a lazy expression holding a Float array to an Integer power
+  (`x.lazy ** 2`) is handed to a registered expression evaluator such as
+  carray-jit; it was always computed by CArray itself. For evaluator
+  authors, `CArray.__kernel_helpers__` returns the C that the kernel bodies
+  call beyond the standard library (the integer-power helpers), to be put
+  ahead of them; an integer array's power body already needed it.
+
 - Change: `minmax` of an empty or fully masked array, or one with fewer
   cells than `min_count:` asks for, returns `[UNDEF, UNDEF]` instead of a
   single `UNDEF`, so `lo, hi = a.minmax` always gets both. This is what the

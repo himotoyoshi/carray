@@ -2,7 +2,9 @@
 #  Turning a lazy expression into a plan a compiler can read.
 #
 #  A lazy view is already a typed, closed expression graph, and the kernels
-#  already carry the C that computes each operation (CArray.__kernel_body__).
+#  already carry the C that computes each operation (CArray.__kernel_body__,
+#  with CArray.__kernel_helpers__ for the functions a body calls beyond the
+#  C standard library).
 #  What is missing between them is the reading: which operation each node is,
 #  what its mask does, and where the leaves are.  That is what a plan holds.
 #
@@ -54,7 +56,10 @@ class CArray
     TRIOP_NAMES = { :__clip_ki__ => :clip }.freeze
 
     MONOP_BY_ID = CArray::LAZY_MONOP_OP_IDS.invert.freeze
-    BINOP_BY_ID = CArray::LAZY_BINOP_OP_IDS.invert.freeze
+    # A Float or Complex array to an Integer power is its own node, ipow,
+    # which `**` makes and no table above names.
+    BINOP_BY_ID = CArray::LAZY_BINOP_OP_IDS.invert
+                    .merge(CABinOp::OP_IPOWER => :ipow).freeze
     TRIOP_BY_ID = CArray::LAZY_TRIOP_OP_IDS.invert.freeze
     MONCMP_BY_ID = CArray::LAZY_MONCMP_OP_IDS.invert.freeze
     # The table holds both spellings of each comparison (`lt` and `<`); the
