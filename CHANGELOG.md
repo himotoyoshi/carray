@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: reading or writing a block of a `roll` view that spans its rows
+  (`r[nil, 10..19]`, or a slice of a 3-D roll) is three to six times
+  faster: it moves as a few strided blocks of the parent instead of one
+  transfer per row. Results are unchanged.
 - Change: reductions over a `shift` or `window` view are faster. When the
   last axis is shifted, `sum`, `min`, `mean` and the like run about ten
   times faster, and the same reductions along an outer axis

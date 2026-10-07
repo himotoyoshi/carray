@@ -274,6 +274,95 @@ ca_roll_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
+  /* The inner range is one run of a parent row, or two when it wraps, and
+     the rows along the next axis out are consecutive parent rows except
+     across that axis's wrap.  So each pass over the axes further out moves
+     at most two strided boxes per inner run, instead of one transfer per
+     row.  A box over an unwrapped inner range is already the request's own
+     layout; a box over one of two inner runs goes through a scratch whose
+     rows are spliced into the request's.  Object cells keep the per-row
+     path: a scratch would hold the VALUEs a parent produces where the GC
+     cannot see them. */
+  if ( inner >= 1 ) {
+    int8_t    m  = inner - 1;
+    ca_size_t dim_in = parent->dim[inner];
+    ca_size_t p0 = starts[inner] - ca->reps[inner];
+    ca_size_t seg_p[2], seg_n[2], seg_i[2];
+    int       nseg, sg;
+    if (p0 < 0) p0 += dim_in;
+    if ( p0 + counts[inner] <= dim_in ) {
+      nseg = 1;
+      seg_p[0] = p0; seg_n[0] = counts[inner]; seg_i[0] = 0;
+    }
+    else {
+      nseg = 2;
+      seg_p[0] = p0; seg_n[0] = dim_in - p0;            seg_i[0] = 0;
+      seg_p[1] = 0;  seg_n[1] = counts[inner] - seg_n[0]; seg_i[1] = seg_n[0];
+    }
+    if ( nseg == 1 || ca->data_type != CA_OBJECT ) {
+      volatile VALUE holder = 0;
+      char *tmp = NULL;
+      if ( nseg == 2 ) {
+        ca_size_t wide = seg_n[0] > seg_n[1] ? seg_n[0] : seg_n[1];
+        tmp = (char *) ALLOCV(holder, counts[m] * wide * ca->bytes);
+      }
+      for (k = 0; k < m; k++) o[k] = 0;
+      while (1) {
+        ca_size_t pbase = 0, doff = 0;
+        for (k = 0; k < m; k++) {
+          ca_size_t j = (starts[k] + o[k]) - ca->reps[k];
+          if (j < 0) j += parent->dim[k];
+          pbase += j * pnative[k];
+          doff  += o[k] * dstride[k];
+        }
+        for (sg = 0; sg < nseg; sg++) {
+          ca_size_t r = 0;
+          while (r < counts[m]) {
+            ca_size_t pm = (starts[m] + r) - ca->reps[m];
+            ca_size_t run, q;
+            ca_size_t pstarts[CA_RANK_MAX], pcounts[CA_RANK_MAX], pstrides[CA_RANK_MAX];
+            char     *rows = d + doff + r * dstride[m] + seg_i[sg] * ca->bytes;
+            ca_size_t rowb = seg_n[sg] * ca->bytes;
+            if (pm < 0) pm += parent->dim[m];
+            run = parent->dim[m] - pm;
+            if (run > counts[m] - r) run = counts[m] - r;
+            ca_addr2index((CArray *) parent,
+                          (pbase + pm * pnative[m] + seg_p[sg] * pnative[inner])
+                          / parent->bytes, pstarts);
+            for (k = 0; k < ndim; k++) { pcounts[k] = 1; pstrides[k] = 0; }
+            pcounts[m]      = run;
+            pstrides[m]     = pnative[m];
+            pcounts[inner]  = seg_n[sg];
+            pstrides[inner] = pnative[inner];
+            if ( nseg == 1 ) {
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, rows, dir);
+            }
+            else if ( dir == CA_XFER_GET ) {
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, tmp, dir);
+              for (q = 0; q < run; q++) {
+                memcpy(rows + q * dstride[m], tmp + q * rowb, rowb);
+              }
+            }
+            else {
+              for (q = 0; q < run; q++) {
+                memcpy(tmp + q * rowb, rows + q * dstride[m], rowb);
+              }
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, tmp, dir);
+            }
+            r += run;
+          }
+        }
+        k = m - 1;
+        while (k >= 0) { if (++o[k] < counts[k]) break; o[k] = 0; k--; }
+        if (k < 0) break;
+      }
+      if ( tmp ) {
+        ALLOCV_END(holder);
+      }
+      return;
+    }
+  }
+
   for (k = 0; k < ndim; k++) o[k] = 0;
   while (1) {
     ca_size_t pbase = 0, doff = 0, i;
