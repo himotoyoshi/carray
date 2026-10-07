@@ -219,6 +219,19 @@ ca_record_build (VALUE klass, VALUE data_class, VALUE parent_val)
              "CARecord requires a CA_FIXLEN parent (got data_type=%d)",
              parent_ca->data_type);
   }
+  /* Each record is read and written at the data_class's member offsets,
+     so the parent's cells have to be exactly that size. */
+  {
+    ca_size_t record_bytes =
+      NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
+    if ( parent_ca->bytes != record_bytes ) {
+      rb_raise(rb_eArgError,
+               "CARecord: %"PRIsVALUE" records are %lld bytes, the array's "
+               "elements are %lld bytes",
+               data_class, (long long) record_bytes,
+               (long long) parent_ca->bytes);
+    }
+  }
   ca  = ca_record_new(parent_ca, data_class);
   obj = TypedData_Wrap_Struct(klass, &carecord_data_type, ca);
   rb_ca_set_parent(obj, parent_val);
