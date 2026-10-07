@@ -1231,6 +1231,22 @@ rb_ca_is_not_masked (VALUE self)
   return out;
 }
 
+VALUE
+rb_ca_scan_mask_count (VALUE self, VALUE axis)
+{
+  VALUE present = rb_funcall(self, rb_intern("is_not_masked"), 0);
+  VALUE count;
+  if ( NIL_P(axis) ) {
+    count = rb_funcall(present, rb_intern("cumsum"), 0);
+  }
+  else {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis);
+    count = rb_funcallv_kw(present, rb_intern("cumsum"), 1, &kw, RB_PASS_KEYWORDS);
+  }
+  return rb_funcall(count, rb_intern("to_type"), 1, INT2NUM(CA_INT64));
+}
+
 /* @overload unmask (fill_value = nil)
 
 (Masking, Destructive)

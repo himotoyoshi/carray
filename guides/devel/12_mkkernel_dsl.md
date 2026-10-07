@@ -349,9 +349,11 @@ emitted body uses `CA_SLAB_SCAN_T` (or `CA_SLAB_SCAN_TA` when
 |---|---|
 | `acc_type:` | `nil` → `acc` is `T_OUT` (default). `:load_type` → `acc` is `T_LOAD` (the last seen *input* value, for adjacent-compare scans like `uniq_scan`); also exposes `first` (int, 1 on the first unmasked cell). |
 | `axis_default:` | `nil` → `axis:` is required. `:flatten` → no-arg form flattens and scans the 1-D result (legacy `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount`). |
+| `empty:` | `nil` → a masked cell writes the running accumulator, unmasked (the identity before the first present cell). `:undef` → for an accumulator with no identity (`cummax` / `cummin`): cells before a fiber's first present cell are masked. |
+| `fallback:` | besides `:raise` / `:wrap_to_f64`, `:mask_count` is for a scan that reads only the mask (`cumcount`): a data type outside `source:` is answered as `is_not_masked.cumsum(axis:)` in int64, without converting its values. |
 
 Multi-axis scan is intentionally unsupported (semantically
-ambiguous); users chain (`a.cumsum(1).cumsum(2)`).
+ambiguous); users chain (`a.cumsum(axis: 1).cumsum(axis: 2)`).
 
 ### `MkKernel.sort`
 

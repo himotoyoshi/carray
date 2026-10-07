@@ -704,7 +704,11 @@ module MkKernel
   #     output:   :f64 | :preserve,
   #     init:     "0",                   # initial acc value (per fiber)
   #     step:     "acc += v; r = acc",   # binds v (T_LOAD), r (T_OUT), acc
-  #     fallback: :wrap_to_f64 | :raise
+  #     fallback: :wrap_to_f64 | :raise | :mask_count
+  #
+  # :mask_count is for a scan that reads only the mask (cumcount): a data
+  # type outside source: is answered as is_not_masked.cumsum(axis:) in
+  # int64, so the values are never converted.
   #
   # Init supports the same special tokens as reduce: T_LIMIT_HI /
   # T_LIMIT_LO / T_ACC / T_OUT.  Each scan slab (= fiber along the
@@ -744,7 +748,7 @@ module MkKernel
       raise "unknown source data_type #{s}" unless DTYPES.key?(s)
     end
     raise "unknown output #{output}" unless output == :preserve || DTYPES.key?(output) || output.is_a?(Hash)
-    raise "unknown fallback #{fallback}" unless %i[raise wrap_to_f64].include?(fallback)
+    raise "unknown fallback #{fallback}" unless %i[raise wrap_to_f64 mask_count].include?(fallback)
     if output == :preserve && fallback == :wrap_to_f64
       raise "#{name}: :preserve + :wrap_to_f64 is a semantic conflict"
     end
@@ -4086,6 +4090,9 @@ module MkKernel
       when :raise
         io.puts "      default:"
         io.puts %Q[        rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[fsrc->data_type]);]
+      when :mask_count
+        io.puts "      default:"
+        io.puts "        return rb_ca_scan_mask_count(self, Qnil);"
       end
       io.puts "    }"
       io.puts "  }"
@@ -4118,6 +4125,9 @@ module MkKernel
     when :raise
       io.puts "    default:"
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+    when :mask_count
+      io.puts "    default:"
+      io.puts "      return rb_ca_scan_mask_count(self, INT2NUM(axis));"
     end
     io.puts "  }"
     io.puts "  return Qnil;  /* unreachable */"
@@ -7683,13 +7693,16 @@ MkKernel.scan :cummin,
 
 # cumcount: running count of unmasked cells.  Output data_type = int64.
 # `(void) v` silences unused-variable warning for the unmasked path
-# (compiler DCEs the v load when STEP doesn't reference it).
+# (compiler DCEs the v load when STEP doesn't reference it).  The count
+# reads only the mask, so a data type outside source: (object, complex,
+# boolean, fixlen, a Face) is counted off the mask without converting its
+# values (fallback: :mask_count).
 MkKernel.scan :cumcount,
   source:       MkKernel::ALL_NUMERIC,
   output:       :i64,
   init:         "0",
   step:         "(void) v; r = ++acc",
-  fallback:     :wrap_to_f64,
+  fallback:     :mask_count,
   axis_default: :flatten
 
 # uniq_scan: per-axis adjacent-compare scan returning a boolean

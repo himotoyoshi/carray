@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `cumcount` answers for every data type, since it reads only the
+  mask: an object array of Strings or `nil`, a fixlen array, a boolean
+  array and a `CATime` no longer raise trying to convert their values to
+  float64. The answer is int64, as it was for numeric arrays.
+
 - Change: `variance` and `stddev` (the sample statistics, dividing by one
   less than the count) answer `UNDEF` when fewer than two values are
   present, instead of `0.0`: the sample variance of a single value is not

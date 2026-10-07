@@ -151,6 +151,12 @@ CArray *ca_lazy_operation_mask (CArray *operation, int mode);
 
 void    ca_view_func_create_mask (void *ap);
 
+/* Running count of the present cells of any data type along axis (Qnil:
+   the flattened array), read off the mask alone (carray_mask.c).  The
+   cumcount kernel answers with it for a data type it does not load. */
+
+VALUE   rb_ca_scan_mask_count (VALUE self, VALUE axis);
+
 /* The registered expression evaluator's answer for a lazy expression the
    caller is about to compute whole, or Qnil to go on with self (see
    carray_lazy.c). */
