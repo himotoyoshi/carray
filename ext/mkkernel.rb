@@ -4283,14 +4283,22 @@ module MkKernel
       # String, custom class with <=> defined) works.  Raises Ruby
       # TypeError mid-sort if a cell pair is uncomparable -- consistent
       # with Array#sort behavior.
-      io.puts %Q{  VALUE r = rb_funcall(pa->v, rb_intern("<=>"), 1, pb->v);}
-      io.puts "  if ( NIL_P(r) ) {"
-      io.puts %Q{    rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),}
-      io.puts "             rb_obj_classname(pa->v), rb_obj_classname(pb->v));"
+      # A Float NaN sorts after every other value, as it does in a float
+      # array; two NaNs fall to the index tie-break.
+      io.puts "  int nan_a = CA_OBJ_ISNAN(pa->v);"
+      io.puts "  int nan_b = CA_OBJ_ISNAN(pb->v);"
+      io.puts "  if ( nan_a && !nan_b ) return 1;"
+      io.puts "  if ( nan_b && !nan_a ) return -1;"
+      io.puts "  if ( !nan_a ) {"
+      io.puts %Q{    VALUE r = rb_funcall(pa->v, rb_intern("<=>"), 1, pb->v);}
+      io.puts "    if ( NIL_P(r) ) {"
+      io.puts %Q{      rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),}
+      io.puts "               rb_obj_classname(pa->v), rb_obj_classname(pb->v));"
+      io.puts "    }"
+      io.puts "    int c = NUM2INT(r);"
+      io.puts "    if ( c > 0 ) return 1;"
+      io.puts "    if ( c < 0 ) return -1;"
       io.puts "  }"
-      io.puts "  int c = NUM2INT(r);"
-      io.puts "  if ( c > 0 ) return 1;"
-      io.puts "  if ( c < 0 ) return -1;"
     else
       if is_fp
         # NaN policy :end -- NaN sorts to the end (matches qcmp_f_type in

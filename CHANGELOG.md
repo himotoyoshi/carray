@@ -65,7 +65,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `max`, `minmax`, `min_index`, `max_index`, `min_addr`, `max_addr`,
   `cummin` and `cummax`, as it does in a float array:
   `CA_OBJECT([NaN, 1.0, 2.0]).min` is `1.0` (was `NaN`). A run of nothing
-  but NaN still answers NaN, and its position is UNDEF.
+  but NaN still answers NaN, and its position is UNDEF. `sort`,
+  `sort_index`, `rank_index` and `partition` put a NaN after every other
+  value instead of raising `ArgumentError`.
 
 - Fix: `sum`, `mean`, `min`, `max`, `prod`, `accumulate` and `count` along
   one axis honour `min_count:` (and `fill_value:`) when the array is large

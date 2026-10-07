@@ -3,7 +3,8 @@ require "carray"
 
 # A Float NaN stored in an object array loses every comparison, as it
 # does in a float64 array: it never displaces another value, a run of
-# nothing but NaN answers NaN, and the position of such a run is UNDEF.
+# nothing but NaN answers NaN, the position of such a run is UNDEF, and a
+# sort puts it after every other value.
 class TestObjectNanOrdering < Test::Unit::TestCase
 
   NAN = Float::NAN
@@ -42,6 +43,18 @@ class TestObjectNanOrdering < Test::Unit::TestCase
     f = CA_FLOAT64(rows)
     %i[min max min_index max_index min_addr max_addr].each do |op|
       assert_same_answer f.send(op, axis: 1).to_a, o.send(op, axis: 1).to_a, "#{op}(axis: 1)"
+    end
+  end
+
+  CASES.each_with_index do |vals, i|
+    define_method("test_sort_family_matches_float64_#{i}") do
+      o = CA_OBJECT(vals)
+      f = CA_FLOAT64(vals)
+      assert_equal f.sort_index.to_a, o.sort_index.to_a, "sort_index #{vals.inspect}"
+      assert_equal f.rank_index.to_a, o.rank_index.to_a, "rank_index #{vals.inspect}"
+      assert_same_answer f.sort.to_a, o.sort.to_a, "sort #{vals.inspect}"
+      kth = vals.size / 2
+      assert_same_answer f.partition(kth).to_a[kth], o.partition(kth).to_a[kth], "partition #{vals.inspect}"
     end
   end
 
