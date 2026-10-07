@@ -1085,8 +1085,14 @@ rb_ca_mask_array (VALUE self)
 
   ca_update_mask(ca);
   if ( ca->mask ) {
+    /* The mask is reached from its array, not through a parent link, so
+       ca_is_readonly on the mask never sees the array's read-only state.
+       Pass it on here, where the mask is handed out. */
+    if ( ca_is_readonly(ca) ) {
+      ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
+    }
     obj = TypedData_Wrap_Struct(ca_mask_class[ca->obj_type],
-                                ca_mask_typeddata[ca->obj_type], ca->mask);	
+                                ca_mask_typeddata[ca->obj_type], ca->mask);
     rb_ivar_set(obj, rb_intern("masked_array"), self);
     if ( OBJ_FROZEN(self) ) {
       rb_ca_freeze(obj);

@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the mask of a read-only array is read-only too. Writing through it
+  (`ca.mask[i] = true`) raised for lazy expressions but went through for
+  other read-only arrays, for views of them, and for a categorical's codes,
+  where it could unmask or mask cells the array said could not change.
 - Change: reading or writing a block of a `roll` view that spans its rows
   (`r[nil, 10..19]`, or a slice of a 3-D roll) is three to six times
   faster: it moves as a few strided blocks of the parent instead of one

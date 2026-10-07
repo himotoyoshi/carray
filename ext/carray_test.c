@@ -724,6 +724,9 @@ without_read_only_ensure (VALUE arg)
   struct without_read_only_state *s = (struct without_read_only_state *) arg;
   if (s->was_readonly) {
     ca_set_flag(s->ca, CA_FLAG_READ_ONLY);
+    if (s->ca->mask) {                 /* the block may have replaced it */
+      ca_set_flag(s->ca->mask, CA_FLAG_READ_ONLY);
+    }
   }
   return Qnil;
 }
@@ -761,10 +764,11 @@ without_read_only_ensure (VALUE arg)
  * immutable (producer's contract) but the mask slot is CArray-side metadata
  * the bridge owns.
  *
- * Mechanics: clears CA_FLAG_READ_ONLY on self for the duration of the block;
- * rb_ensure restores the flag on normal return AND on raise.  Frozen objects
- * still raise FrozenError.  Self only: does not walk parent chains, does not
- * touch ca->mask's flag.
+ * Mechanics: clears CA_FLAG_READ_ONLY on self and on its mask for the
+ * duration of the block; rb_ensure restores both on normal return AND on
+ * raise, setting the flag on whatever mask self has by then.  (A read-only
+ * array's mask carries the flag once CArray#mask has handed it out.)  Frozen
+ * objects still raise FrozenError.  Does not walk parent chains.
  *
  * Caller discipline (not enforced by the primitive): confine usage to
  * entities (CArray / CScalar / CAWrap).  On a view of a read-only parent,
@@ -783,6 +787,9 @@ rb_ca_without_read_only_flag (VALUE self)
   s.was_readonly = ca_test_flag(ca, CA_FLAG_READ_ONLY);
   if (s.was_readonly) {
     ca_unset_flag(ca, CA_FLAG_READ_ONLY);
+    if (ca->mask) {
+      ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
+    }
   }
   return rb_ensure(without_read_only_body, Qnil,
                    without_read_only_ensure, (VALUE) &s);
