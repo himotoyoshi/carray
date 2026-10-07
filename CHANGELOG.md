@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `median` and `percentile` take the next value in sort order as the
+  upper end of an interpolation also when it is `Infinity` or `NaN` (NaN
+  sorts after every number): `[1.0, Infinity].median` is `Infinity` (was
+  `1.0`) and `[NaN, -1.0].median` is `NaN` (was `-1.0`). `quantile`, a list
+  of percentiles, a masked array and `group_by_category` now all answer the
+  same as the single-value form; they disagreed before.
+
 - Fix: a lazy expression holding a Float array to an Integer power
   (`x.lazy ** 2`) is handed to a registered expression evaluator such as
   carray-jit; it was always computed by CArray itself. For evaluator

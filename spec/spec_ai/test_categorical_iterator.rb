@@ -671,16 +671,20 @@ class TestCategoricalIterator < Test::Unit::TestCase
     assert_true(grp.max_index.is_masked[0])
   end
 
-  def test_an_order_statistic_puts_nan_last_and_clamps_its_neighbour
+  def test_an_order_statistic_puts_nan_last
     # NaN sorts last, so a position is picked out of [numbers..., NaN...];
-    # a position whose upper neighbour would be a NaN interpolates against
-    # itself rather than producing NaN
+    # a position whose upper neighbour is a NaN interpolates against it
     g2 = CA_DOUBLE([NAN, -9.0]).group_by_category(CA_INT32([0, 0]).categorize)
-    assert_equal(-9.0, g2.median[0])
-    assert_equal(-9.0, g2.percentile(75)[0])
+    assert_true(g2.median[0].nan?)
+    assert_true(g2.percentile(75)[0].nan?)
+    assert_equal(-9.0, g2.percentile(0)[0])
     g4 = CA_DOUBLE([NAN, 1.0, 7.0, -8.0]).group_by_category(CA_INT32([0] * 4).categorize)
     assert_equal(4.0, g4.median[0])
-    assert_equal(7.0, g4.percentile(75)[0])
+    assert_equal(7.0, g4.percentile(200.0 / 3)[0])
+    assert_true(g4.percentile(75)[0].nan?)
+    gi = CA_DOUBLE([1.0, Float::INFINITY]).group_by_category(CA_INT32([0, 0]).categorize)
+    assert_equal(Float::INFINITY, gi.median[0])
+    assert_equal(1.0, gi.percentile(0)[0])
   end
 
   def test_nan_answers_match_the_core_across_shapes_and_data_types

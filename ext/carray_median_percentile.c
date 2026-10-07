@@ -72,13 +72,14 @@ mp_is_numeric (int8_t dt)
   _(CA_INT64,  int64_t)  _(CA_UINT64, uint64_t)                          \
   _(CA_FLOAT32, float32_t) _(CA_FLOAT64, double)
 
-/* [numeric] min over the upper region [k+1, n-1] of a partitioned fiber,
-   skipping NaN (= matches production .min(axis:): NaN sorts to the tail
-   and is ignored).  stride = element stride along the reduce axis.
-   fmin ignores NaN (fmin(x,NaN)==x), so a +INFINITY seed naturally skips
-   NaN and stays branch-free -> the compiler vectorises this loop, matching
-   the production SIMD min(axis:).  An all-NaN (or empty) upper region
-   leaves hi == +INFINITY; fall back to the kth value (degenerate). */
+/* [numeric] sorted[k+1] of a fiber partitioned at k = the min over the
+   upper region [k+1, n-1].  NaN sorts after every number, so it is the
+   upper element only when the region holds nothing else.  stride = element
+   stride along the reduce axis.  fmin ignores NaN (fmin(x,NaN)==x), so a
+   +INFINITY seed skips NaN and the loop stays branch-free and vectorised.
+   A result of +INFINITY is either a +INFINITY in the region or a region of
+   NaN only; the rescan that tells them apart runs only in that case.  An
+   empty region (k == n-1) answers the kth value. */
 #define MP_GEN_MINUP(CT, T)                                              \
   static double                                                          \
   mp_minup_##T (const T *b, ca_size_t f0, long k, long n, long stride) { \
@@ -87,8 +88,11 @@ mp_is_numeric (int8_t dt)
       double v = (double) b[f0 + (ca_size_t)(ai * stride)];             \
       hi = fmin(hi, v);                                                  \
     }                                                                    \
-    return ( hi == (double) INFINITY )                                   \
-             ? (double) b[f0 + (ca_size_t)(k * stride)] : hi;            \
+    if ( hi != (double) INFINITY ) return hi;                           \
+    if ( k + 1 >= n ) return (double) b[f0 + (ca_size_t)(k * stride)];  \
+    for ( long ai = k + 1; ai < n; ai++ )                               \
+      if ( (double) b[f0 + (ca_size_t)(ai * stride)] == hi ) return hi;  \
+    return (double) NAN;                                                 \
   }
 MP_TYPES(MP_GEN_MINUP)
 

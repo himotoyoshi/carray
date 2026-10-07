@@ -297,10 +297,9 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
         /* Push NaN to the tail, which is where CArray's sort puts it, so the  \
            ki-th element here is the ki-th of the sorted segment. Selection    \
            runs on the numeric prefix, since a comparison-based quickselect    \
-           has nothing to say about a NaN, and a position landing in the tail  \
-           answers NaN. The upper neighbour is clamped into the prefix too: a  \
-           position whose neighbour would be a NaN interpolates against itself \
-           and answers vlo, which is why the median of [NaN, -9.0] is -9.0. */ \
+           has nothing to say about a NaN; a position or an upper neighbour    \
+           landing in the tail is NaN. The blend is CArray#percentile's, so    \
+           both answer alike for NaN and infinities. */                        \
         ca_size_t nnum = m, t0 = 0;                                            \
         while ( t0 < nnum ) {                                                  \
           if ( scratch[t0] != scratch[t0] ) {                                  \
@@ -316,8 +315,10 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
           double mn = scratch[ki+1]; ca_size_t t;                             \
           for ( t = ki + 2; t < nnum; t++ ) if ( scratch[t] < mn ) mn = scratch[t]; \
           vhi = mn;                                                            \
-        } else vhi = vlo;                                                      \
-        outp[c] = vlo + (f - (double) ki) * (vhi - vlo); }                      \
+        } else vhi = (double) NAN;                                             \
+        { double r = f - (double) ki;                                          \
+          outp[c] = ( r == 0.0 || ki + 1 >= m ) ? vlo                          \
+                                                : vlo * (1.0 - r) + vhi * r; } } \
     }                                                                           \
   } while (0)
 
