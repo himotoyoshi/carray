@@ -1458,6 +1458,12 @@ module MkKernel
     true
   end
 
+  # The CArray names of the data types a kernel loads, for its refusal
+  # message ("int8, uint8, ..."), not the generator's own short keys.
+  def self.type_names(sources)
+    sources.map { |s| s == :fixlen ? "fixlen" : DTYPES[s][:ca].sub(/\ACA_/, "").downcase }.join(", ")
+  end
+
   def self.reduce_macro_suffix(k, src = nil)
     # CA_OBJECT cannot ride the SIMD-licensed macros (= _PLUS / _MIN / _MAX
     # / _STAR), which assume C operators (= acc is a VALUE, so
@@ -2062,7 +2068,7 @@ module MkKernel
       # (slab walks the whole array in view-flat row-major); other
       # naxes are rejected at entry.
       io.puts "  if ( naxes != 1 && naxes != ca->ndim ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: view_flat semantics requires single-axis or full reduction (got naxes=%d for ndim=%d)", (int)naxes, (int)ca->ndim);]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: view_flat semantics requires single-axis or full reduction (got naxes=%d for ndim=%d)", ca_calling_method_name(), (int)naxes, (int)ca->ndim);]
       io.puts "  }"
     end
 
@@ -2076,7 +2082,7 @@ module MkKernel
                                        slab_axes, naxes, 0);
         if ( rc != CA_ITER_OK ) {
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: kernel_iterator init failed rc=%d", rc);
+                   "%s: kernel_iterator init failed rc=%d", ca_calling_method_name(), rc);
         }
         char       *p;
         boolean8_t *m;
@@ -2114,7 +2120,7 @@ module MkKernel
       io.puts "                                      slab_axes, naxes, 0);"
       io.puts "      if ( rcw != CA_ITER_OK ) {"
       io.puts "        ca_iter_state_finish(&st);"
-      io.puts %Q[        rb_raise(rb_eRuntimeError, "#{name}_ki: weights kernel_iterator init failed rc=%d", rcw);]
+      io.puts %Q[        rb_raise(rb_eRuntimeError, "%s: weights kernel_iterator init failed rc=%d", ca_calling_method_name(), rcw);]
       io.puts "      }"
       io.puts "      char *p_w;"
     end
@@ -2129,7 +2135,7 @@ module MkKernel
       io.puts "      if ( ! ca_iter_state_next_slab_axes(&st_w, &p_w, NULL) ) {"
       io.puts "        ca_iter_state_finish(&st);"
       io.puts "        ca_iter_state_finish(&st_w);"
-      io.puts %Q[        rb_raise(rb_eRuntimeError, "#{name}_ki: weights iter exhausted early (shape invariant violated)");]
+      io.puts %Q[        rb_raise(rb_eRuntimeError, "%s: weights iter exhausted early (shape invariant violated)", ca_calling_method_name());]
       io.puts "      }"
     else
       io.puts "      while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {"
@@ -2301,7 +2307,7 @@ module MkKernel
     io.puts "  ca_iter_state st;"
     io.puts "  int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, slab_axes, naxes, 0);"
     io.puts "  if ( rc != CA_ITER_OK ) {"
-    io.puts %Q[    rb_raise(rb_eRuntimeError, "#{name}_ki: kernel_iterator init failed rc=%d", rc);]
+    io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: kernel_iterator init failed rc=%d", ca_calling_method_name(), rc);]
     io.puts "  }"
     io.puts "  char       *p;"
     io.puts "  boolean8_t *m;"
@@ -2598,7 +2604,7 @@ module MkKernel
                                        slab_axes, naxes, 0);
         if ( rc != CA_ITER_OK ) {
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: kernel_iterator init failed rc=%d", rc);
+                   "%s: kernel_iterator init failed rc=%d", ca_calling_method_name(), rc);
         }
         char       *p;
         boolean8_t *m;
@@ -3227,7 +3233,7 @@ module MkKernel
                                        slab_axes, naxes, 0);
         if ( rc != CA_ITER_OK ) {
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: kernel_iterator init failed rc=%d", rc);
+                   "%s: kernel_iterator init failed rc=%d", ca_calling_method_name(), rc);
         }
         char       *p;
         boolean8_t *m;
@@ -3551,7 +3557,7 @@ module MkKernel
       # at dispatch (= simple, uniform kernel path).  rev5 strict acceptance
       # mirrors PROPOSAL_LINEAR_INTERP_PER_FIBER_MATCHED rev5 in spirit.
       io.puts "  if ( argc < 1 ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: missing weights argument (1+ required, got 0)");]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: missing weights argument (1+ required, got 0)", ca_calling_method_name());]
       io.puts "  }"
       io.puts "  volatile VALUE rweights = argv[0];"
       io.puts "  argc--; argv++;"
@@ -3595,7 +3601,7 @@ module MkKernel
       wio.puts "      /* W-A3 commit-or-raise: shape strict match */"
       wio.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
       wio.puts "        if ( cv->dim[i] != src->dim[i] ) {"
-      wio.puts %Q[          rb_raise(rb_eArgError, "#{name}_ki: w shape mismatch (W-A3 candidate, dim[%d]=%ld != self.dim[%d]=%ld; expected scalar / [M=self.dim[axes[0]]] / self.shape)", (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
+      wio.puts %Q[          rb_raise(rb_eArgError, "%s: w shape mismatch (W-A3 candidate, dim[%d]=%ld != self.dim[%d]=%ld; expected scalar / [M=self.dim[axes[0]]] / self.shape)", ca_calling_method_name(), (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
       wio.puts "        }"
       wio.puts "      }"
       wio.puts "      /* W-A3 path: use cv directly (= existing) */"
@@ -3645,7 +3651,7 @@ module MkKernel
       wio.puts "      ca_detach(cv);"
       wio.puts "    }"
       wio.puts "    else {"
-      wio.puts %Q[      rb_raise(rb_eArgError, "#{name}_ki: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
+      wio.puts %Q[      rb_raise(rb_eArgError, "%s: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", ca_calling_method_name(), (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
       wio.puts "    }"
       wio.puts "  }"
       # Mask overlay (= legacy W-A3 path; if the materialized cw carries a mask, overlay it)
@@ -3668,7 +3674,7 @@ module MkKernel
       # runtime value_arg (e.g. `a.count_equal(5, 0)` -- 5 is value_arg,
       # 0 is axis).  Per-src cast happens inside the switch case below.
       io.puts "  if ( argc < 1 ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: missing value argument (1+ required, got 0)");]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: missing value argument (1+ required, got 0)", ca_calling_method_name());]
       io.puts "  }"
       io.puts "  volatile VALUE rval = argv[0];"
       io.puts "  argc--; argv++;"
@@ -3710,7 +3716,7 @@ module MkKernel
     # axis is allowed.  Variadic `a.sum(0, 1)` raises here with a migration
     # hint pointing at the kwarg form.
     io.puts "  if ( argc > 0 ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: positional axis arguments are no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0) or a.#{name}(axis: [0, 1])", argc);]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: positional axis arguments are no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0) or a.#{name}(axis: [0, 1])", ca_calling_method_name(), argc);]
     io.puts "  }"
 
     if weights_io
@@ -3720,7 +3726,7 @@ module MkKernel
         io.puts "  switch ( src->data_type ) {"
         io.puts "  " + k[:source].map { |s| "case #{DTYPES[s][:ca]}:" }.join(" ") + " break;"
         io.puts "  default:"
-        io.puts %Q[    rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+        io.puts %Q[    rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
         io.puts "  }"
       end
       io.print weights_io.string
@@ -3771,7 +3777,7 @@ module MkKernel
       io.puts "      switch ( src->data_type ) {"
       io.puts "        case CA_BOOLEAN: break;   /* wrap: count-of-trues semantic */"
       io.puts "        default:"
-      io.puts %Q[          rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")}, or boolean)", ca_type_name[src->data_type]);]
+      io.puts %Q[          rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])}, or boolean)", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "      }"
       io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
       io.puts "      CArray *casted;"
@@ -3790,7 +3796,7 @@ module MkKernel
       io.puts "    }"
     when :raise
       io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     end
     io.puts "  }"
 
@@ -3862,14 +3868,14 @@ module MkKernel
                                    slab_axes, naxes, 0);
         if ( rc != CA_ITER_OK ) {
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: input init failed rc=%d", rc);
+                   "%s: input init failed rc=%d", ca_calling_method_name(), rc);
         }
         rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
                                    slab_axes, naxes, CA_KERNEL_WRITE);
         if ( rc != CA_ITER_OK ) {
           ca_iter_state_finish(&st_in);
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: output init failed rc=%d", rc);
+                   "%s: output init failed rc=%d", ca_calling_method_name(), rc);
         }
 
         char       *pi, *po;
@@ -3909,7 +3915,7 @@ module MkKernel
       io.puts "      switch ( src->data_type ) {"
       io.puts "        case CA_BOOLEAN: break;   /* wrap: count-of-trues semantic */"
       io.puts "        default:"
-      io.puts %Q[          rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")}, or boolean)", ca_type_name[src->data_type]);]
+      io.puts %Q[          rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])}, or boolean)", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "      }"
       io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
       io.puts "      CArray *casted;"
@@ -3918,7 +3924,10 @@ module MkKernel
       io.puts "    }"
     when :raise
       io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
+    when :mask_count
+      io.puts "    default:"
+      io.puts "      return rb_ca_scan_mask_count(self, INT2NUM(axis));"
     end
     io.puts "  }"
     io.puts "  return Qnil;  /* unreachable */"
@@ -4002,14 +4011,14 @@ module MkKernel
                                    slab_axes, 1, 0);
         if ( rc != CA_ITER_OK ) {
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: input init failed rc=%d", rc);
+                   "%s: input init failed rc=%d", ca_calling_method_name(), rc);
         }
         rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
                                    slab_axes, 1, CA_KERNEL_WRITE);
         if ( rc != CA_ITER_OK ) {
           ca_iter_state_finish(&st_in);
           rb_raise(rb_eRuntimeError,
-                   "#{name}_ki: output init failed rc=%d", rc);
+                   "%s: output init failed rc=%d", ca_calling_method_name(), rc);
         }
       #{mask_setup}
         char       *pi, *po;
@@ -4065,7 +4074,7 @@ module MkKernel
     io.puts "  volatile VALUE raxis = Qnil;"
     io.puts "  rb_scan_options(ropt, \"axis\", &raxis);"
     io.puts "  if ( argc > 0 ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: positional axis is no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0)", argc);]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: positional axis is no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0)", ca_calling_method_name(), argc);]
     io.puts "  }"
     if k[:axis_default] == :flatten
       # Legacy compat: nil/omitted axis: flatten source and scan axis 0.
@@ -4089,7 +4098,7 @@ module MkKernel
         io.puts "      }"
       when :raise
         io.puts "      default:"
-        io.puts %Q[        rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[fsrc->data_type]);]
+        io.puts %Q[        rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[fsrc->data_type]);]
       when :mask_count
         io.puts "      default:"
         io.puts "        return rb_ca_scan_mask_count(self, Qnil);"
@@ -4124,7 +4133,7 @@ module MkKernel
       io.puts "    }"
     when :raise
       io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     when :mask_count
       io.puts "    default:"
       io.puts "      return rb_ca_scan_mask_count(self, INT2NUM(axis));"
@@ -4276,7 +4285,7 @@ module MkKernel
       # with Array#sort behavior.
       io.puts %Q{  VALUE r = rb_funcall(pa->v, rb_intern("<=>"), 1, pb->v);}
       io.puts "  if ( NIL_P(r) ) {"
-      io.puts %Q{    rb_raise(rb_eArgError, "#{name}_ki: comparison of %s with %s failed",}
+      io.puts %Q{    rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),}
       io.puts "             rb_obj_classname(pa->v), rb_obj_classname(pb->v));"
       io.puts "  }"
       io.puts "  int c = NUM2INT(r);"
@@ -4412,13 +4421,13 @@ module MkKernel
     io.puts "  rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,"
     io.puts "                             slab_axes, 1, 0);"
     io.puts "  if ( rc != CA_ITER_OK ) {"
-    io.puts %Q[    rb_raise(rb_eRuntimeError, "#{name}_ki: input init failed rc=%d", rc);]
+    io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: input init failed rc=%d", ca_calling_method_name(), rc);]
     io.puts "  }"
     io.puts "  rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,"
     io.puts "                             slab_axes, 1, CA_KERNEL_WRITE);"
     io.puts "  if ( rc != CA_ITER_OK ) {"
     io.puts "    ca_iter_state_finish(&st_in);"
-    io.puts %Q[    rb_raise(rb_eRuntimeError, "#{name}_ki: output init failed rc=%d", rc);]
+    io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: output init failed rc=%d", ca_calling_method_name(), rc);]
     io.puts "  }"
     io.puts
     io.puts "  ca_size_t fiber_n = st_in.slab_elements;"
@@ -4713,8 +4722,8 @@ module MkKernel
     io.puts "    GetCArray(_st, _sc);"
     io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
     io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "#{name}_ki: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage",]
+    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
+    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
     io.puts %Q[               rb_obj_classname(_face));]
     io.puts "    }"
     io.puts "    self = _st;"
@@ -4739,8 +4748,8 @@ module MkKernel
     io.puts "    GetCArray(_st, _sc);"
     io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
     io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "#{name}_ki: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage",]
+    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
+    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
     io.puts %Q[               rb_obj_classname(_face));]
     io.puts "    }"
     if relift
@@ -4851,7 +4860,7 @@ module MkKernel
         io.puts "  /* sort family rejects masked sources globally (R3 / Q3): "
         io.puts "     masked elements would break the ordering invariant. */"
         io.puts "  if ( ca_has_mask(src) ) {"
-        io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: masked input not supported (use ca.value or ca.strip_mask(fill))");]
+        io.puts %Q[    rb_raise(rb_eArgError, "%s: masked input not supported (use ca.value or ca.strip_mask(fill))", ca_calling_method_name());]
         io.puts "  }"
       end
       io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
@@ -4867,7 +4876,7 @@ module MkKernel
         io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, axis, do_stable#{native_extra});"
       end
       io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "  }"
       io.puts "  return Qnil;  /* unreachable */"
       io.puts "}"
@@ -4960,7 +4969,7 @@ module MkKernel
         io.puts "  /* sort family rejects masked sources globally (R3 / Q3): "
         io.puts "     masked elements would break the ordering invariant. */"
         io.puts "  if ( ca_has_mask(src) ) {"
-        io.puts %Q[    rb_raise(rb_eArgError, "#{name}_ki: masked input not supported (use ca.value or ca.strip_mask(fill))");]
+        io.puts %Q[    rb_raise(rb_eArgError, "%s: masked input not supported (use ca.value or ca.strip_mask(fill))", ca_calling_method_name());]
         io.puts "  }"
       end
       io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
@@ -4982,7 +4991,7 @@ module MkKernel
         io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, axis, kth#{native_extra});"
       end
       io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "  }"
       io.puts "  return Qnil;  /* unreachable */"
       io.puts "}"
@@ -5267,7 +5276,7 @@ module MkKernel
                     (void) vsrc_val;  /* fixlen: no wrap-readonly coercion */
                             if ( cv->data_type != CA_FIXLEN || cv->bytes != ca->bytes ) {
                               rb_raise(rb_eArgError,
-                                       "#{name}_ki: CA_FIXLEN query must be CA_FIXLEN of the same byte width (= %ld)", (long) ca->bytes);
+                                       "%s: CA_FIXLEN query must be CA_FIXLEN of the same byte width (= %ld)", ca_calling_method_name(), (long) ca->bytes);
                             }
                   C
                 else
@@ -5426,7 +5435,7 @@ module MkKernel
                                          slab_axes, 1, 0);
           if ( rc != CA_ITER_OK ) {
             rb_raise(rb_eRuntimeError,
-                     "#{name}_ki: kernel_iterator init failed rc=%d", rc);
+                     "%s: kernel_iterator init failed rc=%d", ca_calling_method_name(), rc);
           }
     C
 
@@ -5508,7 +5517,7 @@ module MkKernel
       # transformation in two more inner loops.
       io.puts <<~C
               /* view_flat semantics + CArray val: NotImpError (deferred). */
-              rb_raise(rb_eNotImpError, "#{name}_ki: view_flat semantics with CArray val (broadcast) not yet supported");
+              rb_raise(rb_eNotImpError, "%s: view_flat semantics with CArray val (broadcast) not yet supported", ca_calling_method_name());
       C
     end
 
@@ -5566,13 +5575,13 @@ module MkKernel
             if ( i == axis ) continue;
             if ( cv->dim[i] != ca->dim[i] ) {
               rb_raise(rb_eArgError,
-                       "#{name}_ki: val shape mismatch (A3 candidate, axis %d non-target dim[%d] = %ld != self.dim[%d] = %ld; expected scalar / [M] / base_shape (ndim>=2) / self.shape with axis dim free)",
+                       "%s: val shape mismatch (A3 candidate, axis %d non-target dim[%d] = %ld != self.dim[%d] = %ld; expected scalar / [M] / base_shape (ndim>=2) / self.shape with axis dim free)", ca_calling_method_name(),
                        axis, (int) i, (long) cv->dim[i], (int) i, (long) ca->dim[i]);
             }
           }
           if ( cv->dim[axis] < 1 ) {
             rb_raise(rb_eArgError,
-                     "#{name}_ki: empty query (val.dim[%d] = 0)", axis);
+                     "%s: empty query (val.dim[%d] = 0)", ca_calling_method_name(), axis);
           }
           cv_form = CV_FORM_A3;
           cv_form_set = 1;
@@ -5582,7 +5591,7 @@ module MkKernel
           /* A2: 1-D shared M-query (M >= 1); placed above A2.5 in rev5 */
           if ( cv->dim[0] < 1 ) {
             rb_raise(rb_eArgError,
-                     "#{name}_ki: empty query (val.dim[0] = 0)");
+                     "%s: empty query (val.dim[0] = 0)", ca_calling_method_name());
           }
           cv_form = CV_FORM_A2;
           cv_form_set = 1;
@@ -5603,7 +5612,7 @@ module MkKernel
 
         if ( ! cv_form_set ) {
           rb_raise(rb_eArgError,
-                   "#{name}_ki: val shape not accepted (val.ndim = %d; expected scalar / [M] / base_shape (ndim>=2, = %d) / self.shape with axis dim free (ndim = %d))",
+                   "%s: val shape not accepted (val.ndim = %d; expected scalar / [M] / base_shape (ndim>=2, = %d) / self.shape with axis dim free (ndim = %d))", ca_calling_method_name(),
                    (int) cv->ndim, (int) base_ndim, (int) ca->ndim);
         }
 
@@ -5782,8 +5791,8 @@ module MkKernel
     io.puts "  if ( ca_is_face(src) ) {"
     io.puts "    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {"
     io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "#{name}_ki: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage",]
+    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
+    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
     io.puts %Q[               rb_obj_classname(self));]
     io.puts "    }"
     io.puts "    self_was_face = 1;"
@@ -5829,9 +5838,9 @@ module MkKernel
     io.puts "        rval = rb_ca_strip_face_value(rval);"
     io.puts "      } else {"
     io.puts %Q[        rb_raise(rb_eArgError,]
-    io.puts %Q[                 "#{name}_ki: non-comparable Face reference (%s) has no "]
+    io.puts %Q[                 "%s: non-comparable Face reference (%s) has no "]
     io.puts %Q[                 "to_comparable to reconcile the query; use ca.parent "]
-    io.puts %Q[                 "to search the hidden storage explicitly",]
+    io.puts %Q[                 "to search the hidden storage explicitly", ca_calling_method_name(),]
     io.puts %Q[                 rb_obj_classname(self_ref));]
     io.puts "      }"
     io.puts "    }"
@@ -5841,7 +5850,7 @@ module MkKernel
     when :raise
       io.puts "  /* mask_self: :raise -- global reject if self has any masked element. */"
       io.puts "  if ( ca_is_any_masked(src) ) {"
-      io.puts %Q[    rb_raise(rb_eRuntimeError, "#{name}_ki: self should not have any masked elements");]
+      io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: self should not have any masked elements", ca_calling_method_name());]
       io.puts "  }"
     when :skip, :ignore
       # body handles mask_in or ignores it
@@ -5858,7 +5867,7 @@ module MkKernel
       io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, rval, axis#{extra_arg});"
     end
     io.puts "    default:"
-    io.puts %Q[      rb_raise(rb_eCADataTypeError, "#{name}_ki: source data_type :%s not supported (expected one of: #{k[:source].join(", ")})", ca_type_name[src->data_type]);]
+    io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     io.puts "  }"
     io.puts "  return Qnil;  /* unreachable */"
     io.puts "}"

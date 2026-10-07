@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an error raised by a generated kernel (the reductions, scans,
+  sorts and searches) begins with the name of the method that was called,
+  such as `cumsum:`, instead of an internal name ending in `_ki`, and lists
+  data types by their CArray names (`int8, uint8, ... float64`). Code that
+  matches on the old wording needs updating.
+
 - Fix: `CATimedelta` has `cumsum` and `accumulate`, which answer
   durations on the array's own unit, as `sum` does. `prod` and `cumprod`
   of a `CATimedelta`, and `cumsum`, `accumulate`, `prod` and `cumprod` of a
