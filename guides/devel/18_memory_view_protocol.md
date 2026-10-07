@@ -185,6 +185,10 @@ v.send(:without_read_only_flag) do
 end
 ```
 
+The lift covers every write, not only the mask: a value write inside the
+block lands in the producer's buffer, which the producer declared immutable
+(a frozen CArray source changes). Keep the block to what the lift is for.
+
 Author discipline (not enforced by the primitive): entities only (CArray /
 CScalar / CAWrap). Using it on a view of a read-only parent lets
 `create_mask`'s parent-chain recursion mutate the parent's mask allocation as

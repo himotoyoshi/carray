@@ -770,6 +770,11 @@ without_read_only_ensure (VALUE arg)
  * array's mask carries the flag once CArray#mask has handed it out.)  Frozen
  * objects still raise FrozenError.  Does not walk parent chains.
  *
+ * The lift covers every write, not only the mask: a value write inside the
+ * block reaches the producer's buffer, which case (a) declares immutable (a
+ * frozen CArray wrapped through MemoryView changes).  Keeping the block to
+ * the mask is the caller's part, like the choice among (a) / (b) / (c).
+ *
  * Caller discipline (not enforced by the primitive): confine usage to
  * entities (CArray / CScalar / CAWrap).  On a view of a read-only parent,
  * the yielded block's mask= walks create_mask into the parent chain and

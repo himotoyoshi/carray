@@ -449,6 +449,12 @@ end
 # v is read-only again, now with a mask
 ```
 
+The lift is not limited to the mask. Inside the block every write is
+allowed, values included, and a value write lands in the producer's
+buffer — memory the producer declared immutable. When the producer is
+a frozen CArray, that array's values change. Keep the block to what
+the lift is for.
+
 Discipline (not enforced by the primitive): use it only on **entities**
 (CArray / CScalar / CAWrap). On a view of a read-only parent, `mask=`
 allocates the parent's mask as a side effect (the view chain's
