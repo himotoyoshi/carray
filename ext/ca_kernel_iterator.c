@@ -561,9 +561,9 @@ ca_iter_validate_inputs (ca_iter_state    *st,
                           | CA_KERNEL_FIBER_CONTIG;
   if ( flags & ~accepted ) return CA_ITER_ERR_FLAGS;
 
-  /* WRITE on a readonly view (CARepeat stride-0 / value_array /
-     CAWrap readonly) — explicit reject, would otherwise SEGV on
-     write. */
+  /* WRITE on a readonly view (CARepeat stride-0 / a lazy expression /
+     a read-only CAWrap / any view of a frozen or read-only array) --
+     explicit reject, would otherwise SEGV on write. */
   if ( (flags & CA_KERNEL_WRITE) && ca_is_readonly(src) ) {
     return CA_ITER_ERR_READONLY;
   }

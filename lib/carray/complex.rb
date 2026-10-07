@@ -67,19 +67,16 @@ class CArray
   #   over `self`. Writing to the view updates `self` in place.
   #   @return [CArray]
   def real
-    if not part_of_self?(@__real__)
-      if complex?
-        @__real__ = case data_type
-                    when CA_CMPLX64
-                      field(0, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(0, CA_FLOAT64)
-                    end
-      else
-        @__real__ = self[]
-      end
-    end
-    @__real__
+    return @__real__ if part_of_self?(@__real__)
+    view = if complex?
+             case data_type
+             when CA_CMPLX64  then field(0, CA_FLOAT32)
+             when CA_CMPLX128 then field(0, CA_FLOAT64)
+             end
+           else
+             self[]
+           end
+    frozen? ? view : (@__real__ = view)
   end
 
   # @overload real=(val)
@@ -106,15 +103,12 @@ class CArray
       zero[is_masked] = UNDEF if has_mask?
       return zero
     end
-    if not part_of_self?(@__imag__)
-      @__imag__ = case data_type
-                  when CA_CMPLX64
-                    field(4, CA_FLOAT32)
-                  when CA_CMPLX128
-                    field(8, CA_FLOAT64)
-                  end
-    end
-    return @__imag__
+    return @__imag__ if part_of_self?(@__imag__)
+    view = case data_type
+           when CA_CMPLX64  then field(4, CA_FLOAT32)
+           when CA_CMPLX128 then field(8, CA_FLOAT64)
+           end
+    frozen? ? view : (@__imag__ = view)
   end
 
   # @overload imag=(val)

@@ -398,17 +398,15 @@ When your subclass is logically derived from **one** CArray (a
 computed view, a per-element transform, a typed reinterpretation,
 …), pass that array as the `:parent` option to `super`. This
 registers it both as the C-level `parent` and as the `@parent` Ruby
-ivar, enabling three pieces of standard CArray behaviour that
+ivar, enabling two pieces of standard CArray behaviour that
 otherwise stay inert on a `CAObject`:
 
 1. **Flag inheritance.** `read_only?`, `mask_array?`, and
    `value_array?` walk the parent chain. If the parent is
-   read-only, your CAObject is automatically read-only too — no
-   need to pass `read_only: true` separately.
-2. **Frozen propagation.** If the parent is frozen at the moment of
-   construction, the CAObject is frozen as well (handled by
-   `rb_ca_set_parent`).
-3. **GC anchor.** The `@parent` ivar keeps the parent reachable for
+   read-only or frozen, your CAObject is automatically read-only
+   too — no need to pass `read_only: true` separately. It is not
+   frozen itself, so it can still keep instance variables.
+2. **GC anchor.** The `@parent` ivar keeps the parent reachable for
    as long as the CAObject is alive, so a derived CAObject built
    over a temporary CArray won't dangle.
 
@@ -434,7 +432,7 @@ base = CArray.float64(3) { |i| i + 1.0 }.freeze
 sq   = Square.new(base)
 sq.parent.equal?(base)  # => true
 sq.read_only?           # => true   (inherited from frozen base)
-sq.frozen?              # => true   (inherited from frozen base)
+sq.frozen?              # => false  (read-only, not frozen)
 ```
 
 The `:parent` slot accepts **one** CArray. `CALink` and `CAPack` above

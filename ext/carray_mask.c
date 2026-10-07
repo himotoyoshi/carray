@@ -1094,9 +1094,6 @@ rb_ca_mask_array (VALUE self)
     obj = TypedData_Wrap_Struct(ca_mask_class[ca->obj_type],
                                 ca_mask_typeddata[ca->obj_type], ca->mask);
     rb_ivar_set(obj, rb_intern("masked_array"), self);
-    if ( OBJ_FROZEN(self) ) {
-      rb_ca_freeze(obj);
-    }
     return obj;
   }
   else {

@@ -142,11 +142,12 @@ class TestParentOption < Test::Unit::TestCase
     assert !sq.read_only?
   end
 
-  # rb_ca_set_parent が frozen を伝播
-  def test_frozen_propagates_from_parent
+  # A frozen parent makes the CAObject read-only, not frozen
+  def test_frozen_parent_makes_it_read_only
     base = CArray.float64(3).seq.freeze
     sq = SquareView.new(base)
-    assert sq.frozen?, "frozen parent should freeze the CAObject too"
+    assert sq.read_only?, "frozen parent should make the CAObject read-only"
+    assert_false sq.frozen?
   end
 
   def test_parent_kept_alive_by_anchor
@@ -270,7 +271,7 @@ class TestReadOnlyEnforcement < Test::Unit::TestCase
   def test_frozen_parent_blocks_assignment_on_derived
     base = CArray.float64(3).seq.freeze
     sq = SquareView.new(base)
-    assert_raise(FrozenError) { sq[0] = 0.0 }
+    assert_raise(RuntimeError) { sq[0] = 0.0 }
   end
 
   def test_writable_caobject_assigns
@@ -329,13 +330,16 @@ class TestDupSharesIvars < Test::Unit::TestCase
     assert_same base, dup.parent
   end
 
-  # clone は frozen も伝える (= Ruby standard semantics)
-  def test_clone_preserves_frozen_from_parent
+  # clone keeps the frozen state of its receiver (Ruby standard semantics);
+  # a frozen parent makes the receiver and its clone read-only
+  def test_clone_preserves_frozen_and_read_only
     base = CArray.float64(3).seq.freeze
     sq = SquareView.new(base)
     cl = sq.clone
-    assert cl.frozen?
+    assert_false cl.frozen?
     assert cl.read_only?
+    sq.freeze
+    assert sq.clone.frozen?
   end
 end
 

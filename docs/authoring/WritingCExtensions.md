@@ -824,8 +824,8 @@ Ruby callback, an allocation, `rb_funcall`), wrap the section in
 
 ### 4.6 Read-only views and `nosync`
 
-Some views can't be written through (reduction results, frozen
-arrays, `value_array` variants). In C the predicate is
+Some views can't be written through (reduction results, repeated
+cells, lazy expressions, views of a frozen or read-only array). In C the predicate is
 `ca_is_readonly(ca)`. Calling `ca_sync` on a read-only array raises;
 `ca_attach` on it is fine (you can still read).
 

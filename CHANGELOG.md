@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a view of a frozen array is read-only rather than frozen. A
+  write through it still raises, now `RuntimeError` ("can not modify
+  read-only array") instead of `FrozenError`, which is a subclass of it;
+  `frozen?` on the view is false. The same holds for a `CAObject` built
+  with a frozen `:parent`, and for the mask of a frozen array. In
+  exchange, `sort`, `sort(axis:)`, a boolean row selection, lazy
+  expressions, `lazy[...]`, `real` / `imag`, and views of a frozen Face
+  (`CATime`, strings, categoricals) work on a frozen array; they raised
+  `FrozenError`.
+
 - Change: an operator operand that exports MemoryView and also defines
   `to_ca` (an Apache Arrow array, given a bridge that adds `to_ca`) is now
   taken through `to_ca`, as `wrap_readonly` already did. Arrow's nulls now

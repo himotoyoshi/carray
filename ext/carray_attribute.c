@@ -473,13 +473,14 @@ rb_ca_inherit_attr (VALUE dst, VALUE src)
   }
 }
 
+/* A view of a frozen array is not frozen itself: building it may still set
+   it up after this (an ivar, a lift that moves it onto another parent), and
+   writes through it are refused by ca_is_readonly, which walks to the
+   frozen root and finds CA_FLAG_READ_ONLY there. */
 VALUE
 rb_ca_set_parent (VALUE self, VALUE obj)
 {
   rb_ivar_set(self, id_parent, obj);
-  if ( OBJ_FROZEN(obj) ) {
-    rb_ca_freeze(self);
-  }
   return obj;
 }
 
