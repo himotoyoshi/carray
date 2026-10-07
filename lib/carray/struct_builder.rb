@@ -305,6 +305,7 @@ class CAStruct::Builder  # :nodoc:
     @align      = opt[:pack] ### nil for alignment, int for pack(n)
     @members    = []         ### array of CArray::Struct::Builder::Member
     @offset     = 0          ### offset of each member and size of struct
+    @extent     = 0          ### furthest byte any member reaches
     @align_max  = 1          ### maximum of alignment among members
     @size       = opt[:size] ### user defined struct size
     @bit_offset = 0          ### 0..7, sub-byte position for bitfield accumulator
@@ -386,6 +387,9 @@ class CAStruct::Builder  # :nodoc:
       klass = Class.new(CAUnion)
     end
     # ---
+    # A member placed by an explicit offset can end before an earlier one
+    # does, so the body runs to the furthest member, not the last one.
+    @offset = @extent if @extent > @offset
     if @align.nil?
       @offset = alignment(@offset, :align_max)
     end
@@ -494,6 +498,9 @@ class CAStruct::Builder  # :nodoc:
   end
 
   def pack (addr, align, opt={})
+    if addr < 0
+      raise CAStruct::DefinitionError, format("negative member offset: %d", addr)
+    end
     if ( addr % align ) != 0
       raise CAStruct::DefinitionError,
             format("invalid offset for packing: %d not aligned to %d", addr, align)
@@ -539,6 +546,7 @@ class CAStruct::Builder  # :nodoc:
       mem = Member.new(id, data_type, opt)
       @members.push(mem)
       @offset += mem.byte_length
+      @extent = @offset if @offset > @extent
     when :union                            ### union
       alignment(0, data_type, opt)
       opt[:offset] = 0
