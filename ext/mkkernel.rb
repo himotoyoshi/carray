@@ -2041,8 +2041,14 @@ module MkKernel
                   buf_count >= 1 && induction_count <= 1 && other_count == 0 &&
                   !mixed_buf
     if li_eligible
+      # The interchange folds every cell of an unmasked source, so it can
+      # answer only when the reduced axis holds at least min_count cells;
+      # otherwise the general walk writes the UNDEF (or fill_value) cells.
+      li_gate = k[:mask_policy] == :min_count
+      io.puts "  if ( naxes != 1 || min_count < 0 || ca->dim[slab_axes[0]] >= min_count ) {" if li_gate
       emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
                                    acc_var, acc_init, reduce_stmt, finish_expr)
+      io.puts "  }" if li_gate
     end
 
     if view_flat
@@ -7222,13 +7228,18 @@ MkKernel.reduce :minmax,
 # replace the legacy `min_addr` / `max_addr` retired in E.7 stat_proc
 # retire (commit f5c7ecd).  3.0 breaking: name change from `*_addr` to
 # `*_index` is intentional.
+#
+# best_i starts at -1 (no cell taken yet), so the first unmasked non-NaN
+# cell is taken even when it equals the starting limit (an all-+Infinity
+# or all-INT_MAX fiber).  `v == v` keeps a NaN from being taken first; a
+# fiber of NaN only is left to the all-NaN fixup (UNDEF).
 
 MkKernel.reduce :argmin,
   state:           { best_v: :load_type, best_i: :int64_t },
   init:            { best_v: { numeric: "T_LIMIT_HI", bool: "T_LIMIT_HI", object: "Qundef" },
-                     best_i: "0" },
-  reduce:          { numeric: "if (v < best_v) { best_v = v; best_i = idx; }",
-                     bool:    "if (v < best_v) { best_v = v; best_i = idx; }",
+                     best_i: "-1" },
+  reduce:          { numeric: "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
+                     bool:    "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern("<"), 1, best_v))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   # CA_FIXLEN: position of the memcmp-lexicographic min (first-wins on ties).
@@ -7247,9 +7258,9 @@ MkKernel.reduce :argmin,
 MkKernel.reduce :argmax,
   state:           { best_v: :load_type, best_i: :int64_t },
   init:            { best_v: { numeric: "T_LIMIT_LO", bool: "T_LIMIT_LO", object: "Qundef" },
-                     best_i: "0" },
-  reduce:          { numeric: "if (v > best_v) { best_v = v; best_i = idx; }",
-                     bool:    "if (v > best_v) { best_v = v; best_i = idx; }",
+                     best_i: "-1" },
+  reduce:          { numeric: "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
+                     bool:    "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern(">"), 1, best_v))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   # CA_FIXLEN: position of the memcmp-lexicographic max (first-wins on ties).
@@ -7292,9 +7303,9 @@ MkKernel.reduce :argmax,
 MkKernel.reduce :argmin_addr,
   state:           { best_v: :load_type, best_i: :int64_t },
   init:            { best_v: { numeric: "T_LIMIT_HI", bool: "T_LIMIT_HI", object: "Qundef" },
-                     best_i: "0" },
-  reduce:          { numeric: "if (v < best_v) { best_v = v; best_i = idx; }",
-                     bool:    "if (v < best_v) { best_v = v; best_i = idx; }",
+                     best_i: "-1" },
+  reduce:          { numeric: "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
+                     bool:    "if (v < best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern("<"), 1, best_v))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   source:          MkKernel::ALL_NUMERIC + [:bool, :object],
@@ -7310,9 +7321,9 @@ MkKernel.reduce :argmin_addr,
 MkKernel.reduce :argmax_addr,
   state:           { best_v: :load_type, best_i: :int64_t },
   init:            { best_v: { numeric: "T_LIMIT_LO", bool: "T_LIMIT_LO", object: "Qundef" },
-                     best_i: "0" },
-  reduce:          { numeric: "if (v > best_v) { best_v = v; best_i = idx; }",
-                     bool:    "if (v > best_v) { best_v = v; best_i = idx; }",
+                     best_i: "-1" },
+  reduce:          { numeric: "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
+                     bool:    "if (v > best_v || (best_i < 0 && v == v)) { best_v = v; best_i = idx; }",
                      object:  'if (best_v == Qundef) { best_v = v; best_i = idx; } else if (RTEST(rb_funcall(v, rb_intern(">"), 1, best_v))) { best_v = v; best_i = idx; }' },
   finish:          "best_i",
   source:          MkKernel::ALL_NUMERIC + [:bool, :object],

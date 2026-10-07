@@ -65,7 +65,7 @@ class CArray
     num = prod.sum(**nopt)
     den = wv.sum(axis: axis, keep_axis: keep_axis)
     result =
-      if axis
+      if den.is_a?(CArray)               # axis given, or keep_axis
         den = den.copy
         den[den.eq(0)] = UNDEF          # zero / empty denominator -> undetermined
         num / den                        # UNDEF propagates cell-wise

@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `sum`, `mean`, `min`, `max`, `prod`, `accumulate` and `count` along
+  one axis honour `min_count:` (and `fill_value:`) when the array is large
+  and contiguous; above a size threshold they ignored it and returned the
+  full fold.
+
+- Fix: `min_index`, `max_index`, `min_addr` and `max_addr` never point at a
+  masked cell or a NaN. A fiber whose extremum equalled the type's limit
+  (`Infinity`, `255` for uint8) reported position 0 even when that cell was
+  masked or NaN.
+
+- Fix: `wmean` of an object array with `keep_axis: true` and no axis
+  returns an UNDEF cell for a zero weight sum instead of raising
+  `ZeroDivisionError`.
+
 - Fix: `median` and `percentile` take the next value in sort order as the
   upper end of an interpolation also when it is `Infinity` or `NaN` (NaN
   sorts after every number): `[1.0, Infinity].median` is `Infinity` (was
