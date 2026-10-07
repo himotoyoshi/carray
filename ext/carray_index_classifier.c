@@ -645,7 +645,7 @@ ca_classifier_expand_rubber_dim (ca_classifier_ctx_t *ctx)
     /* No rubber dim — validate argc == ndim and pass through. */
     if ( argc != ctx->ca_ndim ) {
       rb_raise(rb_eIndexError,
-               "number of indices exceeds the ndim of carray (%i > %i)",
+               "%i indices given for a carray of ndim %i",
                (int) argc, ctx->ca_ndim);
     }
     return;
@@ -901,7 +901,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
        here would raise on legitimate grid regions. */
     if ( ! is_grid && ctx.ca_ndim != info->ndim ) {
       rb_raise(rb_eIndexError,
-               "number of indices does not equal to the ndim (%i != %i)",
+               "%i indices given for a carray of ndim %i",
                info->ndim, ctx.ca_ndim);
     }
 

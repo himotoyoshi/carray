@@ -269,7 +269,7 @@ hyperslab notation, for example, treats them differently.
 | element-count mismatch on boolean-CArray `SELECT`    | `RuntimeError`     | `mismatch of # of elements ( %lld <=> %lld ) in reference by selection`                       |
 | `argc == 1` with CArray of an invalid data_type      | `IndexError`       | `data_type %s is invalid for reference by selection/mapping(should be boolean or integer)`     |
 | rubber dim overflow (`argc > ndim + 1`)              | `IndexError`       | `index specification exceeds the ndim of carray (%i)`                                          |
-| arity mismatch without rubber dim                    | `IndexError`       | `number of indices exceeds the ndim of carray (%i > %i)`                                       |
+| arity mismatch without rubber dim                    | `IndexError`       | `%i indices given for a carray of ndim %i`                                                     |
 | integer axis out of range                            | `IndexError`       | `index out of range at %i-dim ( %lld <=> 0..%lld )`                                            |
 | `Range` / `ArithmeticSequence` endpoint out of range | `IndexError`       | `index %lld is out of range (0..%lld) at %i-dim`                                                |
 | `step == 0` (`ArithmeticSequence`)                   | `RuntimeError`     | `step in index equals to 0 in block reference`                                                 |
@@ -278,7 +278,7 @@ hyperslab notation, for example, treats them differently.
 | `step == 0` (`[s, c, step]`)                         | `RuntimeError`     | same as above                                                                                  |
 | `Array` of length other than 1, 2, 3                 | `IndexError`       | `invalid form of index range at %i-dim (should be [start[,count[,step]]], [range, step])`     |
 | `Symbol` other than `:>` in an axis position         | `IndexError`       | `symbol :%s is invalid as the index for slab iterator (use :> instead)`                       |
-| arity mismatch after rubber expansion                | `IndexError`       | `number of indices does not equal to the ndim (%i != %i)`                                      |
+| arity mismatch after rubber expansion                | `IndexError`       | `%i indices given for a carray of ndim %i`                                                     |
 | multi-arg form with CArray of an invalid data_type   | `IndexError`       | `data_type %s is invalid for reference by gridding at %i-dim (should be boolean or integer)`  |
 | any unrecognised argument                            | `IndexError`       | `object '%s' is invalid for the index for reference at %i-dim`                                |
 

@@ -443,14 +443,15 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     assert_match(/invalid form of index range at 0-dim/, e2.message)
   end
 
-  def test_error_msg_argc_exceeds_ndim
-    # "number of indices exceeds the ndim of carray (%i > %i)"
+  def test_error_msg_argc_mismatches_ndim
+    # "%i indices given for a carray of ndim %i"
     e1 = (CArray.scan_index([3], [0, 0]) rescue $!)
     e2 = (CArray._scan_index_v2([3], [0, 0]) rescue $!)
     assert_equal e1.class, e2.class
     assert_equal e1.message, e2.message
-    assert_match(/number of indices exceeds the ndim of carray \(2 > 1\)/,
-                 e2.message)
+    assert_match(/2 indices given for a carray of ndim 1/, e2.message)
+    e3 = (CArray.float64(4, 3, 2)[0, 0] rescue $!)
+    assert_match(/2 indices given for a carray of ndim 3/, e3.message)
   end
 
   def test_error_msg_rubber_overflow
