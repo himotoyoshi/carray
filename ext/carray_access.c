@@ -36,10 +36,7 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
   }
 
   if ( rval == CA_UNDEF ) { /* set mask of the element at the index 'idx' */
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_store_index(ca->mask, idx, &one);
   }
   else {                   /* unset mask and set value of the element at the index 'idx' */
@@ -123,10 +120,7 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
   }
 
   if ( rval == CA_UNDEF ) { /* set mask at the element */
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_store_addr(ca->mask, addr, &one);
   }
   else {                   /* set value at the element */
@@ -204,10 +198,7 @@ rb_ca_fill (VALUE self, VALUE rval)
 
   if ( rval == CA_UNDEF ) {
     boolean8_t one = 1;
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_fill(ca->mask, &one);
   }
   else {

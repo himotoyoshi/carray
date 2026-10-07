@@ -192,8 +192,7 @@ ca_sweep_acquire_body (VALUE arg)
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
       if (st->fsync[k_op] != '1') continue;
-      ca_update_mask(ca);
-      if (!ca->mask) ca_create_mask(ca);
+      ca_create_mask(ca);
       memcpy(ca->mask->ptr, st->m0, st->n_kernel);
     }
   }
@@ -382,8 +381,7 @@ ca_sweep_acquire_chunked_body (VALUE arg)
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
       if (st->fsync[k_op] != '1') continue;
-      ca_update_mask(ca);
-      if (!ca->mask) ca_create_mask(ca);
+      ca_create_mask(ca);
     }
   }
 

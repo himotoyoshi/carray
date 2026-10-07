@@ -427,6 +427,10 @@ ca_create_mask (void *ap)
 {
   CArray *ca = (CArray *) ap;
 
+  if ( ca->mask ) {
+    return;
+  }
+
   if ( ca_is_value_array(ca) ) {
     rb_raise(rb_eRuntimeError,
              "can not create mask array for the value array");
@@ -437,26 +441,24 @@ ca_create_mask (void *ap)
              "can not create mask array for the mask array");
   }
 
-  if ( ! ca->mask ) {
-    ca_func[ca->obj_type].create_mask(ca);
-    ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
-    if ( ca_is_view(ca) ) {
-      if ( CAVIEW(ca)->attach ) {
-        /* The new mask joins its view's level.  Its attach reads the
-           parent's mask, which can raise (a Ruby-backed parent); the mask
-           then comes off again, since the view's sync and detach would
-           find it attached to nothing. */
-        int tag = 0;
-        rb_protect(ca_create_mask_attach, (VALUE) ca->mask, &tag);
-        if ( tag ) {
-          CArray *mask = ca->mask;
-          ca->mask = NULL;
-          ca_free(mask);
-          rb_jump_tag(tag);
-        }
-        if ( ca_is_view(ca->mask) ) {
-          CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
-        }
+  ca_func[ca->obj_type].create_mask(ca);
+  ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
+  if ( ca_is_view(ca) ) {
+    if ( CAVIEW(ca)->attach ) {
+      /* The new mask joins its view's level.  Its attach reads the
+         parent's mask, which can raise (a Ruby-backed parent); the mask
+         then comes off again, since the view's sync and detach would
+         find it attached to nothing. */
+      int tag = 0;
+      rb_protect(ca_create_mask_attach, (VALUE) ca->mask, &tag);
+      if ( tag ) {
+        CArray *mask = ca->mask;
+        ca->mask = NULL;
+        ca_free(mask);
+        rb_jump_tag(tag);
+      }
+      if ( ca_is_view(ca->mask) ) {
+        CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
       }
     }
   }
@@ -572,10 +574,7 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
     return;
   }
 
-  ca_update_mask(ca);
-  if ( ! ca->mask ) {
-    ca_create_mask(ca);
-  }
+  ca_create_mask(ca);
 
   if ( elements > ca->elements ) {
     elements = ca->elements;
@@ -819,11 +818,7 @@ ca_invert_mask (void *ap)
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
 
-  ca_update_mask(ca);
-
-  if ( ! ca->mask ) {
-    ca_create_mask(ca);
-  }
+  ca_create_mask(ca);
 
   ca_attach(ca->mask);   /* window: nothing raises inside */
   m = (boolean8_t *) ca->mask->ptr;
@@ -1131,10 +1126,7 @@ rb_ca_set_mask (VALUE self, VALUE rval)
              "can not create mask for the mask array");
   }
 
-  ca_update_mask(ca);
-  if ( ! ca->mask ) {
-    ca_create_mask(ca);
-  }
+  ca_create_mask(ca);
 
   if ( rb_obj_is_carray(rmask) ) {
     TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);

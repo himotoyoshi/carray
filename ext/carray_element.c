@@ -683,10 +683,7 @@ rb_ca_elem_mask (VALUE self, VALUE ridx)
   /* General path: view array.  Walk parent chain + dispatch. */
   {
     boolean8_t one = 1;
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     if ( TYPE(ridx) == T_ARRAY ) {
       elem_parse_idx_array(ca, ridx, idx);
       ca_store_index(ca->mask, idx, &one);
