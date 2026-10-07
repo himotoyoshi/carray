@@ -33,11 +33,32 @@
 
 /* Data scratch.  A scratch of object cells holds VALUEs no Ruby object
    owns while the kernel calls Ruby for each cell, so it is filled with
-   Qnil and held for the GC until finish releases it. */
+   Qnil and held for the GC until finish releases it.
+
+   One large scratch is kept when a walk frees it and handed to the next
+   walk that fits in it: a fresh allocation of that size costs the page
+   faults of touching it, which for a reduction is several times the
+   reduction itself.  The kept buffer is owned by nobody, and a walk that
+   takes it owns it alone until it frees it again. */
+
+#define KI_KEEP_MIN ((ca_size_t) 1 << 20)
+#define KI_KEEP_MAX ((ca_size_t) 64 << 20)
+
+static void     *ki_kept       = NULL;
+static ca_size_t ki_kept_bytes = 0;
+
 static void *
 ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
-  void *p = xmalloc(bytes > 0 ? bytes : 1);
+  void *p;
+  if ( ki_kept && bytes >= KI_KEEP_MIN && bytes <= ki_kept_bytes ) {
+    p = ki_kept;
+    ki_kept = NULL;
+    ki_kept_bytes = 0;
+  }
+  else {
+    p = xmalloc(bytes > 0 ? bytes : 1);
+  }
   if ( data_type == CA_OBJECT ) {
     VALUE    *v = (VALUE *) p;
     ca_size_t n = bytes / (ca_size_t) sizeof(VALUE);
@@ -48,20 +69,20 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
   return p;
 }
 
-/* A scratch filled by someone else (ca_axis_dispatch_attach) with cells
-   copied from an attached parent. */
+/* `bytes` is the size p was allocated with (0 when unknown: never kept). */
 static void
-ki_data_hold (int8_t data_type, void *p, ca_size_t elements)
-{
-  if ( data_type == CA_OBJECT ) {
-    ca_gc_hold_buffer(p, elements);
-  }
-}
-
-static void
-ki_data_free (void *p)
+ki_data_free (void *p, ca_size_t bytes)
 {
   ca_gc_release_buffer(p);
+  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && bytes > ki_kept_bytes ) {
+    void *old = ki_kept;
+    ki_kept = p;
+    ki_kept_bytes = bytes;
+    if ( old ) {
+      xfree(old);
+    }
+    return;
+  }
   xfree(p);
 }
 
@@ -780,13 +801,11 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
     if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
       bound_fill = ((CAWindow *) src)->fill;
     }
-    st->scratch_ptr = ca_axis_dispatch_attach(parent,
-                                              st->parent_axis_dims,
-                                              raw_descs, raw_ndim,
-                                              src->bytes,
-                                              st->total_elements,
-                                              bound_fill);
-    ki_data_hold(parent->data_type, st->scratch_ptr, st->total_elements);
+    st->scratch_cap = st->total_elements * src->bytes;
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+    ca_axis_dispatch_gather(parent, st->parent_axis_dims, raw_descs, raw_ndim,
+                            src->bytes, st->total_elements, bound_fill,
+                            st->scratch_ptr);
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
 
@@ -1228,11 +1247,10 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           bound_fill = ((CAWindow *) src)->fill;
         }
         st->scratch_cap = src->elements * src->bytes;
-        st->scratch_ptr = ca_axis_dispatch_attach(parent, raw_pdims,
-                                                  local_descs, src->ndim,
-                                                  src->bytes, src->elements,
-                                                  bound_fill);
-        ki_data_hold(parent->data_type, st->scratch_ptr, src->elements);
+        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+        ca_axis_dispatch_gather(parent, raw_pdims, local_descs, src->ndim,
+                                src->bytes, src->elements, bound_fill,
+                                st->scratch_ptr);
         /* sync_slab scatters the whole scratch back by this count. */
         st->total_elements = src->elements;
         st->alias_mode = CA_ITER_ALIAS_NONE;
@@ -2024,13 +2042,11 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
       bound_fill = ((CAWindow *) src)->fill;
     }
-    st->scratch_ptr = ca_axis_dispatch_attach(parent,
-                                              st->parent_axis_dims,
-                                              raw_descs, raw_ndim,
-                                              src->bytes,
-                                              st->total_elements,
-                                              bound_fill);
-    ki_data_hold(parent->data_type, st->scratch_ptr, st->total_elements);
+    st->scratch_cap = st->total_elements * src->bytes;
+    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+    ca_axis_dispatch_gather(parent, st->parent_axis_dims, raw_descs, raw_ndim,
+                            src->bytes, st->total_elements, bound_fill,
+                            st->scratch_ptr);
 
     /* Lay out as a single 1-D L2 strided slab: ptr = scratch,
        n = total_elements, stride = bytes.  next_slab_strided reads
@@ -2715,7 +2731,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     ca_size_t  counts[CA_RANK_MAX];
 
     if ( st->fiber_data_scratch_cap < need ) {
-      if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
+      if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
       st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
       st->fiber_data_scratch_cap = need;
     }
@@ -2817,7 +2833,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
          walk → single alloc in practice). */
       ca_size_t need = n * bytes;
       if ( st->fiber_data_scratch_cap < need ) {
-        if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
+        if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
         st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
         st->fiber_data_scratch_cap = need;
       }
@@ -3075,7 +3091,7 @@ ca_iter_state_finish (ca_iter_state *st)
          ca_detach.
        - else (alias paths): src was attached at init, detach. */
   if ( st->scratch_ptr ) {
-    ki_data_free(st->scratch_ptr);
+    ki_data_free(st->scratch_ptr, st->scratch_cap);
     st->scratch_ptr = NULL;
     st->scratch_cap = 0;
   }
@@ -3085,7 +3101,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* PROPOSAL_FIBER_DELIVERY F.1a/F.1b: per-fiber scratch lifecycle. */
   if ( st->fiber_data_scratch ) {
-    ki_data_free(st->fiber_data_scratch);
+    ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
     st->fiber_data_scratch     = NULL;
     st->fiber_data_scratch_cap = 0;
   }
@@ -3107,7 +3123,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* pilot/castack-axis0-loop-interchange: free tile cache. */
   if ( st->stack_tile_cache ) {
-    ki_data_free(st->stack_tile_cache);
+    ki_data_free(st->stack_tile_cache, 0);
     st->stack_tile_cache = NULL;
     st->stack_tile_cap   = 0;
     st->stack_tile_pos   = 0;

@@ -40,6 +40,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   last axis is shifted, `sum`, `min`, `mean` and the like run about ten
   times faster, and the same reductions along an outer axis
   (`sum(axis: 0)`) two to four times faster. Results are unchanged.
+- Change: a reduction over a view that has to be gathered first (`shift`,
+  `window`, `roll`, and others) no longer allocates a fresh buffer each
+  time, which roughly halves its time at a million cells. The process
+  keeps one such buffer of 1 to 64 MB between calls.
 
 - Change: `sort` of a lazy expression (`(a.lazy * 2).sort(axis: 1)`)
   returns a read-only sorted view over the expression, where it returned
