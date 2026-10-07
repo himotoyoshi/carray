@@ -7947,18 +7947,18 @@ MkKernel.search :bsearch,
     C
     object: <<~C,
       /* CA_OBJECT bsearch: ordering via rb_funcall(<=>).  Assumes the
-         slab is sorted by the same comparator used to build it.  NaN
-         guards skipped (= no float-NaN concept for arbitrary objects;
-         a Float-cell NaN would raise from <=>). */
+         slab is sorted by the same comparator used to build it, which puts
+         a Float NaN last; a NaN query matches nothing, as in float. */
       result = (ca_size_t) -1;
       ca_size_t lo = 0;
-      ca_size_t hi = slab_n;
+      ca_size_t hi = CA_OBJ_ISNAN(query_val) ? 0 : slab_n;   /* NaN matches nothing */
       while ( lo < hi ) {
         ca_size_t mid = lo + (hi - lo) / 2;
         T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
+        if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
         VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
         if ( NIL_P(r) ) {
-          rb_raise(rb_eArgError, "bsearch: comparison of %s with %s failed",
+          rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),
                    rb_obj_classname(v), rb_obj_classname(query_val));
         }
         int c = NUM2INT(r);
@@ -8104,10 +8104,10 @@ MkKernel.search :search_nearest,
       int nearest_by_distance = rb_respond_to(query_val, nearest_id);
       if ( ! nearest_by_distance && ! rb_obj_is_kind_of(query_val, rb_cNumeric) ) {
         rb_raise(rb_eCADataTypeError,
-                 "search_nearest: nearest needs a distance, and %s is neither a "
+                 "%s: nearest needs a distance, and %s is neither a "
                  "number nor answers #distance (define one on the stored "
                  "objects, or use search / bsearch for an exact match)",
-                 rb_obj_classname(query_val));
+                 ca_calling_method_name(), rb_obj_classname(query_val));
       }
       result = (ca_size_t) -1;
       VALUE best = Qnil;
@@ -8118,6 +8118,7 @@ MkKernel.search :search_nearest,
                    ? rb_funcall(query_val, nearest_id, 1, v)
                    : rb_funcall(rb_funcall(query_val, '-', 1, v),
                                 rb_intern("abs"), 0);
+        if ( CA_OBJ_ISNAN(dist) ) continue;   /* a NaN is no distance, as in float */
         if ( NIL_P(best) || RTEST(rb_funcall(dist, rb_intern("<"), 1, best)) ) {
           best = dist; result = i;
         }
@@ -8180,13 +8181,14 @@ MkKernel.search :bsearch_addr,
     object: <<~C,
       result = (ca_size_t) -1;
       ca_size_t lo = 0;
-      ca_size_t hi = slab_n;
+      ca_size_t hi = CA_OBJ_ISNAN(query_val) ? 0 : slab_n;   /* NaN matches nothing */
       while ( lo < hi ) {
         ca_size_t mid = lo + (hi - lo) / 2;
         T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
+        if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
         VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
         if ( NIL_P(r) ) {
-          rb_raise(rb_eArgError, "bsearch_addr: comparison of %s with %s failed",
+          rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),
                    rb_obj_classname(v), rb_obj_classname(query_val));
         }
         int c = NUM2INT(r);
@@ -8305,10 +8307,10 @@ MkKernel.search :search_nearest_addr,
       int nearest_by_distance = rb_respond_to(query_val, nearest_id);
       if ( ! nearest_by_distance && ! rb_obj_is_kind_of(query_val, rb_cNumeric) ) {
         rb_raise(rb_eCADataTypeError,
-                 "search_nearest_addr: nearest needs a distance, and %s is neither a "
+                 "%s: nearest needs a distance, and %s is neither a "
                  "number nor answers #distance (define one on the stored "
                  "objects, or use search / bsearch for an exact match)",
-                 rb_obj_classname(query_val));
+                 ca_calling_method_name(), rb_obj_classname(query_val));
       }
       result = (ca_size_t) -1;
       VALUE best = Qnil;
@@ -8319,6 +8321,7 @@ MkKernel.search :search_nearest_addr,
                    ? rb_funcall(query_val, nearest_id, 1, v)
                    : rb_funcall(rb_funcall(query_val, '-', 1, v),
                                 rb_intern("abs"), 0);
+        if ( CA_OBJ_ISNAN(dist) ) continue;   /* a NaN is no distance, as in float */
         if ( NIL_P(best) || RTEST(rb_funcall(dist, rb_intern("<"), 1, best)) ) {
           best = dist; result = i;
         }

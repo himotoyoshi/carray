@@ -67,7 +67,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `CA_OBJECT([NaN, 1.0, 2.0]).min` is `1.0` (was `NaN`). A run of nothing
   but NaN still answers NaN, and its position is UNDEF. `sort`,
   `sort_index`, `rank_index` and `partition` put a NaN after every other
-  value instead of raising `ArgumentError`.
+  value instead of raising `ArgumentError`; `bsearch` finds past it, and
+  `search_nearest` skips it.
 
 - Fix: `sum`, `mean`, `min`, `max`, `prod`, `accumulate` and `count` along
   one axis honour `min_count:` (and `fill_value:`) when the array is large
