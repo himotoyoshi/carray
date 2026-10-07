@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `minmax` of an empty or fully masked array, or one with fewer
+  cells than `min_count:` asks for, returns `[UNDEF, UNDEF]` instead of a
+  single `UNDEF`, so `lo, hi = a.minmax` always gets both. This is what the
+  iterators, `CAConstString#minmax` and `minmax(fill_value:)` already
+  returned; a `CATime` gave `[UNDEF, nil]`.
+
 - Fix: a reduction of a lazy expression over an empty array answers as
   the same reduction of the array does: `mean`, `min`, `max` and the like
   are UNDEF, where they gave `0.0`, `Infinity` / the type's limits, or

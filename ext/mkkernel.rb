@@ -3273,10 +3273,11 @@ module MkKernel
     # pair of [1,...,1] entities instead.
     io.puts "      if ( naxes == ca->ndim && !keep_axis ) {"
     if min_count
-      # Full reduction: if the sole output cell is masked, return CA_UNDEF.
-      # (Both op_mask_a and op_mask_b share the same bit since both
-      # reductions consume the same slab, so checking _a is sufficient.)
-      io.puts "        if ( op_mask_a && op_mask_a[0] ) return CA_UNDEF;"
+      # Full reduction: if the sole output cell is masked, both answers are
+      # UNDEF, still as a pair -- the shape of the answer does not depend on
+      # the data.  (Both op_mask_a and op_mask_b share the same bit since
+      # both reductions consume the same slab, so checking _a is sufficient.)
+      io.puts "        if ( op_mask_a && op_mask_a[0] ) return rb_assoc_new(CA_UNDEF, CA_UNDEF);"
     end
     io.puts "        return rb_assoc_new(#{ruby_wrap}(op_a[0]), #{ruby_wrap}(op_b[0]));"
     io.puts "      }"

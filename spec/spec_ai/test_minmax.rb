@@ -116,10 +116,17 @@ class TestMinmax < Test::Unit::TestCase
     assert_equal 4.5, hi
   end
 
-  def test_masked_all_returns_undef
+  def test_face_all_masked_is_an_undef_pair
+    t = CArray.int64(3) { |i| i }.time(unit: :s)
+    t[] = UNDEF
+    assert_equal [UNDEF, UNDEF], t.minmax
+  end
+
+  def test_masked_all_returns_undef_pair
     a = CArray.float64(3) { 1.0 }
     a[0] = UNDEF; a[1] = UNDEF; a[2] = UNDEF
-    assert_equal UNDEF, a.minmax
+    assert_equal [UNDEF, UNDEF], a.minmax
+    assert_equal [UNDEF, UNDEF], CArray.float64(0).minmax
   end
 
   def test_masked_per_axis
@@ -144,8 +151,8 @@ class TestMinmax < Test::Unit::TestCase
   def test_min_count_kwarg_flat_undef
     a = CArray.float64(5) { |i| [1.0, 2.0, 3.0, 4.0, 5.0][i] }
     a[0] = UNDEF; a[1] = UNDEF; a[2] = UNDEF
-    # Only 2 valid cells, min_count: 3 should yield UNDEF
-    assert_equal UNDEF, a.minmax(min_count: 3)
+    # Only 2 valid cells, min_count: 3 should yield UNDEF for both
+    assert_equal [UNDEF, UNDEF], a.minmax(min_count: 3)
   end
 
   def test_min_count_kwarg_flat_ok
