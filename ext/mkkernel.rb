@@ -6648,8 +6648,10 @@ module MkKernel
     rows
   end
 
+  # The block forms keep gsub from reading the backslashes in the
+  # replacement as references to the match.
   def self.c_string_literal(text)
-    '"' + text.gsub("\\", "\\\\").gsub('"', '\\"').gsub("\n", '\\n') + '"'
+    '"' + text.gsub("\\") { "\\\\" }.gsub('"') { '\\"' }.gsub("\n") { '\\n' } + '"'
   end
 
   def self.emit_kernel_bodies(io)
