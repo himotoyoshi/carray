@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a reduction of a lazy expression over an empty array answers as
+  the same reduction of the array does: `mean`, `min`, `max` and the like
+  are UNDEF, where they gave `0.0`, `Infinity` / the type's limits, or
+  `nil`, and an object array could crash the interpreter. `min_count:` is
+  honored on a lazy expression too; it was ignored.
+
 - Fix: `offset:` on a struct member places it or is refused, where it
   was dropped. A nested `struct` or `array` member takes its `offset:`
   in a packed struct; in an aligned struct (no `pack:`) and for a union

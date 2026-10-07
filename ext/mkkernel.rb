@@ -3411,9 +3411,16 @@ module MkKernel
   #     produce wrong values for the right operand.)
   #   - non-lazy source: !ca_is_lazy_view(ca)
   #   - mask present: ca_has_mask(ca)
+  #   - nothing to fold, or fewer cells than min_count asks for: the walk
+  #     has no mask, so it answers the finish expression, which is right
+  #     only when the mask policy cannot fire.  An empty source and a
+  #     min_count above the cell count are the two ways it can without a
+  #     mask, and the full path answers them.
   def self.emit_reduce_streaming_call(io, k, src)
     fn = "#{k[:name]}_ki_stream_#{src}"
     io.puts "    if ( naxes == ca->ndim && ca->ndim >= 1 && !keep_axis &&"
+    io.puts "         ca->elements > 0 &&"
+    io.puts "         ( min_count < 0 || ca->elements >= min_count ) &&" if k[:mask_policy] == :min_count
     io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) ) {"
     io.puts "      #{fn}_t __ctx;"
     io.puts "      __ctx.chunk = NULL;"
