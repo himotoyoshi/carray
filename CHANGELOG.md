@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CATimedelta` has `cumsum` and `accumulate`, which answer
+  durations on the array's own unit, as `sum` does. `prod` and `cumprod`
+  of a `CATimedelta`, and `cumsum`, `accumulate`, `prod` and `cumprod` of a
+  `CATime`, raise `TypeError` saying why, as `sum` and `variance` already
+  did; before, they raised `CArray::DataTypeError` about the storage.
+
 - Fix: `cumcount` answers for every data type, since it reads only the
   mask: an object array of Strings or `nil`, a fixlen array, a boolean
   array and a `CATime` no longer raise trying to convert their values to

@@ -958,6 +958,27 @@ class CATime
     raise TypeError, "CATime#sum is ill-defined; use mean for centroid"
   end
 
+  # @overload accumulate(*)
+  #   Not supported, for the same reason as {#sum}.
+  #   @raise [TypeError] always.
+  def accumulate(*); raise TypeError, "CATime#accumulate is ill-defined (a sum of instants)"; end
+
+  # @overload cumsum(*)
+  #   Not supported, for the same reason as {#sum}.  The running position
+  #   relative to the first instant is `(t - t[0])` cumulated as durations.
+  #   @raise [TypeError] always.
+  def cumsum(*); raise TypeError, "CATime#cumsum is ill-defined (a sum of instants)"; end
+
+  # @overload prod(*)
+  #   Not supported: a product of instants has no meaning.
+  #   @raise [TypeError] always.
+  def prod(*); raise TypeError, "CATime#prod is ill-defined (a product of instants)"; end
+
+  # @overload cumprod(*)
+  #   Not supported, for the same reason as {#prod}.
+  #   @raise [TypeError] always.
+  def cumprod(*); raise TypeError, "CATime#cumprod is ill-defined (a product of instants)"; end
+
   # @overload variance(*)
   #   Not supported: the variance of instants has squared-time units, which
   #   no type represents (ill-defined, like {#sum}).  Use {#stddev} for the
@@ -1414,6 +1435,33 @@ class CATimedelta
   def sum(*args, **opts)
     round_and_relift(parent.sum(*args, **opts))
   end
+
+  # @overload accumulate(*args, **opts)
+  #   Returns the sum of durations in the storage's own integer type, as
+  #   {#sum} does in float64.
+  #   @return [Element, CATimedelta]
+  def accumulate(*args, **opts)
+    round_and_relift(parent.accumulate(*args, **opts))
+  end
+
+  # @overload cumsum(axis: nil)
+  #   Returns the running sum of durations as a {CATimedelta} on `self`'s
+  #   unit.  A masked cell holds the running sum, as {CArray#cumsum} does.
+  #   @return [CATimedelta]
+  def cumsum(*args, **opts)
+    round_and_relift(parent.cumsum(*args, **opts))
+  end
+
+  # @overload prod(*)
+  #   Not supported: a product of durations has the units of a power of
+  #   time, which no type represents.
+  #   @raise [TypeError] always.
+  def prod(*); raise TypeError, "CATimedelta#prod is ill-defined (powers of time units)"; end
+
+  # @overload cumprod(*)
+  #   Not supported, for the same reason as {#prod}.
+  #   @raise [TypeError] always.
+  def cumprod(*); raise TypeError, "CATimedelta#cumprod is ill-defined (powers of time units)"; end
 
   # @overload mean(axis: nil, **opts)
   #   Returns the mean duration rounded to the nearest unit count.
