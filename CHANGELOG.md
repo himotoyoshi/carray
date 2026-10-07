@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.save` / `CArray.dump` refuse a Face other than a
+  record (`CATime`, `CATimedelta`, string arrays, categoricals) with
+  `TypeError`, as `Marshal.dump` does. The file kept the storage without
+  the unit, the string buffer or the labels, and loaded back as plain
+  bytes. Save `.parent` to keep the storage.
+- Fix: `CArray.load` refuses a file whose header fields disagree (a shape
+  that does not match the element count, an element size that is not the
+  data type's, more data than the file holds, ...) instead of reading
+  part of it, and checks the size before allocating.
+- Fix: `CArray.struct` refuses a member at a negative offset or one that
+  reaches past the record; such a member read and wrote outside the
+  array. A struct without `size:` now runs to its furthest member.
+  `CARecord.wrap` refuses elements of another size than the struct.
+
 - Change: a view of a frozen array is read-only rather than frozen. A
   write through it still raises, now `RuntimeError` ("can not modify
   read-only array") instead of `FrozenError`, which is a subclass of it;

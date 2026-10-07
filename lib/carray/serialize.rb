@@ -118,6 +118,8 @@ class CArray::Serializer   # :nodoc:
   #   @raise [ArgumentError] when `ca` is a CA_OBJECT array (use
   #     `Marshal.dump(ca)` instead), or carries a data_class the
   #     v1.0 flat-primitive schema cannot express.
+  #   @raise [TypeError] when `ca` is a Face other than a record (save
+  #     its storage with `.parent`).
   def save (ca, **opt)
     if ca.data_type == :object
       raise ArgumentError,
@@ -125,6 +127,15 @@ class CArray::Serializer   # :nodoc:
             "(arbitrary Ruby objects have no portable representation); " \
             "use Marshal.dump(ca) for a Ruby-only round-trip"
     end
+    # A Face other than a record is refused, as Marshal refuses it: the file
+    # would carry its storage without what makes it the Face (a unit, the
+    # string buffer, the labels), and load could not put that back.
+    if ca.face? && !ca.is_a?(CARecord)
+      raise TypeError,
+            "CArray.save cannot carry a #{ca.class} yet (its Face would be " \
+            "lost); save its storage with .parent"
+    end
+
     file_endian = opt[:endian] || CArray.endian
     swap        = (file_endian != CArray.endian)
 
