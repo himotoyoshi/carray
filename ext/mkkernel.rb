@@ -8068,13 +8068,16 @@ MkKernel.search :search_nearest,
   output:    :ca_size,
   body:      {
     int: <<~C,
+      /* The distance is exact in uint64: a double loses the difference
+         between neighbouring int64 values above 2**53. */
       result = (ca_size_t) -1;
-      double best_dist = INFINITY;
+      uint64_t best_dist = 0;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        double dist = fabs((double)v - (double)query_val);
-        if ( dist < best_dist ) { best_dist = dist; result = i; }
+        uint64_t dist = ( v >= query_val ) ? (uint64_t) v - (uint64_t) query_val
+                                           : (uint64_t) query_val - (uint64_t) v;
+        if ( result == (ca_size_t) -1 || dist < best_dist ) { best_dist = dist; result = i; }
       }
       (void) query_eps;  /* unused: search_nearest has no eps semantics */
     C
@@ -8271,13 +8274,16 @@ MkKernel.search :search_nearest_addr,
   output:    :ca_size,
   body:      {
     int: <<~C,
+      /* The distance is exact in uint64: a double loses the difference
+         between neighbouring int64 values above 2**53. */
       result = (ca_size_t) -1;
-      double best_dist = INFINITY;
+      uint64_t best_dist = 0;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        double dist = fabs((double)v - (double)query_val);
-        if ( dist < best_dist ) { best_dist = dist; result = i; }
+        uint64_t dist = ( v >= query_val ) ? (uint64_t) v - (uint64_t) query_val
+                                           : (uint64_t) query_val - (uint64_t) v;
+        if ( result == (ca_size_t) -1 || dist < best_dist ) { best_dist = dist; result = i; }
       }
       (void) query_eps;
     C

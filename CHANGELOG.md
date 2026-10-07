@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `search_nearest` on an int64 or uint64 array measures the distance
+  exactly: above 2**53 a neighbouring value no longer ties with the one
+  next to it.
+
 - Change: an error raised by a generated kernel (the reductions, scans,
   sorts and searches) begins with the name of the method that was called,
   such as `cumsum:`, instead of an internal name ending in `_ki`, and lists
