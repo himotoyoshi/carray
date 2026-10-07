@@ -2474,7 +2474,7 @@ ca_fill (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can't fill read-only carray");
+    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
   }
 
   ca_fill_data(ap, ptr);

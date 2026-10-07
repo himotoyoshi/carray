@@ -173,7 +173,7 @@ rb_ca_to_ca (int argc, VALUE *argv, VALUE self)
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
   }
   return self;

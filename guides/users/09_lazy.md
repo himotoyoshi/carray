@@ -54,7 +54,7 @@ The expression tree itself is read-only:
 
 ```ruby
 expr[0] = 99
-#  => RuntimeError: can not store data to read-only array
+#  => RuntimeError: can not modify read-only array
 ```
 
 This is by design. The tree is a recipe, not a buffer; if you need to write into the result, materialise first with `copy` and assign into that.

@@ -1250,7 +1250,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   if ( rb_obj_is_carray(obj) ) {                    /* obj == carray */
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -1288,7 +1288,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
     }
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
