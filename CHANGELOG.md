@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `search`, `bsearch` and `search_nearest` on an integer array compare
+  a Float query, or a CArray query of a wider data type, in the type the
+  two share, as `eq` does: `CA_INT8([1, 3]).search(3.9)` is `nil` (was `1`,
+  the query truncated to `3`) and `search_nearest(2.6)` finds `3`. A Float
+  query makes the comparison a float one, so `eps` now applies to it. An
+  Integer query that does not fit the array still raises `RangeError`.
+
 - Fix: `search_nearest` on an int64 or uint64 array measures the distance
   exactly: above 2**53 a neighbouring value no longer ties with the one
   next to it.

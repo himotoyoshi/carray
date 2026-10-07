@@ -5854,6 +5854,29 @@ module MkKernel
     io.puts "    }"
     io.puts "  }"
 
+    # A query that needs a wider type than an integer reference -- a Float,
+    # or a CArray of a wider data type -- is compared in the common type,
+    # as `a.eq(q)` compares, not truncated to the reference's: 3.9 must not
+    # match 3.  The reference is read through a cast view of that type.  An
+    # Integer scalar keeps the reference's type and is refused when it does
+    # not fit (the scalar's value never picks the type).
+    io.puts "  if ( ca_is_integer_type(src) || src->data_type == CA_BOOLEAN ) {"
+    io.puts "    int8_t qt = src->data_type;"
+    io.puts "    if ( RB_FLOAT_TYPE_P(rval) ) {"
+    io.puts "      qt = CA_FLOAT64;"
+    io.puts "    } else if ( rb_obj_is_kind_of(rval, rb_cCArray) ) {"
+    io.puts "      CArray *qv;"
+    io.puts "      TypedData_Get_Struct(rval, CArray, &carray_data_type, qv);"
+    io.puts "      if ( ca_is_integer_type(qv) || ca_is_float_type(qv) || qv->data_type == CA_BOOLEAN ) {"
+    io.puts "        qt = ca_promote_type(src->data_type, qv->data_type);"
+    io.puts "      }"
+    io.puts "    }"
+    io.puts "    if ( qt != src->data_type ) {"
+    io.puts "      self = rb_ca_wrap_readonly(self, INT2NUM(qt));"
+    io.puts "      GetCArray(self, src);"
+    io.puts "    }"
+    io.puts "  }"
+
     case k[:mask_self]
     when :raise
       io.puts "  /* mask_self: :raise -- global reject if self has any masked element. */"

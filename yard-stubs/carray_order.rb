@@ -160,6 +160,12 @@ class CArray
   #   to `val`. For float types, `eps` (default machine epsilon)
   #   sets the tolerance. Returns `nil` if no match.
   #
+  #   `val` is compared in the type both share, as `self.eq(val)`
+  #   compares: an integer array searched with a Float is compared in
+  #   float64 (so `3.9` does not match `3`, and `eps` applies), and an
+  #   Integer that does not fit an integer array raises `RangeError`.
+  #   The same holds for {#bsearch} and {#search_nearest}.
+  #
   #   `self` need not be sorted; this is a linear scan. For sorted
   #   data prefer {#bsearch}.
   #   @param val [Object]
