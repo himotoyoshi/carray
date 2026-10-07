@@ -1019,13 +1019,23 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         return CA_ITER_ERR_POLICY;
       }
       int slab_has_non_stride = 0;
+      int slab_has_index      = 0;
       for ( k = 0; k < src->ndim; k++ ) {
         if ( in_slab[k] && raw_descs[k].kind != CA_AXIS_KIND_STRIDE ) {
           slab_has_non_stride = 1;
-          break;
+          if ( raw_descs[k].kind == CA_AXIS_KIND_INDEX ) {
+            slab_has_index = 1;
+          }
         }
       }
-      if ( slab_has_non_stride ) {
+      /* A slab with a SHIFT axis that leaves out the innermost view axis
+         would be gathered one strided cell at a time, once per slab.  Read
+         walks take the whole-view path below instead: the view is gathered
+         once, row by row, and the slabs are walked in the copy. */
+      int whole_view = slab_has_non_stride && ! slab_has_index
+                       && ! in_slab[src->ndim - 1]
+                       && ! ( flags & CA_KERNEL_WRITE );
+      if ( slab_has_non_stride && ! whole_view ) {
         /* C.1 scope: READ-only.  WRITE = future sub-step (C.1c). */
         if ( flags & CA_KERNEL_WRITE ) {
           return CA_ITER_ERR_FLAGS;
@@ -1197,7 +1207,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         }
       }
 
-      if ( outer_has_shift ) {
+      if ( outer_has_shift || whole_view ) {
         st->src      = src;
         st->src_kind = CA_ITER_SRC_DESCRIPTOR;
         st->level    = 2;

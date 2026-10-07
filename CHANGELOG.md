@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: reductions over a `shift` or `window` view are faster. When the
+  last axis is shifted, `sum`, `min`, `mean` and the like run about ten
+  times faster, and the same reductions along an outer axis
+  (`sum(axis: 0)`) two to four times faster. Results are unchanged.
+
 - Change: `sort` of a lazy expression (`(a.lazy * 2).sort(axis: 1)`)
   returns a read-only sorted view over the expression, where it returned
   a sorted view over a copy. A write to it raises, as a write to the
