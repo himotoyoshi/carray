@@ -1694,17 +1694,16 @@ module MkKernel
   # rather than the guess that monop and binop would dominate.  A kernel added
   # later needs an entry here; emit asserts, so a missing one is loud.
   REDUCE_SUB_GROUPS = {
-    # aggregate: arithmetic folds (sum / prod / mean and their strict,
-    # safe and weighted variants)
+    # aggregate: arithmetic folds (sum / prod / mean and their weighted
+    # variants)
     sum: :aggregate, prod: :aggregate, mean: :aggregate,
-    sum_strict: :aggregate, mean_safe: :aggregate,
     wsum: :aggregate, wmean: :aggregate,
     # extreme: order-based (min / max, argmin / argmax, minmax)
     min: :extreme, max: :extreme, minmax: :extreme,
     argmin: :extreme, argmax: :extreme,
     argmin_addr: :extreme, argmax_addr: :extreme,
     # cumulative: counter accumulation (the count family and accumulate)
-    count: :cumulative, accumulate: :cumulative,
+    accumulate: :cumulative,
     count_true: :cumulative, count_false: :cumulative,
     count_equal: :cumulative,
     # variance family: multi-state (Chan / Welford), and the one that
@@ -4766,7 +4765,7 @@ module MkKernel
     has_kind      = !partition   # :full and :rank gain kind: dispatch (Option γ)
     mask_sentinel = (k[:mask_self] == :sentinel)
     # bind_ruby: false kernels are consumed by other .c files at the C
-    # level (= rb_ca_sorted_view in carray_order.c calls rb_ca_sort_addr_ki).
+    # level (carray_sort.c / carray_partition.c call the _mp twins).
     # Emit extern linkage so the symbol is reachable across translation
     # units.  bind_ruby: true kernels stay static (only referenced by
     # Init_carray_kernels in this file).
@@ -4778,6 +4777,10 @@ module MkKernel
     # partition_index / rank_index, which are consumed at the C level
     # by carray_order.c (= ordering helpers like nlargest, order).
     storage = (k[:bind_ruby] == false || k[:c_callable]) ? "" : "static "
+    # bind_ruby: false + mask_self: :sentinel kernels are reached only
+    # through their _mp twins, so the fixed-masked_last entries below
+    # would have no caller.
+    mp_only = (k[:mask_self] == :sentinel && k[:bind_ruby] == false)
     # PROPOSAL_PORTABLE_TEXTBOOK_SORT §9.5.2 Option γ:
     #   For algorithm :full / :rank, dispatch emits THREE C-level entries:
     #     rb_ca_<name>_ki_quick  (self, vaxis)  -> do_stable=0
@@ -4853,30 +4856,33 @@ module MkKernel
       dispatch_call_last  = mask_sentinel ? ", 1" : ""
       dispatch_call_last += rank ? ", 0" : ""
 
-      # _ki_quick: arity 2 (self, vaxis).  Linkage = storage.
-      io.puts
-      io.puts "#{storage}VALUE"
-      io.puts "rb_ca_#{name}_ki_quick (VALUE self, VALUE vaxis)"
-      io.puts "{"
-      io.puts "  return #{name}_ki_dispatch(self, vaxis, 0#{dispatch_call_last});"
-      io.puts "}"
+      unless mp_only
+        # _ki_quick: arity 2 (self, vaxis).  Linkage = storage.
+        io.puts
+        io.puts "#{storage}VALUE"
+        io.puts "rb_ca_#{name}_ki_quick (VALUE self, VALUE vaxis)"
+        io.puts "{"
+        io.puts "  return #{name}_ki_dispatch(self, vaxis, 0#{dispatch_call_last});"
+        io.puts "}"
 
-      # _ki_stable: arity 2 (self, vaxis).  Linkage = storage.
-      io.puts
-      io.puts "#{storage}VALUE"
-      io.puts "rb_ca_#{name}_ki_stable (VALUE self, VALUE vaxis)"
-      io.puts "{"
-      io.puts "  return #{name}_ki_dispatch(self, vaxis, 1#{dispatch_call_last});"
-      io.puts "}"
+        # _ki_stable: arity 2 (self, vaxis).  Linkage = storage.
+        io.puts
+        io.puts "#{storage}VALUE"
+        io.puts "rb_ca_#{name}_ki_stable (VALUE self, VALUE vaxis)"
+        io.puts "{"
+        io.puts "  return #{name}_ki_dispatch(self, vaxis, 1#{dispatch_call_last});"
+        io.puts "}"
 
-      # _ki: arity 2 alias of _ki_quick (= preserves existing arity-1
-      # Ruby binding and existing C extern callers).
-      io.puts
-      io.puts "#{storage}VALUE"
-      io.puts "rb_ca_#{name}_ki (VALUE self, VALUE vaxis)"
-      io.puts "{"
-      io.puts "  return rb_ca_#{name}_ki_quick(self, vaxis);"
-      io.puts "}"
+        # _ki: arity 2 alias of _ki_quick (= preserves existing arity-1
+        # Ruby binding and existing C extern callers).
+        io.puts
+        io.puts "#{storage}VALUE"
+        io.puts "rb_ca_#{name}_ki (VALUE self, VALUE vaxis)"
+        io.puts "{"
+        io.puts "  return rb_ca_#{name}_ki_quick(self, vaxis);"
+        io.puts "}"
+
+      end
 
       if mask_sentinel && k[:bind_ruby] == false
         # _mp twins: explicit masked_last, non-Ruby (plain C int, no
@@ -4957,12 +4963,14 @@ module MkKernel
       io.puts "  return Qnil;  /* unreachable */"
       io.puts "}"
 
-      io.puts
-      io.puts "#{storage}VALUE"
-      io.puts "rb_ca_#{name}_ki (VALUE self, VALUE vaxis, VALUE vkth)"
-      io.puts "{"
-      io.puts "  return #{name}_ki_dispatch(self, vaxis, vkth#{mask_sentinel ? ", 1" : ""});"
-      io.puts "}"
+      unless mp_only
+        io.puts
+        io.puts "#{storage}VALUE"
+        io.puts "rb_ca_#{name}_ki (VALUE self, VALUE vaxis, VALUE vkth)"
+        io.puts "{"
+        io.puts "  return #{name}_ki_dispatch(self, vaxis, vkth#{mask_sentinel ? ", 1" : ""});"
+        io.puts "}"
+      end
 
       if mask_sentinel && k[:bind_ruby] == false
         # _mp twin: explicit masked_last, extern for carray_partition.c's
@@ -6334,6 +6342,10 @@ module MkKernel
     io.print <<~C
       VALUE rb_ca_#{name} (VALUE self, VALUE other2, VALUE other3)
       { return rb_ca_call_triop(self, other2, other3, ca_triop_#{name}); }
+    C
+    # bang: false kernels get no bang method, so no bang entry either.
+    return if k[:bang] == false
+    io.print <<~C
 
       VALUE rb_ca_#{name}_bang (VALUE self, VALUE other2, VALUE other3)
       { return rb_ca_call_triop_bang(self, other2, other3, ca_triop_#{name}); }
@@ -6938,20 +6950,6 @@ MkKernel.reduce :max,
   face_gate:       :relift,
   public_method: true          # Phase E: rebind "max" -> rb_ca_max_ki
 
-# count_ki — count unmasked elements per slab.  The macro skips masked
-# cells, so REDUCE fires only on contributing cells; `acc += 1` ignores
-# the value entirely (cast to void to silence unused-variable warnings).
-# When the input has no mask the macro takes a faster path that loads
-# `v` but our REDUCE doesn't use it -- compiler optimises the load away.
-MkKernel.reduce :count,
-  init:        "0",
-  reduce:      "(void)v; acc += 1",
-  reduction_kind: :plus,         # SL.1.4
-  source:      MkKernel::ALL_NUMERIC,
-  output:      :i64,
-  ruby_scalar: :LL2NUM,
-  fallback:    :wrap_to_f64
-
 # all / any reduce: bool input -> bool output, axis-aware.  Replaces the
 # flat-only hand-written rb_ca_all_equal_p / rb_ca_any_equal_p /
 # all_close? / any_close? / all_equiv? / any_equiv? in carray_stat.c
@@ -7285,36 +7283,6 @@ MkKernel.reduce :argmax_addr,
   face_gate:       :strip,
   all_nan_result:  :undef,
   public_method: :max_addr
-
-# ---- mask_policy demos ------------------------------------------------
-
-# sum_strict_ki -- :strict policy.  Any masked input cell makes the
-# output cell UNDEF.  Use case: "this is sensor data, any gap invalidates
-# the aggregate" (= NaN-propagation semantics).  Sibling of
-# sum_ki which silently treats masked as 0.
-MkKernel.reduce :sum_strict,
-  init:        "0",
-  reduce:      "acc += v",
-  source:      MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output:      { numeric: :f64, complex: :cmplx128 },
-  ruby_scalar: :auto,
-  fallback:    :raise,
-  mask_policy: :strict
-
-# mean_safe_ki -- :all_masked policy.  Output UNDEF only when every
-# input cell is masked, otherwise mean over visible cells.  Use case:
-# "tolerate gaps but flag if nothing is observed".  Sibling of mean_ki
-# which returns 0.0 for all-masked slabs.
-MkKernel.reduce :mean_safe,
-  state:       { acc: :acc_type, cnt: :int64_t },
-  init:        { acc: "0",        cnt: "0" },
-  reduce:      "(acc += v, cnt++)",
-  finish:      "cnt ? acc / (T_OUT) cnt : 0",
-  source:      MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES,
-  output:      { numeric: :f64, complex: :cmplx128 },
-  ruby_scalar: :auto,
-  fallback:    :raise,
-  mask_policy: :all_masked
 
 # accumulate -- sum that preserves input data_type (legacy rb_ca_accum,
 # retired in E.7).  Same machinery as sum_ki but output: :preserve so
@@ -7714,7 +7682,7 @@ MkKernel.sort :sort_index,
 # sort_index but the kernel writes view-flat addresses instead of
 # fiber-local indices, so the output can feed directly into
 # ca_remap_new as a CARemap.idx.  Internal-only (bind_ruby: false):
-# used by `a.sort(axis: k)` at the C level via rb_ca_sort_addr_ki.
+# used by `a.sort(axis: k)` at the C level via rb_ca_sort_addr_ki_*_mp.
 # rev3 of PROPOSAL_SORT_AXIS defers `sort_addr(axis: k)` as a public
 # method to a future phase; here we just need the kernel machinery.
 MkKernel.sort :sort_addr,

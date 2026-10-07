@@ -237,16 +237,11 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   return out;
 }
 
-/* Internal sort_addr_ki kernel entries (C-level only, no Ruby binding;
- * declared in the generated carray_kernels.c).  The _quick and _stable
- * variants implement the kind: dispatch; _ki itself is a 2-arg alias of
- * _quick retained for older callers.  The _mp ("masked position") twins
- * take an explicit masked_last so `sort` / `sort_copy` can pass the
- * masked_position: kwarg through (see MASKED_POSITION rev1 in
- * mkkernel.rb's MkKernel.sort doc). */
-extern VALUE rb_ca_sort_addr_ki        (VALUE self, VALUE vaxis);
-extern VALUE rb_ca_sort_addr_ki_quick  (VALUE self, VALUE vaxis);
-extern VALUE rb_ca_sort_addr_ki_stable (VALUE self, VALUE vaxis);
+/* Internal sort_addr kernel entries (C-level only, no Ruby binding;
+ * defined in the generated carray_kernels_sort.c).  The _quick and
+ * _stable variants implement the kind: dispatch; both take an explicit
+ * masked_last so `sort` / `sort_copy` can pass the masked_position:
+ * kwarg through (see MkKernel.sort in mkkernel.rb). */
 extern VALUE rb_ca_sort_addr_ki_quick_mp  (VALUE self, VALUE vaxis, int masked_last);
 extern VALUE rb_ca_sort_addr_ki_stable_mp (VALUE self, VALUE vaxis, int masked_last);
 extern VALUE rb_ca_remap_new           (VALUE cary, VALUE rmapper); /* ca_obj_remap.c (sort view) */

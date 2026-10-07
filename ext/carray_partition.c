@@ -24,7 +24,6 @@
 /* External entries reached at link time (extern declarations rather than
    carray.h additions to keep the public header lean): */
 extern VALUE rb_ca_remap_new         (VALUE cary, VALUE rmapper);           /* ca_obj_remap.c */
-extern VALUE rb_ca_partition_addr_ki (VALUE self, VALUE vaxis, VALUE vkth); /* carray_kernels.c (generated, bind_ruby: false) */
 /* _mp ("masked position") twin: explicit masked_last, used by `partition`
    / `partition_copy` to pass masked_position: through (see MASKED_POSITION
    rev1 in mkkernel.rb's MkKernel.sort doc). */
