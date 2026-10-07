@@ -1598,6 +1598,28 @@ rb_ca_s_cast (VALUE klass, VALUE val)
   return rb_ca_cast(val);
 }
 
+/* An operator operand that exports MemoryView, as a CArray.  When the object
+   also defines to_ca, that is asked first, in the order wrap_readonly uses:
+   the MemoryView carries only the values buffer, while to_ca can hand over
+   what the object knows besides it (the nulls of an Arrow array as a mask,
+   a time type as a Face).  Only MemoryView producers come here, so an object
+   with to_ca alone (a Range) is still not an operand. */
+static VALUE
+ca_operand_from_memory_view (VALUE obj)
+{
+  volatile VALUE ca;
+  if ( rb_respond_to(obj, rb_intern("to_ca")) ) {
+    ca = rb_funcall(obj, rb_intern("to_ca"), 0);
+    if ( ! rb_obj_is_carray(ca) ) {
+      volatile VALUE inspect = rb_inspect(CLASS_OF(obj));
+      rb_raise(rb_eTypeError,
+               "%s#to_ca did not return a CArray", StringValuePtr(inspect));
+    }
+    return ca;
+  }
+  return rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+}
+
 void
 rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 {
@@ -1610,11 +1632,11 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
      Excludes T_STRING which has its own legacy interpretation. */
   if ( ! rb_obj_is_carray(*self) && TYPE(*self) != T_STRING &&
        rb_memory_view_available_p(*self) ) {
-    *self = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *self);
+    *self = ca_operand_from_memory_view(*self);
   }
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
-    *other = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *other);
+    *other = ca_operand_from_memory_view(*other);
   }
 
   if ( ! rb_obj_is_carray(*self) ) {
@@ -2051,7 +2073,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
      Excludes T_STRING which has its own legacy interpretation. */
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
-    *other = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *other);
+    *other = ca_operand_from_memory_view(*other);
   }
 
   if ( ! rb_obj_is_carray(*other) ) {

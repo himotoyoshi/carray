@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an operator operand that exports MemoryView and also defines
+  `to_ca` (an Apache Arrow array, given a bridge that adds `to_ca`) is now
+  taken through `to_ca`, as `wrap_readonly` already did. Arrow's nulls now
+  come in as masked cells instead of as values, and a sliced Arrow array
+  reads correctly. An Arrow time column now arrives as a `CATime` and no
+  longer adds to plain integers as raw counts; to keep that, pass
+  `arrow.to_ca.ticks`. A producer without `to_ca` is read through
+  MemoryView as before.
 - Fix: the mask of a read-only array is read-only too. Writing through it
   (`ca.mask[i] = true`) raised for lazy expressions but went through for
   other read-only arrays, for views of them, and for a categorical's codes,

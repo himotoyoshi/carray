@@ -194,7 +194,7 @@ intake points, and the dtype derivation is single-sourced:
 
 | Entry point | How the MV is handled |
 |---|---|
-| `a * mv` (binop coerce) | `rb_ca_cast_self_or_other` runs `wrap_memory_view` before classifying, so the MV becomes a CAWrap and the normal cast_table logic takes over. |
+| `a * mv` (binop coerce) | `rb_ca_cast_self_or_other` turns the MV producer into a CArray before classifying, then the normal cast_table logic takes over. A producer that defines `to_ca` goes through it, as in `wrap_readonly`, so what the MV cannot carry (an Arrow array's nulls) survives; otherwise `wrap_memory_view` makes a CAWrap. Only MV producers are asked, so an object with `to_ca` alone (a Range) is still not an operand. |
 | `wrap_readonly(mv, dt)` | detects the MV producer, imports it, adapts to `dt` (import strategy — copy vs zero-copy — is inside `wrap_memory_view` / `from_memory_view`). |
 | `result_type(a, mv)` / `promote_list(list_with_mv)` | `ca_arg_to_data_type` calls `ca_mv_probe_data_type`, which **fetches the MV, parses `view.format`, releases the MV without importing**. Dtype known; no data moved. |
 

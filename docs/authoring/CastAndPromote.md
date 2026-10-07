@@ -69,7 +69,7 @@ entry points:
 
 | Entry point | How the MV is handled |
 |---|---|
-| binop coercion (`a * mv`) | `rb_ca_cast_self_or_other` turns it into a CArray via `wrap_memory_view` before classifying |
+| binop coercion (`a * mv`) | `rb_ca_cast_self_or_other` turns it into a CArray before classifying: through `to_ca` when the producer defines it (the order `wrap_readonly` uses, so whatever the MV cannot carry, such as an Arrow array's nulls, survives), otherwise via `wrap_memory_view` |
 | `wrap_readonly` / `wrap_writable` | detects the MV producer → imports it → adapts to the requested data type |
 | `result_type` / `promote_list` | `ca_arg_to_data_type` **parses the MV's format** to derive the data type |
 
