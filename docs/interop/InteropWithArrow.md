@@ -89,7 +89,9 @@ advances the values pointer by `offset` *bytes* instead of `offset`
 *elements*, so for any type wider than one byte the values arrive
 shifted and wrong — no error is raised. `Int32Array.new([0, 1, 2, 3, 4])
 .slice(1, 3)` reads back as `[16777216, 33554432, 50331648]`, not
-`[1, 2, 3]`. CArray reads what it is given; the shift happens before it.
+`[1, 2, 3]`. CArray reads what it is given; the shift happens before it
+(reported upstream as
+[apache/arrow#52021](https://github.com/apache/arrow/issues/52021)).
 A column that went through `combine` (§2) is always at offset 0. For a
 single `Arrow::Array` that may be a slice, combine it on its own:
 
