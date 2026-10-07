@@ -1339,10 +1339,7 @@ ca_window_func_create_mask (void *ap)
   int8_t i;
   int any_mask;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   /* Any MASK axis of the view becomes FILL in the mask sub-view, with the
      mask cell forced to 1 (= "masked").  Other axes keep their policy.  When
@@ -1358,8 +1355,15 @@ ca_window_func_create_mask (void *ap)
   }
   fill = any_mask ? 1 : 0;
 
-  ca->mask = (CArray *) ca_window_new(ca->parent->mask,
-                                    ca->start, ca->count, mbounds, (char*)&fill);
+  /* The mask has the view's own type, so CAShift (which shares this table)
+     gets a CAShiftMask. */
+  {
+    CAWindow *m = (CAWindow *) ca_array_alloc(ca->obj_type, ca->ndim);
+    ca_window_setup(m, ca->parent->mask,
+                    ca->start, ca->count, mbounds, (char*)&fill);
+    m->obj_type = ca->obj_type;
+    ca->mask = (CArray *) m;
+  }
 }
 
 ca_operation_function_t ca_window_func = {

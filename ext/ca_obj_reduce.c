@@ -272,10 +272,7 @@ ca_reduce_func_create_mask (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   ca->mask = (CArray *) ca_reduce_new(ca->parent->mask, ca->count, ca->offset);
 }

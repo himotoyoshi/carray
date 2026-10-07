@@ -802,10 +802,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
       raddr = SIZE2NUM(addr);
       rval = rb_funcall(ca->self, rb_intern("fetch_addr"), 1, raddr);
       if ( rval == CA_UNDEF ) {
-        ca_update_mask(ca);
-        if ( ! ca->mask ) {
-          ca_create_mask(ca);
-        }
+        ca_create_mask(ca);
         ca_object_mask_bytes(ca)[addr] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
@@ -827,10 +824,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
       }
       rval = rb_funcall(ca->self, rb_intern("fetch_index"), 1, ridx);
       if ( rval == CA_UNDEF ) {
-        ca_update_mask(ca);
-        if ( ! ca->mask ) {
-          ca_create_mask(ca);
-        }
+        ca_create_mask(ca);
         ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
@@ -876,10 +870,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
       }
       rval = rb_funcall(ca->self, rb_intern("fetch_index"), 1, ridx);
       if ( rval == CA_UNDEF ) {
-        ca_update_mask(ca);
-        if ( ! ca->mask ) {
-          ca_create_mask(ca);
-        }
+        ca_create_mask(ca);
         ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
@@ -897,10 +888,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
       raddr = SIZE2NUM(addr);
       rval = rb_funcall(ca->self, rb_intern("fetch_addr"), 1, raddr);
       if ( rval == CA_UNDEF ) {
-        ca_update_mask(ca);
-        if ( ! ca->mask ) {
-          ca_create_mask(ca);
-        }
+        ca_create_mask(ca);
         ca_object_mask_bytes(ca)[addr] = 1;
         if ( ca->data_type == CA_OBJECT ) {
           rb_ca_obj2ptr(ca->self, INT2NUM(0), ptr);
@@ -1042,10 +1030,7 @@ ca_object_func_attach (void *ap)
   ca->ptr = ca->data->ptr;
   ca_object_dispatch_copy(ca, ca->ptr);
   if ( ca_has_mask(ca->data) ) {
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
   }
 }
 
@@ -1392,15 +1377,9 @@ ca_object_func_create_mask (void *ap)
   CAObject *ca = (CAObject *) ap;
   volatile VALUE rmask;
   if ( ca_is_face(ca) ) {
-    /* Face: the mask refers to the parent's mask (same as the C-level Face
-       create_mask, e.g. ca_time_func_create_mask). Storage is the
-       parent, so the mask must be the parent's, not the internal __data__. */
-    ca_update_mask(ca->parent);
-    if ( ! ca->parent->mask ) {
-      ca_create_mask(ca->parent);
-    }
-    ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                       CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+    /* Face: storage is the parent, so the mask is the parent's (as for the
+       C-level Faces), not the internal __data__'s. */
+    ca_view_func_create_mask(ca);
     return;
   }
   if ( rb_obj_respond_to(ca->self, rb_intern("create_mask"), Qtrue) ) {
@@ -1409,10 +1388,7 @@ ca_object_func_create_mask (void *ap)
   else {
     rb_raise(rb_eRuntimeError, "can't create mask for CAObject");
   }
-  ca_update_mask(ca->data);
-  if ( ! ca->data->mask ) {
-    ca_create_mask(ca->data);
-  }
+  ca_create_mask(ca->data);
   {
     CAObjectMask *cm = ca_objmask_new(ca->self, ca->ndim, ca->dim);
     cm->cache = ca->data->mask->ptr;

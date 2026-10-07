@@ -480,10 +480,7 @@ static void
 ca_tile_func_create_mask (void *ap)
 {
   CATile *ca = (CATile *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_tile_new(ca->parent->mask, ca->reps);
 }
 

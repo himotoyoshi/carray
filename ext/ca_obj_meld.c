@@ -891,10 +891,7 @@ ca_meld_func_create_mask (void *ap)
 
   mask_parents = ALLOCV_N(CArray *, holder, ca->n_parents);
   for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_update_mask(ca->parents[k]);
-    if ( ! ca->parents[k]->mask ) {
-      ca_create_mask(ca->parents[k]);
-    }
+    ca_create_mask(ca->parents[k]);
     mask_parents[k] = ca->parents[k]->mask;
   }
   ca->mask = (CArray *) ca_meld_new(ca->n_parents, mask_parents, ca->meld_axis);

@@ -391,6 +391,19 @@ ca_is_all_masked (void *ap)
   return flag;
 }
 
+/* The create_mask slot of a view whose cells map one-to-one onto its
+   parent's in address order (a cast, a byte swap, a Face over its storage):
+   the mask is the parent's mask seen in the view's shape. */
+
+void
+ca_view_func_create_mask (void *ap)
+{
+  CAView *ca = (CAView *) ap;
+  ca_create_mask(ca->parent);
+  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
+                                     CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+}
+
 /* create mask array if array has mask but has not mask array */
 
 void

@@ -208,12 +208,7 @@ static void
 ca_lazy_marker_func_create_mask (void *ap)
 {
   CALazyMarker *ca = (CALazyMarker *) ap;
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  ca_view_func_create_mask(ca);
   ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
 }
 

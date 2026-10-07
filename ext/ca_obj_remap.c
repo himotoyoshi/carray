@@ -264,10 +264,7 @@ static void
 ca_remap_func_create_mask (void *ap)
 {
   CARemap *ca = (CARemap *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   /* Mask is a CARemap over (parent->mask, idx) — same shape, boolean. */
   ca->mask = (CArray *) ca_remap_new(ca->parent->mask, ca->idx);
 }

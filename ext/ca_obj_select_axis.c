@@ -831,10 +831,7 @@ static void
 ca_select_axis_func_create_mask (void *ap)
 {
   CASelectAxis *ca = (CASelectAxis *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = ca_select_axis_new(ca->parent->mask, ca->indirect_axis,
                                 ca->selector,
                                 ca->ap_start, ca->ap_count, ca->ap_step);

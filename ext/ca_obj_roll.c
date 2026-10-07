@@ -493,10 +493,7 @@ static void
 ca_roll_func_create_mask (void *ap)
 {
   CARoll *ca = (CARoll *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_roll_new(ca->parent->mask, ca->reps);
 }
 

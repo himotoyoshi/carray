@@ -8,8 +8,8 @@
   sync_data / fill_data / ptr_at_* / fetch_index / store_index) are
   shared with CAWindow's per-axis bounds engine via the `ca_shift_func`
   table, which is built by copying `ca_window_func` and only overriding
-  free / clone / create_mask so that CAShift-typed instances are produced
-  on cloning and mask-projection.
+  clone, so that cloning produces a CAShift.  create_mask is shared: it
+  gives the mask the view's own obj_type.
 
   User surface (CArray#shift) is documented in yard-stubs/ca_obj_shift.rb.
 
@@ -46,7 +46,7 @@ const rb_data_type_t cashift_data_type = {
 };
 
 /* CAREFUL: mask TypedData uses ca_free_nop.  The mask CArray is owned
-   by the parent CAShift's `ca->mask` field and freed by free_ca_shift's
+   by the parent CAShift's `ca->mask` field and freed by the shared window free's
    ca_free(ca->mask).  If the wrapped Ruby VALUE (from the `ca.mask`
    accessor / rb_ca_mask_array) also freed it, the result is a
    double-free that explodes under GC stress. */
@@ -113,8 +113,7 @@ ca_shift_setup (CAShift *ca, CArray *parent,
 
   /* Override obj_type so dispatch (ca_func[obj_type]) lands on the
      CAShift-specific table (which differs from CAWindow only in
-     free / clone / create_mask, all forwarding to a CAShift-typed
-     result). */
+     clone). */
   ca->obj_type = CA_OBJ_SHIFT;
 
   return 0;
@@ -129,32 +128,6 @@ ca_shift_new (CArray *parent, ca_size_t *shift, char *fill, int8_t *roll,
   ca = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
   ca_shift_setup(ca, parent, shift, fill, roll, fill_mask);
   return ca;
-}
-
-/* Free: same fields as CAWindow (same struct).  CAShift goes through
-   ca_window_setup, so the same seven ndim-sized fields live in ca->_pool
-   (fill stays separate). */
-static void
-free_ca_shift (void *ap)
-{
-  CAShift *ca = (CAShift *) ap;
-  if ( ca != NULL ) {
-    ca_free(ca->mask);
-    xfree(ca->fill);              /* always separate (bytes-sized) */
-    if ( ca->_pool ) {
-      ca_array_free(ca);
-    }
-    else {
-      xfree(ca->bounds);
-      xfree(ca->start);
-      xfree(ca->count);
-      xfree(ca->size0);
-      xfree(ca->embed_parent_start);
-      xfree(ca->embed_count);
-      xfree(ca->embed_output_offset);
-      xfree(ca);
-    }
-  }
 }
 
 /* Clone: produce a CAShift (not CAWindow) by rebuilding via setup.
@@ -182,69 +155,6 @@ ca_shift_func_clone (void *ap)
   return ca_shift_new(ca->parent, shift, ca->fill, roll, fill_mask);
 }
 
-/* create_mask: produce a CAShift-typed mask (not CAWindow-typed).
-   Following the original ca_shift_func_create_mask semantics:
-   - Ensure parent has mask
-   - Build mask sub-view using same shift/roll, fill = 1 if fill_mask
-     else 0 (i.e. range-outside cells get masked when fill_mask was on,
-     unmasked otherwise) */
-static void
-ca_shift_func_create_mask (void *ap)
-{
-  CAShift *ca = (CAShift *) ap;
-  ca_size_t shift[CA_RANK_MAX];
-  int8_t   roll[CA_RANK_MAX];
-  boolean8_t fill_val;
-  int fill_mask_was_on = 0;
-  int8_t k;
-
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-
-  for (k = 0; k < ca->ndim; k++) {
-    shift[k] = -ca->start[k];
-    if ( ca->bounds[k] == CA_BOUNDS_PERIODIC ) {
-      roll[k] = 1;
-    } else {
-      roll[k] = 0;
-      if ( ca->bounds[k] == CA_BOUNDS_MASK ) fill_mask_was_on = 1;
-    }
-  }
-
-  /* If MASK policy was set, the mask sub-view should mark out-of-range
-     cells as "masked" (fill value = 1).  Otherwise out-of-range cells
-     get the fill value (fill = 0) and aren't masked. */
-  fill_val = fill_mask_was_on ? 1 : 0;
-
-  /* Build the mask as CAShift with same shift/roll but using fill_mask=0
-     (the mask itself shouldn't recursively create a mask) and fill = 0/1
-     boolean.  Bounds for mask: replace MASK→FILL so the mask values are
-     written, not the mask's mask. */
-  {
-    /* Construct mask via direct ca_window_new with adjusted bounds. */
-    uint8_t mbounds[CA_RANK_MAX];
-    ca_size_t mstart[CA_RANK_MAX];
-    ca_size_t mcount[CA_RANK_MAX];
-    CAShift *m;
-    CA_ASSUME(ca->ndim >= 0 && ca->ndim <= CA_RANK_MAX);   /* bound loop over [CA_RANK_MAX] arrays */
-    for (k = 0; k < ca->ndim; k++) {
-      mstart[k] = ca->start[k];
-      mcount[k] = ca->count[k];
-      mbounds[k] = ( ca->bounds[k] == CA_BOUNDS_MASK )
-                       ? CA_BOUNDS_FILL : ca->bounds[k];
-    }
-    /* CAShift-typed mask: allocate, setup as CAWindow with adjusted
-       bounds, bump obj_type. */
-    m = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, ca->ndim);
-    ca_window_setup((CAWindow *) m, ca->parent->mask,
-                    mstart, mcount, mbounds, (char *) &fill_val);
-    m->obj_type = CA_OBJ_SHIFT;
-    ca->mask = (CArray *) m;
-  }
-  (void) shift; (void) roll;   /* recovered above but unused in this block */
-}
 
 /* ------------------------------------------------------------------- */
 
@@ -404,12 +314,10 @@ rb_ca_shift_initialize_copy (VALUE self, VALUE other)
 void
 Init_ca_obj_shift (void)
 {
-  /* Build the CAShift op table by copying CAWindow's and overriding
-     just the slots that need to produce CAShift-typed results. */
+  /* Build the CAShift op table by copying CAWindow's; only clone has to
+     rebuild a CAShift. */
   ca_shift_func = ca_window_func;
-  ca_shift_func.free_object = free_ca_shift;
   ca_shift_func.clone       = ca_shift_func_clone;
-  ca_shift_func.create_mask = ca_shift_func_create_mask;
 
   rb_cCAShift = rb_define_class("CAShift", rb_cCAWindow);
   rb_cCAShiftMask = rb_define_class("CAShiftMask", rb_cCAShift);

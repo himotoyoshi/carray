@@ -539,10 +539,7 @@ static void
 ca_select_func_create_mask (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_select_new_share(ca->parent->mask, ca->select);
 }
 

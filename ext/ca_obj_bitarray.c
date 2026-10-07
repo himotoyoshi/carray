@@ -502,10 +502,7 @@ ca_bitarray_func_create_mask (void *ap)
   }
   count[ca->ndim-1] = ca->bitlen;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_repeat_new(ca->parent->mask, ca->ndim, count);
 
   ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);

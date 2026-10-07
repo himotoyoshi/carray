@@ -183,10 +183,7 @@ ca_refer_func_create_mask (void *ap)
   ca_size_t parent_bytes = ca->parent->bytes;
   ca_size_t parent_offset;
 
-  ca_update_mask(ca->parent);
-  if (! ca->parent->mask) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   parent_offset = ca->base_offset / parent_bytes;
 

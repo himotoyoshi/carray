@@ -402,19 +402,6 @@ ca_fake_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
   ALLOCV_END(holder);
 }
 
-static void
-ca_fake_func_create_mask (void *ap)
-{
-  CAFake *ca = (CAFake *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_fake_func = {
   -1, /* CA_OBJ_FAKE */
   CA_VIEW_ARRAY,
@@ -425,7 +412,7 @@ ca_operation_function_t ca_fake_func = {
   ca_fake_func_sync,
   ca_fake_func_detach,
   ca_fake_func_fill_data,
-  ca_fake_func_create_mask,
+  ca_view_func_create_mask,
   ca_fake_func_xfer_index,
   ca_fake_func_xfer_addrs,
   NULL,                       /* fold_stride: never-fold (transform boundary) */

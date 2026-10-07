@@ -805,12 +805,7 @@ static void
 ca_monop_func_create_mask (void *ap)
 {
   CAMonOp *ca = (CAMonOp *) ap;
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  ca_view_func_create_mask(ca);
   /* A cast view writes through to its parent, mask included; any other
      operation is read-only and so is its mask. */
   if ( ca_test_flag(ca, CA_FLAG_READ_ONLY) ) {

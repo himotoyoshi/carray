@@ -20,6 +20,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"
 
 typedef struct {
@@ -177,18 +178,6 @@ ca_string_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_string_func_create_mask (void *ap)
-{
-  CAString *ca = (CAString *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_string_func = {
   -1, /* CA_OBJ_STRING — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -199,7 +188,7 @@ ca_operation_function_t ca_string_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_string_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */

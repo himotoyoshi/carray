@@ -588,22 +588,6 @@ ca_byte_swap_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ALLOCV_END(holder);
 }
 
-static void
-ca_byte_swap_func_create_mask (void *ap)
-{
-  CAByteSwap *ca = (CAByteSwap *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  /* Mask is byte-wide (boolean), so the swap is a no-op for the
-     mask itself.  Share the parent's mask via a CARefer to keep the
-     two in lockstep. */
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_byte_swap_func = {
   -1, /* CA_OBJ_BYTE_SWAP */
   CA_VIEW_ARRAY,
@@ -614,7 +598,7 @@ ca_operation_function_t ca_byte_swap_func = {
   ca_byte_swap_func_sync,
   ca_byte_swap_func_detach,
   ca_byte_swap_func_fill_data,
-  ca_byte_swap_func_create_mask,
+  ca_view_func_create_mask,
   ca_byte_swap_func_xfer_index,
   ca_byte_swap_func_xfer_addrs,
   NULL,                       /* fold_stride: never fold — value-conversion boundary */
