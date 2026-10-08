@@ -3,11 +3,10 @@ module CAMath
   module_function
 
   # Module-function front-ends for binop math methods registered on
-  # CArray by mkkernel. The first argument is auto-wrapped to CArray
-  # via `CArray.wrap_readonly`, so `CAMath.hypot(3, arr)` continues to
-  # work. Integer input is unsupported at the kernel layer -- the
-  # caller must cast to float64 explicitly (e.g.
-  # `arr.as_float64.hypot(...)`).
+  # CArray by mkkernel.  A CArray first argument answers through its own
+  # method, in its own data_type; any other first argument, and an
+  # integer CArray for a function defined only on floats, is taken as
+  # float64, so `CAMath.hypot(3, arr)` works.
 
   # @overload expm1(x)
   #   Returns `exp(x) - 1` element-wise.  A CArray answers in its own
@@ -35,21 +34,21 @@ module CAMath
   #   @param y [CArray, Numeric] numerator.
   #   @param x [CArray, Numeric] denominator.
   #   @return [CArray]
-  def atan2(y, x);     CArray.wrap_readonly(y, :float64).atan2(x);     end
+  def atan2(y, x); float_operand(y).atan2(x); end
 
   # @overload hypot(x, y)
   #   Returns the element-wise Euclidean distance `sqrt(x^2 + y^2)`.
   #   @param x [CArray, Numeric] first leg.
   #   @param y [CArray, Numeric] second leg.
   #   @return [CArray]
-  def hypot(x, y);     CArray.wrap_readonly(x, :float64).hypot(y);     end
+  def hypot(x, y); float_operand(x).hypot(y); end
 
   # @overload copysign(x, y)
   #   Returns `|x|` with the sign of `y`, element-wise.
   #   @param x [CArray, Numeric] magnitude source.
   #   @param y [CArray, Numeric] sign source.
   #   @return [CArray]
-  def copysign(x, y);  CArray.wrap_readonly(x, :float64).copysign(y);  end
+  def copysign(x, y); float_operand(x).copysign(y); end
 
   # @overload logaddexp(x, y)
   #   Returns `log(exp(x) + exp(y))` computed to avoid overflow,
@@ -57,7 +56,7 @@ module CAMath
   #   @param x [CArray, Numeric] first log-space value.
   #   @param y [CArray, Numeric] second log-space value.
   #   @return [CArray]
-  def logaddexp(x, y); CArray.wrap_readonly(x, :float64).logaddexp(y); end
+  def logaddexp(x, y); float_operand(x).logaddexp(y); end
 
   # @overload nextafter(x, y)
   #   Returns the next representable float from `x` toward `y`,
@@ -65,14 +64,20 @@ module CAMath
   #   @param x [CArray, Numeric] starting value.
   #   @param y [CArray, Numeric] direction target.
   #   @return [CArray]
-  def nextafter(x, y); CArray.wrap_readonly(x, :float64).nextafter(y); end
+  def nextafter(x, y); float_operand(x).nextafter(y); end
 
   # @overload fmod(x, y)
   #   Returns the C-style `fmod(x, y)` element-wise (sign follows `x`).
   #   @param x [CArray, Numeric] dividend.
   #   @param y [CArray, Numeric] divisor.
   #   @return [CArray]
-  def fmod(x, y);      CArray.wrap_readonly(x, :float64).fmod(y);      end
+  def fmod(x, y);      (x.is_a?(CArray) ? x : CArray.wrap_readonly(x, :float64)).fmod(y); end
+
+  # A float or complex CArray as it is; anything else as float64.
+  def float_operand(x)
+    x.is_a?(CArray) && (x.float? || x.complex?) ? x : CArray.wrap_readonly(x, :float64)
+  end
+  private_class_method :float_operand
 
   # @overload min(*argv)
   #   Returns the element-wise minimum of the given CArray and other

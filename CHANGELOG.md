@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAMath.atan2`, `hypot`, `copysign`, `logaddexp`, `nextafter` and
+  `fmod` answer a float32 CArray in float32 and an integer CArray to `fmod`
+  in its own type, as the methods of the same name do. They converted every
+  first argument to float64 (`CAMath.fmod` of an int64 above 2**53 lost the
+  low bits). A non-CArray first argument is still taken as float64.
+
 - Fix: `snap_to` with a Ruby Array grid on an integer array no longer
   truncates the grid to the array's type: a Float in the grid makes it
   float64 (`CA_INT32([1, 2, 3]).snap_to([0.5, 1.5, 2.5])` is
