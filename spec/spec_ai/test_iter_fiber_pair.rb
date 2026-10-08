@@ -118,18 +118,21 @@ class TestIterFiberPair < Test::Unit::TestCase
     ref.elements.times { |k| assert_in_delta ref[k], got[k], 1e-12 }
   end
 
-  def test_shape_disagreement_skips_the_body
+  # Two arrays of different shapes are refused before either walk opens,
+  # as for the INOUT forms, even when their element counts and fiber
+  # lengths agree.
+  def test_shape_disagreement_raises
     a = a_base
-    b = CArray.float64(4, 6) { 1.0 }
-    got = IterPair.dot(a, b, 1)
-    assert_equal 0, got.instance_variable_get(:@fibers)
-  end
-
-  def test_rank_disagreement_skips_the_body
-    a = a_base
-    b = CArray.float64(20) { 1.0 }
-    got = IterPair.dot(a, b, 0)
-    assert_equal 0, got.instance_variable_get(:@fibers)
+    [CArray.float64(4, 6) { 1.0 },
+     CArray.float64(20) { 1.0 },
+     CArray.float64(5, 4) { 1.0 }].each do |b|
+      e = assert_raise(ArgumentError) { IterPair.dot(a, b, 0) }
+      assert_match(/differ in shape/, e.message)
+    end
+    # Same rank, element count and fiber length; different shape.
+    assert_raise(ArgumentError) {
+      IterPair.dot(CArray.float64(2, 3, 4).seq, CArray.float64(4, 3, 2).seq, 1)
+    }
   end
 
   # Why the macro rather than the raw API: the flag it adds is easy to leave
@@ -152,20 +155,20 @@ class TestIterFiberPair < Test::Unit::TestCase
                  "the raw walk was expected to differ here"
   end
 
-  # The second walk is opened paired with the first, so when it is refused
-  # or raises partway, the first is closed too: a contiguous view as the
-  # first source is not left attached.
+  # The second walk is opened paired with the first, so when it raises
+  # partway, the first is closed too: a contiguous view as the first source
+  # is not left attached.  A shape refusal comes before either walk opens.
   def test_a_refused_or_raising_second_source_closes_the_first
     omit "development build only" unless CArray.respond_to?(:__attached_views__)
     e = CArray.float64(8, 6).seq!
     o = CArray.object(4, 6) { 1.0 }
     o[3, 5] = Object.new
     raising = CArray.wrap_readonly(o, CA_FLOAT64)
-    [[e[1..4, nil], CArray.float64(6).seq!, 1],   # refused: no axis 1
+    [[e[1..4, nil], CArray.float64(6).seq!, 1],   # refused: shapes differ
      [e[2..5, nil], raising, 1],                   # raises in a later fiber
      [e[2..5, nil], raising, 0]].each do |a, b, axis|
       before = CArray.__attached_views__
-      assert_raise(RuntimeError, TypeError) { IterPair.dot(a, b, axis) }
+      assert_raise(ArgumentError, RuntimeError, TypeError) { IterPair.dot(a, b, axis) }
       assert_equal before, CArray.__attached_views__
       assert_equal false, a.attached?
     end

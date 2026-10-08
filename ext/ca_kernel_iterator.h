@@ -660,7 +660,7 @@ void ca_iter_state_close (ca_iter_state *st);
 int ca_iter_check_init (int rc);
 
 /* Raise ArgumentError unless the two arrays have the same shape.  The
-   INOUT fiber macros call this before opening either walk. */
+   INOUT and PAIR fiber macros call this before opening either walk. */
 int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
 
 /* Run body(arg) so that the walks in states[0..n) are finished however the
@@ -1016,14 +1016,16 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    cursors: which cells a pair of fibers may be used at is a question about
    both of them, and the INOUT forms answer only about the input.
 
-   Shape agreement is guarded the way the INOUT forms guard it (ndim,
-   elements, fiber length), and the body is skipped on mismatch.  The two
-   sources may be the same array.  The second state is opened paired with
-   the first, so a refusal or a raise on either side closes both. */
+   The two sources must have the same shape, as for the INOUT forms:
+   ca_iter_check_same_shape raises ArgumentError before either walk is
+   opened.  The two sources may be the same array.  The second state is
+   opened paired with the first, so a refusal or a raise on either side
+   closes both. */
 
 #define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
                                flags, p_a, p_b, n)                            \
   for ( int __cffp_init = (                                                   \
+            ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
@@ -1039,10 +1041,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         __cffp_init = 0,                                                      \
           ca_iter_state_close(&(st_a)),                                       \
           ca_iter_state_close(&(st_b)) )                                      \
-    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
-         && (st_a).src->elements == (st_b).src->elements                      \
-         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
-         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
+    for ( ; ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
          && ca_iter_state_next_slab_axes(&(st_b), &(p_b), NULL);              \
             ca_iter_state_sync_slab(&(st_a)),                                 \
             ca_iter_state_sync_slab(&(st_b)) )
@@ -1050,6 +1049,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
                                       flags, p_a, p_b, n, m_a, m_b)           \
   for ( int __cffpm_init = (                                                  \
+            ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
@@ -1065,10 +1065,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         __cffpm_init = 0,                                                     \
           ca_iter_state_close(&(st_a)),                                       \
           ca_iter_state_close(&(st_b)) )                                      \
-    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
-         && (st_a).src->elements == (st_b).src->elements                      \
-         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
-         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
+    for ( ; ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
          && ca_iter_state_next_slab_axes(&(st_b), &(p_b), &(m_b));            \
             ca_iter_state_sync_slab(&(st_a)),                                 \
             ca_iter_state_sync_slab(&(st_b)) )

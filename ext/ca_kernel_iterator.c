@@ -616,8 +616,9 @@ ca_iter_strip_storage_wrapper (CArray *src)
   return src;
 }
 
-/* Raise unless a and b have the same shape.  The INOUT fiber macros call
-   it before opening either walk, so a refusal leaves nothing to close. */
+/* Raise unless a and b have the same shape.  The INOUT and PAIR fiber
+   macros call it before opening either walk, so a refusal leaves nothing
+   to close. */
 int
 ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b)
 {
@@ -631,7 +632,7 @@ ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b)
     for ( k = 0; k < a->ndim; k++ ) rb_ary_push(sa, SIZE2NUM(a->dim[k]));
     for ( k = 0; k < b->ndim; k++ ) rb_ary_push(sb, SIZE2NUM(b->dim[k]));
     rb_raise(rb_eArgError,
-             "kernel iterator: the input and the output of an INOUT walk "
+             "kernel iterator: the two arrays of a paired walk "
              "differ in shape (%"PRIsVALUE" vs %"PRIsVALUE")",
              rb_inspect(sa), rb_inspect(sb));
   }

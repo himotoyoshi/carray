@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for C extensions: `CA_FOR_EACH_FIBER_PAIR` and
+  `CA_FOR_EACH_FIBER_PAIR_MASKED` raise `ArgumentError` when the two
+  arrays differ in shape, as the INOUT forms do. They used to skip the
+  body when the rank, element count or fiber length differed, and to pair
+  fibers from unrelated positions when only the shape did.
+
 - Fix: for C extensions: `ca_iter_state_init_l1` / `_init_l2` handed a
   NULL source crashed; they return `CA_ITER_ERR_FLAGS`, as the header
   says.

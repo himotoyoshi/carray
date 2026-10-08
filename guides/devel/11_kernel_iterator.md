@@ -128,7 +128,7 @@ a question about both fibers.
 
 Each fiber macro auto-sets `CA_KERNEL_FIBER_CONTIG`; the engine guarantees
 contig data delivery (gathers strided fibers into per-state scratch when
-needed). The INOUT macros require the input and the output to have the
+needed). The INOUT and PAIR macros require their two arrays to have the
 same shape (`ndim` and every `dim[k]`) and raise `ArgumentError` before
 opening either walk when they do not.
 
