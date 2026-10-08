@@ -25,6 +25,7 @@
 #define CARRAY_INTERNAL_H
 
 #include "carray.h"
+#include <math.h>     /* isnan, for CA_OBJ_ISNAN */
 
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
@@ -309,5 +310,28 @@ ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
 VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);
+
+/* A NaN loses every contest of an extremum (min / max / minmax / the
+   positions / the running cummin / cummax / pmin / pmax): it never displaces
+   another value, the first number displaces it, and nothing but NaN answers
+   NaN.  The two tests below are that rule for a typed cell and for an object
+   cell (a stored Float NaN); each says whether `v` takes the place of the
+   running `acc`.  CMP / op is `>` for a maximum, `<` for a minimum.  On an
+   integer type `v == v` is always true and folds away. */
+
+#define CA_EXTREMUM_REPLACES(v, acc, CMP) \
+  ( (v) == (v) && ( !((acc) == (acc)) || (v) CMP (acc) ) )
+
+#ifndef CA_OBJ_ISNAN
+#define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
+#endif
+
+static inline int
+ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
+{
+  if ( CA_OBJ_ISNAN(v) ) return 0;
+  if ( CA_OBJ_ISNAN(acc) ) return 1;
+  return RTEST(rb_funcall(v, op, 1, acc));
+}
 
 #endif /* CARRAY_INTERNAL_H */

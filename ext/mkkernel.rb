@@ -6894,7 +6894,7 @@ MkKernel.reduce :min,
                      # bool acc is u64 (numeric output); cast the boolean8_t
                      # load to match and avoid a signed/unsigned compare.
                      bool:    "acc = ((uint64_t) v < acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v;' },
+                     object:  'if (acc == Qundef || ca_obj_extremum_replaces(v, acc, rb_intern("<"))) acc = v;' },
   reduction_kind:  :min,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic min (byte order == the fixlen sort
@@ -6919,7 +6919,7 @@ MkKernel.reduce :max,
   # 0/1); the boolean-returning twin is `any` (= bool max).
   reduce:          { numeric: "acc = (v > acc) ? v : acc",
                      bool:    "acc = ((uint64_t) v > acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v;' },
+                     object:  'if (acc == Qundef || ca_obj_extremum_replaces(v, acc, rb_intern(">"))) acc = v;' },
   reduction_kind:  :max,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic max (byte order == the fixlen sort order).
@@ -6948,17 +6948,6 @@ MkKernel.reduce :max,
 # modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
 # or mostly-true `any`) a profile-driven early-break variant can be
 # added later as a separate kernel.
-MkKernel.header_block <<~C
-  /* CA_OBJ_ISNAN: a stored Float NaN in an object cell.  The object lanes
-     of min / max / minmax / argmin / argmax / cummin / cummax let a NaN
-     lose every comparison, as the float lanes do: it never displaces
-     another value, and a run of nothing but NaN answers NaN (UNDEF for a
-     position).  */
-  #ifndef CA_OBJ_ISNAN
-  #define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
-  #endif
-C
-
 MkKernel.header_block <<~C
   /* BOOL2VAL: bool -> Ruby (Qtrue/Qfalse).  Used as ruby_scalar wrapper
      for the all/any flat-reduction Ruby surface so `a.all` / `a.any`
@@ -7142,7 +7131,7 @@ MkKernel.reduce :minmax,
                      # CA_OBJECT minmax via Qundef sentinel + first-cell-init.
                      # One sentinel guards both lo + hi (they go Qundef
                      # together on init, get set together on first reduce).
-                     object:  'if (lo == Qundef) { lo = v; hi = v; } else if (!CA_OBJ_ISNAN(v)) { if (CA_OBJ_ISNAN(lo) || RTEST(rb_funcall(v, rb_intern("<"), 1, lo))) lo = v; if (CA_OBJ_ISNAN(hi) || RTEST(rb_funcall(v, rb_intern(">"), 1, hi))) hi = v; }' },
+                     object:  'if (lo == Qundef) { lo = v; hi = v; } else { if (ca_obj_extremum_replaces(v, lo, rb_intern("<"))) lo = v; if (ca_obj_extremum_replaces(v, hi, rb_intern(">"))) hi = v; }' },
   outputs:         2,
   all_nan_result:  :nan,
   finish:          { min: "lo", max: "hi" },
@@ -7528,7 +7517,7 @@ MkKernel.scan :cummax,
   step:         { float: "acc = fmax(acc, v); r = acc",
                   numeric: "if (v > acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v > acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil || ca_obj_extremum_replaces(v, acc, rb_intern(">"))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
@@ -7548,7 +7537,7 @@ MkKernel.scan :cummin,
   step:         { float: "acc = fmin(acc, v); r = acc",
                   numeric: "if (v < acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v < acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil || ca_obj_extremum_replaces(v, acc, rb_intern("<"))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
@@ -8919,14 +8908,15 @@ MkKernel.monfunc :rad_pi,
 #                    NaN the result is NaN.  Distinct kernel — cannot be
 #                    aliased onto pmax.
 #
-# Integer / object branches are identical across all three (no NaN
-# concept).  Only the float branch differs.
+# Integer branches are identical across all three (no NaN).  The float
+# and object branches differ: pmax / pmin let a NaN lose (an object cell's
+# Float NaN included), maximum / minimum let it win.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
     float:  "(#3) = fmax(#1, #2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);',
+    object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
   }
 
 MkKernel.binop :pmin,
@@ -8934,7 +8924,7 @@ MkKernel.binop :pmin,
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
     float:  "(#3) = fmin(#1, #2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
+    object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
   }
 
 # NaN-propagate variants.  Float
@@ -8947,7 +8937,7 @@ MkKernel.binop :maximum,
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
     float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);',
+    object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : RTEST(rb_funcall((#2), rb_intern(">"), 1, (#1))) ? (#2) : (#1);',
   }
 
 MkKernel.binop :minimum,
@@ -8955,7 +8945,7 @@ MkKernel.binop :minimum,
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
     float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
+    object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : RTEST(rb_funcall((#2), rb_intern("<"), 1, (#1))) ? (#2) : (#1);',
   }
 
 # + and - work on the parts independently, so one generic expression

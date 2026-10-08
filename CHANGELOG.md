@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: on an object array, `pmax` / `pmin` let a Float NaN lose and
+  `maximum` / `minimum` let it win, as on a float array; they raised
+  `ArgumentError`, and so did `windows(...).max` / `.min` on an object
+  array. The running `cummax` / `cummin` of `group_by_category` and the
+  axis group no longer hold a group's leading NaN to its end (and no longer
+  raise on an object array): the first number displaces it, as the core
+  `cummax` / `cummin` do.
+
 - New: `value.segments(offsets:)` / `value.segments(lengths:)` return a
   `CASegmentIterator`, the iterator-family member for consecutive runs of
   cells, with the same reductions, scans, `map` and addresses as the other
