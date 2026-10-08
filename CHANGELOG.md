@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `median`, `percentile` and `quantile` over the whole array return
+  `UNDEF` (or the `fill_value:`) when an array without a mask has fewer
+  cells than `min_count:`, as a masked array and the `axis:` form already
+  did. The count was checked only after stripping a mask.
+
 - Fix: `bincount_nd` skips a sample with a NaN weight when the labels have
   no fiber axes too, as it already did with fibers and as `histogram` does.
   The NaN was added into the count.
