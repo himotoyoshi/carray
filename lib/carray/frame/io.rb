@@ -535,7 +535,10 @@ class CAFrame
   # over-long rows raise), one 2-D object array is bulk-filled, and each column
   # is a view into it (§3.6).
   def self.build_frame(names, rows)
-    ncol  = names ? names.size : (rows.map(&:size).max || 0)
+    ncol  = if names then names.size
+            elsif rows.is_a?(CArray) then rows.shape[1]
+            else rows.map(&:size).max || 0
+            end
     names ||= Array.new(ncol) { |j| "c#{j}" }
     # A frame holds one column per name, so a repeated one would keep only
     # the last of its columns.
@@ -548,27 +551,13 @@ class CAFrame
     end
 
     cols = {}
-    if rows.empty?
+    # A table the C reader built: one row per record, missing cells masked.
+    table = rows if rows.is_a?(CArray) && rows.elements > 0
+    if table.nil? && (rows.is_a?(CArray) || rows.empty?)
       names.each { |name| cols[name] = CArray.string(CArray.object(0)) }
       return new(cols)
     end
-    # Short rows are padded on copies: the rows may be a parser: callable's
-    # own arrays.
-    rows = rows.each_with_index.map do |r, i|
-      if r.size > ncol
-        raise ArgumentError,
-              "row #{i + 1} has #{r.size} fields, expected #{ncol}"
-      end
-      r.size < ncol ? r + Array.new(ncol - r.size) : r
-    end
-    table = CArray.object(rows.size, ncol) { rows }
-    # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
-    # tokenizer says missing with nil (an unquoted empty field; a quoted
-    # one is the empty string and stays a value), and an object array will
-    # hold that nil quite happily -- so a column read without `types:` used
-    # to carry nil where the same column read with one carried UNDEF, and
-    # the mask a to_csv had written did not survive the trip back.
-    table[:eq, nil] = UNDEF
+    table ||= table_of_rows(rows, ncol)
     # Each column is a CAString over its view of the table: the text, with
     # the string operations (strip!, gsub, extract, ...) at hand, writing
     # through to the same cells.
@@ -576,4 +565,31 @@ class CAFrame
     new(cols)
   end
   private_class_method :build_frame
+
+  def self.table_of_rows(rows, ncol)
+    # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
+    # tokenizer says missing with nil (an unquoted empty field; a quoted
+    # one is the empty string and stays a value), and an object array will
+    # hold that nil quite happily -- so a column read without `types:` used
+    # to carry nil where the same column read with one carried UNDEF, and
+    # the mask a to_csv had written did not survive the trip back.  A row
+    # holding a nil gets UNDEF in its place before the table is built (an
+    # UNDEF in the rows becomes a masked cell), so a row with nothing
+    # missing costs no pass over its cells.  Short rows are padded, and a
+    # row with a nil is changed, on a copy: the rows may be a parser:
+    # callable's own arrays.
+    rows = rows.each_with_index.map do |r, i|
+      if r.size > ncol
+        raise ArgumentError,
+              "row #{i + 1} has #{r.size} fields, expected #{ncol}"
+      end
+      r = r + Array.new(ncol - r.size) if r.size < ncol
+      # compact tests for nil without calling == on every cell, as
+      # include?(nil) would.
+      r = r.map { |cell| cell.nil? ? UNDEF : cell } if r.compact.size < ncol
+      r
+    end
+    CArray.object(rows.size, ncol) { rows }
+  end
+  private_class_method :table_of_rows
 end

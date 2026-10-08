@@ -91,6 +91,20 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_equal [["x"], ["2"]], df.variables.map(&:to_a)
   end
 
+  # A one-line record with quotes is read by splitting at the separator;
+  # these are the shapes that path has to agree with the scanner on.
+  def test_quoted_fields_on_one_line
+    df = read(%Q{a,b,c,d\n"x,y",""," ""q"" ",\n"",p,"a,,b","1"\n})
+    assert_equal ["x,y", ""], df["a"].to_a
+    assert_equal ["", "p"], df["b"].to_a
+    assert_equal [" \"q\" ", "a,,b"], df["c"].to_a
+    assert_equal [UNDEF, "1"], df["d"].to_a
+    df = read(%Q{a::b\n"x::y"::"z"\n}, sep: "::")
+    assert_equal [["x::y"], ["z"]], df.variables.map(&:to_a)
+    assert_raise(MALFORMED) { read(%Q{a,b\n"x,y"z,1\n}) }
+    assert_raise(MALFORMED) { read(%Q{a,b\nx"y,1\n}) }
+  end
+
   def test_records_and_line_breaks
     df = read("a,b\r\n\"x\r\ny\",2\r\n3,\"\"\r\n")
     assert_equal ["x\r\ny", "3"], df["a"].to_a

@@ -322,10 +322,12 @@ quietly matching some spellings and not others. `""` means the empty field,
 which is missing already, so a quoted `""` stays the empty string. A Hash
 naming a column the file does not have raises `KeyError`.
 
-Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
-records are split directly, and only quote-bearing records go through the field
-scanner (embedded separators / newlines / `""` escapes). Columns are handed to
-the frame as views over one backing object array, so the build is cheap.
+Parsing uses a **built-in tokenizer** (no external dependency). The body of a
+UTF-8 file is read in C, a few megabytes at a time, straight into one object
+array; the columns are handed to the frame as views over it, so the build is
+cheap. Text in another encoding (unless the IO transcodes it to UTF-8),
+`strip: true`, and a record the C reader does not take go through the same
+rules in Ruby, which is also what reports a malformed record.
 Options: `sep:` (default `","`, and it may be longer than one character, as
 `"::"`), `quote:` (`'"'`), `strip:` (trim spaces from
 unquoted fields, default `false` = RFC 4180 spacing), `encoding:`

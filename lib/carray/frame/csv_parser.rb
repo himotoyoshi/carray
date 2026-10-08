@@ -25,6 +25,7 @@
 #                                     column_names).
 
 require "strscan"
+require "stringio"
 
 class CAFrame
   # CSV tokenizer behind `CAFrame.from_csv`.  It produces raw String cells
@@ -69,6 +70,8 @@ class CAFrame
     # Splits records into fields. Regexps are compiled once and reused across
     # every record, so per-row cost stays low.
     class Tokenizer
+      attr_reader :sep, :quote, :strip
+
       def initialize(sep, quote, strip)
         unless sep.is_a?(String) && !sep.empty?
           raise ArgumentError, "sep: must be a non-empty String (got #{sep.inspect})"
@@ -99,6 +102,11 @@ class CAFrame
           end
         @inner    = /[^#{q}]*/
         @eol      = /\r?\n|\r\z/
+        @blank_re = /\A[ \t]*\z/
+        @sep2     = sep * 2
+        @qq       = quote * 2
+        # A whole quoted field: its quotes closed, the ones inside doubled.
+        @quoted_re = /\A#{q}(?:[^#{q}]|#{q}#{q})*#{q}\z/m
         @recno    = 0
       end
 
@@ -124,9 +132,11 @@ class CAFrame
           return nil if line.nil?
           @recno += 1
           @blank = false
-          return scan(line, io) if line.include?(@quote)
+          if line.include?(@quote)
+            return (!@strip && quoted_line(line)) || scan(line, io)
+          end
           rec = line.chomp
-          if rec.delete(" \t").empty? && !rec.include?(@sep)
+          if rec.match?(@blank_re) && !rec.include?(@sep)
             next unless blank_is_row
             @blank = true
           end
@@ -138,11 +148,52 @@ class CAFrame
         @blank
       end
 
+      # Count records read elsewhere (the C reader), so the record numbers
+      # in an error stay those of the file.
+      def advance(records)
+        @recno += records
+      end
+
+      # An empty field lies at the start or the end of the record or between
+      # two separators, so a record without one is the split as it stands.
       private def simple(rec)
-        rec.split(@sep, -1).map do |cell|
-          cell = cell.strip if @strip
-          cell.empty? ? nil : cell
+        fields = rec.split(@sep, -1)
+        if @strip
+          fields.map! { |cell| cell = cell.strip; cell.empty? ? nil : cell }
+        elsif rec.empty? || rec.start_with?(@sep) || rec.end_with?(@sep) || rec.include?(@sep2)
+          fields.map! { |cell| cell.empty? ? nil : cell }
         end
+        fields
+      end
+
+      # The fields of a one-line record holding quotes, read by splitting at
+      # the separator: a quoted field is the pieces from one that opens with
+      # a quote to the one that closes it (it may hold the separator). nil
+      # when the record is not that simple -- a quoted field open at the end
+      # of the line, a quote inside an unquoted field, text after a closing
+      # quote -- for the scanner to read or to report.
+      private def quoted_line(line)
+        parts = line.chomp.split(@sep, -1)
+        fields = []
+        i = 0
+        while i < parts.size
+          part = parts[i]
+          if part.start_with?(@quote)
+            until part.match?(@quoted_re)
+              i += 1
+              return nil if i >= parts.size
+              part = part + @sep + parts[i]
+            end
+            inner = part[1...-1]
+            fields << (inner.include?(@quote) ? inner.gsub(@qq, @quote) : inner)
+          elsif part.include?(@quote)
+            return nil
+          else
+            fields << (part.empty? ? nil : part)
+          end
+          i += 1
+        end
+        fields
       end
 
       # Fields of the record that starts on +line+, reading more lines from
@@ -267,7 +318,16 @@ class CAFrame
     # so blank lines are kept and marked, and +result+ drops them unless the
     # file turns out to have one column -- the same rows a header would have
     # given.
+    #
+    # Without strip:, the rest of the input is read in C (CArray.__csv_split__)
+    # straight into the table, with the column count of the names, or of the
+    # first record when there are none. When C declines -- text not in
+    # UTF-8, a record it does not take, or one longer than the first in a
+    # file without names -- the text from there on is read here, which pads
+    # the earlier rows or reports what is wrong.
     def body
+      body_in_c if @rows.nil? && !@tok.strip && @io.respond_to?(:read)
+      return self if @table
       rows = (@rows ||= [])
       @blank_rows ||= []
       blank_is_row = @names.nil? || @names.size == 1
@@ -278,9 +338,57 @@ class CAFrame
       self
     end
 
+    # The text C reads at a time when the column count is known; a chunk
+    # ends at a line end, and not inside a quoted field.
+    CHUNK_BYTES = 1 << 22
+
+    # With names, the input goes to C a chunk at a time, so the text is not
+    # held whole beside its cells. Without them, the column count and which
+    # blank lines are rows are known only at the end, so it goes in whole;
+    # so it does when the IO transcodes, since read(length) does not.
+    private def body_in_c(chunk_bytes = CHUNK_BYTES)
+      chunked = @names && @io.respond_to?(:external_encoding) && @io.internal_encoding.nil?
+      ncol = @names ? @names.size : 0
+      cells = []
+      loop do
+        text = chunked ? next_chunk(chunk_bytes) : (@io.read || "")
+        break if text.nil?
+        n, flat, records = CArray.__csv_split__(text, @tok.sep, @tok.quote, ncol)
+        unless flat
+          # This chunk and the rest are read by the Ruby tokenizer, after the
+          # rows read so far.
+          @rows = ncol > 0 ? cells.each_slice(ncol).to_a : []
+          @io = StringIO.new(chunked ? text + (@io.read || "") : text)
+          return
+        end
+        ncol = n
+        cells.concat(flat)
+        @tok.advance(records)
+        break unless chunked
+      end
+      @table = CArray.object(cells.size / ncol, ncol) { cells }
+      @rows = []
+    end
+
+    # The next chunk_bytes of the input, read on to the end of its line and
+    # past any quoted field still open, in the IO's encoding; nil at EOF.
+    private def next_chunk(chunk_bytes)
+      buf = @io.read(chunk_bytes)
+      return nil if buf.nil?
+      buf.force_encoding(@io.external_encoding || Encoding.default_external)
+      if !buf.end_with?("\n") && (rest = @io.gets)
+        buf << rest
+      end
+      while buf.count(@tok.quote).odd? && (more = @io.gets)
+        buf << more
+      end
+      buf
+    end
+
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
+      return [@names, @table] if @table
       rows = @rows || []
       if @names.nil? && @blank_rows && !@blank_rows.empty? &&
          rows.map(&:size).max != 1
