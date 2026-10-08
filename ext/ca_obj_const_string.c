@@ -451,6 +451,54 @@ rb_ca_const_string_buffer (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
+/* to_string: the cells as a CAString over an object array of Strings, in
+   one pass over the buffer (shape and mask carried). */
+static VALUE
+rb_ca_const_string_to_string (VALUE self)
+{
+  CAConstString *ca;
+  volatile VALUE vpairs, out;
+  CArray *pe, *co;
+  rb_encoding *enc;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m;
+  VALUE *cells;
+  ca_size_t i;
+
+  TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
+  vpairs = rb_ca_parent(self);
+  TypedData_Get_Struct(vpairs, CArray, &carray_data_type, pe);
+  if ( ! ca_is_entity(pe) ) {
+    vpairs = rb_ca_copy(vpairs);
+    TypedData_Get_Struct(vpairs, CArray, &carray_data_type, pe);
+  }
+  enc = rb_enc_from_index(ca->encoding_id);
+  out = rb_carray_new(CA_OBJECT, pe->ndim, pe->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  m = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+  if ( m ) {
+    ca_create_mask(co);
+    memcpy(co->mask->ptr, m, pe->elements);
+  }
+  buf   = RSTRING_PTR(ca->buffer);
+  pair  = (const int64_t *) pe->ptr;
+  cells = (VALUE *) co->ptr;
+  for (i = 0; i < pe->elements; i++) {
+    if ( m && m[i] ) {
+      continue;
+    }
+    /* out is reachable and marks its cells, so each String is held as it
+       is stored */
+    cells[i] = rb_enc_str_new(buf + pair[2 * i],
+                              (long) ( pair[2 * i + 1] - pair[2 * i] ), enc);
+  }
+  RB_GC_GUARD(vpairs);
+  RB_GC_GUARD(self);
+  return rb_funcall(rb_const_get(rb_cObject, rb_intern("CAString")),
+                    rb_intern("wrap"), 1, out);
+}
+
 /* copy = compacting deep copy — the only chain-descent point in
    CAConstString.  Produces a standalone CAConstString:
      - a fresh contiguous fixlen-16 (start,end) pair entity
@@ -1012,6 +1060,7 @@ Init_ca_obj_const_string (void)
 
   /* copy = compacting deep copy; to_ca is the same descent point. */
   rb_define_method(rb_cCAConstString, "copy",  rb_ca_const_string_copy, 0);
+  rb_define_method(rb_cCAConstString, "to_string", rb_ca_const_string_to_string, 0);
   rb_define_method(rb_cCAConstString, "to_ca", rb_ca_const_string_to_ca, -1);
 
   /* native byte ops (§3.7) */

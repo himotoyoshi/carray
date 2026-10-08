@@ -356,3 +356,16 @@ class CAConstString
   end
 
 end
+
+class CAConstString
+  # The decimal readers of CAFrame#infer_types / #cast, read from the buffer
+  # without a String per cell.
+  def __infer_number_type_of_text__
+    CArray.__const_string_infer_number_type_of_text__(self)
+  end
+
+  def __read_text_as_number__(type, report = nil)
+    out = CArray.__const_string_read_text_as_number__(self, type, report)
+    out && ndim > 1 ? out.reshape(*shape) : out
+  end
+end

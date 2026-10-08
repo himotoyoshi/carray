@@ -327,7 +327,8 @@ class CAFrame
   # +data+ or +header+ cannot stand in for the verb. Without a block,
   # from_csv reads by its header: / data: / column_names: (see +layout+).
   class CSVReader
-    def initialize(io, sep: ",", quote: '"', strip: false)
+    def initialize(io, sep: ",", quote: '"', strip: false, read_text_as_const_string: false)
+      @read_text_as_const_string = read_text_as_const_string
       @io    = io
       @path  = io.path if io.respond_to?(:path)
       @tok   = CSVParser::Tokenizer.new(sep, quote, strip)
@@ -491,7 +492,35 @@ class CAFrame
     # held whole beside its cells. Without them, the column count and which
     # blank lines are rows are known only at the end, so it goes in whole;
     # so it does when the IO transcodes, since read(length) does not.
+    #
+    # With read_text_as_const_string:, the body goes to C whole, into one
+    # CAConstString per column over the text itself: the text is the buffer
+    # the columns read, so it is held whole either way. When C declines, the
+    # text is read here from the start of the body.
+    private def read_body_into_const_string_columns
+      ncol = @names && !@names_to_check ? @names.size : 0
+      text = @io.read || ""
+      n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__(text, @tok.sep, @tok.quote, ncol)
+      unless buffer
+        @rows = []
+        @io = StringIO.new(text)
+        return
+      end
+      if @names_to_check
+        check_column_names(@names_to_check, n, @tok.lineno + first_record_line(text))
+        @names_to_check = nil
+      end
+      @tok.advance(records, text.count("\n") + (text.empty? || text.end_with?("\n") ? 0 : 1))
+      @table = ConstStringColumns.new(pairs.map { |pr| CAConstString.wrap(pr, buffer: buffer) })
+      @rows = []
+    end
+
+    # The columns read_body_into_const_string_columns made, as +result+
+    # hands them to CAFrame.from_csv.
+    ConstStringColumns = Struct.new(:columns)
+
     private def body_in_c(last = nil, chunk_bytes = CHUNK_BYTES)
+      return read_body_into_const_string_columns if last.nil? && @read_text_as_const_string
       chunked = last.nil? && @names && @io.respond_to?(:external_encoding) &&
                 @io.internal_encoding.nil?
       # Names that have to agree with the first record leave its column

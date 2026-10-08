@@ -533,10 +533,8 @@ ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
 /* A String as one value of data_type (an integer or float type), written
    to out. */
 static int
-ca_decimal_string_read (VALUE str, int8_t data_type, void *out)
+ca_decimal_read_bytes_as (const char *s, long n, int8_t data_type, void *out)
 {
-  const char *s = RSTRING_PTR(str);
-  long n = RSTRING_LEN(str);
   ca_decimal_trim(&s, &n);
   if ( n == 0 ) {
     return CA_DECIMAL_BLANK;
@@ -567,6 +565,12 @@ ca_decimal_string_read (VALUE str, int8_t data_type, void *out)
     ca_decimal_store_integer(data_type, (char *) out, 0, negative, magnitude);
     return CA_DECIMAL_OK;
   }
+}
+
+static int
+ca_decimal_string_read (VALUE str, int8_t data_type, void *out)
+{
+  return ca_decimal_read_bytes_as(RSTRING_PTR(str), RSTRING_LEN(str), data_type, out);
 }
 
 /* The to_type reader: 1 with the value at out, or 0 for a cell that
@@ -3205,10 +3209,8 @@ enum {
 };
 
 static int
-ca_infer_string (VALUE str)
+ca_infer_decimal_kind_of_bytes (const char *s, long n)
 {
-  const char *s = RSTRING_PTR(str);
-  long n = RSTRING_LEN(str);
   long i = 0, k;
   int digits_only = 1;
   ca_decimal_trim(&s, &n);
@@ -3273,7 +3275,7 @@ rb_ca_infer_number_type_of_text (VALUE self)
       continue;
     }
     if ( RB_TYPE_P(v, T_STRING) ) {
-      kind = ca_infer_string(v);
+      kind = ca_infer_decimal_kind_of_bytes(RSTRING_PTR(v), RSTRING_LEN(v));
     }
     else if ( RB_FLOAT_TYPE_P(v) ) {
       kind = CA_INFER_FLOAT;
@@ -3304,6 +3306,126 @@ rb_ca_infer_number_type_of_text (VALUE self)
   return ID2SYM(rb_intern(any_float ? "float64" : "int64"));
 }
 
+/* The same two readers over a CAConstString, from its buffer and its
+   (start, end) byte ranges, without a String per cell.  CAConstString's
+   __infer_number_type_of_text__ / __read_text_as_number__ call them, so
+   CAFrame#infer_types and #cast read a text column from a file this way. */
+
+/* The buffer of a CAConstString and an entity of its (start, end) byte
+   ranges, masked where a cell is missing. */
+static VALUE
+ca_const_string_buffer_and_ranges (VALUE cs, VALUE *buffer, CArray **ranges)
+{
+  volatile VALUE vranges;
+  VALUE klass = rb_const_get(rb_cObject, rb_intern("CAConstString"));
+  if ( ! RTEST(rb_obj_is_kind_of(cs, klass)) ) {
+    rb_raise(rb_eTypeError, "needs a CAConstString");
+  }
+  *buffer = rb_funcall(cs, rb_intern("buffer"), 0);
+  vranges = rb_ca_parent(cs);
+  TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
+  if ( ! ca_is_entity(*ranges) ) {
+    vranges = rb_ca_copy(vranges);
+    TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
+  }
+  return vranges;
+}
+
+static VALUE
+rb_ca_s_const_string_infer_number_type_of_text (VALUE klass, VALUE cs)
+{
+  volatile VALUE src;
+  VALUE buffer;
+  CArray *pe;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m;
+  ca_size_t i;
+  int present = 0, any_float = 0;
+
+  src = ca_const_string_buffer_and_ranges(cs, &buffer, &pe);
+  buf  = RSTRING_PTR(buffer);
+  pair = (const int64_t *) pe->ptr;
+  m = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+  for (i = 0; i < pe->elements; i++) {
+    int kind;
+    if ( m && m[i] ) {
+      continue;
+    }
+    kind = ca_infer_decimal_kind_of_bytes(buf + pair[2 * i], (long) ( pair[2 * i + 1] - pair[2 * i] ));
+    if ( kind == CA_INFER_TEXT ) {
+      RB_GC_GUARD(src);
+      return Qnil;
+    }
+    if ( kind != CA_INFER_MISSING ) {
+      present = 1;
+      any_float |= ( kind == CA_INFER_FLOAT );
+    }
+  }
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(buffer);
+  if ( ! present ) {
+    return Qnil;
+  }
+  return ID2SYM(rb_intern(any_float ? "float64" : "int64"));
+}
+
+static VALUE
+rb_ca_s_const_string_read_text_as_number (VALUE klass, VALUE cs, VALUE rtype, VALUE report)
+{
+  volatile VALUE src, out;
+  VALUE buffer;
+  CArray *pe, *co;
+  int8_t data_type;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m_in, *m_out = NULL;
+  ca_size_t i;
+
+  if ( ! NIL_P(report) ) {
+    Check_Type(report, T_ARRAY);
+  }
+  data_type = rb_ca_guess_type(rtype);
+  switch ( data_type ) {
+  case CA_INT8: case CA_INT16: case CA_INT32: case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+  case CA_FLOAT32: case CA_FLOAT64:
+    break;
+  default:
+    return Qnil;               /* not a number type: the caller casts */
+  }
+  src = ca_const_string_buffer_and_ranges(cs, &buffer, &pe);
+  out = rb_carray_new(data_type, pe->ndim, pe->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  buf  = RSTRING_PTR(buffer);
+  pair = (const int64_t *) pe->ptr;
+  m_in = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+
+  for (i = 0; i < pe->elements; i++) {
+    char *cell = co->ptr + i * co->bytes;
+    int rc = CA_DECIMAL_BLANK;
+    if ( ! ( m_in && m_in[i] ) ) {
+      rc = ca_decimal_read_bytes_as(buf + pair[2 * i],
+                                 (long) ( pair[2 * i + 1] - pair[2 * i] ),
+                                 data_type, cell);
+    }
+    if ( rc != CA_DECIMAL_OK ) {
+      if ( m_out == NULL ) {
+        ca_create_mask(co);
+        m_out = (boolean8_t *) co->mask->ptr;
+      }
+      m_out[i] = 1;
+      memset(cell, 0, co->bytes);
+      if ( rc != CA_DECIMAL_BLANK && ! NIL_P(report) ) {
+        rb_ary_push(report, SIZET2NUM(i));
+      }
+    }
+  }
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(buffer);
+  return out;
+}
+
 void
 Init_carray_cast (void)
 {
@@ -3317,6 +3439,8 @@ Init_carray_cast (void)
      something but do not read (blank, nil and masked cells are missing,
      not unreadable) are pushed onto it. */
   rb_define_method(rb_cCArray, "__read_text_as_number__", rb_ca_read_text_as_number, -1);
+  rb_define_singleton_method(rb_cCArray, "__const_string_infer_number_type_of_text__", rb_ca_s_const_string_infer_number_type_of_text, 1);
+  rb_define_singleton_method(rb_cCArray, "__const_string_read_text_as_number__", rb_ca_s_const_string_read_text_as_number, 3);
 
   rb_define_method(rb_cCArray, "to_type", rb_ca_to_type_internal, -1);
 

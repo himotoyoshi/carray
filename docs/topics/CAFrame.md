@@ -254,8 +254,11 @@ and with fewer the columns it does not reach are `UNDEF`; a masked cell is
 `UNDEF` in all of them. `sep` is a String or a Regexp as `String#split` takes
 it (write a group as `(?:...)`, since a capturing group adds pieces).
 
-All the columns of a file are views over one object array, so the `CAString`
-of each column holds no copy of its own. `to_const_string` packs a column of
+Read without `types:`, all the columns of a file are views over one object
+array, so the `CAString` of each column holds no copy of its own. Read with
+`types:`, the file is read without making a String per cell: a column cast to
+a number never holds Strings, and each column left as text is a `CAString` of
+its own. `to_const_string` packs a column of
 read-only text into one buffer, which is lighter for a large column that is no
 longer edited.
 

@@ -87,9 +87,12 @@ class CAFrame
   # +:default+ the columns it does not name keep only the empty field. As in
   # +to_csv+, "" means the empty field, so a quoted "" is still a value.
   #
-  # Columns are handed to the frame as CABlock views over one backing object
-  # array (§3.6 view-by-default); casting a column materializes it, and +copy+
-  # gives an independent frame.
+  # Without +types:+, the columns are handed to the frame as CABlock views
+  # over one backing object array (§3.6 view-by-default). With +types:+, the
+  # body is read without making a String per cell: a column cast to a number
+  # is read from the text directly, and a column left as text becomes its own
+  # CAString. Casting a column materializes it, and +copy+ gives an
+  # independent frame.
   def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
                     header: nil, data: nil, column_names: nil,
                     sep: ",", quote: '"', strip: false,
@@ -104,20 +107,28 @@ class CAFrame
                            "parameter, as in from_csv(path) { |r| r.skip 2; r.header; r.data }"
     end
     missing = missing_tokens(missing) if missing
+    # With types:, the body is read into CAConstString columns, so a column
+    # cast to a number never becomes Strings; the text columns left over
+    # become CAString below. Without types: every column stays text, so the
+    # body goes straight to Strings. missing: masks text in place, which
+    # wants the Strings first, so it takes that path too.
+    read_text_as_const_string = !types.nil? && missing.nil?
     names, rows =
       if parser
         parser.call(source)
       elsif source.respond_to?(:gets)
         with_encoding_hint("open the IO in the file's encoding, as in " \
                            "File.open(path, \"r:<file encoding>:UTF-8\")") do
-          read_csv(source, sep: sep, quote: quote, strip: strip, layout: layout, &block)
+          read_csv(source, sep: sep, quote: quote, strip: strip, layout: layout,
+                   read_text_as_const_string: read_text_as_const_string, &block)
         end
       else
         with_encoding_hint("it was opened as #{encoding.inspect}; pass the " \
                            "file's encoding, as in " \
                            "encoding: \"<file encoding>:UTF-8\"") do
           File.open(source, "r:#{encoding}") do |io|
-            read_csv(io, sep: sep, quote: quote, strip: strip, layout: layout, &block)
+            read_csv(io, sep: sep, quote: quote, strip: strip, layout: layout,
+                     read_text_as_const_string: read_text_as_const_string, &block)
           end
         end
       end
@@ -125,8 +136,20 @@ class CAFrame
     frame = build_frame(names, rows)
     mask_missing_tokens(frame, missing) if missing
     cast_on_load(frame, types, on_error)
+    convert_const_string_columns_to_castring(frame)
     frame
   end
+
+  # A text column from_csv reads is a CAString, whichever way the body was
+  # read: the string operations (strip!, gsub!, ...) write through to it.
+  def self.convert_const_string_columns_to_castring(frame)
+    frame.variable_names.each do |name|
+      col = frame[name]
+      next unless col.is_a?(CAConstString)
+      frame[name] = col.to_string
+    end
+  end
+  private_class_method :convert_const_string_columns_to_castring
 
   # Split a +missing:+ argument, as from_csv and to_csv both take it, into the
   # setting for every column and a Hash of per-column settings that replace
@@ -184,8 +207,9 @@ class CAFrame
   # Drive the reading-control DSL over one open IO and hand back
   # [names, rows]. Shared by the path and the IO source, so the two cannot
   # come to read a file differently.
-  def self.read_csv (io, sep:, quote:, strip:, layout:, &block)
-    reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
+  def self.read_csv (io, sep:, quote:, strip:, layout:, read_text_as_const_string: false, &block)
+    reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip,
+                           read_text_as_const_string: read_text_as_const_string)
     reader.reporting do
       block ? block.call(reader) : reader.layout(**layout)
     end
@@ -653,6 +677,12 @@ class CAFrame
     end
 
     cols = {}
+    # Columns the C reader built as CAConstStrings over the text, for
+    # cast_on_load to read without a String per cell.
+    if rows.is_a?(CSVReader::ConstStringColumns)
+      names.zip(rows.columns) { |name, col| cols[name] = col }
+      return new(cols)
+    end
     # A table the C reader built: one row per record, missing cells masked.
     table = rows if rows.is_a?(CArray) && rows.elements > 0
     if table.nil? && (rows.is_a?(CArray) || rows.empty?)

@@ -196,9 +196,8 @@ class CAFrame
   def infer_types
     @columns.each_with_object({}) do |(key, col), types|
       next unless string_column?(col)
-      text = time_text_of(col)
-      type = text.__infer_number_type_of_text__
-      type ||= :time if first_present_cell_can_be_time_text?(col) && time_text_column?(text)
+      type = text_for_decimal_reading(col).__infer_number_type_of_text__
+      type ||= :time if first_present_cell_can_be_time_text?(col) && time_text_column?(time_text_of(col))
       types[key] = type if type
     end
   end
@@ -399,12 +398,13 @@ class CAFrame
     end
     # Text cast to a number -- from an object column or a string Face -- is
     # read the same way, so the decimal grammar and on_error: hold for all.
-    text = time_text_of(col)
+    text = text_for_decimal_reading(col)
     unreadable = on_error == :mask ? nil : []
     parsed = text.__read_text_as_number__(type, unreadable)
     unless parsed
       # A target the decimal reader does not take (complex) goes through
       # to_type; a cell that held something and came back masked did not read.
+      text = time_text_of(col)
       parsed = text.to_type(type)
       if unreadable
         cells = text.flatten.to_a
@@ -497,6 +497,12 @@ class CAFrame
 
   # The column as an object array of its text. A CAString already holds one,
   # as its parent; other string Faces convert.
+  # The column as the decimal readers take it: a CAConstString is read from
+  # its buffer, the rest as time_text_of gives them.
+  private def text_for_decimal_reading(col)
+    col.is_a?(CAConstString) ? col : time_text_of(col)
+  end
+
   private def time_text_of(col)
     return col if col.data_type == CA_OBJECT && !col.face?
     return col.parent if col.is_a?(CAString)

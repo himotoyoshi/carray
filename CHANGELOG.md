@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: faster, with the same results: `CAFrame.from_csv` with `types:`
+  reads two to five times faster on a file of numbers, as a column cast to
+  a number is read from the text without making a String per cell. A column
+  left as text is a `CAString` as before, now one of its own rather than a
+  view over an array shared by every column. Without `types:`, or with
+  `missing:`, the file is read as before.
+
+- Change: faster, with the same results: `CAConstString#to_string` is
+  about 25 times faster.
+
 - Change: faster, with the same results: `CAFrame#infer_types`, and
   `from_csv(types: :infer)`, no longer read a whole text column to rule out
   time when its first cell that holds something is not a date or time.
