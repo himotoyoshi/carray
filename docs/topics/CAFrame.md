@@ -886,6 +886,9 @@ Notes:
   (`"1.0"`, `"1e3"`), decided from the digits so a long integer is not
   rounded; `"1.5"` is not an integer. A cell that does not read, or a value
   the type cannot hold (`"300"` into `:int8`), becomes `UNDEF` (parse-mask).
+  A Ruby number in an object column is held to the same rule: an Integer
+  that fits, or a Float with no fractional part, is kept, and `2.5` is
+  `UNDEF` rather than truncated, so `"2.5"` and `2.5` in one column agree.
   Other targets go through `to_type`, and casting a numeric column is an
   ordinary conversion. It rebinds a fresh column — the one edit that does
   **not** write through to frames sharing the old column.
