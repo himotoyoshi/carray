@@ -1217,6 +1217,12 @@ need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) if
 you need to account for the difference, or fill them first
 (`df.fill("k", value)`) to group them together.
 
+The index of a reduced frame is the group's key value. With a single key it
+keeps the key's data type and Face — an integer key gives an integer index, a
+`CATime` key a `CATime` index — so the result can be joined or aligned on it.
+Groups appear in the order their keys first appear. A composite key gives an
+object index of the key tuples.
+
 A `GroupedFrame` has three surfaces:
 
 ### (a) Convenience reductions
@@ -1267,6 +1273,50 @@ per-group reduction the iterator offers is reachable:
 ```ruby
 df.group_by("station")["temp"].mean    # => per-group means as a CArray
 ```
+
+### Time bins — `resample`
+
+`resample(name, unit)` groups the rows into **time bins** of length `unit`
+along a time column (or the time index), and returns a `GroupedFrame`, so
+every reduction above applies:
+
+```ruby
+df.resample("time", "1 hour").mean
+df.resample("time", "1 day").aggregate("rain" => ["rain", :sum], "tmax" => ["temp", :max])
+df.resample("time", "1 month").table { |g| { "n" => g.nrow } }
+```
+
+The result's index is the bin labels as a `CATime`, **in time order**, and its
+row axis is named after the time column. The time column itself is the index,
+not a reduced column.
+
+**Which end names the bin.** With `label: :left` (the default) a bin starts at
+its label and holds the times at or after it: `[00:00, 01:00)` is labelled
+`00:00`. With `label: :right` a bin ends at its label and holds the times up to
+and including it: `(00:00, 01:00]` is labelled `01:00` — the convention for a
+value that describes the hour before it:
+
+```ruby
+df.resample("time", "1 hour", label: :right).sum   # 01:00 = what fell in the hour up to 01:00
+```
+
+`origin:` shifts the bins the way `CATime#floor` does: `"1 hour"` with
+`origin: "2024-01-01 00:30"` gives bins at `00:30`, `01:30`, …. Month and year
+bins start on the calendar boundary.
+
+**Empty bins.** By default a bin with no rows does not appear. `fill: true`
+makes every bin from the first to the last a row; an empty one reduces as an
+empty reduction does — `UNDEF` for `mean`, `0` for `count` and `sum` — so "no
+data in this hour" stays distinguishable from a mean:
+
+```ruby
+df.resample("time", "1 hour", fill: true).mean     # every hour, UNDEF where none
+```
+
+A row whose time is masked belongs to no bin. `resample` builds the bins and
+nothing more: it does not interpolate. To bring a series onto a grid of
+instants, build the grid with `CArray.time_range` and `align` onto it (§10),
+then `fill(name, :linear)` if values should be interpolated.
 
 ---
 
