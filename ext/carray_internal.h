@@ -102,6 +102,21 @@ void    rb_ca_inherit_attr (VALUE dst, VALUE src);
 int     ca_decimal_string_to (VALUE str, int8_t data_type, void *out);
 void    ca_decimal_string_store (VALUE str, int8_t data_type, void *out);
 
+/* Give `ca` a mask holding `m` (one byte per cell) when any cell is set,
+   and leave it without one otherwise. */
+static inline void
+ca_mask_from_bytes (CArray *ca, const boolean8_t *m)
+{
+  ca_size_t i;
+  for (i = 0; i < ca->elements; i++) {
+    if ( m[i] ) {
+      ca_create_mask(ca);
+      memcpy(ca->mask->ptr, m, ca->elements);
+      return;
+    }
+  }
+}
+
 /* ---- Attaching several parents (carray_core.c) ---------------------------
 
    ca_attach_all attaches all of list[0..n-1] or none: if one attach raises,

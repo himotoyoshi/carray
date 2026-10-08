@@ -290,8 +290,8 @@ ca_time_text_unit (ID unit, int64_t *per_day, int64_t *ns_per_tick)
 static VALUE
 rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
 {
-  volatile VALUE src = self, out, vdays, vnsod;
-  CArray *ca, *co, *cdays, *cnsod;
+  volatile VALUE src = self, out, vdays, vnsod, vmask;
+  CArray *ca, *co, *cdays, *cnsod, *cmask;
   VALUE *cells;
   boolean8_t *m_in, *m_out;
   int64_t *days, *nsod, *ticks;
@@ -321,7 +321,7 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
 
   out = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
-  ca_create_mask(co);
+  vmask = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
   vdays = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(vdays, CArray, &carray_data_type, cdays);
   vnsod = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
@@ -329,7 +329,8 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
 
   cells = (VALUE *) ca->ptr;
   m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
-  m_out = (boolean8_t *) co->mask->ptr;
+  TypedData_Get_Struct(vmask, CArray, &carray_data_type, cmask);
+  m_out = (boolean8_t *) cmask->ptr;
   days  = (int64_t *) cdays->ptr;
   nsod  = (int64_t *) cnsod->ptr;
   ticks = (int64_t *) co->ptr;
@@ -387,10 +388,114 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
     }
   }
 
+  ca_mask_from_bytes(co, m_out);
   RB_GC_GUARD(src);
   RB_GC_GUARD(vdays);
   RB_GC_GUARD(vnsod);
+  RB_GC_GUARD(vmask);
   return rb_assoc_new(out, ID2SYM(unit));
+}
+
+/* Floor division of an int128 by a positive int64. */
+static __int128
+ca_time_floor_div (__int128 a, int64_t b)
+{
+  __int128 q = a / b;
+  if ( ( a % b ) != 0 && a < 0 ) {
+    q -= 1;
+  }
+  return q;
+}
+
+/* CArray.__time_ticks_from_fields__(year, mon, day, sec_of_day, frac_ns,
+                                     offset, present, kind, per)
+     -> int64 ticks
+
+   Ticks since the epoch from date and time fields already parsed, one
+   int64 array per field (offset in seconds east of UTC).  Cells whose
+   present byte is 0 come back masked, and so do cells whose tick does not
+   fit int64.  kind :fixed counts ticks of `per` nanoseconds; kind
+   :calendar counts ticks of `per` months and reads the year and month
+   only. */
+static VALUE
+rb_ca_s_time_ticks_from_fields (VALUE klass,
+                                VALUE vyear, VALUE vmon, VALUE vday,
+                                VALUE vsod, VALUE vfrac, VALUE voff,
+                                VALUE vpresent, VALUE rkind, VALUE rper)
+{
+  volatile VALUE out, vmask;
+  CArray *cy, *cm, *cd, *cs, *cf, *co_, *cp, *co, *cmask;
+  int64_t *y, *mo, *d, *sod, *frac, *off, *ticks;
+  uint8_t *present;
+  boolean8_t *m_out;
+  int64_t per = NUM2LL(rper);
+  int calendar = ( SYM2ID(rb_to_symbol(rkind)) == rb_intern("calendar") );
+  ca_size_t i, n;
+
+  if ( per <= 0 ) {
+    rb_raise(rb_eArgError, "tick length must be positive");
+  }
+#define CA_TIME_FIELD(v, c, field, T)                                  \
+  TypedData_Get_Struct(v, CArray, &carray_data_type, c);               \
+  if ( ! ca_is_entity(c) ) {                                           \
+    rb_raise(rb_eArgError, "time fields must be entities");            \
+  }                                                                     \
+  field = (T *) c->ptr;
+  CA_TIME_FIELD(vyear, cy, y, int64_t);
+  CA_TIME_FIELD(vmon, cm, mo, int64_t);
+  CA_TIME_FIELD(vday, cd, d, int64_t);
+  CA_TIME_FIELD(vsod, cs, sod, int64_t);
+  CA_TIME_FIELD(vfrac, cf, frac, int64_t);
+  CA_TIME_FIELD(voff, co_, off, int64_t);
+  CA_TIME_FIELD(vpresent, cp, present, uint8_t);
+#undef CA_TIME_FIELD
+  n = cy->elements;
+  if ( cy->data_type != CA_INT64 || cm->data_type != CA_INT64
+       || cd->data_type != CA_INT64 || cs->data_type != CA_INT64
+       || cf->data_type != CA_INT64 || co_->data_type != CA_INT64
+       || cp->data_type != CA_UINT8
+       || cm->elements != n || cd->elements != n || cs->elements != n
+       || cf->elements != n || co_->elements != n || cp->elements != n ) {
+    rb_raise(rb_eArgError, "time fields must be int64 arrays of one size "
+                           "(present uint8)");
+  }
+
+  out = rb_carray_new(CA_INT64, 1, &n, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  vmask = rb_carray_new(CA_BOOLEAN, 1, &n, 0, NULL);
+  ticks = (int64_t *) co->ptr;
+  TypedData_Get_Struct(vmask, CArray, &carray_data_type, cmask);
+  m_out = (boolean8_t *) cmask->ptr;
+
+  for (i = 0; i < n; i++) {
+    __int128 t;
+    if ( ! present[i] ) {
+      m_out[i] = 1;
+      ticks[i] = 0;
+      continue;
+    }
+    if ( calendar ) {
+      t = ca_time_floor_div((__int128) ( y[i] - 1970 ) * 12 + ( mo[i] - 1 ), per);
+    }
+    else {
+      __int128 ns = (__int128) ca_time_text_days_from_civil(y[i], mo[i], d[i])
+                    * ca_ns_per_day
+                    + (__int128) ( sod[i] - off[i] ) * 1000000000
+                    + frac[i];
+      t = ca_time_floor_div(ns, per);
+    }
+    if ( t > INT64_MAX || t < INT64_MIN ) {
+      m_out[i] = 1;
+      ticks[i] = 0;
+    }
+    else {
+      m_out[i] = 0;
+      ticks[i] = (int64_t) t;
+    }
+  }
+  ca_mask_from_bytes(co, m_out);
+  RB_GC_GUARD(vmask);
+  return out;
 }
 
 void
@@ -398,4 +503,7 @@ Init_carray_time_text (void)
 {
   /* Internal: CAFrame reads text columns as time with this reader. */
   rb_define_method(rb_cCArray, "__parse_time_text__", rb_ca_parse_time_text, 2);
+  /* Internal: CArray.time turns parsed fields into ticks with this. */
+  rb_define_singleton_method(rb_cCArray, "__time_ticks_from_fields__",
+                             rb_ca_s_time_ticks_from_fields, 9);
 }

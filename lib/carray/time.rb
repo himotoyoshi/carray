@@ -1775,6 +1775,63 @@ module CATimeLiteral
     end
   end
 
+  # The ticks of every cell of `x` on the `res` grid, as an int64 array of
+  # x's shape (missing and, under on_error: :mask, unparseable cells
+  # masked), or nil when `res` is finer than a nanosecond. Each String is
+  # parsed into fields here and the fields are turned into ticks for the
+  # whole array at once; a cell that is not a String goes through
+  # tick_index.
+  def ticks_from_cells(x, res, format, on_error)
+    require 'date'
+    if CATimeUnitAlgebra::FIXED.key?(res.base)
+      kind = :fixed
+      per = res.tick_ratio * 1_000_000_000
+    else
+      kind = :calendar
+      per = res.tick_ratio
+    end
+    return nil unless per.denominator == 1 && per >= 1
+    cells = x.flatten.to_a
+    n = cells.size
+    year = Array.new(n, 1970)
+    mon = Array.new(n, 1)
+    day = Array.new(n, 1)
+    sod = Array.new(n, 0)
+    frac = Array.new(n, 0)
+    off = Array.new(n, 0)
+    present = Array.new(n, 0)
+    direct = {}
+    cells.each_with_index do |s, i|
+      next if s.nil? || UNDEF.equal?(s)
+      begin
+        if s.is_a?(String)
+          h = parse_date_fields(s, format)
+          year[i] = h[:year]
+          mon[i] = h[:mon] || 1
+          day[i] = h[:mday] || 1
+          sod[i] = (h[:hour] || 0) * 3600 + (h[:min] || 0) * 60 + (h[:sec] || 0)
+          frac[i] = (h[:sec_fraction] * 1_000_000_000).floor if h[:sec_fraction]
+          off[i] = h[:offset] if h[:offset]
+          present[i] = 1
+        else
+          direct[i] = tick_index(s, res, format)
+        end
+      rescue ArgumentError, TypeError
+        raise if on_error == :raise
+      end
+    end
+    raw = CArray.__time_ticks_from_fields__(
+      CA_INT64(year), CA_INT64(mon), CA_INT64(day), CA_INT64(sod),
+      CA_INT64(frac), CA_INT64(off), CA_UINT8(present), kind, per.to_i)
+    # A tick that does not fit int64 is out of range, not unparseable.
+    if raw.count_not_masked < present.count(1)
+      i = present.each_index.find { |k| present[k] == 1 && UNDEF.equal?(raw[k]) }
+      raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
+    end
+    direct.each { |i, t| raw[i] = t }
+    raw.reshape(*x.shape)
+  end
+
   # Single-literal build for {.time}: a 1-element CATime, honouring
   # the on_error policy (raise, or a masked cell).
   def to_time_array(literal, res, format, on_error)
@@ -1884,6 +1941,8 @@ class CArray
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
+    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error)
+    return raw.time(unit: res) if raw
     raw = CArray.int64(*x.shape)
     x.each_index do |*idx|
       s = x[*idx]

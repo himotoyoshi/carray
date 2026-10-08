@@ -2885,9 +2885,9 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE src = self, out;
+  volatile VALUE src = self, out, vmask;
   VALUE rtype, report;
-  CArray *ca, *co;
+  CArray *ca, *co, *cmask;
   int8_t data_type;
   int is_float;
   VALUE *cells;
@@ -2923,11 +2923,12 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 
   out = rb_carray_new(data_type, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
-  ca_create_mask(co);
+  vmask = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
 
   cells = (VALUE *) ca->ptr;
   m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
-  m_out = (boolean8_t *) co->mask->ptr;
+  TypedData_Get_Struct(vmask, CArray, &carray_data_type, cmask);
+  m_out = (boolean8_t *) cmask->ptr;
 
   for (i = 0; i < ca->elements; i++) {
     VALUE v = cells[i];
@@ -2972,8 +2973,10 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
     }
   }
 
+  ca_mask_from_bytes(co, m_out);
   rb_ca_inherit_attr(out, self);
   RB_GC_GUARD(src);
+  RB_GC_GUARD(vmask);
   return out;
 }
 
