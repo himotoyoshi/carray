@@ -47,6 +47,70 @@ class TestCAFramePivot < Test::Unit::TestCase
     assert_match(/time=2, station="tokyo"/, err.message)
   end
 
+  def test_pivot_points_a_repeated_pair_at_aggregate
+    @long["time"][4] = 2
+    err = assert_raise(ArgumentError) do
+      @long.pivot(index: "time", columns: "station", values: "temp")
+    end
+    assert_match(/aggregate:/, err.message)
+  end
+
+  def test_pivot_aggregate_reduces_the_rows_of_each_pair
+    @long["time"][4] = 2          # tokyo at time 2 now has 20.0 and 30.0
+    wide = @long.pivot(index: "time", columns: "station", values: "temp", aggregate: :mean)
+    assert_equal [1, 2], wide.index.to_a
+    assert_equal [10.0, 25.0], wide["tokyo"].to_a
+    assert_equal [11.0, 21.0], wide["osaka"].to_a
+  end
+
+  def test_pivot_aggregate_count_leaves_an_absent_pair_undef
+    wide = @long.pivot(index: "time", columns: "station", values: "temp", aggregate: :count)
+    assert_equal [1, 1, 1], wide["tokyo"].to_a
+    assert_equal [1, 1, UNDEF], wide["osaka"].to_a
+  end
+
+  def test_pivot_aggregate_skips_masked_values
+    @long["time"][4] = 2
+    @long["temp"][4] = UNDEF
+    @long["temp"][3] = UNDEF      # osaka at time 2: its only value
+    wide = @long.pivot(index: "time", columns: "station", values: "temp", aggregate: :mean)
+    assert_equal [10.0, 20.0], wide["tokyo"].to_a
+    assert_equal [11.0, UNDEF], wide["osaka"].to_a
+  end
+
+  def test_pivot_aggregate_matches_plain_pivot_without_repeats
+    plain = @long.pivot(index: "time", columns: "station", values: "temp")
+    agg   = @long.pivot(index: "time", columns: "station", values: "temp", aggregate: :max)
+    assert_equal plain["tokyo"].to_a, agg["tokyo"].to_a
+    assert_equal plain["osaka"].to_a, agg["osaka"].to_a
+  end
+
+  def test_pivot_aggregate_keeps_a_face_value
+    t = CArray.time(["2024-01-01", "2024-01-03", "2024-01-02"], unit: :D)
+    long = CAFrame.new("k" => CA_INT32([0, 0, 1]), "s" => CA_OBJECT(["a", "a", "a"]), "t" => t)
+    wide = long.pivot(index: "k", columns: "s", values: "t", aggregate: :max)
+    assert_kind_of CATime, wide["a"]
+    assert_equal "2024-01-03", wide["a"][0].to_s
+  end
+
+  def test_pivot_aggregate_rejects_an_unknown_reduction
+    assert_raise(ArgumentError) do
+      @long.pivot(index: "time", columns: "station", values: "temp", aggregate: :nonsense)
+    end
+    assert_raise(ArgumentError) do
+      @long.pivot(index: "time", columns: "station", values: "temp", aggregate: "mean")
+    end
+  end
+
+  def test_pivot_aggregate_needs_a_one_dimensional_value
+    long = CAFrame.new("t" => CA_INT32([0, 0]), "k" => CA_OBJECT(["a", "a"]),
+                       "w" => CA_FLOAT64([[1, 2], [3, 4]]))
+    err = assert_raise(ArgumentError) do
+      long.pivot(index: "t", columns: "k", values: "w", aggregate: :mean)
+    end
+    assert_match(/one-dimensional/, err.message)
+  end
+
   def test_pivot_names_columns_by_label_to_s
     long = CAFrame.new("t" => CA_INT32([0, 0, 1]), "id" => CA_INT32([7, 9, 7]),
                        "v" => CA_FLOAT64([1, 2, 3]))

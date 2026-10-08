@@ -30,17 +30,26 @@ class CAFrame
   # frame's index (its row axis name).  The value column may have trailing
   # dimensions, which each output column keeps.
   #
-  # Two rows with the same pair raise: pivot places values, it does not
-  # combine them.  Reduce first (+group_by+ on both keys) when the long frame
-  # has repeats.
+  # Without +aggregate:+, two rows with the same pair raise: pivot places
+  # values, it does not combine them.  With +aggregate:+ (a reduction name
+  # such as +:mean+, +:sum+, +:max+ or +:count+) every pair holds that
+  # reduction over the rows that carry it, computed by +group_by_category+;
+  # masked values are left out of it as in any reduction, so a pair whose
+  # values are all masked is UNDEF.  A pair no row carries stays UNDEF
+  # whatever the reduction, +:count+ included.  +aggregate:+ needs a
+  # one-dimensional value column.
+  #
+  #   long.pivot(index: "day", columns: "station", values: "temp", aggregate: :mean)
   #
   # @param index [String] key whose values become the rows.
   # @param columns [String] key whose values become the columns.
   # @param values [String] column whose cells fill the result.
+  # @param aggregate [Symbol, nil] reduction applied to the rows of each pair.
   # @return [CAFrame] a new frame, not a view of +self+.
-  # @raise [ArgumentError] on a repeated pair, or when two column labels
-  #   share a name.
-  def pivot(index:, columns:, values:)
+  # @raise [ArgumentError] on a repeated pair without +aggregate:+, on an
+  #   unknown reduction or a multi-dimensional value column with it, or when
+  #   two column labels share a name.
+  def pivot(index:, columns:, values:, aggregate: nil)
     index   = index.to_s
     columns = columns.to_s
     rkey = pivot_key(index)
@@ -60,18 +69,22 @@ class CAFrame
     r = rkey.locate_addr(rlab)
     c = ckey.locate_addr(clab)
     placed = r.is_not_masked & c.is_not_masked
-    rows = CArray.int64(nrow).seq[placed]
     cell = r[placed] * nc + c[placed]
-    if cell.nunique != cell.elements
-      first = cell.to_a.tally.find { |_, count| count > 1 }.first
-      raise ArgumentError,
-            "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
-            "#{columns}=#{clab[first % nc].inspect}; reduce the repeats first"
-    end
-
     source = CArray.int64(nr * nc)
     source[] = UNDEF
-    source[cell] = rows
+    if aggregate
+      pairs = cell.categorize(sort_labels: true)
+      val = pivot_aggregate(val, placed, pairs, aggregate)
+      source[CA_INT64(pairs.labels)] = CArray.int64(val.elements).seq
+    else
+      if cell.nunique != cell.elements
+        first = cell.to_a.tally.find { |_, count| count > 1 }.first
+        raise ArgumentError,
+              "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
+              "#{columns}=#{clab[first % nc].inspect}; pass aggregate: to combine them"
+      end
+      source[cell] = CArray.int64(nrow).seq[placed]
+    end
     source = source.reshape(nr, nc)
 
     cols = {}
@@ -135,6 +148,22 @@ class CAFrame
     out[var_name]   = CArray.object(n * k) { |i| vars[i / n] }
     out[value_name] = CArray.meld(pieces)
     CAFrame.new(out)
+  end
+
+  # One reduced value per occupied pair, in the order of +pairs.labels+.
+  private def pivot_aggregate(val, placed, pairs, reduction)
+    unless reduction.is_a?(Symbol)
+      raise ArgumentError, "pivot: aggregate: takes a reduction name (got #{reduction.inspect})"
+    end
+    unless val.ndim == 1
+      raise ArgumentError,
+            "pivot: aggregate: needs a one-dimensional value column (got shape #{val.shape.inspect})"
+    end
+    groups = val[placed].group_by_category(pairs)
+    unless groups.respond_to?(reduction)
+      raise ArgumentError, "pivot: unknown reduction #{reduction.inspect} for aggregate:"
+    end
+    groups.public_send(reduction)
   end
 
   # A pivot key is a column, or the index when +name+ is the row axis name.
