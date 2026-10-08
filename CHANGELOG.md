@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `search`, `bsearch` and `search_nearest` compare a CArray query in
+  the type the two arrays share on a float reference too (a float64 query
+  is no longer rounded to a float32 array's type), and match integers of
+  mixed sign by value (`-1` no longer raises against a uint8 array). An
+  infinite query finds an equal cell and nothing else: `search(Float::INFINITY)`
+  matched any finite cell under the default tolerance, and
+  `search_nearest(Float::INFINITY)` answered `nil` even with an infinite cell.
+
 - Change: `CArray.result_type` lets a scalar argument (a Ruby number, or a
   CScalar) take the type of the arrays it is given with, as an operator
   does: `result_type(float32_array, 0.1)` is `:float32` (was `:float64`),

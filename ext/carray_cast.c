@@ -1871,6 +1871,39 @@ ca_promote_type (int8_t a, int8_t b)
            ca_type_name[a], ca_type_name[b]);
 }
 
+/* The type in which values of types `a` and `b`, whose common type is `t`,
+   are matched for equality.  It is `t`, except for an integer pair of mixed
+   sign whose common type is unsigned (uint8 with int8 is uint8, where -1
+   would read as 255): there the match moves to a signed type that holds
+   every value of both, or, for 64 bits, where no numeric type does, to
+   object, whose Integers compare by value.  `eq` answers the same pair by
+   value. */
+int8_t
+ca_value_match_type (int8_t t, int8_t a, int8_t b)
+{
+  int signed_a = ( a == CA_INT8 || a == CA_INT16 || a == CA_INT32 || a == CA_INT64 );
+  int signed_b = ( b == CA_INT8 || b == CA_INT16 || b == CA_INT32 || b == CA_INT64 );
+  if ( ! signed_a && ! signed_b ) return t;
+  switch ( t ) {
+  case CA_UINT8:  return CA_INT16;
+  case CA_UINT16: return CA_INT32;
+  case CA_UINT32: return CA_INT64;
+  case CA_UINT64: return CA_OBJECT;
+  default:        return t;
+  }
+}
+
+/* ca.value_match_type(t, other_type) -- ca_value_match_type with self's
+   data type as the first operand, for the set family and locate_addr. */
+static VALUE
+rb_ca_value_match_type (VALUE self, VALUE vt, VALUE vother)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  return rb_ca_data_type_to_sym(ca_value_match_type(rb_ca_guess_type(vt), ca->data_type,
+                                                    rb_ca_guess_type(vother)));
+}
+
 /* A result_type argument that is a scalar: a Ruby value (Integer, Float,
    true, ...) or a CScalar.  The operators let a scalar take the type of the
    array beside it, so result_type does too. */
@@ -1894,7 +1927,7 @@ ca_arg_is_scalar (VALUE obj)
    of another kind promotes (1.5 beside int32 is float64).  An Integer that
    does not fit the array's integer type takes the type of its value, where
    an operator would raise RangeError. */
-static int8_t
+int8_t
 ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st)
 {
   if ( RB_INTEGER_TYPE_P(obj) && at >= CA_INT8 && at <= CA_UINT64 ) {
@@ -2566,6 +2599,8 @@ Init_carray_cast (void)
            "cast_self_or_other", rb_ca_s_cast_self_or_other, 2);
   rb_define_singleton_method(rb_cCArray,
            "result_type", rb_ca_s_result_type, -1);
+  rb_define_private_method(rb_cCArray,
+           "value_match_type", rb_ca_value_match_type, 2);
 
   rb_define_singleton_method(rb_cCArray,
            "promote_list", rb_ca_s_promote_list, -1);

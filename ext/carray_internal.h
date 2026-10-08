@@ -343,6 +343,14 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
    read-only array does. */
 CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 
+/* The common-type rules the operators, result_type and the search family
+   share (ext/carray_cast.c): the type a scalar `obj` of type `st` takes
+   beside an array of type `at`, and the type two types are matched for
+   equality in (a mixed-sign integer pair widened so that each value is
+   kept). */
+int8_t      ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st);
+int8_t      ca_value_match_type (int8_t t, int8_t a, int8_t b);
+
 /* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
    except that a Float NaN equals nothing, itself included.  rb_equal alone
    answers true for the same object, so whether two NaN cells matched would

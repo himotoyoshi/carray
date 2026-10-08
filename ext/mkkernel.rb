@@ -5082,7 +5082,7 @@ module MkKernel
                     <<~C.chomp
                       int eps_is_default = NIL_P(reps);
                       double user_eps    = eps_is_default ? 0.0 : NUM2DBL(reps);
-                      double query_eps   = eps_is_default ? (double)(#{eps_def}) * fabs((double)query_val) : user_eps;
+                      double query_eps   = eps_is_default ? (isfinite((double)query_val) ? (double)(#{eps_def}) * fabs((double)query_val) : 0.0) : user_eps;
                     C
                   elsif has_eps && no_eps
                     "(void) reps;  /* #{is_fixlen ? "CA_FIXLEN" : "CA_OBJECT"}: eps ignored, exact match only */\n          double query_eps = 0.0; (void) query_eps;"
@@ -5097,7 +5097,7 @@ module MkKernel
                      ""
                    end
     eps_percell  = if has_eps && !no_eps
-                     "double query_eps = eps_is_default ? (double)(#{eps_def}) * fabs((double)query_val) : user_eps;"
+                     "double query_eps = eps_is_default ? (isfinite((double)query_val) ? (double)(#{eps_def}) * fabs((double)query_val) : 0.0) : user_eps;"
                    else
                      "double query_eps = 0.0; (void) query_eps;"
                    end
@@ -5718,21 +5718,24 @@ module MkKernel
     io.puts "    }"
     io.puts "  }"
 
-    # A query that needs a wider type than an integer reference -- a Float,
-    # or a CArray of a wider data type -- is compared in the common type,
-    # as `a.eq(q)` compares, not truncated to the reference's: 3.9 must not
-    # match 3.  The reference is read through a cast view of that type.  An
-    # Integer scalar keeps the reference's type and is refused when it does
-    # not fit (the scalar's value never picks the type).
-    io.puts "  if ( ca_is_integer_type(src) || src->data_type == CA_BOOLEAN ) {"
+    # The query and the reference are compared in the type they share, as
+    # `a.eq(q)` compares, not with the query cast to the reference's type:
+    # 3.9 must not match 3, a float64 query must not be rounded to a float32
+    # reference, and -1 must not read as 255.  A scalar takes the type the
+    # operators give it (ca_promote_scalar_type); a CArray query the type
+    # the two match in (ca_value_match_type).  The reference is read through
+    # a cast view of that type.  An Integer scalar keeps the reference's type
+    # and is refused when it does not fit.
+    io.puts "  if ( ca_is_integer_type(src) || ca_is_float_type(src) || src->data_type == CA_BOOLEAN ) {"
     io.puts "    int8_t qt = src->data_type;"
     io.puts "    if ( RB_FLOAT_TYPE_P(rval) ) {"
-    io.puts "      qt = CA_FLOAT64;"
+    io.puts "      qt = ca_promote_scalar_type(src->data_type, rval, CA_FLOAT64);"
     io.puts "    } else if ( rb_obj_is_kind_of(rval, rb_cCArray) ) {"
     io.puts "      CArray *qv;"
     io.puts "      TypedData_Get_Struct(rval, CArray, &carray_data_type, qv);"
     io.puts "      if ( ca_is_integer_type(qv) || ca_is_float_type(qv) || qv->data_type == CA_BOOLEAN ) {"
-    io.puts "        qt = ca_promote_type(src->data_type, qv->data_type);"
+    io.puts "        qt = ca_value_match_type(ca_promote_type(src->data_type, qv->data_type),"
+    io.puts "                                 src->data_type, qv->data_type);"
     io.puts "      }"
     io.puts "    }"
     io.puts "    if ( qt != src->data_type ) {"
@@ -7853,7 +7856,7 @@ MkKernel.search :search,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( fabs((double)(v - query_val)) <= query_eps ) { result = i; break; }
+        if ( v == query_val || fabs((double)(v - query_val)) <= query_eps ) { result = i; break; }
       }
     C
     object: <<~C,
@@ -7922,8 +7925,11 @@ MkKernel.search :search_nearest,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        double dist = fabs((double)v - (double)query_val);
-        if ( dist < best_dist ) { best_dist = dist; result = i; }
+        /* An equal value is at distance 0 even when both are infinite
+           (Inf - Inf is NaN); a NaN distance never wins. */
+        double dist = ( v == query_val ) ? 0.0 : fabs((double)v - (double)query_val);
+        if ( dist != dist ) continue;
+        if ( result == (ca_size_t) -1 || dist < best_dist ) { best_dist = dist; result = i; }
       }
       (void) query_eps;  /* unused: search_nearest has no eps semantics */
     C
@@ -7952,7 +7958,8 @@ MkKernel.search :search_nearest,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        VALUE dist = nearest_by_distance
+        VALUE dist = ca_obj_equal(v, query_val) ? INT2FIX(0)
+                   : nearest_by_distance
                    ? rb_funcall(query_val, nearest_id, 1, v)
                    : rb_funcall(rb_funcall(query_val, '-', 1, v),
                                 rb_intern("abs"), 0);
@@ -8074,7 +8081,7 @@ MkKernel.search :search_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( fabs((double)v - (double)query_val) <= query_eps ) { result = i; break; }
+        if ( v == query_val || fabs((double)v - (double)query_val) <= query_eps ) { result = i; break; }
       }
     C
     object: <<~C,
@@ -8128,8 +8135,11 @@ MkKernel.search :search_nearest_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        double dist = fabs((double)v - (double)query_val);
-        if ( dist < best_dist ) { best_dist = dist; result = i; }
+        /* An equal value is at distance 0 even when both are infinite
+           (Inf - Inf is NaN); a NaN distance never wins. */
+        double dist = ( v == query_val ) ? 0.0 : fabs((double)v - (double)query_val);
+        if ( dist != dist ) continue;
+        if ( result == (ca_size_t) -1 || dist < best_dist ) { best_dist = dist; result = i; }
       }
       (void) query_eps;
     C
@@ -8158,7 +8168,8 @@ MkKernel.search :search_nearest_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        VALUE dist = nearest_by_distance
+        VALUE dist = ca_obj_equal(v, query_val) ? INT2FIX(0)
+                   : nearest_by_distance
                    ? rb_funcall(query_val, nearest_id, 1, v)
                    : rb_funcall(rb_funcall(query_val, '-', 1, v),
                                 rb_intern("abs"), 0);
