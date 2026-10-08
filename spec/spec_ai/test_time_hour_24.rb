@@ -21,12 +21,12 @@ class TestTimeHour24 < Test::Unit::TestCase
 
   def test_on_error_raise_names_the_cell
     df = CAFrame.new("t" => CA_OBJECT(["13/02/2024 24:30"]))
-    assert_raise(CAFrame::UnreadableText) { df.parse_to_time("t", "%d/%m/%Y %H:%M", on_error: :raise) }
+    assert_raise(CAFrame::UnreadableColumn) { df.parse_to_time("t", "%d/%m/%Y %H:%M", on_error: :raise) }
   end
 
   def test_infer_does_not_read_past_24_00
     df = CAFrame.new("t" => CA_OBJECT(["13/02/2024 24:30"]))
-    assert_raise(CAFrame::UnreadableText) { df.parse_to_time("t", :infer) }
+    assert_raise(CAFrame::UnreadableColumn) { df.parse_to_time("t", :infer) }
   end
 
   # The format reader in Ruby, for what the C reader does not take.

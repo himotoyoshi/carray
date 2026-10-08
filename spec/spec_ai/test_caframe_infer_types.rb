@@ -127,7 +127,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   end
 
   def test_on_error
-    e = assert_raise(CAFrame::UnreadableText) { frame.cast("bad" => :time, on_error: :raise) }
+    e = assert_raise(CAFrame::UnreadableColumn) { frame.cast("bad" => :time, on_error: :raise) }
     assert_match(/column "bad", row 1 "2024-13-01" cannot be read as time/, e.message)
     df = frame
     _out, err = capture_output { df.cast("bad" => :time, on_error: :warn) }
@@ -136,7 +136,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   end
 
   def test_parse_to_time_takes_on_error
-    assert_raise(CAFrame::UnreadableText) { frame.parse_to_time("bad", on_error: :raise) }
+    assert_raise(CAFrame::UnreadableColumn) { frame.parse_to_time("bad", on_error: :raise) }
     assert_nothing_raised { frame.parse_to_time("date", on_error: :raise) }
   end
 
@@ -233,9 +233,9 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
   # The column's contents are what did not read, not the arguments; and
   # text that reads in two formats is not unreadable.
   def test_the_errors_are_not_argument_errors
-    assert_nil(CAFrame::UnreadableText <= ArgumentError)
+    assert_nil(CAFrame::UnreadableColumn <= ArgumentError)
     assert_nil(CAFrame::AmbiguousTimeFormat <= ArgumentError)
-    assert_nil(CAFrame::AmbiguousTimeFormat <= CAFrame::UnreadableText)
+    assert_nil(CAFrame::AmbiguousTimeFormat <= CAFrame::UnreadableColumn)
   end
 
   def test_formats
@@ -263,12 +263,12 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
   def test_a_cell_out_of_format_raises
     [["13/02/2024", "01-02-2024"], ["13/02/2024", "31/02/2024"],
      ["13/02/2024", "01/02/24"], ["2024-01-02", "Jan 3, 2024"]].each do |cells|
-      assert_raise(CAFrame::UnreadableText, cells.inspect) { times(cells, on_error: :mask) }
+      assert_raise(CAFrame::UnreadableColumn, cells.inspect) { times(cells, on_error: :mask) }
     end
   end
 
   def test_no_candidate_for_the_first_cell
-    e = assert_raise(CAFrame::UnreadableText) { format_of(["hello", "13/02/2024"]) }
+    e = assert_raise(CAFrame::UnreadableColumn) { format_of(["hello", "13/02/2024"]) }
     assert_match(/cannot infer a time format from "hello"/, e.message)
   end
 
@@ -288,7 +288,7 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
                  times(["2024#{Y}1#{MO}2#{D} 3#{H}4#{MI}", "2024#{Y}1#{MO}2#{D}15#{H}04#{MI}"])
     assert_equal ["2024-01-02T03:04:05Z"], times(["2024#{Y}1#{MO}2#{D} 3#{H}4#{MI}5#{S}"])
     assert_equal ["2024-01-02T03:04:00Z"], times(["2024#{Y}1#{MO}2#{D} 03:04"])
-    assert_raise(CAFrame::UnreadableText) { times(["2024#{Y}1#{MO}2#{D}", "2024#{Y}2#{MO}30#{D}"]) }
+    assert_raise(CAFrame::UnreadableColumn) { times(["2024#{Y}1#{MO}2#{D}", "2024#{Y}2#{MO}30#{D}"]) }
   end
 
   def test_zones
@@ -304,7 +304,7 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
   # A zone named for a place is not taken, and a zone on some cells only is
   # a second format.
   def test_zones_that_do_not_fit
-    assert_raise(CAFrame::UnreadableText) { format_of(["1/2/2024 15:04 JST"]) }
-    assert_raise(CAFrame::UnreadableText) { times(["13/02/2024 15:04 +0900", "13/02/2024 15:04"]) }
+    assert_raise(CAFrame::UnreadableColumn) { format_of(["1/2/2024 15:04 JST"]) }
+    assert_raise(CAFrame::UnreadableColumn) { times(["13/02/2024 15:04 +0900", "13/02/2024 15:04"]) }
   end
 end

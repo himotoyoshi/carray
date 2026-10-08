@@ -1836,14 +1836,14 @@ module CATimeLiteral
   # does not fit, until one is left. Each candidate is read over the whole
   # array once, and the candidate a later cell leaves last is the one left:
   # no candidate for the first cell or none left (the last ones dropped by
-  # one cell) raises CAFrame::UnreadableText, and more than one left at the
+  # one cell) raises CAFrame::UnreadableColumn, and more than one left at the
   # end raises CAFrame::AmbiguousTimeFormat (CAFrame is its only caller). A cell
   # after the choice that is not in the format is returned for the caller
   # to report.
   def infer_time_format(x, first)
     candidates = CArray.__strptime_fits__(first, INFER_FORMAT_STRINGS)
     if candidates.empty?
-      raise CAFrame::UnreadableText,
+      raise CAFrame::UnreadableColumn,
             "cannot infer a time format from #{first.inspect}; " \
             "pass a strptime format, or :mixed to guess at each cell"
     end
@@ -1862,7 +1862,7 @@ module CATimeLiteral
                 "and no cell tells which; pass the format",
                 formats: formats)
       end
-      raise CAFrame::UnreadableText,
+      raise CAFrame::UnreadableColumn,
             "#{x.flatten[last].inspect} is not in the format of #{first.inspect}; " \
             "pass a strptime format, or :mixed to guess at each cell"
     end

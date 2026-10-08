@@ -12,7 +12,7 @@ class TestCAFrameCastText < Test::Unit::TestCase
     df = CAFrame.new("s" => CArray.string(%w[010 x 3]))
     assert_equal [10, UNDEF, 3], df.cast("s", :int64)["s"].to_a
     df = CAFrame.new("s" => CArray.string(%w[1 x 3]))
-    err = assert_raise(CAFrame::UnreadableText) { df.cast("s", :int64, on_error: :raise) }
+    err = assert_raise(CAFrame::UnreadableColumn) { df.cast("s", :int64, on_error: :raise) }
     assert_match(/row 1 "x" cannot be read as int64/, err.message)
   end
 
@@ -23,7 +23,7 @@ class TestCAFrameCastText < Test::Unit::TestCase
 
   def test_on_error_holds_for_a_complex_target
     df = CAFrame.new("c" => CA_OBJECT(["1+2i", "x", ""]))
-    err = assert_raise(CAFrame::UnreadableText) { df.cast("c", :cmplx128, on_error: :raise) }
+    err = assert_raise(CAFrame::UnreadableColumn) { df.cast("c", :cmplx128, on_error: :raise) }
     assert_match(/row 1 "x" cannot be read as cmplx128/, err.message)
     assert_equal [Complex(1, 2), UNDEF, UNDEF], df.cast("c", :cmplx128)["c"].to_a
   end

@@ -44,7 +44,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
 
   def test_on_error_raise_names_column_row_and_cell
     text = "a,b\n1,1\n2,1.5\n"
-    e = assert_raise(CAFrame::UnreadableText) do
+    e = assert_raise(CAFrame::UnreadableColumn) do
       CAFrame.from_csv(StringIO.new(text), types: { "a" => :int32, "b" => :int32 },
                        on_error: :raise)
     end
@@ -53,7 +53,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
 
   def test_on_error_raise_rebinds_nothing
     df = CAFrame.new("a" => CA_OBJECT(["1", "2"]), "b" => CA_OBJECT(["x", "2"]))
-    assert_raise(CAFrame::UnreadableText) { df.cast(["a", "b"] => :int32, on_error: :raise) }
+    assert_raise(CAFrame::UnreadableColumn) { df.cast(["a", "b"] => :int32, on_error: :raise) }
     assert_equal :object, df["a"].data_type
   end
 
@@ -77,7 +77,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
 
   def test_row_of_an_nd_column
     df = CAFrame.new("a" => CA_OBJECT([["1", "2"], ["3", "x"]]))
-    e = assert_raise(CAFrame::UnreadableText) { df.cast("a" => :int32, on_error: :raise) }
+    e = assert_raise(CAFrame::UnreadableColumn) { df.cast("a" => :int32, on_error: :raise) }
     assert_match(/row 1 "x"/, e.message)
   end
 

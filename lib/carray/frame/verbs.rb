@@ -136,7 +136,7 @@ class CAFrame
   #   :mask   the cell becomes UNDEF (default)
   #   :warn   as :mask, plus one warning per column with the count and the
   #           first few cells
-  #   :raise  CAFrame::UnreadableText naming the column, the row and the
+  #   :raise  CAFrame::UnreadableColumn naming the column, the row and the
   #           cell; no column is rebound
   def cast(name_or_map = nil, type = nil, on_error: :mask, **map)
     # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
@@ -242,13 +242,13 @@ class CAFrame
   # not, since whether "01/02/2024" is January or February cannot be told.
   # For those, +format+ is a strptime format, :infer to find the one format
   # the column is written in (see infer_time_format; a cell not in it
-  # raises CAFrame::UnreadableText, whatever +on_error+ says), or :mixed to guess at each cell
-  # (much slower). +unit+ is the storage resolution: without a format or
-  # with :infer it defaults to the finest the text shows, with a format to
-  # :s. Masked / nil and unparseable cells become UNDEF; +on_error:+ :warn /
-  # :raise reports the unparseable ones as +cast+ does. Make it the index
-  # with +set_index+ afterward. +cast(name => :time)+ is the call without a
-  # format.
+  # raises CAFrame::UnreadableColumn, whatever +on_error+ says), or :mixed
+  # to guess at each cell (much slower). +unit+ is the storage resolution:
+  # without a format or with :infer it defaults to the finest the text
+  # shows, with a format to :s. Masked / nil and unparseable cells become
+  # UNDEF; +on_error:+ :warn / :raise reports the unparseable ones as +cast+
+  # does. Make it the index with +set_index+ afterward.
+  # +cast(name => :time)+ is the call without a format.
   #
   #   df.parse_to_time("time").set_index("time")
   #   df.parse_to_time("date", "%d/%m/%Y")
@@ -272,7 +272,7 @@ class CAFrame
   # The strptime format parse_to_time(name, :infer) reads the column with,
   # or nil when the text is written year first and needs none. The first
   # present cell gives the candidates and each later cell drops those it
-  # does not fit, until one is left. CAFrame::UnreadableText when none fits
+  # does not fit, until one is left. CAFrame::UnreadableColumn when none fits
   # the first cell or none is left; CAFrame::AmbiguousTimeFormat when more
   # than one is left at the end (as for "01/02/2024" when no cell has a day
   # above 12), whose +formats+ lists them. Write the answer into the code to
@@ -296,9 +296,9 @@ class CAFrame
   # Excel serial date (epoch "1899-12-30", unit :D) — converts directly.
   #
   # A float column is accepted only when every value is whole (no fractional
-  # part); a fractional serial has sub-unit precision that a finer +unit+ should
-  # carry, so it raises CAFrame::UnreadableText rather than silently truncate. Make it the index with
-  # +set_index+ afterward.
+  # part); a fractional serial has sub-unit precision that a finer +unit+
+  # should carry, so it raises CAFrame::UnreadableColumn rather than
+  # silently truncate. Make it the index with +set_index+ afterward.
   #
   # A +CATime::Grid+ carries the same (unit, epoch) pair as one value, so a
   # netCDF +units+ attribute goes straight in. It also carries a phase the
@@ -457,7 +457,7 @@ class CAFrame
     return read_time_text(key, col, unit, :raise) if f.nil?
     unless fields[8].empty?
       cell = col.flatten[fields[8].first]
-      raise UnreadableText, "column #{key.inspect} holds #{cell.inspect}, not text"
+      raise UnreadableColumn, "column #{key.inspect} holds #{cell.inspect}, not text"
     end
     report_unreadable(key, col, f.format.inspect, [bad], :raise) if bad
     unit ||= case f.kind
@@ -482,7 +482,7 @@ class CAFrame
     first = text.flatten.to_a.find { |cell| !missing_text?(cell) }
     return nil if first.nil?
     unless first.is_a?(String)
-      raise UnreadableText, "column #{key.inspect} holds #{first.inspect}, not text"
+      raise UnreadableColumn, "column #{key.inspect} holds #{first.inspect}, not text"
     end
     first = first.strip
     unreadable = []
@@ -572,7 +572,7 @@ class CAFrame
     per_row = col.elements / col.shape[0]
     describe = ->(addr) { "row #{addr / per_row} #{cells[addr].inspect}" }
     if on_error == :raise
-      raise UnreadableText,
+      raise UnreadableColumn,
             "column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
     end
     shown = addrs.first(3).map(&describe)
@@ -647,7 +647,7 @@ class CAFrame
       col.to_type(:int64)
     elsif col.data_type == :float32 || col.data_type == :float64
       unless col.floor.eq(col).all
-        raise UnreadableText,
+        raise UnreadableColumn,
               "to_time: float column #{key.inspect} has fractional values; " \
               "use a finer unit: or convert to integer counts explicitly"
       end

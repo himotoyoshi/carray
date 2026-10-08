@@ -595,7 +595,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
   end
 
   def test_to_time_fractional_float_rejected
-    assert_raise(CAFrame::UnreadableText) do
+    assert_raise(CAFrame::UnreadableColumn) do
       CAFrame.new("t" => CA_FLOAT64([1.5, 2.0])).to_time("t", unit: :D)
     end
   end

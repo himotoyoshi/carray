@@ -1178,13 +1178,13 @@ Notes:
 
   `on_error:` decides what an unreadable cell does: `:mask` (the default)
   makes it `UNDEF`; `:warn` does the same and warns once per column with the
-  count and the first few cells; `:raise` raises `CAFrame::UnreadableText`
+  count and the first few cells; `:raise` raises `CAFrame::UnreadableColumn`
   naming the column, the row and the cell, and rebinds no column. Blank, `nil` and
   masked cells are missing values, not errors, under every policy.
 
   ```ruby
   df.cast("rh" => :int32, on_error: :raise)
-  # CAFrame::UnreadableText: column "rh", row 41 "1.5" cannot be read as int32
+  # CAFrame::UnreadableColumn: column "rh", row 41 "1.5" cannot be read as int32
   ```
 - **`promote`** brings the **whole frame** to one data type, where `cast`
   forces the columns you name. Without an argument the type is the one
@@ -1261,7 +1261,7 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   optional `3時4分`, `3時4分5秒` or `3:04` time), and each later cell drops
   the candidates it does not fit until one is left, so a later
   `13/02/2024` settles whether `01/02/2024` is day-first. It raises
-  `CAFrame::UnreadableText` when no candidate fits the first cell and when
+  `CAFrame::UnreadableColumn` when no candidate fits the first cell and when
   none is left, and a cell not in the chosen format raises it too, whatever
   `on_error` says. When more than one is left at the end it raises
   `CAFrame::AmbiguousTimeFormat`, whose `formats` lists them. A zone named for a place (`JST`, `CST`) is not a
@@ -1289,7 +1289,7 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   `epoch` takes any time literal (String / `Time` / Integer), so columns
   measured from another origin convert directly. A float column is accepted
   only when every value is whole; a fractional serial raises
-  `CAFrame::UnreadableText` (use a finer `unit`). A non-numeric column raises.
+  `CAFrame::UnreadableColumn` (use a finer `unit`). A non-numeric column raises.
 
   A [`CATime::Grid`](CATime.md) carries that (unit, epoch)
   pair as one value — passed positionally or as `unit:` — so a netCDF `units`
