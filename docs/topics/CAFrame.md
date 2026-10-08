@@ -368,8 +368,8 @@ its column count is known.
 
 A header that
 names a column twice raises `ArgumentError`, since a frame keeps one column
-per name; name the columns yourself with `column_names` in a reading block
-(below) to read such a file.
+per name; name the columns yourself, as in `header: 0, column_names: [...]`
+(below), to read such a file.
 
 **A file in another encoding** is read by naming its encoding and the one to
 transcode to. A CSV written by Excel in Japanese is CP932 — what Windows calls
@@ -408,9 +408,12 @@ CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
 a Range of lines (`4..`, `...101`). A record that starts within `data:` is read
 whole, even when a quoted field carries it past the last line. A
 malformed-record error names the line from 1, as an editor numbers it, so the
-line `e.lineno` is index `e.lineno - 1`. `column_names:` names the columns; given alone, the file
-is taken to have no header line, and given with `header:`, it replaces the
-names on that line.
+line `e.lineno` is index `e.lineno - 1`.
+
+`column_names:` names the columns. Given alone, the file is taken to have no
+header line; given with `header:`, it replaces the names on that line. There
+have to be as many names as the file has columns -- those of the header line,
+or else of the first record -- or it raises `ArgumentError`.
 
 For anything else, pass a **reading block**. It is given the reader, which
 reads in the order the block says, with `skip(n)` / `header` /

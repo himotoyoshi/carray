@@ -355,16 +355,34 @@ class CAFrame
       end
       if name.nil?
         @names = fields.map(&:to_s)
+        @header_line = @tok.record_line
+        @names_to_check = nil
       else
         (@named_headers ||= {})[name.to_s] = fields
       end
       fields
     end
 
-    # Set the column names explicitly (headerless files).
+    # Set the column names explicitly: for a file with no header, or in
+    # place of the names a header gave. Their number has to be the file's
+    # number of columns -- the header's, or else that of the first record
+    # of the data -- or a name would go to no column, or a column without
+    # one.
     def column_names(*names)
-      @names = names.flatten.map(&:to_s)
+      names = names.flatten.map(&:to_s)
+      if @header_line
+        check_column_names(names, @names.size, @header_line)
+      else
+        @names_to_check = names
+      end
+      @names = names
       self
+    end
+
+    private def check_column_names(names, ncol, line)
+      return if names.size == ncol
+      raise ArgumentError, "from_csv: column_names: gives #{names.size} " \
+                           "name#{names.size == 1 ? '' : 's'} for the #{ncol} columns of line #{line}"
     end
 
     # Consume the remaining records as data rows. A second data adds what is
@@ -444,6 +462,10 @@ class CAFrame
       blank_is_row = @names.nil? || @names.size == 1
       ncol = @names&.size
       while (fields = @tok.read(@io, blank_is_row: blank_is_row, last_line: last))
+        if @names_to_check && !@tok.blank?
+          check_column_names(@names_to_check, fields.size, @tok.record_line)
+          @names_to_check = nil
+        end
         if ncol && fields.size > ncol
           raise @tok.malformed("#{fields.size} fields, but there are #{ncol} columns")
         end
@@ -472,7 +494,9 @@ class CAFrame
     private def body_in_c(last = nil, chunk_bytes = CHUNK_BYTES)
       chunked = last.nil? && @names && @io.respond_to?(:external_encoding) &&
                 @io.internal_encoding.nil?
-      ncol = @names ? @names.size : 0
+      # Names that have to agree with the first record leave its column
+      # count to C, to be checked against them.
+      ncol = @names && !@names_to_check ? @names.size : 0
       cells = []
       loop do
         text = if chunked then next_chunk(chunk_bytes)
@@ -488,13 +512,33 @@ class CAFrame
           @io = StringIO.new(chunked ? text + (@io.read || "") : text)
           return
         end
+        if @names_to_check
+          check_column_names(@names_to_check, n, @tok.lineno + first_record_line(text))
+          @names_to_check = nil
+        end
         ncol = n
         cells.concat(flat)
         @tok.advance(records, text.count("\n") + (text.empty? || text.end_with?("\n") ? 0 : 1))
         break unless chunked
       end
+      if ncol == 0                    # no record, for the names to be checked against
+        @rows = []
+        return
+      end
       @table = CArray.object(cells.size / ncol, ncol) { cells }
       @rows = []
+    end
+
+    # The line, from 1 within +text+, of its first record: past the blank
+    # lines before it, as C reads them.
+    private def first_record_line(text)
+      line = 1
+      text.each_line do |l|
+        rec = l.chomp
+        break unless rec.match?(/\A[ \t]*\z/) && !rec.include?(@tok.sep)
+        line += 1
+      end
+      line
     end
 
     # The lines through +last+, read on past any quoted field still open.

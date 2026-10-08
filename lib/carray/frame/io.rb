@@ -648,7 +648,7 @@ class CAFrame
     unless dup.empty?
       raise ArgumentError,
             "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
-            "name the columns yourself: from_csv(path, header: false, data: 1, " \
+            "name the columns yourself: from_csv(path, header: 0, " \
             "column_names: [...])"
     end
 

@@ -104,6 +104,26 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     assert_match(/\{ \|r\| r\.skip 2; r\.header; r\.data \}/, err.message)
   end
 
+  # A name too many went to an empty column, a name too few left a column
+  # that raised as too long only on the rows after it.
+  def test_column_names_have_to_match_the_columns
+    [false, true].each do |ruby|
+      check = lambda do
+        err = assert_raise(ArgumentError) { read("1,2\n3,4\n", column_names: %w[a b c]) }
+        assert_equal "from_csv: column_names: gives 3 names for the 2 columns of line 1", err.message
+        err = assert_raise(ArgumentError) { read("\n\n1,2,3\n", column_names: %w[a b]) }
+        assert_match(/2 names for the 3 columns of line 3/, err.message)
+        err = assert_raise(ArgumentError) { read("x,y\n1,2\n", header: 0, column_names: %w[a]) }
+        assert_match(/1 name for the 2 columns of line 1/, err.message)
+        err = assert_raise(ArgumentError) { read("#\n1,2\n") { |r| r.skip 1; r.column_names "a"; r.data } }
+        assert_match(/of line 2/, err.message)
+        assert_equal [%w[a], [UNDEF, "1", UNDEF, "2"]], cells(read("\n1\n\n2\n", column_names: %w[a]))
+        assert_equal [%w[a b], [], []], cells(read("", column_names: %w[a b]))
+      end
+      ruby ? in_ruby(&check) : check.()
+    end
+  end
+
   def test_a_header_past_the_end
     err = assert_raise(MALFORMED) { read("a\n1\n", header: 4) }
     assert_match(/header expected but input ended/, err.message)
