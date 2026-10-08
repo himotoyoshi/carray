@@ -25,6 +25,9 @@ class CArray
   #   reading as "if `self` then `x` else `y`". The boolean 2-way
   #   case of {#choose} that additionally propagates `self`'s mask
   #   (`UNDEF` in `self` produces `UNDEF` in the result).
+  #   The result's data type is the common type of the two branches; a
+  #   branch given as `UNDEF` masks its cells and leaves the type to the
+  #   other branch (`cond.then_else(a, UNDEF)` has `a`'s data type).
   #   @param x [CArray, Numeric, Object] true-branch value(s).
   #   @param y [CArray, Numeric, Object] false-branch value(s).
   #   @return [CArray] new array with the same shape as `self`.
@@ -42,8 +45,11 @@ class CArray
     return face_then_else(x, y, face) if face
     # Promote data_type from both branches via CArray.result_type
     # (a CScalar contributes its own data_type, so CA_INT32(0) keeps int32
-    # where a bare Ruby Integer would widen to int64).
-    dt = CArray.result_type(x, y)
+    # where a bare Ruby Integer would widen to int64).  UNDEF is a missing
+    # value, not a value of some type: a branch that is UNDEF leaves the
+    # type to the other.
+    typed = [x, y].reject { |v| v.equal?(UNDEF) }
+    dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
     # A CScalar (scalar? CArray) is treated as a scalar value, not as a
     # self-shaped operand: full CArray -> gather/copy, scalar -> broadcast.
     y_full = y.is_a?(CArray) && !y.scalar?

@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `cond.then_else(x, UNDEF)` keeps the data type of `x` and masks the
+  cells where `cond` is false (it returned an object array). The same holds
+  with `UNDEF` as the first branch.
+
 - Fix: `count_masked` and `count_not_masked` with `axis:` answer the same
   whether or not the array has a mask. Naming every axis
   (`axis: [0, 1]` on a 2-D array) returns an Integer, as the form without
