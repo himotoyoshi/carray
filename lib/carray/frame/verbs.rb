@@ -132,16 +132,18 @@ class CAFrame
   # A number with a leading zero ("007") is a code and keeps its column as
   # text, and so does an integer too long for int64 (an identifier), which a
   # float would round. A day-first or month-first date ("01/02/2024") is not
-  # read as time, since which one it is cannot be told. Columns that already
-  # have a type are not listed.
+  # read as time, since which one it is cannot be told. Only text columns
+  # are looked at -- an object column or a string Face (CAString,
+  # CAConstString); columns that already have a type are not listed.
   #
   #   df.cast(df.infer_types)                            # what types: :infer does
   #   df.cast(df.infer_types.merge("code" => :int32))    # with one column set by hand
   def infer_types
     @columns.each_with_object({}) do |(key, col), types|
-      next unless col.data_type == CA_OBJECT && !col.face?
-      type = col.__infer_decimal__
-      type ||= :time if time_text_column?(col)
+      next unless string_column?(col)
+      text = time_text_of(col)
+      type = text.__infer_decimal__
+      type ||= :time if time_text_column?(text)
       types[key] = type if type
     end
   end
@@ -437,9 +439,12 @@ class CAFrame
     CATimeLiteral.infer_time_format(text, first)
   end
 
-  # The column as an object array of its text.
+  # The column as an object array of its text. A CAString already holds one,
+  # as its parent; other string Faces convert.
   private def time_text_of(col)
-    (col.data_type == CA_OBJECT && !col.face?) ? col : col.to_type(:object)
+    return col if col.data_type == CA_OBJECT && !col.face?
+    return col.parent if col.is_a?(CAString)
+    col.to_type(:object)
   end
 
   # Year-first text, read in C. A unit the reader does not write itself is
