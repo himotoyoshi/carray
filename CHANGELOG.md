@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `bincount_nd` skips a sample with a NaN weight when the labels have
+  no fiber axes too, as it already did with fibers and as `histogram` does.
+  The NaN was added into the count.
+
 - Fix: `wmean(w, min_count:)` on an object array returns `UNDEF` (or the
   `fill_value:`) when too few cells are present, as numeric arrays do. It
   raised `NoMethodError`.

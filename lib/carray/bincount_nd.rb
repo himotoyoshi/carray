@@ -269,6 +269,12 @@ class CArray
           term = strides_ext[k] == 1 ? b : b * strides_ext[k]
           ravel = ravel.nil? ? term : ravel + term
         end
+        # A NaN weight drops its sample, as the fiber kernel and histogram
+        # do; bincount itself would add the NaN in.
+        if tweights && tweights.float?
+          nan = tweights.is_nan
+          tweights = tweights.mask_where(nan) if nan.any
+        end
         chunk_counts = ravel.bincount(weights: tweights, length: total_ext)
         @full_counts[] = @full_counts + chunk_counts.reshape(*@full_counts.shape)
       else
