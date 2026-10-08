@@ -102,13 +102,16 @@ class CAFrame
         @recno    = 0
       end
 
-      # Fields of the next record, or nil at EOF.  A blank line carries no
-      # separator, so it cannot be a row of a file with more than one column
-      # and is skipped as noise between records.  In a single-column file it
-      # is the only spelling a missing single field has -- which is what
-      # to_csv writes for a masked cell -- so the caller passes
+      # Fields of the next record, or nil at EOF.  A blank line -- empty, or
+      # only spaces and tabs with no separator -- cannot be a row of a file
+      # with more than one column and is skipped as noise between records.
+      # In a single-column file it is a row: an empty line is the only
+      # spelling a missing single field has, which is what to_csv writes for
+      # a masked cell, and spaces are a value. So the caller passes
       # +blank_is_row: true+ once the column count is known to be one, and
-      # the empty record becomes a row of no fields for build_frame to pad.
+      # the line becomes a row for build_frame to pad. +blank?+ says whether
+      # the record just returned was such a line, for a caller that learns
+      # the column count only after the body.
       #
       # A line with no quote character is a whole record. One with a quote
       # goes to the scanner, which reads further lines only while a field
@@ -120,11 +123,19 @@ class CAFrame
           line = io.gets
           return nil if line.nil?
           @recno += 1
+          @blank = false
           return scan(line, io) if line.include?(@quote)
           rec = line.chomp
-          next if rec.empty? && !blank_is_row
+          if rec.delete(" \t").empty? && !rec.include?(@sep)
+            next unless blank_is_row
+            @blank = true
+          end
           return simple(rec)
         end
+      end
+
+      def blank?
+        @blank
       end
 
       private def simple(rec)
@@ -251,10 +262,17 @@ class CAFrame
 
     # Consume the remaining records as data rows. A second body adds what is
     # left, which is nothing; it does not discard the rows already read.
+    #
+    # Without names the column count is known only once every row is read,
+    # so blank lines are kept and marked, and +result+ drops them unless the
+    # file turns out to have one column -- the same rows a header would have
+    # given.
     def body
       rows = (@rows ||= [])
-      blank_is_row = @names && @names.size == 1
+      @blank_rows ||= []
+      blank_is_row = @names.nil? || @names.size == 1
       while (fields = @tok.read(@io, blank_is_row: blank_is_row))
+        @blank_rows << rows.size if @names.nil? && @tok.blank?
         rows << fields
       end
       self
@@ -263,7 +281,13 @@ class CAFrame
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
-      [@names, @rows || []]
+      rows = @rows || []
+      if @names.nil? && @blank_rows && !@blank_rows.empty? &&
+         rows.map(&:size).max != 1
+        drop = @blank_rows.to_h { |i| [i, true] }
+        rows = rows.reject.with_index { |_, i| drop[i] }
+      end
+      [@names, rows]
     end
   end
 end

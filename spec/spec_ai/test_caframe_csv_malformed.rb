@@ -138,6 +138,41 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_raise(ArgumentError) { read("a\n1\n") { skip "x"; body } }
   end
 
+  # A line of only spaces used to be a short row in a file of several
+  # columns; it is a blank line there, as an empty one is.
+  def test_a_line_of_spaces_is_blank_in_a_file_of_several_columns
+    df = read("a,b\n1,2\n  \n\t\n3,4\n")
+    assert_equal [["1", "3"], ["2", "4"]], df.variables.map(&:to_a)
+  end
+
+  def test_a_line_of_separators_is_a_row
+    df = read("a\tb\n1\t2\n\t\n", sep: "\t")
+    assert_equal [["1", UNDEF], ["2", UNDEF]], df.variables.map(&:to_a)
+  end
+
+  def test_spaces_are_a_value_in_a_file_of_one_column
+    assert_equal ["1", "  ", "3"], read("a\n1\n  \n3\n")["a"].to_a
+    assert_equal ["1", UNDEF, "3"], read("a\n1\n  \n3\n", strip: true)["a"].to_a
+  end
+
+  # Without a header the column count is known only after the body; blank
+  # lines used to be skipped even in a file of one column.
+  def test_blank_lines_without_a_header
+    df = read("a\n\nc\n") { body }
+    assert_equal ["a", UNDEF, "c"], df["c0"].to_a
+    df = read("a,b\n\nc,d\n  \n") { body }
+    assert_equal [["a", "c"], ["b", "d"]], df.variables.map(&:to_a)
+  end
+
+  # A blank last line of a one-column file is a masked last row, since that
+  # is how to_csv writes one; the two cannot be told apart.
+  def test_a_blank_last_line_of_a_one_column_file_is_a_row
+    df = CAFrame.new("s" => CA_OBJECT(["a", "b", "x"]))
+    df["s"][2] = UNDEF
+    assert_equal "s\na\nb\n\n", df.to_csv
+    assert_equal ["a", "b", UNDEF], read("s\na\nb\n\n")["s"].to_a
+  end
+
   def test_a_separator_in_another_encoding_says_how_to_read
     io = StringIO.new("a;b\n1;2\n".encode("UTF-16LE"))
     io.set_encoding("UTF-16LE")
