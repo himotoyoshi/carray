@@ -9445,16 +9445,16 @@ C
 # fma: fused multiply-add — `self * op2 + op3` in a single rounding step
 # (= C99 `fma(x, y, z)` and HW FMA3/FMA4 / ARM FMA instructions).  More
 # accurate than the equivalent two-op `a*b + c` expression which rounds
-# twice.  Used in Horner evaluation, linear interpolation, dot product,
+# twice.  float32 calls fmaf: fma in double followed by a narrowing is a
+# second rounding, and can land 1 ulp off.  Used in Horner evaluation, linear interpolation, dot product,
 # Newton iteration.
 MkKernel.triop :fma,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#4) = (#1) * (#2) + (#3);",
-    float:   "(#4) = fma((#1), (#2), (#3));",
     complex: "(#4) = (#1) * (#2) + (#3);",
     object:  '(#4) = rb_funcall(rb_funcall((#1), rb_intern("*"), 1, (#2)), rb_intern("+"), 1, (#3));',
-  }
+  }.merge(MkKernel.float_widths("(#4) = fma<f>((#1), (#2), (#3));"))
 
 # fms: fused multiply-subtract — `self * op2 - op3` in a single rounding.
 # Useful in cross products and complex multiplication primitives.
@@ -9462,11 +9462,10 @@ MkKernel.triop :fms,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#4) = (#1) * (#2) - (#3);",
-    # fma(a, b, -c) = a*b - c with single rounding (= C99 / IEEE 754 hint).
-    float:   "(#4) = fma((#1), (#2), -(#3));",
     complex: "(#4) = (#1) * (#2) - (#3);",
     object:  '(#4) = rb_funcall(rb_funcall((#1), rb_intern("*"), 1, (#2)), rb_intern("-"), 1, (#3));',
-  }
+    # fma(a, b, -c) = a*b - c with single rounding (= C99 / IEEE 754 hint).
+  }.merge(MkKernel.float_widths("(#4) = fma<f>((#1), (#2), -(#3));"))
 
 # clip: per-element clamp into [lo, hi].  3.0 migration: was a hand-
 # written eager-only method in ext/carray_generate.c that only accepted

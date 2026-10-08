@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `fma` and `fms` on float32 now round once, as their documentation
+  says. They computed in double and narrowed the result, a second rounding
+  that could leave the answer 1 ulp off. Eager, lazy and `fma!` / `fms!`
+  all changed; float64 is unaffected.
+
 - Change: `then_else` returns a lazy view when the condition or a branch is
   a lazy view, as the other element-wise operations do, so the selection
   joins the expression around it (and a registered expression evaluator
