@@ -498,6 +498,581 @@ rb_ca_s_time_ticks_from_fields (VALUE klass,
   return out;
 }
 
+/* ------------------------------------------------------------------------
+   Reading text in a strptime format
+
+   This reads the directives Date._strptime reads for a date and a time of
+   day, the same way, so that a format answers the same in either: %Y %y %m
+   %d %e %H %k %I %l %M %S %N %L %p %P %b %B %h %a %A %z %Z %n %t %%, and
+   %D %F %R %T %X %x, which stand for longer formats.  A format with any
+   other directive is not read here (the caller uses Date._strptime).
+   Text left over after the format makes a cell unreadable, unless it is
+   whitespace.  A zone this reader does not know the offset of (a name
+   other than Z, UTC and GMT, an offset written another way) is deferred to
+   Date._strptime for that cell.
+
+   Strict reading, used to find the format a column is written in, holds
+   the text to the shape of the format: %Y is four digits and %y two, %N
+   one to nine digits, the other numbers one or two digits (two when a
+   number follows directly), no sign and no leading space before a number,
+   %p takes AM or PM only, an unknown zone is unreadable rather than
+   deferred, and blank text is missing.  Whitespace in the format matches
+   any run of whitespace, none included, in both readings.
+   ------------------------------------------------------------------------ */
+
+enum {
+  CA_STRP_OK = 0,
+  CA_STRP_FAIL,
+  CA_STRP_DEFER
+};
+
+typedef struct {
+  int64_t year, mon, mday, hour, min, sec, frac_ns, offset;
+  int has_year, has_hour, merid, frac_digits;
+} ca_strp_t;
+
+static const char *ca_strp_months[] = {
+  "January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"
+};
+static const char *ca_strp_days[] = {
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+  "Saturday"
+};
+
+/* Whether a number follows directly: a digit, or a numeric directive. */
+static int
+ca_strp_number_next (const char *f, long flen, long fi)
+{
+  char c;
+  if ( fi >= flen ) {
+    return 0;
+  }
+  c = f[fi];
+  if ( c >= '0' && c <= '9' ) {
+    return 1;
+  }
+  if ( c == '%' && fi + 1 < flen ) {
+    c = f[fi + 1];
+    if ( c == 'E' || c == 'O' ) {
+      c = ( fi + 2 < flen ) ? f[fi + 2] : '\0';
+    }
+    return c != '\0' && ( strchr("CDdeFGgHIjkLlMmNQRrSsTUuVvWwXxYy", c) != NULL
+                          || ( c >= '0' && c <= '9' ) );
+  }
+  return 0;
+}
+
+/* Up to `width` digits (width 0: as many as there are).  Returns the count
+   read, with the value of the first 18 in *v. */
+static long
+ca_strp_digits (const char *s, long n, long *si, long width, int64_t *v)
+{
+  long count = 0;
+  *v = 0;
+  while ( *si < n && s[*si] >= '0' && s[*si] <= '9'
+          && ( width == 0 || count < width ) ) {
+    if ( count < 18 ) {
+      *v = *v * 10 + ( s[*si] - '0' );
+    }
+    (*si)++;
+    count++;
+  }
+  return count;
+}
+
+/* A one-or-two-digit field: %d %e %H %k %I %l %M %m %S. */
+static int
+ca_strp_small (const char *s, long n, long *si, int space_form, int strict,
+               int number_next, int64_t lo, int64_t hi, int64_t *v)
+{
+  long count;
+  if ( space_form && ! strict && s[*si] == ' ' ) {
+    (*si)++;
+    count = ca_strp_digits(s, n, si, 1, v);
+  }
+  else {
+    count = ca_strp_digits(s, n, si, 2, v);
+    if ( strict && number_next && count != 2 ) {
+      return CA_STRP_FAIL;
+    }
+  }
+  if ( count == 0 || *v < lo || *v > hi ) {
+    return CA_STRP_FAIL;
+  }
+  return CA_STRP_OK;
+}
+
+static int
+ca_strp_name (const char *s, long n, long *si, const char **names, int count)
+{
+  int i;
+  for (i = 0; i < count; i++) {
+    long len = (long) strlen(names[i]);
+    if ( n - *si >= len && strncasecmp(names[i], s + *si, len) == 0 ) {
+      *si += len;
+      return i;
+    }
+    if ( n - *si >= 3 && strncasecmp(names[i], s + *si, 3) == 0 ) {
+      *si += 3;
+      return i;
+    }
+  }
+  return -1;
+}
+
+static int
+ca_strp_is_alpha (char c)
+{
+  return ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' );
+}
+
+/* %z: [+-]hh, [+-]hhmm, [+-]hh:mm, Z, UTC, GMT. */
+static int
+ca_strp_zone (const char *s, long n, long *si, int strict, int64_t *offset)
+{
+  int unknown = strict ? CA_STRP_FAIL : CA_STRP_DEFER;
+  long i = *si;
+  if ( s[i] == '+' || s[i] == '-' ) {
+    int negative = ( s[i] == '-' );
+    int64_t hh, mm = 0;
+    long count;
+    i++;
+    count = ca_strp_digits(s, n, &i, 0, &hh);
+    if ( count == 4 ) {
+      mm = hh % 100;
+      hh = hh / 100;
+    }
+    else if ( count == 2 ) {
+      if ( i < n && s[i] == ':' ) {
+        i++;
+        if ( ca_strp_digits(s, n, &i, 0, &mm) != 2 ) {
+          return unknown;
+        }
+      }
+    }
+    else {
+      return unknown;
+    }
+    if ( i < n && ( s[i] == ':' || s[i] == '.' || s[i] == ','
+                    || ( s[i] >= '0' && s[i] <= '9' ) ) ) {
+      return unknown;
+    }
+    if ( hh > 23 || mm > 59 ) {
+      return unknown;
+    }
+    *offset = ( hh * 3600 + mm * 60 ) * ( negative ? -1 : 1 );
+    *si = i;
+    return CA_STRP_OK;
+  }
+  if ( ca_strp_is_alpha(s[i]) ) {
+    long len = 0;
+    while ( i + len < n && ca_strp_is_alpha(s[i + len]) ) {
+      len++;
+    }
+    if ( ( len == 1 && s[i] == 'Z' )
+         || ( len == 3 && ( strncmp(s + i, "UTC", 3) == 0
+                            || strncmp(s + i, "GMT", 3) == 0 ) ) ) {
+      long j = i + len;
+      /* "UTC+09:00", "GMT standard time", "UTC dst" mean something else */
+      if ( j < n && ( s[j] == '+' || s[j] == '-' || s[j] == '.' ) ) {
+        return unknown;
+      }
+      if ( j < n && s[j] == ' ' ) {
+        long k = j;
+        while ( k < n && s[k] == ' ' ) {
+          k++;
+        }
+        if ( k < n && ca_strp_is_alpha(s[k]) ) {
+          return unknown;
+        }
+      }
+      *offset = 0;
+      *si = j;
+      return CA_STRP_OK;
+    }
+    return unknown;
+  }
+  return CA_STRP_FAIL;
+}
+
+static int ca_strp_run (const char *s, long n, long *si,
+                        const char *f, long flen, int strict, ca_strp_t *t);
+
+static int
+ca_strp_sub (const char *s, long n, long *si, const char *sub, int strict,
+             ca_strp_t *t)
+{
+  return ca_strp_run(s, n, si, sub, (long) strlen(sub), strict, t);
+}
+
+static int
+ca_strp_run (const char *s, long n, long *si, const char *f, long flen,
+             int strict, ca_strp_t *t)
+{
+  long fi = 0;
+  while ( fi < flen ) {
+    char c = f[fi];
+    if ( ca_time_text_is_space(c) ) {
+      while ( *si < n && ca_time_text_is_space(s[*si]) ) {
+        (*si)++;
+      }
+      while ( fi < flen && ca_time_text_is_space(f[fi]) ) {
+        fi++;
+      }
+      continue;
+    }
+    if ( *si >= n ) {
+      return CA_STRP_FAIL;
+    }
+    if ( c != '%' ) {
+      if ( s[*si] != c ) {
+        return CA_STRP_FAIL;
+      }
+      (*si)++;
+      fi++;
+      continue;
+    }
+    {
+      int rc = CA_STRP_OK;
+      int number_next;
+      int64_t v;
+      char d = ( fi + 1 < flen ) ? f[fi + 1] : '\0';
+      fi += 2;
+      number_next = ca_strp_number_next(f, flen, fi);
+      switch ( d ) {
+      case 'a': case 'A':
+        if ( ca_strp_name(s, n, si, ca_strp_days, 7) < 0 ) {
+          return CA_STRP_FAIL;
+        }
+        break;
+      case 'b': case 'B': case 'h': {
+        int m = ca_strp_name(s, n, si, ca_strp_months, 12);
+        if ( m < 0 ) {
+          return CA_STRP_FAIL;
+        }
+        t->mon = m + 1;
+        break;
+      }
+      case 'd': case 'e':
+        rc = ca_strp_small(s, n, si, 1, strict, number_next, 1, 31, &t->mday);
+        break;
+      case 'H': case 'k':
+        rc = ca_strp_small(s, n, si, 1, strict, number_next, 0, 24, &t->hour);
+        t->has_hour = 1;
+        break;
+      case 'I': case 'l':
+        rc = ca_strp_small(s, n, si, 1, strict, number_next, 1, 12, &t->hour);
+        t->has_hour = 1;
+        break;
+      case 'M':
+        rc = ca_strp_small(s, n, si, 0, strict, number_next, 0, 59, &t->min);
+        break;
+      case 'm':
+        rc = ca_strp_small(s, n, si, 0, strict, number_next, 1, 12, &t->mon);
+        break;
+      case 'S':
+        rc = ca_strp_small(s, n, si, 0, strict, number_next, 0, 60, &t->sec);
+        break;
+      case 'L': case 'N': {
+        int negative = 0;
+        long count, start, k;
+        int64_t ns = 0;
+        int rest = 0;
+        if ( ! strict && ( s[*si] == '+' || s[*si] == '-' ) ) {
+          negative = ( s[*si] == '-' );
+          (*si)++;
+        }
+        start = *si;
+        count = ca_strp_digits(s, n, si,
+                               strict ? 9 : ( number_next ? ( d == 'L' ? 3 : 9 ) : 0 ),
+                               &v);
+        if ( count == 0 ) {
+          return CA_STRP_FAIL;
+        }
+        for (k = 0; k < 9; k++) {
+          ns = ns * 10 + ( k < count ? s[start + k] - '0' : 0 );
+        }
+        for (k = 9; k < count; k++) {
+          rest |= ( s[start + k] != '0' );
+        }
+        if ( negative ) {
+          ns = - ns - ( rest ? 1 : 0 );     /* floor, as (fraction * 1e9).floor */
+        }
+        t->frac_ns = ns;
+        t->frac_digits = (int) count;
+        break;
+      }
+      case 'p': case 'P': {
+        char a, m;
+        int hour;
+        if ( n - *si < 2 ) {
+          return CA_STRP_FAIL;
+        }
+        a = s[*si];
+        hour = ( a == 'P' || a == 'p' ) ? 12 : 0;
+        if ( ! hour && ! ( a == 'A' || a == 'a' ) ) {
+          return CA_STRP_FAIL;
+        }
+        m = s[*si + 1];
+        if ( m == '.' && ! strict ) {
+          if ( n - *si < 4 || s[*si + 3] != '.' ) {
+            return CA_STRP_FAIL;
+          }
+          *si += 2;
+          m = s[*si];
+        }
+        if ( ! ( m == 'M' || m == 'm' ) ) {
+          return CA_STRP_FAIL;
+        }
+        *si += 2;
+        t->merid = hour;
+        break;
+      }
+      case 'Y': {
+        int negative = 0;
+        long count;
+        if ( ! strict && ( s[*si] == '+' || s[*si] == '-' ) ) {
+          negative = ( s[*si] == '-' );
+          (*si)++;
+        }
+        count = ca_strp_digits(s, n, si, ( strict || number_next ) ? 4 : 0, &v);
+        if ( count == 0 || ( strict && count != 4 ) ) {
+          return CA_STRP_FAIL;
+        }
+        if ( count > 9 ) {
+          return CA_STRP_DEFER;            /* a year past int64 days */
+        }
+        t->year = negative ? -v : v;
+        t->has_year = 1;
+        break;
+      }
+      case 'y': {
+        long count = ca_strp_digits(s, n, si, 2, &v);
+        if ( count == 0 || ( strict && count != 2 ) ) {
+          return CA_STRP_FAIL;
+        }
+        t->year = v + ( v >= 69 ? 1900 : 2000 );
+        t->has_year = 1;
+        break;
+      }
+      case 'z': case 'Z':
+        rc = ca_strp_zone(s, n, si, strict, &t->offset);
+        break;
+      case 'n': case 't':
+        rc = ca_strp_sub(s, n, si, " ", strict, t);
+        break;
+      case 'D': case 'x':
+        rc = ca_strp_sub(s, n, si, "%m/%d/%y", strict, t);
+        break;
+      case 'F':
+        rc = ca_strp_sub(s, n, si, "%Y-%m-%d", strict, t);
+        break;
+      case 'R':
+        rc = ca_strp_sub(s, n, si, "%H:%M", strict, t);
+        break;
+      case 'T': case 'X':
+        rc = ca_strp_sub(s, n, si, "%H:%M:%S", strict, t);
+        break;
+      case '%':
+        if ( s[*si] != '%' ) {
+          return CA_STRP_FAIL;
+        }
+        (*si)++;
+        break;
+      default:
+        return CA_STRP_FAIL;                /* not reached: checked up front */
+      }
+      if ( rc != CA_STRP_OK ) {
+        return rc;
+      }
+    }
+  }
+  return CA_STRP_OK;
+}
+
+/* Whether every directive of the format is one ca_strp_run reads. */
+static int
+ca_strp_supported (const char *f, long flen)
+{
+  long i;
+  for (i = 0; i < flen; i++) {
+    if ( f[i] == '%' ) {
+      char d = ( i + 1 < flen ) ? f[i + 1] : '\0';
+      if ( d == '\0' || strchr("YymdeHkIlMSNLpPbBhaAzZntDFRTXx%", d) == NULL ) {
+        return 0;
+      }
+      i++;
+    }
+  }
+  return 1;
+}
+
+/* One text in a format: CA_STRP_OK with the fields in *t, CA_STRP_FAIL,
+   or CA_STRP_DEFER. */
+static int
+ca_strp_text (VALUE str, const char *f, long flen, int strict, ca_strp_t *t)
+{
+  const char *s = RSTRING_PTR(str);
+  long n = RSTRING_LEN(str);
+  long si = 0;
+  int rc;
+  memset(t, 0, sizeof(*t));
+  t->mon = 1;
+  t->mday = 1;
+  t->merid = -1;
+  rc = ca_strp_run(s, n, &si, f, flen, strict, t);
+  if ( rc != CA_STRP_OK ) {
+    return rc;
+  }
+  while ( si < n && ca_time_text_is_space(s[si]) ) {
+    si++;
+  }
+  if ( si < n || ! t->has_year ) {
+    return CA_STRP_FAIL;
+  }
+  if ( t->merid >= 0 && t->has_hour ) {
+    t->hour = t->hour % 12 + t->merid;
+  }
+  if ( t->mday > ca_time_text_month_days(t->year, t->mon) ) {
+    return CA_STRP_FAIL;
+  }
+  return CA_STRP_OK;
+}
+
+/* CArray#__strptime_fields__(format, strict)
+     -> [year, mon, day, sec_of_day, frac_ns, offset, present,
+         unreadable, deferred, fraction_digits] or nil
+
+   Reads every cell of an object array in a strptime format into the int64
+   field arrays CArray.__time_ticks_from_fields__ takes (present is uint8).
+   nil when the format has a directive this reader does not read.  A cell
+   that holds text and does not read is listed by its address in
+   `unreadable`; a cell that is not a String, or holds a zone or a year
+   this reader leaves to Date._strptime, in `deferred`; nil and masked
+   cells in neither, and blank text too when strict (a blank cell does not
+   read in a format, as Date._strptime has it).  fraction_digits is the widest fraction of a
+   second read. */
+static VALUE
+rb_ca_strptime_fields (VALUE self, VALUE rformat, VALUE rstrict)
+{
+  volatile VALUE src = self, rf = rformat;
+  VALUE fields[7];
+  volatile VALUE unreadable, deferred;
+  CArray *ca, *cf[7];
+  int64_t *y, *mo, *d, *sod, *frac, *off;
+  uint8_t *present;
+  VALUE *cells;
+  boolean8_t *m_in;
+  const char *f;
+  long flen;
+  int strict = RTEST(rstrict);
+  int fraction = 0;
+  ca_size_t i;
+  int k;
+
+  StringValue(rf);
+  f = RSTRING_PTR(rf);
+  flen = RSTRING_LEN(rf);
+  if ( ! ca_strp_supported(f, flen) ) {
+    return Qnil;
+  }
+  TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eArgError, "strptime reading needs an object array");
+  }
+  if ( ! ca_is_entity(ca) ) {
+    src = rb_ca_copy(src);
+    TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  }
+  for (k = 0; k < 7; k++) {
+    fields[k] = rb_carray_new(k == 6 ? CA_UINT8 : CA_INT64, 1, &ca->elements, 0, NULL);
+    TypedData_Get_Struct(fields[k], CArray, &carray_data_type, cf[k]);
+  }
+  y = (int64_t *) cf[0]->ptr;
+  mo = (int64_t *) cf[1]->ptr;
+  d = (int64_t *) cf[2]->ptr;
+  sod = (int64_t *) cf[3]->ptr;
+  frac = (int64_t *) cf[4]->ptr;
+  off = (int64_t *) cf[5]->ptr;
+  present = (uint8_t *) cf[6]->ptr;
+  unreadable = rb_ary_new();
+  deferred = rb_ary_new();
+
+  cells = (VALUE *) ca->ptr;
+  m_in = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
+  for (i = 0; i < ca->elements; i++) {
+    VALUE v = cells[i];
+    ca_strp_t t;
+    int rc;
+    y[i] = 1970; mo[i] = 1; d[i] = 1; sod[i] = 0; frac[i] = 0; off[i] = 0;
+    present[i] = 0;
+    if ( ( m_in && m_in[i] ) || NIL_P(v) ) {
+      continue;
+    }
+    if ( ! RB_TYPE_P(v, T_STRING) ) {
+      rb_ary_push(deferred, SIZET2NUM(i));
+      continue;
+    }
+    if ( strict ) {                        /* finding a format: blank is missing */
+      const char *s = RSTRING_PTR(v);
+      long n = RSTRING_LEN(v), j = 0;
+      while ( j < n && ca_time_text_is_space(s[j]) ) {
+        j++;
+      }
+      if ( j == n ) {
+        continue;
+      }
+    }
+    rc = ca_strp_text(v, f, flen, strict, &t);
+    if ( rc == CA_STRP_OK ) {
+      y[i] = t.year;
+      mo[i] = t.mon;
+      d[i] = t.mday;
+      sod[i] = t.hour * 3600 + t.min * 60 + t.sec;
+      frac[i] = t.frac_ns;
+      off[i] = t.offset;
+      present[i] = 1;
+      if ( t.frac_digits > fraction ) {
+        fraction = t.frac_digits;
+      }
+    }
+    else if ( rc == CA_STRP_DEFER ) {
+      rb_ary_push(deferred, SIZET2NUM(i));
+    }
+    else {
+      rb_ary_push(unreadable, SIZET2NUM(i));
+    }
+  }
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(rf);
+  return rb_ary_new_from_args(10, fields[0], fields[1], fields[2], fields[3],
+                              fields[4], fields[5], fields[6],
+                              unreadable, deferred, INT2NUM(fraction));
+}
+
+/* CArray.__strptime_fits__(text, formats) -> indices
+
+   The indices of the formats `text` reads in, strictly. */
+static VALUE
+rb_ca_s_strptime_fits (VALUE klass, VALUE text, VALUE formats)
+{
+  volatile VALUE out = rb_ary_new();
+  long i;
+  StringValue(text);
+  Check_Type(formats, T_ARRAY);
+  for (i = 0; i < RARRAY_LEN(formats); i++) {
+    VALUE f = rb_ary_entry(formats, i);
+    ca_strp_t t;
+    StringValue(f);
+    if ( ca_strp_supported(RSTRING_PTR(f), RSTRING_LEN(f))
+         && ca_strp_text(text, RSTRING_PTR(f), RSTRING_LEN(f), 1, &t) == CA_STRP_OK ) {
+      rb_ary_push(out, LONG2NUM(i));
+    }
+  }
+  return out;
+}
+
 void
 Init_carray_time_text (void)
 {
@@ -506,4 +1081,8 @@ Init_carray_time_text (void)
   /* Internal: CArray.time turns parsed fields into ticks with this. */
   rb_define_singleton_method(rb_cCArray, "__time_ticks_from_fields__",
                              rb_ca_s_time_ticks_from_fields, 9);
+  /* Internal: CArray.time and CAFrame read a strptime format with these. */
+  rb_define_method(rb_cCArray, "__strptime_fields__", rb_ca_strptime_fields, 2);
+  rb_define_singleton_method(rb_cCArray, "__strptime_fits__",
+                             rb_ca_s_strptime_fits, 2);
 }
