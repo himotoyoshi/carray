@@ -115,6 +115,13 @@ class CAFrame
         s = Regexp.escape(sep)
         q = Regexp.escape(quote)
         @sep_re   = /#{s}/
+        # String#split(" ") splits on runs of whitespace (awk style); a
+        # Regexp splits at each separator as written, as the C reader does.
+        @split_sep = sep == " " ? @sep_re : sep
+        # strip: skips the spaces and tabs around a field, but not one that is
+        # the separator: with sep: "\t" a tab ends the field.
+        pad = [" ", "\t"].reject { |c| sep.include?(c) }
+        @pad_re = pad.empty? ? nil : /[#{Regexp.escape(pad.join)}]+/
         @quote_re = /#{q}/
         # An unquoted field runs up to the separator, a quote or the end of
         # the record; a CR that does not end the record is part of the field.
@@ -204,7 +211,7 @@ class CAFrame
       # An empty field lies at the start or the end of the record or between
       # two separators, so a record without one is the split as it stands.
       private def simple(rec)
-        fields = rec.split(@sep, -1)
+        fields = rec.split(@split_sep, -1)
         if @strip
           fields.map! { |cell| cell = cell.strip; cell.empty? ? nil : cell }
         elsif rec.empty? || rec.start_with?(@sep) || rec.end_with?(@sep) || rec.include?(@sep2)
@@ -220,7 +227,7 @@ class CAFrame
       # of the line, a quote inside an unquoted field, text after a closing
       # quote -- for the scanner to read or to report.
       private def quoted_line(line)
-        parts = line.chomp.split(@sep, -1)
+        parts = line.chomp.split(@split_sep, -1)
         fields = []
         i = 0
         while i < parts.size
@@ -250,14 +257,14 @@ class CAFrame
         sc = StringScanner.new(line)
         fields = []
         loop do
-          sc.skip(/[ \t]+/) if @strip
+          sc.skip(@pad_re) if @strip && @pad_re
           if sc.skip(@quote_re)
             fields << quoted_field(sc, io, fields.size + 1, line_at(sc))
             # A closed quoted field ends at the separator or the end of the
             # record. Anything else there is malformed, and read on it would
             # drop the rest of the record without a word. strip: lets spaces
             # through, as it does around an unquoted field.
-            sc.skip(/[ \t]+/) if @strip
+            sc.skip(@pad_re) if @strip && @pad_re
             unless sc.eos? || sc.check(@sep_re) || sc.check(@eol)
               raise malformed("text #{sc.rest.chomp[0, 20].inspect} after the closing quote " \
                               "of field #{fields.size}", line_at(sc))

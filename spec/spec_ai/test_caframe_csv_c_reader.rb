@@ -42,7 +42,7 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
   def inputs
     rng = Random.new(20)
     texts = []
-    [",", ";", "::", "\t"].each do |sep|
+    [",", ";", "::", "\t", " "].each do |sep|
       120.times do                                  # mostly malformed
         ncol = rng.rand(1..3)
         head = Array.new(ncol) { |j| "h#{j}" }.join(sep) + "\n"
