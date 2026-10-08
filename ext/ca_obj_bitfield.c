@@ -74,13 +74,16 @@ static int8_t CA_OBJ_BITFIELD;
 
 static VALUE rb_cCABitfield;
 
+/* The width of the field: the bits set in its mask.  The mask is placed
+   at the field's offset within an 8-byte load, so it is counted over all
+   64 bits, not over the width of the value type (a field that starts
+   inside a byte reaches past it). */
 static ca_size_t
-bitfield_bitlen (uint64_t bit_mask, ca_size_t bytes)
+bitfield_bitlen (uint64_t bit_mask)
 {
-  ca_size_t bitsize = bytes * 8;
   ca_size_t count = 0;
   ca_size_t i;
-  for (i=0; i<bitsize; i++) {
+  for (i=0; i<64; i++) {
     if ( ( bit_mask >> i ) & 1 ) {
       count++;
     }
@@ -164,8 +167,21 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
     rb_raise(rb_eIndexError, "invalid bit length specified for bit field");
   }
 
-  if ( offset + bitlen -1 >= bitsize ) {
+  if ( offset < 0 || offset + bitlen -1 >= bitsize ) {
     rb_raise(rb_eIndexError, "invalid offset for bit field");
+  }
+
+  /* The bits of an object cell are a reference: writing them would leave
+     the cell pointing nowhere. */
+  if ( ca_is_object_type(parent) ) {
+    rb_raise(rb_eCADataTypeError, "invalid data_type for bitfield");
+  }
+
+  /* A field is read with one 8-byte load from the byte it starts in. */
+  if ( offset % 8 + bitlen > 64 ) {
+    rb_raise(rb_eIndexError,
+             "a bit field of %lld bits at bit %lld spans more than 8 bytes",
+             (long long) bitlen, (long long) offset);
   }
 
   if ( bitlen == 1 ) {
@@ -292,7 +308,7 @@ ca_bitfield_func_clone (void *ap)
   CABitfield *ca = (CABitfield *) ap;
   return ca_bitfield_new(ca->parent,
                          ca->bit_start,
-                         bitfield_bitlen(ca->bit_mask, ca->bytes));
+                         bitfield_bitlen(ca->bit_mask));
 }
 
 /* Per-cell get/put: fetch the parent cell into a scratch buffer,
@@ -637,6 +653,9 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
 
   if ( TYPE(rrange) == T_FIXNUM ) {
     offset = NUM2INT(rrange);
+    if ( offset < 0 ) {
+      offset += ca->bytes * 8;
+    }
     bitlen = 1;
   }
   else {
@@ -671,7 +690,7 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
   }
   ca_bitfield_setup(ca, cs->parent,
                     cs->bit_start,
-                    bitfield_bitlen(cs->bit_mask, cs->bytes));
+                    bitfield_bitlen(cs->bit_mask));
 
   return self;
 }

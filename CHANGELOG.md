@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `bitfield` refuses an object array (writing the field rewrote the
+  references held in the cells) and a field that starts inside a byte and
+  reaches more than 64 bits past it (its top bits were dropped); both raise.
+
+- Fix: `bitfield(-1)` is the last bit of the cell, as `bitfield(-1..-1)`
+  is (it read a bit that was not there).
+
+- Fix: `dup` and `clone` of a `bitfield` view whose field reaches past the
+  width of its value type (`bitfield(4..11)` on a uint16 array) are the
+  same field; the copy was a narrower one.
+
 - New: `CAFrame.from_csv` takes `header:` (the line of the column names, or
   `false`), `data:` (the first line of the data, or a Range of lines) and
   `column_names:`, with a line given by its index from 0, as in
