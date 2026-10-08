@@ -1,5 +1,6 @@
 require "test/unit"
 require "carray"
+require "rbconfig"
 
 # each_slab over a view: the slab handed to the block reads the cells of
 # that slab, and so does anything derived from it (dup, sort_copy, ...).
@@ -63,4 +64,35 @@ class TestSlabIterViewSource < Test::Unit::TestCase
     end
   end
 
+  # A slab kept past the walk (the slab itself or `slab.dup`, which shares
+  # its buffer) reads the last slab, not freed memory; `slab.copy` keeps
+  # each one.  An object array's cells are also marked by the GC from
+  # there, so the kept slab must not point into the walk's freed scratch.
+  def test_slab_kept_past_the_walk
+    f = CArray.float64(2, 3).seq
+    [->(x) { x }, ->(x) { x.transpose }].each do |mk|
+      src = mk.call(f)
+      axis = src.ndim - 2
+      kept = []; dups = []; copies = []
+      src.each_slab(axis: axis) { |r| kept << r; dups << r.dup; copies << r.copy }
+      1000.times { "x" * 50 }
+      last = copies.last.to_a
+      assert_equal [last] * copies.size, kept.map(&:to_a)
+      assert_equal [last] * copies.size, dups.map(&:to_a)
+      ref = []; src.copy.each_slab(axis: axis) { |r| ref << r.to_a }
+      assert_equal ref, copies.map(&:to_a)
+    end
+    script = <<~'RUBY'
+      require "carray"
+      a = CArray.object(2, 3); 6.times { |i| a[i / 3, i % 3] = Rational(i, 7) }
+      [a, a.transpose].each do |src|
+        rows = []; src.each_slab(axis: 0) { |r| rows << r.dup }
+        GC.start; 1000.times { "x" * 50 }; GC.start
+        rows.each(&:to_a)
+      end
+      16.times { a.transpose.map_slab(axis: 1) { |x| x + 1 } ; GC.start }
+    RUBY
+    inc = $LOAD_PATH.map { |d| ["-I", d] }.flatten
+    assert system(RbConfig.ruby, *inc, "-e", script, err: File::NULL), "child ended with #{$?.inspect}"
+  end
 end

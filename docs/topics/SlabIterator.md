@@ -141,12 +141,15 @@ every entry referring to the same CArray, showing only the last iter's
 data. This is documented and **not runtime-checked** (= per-cell access
 hooks would defeat the cost model).
 
-Use `slab.copy` / `slab.dup` / `slab.to_a` inside the block to snapshot:
+Use `slab.copy` or `slab.to_a` inside the block to snapshot. `slab.dup`
+is a view sharing the slab's buffer, so after the walk it shows the
+last slab too (except where the slab happens to be a window onto the
+source):
 
 ```ruby
 # CORRECT — snapshots taken in the block
 rows = []
-ca.each_slab(axis: 1) { |row| rows << row.dup }
+ca.each_slab(axis: 1) { |row| rows << row.copy }
 
 # TRAP — every entry refers to the same persistence-trapped object
 refs = []

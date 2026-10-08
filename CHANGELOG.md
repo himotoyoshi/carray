@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `each_slab`, `map_slab` and `reduce_slab` left their slab pointing
+  at freed memory once the walk ended, unless the slab was a window onto
+  an array's last axis. A slab (or `slab.dup`) kept past the walk read
+  garbage, and over an object array the garbage collector could crash
+  even when nothing was kept. A kept slab now shows the last slab; take
+  `slab.copy` or `slab.to_a` in the block to keep each one (the docs
+  used to suggest `slab.dup`, which shares the slab's data).
+
 - Change: faster, with the same results: `CAFrame.from_csv` with `types:`
   reads two to five times faster on a file of numbers, as a column cast to
   a number is read from the text without making a String per cell. A column

@@ -1110,10 +1110,55 @@ slab_state_run_body (VALUE arg)
   return Qnil;
 }
 
+/* The slab views outlive the walk: the block may keep the slab or a view
+   of it (`row.dup`), and the GC marks an object array's cells for as long
+   as it has a ptr.  Before the scratch they point into is freed, the
+   input slab and its carrier are moved onto a copy of the last slab,
+   held by the carrier, and the internal output view lets go of its
+   buffer.  A slab that is a window onto the source itself points into
+   the source and needs nothing. */
+static void
+slab_state_release_views (ca_slab_iter_state_t *st)
+{
+  if ( st->output_slab_view != Qnil ) {
+    CArray *ov;
+    TypedData_Get_Struct(st->output_slab_view, CArray, &carray_data_type, ov);
+    ov->ptr = NULL;
+  }
+  if ( st->carrier != Qnil && st->slab_view != Qnil ) {
+    CArray *cw, *cs, *backing;
+    volatile VALUE bv;
+    TypedData_Get_Struct(st->carrier,   CArray, &carray_data_type, cw);
+    TypedData_Get_Struct(st->slab_view, CArray, &carray_data_type, cs);
+    if ( cw->ptr == NULL ) {
+      return;
+    }
+    backing = ca_copy(cw);
+    bv = ca_wrap_struct(backing);
+    if ( cw->mask && ! backing->mask ) {
+      ca_create_mask(backing);
+    }
+    rb_ivar_set(st->carrier, rb_intern("__slab_backing__"), bv);
+    if ( cs->ptr ) {
+      cs->ptr = backing->ptr;
+    }
+    if ( cs->mask && cs->mask->ptr ) {
+      cs->mask->ptr = backing->mask->ptr;
+    }
+    cw->ptr = backing->ptr;
+    if ( cw->mask ) {
+      cw->mask->ptr = backing->mask->ptr;
+    }
+    RB_GC_GUARD(bv);
+  }
+}
+
 static VALUE
 slab_state_finish (VALUE arg)
 {
   ca_slab_iter_state_t *st = (ca_slab_iter_state_t *)(uintptr_t) arg;
+
+  slab_state_release_views(st);
 
   /* T1 substrate teardown.
      CAREFUL: ca_detach(slab_view) is NEVER called — T1 owns the buffer;

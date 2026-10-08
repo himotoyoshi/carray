@@ -163,10 +163,10 @@ m.each_slab(axis: 1) { |row| refs << row }       # all entries alias each other
 
 # RIGHT — take a snapshot in the block
 rows = []
-m.each_slab(axis: 1) { |row| rows << row.dup }
+m.each_slab(axis: 1) { |row| rows << row.copy }
 ```
 
-Use `row.dup`, `row.copy`, or `row.to_a` when you need to remember a slab. This is the same rule as views in general — see [Views](06_views.md) — and the slab is in fact presented as a small view onto the source.
+Use `row.copy` or `row.to_a` when you need to remember a slab. `row.dup` is not a snapshot: like any view's `dup` it shares the data — here the slab's buffer — so after the walk it shows the last slab as well. This is the same rule as views in general — see [Views](06_views.md).
 
 Derived values made inside the block (`row.sum`, `row - 1`, `row[1..-1]`, `row.median`) read the current iteration's data correctly. The trap is only about keeping the slab object itself across iterations.
 
@@ -209,5 +209,5 @@ m.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 
 ```ruby
 rows = []
-m.each_slab(axis: 1) { |row| rows << row.dup }
+m.each_slab(axis: 1) { |row| rows << row.copy }
 ```
