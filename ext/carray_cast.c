@@ -38,6 +38,341 @@
 #include "ruby/util.h"            /* ruby_strtod */
 #include <math.h>
 
+/* ------------------------------------------------------------------------
+   Reading numbers from strings
+
+   A String stored into, or converted to, an integer or float array is data,
+   not a Ruby literal, so it is read as a decimal number rather than through
+   Integer() / Float():
+
+     number    [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
+                     ( [eE] [+-]? digit+ )?
+     float     number | nan | inf | infinity     (any case, optional sign)
+
+   Surrounding ASCII whitespace is ignored.  "010" is ten, never octal, and
+   "0x1F" / "1_000" / "0b11" are not numbers.  An integer target takes a
+   number whose value is exactly an integer ("1.0", "1e3", "2.50e1"), decided
+   from the digits rather than through a double, so a long integer is not
+   rounded; "1.5" is not an integer.
+
+   to_type makes a string that does not read, or an integer the target type
+   cannot hold, UNDEF; a store raises (ArgumentError / RangeError).
+   ------------------------------------------------------------------------ */
+
+static int ca_str_nonfinite (const char *str, double *out);
+
+enum {
+  CA_DECIMAL_OK = 0,
+  CA_DECIMAL_BLANK,
+  CA_DECIMAL_UNREADABLE,
+  CA_DECIMAL_OUT_OF_RANGE
+};
+
+static int
+ca_decimal_is_space (char c)
+{
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+         || c == '\v' || c == '\f';
+}
+
+static void
+ca_decimal_trim (const char **str, long *len)
+{
+  const char *s = *str;
+  long n = *len;
+  while ( n > 0 && ca_decimal_is_space(s[0]) ) {
+    s++;
+    n--;
+  }
+  while ( n > 0 && ca_decimal_is_space(s[n-1]) ) {
+    n--;
+  }
+  *str = s;
+  *len = n;
+}
+
+/* A decimal number whose value is exactly an integer, into a sign and a
+   magnitude.  The digits are read with the decimal point moved by the
+   exponent: those left of it form the magnitude, those right of it must all
+   be zero.  Returns CA_DECIMAL_OK, CA_DECIMAL_UNREADABLE, or
+   CA_DECIMAL_OUT_OF_RANGE for a magnitude beyond uint64. */
+static int
+ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
+{
+  long i = 0, int_start, int_end, frac_start, frac_end;
+  long nint, total, point, exponent = 0, k;
+  int exponent_negative = 0;
+  uint64_t v = 0;
+  *negative = 0;
+  if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+    *negative = ( s[i] == '-' );
+    i++;
+  }
+  int_start = i;
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+  }
+  int_end = frac_start = frac_end = i;
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    frac_start = i;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+    }
+    frac_end = i;
+  }
+  nint  = int_end - int_start;
+  total = nint + ( frac_end - frac_start );
+  if ( total == 0 ) {
+    return CA_DECIMAL_UNREADABLE;
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      exponent_negative = ( s[i] == '-' );
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      if ( exponent < 1000000 ) {            /* saturate; far past any fit */
+        exponent = exponent * 10 + ( s[i] - '0' );
+      }
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
+      return CA_DECIMAL_UNREADABLE;
+    }
+    if ( exponent_negative ) {
+      exponent = - exponent;
+    }
+  }
+  if ( i != n ) {
+    return CA_DECIMAL_UNREADABLE;
+  }
+  point = nint + exponent;
+  for (k = 0; k < total; k++) {
+    char c = ( k < nint ) ? s[int_start + k] : s[frac_start + k - nint];
+    unsigned d = (unsigned) ( c - '0' );
+    if ( k >= point ) {
+      if ( d != 0 ) {
+        return CA_DECIMAL_UNREADABLE;       /* a fractional part */
+      }
+      continue;
+    }
+    if ( v > ( UINT64_MAX - d ) / 10 ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    v = v * 10 + d;
+  }
+  for (k = total; k < point && v != 0; k++) {
+    if ( v > UINT64_MAX / 10 ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    v *= 10;
+  }
+  *magnitude = v;
+  return CA_DECIMAL_OK;
+}
+
+static int
+ca_decimal_float (const char *s, long n, double *out)
+{
+  char buf[64];
+  long i = 0, digits = 0;
+  if ( n == 0 ) {
+    return 0;
+  }
+  if ( n <= 9 ) {            /* the longest non-finite word is "+infinity" */
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    if ( ca_str_nonfinite(buf, out) ) {
+      return 1;
+    }
+  }
+  if ( s[i] == '+' || s[i] == '-' ) {
+    i++;
+  }
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+    digits++;
+  }
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      digits++;
+    }
+  }
+  if ( digits == 0 ) {
+    return 0;
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
+      return 0;
+    }
+  }
+  if ( i != n ) {
+    return 0;
+  }
+  /* The token is validated, so ruby_strtod (locale-independent, correctly
+     rounded) sees nothing but a decimal number. */
+  if ( n < (long) sizeof(buf) ) {
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    *out = ruby_strtod(buf, NULL);
+  }
+  else {
+    volatile VALUE token = rb_str_new(s, n);
+    *out = ruby_strtod(RSTRING_PTR(token), NULL);
+  }
+  return 1;
+}
+
+static int
+ca_decimal_fits (int8_t data_type, int negative, uint64_t magnitude)
+{
+  uint64_t positive_max, negative_max;
+  switch ( data_type ) {
+  case CA_INT8:   positive_max = INT8_MAX;   negative_max = (uint64_t) INT8_MAX + 1;  break;
+  case CA_INT16:  positive_max = INT16_MAX;  negative_max = (uint64_t) INT16_MAX + 1; break;
+  case CA_INT32:  positive_max = INT32_MAX;  negative_max = (uint64_t) INT32_MAX + 1; break;
+  case CA_INT64:  positive_max = INT64_MAX;  negative_max = (uint64_t) INT64_MAX + 1; break;
+  case CA_UINT8:  positive_max = UINT8_MAX;  negative_max = 0; break;
+  case CA_UINT16: positive_max = UINT16_MAX; negative_max = 0; break;
+  case CA_UINT32: positive_max = UINT32_MAX; negative_max = 0; break;
+  case CA_UINT64: positive_max = UINT64_MAX; negative_max = 0; break;
+  default:
+    return 0;
+  }
+  return negative ? ( magnitude <= negative_max ) : ( magnitude <= positive_max );
+}
+
+/* Store a value that ca_decimal_fits accepted. */
+static void
+ca_decimal_store_integer (int8_t data_type, char *ptr, ca_size_t i,
+                          int negative, uint64_t magnitude)
+{
+  int64_t v;
+  if ( negative && magnitude > 0 ) {
+    v = - (int64_t) ( magnitude - 1 ) - 1;
+  }
+  else {
+    v = (int64_t) magnitude;
+  }
+  switch ( data_type ) {
+  case CA_INT8:   ((int8_t *)   ptr)[i] = (int8_t) v;   break;
+  case CA_INT16:  ((int16_t *)  ptr)[i] = (int16_t) v;  break;
+  case CA_INT32:  ((int32_t *)  ptr)[i] = (int32_t) v;  break;
+  case CA_INT64:  ((int64_t *)  ptr)[i] = v;            break;
+  case CA_UINT8:  ((uint8_t *)  ptr)[i] = (uint8_t) magnitude;  break;
+  case CA_UINT16: ((uint16_t *) ptr)[i] = (uint16_t) magnitude; break;
+  case CA_UINT32: ((uint32_t *) ptr)[i] = (uint32_t) magnitude; break;
+  case CA_UINT64: ((uint64_t *) ptr)[i] = magnitude;            break;
+  }
+}
+
+/* A non-String cell as an integer: an Integer, or a Float with no
+   fractional part, that the target can hold. */
+static int
+ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
+{
+  if ( RB_INTEGER_TYPE_P(v) ) {
+    VALUE zero = INT2FIX(0);
+    *negative = RTEST(rb_funcall(v, '<', 1, zero));
+    if ( *negative ) {
+      v = rb_funcall(v, rb_intern("-@"), 0);
+    }
+    if ( RTEST(rb_funcall(v, '>', 1, ULL2NUM(UINT64_MAX))) ) {
+      return 0;
+    }
+    *magnitude = NUM2ULL(v);
+    return 1;
+  }
+  if ( RB_FLOAT_TYPE_P(v) ) {
+    double d = RFLOAT_VALUE(v);
+    if ( d != d || d != floor(d) || fabs(d) >= 18446744073709551616.0 ) {
+      return 0;
+    }
+    *negative = ( d < 0 );
+    *magnitude = (uint64_t) fabs(d);
+    return 1;
+  }
+  return 0;
+}
+
+/* A String as one value of data_type (an integer or float type), written
+   to out. */
+static int
+ca_decimal_string_read (VALUE str, int8_t data_type, void *out)
+{
+  const char *s = RSTRING_PTR(str);
+  long n = RSTRING_LEN(str);
+  ca_decimal_trim(&s, &n);
+  if ( n == 0 ) {
+    return CA_DECIMAL_BLANK;
+  }
+  if ( data_type == CA_FLOAT32 || data_type == CA_FLOAT64 ) {
+    double d;
+    if ( ! ca_decimal_float(s, n, &d) ) {
+      return CA_DECIMAL_UNREADABLE;
+    }
+    if ( data_type == CA_FLOAT32 ) {
+      *(float32_t *) out = (float32_t) d;
+    }
+    else {
+      *(float64_t *) out = d;
+    }
+    return CA_DECIMAL_OK;
+  }
+  else {
+    int negative = 0;
+    uint64_t magnitude = 0;
+    int rc = ca_decimal_integer(s, n, &negative, &magnitude);
+    if ( rc != CA_DECIMAL_OK ) {
+      return rc;
+    }
+    if ( ! ca_decimal_fits(data_type, negative, magnitude) ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    ca_decimal_store_integer(data_type, (char *) out, 0, negative, magnitude);
+    return CA_DECIMAL_OK;
+  }
+}
+
+/* The to_type reader: 1 with the value at out, or 0 for a cell that
+   becomes UNDEF. */
+int
+ca_decimal_string_to (VALUE str, int8_t data_type, void *out)
+{
+  return ca_decimal_string_read(str, data_type, out) == CA_DECIMAL_OK;
+}
+
+/* The store reader: the value at out, or a raise. */
+void
+ca_decimal_string_store (VALUE str, int8_t data_type, void *out)
+{
+  switch ( ca_decimal_string_read(str, data_type, out) ) {
+  case CA_DECIMAL_OK:
+    return;
+  case CA_DECIMAL_OUT_OF_RANGE:
+    rb_raise(rb_eRangeError, "%+"PRIsVALUE" is out of range for %s",
+             str, ca_type_name[data_type]);
+  default:
+    rb_raise(rb_eArgError, "%+"PRIsVALUE" cannot be read as %s",
+             str, ca_type_name[data_type]);
+  }
+}
+
 boolean8_t
 OBJ2BOOL (VALUE v)
 {
@@ -104,23 +439,18 @@ OBJ2DBL (VALUE val)
     return NUM2DBL(val);
   case T_STRING: {
     double d;
-    volatile VALUE rstr = rb_funcall(val, rb_intern("strip"), 0);
-    char *str = StringValuePtr(rstr);
-    if ( ca_str_nonfinite(str, &d) ) {
-      return d;
-    }
-    /* As Float(): a string that is not a number raises, as storing one
-       into an integer array does through Integer(). */
-    return NUM2DBL(rb_Float(rstr));
+    ca_decimal_string_store(val, CA_FLOAT64, &d);
+    return d;
   }
   default:
     return NUM2DBL(rb_Float(val));
   }
 }
 
-/* rb_protect bodies: Kernel#Float / Kernel#Integer applied to one value.
-   Used by the mask-aware object->numeric parsers below so a conversion
-   error is caught (and turned into a masked cell) rather than raised. */
+/* rb_protect bodies: Kernel#Float / Kernel#Integer applied to one value
+   that is not a String.  Used by the mask-aware object->numeric parsers
+   below so a conversion error is caught (and turned into a masked cell)
+   rather than raised. */
 static VALUE
 ca_kernel_float (VALUE v)
 {
@@ -133,34 +463,28 @@ ca_kernel_integer (VALUE v)
   return rb_Integer(v);
 }
 
+/* A real is read as a decimal number; anything else goes to Complex(). */
 double complex
 ca_str_to_cmplx (VALUE str)
 {
-  volatile VALUE rstr = rb_funcall(str, rb_intern("strip"), 0);
+  volatile VALUE rstr;
   volatile VALUE c;
   double d;
-  int state = 0;
-  if ( ca_str_nonfinite(StringValuePtr(rstr), &d) ) {
+  if ( ca_decimal_string_to(str, CA_FLOAT64, &d) ) {
     return (double complex) d;
   }
-  c = rb_protect(ca_kernel_float, rstr, &state);
-  if ( ! state ) {
-    return (double complex) NUM2DBL(c);
-  }
-  rb_set_errinfo(Qnil);
+  rstr = rb_funcall(str, rb_intern("strip"), 0);
   c = rb_funcall(rb_mKernel, rb_intern("Complex"), 1, rstr);
   return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
 }
 
 /* Object -> double with parse-failure signalling.  Returns 1 and sets *out
    on success; returns 0 when the cell cannot be parsed, in which case the
-   caller writes UNDEF (mask) for that cell.  nil and unparseable
-   strings/objects fail; already-numeric values and explicit nan/inf
-   literals succeed.  This is the reading path of to_type from an object
-   array, where a cell with no number in it is a missing value; a store
-   (OBJ2DBL) raises for nil instead.  Strictness mirrors Ruby Float()
-   (whitespace strip, "1e3" ok, ...) but a bad token masks instead of
-   raising. */
+   caller writes UNDEF (mask) for that cell.  nil and unreadable
+   strings/objects fail; already-numeric values succeed, and a String is
+   read as a decimal number.  This is the reading path of to_type from an
+   object array, where a cell with no number in it is a missing value; a
+   store (OBJ2DBL) raises instead. */
 int
 ca_obj2dbl_ok (VALUE val, double *out)
 {
@@ -172,10 +496,7 @@ ca_obj2dbl_ok (VALUE val, double *out)
     return 1;
   }
   if ( RB_TYPE_P(val, T_STRING) ) {
-    volatile VALUE rstr = rb_funcall(val, rb_intern("strip"), 0);
-    if ( ca_str_nonfinite(StringValuePtr(rstr), out) ) {
-      return 1;
-    }
+    return ca_decimal_string_to(val, CA_FLOAT64, out);
   }
   {
     int state = 0;
@@ -190,8 +511,8 @@ ca_obj2dbl_ok (VALUE val, double *out)
 }
 
 /* Object -> complex with parse-failure signalling: the complex sibling of
-   ca_obj2dbl_ok.  A cell is read as a store reads it (a real as Float(),
-   the rest as Complex()); nil and a cell that does not read fail. */
+   ca_obj2dbl_ok.  A cell is read as a store reads it (a real as a decimal
+   number, the rest as Complex()); nil and a cell that does not read fail. */
 static VALUE
 ca_cmplx_cell_body (VALUE v)
 {
@@ -216,98 +537,91 @@ ca_obj2cmplx_ok (VALUE val, double complex *out)
   return 1;
 }
 
-/* Object -> integer with parse-failure signalling (int/long lane).  Same
-   contract as ca_obj2dbl_ok: 1 + *out on success, 0 (mask) on failure.
-   Strictness mirrors Ruby Integer() -- a non-integer string ("1.5") fails
-   (no truncation), nil fails, "0xff"/"1_000" parse.  A valid Integer that
-   overflows the widest C integer still raises (a domain error, not a parse
-   failure). */
-int
-rb_obj2long_ok (VALUE val, long *out)
+/* Object -> integer with parse-failure signalling.  Same contract as
+   ca_obj2dbl_ok: 1 + *out on success, 0 (mask) on failure.  A String is
+   read as a decimal number ("1.5" fails, no truncation); any other object
+   goes through Integer().  nil fails.  A valid Integer that overflows the
+   widest C integer still raises (a domain error, not a parse failure). */
+static int
+ca_obj2integer_ok (VALUE val, int8_t wide_type, void *wide, VALUE *integer)
 {
+  int state = 0;
   if ( NIL_P(val) ) {
     return 0;
   }
+  if ( RB_TYPE_P(val, T_STRING) ) {
+    return ca_decimal_string_to(val, wide_type, wide);
+  }
+  *integer = rb_protect(ca_kernel_integer, val, &state);
+  if ( state ) {
+    rb_set_errinfo(Qnil);
+    return 0;
+  }
+  return 1;
+}
+
+int
+rb_obj2long_ok (VALUE val, long *out)
+{
+  int64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2LONG(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2LONG(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (long) wide : NUM2LONG(integer);
+  return 1;
 }
 
 int
 rb_obj2ulong_ok (VALUE val, unsigned long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  uint64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2ULONG(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2ULONG(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (unsigned long) wide : NUM2ULONG(integer);
+  return 1;
 }
 
 int
 rb_obj2ll_ok (VALUE val, long long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  int64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2LL(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2LL(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (long long) wide : NUM2LL(integer);
+  return 1;
 }
 
 int
 rb_obj2ull_ok (VALUE val, unsigned long long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  uint64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2ULL(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = rb_num2ull(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (unsigned long long) wide : rb_num2ull(integer);
+  return 1;
 }
 
 long
@@ -321,6 +635,11 @@ rb_obj2long (VALUE val)
   case T_NIL:
     rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    int64_t v;
+    ca_decimal_string_store(val, CA_INT64, &v);
+    return (long) v;
+  }
   default:
     return NUM2LONG(rb_Integer(val));
   }
@@ -337,6 +656,11 @@ rb_obj2ulong (VALUE val)
   case T_NIL:
     rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    uint64_t v;
+    ca_decimal_string_store(val, CA_UINT64, &v);
+    return (unsigned long) v;
+  }
   default:
     return NUM2ULONG(rb_Integer(val));
   }
@@ -351,6 +675,11 @@ rb_obj2ll (VALUE val)
   case T_NIL:
     rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    int64_t v;
+    ca_decimal_string_store(val, CA_INT64, &v);
+    return (long long) v;
+  }
   default:
     return NUM2LL(rb_Integer(val));
   }
@@ -365,6 +694,11 @@ rb_obj2ull (VALUE val)
   case T_NIL:
     rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    uint64_t v;
+    ca_decimal_string_store(val, CA_UINT64, &v);
+    return (unsigned long long) v;
+  }
   default:
     return rb_num2ull(rb_Integer(val));
   }
@@ -2456,271 +2790,6 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
   }
 }
 
-/* ------------------------------------------------------------------------
-   Reading numbers from table text
-
-   A cell of a CSV file is data, not a Ruby literal, so it is read as a
-   decimal number rather than through Integer() / Float():
-
-     number    [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
-                     ( [eE] [+-]? digit+ )?
-     float     number | nan | inf | infinity     (any case, optional sign)
-
-   Surrounding ASCII whitespace is ignored.  "010" is ten, never octal, and
-   "0x1F" / "1_000" / "0b11" are not numbers.  An integer target takes a
-   number whose value is exactly an integer ("1.0", "1e3", "2.50e1"), decided
-   from the digits rather than through a double, so a long integer is not
-   rounded; "1.5" is not an integer.  A cell that does not read, or an
-   integer the target type cannot hold, becomes UNDEF.
-
-   A cell that is not a String (an Integer or Float from a record) is taken
-   as a number when it is one the target can hold exactly: an Integer that
-   fits, or for an integer target a Float with no fractional part.  nil and
-   anything else become UNDEF.
-   ------------------------------------------------------------------------ */
-
-static int
-ca_decimal_is_space (char c)
-{
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-         || c == '\v' || c == '\f';
-}
-
-static void
-ca_decimal_trim (const char **str, long *len)
-{
-  const char *s = *str;
-  long n = *len;
-  while ( n > 0 && ca_decimal_is_space(s[0]) ) {
-    s++;
-    n--;
-  }
-  while ( n > 0 && ca_decimal_is_space(s[n-1]) ) {
-    n--;
-  }
-  *str = s;
-  *len = n;
-}
-
-/* A decimal number whose value is exactly an integer, into a sign and a
-   magnitude.  The digits are read with the decimal point moved by the
-   exponent: those left of it form the magnitude, those right of it must all
-   be zero.  A magnitude beyond uint64 does not fit any target and fails
-   like a non-number. */
-static int
-ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
-{
-  long i = 0, int_start, int_end, frac_start, frac_end;
-  long nint, total, point, exponent = 0, k;
-  int exponent_negative = 0;
-  uint64_t v = 0;
-  *negative = 0;
-  if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
-    *negative = ( s[i] == '-' );
-    i++;
-  }
-  int_start = i;
-  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-    i++;
-  }
-  int_end = frac_start = frac_end = i;
-  if ( i < n && s[i] == '.' ) {
-    i++;
-    frac_start = i;
-    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-      i++;
-    }
-    frac_end = i;
-  }
-  nint  = int_end - int_start;
-  total = nint + ( frac_end - frac_start );
-  if ( total == 0 ) {
-    return 0;
-  }
-  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
-    long exponent_digits = 0;
-    i++;
-    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
-      exponent_negative = ( s[i] == '-' );
-      i++;
-    }
-    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-      if ( exponent < 1000000 ) {            /* saturate; far past any fit */
-        exponent = exponent * 10 + ( s[i] - '0' );
-      }
-      i++;
-      exponent_digits++;
-    }
-    if ( exponent_digits == 0 ) {
-      return 0;
-    }
-    if ( exponent_negative ) {
-      exponent = - exponent;
-    }
-  }
-  if ( i != n ) {
-    return 0;
-  }
-  point = nint + exponent;
-  for (k = 0; k < total; k++) {
-    char c = ( k < nint ) ? s[int_start + k] : s[frac_start + k - nint];
-    unsigned d = (unsigned) ( c - '0' );
-    if ( k >= point ) {
-      if ( d != 0 ) {
-        return 0;                            /* a fractional part */
-      }
-      continue;
-    }
-    if ( v > ( UINT64_MAX - d ) / 10 ) {
-      return 0;
-    }
-    v = v * 10 + d;
-  }
-  for (k = total; k < point && v != 0; k++) {
-    if ( v > UINT64_MAX / 10 ) {
-      return 0;
-    }
-    v *= 10;
-  }
-  *magnitude = v;
-  return 1;
-}
-
-static int
-ca_decimal_float (const char *s, long n, double *out)
-{
-  char buf[64];
-  long i = 0, digits = 0;
-  if ( n == 0 ) {
-    return 0;
-  }
-  if ( n <= 9 ) {            /* the longest non-finite word is "+infinity" */
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    if ( ca_str_nonfinite(buf, out) ) {
-      return 1;
-    }
-  }
-  if ( s[i] == '+' || s[i] == '-' ) {
-    i++;
-  }
-  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-    i++;
-    digits++;
-  }
-  if ( i < n && s[i] == '.' ) {
-    i++;
-    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-      i++;
-      digits++;
-    }
-  }
-  if ( digits == 0 ) {
-    return 0;
-  }
-  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
-    long exponent_digits = 0;
-    i++;
-    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
-      i++;
-    }
-    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
-      i++;
-      exponent_digits++;
-    }
-    if ( exponent_digits == 0 ) {
-      return 0;
-    }
-  }
-  if ( i != n ) {
-    return 0;
-  }
-  /* The token is validated, so ruby_strtod (locale-independent, correctly
-     rounded) sees nothing but a decimal number. */
-  if ( n < (long) sizeof(buf) ) {
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    *out = ruby_strtod(buf, NULL);
-  }
-  else {
-    volatile VALUE token = rb_str_new(s, n);
-    *out = ruby_strtod(RSTRING_PTR(token), NULL);
-  }
-  return 1;
-}
-
-static int
-ca_decimal_fits (int8_t data_type, int negative, uint64_t magnitude)
-{
-  uint64_t positive_max, negative_max;
-  switch ( data_type ) {
-  case CA_INT8:   positive_max = INT8_MAX;   negative_max = (uint64_t) INT8_MAX + 1;  break;
-  case CA_INT16:  positive_max = INT16_MAX;  negative_max = (uint64_t) INT16_MAX + 1; break;
-  case CA_INT32:  positive_max = INT32_MAX;  negative_max = (uint64_t) INT32_MAX + 1; break;
-  case CA_INT64:  positive_max = INT64_MAX;  negative_max = (uint64_t) INT64_MAX + 1; break;
-  case CA_UINT8:  positive_max = UINT8_MAX;  negative_max = 0; break;
-  case CA_UINT16: positive_max = UINT16_MAX; negative_max = 0; break;
-  case CA_UINT32: positive_max = UINT32_MAX; negative_max = 0; break;
-  case CA_UINT64: positive_max = UINT64_MAX; negative_max = 0; break;
-  default:
-    return 0;
-  }
-  return negative ? ( magnitude <= negative_max ) : ( magnitude <= positive_max );
-}
-
-/* Store a value that ca_decimal_fits accepted. */
-static void
-ca_decimal_store_integer (int8_t data_type, char *ptr, ca_size_t i,
-                          int negative, uint64_t magnitude)
-{
-  int64_t v;
-  if ( negative && magnitude > 0 ) {
-    v = - (int64_t) ( magnitude - 1 ) - 1;
-  }
-  else {
-    v = (int64_t) magnitude;
-  }
-  switch ( data_type ) {
-  case CA_INT8:   ((int8_t *)   ptr)[i] = (int8_t) v;   break;
-  case CA_INT16:  ((int16_t *)  ptr)[i] = (int16_t) v;  break;
-  case CA_INT32:  ((int32_t *)  ptr)[i] = (int32_t) v;  break;
-  case CA_INT64:  ((int64_t *)  ptr)[i] = v;            break;
-  case CA_UINT8:  ((uint8_t *)  ptr)[i] = (uint8_t) magnitude;  break;
-  case CA_UINT16: ((uint16_t *) ptr)[i] = (uint16_t) magnitude; break;
-  case CA_UINT32: ((uint32_t *) ptr)[i] = (uint32_t) magnitude; break;
-  case CA_UINT64: ((uint64_t *) ptr)[i] = magnitude;            break;
-  }
-}
-
-/* A non-String cell as an integer: an Integer, or a Float with no
-   fractional part, that the target can hold. */
-static int
-ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
-{
-  if ( RB_INTEGER_TYPE_P(v) ) {
-    VALUE zero = INT2FIX(0);
-    *negative = RTEST(rb_funcall(v, '<', 1, zero));
-    if ( *negative ) {
-      v = rb_funcall(v, rb_intern("-@"), 0);
-    }
-    if ( RTEST(rb_funcall(v, '>', 1, ULL2NUM(UINT64_MAX))) ) {
-      return 0;
-    }
-    *magnitude = NUM2ULL(v);
-    return 1;
-  }
-  if ( RB_FLOAT_TYPE_P(v) ) {
-    double d = RFLOAT_VALUE(v);
-    if ( d != d || d != floor(d) || fabs(d) >= 18446744073709551616.0 ) {
-      return 0;
-    }
-    *negative = ( d < 0 );
-    *magnitude = (uint64_t) fabs(d);
-    return 1;
-  }
-  return 0;
-}
-
 static VALUE
 rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 {
@@ -2770,49 +2839,36 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 
   for (i = 0; i < ca->elements; i++) {
     VALUE v = cells[i];
+    char *cell = co->ptr + i * co->bytes;
     int ok = 0;
     int missing = ( m_in && m_in[i] ) || NIL_P(v);
     if ( missing ) {
       ok = 0;
     }
+    else if ( RB_TYPE_P(v, T_STRING) ) {
+      int rc = ca_decimal_string_read(v, data_type, cell);
+      missing = ( rc == CA_DECIMAL_BLANK );
+      ok = ( rc == CA_DECIMAL_OK );
+    }
     else if ( is_float ) {
-      double d = 0.0;
-      if ( RB_TYPE_P(v, T_STRING) ) {
-        const char *s = RSTRING_PTR(v);
-        long n = RSTRING_LEN(v);
-        ca_decimal_trim(&s, &n);
-        missing = ( n == 0 );
-        ok = ca_decimal_float(s, n, &d);
-      }
-      else if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) ) {
-        d = NUM2DBL(v);
-        ok = 1;
-      }
-      if ( ok ) {
+      if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) ) {
+        double d = NUM2DBL(v);
         if ( data_type == CA_FLOAT32 ) {
-          ((float32_t *) co->ptr)[i] = (float32_t) d;
+          *(float32_t *) cell = (float32_t) d;
         }
         else {
-          ((float64_t *) co->ptr)[i] = d;
+          *(float64_t *) cell = d;
         }
+        ok = 1;
       }
     }
     else {
       int negative = 0;
       uint64_t magnitude = 0;
-      if ( RB_TYPE_P(v, T_STRING) ) {
-        const char *s = RSTRING_PTR(v);
-        long n = RSTRING_LEN(v);
-        ca_decimal_trim(&s, &n);
-        missing = ( n == 0 );
-        ok = ca_decimal_integer(s, n, &negative, &magnitude);
-      }
-      else {
-        ok = ca_decimal_object_integer(v, &negative, &magnitude);
-      }
-      ok = ok && ca_decimal_fits(data_type, negative, magnitude);
+      ok = ca_decimal_object_integer(v, &negative, &magnitude)
+           && ca_decimal_fits(data_type, negative, magnitude);
       if ( ok ) {
-        ca_decimal_store_integer(data_type, co->ptr, i, negative, magnitude);
+        ca_decimal_store_integer(data_type, cell, 0, negative, magnitude);
       }
     }
     m_out[i] = ok ? 0 : 1;

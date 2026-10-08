@@ -176,6 +176,7 @@ puts %{
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_decimal_string_to / _store */
 
 static void __attribute__((noreturn))
 ca_cast_not_implemented(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
@@ -469,6 +470,21 @@ OBJECT.each do |type1|
       conv_ok = obj2cval_ok[type2]
       conv    = obj2cval[type2]
       oktype2 = oktype[type2]
+      # A String cell of an integer or float target is read as a decimal
+      # number (ca_decimal_string_to / _store in carray_cast.c), not as a
+      # Ruby literal. Complex keeps its own reader.
+      if (INTEGER+FLOAT).include?(type2)
+        type_name = "CA_" + ctype2.sub(/_t\z/, "").upcase
+        read_ok   = "( RB_TYPE_P(*p1, T_STRING) ? " \
+                    "ca_decimal_string_to(*p1, #{type_name}, p2) : " \
+                    "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
+        read      = "if ( RB_TYPE_P(*p1, T_STRING) ) { " \
+                    "ca_decimal_string_store(*p1, #{type_name}, p2); } " \
+                    "else { *p2 = (#{ctype2}) #{conv}(*p1); }"
+      else
+        read_ok   = "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 )"
+        read      = "*p2 = (#{ctype2}) #{conv}(*p1);"
+      end
       puts <<-END_DEF  .gsub(/^ {6}/, '')
         static void
         ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
@@ -478,20 +494,15 @@ OBJECT.each do |type1|
            #{oktype2} tmp;
            if ( m ) {
              while ( n-- ) {
-               if ( !*m ) {
-                 if ( #{conv_ok}(*p1, &tmp) ) {
-                   *p2 = (#{ctype2}) tmp;
-                 }
-                 else {
-                   *m = 1;
-                   *p2 = 0;
-                 }
+               if ( !*m && ! #{read_ok} ) {
+                 *m = 1;
+                 *p2 = 0;
                }
                p1++; p2++; m++;
              }
            }
            else {
-             while ( n-- ) { *p2 = (#{ctype2}) #{conv}(*p1); p1++; p2++; }
+             while ( n-- ) { #{read} p1++; p2++; }
            }
            return;
         }

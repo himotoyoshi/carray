@@ -41,14 +41,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   type. `:mask` (the default) makes them `UNDEF` as before; `:warn` also
   warns once per column; `:raise` raises `ArgumentError` naming the column,
   the row and the cell. Blank and missing cells are never errors.
-- Change: `CAFrame#cast`, and so `CAFrame.from_csv(types:)`, reads a text
-  column into an integer or float type as decimal numbers rather than as
-  Ruby literals. `"010"` is now 10 (it was 8, read as octal), and `"0x1F"`,
-  `"1_000"` and `"0b11"` are now `UNDEF` instead of numbers. An integer type
-  now takes a number whose value is exactly an integer (`"1.0"`, `"1e3"`),
-  which was `UNDEF`; `"1.5"` is still `UNDEF`. A value the type cannot hold
-  (`"300"` into `:int8`) is now `UNDEF` instead of being wrapped.
-  `CArray#to_type` is unchanged.
+- Change: A String stored into, or converted to, an integer or float array
+  is read as a decimal number rather than as a Ruby literal. This covers
+  `to_type`, `[]=`, `fill`, the constructors (`CA_INT32([...])`) and
+  `CAFrame#cast` / `CAFrame.from_csv(types:)`. `"010"` is now 10 (it was 8,
+  read as octal, while the same string converted to float was 10.0), and
+  `"0x10"`, `"1_000"` and `"0b11"` are no longer numbers: `UNDEF` from
+  `to_type`, `ArgumentError` from a store. An integer type now takes a
+  string whose value is exactly an integer (`"1.0"`, `"1e3"`); `"1.5"` is
+  still refused. A string integer the type cannot hold (`"300"` into
+  `:int8`) is now `UNDEF` from `to_type` and `RangeError` from a store,
+  instead of being wrapped. Numbers that are not strings convert as
+  before, and a complex type still reads `"1+2i"`.
 
 - Fix: `fma` and `fms` on float32 now round once, as their documentation
   says. They computed in double and narrowed the result, a second rounding
