@@ -15,6 +15,8 @@
 #include "carray_internal.h"   /* ca_attach_window */
 
 #include "ruby/io.h"
+#include "ruby/util.h"            /* ruby_strtod */
+#include <math.h>
 
 /* to_a dispatch:
      numeric / boolean data type + entity or attach-able view -> fast path
@@ -533,6 +535,82 @@ rb_ca_load_binary (VALUE self, VALUE io)
   return self;
 }
 
+/* The double nearest to the shortest decimal that reads back as x, the
+   float32 value, as from_csv reads text into float32: strtod, then the cast
+   to float.  Its digits are those of the decimal (at most 9, which a double
+   holds), so Float#to_s writes them. */
+static double
+ca_float32_shortest (float x)
+{
+  char buf[32];
+  int lo = 1, hi = 9;
+  double best;
+  if ( isnan(x) || isinf(x) ) {
+    return (double) x;
+  }
+  /* Nine significant digits always read back; search for the fewest.  More
+     digits round closer to x, so the digit counts that read back are those
+     from some count up. */
+  best = 0.0;
+  while ( lo < hi ) {
+    int mid = (lo + hi) / 2;
+    double d;
+    snprintf(buf, sizeof(buf), "%.*e", mid - 1, (double) x);
+    d = ruby_strtod(buf, NULL);
+    if ( (float) d == x ) {
+      best = d;
+      hi = mid;
+    }
+    else {
+      lo = mid + 1;
+    }
+  }
+  if ( lo == 9 ) {
+    snprintf(buf, sizeof(buf), "%.8e", (double) x);
+    best = ruby_strtod(buf, NULL);
+  }
+  return best;
+}
+
+/* float32 -> float64 and cmplx64 -> cmplx128, each value replaced by the
+   double its shortest decimal reads as, for to_csv to write that decimal.
+   The mask is kept. */
+static VALUE
+rb_ca_shortest_float64 (VALUE self)
+{
+  volatile VALUE out, holder = 0;
+  CArray *ca, *co;
+  ca_size_t i, n;
+  int8_t type;
+
+  GetCArray(self, ca);
+  if ( ca->data_type == CA_FLOAT32 ) {
+    type = CA_FLOAT64;
+  }
+  else if ( ca->data_type == CA_CMPLX64 ) {
+    type = CA_CMPLX128;
+  }
+  else {
+    rb_raise(rb_eCADataTypeError, "__shortest_float64__ takes float32 or cmplx64");
+  }
+  n = ca->elements * (ca->data_type == CA_CMPLX64 ? 2 : 1);
+  out = rb_carray_new_safe(type, ca->ndim, ca->dim, 0, NULL);
+  GetCArray(out, co);
+  {
+    float *src = ALLOCV_N(float, holder, n > 0 ? n : 1);
+    double *dst = (double *) co->ptr;
+    ca_copy_data(ca, (char *) src);
+    for (i = 0; i < n; i++) {
+      dst[i] = ca_float32_shortest(src[i]);
+    }
+    ALLOCV_END(holder);
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask_overlay(co, co->elements, 1, ca);
+  }
+  return out;
+}
+
 /* [MOVED] str_format (2.0-era per-element formatter) is replaced by the Ruby
    CArray#format / CArray.format surface in lib/carray/methods/string_format.rb,
    which yields a CAString. */
@@ -549,6 +627,7 @@ Init_carray_conversion (void)
   rb_define_method(rb_cCArray, "dump_binary", rb_ca_dump_binary, -1);
   rb_define_method(rb_cCArray, "to_s", rb_ca_to_s, 0);
   rb_define_method(rb_cCArray, "load_binary", rb_ca_load_binary, 1);
+  rb_define_method(rb_cCArray, "__shortest_float64__", rb_ca_shortest_float64, 0);
 
   /* CAREFUL: do not bind #to_ary — implicit array coercion in Ruby core
      (splat / multiple assignment / Array()) then triggers on any CArray

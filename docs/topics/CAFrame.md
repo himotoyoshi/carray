@@ -939,6 +939,11 @@ containing the separator, a quote, or a newline are quoted with internal quotes
 doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
 `index` default to true.
 
+A float32 value is written as the shortest decimal that reads back as the
+same float32 (`0.1`, not `0.10000000149011612`, the double it widens to), and
+so is each part of a cmplx64 one; reading the file with `types:` of
+`:float32` gives the values back bit for bit.
+
 `encoding:` transcodes the text before it is written or returned; left out,
 the CSV is UTF-8. A character the encoding cannot hold raises
 `Encoding::UndefinedConversionError` instead of being dropped, naming the

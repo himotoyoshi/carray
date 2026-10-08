@@ -521,6 +521,12 @@ class CAFrame
   end
 
   private def format_csv_column(col)
+    # A float32 value goes out as its own shortest decimal ("0.1"), which
+    # from_csv reads back as the same value, not as the double it widens
+    # to ("0.10000000149011612"); cmplx64 has that in each part.
+    if !col.face? && (col.data_type == CA_FLOAT32 || col.data_type == CA_CMPLX64)
+      col = col.__shortest_float64__
+    end
     col.to_a.map do |e|
       if UNDEF.equal?(e) || e.nil?
         nil

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CAFrame#to_csv` writes a float32 value as the shortest decimal
+  that reads back as the same float32 (`0.1` rather than
+  `0.10000000149011612`), and each part of a cmplx64 value likewise.
+  Reading the file back as `:float32` gives the same values as before; read
+  as float64, it gives the decimal, not the widened double.
 - Change: `CAFrame#to_csv` names the row and the column of a cell it cannot
   write, as `to_csv: row 1500 of "s" ("東😀"): "😀" (U+1F600) cannot be
   written in CP932`. A String cell in another encoding is now transcoded to

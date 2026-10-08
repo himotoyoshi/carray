@@ -482,6 +482,28 @@ class TestCAFrameToCsv < Test::Unit::TestCase
     assert_equal Encoding::UTF_8, df.to_csv.encoding
   end
 
+  # A float32 value used to be written as the double it widens to.
+  def test_float32_is_written_as_its_shortest_decimal
+    f = CA_FLOAT32([0.1, 1.0 / 3, 23.5, -0.0, 1e-30, 3.4028234663852886e+38, Float::NAN, Float::INFINITY])
+    f[2] = UNDEF
+    df = CAFrame.new("f" => f, "z" => CA_CMPLX64([Complex(0.1, -0.2)] * 8))
+    csv = df.to_csv
+    assert_equal ["0.1", "0.33333334", "", "-0.0", "1.0e-30", "3.4028235e+38", "NaN", "Infinity"],
+                 csv.lines.drop(1).map { |l| l.chomp.split(",", -1)[0] }
+    assert_equal "0.1-0.2i", csv.lines[1].chomp.split(",")[1]
+    back = CAFrame.from_csv(StringIO.new(csv), types: { "f" => :float32, "z" => :cmplx64 })
+    assert_equal f.to_a.map(&:to_s), back["f"].to_a.map(&:to_s)
+    assert_equal df["z"].to_a, back["z"].to_a
+  end
+
+  def test_float32_reads_back_bit_for_bit
+    rng = Random.new(3)
+    vals = Array.new(20_000) { rng.rand(2**32) }.pack("L*").unpack("f*").reject { |x| x.nan? || x.infinite? }
+    f = CA_FLOAT32(vals)
+    back = CAFrame.from_csv(StringIO.new(CAFrame.new("f" => f).to_csv), types: { "f" => :float32 })
+    assert_equal f.to_a.pack("f*"), back["f"].to_a.pack("f*")
+  end
+
   def test_a_cell_that_is_not_text_names_its_cell
     df = CAFrame.new("x" => CA_OBJECT(["日本", "\xe3\x81\x82".b]))
     e = assert_raise(Encoding::CompatibilityError) { df.to_csv }
