@@ -297,11 +297,40 @@ ca_decimal_store_integer (int8_t data_type, char *ptr, ca_size_t i,
   }
 }
 
-/* A non-String cell as an integer: an Integer, or a Float with no
-   fractional part, that the target can hold. */
+/* Whether v is a real number other than an Integer or a Float -- a Rational,
+   a BigDecimal -- which reads as the value it stands for. */
+static int
+ca_decimal_other_real (VALUE v)
+{
+  return RTEST(rb_obj_is_kind_of(v, rb_cNumeric))
+      && RTEST(rb_funcall(v, rb_intern("real?"), 0));
+}
+
+static VALUE
+ca_decimal_truncate (VALUE v)
+{
+  return rb_funcall(v, rb_intern("truncate"), 0);
+}
+
+/* A non-String cell as an integer: an Integer, or a Float or another real
+   number with no fractional part, that the target can hold. */
 static int
 ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
 {
+  if ( ! RB_INTEGER_TYPE_P(v) && ! RB_FLOAT_TYPE_P(v) && ca_decimal_other_real(v) ) {
+    /* truncate raises for a NaN or infinite BigDecimal, which reads as
+       nothing an integer can hold. */
+    int state = 0;
+    VALUE whole = rb_protect(ca_decimal_truncate, v, &state);
+    if ( state ) {
+      rb_set_errinfo(Qnil);
+      return 0;
+    }
+    if ( ! RB_INTEGER_TYPE_P(whole) || ! RTEST(rb_equal(whole, v)) ) {
+      return 0;
+    }
+    v = whole;
+  }
   if ( RB_INTEGER_TYPE_P(v) ) {
     VALUE zero = INT2FIX(0);
     *negative = RTEST(rb_funcall(v, '<', 1, zero));
@@ -2944,7 +2973,7 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
       ok = ( rc == CA_DECIMAL_OK );
     }
     else if ( is_float ) {
-      if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) ) {
+      if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) || ca_decimal_other_real(v) ) {
         double d = NUM2DBL(v);
         if ( data_type == CA_FLOAT32 ) {
           *(float32_t *) cell = (float32_t) d;
