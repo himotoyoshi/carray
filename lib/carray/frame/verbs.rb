@@ -197,7 +197,7 @@ class CAFrame
     @columns.each_with_object({}) do |(key, col), types|
       next unless string_column?(col)
       text = time_text_of(col)
-      type = text.__infer_decimal__
+      type = text.__infer_number_type_of_text__
       type ||= :time if time_text_column?(text)
       types[key] = type if type
     end
@@ -401,7 +401,7 @@ class CAFrame
     # read the same way, so the decimal grammar and on_error: hold for all.
     text = time_text_of(col)
     unreadable = on_error == :mask ? nil : []
-    parsed = text.__parse_decimal__(type, unreadable)
+    parsed = text.__read_text_as_number__(type, unreadable)
     unless parsed
       # A target the decimal reader does not take (complex) goes through
       # to_type; a cell that held something and came back masked did not read.

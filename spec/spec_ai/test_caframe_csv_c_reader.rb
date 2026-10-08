@@ -2,7 +2,7 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# The C reader of a CSV body (CArray.__csv_split__, ext/caframe_csv_split.c)
+# The C reader of a CSV body (CArray.__csv_read_body_as_string_cells__, ext/caframe_csv_reader.c)
 # against the Ruby tokenizer, which is the reference: every input must read
 # to the same frame, or raise the same error, both ways -- whole, and in
 # chunks small enough to end inside a quoted field.
@@ -22,11 +22,11 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
 
   # The same input read by the Ruby tokenizer alone.
   def read_in_ruby(text, **opts)
-    c_split = CArray.method(:__csv_split__)
-    CArray.define_singleton_method(:__csv_split__) { |*| nil }
+    c_split = CArray.method(:__csv_read_body_as_string_cells__)
+    CArray.define_singleton_method(:__csv_read_body_as_string_cells__) { |*| nil }
     read(text, **opts)
   ensure
-    CArray.define_singleton_method(:__csv_split__, c_split)
+    CArray.define_singleton_method(:__csv_read_body_as_string_cells__, c_split)
   end
 
   def with_chunk_bytes(n)
@@ -88,14 +88,14 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
   end
 
   def test_the_reader_itself
-    ncol, cells, records = CArray.__csv_split__("1,2\r\n\"a,b\",\n3\n  \n\"x\ny\",\"q\"\"r\"\n", ",", "\"", 2)
+    ncol, cells, records = CArray.__csv_read_body_as_string_cells__("1,2\r\n\"a,b\",\n3\n  \n\"x\ny\",\"q\"\"r\"\n", ",", "\"", 2)
     assert_equal 2, ncol
     assert_equal ["1", "2", "a,b", UNDEF, "3", UNDEF, "x\ny", "q\"r"], cells
     assert_equal 5, records
-    assert_equal [1, [UNDEF, "a", UNDEF, " "], 4], CArray.__csv_split__("\na\n\n \n", ",", "\"", 0)
-    assert_nil CArray.__csv_split__("a\"b,1\n", ",", "\"", 2)        # a quote in an unquoted field
-    assert_nil CArray.__csv_split__("1,2,3\n", ",", "\"", 2)         # a row too long
-    assert_nil CArray.__csv_split__("1,2\n".encode("UTF-16LE"), ",", "\"", 2)
+    assert_equal [1, [UNDEF, "a", UNDEF, " "], 4], CArray.__csv_read_body_as_string_cells__("\na\n\n \n", ",", "\"", 0)
+    assert_nil CArray.__csv_read_body_as_string_cells__("a\"b,1\n", ",", "\"", 2)        # a quote in an unquoted field
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 2)         # a row too long
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2\n".encode("UTF-16LE"), ",", "\"", 2)
   end
 
   def test_a_file_in_another_encoding_reads_in_ruby

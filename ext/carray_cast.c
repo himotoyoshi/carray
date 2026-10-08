@@ -2912,7 +2912,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
 }
 
 static VALUE
-rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
+rb_ca_read_text_as_number (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE src = self, out, vmask;
   VALUE rtype, report;
@@ -3071,7 +3071,7 @@ ca_infer_string (VALUE str)
 }
 
 static VALUE
-rb_ca_infer_decimal (VALUE self)
+rb_ca_infer_number_type_of_text (VALUE self)
 {
   volatile VALUE src = self;
   CArray *ca;
@@ -3135,13 +3135,13 @@ Init_carray_cast (void)
   /* CArray data_type conversion */
 
   /* Internal: CAFrame#infer_types asks the number type of a text column. */
-  rb_define_method(rb_cCArray, "__infer_decimal__", rb_ca_infer_decimal, 0);
+  rb_define_method(rb_cCArray, "__infer_number_type_of_text__", rb_ca_infer_number_type_of_text, 0);
 
   /* Internal: CAFrame#cast reads text cells with this grammar.  With an
      Array as the second argument, the addresses of cells that hold
      something but do not read (blank, nil and masked cells are missing,
      not unreadable) are pushed onto it. */
-  rb_define_method(rb_cCArray, "__parse_decimal__", rb_ca_parse_decimal, -1);
+  rb_define_method(rb_cCArray, "__read_text_as_number__", rb_ca_read_text_as_number, -1);
 
   rb_define_method(rb_cCArray, "to_type", rb_ca_to_type_internal, -1);
 

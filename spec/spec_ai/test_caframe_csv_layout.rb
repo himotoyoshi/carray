@@ -19,11 +19,11 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
 
   # The same input read by the Ruby tokenizer alone.
   def in_ruby
-    c_split = CArray.method(:__csv_split__)
-    CArray.define_singleton_method(:__csv_split__) { |*| nil }
+    c_split = CArray.method(:__csv_read_body_as_string_cells__)
+    CArray.define_singleton_method(:__csv_read_body_as_string_cells__) { |*| nil }
     yield
   ensure
-    CArray.define_singleton_method(:__csv_split__, c_split)
+    CArray.define_singleton_method(:__csv_read_body_as_string_cells__, c_split)
   end
 
   def test_header_and_data_lines

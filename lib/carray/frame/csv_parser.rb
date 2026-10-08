@@ -393,7 +393,7 @@ class CAFrame
     # file turns out to have one column -- the same rows a header would have
     # given.
     #
-    # Without strip:, the rest of the input is read in C (CArray.__csv_split__)
+    # Without strip:, the rest of the input is read in C (CArray.__csv_read_body_as_string_cells__)
     # straight into the table, with the column count of the names, or of the
     # first record when there are none. When C declines -- text not in
     # UTF-8, a record it does not take, or one longer than the first in a
@@ -504,7 +504,7 @@ class CAFrame
                else @io.read || ""
                end
         break if text.nil?
-        n, flat, records = CArray.__csv_split__(text, @tok.sep, @tok.quote, ncol)
+        n, flat, records = CArray.__csv_read_body_as_string_cells__(text, @tok.sep, @tok.quote, ncol)
         unless flat
           # This chunk and the rest are read by the Ruby tokenizer, after the
           # rows read so far.

@@ -1,6 +1,6 @@
 /* CSV body reader for CAFrame.from_csv.
 
-   CArray.__csv_split__(text, sep, quote, ncol) -> [ncol, cells, records]
+   CArray.__csv_read_body_as_string_cells__(text, sep, quote, ncol) -> [ncol, cells, records]
    reads every record of text into one flat Array of nrow * ncol cells, row
    after row: a String for a field, UNDEF for a missing one (an unquoted
    empty field, or a cell a short row never reached).  records counts the
@@ -41,7 +41,7 @@ ca_csv_line_end (const char *s, long n, long p, long *next)
 }
 
 static VALUE
-rb_ca_s_csv_split (VALUE klass, VALUE text, VALUE vsep, VALUE vquote, VALUE vncol)
+rb_ca_s_csv_read_body_as_string_cells (VALUE klass, VALUE text, VALUE vsep, VALUE vquote, VALUE vncol)
 {
   volatile VALUE out, pending = Qnil;
   const char *s, *sp, *qp;
@@ -193,7 +193,7 @@ rb_ca_s_csv_split (VALUE klass, VALUE text, VALUE vsep, VALUE vquote, VALUE vnco
 }
 
 void
-Init_caframe_csv_split (void)
+Init_caframe_csv_reader (void)
 {
-  rb_define_singleton_method(rb_cCArray, "__csv_split__", rb_ca_s_csv_split, 4);
+  rb_define_singleton_method(rb_cCArray, "__csv_read_body_as_string_cells__", rb_ca_s_csv_read_body_as_string_cells, 4);
 }
