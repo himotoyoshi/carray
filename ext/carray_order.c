@@ -518,6 +518,11 @@ rb_ca_take_along_axis_c (VALUE self, VALUE indices, VALUE raxis)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, indices, raxis);
+  /* A masked index reads as UNDEF: project carries the mask of its
+     addresses into the result. */
+  if ( RTEST(rb_ca_has_mask(addrs)) ) {
+    return rb_funcall(self, rb_intern("project"), 1, addrs);
+  }
   return rb_ca_fetch(self, addrs);
 }
 
@@ -542,6 +547,12 @@ rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
+  /* A masked index writes nothing: scatter_replace! skips a masked
+     address (and writes the rest last-write-wins, as the store does). */
+  if ( RTEST(rb_ca_has_mask(addrs)) ) {
+    rb_funcall(self, rb_intern("scatter_replace!"), 2, addrs, argv[1]);
+    return self;
+  }
   rb_ca_store(self, addrs, argv[1]);
   return self;
 }

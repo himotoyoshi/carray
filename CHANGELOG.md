@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a masked index no longer reads or writes cell 0. `gather_nd`,
+  `take_along_axis` and `axis2addr` answer `UNDEF` for a masked index (or
+  coordinate tuple), as `project` does; `put_nd` and `put_along_axis` write
+  nothing there, as `scatter_replace!` does. `gather_nd` read cell 0 without
+  a mask, and `put_nd` / `put_along_axis` overwrote it. The value stored
+  under a masked index is not read, so it is not range-checked either.
+
 - Fix: the mask of a `CArray.meld` or `CArray.stack` view no longer fails or
   writes to a part that cannot carry a mask. With a value array part
   (`x.value`) it raised `RuntimeError`; a frozen or read-only part was given

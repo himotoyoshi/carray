@@ -205,4 +205,13 @@ class TestTakeAlongAxis < Test::Unit::TestCase
     assert_equal 30.0, a[0]
   end
 
+  def test_a_masked_index_reads_undef_and_writes_nothing
+    m = CA_FLOAT64([[1, 2, 3], [4, 5, 6]])
+    k = CA_INT64([[2, 99, 1], [0, 1, 2]]); k[0, 1] = UNDEF
+    assert_equal [[3.0, UNDEF, 2.0], [4.0, 5.0, 6.0]], m.take_along_axis(k, axis: 1).to_a
+    assert_equal [[2, UNDEF, 1], [3, 4, 5]], m.axis2addr(k, axis: 1).to_a
+    y = CA_FLOAT64([[0, 0, 0], [0, 0, 0]])
+    y.put_along_axis(k, CA_FLOAT64([[7, 8, 9], [1, 2, 3]]), axis: 1)
+    assert_equal [[0.0, 9.0, 7.0], [1.0, 2.0, 3.0]], y.to_a
+  end
 end

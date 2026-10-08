@@ -279,4 +279,15 @@ class TestGatherNd < Test::Unit::TestCase
     assert_equal [4, 11], g.to_a
   end
 
+  def test_a_masked_coordinate_reads_undef_and_writes_nothing
+    j = CA_INT32([0, 3, 2, 3]); j.mask = CA_BOOLEAN([0, 1, 0, 0])
+    a = CA_FLOAT64([10, 20, 30, 40])
+    assert_equal [10.0, UNDEF, 30.0, 40.0], a.gather_nd(j.reshape(4, 1)).to_a
+    x = CA_FLOAT64([0, 0, 0, 0])
+    x.put_nd(j.reshape(4, 1), CA_FLOAT64([7, 8, 9, 6]))
+    assert_equal [7.0, 0.0, 9.0, 6.0], x.to_a
+    m = CA_FLOAT64([[1, 2, 3], [4, 5, 6]])
+    g = CA_INT64([[1], [0]]); g[1, 0] = UNDEF
+    assert_equal [[4.0, 5.0, 6.0], [UNDEF, UNDEF, UNDEF]], m.gather_nd(g).to_a
+  end
 end
