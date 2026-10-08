@@ -55,8 +55,11 @@ class CAFrame
     self
   end
 
-  # Cast columns to a data type and rebind them (memo §11.4). Uses to_type,
-  # so parse failures on string columns become UNDEF (parse-mask, §6-2).
+  # Cast columns to a data type and rebind them (memo §11.4). A text column
+  # cast to an integer or float type is read with a decimal grammar ("010" is
+  # ten, "0x1F" and "1_000" are not numbers); a cell that does not read, or a
+  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). Other
+  # targets use to_type.
   # Three call shapes, disambiguated by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
@@ -66,19 +69,49 @@ class CAFrame
   #
   # A map key may be a single name or an Array of names; the value is the
   # target type. Returns self so calls chain.
-  def cast(name_or_map, type = nil)
-    if name_or_map.is_a?(Hash)
-      unless type.nil?
-        raise ArgumentError, "cast(map) takes no positional type argument"
+  #
+  # +on_error:+ says what to do with a text cell that holds something but
+  # does not read as the number type ("x", "1.5" for an integer, "300" for
+  # :int8). Blank, nil and masked cells are missing values, not errors, and
+  # are UNDEF under every policy.
+  #
+  #   :mask   the cell becomes UNDEF (default)
+  #   :warn   as :mask, plus one warning per column with the count and the
+  #           first few cells
+  #   :raise  ArgumentError naming the column, the row and the cell; no
+  #           column is rebound
+  def cast(name_or_map = nil, type = nil, on_error: :mask, **map)
+    # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
+    # keywords next to on_error:.
+    unless map.empty?
+      unless name_or_map.nil?
+        raise ArgumentError, "cast takes a name and a type, or a map, not both"
       end
-      name_or_map.each do |names, t|
-        Array(names).each { |name| cast_one(name, t) }
-      end
-    else
-      cast_one(name_or_map, type)
+      name_or_map = map
     end
+    raise ArgumentError, "cast needs a column name or a map" if name_or_map.nil?
+    unless CAST_ON_ERROR.include?(on_error)
+      raise ArgumentError,
+            "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
+    end
+    pairs =
+      if name_or_map.is_a?(Hash)
+        unless type.nil?
+          raise ArgumentError, "cast(map) takes no positional type argument"
+        end
+        name_or_map.flat_map { |names, t| Array(names).map { |name| [name, t] } }
+      else
+        [[name_or_map, type]]
+      end
+    # Read every column before rebinding any, so a raise leaves the frame as
+    # it was.
+    casted = pairs.map { |name, t| [name.to_s, cast_column(name, t, on_error)] }
+    casted.each { |key, col| @columns[key] = col }
     self
   end
+
+  CAST_ON_ERROR = %i[mask warn raise].freeze
+  private_constant :CAST_ON_ERROR
 
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
@@ -230,10 +263,36 @@ class CAFrame
     end
   end
 
-  private def cast_one(name, type)
+  # Text cells are data, not Ruby literals: an object column cast to a
+  # number type is read as decimal numbers ("010" is ten, "0x1F" and "1_000"
+  # are not numbers). Other targets go through to_type.
+  private def cast_column(name, type, on_error)
     key = name.to_s
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
-    @columns[key] = @columns[key].to_type(type)
+    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    return col.to_type(type) unless col.data_type == CA_OBJECT && !col.face?
+    unreadable = on_error == :mask ? nil : []
+    parsed = col.__parse_decimal__(type, unreadable)
+    return col.to_type(type) unless parsed
+    if unreadable && !unreadable.empty?
+      report_unreadable(key, col, type, unreadable, on_error)
+    end
+    parsed
+  end
+
+  # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.
+  private def report_unreadable(key, col, type, addrs, on_error)
+    cells = col.flatten
+    per_row = col.elements / col.shape[0]
+    describe = ->(addr) { "row #{addr / per_row} #{cells[addr].inspect}" }
+    if on_error == :raise
+      raise ArgumentError,
+            "cast: column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
+    end
+    shown = addrs.first(3).map(&describe)
+    shown << "..." if addrs.size > 3
+    noun, verb = addrs.size == 1 ? %w[cell is] : %w[cells are]
+    warn "CAFrame#cast: column #{key.inspect}: #{addrs.size} #{noun} cannot be " \
+         "read as #{type} and #{verb} UNDEF (#{shown.join(', ')})"
   end
 
   # +promote+ with no target: let +promote_list+ decide the common type --

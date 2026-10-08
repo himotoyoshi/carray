@@ -17,8 +17,9 @@
 class CAFrame
   # Build a frame from an Array of row Hashes. Column set is the union of keys
   # in first-appearance order; keys are stringified. +types:+ casts named
-  # columns afterward (same map / array-key forms as +cast+).
-  def self.from_records(records, types: nil)
+  # columns afterward (same map / array-key forms as +cast+), with +on_error:+
+  # as for +cast+.
+  def self.from_records(records, types: nil, on_error: :mask)
     unless records.is_a?(Array) && records.all? { |r| r.is_a?(Hash) }
       raise ArgumentError, "from_records expects an Array of Hashes"
     end
@@ -33,7 +34,7 @@ class CAFrame
     end
 
     frame = new(cols)
-    frame.cast(types) if types
+    frame.cast(types, on_error: on_error) if types
     frame
   end
 

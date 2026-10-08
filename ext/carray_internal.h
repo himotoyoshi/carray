@@ -97,6 +97,11 @@ void    ca_gc_release_buffer (void *ptr);
 /* Copy the attributes src shows onto dst (a new entity with src's values). */
 void    rb_ca_inherit_attr (VALUE dst, VALUE src);
 
+/* A String read as a decimal number of an integer or float data_type
+   (carray_cast.c): _to answers 1 / 0 (UNDEF), _store raises. */
+int     ca_decimal_string_to (VALUE str, int8_t data_type, void *out);
+void    ca_decimal_string_store (VALUE str, int8_t data_type, void *out);
+
 /* ---- Attaching several parents (carray_core.c) ---------------------------
 
    ca_attach_all attaches all of list[0..n-1] or none: if one attach raises,

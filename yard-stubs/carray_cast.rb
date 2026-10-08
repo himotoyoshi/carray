@@ -94,13 +94,16 @@ class CArray
   #   is wrapped in CARecord.
   #
   #   When `self` is an `:object` array and `data_type` is an integer or
-  #   float type, each cell is parsed with Ruby `Integer()` / `Float()`
-  #   rules and a cell that cannot be parsed becomes UNDEF (masked) rather
-  #   than a silent `0.0` or a raise. This is symmetric for float and int:
-  #   `nil`, `""`, `"xx"`, and (for int targets) a non-integer string such
-  #   as `"1.5"` all map to UNDEF. Explicit `nan` / `inf` / `infinity`
-  #   literals (optional sign, case-insensitive, matched as a whole token)
-  #   are kept as NaN / ±Infinity.
+  #   float type, a String cell is read as a decimal number, not as a Ruby
+  #   literal: `"010"` is 10, and `"0x10"` / `"1_000"` / `"0b11"` are not
+  #   numbers. An integer type takes a number whose value is exactly an
+  #   integer (`"1.0"`, `"1e3"`) but not `"1.5"`. A cell that cannot be
+  #   read becomes UNDEF (masked) rather than a silent `0.0` or a raise:
+  #   `nil`, `""`, `"xx"`, and a String integer the type cannot hold
+  #   (`"300"` into `:int8`) all map to UNDEF. Explicit `nan` / `inf` /
+  #   `infinity` (optional sign, any case) are kept as NaN / ±Infinity for
+  #   float types. A cell that is not a String goes through `Integer()` /
+  #   `Float()` as before.
   #   @param data_type [Symbol, Integer, Class, String] target element type.
   #   @param bytes [Integer, nil] element width in bytes, required for
   #     `:fixlen`.

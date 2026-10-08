@@ -4,10 +4,6 @@
 > where it is expected to stay. Splitting it into a gem of its own remains an
 > option if it ever outgrows the fit — that would change the `require` and make
 > it a separate dependency — but it is not the current direction.
->
-> The surface described here is implemented and tested unless a section is
-> marked **TBD**, which flags a planned feature that is not yet built. Names
-> and details of TBD items may change.
 
 `CAFrame` is a lightweight DataFrame: a set of **named columns**, each a real
 [`CArray`](../WhatIsCArray.md). The frame adds only one thing on top of the
@@ -221,8 +217,15 @@ df["temp"].data_type      # => :object   (raw strings)
 
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64, "rh" => :int32 })
 df["temp"].data_type      # => :float64
-# an empty cell or "xx" in the temp column fails to_type -> UNDEF
+# an empty cell or "xx" in the temp column -> UNDEF
+
+CAFrame.from_csv("obs.csv", types: { "rh" => :int32 }, on_error: :warn)
+# "xx" is still UNDEF, and a warning names the column and the cells
 ```
+
+Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
+(`:mask` / `:warn` / `:raise`) works as it does for
+[`cast`](#8-column-verbs).
 
 Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
@@ -895,10 +898,31 @@ Notes:
   replacing an existing name in place). The length must match `N`; appending to
   an empty frame (`nrow` `0`, a defined value) yields a frame whose `N` is that
   column's length.
-- **`cast`** uses `to_type`, so parse failures on string columns become
-  `UNDEF` (parse-mask). Casting a numeric column is an ordinary conversion. It
-  rebinds a fresh column — the one edit that does **not** write through to
-  frames sharing the old column.
+- **`cast`** reads a text (object) column into an integer or float type as
+  decimal numbers: digits with an optional sign, decimal point and exponent
+  (and `nan` / `inf` for floats), surrounding spaces ignored. A cell is data,
+  not a Ruby literal, so `"010"` is ten and `"0x1F"` / `"1_000"` are not
+  numbers. An integer type takes any number whose value is exactly an integer
+  (`"1.0"`, `"1e3"`), decided from the digits so a long integer is not
+  rounded; `"1.5"` is not an integer. A cell that does not read, or a value
+  the type cannot hold (`"300"` into `:int8`), becomes `UNDEF` (parse-mask).
+  A Ruby number in an object column is held to the same rule: an Integer
+  that fits, or a Float with no fractional part, is kept, and `2.5` is
+  `UNDEF` rather than truncated, so `"2.5"` and `2.5` in one column agree.
+  Other targets go through `to_type`, and casting a numeric column is an
+  ordinary conversion. It rebinds a fresh column — the one edit that does
+  **not** write through to frames sharing the old column.
+
+  `on_error:` decides what an unreadable cell does: `:mask` (the default)
+  makes it `UNDEF`; `:warn` does the same and warns once per column with the
+  count and the first few cells; `:raise` raises `ArgumentError` naming the
+  column, the row and the cell, and rebinds no column. Blank, `nil` and
+  masked cells are missing values, not errors, under every policy.
+
+  ```ruby
+  df.cast("rh" => :int32, on_error: :raise)
+  # ArgumentError: cast: column "rh", row 41 "1.5" cannot be read as int32
+  ```
 - **`promote`** brings the **whole frame** to one data type, where `cast`
   forces the columns you name. Without an argument the type is the one
   `CArray.result_type` picks — the same decision `to_ca` makes internally, so
@@ -989,9 +1013,6 @@ df.fill("temp", 0.0)        # constant fill
 Because `fill` writes through, a [categorical](../objects/CACategorical.md) column raises
 (its codes are read-only) — rebind a filled copy instead:
 `df = df.append("s", df["s"].strip_mask(method: :forward))`.
-
-> **TBD — `strict` cast.** A `strict:` option on `cast` (parse failure raises
-> instead of masking) is not yet built.
 
 ---
 
@@ -1278,21 +1299,6 @@ frame, use `copy`:
 ```ruby
 snapshot = df.copy         # independent; later edits to df don't touch it
 ```
-
----
-
-## 13. Planned features (TBD)
-
-This appears in the design and is intended, but is **not implemented yet**:
-
-- **`cast(name, type, strict: true)`** — parse failure raises instead of
-  masking.
-  > **Naming caveat (settle before building).** "strict" is overloaded across
-  > the notes: an earlier "strict-parse" idea meant *mask* the failures, while
-  > this `strict:` means *raise* on them — opposite senses. There are really
-  > three parse behaviors — lenient (`"xx" → 0.0`), mask (`"xx" → UNDEF`, now
-  > the `to_type` default), and raise — and they deserve three distinct words.
-  > Pick the vocabulary before this option lands, while it is still free to move.
 
 ---
 
