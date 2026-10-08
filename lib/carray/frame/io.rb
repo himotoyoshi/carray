@@ -223,19 +223,20 @@ class CAFrame
   def self.with_encoding_hint(hint)
     yield
   rescue Encoding::InvalidByteSequenceError, Encoding::UndefinedConversionError,
-         ArgumentError => e
+         Encoding::CompatibilityError, ArgumentError => e
     raise if e.is_a?(ArgumentError) && !e.message.include?("invalid byte sequence")
+    if e.is_a?(Encoding::CompatibilityError)
+      # The text decoded; the separator or quote is in another encoding.
+      raise e.class, "#{e.message} -- sep: and quote: are matched against the " \
+                     "text as read, so read the file transcoded to UTF-8, as in " \
+                     "encoding: \"<file encoding>:UTF-8\"", e.backtrace
+    end
     raise e.class, "#{e.message} -- the CSV is not in the encoding it was " \
                    "read as: #{hint}", e.backtrace
   end
 
   private_class_method :with_encoding_hint
 
-  # Build a frame from parsed [names, rows]. When names is nil (headerless and
-  # no column_names) positional names "c0".."cN" are generated from the widest
-  # row. Rows are squared off to the column count (short rows padded with nil,
-  # over-long rows raise), one 2-D object array is bulk-filled, and each column
-  # is a view into it (§3.6).
   # Write the frame as CSV. CSV is a flat table of scalar cells, so this is the
   # text form of the same all-scalar subset +to_ca+ requires (§11.9): every
   # column must be 1-D. Unlike +to_ca+ it does not promote to a common data type --
@@ -528,6 +529,11 @@ class CAFrame
     end
   end
 
+  # Build a frame from parsed [names, rows]. When names is nil (headerless and
+  # no column_names) positional names "c0".."cN" are generated from the widest
+  # row. Rows are squared off to the column count (short rows padded with nil,
+  # over-long rows raise), one 2-D object array is bulk-filled, and each column
+  # is a view into it (§3.6).
   def self.build_frame(names, rows)
     ncol  = names ? names.size : (rows.map(&:size).max || 0)
     names ||= Array.new(ncol) { |j| "c#{j}" }
@@ -546,13 +552,14 @@ class CAFrame
       names.each { |name| cols[name] = CArray.object(0) }
       return new(cols)
     end
-    rows.each_with_index do |r, i|
-      if r.size < ncol
-        r.concat(Array.new(ncol - r.size))
-      elsif r.size > ncol
+    # Short rows are padded on copies: the rows may be a parser: callable's
+    # own arrays.
+    rows = rows.each_with_index.map do |r, i|
+      if r.size > ncol
         raise ArgumentError,
               "row #{i + 1} has #{r.size} fields, expected #{ncol}"
       end
+      r.size < ncol ? r + Array.new(ncol - r.size) : r
     end
     table = CArray.object(rows.size, ncol) { rows }
     # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
