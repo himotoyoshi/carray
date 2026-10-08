@@ -18,8 +18,9 @@ class CAFrame
   # Build a frame from an Array of row Hashes. Column set is the union of keys
   # in first-appearance order; keys are stringified. +types:+ casts named
   # columns afterward (same map / array-key forms as +cast+, or :infer for
-  # what +infer_types+ finds), with +on_error:+
-  # as for +cast+.
+  # what +infer_types+ finds), with +on_error:+ as for +cast+. As in
+  # +from_csv+, +:default+ in the map sets the columns it does not name
+  # (:infer or a type) and nil leaves a named column as built.
   def self.from_records(records, types: nil, on_error: :mask)
     unless records.is_a?(Array) && records.all? { |r| r.is_a?(Hash) }
       raise ArgumentError, "from_records expects an Array of Hashes"
