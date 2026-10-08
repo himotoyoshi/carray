@@ -1640,29 +1640,29 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
   return self;
 }
 
-/* Helper: build a fill-valued int64 CArray whose shape is ca's shape
-   with the listed axes removed.  Used by count_masked/count_not_masked
-   when there is no mask. */
+/* The no-mask answer of count_masked / count_not_masked along `axes`:
+   every reduced cell holds `fill`.  A reduction over every axis is the
+   number itself. */
 static VALUE
-ca_make_reduced_int64 (CArray *ca, int argc, VALUE *argv, ca_size_t fill_val)
+ca_count_uniform (CArray *ca, const int8_t *axes, int8_t naxes, ca_size_t fill)
 {
   ca_size_t dim[CA_RANK_MAX];
   int8_t    ndim = 0;
   int       i, j;
-  int64_t   v = (int64_t) fill_val;
+  int64_t   v = (int64_t) fill;
   VALUE     result;
   CArray   *co;
 
+  if ( naxes == ca->ndim ) {
+    return SIZE2NUM(fill);
+  }
   for (i = 0; i < ca->ndim; i++) {
     int is_axis = 0;
-    for (j = 0; j < argc; j++) {
-      int ax = NUM2INT(argv[j]);
-      if (ax < 0) ax += ca->ndim;
-      if (ax == i) { is_axis = 1; break; }
+    for (j = 0; j < naxes; j++) {
+      if ( axes[j] == i ) { is_axis = 1; break; }
     }
     if (!is_axis) dim[ndim++] = ca->dim[i];
   }
-
   result = rb_carray_new(CA_INT64, ndim, dim, 0, NULL);
   TypedData_Get_Struct(result, CArray, &carray_data_type, co);
   ca_fill(co, &v);
@@ -1676,111 +1676,95 @@ ca_make_reduced_int64 (CArray *ca, int argc, VALUE *argv, ca_size_t fill_val)
 extern VALUE rb_ca_count_true_ki  (int argc, VALUE *argv, VALUE self);
 extern VALUE rb_ca_count_false_ki (int argc, VALUE *argv, VALUE self);
 
-/* count_masked(*axis) -- number of masked elements, optionally reduced
-   along axes (no args -> Integer; axis args -> int64 CArray with those
-   axes collapsed).
+/* count_masked / count_not_masked -- the number of masked (present)
+   cells, over every axis (an Integer) or along `axis:` (an int64 CArray).
+   The keywords are those of the count kernels (axis:, keep_axis:,
+   min_count:, fill_value:), checked by them: the mask is counted with
+   count_true_ki / count_false_ki.  Without a mask the answer is known
+   from the shape; an axis: alone takes that short cut after the same
+   axis check the kernels make, and any other keyword runs the kernel on
+   an all-false view that occupies one cell.
 
    Public (non-static) linkage so rb_ca_count in carray_count.c can forward
    count(UNDEF) here directly without going through Ruby method dispatch. */
+static VALUE
+ca_count_by_mask (int argc, VALUE *argv, VALUE self, int masked)
+{
+  CArray *ca;
+  VALUE   kw_hash = Qnil, mask_obj;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rb_scan_args(argc, argv, "0:", &kw_hash);
+
+  if ( ! ca_has_mask(ca) ) {
+    VALUE axis_val = Qnil;
+    int   only_axis = 1;
+    if ( ! NIL_P(kw_hash) ) {
+      VALUE given = rb_hash_lookup2(kw_hash, ID2SYM(rb_intern("axis")), Qundef);
+      axis_val  = ( given == Qundef ) ? Qnil : given;
+      only_axis = ( RHASH_SIZE(kw_hash) == ( given == Qundef ? 0u : 1u ) );
+    }
+    if ( only_axis ) {
+      int8_t    axes[CA_RANK_MAX];
+      int8_t    naxes = rb_ca_parse_reduce_axes_kw(axis_val, ca, axes);
+      ca_size_t vol = 1;
+      int       i;
+      for ( i = 0; i < naxes; i++ ) vol *= ca->dim[axes[i]];
+      return ca_count_uniform(ca, axes, naxes, masked ? 0 : vol);
+    }
+    {
+      ca_size_t one[CA_RANK_MAX];
+      VALUE     shape = rb_ary_new_capa(ca->ndim), cell;
+      boolean8_t zero = 0;
+      CArray   *cc;
+      int       i;
+      for ( i = 0; i < ca->ndim; i++ ) {
+        one[i] = 1;
+        rb_ary_push(shape, SIZE2NUM(ca->dim[i]));
+      }
+      cell = rb_carray_new(CA_BOOLEAN, ca->ndim, one, 0, NULL);
+      TypedData_Get_Struct(cell, CArray, &carray_data_type, cc);
+      ca_fill(cc, &zero);
+      mask_obj = rb_funcallv(cell, rb_intern("broadcast_to"),
+                             (int) RARRAY_LEN(shape), RARRAY_CONST_PTR(shape));
+    }
+  }
+  else {
+    mask_obj = rb_ca_mask_array(self);
+  }
+  if ( NIL_P(kw_hash) ) {
+    return masked ? rb_ca_count_true_ki(0, NULL, mask_obj)
+                  : rb_ca_count_false_ki(0, NULL, mask_obj);
+  }
+  {
+    VALUE kargv[1] = { kw_hash };
+    return masked ? rb_ca_count_true_ki(1, kargv, mask_obj)
+                  : rb_ca_count_false_ki(1, kargv, mask_obj);
+  }
+}
+
 VALUE
 rb_ca_count_masked (int argc, VALUE *argv, VALUE self)
 {
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  /* Accepts the axis: kwarg only (positional axis is not accepted),
-     matching the aggregate _ki family. */
-  VALUE kw_hash, axis_val = Qnil;
-  rb_scan_args(argc, argv, "0:", &kw_hash);
-  rb_scan_options(kw_hash, "axis", &axis_val);
-
-  /* No mask -> nothing is masked.  Short-circuit without materialising a
-     zero mask (axis form returns a zero-filled reduced int64 array). */
-  if (!ca_has_mask(ca)) {
-    if (NIL_P(axis_val)) {
-      return SIZE2NUM(0);
-    }
-    VALUE axis_ary = (TYPE(axis_val) == T_ARRAY) ? axis_val : rb_ary_new3(1, axis_val);
-    return ca_make_reduced_int64(ca, (int) RARRAY_LEN(axis_ary),
-                                 (VALUE *) RARRAY_CONST_PTR(axis_ary), 0);
-  }
-
-  /* Masked count = count of `true` in the mask, routed through the
-     count_true_ki kernel for both the flat (no axis -> scalar Integer) and
-     per-axis (-> reduced CArray) forms.  The scalar C primitive
-     ca_count_masked stays separately for internal C callers (grid /
-     median / order) that need a raw ca_size_t without Ruby allocation. */
-  VALUE mask_obj = rb_ca_mask_array(self);
-  if (NIL_P(axis_val)) {
-    return rb_ca_count_true_ki(0, NULL, mask_obj);
-  }
-  VALUE kw = rb_hash_new();
-  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
-  VALUE kargv[1] = { kw };
-  return rb_ca_count_true_ki(1, kargv, mask_obj);
+  return ca_count_by_mask(argc, argv, self, 1);
 }
 
-/* @overload count_not_masked(*axis)
-
-(Masking, Statistics)
-Returns the number of not-masked elements, optionally reduced along axes.
-With no arguments returns an Integer.  With axis arguments returns a
-CArray of int64 with the specified axes collapsed.
-*/
-/* C-callable entry: skip rb_scan_args (call-frame state dependency).
- * axis_val = Qnil       -> scalar Integer count over whole array
- * axis_val = Integer/Array -> reduced CArray int64
- * For ext authors who need to call count_not_masked from C. */
-VALUE
-rb_ca_count_not_masked_c (VALUE self, VALUE axis_val)
-{
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  /* No mask -> every element is not-masked.  Short-circuit without
-     materialising a mask (no axis -> elements; axis form -> reduced int64
-     filled with the product of the reduced-axis extents). */
-  if (!ca_has_mask(ca)) {
-    if (NIL_P(axis_val)) {
-      return SIZE2NUM(ca->elements);
-    }
-    VALUE axis_ary = (TYPE(axis_val) == T_ARRAY) ? axis_val : rb_ary_new3(1, axis_val);
-    int n_axes = (int) RARRAY_LEN(axis_ary);
-    VALUE *axes_argv = (VALUE *) RARRAY_CONST_PTR(axis_ary);
-    ca_size_t axis_vol = 1;
-    int j;
-    for (j = 0; j < n_axes; j++) {
-      int ax = NUM2INT(axes_argv[j]);
-      if (ax < 0) ax += ca->ndim;
-      axis_vol *= ca->dim[ax];
-    }
-    return ca_make_reduced_int64(ca, n_axes, axes_argv, axis_vol);
-  }
-
-  /* Not-masked count = count of `false` in the mask, routed through the
-     count_false_ki kernel for both the flat (no axis -> scalar Integer) and
-     per-axis (-> reduced CArray) forms.  The scalar C primitive
-     ca_count_not_masked (= elements - ca_count_masked) stays separately for
-     internal C callers (median / order) that need a raw ca_size_t. */
-  VALUE mask_obj = rb_ca_mask_array(self);
-  if (NIL_P(axis_val)) {
-    return rb_ca_count_false_ki(0, NULL, mask_obj);
-  }
-  VALUE kw = rb_hash_new();
-  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
-  VALUE kargv[1] = { kw };
-  return rb_ca_count_false_ki(1, kargv, mask_obj);
-}
-
-/* Ruby binding entry: parses (axis: kwarg) -> forwards to _c. */
 VALUE
 rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self)
 {
-  /* Accepts the axis: kwarg only. */
-  VALUE kw_hash, axis_val = Qnil;
-  rb_scan_args(argc, argv, "0:", &kw_hash);
-  rb_scan_options(kw_hash, "axis", &axis_val);
-  return rb_ca_count_not_masked_c(self, axis_val);
+  return ca_count_by_mask(argc, argv, self, 0);
+}
+
+/* count_not_masked(axis: axis_val) for C callers. */
+VALUE
+rb_ca_count_not_masked_c (VALUE self, VALUE axis_val)
+{
+  VALUE kw;
+  if ( NIL_P(axis_val) ) {
+    return ca_count_by_mask(0, NULL, self, 0);
+  }
+  kw = rb_hash_new();
+  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
+  return rb_funcall_with_block_kw(self, rb_intern("count_not_masked"), 1, &kw, Qnil, RB_PASS_KEYWORDS);
 }
 
 /* ============================================================================

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `count_masked` and `count_not_masked` with `axis:` answer the same
+  whether or not the array has a mask. Naming every axis
+  (`axis: [0, 1]` on a 2-D array) returns an Integer, as the form without
+  `axis:` does; on an array without a mask it raised `RuntimeError`. Both
+  now take `keep_axis:`, `min_count:` and `fill_value:` as `sum` does, and
+  an out-of-range or repeated axis raises `ArgumentError` either way.
+
 - Fix: `search`, `bsearch` and `search_nearest` on an integer array compare
   a Float query, or a CArray query of a wider data type, in the type the
   two share, as `eq` does: `CA_INT8([1, 3]).search(3.9)` is `nil` (was `1`,
