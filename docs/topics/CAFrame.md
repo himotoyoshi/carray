@@ -875,10 +875,15 @@ Notes:
   replacing an existing name in place). The length must match `N`; appending to
   an empty frame (`nrow` `0`, a defined value) yields a frame whose `N` is that
   column's length.
-- **`cast`** uses `to_type`, so parse failures on string columns become
-  `UNDEF` (parse-mask). Casting a numeric column is an ordinary conversion. It
-  rebinds a fresh column — the one edit that does **not** write through to
-  frames sharing the old column.
+- **`cast`** reads a text (object) column into an integer or float type with
+  a decimal grammar: `[+-]digits` for integers, `[+-]digits.digits` with an
+  optional exponent (or `nan` / `inf`) for floats, surrounding spaces ignored.
+  A cell is data, not a Ruby literal, so `"010"` is ten and `"0x1F"` /
+  `"1_000"` are not numbers. A cell that does not read, or a value the type
+  cannot hold (`"300"` into `:int8`), becomes `UNDEF` (parse-mask). Other
+  targets go through `to_type`, and casting a numeric column is an ordinary
+  conversion. It rebinds a fresh column — the one edit that does **not**
+  write through to frames sharing the old column.
 - **`promote`** brings the **whole frame** to one data type, where `cast`
   forces the columns you name. Without an argument the type is the one
   `CArray.result_type` picks — the same decision `to_ca` makes internally, so

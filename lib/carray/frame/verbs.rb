@@ -55,8 +55,11 @@ class CAFrame
     self
   end
 
-  # Cast columns to a data type and rebind them (memo §11.4). Uses to_type,
-  # so parse failures on string columns become UNDEF (parse-mask, §6-2).
+  # Cast columns to a data type and rebind them (memo §11.4). A text column
+  # cast to an integer or float type is read with a decimal grammar ("010" is
+  # ten, "0x1F" and "1_000" are not numbers); a cell that does not read, or a
+  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). Other
+  # targets use to_type.
   # Three call shapes, disambiguated by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
@@ -238,7 +241,12 @@ class CAFrame
   private def cast_one(name, type)
     key = name.to_s
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
-    @columns[key] = @columns[key].to_type(type)
+    col = @columns[key]
+    # Text cells are data, not Ruby literals: an object column cast to a
+    # number type is read with the decimal grammar ("010" is ten, "0x1F" and
+    # "1_000" are not numbers). Other targets go through to_type.
+    parsed = col.__parse_decimal__(type) if col.data_type == CA_OBJECT && !col.face?
+    @columns[key] = parsed || col.to_type(type)
   end
 
   # +promote+ with no target: let +promote_list+ decide the common type --

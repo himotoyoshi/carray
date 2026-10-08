@@ -35,6 +35,8 @@
 #include "ca_monop_dispatch.h"   /* CA_MONOP_CAST_BASE for as_type routing */
 #include "ca_obj_face.h"         /* ca_strip_face for write path lift */
 #include "carray_internal.h"      /* rb_ca_inherit_attr */
+#include "ruby/util.h"            /* ruby_strtod */
+#include <math.h>
 
 boolean8_t
 OBJ2BOOL (VALUE v)
@@ -2454,10 +2456,317 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
   }
 }
 
+/* ------------------------------------------------------------------------
+   Reading numbers from table text
+
+   A cell of a CSV file is data, not a Ruby literal, so it is read with a
+   decimal grammar rather than Integer() / Float():
+
+     integer   [+-]? digit+
+     float     [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
+                     ( [eE] [+-]? digit+ )?
+               | nan | inf | infinity     (any case, optional sign)
+
+   Surrounding ASCII whitespace is ignored.  "010" is ten, never octal, and
+   "0x1F" / "1_000" / "0b11" are not numbers.  A cell that does not match,
+   or an integer that does not fit the target type, becomes UNDEF.
+
+   A cell that is not a String (an Integer or Float from a record) is taken
+   as a number when it is one the target can hold exactly: an Integer that
+   fits, or for an integer target a Float with no fractional part.  nil and
+   anything else become UNDEF.
+   ------------------------------------------------------------------------ */
+
+static int
+ca_decimal_is_space (char c)
+{
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+         || c == '\v' || c == '\f';
+}
+
+static void
+ca_decimal_trim (const char **str, long *len)
+{
+  const char *s = *str;
+  long n = *len;
+  while ( n > 0 && ca_decimal_is_space(s[0]) ) {
+    s++;
+    n--;
+  }
+  while ( n > 0 && ca_decimal_is_space(s[n-1]) ) {
+    n--;
+  }
+  *str = s;
+  *len = n;
+}
+
+/* [+-]? digit+ into a sign and a magnitude.  A magnitude beyond uint64
+   does not fit any target and fails like a non-number. */
+static int
+ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
+{
+  long i = 0;
+  uint64_t v = 0;
+  *negative = 0;
+  if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+    *negative = ( s[i] == '-' );
+    i++;
+  }
+  if ( i == n ) {
+    return 0;
+  }
+  for ( ; i < n; i++ ) {
+    unsigned d = (unsigned) ( (unsigned char) s[i] - '0' );
+    if ( d > 9 ) {
+      return 0;
+    }
+    if ( v > ( UINT64_MAX - d ) / 10 ) {
+      return 0;
+    }
+    v = v * 10 + d;
+  }
+  *magnitude = v;
+  return 1;
+}
+
+static int
+ca_decimal_float (const char *s, long n, double *out)
+{
+  char buf[64];
+  long i = 0, digits = 0;
+  if ( n == 0 ) {
+    return 0;
+  }
+  if ( n <= 9 ) {            /* the longest non-finite word is "+infinity" */
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    if ( ca_str_nonfinite(buf, out) ) {
+      return 1;
+    }
+  }
+  if ( s[i] == '+' || s[i] == '-' ) {
+    i++;
+  }
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+    digits++;
+  }
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      digits++;
+    }
+  }
+  if ( digits == 0 ) {
+    return 0;
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
+      return 0;
+    }
+  }
+  if ( i != n ) {
+    return 0;
+  }
+  /* The token is validated, so ruby_strtod (locale-independent, correctly
+     rounded) sees nothing but a decimal number. */
+  if ( n < (long) sizeof(buf) ) {
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    *out = ruby_strtod(buf, NULL);
+  }
+  else {
+    volatile VALUE token = rb_str_new(s, n);
+    *out = ruby_strtod(RSTRING_PTR(token), NULL);
+  }
+  return 1;
+}
+
+static int
+ca_decimal_fits (int8_t data_type, int negative, uint64_t magnitude)
+{
+  uint64_t positive_max, negative_max;
+  switch ( data_type ) {
+  case CA_INT8:   positive_max = INT8_MAX;   negative_max = (uint64_t) INT8_MAX + 1;  break;
+  case CA_INT16:  positive_max = INT16_MAX;  negative_max = (uint64_t) INT16_MAX + 1; break;
+  case CA_INT32:  positive_max = INT32_MAX;  negative_max = (uint64_t) INT32_MAX + 1; break;
+  case CA_INT64:  positive_max = INT64_MAX;  negative_max = (uint64_t) INT64_MAX + 1; break;
+  case CA_UINT8:  positive_max = UINT8_MAX;  negative_max = 0; break;
+  case CA_UINT16: positive_max = UINT16_MAX; negative_max = 0; break;
+  case CA_UINT32: positive_max = UINT32_MAX; negative_max = 0; break;
+  case CA_UINT64: positive_max = UINT64_MAX; negative_max = 0; break;
+  default:
+    return 0;
+  }
+  return negative ? ( magnitude <= negative_max ) : ( magnitude <= positive_max );
+}
+
+/* Store a value that ca_decimal_fits accepted. */
+static void
+ca_decimal_store_integer (int8_t data_type, char *ptr, ca_size_t i,
+                          int negative, uint64_t magnitude)
+{
+  int64_t v;
+  if ( negative && magnitude > 0 ) {
+    v = - (int64_t) ( magnitude - 1 ) - 1;
+  }
+  else {
+    v = (int64_t) magnitude;
+  }
+  switch ( data_type ) {
+  case CA_INT8:   ((int8_t *)   ptr)[i] = (int8_t) v;   break;
+  case CA_INT16:  ((int16_t *)  ptr)[i] = (int16_t) v;  break;
+  case CA_INT32:  ((int32_t *)  ptr)[i] = (int32_t) v;  break;
+  case CA_INT64:  ((int64_t *)  ptr)[i] = v;            break;
+  case CA_UINT8:  ((uint8_t *)  ptr)[i] = (uint8_t) magnitude;  break;
+  case CA_UINT16: ((uint16_t *) ptr)[i] = (uint16_t) magnitude; break;
+  case CA_UINT32: ((uint32_t *) ptr)[i] = (uint32_t) magnitude; break;
+  case CA_UINT64: ((uint64_t *) ptr)[i] = magnitude;            break;
+  }
+}
+
+/* A non-String cell as an integer: an Integer, or a Float with no
+   fractional part, that the target can hold. */
+static int
+ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
+{
+  if ( RB_INTEGER_TYPE_P(v) ) {
+    VALUE zero = INT2FIX(0);
+    *negative = RTEST(rb_funcall(v, '<', 1, zero));
+    if ( *negative ) {
+      v = rb_funcall(v, rb_intern("-@"), 0);
+    }
+    if ( RTEST(rb_funcall(v, '>', 1, ULL2NUM(UINT64_MAX))) ) {
+      return 0;
+    }
+    *magnitude = NUM2ULL(v);
+    return 1;
+  }
+  if ( RB_FLOAT_TYPE_P(v) ) {
+    double d = RFLOAT_VALUE(v);
+    if ( d != d || d != floor(d) || fabs(d) >= 18446744073709551616.0 ) {
+      return 0;
+    }
+    *negative = ( d < 0 );
+    *magnitude = (uint64_t) fabs(d);
+    return 1;
+  }
+  return 0;
+}
+
+static VALUE
+rb_ca_parse_decimal (VALUE self, VALUE rtype)
+{
+  volatile VALUE src = self, out;
+  CArray *ca, *co;
+  int8_t data_type;
+  int is_float;
+  VALUE *cells;
+  boolean8_t *m_in, *m_out;
+  ca_size_t i;
+
+  data_type = rb_ca_guess_type(rtype);
+  switch ( data_type ) {
+  case CA_INT8: case CA_INT16: case CA_INT32: case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+    is_float = 0;
+    break;
+  case CA_FLOAT32: case CA_FLOAT64:
+    is_float = 1;
+    break;
+  default:
+    return Qnil;               /* not a number type: the caller casts */
+  }
+
+  TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eArgError, "decimal reading needs an object array");
+  }
+  if ( ! ca_is_entity(ca) ) {
+    src = rb_ca_copy(src);
+    TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  }
+
+  out = rb_carray_new(data_type, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  ca_create_mask(co);
+
+  cells = (VALUE *) ca->ptr;
+  m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
+  m_out = (boolean8_t *) co->mask->ptr;
+
+  for (i = 0; i < ca->elements; i++) {
+    VALUE v = cells[i];
+    int ok = 0;
+    if ( m_in && m_in[i] ) {
+      ok = 0;
+    }
+    else if ( is_float ) {
+      double d = 0.0;
+      if ( RB_TYPE_P(v, T_STRING) ) {
+        const char *s = RSTRING_PTR(v);
+        long n = RSTRING_LEN(v);
+        ca_decimal_trim(&s, &n);
+        ok = ca_decimal_float(s, n, &d);
+      }
+      else if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) ) {
+        d = NUM2DBL(v);
+        ok = 1;
+      }
+      if ( ok ) {
+        if ( data_type == CA_FLOAT32 ) {
+          ((float32_t *) co->ptr)[i] = (float32_t) d;
+        }
+        else {
+          ((float64_t *) co->ptr)[i] = d;
+        }
+      }
+    }
+    else {
+      int negative = 0;
+      uint64_t magnitude = 0;
+      if ( RB_TYPE_P(v, T_STRING) ) {
+        const char *s = RSTRING_PTR(v);
+        long n = RSTRING_LEN(v);
+        ca_decimal_trim(&s, &n);
+        ok = ca_decimal_integer(s, n, &negative, &magnitude);
+      }
+      else {
+        ok = ca_decimal_object_integer(v, &negative, &magnitude);
+      }
+      ok = ok && ca_decimal_fits(data_type, negative, magnitude);
+      if ( ok ) {
+        ca_decimal_store_integer(data_type, co->ptr, i, negative, magnitude);
+      }
+    }
+    m_out[i] = ok ? 0 : 1;
+    if ( ! ok ) {
+      memset(co->ptr + i * co->bytes, 0, co->bytes);
+    }
+  }
+
+  rb_ca_inherit_attr(out, self);
+  RB_GC_GUARD(src);
+  return out;
+}
+
 void
 Init_carray_cast (void)
 {
   /* CArray data_type conversion */
+
+  /* Internal: CAFrame#cast reads text cells with this grammar. */
+  rb_define_method(rb_cCArray, "__parse_decimal__", rb_ca_parse_decimal, 1);
 
   rb_define_method(rb_cCArray, "to_type", rb_ca_to_type_internal, -1);
 
