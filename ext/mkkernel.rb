@@ -9505,6 +9505,20 @@ MkKernel.triop :clip,
             '(#4) = _v; }',
   }
 
+# select: the per-cell choice a lazy `then_else` makes (#1 is the
+# condition, converted to the branches' common type; #2 / #3 are the
+# branches).  No Ruby method: CArray#then_else builds the node.
+MkKernel.triop :select,
+  bind:   false,
+  bang:   false,
+  source: MkKernel::MATH_NUMERIC + [:bool],
+  expr:   {
+    int:     "(#4) = (#1) ? (#2) : (#3);",
+    float:   "(#4) = (#1) ? (#2) : (#3);",
+    complex: "(#4) = (#1) ? (#2) : (#3);",
+    bool:    "(#4) = (#1) ? (#2) : (#3);",
+  }
+
 MkKernel.binop :power,
   op:     :power,
   source: MkKernel::MATH_NUMERIC + [:object],

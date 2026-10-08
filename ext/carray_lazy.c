@@ -1054,7 +1054,7 @@ typedef struct CAMaskOfOperands {
   CArray   *parent;
   uint32_t  attach;
   uint8_t   nosync;
-  int8_t    mode;          /* CA_LAZY_MASK_OR / _KLEENE_OR / _KLEENE_AND */
+  int8_t    mode;          /* CA_LAZY_MASK_OR / _KLEENE_OR / _KLEENE_AND / _SELECT */
 } CAMaskOfOperands;
 
 static size_t
@@ -1141,16 +1141,75 @@ ca_mask_of_operands_pull (CAMaskOfOperands *lm, CArray *src, const ca_lazy_req_t
   }
 }
 
+/* select: masked where the condition is, else where the branch it
+   chooses is.  The condition arrives converted to the branches' type
+   from boolean, so a cell is true exactly when one of its bytes is not
+   zero. */
+static void
+ca_mask_of_operands_eval_select (CAMaskOfOperands *lm, const ca_lazy_req_t *req,
+                                 boolean8_t *dst)
+{
+  CAMultiParent *mp = (CAMultiParent *) lm->parent;
+  CArray *cond = mp->parents[0];
+  ca_size_t bytes = cond->bytes;
+  ca_size_t n = req->n, i, b;
+  volatile VALUE h_value, h_m1, h_m2;
+  boolean8_t *m1, *m2;
+  char *v;
+  int32_t k;
+
+  memset(dst, 0, n);
+  if ( ca_has_mask(cond) ) {
+    ca_mask_of_operands_pull(lm, cond->mask, req, dst);
+  }
+  m1 = ALLOCV_N(boolean8_t, h_m1, n);
+  m2 = ALLOCV_N(boolean8_t, h_m2, n);
+  for ( k = 1; k <= 2; k++ ) {
+    CArray *op = mp->parents[k];
+    boolean8_t *m = ( k == 1 ) ? m1 : m2;
+    if ( ca_has_mask(op) ) {
+      ca_mask_of_operands_pull(lm, op->mask, req, m);
+    }
+    else {
+      memset(m, 0, n);
+    }
+  }
+  if ( ca_mask_of_operands_operand_is_scalar(lm, cond) ) {
+    v = ALLOCV_N(char, h_value, bytes);
+    ca_xfer_all(cond, v, CA_XFER_GET);
+    for ( b = 0; b < bytes && ! v[b]; b++ ) ;
+    for ( i = 0; i < n; i++ ) dst[i] |= ( b < bytes ) ? m1[i] : m2[i];
+  }
+  else {
+    v = ALLOCV_N(char, h_value, n * bytes);
+    ca_lazy_req_pull(cond, req, v, CA_XFER_GET);
+    for ( i = 0; i < n; i++ ) {
+      const char *c = v + i * bytes;
+      for ( b = 0; b < bytes && ! c[b]; b++ ) ;
+      dst[i] |= ( b < bytes ) ? m1[i] : m2[i];
+    }
+  }
+  ALLOCV_END(h_value);
+  ALLOCV_END(h_m2);
+  ALLOCV_END(h_m1);
+}
+
 static void
 ca_mask_of_operands_eval (CAMaskOfOperands *lm, const ca_lazy_req_t *req, boolean8_t *dst)
 {
   CAMultiParent *mp = (CAMultiParent *) lm->parent;
-  int kleene = ( lm->mode != CA_LAZY_MASK_OR );
+  int kleene = ( lm->mode == CA_LAZY_MASK_KLEENE_OR ||
+                 lm->mode == CA_LAZY_MASK_KLEENE_AND );
   boolean8_t absorbing = ( lm->mode == CA_LAZY_MASK_KLEENE_OR ) ? 1 : 0;
   volatile VALUE h_mask, h_value, h_known;
   boolean8_t *m, *v = NULL, *known = NULL;
   ca_size_t n = req->n, i;
   int32_t k;
+
+  if ( lm->mode == CA_LAZY_MASK_SELECT ) {
+    ca_mask_of_operands_eval_select(lm, req, dst);
+    return;
+  }
 
   memset(dst, 0, n);
   m = ALLOCV_N(boolean8_t, h_mask, n);

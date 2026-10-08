@@ -204,9 +204,11 @@ An `Op` carries `kind` (`:monop`, `:binop`, `:triop`, `:moncmp`, `:bincmp`),
 `name` (the operation as the kernels name it), `body` (its C from
 `CArray.__kernel_body__`, with `#1`, `#2`, ... for the operands and the next
 number for the result), `mask` (`:pass`, `:union`, `:kleene_or`,
-`:kleene_and`) and `trapping` (a masked cell must not be computed).
+`:kleene_and`, `:select`) and `trapping` (a masked cell must not be computed).
 A conversion between data types is a `:monop` named `cast_<type>` for the
-type it converts to, its body keyed by the type it converts from.
+type it converts to, its body keyed by the type it converts from. A lazy
+`then_else` is the `:triop` `select`, masked where its condition is or where
+the branch the condition chooses is (`:select`).
 
 **The contract.** The node classes, kinds, names, mask rules and fields keep
 the meaning they have. New ones are added; none is renamed or changes meaning.

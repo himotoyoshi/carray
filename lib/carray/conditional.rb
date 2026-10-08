@@ -6,7 +6,7 @@
 #  same "pick a value per cell based on a boolean condition" contract but
 #  differ in where the condition lives and how the branches are supplied:
 #
-#      cond.then_else(x, y)                  # boolean receiver, 2 values (eager)
+#      cond.then_else(x, y)                  # boolean receiver, 2 values (lazy if an operand is)
 #      self.replace_where(cond, b)           # value receiver, 1 replacement (eager)
 #      self.conditional(cond, f_then, f_else) # value receiver, 2 callables (per-region)
 #
@@ -28,9 +28,13 @@ class CArray
   #   The result's data type is the common type of the two branches; a
   #   branch given as `UNDEF` masks its cells and leaves the type to the
   #   other branch (`cond.then_else(a, UNDEF)` has `a`'s data type).
+  #   When `self` or a branch is a lazy view, the result is a lazy view
+  #   (read-only) that joins the expression around it; `copy` makes an
+  #   array of it.  An object result is always computed at once.
   #   @param x [CArray, Numeric, Object] true-branch value(s).
   #   @param y [CArray, Numeric, Object] false-branch value(s).
-  #   @return [CArray] new array with the same shape as `self`.
+  #   @return [CArray] new array with the same shape as `self`, or a
+  #     lazy view (CATriOp) when an operand is lazy.
   #   @raise [ArgumentError] when `self` is not a boolean CArray.
   def then_else (x, y)
     # Guard: self must be boolean.  Integer / float receiver would be
@@ -50,6 +54,7 @@ class CArray
     # type to the other.
     typed = [x, y].reject { |v| v.equal?(UNDEF) }
     dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
+    return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
     # A CScalar (scalar? CArray) is treated as a scalar value, not as a
     # self-shaped operand: full CArray -> gather/copy, scalar -> broadcast.
     y_full = y.is_a?(CArray) && !y.scalar?
@@ -66,6 +71,25 @@ class CArray
       result[self.is_masked] = UNDEF
     end
     result
+  end
+
+  # A lazy receiver or branch makes the selection a lazy node (CATriOp
+  # select), so it joins the expression around it rather than computing
+  # it here.  The branches carry the result type: a scalar branch becomes
+  # a CScalar of it, UNDEF a masked one.
+  private def lazy_then_else? (x, y, dt)
+    return false if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
+    [self, x, y].any? { |v| v.is_a?(CArray) && v.__lazy_view__? }
+  end
+
+  private def lazy_then_else (x, y, dt)
+    branch = lambda do |v|
+      next v if v.is_a?(CArray) && !v.scalar?
+      cell = CScalar.new(dt)
+      cell[0] = v.is_a?(CArray) ? v[0] : v
+      cell
+    end
+    CATriOp.__build__(self, branch.(x), branch.(y), CATriOp::OP_SELECT)
   end
 
   private def face_then_else (x, y, face)

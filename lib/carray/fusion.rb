@@ -45,7 +45,10 @@ class CArray
     #              is CArray's name for the type (float64_t)
     #   mask       how the result is masked: :pass (as its one operand),
     #              :union (where any operand is), :kleene_or / :kleene_and
-    #              (boolean | and &, unmasked where the known side settles it)
+    #              (boolean | and &, unmasked where the known side settles it),
+    #              :select (where the first operand is, else where the
+    #              operand it chooses is: the second where it is true, the
+    #              third where it is false)
     #   trapping   true where a masked cell must not be computed at all
     #
     # What a reader may rely on: the node classes, the kinds, the names, the
@@ -80,7 +83,9 @@ class CArray
     # which `**` makes and no table above names.
     BINOP_BY_ID = CArray::LAZY_BINOP_OP_IDS.invert
                     .merge(CABinOp::OP_IPOWER => :ipow).freeze
-    TRIOP_BY_ID = CArray::LAZY_TRIOP_OP_IDS.invert.freeze
+    # The lazy then_else is its own triop, select, which no method names.
+    TRIOP_BY_ID = CArray::LAZY_TRIOP_OP_IDS.invert
+                    .merge(CATriOp::OP_SELECT => :select).freeze
     MONCMP_BY_ID = CArray::LAZY_MONCMP_OP_IDS.invert.freeze
     # The table holds both spellings of each comparison (`lt` and `<`); the
     # kernels are named by the word.
@@ -285,7 +290,10 @@ class CArray
       def ternary (n)
         name = spell(TRIOP_BY_ID, n.__op_id__, TRIOP_NAMES)
         args = [visit(n.parent), visit(n.__triop_op2__), visit(n.__triop_op3__)]
-        op(:triop, name, n.data_type, args, :union, n.__trapping__)
+        # select is masked where its condition is, or where the branch the
+        # condition chooses is (ca_obj_triop.c).
+        rule = name == :select ? :select : :union
+        op(:triop, name, n.data_type, args, rule, n.__trapping__)
       end
 
       # A comparison is masked where its operands are (ca_obj_moncmp.c,

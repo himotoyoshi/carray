@@ -20,9 +20,9 @@
        op1), src2 == scratch2, src3 == scratch3.
 
   Mask handling: none of the currently-defined triops (fma / fms /
-  clip) trap on integer zero divisor, so m=NULL always at the
-  kernel walk (SIMD fast path).  Output mask is a blind OR of
-  operand masks (create_mask time).
+  clip / select) trap on integer zero divisor, so m=NULL always at the
+  kernel walk (SIMD fast path).  Output mask is the OR of the operand
+  masks, except for select (create_mask time).
 
   Cross-ndim promotion: intentional design rejection, mirroring
   CABinOp.  Callers must reshape explicitly.
@@ -419,13 +419,16 @@ ca_triop_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CATriOp is read-only (fill_data)");
 }
 
-/* Build out.mask: the three operands' masks ORed on each read
-   (CAMaskOfOperands).  None of the triops resolves a masked cell from values. */
+/* Build out.mask on each read (CAMaskOfOperands): the three operands'
+   masks ORed, except for select, which is masked where the condition is
+   or where the branch it chooses is. */
 static void
 ca_triop_func_create_mask (void *ap)
 {
   CATriOp *to = (CATriOp *) ap;
-  to->mask = ca_lazy_operation_mask((CArray *) to, CA_LAZY_MASK_OR);
+  int mode = ( to->op_id == CA_TRIOP_SELECT ) ? CA_LAZY_MASK_SELECT
+                                              : CA_LAZY_MASK_OR;
+  to->mask = ca_lazy_operation_mask((CArray *) to, mode);
 }
 
 ca_operation_function_t ca_triop_func = {
@@ -526,9 +529,19 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   r2 = collapse_marker(cary2);
   r3 = collapse_marker(cary3);
 
+  /* select takes its branches already typed (CArray#then_else makes a
+     scalar branch a CScalar of the result type); the condition is boolean
+     and takes no part in the promotion. */
+  if ( op_id == CA_TRIOP_SELECT ) {
+    if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ) {
+      rb_raise(rb_eArgError, "CATriOp: select takes three CArrays");
+    }
+    r2 = ca_lazy_settle_scalar(r2, RTEST(rb_obj_is_cscalar(r2)));
+    r3 = ca_lazy_settle_scalar(r3, RTEST(rb_obj_is_cscalar(r3)));
+  }
   /* Scalar operands (clip's Numeric bounds, a CScalar) are wrapped and
      promoted pairwise in the order the eager triop uses. */
-  if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
+  else if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
        rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
     if ( ! rb_obj_is_carray(r1) ) {
       rb_raise(rb_eArgError,
@@ -736,6 +749,7 @@ Init_ca_obj_triop (void)
   rb_define_const(rb_cCATriOp, "OP_FMA",  INT2NUM(CA_TRIOP_FMA));
   rb_define_const(rb_cCATriOp, "OP_FMS",  INT2NUM(CA_TRIOP_FMS));
   rb_define_const(rb_cCATriOp, "OP_CLIP", INT2NUM(CA_TRIOP_CLIP));
+  rb_define_const(rb_cCATriOp, "OP_SELECT", INT2NUM(CA_TRIOP_SELECT));
 
   rb_define_alloc_func(rb_cCATriOp, rb_ca_triop_s_allocate);
   rb_define_method(rb_cCATriOp, "initialize_copy",

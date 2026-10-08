@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `then_else` returns a lazy view when the condition or a branch is
+  a lazy view, as the other element-wise operations do, so the selection
+  joins the expression around it (and a registered expression evaluator
+  such as carray-jit compiles it with the rest). The view is read-only;
+  `copy` makes an array of it. An object result is still computed at once.
+
 - New: a lazy expression that mixes data types (`f32.lazy + f64.lazy`,
   `i32.lazy.sin`) can be handed to a registered expression evaluator such
   as carray-jit; before, such an expression was always walked by CArray.

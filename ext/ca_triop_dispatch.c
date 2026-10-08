@@ -27,6 +27,7 @@ ca_triop_kernel_lookup_vvv (uint16_t op_id, int8_t common_dt)
     case CA_TRIOP_FMA:  return ca_triop_fma  [common_dt];
     case CA_TRIOP_FMS:  return ca_triop_fms  [common_dt];
     case CA_TRIOP_CLIP: return ca_triop_clip [common_dt];
+    case CA_TRIOP_SELECT: return ca_triop_select [common_dt];
     default:            return NULL;
   }
 }
@@ -38,7 +39,9 @@ ca_triop_kernel_lookup_vvv (uint16_t op_id, int8_t common_dt)
 int8_t
 ca_lazy_promote_triop (uint16_t op_id, int8_t dt1, int8_t dt2, int8_t dt3)
 {
-  (void) op_id;   /* uniform 3-way promote across all currently-defined triops */
+  if ( op_id == CA_TRIOP_SELECT ) {
+    return (int8_t) ca_promote_type(dt2, dt3);
+  }
   return (int8_t) ca_promote_type(ca_promote_type(dt1, dt2), dt3);
 }
 
