@@ -1288,8 +1288,8 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns
   measured from another origin convert directly. A float column is accepted
-  only when every value is whole; a fractional serial raises (use a finer
-  `unit`). A non-numeric column raises.
+  only when every value is whole; a fractional serial raises
+  `CAFrame::UnreadableText` (use a finer `unit`). A non-numeric column raises.
 
   A [`CATime::Grid`](CATime.md) carries that (unit, epoch)
   pair as one value — passed positionally or as `unit:` — so a netCDF `units`

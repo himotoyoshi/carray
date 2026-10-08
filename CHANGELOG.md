@@ -39,7 +39,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - Change: `CAFrame` raises `CAFrame::UnreadableText` instead of
   `ArgumentError` when a column's text cannot be read: `cast` and
   `from_csv(types:)` under `on_error: :raise`, `parse_to_time`, and
-  `infer_time_format` / `parse_to_time(name, :infer)` when no format fits.
+  `infer_time_format` / `parse_to_time(name, :infer)` when no format fits,
+  and `to_time` on a float column with a fractional value.
   When more than one format fits every cell, these raise
   `CAFrame::AmbiguousTimeFormat`, whose `formats` lists them. Neither is an
   `ArgumentError`, so a `rescue ArgumentError` around these calls no longer

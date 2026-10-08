@@ -297,7 +297,7 @@ class CAFrame
   #
   # A float column is accepted only when every value is whole (no fractional
   # part); a fractional serial has sub-unit precision that a finer +unit+ should
-  # carry, so it raises rather than silently truncate. Make it the index with
+  # carry, so it raises CAFrame::UnreadableText rather than silently truncate. Make it the index with
   # +set_index+ afterward.
   #
   # A +CATime::Grid+ carries the same (unit, epoch) pair as one value, so a
@@ -647,7 +647,7 @@ class CAFrame
       col.to_type(:int64)
     elsif col.data_type == :float32 || col.data_type == :float64
       unless col.floor.eq(col).all
-        raise ArgumentError,
+        raise UnreadableText,
               "to_time: float column #{key.inspect} has fractional values; " \
               "use a finer unit: or convert to integer counts explicitly"
       end
