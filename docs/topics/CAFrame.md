@@ -303,7 +303,10 @@ Input that cannot be read as written **raises rather than losing data**. A
 quoted field must end at the separator or the end of the record: text after
 the closing quote (`"ab"cd`, or a space as in `"x" ,2`) raises
 `CAFrame::CSVParser::MalformedCSV` naming the record, except that `strip:`
-lets spaces through there as it does around an unquoted field. A header that
+lets spaces through there as it does around an unquoted field. A quote inside
+an unquoted field (`5"in`) raises too: a field that holds a quote is written
+quoted, with the quote doubled (`"5""in"`), which is how `to_csv` writes it. A
+record goes on past the end of its line only inside a quoted field. A header that
 names a column twice raises `ArgumentError`, since a frame keeps one column
 per name; name the columns yourself with `column_names` in a reading block
 (below) to read such a file.
@@ -1055,8 +1058,10 @@ Notes:
   rounded; `"1.5"` is not an integer. A cell that does not read, or a value
   the type cannot hold (`"300"` into `:int8`), becomes `UNDEF` (parse-mask).
   A Ruby number in an object column is held to the same rule: an Integer
-  that fits, or a Float with no fractional part, is kept, and `2.5` is
-  `UNDEF` rather than truncated, so `"2.5"` and `2.5` in one column agree.
+  that fits, or a Float, Rational or BigDecimal with no fractional part, is
+  kept, and `2.5` is `UNDEF` rather than truncated, so `"2.5"` and `2.5` in
+  one column agree. A string column (`CArray.string`, `CArray.const_string`)
+  is read the same way as an object column of text.
   `:time` parses a text column into a `CATime` column in the finest unit its
   text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` /
   `:ns` for fractions of a second (for a format or a unit of your own, use
@@ -1135,7 +1140,10 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   because whether `"01/02/2024"` is January or February cannot be told from
   the text; pass a strptime `format` for it, `:infer`, or `:mixed` to guess
   at each cell, which is much slower. `unit` defaults to the finest the text
-  shows without a format or with `:infer`, and to `:s` with a format.
+  shows without a format or with `:infer`, and to `:s` with a format; it
+  takes the unit spellings `CArray.time` does (`:s`, `"10 minutes"`, a
+  `CATime::Resolution`). Hour 24 is read only as `24:00:00`, the end of the
+  day (the next midnight); `24:30` does not parse.
   Missing and unparseable cells become `UNDEF` (parse-mask);
   `on_error: :warn` / `:raise` reports the unparseable ones as `cast` does.
   A non-string column raises. `cast(name => :time)` is the call without a
