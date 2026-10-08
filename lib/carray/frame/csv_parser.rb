@@ -386,33 +386,32 @@ class CAFrame
     end
 
     # The header: / data: / column_names: of from_csv, as the verbs above.
-    # Lines are the file's, from 1, as an editor and an error number them;
-    # a record that starts within data: is read whole. header: defaults to
-    # line 1, or to none when column_names: is given; data: to the line after
-    # the header. data: is a first line, a Range, or "first:last" (either
-    # end may be left out).
+    # They index the lines of the file from 0, as File.readlines does (an
+    # error names a line from 1, as an editor does). header: defaults to 0,
+    # or to none (false) when column_names: is given; data: is the first line
+    # of the data or a Range of lines, by default from the line after the
+    # header. A record that starts within data: is read whole.
     def layout(header: nil, data: nil, column_names: nil)
-      header = column_names ? false : 1 if header.nil?
+      header = column_names ? false : 0 if header.nil?
+      unless header == false || (header.is_a?(Integer) && header >= 0)
+        raise ArgumentError, "from_csv: header: takes the index of a line, from 0, " \
+                             "or false (got #{header.inspect})"
+      end
       first, last = CSVReader.data_lines(data)
       if header
-        unless header.is_a?(Integer) && header >= 1
-          raise ArgumentError, "from_csv: header: takes a line number from 1, or false " \
-                               "(got #{header.inspect})"
-        end
-        skip(header - 1 - @tok.lineno) if header - 1 > @tok.lineno
+        skip(header - @tok.lineno) if header > @tok.lineno
         self.header
       end
       column_names(*column_names) if column_names
-      first ||= @tok.lineno + 1
-      if first <= @tok.lineno
-        raise ArgumentError, "from_csv: data: starts on line #{first}, which is not " \
-                             "after the header on line #{header}"
+      first ||= @tok.lineno
+      if first < @tok.lineno
+        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}"
       end
-      skip(first - 1 - @tok.lineno)
-      read_data(last)
+      skip(first - @tok.lineno)
+      read_data(last && last + 1)
     end
 
-    # [first, last] lines of a data: setting, nil for an end left open.
+    # [first, last] line indexes of a data: setting, nil for an end left open.
     def self.data_lines(spec)
       first, last =
         case spec
@@ -420,17 +419,15 @@ class CAFrame
         when Integer then [spec, nil]
         when Range
           e = spec.end
-          e -= 1 if e && spec.exclude_end?
+          e -= 1 if e.is_a?(Integer) && spec.exclude_end?
           [spec.begin, e]
-        when /\A(\d*):(\d*)\z/
-          [$1.empty? ? nil : $1.to_i, $2.empty? ? nil : $2.to_i]
         else
-          raise ArgumentError, "from_csv: data: takes a first line, a Range of lines, " \
-                               "or \"first:last\" (got #{spec.inspect})"
+          raise ArgumentError, "from_csv: data: takes the index of a line or a Range of " \
+                               "them, from 0 (got #{spec.inspect})"
         end
       [first, last].each do |n|
-        next if n.nil? || (n.is_a?(Integer) && n >= 1)
-        raise ArgumentError, "from_csv: data: lines are numbered from 1 (got #{spec.inspect})"
+        next if n.nil? || (n.is_a?(Integer) && n >= 0)
+        raise ArgumentError, "from_csv: data: lines are indexed from 0 (got #{spec.inspect})"
       end
       if first && last && last < first
         raise ArgumentError, "from_csv: data: #{spec.inspect} ends before it starts"

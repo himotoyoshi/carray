@@ -391,24 +391,24 @@ pass `encoding:`. Which encoding a file is in cannot be told from its bytes, so
 the message names the option, not a value.
 
 For files with a title, a units row, or no header, say on which **lines** the
-header and the data are. Lines are numbered from 1, as an editor numbers them
-and as a malformed-record error names them:
+header and the data are. A line is given by its index from 0, as in
+`File.readlines(path)[i]`:
 
 ```ruby
-CAFrame.from_csv("obs.csv")                              # header on line 1, data after it
-CAFrame.from_csv("obs.csv", header: 3)                   # a title above the header
-CAFrame.from_csv("obs.csv", header: 1, data: 4)          # units on lines 2-3
-CAFrame.from_csv("big.csv", data: "2:101")               # lines 2 to 101
-CAFrame.from_csv("big.csv", data: 2..101)                # the same, as a Range
+CAFrame.from_csv("obs.csv")                              # header at 0, data after it
+CAFrame.from_csv("obs.csv", header: 2)                   # two title lines above
+CAFrame.from_csv("obs.csv", header: 0, data: 3)          # units on lines 1-2
+CAFrame.from_csv("big.csv", data: 1..100)                # the first 100 data lines
 CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])   # no header line
 CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
 ```
 
-`header:` is the line of the column names (default 1), or `false` for none.
-`data:` is the first line of the data (default the line after the header), a
-Range, or `"first:last"` with either end left out (`"4:"`, `":101"`). A record
-that starts within `data:` is read whole, even when a quoted field carries it
-past the last line. `column_names:` names the columns; given alone, the file
+`header:` is the line of the column names (default 0), or `false` for none.
+`data:` is the first line of the data (default the line after the header), or
+a Range of lines (`4..`, `...101`). A record that starts within `data:` is read
+whole, even when a quoted field carries it past the last line. A
+malformed-record error names the line from 1, as an editor numbers it, so the
+line `e.lineno` is index `e.lineno - 1`. `column_names:` names the columns; given alone, the file
 is taken to have no header line, and given with `header:`, it replaces the
 names on that line.
 

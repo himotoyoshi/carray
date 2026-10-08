@@ -47,18 +47,19 @@ class CAFrame
   #   on_error: what a +types:+ cast does with a cell that does not read
   #             (:mask default, :warn, :raise); see +cast+.
   #
-  # Where the header and the data are is given by line, numbered from 1 as
-  # an editor numbers them (and as an error names them):
-  #   header:   the line of the column names (default 1), or false for none
+  # Where the header and the data are is given by the index of the line,
+  # from 0, as in File.readlines (an error names the line from 1, as an
+  # editor numbers it):
+  #   header:   the line of the column names (default 0), or false for none
   #   data:     the first line of the data (default the line after the
-  #             header), a Range of lines, or "first:last" with either end
-  #             left out; a record that starts in it is read whole
+  #             header), or a Range of lines; a record that starts in it is
+  #             read whole
   #   column_names: the names, for a file with none or to replace them; the
   #             header then defaults to none
   #
-  #   CAFrame.from_csv("obs.csv", header: 3)            # a title above
-  #   CAFrame.from_csv("obs.csv", header: 1, data: 4)   # units on lines 2-3
-  #   CAFrame.from_csv("big.csv", data: "2:101")        # the first 100 lines
+  #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
+  #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
+  #   CAFrame.from_csv("big.csv", data: 1..100)         # the first 100 lines
   #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
   #
   # A block, given the reader, reads in any other order with +skip+ /
@@ -647,7 +648,7 @@ class CAFrame
     unless dup.empty?
       raise ArgumentError,
             "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
-            "name the columns yourself: from_csv(path, header: false, data: 2, " \
+            "name the columns yourself: from_csv(path, header: false, data: 1, " \
             "column_names: [...])"
     end
 

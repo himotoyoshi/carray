@@ -37,10 +37,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 ## 3.0.3 (unreleased)
 
 - New: `CAFrame.from_csv` takes `header:` (the line of the column names, or
-  `false`), `data:` (the first line of the data, a Range, or `"first:last"`)
-  and `column_names:`, with lines numbered from 1 as an editor numbers them:
-  `from_csv("obs.csv", header: 3, data: 5)`, `from_csv("big.csv", data:
-  "2:101")`.
+  `false`), `data:` (the first line of the data, or a Range of lines) and
+  `column_names:`, with a line given by its index from 0, as in
+  `File.readlines`: `from_csv("obs.csv", header: 2, data: 4)`,
+  `from_csv("big.csv", data: 1..100)`.
 - Change: the reading block of `CAFrame.from_csv` is given the reader as its
   parameter, and its `body` verb is now `data`: write `from_csv(path) { |r|
   r.skip 2; r.header; r.data }`, or `{ it.skip 2; it.header; it.data }`. A
