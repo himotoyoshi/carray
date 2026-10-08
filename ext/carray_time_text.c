@@ -937,6 +937,11 @@ ca_strp_text (VALUE str, const char *f, long flen, int strict, ca_strp_t *t)
   if ( t->merid >= 0 && t->has_hour ) {
     t->hour = t->hour % 12 + t->merid;
   }
+  /* Hour 24 is the end of the day, 24:00:00, and nothing past it: 24:30
+     would otherwise roll into the next day. */
+  if ( t->hour == 24 && ( t->min || t->sec || t->frac_ns ) ) {
+    return CA_STRP_FAIL;
+  }
   if ( t->mday > ca_time_text_month_days(t->year, t->mon) ) {
     return CA_STRP_FAIL;
   }
