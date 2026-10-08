@@ -265,4 +265,35 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
     assert_nil format_of(["", nil])
     assert_equal ["UNDEF", "UNDEF"], times(["", nil])
   end
+
+  # Japanese year, month, day, hour, minute and second markers.
+  Y, MO, D = "年", "月", "日"
+  H, MI, S = "時", "分", "秒"
+
+  def test_japanese_dates
+    assert_equal ["2024-01-02", "2024-12-31"],
+                 times(["2024#{Y}1#{MO}2#{D}", "2024#{Y}12#{MO}31#{D}"])
+    assert_equal ["2024-01-02T03:04:00Z", "2024-01-02T15:04:00Z"],
+                 times(["2024#{Y}1#{MO}2#{D} 3#{H}4#{MI}", "2024#{Y}1#{MO}2#{D}15#{H}04#{MI}"])
+    assert_equal ["2024-01-02T03:04:05Z"], times(["2024#{Y}1#{MO}2#{D} 3#{H}4#{MI}5#{S}"])
+    assert_equal ["2024-01-02T03:04:00Z"], times(["2024#{Y}1#{MO}2#{D} 03:04"])
+    assert_raise(ArgumentError) { times(["2024#{Y}1#{MO}2#{D}", "2024#{Y}2#{MO}30#{D}"]) }
+  end
+
+  def test_zones
+    assert_equal "%d/%m/%Y %H:%M %z", format_of(["01/02/2024 15:04 +0900", "13/02/2024 00:00 +09:00"])
+    assert_equal ["2024-02-01T06:04:00Z", "2024-02-12T15:00:00Z"],
+                 times(["01/02/2024 15:04 +0900", "13/02/2024 00:00 +09:00"])
+    assert_equal ["2024-02-01T06:04:00Z", "2024-02-13T11:00:00Z"],
+                 times(["01/02/2024 3:04 PM +09", "13/02/2024 11:00 AM UTC"])
+    assert_equal ["2024-01-02T15:04:00Z", "2024-02-13T06:00:00Z"],
+                 times(["Jan 2, 2024 15:04 GMT", "Feb 13, 2024 01:00 -0500"])
+  end
+
+  # A zone named for a place is not taken, and a zone on some cells only is
+  # a second format.
+  def test_zones_that_do_not_fit
+    assert_raise(ArgumentError) { format_of(["1/2/2024 15:04 JST"]) }
+    assert_raise(ArgumentError) { times(["13/02/2024 15:04 +0900", "13/02/2024 15:04"]) }
+  end
 end

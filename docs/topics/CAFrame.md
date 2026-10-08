@@ -1037,17 +1037,26 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   present cell gives the candidate formats (day-first and month-first dates
   with `/`, `-` or `.`, two-digit years, month names as in `Jan 2, 2024`
   or `2 Jan 2024`, `YYYYMMDD`, each with an optional `h:mm`, `h:mm:ss`,
-  fraction of a second, or `AM` / `PM` time), and each later cell drops the
-  candidates it does not fit until one is left, so a later `13/02/2024`
-  settles whether `01/02/2024` is day-first. It raises when no candidate
-  fits the first cell, when none is left, and when more than one is left
-  at the end; a cell not in the chosen format raises too, whatever
-  `on_error` says. `infer_time_format(name)` returns the format it chose,
-  to write into the code:
+  fraction of a second, or `AM` / `PM` time and a zone `+0900`, `+09:00`,
+  `+09`, `Z`, `UTC` or `GMT`; and Japanese dates `2024年1月2日`, with an
+  optional `3時4分`, `3時4分5秒` or `3:04` time), and each later cell drops
+  the candidates it does not fit until one is left, so a later
+  `13/02/2024` settles whether `01/02/2024` is day-first. It raises when no
+  candidate fits the first cell, when none is left, and when more than one
+  is left at the end; a cell not in the chosen format raises too, whatever
+  `on_error` says. A zone named for a place (`JST`, `CST`) is not a
+  candidate, since some of those names mean different offsets in different
+  places. `infer_time_format(name)` returns the format it chose, to write
+  into the code:
 
   ```ruby
   df.infer_time_format("date")   # => "%d/%m/%Y"
   ```
+
+  `:mixed` is for text that is not written in one format, which is broken
+  as data a machine reads. It guesses at each cell on its own, as
+  `Time.parse` does, so it can read a cell wrongly without saying so:
+  `"01/02/24"` is read as 24 February 2001.
 - **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns

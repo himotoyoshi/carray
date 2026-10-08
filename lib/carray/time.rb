@@ -1799,30 +1799,66 @@ module CATimeLiteral
     ['\d{8}',                      ["%Y%m%d"]],
   ].freeze
 
-  INFER_TIMES = [
-    ['',                                       '',             :date],
-    [' +\d{1,2}:\d{2}',                        ' %H:%M',       :clock],
-    [' +\d{1,2}:\d{2}:\d{2}',                  ' %H:%M:%S',    :clock],
-    [' +\d{1,2}:\d{2}:\d{2}\.(?<f>\d{1,9})',   ' %H:%M:%S.%N', :fraction],
-    [' +\d{1,2}:\d{2} *[AaPp][Mm]',            ' %I:%M %p',    :clock],
-    [' +\d{1,2}:\d{2}:\d{2} *[AaPp][Mm]',      ' %I:%M:%S %p', :clock],
+  # A zone after a time of day: an offset, Z, UTC or GMT. Zone names that
+  # mean different offsets in different places (CST, IST) are not taken.
+  INFER_ZONE = ' *(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)'
+
+  INFER_CLOCKS = [
+    ['\d{1,2}:\d{2}',                        '%H:%M',       :clock],
+    ['\d{1,2}:\d{2}:\d{2}',                  '%H:%M:%S',    :clock],
+    ['\d{1,2}:\d{2}:\d{2}\.(?<f>\d{1,9})',   '%H:%M:%S.%N', :fraction],
+    ['\d{1,2}:\d{2} *[AaPp][Mm]',            '%I:%M %p',    :clock],
+    ['\d{1,2}:\d{2}:\d{2} *[AaPp][Mm]',      '%I:%M:%S %p', :clock],
   ].freeze
 
-  INFER_FORMATS = INFER_DATES.flat_map { |date, formats|
-    formats.flat_map { |fmt|
-      INFER_TIMES.map { |time, tfmt, kind|
-        TimeFormat.new(/\A#{date}#{time}\z/, fmt + tfmt, kind)
+  # Times after a date: none, or one of INFER_CLOCKS after a space, with or
+  # without a zone.
+  INFER_TIMES = ([['', '', :date]] +
+    INFER_CLOCKS.flat_map { |pattern, fmt, kind|
+      [[" +#{pattern}", " #{fmt}", kind],
+       [" +#{pattern}#{INFER_ZONE}", " #{fmt} %z", kind]]
+    }).freeze
+
+  # A date written in Japanese, year first ("2024<year>1<month>2<day>"),
+  # takes a time with or without a space before it, in the same markers
+  # ("3<hour>4<minute>", "...5<second>") or with colons.
+  JA_YEAR, JA_MONTH, JA_DAY = "年", "月", "日"
+  JA_HOUR, JA_MINUTE, JA_SECOND = "時", "分", "秒"
+  INFER_JA_TIMES = ([['', '', :date],
+    [" *\\d{1,2}#{JA_HOUR}\\d{1,2}#{JA_MINUTE}",
+     " %H#{JA_HOUR}%M#{JA_MINUTE}", :clock],
+    [" *\\d{1,2}#{JA_HOUR}\\d{1,2}#{JA_MINUTE}\\d{1,2}#{JA_SECOND}",
+     " %H#{JA_HOUR}%M#{JA_MINUTE}%S#{JA_SECOND}", :clock]] +
+    INFER_CLOCKS.map { |pattern, fmt, kind| [" *#{pattern}", " #{fmt}", kind] }).freeze
+
+  INFER_FORMATS = (
+    INFER_DATES.flat_map { |date, formats|
+      formats.flat_map { |fmt|
+        INFER_TIMES.map { |time, tfmt, kind|
+          TimeFormat.new(/\A#{date}#{time}\z/, fmt + tfmt, kind)
+        }
       }
+    } +
+    INFER_JA_TIMES.map { |time, tfmt, kind|
+      TimeFormat.new(/\A\d{4}#{JA_YEAR}\d{1,2}#{JA_MONTH}\d{1,2}#{JA_DAY}#{time}\z/,
+                     "%Y#{JA_YEAR}%m#{JA_MONTH}%d#{JA_DAY}#{tfmt}", kind)
     }
-  }.freeze
+  ).freeze
 
   # Whether `text` is in format `f`: its shape, then a reading with no
   # leftover that names a date which exists.
   def time_format_fits?(f, text)
-    return false unless f.pattern.match?(text)
+    return false unless text_matches?(f.pattern, text)
     h = Date._strptime(text, f.format)
     h && !h.key?(:leftover) && h[:year] &&
       Date.valid_date?(h[:year], h[:mon] || 1, h[:mday] || 1, Date::GREGORIAN)
+  end
+
+  # A text in an encoding the pattern cannot meet does not match it.
+  def text_matches?(pattern, text)
+    pattern.match?(text)
+  rescue EncodingError
+    false
   end
 
   # The one format of INFER_FORMATS that the texts are written in. The
@@ -1895,7 +1931,7 @@ module CATimeLiteral
       next if s.nil? || UNDEF.equal?(s)
       begin
         if s.is_a?(String)
-          if pattern && !pattern.match?(s.strip)
+          if pattern && !text_matches?(pattern, s.strip)
             raise ArgumentError, "#{s.inspect} is not in the format #{format.inspect}"
           end
           h = parse_date_fields(s, format)
