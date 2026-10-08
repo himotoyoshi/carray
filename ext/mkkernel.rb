@@ -659,41 +659,6 @@ module MkKernel
     }
   end
 
-  # Register a map kernel (element-wise transform: input shape == output
-  # shape, one cell at a time).  Each generated helper walks the input
-  # and output slabs in lockstep using CA_SLAB_MAP_T(T_LOAD, T_OUT, ...).
-  #
-  # DSL:
-  #   MkKernel.map :name,
-  #     source:   MkKernel::ALL_NUMERIC,
-  #     output:   :f64 | :preserve,
-  #     expr:     "r = sqrt((double) v)",   # binds v (input) + r (output)
-  #     fallback: :wrap_to_f64 | :raise
-  #
-  # Generated method takes no arguments (`a.sqrt_ki` not `a.sqrt_ki(0)`)
-  # since the operation is per-cell across the whole array.
-  def self.map(name, source:, output:, expr:, fallback: :raise)
-    raise "duplicate kernel #{name}" if KERNELS.any? { |k| k[:name] == name }
-    source.each do |s|
-      raise "unknown source data_type #{s}" unless DTYPES.key?(s)
-    end
-    raise "unknown output #{output}" unless output == :preserve || DTYPES.key?(output) || output.is_a?(Hash)
-    raise "unknown fallback #{fallback}" unless %i[raise wrap_to_f64].include?(fallback)
-    if output == :preserve && fallback == :wrap_to_f64
-      raise "#{name}: :preserve + :wrap_to_f64 is a semantic conflict " \
-            "(fallback path produces f64 output, contradicting :preserve)"
-    end
-
-    KERNELS << {
-      kind:     :map,
-      name:     name,
-      source:   source,
-      output:   output,
-      expr:     expr,
-      fallback: fallback,
-    }
-  end
-
   # Register a scan kernel (cumulative / prefix-scan: input shape ==
   # output shape, running accumulator along one axis).  The generated
   # method takes exactly one axis argument (e.g., `a.cumsum_ki(0)`).
@@ -1642,9 +1607,11 @@ module MkKernel
     require "fileutils"
     FileUtils.mkdir_p(outdir)
     tags = file_tags
+    written = ["carray_kernels_init.c"]
     tags.each do |kind, subgroup|
       suffix = file_suffix(kind, subgroup)
       path = File.join(outdir, "carray_kernels_#{suffix}.c")
+      written << File.basename(path)
       File.open(path, "w") do |io|
         io.puts header
         KERNELS.each do |k|
@@ -1657,6 +1624,11 @@ module MkKernel
     end
     File.open(File.join(outdir, "carray_kernels_init.c"), "w") do |io|
       emit_aggregator_init(io, tags)
+    end
+    # extconf compiles every carray_kernels_*.c it finds, so a file left
+    # by a kind or sub-group that no longer exists has to go.
+    Dir.glob(File.join(outdir, "carray_kernels_*.c")).each do |f|
+      File.delete(f) unless written.include?(File.basename(f))
     end
   end
 
@@ -1676,7 +1648,6 @@ module MkKernel
   def self.emit_kernel_dispatch(io, k)
     case k[:kind]
     when :reduce then emit_reduce(io, k)
-    when :map    then emit_map(io, k)
     when :scan   then emit_scan(io, k)
     when :sort   then emit_sort(io, k)
     when :search then emit_search(io, k)
@@ -1693,7 +1664,7 @@ module MkKernel
     end
   end
 
-  KINDS = [:reduce, :map, :scan, :sort, :search,
+  KINDS = [:reduce, :scan, :sort, :search,
            :monop, :binop, :triop, :moncmp, :bincmp].freeze
 
   # Sub-split map for the reduce kind.  As one file, reduce accounted for 71%
@@ -3824,113 +3795,6 @@ module MkKernel
     else
       io.puts "  return Qnil;  /* unreachable */"
     end
-    io.puts "}"
-  end
-
-  # ---- map emitter ------------------------------------------------------
-
-  def self.emit_map(io, k)
-    io.puts
-    io.puts "/* ===== #{k[:name]}_ki ============================================ */"
-    k[:source].each do |src|
-      emit_map_native(io, k, src)
-    end
-    emit_map_dispatch(io, k)
-  end
-
-  def self.emit_map_native(io, k, src)
-    si   = DTYPES[src]
-    oi   = output_info(k, src)
-    name = k[:name]
-    expr = resolve_expr(k[:expr], oi, src)
-
-    io.puts
-    io.puts <<~C
-      static VALUE
-      #{name}_ki_native_#{src} (VALUE self, CArray *ca)
-      {
-        VALUE   vout = rb_ca_template_with_type(self, INT2NUM(#{oi[:ca]}),
-                                                INT2NUM(sizeof(#{oi[:c]})));
-        CArray *co;
-        GetCArray(vout, co);
-
-        /* All-axes slab = whole array as one K-D walk via CA_SLAB_AXES.
-           CA_SLAB_WHOLE uses the flat next_slab path, which doesn't
-           populate slab_dims; CA_SLAB_AXES with naxes == ndim is the
-           K-D-walkable form. */
-        int8_t slab_axes[CA_RANK_MAX];
-        int8_t naxes = ca->ndim;
-        for ( int8_t k = 0; k < naxes; k++ ) slab_axes[k] = k;
-
-        ca_iter_state st_in, st_out;
-        int rc;
-        rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,
-                                   slab_axes, naxes, 0);
-        if ( rc != CA_ITER_OK ) {
-          rb_raise(rb_eRuntimeError,
-                   "%s: input init failed rc=%d", ca_calling_method_name(), rc);
-        }
-        rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
-                                   slab_axes, naxes, CA_KERNEL_WRITE);
-        if ( rc != CA_ITER_OK ) {
-          ca_iter_state_finish(&st_in);
-          rb_raise(rb_eRuntimeError,
-                   "%s: output init failed rc=%d", ca_calling_method_name(), rc);
-        }
-
-        char       *pi, *po;
-        boolean8_t *mi, *mo;
-        while ( ca_iter_state_next_slab_axes(&st_in,  &pi, &mi) &&
-                ca_iter_state_next_slab_axes(&st_out, &po, &mo) ) {
-          CA_SLAB_MAP_T(#{si[:c]}, #{oi[:c]}, st_in, pi, st_out, po, #{expr});
-          ca_iter_state_sync_slab(&st_out);
-        }
-        ca_iter_state_finish(&st_in);
-        ca_iter_state_finish(&st_out);
-        return vout;
-      }
-    C
-  end
-
-  def self.emit_map_dispatch(io, k)
-    name = k[:name]
-    io.puts
-    io.puts "static VALUE"
-    io.puts "rb_ca_#{name}_ki (VALUE self)"
-    io.puts "{"
-    io.puts "  CArray *src;"
-    io.puts "  GetCArray(self, src);"
-    io.puts "  switch ( src->data_type ) {"
-    k[:source].each do |s|
-      si = DTYPES[s]
-      io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src);"
-    end
-    case k[:fallback]
-    when :wrap_to_f64
-      io.puts "    default: {"
-      io.puts "      /* Phase E: only wrap data_types that have a meaningful float64"
-      io.puts "         representation.  Complex / fixlen / object would lose"
-      io.puts "         structure (e.g. complex -> float strips imaginary part)"
-      io.puts "         so reject explicitly, matching legacy DataTypeError. */"
-      io.puts "      switch ( src->data_type ) {"
-      io.puts "        case CA_BOOLEAN: break;   /* wrap: count-of-trues semantic */"
-      io.puts "        default:"
-      io.puts %Q[          rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])}, or boolean)", ca_calling_method_name(), ca_type_name[src->data_type]);]
-      io.puts "      }"
-      io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
-      io.puts "      CArray *casted;"
-      io.puts "      GetCArray(vsrc, casted);"
-      io.puts "      return #{name}_ki_native_f64(vsrc, casted);"
-      io.puts "    }"
-    when :raise
-      io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
-    when :mask_count
-      io.puts "    default:"
-      io.puts "      return rb_ca_scan_mask_count(self, INT2NUM(axis));"
-    end
-    io.puts "  }"
-    io.puts "  return Qnil;  /* unreachable */"
     io.puts "}"
   end
 
@@ -6904,7 +6768,6 @@ module MkKernel
       end
       arity = case k[:kind]
               when :reduce then -1   # axis: kwarg + optional weights/value positional
-              when :map    then  0   # no args
               when :scan   then -1   # axis: kwarg (Integer required)
               when :sort
                 # SO.3+ (rev8): :partition algorithm takes (axis, kth) = arity 2
@@ -6929,7 +6792,7 @@ module MkKernel
       #   reduce: default false (E.8 retire), opt-in via bind_ruby: true
       #           (used by CF.1 count_equal smoke + future kernel testing)
       #   sort:   default true,  opt-out via bind_ruby: false
-      #   map/scan: always bound (no opt-out)
+      #   scan:   always bound (no opt-out)
       bind = case k[:kind]
              when :reduce then k[:bind_ruby] == true
              when :sort   then k[:bind_ruby] != false

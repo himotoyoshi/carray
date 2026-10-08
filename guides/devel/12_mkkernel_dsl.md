@@ -4,7 +4,7 @@
 > build. See [README](README.md) for conventions.
 
 `ext/mkkernel.rb` is CArray's kernel code generator. It takes a compact
-Ruby declaration of an operation — a reduction, a map, a scan, a sort, a
+Ruby declaration of an operation — a reduction, a scan, a sort, a
 search, or an element-wise math op — and emits all the per-data-type C
 helpers, the data-type dispatcher, and the `rb_define_method` registration
 into `ext/carray_kernels.c`.
@@ -17,7 +17,7 @@ in [ch. 11](11_kernel_iterator.md); the helper primitives are in
 
 > **The DSL is the default landing point for new ops.** Do not hand-write
 > a kernel wrapper into `carray_math.c` / `carray_stat.c`. If an
-> operation fits one of the nine forms below, declare it here. Bypassing
+> operation fits one of the forms below, declare it here. Bypassing
 > the DSL to add a hand-written wrapper is a discipline violation. The exception — a
 > genuinely dedicated kernel that no DSL form can express — is itself a
 > documented decision.
@@ -205,7 +205,7 @@ This changes the floating-point reduction contract from bit-exact to
 `_safe` suffix **must not** carry a `reduction_kind` — they keep the
 non-reassoc path.
 
-## The nine entry points
+## The entry points
 
 ### `MkKernel.reduce`
 
@@ -307,23 +307,6 @@ emits a `CA_SLAB_REDUCE_ARRAY_T_*` body that binds both `v` and `w`.
 `minmax`). `finish:` must be a 2-entry Hash; `value_arg` /
 `array_arg` / `semantics: :view_flat` / non-`:none` `reduction_kind`
 are rejected in this form.
-
-### `MkKernel.map`
-
-Element-wise transform: input shape == output shape, one cell at a
-time. The generated method takes no arguments.
-
-```ruby
-MkKernel.map :name,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,          # or :preserve
-  expr:     "r = sqrt((double) v)",   # binds v (input), r (output)
-  fallback: :wrap_to_f64   # or :raise
-```
-
-The emitted body uses `CA_SLAB_MAP_T`. Note that `:preserve` +
-`:wrap_to_f64` is rejected (the fallback produces f64, contradicting
-`:preserve`).
 
 ### `MkKernel.scan`
 
@@ -596,7 +579,7 @@ Each declaration produces a coherent C unit in `carray_kernels.c`:
    symbol to point at the new kernel.
 
 The data-type dispatcher is mechanically identical across reduce /
-map / scan / sort / search; the math-family dispatchers
+scan / sort / search; the math-family dispatchers
 (`monop` / `binop` / `triop` / `moncmp` / `bincmp`) instead populate
 the per-data-type op-tables declared in `ca_monop_dispatch.h` /
 `ca_binop_dispatch.h` / `ca_triop_dispatch.h` /

@@ -1008,7 +1008,6 @@ fiber/slab walk):
 | DSL form | emits per data type | underlying surface |
 |---|---|---|
 | `MkKernel.reduce` | a reduction helper + dispatcher | `CA_SLAB_REDUCE_T` (or the SIMD-licensed `_PLUS/_MIN/_MAX/_STAR_EX` variants when `reduction_kind:` is set; `CA_SLAB_REDUCE_ARRAY_T*` for `array_arg` weighted reductions) |
-| `MkKernel.map` | an element-wise helper | `CA_SLAB_MAP_T` |
 | `MkKernel.scan` | a prefix-scan helper | `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA` |
 | `MkKernel.sort` | a per-fiber position kernel (argsort / partition / rank) | `CA_FOR_EACH_FIBER` + a hand-rolled stable sort / quickselect |
 | `MkKernel.search` | a per-slab search (author-written C body) | `CA_FOR_EACH_SLAB` walk |
