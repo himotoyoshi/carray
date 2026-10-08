@@ -114,7 +114,11 @@ class CAFrame
   end
 
   CAST_ON_ERROR = %i[mask warn raise].freeze
-  private_constant :CAST_ON_ERROR
+
+  # The targets a text column is read as numbers for.
+  CAST_NUMBER_TYPES = %w[int8 int16 int32 int64 uint8 uint16 uint32 uint64
+                         float32 float64 cmplx64 cmplx128].freeze
+  private_constant :CAST_ON_ERROR, :CAST_NUMBER_TYPES
 
   # The types the text columns read as, as a map +cast+ takes:
   # { "temp" => :float64, "count" => :int64, "time" => :time }. A column is
@@ -332,10 +336,24 @@ class CAFrame
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     return cast_time_column(key, col, on_error) if type == :time
-    return col.to_type(type) unless col.data_type == CA_OBJECT && !col.face?
+    unless string_column?(col) && CAST_NUMBER_TYPES.include?(CArray.data_type_name(type))
+      return col.to_type(type)
+    end
+    # Text cast to a number -- from an object column or a string Face -- is
+    # read the same way, so the decimal grammar and on_error: hold for all.
+    text = time_text_of(col)
     unreadable = on_error == :mask ? nil : []
-    parsed = col.__parse_decimal__(type, unreadable)
-    return col.to_type(type) unless parsed
+    parsed = text.__parse_decimal__(type, unreadable)
+    unless parsed
+      # A target the decimal reader does not take (complex) goes through
+      # to_type; a cell that held something and came back masked did not read.
+      parsed = text.to_type(type)
+      if unreadable
+        cells = text.flatten.to_a
+        masked = parsed.flatten.is_masked.to_a
+        unreadable = cells.each_index.select { |i| masked[i] && !missing_text?(cells[i]) }
+      end
+    end
     if unreadable && !unreadable.empty?
       report_unreadable(key, col, type, unreadable, on_error)
     end
@@ -368,6 +386,10 @@ class CAFrame
             "time format must be a strptime String, :infer or :mixed " \
             "(got #{format.inspect})"
     end
+  rescue RangeError => e
+    raise unless e.message.include?("does not fit int64 ticks")
+    raise RangeError, "column #{key.inspect}: #{e.message}; parse_to_time takes " \
+                      "unit: to read it in a coarser unit (:us spans 292,000 years)"
   end
 
   # :infer reads the column in the one format its text is written in; a cell
@@ -406,7 +428,11 @@ class CAFrame
     end
     first = first.strip
     unreadable = []
-    CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    begin
+      CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    rescue RangeError
+      return nil                   # year first, only too far out for its unit
+    end
     return nil if unreadable.empty?
     CATimeLiteral.infer_time_format(text, first)
   end
@@ -418,16 +444,21 @@ class CAFrame
 
   # Year-first text, read in C. A unit the reader does not write itself is
   # reached by reading in the finest unit the text shows and converting.
+  # The reader is asked only for a unit of one base tick (:s, :ms, ...), given
+  # as a Symbol; any unit spelling (a String, a CATime::Resolution) is
+  # normalized first.
   private def read_time_text(key, col, unit, on_error)
     text = time_text_of(col)
+    res = unit && CATime::Resolution.parse(unit)
+    base = res && res.count == 1 ? res.base : nil
     unreadable = on_error == :mask ? nil : []
-    ticks, read_unit = text.__parse_time_text__(unit, unreadable) ||
+    ticks, read_unit = (base && text.__parse_time_text__(base, unreadable)) ||
                        text.__parse_time_text__(nil, unreadable)
     if unreadable && !unreadable.empty?
       report_unreadable(key, col, :time, unreadable, on_error)
     end
     times = ticks.time(unit: read_unit)
-    (unit.nil? || read_unit == unit) ? times : times.to_unit(unit)
+    (res.nil? || read_unit == base) ? times : times.to_unit(res)
   end
 
   # A strptime format, or nil for :mixed (a guess at each cell). The cells
@@ -464,11 +495,14 @@ class CAFrame
   end
 
   # Whether every present cell of a text column is year-first text, and one
-  # is present.
+  # is present. A time too far out for the unit its text shows is still time
+  # text; the cast that follows says it does not fit.
   private def time_text_column?(col)
     unreadable = []
     ticks, = col.__parse_time_text__(nil, unreadable)
     unreadable.empty? && ticks.count_not_masked > 0
+  rescue RangeError
+    unreadable.empty?              # the reader lists unreadable cells before it raises
   end
 
   # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.

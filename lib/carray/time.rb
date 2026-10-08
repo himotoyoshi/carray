@@ -1699,6 +1699,11 @@ module CATimeLiteral
             "cannot parse time #{spec.inspect}: it reads as year #{y}, " \
             "month #{m}, day #{d}, which is not a date"
     end
+    # Hour 24 is the end of the day, 24:00:00, and nothing past it.
+    if h[:hour] == 24 && [h[:min], h[:sec], h[:sec_fraction]].any? { |v| v && v != 0 }
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: hour 24 is only 24:00:00"
+    end
     h
   end
   private_class_method :parse_date_fields

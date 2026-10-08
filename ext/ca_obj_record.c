@@ -282,7 +282,9 @@ rb_ca_record_s_new (int argc, VALUE *argv, VALUE klass)
   }
   bytes = NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
 
-  parent_val = rb_carray_new(CA_FIXLEN, ndim, dim, bytes, NULL);
+  /* Zero-filled, as CArray.new is: a new record holds zeros, not the bytes
+     the allocator last handed out. */
+  parent_val = rb_carray_new_safe(CA_FIXLEN, ndim, dim, bytes, NULL);
   return ca_record_build(klass, data_class, parent_val);
 }
 

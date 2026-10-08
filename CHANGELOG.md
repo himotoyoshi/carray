@@ -36,6 +36,41 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.from_csv` raises `MalformedCSV` on a quote inside an
+  unquoted field (`5"in`), where it joined the lines after it into one
+  record; a field holding a quote is written quoted, with the quote
+  doubled. A quoted field of many lines is read in linear time. With
+  `strip: true`, spaces before an opening quote are skipped.
+- Fix: in the reading block of `CAFrame.from_csv`, a second `body` keeps the
+  rows already read; rows from a `parser:` callable are no longer changed.
+  An empty `sep:`, a `quote:` that is not one character, and a `skip` that
+  is not a number of lines raise `ArgumentError`.
+- Change: `CAFrame#cast` of a `CArray.string` or `CArray.const_string`
+  column to a number reads it as an object column of text is read: the
+  decimal grammar (`"010"` is 10) and `on_error:`. `on_error:` also holds
+  for a complex target, and a Rational or BigDecimal in an object column
+  reads as its value, where it was `UNDEF`.
+- Fix: `CAFrame#parse_to_time` reads hour 24 only as `24:00:00`; `24:30` was
+  read as 00:30 of the next day. Its `unit:` takes a `CATime::Resolution`
+  and the other spellings `CArray.time` takes.
+- Fix: `CARecord.new` fills the records with zeros, as `CArray.new` does; they
+  held whatever the memory held before.
+
+- Fix: `CAFrame.from_csv` raises `MalformedCSV` on text after a closing
+  quote (`"ab"cd`, or `"x" ,2`) instead of dropping the rest of the record;
+  `strip: true` lets spaces through there.
+- Fix: `CAFrame.from_csv` with a separator longer than one character
+  (`sep: "::"`) reads a record that contains a quote; it ended a field at
+  any one character of the separator. `to_csv` quotes a value that ends in
+  part of such a separator, so the file reads back.
+- Fix: `CAFrame.from_csv` raises `ArgumentError` on a header that names a
+  column twice; the earlier column was dropped.
+- Change: `CAFrame#cast(name => :time)` and `infer_types` / `types: :infer`
+  raise `RangeError` for a year-first date the column's unit cannot hold,
+  under every `on_error:`. One cell with nanoseconds puts a column in `:ns`
+  (1677 to 2262), and dates outside it were masked without a warning.
+  `parse_to_time(name, unit: :us)` reads such a column.
+
 - New: `CAFrame#resample(name, unit)` groups rows into time bins along a
   time column or the time index and returns a `GroupedFrame`, so
   `df.resample("time", "1 hour").mean` gives hourly means indexed by a

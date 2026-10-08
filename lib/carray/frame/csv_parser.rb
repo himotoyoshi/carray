@@ -13,7 +13,10 @@
 #   * An empty unquoted field is nil (missing); an empty quoted field ("") is
 #     the empty String. Both cast to UNDEF for numeric columns (parse-mask).
 #   * A UTF-8 BOM is stripped via the "bom|utf-8" read mode by default.
-#   * A parse error names the record number.
+#   * Malformed input raises MalformedCSV naming the record number: a quote
+#     inside an unquoted field, text after a closing quote, or a quoted field
+#     still open at the end of input. A record continues onto the next line
+#     only inside a quoted field.
 #
 # Two entry points share the Tokenizer:
 #   * CSVParser.parse / parse_file -- whole-file parse into [headers, rows].
@@ -47,7 +50,8 @@ class CAFrame
     end
 
     # Parse an IO (or anything answering +gets+). The first record supplies the
-    # headers; the rest are data rows. Fully blank lines are skipped.
+    # headers; the rest are data rows. Blank lines are skipped, including in a
+    # one-column file (from_csv reads them there as missing cells).
     def parse(io, sep: ",", quote: '"', strip: false)
       tok = Tokenizer.new(sep, quote, strip)
       headers = nil
@@ -62,32 +66,39 @@ class CAFrame
       [headers, rows]
     end
 
-    # Read one logical record, joining continuation lines while a quoted field
-    # is still open (an odd number of quote characters means unbalanced).
-    def read_record(io, quote)
-      line = io.gets
-      return nil if line.nil?
-      rec = line.dup
-      while rec.count(quote).odd?
-        more = io.gets
-        raise MalformedCSV, "unterminated quoted field at end of input" if more.nil?
-        rec << more
-      end
-      rec.chomp!
-      rec
-    end
-
     # Splits records into fields. Regexps are compiled once and reused across
     # every record, so per-row cost stays low.
     class Tokenizer
       def initialize(sep, quote, strip)
+        unless sep.is_a?(String) && !sep.empty?
+          raise ArgumentError, "sep: must be a non-empty String (got #{sep.inspect})"
+        end
+        unless quote.is_a?(String) && quote.size == 1
+          raise ArgumentError, "quote: must be one character (got #{quote.inspect})"
+        end
+        if sep.include?(quote)
+          raise ArgumentError, "sep: #{sep.inspect} cannot contain the quote character"
+        end
         @sep      = sep
         @quote    = quote
         @strip    = strip
-        @sep_re   = /#{Regexp.escape(sep)}/
-        @quote_re = /#{Regexp.escape(quote)}/
-        @unquoted = /[^#{Regexp.escape(sep)}]*/
-        @inner    = /[^#{Regexp.escape(quote)}]*/
+        s = Regexp.escape(sep)
+        q = Regexp.escape(quote)
+        @sep_re   = /#{s}/
+        @quote_re = /#{q}/
+        # An unquoted field runs up to the separator, a quote or the end of
+        # the record; a CR that does not end the record is part of the field.
+        # A character class says "up to the separator" for a one-character
+        # one; a longer one has to be matched as a whole, or "::" would end
+        # the field at a single ":".
+        @unquoted =
+          if sep.size == 1
+            /(?:[^#{s}#{q}\r\n]|\r(?!\n|\z))*/
+          else
+            /(?:(?!#{s})(?:[^#{q}\r\n]|\r(?!\n|\z)))*/
+          end
+        @inner    = /[^#{q}]*/
+        @eol      = /\r?\n|\r\z/
         @recno    = 0
       end
 
@@ -98,13 +109,21 @@ class CAFrame
       # to_csv writes for a masked cell -- so the caller passes
       # +blank_is_row: true+ once the column count is known to be one, and
       # the empty record becomes a row of no fields for build_frame to pad.
+      #
+      # A line with no quote character is a whole record. One with a quote
+      # goes to the scanner, which reads further lines only while a field
+      # that opened with a quote is still open -- so a quote inside an
+      # unquoted field is malformed rather than a reason to swallow the lines
+      # after it, and a field of many lines is read once, not re-counted.
       def read(io, blank_is_row: false)
         loop do
-          rec = CSVParser.read_record(io, @quote)
-          return nil if rec.nil?
+          line = io.gets
+          return nil if line.nil?
           @recno += 1
+          return scan(line, io) if line.include?(@quote)
+          rec = line.chomp
           next if rec.empty? && !blank_is_row
-          return rec.count(@quote).zero? ? simple(rec) : scan(rec)
+          return simple(rec)
         end
       end
 
@@ -115,32 +134,61 @@ class CAFrame
         end
       end
 
-      private def scan(rec)
-        sc = StringScanner.new(rec)
+      # Fields of the record that starts on +line+, reading more lines from
+      # +io+ while a quoted field is open. strip: skips spaces before a field,
+      # so a quote after them still opens one.
+      private def scan(line, io)
+        sc = StringScanner.new(line)
         fields = []
         loop do
-          if sc.scan(@quote_re)
-            buf = +""
-            loop do
-              buf << sc.scan(@inner)
-              unless sc.scan(@quote_re)
-                raise MalformedCSV, "unterminated quoted field in record #{@recno}"
-              end
-              if sc.scan(@quote_re) # doubled quote -> literal quote, field continues
-                buf << @quote
-              else
-                break
-              end
+          sc.skip(/[ \t]+/) if @strip
+          if sc.skip(@quote_re)
+            fields << quoted_field(sc, io)
+            # A closed quoted field ends at the separator or the end of the
+            # record. Anything else there is malformed, and read on it would
+            # drop the rest of the record without a word. strip: lets spaces
+            # through, as it does around an unquoted field.
+            sc.skip(/[ \t]+/) if @strip
+            unless sc.eos? || sc.check(@sep_re) || sc.check(@eol)
+              raise MalformedCSV,
+                    "text #{sc.rest.chomp[0, 20].inspect} after the closing quote of " \
+                    "field #{fields.size} in record #{@recno}"
             end
-            fields << buf
           else
-            cell = sc.scan(@unquoted) || ""
+            cell = sc.scan(@unquoted)
+            if sc.check(@quote_re)
+              raise MalformedCSV,
+                    "a quote inside unquoted field #{fields.size + 1} in record " \
+                    "#{@recno} (#{(cell + sc.rest.chomp)[0, 20].inspect}); a field " \
+                    "holding a quote is written quoted, with the quote doubled"
+            end
             cell = cell.strip if @strip
             fields << (cell.empty? ? nil : cell)
           end
-          break unless sc.scan(@sep_re)
+          break unless sc.skip(@sep_re)
         end
+        sc.skip(@eol)
         fields
+      end
+
+      # The rest of a field whose opening quote has been read, through its
+      # closing quote. A doubled quote is a literal one; the end of the line
+      # inside the field brings the next line in.
+      private def quoted_field(sc, io)
+        buf = +""
+        loop do
+          buf << sc.scan(@inner)
+          if sc.eos?
+            more = io.gets
+            raise MalformedCSV, "unterminated quoted field in record #{@recno}" if more.nil?
+            sc << more
+            next
+          end
+          sc.skip(@quote_re)
+          break unless sc.skip(@quote_re)
+          buf << @quote
+        end
+        buf
       end
     end
   end
@@ -174,6 +222,9 @@ class CAFrame
 
     # Drop +n+ raw lines (preamble, units, notes).
     def skip(n = 1)
+      unless n.is_a?(Integer) && n >= 0
+        raise ArgumentError, "skip takes a number of lines (got #{n.inspect})"
+      end
       n.times { @io.gets }
       self
     end
@@ -198,14 +249,14 @@ class CAFrame
       self
     end
 
-    # Consume the remaining records as data rows.
+    # Consume the remaining records as data rows. A second body adds what is
+    # left, which is nothing; it does not discard the rows already read.
     def body
-      rows = []
+      rows = (@rows ||= [])
       blank_is_row = @names && @names.size == 1
       while (fields = @tok.read(@io, blank_is_row: blank_is_row))
         rows << fields
       end
-      @rows = rows
       self
     end
 
