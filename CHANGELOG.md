@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `count(v)` on an integer array compares a Float `v`, or a `v` array
+  of a wider data type, in the type the two share, as `eq` does:
+  `CA_INT32([1, 2, 3]).count(1.5)` is `0` (was `1`, the query truncated to
+  `1`). An Integer `v` that does not fit the array still raises `RangeError`.
+
 - Change: `sqrt_ki`, `sin_ki`, `cos_ki`, `exp_ki`, `log_ki`, `square_ki`,
   `abs_ki` and `negate_ki` are removed. They were undocumented leftovers
   that ignored the mask, computing masked cells from the stored values. Use
