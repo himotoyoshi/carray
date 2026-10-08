@@ -285,8 +285,9 @@ ca_time_text_unit (ID unit, int64_t *per_day, int64_t *ns_per_tick)
    epoch.  With unit nil the unit is the finest the text shows; a unit this
    reader does not write answers nil, and the caller parses another way.
    With an Array as report, the addresses of cells that hold something but
-   do not read (or do not fit int64 in the unit) are pushed onto it; blank,
-   nil and masked cells are missing, not unreadable. */
+   do not read are pushed onto it; blank, nil and masked cells are missing,
+   not unreadable.  A cell that reads but does not fit int64 ticks of the
+   unit raises RangeError. */
 static VALUE
 rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
 {
@@ -378,13 +379,15 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
       ticks[i] = 0;
       continue;
     }
+    /* A time that reads but does not fit int64 ticks of the unit is out of
+       range, not unreadable, so it raises under every policy rather than
+       becoming a masked cell: with the unit chosen from the finest text in
+       the column, one cell with nanoseconds would otherwise mask every date
+       outside 1677..2262 without a word. */
     if ( __builtin_mul_overflow(days[i], per_day, &whole)
          || __builtin_add_overflow(whole, nsod[i] / ns_per_tick, &ticks[i]) ) {
-      m_out[i] = 1;
-      ticks[i] = 0;
-      if ( ! NIL_P(report) ) {
-        rb_ary_push(report, SIZET2NUM(i));
-      }
+      rb_raise(rb_eRangeError, "time %" PRIsVALUE " does not fit int64 ticks of %s",
+               rb_inspect(cells[i]), rb_id2name(unit));
     }
   }
 

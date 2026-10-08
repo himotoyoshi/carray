@@ -368,6 +368,10 @@ class CAFrame
             "time format must be a strptime String, :infer or :mixed " \
             "(got #{format.inspect})"
     end
+  rescue RangeError => e
+    raise unless e.message.include?("does not fit int64 ticks")
+    raise RangeError, "column #{key.inspect}: #{e.message}; parse_to_time takes " \
+                      "unit: to read it in a coarser unit (:us spans 292,000 years)"
   end
 
   # :infer reads the column in the one format its text is written in; a cell
@@ -406,7 +410,11 @@ class CAFrame
     end
     first = first.strip
     unreadable = []
-    CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    begin
+      CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    rescue RangeError
+      return nil                   # year first, only too far out for its unit
+    end
     return nil if unreadable.empty?
     CATimeLiteral.infer_time_format(text, first)
   end
@@ -464,11 +472,14 @@ class CAFrame
   end
 
   # Whether every present cell of a text column is year-first text, and one
-  # is present.
+  # is present. A time too far out for the unit its text shows is still time
+  # text; the cast that follows says it does not fit.
   private def time_text_column?(col)
     unreadable = []
     ticks, = col.__parse_time_text__(nil, unreadable)
     unreadable.empty? && ticks.count_not_masked > 0
+  rescue RangeError
+    unreadable.empty?              # the reader lists unreadable cells before it raises
   end
 
   # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.
