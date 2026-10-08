@@ -1352,12 +1352,15 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* Face has surface != storage; the fill value is cast in the storage data_type. */
+    /* A Face's surface is not its storage: the fill value goes through the
+       Face's write hook, as a store does, and is cast in the storage
+       data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {
       CArray *root = ca;
       while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
       if (root) conv_type = root->data_type;
+      rfval = ca_face_element_to_storage(self, ca, rfval);
     }
     rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
@@ -1415,12 +1418,15 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* Face has surface != storage; the fill value is cast in the storage data_type. */
+    /* A Face's surface is not its storage: the fill value goes through the
+       Face's write hook, as a store does, and is cast in the storage
+       data_type. */
     int8_t conv_type = ca->data_type;
     if ( ca_is_face(ca) ) {
       CArray *root = ca;
       while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
       if (root) conv_type = root->data_type;
+      rfval = ca_face_element_to_storage(self, ca, rfval);
     }
     rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
