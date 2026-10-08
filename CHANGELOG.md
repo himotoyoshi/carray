@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `types:` of `CAFrame.from_csv` and `CAFrame.from_records` takes
+  `default:` for the columns the map does not name, so inference and
+  columns set by hand combine in one call:
+  `types: { default: :infer, "code" => :int32, "id" => nil }`. The default
+  is `:infer` or a type; `nil` leaves a column as read. A map without
+  `default:` casts only what it names, as before; a Symbol key other than
+  `:default` now raises (column names are Strings).
+
 - Change: `CArray.time` and `CAFrame#parse_to_time` with a strptime format
   no longer read a text that has more after the format:
   `"13/02/2024xyz"` with `"%d/%m/%Y"` is now unparseable (`UNDEF`, or

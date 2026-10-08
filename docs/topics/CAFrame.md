@@ -244,6 +244,24 @@ df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :in
 df.cast(df.infer_types.merge("count" => :int32))
 ```
 
+**Mostly one rule, with exceptions.** `default:` in the map sets every column
+the map does not name — `:infer` to infer them, or a type to cast them all —
+and a named column takes its own entry instead. `nil` leaves a column as the
+text it was read as, which is how to keep a column out of inference:
+
+```ruby
+CAFrame.from_csv("obs.csv", types: { default: :infer, "count" => :int32, "id" => nil })
+# infer the rest; count is int32; id stays text even though it reads as a number
+
+CAFrame.from_csv("obs.csv", types: { default: :float64, ["station", "note"] => nil })
+# every column float64 except station and note
+```
+
+`types: :infer` is `types: { default: :infer }`. A map without `default:`
+casts only what it names, as before. `default:` is a Symbol and column names
+are Strings, so they cannot collide; any other Symbol key raises.
+`from_records` takes the same `types:`.
+
 **A file's own spelling of missing.** An unquoted empty field, and a cell a
 short row never reached, are `UNDEF` without asking. Files that write missing
 some other way — a `-999` sentinel, `///`, `NA` — say so with `missing:`. A
