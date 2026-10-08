@@ -33,6 +33,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* CA_EXTREMUM_REPLACES, ca_obj_extremum_replaces */
 #include "ca_kernel_iterator.h"
 #include <math.h>
 
@@ -206,16 +207,16 @@ group_op_code (VALUE vop)
    only while nothing else has landed, the first number displaces it, and a
    group of nothing but NaN answers NaN (for a position, UNDEF).  `v` is the
    widened load, so testing it for NaN is the same question for every source
-   type and costs an integer body nothing.  seen_num[] says whether a number
-   has landed; cnt[] still says whether anything has. */
+   type and costs an integer body nothing.  The replacement test is the
+   shared CA_EXTREMUM_REPLACES; the first member is taken whatever it is.
+   seen_num[] says whether a number has landed (the positions read it);
+   cnt[] says whether anything has. */
 #define GMINMAX(T, A, CMP)                                                     \
   do {                                                                         \
     A *acc = (A *) co->ptr;                                                     \
     A  av  = (A) rv;                                                            \
-    if ( v == v ) {                                                             \
-      if ( ! seen_num[o] ) { acc[o] = av; seen_num[o] = 1; }                     \
-      else if ( av CMP acc[o] ) acc[o] = av;                                     \
-    } else if ( cnt[o] == 0 ) acc[o] = av;                                       \
+    if ( cnt[o] == 0 || CA_EXTREMUM_REPLACES(av, acc[o], CMP) ) acc[o] = av;    \
+    if ( v == v ) seen_num[o] = 1;                                              \
     cnt[o] += 1;                                                                \
   } while (0)
 
@@ -851,7 +852,9 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
    emits its own value: a per-group `seen` byte initialises the accumulator
    lazily on first hit — no sentinel like HUGE_VAL, which an integer data type could
    not represent.  CMP is > for max, < for min: a later member replaces the
-   running extremum when `rv CMP acc`.  A cell masked within its group holds the
+   running extremum when CA_EXTREMUM_REPLACES (a NaN never does, and a
+   number displaces a leading NaN, as the core cummax / cummin and the
+   reduce twins above do).  A cell masked within its group holds the
    current extremum once a member has been seen (output NOT masked, like sum);
    before any member the extremum is undefined so the cell stays UNDEF (the
    CArray reduction contract: empty max/min has no value — deliberately NOT the
@@ -892,7 +895,9 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
           }                                                                   \
           T rv = *(T *)(p + sw_doff[e]);                                      \
           if ( ! seen[code] ) { acce[code] = rv; seen[code] = 1; }            \
-          else if ( rv CMP acce[code] ) { acce[code] = rv; }                  \
+          else if ( CA_EXTREMUM_REPLACES(rv, acce[code], CMP) ) {             \
+            acce[code] = rv;                                                  \
+          }                                                                   \
           outp[addr] = acce[code];                                            \
         }                                                                     \
       }                                                                       \
@@ -1074,7 +1079,7 @@ group_scan_object_body (VALUE arg)
          masked before any member stays UNDEF (empty-max contract). */
       GROUP_SCAN_OBJECT_WALK(
         if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
-        else if ( NUM2INT(rb_funcall(ev, rb_intern("<=>"), 1, acco[code])) > 0 ) {
+        else if ( ca_obj_extremum_replaces(ev, acco[code], rb_intern(">")) ) {
           acco[code] = ev;
         }
         outo[addr] = acco[code];,
@@ -1085,7 +1090,7 @@ group_scan_object_body (VALUE arg)
     case GS_CUMMIN:
       GROUP_SCAN_OBJECT_WALK(
         if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
-        else if ( NUM2INT(rb_funcall(ev, rb_intern("<=>"), 1, acco[code])) < 0 ) {
+        else if ( ca_obj_extremum_replaces(ev, acco[code], rb_intern("<")) ) {
           acco[code] = ev;
         }
         outo[addr] = acco[code];,

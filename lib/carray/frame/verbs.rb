@@ -251,21 +251,16 @@ class CAFrame
     # Without an index coordinate x is the cell position, which is exactly what
     # the core scan already interpolates against -- time columns included.
     return col.unmask(method: :linear) if @index.nil?
-    present = col.is_not_masked
-    return if present.count(true) < 2
-    addr = @index[present].linear_section(@index)
+    # The same fill as the core, with the index as x.
+    filled = col.send(:__linear_fill_along__, @index)
     if time_face
-      filled = col[present].linear_fetch(addr)   # UNDEF beyond the valid span
       # Write through the storage: a bulk store into the Face itself would try
       # to cast int64 ticks to its fixlen surface.  Both sides carry the same
       # unit (selection preserves it), so the ticks land exactly, mask included.
       col.parent[] = filled.parent
-      return
+    else
+      col[] = filled   # write-through
     end
-    yvalid = col.value.float64[present]
-    # mask_invalid before the cast: linear_fetch marks out of range with NaN,
-    # and casting back to an integer column would turn it into a plausible 0.
-    col[] = yvalid.linear_fetch(addr).mask_invalid.to_type(col.data_type)  # write-through
   end
 
   # Text cells are data, not Ruby literals: an object column cast to a

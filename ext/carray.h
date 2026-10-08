@@ -716,6 +716,9 @@ typedef struct {
                               0 = outer-axis stack (legacy default).
                               parent_ndim = K innermost (= old merge at=-1).
                               Set by ca_stack_setup_with_axis / preserved on clone. */
+  CArray  **mask_standins; /* NULL, or ALLOC_N(CArray*, n_parents) once the mask is
+                              built: the read-only all-false masks standing in for
+                              parents that cannot carry one (owned, freed with the view) */
 } CAStack;
 
 /* CAMeld (ragged concatenate view along an existing axis).  Unlike CAStack
@@ -749,6 +752,7 @@ typedef struct {
   ca_size_t *seg_offset;   /* ALLOC_N(ca_size_t, K+1); prefix sum along meld_axis.
                               seg_offset[0]=0, seg_offset[k+1]=seg_offset[k]+parents[k]->dim[meld_axis],
                               seg_offset[K]=dim[meld_axis]. */
+  CArray  **mask_standins; /* as CAStack's: stand-in masks this view owns, or NULL */
 } CAMeld;
 
 /* Multi-parent view layout convention (CA_FLAG_MULTI_PARENTS).  A view that

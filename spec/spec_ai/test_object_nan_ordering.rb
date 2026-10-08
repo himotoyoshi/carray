@@ -64,4 +64,36 @@ class TestObjectNanOrdering < Test::Unit::TestCase
     assert_equal 2, o.max
     assert_equal 2, o.min_index
   end
+
+  def test_pmax_pmin_let_a_nan_lose_and_maximum_minimum_let_it_win
+    nan = Float::NAN
+    o = CA_OBJECT([nan, 1.0, 3.0])
+    f = CA_FLOAT64([nan, 1.0, 3.0])
+    assert_equal f.pmax(2.0).to_a, o.pmax(2.0).to_a
+    assert_equal f.pmin(2.0).to_a, o.pmin(2.0).to_a
+    assert o.maximum(2.0)[0].nan?
+    assert o.minimum(2.0)[0].nan?
+    assert_equal [2.0, 3.0], o.maximum(2.0).to_a[1..2]
+    assert_equal [3, 5], CA_OBJECT([1, 5]).pmax(CA_OBJECT([3, 2])).to_a
+  end
+
+  def test_windows_extremum_on_an_object_array_with_nan
+    nan = Float::NAN
+    assert_equal CA_FLOAT64([1.0, nan, 3.0]).windows(0..1).max.to_a,
+                 CA_OBJECT([1.0, nan, 3.0]).windows(0..1).max.to_a
+  end
+
+  def test_equality_of_a_nan_does_not_depend_on_the_float_object
+    nan = Float::NAN
+    other = 0.0 / 0.0
+    o = CA_OBJECT([nan, 1.0, other])
+    assert_equal 0, o.count(nan)
+    assert_nil o.search(other)
+    assert_equal 1, o.search(1.0)
+    f = CA_FLOAT64([nan, 1.0, nan])
+    assert_equal f.rank_index(method: :dense).to_a,
+                 CA_OBJECT([nan, 1.0, nan]).rank_index(method: :dense).to_a
+    assert_equal CA_OBJECT([nan, 1.0, nan]).rank_index(method: :dense).to_a,
+                 CA_OBJECT([nan, 1.0, other]).rank_index(method: :dense).to_a
+  end
 end

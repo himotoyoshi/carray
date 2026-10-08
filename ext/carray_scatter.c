@@ -44,10 +44,11 @@
 #define OP_MIN_INT(qp, v) do { if ((v) < *(qp)) *(qp) = (v); } while (0)
 #define OP_MAX_INT(qp, v) do { if ((v) > *(qp)) *(qp) = (v); } while (0)
 
-/* The scalar operand as T.  A complex self also takes a Ruby Complex
-   scalar, whose parts sit in vd / vi; an Integer or Float scalar leaves
-   vi at 0. */
-#define SCALAR_REAL(T)  ((T) (v_is_float ? (double)vd : (double)vl))
+/* The scalar operand as T.  An Integer goes to T directly, not through
+   double, so an int64 above 2**53 is exact.  A complex self also takes a
+   Ruby Complex scalar, whose parts sit in vd / vi; an Integer or Float
+   scalar leaves vi at 0. */
+#define SCALAR_REAL(T)  (v_is_float ? (T) vd : (T) vl)
 #define SCALAR_CMPLX(T) ((T) ((v_is_float ? (double)vd : (double)vl) + vi * I))
 
 #define LOOP_SCALAR(T, APPLY) LOOP_SCALAR_V(T, APPLY, SCALAR_REAL(T))

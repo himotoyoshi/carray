@@ -422,6 +422,22 @@ ca_create_mask_attach (VALUE arg)
   return Qnil;
 }
 
+CArray *
+ca_multi_parent_mask (CArray *p, CArray **standin)
+{
+  *standin = NULL;
+  if ( ! ca_has_mask(p) &&
+       ( ca_is_value_array(p) || ca_is_mask_array(p) || ca_is_readonly(p) ) ) {
+    CArray *z = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
+    MEMZERO(z->ptr, boolean8_t, z->elements);
+    ca_set_flag(z, CA_FLAG_READ_ONLY);
+    *standin = z;
+    return z;
+  }
+  ca_create_mask(p);
+  return p->mask;
+}
+
 void
 ca_create_mask (void *ap)
 {

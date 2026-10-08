@@ -283,7 +283,12 @@ class CArray
   #   `fill_value` (or `lfill` / `ufill`) is given, out-of-range
   #   cells are replaced by the fill instead of clamped -- pass
   #   `UNDEF` to mask that end. `fill_value` is sugar for symmetric
-  #   dual-fill; `lfill` / `ufill` override per side.
+  #   dual-fill; `lfill` / `ufill` override per side, and a side
+  #   given no fill is still clamped.
+  #
+  #   `min` may not exceed `max` (in any cell, when a bound is an
+  #   array); equal bounds give every unmasked cell that value.
+  #   A NaN bound bounds nothing.
   #
   #   Boundary is strict `[min, max]`: values equal to a bound
   #   remain unchanged in both the clamped and filled variants.
@@ -297,7 +302,8 @@ class CArray
   #   @param lfill [Object, nil] override below-range fill.
   #   @param ufill [Object, nil] override above-range fill.
   #   @return [CArray] new CArray with clamped or filled values.
-  #   @raise [ArgumentError] when both `min` and `max` are `nil`.
+  #   @raise [ArgumentError] when both `min` and `max` are `nil`,
+  #     or when `min` exceeds `max`.
   #   @example
   #     a.clip(0, 10)                          # strict clamp
   #     a.clip(0, 10, -1)                      # both ends -> -1
@@ -305,6 +311,15 @@ class CArray
   def clip(min, max=nil, fill_value=nil, lfill: nil, ufill: nil)
     if min.nil? && max.nil?
       raise ArgumentError, "clip: at least one of (min, max) must be given"
+    end
+    if !min.nil? && !max.nil?
+      reversed = if min.is_a?(CArray) then min.gt(max).any
+                 elsif max.is_a?(CArray) then max.lt(min).any
+                 else min > max
+                 end
+      if reversed
+        raise ArgumentError, "clip: min must be less than or equal to max"
+      end
     end
 
     # `fill_value` as a single argument is sugar applied to both ends; kwargs override.
@@ -317,9 +332,12 @@ class CArray
       return pmin(max)
     end
 
+    # A side without a fill still clamps.
     out = self.copy
-    out[:lt, min] = lfill unless min.nil? || lfill.nil?
-    out[:gt, max] = ufill unless max.nil? || ufill.nil?
+    out = out.pmax(min) if !min.nil? && lfill.nil?
+    out = out.pmin(max) if !max.nil? && ufill.nil?
+    out[self.lt(min)] = lfill unless min.nil? || lfill.nil?
+    out[self.gt(max)] = ufill unless max.nil? || ufill.nil?
     out
   end
 
@@ -413,6 +431,27 @@ class CArray
   #   @return [CArray]
   def scale (xa, xb)
     template.scale!(xa, xb)
+  end
+
+  private
+
+  # The data type in which values of this array and of `other_type` are
+  # matched for equality, given their common type `t`.  It is `t`, except
+  # for an integer pair of mixed sign whose common type is unsigned (uint8
+  # with int8 is uint8, where -1 would read as 255): there the match moves
+  # to a signed type that holds every value of both, or, for 64 bits, where
+  # no numeric type does, to object, whose Integers compare by value.
+  # `eq` answers the same pair by value.
+  SIGNED_HOLDING = { CA_UINT8 => CA_INT16, CA_UINT16 => CA_INT32,
+                     CA_UINT32 => CA_INT64, CA_UINT64 => CA_OBJECT }.freeze
+  SIGNED_INTEGERS = [CA_INT8, CA_INT16, CA_INT32, CA_INT64].freeze
+  private_constant :SIGNED_HOLDING, :SIGNED_INTEGERS
+
+  def value_match_type (t, other_type)
+    wider = SIGNED_HOLDING[t]
+    return t unless wider
+    return t unless SIGNED_INTEGERS.include?(data_type) || SIGNED_INTEGERS.include?(other_type)
+    wider
   end
 
 end

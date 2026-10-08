@@ -185,7 +185,10 @@ class CArray
   #   `indices` data_type: any integer kind (zero-copy when
   #   already `:int64`). Negative indices: Python-style
   #   (`-1` == last). Out-of-range indices raise `RangeError`.
-  #   Negative `axis:` is Python-style.
+  #   Negative `axis:` is Python-style.  A masked index gives a
+  #   masked address (its stored value is not read), so
+  #   `take_along_axis` answers `UNDEF` there and `put_along_axis`
+  #   writes nothing there.
   #
   #   @param indices [CArray] integer-typed axis-local positions.
   #   @param axis [Integer] axis along which `indices` are

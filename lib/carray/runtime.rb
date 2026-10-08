@@ -69,8 +69,8 @@ class CArray
         den = den.copy
         den[den.eq(0)] = UNDEF          # zero / empty denominator -> undetermined
         num / den                        # UNDEF propagates cell-wise
-      elsif den.equal?(UNDEF) || den == 0
-        UNDEF
+      elsif num.equal?(UNDEF) || den.equal?(UNDEF) || den == 0
+        UNDEF                            # min_count unmet leaves num UNDEF
       else
         num / den
       end

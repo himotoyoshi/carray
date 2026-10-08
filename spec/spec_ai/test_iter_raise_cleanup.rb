@@ -131,7 +131,8 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
     assert_raise(TypeError) {
       CArray.object(n) { |i| i < n - 1 ? 1 : Object.new }.group_by_category(cat).cumsum
     }
-    assert_raise(TypeError) {
+    # An incomparable pair raises what the core cummax and Array#max raise.
+    assert_raise(ArgumentError) {
       CArray.object(n) { |i| i < n - 1 ? 1 : "s" }.group_by_category(cat).cummax
     }
   end

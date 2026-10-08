@@ -27,8 +27,9 @@ class CArray
   #   `self` and `ref` are compared at their common type, negotiated by
   #   `CArray.result_type` — a fractional query against an integer `ref`
   #   is compared at the promoted type rather than truncated, so `1.5` no
-  #   longer matches `1`. Cross-family input (numeric against fixlen)
-  #   raises.
+  #   longer matches `1`, and integers of mixed sign are matched by value
+  #   (`-1` never matches `255`). Cross-family input (numeric against
+  #   fixlen) raises.
   #
   #   Typical use is time-axis lookup: compute the address once against a
   #   reference axis, then reuse it to gather from many `ref`-shaped
@@ -48,8 +49,9 @@ class CArray
     # (CArray.result_type), so a fractional query against an int ref is compared
     # at the promoted type instead of truncating (1.5 no longer matches 1).
     # to_type is elementwise and order-preserving, so the addresses stay valid
-    # indices into ref. result_type raises for cross-family input.
-    t = CArray.result_type(self, ref)
+    # indices into ref. result_type raises for cross-family input; an integer
+    # pair of mixed sign is matched by value (see value_match_type).
+    t = value_match_type(CArray.result_type(self, ref), ref.data_type)
     q = (data_type     == t) ? self : to_type(t)
     r = (ref.data_type == t) ? ref  : ref.to_type(t)
     q.send(:__locate_addr__, r)

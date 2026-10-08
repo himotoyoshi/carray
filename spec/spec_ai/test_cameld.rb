@@ -726,4 +726,34 @@ class TestCAMeld < Test::Unit::TestCase
     assert_equal [10, 11, 12], b.src.to_a
   end
 
+  def test_flat_min_max_with_an_all_nan_parent
+    nan = Float::NAN
+    [CA_FLOAT64, CA_FLOAT32].each do |t|
+      m = CArray.meld(CArray.new(t, [2]) { nan }, CArray.new(t, [2]).seq(1))
+      assert_equal m.copy.min, m.min
+      assert_equal m.copy.max, m.max
+    end
+    assert_equal 1, CArray.meld(CA_OBJECT([3, 4]), CA_OBJECT([1, 2])).min
+  end
+
+  def test_mask_over_parents_that_cannot_carry_one
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    value  = CA_FLOAT64([4, 5]).value
+    frozen = CA_FLOAT64([6, 7]).freeze
+    m = CArray.meld([masked, value, frozen])
+    assert_equal [false, true, false, false, false, false, false], m.mask.to_a
+    assert_equal 1 + 3 + 4 + 5 + 6 + 7, m.sum
+    refute frozen.has_mask?
+    assert_raise(RuntimeError) { m[3] = UNDEF }
+    stacked = CArray.stack([masked, CA_FLOAT64([1, 2, 3]).value])
+    assert_equal 1 + 3 + 1 + 2 + 3, stacked.sum
+  end
+
+  def test_undef_written_through_the_view_reaches_a_writable_parent
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    plain  = CA_FLOAT64([4, 5, 6])
+    m = CArray.meld([masked, plain])
+    m[4] = UNDEF
+    assert_equal [4.0, UNDEF, 6.0], plain.to_a
+  end
 end

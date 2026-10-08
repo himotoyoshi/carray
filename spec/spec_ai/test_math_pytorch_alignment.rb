@@ -277,4 +277,14 @@ class TestMathPyTorchAlignment < Test::Unit::TestCase
     assert CArray::LAZY_MONCMP_OP_IDS.key?(:signbit)
   end
 
+  def test_camath_binop_keeps_a_float_or_integer_carray_type
+    big = 2**53
+    r = CAMath.fmod(CA_INT64([big + 1]), CA_INT64([2]))
+    assert_equal CA_INT64, r.data_type
+    assert_equal [1], r.to_a
+    assert_equal CA_FLOAT32, CAMath.atan2(CA_FLOAT32([1]), CA_FLOAT32([1])).data_type
+    assert_equal CA_FLOAT32, CAMath.hypot(CA_FLOAT32([3]), CA_FLOAT32([4])).data_type
+    assert_equal CA_FLOAT64, CAMath.atan2(CA_INT32([1]), CA_INT32([1])).data_type
+    assert_equal [5.0], CAMath.hypot(3, CA_FLOAT64([4])).to_a
+  end
 end

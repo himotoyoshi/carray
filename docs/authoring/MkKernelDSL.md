@@ -1,7 +1,7 @@
 # The mkkernel DSL
 
 `ext/mkkernel.rb` is CArray's kernel code generator. It takes a compact
-Ruby description of an operation — a reduction, a map, a scan, a sort, a
+Ruby description of an operation — a reduction, a scan, a sort, a
 search, or an element-wise math op — and emits all the per-data-type C
 helpers, the data-type dispatcher, and the `rb_define_method` registration
 into `ext/carray_kernels.c`.
@@ -17,7 +17,7 @@ that C for you.
 
 > **The DSL is the default landing point for new ops.** Do not hand-write a
 > kernel wrapper into `carray_math.c` / `carray_stat.c`. If an operation
-> fits one of the nine forms below, declare it here. Bypassing the DSL to
+> fits one of the forms below, declare it here. Bypassing the DSL to
 > add a hand-written wrapper is a discipline violation. The exception — a genuinely dedicated kernel
 > that no DSL form can express — is itself a documented decision.
 
@@ -32,9 +32,8 @@ that C for you.
   - [Family-keyed Hash bodies](#family-keyed-hash-bodies)
   - [The `:object` branch](#the-object-branch)
   - [The SIMD license (`reduction_kind:`)](#the-simd-license-reduction_kind)
-- [The nine entry points](#the-nine-entry-points)
+- [The entry points](#the-entry-points)
   - [`reduce`](#reduce)
-  - [`map`](#map)
   - [`scan`](#scan)
   - [`sort`](#sort)
   - [`search`](#search)
@@ -219,7 +218,7 @@ This changes the floating-point reduction contract from bit-exact to
 suffix **must not** carry a `reduction_kind` — they keep the non-reassoc
 path.
 
-## The nine entry points
+## The entry points
 
 ### `reduce`
 
@@ -346,22 +345,6 @@ positional argument because the C escape forwards raw `argv`.
 `finish:` must be a 2-entry Hash; `value_arg` / `array_arg` /
 `semantics: :view_flat` / non-`:none` `reduction_kind` are rejected in this
 form (FM.1.0 scope).
-
-### `map`
-
-Element-wise transform: input shape == output shape, one cell at a time.
-The generated method takes no arguments.
-
-```ruby
-MkKernel.map :name,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,          # or :preserve
-  expr:     "r = sqrt((double) v)",   # binds v (input), r (output)
-  fallback: :wrap_to_f64   # or :raise
-```
-
-Note `:preserve` + `:wrap_to_f64` is rejected (the fallback produces f64,
-contradicting `:preserve`).
 
 ### `scan`
 

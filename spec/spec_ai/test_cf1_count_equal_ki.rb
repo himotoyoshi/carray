@@ -83,9 +83,9 @@ class TestCF1CountEqualKi < Test::Unit::TestCase
     a = CArray.int32(5).seq
     # 2.0 (Ruby Float) should cast to 2 (int32) via NUM2LL.
     assert_equal(1, a.count(2.0))
-    # 2.7 truncates to 2 by NUM2LL (= Float-to-Integer in Ruby).
-    # This pins the cast behavior; if it changes, this test signals.
-    assert_equal(1, a.count(2.7))
+    # A Float that is not a whole number matches nothing, as `eq` answers.
+    assert_equal(0, a.count(2.7))
+    assert_equal(a.eq(2.7).count(true), a.count(2.7))
   end
 
   def test_min_count_opt
@@ -143,5 +143,19 @@ class TestCF1CountEqualKi < Test::Unit::TestCase
                    a.count(v),
                    "value #{v} mismatch")
     end
+  end
+
+  def test_float_query_on_integer_array_is_compared_as_float
+    a = CA_INT32([1, 2, 3])
+    assert_equal 0, a.count(1.5)
+    assert_equal [0, 1], a.count(CA_FLOAT64([1.5, 2.0])).to_a
+    big = 2**53
+    b = CA_INT64([big + 1, big])
+    assert_equal b.eq(2.0**53).count(true), b.count(2.0**53)
+  end
+
+  def test_wider_integer_query_array_is_counted_in_the_shared_type
+    assert_equal [1, 0], CA_INT8([1, 2]).count(CA_INT64([1, 300])).to_a
+    assert_raise(RangeError) { CA_INT8([1, 2]).count(300) }
   end
 end

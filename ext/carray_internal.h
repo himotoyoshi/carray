@@ -25,6 +25,7 @@
 #define CARRAY_INTERNAL_H
 
 #include "carray.h"
+#include <math.h>     /* isnan, for CA_OBJ_ISNAN */
 
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
@@ -314,5 +315,50 @@ ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
 VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);
+
+/* A NaN loses every contest of an extremum (min / max / minmax / the
+   positions / the running cummin / cummax / pmin / pmax): it never displaces
+   another value, the first number displaces it, and nothing but NaN answers
+   NaN.  The two tests below are that rule for a typed cell and for an object
+   cell (a stored Float NaN); each says whether `v` takes the place of the
+   running `acc`.  CMP / op is `>` for a maximum, `<` for a minimum.  On an
+   integer type `v == v` is always true and folds away. */
+
+#define CA_EXTREMUM_REPLACES(v, acc, CMP) \
+  ( (v) == (v) && ( !((acc) == (acc)) || (v) CMP (acc) ) )
+
+#ifndef CA_OBJ_ISNAN
+#define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
+#endif
+
+static inline int
+ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
+{
+  if ( CA_OBJ_ISNAN(v) ) return 0;
+  if ( CA_OBJ_ISNAN(acc) ) return 1;
+  return RTEST(rb_funcall(v, op, 1, acc));
+}
+
+/* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:
+   p's own mask, created if needed when p can carry one.  A parent that
+   cannot -- a value array, a mask array, a read-only (or frozen) array with
+   no mask -- gets a read-only all-false stand-in instead, stored in
+   *standin for the view to free.  Reading the view's mask then never gives
+   such a parent a mask; writing UNDEF into its part raises as a write to a
+   read-only array does. */
+CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
+
+/* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
+   except that a Float NaN equals nothing, itself included.  rb_equal alone
+   answers true for the same object, so whether two NaN cells matched would
+   depend on whether they held one Float or two.  (The value-hash family --
+   unique / is_in / the set operations -- folds every NaN into one value
+   instead, in its own hash.) */
+static inline int
+ca_obj_equal (VALUE a, VALUE b)
+{
+  if ( CA_OBJ_ISNAN(a) ) return 0;
+  return RTEST(rb_equal(a, b));
+}
 
 #endif /* CARRAY_INTERNAL_H */

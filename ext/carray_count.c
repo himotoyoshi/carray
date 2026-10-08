@@ -223,6 +223,18 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cv;
     GetCArray(rval, cv);
 
+    /* A query of a wider type than an integer array is counted in the type
+       the two share, as `eq` compares: each v[k] below is then a value of
+       that type, not one truncated to the array's. */
+    if ( ca_is_integer_type(src) &&
+         ( ca_is_integer_type(cv) || ca_is_float_type(cv) ) ) {
+      int8_t qt = ca_promote_type(src->data_type, cv->data_type);
+      if ( qt != src->data_type ) {
+        self = rb_ca_wrap_readonly(self, INT2NUM(qt));
+        GetCArray(self, src);
+      }
+    }
+
     /* Pop trailing options hash (min_count / fill_value) before axes
        parsing so parse_reduce_axes only sees Integer axes.  The opts
        are forwarded verbatim via inner_argv to the recursive count(). */
@@ -328,6 +340,12 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eTypeError,
                "count(v) on numeric array: v must be numeric, got %s",
                rb_obj_classname(rval));
+    }
+    /* A Float query on an integer array is compared as a float, as `eq`
+       compares and `search` searches: 1.5 must not match 1.  An Integer
+       query keeps the array's type and is refused when it does not fit. */
+    if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
+      self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
     }
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);

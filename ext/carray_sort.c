@@ -368,6 +368,7 @@ typedef struct {
   ca_size_t *strides;
   int        axis;
   ca_size_t  axis_size;
+  boolean8_t *mask;      /* the indices' mask, or NULL */
 } axis2addr_ctx_t;
 
 /* Body of rb_ca_axis2addr_c: one flat address per index cell. */
@@ -381,6 +382,12 @@ axis2addr_body (void *user_data, void *ptr, ca_size_t n)
 
   for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
   for ( ca_size_t k = 0; k < n; k++ ) {
+    /* A masked index has no address: the cell keeps the mask (copied from
+       the indices) and is skipped here, its stored value unread. */
+    if ( c->mask && c->mask[k] ) {
+      c->out_ptr[k] = 0;
+      goto advance;
+    }
     /* Negative normalize + OOB check. */
     ca_size_t raw  = idx_ptr[k];
     ca_size_t norm = (raw < 0) ? (raw + c->axis_size) : raw;
@@ -400,6 +407,7 @@ axis2addr_body (void *user_data, void *ptr, ca_size_t n)
       }
     }
     c->out_ptr[k] = addr;
+  advance:
     /* Advance coord row-major (last axis ticks fastest). */
     for ( int8_t j = (int8_t)(ndim - 1); j >= 0; j-- ) {
       if ( ++coord[j] < c->idx_ca->dim[j] ) break;
@@ -489,8 +497,15 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   ctx.strides   = strides;
   ctx.axis      = axis;
   ctx.axis_size = axis_size;
+  ctx.mask      = NULL;
 
   ca_copy_data(idx_cast, out_ca->ptr);
+  /* A masked index gives a masked address: readers propagate it (UNDEF in
+     that cell), writers skip it. */
+  if ( ca_has_mask(idx_cast) ) {
+    ca_copy_mask_overlay(out_ca, out_ca->elements, 1, idx_cast);
+    ctx.mask = (boolean8_t *) out_ca->mask->ptr;
+  }
   axis2addr_body(&ctx, out_ca->ptr, out_ca->elements);
 
   return vout;

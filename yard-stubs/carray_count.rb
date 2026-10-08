@@ -41,6 +41,10 @@ class CArray
   #     (`2`, `1.0`, `nil`, …) raises `TypeError`.
   #   - `self` is numeric, `v` is scalar: `v` must be numeric (true /
   #     false are rejected -- they are the boolean array's domain).
+  #     On an integer array a Float `v`, or a `v` array of a wider
+  #     type, is compared in the type the two share, as {#eq} compares:
+  #     `CA_INT32([1, 2]).count(1.5)` is `0`.  An Integer `v` that does
+  #     not fit the array raises `RangeError`.
   #   - `self.data_type == :object`, `v` is scalar: cells equal to `v`
   #     by Ruby `==`, so `count(1)` and `count(1.0)` agree, and `true` /
   #     `false` / `nil` are ordinary values to count.

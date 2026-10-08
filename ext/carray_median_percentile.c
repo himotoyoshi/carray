@@ -309,7 +309,7 @@ median_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
   }
 
   if ( filled ) {
@@ -504,7 +504,7 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
   }
   if ( filled ) {
     result = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -555,9 +555,6 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
 static VALUE
 pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
 {
-  if ( p == 100.0 )
-    return rb_funcall(obj_call_axis(self, id_max, LONG2NUM(axis)),
-                      id_mul, 1, DBL2NUM(1.0));
   if ( n == 1 )
     return rb_funcall(obj_slice(self, axis, 0), id_mul, 1, DBL2NUM(1.0));
   double f = (n - 1) * p / 100.0;
@@ -749,7 +746,7 @@ percentile_object_flat (VALUE self, VALUE pers, long min_count, VALUE fill_value
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
   }
   if ( filled ) {
     VALUE fill = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -1150,7 +1147,7 @@ pct_flat (VALUE self, VALUE pers_ary, long min_count, VALUE fill_value,
   if ( !masked_out ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) {
+    if ( sc->elements == 0 || sc->elements < min_count ) {
       masked_out = 1; is_undef = NIL_P(fill_value);
       if ( !is_undef ) fillv = NUM2DBL(fill_value);
     }

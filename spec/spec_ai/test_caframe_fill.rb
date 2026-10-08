@@ -147,4 +147,13 @@ class TestCAFrameFill < Test::Unit::TestCase
     assert_equal([1.0, 1.0], df["a"].to_a)
     assert_equal([2.0, 2.0], df["b"].to_a)
   end
+
+  def test_linear_against_the_index_keeps_present_cells_exact
+    big = 2**53
+    df = CAFrame.new({ "t" => CA_FLOAT64([0.0, 1.0, 3.0]), "x" => CA_INT64([big + 1, 0, big + 5]) })
+    df["x"][1] = UNDEF
+    df.set_index("t")
+    df.fill("x", :linear)
+    assert_equal [big + 1, big + 2, big + 5], df["x"].to_a
+  end
 end

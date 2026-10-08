@@ -518,4 +518,13 @@ class TestAtFamily < Test::Unit::TestCase
     end
   end
 
+  def test_integer_scalar_is_exact_above_2_53
+    big = 2**53
+    x = CA_INT64([0])
+    x.scatter_add!(CA_INT64([0]), big + 1)
+    assert_equal big + 1, x[0]
+    y = CA_INT64([0])
+    y.scatter_replace!(CA_INT64([0]), big + 1)
+    assert_equal big + 1, y[0]
+  end
 end

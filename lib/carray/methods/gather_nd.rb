@@ -64,7 +64,8 @@ class CArray
     flat_addr, outer, rest = gather_nd_flat_addr(indices, "gather_nd")
     out_shape = outer + rest
     # flatten + 1-D fancy indexing -> CAMapping view -> materialise via .copy.
-    result = self.flatten[flat_addr].copy
+    # A masked coordinate reads as UNDEF: project carries the address mask.
+    result = flat_addr.has_mask? ? flatten.project(flat_addr) : self.flatten[flat_addr].copy
     out_shape.empty? ? result : result.reshape(*out_shape)
   end
 
@@ -91,7 +92,12 @@ class CArray
   #   @raise [IndexError] when a coordinate is out of range on any axis.
   def put_nd (indices, values)
     flat_addr, _outer, _rest = gather_nd_flat_addr(indices, "put_nd")
-    self.flatten[flat_addr] = values
+    if flat_addr.has_mask?
+      # A masked coordinate writes nothing: scatter_replace! skips it.
+      flatten.scatter_replace!(flat_addr, values)
+    else
+      self.flatten[flat_addr] = values
+    end
     self
   end
 
@@ -150,6 +156,11 @@ class CArray
     flat_idx = (flat_idx_raw + dims) % dims
 
     base     = (flat_idx * strides).sum(axis: 1).int64.reshape(m)  # (M,)
+    # sum skips a masked coordinate, which would leave its row pointing at
+    # the wrong cell: a row with any masked coordinate has no address.
+    if flat_idx_raw.has_mask?
+      base[flat_idx_raw.is_masked.any(axis: 1)] = UNDEF
+    end
 
     flat_addr =
       if rest.empty?

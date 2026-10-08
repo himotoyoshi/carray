@@ -251,4 +251,16 @@ class TestIsIn < Test::Unit::TestCase
     assert_equal false, CA_INT32([1, 2, 3]).respond_to?(:contains)
   end
 
+  def test_mixed_sign_integers_match_by_value_as_eq_does
+    u = CA_UINT8([255, 1]); s = CA_INT8([-1, 1])
+    assert_equal u.eq(s).to_a, u.is_in(s).to_a
+    assert_equal [false, true], s.is_in(u).to_a
+    assert_equal [1], u.intersection(s).to_a
+    assert_equal [255], u.difference(s).to_a
+    assert_equal [-1, 1, 255], u.union(s, sort: true).to_a
+    big = CA_UINT64([2**64 - 1, 1]); neg = CA_INT64([-1, 1])
+    assert_equal [false, true], big.is_in(neg).to_a
+    assert_equal [false, true], neg.is_in(big).to_a
+    assert_equal [false], CA_UINT64([2**64 - 1]).is_in([-1]).to_a
+  end
 end

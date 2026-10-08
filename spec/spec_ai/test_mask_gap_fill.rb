@@ -378,4 +378,19 @@ class TestMaskGapFillHold < Test::Unit::TestCase
     a.unmask
     refute(a.any_masked?)
   end
+
+  def test_linear_keeps_present_cells_exact_and_unmasked_nan_alone
+    big = 2**53
+    a = CA_INT64([big + 1, 0, big + 3]); a[1] = UNDEF
+    assert_equal [big + 1, big + 2, big + 3], a.strip_mask(method: :linear).to_a
+    m = CA_INT64([[big + 1, 0, big + 3], [1, 2, 3]]); m[0, 1] = UNDEF
+    assert_equal [big + 1, big + 2, big + 3], m.strip_mask(method: :linear, axis: 1)[0, nil].to_a
+    nan = Float::NAN
+    c = CA_FLOAT64([1, nan, 3, 4]).strip_mask(method: :linear)
+    refute c.has_mask?
+    assert c[1].nan?
+    inf = Float::INFINITY
+    q = CA_FLOAT64([1, inf, 3, 4]); q[2] = UNDEF
+    assert_equal [1.0, inf, inf, 4.0], q.strip_mask(method: :linear).to_a
+  end
 end

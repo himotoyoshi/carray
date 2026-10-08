@@ -98,4 +98,13 @@ class TestBincountND < Test::Unit::TestCase
     assert_equal 3, h.total
   end
 
+  def test_nan_weight_is_skipped_with_and_without_fibers
+    nan = Float::NAN
+    labels = CA_INT32([[[0], [1], [1]], [[0], [1], [1]]])
+    w = CA_FLOAT64([[nan, 1.0, 2.0], [nan, 1.0, 2.0]])
+    fiber = labels.bincount_nd(lengths: [2], weights: w)
+    flat  = labels[0, nil, nil].bincount_nd(lengths: [2], weights: w[0, nil])
+    assert_equal [[0.0, 3.0], [0.0, 3.0]], fiber.counts.to_a
+    assert_equal [0.0, 3.0], flat.counts.to_a
+  end
 end

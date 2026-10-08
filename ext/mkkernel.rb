@@ -659,41 +659,6 @@ module MkKernel
     }
   end
 
-  # Register a map kernel (element-wise transform: input shape == output
-  # shape, one cell at a time).  Each generated helper walks the input
-  # and output slabs in lockstep using CA_SLAB_MAP_T(T_LOAD, T_OUT, ...).
-  #
-  # DSL:
-  #   MkKernel.map :name,
-  #     source:   MkKernel::ALL_NUMERIC,
-  #     output:   :f64 | :preserve,
-  #     expr:     "r = sqrt((double) v)",   # binds v (input) + r (output)
-  #     fallback: :wrap_to_f64 | :raise
-  #
-  # Generated method takes no arguments (`a.sqrt_ki` not `a.sqrt_ki(0)`)
-  # since the operation is per-cell across the whole array.
-  def self.map(name, source:, output:, expr:, fallback: :raise)
-    raise "duplicate kernel #{name}" if KERNELS.any? { |k| k[:name] == name }
-    source.each do |s|
-      raise "unknown source data_type #{s}" unless DTYPES.key?(s)
-    end
-    raise "unknown output #{output}" unless output == :preserve || DTYPES.key?(output) || output.is_a?(Hash)
-    raise "unknown fallback #{fallback}" unless %i[raise wrap_to_f64].include?(fallback)
-    if output == :preserve && fallback == :wrap_to_f64
-      raise "#{name}: :preserve + :wrap_to_f64 is a semantic conflict " \
-            "(fallback path produces f64 output, contradicting :preserve)"
-    end
-
-    KERNELS << {
-      kind:     :map,
-      name:     name,
-      source:   source,
-      output:   output,
-      expr:     expr,
-      fallback: fallback,
-    }
-  end
-
   # Register a scan kernel (cumulative / prefix-scan: input shape ==
   # output shape, running accumulator along one axis).  The generated
   # method takes exactly one axis argument (e.g., `a.cumsum_ki(0)`).
@@ -1642,9 +1607,11 @@ module MkKernel
     require "fileutils"
     FileUtils.mkdir_p(outdir)
     tags = file_tags
+    written = ["carray_kernels_init.c"]
     tags.each do |kind, subgroup|
       suffix = file_suffix(kind, subgroup)
       path = File.join(outdir, "carray_kernels_#{suffix}.c")
+      written << File.basename(path)
       File.open(path, "w") do |io|
         io.puts header
         KERNELS.each do |k|
@@ -1657,6 +1624,11 @@ module MkKernel
     end
     File.open(File.join(outdir, "carray_kernels_init.c"), "w") do |io|
       emit_aggregator_init(io, tags)
+    end
+    # extconf compiles every carray_kernels_*.c it finds, so a file left
+    # by a kind or sub-group that no longer exists has to go.
+    Dir.glob(File.join(outdir, "carray_kernels_*.c")).each do |f|
+      File.delete(f) unless written.include?(File.basename(f))
     end
   end
 
@@ -1676,7 +1648,6 @@ module MkKernel
   def self.emit_kernel_dispatch(io, k)
     case k[:kind]
     when :reduce then emit_reduce(io, k)
-    when :map    then emit_map(io, k)
     when :scan   then emit_scan(io, k)
     when :sort   then emit_sort(io, k)
     when :search then emit_search(io, k)
@@ -1693,7 +1664,7 @@ module MkKernel
     end
   end
 
-  KINDS = [:reduce, :map, :scan, :sort, :search,
+  KINDS = [:reduce, :scan, :sort, :search,
            :monop, :binop, :triop, :moncmp, :bincmp].freeze
 
   # Sub-split map for the reduce kind.  As one file, reduce accounted for 71%
@@ -3827,113 +3798,6 @@ module MkKernel
     io.puts "}"
   end
 
-  # ---- map emitter ------------------------------------------------------
-
-  def self.emit_map(io, k)
-    io.puts
-    io.puts "/* ===== #{k[:name]}_ki ============================================ */"
-    k[:source].each do |src|
-      emit_map_native(io, k, src)
-    end
-    emit_map_dispatch(io, k)
-  end
-
-  def self.emit_map_native(io, k, src)
-    si   = DTYPES[src]
-    oi   = output_info(k, src)
-    name = k[:name]
-    expr = resolve_expr(k[:expr], oi, src)
-
-    io.puts
-    io.puts <<~C
-      static VALUE
-      #{name}_ki_native_#{src} (VALUE self, CArray *ca)
-      {
-        VALUE   vout = rb_ca_template_with_type(self, INT2NUM(#{oi[:ca]}),
-                                                INT2NUM(sizeof(#{oi[:c]})));
-        CArray *co;
-        GetCArray(vout, co);
-
-        /* All-axes slab = whole array as one K-D walk via CA_SLAB_AXES.
-           CA_SLAB_WHOLE uses the flat next_slab path, which doesn't
-           populate slab_dims; CA_SLAB_AXES with naxes == ndim is the
-           K-D-walkable form. */
-        int8_t slab_axes[CA_RANK_MAX];
-        int8_t naxes = ca->ndim;
-        for ( int8_t k = 0; k < naxes; k++ ) slab_axes[k] = k;
-
-        ca_iter_state st_in, st_out;
-        int rc;
-        rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,
-                                   slab_axes, naxes, 0);
-        if ( rc != CA_ITER_OK ) {
-          rb_raise(rb_eRuntimeError,
-                   "%s: input init failed rc=%d", ca_calling_method_name(), rc);
-        }
-        rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
-                                   slab_axes, naxes, CA_KERNEL_WRITE);
-        if ( rc != CA_ITER_OK ) {
-          ca_iter_state_finish(&st_in);
-          rb_raise(rb_eRuntimeError,
-                   "%s: output init failed rc=%d", ca_calling_method_name(), rc);
-        }
-
-        char       *pi, *po;
-        boolean8_t *mi, *mo;
-        while ( ca_iter_state_next_slab_axes(&st_in,  &pi, &mi) &&
-                ca_iter_state_next_slab_axes(&st_out, &po, &mo) ) {
-          CA_SLAB_MAP_T(#{si[:c]}, #{oi[:c]}, st_in, pi, st_out, po, #{expr});
-          ca_iter_state_sync_slab(&st_out);
-        }
-        ca_iter_state_finish(&st_in);
-        ca_iter_state_finish(&st_out);
-        return vout;
-      }
-    C
-  end
-
-  def self.emit_map_dispatch(io, k)
-    name = k[:name]
-    io.puts
-    io.puts "static VALUE"
-    io.puts "rb_ca_#{name}_ki (VALUE self)"
-    io.puts "{"
-    io.puts "  CArray *src;"
-    io.puts "  GetCArray(self, src);"
-    io.puts "  switch ( src->data_type ) {"
-    k[:source].each do |s|
-      si = DTYPES[s]
-      io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src);"
-    end
-    case k[:fallback]
-    when :wrap_to_f64
-      io.puts "    default: {"
-      io.puts "      /* Phase E: only wrap data_types that have a meaningful float64"
-      io.puts "         representation.  Complex / fixlen / object would lose"
-      io.puts "         structure (e.g. complex -> float strips imaginary part)"
-      io.puts "         so reject explicitly, matching legacy DataTypeError. */"
-      io.puts "      switch ( src->data_type ) {"
-      io.puts "        case CA_BOOLEAN: break;   /* wrap: count-of-trues semantic */"
-      io.puts "        default:"
-      io.puts %Q[          rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])}, or boolean)", ca_calling_method_name(), ca_type_name[src->data_type]);]
-      io.puts "      }"
-      io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
-      io.puts "      CArray *casted;"
-      io.puts "      GetCArray(vsrc, casted);"
-      io.puts "      return #{name}_ki_native_f64(vsrc, casted);"
-      io.puts "    }"
-    when :raise
-      io.puts "    default:"
-      io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
-    when :mask_count
-      io.puts "    default:"
-      io.puts "      return rb_ca_scan_mask_count(self, INT2NUM(axis));"
-    end
-    io.puts "  }"
-    io.puts "  return Qnil;  /* unreachable */"
-    io.puts "}"
-  end
-
   # ---- scan emitter -----------------------------------------------------
 
   def self.emit_scan(io, k)
@@ -4654,7 +4518,7 @@ module MkKernel
       io.puts "      if ( r > 0 ) {"
       io.puts "        if ( dense ) {"
       if is_object
-        io.puts "          if ( ! rb_equal(buf[r].v, buf[r - 1].v) ) out_r++;"
+        io.puts "          if ( ! ca_obj_equal(buf[r].v, buf[r - 1].v) ) out_r++;"
       elsif is_fixlen
         io.puts "          if ( memcmp(buf[r].vp, buf[r - 1].vp, (size_t) buf[r].nb) != 0 ) out_r++;"
       else
@@ -5184,7 +5048,7 @@ module MkKernel
     # body: Hash form picks per-data_type-kind branch (= :int / :float /
     # :object / :fixlen); String form is uniform.
     # PROPOSAL_MKKERNEL_OBJECT_DTYPE_BRANCH Phase 4: :object branch added for
-    # CA_OBJECT (equality via rb_equal, ordering via rb_funcall(<=>)).
+    # CA_OBJECT (equality via ca_obj_equal, ordering via rb_funcall(<=>)).
     # PROPOSAL_SEARCH_SEMANTICS_UNIFY S2: :fixlen branch added for CA_FIXLEN
     # (the cell is a runtime-width byte blob; comparison is memcmp over
     # ca->bytes, the same total order fixlen bincmp uses).
@@ -6904,7 +6768,6 @@ module MkKernel
       end
       arity = case k[:kind]
               when :reduce then -1   # axis: kwarg + optional weights/value positional
-              when :map    then  0   # no args
               when :scan   then -1   # axis: kwarg (Integer required)
               when :sort
                 # SO.3+ (rev8): :partition algorithm takes (axis, kth) = arity 2
@@ -6929,7 +6792,7 @@ module MkKernel
       #   reduce: default false (E.8 retire), opt-in via bind_ruby: true
       #           (used by CF.1 count_equal smoke + future kernel testing)
       #   sort:   default true,  opt-out via bind_ruby: false
-      #   map/scan: always bound (no opt-out)
+      #   scan:   always bound (no opt-out)
       bind = case k[:kind]
              when :reduce then k[:bind_ruby] == true
              when :sort   then k[:bind_ruby] != false
@@ -7031,7 +6894,7 @@ MkKernel.reduce :min,
                      # bool acc is u64 (numeric output); cast the boolean8_t
                      # load to match and avoid a signed/unsigned compare.
                      bool:    "acc = ((uint64_t) v < acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v;' },
+                     object:  'if (acc == Qundef || ca_obj_extremum_replaces(v, acc, rb_intern("<"))) acc = v;' },
   reduction_kind:  :min,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic min (byte order == the fixlen sort
@@ -7056,7 +6919,7 @@ MkKernel.reduce :max,
   # 0/1); the boolean-returning twin is `any` (= bool max).
   reduce:          { numeric: "acc = (v > acc) ? v : acc",
                      bool:    "acc = ((uint64_t) v > acc) ? (uint64_t) v : acc",
-                     object:  'if (acc == Qundef) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v;' },
+                     object:  'if (acc == Qundef || ca_obj_extremum_replaces(v, acc, rb_intern(">"))) acc = v;' },
   reduction_kind:  :max,     # SL.1.2
   all_nan_result:  :nan,
   # CA_FIXLEN: memcmp lexicographic max (byte order == the fixlen sort order).
@@ -7085,17 +6948,6 @@ MkKernel.reduce :max,
 # modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
 # or mostly-true `any`) a profile-driven early-break variant can be
 # added later as a separate kernel.
-MkKernel.header_block <<~C
-  /* CA_OBJ_ISNAN: a stored Float NaN in an object cell.  The object lanes
-     of min / max / minmax / argmin / argmax / cummin / cummax let a NaN
-     lose every comparison, as the float lanes do: it never displaces
-     another value, and a run of nothing but NaN answers NaN (UNDEF for a
-     position).  */
-  #ifndef CA_OBJ_ISNAN
-  #define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
-  #endif
-C
-
 MkKernel.header_block <<~C
   /* BOOL2VAL: bool -> Ruby (Qtrue/Qfalse).  Used as ruby_scalar wrapper
      for the all/any flat-reduction Ruby surface so `a.all` / `a.any`
@@ -7279,7 +7131,7 @@ MkKernel.reduce :minmax,
                      # CA_OBJECT minmax via Qundef sentinel + first-cell-init.
                      # One sentinel guards both lo + hi (they go Qundef
                      # together on init, get set together on first reduce).
-                     object:  'if (lo == Qundef) { lo = v; hi = v; } else if (!CA_OBJ_ISNAN(v)) { if (CA_OBJ_ISNAN(lo) || RTEST(rb_funcall(v, rb_intern("<"), 1, lo))) lo = v; if (CA_OBJ_ISNAN(hi) || RTEST(rb_funcall(v, rb_intern(">"), 1, hi))) hi = v; }' },
+                     object:  'if (lo == Qundef) { lo = v; hi = v; } else { if (ca_obj_extremum_replaces(v, lo, rb_intern("<"))) lo = v; if (ca_obj_extremum_replaces(v, hi, rb_intern(">"))) hi = v; }' },
   outputs:         2,
   all_nan_result:  :nan,
   finish:          { min: "lo", max: "hi" },
@@ -7514,10 +7366,11 @@ MkKernel.reduce :count_false,
 
 MkKernel.reduce :count_equal,
   init:        "0",
-  # The object lane compares with rb_equal (= Ruby ==), not the C ==, which
-  # on two VALUEs would ask whether they are the same object.
+  # The object lane compares with ca_obj_equal (= Ruby ==, a NaN equal to
+  # nothing), not the C ==, which on two VALUEs would ask whether they are
+  # the same object.
   reduce:      { numeric: "if (v == value_arg) acc += 1",
-                 object:  "if (RTEST(rb_equal(v, value_arg))) acc += 1" },
+                 object:  "if (ca_obj_equal(v, value_arg)) acc += 1" },
   reduction_kind: :plus,         # SL.1.4 (conditional predication; clang predicates safely under reduction(+:acc))
   source:      MkKernel::ALL_NUMERIC + [:object, :fixlen],
   fixlen:      :count_equal,   # bespoke memcmp walk (a blob has no scalar C type)
@@ -7609,69 +7462,6 @@ MkKernel.reduce :wmean,
   bind_ruby:       true,
   public_method: true
 
-# ---- map kernels (element-wise transforms) ----------------------------
-
-# Float-output transcendentals -- input widens to double inside the
-# expression, output is float64.  The :wrap_to_f64 fallback handles
-# any other numeric data_type (int16, bool, etc.) by promoting to f64 first.
-
-MkKernel.map :sqrt,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = sqrt((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :sin,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = sin((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :cos,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = cos((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :exp,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = exp((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :log,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = log((double) v)",
-  fallback: :wrap_to_f64
-
-# Source-data_type-preserving transforms -- arithmetic ops that don't need
-# floating-point.  Fallback raises rather than silently widening.
-
-MkKernel.map :square,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :preserve,
-  expr:     "r = v * v",
-  fallback: :raise
-
-MkKernel.map :abs,
-  # Signed-only: `v < 0` is always false on unsigned types (compiler
-  # warning + identity result).  Use `negate` semantics for unsigned
-  # only if you genuinely want wrap-around.
-  source:   MkKernel::SIGNED_NUMERIC,
-  output:   :preserve,
-  expr:     "r = (v < 0) ? -v : v",
-  fallback: :raise
-
-MkKernel.map :negate,
-  # Signed-only: -v on unsigned types wraps (C semantics), which is
-  # mathematically wrong for "negate".  If you want bitwise inversion
-  # on unsigned, use a different kernel (~v).
-  source:   MkKernel::SIGNED_NUMERIC,
-  output:   :preserve,
-  expr:     "r = -v",
-  fallback: :raise
-
 # ---- scan kernels (cumulative / prefix scan along one axis) ----------
 
 # cumsum / cumprod: data_type-conditional output (numeric -> f64 widening,
@@ -7728,7 +7518,7 @@ MkKernel.scan :cummax,
   step:         { float: "acc = fmax(acc, v); r = acc",
                   numeric: "if (v > acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v > acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern(">"), 1, acc)))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil || ca_obj_extremum_replaces(v, acc, rb_intern(">"))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
@@ -7748,7 +7538,7 @@ MkKernel.scan :cummin,
   step:         { float: "acc = fmin(acc, v); r = acc",
                   numeric: "if (v < acc) acc = v; r = acc",
                   bool:    "if ((uint64_t) v < acc) acc = v; r = acc",
-                  object:  'if (acc == Qnil) acc = v; else if (!CA_OBJ_ISNAN(v) && (CA_OBJ_ISNAN(acc) || RTEST(rb_funcall(v, rb_intern("<"), 1, acc)))) acc = v; r = acc' },
+                  object:  'if (acc == Qnil || ca_obj_extremum_replaces(v, acc, rb_intern("<"))) acc = v; r = acc' },
   fallback:     :raise,
   axis_default: :flatten,
   empty:        :undef
@@ -7926,7 +7716,7 @@ MkKernel.search :find_value_index,
       result = (ca_size_t) -1;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,
@@ -8041,7 +7831,7 @@ MkKernel.search :bsearch,
 #
 # Per-data_type body: int uses exact `v == query_val` (eps ignored); float
 # uses `fabs(v - query_val) <= query_eps` (eps_default = FLT_EPSILON*|val|
-# or DBL_EPSILON*|val|); object uses rb_equal (eps ignored); fixlen uses
+# or DBL_EPSILON*|val|); object uses ca_obj_equal (eps ignored); fixlen uses
 # memcmp exact match (eps ignored).  Sole search implementation: the
 # no-axis (flat) surface routes here via flatten + axis 0
 # (PROPOSAL_SEARCH_SEMANTICS_UNIFY S2/S3; the legacy flat scan was removed).
@@ -8067,14 +7857,14 @@ MkKernel.search :search,
       }
     C
     object: <<~C,
-      /* CA_OBJECT search: exact equality via rb_equal.  eps is silently
+      /* CA_OBJECT search: exact equality via ca_obj_equal.  eps is silently
          ignored (= no meaningful tolerance on arbitrary Ruby objects). */
       result = (ca_size_t) -1;
       (void) query_eps;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,
@@ -8293,7 +8083,7 @@ MkKernel.search :search_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,
@@ -9119,14 +8909,15 @@ MkKernel.monfunc :rad_pi,
 #                    NaN the result is NaN.  Distinct kernel — cannot be
 #                    aliased onto pmax.
 #
-# Integer / object branches are identical across all three (no NaN
-# concept).  Only the float branch differs.
+# Integer branches are identical across all three (no NaN).  The float
+# and object branches differ: pmax / pmin let a NaN lose (an object cell's
+# Float NaN included), maximum / minimum let it win.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
     float:  "(#3) = fmax(#1, #2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);',
+    object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
   }
 
 MkKernel.binop :pmin,
@@ -9134,7 +8925,7 @@ MkKernel.binop :pmin,
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
     float:  "(#3) = fmin(#1, #2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
+    object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
   }
 
 # NaN-propagate variants.  Float
@@ -9147,7 +8938,7 @@ MkKernel.binop :maximum,
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
     float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("max"), 0);',
+    object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : RTEST(rb_funcall((#2), rb_intern(">"), 1, (#1))) ? (#2) : (#1);',
   }
 
 MkKernel.binop :minimum,
@@ -9155,7 +8946,7 @@ MkKernel.binop :minimum,
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
     float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
-    object: '(#3) = rb_funcall(rb_assoc_new((#1),(#2)), rb_intern("min"), 0);',
+    object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : RTEST(rb_funcall((#2), rb_intern("<"), 1, (#1))) ? (#2) : (#1);',
   }
 
 # + and - work on the parts independently, so one generic expression
