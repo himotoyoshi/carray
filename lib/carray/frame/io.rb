@@ -5,10 +5,10 @@ require "carray/frame/csv_parser"
 class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
   # §3.7); every column is built raw as an object CArray of the cell strings
-  # (§4.2 -- read and arrange only, no type-inference engine). Casting is a
-  # separate step: pass +types:+ ({ "temp" => :float64 }, or the array-key /
-  # reverse forms of +cast+) to cast named columns on load, or call +cast+
-  # later. Broken cells fail to_type and become UNDEF automatically
+  # (§4.2). Casting is a separate step: pass +types:+ ({ "temp" => :float64 },
+  # or the array-key / reverse forms of +cast+) to cast named columns on
+  # load, +types: :infer+ to cast the columns +infer_types+ finds to be
+  # numbers, or call +cast+ later. Broken cells become UNDEF automatically
   # (parse-mask, §6-2).
   #
   # +source+ is a path, or an open IO -- anything answering +gets+, which a
@@ -95,7 +95,7 @@ class CAFrame
 
     frame = build_frame(names, rows)
     mask_missing_tokens(frame, missing) if missing
-    frame.cast(types, on_error: on_error) if types
+    cast_on_load(frame, types, on_error)
     frame
   end
 
@@ -167,6 +167,21 @@ class CAFrame
   end
 
   private_class_method :read_csv
+
+  # The types: of from_csv / from_records: a map for cast, or :infer to
+  # cast what infer_types finds.
+  def self.cast_on_load(frame, types, on_error)
+    return if types.nil?
+    if types == :infer
+      types = frame.infer_types
+    elsif !types.is_a?(Hash)
+      raise ArgumentError, "types: takes a map of column types or :infer " \
+                           "(got #{types.inspect})"
+    end
+    frame.cast(types, on_error: on_error) unless types.empty?
+  end
+
+  private_class_method :cast_on_load
 
   # Re-raise a failure to decode the input with a line saying how to name the
   # file's encoding. The error and its class are kept; only the message grows.

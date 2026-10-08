@@ -175,18 +175,31 @@ ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
   return CA_DECIMAL_OK;
 }
 
+/* Whether s could be nan / inf / infinity: a letter after an optional sign. */
+static int
+ca_decimal_may_be_word (const char *s, long n)
+{
+  long i = ( s[0] == '+' || s[0] == '-' ) ? 1 : 0;
+  return i < n && ( ( s[i] | 0x20 ) == 'n' || ( s[i] | 0x20 ) == 'i' );
+}
+
+/* A decimal float, written to out.  With out NULL, only whether s is one. */
 static int
 ca_decimal_float (const char *s, long n, double *out)
 {
   char buf[64];
   long i = 0, digits = 0;
+  double nonfinite;
   if ( n == 0 ) {
     return 0;
   }
-  if ( n <= 9 ) {            /* the longest non-finite word is "+infinity" */
+  if ( n <= 9 && ca_decimal_may_be_word(s, n) ) {   /* longest: "+infinity" */
     memcpy(buf, s, n);
     buf[n] = '\0';
-    if ( ca_str_nonfinite(buf, out) ) {
+    if ( ca_str_nonfinite(buf, &nonfinite) ) {
+      if ( out ) {
+        *out = nonfinite;
+      }
       return 1;
     }
   }
@@ -223,6 +236,9 @@ ca_decimal_float (const char *s, long n, double *out)
   }
   if ( i != n ) {
     return 0;
+  }
+  if ( out == NULL ) {
+    return 1;
   }
   /* The token is validated, so ruby_strtod (locale-independent, correctly
      rounded) sees nothing but a decimal number. */
@@ -2869,9 +2885,9 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE src = self, out;
+  volatile VALUE src = self, out, vmask;
   VALUE rtype, report;
-  CArray *ca, *co;
+  CArray *ca, *co, *cmask;
   int8_t data_type;
   int is_float;
   VALUE *cells;
@@ -2907,11 +2923,12 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 
   out = rb_carray_new(data_type, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
-  ca_create_mask(co);
+  vmask = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
 
   cells = (VALUE *) ca->ptr;
   m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
-  m_out = (boolean8_t *) co->mask->ptr;
+  TypedData_Get_Struct(vmask, CArray, &carray_data_type, cmask);
+  m_out = (boolean8_t *) cmask->ptr;
 
   for (i = 0; i < ca->elements; i++) {
     VALUE v = cells[i];
@@ -2956,15 +2973,140 @@ rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
     }
   }
 
+  ca_mask_from_bytes(co, m_out);
   rb_ca_inherit_attr(out, self);
   RB_GC_GUARD(src);
+  RB_GC_GUARD(vmask);
   return out;
+}
+
+/* The number type a column of text reads as, for CAFrame#infer_types.
+
+   A cell is an integer when it is digits with an optional sign and fits
+   int64, and a float when it is any other decimal number (the grammar
+   above, nan / inf included).  A number with a leading zero ("007",
+   "007.5") is not a number here: it is a code, kept as text.  Neither is
+   an integer too long for int64 (an identifier), which a float would
+   round.  Blank, nil and masked cells are missing and say nothing.
+
+   Returns :int64 when every present cell is an integer, :float64 when
+   every present cell is a number and one is not an integer, and nil
+   otherwise -- including when no cell is present. */
+
+enum {
+  CA_INFER_MISSING,
+  CA_INFER_INTEGER,
+  CA_INFER_FLOAT,
+  CA_INFER_TEXT
+};
+
+static int
+ca_infer_string (VALUE str)
+{
+  const char *s = RSTRING_PTR(str);
+  long n = RSTRING_LEN(str);
+  long i = 0, k;
+  int digits_only = 1;
+  ca_decimal_trim(&s, &n);
+  if ( n == 0 ) {
+    return CA_INFER_MISSING;
+  }
+  if ( ! ca_decimal_float(s, n, NULL) ) {
+    return CA_INFER_TEXT;
+  }
+  if ( s[i] == '+' || s[i] == '-' ) {
+    i++;
+  }
+  if ( i + 1 < n && s[i] == '0' && s[i+1] >= '0' && s[i+1] <= '9' ) {
+    return CA_INFER_TEXT;                    /* a leading zero */
+  }
+  if ( i == n ) {
+    return CA_INFER_TEXT;
+  }
+  for (k = i; k < n; k++) {
+    if ( s[k] < '0' || s[k] > '9' ) {
+      digits_only = 0;
+      break;
+    }
+  }
+  if ( digits_only ) {
+    int negative;
+    uint64_t magnitude;
+    if ( ca_decimal_integer(s, n, &negative, &magnitude) == CA_DECIMAL_OK
+         && ca_decimal_fits(CA_INT64, negative, magnitude) ) {
+      return CA_INFER_INTEGER;
+    }
+    return CA_INFER_TEXT;                    /* too long for int64 */
+  }
+  return CA_INFER_FLOAT;
+}
+
+static VALUE
+rb_ca_infer_decimal (VALUE self)
+{
+  volatile VALUE src = self;
+  CArray *ca;
+  VALUE *cells;
+  boolean8_t *m;
+  ca_size_t i;
+  int present = 0, any_float = 0;
+
+  TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eArgError, "type inference needs an object array");
+  }
+  if ( ! ca_is_entity(ca) ) {
+    src = rb_ca_copy(src);
+    TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  }
+  cells = (VALUE *) ca->ptr;
+  m = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
+
+  for (i = 0; i < ca->elements; i++) {
+    VALUE v = cells[i];
+    int kind;
+    if ( ( m && m[i] ) || NIL_P(v) ) {
+      continue;
+    }
+    if ( RB_TYPE_P(v, T_STRING) ) {
+      kind = ca_infer_string(v);
+    }
+    else if ( RB_FLOAT_TYPE_P(v) ) {
+      kind = CA_INFER_FLOAT;
+    }
+    else if ( RB_INTEGER_TYPE_P(v) ) {
+      int negative;
+      uint64_t magnitude;
+      kind = ( ca_decimal_object_integer(v, &negative, &magnitude)
+               && ca_decimal_fits(CA_INT64, negative, magnitude) )
+             ? CA_INFER_INTEGER : CA_INFER_TEXT;
+    }
+    else {
+      kind = CA_INFER_TEXT;
+    }
+    if ( kind == CA_INFER_TEXT ) {
+      RB_GC_GUARD(src);
+      return Qnil;
+    }
+    if ( kind != CA_INFER_MISSING ) {
+      present = 1;
+      any_float |= ( kind == CA_INFER_FLOAT );
+    }
+  }
+  RB_GC_GUARD(src);
+  if ( ! present ) {
+    return Qnil;
+  }
+  return ID2SYM(rb_intern(any_float ? "float64" : "int64"));
 }
 
 void
 Init_carray_cast (void)
 {
   /* CArray data_type conversion */
+
+  /* Internal: CAFrame#infer_types asks the number type of a text column. */
+  rb_define_method(rb_cCArray, "__infer_decimal__", rb_ca_infer_decimal, 0);
 
   /* Internal: CAFrame#cast reads text cells with this grammar.  With an
      Array as the second argument, the addresses of cells that hold

@@ -17,7 +17,8 @@
 class CAFrame
   # Build a frame from an Array of row Hashes. Column set is the union of keys
   # in first-appearance order; keys are stringified. +types:+ casts named
-  # columns afterward (same map / array-key forms as +cast+), with +on_error:+
+  # columns afterward (same map / array-key forms as +cast+, or :infer for
+  # what +infer_types+ finds), with +on_error:+
   # as for +cast+.
   def self.from_records(records, types: nil, on_error: :mask)
     unless records.is_a?(Array) && records.all? { |r| r.is_a?(Hash) }
@@ -34,7 +35,7 @@ class CAFrame
     end
 
     frame = new(cols)
-    frame.cast(types, on_error: on_error) if types
+    cast_on_load(frame, types, on_error)
     frame
   end
 

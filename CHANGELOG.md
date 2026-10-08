@@ -36,6 +36,42 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.time` and `CAFrame#parse_to_time` with a strptime format
+  no longer read a text that has more after the format:
+  `"13/02/2024xyz"` with `"%d/%m/%Y"` is now unparseable (`UNDEF`, or
+  `ArgumentError` with `on_error: :raise`) instead of 2024-02-13. Trailing
+  spaces are still accepted.
+
+- New: `CAFrame#parse_to_time(name, :infer)` finds the one format a text
+  column is written in: the first cell gives the candidates (day-first or
+  month-first dates, month names, `YYYYMMDD`, Japanese dates such as
+  `2024年1月2日`, with an optional time and zone such as `+0900`) and
+  later cells drop those they do not fit, so `13/02/2024` further down
+  settles that `01/02/2024` is day-first. It raises when no format or more
+  than one is left, and for a cell not in the format. `infer_time_format`
+  returns the format it chose.
+
+- New: `CAFrame#cast(name => :time)` parses a text column written year
+  first (`2024-01-01`, `2024/1/2 3:04`, `2024-01-01T12:00:00.5+09:00`) into
+  a `CATime` column, in the finest unit its text shows (`:D` for dates
+  alone, `:s` with a time of day, `:ms` and finer for fractions of a
+  second). `CAFrame#parse_to_time` takes `on_error:` as `cast` does.
+
+- Change: `CAFrame#parse_to_time` without a format reads only text written
+  year first, and much faster; it no longer guesses at other forms, so
+  `"01/02/2024"` or `"Jan 2, 2024"` is now `UNDEF`. Pass a strptime format
+  for those, or `:mixed` for the old guess at each cell. Without a format
+  the unit now defaults to the finest the text shows, so a column of dates
+  alone is `:D` (it was `:s`); pass `unit:` to keep another.
+
+- New: `CAFrame.from_csv(types: :infer)` (and `from_records`) casts each
+  text column whose cells all read as numbers to `:int64` or `:float64`,
+  and one whose cells are all year-first dates or times to `:time`,
+  ignoring missing cells; `CAFrame#infer_types` returns that decision as a
+  map for `cast`. A leading-zero code (`"007"`), an integer too long for
+  `:int64` and a date such as `"01/02/2024"` stay text. Without `:infer`
+  nothing is inferred.
+
 - New: `CAFrame.from_csv` takes `missing:` for a file that spells missing
   values its own way: `missing: ["-999", "///"]` for every column, or a
   Hash such as `{ default: "-999", "id" => [] }` where a column name

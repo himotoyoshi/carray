@@ -206,10 +206,10 @@ IO is already open (there the IO's own encoding governs, and a BOM is the
 caller's).
 
 The header row supplies column names (Strings). Every column is
-read **raw as an object column of the cell strings** — CAFrame does not guess
-types. Casting is a separate, explicit step: pass `types:` to cast named
-columns on the way in, or call [`cast`](#8-column-verbs) later. Cells that fail
-to parse become `UNDEF` automatically (**parse-mask**):
+read **raw as an object column of the cell strings** unless you ask for types.
+Pass `types:` to cast named columns on the way in, `types: :infer` to cast the
+columns that read as numbers, or call [`cast`](#8-column-verbs) later. Cells
+that fail to parse become `UNDEF` automatically (**parse-mask**):
 
 ```ruby
 df = CAFrame.from_csv("obs.csv")
@@ -226,6 +226,23 @@ CAFrame.from_csv("obs.csv", types: { "rh" => :int32 }, on_error: :warn)
 Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 (`:mask` / `:warn` / `:raise`) works as it does for
 [`cast`](#8-column-verbs).
+
+`types: :infer` casts a column to `:int64` when every cell that is not missing
+is an integer that fits, to `:float64` when every such cell is a number, to
+`:time` when every such cell is a year-first date or time (`"2024-01-01"`,
+`"2024/1/2 3:04"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text
+otherwise. A number with a leading zero (`"007"`) is a code and keeps its
+column as text, and so does an integer too long for `:int64` (an
+identifier), which a float would round. A day-first or month-first date
+(`"01/02/2024"`) is not read as time, since which one it is cannot be told;
+cast it with `parse_to_time` and a format. `df.infer_types` returns the same
+decision as a map, so it can be checked, written into the code, or adjusted:
+
+```ruby
+df = CAFrame.from_csv("obs.csv")
+df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :int64 }
+df.cast(df.infer_types.merge("count" => :int32))
+```
 
 **A file's own spelling of missing.** An unquoted empty field, and a cell a
 short row never reached, are `UNDEF` without asking. Files that write missing
@@ -979,8 +996,11 @@ Notes:
   A Ruby number in an object column is held to the same rule: an Integer
   that fits, or a Float with no fractional part, is kept, and `2.5` is
   `UNDEF` rather than truncated, so `"2.5"` and `2.5` in one column agree.
-  Other targets go through `to_type`, and casting a numeric column is an
-  ordinary conversion. It rebinds a fresh column — the one edit that does
+  `:time` parses a text column into a `CATime` column in the finest unit its
+  text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` /
+  `:ns` for fractions of a second (for a format or a unit of your own, use
+  `parse_to_time`). Other targets go through `to_type`, and casting a
+  numeric column is an ordinary conversion. It rebinds a fresh column — the one edit that does
   **not** write through to frames sharing the old column.
 
   `on_error:` decides what an unreadable cell does: `:mask` (the default)
@@ -1026,8 +1046,10 @@ input shape. Each rebinds the column and returns `self`; make it the index with
 
 ```ruby
 # text -> time: parse date strings
-df.parse_to_time("time").set_index("time")
+df.parse_to_time("time").set_index("time")      # written year first
 df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
+df.parse_to_time("time", :infer)                # find the one format it is in
+df.parse_to_time("time", :mixed)                # guess at each cell (slow)
 
 # serial -> time: reinterpret integer counts since an epoch
 df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
@@ -1037,10 +1059,47 @@ df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial 
 df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
-- **`parse_to_time(name, format = nil, unit: :s)`** parses a
-  string-bearing column (an object `CArray` of Strings, or a `CAString` /
-  `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
-  `UNDEF` (parse-mask). A non-string column raises.
+- **`parse_to_time(name, format = nil, unit: nil, on_error: :mask)`**
+  parses a string-bearing column (an object `CArray` of Strings, or a
+  `CAString` / `CAConstString` / `CAFixlenString`). Without `format` it reads
+  text written **year first** and nothing else: the date as
+  `YYYY-M-D` or `YYYY/M/D` (month and day with or without a leading zero),
+  then optionally a time of day after `T` or a space (`h:mm`, `:ss`, a
+  fraction of up to nine digits) and a zone (`Z`, `+09:00`, `+0900`, `+09`;
+  a time without a zone is UTC). A date in another order is not read,
+  because whether `"01/02/2024"` is January or February cannot be told from
+  the text; pass a strptime `format` for it, `:infer`, or `:mixed` to guess
+  at each cell, which is much slower. `unit` defaults to the finest the text
+  shows without a format or with `:infer`, and to `:s` with a format.
+  Missing and unparseable cells become `UNDEF` (parse-mask);
+  `on_error: :warn` / `:raise` reports the unparseable ones as `cast` does.
+  A non-string column raises. `cast(name => :time)` is the call without a
+  format.
+
+  `:infer` finds the one format the column is written in. The first
+  present cell gives the candidate formats (day-first and month-first dates
+  with `/`, `-` or `.`, two-digit years, month names as in `Jan 2, 2024`
+  or `2 Jan 2024`, `YYYYMMDD`, each with an optional `h:mm`, `h:mm:ss`,
+  fraction of a second, or `AM` / `PM` time and a zone `+0900`, `+09:00`,
+  `+09`, `Z`, `UTC` or `GMT`; and Japanese dates `2024年1月2日`, with an
+  optional `3時4分`, `3時4分5秒` or `3:04` time), and each later cell drops
+  the candidates it does not fit until one is left, so a later
+  `13/02/2024` settles whether `01/02/2024` is day-first. It raises when no
+  candidate fits the first cell, when none is left, and when more than one
+  is left at the end; a cell not in the chosen format raises too, whatever
+  `on_error` says. A zone named for a place (`JST`, `CST`) is not a
+  candidate, since some of those names mean different offsets in different
+  places. `infer_time_format(name)` returns the format it chose, to write
+  into the code:
+
+  ```ruby
+  df.infer_time_format("date")   # => "%d/%m/%Y"
+  ```
+
+  `:mixed` is for text that is not written in one format, which is broken
+  as data a machine reads. It guesses at each cell on its own, as
+  `Time.parse` does, so it can read a cell wrongly without saying so:
+  `"01/02/24"` is read as 24 February 2001.
 - **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns

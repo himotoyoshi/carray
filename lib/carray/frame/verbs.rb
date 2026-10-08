@@ -58,8 +58,11 @@ class CAFrame
   # Cast columns to a data type and rebind them (memo §11.4). A text column
   # cast to an integer or float type is read with a decimal grammar ("010" is
   # ten, "0x1F" and "1_000" are not numbers); a cell that does not read, or a
-  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). Other
-  # targets use to_type.
+  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). A text
+  # column cast to :time is parsed into a CATime column, in the finest unit
+  # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
+  # :ns for fractions of a second); parse_to_time takes a format and a
+  # unit. Other targets use to_type.
   # Three call shapes, disambiguated by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
@@ -113,6 +116,32 @@ class CAFrame
   CAST_ON_ERROR = %i[mask warn raise].freeze
   private_constant :CAST_ON_ERROR
 
+  # The types the text columns read as, as a map +cast+ takes:
+  # { "temp" => :float64, "count" => :int64, "time" => :time }. A column is
+  # listed only when every cell that is not missing reads as one type:
+  # :int64 when they are all integers that fit, :float64 when they are all
+  # numbers, :time when they are all year-first dates or times
+  # ("2024-01-01", "2024-01-01 12:00:00", "2024-01-01T12:00:00.5Z").
+  # Blank, nil and masked cells are missing and say nothing; a column with
+  # none present is not listed.
+  #
+  # A number with a leading zero ("007") is a code and keeps its column as
+  # text, and so does an integer too long for int64 (an identifier), which a
+  # float would round. A day-first or month-first date ("01/02/2024") is not
+  # read as time, since which one it is cannot be told. Columns that already
+  # have a type are not listed.
+  #
+  #   df.cast(df.infer_types)                            # what types: :infer does
+  #   df.cast(df.infer_types.merge("code" => :int32))    # with one column set by hand
+  def infer_types
+    @columns.each_with_object({}) do |(key, col), types|
+      next unless col.data_type == CA_OBJECT && !col.face?
+      type = col.__infer_decimal__
+      type ||= :time if time_text_column?(col)
+      types[key] = type if type
+    end
+  end
+
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
   # named columns to a type, +promote+ widens the whole table until it has a
@@ -145,14 +174,29 @@ class CAFrame
   # Parse a string column into a time column and rebind it (memo §11.2).
   # The column must be string-bearing (an object CArray of Strings, or a
   # CAString / CAConstString / CAFixlenString) — this is the "text -> time"
-  # mode, distinct from the integer-serial mode of +to_time+. Delegates to
-  # +CArray.time(col, on_error: :mask)+: +format+ picks strptime parsing
-  # (auto-detect when nil), +unit+ the storage resolution; masked / nil and
-  # unparseable cells become UNDEF (bulk column parse tolerates bad cells).
-  # Make it the index with +set_index+ afterward.
+  # mode, distinct from the integer-serial mode of +to_time+.
+  #
+  # Without +format+ only text written year first is read ("2024-01-01",
+  # "2024/1/2 3:04", "2024-01-01T12:00:00.5Z"); a date in another order is
+  # not, since whether "01/02/2024" is January or February cannot be told.
+  # For those, +format+ is a strptime format, :infer to find the one format
+  # the column is written in (see infer_time_format; a cell not in it
+  # raises, whatever +on_error+ says), or :mixed to guess at each cell
+  # (much slower). +unit+ is the storage resolution: without a format or
+  # with :infer it defaults to the finest the text shows, with a format to
+  # :s. Masked / nil and unparseable cells become UNDEF; +on_error:+ :warn /
+  # :raise reports the unparseable ones as +cast+ does. Make it the index
+  # with +set_index+ afterward. +cast(name => :time)+ is the call without a
+  # format.
   #
   #   df.parse_to_time("time").set_index("time")
-  def parse_to_time(name, format = nil, unit: :s)
+  #   df.parse_to_time("date", "%d/%m/%Y")
+  #   df.parse_to_time("date", :infer)
+  def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
+    unless CAST_ON_ERROR.include?(on_error)
+      raise ArgumentError,
+            "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
+    end
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     unless string_column?(col)
@@ -160,8 +204,26 @@ class CAFrame
             "parse_to_time needs a string column (object / CAString / " \
             "CAConstString / CAFixlenString); #{key.inspect} is #{col.data_type}"
     end
-    @columns[key] = CArray.time(col, format: format, unit: unit, on_error: :mask)
+    @columns[key] = parse_time_column(key, col, format, unit, on_error)
     self
+  end
+
+  # The strptime format parse_to_time(name, :infer) reads the column with,
+  # or nil when the text is written year first and needs none. The first
+  # present cell gives the candidates and each later cell drops those it
+  # does not fit, until one is left; ArgumentError when none fits the first
+  # cell, none is left, or more than one is left at the end (as for
+  # "01/02/2024" when no cell has a day above 12). Write the answer into the
+  # code to read the column with a format from then on.
+  #
+  #   df.infer_time_format("date")   # => "%d/%m/%Y"
+  def infer_time_format(name)
+    key = name.to_s
+    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    unless string_column?(col)
+      raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
+    end
+    inferred_time_format(key, col)&.format
   end
 
   # Reinterpret an integer column as time serial counts and rebind it (memo
@@ -269,6 +331,7 @@ class CAFrame
   private def cast_column(name, type, on_error)
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    return cast_time_column(key, col, on_error) if type == :time
     return col.to_type(type) unless col.data_type == CA_OBJECT && !col.face?
     unreadable = on_error == :mask ? nil : []
     parsed = col.__parse_decimal__(type, unreadable)
@@ -279,6 +342,121 @@ class CAFrame
     parsed
   end
 
+  # cast(name => :time): year-first text to CATime, in the finest unit the
+  # text shows.
+  private def cast_time_column(key, col, on_error)
+    unless string_column?(col)
+      raise ArgumentError,
+            "cast: column #{key.inspect} is #{col.data_type}, not text; " \
+            "to_time reads a column of serial counts as time"
+    end
+    parse_time_column(key, col, nil, nil, on_error)
+  end
+
+  # Text to CATime. Without a format only year-first text is read; a
+  # strptime format, or :mixed for a guess at each cell, goes through
+  # CArray.time. Cells that hold something but do not parse are reported as
+  # on_error says.
+  private def parse_time_column(key, col, format, unit, on_error)
+    case format
+    when nil    then read_time_text(key, col, unit, on_error)
+    when String then parse_time_by_format(key, col, format, unit || :s, on_error)
+    when :infer then parse_time_inferred(key, col, unit)
+    when :mixed then parse_time_by_format(key, col, nil, unit || :s, on_error)
+    else
+      raise ArgumentError,
+            "time format must be a strptime String, :infer or :mixed " \
+            "(got #{format.inspect})"
+    end
+  end
+
+  # :infer reads the column in the one format its text is written in. A cell
+  # that is not in it does not parse in it, and raises.
+  private def parse_time_inferred(key, col, unit)
+    f = inferred_time_format(key, col)
+    return read_time_text(key, col, unit, :raise) if f.nil?
+    unit ||= case f.kind
+             when :date  then :D
+             when :clock then :s
+             else fraction_unit(col, f)
+             end
+    parse_time_by_format(key, col, f.format, unit, :raise, f.pattern)
+  end
+
+  # The inferred format, or nil when the text is written year first (or no
+  # cell is present), which needs none. Only the cells up to the choice are
+  # looked at.
+  private def inferred_time_format(key, col)
+    texts = col.flatten.to_a.lazy.reject { |cell| missing_text?(cell) }.map do |cell|
+      unless cell.is_a?(String)
+        raise ArgumentError, "column #{key.inspect} holds #{cell.inspect}, not text"
+      end
+      cell.strip
+    end
+    first = texts.first
+    return nil if first.nil?
+    unreadable = []
+    CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    return nil if unreadable.empty?
+    CATimeLiteral.infer_time_format(texts)
+  end
+
+  # The unit that holds the widest fraction of a second in the column.
+  private def fraction_unit(col, f)
+    digits = 0
+    col.flatten.to_a.each do |cell|
+      next unless cell.is_a?(String) && (m = f.pattern.match(cell.strip))
+      digits = [digits, m[:f].size].max
+    end
+    digits > 6 ? :ns : digits > 3 ? :us : :ms
+  end
+
+  # Year-first text, read in C. A unit the reader does not write itself is
+  # reached by reading in the finest unit the text shows and converting.
+  private def read_time_text(key, col, unit, on_error)
+    text = (col.data_type == CA_OBJECT && !col.face?) ? col : col.to_type(:object)
+    unreadable = on_error == :mask ? nil : []
+    ticks, read_unit = text.__parse_time_text__(unit, unreadable) ||
+                       text.__parse_time_text__(nil, unreadable)
+    if unreadable && !unreadable.empty?
+      report_unreadable(key, col, :time, unreadable, on_error)
+    end
+    times = ticks.time(unit: read_unit)
+    (unit.nil? || read_unit == unit) ? times : times.to_unit(unit)
+  end
+
+  # With a `pattern`, a cell whose text does not match it is unparseable,
+  # checked in the same pass that reads the cells.
+  private def parse_time_by_format(key, col, format, unit, on_error, pattern = nil)
+    res = CATime::Resolution.parse(unit)
+    raw = pattern && CATimeLiteral.ticks_from_cells(col, res, format, :mask, pattern)
+    parsed = raw ? raw.time(unit: res) :
+             CArray.time(col, format: format, unit: unit, on_error: :mask)
+    unless on_error == :mask
+      failed = col.flatten.to_a.zip(parsed.flatten.is_masked.to_a)
+      addrs = failed.each_index.select do |i|
+        cell, masked = failed[i]
+        masked && !missing_text?(cell)
+      end
+      label = pattern ? format.inspect : :time
+      report_unreadable(key, col, label, addrs, on_error) unless addrs.empty?
+    end
+    parsed
+  end
+
+  # nil, UNDEF and a blank String are missing values.
+  private def missing_text?(cell)
+    cell.nil? || UNDEF.equal?(cell) || (cell.is_a?(String) && cell.strip.empty?)
+  end
+
+  # Whether every present cell of a text column is year-first text, and one
+  # is present.
+  private def time_text_column?(col)
+    unreadable = []
+    ticks, = col.__parse_time_text__(nil, unreadable)
+    unreadable.empty? && ticks.count_not_masked > 0
+  end
+
   # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.
   private def report_unreadable(key, col, type, addrs, on_error)
     cells = col.flatten
@@ -286,7 +464,7 @@ class CAFrame
     describe = ->(addr) { "row #{addr / per_row} #{cells[addr].inspect}" }
     if on_error == :raise
       raise ArgumentError,
-            "cast: column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
+            "column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
     end
     shown = addrs.first(3).map(&describe)
     shown << "..." if addrs.size > 3
