@@ -36,12 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#cast`, `CAFrame.from_csv` and `CAFrame.from_records` take
+  `on_error:` for cells that hold something but do not read as the number
+  type. `:mask` (the default) makes them `UNDEF` as before; `:warn` also
+  warns once per column; `:raise` raises `ArgumentError` naming the column,
+  the row and the cell. Blank and missing cells are never errors.
 - Change: `CAFrame#cast`, and so `CAFrame.from_csv(types:)`, reads a text
   column into an integer or float type as decimal numbers rather than as
   Ruby literals. `"010"` is now 10 (it was 8, read as octal), and `"0x1F"`,
-  `"1_000"` and `"0b11"` are now `UNDEF` instead of numbers. A value the
-  type cannot hold (`"300"` into `:int8`) is now `UNDEF` instead of being
-  wrapped. `CArray#to_type` is unchanged.
+  `"1_000"` and `"0b11"` are now `UNDEF` instead of numbers. An integer type
+  now takes a number whose value is exactly an integer (`"1.0"`, `"1e3"`),
+  which was `UNDEF`; `"1.5"` is still `UNDEF`. A value the type cannot hold
+  (`"300"` into `:int8`) is now `UNDEF` instead of being wrapped.
+  `CArray#to_type` is unchanged.
 
 - Fix: `fma` and `fms` on float32 now round once, as their documentation
   says. They computed in double and narrowed the result, a second rounding

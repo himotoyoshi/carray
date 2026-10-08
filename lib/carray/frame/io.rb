@@ -34,6 +34,8 @@ class CAFrame
   #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
   #             sep/quote/strip/encoding and any block are that parser's concern.
+  #   on_error: what a +types:+ cast does with a cell that does not read
+  #             (:mask default, :warn, :raise); see +cast+.
   #
   # A block gives reading control for files with preamble lines, a units row,
   # or no header (memo §11.2), using +skip+ / +header+ / +column_names+ /
@@ -51,7 +53,7 @@ class CAFrame
   # Columns are handed to the frame as CABlock views over one backing object
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
-  def self.from_csv(source, types: nil,
+  def self.from_csv(source, types: nil, on_error: :mask,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     names, rows =
@@ -66,7 +68,7 @@ class CAFrame
       end
 
     frame = build_frame(names, rows)
-    frame.cast(types) if types
+    frame.cast(types, on_error: on_error) if types
     frame
   end
 

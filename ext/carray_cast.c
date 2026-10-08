@@ -2459,17 +2459,19 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
 /* ------------------------------------------------------------------------
    Reading numbers from table text
 
-   A cell of a CSV file is data, not a Ruby literal, so it is read with a
-   decimal grammar rather than Integer() / Float():
+   A cell of a CSV file is data, not a Ruby literal, so it is read as a
+   decimal number rather than through Integer() / Float():
 
-     integer   [+-]? digit+
-     float     [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
+     number    [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
                      ( [eE] [+-]? digit+ )?
-               | nan | inf | infinity     (any case, optional sign)
+     float     number | nan | inf | infinity     (any case, optional sign)
 
    Surrounding ASCII whitespace is ignored.  "010" is ten, never octal, and
-   "0x1F" / "1_000" / "0b11" are not numbers.  A cell that does not match,
-   or an integer that does not fit the target type, becomes UNDEF.
+   "0x1F" / "1_000" / "0b11" are not numbers.  An integer target takes a
+   number whose value is exactly an integer ("1.0", "1e3", "2.50e1"), decided
+   from the digits rather than through a double, so a long integer is not
+   rounded; "1.5" is not an integer.  A cell that does not read, or an
+   integer the target type cannot hold, becomes UNDEF.
 
    A cell that is not a String (an Integer or Float from a record) is taken
    as a number when it is one the target can hold exactly: an Integer that
@@ -2500,30 +2502,85 @@ ca_decimal_trim (const char **str, long *len)
   *len = n;
 }
 
-/* [+-]? digit+ into a sign and a magnitude.  A magnitude beyond uint64
-   does not fit any target and fails like a non-number. */
+/* A decimal number whose value is exactly an integer, into a sign and a
+   magnitude.  The digits are read with the decimal point moved by the
+   exponent: those left of it form the magnitude, those right of it must all
+   be zero.  A magnitude beyond uint64 does not fit any target and fails
+   like a non-number. */
 static int
 ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
 {
-  long i = 0;
+  long i = 0, int_start, int_end, frac_start, frac_end;
+  long nint, total, point, exponent = 0, k;
+  int exponent_negative = 0;
   uint64_t v = 0;
   *negative = 0;
   if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
     *negative = ( s[i] == '-' );
     i++;
   }
-  if ( i == n ) {
+  int_start = i;
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+  }
+  int_end = frac_start = frac_end = i;
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    frac_start = i;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+    }
+    frac_end = i;
+  }
+  nint  = int_end - int_start;
+  total = nint + ( frac_end - frac_start );
+  if ( total == 0 ) {
     return 0;
   }
-  for ( ; i < n; i++ ) {
-    unsigned d = (unsigned) ( (unsigned char) s[i] - '0' );
-    if ( d > 9 ) {
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      exponent_negative = ( s[i] == '-' );
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      if ( exponent < 1000000 ) {            /* saturate; far past any fit */
+        exponent = exponent * 10 + ( s[i] - '0' );
+      }
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
       return 0;
+    }
+    if ( exponent_negative ) {
+      exponent = - exponent;
+    }
+  }
+  if ( i != n ) {
+    return 0;
+  }
+  point = nint + exponent;
+  for (k = 0; k < total; k++) {
+    char c = ( k < nint ) ? s[int_start + k] : s[frac_start + k - nint];
+    unsigned d = (unsigned) ( c - '0' );
+    if ( k >= point ) {
+      if ( d != 0 ) {
+        return 0;                            /* a fractional part */
+      }
+      continue;
     }
     if ( v > ( UINT64_MAX - d ) / 10 ) {
       return 0;
     }
     v = v * 10 + d;
+  }
+  for (k = total; k < point && v != 0; k++) {
+    if ( v > UINT64_MAX / 10 ) {
+      return 0;
+    }
+    v *= 10;
   }
   *magnitude = v;
   return 1;
@@ -2665,15 +2722,21 @@ ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
 }
 
 static VALUE
-rb_ca_parse_decimal (VALUE self, VALUE rtype)
+rb_ca_parse_decimal (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE src = self, out;
+  VALUE rtype, report;
   CArray *ca, *co;
   int8_t data_type;
   int is_float;
   VALUE *cells;
   boolean8_t *m_in, *m_out;
   ca_size_t i;
+
+  rb_scan_args(argc, argv, "11", &rtype, &report);
+  if ( ! NIL_P(report) ) {
+    Check_Type(report, T_ARRAY);
+  }
 
   data_type = rb_ca_guess_type(rtype);
   switch ( data_type ) {
@@ -2708,7 +2771,8 @@ rb_ca_parse_decimal (VALUE self, VALUE rtype)
   for (i = 0; i < ca->elements; i++) {
     VALUE v = cells[i];
     int ok = 0;
-    if ( m_in && m_in[i] ) {
+    int missing = ( m_in && m_in[i] ) || NIL_P(v);
+    if ( missing ) {
       ok = 0;
     }
     else if ( is_float ) {
@@ -2717,6 +2781,7 @@ rb_ca_parse_decimal (VALUE self, VALUE rtype)
         const char *s = RSTRING_PTR(v);
         long n = RSTRING_LEN(v);
         ca_decimal_trim(&s, &n);
+        missing = ( n == 0 );
         ok = ca_decimal_float(s, n, &d);
       }
       else if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) ) {
@@ -2739,6 +2804,7 @@ rb_ca_parse_decimal (VALUE self, VALUE rtype)
         const char *s = RSTRING_PTR(v);
         long n = RSTRING_LEN(v);
         ca_decimal_trim(&s, &n);
+        missing = ( n == 0 );
         ok = ca_decimal_integer(s, n, &negative, &magnitude);
       }
       else {
@@ -2752,6 +2818,9 @@ rb_ca_parse_decimal (VALUE self, VALUE rtype)
     m_out[i] = ok ? 0 : 1;
     if ( ! ok ) {
       memset(co->ptr + i * co->bytes, 0, co->bytes);
+      if ( ! missing && ! NIL_P(report) ) {
+        rb_ary_push(report, SIZET2NUM(i));
+      }
     }
   }
 
@@ -2765,8 +2834,11 @@ Init_carray_cast (void)
 {
   /* CArray data_type conversion */
 
-  /* Internal: CAFrame#cast reads text cells with this grammar. */
-  rb_define_method(rb_cCArray, "__parse_decimal__", rb_ca_parse_decimal, 1);
+  /* Internal: CAFrame#cast reads text cells with this grammar.  With an
+     Array as the second argument, the addresses of cells that hold
+     something but do not read (blank, nil and masked cells are missing,
+     not unreadable) are pushed onto it. */
+  rb_define_method(rb_cCArray, "__parse_decimal__", rb_ca_parse_decimal, -1);
 
   rb_define_method(rb_cCArray, "to_type", rb_ca_to_type_internal, -1);
 
