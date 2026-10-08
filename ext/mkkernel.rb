@@ -7609,69 +7609,6 @@ MkKernel.reduce :wmean,
   bind_ruby:       true,
   public_method: true
 
-# ---- map kernels (element-wise transforms) ----------------------------
-
-# Float-output transcendentals -- input widens to double inside the
-# expression, output is float64.  The :wrap_to_f64 fallback handles
-# any other numeric data_type (int16, bool, etc.) by promoting to f64 first.
-
-MkKernel.map :sqrt,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = sqrt((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :sin,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = sin((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :cos,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = cos((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :exp,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = exp((double) v)",
-  fallback: :wrap_to_f64
-
-MkKernel.map :log,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :f64,
-  expr:     "r = log((double) v)",
-  fallback: :wrap_to_f64
-
-# Source-data_type-preserving transforms -- arithmetic ops that don't need
-# floating-point.  Fallback raises rather than silently widening.
-
-MkKernel.map :square,
-  source:   MkKernel::ALL_NUMERIC,
-  output:   :preserve,
-  expr:     "r = v * v",
-  fallback: :raise
-
-MkKernel.map :abs,
-  # Signed-only: `v < 0` is always false on unsigned types (compiler
-  # warning + identity result).  Use `negate` semantics for unsigned
-  # only if you genuinely want wrap-around.
-  source:   MkKernel::SIGNED_NUMERIC,
-  output:   :preserve,
-  expr:     "r = (v < 0) ? -v : v",
-  fallback: :raise
-
-MkKernel.map :negate,
-  # Signed-only: -v on unsigned types wraps (C semantics), which is
-  # mathematically wrong for "negate".  If you want bitwise inversion
-  # on unsigned, use a different kernel (~v).
-  source:   MkKernel::SIGNED_NUMERIC,
-  output:   :preserve,
-  expr:     "r = -v",
-  fallback: :raise
-
 # ---- scan kernels (cumulative / prefix scan along one axis) ----------
 
 # cumsum / cumprod: data_type-conditional output (numeric -> f64 widening,

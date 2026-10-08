@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `sqrt_ki`, `sin_ki`, `cos_ki`, `exp_ki`, `log_ki`, `square_ki`,
+  `abs_ki` and `negate_ki` are removed. They were undocumented leftovers
+  that ignored the mask, computing masked cells from the stored values. Use
+  `sqrt`, `sin`, `cos`, `exp`, `log`, `square`, `abs` and `-@`.
+
 - Change: `clip(min, max)` raises `ArgumentError` when `min` exceeds `max`
   (in any cell, when a bound is an array), as Ruby's `clamp` does. Integer,
   object and float arrays answered three different ways. Equal bounds are

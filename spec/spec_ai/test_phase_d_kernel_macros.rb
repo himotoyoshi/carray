@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 #
-# Phase D POC — CA_SLAB_REDUCE_F64 / CA_SLAB_MAP_F64 macro suite tests.
+# Phase D POC — CA_SLAB_REDUCE_F64 macro suite tests.
 #
 # Pins:
 #   - sum_ki / mean_ki / min_ki / max_ki parity against CArray#sum etc.
 #     across entity, view chain, mask, and multi-axis reductions.
-#   - sqrt_ki parity against per-element Math.sqrt, plus view chain
-#     transparency (= macro walks strided input correctly).
 #
 # These exercise the macros (declared in ext/ca_kernel_iterator.h) by
 # verifying that the lifted kernels in ext/carray_kernel_sum.c produce
@@ -623,155 +621,6 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
     assert_kind_of(Float, a.mean(axis: 0))
   end
 
-  # ---- MkKernel.map form (sqrt + transcendentals + arithmetic) --------
-  # Phase D §map: sqrt_ki migrated from hand-written carray_kernel_sum.c
-  # to the generator (= ext/carray_kernels.c).  carray_kernel_sum.c
-  # retired entirely.  Six new map kernels added in the same form:
-  # sin, cos, exp, log, square, abs, negate.
-
-  # ---- sqrt_ki via generator (replaces hand-written version) ---------
-
-  def test_sqrt_ki_via_generator_entity_1d
-    a = CA_FLOAT64([1.0, 4.0, 9.0, 16.0, 25.0])
-    assert_equal([1.0, 2.0, 3.0, 4.0, 5.0], a.sqrt_ki.to_a)
-  end
-
-  def test_sqrt_ki_via_generator_int32_widens_to_f64
-    a = CA_INT32([1, 4, 9, 16])
-    result = a.sqrt_ki
-    assert_equal(CA_FLOAT64, result.data_type)
-    assert_equal([1.0, 2.0, 3.0, 4.0], result.to_a)
-  end
-
-  def test_sqrt_ki_via_generator_int16_falls_through_to_wrap
-    # int16 not in :source -> wrap_to_f64 fallback -> f64 native path
-    a = CArray.int16(4).seq + 1   # [1, 2, 3, 4]
-    result = a.sqrt_ki
-    assert_equal(CA_FLOAT64, result.data_type)
-    assert_in_delta(0.0, (result - CA_FLOAT64([Math.sqrt(1), Math.sqrt(2), Math.sqrt(3), Math.sqrt(4)])).abs.max, 1e-12)
-  end
-
-  def test_sqrt_ki_via_generator_view_chain
-    a = CArray.float64(6, 7).seq + 1
-    tv = a.transpose
-    result = tv.sqrt_ki
-    tv.each_with_addr do |v, addr|
-      idx = tv.addr2index(addr)
-      assert_in_delta(Math.sqrt(v), result[*idx], 1e-12)
-    end
-  end
-
-  # ---- transcendentals (output: :f64) --------------------------------
-
-  def test_sin_ki
-    a = CA_FLOAT64([0.0, Math::PI / 2, Math::PI])
-    assert_in_delta(0.0, a.sin_ki[0], 1e-12)
-    assert_in_delta(1.0, a.sin_ki[1], 1e-12)
-    assert_in_delta(0.0, a.sin_ki[2], 1e-12)
-  end
-
-  def test_cos_ki
-    a = CA_FLOAT64([0.0, Math::PI / 2, Math::PI])
-    assert_in_delta(1.0,  a.cos_ki[0], 1e-12)
-    assert_in_delta(0.0,  a.cos_ki[1], 1e-12)
-    assert_in_delta(-1.0, a.cos_ki[2], 1e-12)
-  end
-
-  def test_exp_ki
-    a = CA_FLOAT64([0.0, 1.0, 2.0])
-    assert_in_delta(1.0,         a.exp_ki[0], 1e-12)
-    assert_in_delta(Math::E,     a.exp_ki[1], 1e-12)
-    assert_in_delta(Math::E**2,  a.exp_ki[2], 1e-12)
-  end
-
-  def test_log_ki
-    a = CA_FLOAT64([1.0, Math::E, Math::E ** 2])
-    assert_in_delta(0.0, a.log_ki[0], 1e-12)
-    assert_in_delta(1.0, a.log_ki[1], 1e-12)
-    assert_in_delta(2.0, a.log_ki[2], 1e-12)
-  end
-
-  def test_transcendental_int_source_widens
-    # int32 source -> f64 output for all transcendentals.
-    a = CA_INT32([0, 1, 4])
-    [:sqrt_ki, :sin_ki, :cos_ki, :exp_ki].each do |op|
-      result = a.send(op)
-      assert_equal(CA_FLOAT64, result.data_type,
-                   "expected #{op} on int32 to produce float64 output")
-    end
-  end
-
-  # ---- preserve-data_type maps (square, abs, negate) ---------------------
-
-  def test_square_ki_float64
-    a = CA_FLOAT64([1.0, -2.0, 3.0, -4.0])
-    assert_equal([1.0, 4.0, 9.0, 16.0], a.square_ki.to_a)
-  end
-
-  def test_square_ki_int32_preserves_data_type
-    a = CA_INT32([1, 2, 3, 4])
-    result = a.square_ki
-    assert_equal(CA_INT32, result.data_type)
-    assert_equal([1, 4, 9, 16], result.to_a)
-  end
-
-  def test_abs_ki_float64
-    a = CA_FLOAT64([-1.5, 0.0, 2.5, -3.5])
-    assert_equal([1.5, 0.0, 2.5, 3.5], a.abs_ki.to_a)
-  end
-
-  def test_abs_ki_int32_preserves_data_type
-    a = CA_INT32([-1, 0, 2, -3])
-    result = a.abs_ki
-    assert_equal(CA_INT32, result.data_type)
-    assert_equal([1, 0, 2, 3], result.to_a)
-  end
-
-  def test_negate_ki_float64
-    a = CA_FLOAT64([1.0, -2.0, 3.0])
-    assert_equal([-1.0, 2.0, -3.0], a.negate_ki.to_a)
-  end
-
-  def test_negate_ki_int64_preserves_data_type
-    a = CA_INT64([1, -2, 3])
-    result = a.negate_ki
-    assert_equal(CA_INT64, result.data_type)
-    assert_equal([-1, 2, -3], result.to_a)
-  end
-
-  def test_preserve_data_type_map_raises_on_unsupported
-    # square/abs/negate use fallback: :raise (because :preserve + wrap
-    # would silently change data_type).  Boolean source raises.
-    # Phase E: data_type-reject now raises CArray::DataTypeError.
-    a = CArray.boolean(4)
-    assert_raise(CArray::DataTypeError) { a.square_ki }
-    assert_raise(CArray::DataTypeError) { a.abs_ki    }
-    assert_raise(CArray::DataTypeError) { a.negate_ki }
-  end
-
-  def test_abs_negate_raise_on_unsigned
-    # abs / negate are defined for SIGNED_NUMERIC only -- unsigned `v < 0`
-    # is always false (compiler warning + identity), and -v on unsigned
-    # wraps.  Both should raise on uint sources.
-    # Phase E: data_type-reject now raises CArray::DataTypeError.
-    a = CArray.uint8(4).seq
-    assert_raise(CArray::DataTypeError) { a.abs_ki    }
-    assert_raise(CArray::DataTypeError) { a.negate_ki }
-    b = CArray.uint16(4).seq
-    assert_raise(CArray::DataTypeError) { b.abs_ki    }
-    assert_raise(CArray::DataTypeError) { b.negate_ki }
-  end
-
-  def test_map_ki_3d_walk
-    # Verify the K-D walk works correctly across all map kernels.
-    a = CArray.float64(2, 3, 4).seq + 1
-    result = a.sqrt_ki
-    a.each_with_addr do |v, addr|
-      idx = a.addr2index(addr)
-      assert_in_delta(Math.sqrt(v), result[*idx], 1e-12)
-    end
-  end
-
   # ---- MkKernel.scan form (cumsum + family) ---------------------------
   # Phase D §scan: stat_proc 14/14 completion landed.
   # New CA_SLAB_SCAN_T macro + DSL form.  Each scan slab is one "fiber"
@@ -1022,14 +871,6 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
     assert_equal([5, 3, 3, 1], result.to_a)
   end
 
-  def test_square_ki_uint8
-    a = CA_UINT8([1, 2, 3, 5])
-    result = a.square_ki
-    assert_equal(CA_UINT8, result.data_type)
-    # 25 fits in uint8; check overflow boundary too
-    assert_equal([1, 4, 9, 25], result.to_a)
-  end
-
   def test_mean_ki_int8_native
     a = CArray.int8(5).seq   # [0,1,2,3,4]
     assert_in_delta(2.0, a.mean(axis: 0), 1e-12)
@@ -1041,13 +882,6 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
     # sample variance = ((1-2.5)^2 + (2-2.5)^2 + (3-2.5)^2 + (4-2.5)^2)/3
     # = (2.25+0.25+0.25+2.25)/3 = 5/3 ≈ 1.6667
     assert_in_delta(5.0/3.0, a.variance(axis: 0), 1e-9)
-  end
-
-  def test_sqrt_ki_int8_native
-    a = CA_INT8([1, 4, 9, 16])
-    result = a.sqrt_ki
-    assert_equal(CA_FLOAT64, result.data_type)
-    assert_equal([1.0, 2.0, 3.0, 4.0], result.to_a)
   end
 
   def test_all_native_dtypes_no_longer_use_wrap_fallback
@@ -1139,48 +973,6 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
     a = CArray.float64(8, 6).seq - 10
     tv = a.transpose
     assert_in_delta((tv.min(axis: 0) - tv.min(axis: 0)).abs.max, 0.0, 1e-9)
-  end
-
-  # ---- sqrt_ki (CA_SLAB_MAP_F64) ---------------------------------------
-
-  def test_sqrt_ki_entity_1d
-    a = CA_FLOAT64([1.0, 4.0, 9.0, 16.0, 25.0])
-    assert_equal([1.0, 2.0, 3.0, 4.0, 5.0], a.sqrt_ki.to_a)
-  end
-
-  def test_sqrt_ki_entity_3d
-    a = CArray.float64(3, 4, 5).seq + 1
-    result = a.sqrt_ki
-    a.each_with_addr do |v, addr|
-      expected = Math.sqrt(v)
-      idx = a.addr2index(addr)
-      assert_in_delta(expected, result[*idx], 1e-12,
-                      "mismatch at idx=#{idx.inspect}")
-    end
-  end
-
-  def test_sqrt_ki_view_chain_transpose
-    a = CArray.float64(6, 7).seq + 1
-    tv = a.transpose
-    result = tv.sqrt_ki
-    tv.each_with_addr do |v, addr|
-      idx = tv.addr2index(addr)
-      assert_in_delta(Math.sqrt(v), result[*idx], 1e-12)
-    end
-  end
-
-  def test_sqrt_ki_int_source_auto_widening
-    a = CA_INT32([1, 4, 9, 16])
-    assert_equal([1.0, 2.0, 3.0, 4.0], a.sqrt_ki.to_a)
-    # Output is float64 entity
-    assert_equal(CA_FLOAT64, a.sqrt_ki.data_type)
-  end
-
-  def test_sqrt_ki_output_is_entity
-    a = CArray.float64(2, 3).seq + 1
-    out = a.sqrt_ki
-    assert_equal(CArray, out.class)
-    assert_equal(a.dim, out.dim)
   end
 
 end
