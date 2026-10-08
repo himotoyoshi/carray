@@ -164,11 +164,13 @@ class CAFrame
   # come to read a file differently.
   def self.read_csv (io, sep:, quote:, strip:, &block)
     reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
-    if block
-      block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
-    else
-      reader.header
-      reader.body
+    reader.reporting do
+      if block
+        block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
+      else
+        reader.header
+        reader.body
+      end
     end
     reader.result
   end

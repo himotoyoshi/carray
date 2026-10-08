@@ -146,7 +146,8 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
       assert_equal [UNDEF, "3"], df["c"].to_a
     end
     with_csv("a,b\n1,2,3\n") do |path|
-      assert_raise(ArgumentError) { CAFrame.from_csv(path) }
+      err = assert_raise(CAFrame::CSVParser::MalformedCSV) { CAFrame.from_csv(path) }
+      assert_equal 2, err.lineno
     end
   end
 

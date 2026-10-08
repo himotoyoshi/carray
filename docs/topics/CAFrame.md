@@ -336,11 +336,25 @@ unquoted fields, default `false` = RFC 4180 spacing), `encoding:`
 Input that cannot be read as written **raises rather than losing data**. A
 quoted field must end at the separator or the end of the record: text after
 the closing quote (`"ab"cd`, or a space as in `"x" ,2`) raises
-`CAFrame::CSVParser::MalformedCSV` naming the record, except that `strip:`
-lets spaces through there as it does around an unquoted field. A quote inside
-an unquoted field (`5"in`) raises too: a field that holds a quote is written
-quoted, with the quote doubled (`"5""in"`), which is how `to_csv` writes it. A
-record goes on past the end of its line only inside a quoted field.
+`CAFrame::CSVParser::MalformedCSV`, except that `strip:` lets spaces through
+there as it does around an unquoted field. A quote inside an unquoted field
+(`5"in`) raises too: a field that holds a quote is written quoted, with the
+quote doubled (`"5""in"`), which is how `to_csv` writes it. So does a quoted
+field that is never closed, and a record with more fields than there are
+columns. A record goes on past the end of its line only inside a quoted field.
+
+The message starts with the file and the line, in the form an editor or a
+terminal jumps to:
+
+```
+obs.csv:5004: a quote inside unquoted field 2 ("ab\"c"); ... (record 5003)
+```
+
+The line is the file's, counting the header, the lines `skip` dropped and the
+lines inside quoted fields; for a field never closed it is the line the field
+opens on. The record number follows when it is not the same. An IO with no
+path gives `line 5004:` instead. The error also answers `path`, `lineno` and
+`record`.
 
 **Blank lines.** In a file of more than one column, a line that is empty, or
 only spaces and tabs with no separator, is not a row and is skipped. In a file

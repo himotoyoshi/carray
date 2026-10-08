@@ -1,5 +1,6 @@
 require "test/unit"
 require "stringio"
+require "tmpdir"
 require "carray"
 
 # CSV input that used to lose data without a word.
@@ -14,7 +15,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # field.
   def test_text_after_a_closing_quote_raises
     err = assert_raise(MALFORMED) { read("a,b,c\n\"ab\"cd,2,3\n") }
-    assert_match(/"cd,2,3" after the closing quote of field 1 in record 2/, err.message)
+    assert_equal %q{line 2: text "cd,2,3" after the closing quote of field 1}, err.message
   end
 
   def test_a_space_after_a_closing_quote_raises
@@ -76,7 +77,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # after it into one record.
   def test_a_quote_inside_an_unquoted_field_raises
     err = assert_raise(MALFORMED) { read("h\n5\"in\nx\n\"y\n") }
-    assert_match(/a quote inside unquoted field 1 in record 2/, err.message)
+    assert_match(/\Aline 2: a quote inside unquoted field 1 /, err.message)
     assert_raise(MALFORMED) { read("w,h\n5\",6\n7,8\n") }
   end
 
@@ -115,9 +116,55 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_equal [["x"], ["2"]], df.variables.map(&:to_a)
   end
 
-  def test_an_unterminated_quoted_field_names_its_record
+  def test_an_unterminated_quoted_field_names_the_line_it_opens_on
     err = assert_raise(MALFORMED) { read("a\n1\n\"open\nmore\n") }
-    assert_match(/record 3/, err.message)
+    assert_equal "line 3: quoted field 1 opened here is never closed", err.message
+  end
+
+  # The line is the file's, which an editor jumps to: a quoted field of
+  # several lines before it, or a skip, makes it differ from the record.
+  def test_an_error_names_the_line_of_the_file
+    rows = (1..3000).map { |i| "#{i},\"x\ny\"\n" }.join
+    [1 << 22, 7].each do |n|
+      with_chunk_bytes(n) do
+        err = assert_raise(MALFORMED) { read("a,b\n" + rows + "9,\"ab\ncd\"e\n") }
+        assert_equal [6003, 3002], [err.lineno, err.record]
+        assert_equal %q{line 6003: text "e" after the closing quote of field 2 (record 3002)}, err.message
+      end
+    end
+    err = assert_raise(MALFORMED) { read("# x\n# y\na,b\n1,2\n1,2\"\n") { skip 2; header; body } }
+    assert_equal [5, 3], [err.lineno, err.record]
+  end
+
+  # A record longer than the header used to raise an ArgumentError counting
+  # data rows, not lines.
+  def test_a_record_with_too_many_fields_names_its_line
+    err = assert_raise(MALFORMED) { read("a,b\r\n1,2\r\n3,4,5\r\n") }
+    assert_equal "line 3: 3 fields, but there are 2 columns", err.message
+    err = assert_raise(MALFORMED) { read("1,2\n\n3,4,5\n") { column_names "a", "b"; body } }
+    assert_equal 3, err.lineno
+  end
+
+  def test_an_error_names_the_file
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "obs.csv")
+      File.write(path, "a,b\n1,2\n3,x\"y\n")
+      err = assert_raise(MALFORMED) { CAFrame.from_csv(path) }
+      assert_equal path, err.path
+      assert_match(/\A#{Regexp.escape(path)}:3: a quote inside unquoted field 2 /, err.message)
+      err = assert_raise(MALFORMED) { File.open(path) { |io| CAFrame.from_csv(io) } }
+      assert_match(/\A#{Regexp.escape(path)}:3: /, err.message)
+    end
+  end
+
+  def with_chunk_bytes(n)
+    old = CAFrame::CSVReader::CHUNK_BYTES
+    CAFrame::CSVReader.send(:remove_const, :CHUNK_BYTES)
+    CAFrame::CSVReader.const_set(:CHUNK_BYTES, n)
+    yield
+  ensure
+    CAFrame::CSVReader.send(:remove_const, :CHUNK_BYTES)
+    CAFrame::CSVReader.const_set(:CHUNK_BYTES, old)
   end
 
   # A field of many lines used to be re-counted at every line.

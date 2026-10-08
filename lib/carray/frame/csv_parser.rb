@@ -13,10 +13,11 @@
 #   * An empty unquoted field is nil (missing); an empty quoted field ("") is
 #     the empty String. Both cast to UNDEF for numeric columns (parse-mask).
 #   * A UTF-8 BOM is stripped via the "bom|utf-8" read mode by default.
-#   * Malformed input raises MalformedCSV naming the record number: a quote
-#     inside an unquoted field, text after a closing quote, or a quoted field
-#     still open at the end of input. A record continues onto the next line
-#     only inside a quoted field.
+#   * Malformed input raises MalformedCSV naming the file and the line: a
+#     quote inside an unquoted field, text after a closing quote, a quoted
+#     field still open at the end of input, or a record with more fields
+#     than there are columns. A record continues onto the next line only
+#     inside a quoted field.
 #
 # Two entry points share the Tokenizer:
 #   * CSVParser.parse / parse_file -- whole-file parse into [headers, rows].
@@ -40,9 +41,35 @@ class CAFrame
   module CSVParser
     module_function
 
-    # Raised when the input cannot be tokenized, e.g. a quoted field that
-    # never closes before end of input.
-    class MalformedCSV < StandardError; end
+    # Raised when the input cannot be read as written. The message starts
+    # with "path:line:" (or "line N:" for an IO with no path), the form an
+    # editor or terminal jumps to; the record number follows when it is not
+    # the line's, as after a quoted field of several lines or a +skip+.
+    # +path+, +lineno+ and +record+ give the same for a program.
+    class MalformedCSV < StandardError
+      attr_accessor :path
+      attr_reader :lineno, :record, :detail
+
+      def initialize(detail = nil, lineno: nil, record: nil, path: nil)
+        @detail = detail
+        @lineno = lineno
+        @record = record
+        @path   = path
+        super(detail)
+      end
+
+      def message
+        return super if @detail.nil?
+        where =
+          if @path && @lineno then "#{@path}:#{@lineno}: "
+          elsif @path         then "#{@path}: "
+          elsif @lineno       then "line #{@lineno}: "
+          else ""
+          end
+        tail = @record && @record != @lineno ? " (record #{@record})" : ""
+        "#{where}#{@detail}#{tail}"
+      end
+    end
 
     # Parse a file into [headers, rows]. +encoding+ is an IO open-mode encoding
     # string; the default strips a leading BOM and reads UTF-8.
@@ -108,6 +135,23 @@ class CAFrame
         # A whole quoted field: its quotes closed, the ones inside doubled.
         @quoted_re = /\A#{q}(?:[^#{q}]|#{q}#{q})*#{q}\z/m
         @recno    = 0
+        @lineno   = 0
+        @record_line = 0
+      end
+
+      # The lines read so far, and the line the last record started on.
+      attr_reader :lineno, :record_line
+
+      # The next line of +io+, counted.
+      def gets(io)
+        line = io.gets
+        @lineno += 1 if line
+        line
+      end
+
+      # A MalformedCSV at +line+ of the current record.
+      def malformed(detail, line = @record_line)
+        MalformedCSV.new(detail, lineno: line, record: @recno)
       end
 
       # Fields of the next record, or nil at EOF.  A blank line -- empty, or
@@ -128,9 +172,10 @@ class CAFrame
       # after it, and a field of many lines is read once, not re-counted.
       def read(io, blank_is_row: false)
         loop do
-          line = io.gets
+          line = gets(io)
           return nil if line.nil?
           @recno += 1
+          @record_line = @lineno
           @blank = false
           if line.include?(@quote)
             return (!@strip && quoted_line(line)) || scan(line, io)
@@ -148,10 +193,11 @@ class CAFrame
         @blank
       end
 
-      # Count records read elsewhere (the C reader), so the record numbers
-      # in an error stay those of the file.
-      def advance(records)
+      # Count records and lines read elsewhere (the C reader), so the
+      # numbers in an error stay those of the file.
+      def advance(records, lines)
         @recno += records
+        @lineno += lines
       end
 
       # An empty field lies at the start or the end of the record or between
@@ -205,24 +251,22 @@ class CAFrame
         loop do
           sc.skip(/[ \t]+/) if @strip
           if sc.skip(@quote_re)
-            fields << quoted_field(sc, io)
+            fields << quoted_field(sc, io, fields.size + 1, line_at(sc))
             # A closed quoted field ends at the separator or the end of the
             # record. Anything else there is malformed, and read on it would
             # drop the rest of the record without a word. strip: lets spaces
             # through, as it does around an unquoted field.
             sc.skip(/[ \t]+/) if @strip
             unless sc.eos? || sc.check(@sep_re) || sc.check(@eol)
-              raise MalformedCSV,
-                    "text #{sc.rest.chomp[0, 20].inspect} after the closing quote of " \
-                    "field #{fields.size} in record #{@recno}"
+              raise malformed("text #{sc.rest.chomp[0, 20].inspect} after the closing quote " \
+                              "of field #{fields.size}", line_at(sc))
             end
           else
             cell = sc.scan(@unquoted)
             if sc.check(@quote_re)
-              raise MalformedCSV,
-                    "a quote inside unquoted field #{fields.size + 1} in record " \
-                    "#{@recno} (#{(cell + sc.rest.chomp)[0, 20].inspect}); a field " \
-                    "holding a quote is written quoted, with the quote doubled"
+              raise malformed("a quote inside unquoted field #{fields.size + 1} " \
+                              "(#{(cell + sc.rest.chomp)[0, 20].inspect}); a field holding " \
+                              "a quote is written quoted, with the quote doubled", line_at(sc))
             end
             cell = cell.strip if @strip
             fields << (cell.empty? ? nil : cell)
@@ -233,16 +277,24 @@ class CAFrame
         fields
       end
 
+      # The line of the file the scanner is at: the record's first line and
+      # the line breaks it has passed in quoted fields.
+      private def line_at(sc)
+        @record_line + sc.string[0, sc.pos].count("\n")
+      end
+
       # The rest of a field whose opening quote has been read, through its
       # closing quote. A doubled quote is a literal one; the end of the line
       # inside the field brings the next line in.
-      private def quoted_field(sc, io)
+      private def quoted_field(sc, io, field_no, open_line)
         buf = +""
         loop do
           buf << sc.scan(@inner)
           if sc.eos?
-            more = io.gets
-            raise MalformedCSV, "unterminated quoted field in record #{@recno}" if more.nil?
+            more = gets(io)
+            if more.nil?
+              raise malformed("quoted field #{field_no} opened here is never closed", open_line)
+            end
             sc << more
             next
           end
@@ -277,6 +329,7 @@ class CAFrame
   class CSVReader
     def initialize(io, sep: ",", quote: '"', strip: false)
       @io    = io
+      @path  = io.path if io.respond_to?(:path)
       @tok   = CSVParser::Tokenizer.new(sep, quote, strip)
       @names = nil
       @rows  = nil
@@ -287,7 +340,7 @@ class CAFrame
       unless n.is_a?(Integer) && n >= 0
         raise ArgumentError, "skip takes a number of lines (got #{n.inspect})"
       end
-      n.times { @io.gets }
+      n.times { @tok.gets(@io) }
       self
     end
 
@@ -296,7 +349,10 @@ class CAFrame
     # names. Returns the record's fields either way.
     def header(name = nil)
       fields = @tok.read(@io)
-      raise CSVParser::MalformedCSV, "header expected but input ended" if fields.nil?
+      if fields.nil?
+        raise CSVParser::MalformedCSV.new("header expected but input ended",
+                                          lineno: @tok.lineno + 1)
+      end
       if name.nil?
         @names = fields.map(&:to_s)
       else
@@ -331,11 +387,23 @@ class CAFrame
       rows = (@rows ||= [])
       @blank_rows ||= []
       blank_is_row = @names.nil? || @names.size == 1
+      ncol = @names&.size
       while (fields = @tok.read(@io, blank_is_row: blank_is_row))
+        if ncol && fields.size > ncol
+          raise @tok.malformed("#{fields.size} fields, but there are #{ncol} columns")
+        end
         @blank_rows << rows.size if @names.nil? && @tok.blank?
         rows << fields
       end
       self
+    end
+
+    # Run the block, naming the file in a MalformedCSV it raises.
+    def reporting
+      yield
+    rescue CSVParser::MalformedCSV => e
+      e.path ||= @path
+      raise
     end
 
     # The text C reads at a time when the column count is known; a chunk
@@ -363,7 +431,7 @@ class CAFrame
         end
         ncol = n
         cells.concat(flat)
-        @tok.advance(records)
+        @tok.advance(records, text.count("\n") + (text.empty? || text.end_with?("\n") ? 0 : 1))
         break unless chunked
       end
       @table = CArray.object(cells.size / ncol, ncol) { cells }
