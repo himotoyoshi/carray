@@ -136,4 +136,9 @@ class TestObjectWsumWmean < Test::Unit::TestCase
     w = CA_OBJECT([1, 1, 1])
     assert_equal(2, a.wmean(w))
   end
+
+  def test_wmean_min_count_unmet_is_undef
+    assert_equal UNDEF, CA_OBJECT([1, 2]).wmean(CA_OBJECT([1, 1]), min_count: 3)
+    assert_equal 9, CA_OBJECT([1, 2]).wmean(CA_OBJECT([1, 1]), min_count: 3, fill_value: 9)
+  end
 end
