@@ -2543,10 +2543,21 @@ CArray 3.0 is an intentionally breaking major release; its C API is not
 promised to be identical to 2.x, and future majors may again break
 source or ABI. A few practical rules for a companion gem:
 
-- **Pin a minimum CArray version** in both your gemspec (as a runtime
-  dependency) and `extconf.rb` (as a build-time `VERSION_CODE` check),
-  so an incompatible CArray fails early with a clear message rather
-  than as a confusing compile error.
+- **Give a lower bound, and no upper bound.** In the gemspec, require
+  the CArray release that added the newest part of CArray your gem uses
+  (`'carray', '>= 3.0.2'`), found by building and testing against it,
+  not the release you happened to develop on. Leave the upper end open:
+  a bound such as `< 3.1` makes every release of your gem refuse the
+  next CArray until you publish again, while a CArray that has changed
+  something you use fails loudly anyway, at build or load time. The one
+  exception is a gem that depends on CArray's own build rather than on
+  its API — carray-jit compiles CArray's kernel bodies and must match
+  the release it reads them from, so it states an upper bound.
+- **An `extconf.rb` check is optional.** It repeats the gemspec's lower
+  bound for a build that does not go through `gem install` (a source
+  tree, `rake compile`). Write it in the current `VERSION_CODE` form;
+  a lower bound below 3.0.3 cannot be written in that form, so leave
+  the check out and rely on the gemspec.
 - **Recompile against the CArray you run on.** Because symbols resolve
   from the loaded `carray` extension at load time, an extension built
   against one CArray and run against a materially different one can
@@ -2569,7 +2580,5 @@ source or ABI. A few practical rules for a companion gem:
   break. Stay on the public surface and version compatibility stays
   manageable.
 
-When in doubt, match your gem's supported CArray range to what you
-actually test against, state it in the gemspec dependency, and let the
-`extconf.rb` version gate turn an unsupported combination into a
-readable abort rather than a mysterious failure.
+When in doubt, find the oldest CArray your gem builds and passes its
+tests on, and state that as the lower bound in the gemspec.
