@@ -6,10 +6,17 @@ class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
   # §3.7); every column is built raw as an object CArray of the cell strings
   # (§4.2). Casting is a separate step: pass +types:+ ({ "temp" => :float64 },
-  # or the array-key / reverse forms of +cast+) to cast named columns on
-  # load, +types: :infer+ to cast the columns +infer_types+ finds to be
-  # numbers, or call +cast+ later. Broken cells become UNDEF automatically
+  # or the array-key form of +cast+) to cast named columns on load,
+  # +types: :infer+ to cast the columns +infer_types+ finds to be numbers or
+  # times, or call +cast+ later. Broken cells become UNDEF automatically
   # (parse-mask, §6-2).
+  #
+  # +:default+ in the map sets the columns the map does not name, so the
+  # two combine in one call; a named column's entry replaces the default,
+  # and nil leaves the column as text:
+  #
+  #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
+  #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
   #
   # +source+ is a path, or an open IO -- anything answering +gets+, which a
   # StringIO is. So CSV that is already in memory does not have to go to a
@@ -170,15 +177,41 @@ class CAFrame
 
   # The types: of from_csv / from_records: a map for cast, or :infer to
   # cast what infer_types finds.
+  #
+  # A map may say +:default+ for the columns it does not name: :infer casts
+  # the ones infer_types finds among them, a type casts all of them. A named
+  # column takes its own entry, which replaces the default; nil leaves it as
+  # it was read.
   def self.cast_on_load(frame, types, on_error)
     return if types.nil?
-    if types == :infer
-      types = frame.infer_types
-    elsif !types.is_a?(Hash)
+    types = { default: :infer } if types == :infer
+    unless types.is_a?(Hash)
       raise ArgumentError, "types: takes a map of column types or :infer " \
                            "(got #{types.inspect})"
     end
-    frame.cast(types, on_error: on_error) unless types.empty?
+    default = nil
+    named = {}
+    types.each do |key, type|
+      if key == :default
+        default = type
+      elsif key.is_a?(Symbol)
+        raise ArgumentError, "types: takes column names (Strings) and :default " \
+                             "as keys (got #{key.inspect})"
+      else
+        Array(key).each { |name| named[name.to_s] = type }
+      end
+    end
+    named.each_key { |name| frame[name] }    # KeyError for a column that is not there
+
+    rest = frame.variable_names - named.keys
+    map =
+      case default
+      when nil    then {}
+      when :infer then rest.empty? ? {} : frame.select(*rest).infer_types
+      else             rest.to_h { |name| [name, default] }
+      end
+    map.merge!(named.compact)
+    frame.cast(map, on_error: on_error) unless map.empty?
   end
 
   private_class_method :cast_on_load
