@@ -245,6 +245,13 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
   end
 
+  # The header promises CA_ITER_ERR_FLAGS for a NULL source.
+  def test_null_source_is_refused
+    [[1, 0], [1, WRITE], [2, 0], [2, WRITE]].each do |level, flags|
+      assert_equal 3, CArray.iw_null_src_rc(level, flags), "L#{level} flags #{flags}"
+    end
+  end
+
   def test_a_rejected_init_says_so
     b = CArray.float64(3, 4).seq!(1)
     {

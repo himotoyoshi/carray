@@ -686,6 +686,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
      times rather than whatever its stack frame happened to contain. */
   if ( st == NULL ) return CA_ITER_ERR_FLAGS;
   memset(st, 0, sizeof(*st));
+  if ( src == NULL ) return CA_ITER_ERR_FLAGS;
 
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 + PROPOSAL_LAZY_MARKER_LIFT Phase 0:
      storage-identical wrapper strip at entry (= same rationale as init_l2
@@ -877,6 +878,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
      times rather than whatever its stack frame happened to contain. */
   if ( st == NULL ) return CA_ITER_ERR_FLAGS;
   memset(st, 0, sizeof(*st));
+  if ( src == NULL ) return CA_ITER_ERR_FLAGS;
 
   /* PROPOSAL_CAFACE_PHASE_2 F.2.6 (= MEMO §3.5 kernel_iterator entry strip)
      + PROPOSAL_LAZY_MARKER_LIFT Phase 0.

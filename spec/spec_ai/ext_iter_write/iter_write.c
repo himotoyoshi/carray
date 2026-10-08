@@ -212,6 +212,26 @@ iw_init_rc (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vflags)
   return INT2NUM(rc);
 }
 
+/* Return code of init_l1 / init_l2 handed a NULL source. */
+static VALUE
+iw_null_src_rc (VALUE klass, VALUE vlevel, VALUE vflags)
+{
+  ca_iter_state st;
+  int8_t        ax[1] = { 0 };
+  uint32_t      flags = (uint32_t) NUM2UINT(vflags);
+  int           rc;
+
+  (void) klass;
+  if ( NUM2INT(vlevel) == 1 ) {
+    rc = ca_iter_state_init_l1(&st, NULL, CA_SLAB_WHOLE, NULL, 0, flags);
+  }
+  else {
+    rc = ca_iter_state_init_l2(&st, NULL, CA_SLAB_AXES, ax, 1, flags);
+  }
+  if ( rc == CA_ITER_OK ) ca_iter_state_finish(&st);
+  return INT2NUM(rc);
+}
+
 /* iw_slab_fill with the state struct poisoned first, which is what a real
    caller frame looks like when init returns early without writing to it.
    A caller that happens to sit on zeroed stack sees the write vanish; this
@@ -246,6 +266,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill", iw_slab_fill, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_mask", iw_slab_fill_mask, 3);
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_null_src_rc", iw_null_src_rc, 2);
   rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
   rb_define_singleton_method(rb_cCArray, "iw_strided_mask", iw_strided_mask, 1);
   rb_define_singleton_method(rb_cCArray, "iw_inout_copy", iw_inout_copy, 3);

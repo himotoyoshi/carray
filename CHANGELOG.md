@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions: `ca_iter_state_init_l1` / `_init_l2` handed a
+  NULL source crashed; they return `CA_ITER_ERR_FLAGS`, as the header
+  says.
+
 - Fix: `sum`, `min`, `max`, `mean` and the variance family on the mask of
   a `CArray.meld` view raised `NoMethodError`; they now answer as on the
   mask's copy.
