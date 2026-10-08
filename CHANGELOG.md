@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `clip(min, max)` raises `ArgumentError` when `min` exceeds `max`
+  (in any cell, when a bound is an array), as Ruby's `clamp` does. Integer,
+  object and float arrays answered three different ways. Equal bounds are
+  accepted; a NaN bound bounds nothing, as before.
+
+- Change: `clip(min, max, lfill: x)` (or `ufill:` alone) now clamps the side
+  given no fill. It left that side unchanged, so the bound passed for it was
+  never used.
+
 - Fix: `fma` and `fms` on float32 now round once, as their documentation
   says. They computed in double and narrowed the result, a second rounding
   that could leave the answer 1 ulp off. Eager, lazy and `fma!` / `fms!`
