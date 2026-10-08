@@ -63,7 +63,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
   end
 
   def test_on_error_applies_to_the_default_too
-    assert_raise(ArgumentError) do
+    assert_raise(CAFrame::UnreadableText) do
       frame(types: { default: :float64 }, on_error: :raise)   # "tokyo" does not read
     end
   end

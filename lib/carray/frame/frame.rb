@@ -11,6 +11,28 @@
 # storage, and +copy+ is the way to an independent frame.
 
 class CAFrame
+  # Raised when the text of a column cannot be read as asked: a cell that
+  # does not read as the type a +cast+ (or +from_csv+'s +types:+) asks for
+  # under on_error: :raise, a cell +parse_to_time+ cannot read, or a column
+  # whose time format +infer_time_format+ / parse_to_time(name, :infer)
+  # cannot find. The message names the column and the cell. The arguments
+  # were fine; the column's contents are what did not read.
+  class UnreadableText < StandardError; end
+
+  # Raised when +infer_time_format+ / parse_to_time(name, :infer) finds more
+  # than one format every cell fits ("01/02/2024" and "03/04/2024" are both
+  # day-first and month-first). The text reads in each of them, so it is
+  # not an UnreadableText; +formats+ gives the candidates, to choose one and
+  # pass it as the format.
+  class AmbiguousTimeFormat < StandardError
+    attr_reader :formats
+
+    def initialize(message = nil, formats: [])
+      @formats = formats
+      super(message)
+    end
+  end
+
   # Integer data_types that select rows positionally when used as a df[] key.
   INTEGER_TYPES = [:int8, :int16, :int32, :int64,
                    :uint8, :uint16, :uint32, :uint64].freeze

@@ -1178,13 +1178,13 @@ Notes:
 
   `on_error:` decides what an unreadable cell does: `:mask` (the default)
   makes it `UNDEF`; `:warn` does the same and warns once per column with the
-  count and the first few cells; `:raise` raises `ArgumentError` naming the
-  column, the row and the cell, and rebinds no column. Blank, `nil` and
+  count and the first few cells; `:raise` raises `CAFrame::UnreadableText`
+  naming the column, the row and the cell, and rebinds no column. Blank, `nil` and
   masked cells are missing values, not errors, under every policy.
 
   ```ruby
   df.cast("rh" => :int32, on_error: :raise)
-  # ArgumentError: cast: column "rh", row 41 "1.5" cannot be read as int32
+  # CAFrame::UnreadableText: column "rh", row 41 "1.5" cannot be read as int32
   ```
 - **`promote`** brings the **whole frame** to one data type, where `cast`
   forces the columns you name. Without an argument the type is the one
@@ -1260,16 +1260,24 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   `+09`, `Z`, `UTC` or `GMT`; and Japanese dates `2024年1月2日`, with an
   optional `3時4分`, `3時4分5秒` or `3:04` time), and each later cell drops
   the candidates it does not fit until one is left, so a later
-  `13/02/2024` settles whether `01/02/2024` is day-first. It raises when no
-  candidate fits the first cell, when none is left, and when more than one
-  is left at the end; a cell not in the chosen format raises too, whatever
-  `on_error` says. A zone named for a place (`JST`, `CST`) is not a
+  `13/02/2024` settles whether `01/02/2024` is day-first. It raises
+  `CAFrame::UnreadableText` when no candidate fits the first cell and when
+  none is left, and a cell not in the chosen format raises it too, whatever
+  `on_error` says. When more than one is left at the end it raises
+  `CAFrame::AmbiguousTimeFormat`, whose `formats` lists them. A zone named for a place (`JST`, `CST`) is not a
   candidate, since some of those names mean different offsets in different
   places. `infer_time_format(name)` returns the format it chose, to write
   into the code:
 
   ```ruby
   df.infer_time_format("date")   # => "%d/%m/%Y"
+
+  begin
+    df.parse_to_time("date", :infer)
+  rescue CAFrame::AmbiguousTimeFormat => e
+    e.formats                    # => ["%d/%m/%Y", "%m/%d/%Y"]
+    df.parse_to_time("date", "%d/%m/%Y")
+  end
   ```
 
   `:mixed` is for text that is not written in one format, which is broken

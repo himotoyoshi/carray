@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CAFrame` raises `CAFrame::UnreadableText` instead of
+  `ArgumentError` when a column's text cannot be read: `cast` and
+  `from_csv(types:)` under `on_error: :raise`, `parse_to_time`, and
+  `infer_time_format` / `parse_to_time(name, :infer)` when no format fits.
+  When more than one format fits every cell, these raise
+  `CAFrame::AmbiguousTimeFormat`, whose `formats` lists them. Neither is an
+  `ArgumentError`, so a `rescue ArgumentError` around these calls no longer
+  catches them; rescue the new classes. Bad arguments still raise
+  `ArgumentError`.
+
 - Change: asking a `CArray.stack` or `CArray.meld` view about its mask
   (`has_mask?`, `mask`, `copy`, a reduction, ...) no longer gives its
   unmasked parents an all-unmasked mask; they are read as unmasked and
