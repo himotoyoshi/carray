@@ -99,6 +99,11 @@ class CAFrame
           end
         @inner    = /[^#{q}]*/
         @eol      = /\r?\n|\r\z/
+        @blank_re = /\A[ \t]*\z/
+        @sep2     = sep * 2
+        @qq       = quote * 2
+        # A whole quoted field: its quotes closed, the ones inside doubled.
+        @quoted_re = /\A#{q}(?:[^#{q}]|#{q}#{q})*#{q}\z/m
         @recno    = 0
       end
 
@@ -124,9 +129,11 @@ class CAFrame
           return nil if line.nil?
           @recno += 1
           @blank = false
-          return scan(line, io) if line.include?(@quote)
+          if line.include?(@quote)
+            return (!@strip && quoted_line(line)) || scan(line, io)
+          end
           rec = line.chomp
-          if rec.delete(" \t").empty? && !rec.include?(@sep)
+          if rec.match?(@blank_re) && !rec.include?(@sep)
             next unless blank_is_row
             @blank = true
           end
@@ -138,11 +145,46 @@ class CAFrame
         @blank
       end
 
+      # An empty field lies at the start or the end of the record or between
+      # two separators, so a record without one is the split as it stands.
       private def simple(rec)
-        rec.split(@sep, -1).map do |cell|
-          cell = cell.strip if @strip
-          cell.empty? ? nil : cell
+        fields = rec.split(@sep, -1)
+        if @strip
+          fields.map! { |cell| cell = cell.strip; cell.empty? ? nil : cell }
+        elsif rec.empty? || rec.start_with?(@sep) || rec.end_with?(@sep) || rec.include?(@sep2)
+          fields.map! { |cell| cell.empty? ? nil : cell }
         end
+        fields
+      end
+
+      # The fields of a one-line record holding quotes, read by splitting at
+      # the separator: a quoted field is the pieces from one that opens with
+      # a quote to the one that closes it (it may hold the separator). nil
+      # when the record is not that simple -- a quoted field open at the end
+      # of the line, a quote inside an unquoted field, text after a closing
+      # quote -- for the scanner to read or to report.
+      private def quoted_line(line)
+        parts = line.chomp.split(@sep, -1)
+        fields = []
+        i = 0
+        while i < parts.size
+          part = parts[i]
+          if part.start_with?(@quote)
+            until part.match?(@quoted_re)
+              i += 1
+              return nil if i >= parts.size
+              part = part + @sep + parts[i]
+            end
+            inner = part[1...-1]
+            fields << (inner.include?(@quote) ? inner.gsub(@qq, @quote) : inner)
+          elsif part.include?(@quote)
+            return nil
+          else
+            fields << (part.empty? ? nil : part)
+          end
+          i += 1
+        end
+        fields
       end
 
       # Fields of the record that starts on +line+, reading more lines from
