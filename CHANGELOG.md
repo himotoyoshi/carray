@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.from_csv` skips a line of only spaces in a file of more than
+  one column, as it skips an empty line; it was a short row. A file read
+  without a header or `column_names` keeps its empty lines as masked rows
+  when it has one column, as a file with a header does; they were skipped.
+
 - Fix: `CAFrame.from_csv` raises `MalformedCSV` on a quote inside an
   unquoted field (`5"in`), where it joined the lines after it into one
   record; a field holding a quote is written quoted, with the quote

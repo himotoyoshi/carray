@@ -306,7 +306,19 @@ the closing quote (`"ab"cd`, or a space as in `"x" ,2`) raises
 lets spaces through there as it does around an unquoted field. A quote inside
 an unquoted field (`5"in`) raises too: a field that holds a quote is written
 quoted, with the quote doubled (`"5""in"`), which is how `to_csv` writes it. A
-record goes on past the end of its line only inside a quoted field. A header that
+record goes on past the end of its line only inside a quoted field.
+
+**Blank lines.** In a file of more than one column, a line that is empty, or
+only spaces and tabs with no separator, is not a row and is skipped. In a file
+of one column it is a row, because an empty line is how a missing single cell
+is written — `to_csv` writes a masked cell of a one-column frame that way — and
+spaces are a value (`UNDEF` with `strip: true`). So a blank last line of a
+one-column file reads as a masked last row: it cannot be told from one that
+`to_csv` wrote. Strip it from the file, or give the frame another column, if it
+is not meant as a row. A file without a header is treated the same way once
+its column count is known.
+
+A header that
 names a column twice raises `ArgumentError`, since a frame keeps one column
 per name; name the columns yourself with `column_names` in a reading block
 (below) to read such a file.
