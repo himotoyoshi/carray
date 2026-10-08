@@ -459,6 +459,37 @@ class TestCAFrameToCsv < Test::Unit::TestCase
     df = CAFrame.new("a" => CA_OBJECT(["😀"]))
     assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
   end
+
+  # A cell the CSV cannot hold used to raise naming only the character, or
+  # the two encodings, and a broken one was written without a word.
+  def test_a_character_the_encoding_cannot_hold_names_its_cell
+    s = CA_OBJECT((1..2000).map { |i| "a#{i}" })
+    s[1500] = "東😀"
+    df = CAFrame.new({ "s" => s }, index: CArray.int32(2000).seq, axis_name: "id")
+    e = assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
+    assert_equal 'to_csv: row 1500 of "s" ("東😀"): "😀" (U+1F600) cannot be written in CP932', e.message
+    df = CAFrame.new("😀" => CA_OBJECT(["a"]))
+    e = assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
+    assert_match(/\Ato_csv: the name of column 0 /, e.message)
+  end
+
+  def test_a_cell_in_another_encoding_is_transcoded
+    df = CAFrame.new("x" => CA_OBJECT(["日本", "あ".encode("CP932"), "b".encode("UTF-16LE")]))
+    csv = df.to_csv
+    assert_equal Encoding::UTF_8, csv.encoding
+    assert_equal "x\n日本\nあ\nb\n", csv
+    df = CAFrame.new("x" => CA_OBJECT(["a", "あ".encode("CP932")]))
+    assert_equal Encoding::UTF_8, df.to_csv.encoding
+  end
+
+  def test_a_cell_that_is_not_text_names_its_cell
+    df = CAFrame.new("x" => CA_OBJECT(["日本", "\xe3\x81\x82".b]))
+    e = assert_raise(Encoding::CompatibilityError) { df.to_csv }
+    assert_match(/\Ato_csv: row 1 of "x" .*ASCII-8BIT/, e.message)
+    df = CAFrame.new("x" => CA_OBJECT(["a", "\xff".dup.force_encoding("UTF-8")]))
+    e = assert_raise(Encoding::InvalidByteSequenceError) { df.to_csv }
+    assert_equal 'to_csv: row 1 of "x" ("\xFF") is not valid UTF-8', e.message
+  end
 end
 
 class TestCAFrameDatetimeVerbs < Test::Unit::TestCase

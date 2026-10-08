@@ -260,8 +260,11 @@ class CAFrame
   # Options: +sep+ / +quote+ mirror +from_csv+; +header+ writes the name row
   # (default true); +index+ writes the index column (default true);
   # +encoding+ transcodes the text before it is written or returned (default
-  # nil leaves it as built, normally UTF-8). A character the encoding cannot
-  # hold raises Encoding::UndefinedConversionError rather than being dropped.
+  # nil leaves it as built, UTF-8). A character the encoding cannot hold
+  # raises Encoding::UndefinedConversionError rather than being dropped. A
+  # String cell in another encoding is transcoded to UTF-8; one with bytes
+  # that are not valid in it, or with no encoding (ASCII-8BIT), raises. Each
+  # names the row and the column of the cell.
   #
   #   df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
   #
@@ -314,15 +317,29 @@ class CAFrame
       fcol.map! { |text| text.nil? ? token : text }
     end
 
-    out = +""
-    if header
-      out << names.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
+    out = begin
+      csv_text(names, formatted, header, sep, quote)
+    rescue Encoding::CompatibilityError
+      nil
     end
-    @nrow.times do |i|
-      out << formatted.map { |fcol| quote_csv_field(fcol[i], sep, quote) }.join(sep) << "\n"
+    # A cell in another encoding, or with bytes that are not text, is found
+    # and named here, after the text was built in one pass, so a frame of
+    # UTF-8 text pays nothing for the check.
+    unless out && out.encoding == Encoding::UTF_8 && out.valid_encoding?
+      names = names.each_with_index.map { |t, j| csv_text_in_utf8(t, "the name of column #{j}") }
+      formatted = formatted.each_with_index.map do |fcol, j|
+        fcol.each_with_index.map { |t, i| csv_text_in_utf8(t, "row #{i} of #{names[j].inspect}") }
+      end
+      out = csv_text(names, formatted, header, sep, quote)
     end
 
-    out = out.encode(encoding) if encoding
+    if encoding
+      out = begin
+        out.encode(encoding)
+      rescue Encoding::UndefinedConversionError => e
+        raise csv_unwritable_cell(names, formatted, encoding) || e
+      end
+    end
 
     if path
       File.binwrite(path, out)
@@ -515,6 +532,66 @@ class CAFrame
         e.to_s
       end
     end
+  end
+
+  private def csv_text(names, formatted, header, sep, quote)
+    out = +""
+    if header
+      out << names.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
+    end
+    @nrow.times do |i|
+      out << formatted.map { |fcol| quote_csv_field(fcol[i], sep, quote) }.join(sep) << "\n"
+    end
+    out
+  end
+
+  # The text of a cell as UTF-8, the encoding the CSV is built in: text in
+  # another encoding is transcoded; bytes that are not valid in their
+  # encoding, or have none (ASCII-8BIT), raise naming the cell.
+  private def csv_text_in_utf8(text, where)
+    return text if text.nil?
+    enc = text.encoding
+    unless text.valid_encoding?
+      raise Encoding::InvalidByteSequenceError,
+            "to_csv: #{where} (#{csv_excerpt(text)}) is not valid #{enc}"
+    end
+    return text if enc == Encoding::UTF_8 || (enc.ascii_compatible? && text.ascii_only?)
+    if enc == Encoding::BINARY
+      raise Encoding::CompatibilityError,
+            "to_csv: #{where} (#{csv_excerpt(text)}) is bytes with no encoding " \
+            "(ASCII-8BIT); give it one with force_encoding"
+    end
+    text.encode(Encoding::UTF_8)
+  rescue Encoding::UndefinedConversionError
+    raise Encoding::UndefinedConversionError,
+          "to_csv: #{where} (#{csv_excerpt(text)}) has a character with no UTF-8 form in #{enc}"
+  end
+
+  # The start of a cell's text, quoted, for an error. Text is shown as it
+  # is, whatever the locale (inspect would escape it where the locale is not
+  # UTF-8); control characters and bytes that are not text are escaped.
+  private def csv_excerpt(text)
+    head = text[0, 20]
+    return head.dump unless head.valid_encoding? && head.encoding != Encoding::BINARY
+    head = head.encode(Encoding::UTF_8)
+    '"' + head.gsub(/[\x00-\x1f\x7f"\\]/) { |c| c.dump[1..-2] } + '"'
+  rescue EncodingError
+    text[0, 20].dump
+  end
+
+  # The error for the first cell (or name) +encoding+ cannot hold, or nil.
+  private def csv_unwritable_cell(names, formatted, encoding)
+    cells = names.each_with_index.map { |t, j| [t, "the name of column #{j}"] }
+    formatted.each_with_index do |fcol, j|
+      fcol.each_with_index { |t, i| cells << [t, "row #{i} of #{names[j].inspect}"] if t }
+    end
+    cells.each do |text, where|
+      text.encode(encoding)
+    rescue Encoding::UndefinedConversionError => e
+      return Encoding::UndefinedConversionError.new(
+        "to_csv: #{where} (#{csv_excerpt(text)}): #{csv_excerpt(e.error_char)} (U+#{format("%04X", e.error_char.ord)}) cannot be written in #{encoding}")
+    end
+    nil
   end
 
   private def quote_csv_field(text, sep, quote)

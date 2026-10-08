@@ -941,11 +941,19 @@ doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
 
 `encoding:` transcodes the text before it is written or returned; left out,
 the CSV is UTF-8. A character the encoding cannot hold raises
-`Encoding::UndefinedConversionError` instead of being dropped:
+`Encoding::UndefinedConversionError` instead of being dropped, naming the
+cell:
 
 ```ruby
 df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+# to_csv: row 1500 of "s" ("東😀"): "😀" (U+1F600) cannot be written in CP932
 ```
+
+The CSV is built in UTF-8, so a String cell in another encoding is
+transcoded. A cell that is not text raises naming the cell too: bytes that
+are not valid in their encoding (`Encoding::InvalidByteSequenceError`), and
+bytes with no encoding, ASCII-8BIT (`Encoding::CompatibilityError`; give them
+one with `force_encoding`). Rows are counted from 0, as `df[i]` is.
 
 `missing:` writes a masked cell as a given String instead of an empty field,
 for a reader that expects a sentinel. It takes the same forms as on

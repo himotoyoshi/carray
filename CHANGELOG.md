@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CAFrame#to_csv` names the row and the column of a cell it cannot
+  write, as `to_csv: row 1500 of "s" ("東😀"): "😀" (U+1F600) cannot be
+  written in CP932`. A String cell in another encoding is now transcoded to
+  UTF-8 rather than raising or making the result depend on the row order; a
+  cell of bytes not valid in their encoding, written before without a word,
+  now raises `Encoding::InvalidByteSequenceError`, and one of bytes with no
+  encoding (ASCII-8BIT) raises `Encoding::CompatibilityError`.
 - Change: `CAFrame.from_csv` names the file and the line of a malformed
   record, as `obs.csv:5004: ...`, counting the lines of the file rather than
   its records (the two differ after a quoted field of several lines or a
