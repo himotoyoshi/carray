@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `min` and `max` of a `CArray.meld` view over the whole array no
+  longer raise `ArgumentError` when one part is all NaN: the parts' answers
+  are combined by the same rule as one array's cells (NaN loses), so the
+  view answers as its `copy` does.
+
 - Fix: an Integer scalar given to `scatter_add!`, `scatter_replace!` and the
   rest of the family is written exactly: it went through a double, so an
   int64 value above 2**53 was rounded. `self[addrs] = v` was already exact.

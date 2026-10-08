@@ -83,7 +83,7 @@ class CAMeld
     # super for UNDEF.
     if axis.nil?
       return super if parents.all? { |p| p.elements == 0 }
-      parents.reject { |p| p.elements == 0 }.map(&:min).min
+      meld_combine_flat(:min)
     elsif meld_axis_normalized?(axis)
       return super if parents.all? { |p| p.dim[meld_axis] == 0 }
       nonempty = parents.reject { |p| p.dim[meld_axis] == 0 }
@@ -102,7 +102,7 @@ class CAMeld
     axis = kw[:axis]
     if axis.nil?
       return super if parents.all? { |p| p.elements == 0 }
-      parents.reject { |p| p.elements == 0 }.map(&:max).max
+      meld_combine_flat(:max)
     elsif meld_axis_normalized?(axis)
       return super if parents.all? { |p| p.dim[meld_axis] == 0 }
       nonempty = parents.reject { |p| p.dim[meld_axis] == 0 }
@@ -178,6 +178,16 @@ class CAMeld
     return false if has_mask?
     parents.each { |p| return false if p.has_mask? }
     true
+  end
+
+  # The per-parent answers of a whole-array min / max, combined by core's
+  # own min / max so NaN loses the way it loses inside one parent (Ruby's
+  # Array#min would raise on it).
+  def meld_combine_flat(op)
+    vals = parents.reject { |p| p.elements == 0 }.map(&op)
+    part = CArray.new(data_type, [vals.size])
+    vals.each_with_index { |v, i| part[i] = v }
+    part.public_send(op)
   end
 
   # Non-meld-axis decompose: each parent reduces the same axis independently,

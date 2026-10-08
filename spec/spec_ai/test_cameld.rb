@@ -726,4 +726,13 @@ class TestCAMeld < Test::Unit::TestCase
     assert_equal [10, 11, 12], b.src.to_a
   end
 
+  def test_flat_min_max_with_an_all_nan_parent
+    nan = Float::NAN
+    [CA_FLOAT64, CA_FLOAT32].each do |t|
+      m = CArray.meld(CArray.new(t, [2]) { nan }, CArray.new(t, [2]).seq(1))
+      assert_equal m.copy.min, m.min
+      assert_equal m.copy.max, m.max
+    end
+    assert_equal 1, CArray.meld(CA_OBJECT([3, 4]), CA_OBJECT([1, 2])).min
+  end
 end
