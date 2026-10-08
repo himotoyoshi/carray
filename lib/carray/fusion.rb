@@ -35,6 +35,26 @@ class CArray
     #
     # A comparison's body is the one for the data type it compares; what it
     # answers is boolean, which is the node's data_type.
+    # An Op's fields:
+    #
+    #   kind       :monop, :binop, :triop, :moncmp or :bincmp
+    #   name       the operation as the kernels name it (:add, :sqrt, :ipow)
+    #   args       indices of the nodes it reads, in operand order
+    #   body       its C, from CArray.__kernel_body__: `#1`, `#2`, ... are
+    #              the operands and the next number is the result; `<type>`
+    #              is CArray's name for the type (float64_t)
+    #   mask       how the result is masked: :pass (as its one operand),
+    #              :union (where any operand is), :kleene_or / :kleene_and
+    #              (boolean | and &, unmasked where the known side settles it)
+    #   trapping   true where a masked cell must not be computed at all
+    #
+    # What a reader may rely on: the node classes, the kinds, the names, the
+    # mask rules and the fields above keep the meaning they have here.  New
+    # ones are added -- a node class, a kind, an operation, a mask rule --
+    # and an evaluator that meets one it does not know declines the plan
+    # (returns false).  It does not raise: raising takes it out of service
+    # for the rest of the process.  Declining is what lets CArray add to
+    # the plan without a new evaluator being released at the same time.
     Op      = Struct.new(:kind, :name, :data_type, :args, :body, :mask, :trapping)
     Leaf    = Struct.new(:index, :data_type, :masked)
     Shifted = Struct.new(:index, :data_type, :masked, :offset, :bounds, :fill)
