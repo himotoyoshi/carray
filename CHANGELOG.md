@@ -38,11 +38,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - New: `CAFrame.from_csv` takes `missing:` for a file that spells missing
   values its own way: `missing: ["-999", "///"]` for every column, or a
-  Hash of column name to tokens. A field whose text is a token is `UNDEF`,
-  before `types:` casts. Tokens are Strings matched against the field's
-  text, so `"-999"` does not match `-999.0`. `CAFrame#to_csv(missing: "-999")`
-  writes a masked cell as that text instead of an empty field, and raises
-  if a value would be written as the same text.
+  Hash such as `{ default: "-999", "id" => [] }` where a column name
+  replaces the default for that column. A field whose text is a token is
+  `UNDEF`, before `types:` casts. Tokens are Strings matched against the
+  field's text, so `"-999"` does not match `-999.0`. `CAFrame#to_csv` takes
+  the same `missing:` and writes a masked cell as the token instead of an
+  empty field (`""` keeps the empty field), raising if a value would be
+  written as the same text.
 
 - New: `CAFrame#pivot` spreads a long frame into a wide one (one row per
   distinct `index:` value, one column per distinct `columns:` value), and

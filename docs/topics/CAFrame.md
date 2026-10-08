@@ -238,15 +238,22 @@ CAFrame.from_csv("obs.csv", missing: ["-999", "///"],
                  types: { "temp" => :float64 })
 # -999 and /// are UNDEF in every column; temp is float64 without a -999.0 in it
 
-CAFrame.from_csv("obs.csv", missing: { "temp" => "-999", "rh" => ["-999", "-"] })
-# per column; columns the Hash does not name keep only the empty field
+CAFrame.from_csv("obs.csv", missing: { default: "-999", "rh" => ["-999", "-"], "id" => [] })
+# -999 in every column; rh also takes "-"; in id, -999 is a real value
 ```
+
+In a Hash, `default:` gives the tokens for every column and a **column name
+gives that column's own, replacing the default** (`[]` or `""` for none).
+Without `default:`, the columns the Hash does not name keep only the empty
+field. `default:` is a Symbol and column names are Strings, so the two cannot
+collide; any other Symbol key raises.
 
 Tokens are **Strings, compared with the field's text as read** — after
 `strip:`, whether the field was quoted or not. So `"-999"` does not match
 `-999.0`, and a number given as a token (`missing: -999`) raises instead of
-quietly matching some spellings and not others. A Hash naming a column the file
-does not have raises `KeyError`.
+quietly matching some spellings and not others. `""` means the empty field,
+which is missing already, so a quoted `""` stays the empty string. A Hash
+naming a column the file does not have raises `KeyError`.
 
 Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
@@ -833,15 +840,19 @@ df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
 ```
 
 `missing:` writes a masked cell as a given String instead of an empty field,
-for a reader that expects a sentinel. `from_csv` with the same `missing:`
-reads it back as `UNDEF`. If a real value would be written as that same text,
-the file could not tell the two apart, so `to_csv` raises and names the column
-and row:
+for a reader that expects a sentinel. It takes the same forms as on
+`from_csv` — one String, or a Hash with `default:` and per-column overrides
+(the index goes by its axis name), where `""` is the empty field — so the same
+argument reads the file back with the mask in place:
 
 ```ruby
-df.to_csv("out.csv", missing: "-999")
-CAFrame.from_csv("out.csv", missing: "-999")   # the mask comes back
+spec = { default: "-999", "comment" => "" }
+df.to_csv("out.csv", missing: spec)
+CAFrame.from_csv("out.csv", missing: spec)   # the mask comes back
 ```
+
+If a real value would be written as a column's token, the file could not tell
+the two apart, so `to_csv` raises and names the column and row.
 
 ### Looking at a frame — `to_table`, `p`, `puts`
 

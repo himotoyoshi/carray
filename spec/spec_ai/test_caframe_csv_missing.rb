@@ -30,6 +30,29 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
     assert_equal [UNDEF, UNDEF, "40"], df["rh"].to_a
   end
 
+  def test_a_default_with_a_column_of_its_own
+    df = read(missing: { default: ["-999", "///"], "rh" => "-999" })
+    assert_equal ["20.5", UNDEF, UNDEF], df["temp"].to_a
+    assert_equal [UNDEF, "///", "40"], df["rh"].to_a
+  end
+
+  def test_an_empty_list_turns_the_default_off_for_a_column
+    df = read(missing: { default: "-999", "temp" => [] })
+    assert_equal ["20.5", "-999", "///"], df["temp"].to_a
+    assert_equal [UNDEF, "///", "40"], df["rh"].to_a
+  end
+
+  def test_a_symbol_other_than_default_raises
+    err = assert_raise(ArgumentError) { read(missing: { temp: "-999" }) }
+    assert_match(/:default/, err.message)
+  end
+
+  def test_a_bad_default_token_raises_before_reading
+    assert_raise(ArgumentError) do
+      CAFrame.from_csv("/nonexistent/file.csv", missing: { default: -999 })
+    end
+  end
+
   def test_masks_before_types_cast
     df = read(missing: ["-999", "///"], types: { "temp" => :float64, "rh" => :int32 })
     assert_equal [20.5, UNDEF, UNDEF], df["temp"].to_a
@@ -113,5 +136,65 @@ class TestCAFrameToCSVMissing < Test::Unit::TestCase
 
   def test_non_string_missing_raises
     assert_raise(ArgumentError) { @df.to_csv(missing: -999) }
+    assert_raise(ArgumentError) { @df.to_csv(missing: { default: -999 }) }
+  end
+
+  def test_a_default_with_one_column_left_empty
+    note = CA_OBJECT(["ok", nil, "-999"])
+    note[1] = UNDEF
+    df = @df.copy
+    df["note"] = note
+    assert_equal "time,temp,note\n1,20.5,ok\n2,-999,\n3,30.0,-999\n",
+                 df.to_csv(missing: { default: "-999", "note" => "" })
+  end
+
+  def test_a_column_token_replaces_the_default
+    assert_equal "time,temp\n1,20.5\n2,NA\n3,30.0\n",
+                 @df.to_csv(missing: { default: "-999", "temp" => "NA" })
+  end
+
+  def test_a_hash_without_default_leaves_other_columns_empty
+    df = @df.copy
+    df["time"][0] = UNDEF
+    assert_equal "time,temp\n,20.5\n2,-999\n3,30.0\n",
+                 df.to_csv(missing: { "temp" => "-999" })
+  end
+
+  def test_an_empty_string_value_stays_distinct_from_the_empty_field
+    note = CA_OBJECT(["", "x", "y"])
+    note[1] = UNDEF
+    df = CAFrame.new("note" => note)
+    assert_equal "note\n\"\"\n\ny\n", df.to_csv(missing: { default: "-999", "note" => "" })
+  end
+
+  def test_the_index_takes_its_axis_name
+    idx = CA_INT32([1, 2, 3])
+    idx[2] = UNDEF
+    df = CAFrame.new({ "v" => CA_INT32([4, 5, 6]) }, index: idx, axis_name: "t")
+    assert_equal "t,v\n1,4\n2,5\n?,6\n", df.to_csv(missing: { "t" => "?" })
+  end
+
+  def test_an_unknown_column_raises
+    assert_raise(KeyError) { @df.to_csv(missing: { "nope" => "-999" }) }
+  end
+
+  def test_a_hash_round_trips_with_from_csv
+    note = CA_OBJECT(["ok", nil, "-999"])
+    note[1] = UNDEF
+    df = @df.copy
+    df["note"] = note
+    spec = { default: "-999", "note" => "" }
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec)
+    assert_equal ["20.5", UNDEF, "30.0"], back["temp"].to_a
+    assert_equal ["ok", UNDEF, "-999"], back["note"].to_a
+  end
+
+  def test_an_empty_string_round_trips_under_an_empty_token
+    note = CA_OBJECT(["", "x"])
+    note[1] = UNDEF
+    df = CAFrame.new("note" => note)
+    spec = { default: "-999", "note" => "" }
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec)
+    assert_equal ["", UNDEF], back["note"].to_a
   end
 end
