@@ -36,1021 +36,417 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
-- Fix: `percentile(100)` on an object array takes the last sorted value, as
-  every other `p` and the numeric arrays do, so a NaN in the data answers
-  NaN. It called `max`, which skips NaN.
-
-- Fix: `median`, `percentile` and `quantile` over the whole array return
-  `UNDEF` (or the `fill_value:`) when an array without a mask has fewer
-  cells than `min_count:`, as a masked array and the `axis:` form already
-  did. The count was checked only after stripping a mask.
-
-- Fix: `bincount_nd` skips a sample with a NaN weight when the labels have
-  no fiber axes too, as it already did with fibers and as `histogram` does.
-  The NaN was added into the count.
-
-- Fix: `wmean(w, min_count:)` on an object array returns `UNDEF` (or the
-  `fill_value:`) when too few cells are present, as numeric arrays do. It
-  raised `NoMethodError`.
-
-- Fix: `min` and `max` of a `CArray.meld` view over the whole array no
-  longer raise `ArgumentError` when one part is all NaN: the parts' answers
-  are combined by the same rule as one array's cells (NaN loses), so the
-  view answers as its `copy` does.
-
-- Fix: an Integer scalar given to `scatter_add!`, `scatter_replace!` and the
-  rest of the family is written exactly: it went through a double, so an
-  int64 value above 2**53 was rounded. `self[addrs] = v` was already exact.
-
-- Fix: `CAMath.atan2`, `hypot`, `copysign`, `logaddexp`, `nextafter` and
-  `fmod` answer a float32 CArray in float32 and an integer CArray to `fmod`
-  in its own type, as the methods of the same name do. They converted every
-  first argument to float64 (`CAMath.fmod` of an int64 above 2**53 lost the
-  low bits). A non-CArray first argument is still taken as float64.
-
-- Fix: `snap_to` with a Ruby Array grid on an integer array no longer
-  truncates the grid to the array's type: a Float in the grid makes it
-  float64 (`CA_INT32([1, 2, 3]).snap_to([0.5, 1.5, 2.5])` is
-  `[1.5, 2.5, 2.5]`, was `[1, 2, 2]`), and an Integer that does not fit
-  raises `RangeError` instead of wrapping. A CArray grid is unchanged.
-
-- Fix: `count(v)` on an integer array compares a Float `v`, or a `v` array
-  of a wider data type, in the type the two share, as `eq` does:
-  `CA_INT32([1, 2, 3]).count(1.5)` is `0` (was `1`, the query truncated to
-  `1`). An Integer `v` that does not fit the array still raises `RangeError`.
-
-- Change: `sqrt_ki`, `sin_ki`, `cos_ki`, `exp_ki`, `log_ki`, `square_ki`,
-  `abs_ki` and `negate_ki` are removed. They were undocumented leftovers
-  that ignored the mask, computing masked cells from the stored values. Use
-  `sqrt`, `sin`, `cos`, `exp`, `log`, `square`, `abs` and `-@`.
-
-- Change: `clip(min, max)` raises `ArgumentError` when `min` exceeds `max`
-  (in any cell, when a bound is an array), as Ruby's `clamp` does. Integer,
-  object and float arrays answered three different ways. Equal bounds are
-  accepted; a NaN bound bounds nothing, as before.
-
-- Change: `clip(min, max, lfill: x)` (or `ufill:` alone) now clamps the side
-  given no fill. It left that side unchanged, so the bound passed for it was
-  never used.
-
-- Fix: `fma` and `fms` on float32 now round once, as their documentation
-  says. They computed in double and narrowed the result, a second rounding
-  that could leave the answer 1 ulp off. Eager, lazy and `fma!` / `fms!`
-  all changed; float64 is unaffected.
-
-- Change: `then_else` returns a lazy view when the condition or a branch is
-  a lazy view, as the other element-wise operations do, so the selection
-  joins the expression around it (and a registered expression evaluator
-  such as carray-jit compiles it with the rest). The view is read-only;
-  `copy` makes an array of it. An object result is still computed at once.
-
-- New: a lazy expression that mixes data types (`f32.lazy + f64.lazy`,
-  `i32.lazy.sin`) can be handed to a registered expression evaluator such
-  as carray-jit; before, such an expression was always walked by CArray.
-
-- Fix: `cond.then_else(x, UNDEF)` keeps the data type of `x` and masks the
-  cells where `cond` is false (it returned an object array). The same holds
-  with `UNDEF` as the first branch.
-
-- Fix: `count_masked` and `count_not_masked` with `axis:` answer the same
-  whether or not the array has a mask. Naming every axis
-  (`axis: [0, 1]` on a 2-D array) returns an Integer, as the form without
-  `axis:` does; on an array without a mask it raised `RuntimeError`. Both
-  now take `keep_axis:`, `min_count:` and `fill_value:` as `sum` does, and
-  an out-of-range or repeated axis raises `ArgumentError` either way.
-
-- Fix: `search`, `bsearch` and `search_nearest` on an integer array compare
-  a Float query, or a CArray query of a wider data type, in the type the
-  two share, as `eq` does: `CA_INT8([1, 3]).search(3.9)` is `nil` (was `1`,
-  the query truncated to `3`) and `search_nearest(2.6)` finds `3`. A Float
-  query makes the comparison a float one, so `eps` now applies to it. An
-  Integer query that does not fit the array still raises `RangeError`.
-
-- Fix: `search_nearest` on an int64 or uint64 array measures the distance
-  exactly: above 2**53 a neighbouring value no longer ties with the one
-  next to it.
-
-- Change: an error raised by a generated kernel (the reductions, scans,
-  sorts and searches) begins with the name of the method that was called,
-  such as `cumsum:`, instead of an internal name ending in `_ki`, and lists
-  data types by their CArray names (`int8, uint8, ... float64`). Code that
-  matches on the old wording needs updating.
-
-- Fix: `CATimedelta` has `cumsum` and `accumulate`, which answer
-  durations on the array's own unit, as `sum` does. `prod` and `cumprod`
-  of a `CATimedelta`, and `cumsum`, `accumulate`, `prod` and `cumprod` of a
-  `CATime`, raise `TypeError` saying why, as `sum` and `variance` already
-  did; before, they raised `CArray::DataTypeError` about the storage.
-
-- Fix: `cumcount` answers for every data type, since it reads only the
-  mask: an object array of Strings or `nil`, a fixlen array, a boolean
-  array and a `CATime` no longer raise trying to convert their values to
-  float64. The answer is int64, as it was for numeric arrays.
-
-- Change: `variance` and `stddev` (the sample statistics, dividing by one
-  less than the count) answer `UNDEF` when fewer than two values are
-  present, instead of `0.0`: the sample variance of a single value is not
-  defined. This holds for `CArray`, along an axis, and for every iterator
-  (`group_by_category`, `axis_group`, `windows`, `blocks`). `variancep` and
-  `stddevp` still answer `0.0` for a single value. To get the old answer,
-  pass `fill_value: 0.0`.
-
-- Fix: in an object array, a Float NaN loses every comparison in `min`,
-  `max`, `minmax`, `min_index`, `max_index`, `min_addr`, `max_addr`,
-  `cummin` and `cummax`, as it does in a float array:
-  `CA_OBJECT([NaN, 1.0, 2.0]).min` is `1.0` (was `NaN`). A run of nothing
-  but NaN still answers NaN, and its position is UNDEF. `sort`,
-  `sort_index`, `rank_index` and `partition` put a NaN after every other
-  value instead of raising `ArgumentError`; `bsearch` finds past it, and
-  `search_nearest` skips it.
-
-- Fix: `sum`, `mean`, `min`, `max`, `prod`, `accumulate` and `count` along
-  one axis honour `min_count:` (and `fill_value:`) when the array is large
-  and contiguous; above a size threshold they ignored it and returned the
-  full fold.
-
-- Fix: `min_index`, `max_index`, `min_addr` and `max_addr` never point at a
-  masked cell or a NaN. A fiber whose extremum equalled the type's limit
-  (`Infinity`, `255` for uint8) reported position 0 even when that cell was
-  masked or NaN.
-
-- Fix: `wmean` of an object array with `keep_axis: true` and no axis
-  returns an UNDEF cell for a zero weight sum instead of raising
-  `ZeroDivisionError`.
-
-- Fix: `median` and `percentile` take the next value in sort order as the
-  upper end of an interpolation also when it is `Infinity` or `NaN` (NaN
-  sorts after every number): `[1.0, Infinity].median` is `Infinity` (was
-  `1.0`) and `[NaN, -1.0].median` is `NaN` (was `-1.0`). `quantile`, a list
-  of percentiles, a masked array and `group_by_category` now all answer the
-  same as the single-value form; they disagreed before.
-
-- Fix: a lazy expression holding a Float array to an Integer power
-  (`x.lazy ** 2`) is handed to a registered expression evaluator such as
-  carray-jit; it was always computed by CArray itself. For evaluator
-  authors, `CArray.__kernel_helpers__` returns the C that the kernel bodies
-  call beyond the standard library (the integer-power helpers), to be put
-  ahead of them; an integer array's power body already needed it.
-
-- Change: `minmax` of an empty or fully masked array, or one with fewer
-  cells than `min_count:` asks for, returns `[UNDEF, UNDEF]` instead of a
-  single `UNDEF`, so `lo, hi = a.minmax` always gets both. This is what the
-  iterators, `CAConstString#minmax` and `minmax(fill_value:)` already
-  returned; a `CATime` gave `[UNDEF, nil]`.
-
-- Fix: a reduction of a lazy expression over an empty array answers as
-  the same reduction of the array does: `mean`, `min`, `max` and the like
-  are UNDEF, where they gave `0.0`, `Infinity` / the type's limits, or
-  `nil`, and an object array could crash the interpreter. `min_count:` is
-  honored on a lazy expression too; it was ignored.
-
-- Fix: `offset:` on a struct member places it or is refused, where it
-  was dropped. A nested `struct` or `array` member takes its `offset:`
-  in a packed struct; in an aligned struct (no `pack:`) and for a union
-  member other than at 0, `offset:` raises `CAStruct::DefinitionError`.
-
-- Change: `CArray.save` / `CArray.dump` refuse a Face other than a
-  record (`CATime`, `CATimedelta`, string arrays, categoricals) with
-  `TypeError`, as `Marshal.dump` does. The file kept the storage without
-  the unit, the string buffer or the labels, and loaded back as plain
-  bytes. Save `.parent` to keep the storage.
-- Fix: `CArray.load` refuses a file whose header fields disagree (a shape
-  that does not match the element count, an element size that is not the
-  data type's, more data than the file holds, ...) instead of reading
-  part of it, and checks the size before allocating.
-- Fix: `CArray.struct` refuses a member at a negative offset or one that
-  reaches past the record; such a member read and wrote outside the
-  array. A struct without `size:` now runs to its furthest member.
-  `CARecord.wrap` refuses elements of another size than the struct.
-
-- Change: a view of a frozen array is read-only rather than frozen. A
-  write through it still raises, now `RuntimeError` ("can not modify
-  read-only array") instead of `FrozenError`, which is a subclass of it;
-  `frozen?` on the view is false. The same holds for a `CAObject` built
-  with a frozen `:parent`, and for the mask of a frozen array. In
-  exchange, `sort`, `sort(axis:)`, a boolean row selection, lazy
-  expressions, `lazy[...]`, `real` / `imag`, and views of a frozen Face
-  (`CATime`, strings, categoricals) work on a frozen array; they raised
-  `FrozenError`.
-
-- Change: an operator operand that exports MemoryView and also defines
-  `to_ca` (an Apache Arrow array, given a bridge that adds `to_ca`) is now
-  taken through `to_ca`, as `wrap_readonly` already did. Arrow's nulls now
-  come in as masked cells instead of as values, and a sliced Arrow array
-  reads correctly. An Arrow time column now arrives as a `CATime` and no
-  longer adds to plain integers as raw counts; to keep that, pass
-  `arrow.to_ca.ticks`. A producer without `to_ca` is read through
-  MemoryView as before.
-- Fix: the mask of a read-only array is read-only too. Writing through it
-  (`ca.mask[i] = true`) raised for lazy expressions but went through for
-  other read-only arrays, for views of them, and for a categorical's codes,
-  where it could unmask or mask cells the array said could not change.
-- Change: reading or writing a block of a `roll` view that spans its rows
-  (`r[nil, 10..19]`, or a slice of a 3-D roll) is three to six times
-  faster: it moves as a few strided blocks of the parent instead of one
-  transfer per row. Results are unchanged.
-- Change: reductions over a `shift` or `window` view are faster. When the
-  last axis is shifted, `sum`, `min`, `mean` and the like run about ten
-  times faster, and the same reductions along an outer axis
-  (`sum(axis: 0)`) two to four times faster. Results are unchanged.
-- Change: a reduction over a view that has to be gathered first (`shift`,
-  `window`, `roll`, and others) no longer allocates a fresh buffer each
-  time, which roughly halves its time at a million cells. The process
-  keeps one such buffer of 1 to 64 MB between calls.
-
-- Change: `sort` of a lazy expression (`(a.lazy * 2).sort(axis: 1)`)
-  returns a read-only sorted view over the expression, where it returned
-  a sorted view over a copy. A write to it raises, as a write to the
-  expression does, instead of landing in the copy; its cells follow later
-  changes of the operands. Call `copy` first to keep sorting a snapshot.
-
-- Fix: an array stored through a grid, boolean selection or `select_axis`
-  on a `reshape` over a `transpose`, `flip` or block now reaches the
-  original array; it was dropped without an error. A scalar fill, `map!`
-  and `add!` were not affected.
-- Fix: a partial write through a `reshape` over a `tile` keeps every value
-  written, where a copy of a cell that was not written could overwrite it.
-  Over a `CAObject`, a partial read or write through such a view calls the
-  hooks for those cells only, not for every cell of the object.
-- Fix: a `swap_bytes` view held twice by `CArray.stack` or `CArray.meld`
-  writes byte-swapped values back, where an assignment of another data
-  type wrote them unswapped.
-- Fix: `refer` to a narrower data type with `offset:` reads and writes the
-  mask of the cells it shows; it used the mask of cells nearer the start.
-
-- Fix: `eq`, `ne`, `lt`, `gt`, `le`, `ge` (and `<` `>` `<=` `>=`) between
-  an unsigned and a signed integer array compare by value, eager and lazy:
-  `CA_UINT64([7]).lt(CA_INT64([-7]))` is `[false]`, where the negative
-  operand was read as a large unsigned number. An Integer the array's type
-  cannot hold, on either side, compares by value too. Arithmetic between
-  the two types still promotes to the unsigned type.
-
-- Change: `maximum` and `minimum` of two zeros no longer depend on the
-  order of their arguments: `maximum` is `0.0` and `minimum` is `-0.0`,
-  as `pmax` and `pmin` give.
-- Change: for C extensions, the kernels are built with `-fwrapv`, and
-  `CArray::BUILD_FLAGS` says so. Signed integer overflow wraps modulo 2^N
-  in every kernel, as it already did one operation at a time; carray-jit,
-  which compiles the same kernel bodies with these flags, now wraps the
-  same way across a whole expression (`(x + 1).gt(x)` was true at the
-  maximum).
-- Fix: an arange from a Range that excludes its end keeps every step that
-  starts before the end: `CA_INT32(0...5, 2)` is `[0, 2, 4]`, not
-  `[0, 2]`.
-- Change: `to_type` from a float or complex array to an integer type
-  makes a NaN cell UNDEF. A finite value outside the integer type is still
-  converted as the machine's C converts it, so the result can differ
-  between machines (ARM saturates, x86 gives the minimum). `as_type` and
-  storing a float array into an integer one are unchanged.
-- Change: a shift count means what it means to `Integer#<<` and `#>>`. A
-  negative count shifts the other way and a count of the width or more
-  shifts every bit out: `CA_INT64([3]) << 64` is `[0]`, `CA_UINT8([8]) <<
-  -1` is `[4]`. Before, the result depended on the machine.
-- Change: an Integer operand that the array's type cannot hold raises
-  `RangeError` in arithmetic, `count` and the `search` family:
-  `CA_INT32([5]) * 2**32` used to answer `[0]`. A uint64 array accepts
-  operands up to `2**64 - 1`. Float operands are unchanged. The six
-  comparisons answer by value instead (`CA_UINT8([0]).eq(256)` is
-  `[false]`, `CA_UINT8([0]) > -1` is `[true]`).
-- Change: on signed integers, `rcp_mul` and `rcp` round toward minus
-  infinity as `/` does: `CA_INT32([2]).rcp_mul(CA_INT32([-7]))` is `[-4]`,
-  and `rcp` of a negative integer is `-1`.
-- Fix: the signed minimum divided by -1 no longer crashes Linux on x86.
-  `MIN / -1` is `MIN` and `MIN % -1` is `0` on every machine, for `/`,
-  `%`, `fmod`, `rcp_mul` and `divmod`.
-- Fix: shapes, block indices and positions whose integer arithmetic
-  overflows are refused rather than reading or writing outside the
-  buffer: a `reshape` / `refer` / `tile` whose cell count overflows, a
-  block index `[start, count, step]` whose last cell overflows, a uint64
-  index of `2**63` or more, and `percentile(NaN)`. The group-wise
-  `percentile` now checks that p is in `[0, 100]`. A uniform `histogram`
-  whose edges span more than a double holds bins by the edges.
-- Fix: for code that opens arrays through `CArray::AddressBasis` (as
-  carray-jit does), a writable view that converts its cells -- a float64
-  array seen through `fake(CA_INT32)` -- no longer rewrites the cells the
-  kernel left alone (1.75 came back as 1.0); only changed cells are sent
-  back. A region whose start and count overflow when added, or given as
-  Floats, is refused; a mask added to the parent after the view was made
-  is opened; the arrays stay alive while open even if the caller's Array
-  is emptied.
-- Fix: with an expression evaluator registered (carray-jit), two
-  expressions that differ only in which operand an operation reads --
-  `(a - b) - b` and `(a - b) - a` -- no longer share a compiled kernel and
-  each other's answers. A store whose destination overlaps an operand, or
-  reads itself shifted, is computed by CArray; a masked destination
-  assigned an unmasked expression is left unmasked, as without the
-  evaluator; a boolean shift filled with `0` is filled with false.
-- Fix: an integer raised to a negative power is decided by its base:
-  `2 ** -64` is 0 rather than `ZeroDivisionError`, and a power of
-  `-2**63` no longer recurses without end. 0 to a negative power still
-  raises `ZeroDivisionError`.
-- Change: for C extensions, `CA_FOR_EACH_FIBER_INOUT` and its `_MASKED`
-  form raise `ArgumentError` when the input and the output differ in
-  shape. They checked only the rank, the element count and the walked
-  axis, and a pair that passed walked mismatched fibers (`(2,3,4)` into
-  `(2,4,3)`); one that failed skipped the body without a word. Rebuild
-  the extension to take the check.
-- Fix: for C extensions, a write walk through the block macros
-  (`CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER` and their kin) left with
-  `break` writes back the slab the body was in. Whether it was kept
-  depended on the source. Rebuild the extension to take the fix.
-
-- Fix: a lazy `clip`, `fma` or `fms` (`a.lazy.clip(lo, hi)`, or the same
-  inside `CArray.fuse`) can be reduced, scanned or sorted along an axis,
-  and passed to `median`, `unique` and their kin. These raised
-  `kernel_iterator init failed rc=1`.
-
-- Fix: for C extensions, `ca_iter_state_next_slab_strided` hands out the
-  mask cursor of an entity or a strided view such as a block or a
-  transpose; it gave `NULL` for them, so masked cells read as values.
-
-- Fix: for C extensions, the mask cursor a read walk over a `CArray.stack`
-  hands out is the walk's own copy, as it is for every other source.
-  Writing to it changed the stacked arrays' masks.
-
-- Fix: for C extensions, `CA_FOR_EACH_FIBER_PAIR` and its `_MASKED` form
-  close the first source when the second is refused or raises partway.
-  The first was left open: its scratch leaked and a view passed as the
-  first source stayed attached. Rebuild the extension to take the fix.
-
-- Fix: for C extensions, a kernel that writes through `CA_FOR_EACH_SLAB`
-  or `CA_FOR_EACH_FIBER` into a `CAGrid`, `CASelectAxis`, `CAWindow` or
-  `CAShift` reaches the array when the view's parent is itself a view (a
-  transpose, a non-contiguous block), and into a `CAShift` or `CAWindow`
-  walked along an axis it does not shift. The writes were dropped.
-
-- Fix: writing through a window that covers whole inner axes
-  (`b.window(1..2, 0..3)`) reaches the parent for `seq!` and for a store
-  of an array of another data type (`w[] = int32_array`). Both were
-  dropped.
-
-- Fix: an object array whose cells are computed -- a `CAObject` with a
-  Ruby `fetch_index`, a lazy expression over object arrays, or a view of
-  either -- no longer crashes or returns wrong values when a garbage
-  collection runs in the middle of a reduction along an axis, `unique`
-  and its family, or `copy` of a masked lazy expression.
-
-- Fix: `abs` of an object array calls each cell's `abs`; it raised
-  `CArray::DataTypeError`.
-
-- Fix: `imag` of a real array keeps its masked cells masked, and `imag`
-  of an object array returns each cell's `imaginary` (it returned zeros,
-  so `CA_OBJECT([Complex(1, 2)]).imag` was `[0]`).
-
-- Change: `.lazy` on a Face (`CATime`, `CATimedelta`, `CACategorical`,
-  string arrays) returns the array itself, and its operations run eagerly,
-  inside `CArray.fuse` too. Previously the lazy expression dropped the
-  Face and computed on storage: `t.lazy - t.lazy` raised, and comparing
-  times of different units returned `false` instead of raising.
-
-- Fix: arithmetic on a fixlen array raises `CArray::DataTypeError` when
-  the expression is lazy too, as it does eagerly. Previously the lazy
-  expression raised `RuntimeError` ("invalid bytes").
-
-- Fix: `float32.lazy.arg` gives the eager answer; it returned pi one ulp
-  low.
-
-- Change: a lazy expression over a boolean array follows the eager rules.
-  Arithmetic reads the 0/1 values as int64 (`b.lazy + b.lazy`, `-b.lazy`,
-  `b.lazy.fma(...)`), where it raised before. A math function raises and
-  wants an explicit cast (`b.lazy.to_type(:float64).sqrt`), where it
-  quietly widened to float64 before; `abs` and `arg` raise as well, and
-  `imag` stays boolean.
-
-- Fix: a lazy expression skips its masked cells where computing them could
-  raise, as the eager operators do. Previously it computed them, so
-  `int.lazy ** e` with a masked `0 ** -1`, integer `rcp` and `rcp_mul`
-  over a masked zero, and any object expression over a masked `nil` or
-  zero raised where the eager expression gave an answer.
-
-- Fix: the mask of a lazy expression is read-only, as the expression is.
-  Previously, where only one operand was masked, the expression's mask
-  was that operand's, and `expr.mask[i] = 1` masked the cell in the
-  operand.
-
-- Fix: storing into an array a value that reads from that same array
-  keeps the value's masked cells masked: `c[] = c.flip(0)`,
-  `c[0..2] = c[1..3]`, `c[] = c.lazy + 1` and `c[] = (c.lazy > 1)`.
-  Previously the destination's mask was cleared before the value's mask
-  was read, so those cells were stored as values.
-
-- Fix: a Ruby Float, Complex, `true` or String beside a lazy expression
-  takes the data_type the eager operator gives it. Previously it took the
-  array's: `int32.lazy * 0.5` and `CArray.fuse { a * 0.5 }` truncated to
-  integers, `int32.lazy >= 2.5` compared against 2, `clip(-1.5, 1.5)`
-  and `fma(0.5, 0.25)` truncated their bounds, and `+ Complex(...)`,
-  `+ true` and `fixlen.lazy.eq("text")` raised.
-
-- Fix: a lazy comparison read over part of an array -- a column, or an
-  inner box such as `(a.lazy < b)[nil, 2]` or `x.lazy.signbit[0..1, 1..2]`
-  -- returns the cells it names. Previously it read the same number of
-  cells straight on from the first one.
-
-- Fix: comparing two fixlen arrays lazily (`x.lazy.eq(y.lazy)`, and
-  `<`, `>` and the rest) gives the eager answer. Previously it wrote
-  every cell's result into the first one and ran past its scratch
-  buffer, which could abort the process.
-- Fix: `join(axis:)` along an axis of length zero gives one `""` for each
-  cell of the other axes; it raised `ZeroDivisionError`.
-- Fix: the mask of a lazy expression (`a.lazy + b`, `a.lazy.gt(3)`,
-  `a.lazy.fma(b, c)`, the boolean `&` and `|`) follows its operands on
-  every read, as its values do. Before, it was fixed when first read, so
-  a cell masked in an operand afterwards read back as a value. Reading the
-  mask no longer gives an operand a mask it did not have.
-- Fix: the mask of a read-only lazy expression (`a.lazy.sqrt.mask`) is
-  read-only. Writing to it changed the operand's mask.
-- Fix: `invert_mask` raises on a frozen array, a view of one, and a lazy
-  expression, and changes nothing. It inverted the mask first, and on a
-  lazy expression inverted the operand's mask without raising.
-- Fix: an object array viewed through `sort(axis:)`, `CArray.stack`,
-  `CArray.meld` or a selection, over a `CAObject` whose hooks call Ruby
-  (`copy_addrs`, `copy_block`, ...), no longer crashes in a garbage
-  collection. The array a hook receives is taken back from the caller's
-  buffer when the hook returns; a hook that keeps it holds an empty array.
-- Fix: a view with no cells (an axis of length zero) can be copied, read,
-  summed and written. Some views corrupted memory, and over a `CAObject`
-  some raised `IndexError`.
-- Fix: a lazy operation or comparison between an empty array and a scalar
-  (`CArray.float64(0).lazy + 1`) works as the eager one does; it raised
-  `ArgumentError`.
-- Fix: selecting along one axis with a boolean array keeps another axis
-  of length zero (`CArray.float64(4, 0)[bool, nil]`); it raised
-  `ArgumentError`.
-- Change: for C extensions, a view onto an entity installed with
-  `ca_install_obj_type` (a `CASource` subclass, say) is no longer exported
-  through MemoryView, as the entity itself already was not: its bytes need
-  not be in memory. Export a `copy`.
-- Fix: `memory_view_reject_reason` tells you to export `arr.copy`. It
-  suggested `CArray.from_memory_view(arr)` and `arr.to_ca`, and neither
-  gives a snapshot: the first refuses the same arrays, the second returns
-  the view itself.
-- Fix: a `CATime`, `CATimedelta`, `CACategorical` or `CAConstString` is
-  refused by `memory_view_available?`, with a reason. It answered `true`
-  and then could not be exported. Export its storage instead (`.ticks`,
-  `.codes`); a copy is still the Face and is refused too.
-- Fix: a `CARecord` is exported through MemoryView as its `T{...}` struct
-  (it raised a `RuntimeError`), and a `CAFixlenString` as `Ns` bytes (it
-  could not be exported). `wrap_memory_view` and `from_memory_view` do not
-  read `T{...}` yet.
-
-- Fix: `group_by_category(cat).sum(axis:)`, `mean`, `min`, `max`, `minmax`
-  and `count` are several times faster when `cat` has the source's shape
-  without the reduce axis (one category per fiber, such as a class per
-  pixel reduced over time): each fiber is reduced whole along the axis.
-  The sums can differ from earlier releases in the last bits.
-
-- Fix: `group_by_category(...).count(axis:)` and `count_not_masked(axis:)`
-  count in one pass over an integer or float array, and without a widened
-  copy for any other payload. Previously they built a full-size int64 array
-  once per category, about five times the cost of `sum`.
-
-- Change: a reduction along an axis, a reduction of a masked expression,
-  `variance`, `min_index`, `cumsum`, `sort_index`, `median` and
-  `percentile` over a `CArray.fuse` / `.lazy` expression ask the
-  registered `CArray.expression_evaluator` (the `carray-jit` gem) to
-  compute it, as `to_ca` does.  A reduction of the whole array with no
-  mask still streams the expression and is not asked.  The answer is the
-  same either way.
-
-- Fix: `Marshal.load` of a view (a slice, a transpose, a lazy expression)
-  or a `CScalar` raised `TypeError`; a view comes back a plain `CArray`
-  and a scalar a `CScalar`.  A Face other than `CARecord`, and a `CAWrap`,
-  are now refused by `Marshal.dump` with a message, where they were dumped
-  and then failed to load; dump `.parent` or `.copy`.
-- Fix: a record array saved in the other byte order (`endian:`) came back
-  with each record reversed whole.  It is swapped member by member, as it
-  is written.
-
-- Fix: `strip_mask(fill)` on an array that computes its values -- a lazy
-  expression or a `CAObject` -- reads those values once. Previously it
-  read them a second time to find the masked cells.
-
-- Change: `CArray.fuse` reads a block's source the first time the block is
-  called and keeps what it made of it, so a later call costs about 3 µs
-  rather than about 60 µs.  A block that assigns to a local outside it, or
-  yields, is still run in its own frame, at about 12 µs a call.
-
-- Change: a `CARecord` orders only by the members its struct names in the
-  new `order_by:` option of `CArray.struct`; without it `sort`, `min`,
-  `max`, `partition_copy`, their index forms and the comparison operators
-  raise.  They ordered by the record bytes, which for a float or a negative
-  integer is no order of the values.  Declare
-  `CArray.struct(order_by: [:a, :b]) { ... }`, or sort a field's projection
-  (`rec[rec["a"].sort_index]`).
-- New: `CArray.struct(order_by: [...])` gives the records `<=>` and the
-  comparison operators, comparing the named members in order (NaN after
-  every number), and gives a `CARecord` of them the sort family, `min` /
-  `max` / `minmax` and `partition_copy`.  `==` is unchanged.
-
-- Change: for whoever writes a Face: the read and write hooks are renamed
-  `storage_to_element` and `element_to_storage` (they were
-  `storage_to_scalar` and `scalar_to_storage`), and so are the C
-  registration functions and macros built on them
-  (`ca_face_register_storage_to_element`, ...).  The old names are gone;
-  rename the methods a Face defines.
-
-- Change: `dup` and `clone` of a `CAWrap`, including a subclass made with
-  `wrap_memory_view`, return a plain `CArray`, as `copy` does.  They
-  returned an array that owned its memory but kept the wrap's class, so a
-  subclass named for what it borrows named an array that borrowed nothing.
-
-- Change: a `CAString` can be put through `CArray.stack`, `concatenate`
-  and `meld`, and comes back a `CAString`; they raised.  A
-  `CAConstString` is still refused, since each array's cells point into
-  its own buffer.
-- Fix: `mask_eq`, `mask_where` and `mask_invalid` on a `CAConstString` or
-  `CACategorical` return the masked array, of the same class; they raised
-  because the copy they mask is read-only.  The receiver is not changed.
-- Fix: `unmask` / `strip_mask` with `method: :linear` on a Face that does
-  not interpolate (the string Faces) raises an `ArgumentError` that says
-  so and names `:forward` / `:backward`, instead of an error from inside
-  `linear_fetch` or a failed cast.
-
-- Fix: `cond.then_else(x, y)` with a Face branch returns that Face; a
-  `CATime` branch came back as a mix of 8-byte strings and elements, and
-  two `CATime` branches raised.  A `CACategorical` branch, which cannot be
-  written, answers with an object array of its labels.
-- Fix: the reductions of `windows(...)` and `blocks(...)` over a Face come
-  back as the Face (`mean`, `median`, `sum`, `stddev`, `percentile`, `min`,
-  `max`); a `CATime` raised in `windows` and came back as 8-byte strings
-  in `blocks`, and a `CAString` lost its class.  `sliding_windows`,
-  `unfold` and `as_strided` of a Face are the Face.  `windows` with
-  `bounds: :nearest` no longer raises on a fixlen array.
-- Fix: `cummax` and `cummin` of a `CATime` or `CATimedelta` run in time
-  order and return the same class; they raised.  A `CAString` keeps its
-  class, and a `CACategorical` raises, as `min` does.
-- Fix: assigning a `CATime` or `CATimedelta` array to one, through `[]=`
-  on the whole array, a boolean selection or an index array, raised
-  `DataTypeError`; only a range worked.  It now stores, converting the
-  unit as a range store does, and a bare `int64` array is taken as raw
-  storage as documented.
-
-- Fix: `blocks(...).min`, `.max` and `.minmax` over a Face answer in the
-  Face's own order and come back as the Face; a `CATime` or
-  `CATimedelta` result was 8-byte strings, and a `CAConstString` tile
-  was compared by where its strings sat in the buffer.  `block_view` of
-  a Face is now the Face.  A `CACategorical` raises, as `min` does.
-- Fix: `partition_copy` of a `CATime` or `CATimedelta` selects in time
-  order and returns the same class; it compared the bytes of the ticks,
-  which is not their order once a value passes 255.  A `CACategorical`
-  raises, as `sort_index` does.
-- Fix: the comparison operators `<`, `<=`, `>`, `>=`, `ne` (and so `<=>`)
-  on a `CAConstString` compare the strings.  They compared where each
-  string sat in the column's buffer, so `x < "dd"` was true everywhere.
-
-- New: for whoever registers a `CArray.expression_evaluator`: the plan it
-  is handed now describes comparisons (`eq`, `lt`, `is_nan`, ...) as
-  operations and `CArray#shift` of an array as that array read at an
-  offset (`CArray::Fusion::Shifted`).  An evaluator that does not know
-  the new node can decline the plan, and CArray computes it as before.
-- Fix: `start`, `size0`, `bounds` and the other methods a `CAShift`
-  inherits from `CAWindow` raised `TypeError`; they now answer for the
-  shift.
-
-- Fix: `sum`, `min`, `max` and the other reductions along an inner axis
-  of `CArray.stack` over lazy expressions skip the masked cells of those
-  expressions. Previously they could count them, unless the mask had been
-  read before the reduction.
-
-- Fix: a mask made inside `map!` or another block that writes an array,
-  whose reading raises (a `CAObject` whose mask callback fails), raises
-  that error and leaves the array closed. Previously it raised
-  `[BUG] tried to sync data to detached array` and left the array
-  attached.
-
-- Fix: `hash` of an object array agrees with `eql?`, so arrays with equal
-  elements find each other as Hash keys. Previously two such arrays had
-  different hashes unless they held the very same objects.
-
-- Fix: a stepped or reversed slice of a lazy expression
-  (`a.lazy.sinh[(0...n).step(2)]`, `x[-1..0]`) returns the cells it
-  names. Previously an expression that converts its input -- an integer
-  array through `sinh`, the second and third operands of `fma` -- read
-  the first cells in order instead: `int16.lazy.sinh[(0...12).step(2)]`
-  gave sinh of 0, 1, 2, ... rather than of 0, 2, 4, ...
-
-- Fix: selecting from an array that computes its values -- a lazy
-  expression or a `CAObject` -- by index arrays (`a[[0, 10, 20]]`,
-  `a[rows, cols]`), by a boolean mask, by a boolean mask along an axis,
-  or through `window` with filled bounds reads and writes only the
-  selected cells. Previously `copy`, the reductions and the bang methods
-  on such a selection produced every cell of the source first, so their
-  cost followed the source's size.
-
-- Fix: `load_binary` into a read-only array (for example one from
-  `wrap_memory_view` over a frozen source) raises before reading.
-  Previously it wrote the bytes into the source and then raised.
-
-- Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!`, `scatter_min!`,
-  `scatter_max!` and `scatter_replace!` on a view that converts its
-  values (such as `fake`) write only the cells the addresses name.
-  Previously every cell of the view was converted and written back, so
-  cells the conversion could not hold exactly changed: `int32` values
-  above 2^24 seen through `fake(CA_FLOAT32)`, for example.
-
-- Change: for C extensions, the `CA_FOR_EACH_ELEMENT` macros
-  (`ca_for_each_element.h`, with `ca_each_state_t` /
-  `ca_each_map_state_t`) and the `CA_WITH_BUFFER` /
-  `CA_WITH_BUFFER_WRITABLE` macros are removed. For element-wise work use
-  `ca_call_cslab_N_r` (a loop over each chunk) or `ca_call_cfunc_N_r` (a
-  function per cell); to hand the whole buffer to a library use
-  `rb_ca_call_with_buffer`, which also closes the array when the body
-  raises.
+- New: `value.segments(offsets:)` / `value.segments(lengths:)` return a
+  `CASegmentIterator`, the iterator-family member for consecutive runs of
+  cells, with the same reductions, scans, `map` and addresses as the other
+  members. `CArray.segment_offsets(lengths:)` and
+  `CArray.segment_index(lengths:)` / `segment_index(offsets:)` convert
+  between segment lengths, boundaries and the segment of each element,
+  counting in int64. `CACategoricalIterator` now descends from
+  `CASegmentIterator`; what it answers is unchanged.
+
+- New: `CArray#set_attrs(hash)` sets several attributes at once;
+  `b.set_attrs(a.attrs)` gives `b` the attributes `a` shows.
+
+- New: `order` takes `kind:` (`:quick` or `:stable`), as `rank_index` does.
+
+- New: for whoever registers a `CArray.expression_evaluator` (carray-jit):
+  more of a lazy expression reaches it. A plan can now hold mixed data
+  types (`f32.lazy + f64.lazy`), a Float array to an Integer power, the
+  comparisons, `then_else`, and `shift` (`CArray::Fusion::Shifted`), and a
+  reduction along an axis, a masked reduction, `variance`, `min_index`,
+  `cumsum`, `sort_index`, `median` and `percentile` of an expression ask
+  the evaluator as `to_ca` does. `CArray.__kernel_helpers__` returns the C
+  the kernel bodies call beyond the standard library. An evaluator that
+  does not know a node declines the plan, and CArray computes it as
+  before; the answer is the same either way.
+
+- New: for C extensions: `ca_iter_ensure` runs a kernel-iterator walk whose
+  body can raise and finishes the walk however the body leaves;
+  `ca_sync_detach` closes an attach window even when the sync raises;
+  `ca_attach_n` / `ca_allocate_n` attach all of their arrays or none;
+  `ca_iter_state_init_l2_paired` opens an input and an output walk that
+  finish together (the `_INOUT` macros use it); `ca_stride_setup(NULL, ...)`
+  checks without writing, so a constructor can check before it allocates;
+  `ca_check_uninitialized(ca)` guards your own `initialize` /
+  `initialize_copy`. Nothing changes where nothing raises.
+
+- Change: `sort_index`, `rank_index`, `partition_index`, `partition` and
+  `partition_copy` without `axis:` (or with `axis: nil`) work on the
+  whole array, as `sort` and `order` already did. They used to work along
+  axis 0. On a 1-D array nothing changes. On an N-D array `sort_index`,
+  `partition_index`, `partition` and `partition_copy` return a 1-D result
+  (`a.flatten[a.sort_index]` is `a.sort`) and `rank_index` ranks every
+  cell against the whole array. To keep the old result, pass `axis: 0`.
 
 - Change: storing `nil` into a numeric or boolean array raises, as
-  `Float(nil)`, `Integer(nil)` and `Complex(nil)` do: `TypeError` for
-  float and complex, `CArray::DataTypeError` for boolean (integer already
-  raised). It used to become NaN (float), 0+0i (complex) or false
-  (boolean). Store `Float::NAN` or `UNDEF` for what you mean. `to_type`
-  from an object array still reads `nil` as `UNDEF`, and now does so for
-  complex too, along with any cell it cannot read as a number (it raised
-  for complex).
+  `Float(nil)`, `Integer(nil)` and `Complex(nil)` do (`TypeError`, or
+  `CArray::DataTypeError` for boolean). It used to become NaN, 0+0i or
+  false. Store `Float::NAN` or `UNDEF` for what you mean. `to_type` from an
+  object array still reads `nil` as `UNDEF`, for complex too.
 
-- Change: a string stored into a float or complex array is read as
-  `Float()` reads it, and one that is not a number raises
-  `ArgumentError`, as it already did for an integer array. `"x"` and
-  `""` used to become `0.0` (through `[]=`, `fill`, `CA_FLOAT64([...])`,
-  `strip_mask` and the lazy `as_type` alike). `" 3 "`, `"1e3"`,
-  `"0x10"`, `"nan"` and `"inf"` still read as numbers, and a complex
-  array also takes `"1+2i"`. `to_type` from an object array is
-  unchanged: a cell it cannot read as a number becomes `UNDEF`.
+- Change: a String stored into a float or complex array is read as
+  `Float()` reads it, and one that is not a number raises `ArgumentError`,
+  as it already did for an integer array. `"x"` and `""` used to become
+  `0.0`. `" 3 "`, `"1e3"`, `"0x10"`, `"nan"` and `"inf"` still read as
+  numbers, and a complex array also takes `"1+2i"`. `to_type` from an
+  object array is unchanged.
+
+- Change: a reduction's `fill_value:` is what storing it into the result
+  would give, with or without `axis:` (without `axis:` it came back as
+  given): `uint8` `accumulate(min_count: 256, fill_value: -9999)` returns
+  `241`, and a fill the result cannot read raises. `fill_value: UNDEF`
+  leaves the result undefined (it filled `0.0` along an axis). `median`
+  and `percentile` take a fill the same way, and `minmax` fills both
+  members. Pick a fill the result's data type can hold.
 
 - Change: `strip_mask(UNDEF)` and `unmask(UNDEF)` leave the masked cells
   masked, as storing `UNDEF` does. They used to fill them with `0`.
 
-- Change: `CArray._scan_float` and `CArray._scan_int` are removed. They
-  were internal helpers (`@api private`) that nothing called. To parse a
-  number from a String, use `Float(str, exception: false)` or
-  `Integer(str, exception: false)`, which return `nil` where these
-  returned the fill value.
+- Change: `variance` and `stddev` (the sample statistics) answer `UNDEF`
+  when fewer than two values are present, instead of `0.0`, on `CArray`,
+  along an axis and in every iterator. `variancep` and `stddevp` still
+  answer `0.0` for a single value. For the old answer pass
+  `fill_value: 0.0`.
 
-- Change: a reduction's `fill_value:` is what storing it into the result
-  would give, with or without `axis:`. Without `axis:` it used to come
-  back as given: `uint8` `accumulate(min_count: 256, fill_value: -9999)`
-  now returns `241`, as the per-axis result already held, and
-  `fill_value: "x"` on a float result is `0.0` either way. Pick a fill
-  the result's data type can hold. `fill_value: UNDEF` now leaves the
-  result undefined (it filled `0.0` on the per-axis path). `median` and
-  `percentile` take a fill the same way (they raised `TypeError` for
-  `UNDEF` and for anything not numeric), and `minmax` fills both
-  members (it ignored `fill_value:` per axis and returned a single value
-  without `axis:`).
+- Change: `minmax` of an empty or fully masked array, or one with fewer
+  cells than `min_count:`, returns `[UNDEF, UNDEF]` instead of a single
+  `UNDEF`, so `lo, hi = a.minmax` always gets both.
 
-- New: `order` takes `kind:` (`:quick` or `:stable`), as `rank_index`
-  does.
+- Change: an Integer operand that the array's type cannot hold raises
+  `RangeError` in arithmetic, `count` and the `search` family:
+  `CA_INT32([5]) * 2**32` used to answer `[0]`. A uint64 array accepts
+  operands up to `2**64 - 1`. The six comparisons answer by value instead
+  (`CA_UINT8([0]).eq(256)` is `[false]`). Float operands are unchanged.
 
-- Fix: `masked_position:`, `kind:` and `method:` (`rank_index`, `order`)
-  report a value that is not a Symbol as `TypeError` naming the method
-  (`"sort: masked_position must be a Symbol (got String)"`), and an
-  unknown Symbol as `ArgumentError` naming the method you called
-  (`sort_copy` used to say `sort`). `sort_copy` on an unmasked numeric
-  array accepted any `masked_position:` without checking it.
+- Change: an axis is checked the same way everywhere. Out of range raises
+  `ArgumentError` (the reductions, `normalize_axes`, `axis2addr` and
+  `take_along_axis` raised `IndexError`); an axis that is not an Integer
+  raises `TypeError` (`median`, `sort`, `flip` and others truncated
+  `1.5`). A negative axis counts from the end everywhere, including the
+  `axis:` reductions of `group_by_category` and `unmask(method: :forward)`
+  (where `-3` on a 2-D array filled along axis 1). `axis: nil` is the same
+  as leaving it out for `flip`, `meld`, `concatenate` and `stack`. Code
+  that rescues `IndexError` for a bad axis should rescue `ArgumentError`.
 
-- Change: `nlargest`, `nsmallest` and their `_index` forms raise
-  `ArgumentError` for a negative `n`, as `Array#max(n)` does. They used to
-  return an empty result. An `n` past the length still gives the whole
-  fiber.
+- Change: `min_count:`, `kth` and `n` (`nlargest`, `nsmallest`) take an
+  Integer and nothing else: `1.5` raises `TypeError` instead of being
+  truncated. A negative `n` raises `ArgumentError`, as `Array#max(n)`
+  does (it returned an empty result). `masked_position:`, `kind:` and
+  `method:` raise `TypeError` for a value that is not a Symbol. The
+  `windows` reductions refuse a `min_count:` the core reductions refuse.
+  `min_count: nil` is the same as leaving it out.
 
-- Change: `min_count:`, `kth` (`partition`, `partition_copy`,
-  `partition_index`) and `n` (`nlargest`, `nsmallest` and their `_index`
-  forms) take an Integer and nothing else, as `axis:` does: `1.5` raises
-  `TypeError` instead of being truncated to `1`. `min_count: nil` is the
-  same as leaving it out, for `median` and `percentile` too (it used to
-  raise there). Errors name the method you called, in one form:
-  `"<method>: min_count must be non-negative (got -1)"` and
-  `"<method>: kth 4 out of range for length 4"`.
+- Change: error messages name the method you called and the value you
+  passed (`"cumsum: ..."`, `"sort: axis 3 out of range for ndim 2"`),
+  where they named internal functions ending in `_ki`, a sibling method,
+  or the axis after adding `ndim`. Data types are listed by their CArray
+  names. Exception classes are unchanged; code that matches on the
+  wording needs updating.
 
-- Fix: the reductions of `windows` (`sum`, `prod`, `min`, `max`, `mean`,
-  `all`, `any`, `accumulate`) refuse a `min_count:` that the core
-  reductions refuse. `min_count: -1` or `min_count: true` used to be
-  taken as no `min_count:` at all.
+- Change: a shift count means what it means to `Integer#<<` and `#>>`: a
+  negative count shifts the other way and a count of the width or more
+  shifts every bit out (`CA_INT64([3]) << 64` is `[0]`). Before, the
+  result depended on the machine.
 
-- Change: an out-of-range axis raises `ArgumentError` everywhere. The
-  reductions (`sum`, `mean`, `min_index`, `count`, `first`, ... with
-  `axis:`), `normalize_axes`, `axis2addr` and `take_along_axis` raised
-  `IndexError`, every other method `ArgumentError`. Code that rescues
-  `IndexError` for a bad axis should rescue `ArgumentError`.
+- Change: `to_type` from a float or complex array to an integer type makes
+  a NaN cell UNDEF. A finite value outside the integer type is still
+  converted as the machine's C converts it, so it can differ between
+  machines. `as_type` and stores are unchanged.
 
-- Change: an axis that is not an Integer raises `TypeError` everywhere
-  (`"<method>: axis must be an Integer (got Float)"`). `median`, `sort`,
-  `flip`, `meld`, `split`, `insert_axis`, `diagonal` and others used to
-  truncate `axis: 1.5` to `1`, while `sum` and `cumsum` refused it; the
-  `axis:` reductions of `group_by_category` raised `ArgumentError`. Pass
-  an Integer.
+- Change: on signed integers, `rcp_mul` and `rcp` round toward minus
+  infinity as `/` does: `CA_INT32([2]).rcp_mul(CA_INT32([-7]))` is `[-4]`.
 
-- Fix: the `axis:` reductions of `group_by_category` accept a negative
-  axis, counting from the end as every other `axis:` does. `axis: -1`
-  used to raise `ArgumentError`.
+- Change: `maximum` and `minimum` of two zeros no longer depend on the
+  argument order: `maximum` is `0.0` and `minimum` is `-0.0`, as `pmax`
+  and `pmin` give.
 
-- Change: an out-of-range `axis:` is reported as
-  `"<method>: axis N out of range for ndim D"`, naming the method you
-  called and the value you passed. Messages used to name internal
-  functions (`rb_ca_parse_reduce_axes_kw`, `sort_addr_ki`, ...) or a
-  sibling method (`quantile` said `percentile`), and some reported the
-  axis after adding `ndim` (`axis: -3` came out as `-1`). The exception
-  classes are unchanged.
+- Change: `clip(min, max)` raises `ArgumentError` when `min` exceeds `max`
+  in any cell, as Ruby's `clamp` does. With `lfill:` or `ufill:` alone,
+  the side given no fill is now clamped; it was left unchanged.
 
-- Fix: `axis: nil` is the same as leaving the axis out for `flip`
-  (every axis), and for `meld`, `concatenate` and `stack` (axis 0). It
-  used to raise `TypeError`. `split` still needs an axis, and now says
-  so with `ArgumentError`.
+- Change: a view of a frozen array is read-only rather than frozen. A
+  write through it raises `RuntimeError` ("can not modify read-only
+  array") instead of `FrozenError`, a subclass of it; `frozen?` on the
+  view is false. In exchange `sort`, a boolean row selection, lazy
+  expressions, `real` / `imag` and views of a frozen Face work on a
+  frozen array; they raised `FrozenError`.
 
-- Change: `sort_index`, `rank_index`, `partition_index`, `partition` and
-  `partition_copy` without `axis:` (or with `axis: nil`) work on the
-  whole array, as `sort` and `order` already did. They used to work
-  along axis 0. On a 1-D array nothing changes. On an N-D array,
-  `sort_index` / `partition_index` / `partition` / `partition_copy`
-  return a 1-D result (`a.flatten[a.sort_index]` is `a.sort`) and
-  `rank_index` ranks every cell against the whole array, keeping the
-  shape. To keep the old result, pass `axis: 0`.
+- Change: an operator operand that exports MemoryView and also defines
+  `to_ca` (an Apache Arrow array, given a bridge that adds `to_ca`) is
+  taken through `to_ca`, as `wrap_readonly` already did. Arrow nulls come
+  in as masked cells, a sliced Arrow array reads correctly, and an Arrow
+  time column arrives as a `CATime` (to add raw counts, pass
+  `arrow.to_ca.ticks`).
 
-- Fix: `unmask` and `strip_mask` with `method: :forward` or `:backward`
-  raise `ArgumentError` for a negative `axis:` past `-ndim`. On a 2-D
-  array, `axis: -3` filled along axis 1 and `axis: -4` along axis 0.
+- Change: `CArray.save` / `CArray.dump` and `Marshal.dump` refuse a Face
+  other than a record (`CATime`, `CATimedelta`, string arrays,
+  categoricals) and a `CAWrap`, with `TypeError`. They wrote the storage
+  without its unit, buffer or labels, or failed to load. Save `.parent` to
+  keep the storage, or `.copy`.
 
-- Fix: `dup` and `clone` of `a.sort`, and of `a[i]` with an index array
-  of `a`'s own shape, return a copy of the view. They used to raise
-  `TypeError: allocator undefined for CARemap`.
+- Change: a `CARecord` is ordered only by the members named in the new
+  `order_by:` option of `CArray.struct`, which gives the records `<=>`,
+  the comparison operators, the sort family, `min` / `max` / `minmax` and
+  `partition_copy` (NaN after every number; `==` is unchanged). Without it
+  these raise; they ordered by the record bytes, which for a float or a
+  negative integer is not the order of the values.
 
-- Fix: evaluating lazy expressions of different sizes no longer keeps one
-  scratch buffer per size. The buffers CArray keeps between evaluations
-  are now one per buffer needed at the same time, each as large as the
-  largest evaluation so far; a program that evaluated arrays of growing
-  size used to keep up to 32 of them. They are still kept until the
-  process exits. Nothing to change.
+- Change: for whoever writes a Face: the read and write hooks are renamed
+  `storage_to_element` and `element_to_storage` (were `storage_to_scalar`
+  and `scalar_to_storage`), and so are the C registration functions and
+  macros. The old names are gone.
 
-- Change: a masked cell of a boolean selector given for one axis
-  (`a[sel, nil]`) selects nothing, as it already did for a selector over
-  the whole array (`a[sel]`). It used to raise `ArgumentError`.
+- Change: a fixlen array needs `bytes:` of 1 or more; `bytes: 0` and a
+  missing `bytes:` raise `RuntimeError`. They gave zero-width cells that
+  dropped what was written. `CA_FIXLEN(data)` still takes the width from
+  the longest string.
 
-- Fix: `bsearch`, `search`, `count(v)` and `partition_copy` on a fixlen
-  array whose cells are megabytes wide no longer raise `SystemStackError`.
+- Change: the `CA_<TYPE>()` cast shorthands refuse argument lists they used
+  to ignore: `CA_INT32(0, 2)` answered `0` and now raises `ArgumentError`.
+  The two-argument form is a Range and its step (`CA_INT32(0..6, 2)`),
+  unchanged.
 
-- Change: a fixlen array needs `bytes:` of 1 or more. `bytes: 0`, and
-  leaving `bytes:` out, raise `RuntimeError`; they used to give an array
-  of zero-width cells, which dropped the data written to it
-  (`CArray.object(2) { "abc" }.to_type(:fixlen)` gave `["", ""]`) and
-  lost its mask through a view. `CA_FIXLEN(data)` without `bytes:` still
-  takes the width from the longest string, and now does so for a single
-  String as well; all-empty data gets a width of 1.
+- Change: `.lazy` on a Face (`CATime`, `CATimedelta`, `CACategorical`,
+  string arrays) returns the array itself, and its operations run eagerly,
+  inside `CArray.fuse` too. The lazy expression used to drop the Face and
+  compute on storage.
+
+- Change: a lazy expression over a boolean array follows the eager rules:
+  arithmetic reads the 0/1 values as int64, where it raised; a math
+  function raises and wants an explicit cast, where it widened to float64.
+
+- Change: `then_else` returns a lazy view when the condition or a branch is
+  lazy, as the other element-wise operations do. The view is read-only;
+  `copy` makes an array of it.
+
+- Change: `sort` of a lazy expression returns a read-only sorted view over
+  the expression, where it sorted a copy. A write to it raises, and its
+  cells follow later changes of the operands. Call `copy` first to sort a
+  snapshot.
+
+- Change: a masked cell of a boolean selector for one axis (`a[sel, nil]`)
+  selects nothing, as it does for `a[sel]`. It raised `ArgumentError`.
 
 - Change: `shift`, `roll`, `tile` and `window` on an array with a
-  zero-length axis return an empty view, as `transpose` and a block
-  reference already did. They used to raise `IndexError`. A window may
-  also select nothing (`a.window(0...0)`).
+  zero-length axis return an empty view; they raised `IndexError`.
 
-- Fix: `imag` of a real array returns a new array of zeros on each call,
-  as documented. It used to return the same array every time, so a value
-  written into it showed up in later calls.
+- Change: attributes set with `set_attr` survive `copy` and `to_type` (and
+  its shorthands such as `int32`). A lazy operation no longer shows its
+  left operand's attributes.
 
-- Fix: after `b = a.dup` (or `clone`), `b.real = x` and `b.imag = x`
-  write into `b`. If `a.real` or `a.imag` had been called before the
-  copy, they used to write into `a` and leave `b` unchanged.
+- Change: `dup` and `clone` of a `CAWrap`, including a subclass made with
+  `wrap_memory_view`, return a plain `CArray`, as `copy` does.
 
-- Fix: `window` and `shift` over an object array keep their `fill_value:`
-  alive. A garbage collection used to free it, and the out-of-range cells
-  then read some other object, or crashed.
+- Change: a `CAString` can go through `CArray.stack`, `concatenate` and
+  `meld`, and comes back a `CAString`; they raised.
 
-- Fix, for C extensions: a sweep (`CA_FOR_EACH_ELEMENT_INOUT`, `_OUT`,
-  `ca_call_cfunc_*`, `ca_call_cslab_*`) whose output raises while it is
-  written back (a `CAObject` store hook) now detaches its operands and
-  frees its buffers before the error propagates. The output used to stay
-  attached.
+- Change: for C extensions: the `CA_FOR_EACH_ELEMENT` macros
+  (`ca_for_each_element.h`) and `CA_WITH_BUFFER` /
+  `CA_WITH_BUFFER_WRITABLE` are removed. For element-wise work use
+  `ca_call_cslab_N_r` or `ca_call_cfunc_N_r`; to hand the whole buffer to a
+  library use `rb_ca_call_with_buffer`, which also closes the array when
+  the body or the write-back raises.
 
-- Change: calling `initialize` or `initialize_copy` on an array that is
-  already set up (only possible through `send`) raises `TypeError`. It
-  used to set the array up again and lose the buffer it had. `new`, `dup`
-  and `clone` are unaffected. For C extensions: call
-  `ca_check_uninitialized(ca)` at the top of your own `initialize` /
-  `initialize_copy` for the same protection.
+- Change: for C extensions: `CA_FOR_EACH_FIBER_INOUT` and its `_MASKED`
+  form raise `ArgumentError` when the input and the output differ in
+  shape; a mismatched pair walked the wrong fibers or skipped the body.
+  Rebuild the extension to take the check.
 
-- New, for C extensions: `ca_iter_state_init_l2_paired` opens the second
-  state of a kernel that walks an input and an output together. The two
-  are finished together when either walk raises. The `_INOUT` macros use
-  it, so a kernel written with them gets this by recompiling.
+- Change: for C extensions: the kernels are built with `-fwrapv`, and
+  `CArray::BUILD_FLAGS` says so. Signed overflow wraps across a whole
+  carray-jit expression as it does one operation at a time.
 
-- Fix: `sort_copy(axis:)`, `partition_copy(axis:)` and the other methods
-  that read one array and write another fiber by fiber no longer leave
-  the result's walk open when reading the source raises.
+- Change: for C extensions: a view onto an entity installed with
+  `ca_install_obj_type` (a `CASource` subclass) is not exported through
+  MemoryView, as the entity itself already was not. Export a `copy`.
 
-- Fix: a frozen fixlen array can be exported through MemoryView. The
-  export used to raise `FrozenError`.
+- Change: faster, with the same results: a block of a `roll` view (three
+  to six times), reductions over a `shift` or `window` view (two to ten
+  times), reductions over any view that has to be gathered (the buffer is
+  kept between calls, up to 64 MB), `group_by_category(...).sum(axis:)`
+  and `count(axis:)` when there is one category per fiber (the sums can
+  differ in the last bits), a later call of the same `CArray.fuse` block
+  (about 3 µs instead of 60 µs), and selecting by index or boolean from a
+  lazy expression or `CAObject`, which now computes only the selected
+  cells.
 
-- Fix: exporting a `CScalar` through MemoryView no longer loses 32 bytes
-  on every export, and `CArray.wrap_memory_view` no longer loses its
-  holder when it rejects the source.
+- Fix: a Float operand of an integer array is no longer truncated to the
+  array's type: `CA_INT32([1, 2, 3]).count(1.5)` is `0` and
+  `CA_INT8([1, 3]).search(3.9)` is `nil` (both found `1`). This covers
+  `count`, `search`, `bsearch`, `search_nearest`, `snap_to` with an Array
+  grid, and a Float, Complex or `true` beside a lazy expression
+  (`int32.lazy * 0.5` truncated to integers).
 
-- Fix: a shape with more than 16 entries given to `CArray.new`,
-  `CArray.empty`, `CAObject.new` or `refer`, and more than 16 arguments
-  to the repeat indexer (`a[3, :%]`), are rejected before they are copied.
-  They used to be written past the end of a fixed-size work array before
-  the rank check raised.
+- Fix: integers and narrow floats keep their own data type and value:
+  `scatter_*!` writes an Integer scalar exactly (above 2**53 it was
+  rounded), `CAMath.atan2`, `hypot`, `copysign`, `logaddexp`,
+  `nextafter`, `fmod`, `expm1` and `log1p` answer a float32 or integer
+  CArray in its own type, `search_nearest` on int64 / uint64 measures
+  distances exactly, and float32 `fma` / `fms` round once.
 
-- Fix: constructors that reject their arguments no longer lose the
-  array's struct when they raise: `transpose`, `refer`, `field`,
-  `as_strided`, `window`, `shift`, `tile`, `roll`, `bitfield`, `bitarray`,
-  `endian`, the repeat indexer, `CArray.empty`, `template`, and `wrap` of
-  `CAString`, `CAFixlenString`, `CATime` and `CATimedelta`. Each call held
-  80 to 900 bytes.
+- Fix: comparisons between an unsigned and a signed integer array compare
+  by value, eager and lazy: `CA_UINT64([7]).lt(CA_INT64([-7]))` is
+  `[false]`. Arithmetic still promotes to the unsigned type.
 
-- New, for C extensions: `ca_stride_setup` called with `ca == NULL` runs
-  its checks and returns without writing, so a constructor can check
-  before it allocates (`ca_stride_new` does). Existing calls are
-  unaffected.
+- Fix: the signed minimum divided by -1 no longer crashes Linux on x86;
+  `MIN / -1` is `MIN` and `MIN % -1` is `0` everywhere. `2 ** -64` is 0
+  rather than `ZeroDivisionError`, and a power of `-2**63` no longer
+  recurses without end. `CA_INT32(0...5, 2)` is `[0, 2, 4]`, not `[0, 2]`.
 
-- Fix: a reduction over `CArray.stack(...)` whose parent fails to read
-  (a `CAObject` hook that raises) now raises that error. It used to raise
-  `[BUG] tried to detach a detached array` in its place.
+- Fix: NaN is ordered the same way everywhere. In an object array a Float
+  NaN loses `min`, `max`, `minmax`, `cummin`, `cummax` and the `*_index`
+  forms, and `sort` and its family put it last instead of raising.
+  `median` and `percentile` interpolate toward `Infinity` or NaN when it
+  is the next sorted value (`[1.0, Infinity].median` is `Infinity`), and
+  every form of them agrees. `min` / `max` of a `CArray.meld` with an
+  all-NaN part no longer raise.
 
-- Fix: these no longer lose their work buffer when reading the source or
-  running the block raises: `sort_copy(kind: :stable)`, `|` and `&` on
-  masked boolean arrays, `reduce_slab` and `map_slab` on cells wider than
-  64 bytes.
+- Fix: `min_count:` and `fill_value:` are honoured where they were
+  ignored: reductions along one axis of a large contiguous array, `median`
+  / `percentile` / `quantile` over an unmasked array, object `wmean`
+  (which raised), and reductions of a lazy expression. A lazy reduction
+  over an empty array answers as the array's does (UNDEF), where it gave
+  `0.0` or the type's limits.
 
-- Fix: `sort_copy` without `axis:` on a `CAObject` no longer returns wrong
-  values or crashes when a garbage collection runs during the sort.
+- Fix: `min_index`, `max_index`, `min_addr` and `max_addr` never point at a
+  masked cell or a NaN; they reported position 0 when the extremum
+  equalled the type's limit.
 
-- Fix: `a[i]` with an index array of `a`'s own shape now checks the
-  indices when it reads or writes. An index out of range raises
-  `IndexError`; it used to read or write outside `a`, returning other
-  values or crashing. A negative index counts from the end of
-  `a.flatten`, as it does for other index arrays.
+- Fix: `count_masked` and `count_not_masked` with `axis:` answer the same
+  with or without a mask, take `keep_axis:`, `min_count:` and
+  `fill_value:`, and return an Integer when every axis is named.
+  `cumcount` works for every data type. `bincount_nd` skips a NaN weight.
+  A group scan with no category answers UNDEF instead of raising.
+  `CATimedelta` has `cumsum` and `accumulate`.
 
-- Fix: `dup` of a view made by indexing with an index array (`a[i]`) no
-  longer reads freed memory once the original view is collected. It used
-  to return other values, or crash.
+- Fix: a slice of a lazy expression returns the cells it names. A column
+  or inner box of a lazy comparison, and a stepped or reversed slice of
+  an expression that converts its input (`int16.lazy.sinh[(0...12).step(2)]`),
+  read the first cells in order instead.
 
-- Fix: `a[i]` with an index out of range no longer loses a copy of the
-  index array when it raises.
+- Fix: a lazy expression answers as the eager one does: it skips masked
+  cells where computing them could raise, works on an empty array beside
+  a scalar, gives `float32.lazy.arg` exactly, raises `DataTypeError` for
+  fixlen arithmetic, compares two fixlen arrays without overrunning its
+  buffer, and `clip` / `fma` / `fms` can be reduced, scanned and sorted.
 
-- Fix: `fill`, `[]=`, `elem_store`, `elem_swap` and `elem_copy` no longer
-  lose memory when they raise (a value of the wrong type, an index out of
-  range). Each call held one or two cells' worth, so it showed only on
-  wide cells, such as a large fixlen. Reads and writes through views that
-  raise on the way to their parent are covered the same way.
+- Fix: the mask of a lazy expression follows its operands on every read
+  (it was fixed at the first read), is read-only, and is not shared with
+  an operand: `expr.mask[i] = 1` used to mask the operand. Reductions
+  along an inner axis of `CArray.stack` over lazy expressions skip their
+  masked cells.
 
-- New: `CArray#set_attrs(hash)` sets several attributes at once;
-  `b.set_attrs(a.attrs)` gives `b` the attributes `a` shows. Keys `b`
-  already has and the Hash does not name are kept.
+- Fix: the mask of a read-only array is read-only, and `invert_mask` raises
+  on a frozen array or a lazy expression without changing anything. On a
+  selection or a transpose `invert_mask` now flips the parent's mask; it
+  did nothing.
 
-- Change: attributes set with `set_attr` now survive `copy` and `to_type`
-  (and its shorthands such as `int32`): the new array gets the attributes
-  the source shows, as its own. Arithmetic and reductions still start with
-  none. A lazy operation (`a.lazy + 1`, `a.lazy.sqrt`, …) no longer shows
-  the attributes of its left operand; `a.lazy` itself still shows `a`'s.
+- Fix: a boolean selection or a `shift` of a masked array follows later
+  changes to the array's mask; it kept answering the mask of its first
+  read.
 
-- Fix: a `CAObject` that keeps its mask in Ruby (`mask_copy_data` /
-  `mask_sync_data`, or `mask_fetch_addr` / `mask_store_addr`) is asked for
-  every read of its mask and handed every write. Assigning a whole mask
-  (`mask[] =`, `mask =`) passed the old mask to `mask_sync_data`, a partial
-  write such as `obj[0..1] = UNDEF` sent back cells that had never been
-  read, and `unmask`, `mask.fill`, `mask[i] =` and `obj[i] = UNDEF` did not
-  reach the hooks at all. `obj + 1` and `mask.copy` now carry the mask the
-  hooks give. A `CAObject` without mask hooks is unchanged.
+- Fix: storing into an array a value that reads from that same array
+  (`c[] = c.flip(0)`, `c[] = c.lazy + 1`) keeps the value's masked cells
+  masked; they were stored as values.
 
-- Fix: `invert_mask` on a selection (`x[x > 2]`) or a transpose (`x.T`)
-  flips the parent's mask; it did nothing. A block (`x[1..3]`) already
-  worked.
+- Fix: a `CAObject` that keeps its mask in Ruby is asked for every read of
+  its mask and handed every write; assigning a whole mask, partial writes,
+  `unmask` and `obj[i] = UNDEF` did not reach the hooks or passed the
+  wrong mask.
 
-- Fix: for C extensions: `CA_WITH_BUFFER_WRITABLE` and
-  `rb_ca_call_with_buffer` detach the array when writing it back raises;
-  they used to leave it attached. The macro changes once the extension is
-  rebuilt against this version. A raise from the body of `CA_WITH_BUFFER`
-  or `CA_WITH_BUFFER_WRITABLE` still leaves the array attached: use
-  `rb_ca_call_with_buffer` when the body can raise.
+- Fix: writes that were dropped now reach the array: a store through a
+  grid, boolean selection or `select_axis` on a `reshape` over a
+  `transpose`, `flip` or block; `seq!` and a store of another data type
+  through a window over whole inner axes; the in-place methods on a
+  `stack` or `meld` of selections or `CAObject`s; a partial write through
+  a `reshape` over a `tile`; byte-swapped values through a `stack` or
+  `meld`. `refer` with `offset:` reads its own cells' mask, and
+  `scatter_*!` through a converting view writes only the named cells.
 
-- Fix: these no longer leave an array attached when they raise part way:
-  `to_a` on an object, fixlen or Face array with a cell that cannot be
-  decoded; `wsum` and `wmean` refusing an argument; `histogram`,
-  `histogram1d` and `histogram2d` when the samples cannot be read; an
-  in-place operator such as `add!` when an operand's mask cannot be read;
-  `mask=` when writing the mask fails; and `CAConstString#eq` when the
-  other string cannot be read.
+- Fix: Faces stay Faces. The reductions of `windows` and `blocks`,
+  `block_view`, `sliding_windows`, `cummax` / `cummin`, `partition_copy`,
+  `then_else` and `mask_eq` / `mask_where` / `mask_invalid` return the
+  Face, in its own order; a `CATime` result came back as 8-byte strings or
+  raised, and `partition_copy` compared tick bytes. Assigning a `CATime` or
+  `CATimedelta` array through `[]=`, a boolean selection or an index array
+  stores it. A `CACategorical` raises where it has no order.
 
-- Fix: a boolean selection (`x[x > 2]`, `x[CA_BOOLEAN([1, 0, 1])]`) or a
-  `shift` of a masked array follows later changes to the array's mask.
-  Once read, it went on answering the mask as it was at that first read,
-  so cells masked or unmasked afterwards came out wrong.
+- Fix: the comparison operators on a `CAConstString` compare the strings;
+  they compared where each string sat in the buffer.
 
-- Fix: `add!`, `map!`, `seq!` and the other in-place methods on a
-  `CArray.stack` or `CArray.meld` whose parents are selections
-  (`x[x > 2]`) or `CAObject`s now write their cells back to the parents;
-  the writes were silently discarded. Parents that are whole arrays or
-  blocks were not affected. A parent whose write-back raises no longer
-  keeps the others from receiving theirs.
+- Fix: `abs` of an object array calls each cell's `abs`; `imag` of an
+  object array returns each cell's `imaginary`; `imag` of a real array
+  keeps the mask and is a new array each call; `b.real =` / `b.imag =`
+  after `b = a.dup` write into `b`. `hash` of an object array agrees with
+  `eql?`. `cond.then_else(x, UNDEF)` keeps `x`'s data type.
 
-- Fix: after a store into an object array fails to convert the value, the
-  array no longer answers every later access with "cyclic reference is not
-  allowed in CArray".
+- Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!` and
+  `scatter_replace!` work on a complex array; every `scatter_*!` crashed
+  the process there. `scatter_min!` / `scatter_max!` raise.
 
-- Fix: `CArray.sort_addr` with an object key whose elements do not compare
-  raises without leaving the keys attached or leaking its working memory.
+- Fix: `dup` and `clone` of `a.sort` and of `a[i]` with an index array of
+  `a`'s shape work; the methods a `CAShift` inherits from `CAWindow`
+  answer; `join(axis:)` over a zero-length axis gives `""` per cell; a
+  view with no cells can be copied, summed and written, and a boolean
+  selection along one axis keeps another axis of length zero;
+  `unmask(method: :linear)` on a string Face says it does not interpolate.
 
-- Fix: when an operand's mask cannot be read while a lazy expression builds
-  its own mask, the expression no longer keeps a half-built mask; asking
-  for the mask again builds it afresh.
+- Fix: MemoryView: a `CARecord` exports as its `T{...}` struct and a
+  `CAFixlenString` as `Ns` bytes; a frozen fixlen array can be exported;
+  `CATime`, `CATimedelta`, `CACategorical` and `CAConstString` are refused
+  by `memory_view_available?` with a reason (export `.ticks` or `.codes`)
+  instead of answering `true` and failing; `memory_view_reject_reason`
+  suggests `arr.copy`.
 
-- Fix: `CArray::AddressBasis.open` (used by carray-jit) no longer leaks when
-  it refuses an argument, and a region whose write-back raises no longer
-  keeps the other regions from being written back. An exception raised by
-  the block takes precedence over one raised by a write-back.
+- Fix: `CArray.load` refuses a file whose header fields disagree and checks
+  the size before allocating; `Marshal.load` of a view or a `CScalar`
+  works; a record array saved in the other byte order is swapped member by
+  member; `load_binary` into a read-only array raises before writing.
 
-- New: for C extensions, `ca_iter_ensure` runs a kernel-iterator walk whose
-  body can raise (one that calls back into Ruby) and finishes the walk
-  however the body leaves. The walk states belong in the caller's frame and
-  reach the body through its argument. Walks whose body cannot raise need
-  no change.
+- Fix: `CArray.struct` places or refuses a member's `offset:` (it was
+  dropped), and refuses a member at a negative offset or past the record,
+  which read and wrote outside the array. `CARecord.wrap` refuses elements
+  of another size.
 
-- Fix: a reduction, scan, sort, search or distinct-value method that raises
-  part way (an object element without `+`, two object elements `<=>` cannot
-  order, an object whose `#hash` raises, a search query that does not
-  convert to the array's type) no longer leaves the array attached or its
-  working buffers behind. This covers `unique`, `value_counts`, `nunique`,
-  `mode`, `is_in`, the set operations, `locate_addr` and `categorize`, and
-  the running statistics over groups such as
-  `v[cat, nil].cumsum(axis: :group)`.
+- Fix: no more reading or writing outside an array: shapes, block indices
+  and uint64 indices whose arithmetic overflows, `percentile(NaN)`, a
+  shape of more than 16 entries, and an index array of the array's own
+  shape with an index out of range are refused. Megabyte-wide fixlen cells
+  no longer raise `SystemStackError` in `search` and `count`.
 
-- Fix: an arithmetic or comparison operator that raises in the middle (an
-  object element without the method, an integer division by zero) no
-  longer leaves its operands attached. A bang form such as `add!` keeps the
-  cells it wrote before the raise, through a view as well.
+- Fix: no more crashes or wrong values from a garbage collection in the
+  middle of an operation on object arrays whose cells are computed (a
+  `CAObject`, a lazy expression, views of them), in `sort_copy`, or for
+  the `fill_value:` of an object `window` or `shift`, and `dup` of a view
+  made by an index array no longer reads freed memory.
 
-- Fix: a block, a conversion or an index check that raises part way
-  through `map!` and its family, `convert`, `[]=`, `seq!`, `random!`,
-  `randomn!`, `shuffle!`, the `scatter_*!` methods, `index2addr`,
-  `count(v)`, `==`, `map_slab`, or building a view from index arrays no
-  longer leaves an array attached. The cells written before the raise stay
-  written, and a view now writes them back to its parent as an entity
-  keeps them; previously a view dropped them and could go on reading its
-  stale buffer.
+- Fix: an operation that raises part way (a block, a conversion, an
+  object cell without the method, a division by zero, an argument that is
+  refused) leaves its arrays closed and frees its memory: the cells
+  written before the raise stay written, through a view as well, and the
+  array, a `CAObject` parent and later lazy expressions keep working.
+  Before, an array could stay attached or answer "cyclic reference" on
+  every access, and after 32 such errors every lazy expression failed with
+  "all 32 slots in use".
 
-- New: for C extensions, `ca_sync_detach` closes an attach window and
-  detaches even when the sync raises; written as `ca_sync` then
-  `ca_detach`, a raising sync leaves the array attached. `ca_attach_n` and
-  `ca_allocate_n` now attach all of their arrays or none, and `ca_allocate`
-  that raises takes nothing. No change is needed where nothing raises.
+- Fix: with an expression evaluator registered (carray-jit), two
+  expressions that differ only in which operand an operation reads no
+  longer share a compiled kernel. A store whose destination overlaps an
+  operand is computed by CArray, and a masked destination stays as it
+  would without the evaluator. Through `CArray::AddressBasis`, a view that
+  converts its cells sends back only the changed cells, and an overflowing
+  region is refused.
 
-- Fix: an assignment or bang method that fails on the way out (a read-only
-  parent, a backing whose write fails, values that do not convert) no longer
-  leaves the view attached. A companion gem that checks its backing on each
-  attach, such as carray-rmagick after a resize, now sees every later write.
-
-- Fix: storing through a selection, grid, `roll`, `tile`, axis selection
-  or `window` of a `CAObject` whose `sync_data` raises no longer leaves the
-  parent broken. The exception reaches the caller as before, and the parent
-  stays readable; previously the next read could abort the process.
-
-- Fix: a lazy reduction or an operator on two gathered views that raises
-  (an object cell that does not add, an integer division by zero) no longer
-  leaks state across the process. After 32 such errors, every later lazy
-  expression, numeric ones included, used to fail with "all 32 slots in use".
-
-- Fix: `CAMath.expm1` and `CAMath.log1p` answer a CArray in its own
-  `data_type`, as `CArray#expm1` / `#log1p` do: float32 input stays float32
-  and object input stays object (they used to return float64). Integer
-  input still widens to float64, and a plain Numeric is still accepted.
-
-- New: `value.segments(offsets:)` / `value.segments(lengths:)` return a
-  `CASegmentIterator`, the iterator-family member for consecutive runs of
-  cells: one value per segment from the same reductions, scans, `map` and
-  addresses as the other members. `CACategoricalIterator` now descends from
-  it (a categorical group-by is a sort followed by a segment reduction),
-  which does not change what it answers.
-
-- Fix: a running scan (`cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`)
-  on a `group_by_category` or `group_by_run` iterator with no category
-  answers UNDEF for every cell instead of raising `ArgumentError`, as it
-  already did for cells in no category.
-
-- New: `CArray.segment_offsets(lengths:)` and
-  `CArray.segment_index(lengths:)` / `CArray.segment_index(offsets:)`
-  convert between the lengths of consecutive segments, their boundaries
-  (`[0, ..., total]`, one more than the lengths) and the segment each
-  element belongs to. They count in int64, so a total beyond `2**53` stays
-  exact, which a `cumsum` (float64) does not. Offsets need not start at 0.
-
-- Fix: `scatter_add!`, `scatter_sub!`, `scatter_mul!` and `scatter_replace!`
-  work on a complex array, and take a `Complex` scalar as `vals`. Before,
-  every `scatter_*!` method crashed the process on a complex array.
-  `scatter_min!` and `scatter_max!` now raise `CArray::DataTypeError` there,
-  since complex values have no order.
-
-- Fix: for C extension authors: `ca_for_each_element.h`, `ca_for_buffer.h`,
-  `ca_sweep_engine.h` and `ca_triop_dispatch.h` are now installed with the
-  gem. Before, the `CA_FOR_EACH_ELEMENT` and `CA_WITH_BUFFER` /
-  `rb_ca_call_with_buffer` surface was exported by the library but could
-  not be included from a separately built gem, and the `fma` / `fms` /
-  `clip` dispatch tables were the one family missing from
-  `#include "carray.h"`.
-
-- Change: the global `CA_<TYPE>()` cast shorthands refuse the argument lists
-  they used to ignore. `CA_INT32(0, 2)` reads like the shape spelling
-  `CArray.int32(3, 3)` but is a cast, and answered with the scalar `0`;
-  it now raises `ArgumentError`, as does a third argument and a second
-  argument after anything but a `Range`. The one two-argument form is a
-  `Range` and its step, `CA_INT32(0..6, 2)`, which is unchanged, and so is
-  every single-argument call. `CA_FIXLEN`, which takes `bytes:` rather than a
-  step, already checked its own arity and is untouched.
+- Fix: for C extensions: a write walk through the block macros left with
+  `break` writes back its slab; writes into a `CAGrid`, `CASelectAxis`,
+  `CAWindow` or `CAShift` whose parent is a view reach the array;
+  `ca_iter_state_next_slab_strided` hands out the mask cursor of an entity
+  or strided view; the mask cursor of a walk over `CArray.stack` is the
+  walk's own copy; `CA_FOR_EACH_FIBER_PAIR` closes its first source when
+  the second fails. `ca_for_buffer.h`, `ca_sweep_engine.h` and
+  `ca_triop_dispatch.h` are installed with the gem. Rebuild the extension
+  to take the fixes.
 
 ## 3.0.2
 
