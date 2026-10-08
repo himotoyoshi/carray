@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `categorize(sort_labels: true)` takes one pass over the array, as
+  `categorize` does, instead of one pass per category (876,000 cells with
+  36,500 categories took 32 seconds). A lone Float NaN is now a category,
+  as it already was without `sort_labels:`.
+
 - Fix: `search`, `bsearch` and `search_nearest` compare a CArray query in
   the type the two arrays share on a float reference too (a float64 query
   is no longer rounded to a float32 array's type), and match integers of
