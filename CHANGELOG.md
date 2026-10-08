@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#resample(name, unit)` groups rows into time bins along a
+  time column or the time index and returns a `GroupedFrame`, so
+  `df.resample("time", "1 hour").mean` gives hourly means indexed by a
+  `CATime` in time order. `label: :right` makes a bin end at its label and
+  include it, as `(00:00, 01:00]` labelled `01:00`; `origin:` shifts the
+  bins; `fill: true` keeps empty bins as rows (`UNDEF` for `mean`, 0 for
+  `count`).
+- Change: the index of a frame reduced by `CAFrame#group_by` on one key
+  keeps the key's data type and Face: an integer key gives an integer
+  index and a `CATime` key a `CATime` index, where both were object arrays
+  of the values. A composite key's index is still an object array of tuples.
+
 - New: `CAFrame#describe` summarizes a frame one row per column, as a new
   frame: type, present and masked counts, distinct values, and min / max /
   mean / stddev where the column's kind has them (numbers, booleans, times;

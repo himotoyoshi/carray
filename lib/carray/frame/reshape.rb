@@ -118,8 +118,8 @@ class CAFrame
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
   private def pivot_plan(index, columns, aggregate)
-    rkey = pivot_key(index)
-    ckey = pivot_key(columns)
+    rkey = column_or_index(index)
+    ckey = column_or_index(columns)
     rlab = rkey.unique(sort: true)
     clab = ckey.unique(sort: true)
     nr = rlab.elements
@@ -225,8 +225,9 @@ class CAFrame
     CAFrame.new(out)
   end
 
-  # A pivot key is a column, or the index when +name+ is the row axis name.
-  private def pivot_key(name)
+  # A column, or the index when +name+ is the row axis name (pivot and resample
+  # keys may be either).
+  private def column_or_index(name)
     return @index if @index && !@columns.key?(name) && @axis_name == name
     self[name]
   end

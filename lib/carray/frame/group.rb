@@ -13,7 +13,67 @@ class CAFrame
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
     cat  = grouping_categorical(keys)
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
-    GroupedFrame.new(self, cat, axis, keys.grep(String))
+    key  = keys.size == 1 ? key_column(keys.first) : nil
+    GroupedFrame.new(self, cat, axis, keys.grep(String), key: key)
+  end
+
+  # Group rows into time bins of length +unit+ along the time column (or the
+  # time index) +name+, for the reductions GroupedFrame offers:
+  #
+  #   df.resample("time", "1 hour").mean
+  #   df.resample("time", "1 day", fill: true).aggregate("rain" => ["rain", :sum])
+  #
+  # The result's index is the bin labels as a CATime, in time order, and its
+  # row axis is named after +name+.
+  #
+  # +label: :left+ (the default) makes each bin start at its label and hold
+  # the times at or after it: [00:00, 01:00) is labelled 00:00. +label: :right+
+  # makes it end at its label and hold the times up to and including it:
+  # (00:00, 01:00] is labelled 01:00, the convention for a value that
+  # describes the hour before it. +origin:+ shifts the bins as +CATime#floor+
+  # does ("1 hour" with origin 00:30 gives 00:30, 01:30, ...).
+  #
+  # Without +fill:+, a bin with no rows does not appear. With +fill: true+
+  # every bin from the first to the last is a row, and an empty one reduces
+  # as an empty reduction does: UNDEF for +mean+, 0 for +count+ and +sum+.
+  # A row whose time is masked belongs to no bin.
+  #
+  # @param name [String] the time column, or the index's axis name.
+  # @param unit [String, Symbol, CATime::Resolution] the bin length.
+  # @param origin [nil, Time, String, CATime::Element] where bins start.
+  # @param label [:left, :right] which end of a bin names it and is closed.
+  # @param fill [Boolean] whether bins with no rows are rows of the result.
+  # @return [GroupedFrame]
+  # @raise [ArgumentError] when the column is not a CATime, or +label:+ is
+  #   neither :left nor :right.
+  def resample(name, unit, origin: nil, label: :left, fill: false)
+    name = name.to_s
+    time = column_or_index(name)
+    unless time.is_a?(CATime)
+      raise ArgumentError, "resample: #{name.inspect} is not a time column (got #{time.class})"
+    end
+    bins =
+      case label
+      when :left  then time.floor(unit: unit, origin: origin)
+      when :right then time.ceil(unit: unit, origin: origin)
+      else
+        raise ArgumentError, "resample: label: must be :left or :right (got #{label.inspect})"
+      end
+    grid = fill && bins.count_not_masked > 0 ? resample_grid(bins, unit) : bins.unique(sort: true)
+    cat = CACategorical.from_codes(bins.locate_addr(grid), grid.to_a)
+    GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [], index: grid)
+  end
+
+  # Every bin from the first occupied one to the last. A fixed-length bin
+  # steps from the first bin, so an origin's phase is kept; a month or a year
+  # cannot be stepped on a finer grid and is laid on its own unit, where
+  # bins start on the calendar boundary anyway.
+  private def resample_grid(bins, unit)
+    if %i[Y M].include?(CATime::Resolution.parse(unit).base)
+      CArray.time_range(bins.min, bins.max, unit: unit)
+    else
+      CArray.time_range(bins.min, bins.max, unit: bins.unit, step: unit)
+    end
   end
 
   # Number of rows currently selected — used by group per-group view-frames
@@ -66,12 +126,19 @@ class GroupedFrame
   # +key_names+ are the frame columns the grouping was keyed on. They become
   # the result's index, so the reduction shortcuts must not also return them as
   # reduced columns; an external CArray key contributes no name.
-  def initialize(frame, cat, axis_name, key_names = [])
+  #
+  # The result's index is +index:+ when given (one entry per group, in code
+  # order); otherwise, for a single +key:+, the key's value at each group's
+  # first row, so it keeps the key's data type and Face; otherwise an object
+  # array of the labels (a composite key's tuples).
+  def initialize(frame, cat, axis_name, key_names = [], index: nil, key: nil)
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
     @key_names = key_names
     @labels    = cat.labels          # group values, in code order
+    @index     = index
+    @key       = key
   end
 
   # Number of groups.
@@ -162,7 +229,9 @@ class GroupedFrame
   end
 
   private def label_index
-    CArray.object(@labels.size) { |i| @labels[i] }
+    return @index if @index
+    return CArray.object(@labels.size) { |i| @labels[i] } unless @key
+    @key.project(group_perm[group_bounds[0...ngroup]])
   end
 
   NON_NUMERIC = [:object, :boolean, :fixlen].freeze
