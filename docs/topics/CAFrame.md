@@ -235,6 +235,25 @@ Options: `sep:` (default `","`), `quote:` (`'"'`), `strip:` (trim spaces from
 unquoted fields, default `false` = RFC 4180 spacing), `encoding:`
 (default `"bom|utf-8"`, strips a BOM).
 
+**A file in another encoding** is read by naming its encoding and the one to
+transcode to. A CSV written by Excel in Japanese is CP932 — what Windows calls
+Shift_JIS, with the characters plain Shift_JIS lacks (`①`, `髙`, `㈱`):
+
+```ruby
+df = CAFrame.from_csv("obs.csv", encoding: "CP932:UTF-8")
+df["地点"]                         # names and cells are UTF-8
+
+File.open("obs.csv", "r:CP932:UTF-8") { |io| CAFrame.from_csv(io) }
+```
+
+Name both halves. `encoding: "CP932"` alone reads the file but leaves names and
+cells in CP932, so `df["地点"]` written in UTF-8 source finds no column. Naming
+plain `Shift_JIS` for an Excel file reads until the first character it lacks,
+then raises `Encoding::UndefinedConversionError`. Left at the default, a file
+that is not UTF-8 raises `invalid byte sequence in UTF-8`; both errors say to
+pass `encoding:`. Which encoding a file is in cannot be told from its bytes, so
+the message names the option, not a value.
+
 For files with a preamble, a units row, or no header, pass a **reading-control
 block** — `skip(n)` / `header` / `header(name)` / `column_names(...)` / `body`:
 
@@ -783,6 +802,14 @@ empty string is written quoted (`""`) to stay distinct from missing. Fields
 containing the separator, a quote, or a newline are quoted with internal quotes
 doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
 `index` default to true.
+
+`encoding:` transcodes the text before it is written or returned; left out,
+the CSV is UTF-8. A character the encoding cannot hold raises
+`Encoding::UndefinedConversionError` instead of being dropped:
+
+```ruby
+df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+```
 
 ### Looking at a frame — `to_table`, `p`, `puts`
 

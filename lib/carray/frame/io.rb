@@ -30,7 +30,10 @@ class CAFrame
   #   strip:    trim spaces from unquoted fields (default false, RFC spacing)
   #   +encoding+: open-mode encoding for a path (default "bom|utf-8", strips a
   #             BOM). It has nothing to open when +source+ is an IO, so there
-  #             the IO's own encoding governs and a BOM is the caller's.
+  #             the IO's own encoding governs and a BOM is the caller's. To
+  #             read a file in another encoding, name it and the one to
+  #             transcode to: "CP932:UTF-8" for a CSV written by Excel in
+  #             Japanese.
   #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
   #             sep/quote/strip/encoding and any block are that parser's concern.
@@ -60,10 +63,17 @@ class CAFrame
       if parser
         parser.call(source)
       elsif source.respond_to?(:gets)
-        read_csv(source, sep: sep, quote: quote, strip: strip, &block)
+        with_encoding_hint("open the IO in the file's encoding, as in " \
+                           "File.open(path, \"r:<file encoding>:UTF-8\")") do
+          read_csv(source, sep: sep, quote: quote, strip: strip, &block)
+        end
       else
-        File.open(source, "r:#{encoding}") do |io|
-          read_csv(io, sep: sep, quote: quote, strip: strip, &block)
+        with_encoding_hint("it was opened as #{encoding.inspect}; pass the " \
+                           "file's encoding, as in " \
+                           "encoding: \"<file encoding>:UTF-8\"") do
+          File.open(source, "r:#{encoding}") do |io|
+            read_csv(io, sep: sep, quote: quote, strip: strip, &block)
+          end
         end
       end
 
@@ -87,6 +97,21 @@ class CAFrame
   end
 
   private_class_method :read_csv
+
+  # Re-raise a failure to decode the input with a line saying how to name the
+  # file's encoding. The error and its class are kept; only the message grows.
+  # Which encoding the file is in cannot be told from its bytes, so the hint
+  # names the option, not a value.
+  def self.with_encoding_hint(hint)
+    yield
+  rescue Encoding::InvalidByteSequenceError, Encoding::UndefinedConversionError,
+         ArgumentError => e
+    raise if e.is_a?(ArgumentError) && !e.message.include?("invalid byte sequence")
+    raise e.class, "#{e.message} -- the CSV is not in the encoding it was " \
+                   "read as: #{hint}", e.backtrace
+  end
+
+  private_class_method :with_encoding_hint
 
   # Build a frame from parsed [names, rows]. When names is nil (headerless and
   # no column_names) positional names "c0".."cN" are generated from the widest
@@ -112,8 +137,14 @@ class CAFrame
   #   csv = df.to_csv               # get a String
   #
   # Options: +sep+ / +quote+ mirror +from_csv+; +header+ writes the name row
-  # (default true); +index+ writes the index column (default true).
-  def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true)
+  # (default true); +index+ writes the index column (default true);
+  # +encoding+ transcodes the text before it is written or returned (default
+  # nil leaves it as built, normally UTF-8). A character the encoding cannot
+  # hold raises Encoding::UndefinedConversionError rather than being dropped.
+  #
+  #   df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+  def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
+             encoding: nil)
     nd = @columns.find { |_, c| c.ndim != 1 }
     if nd
       raise ArgumentError,
@@ -140,8 +171,10 @@ class CAFrame
       out << formatted.map { |fcol| quote_csv_field(fcol[i], sep, quote) }.join(sep) << "\n"
     end
 
+    out = out.encode(encoding) if encoding
+
     if path
-      File.write(path, out)
+      File.binwrite(path, out)
       self
     else
       out

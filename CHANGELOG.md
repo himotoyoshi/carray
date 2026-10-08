@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#to_csv` takes `encoding:` and transcodes the text before
+  writing or returning it, as in `df.to_csv("out.csv", encoding: "CP932")`
+  for Excel in Japanese. Left out, the CSV is UTF-8 as before. A character
+  the encoding cannot hold raises `Encoding::UndefinedConversionError`.
+- Change: `CAFrame.from_csv` on a file that is not in the encoding it was
+  read as now says to pass `encoding:` (for example `"CP932:UTF-8"` for a
+  CSV written by Excel in Japanese), or for an IO, to open it in the file's
+  encoding. The error class is unchanged.
+
 - Fix: `search`, `bsearch` and `search_nearest` compare a CArray query in
   the type the two arrays share on a float reference too (a float64 query
   is no longer rounded to a float32 array's type), and match integers of

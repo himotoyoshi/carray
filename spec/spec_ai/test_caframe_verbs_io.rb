@@ -311,6 +311,49 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
     CAFrame.from_csv(:whatever, parser: ->(src) { seen = src; [["a"], [["1"]]] })
     assert_equal :whatever, seen
   end
+
+  # --- files in another encoding -----------------------------------------
+
+  CP932_TEXT = "地点,備考\n東京,①髙橋㈱\n".encode("CP932")
+
+  def with_bytes(bytes)
+    Tempfile.create(["obs", ".csv"]) do |f|
+      f.binmode
+      f.write(bytes)
+      f.flush
+      yield f.path
+    end
+  end
+
+  def test_encoding_reads_and_transcodes_a_cp932_file
+    with_bytes(CP932_TEXT) do |path|
+      df = CAFrame.from_csv(path, encoding: "CP932:UTF-8")
+      assert_equal ["地点", "備考"], df.variable_names
+      assert_equal ["①髙橋㈱"], df["備考"].to_a
+    end
+  end
+
+  def test_a_file_in_another_encoding_names_the_option
+    with_bytes(CP932_TEXT) do |path|
+      e = assert_raise(ArgumentError) { CAFrame.from_csv(path) }
+      assert_match(/invalid byte sequence/, e.message)
+      assert_match(/encoding: "<file encoding>:UTF-8"/, e.message)
+    end
+  end
+
+  def test_a_failed_transcode_keeps_its_class_and_names_the_option
+    with_bytes(CP932_TEXT) do |path|
+      e = assert_raise(Encoding::UndefinedConversionError) do
+        CAFrame.from_csv(path, encoding: "Shift_JIS:UTF-8")
+      end
+      assert_match(/"Shift_JIS:UTF-8"/, e.message)
+    end
+  end
+
+  def test_an_io_in_another_encoding_names_how_to_open_it
+    e = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CP932_TEXT.dup.force_encoding("UTF-8"))) }
+    assert_match(/File\.open\(path, "r:<file encoding>:UTF-8"\)/, e.message)
+  end
 end
 
 class TestCAFrameToCsv < Test::Unit::TestCase
@@ -391,6 +434,28 @@ class TestCAFrameToCsv < Test::Unit::TestCase
     df = CAFrame.new("a" => CA_INT32([]), "b" => CA_FLOAT64([]))
     assert_equal "a,b\n", df.to_csv
     assert_equal "", df.to_csv(header: false)
+  end
+
+  # --- encoding: -------------------------------------------------------
+
+  def test_encoding_transcodes_the_text
+    df = CAFrame.new("地点" => CA_OBJECT(["東京", "①"]))
+    csv = df.to_csv(encoding: "CP932")
+    assert_equal Encoding::Windows_31J, csv.encoding
+    assert_equal "地点\n東京\n①\n".encode("CP932"), csv
+  end
+
+  def test_encoding_is_written_to_the_file
+    df = CAFrame.new("地点" => CA_OBJECT(["東京"]))
+    Tempfile.create(["sj", ".csv"]) do |f|
+      df.to_csv(f.path, encoding: "CP932")
+      assert_equal "地点\n東京\n".encode("CP932").b, File.binread(f.path)
+    end
+  end
+
+  def test_encoding_refuses_a_character_it_cannot_hold
+    df = CAFrame.new("a" => CA_OBJECT(["😀"]))
+    assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
   end
 end
 
