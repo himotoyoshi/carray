@@ -173,19 +173,28 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
     if ( elements != NUM2SIZE(rb_ca_elements(argv[j])) ) {
       rb_raise(rb_eArgError, "elements mismatch");
     }
-    /* Face gate: descend a Face to its storage and build attach / comparator
-       / template output on that plain storage (this also removes the SEGV
-       from a face-lifted NULL-ptr index output).  A fixlen storage sorts by
-       memcmp (the default order for fixlen, as for a plain fixlen array); a
-       numeric storage requires ORDERABLE so the numeric order equals the
-       surface order, else it raises. */
+    /* Face gate: an ORDERABLE Face sorts by its storage, so it descends to
+       it (attach / comparator / template output then run on plain storage,
+       which also avoids a face-lifted NULL-ptr index output).  A fixlen
+       storage that is not ORDERABLE (CAConstString's offsets, a record's
+       bytes) has no order in its bytes; the Face's own order stands in for
+       it, as a dense rank, so ties stay ties for the next key.  A Face that
+       has no order (CARecord without order_by:) raises there.  Any other
+       storage raises here. */
     TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca_j);
     if ( ca_is_face(ca_j) ) {
       int orderable = ca_test_flag(ca_j, CA_FLAG_FACE_ORDERABLE_STORAGE);
       VALUE stripped = rb_ca_strip_face_value(argv[j]);
       CArray *sc;
       TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
-      if ( sc->data_type != CA_FIXLEN && ! orderable ) {
+      if ( sc->data_type == CA_FIXLEN && ! orderable ) {
+        VALUE opts = rb_hash_new();
+        rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+        argv[j] = rb_funcallv_kw(argv[j], rb_intern("order"), 1, &opts,
+                                 RB_PASS_KEYWORDS);
+        continue;
+      }
+      if ( ! orderable ) {
         rb_raise(rb_eArgError,
                  "sort_addr: Face-typed input (%s) is not orderable by "
                  "storage; use ca.parent to descend to storage",
