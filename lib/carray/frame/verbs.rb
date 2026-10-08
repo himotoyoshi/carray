@@ -198,7 +198,7 @@ class CAFrame
       next unless string_column?(col)
       text = time_text_of(col)
       type = text.__infer_number_type_of_text__
-      type ||= :time if time_text_column?(text)
+      type ||= :time if first_present_cell_can_be_time_text?(col) && time_text_column?(text)
       types[key] = type if type
     end
   end
@@ -553,6 +553,24 @@ class CAFrame
   # nil, UNDEF and a blank String are missing values.
   private def missing_text?(cell)
     cell.nil? || UNDEF.equal?(cell) || (cell.is_a?(String) && cell.strip.empty?)
+  end
+
+  # A column is time text only if every present cell is, so one cell that
+  # holds something and does not read settles it without reading the rest.
+  # Only a refusal is taken from it: a blank cell says nothing.
+  private def first_present_cell_can_be_time_text?(col)
+    i = 0
+    if col.has_mask?
+      present = col.is_not_masked.where
+      return true if present.elements == 0
+      i = present[0]
+    end
+    return true if col.elements == 0
+    unreadable = []
+    time_text_of(col[i..i]).__parse_time_text__(nil, unreadable)
+    unreadable.empty?
+  rescue RangeError
+    true
   end
 
   # Whether every present cell of a text column is year-first text, and one

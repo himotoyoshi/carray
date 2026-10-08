@@ -126,6 +126,13 @@ class TestCAFrameCastTime < Test::Unit::TestCase
     assert_equal :object, df["bad"].data_type
   end
 
+  def test_a_blank_first_cell_does_not_stop_a_time_column
+    df = CAFrame.from_csv(StringIO.new("t,u\n,x\n2024-01-02,2024-01-02\n2024-01-03,2024-01-03\n"),
+                          types: :infer)
+    assert_kind_of CATime, df["t"]
+    assert_equal :object, df["u"].data_type
+  end
+
   def test_on_error
     e = assert_raise(CAFrame::UnreadableColumn) { frame.cast("bad" => :time, on_error: :raise) }
     assert_match(/column "bad", row 1 "2024-13-01" cannot be read as time/, e.message)
