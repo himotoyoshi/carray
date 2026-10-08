@@ -72,6 +72,31 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `:int64` and a date such as `"01/02/2024"` stay text. Without `:infer`
   nothing is inferred.
 
+- New: `CAFrame.from_csv` takes `missing:` for a file that spells missing
+  values its own way: `missing: ["-999", "///"]` for every column, or a
+  Hash such as `{ default: "-999", "id" => [] }` where a column name
+  replaces the default for that column. A field whose text is a token is
+  `UNDEF`, before `types:` casts. Tokens are Strings matched against the
+  field's text, so `"-999"` does not match `-999.0`. `CAFrame#to_csv` takes
+  the same `missing:` and writes a masked cell as the token instead of an
+  empty field (`""` keeps the empty field), raising if a value would be
+  written as the same text.
+
+- New: `CAFrame#pivot` spreads a long frame into a wide one (one row per
+  distinct `index:` value, one column per distinct `columns:` value), and
+  `CAFrame#melt` stacks columns back into a long one. A pair no row carries
+  is UNDEF. `pivot` raises on a repeated pair unless `aggregate:` names a
+  reduction (`:mean`, `:sum`, ...), and takes several value columns
+  (`values: ["temp", "rh"]` gives `temp_<label>`, `rh_<label>`).
+  `CAFrame#pivot_grid` returns the same cells as one 2-D CArray together
+  with its row and column keys. The result of `melt` is a view of the wide
+  frame, so its value columns must share one data type.
+
+- Fix: `categorize(sort_labels: true)` takes one pass over the array, as
+  `categorize` does, instead of one pass per category (876,000 cells with
+  36,500 categories took 32 seconds). A lone Float NaN is now a category,
+  as it already was without `sort_labels:`.
+
 - New: `CAFrame#to_csv` takes `encoding:` and transcodes the text before
   writing or returning it, as in `df.to_csv("out.csv", encoding: "CP932")`
   for Excel in Japanese. Left out, the CSV is UTF-8 as before. A character

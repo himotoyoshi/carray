@@ -24,7 +24,7 @@ That escape-first stance is the whole idea:
   slices share storage with the frame they came from, so writing to one writes
   to the other. `copy` is the only way to cut the link
   ([Ownership](#ownership--columns-are-shared-views-copy-is-the-only-cut),
-  [§12](#12-view-copy-and-aliasing)).
+  [§13](#13-view-copy-and-aliasing)).
 
 ```ruby
 require "carray"
@@ -82,7 +82,7 @@ CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t").nrow   # => 3
 
 Such a frame is an ordinary one. `at`, `filter`, `head`, `sort_by_key`, `align`,
 `copy`, `to_csv` and `to_records` all work on it, reading and carrying the index
-the same way they carry a column (§12). What does not work is asking for the
+the same way they carry a column (§13). What does not work is asking for the
 index as a column — `df["t"]` raises `KeyError`, because the index is not one
 (§3) — and `to_ca`, which has no column to stack.
 
@@ -144,7 +144,7 @@ df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
 ```
 
 Which operations share and which copy is listed operation by operation in
-[§12](#12-view-copy-and-aliasing).
+[§13](#13-view-copy-and-aliasing).
 
 ---
 
@@ -243,6 +243,34 @@ df = CAFrame.from_csv("obs.csv")
 df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :int64 }
 df.cast(df.infer_types.merge("count" => :int32))
 ```
+
+**A file's own spelling of missing.** An unquoted empty field, and a cell a
+short row never reached, are `UNDEF` without asking. Files that write missing
+some other way — a `-999` sentinel, `///`, `NA` — say so with `missing:`. A
+field whose text is one of the tokens becomes `UNDEF` **before** `types:`
+casts, so the sentinel never reaches the column as a number:
+
+```ruby
+CAFrame.from_csv("obs.csv", missing: ["-999", "///"],
+                 types: { "temp" => :float64 })
+# -999 and /// are UNDEF in every column; temp is float64 without a -999.0 in it
+
+CAFrame.from_csv("obs.csv", missing: { default: "-999", "rh" => ["-999", "-"], "id" => [] })
+# -999 in every column; rh also takes "-"; in id, -999 is a real value
+```
+
+In a Hash, `default:` gives the tokens for every column and a **column name
+gives that column's own, replacing the default** (`[]` or `""` for none).
+Without `default:`, the columns the Hash does not name keep only the empty
+field. `default:` is a Symbol and column names are Strings, so the two cannot
+collide; any other Symbol key raises.
+
+Tokens are **Strings, compared with the field's text as read** — after
+`strip:`, whether the field was quoted or not. So `"-999"` does not match
+`-999.0`, and a number given as a token (`missing: -999`) raises instead of
+quietly matching some spellings and not others. `""` means the empty field,
+which is missing already, so a quoted `""` stays the empty string. A Hash
+naming a column the file does not have raises `KeyError`.
 
 Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
@@ -828,6 +856,21 @@ the CSV is UTF-8. A character the encoding cannot hold raises
 df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
 ```
 
+`missing:` writes a masked cell as a given String instead of an empty field,
+for a reader that expects a sentinel. It takes the same forms as on
+`from_csv` — one String, or a Hash with `default:` and per-column overrides
+(the index goes by its axis name), where `""` is the empty field — so the same
+argument reads the file back with the mask in place:
+
+```ruby
+spec = { default: "-999", "comment" => "" }
+df.to_csv("out.csv", missing: spec)
+CAFrame.from_csv("out.csv", missing: spec)   # the mask comes back
+```
+
+If a real value would be written as a column's token, the file could not tell
+the two apart, so `to_csv` raises and names the column and row.
+
 ### Looking at a frame — `to_table`, `p`, `puts`
 
 ```ruby
@@ -1315,7 +1358,121 @@ position.
 
 ---
 
-## 11. Metadata readers
+## 11. Reshaping — `pivot`, `pivot_grid`, `melt`
+
+Observations often arrive **long**: one row per (time, station) pair. To put
+the stations side by side, spread the long frame into a **wide** one with
+`pivot`; `melt` goes the other way.
+
+```ruby
+long = CAFrame.new(
+  "time"    => CA_INT32([2, 1, 1, 2, 3]),
+  "station" => CA_OBJECT(["tokyo", "tokyo", "osaka", "osaka", "tokyo"]),
+  "temp"    => CA_FLOAT64([20.0, 10.0, 11.0, 21.0, 30.0]),
+)
+
+wide = long.pivot(index: "time", columns: "station", values: "temp")
+wide.variable_names   # => ["osaka", "tokyo"]
+wide.index.to_a       # => [1, 2, 3]
+wide["osaka"].to_a    # => [11.0, 21.0, UNDEF]
+wide["tokyo"].to_a    # => [10.0, 20.0, 30.0]
+```
+
+### `pivot` — long to wide
+
+`pivot(index:, columns:, values:)` makes each distinct value of the `index` key
+a row and each distinct value of the `columns` key a column; the cell where
+they cross holds `values` from the row that carried that pair.
+
+- Both keys are **sorted ascending**. The `index` key becomes the result's
+  index and names its row axis; the `columns` key values become column names
+  through `to_s`.
+- A pair **no row carries is UNDEF** (osaka at time 3 above), and so is a pair
+  whose value is masked. A row whose `index` or `columns` key is masked belongs
+  to no cell and is left out.
+- `index:` may name the frame's index as well as a column.
+- A value column with trailing dimensions keeps them in every output column. A
+  Face column (a time column, say) stays that Face, and so does a Face index.
+- The result is a **new frame**; it shares no storage with the long one.
+
+`values:` may be an **Array** of column names. Every one is spread over the same
+rows and columns, and the output columns are named `"<value>_<label>"`, all of
+the first value's columns before the next's:
+
+```ruby
+long.pivot(index: "time", columns: "station", values: ["temp", "rh"])
+# columns: temp_osaka, temp_tokyo, rh_osaka, rh_tokyo
+```
+
+Two output columns that would share a name raise.
+
+**Repeated pairs.** Without `aggregate:`, two rows with the same pair raise —
+`pivot` places values, it does not combine them. Pass `aggregate:` with a
+reduction name (`:mean`, `:sum`, `:max`, `:count`, …) and every pair holds that
+reduction over the rows that carry it:
+
+```ruby
+hourly.pivot(index: "day", columns: "station", values: "temp", aggregate: :mean)
+```
+
+Masked values are left out of the reduction, as in any reduction, so a pair
+whose values are all masked is UNDEF. A pair **no row carries stays UNDEF
+whatever the reduction, `:count` included** — "counted none" and "no such pair"
+stay distinguishable. `aggregate:` needs one-dimensional value columns.
+
+### `pivot_grid` — the same cells as one CArray
+
+When the next step is array arithmetic rather than named columns,
+`pivot_grid` returns the cells as a single CArray, with the two key arrays that
+label its axes:
+
+```ruby
+temp, times, stations = long.pivot_grid(index: "time", columns: "station",
+                                        values: "temp")
+temp.shape            # => [3, 2]
+stations.to_a         # => ["osaka", "tokyo"]
+temp.mean(axis: 0)    # => mean per station: [16.0, 20.0]
+```
+
+Axis 0 follows the `index` key and axis 1 the `columns` key; any trailing
+dimensions of the value column come after them. Missing pairs, masked keys,
+repeats and `aggregate:` behave as in `pivot`, and the grid keeps the value
+column's data type, Face included. It takes one value column; call it once per
+column for several.
+
+### `melt` — wide to long
+
+`melt` stacks value columns one after another into a single column, with a
+column naming where each row came from and the id columns repeated alongside:
+
+```ruby
+wide = CAFrame.new("time"  => CA_INT32([1, 2, 3]),
+                   "tokyo" => CA_FLOAT64([10, 20, 30]),
+                   "osaka" => CA_FLOAT64([11, 21, 31]))
+
+long = wide.melt(id: "time")
+long.variable_names     # => ["time", "variable", "value"]
+long["variable"].to_a   # => ["tokyo", "tokyo", "tokyo", "osaka", "osaka", "osaka"]
+long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
+```
+
+- With no `value_columns:`, every column that is not an id is melted.
+  `var_name:` and `value_name:` rename the two new columns.
+- When the frame has an index, it is carried as an id column named after the
+  row axis.
+- Masked cells stay masked.
+- The result is a **view-frame**: the value column is a `CArray.meld` of the
+  melted columns and each id column a `CArray.meld` of itself, so writing the
+  result reaches the wide frame. `copy` it if you want it detached.
+- Because it is a view, the value columns must share **one data type** and one
+  trailing shape. Mixed types raise rather than being promoted silently; `cast`
+  them first.
+
+`melt` followed by `pivot` on the same keys gives the wide frame back.
+
+---
+
+## 12. Metadata readers
 
 Each reader returns a **fresh** object — the live columns Hash is never
 exposed.
@@ -1341,7 +1498,7 @@ having its own API — e.g. `df.select(*df.variable_names[1..])` or
 
 ---
 
-## 12. View, copy, and aliasing
+## 13. View, copy, and aliasing
 
 Frame view/copy semantics follow CArray exactly:
 
@@ -1373,6 +1530,8 @@ Frame view/copy semantics follow CArray exactly:
 | `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
 | `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
 | `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
+| `df.pivot(...)` / `df.pivot_grid(...)` | a **new frame** / a **new CArray** sharing nothing — each cell is gathered from the row that carried its pair, and a missing pair has to become UNDEF (§11) |
+| `df.melt(...)` | a **view-frame** — the value column is a `CAMeld` of the melted columns and each id column a `CAMeld` of itself, so writes reach this frame; only the column naming the source is new (§11) |
 | `grouped.table { \|sub\| }` | each `sub` is a **view-frame** of that group's rows — writing it reaches the grouped frame (§9) |
 | `df.each_row` | a Hash of **raw cells** per row: a scalar cell is a Ruby value, an N-D cell is a **live view** of that row's slice (§7) |
 | `df.to_records` | plain Ruby Hashes — values normalized (`CArray` -> `Array`, UNDEF -> `nil`), so independent of the frame (§7) |

@@ -1,9 +1,9 @@
 # Test for CArray#__factorize_appearance__ (the single-pass factorization behind
 # CArray#categorize) and the categorize integration that dispatches to it.
 #
-# Contract: with automatic (labels: nil) appearance-order vocabulary and
-# sort_labels: false, categorize routes the integer / float / object / fixlen
-# lanes through the one-pass factorizer. For lanes/values where the hash-key
+# Contract: with automatic (labels: nil) vocabulary, categorize routes the
+# integer / float / object / fixlen lanes through the one-pass factorizer;
+# sort_labels: true sorts its levels and renumbers the codes. For lanes/values where the hash-key
 # distinctness agrees with the old discovery path (integer, plain float, plain
 # strings/fixlen) the codes + levels + mask are identical, pinned here against a
 # reproduced discovery reference. Three cases diverge deliberately, aligning
@@ -121,6 +121,31 @@ class TestFactorizeAppearance < Test::Unit::TestCase
     a = CArray.int32(6) { |i| [3, 1, 3, 7, 1, 3][i] }
     cat = a.categorize(sort_labels: true)
     assert_equal [1, 3, 7], cat.labels
+  end
+
+  # sort_labels renumbers the appearance-order codes through the sorted rank,
+  # so every cell must still decode to its own value and masked cells stay out.
+  def assert_sorted_categorize_decodes (a, msg)
+    cat = a.categorize(sort_labels: true)
+    assert_equal a.mask_duplicates[:is_not_masked].to_a.sort, cat.labels, "#{msg}: labels"
+    assert_equal a.is_masked.to_a, cat.codes.is_masked.to_a, "#{msg}: mask positions"
+    a.elements.times do |i|
+      next if a.is_masked[i]
+      assert_equal a[i], cat.labels[cat.codes[i]], "#{msg}: cell #{i}"
+    end
+  end
+
+  def test_sort_labels_codes_decode
+    a = CArray.int32(8) { |i| [3, 1, 3, 7, 1, 3, 7, 1][i] }
+    a[2] = UNDEF
+    assert_sorted_categorize_decodes(a, "int32 masked")
+    assert_sorted_categorize_decodes(CA_OBJECT(%w[west east north east west]), "strings")
+  end
+
+  def test_sort_labels_codes_decode_uint16
+    a = CArray.int32(1000) { |i| (i * 37) % 300 }
+    assert_equal CA_UINT16, a.categorize(sort_labels: true).codes.data_type
+    assert_sorted_categorize_decodes(a, "k=300 uint16")
   end
 
   # --- lanes that agree with the discovery path (equivalence pinned) ----------
