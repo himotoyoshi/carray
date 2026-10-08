@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an Integer scalar given to `scatter_add!`, `scatter_replace!` and the
+  rest of the family is written exactly: it went through a double, so an
+  int64 value above 2**53 was rounded. `self[addrs] = v` was already exact.
+
 - Fix: `CAMath.atan2`, `hypot`, `copysign`, `logaddexp`, `nextafter` and
   `fmod` answer a float32 CArray in float32 and an integer CArray to `fmod`
   in its own type, as the methods of the same name do. They converted every
