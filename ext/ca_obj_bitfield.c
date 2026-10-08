@@ -33,6 +33,8 @@ typedef struct {
   ca_size_t   bit_offset;
   uint64_t  bit_mask;
   ca_size_t   bit_start;  /* original offset before endian adjustment */
+  ca_size_t   bit_length; /* width of the field in bits */
+  int8_t      sign_extend; /* the field is read as a signed integer */
 } CABitfield;
 
 static size_t
@@ -74,23 +76,6 @@ static int8_t CA_OBJ_BITFIELD;
 
 static VALUE rb_cCABitfield;
 
-/* The width of the field: the bits set in its mask.  The mask is placed
-   at the field's offset within an 8-byte load, so it is counted over all
-   64 bits, not over the width of the value type (a field that starts
-   inside a byte reaches past it). */
-static ca_size_t
-bitfield_bitlen (uint64_t bit_mask)
-{
-  ca_size_t count = 0;
-  ca_size_t i;
-  for (i=0; i<64; i++) {
-    if ( ( bit_mask >> i ) & 1 ) {
-      count++;
-    }
-  }
-  return count;
-}
-
 /* Generic per-cell fetch: load up to 8 bytes from src starting at
    byte_offset, mask with bit_mask, shift down by bit_offset, and
    write the low `dwrite` bytes of the result to dst.
@@ -104,8 +89,10 @@ static void
 bitfield_fetch(char *dst, ca_size_t dbytes,
                    char *src, ca_size_t sbytes,
                    ca_size_t byte_offset, ca_size_t bit_offset, uint64_t bit_mask,
+                   ca_size_t bit_length, int sign_extend,
                    ca_size_t elements)
 {
+  uint64_t sign = ( sign_extend && bit_length < 64 ) ? ( 1ULL << ( bit_length - 1 ) ) : 0;
   ca_size_t k;
   ca_size_t span = sbytes - byte_offset;
   if (span > 8) span = 8;
@@ -114,6 +101,9 @@ bitfield_fetch(char *dst, ca_size_t dbytes,
     uint64_t tmp = 0;
     memcpy(&tmp, src + k * sbytes + byte_offset, (size_t) span);
     uint64_t result = (tmp & bit_mask) >> bit_offset;
+    if ( result & sign ) {
+      result |= ~( ( sign << 1 ) - 1 );   /* the field's top bit is its sign */
+    }
     memcpy(dst + k * dbytes, &result, (size_t) dwrite);
   }
 }
@@ -146,12 +136,14 @@ bitfield_store(char *src, ca_size_t sbytes,
 
 /* ------------------------------------------------------------------- */
 
+/* `data_type` is the integer type the field is read as, or CA_NONE for
+   the narrowest unsigned type that holds it (boolean for one bit).  A
+   signed type reads the field's top bit as its sign. */
 int
 ca_bitfield_setup (CABitfield *ca, CArray *parent,
-                   ca_size_t offset, ca_size_t bitlen)
+                   ca_size_t offset, ca_size_t bitlen, int8_t data_type)
 {
   int8_t ndim;
-  int8_t data_type;
   ca_size_t bytes = 0, elements;
   ca_size_t bitsize;
   ca_size_t  byte_offset;
@@ -184,7 +176,19 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
              (long long) bitlen, (long long) offset);
   }
 
-  if ( bitlen == 1 ) {
+  if ( data_type != CA_NONE ) {
+    switch ( data_type ) {
+    case CA_BOOLEAN:
+    case CA_INT8:  case CA_UINT8:  case CA_INT16: case CA_UINT16:
+    case CA_INT32: case CA_UINT32: case CA_INT64: case CA_UINT64:
+      break;
+    default:
+      rb_raise(rb_eCADataTypeError,
+               "a bit field is read as an integer type, not <%s>",
+               ca_type_name[data_type]);
+    }
+  }
+  else if ( bitlen == 1 ) {
     data_type = CA_BOOLEAN;
   }
   else if ( bitlen <= 8 ) {
@@ -202,16 +206,18 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 
   CA_CHECK_BYTES(data_type, bytes);
 
-  if ( bitlen > bytes * 8 ) {
-    rb_raise(rb_eArgError, "invalid bit length for specified data_type");
-  }
-
-  if ( ( data_type == CA_BOOLEAN ) && ( bitlen > 1 ) ) {
-    rb_raise(rb_eArgError, "invalid bit length for specified data_type");
+  if ( bitlen > bytes * 8 ||
+       ( ( data_type == CA_BOOLEAN ) && ( bitlen > 1 ) ) ) {
+    rb_raise(rb_eArgError, "a bit field of %lld bits does not fit <%s>",
+             (long long) bitlen, ca_type_name[data_type]);
   }
 
   if ( ca_endian == CA_BIG_ENDIAN ) {
-    byte_offset = parent->bytes - offset/8 - bytes;
+    /* The window is placed by the narrowest width that holds the field,
+       not by the type it is read as, which may be wider. */
+    ca_size_t window = ( bitlen <= 8 ) ? 1 : ( bitlen <= 16 ) ? 2 :
+                       ( bitlen <= 32 ) ? 4 : 8;
+    byte_offset = parent->bytes - offset/8 - window;
     bit_offset  = offset % 8;
     bit_mask    = 0;
     for (i=0; i<bitlen; i++) {
@@ -260,6 +266,9 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   ca->bit_offset  = bit_offset;
   ca->bit_mask    = bit_mask;
   ca->bit_start   = offset;  /* preserve original offset for clone/copy */
+  ca->bit_length  = bitlen;
+  ca->sign_extend = ( data_type == CA_INT8  || data_type == CA_INT16 ||
+                      data_type == CA_INT32 || data_type == CA_INT64 );
 
   memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
 
@@ -271,12 +280,13 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 }
 
 CABitfield *
-ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen)
+ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen,
+                 int8_t data_type)
 {
   CABitfield *ca;
-  ca_bitfield_setup(NULL, parent, offset, bitlen);
+  ca_bitfield_setup(NULL, parent, offset, bitlen, data_type);
   ca = (CABitfield *) ca_array_alloc(CA_OBJ_BITFIELD, parent->ndim);
-  ca_bitfield_setup(ca, parent, offset, bitlen);
+  ca_bitfield_setup(ca, parent, offset, bitlen, data_type);
   return ca;
 }
 
@@ -306,9 +316,8 @@ static void *
 ca_bitfield_func_clone (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
-  return ca_bitfield_new(ca->parent,
-                         ca->bit_start,
-                         bitfield_bitlen(ca->bit_mask));
+  return ca_bitfield_new(ca->parent, ca->bit_start, ca->bit_length,
+                         ca->data_type);
 }
 
 /* Per-cell get/put: fetch the parent cell into a scratch buffer,
@@ -324,7 +333,8 @@ ca_bitfield_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   if ( dir == CA_XFER_GET ) {
     memset(data, 0, ca->bytes);
     bitfield_fetch(data, ca->bytes, v, ca->parent->bytes,
-                   ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+                   ca->byte_offset, ca->bit_offset, ca->bit_mask,
+                   ca->bit_length, ca->sign_extend, 1);
   }
   else {
     bitfield_store(data, ca->bytes, v, ca->parent->bytes,
@@ -368,7 +378,8 @@ ca_bitfield_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
            directly from the attached parent. */
         memset(d, 0, n * ca->bytes);
         bitfield_fetch(d, ca->bytes, eff_parent->ptr, pbytes,
-                       ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+                       ca->byte_offset, ca->bit_offset, ca->bit_mask, 
+                       ca->bit_length, ca->sign_extend, n);
       } else {
         /* Bulk RMW directly against parent memory (bitfield_store
            preserves non-field bits). */
@@ -385,7 +396,8 @@ ca_bitfield_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
     for (i = 0; i < n; i++) {
       memset(d + i * ca->bytes, 0, ca->bytes);
       bitfield_fetch(d + i * ca->bytes, ca->bytes, v + i * pbytes, pbytes,
-                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 1);
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 
+                       ca->bit_length, ca->sign_extend, 1);
     }
   }
   else {
@@ -494,7 +506,8 @@ ca_bitfield_func_xfer_all (void *ap, void *data, int dir)
     if ( dir == CA_XFER_GET ) {
       memset(d, 0, n * ca->bytes);
       bitfield_fetch(d, ca->bytes, eff_parent->ptr, pbytes,
-                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 
+                       ca->bit_length, ca->sign_extend, n);
     } else {
       bitfield_store(d, ca->bytes, eff_parent->ptr, pbytes,
                      ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
@@ -518,7 +531,8 @@ ca_bitfield_func_xfer_all (void *ap, void *data, int dir)
       ca_xfer_stride(parent, pstarts, parent->dim, pnative, scratch, CA_XFER_GET);
       memset(d, 0, n * ca->bytes);
       bitfield_fetch(d, ca->bytes, scratch, pbytes,
-                     ca->byte_offset, ca->bit_offset, ca->bit_mask, n);
+                     ca->byte_offset, ca->bit_offset, ca->bit_mask, 
+                       ca->bit_length, ca->sign_extend, n);
     } else {
       /* CAREFUL: gather parent into scratch before splicing so the
          non-field bits are preserved across the RMW. */
@@ -595,7 +609,8 @@ ca_bitfield_attach (CABitfield *ca)
 {
   memset(ca->ptr, 0, ca_length(ca));
   bitfield_fetch(ca->ptr, ca->bytes, ca->parent->ptr, ca->parent->bytes,
-                 ca->byte_offset, ca->bit_offset, ca->bit_mask, ca->elements);
+                 ca->byte_offset, ca->bit_offset, ca->bit_mask, 
+                       ca->bit_length, ca->sign_extend, ca->elements);
 }
 
 static void
@@ -626,14 +641,15 @@ ca_bitfield_fill (CABitfield *ca, char *ptr)
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen)
+rb_ca_bitfield_new (VALUE cary, ca_size_t offset, ca_size_t bitlen,
+                    int8_t data_type)
 {
   volatile VALUE obj;
   CArray *parent;
   CABitfield *ca;
   rb_check_carray_object(cary);
   TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
-  ca = ca_bitfield_new(parent, offset, bitlen);
+  ca = ca_bitfield_new(parent, offset, bitlen, data_type);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
   return obj;
@@ -666,7 +682,8 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  return rb_ca_bitfield_new(self, offset, bitlen);
+  return rb_ca_bitfield_new(self, offset, bitlen,
+                            NIL_P(rtype) ? CA_NONE : rb_ca_guess_type(rtype));
 }
 
 static VALUE
@@ -688,9 +705,8 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
   if ( ca_func[CA_OBJ_BITFIELD].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_BITFIELD, cs->parent->ndim);
   }
-  ca_bitfield_setup(ca, cs->parent,
-                    cs->bit_start,
-                    bitfield_bitlen(cs->bit_mask));
+  ca_bitfield_setup(ca, cs->parent, cs->bit_start, cs->bit_length,
+                    cs->data_type);
 
   return self;
 }

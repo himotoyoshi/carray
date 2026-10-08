@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `bitfield(range, type)` reads the field as an integer of `type`.
+  A signed type reads the field's top bit as its sign (`0b101` in 3 bits
+  is -3 as `:int8`), and a type wider than the field widens the value.
+  The argument was accepted and ignored before; without it the type is
+  the narrowest unsigned one, as it was.
+
 - Fix: `bitfield` refuses an object array (writing the field rewrote the
   references held in the cells) and a field that starts inside a byte and
   reaches more than 64 bits past it (its top bits were dropped); both raise.
