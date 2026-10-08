@@ -45,6 +45,27 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   CSV written by Excel in Japanese), or for an IO, to open it in the file's
   encoding. The error class is unchanged.
 
+- New: `CAFrame#cast`, `CAFrame.from_csv` and `CAFrame.from_records` take
+  `on_error:` for a cell that holds something but does not read as the
+  number type. `:mask` (the default) makes it `UNDEF` as before, `:warn`
+  also warns once per column, and `:raise` raises `ArgumentError` naming
+  the column, the row and the cell. Blank and missing cells are never
+  errors.
+
+- Change: `CAFrame#cast` to an integer type no longer truncates a Ruby
+  number in an object column: `2.5` becomes `UNDEF` (it was `2`), as the
+  string `"2.5"` does, and so does a number the type cannot hold. An
+  Integer that fits and a Float with no fractional part are kept. A
+  numeric column casts as before.
+
+- Change: a String stored into a numeric array, or converted to one by
+  `to_type`, is read as a decimal number, not a Ruby literal: `"010"` is 10
+  (an integer type read 8) and `"1.0"` / `"1e3"` fill an integer type.
+  `"0x10"`, `"1_000"`, `"x"`, `""` and `"300"` for int8 raise from a store
+  and are `UNDEF` from `to_type` (a float array read `"x"` as `0.0`; int8
+  wrapped `"300"`). A complex array also reads what `Complex()` reads, such
+  as `"1+2i"`. Values that are not Strings convert as before.
+
 - Fix: `search`, `bsearch` and `search_nearest` compare a CArray query in
   the type the two arrays share on a float reference too (a float64 query
   is no longer rounded to a float32 array's type), and match integers of
@@ -152,13 +173,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `CArray::DataTypeError` for boolean). It used to become NaN, 0+0i or
   false. Store `Float::NAN` or `UNDEF` for what you mean. `to_type` from an
   object array still reads `nil` as `UNDEF`, for complex too.
-
-- Change: a String stored into a float or complex array is read as
-  `Float()` reads it, and one that is not a number raises `ArgumentError`,
-  as it already did for an integer array. `"x"` and `""` used to become
-  `0.0`. `" 3 "`, `"1e3"`, `"0x10"`, `"nan"` and `"inf"` still read as
-  numbers, and a complex array also takes `"1+2i"`. `to_type` from an
-  object array is unchanged.
 
 - Change: a reduction's `fill_value:` is what storing it into the result
   would give, with or without `axis:` (without `axis:` it came back as
