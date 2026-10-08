@@ -42,7 +42,8 @@ class CArray
   #     width, when the range has a step != 1, when the bit length
   #     is outside `1..64`, or when the field reaches more than 64 bits
   #     past the start of its first byte.
-  #   @raise [CArray::DataTypeError] when `self` is an object array.
+  #   @raise [CArray::DataTypeError] when `self` is an object or complex
+  #     array.
   #   @raise [ArgumentError] when `type` is narrower than the field
   #     (or `:boolean` for a field of more than one bit).
   #   @raise [CArray::DataTypeError] when `type` is not an integer type

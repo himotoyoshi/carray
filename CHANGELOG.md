@@ -46,6 +46,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   references held in the cells) and a field that starts inside a byte and
   reaches more than 64 bits past it (its top bits were dropped); both raise.
 
+- Change: `bitfield` refuses a complex array, as `bitarray` does.
+
 - Fix: `bitfield(-1)` is the last bit of the cell, as `bitfield(-1..-1)`
   is (it read a bit that was not there).
 

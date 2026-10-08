@@ -164,8 +164,9 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   }
 
   /* The bits of an object cell are a reference: writing them would leave
-     the cell pointing nowhere. */
-  if ( ca_is_object_type(parent) ) {
+     the cell pointing nowhere.  A complex cell is refused as bitarray
+     refuses it. */
+  if ( ca_is_object_type(parent) || ca_is_complex_type(parent) ) {
     rb_raise(rb_eCADataTypeError, "invalid data_type for bitfield");
   }
 

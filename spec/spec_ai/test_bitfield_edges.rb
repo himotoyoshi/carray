@@ -50,4 +50,11 @@ class TestBitfieldEdges < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { o.bitfield(0..3) }
     assert_raise(CArray::DataTypeError) { o.bitfield(0) }
   end
+
+  # A complex parent is refused, as bitarray refuses it.
+  def test_a_complex_parent_is_refused
+    c = CA_CMPLX128([Complex(1, 2)])
+    assert_raise(CArray::DataTypeError) { c.bitfield(0..7) }
+    assert_raise(CArray::DataTypeError) { CA_CMPLX64([1]).bitfield(0) }
+  end
 end
