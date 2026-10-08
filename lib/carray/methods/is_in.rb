@@ -15,8 +15,11 @@ class CArray
   #   {CArray.result_type}), so membership is value-correct across
   #   data types (e.g. an int cell equals a float set element of the same
   #   value, and a fractional set element never truncates onto an int
-  #   cell). Genuinely incompatible data types (e.g. numeric vs fixlen)
-  #   raise.
+  #   cell). Integers of mixed sign are matched by value, as {#eq}
+  #   compares them: `-1` in an int8 array never matches `255` in a uint8
+  #   one, and the set operations answer such a pair in a type that holds
+  #   both (int16 for uint8 with int8, object for uint64 with int64).
+  #   Genuinely incompatible data types (e.g. numeric vs fixlen) raise.
   #
   #   Membership is value-based and shares the distinctness of the
   #   value-hash discovery family ({#unique} / {#value_counts}):
@@ -119,7 +122,7 @@ class CArray
     end
     set = values.is_a?(CArray) ? values : CArray.wrap_readonly(values)
     return [self, set] if set.data_type == data_type   # common fast path
-    t = CArray.result_type(self, set)
+    t = value_match_type(CArray.result_type(self, set), set.data_type)
     [coerce_self(t), set.to_type(t)]
   end
 
@@ -141,6 +144,7 @@ class CArray
       [self, elems.to_ca.to_type(data_type)]
     else
       t = CArray.result_type(self, *elems)
+      t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
       [coerce_self(t), elems.to_ca.to_type(t)]
     end
   end

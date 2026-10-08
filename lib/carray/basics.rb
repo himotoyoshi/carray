@@ -433,6 +433,27 @@ class CArray
     template.scale!(xa, xb)
   end
 
+  private
+
+  # The data type in which values of this array and of `other_type` are
+  # matched for equality, given their common type `t`.  It is `t`, except
+  # for an integer pair of mixed sign whose common type is unsigned (uint8
+  # with int8 is uint8, where -1 would read as 255): there the match moves
+  # to a signed type that holds every value of both, or, for 64 bits, where
+  # no numeric type does, to object, whose Integers compare by value.
+  # `eq` answers the same pair by value.
+  SIGNED_HOLDING = { CA_UINT8 => CA_INT16, CA_UINT16 => CA_INT32,
+                     CA_UINT32 => CA_INT64, CA_UINT64 => CA_OBJECT }.freeze
+  SIGNED_INTEGERS = [CA_INT8, CA_INT16, CA_INT32, CA_INT64].freeze
+  private_constant :SIGNED_HOLDING, :SIGNED_INTEGERS
+
+  def value_match_type (t, other_type)
+    wider = SIGNED_HOLDING[t]
+    return t unless wider
+    return t unless SIGNED_INTEGERS.include?(data_type) || SIGNED_INTEGERS.include?(other_type)
+    wider
+  end
+
 end
 
 # ---------------------------------------------------------------------------

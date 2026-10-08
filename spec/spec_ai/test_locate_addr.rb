@@ -283,4 +283,9 @@ class TestMatchup < Test::Unit::TestCase
     assert_equal 1, r[1, 0]
     assert_equal true, r.mask[1, 1]           # 999 absent
   end
+
+  def test_mixed_sign_integers_locate_by_value
+    assert_equal [UNDEF, 1], CA_UINT8([255, 1]).locate_addr(CA_INT8([-1, 1])).to_a
+    assert_equal [UNDEF, 1], CA_UINT64([2**64 - 1, 1]).locate_addr(CA_INT64([-1, 1])).to_a
+  end
 end

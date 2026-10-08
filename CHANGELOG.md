@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `is_in`, `intersection`, `difference`, `union` and `locate_addr`
+  match integers of mixed sign by value, as `eq` compares them: `-1` in an
+  int8 array no longer matches `255` in a uint8 one. The set operations
+  answer such a pair in a type that holds both: int16 for uint8 with int8
+  (was uint8), and object for uint64 with int64, which no numeric type holds.
+
 - Fix: `unmask` / `strip_mask(method: :linear)` and `CAFrame#fill(name,
   :linear)` leave the cells that were not masked as they were: an int64
   value above 2**53 is no longer rounded through float64, and a NaN or Inf
