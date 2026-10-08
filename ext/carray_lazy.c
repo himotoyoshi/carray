@@ -20,6 +20,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_*, ca_is_lazy_view */
 #include "ca_kernel_iterator.h" /* ca_iter_register_source_kind */
+#include <ruby/ractor.h>
 
 int8_t CA_OBJ_LAZY_MARKER;
 VALUE rb_cCALazyMarker;
@@ -299,8 +300,65 @@ typedef struct ca_gc_hold {
   ca_size_t elements;
 } ca_gc_hold_t;
 
-static ca_gc_hold_t ca_gc_holds[CA_GC_HOLD_MAX];
-static int          ca_gc_hold_depth = 0;
+/* Each Ractor keeps its own holds: walks in different Ractors push and
+   release at the same time.  The GC marks every Ractor's set through
+   the storage type's mark function. */
+typedef struct ca_gc_local {
+  ca_gc_hold_t  holds[CA_GC_HOLD_MAX];
+  int           hold_depth;
+  ca_gc_hold_t *buffers;      /* held until released, in any order */
+  int           buffer_n;
+  int           buffer_cap;
+} ca_gc_local_t;
+
+static rb_ractor_local_key_t ca_gc_local_key;
+
+static void
+ca_gc_local_mark (void *ptr)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) ptr;
+  int i;
+  if ( g == NULL ) return;
+  for ( i = 0; i < g->hold_depth; i++ ) {
+    VALUE    *p = g->holds[i].ptr;
+    ca_size_t n = g->holds[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+  for ( i = 0; i < g->buffer_n; i++ ) {
+    VALUE    *p = g->buffers[i].ptr;
+    ca_size_t n = g->buffers[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+}
+
+static void
+ca_gc_local_free (void *ptr)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) ptr;
+  if ( g == NULL ) return;
+  free(g->buffers);
+  free(g);
+}
+
+static const struct rb_ractor_local_storage_type ca_gc_local_type = {
+  ca_gc_local_mark, ca_gc_local_free
+};
+
+/* The state is allocated with the C allocator, like the table it grows:
+   a collection must not run while either is half set up. */
+static ca_gc_local_t *
+ca_gc_local (void)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) rb_ractor_local_storage_ptr(ca_gc_local_key);
+  if ( g == NULL ) {
+    g = (ca_gc_local_t *) calloc(1, sizeof(ca_gc_local_t));
+    if ( g == NULL ) {
+      rb_memerror();
+    }
+    rb_ractor_local_storage_ptr_set(ca_gc_local_key, g);
+  }
+  return g;
+}
 
 static void ca_lazy_arena_mark_object_slots (void);
 
@@ -313,61 +371,67 @@ static void ca_lazy_arena_mark_object_slots (void);
 int
 ca_gc_hold_push (void *ptr, ca_size_t n_elements)
 {
-  int depth = ca_gc_hold_depth;
+  ca_gc_local_t *g;
+  int depth;
 
-  if ( depth >= CA_GC_HOLD_MAX || n_elements <= 0 || ptr == NULL ) {
+  if ( n_elements <= 0 || ptr == NULL ) {
     return -1;
   }
-  ca_gc_holds[depth].ptr      = (VALUE *) ptr;
-  ca_gc_holds[depth].elements = n_elements;
-  ca_gc_hold_depth = depth + 1;
+  g = ca_gc_local();
+  depth = g->hold_depth;
+  if ( depth >= CA_GC_HOLD_MAX ) {
+    return -1;
+  }
+  g->holds[depth].ptr      = (VALUE *) ptr;
+  g->holds[depth].elements = n_elements;
+  g->hold_depth = depth + 1;
   return depth;
 }
 
 void
 ca_gc_hold_pop_to (int depth)
 {
-  if ( depth >= 0 && depth < ca_gc_hold_depth ) {
-    ca_gc_hold_depth = depth;
+  ca_gc_local_t *g;
+  if ( depth < 0 ) return;
+  g = ca_gc_local();
+  if ( depth < g->hold_depth ) {
+    g->hold_depth = depth;
   }
 }
-
-/* Buffers held until released, in any order (ca_gc_hold_buffer).  The
-   table is grown with the C allocator so that a collection cannot run
-   while it is half moved. */
-static ca_gc_hold_t *ca_gc_buffers     = NULL;
-static int           ca_gc_buffer_n    = 0;
-static int           ca_gc_buffer_cap  = 0;
 
 void
 ca_gc_hold_buffer (void *ptr, ca_size_t n_elements)
 {
+  ca_gc_local_t *g;
   if ( ptr == NULL || n_elements <= 0 ) {
     return;
   }
-  if ( ca_gc_buffer_n == ca_gc_buffer_cap ) {
-    int cap = ca_gc_buffer_cap ? ca_gc_buffer_cap * 2 : 16;
-    ca_gc_hold_t *grown = (ca_gc_hold_t *) realloc(ca_gc_buffers,
+  g = ca_gc_local();
+  if ( g->buffer_n == g->buffer_cap ) {
+    int cap = g->buffer_cap ? g->buffer_cap * 2 : 16;
+    ca_gc_hold_t *grown = (ca_gc_hold_t *) realloc(g->buffers,
                                                    cap * sizeof(ca_gc_hold_t));
     if ( grown == NULL ) {
       rb_memerror();
     }
-    ca_gc_buffers    = grown;
-    ca_gc_buffer_cap = cap;
+    g->buffers    = grown;
+    g->buffer_cap = cap;
   }
-  ca_gc_buffers[ca_gc_buffer_n].ptr      = (VALUE *) ptr;
-  ca_gc_buffers[ca_gc_buffer_n].elements = n_elements;
-  ca_gc_buffer_n++;
+  g->buffers[g->buffer_n].ptr      = (VALUE *) ptr;
+  g->buffers[g->buffer_n].elements = n_elements;
+  g->buffer_n++;
 }
 
 void
 ca_gc_release_buffer (void *ptr)
 {
+  ca_gc_local_t *g = (ca_gc_local_t *) rb_ractor_local_storage_ptr(ca_gc_local_key);
   int i;
-  for ( i = ca_gc_buffer_n - 1; i >= 0; i-- ) {
-    if ( ca_gc_buffers[i].ptr == (VALUE *) ptr ) {
-      ca_gc_buffers[i] = ca_gc_buffers[ca_gc_buffer_n - 1];
-      ca_gc_buffer_n--;
+  if ( g == NULL ) return;
+  for ( i = g->buffer_n - 1; i >= 0; i-- ) {
+    if ( g->buffers[i].ptr == (VALUE *) ptr ) {
+      g->buffers[i] = g->buffers[g->buffer_n - 1];
+      g->buffer_n--;
       return;
     }
   }
@@ -379,21 +443,11 @@ static VALUE ca_gc_guard = Qnil;
    function of a TypedData whose data pointer is NULL. */
 static int ca_gc_guard_body = 0;
 
+/* The arena's object slots.  The holds are marked per Ractor above. */
 static void
 ca_gc_guard_mark (void *ptr)
 {
-  int i;
   (void) ptr;
-  for ( i = 0; i < ca_gc_hold_depth; i++ ) {
-    VALUE    *p = ca_gc_holds[i].ptr;
-    ca_size_t n = ca_gc_holds[i].elements;
-    while ( n-- ) rb_gc_mark(*p++);
-  }
-  for ( i = 0; i < ca_gc_buffer_n; i++ ) {
-    VALUE    *p = ca_gc_buffers[i].ptr;
-    ca_size_t n = ca_gc_buffers[i].elements;
-    while ( n-- ) rb_gc_mark(*p++);
-  }
   ca_lazy_arena_mark_object_slots();
 }
 
@@ -801,8 +855,10 @@ Init_carray_lazy (void)
 
   rb_define_method(rb_cCArray, "lazy", rb_ca_lazy, 0);
 
+  ca_gc_local_key = rb_ractor_local_storage_ptr_newkey(&ca_gc_local_type);
+
   /* Hidden, never collected: its mark function is what keeps the
-     in-flight CA_OBJECT buffers reachable. */
+     arena's CA_OBJECT slots reachable. */
   ca_gc_guard = TypedData_Wrap_Struct(rb_cObject, &ca_gc_guard_data_type,
                                       &ca_gc_guard_body);
   rb_gc_register_mark_object(ca_gc_guard);

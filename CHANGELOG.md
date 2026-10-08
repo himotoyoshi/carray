@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: reductions along an axis of an object-type view running in
+  several Ractors at once could hang the process in the garbage
+  collector; each Ractor now keeps its own record of the cells it holds.
+
 - Change: for C extensions: `CA_FOR_EACH_FIBER_PAIR` and
   `CA_FOR_EACH_FIBER_PAIR_MASKED` raise `ArgumentError` when the two
   arrays differ in shape, as the INOUT forms do. They used to skip the
