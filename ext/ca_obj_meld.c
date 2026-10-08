@@ -1122,8 +1122,9 @@ rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
     }
   }
 
-  /* A single parent has nothing to weld against, so its Face rides the
-     chain as it always did; refuse and lift only apply from two up. */
+  /* A single parent shares its state with nobody, so only two or more are
+     refused; the lift below applies to one parent as well, since the setup
+     strips a Face parent whatever their number. */
   if ( all_face && n > 1
        && !ca_face_state_portable(ref_face->obj_type, face_class) ) {
     rb_raise(rb_eArgError,
@@ -1136,7 +1137,7 @@ rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
   obj = rb_obj_alloc(klass);
   rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
 
-  if ( !all_face || n < 2 ) return obj;
+  if ( !all_face ) return obj;
 
   for ( i = 1; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);
