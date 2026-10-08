@@ -30,6 +30,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <ruby/ractor.h>
 
 /* Data scratch.  A scratch of object cells holds VALUEs no Ruby object
    owns while the kernel calls Ruby for each cell, so it is filled with
@@ -39,24 +40,60 @@
    walk that fits in it: a fresh allocation of that size costs the page
    faults of touching it, which for a reduction is several times the
    reduction itself.  The kept buffer is owned by nobody, and a walk that
-   takes it owns it alone until it frees it again. */
+   takes it owns it alone until it frees it again.  Each Ractor keeps its
+   own (ractor-local storage), since walks in different Ractors run at
+   the same time. */
 
 #define KI_KEEP_MIN ((ca_size_t) 1 << 20)
 #define KI_KEEP_MAX ((ca_size_t) 64 << 20)
 
-static void     *ki_kept       = NULL;
-static ca_size_t ki_kept_bytes = 0;
+typedef struct {
+  void      *p;
+  ca_size_t  bytes;
+} ki_kept_t;
+
+static rb_ractor_local_key_t ki_kept_key;
+
+static void
+ki_kept_free (void *ptr)
+{
+  ki_kept_t *k = (ki_kept_t *) ptr;
+  if ( k ) {
+    if ( k->p ) ruby_xfree(k->p);
+    ruby_xfree(k);
+  }
+}
+
+static const struct rb_ractor_local_storage_type ki_kept_type = {
+  NULL, ki_kept_free
+};
+
+static ki_kept_t *
+ki_kept_slot (void)
+{
+  ki_kept_t *k = (ki_kept_t *) rb_ractor_local_storage_ptr(ki_kept_key);
+  if ( k == NULL ) {
+    k = ALLOC(ki_kept_t);
+    k->p     = NULL;
+    k->bytes = 0;
+    rb_ractor_local_storage_ptr_set(ki_kept_key, k);
+  }
+  return k;
+}
 
 static void *
 ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
-  void *p;
-  if ( ki_kept && bytes >= KI_KEEP_MIN && bytes <= ki_kept_bytes ) {
-    p = ki_kept;
-    ki_kept = NULL;
-    ki_kept_bytes = 0;
+  void *p = NULL;
+  if ( bytes >= KI_KEEP_MIN ) {
+    ki_kept_t *k = ki_kept_slot();
+    if ( k->p && bytes <= k->bytes ) {
+      p = k->p;
+      k->p = NULL;
+      k->bytes = 0;
+    }
   }
-  else {
+  if ( p == NULL ) {
     p = xmalloc(bytes > 0 ? bytes : 1);
   }
   if ( data_type == CA_OBJECT ) {
@@ -74,14 +111,17 @@ static void
 ki_data_free (void *p, ca_size_t bytes)
 {
   ca_gc_release_buffer(p);
-  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && bytes > ki_kept_bytes ) {
-    void *old = ki_kept;
-    ki_kept = p;
-    ki_kept_bytes = bytes;
-    if ( old ) {
-      xfree(old);
+  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX ) {
+    ki_kept_t *k = ki_kept_slot();
+    if ( bytes > k->bytes ) {
+      void *old = k->p;
+      k->p     = p;
+      k->bytes = bytes;
+      if ( old ) {
+        xfree(old);
+      }
+      return;
     }
-    return;
   }
   xfree(p);
 }
@@ -4789,6 +4829,8 @@ rb_caf_bench_per_fiber_xfer_sum_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
 void
 Init_ca_kernel_iterator (void)
 {
+  ki_kept_key = rb_ractor_local_storage_ptr_newkey(&ki_kept_type);
+
 #ifdef CARRAY_DEV_BUILD
   /* ==== smoke surface registrations (dev-only, stripped in release) ====
    * See PROPOSAL_SMOKE_DEV_BUILD_GATE.md.  All `t1_smoke_*`, `caf_smoke_*`,
