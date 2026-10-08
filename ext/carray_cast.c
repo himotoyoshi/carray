@@ -687,6 +687,43 @@ ca_kernel_integer (VALUE v)
   return rb_Integer(v);
 }
 
+/* Complex#to_s writes a part that is not finite as "NaN" or "Infinity" and
+   then marks the imaginary part with "*i" ("1.0+Infinity*i", "NaN+0i"),
+   which Complex() does not read back.  Read that form as two decimal
+   numbers: the imaginary part starts at the last sign that is not the
+   first character and not an exponent's.  Returns 0 when the text is not
+   of that form. */
+static int
+ca_str_to_cmplx_nonfinite (VALUE str, double complex *out)
+{
+  const char *s = RSTRING_PTR(str);
+  long n = RSTRING_LEN(str), k;
+  double re, im;
+  volatile VALUE vre, vim;
+  while ( n > 0 && ( s[0] == ' ' || s[0] == '\t' ) ) { s++; n--; }
+  while ( n > 0 && ( s[n-1] == ' ' || s[n-1] == '\t' ) ) { n--; }
+  if ( n < 2 || s[n-1] != 'i' ) {
+    return 0;
+  }
+  n -= ( n >= 2 && s[n-2] == '*' ) ? 2 : 1;
+  for ( k = n - 1; k > 0; k-- ) {
+    if ( ( s[k] == '+' || s[k] == '-' ) && s[k-1] != 'e' && s[k-1] != 'E' ) {
+      break;
+    }
+  }
+  if ( k <= 0 ) {
+    return 0;
+  }
+  vre = rb_str_new(s, k);
+  vim = rb_str_new(s + k, n - k);
+  if ( ! ca_decimal_string_to(vre, CA_FLOAT64, &re)
+       || ! ca_decimal_string_to(vim, CA_FLOAT64, &im) ) {
+    return 0;
+  }
+  *out = CMPLX(re, im);
+  return 1;
+}
+
 /* A real is read as a decimal number; anything else goes to Complex(). */
 double complex
 ca_str_to_cmplx (VALUE str)
@@ -694,8 +731,14 @@ ca_str_to_cmplx (VALUE str)
   volatile VALUE rstr;
   volatile VALUE c;
   double d;
+  double complex z;
   if ( ca_decimal_string_to(str, CA_FLOAT64, &d) ) {
     return (double complex) d;
+  }
+  if ( ( memchr(RSTRING_PTR(str), 'N', RSTRING_LEN(str))
+         || memchr(RSTRING_PTR(str), 'I', RSTRING_LEN(str)) )
+       && ca_str_to_cmplx_nonfinite(str, &z) ) {
+    return z;
   }
   rstr = rb_funcall(str, rb_intern("strip"), 0);
   c = rb_funcall(rb_mKernel, rb_intern("Complex"), 1, rstr);
