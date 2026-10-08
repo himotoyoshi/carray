@@ -88,3 +88,60 @@ class TestCAFrameInferTypes < Test::Unit::TestCase
     assert_raise(ArgumentError) { frame(types: :auto) }
   end
 end
+
+# cast(name => :time) and the :time that infer_types gives.
+class TestCAFrameCastTime < Test::Unit::TestCase
+  CSV_TEXT = <<~CSV
+    date,stamp,fine,dmy,bad
+    2024-01-01,2024-01-01 00:00:00,2024-01-01T00:00:00.123Z,01/02/2024,2024-01-01
+    2024-01-02,2024/01/01 01:30,2024-01-01T00:00:00.5+09:00,02/02/2024,2024-13-01
+    ,,,,x
+  CSV
+
+  def frame
+    CAFrame.from_csv(StringIO.new(CSV_TEXT))
+  end
+
+  def strings(col)
+    col.to_a.map(&:to_s)
+  end
+
+  def test_infer_types_reads_year_first_dates_and_times
+    assert_equal({ "date" => :time, "stamp" => :time, "fine" => :time }, frame.infer_types)
+  end
+
+  def test_unit_follows_the_text
+    df = frame.cast("date" => :time, "stamp" => :time, "fine" => :time)
+    assert_kind_of CATime, df["date"]
+    assert_equal ["2024-01-01", "2024-01-02", "UNDEF"], strings(df["date"])
+    assert_equal ["2024-01-01T00:00:00Z", "2024-01-01T01:30:00Z", "UNDEF"], strings(df["stamp"])
+    assert_equal ["2024-01-01T00:00:00.123Z", "2023-12-31T15:00:00.500Z", "UNDEF"],
+                 strings(df["fine"])
+  end
+
+  def test_types_infer_casts_time
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :infer)
+    assert_kind_of CATime, df["stamp"]
+    assert_equal :object, df["dmy"].data_type
+    assert_equal :object, df["bad"].data_type
+  end
+
+  def test_on_error
+    e = assert_raise(ArgumentError) { frame.cast("bad" => :time, on_error: :raise) }
+    assert_match(/column "bad", row 1 "2024-13-01" cannot be read as time/, e.message)
+    df = frame
+    _out, err = capture_output { df.cast("bad" => :time, on_error: :warn) }
+    assert_match(/2 cells cannot be read as time/, err)
+    assert_equal ["2024-01-01", "UNDEF", "UNDEF"], strings(df["bad"])
+  end
+
+  def test_parse_to_time_takes_on_error
+    assert_raise(ArgumentError) { frame.parse_to_time("bad", on_error: :raise) }
+    assert_nothing_raised { frame.parse_to_time("date", on_error: :raise) }
+  end
+
+  def test_a_column_that_is_not_text
+    df = CAFrame.new("t" => CA_FLOAT64([1.0]))
+    assert_raise(ArgumentError) { df.cast("t" => :time) }
+  end
+end

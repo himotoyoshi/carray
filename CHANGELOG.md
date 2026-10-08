@@ -36,11 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#cast(name => :time)` parses a text column into a `CATime`
+  column in the finest unit its text shows (`:D` for dates alone, `:s` with
+  a time of day, `:ms` and finer for fractions of a second).
+  `CAFrame#parse_to_time` takes `on_error:` as `cast` does.
+
 - New: `CAFrame.from_csv(types: :infer)` (and `from_records`) casts each
   text column whose cells all read as numbers to `:int64` or `:float64`,
+  and one whose cells are all year-first dates or times to `:time`,
   ignoring missing cells; `CAFrame#infer_types` returns that decision as a
-  map for `cast`. A column with a leading-zero code (`"007"`) or an integer
-  too long for `:int64` stays text. Without `:infer` nothing is inferred.
+  map for `cast`. A leading-zero code (`"007"`), an integer too long for
+  `:int64` and a date such as `"01/02/2024"` stay text. Without `:infer`
+  nothing is inferred.
 
 - New: `CAFrame#to_csv` takes `encoding:` and transcodes the text before
   writing or returning it, as in `df.to_csv("out.csv", encoding: "CP932")`

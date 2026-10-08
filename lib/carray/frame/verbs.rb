@@ -58,8 +58,11 @@ class CAFrame
   # Cast columns to a data type and rebind them (memo §11.4). A text column
   # cast to an integer or float type is read with a decimal grammar ("010" is
   # ten, "0x1F" and "1_000" are not numbers); a cell that does not read, or a
-  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). Other
-  # targets use to_type.
+  # value the type cannot hold, becomes UNDEF (parse-mask, §6-2). A text
+  # column cast to :time is parsed into a CATime column, in the finest unit
+  # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
+  # :ns for fractions of a second); parse_to_time takes a format and a
+  # unit. Other targets use to_type.
   # Three call shapes, disambiguated by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
@@ -113,15 +116,20 @@ class CAFrame
   CAST_ON_ERROR = %i[mask warn raise].freeze
   private_constant :CAST_ON_ERROR
 
-  # The number types the text columns read as, as a map +cast+ takes:
-  # { "temp" => :float64, "count" => :int64 }. A column is listed only when
-  # every cell that is not missing reads as a number: :int64 when they are
-  # all integers that fit, :float64 otherwise. Blank, nil and masked cells
-  # are missing and say nothing; a column with none present is not listed.
+  # The types the text columns read as, as a map +cast+ takes:
+  # { "temp" => :float64, "count" => :int64, "time" => :time }. A column is
+  # listed only when every cell that is not missing reads as one type:
+  # :int64 when they are all integers that fit, :float64 when they are all
+  # numbers, :time when they are all year-first dates or times
+  # ("2024-01-01", "2024-01-01 12:00:00", "2024-01-01T12:00:00.5Z").
+  # Blank, nil and masked cells are missing and say nothing; a column with
+  # none present is not listed.
   #
   # A number with a leading zero ("007") is a code and keeps its column as
-  # text, and so does an integer too long for int64 (an identifier), which
-  # a float would round. Columns that already have a type are not listed.
+  # text, and so does an integer too long for int64 (an identifier), which a
+  # float would round. A day-first or month-first date ("01/02/2024") is not
+  # read as time, since which one it is cannot be told. Columns that already
+  # have a type are not listed.
   #
   #   df.cast(df.infer_types)                            # what types: :infer does
   #   df.cast(df.infer_types.merge("code" => :int32))    # with one column set by hand
@@ -129,6 +137,7 @@ class CAFrame
     @columns.each_with_object({}) do |(key, col), types|
       next unless col.data_type == CA_OBJECT && !col.face?
       type = col.__infer_decimal__
+      type ||= :time if time_text_column?(col)
       types[key] = type if type
     end
   end
@@ -168,11 +177,17 @@ class CAFrame
   # mode, distinct from the integer-serial mode of +to_time+. Delegates to
   # +CArray.time(col, on_error: :mask)+: +format+ picks strptime parsing
   # (auto-detect when nil), +unit+ the storage resolution; masked / nil and
-  # unparseable cells become UNDEF (bulk column parse tolerates bad cells).
-  # Make it the index with +set_index+ afterward.
+  # unparseable cells become UNDEF (bulk column parse tolerates bad cells);
+  # +on_error:+ :warn / :raise reports them as +cast+ does. Make it the index
+  # with +set_index+ afterward. +cast(name => :time)+ does the same with the
+  # unit chosen from the text.
   #
   #   df.parse_to_time("time").set_index("time")
-  def parse_to_time(name, format = nil, unit: :s)
+  def parse_to_time(name, format = nil, unit: :s, on_error: :mask)
+    unless CAST_ON_ERROR.include?(on_error)
+      raise ArgumentError,
+            "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
+    end
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     unless string_column?(col)
@@ -180,7 +195,7 @@ class CAFrame
             "parse_to_time needs a string column (object / CAString / " \
             "CAConstString / CAFixlenString); #{key.inspect} is #{col.data_type}"
     end
-    @columns[key] = CArray.time(col, format: format, unit: unit, on_error: :mask)
+    @columns[key] = parse_time_column(key, col, format, unit, on_error)
     self
   end
 
@@ -289,6 +304,7 @@ class CAFrame
   private def cast_column(name, type, on_error)
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    return cast_time_column(key, col, on_error) if type == :time
     return col.to_type(type) unless col.data_type == CA_OBJECT && !col.face?
     unreadable = on_error == :mask ? nil : []
     parsed = col.__parse_decimal__(type, unreadable)
@@ -297,6 +313,78 @@ class CAFrame
       report_unreadable(key, col, type, unreadable, on_error)
     end
     parsed
+  end
+
+  # cast(name => :time): text to CATime, in the finest unit the text shows
+  # (time_unit_of).
+  private def cast_time_column(key, col, on_error)
+    unless string_column?(col)
+      raise ArgumentError,
+            "cast: column #{key.inspect} is #{col.data_type}, not text; " \
+            "to_time reads a column of serial counts as time"
+    end
+    parse_time_column(key, col, nil, time_unit_of(col), on_error)
+  end
+
+  # Text to CATime, reporting the cells that hold something but do not
+  # parse as on_error says.
+  private def parse_time_column(key, col, format, unit, on_error)
+    parsed = CArray.time(col, format: format, unit: unit, on_error: :mask)
+    unless on_error == :mask
+      failed = col.flatten.to_a.zip(parsed.flatten.is_masked.to_a)
+      addrs = failed.each_index.select do |i|
+        cell, masked = failed[i]
+        masked && !missing_text?(cell)
+      end
+      report_unreadable(key, col, :time, addrs, on_error) unless addrs.empty?
+    end
+    parsed
+  end
+
+  # The unit that holds every time in a text column: :D for dates alone,
+  # :s with a time of day, and :ms / :us / :ns for fractional seconds of up
+  # to 3 / 6 / 9 digits.
+  private def time_unit_of(col)
+    fraction = 0
+    clock = false
+    col.flatten.to_a.each do |cell|
+      next if missing_text?(cell)
+      text = cell.to_s
+      clock ||= TIME_OF_DAY.match?(text)
+      if (m = FRACTION_OF_SECOND.match(text))
+        fraction = [fraction, m[1].size].max
+      end
+    end
+    return :ns if fraction > 6
+    return :us if fraction > 3
+    return :ms if fraction > 0
+    clock ? :s : :D
+  end
+
+  TIME_OF_DAY = /\d:\d\d/
+  FRACTION_OF_SECOND = /\d:\d\d:\d\d[.,](\d+)/
+  # The text infer_types reads as time: a year-first date, with an optional
+  # time of day, fraction of a second and zone. A day-first or month-first
+  # date ("01/02/2024") is not read, since which one it is cannot be told.
+  TIME_TEXT = %r{\A\d{4}[-/]\d{2}[-/]\d{2}
+                 (?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)?
+                 (?:Z|[+-]\d{2}:?\d{2})?\z}x
+  private_constant :TIME_OF_DAY, :FRACTION_OF_SECOND, :TIME_TEXT
+
+  # nil, UNDEF and a blank String are missing values.
+  private def missing_text?(cell)
+    cell.nil? || UNDEF.equal?(cell) || (cell.is_a?(String) && cell.strip.empty?)
+  end
+
+  # Whether every present cell of a text column is a year-first date or time.
+  private def time_text_column?(col)
+    present = false
+    col.flatten.to_a.each do |cell|
+      next if missing_text?(cell)
+      return false unless cell.is_a?(String) && TIME_TEXT.match?(cell.strip)
+      present = true
+    end
+    present
   end
 
   # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.

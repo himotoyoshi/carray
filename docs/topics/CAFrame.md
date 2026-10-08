@@ -228,15 +228,19 @@ Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 [`cast`](#8-column-verbs).
 
 `types: :infer` casts a column to `:int64` when every cell that is not missing
-is an integer that fits, to `:float64` when every such cell is a number, and
-leaves it as text otherwise. A number with a leading zero (`"007"`) is a code
-and keeps its column as text, and so does an integer too long for `:int64`
-(an identifier), which a float would round. `df.infer_types` returns the same
+is an integer that fits, to `:float64` when every such cell is a number, to
+`:time` when every such cell is a year-first date or time (`"2024-01-01"`,
+`"2024-01-01 12:00"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text
+otherwise. A number with a leading zero (`"007"`) is a code and keeps its
+column as text, and so does an integer too long for `:int64` (an
+identifier), which a float would round. A day-first or month-first date
+(`"01/02/2024"`) is not read as time, since which one it is cannot be told;
+cast it with `parse_to_time` and a format. `df.infer_types` returns the same
 decision as a map, so it can be checked, written into the code, or adjusted:
 
 ```ruby
 df = CAFrame.from_csv("obs.csv")
-df.infer_types                    # => { "temp" => :float64, "count" => :int64 }
+df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :int64 }
 df.cast(df.infer_types.merge("count" => :int32))
 ```
 
@@ -949,8 +953,11 @@ Notes:
   A Ruby number in an object column is held to the same rule: an Integer
   that fits, or a Float with no fractional part, is kept, and `2.5` is
   `UNDEF` rather than truncated, so `"2.5"` and `2.5` in one column agree.
-  Other targets go through `to_type`, and casting a numeric column is an
-  ordinary conversion. It rebinds a fresh column — the one edit that does
+  `:time` parses a text column into a `CATime` column in the finest unit its
+  text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` /
+  `:ns` for fractions of a second (for a format or a unit of your own, use
+  `parse_to_time`). Other targets go through `to_type`, and casting a
+  numeric column is an ordinary conversion. It rebinds a fresh column — the one edit that does
   **not** write through to frames sharing the old column.
 
   `on_error:` decides what an unreadable cell does: `:mask` (the default)
@@ -1007,10 +1014,12 @@ df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial 
 df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
-- **`parse_to_time(name, format = nil, unit: :s)`** parses a
-  string-bearing column (an object `CArray` of Strings, or a `CAString` /
+- **`parse_to_time(name, format = nil, unit: :s, on_error: :mask)`** parses
+  a string-bearing column (an object `CArray` of Strings, or a `CAString` /
   `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
-  `UNDEF` (parse-mask). A non-string column raises.
+  `UNDEF` (parse-mask); `on_error: :warn` / `:raise` reports the unparseable
+  ones as `cast` does. A non-string column raises. `cast(name => :time)` is
+  the same parse with the unit chosen from the text.
 - **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns
