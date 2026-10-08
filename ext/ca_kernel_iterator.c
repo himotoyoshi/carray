@@ -2380,6 +2380,55 @@ ca_iter_state_next_slab_strided_unprotected (ca_iter_state *st,
   return 1;
 }
 
+/* CA_KERNEL_FIBER_CONTIG: a fiber (a walk with one slab axis) reaches the
+   kernel as a contiguous run of cells and of mask flags.  Each path of
+   next_slab_axes finds the fiber's first cell and the step along it, and
+   hands both through these two functions, which copy a fiber with any
+   other step into the walk's fiber scratch.  Other walks get the pointer
+   back unchanged. */
+static int
+ki_fiber_contig_wanted (const ca_iter_state *st)
+{
+  return (st->flags & CA_KERNEL_FIBER_CONTIG)
+         && st->naxes == 1 && st->slab_ndim == 1;
+}
+
+static char *
+ki_fiber_contig_data (ca_iter_state *st, char *data, ca_size_t step)
+{
+  ca_size_t n     = st->slab_dims[0];
+  ca_size_t bytes = st->bytes;
+  ca_size_t need  = n * bytes;
+  if ( ! ki_fiber_contig_wanted(st) || step == bytes ) {
+    return data;
+  }
+  if ( st->fiber_data_scratch_cap < need ) {
+    if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
+    st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
+    st->fiber_data_scratch_cap = need;
+  }
+  ca_stride_gather_run(st->fiber_data_scratch, data, bytes, n, step);
+  return st->fiber_data_scratch;
+}
+
+static boolean8_t *
+ki_fiber_contig_mask (ca_iter_state *st, boolean8_t *mask, ca_size_t step)
+{
+  ca_size_t n = st->slab_dims[0];
+  if ( mask == NULL || ! ki_fiber_contig_wanted(st) || step == 1 ) {
+    return mask;
+  }
+  if ( st->fiber_mask_scratch_cap < n ) {
+    if ( st->fiber_mask_scratch ) xfree(st->fiber_mask_scratch);
+    st->fiber_mask_scratch     = (boolean8_t *) xmalloc(n > 0 ? n : 1);
+    st->fiber_mask_scratch_cap = n;
+  }
+  for ( ca_size_t i = 0; i < n; i++ ) {
+    st->fiber_mask_scratch[i] = mask[i * step];
+  }
+  return st->fiber_mask_scratch;
+}
+
 static int
 ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
                               char         **out_ptr,
@@ -2479,7 +2528,11 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     }
 
     if ( out_ptr  ) *out_ptr  = st->scratch_ptr;
-    if ( out_mask ) *out_mask = st->scratch_mask ? st->scratch_mask + mask_off : NULL;
+    if ( out_mask ) {
+      *out_mask = ki_fiber_contig_mask(st,
+                    st->scratch_mask ? st->scratch_mask + mask_off : NULL,
+                    st->slab_mask_strides[0]);
+    }
 
     st->slabs_emitted += 1;
     for ( int8_t m = st->outer_ndim - 1; m >= 0; m-- ) {
@@ -2515,11 +2568,15 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
       mask_off   += st->outer_idx[m] * st->stack_parent_mask_strides[parent_ax];
     }
 
-    if ( out_ptr  ) *out_ptr  = st->stack_parent_ptrs[k] + parent_off;
+    if ( out_ptr  ) {
+      *out_ptr = ki_fiber_contig_data(st, st->stack_parent_ptrs[k] + parent_off,
+                                      st->slab_strides[0]);
+    }
     if ( out_mask ) {
-      *out_mask = st->stack_parent_mask_ptrs
-                ? st->stack_parent_mask_ptrs[k] + mask_off
-                : NULL;
+      *out_mask = ki_fiber_contig_mask(st,
+                    st->stack_parent_mask_ptrs
+                    ? st->stack_parent_mask_ptrs[k] + mask_off : NULL,
+                    st->slab_mask_strides[0]);
     }
 
     st->slabs_emitted += 1;
@@ -2670,7 +2727,11 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     }
 
     if ( out_ptr  ) *out_ptr  = st->scratch_ptr;
-    if ( out_mask ) *out_mask = st->scratch_mask ? st->scratch_mask + mask_off : NULL;
+    if ( out_mask ) {
+      *out_mask = ki_fiber_contig_mask(st,
+                    st->scratch_mask ? st->scratch_mask + mask_off : NULL,
+                    st->slab_mask_strides[0]);
+    }
 
     st->slabs_emitted += 1;
     /* Advance outer_idx row-major (innermost outer axis ticks first). */
@@ -2810,72 +2871,14 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
      Capture last_data_off BEFORE the outer_idx advance below; sync_slab
      consumes it for WRITE scatter.  See header field doc + PROPOSAL
      §4.3.2 hazard comment in sync_slab. */
-  char *yield_ptr;
-  if ( (st->flags & CA_KERNEL_FIBER_CONTIG)
-       && st->naxes == 1 && st->slab_ndim == 1 ) {
-    ca_size_t n         = st->slab_dims[0];
-    ca_size_t data_step = st->slab_strides[0];
-    ca_size_t bytes     = st->bytes;
-    char     *src_data  = st->alias_ptr + data_off;
-
+  if ( ki_fiber_contig_wanted(st) ) {
     st->last_data_off = data_off;
-
-    if ( data_step == (ca_size_t) bytes ) {
-      /* Fast path: fiber is already contig (= innermost-axis or stride
-         coincidentally == bytes).  No gather needed. */
-      yield_ptr = src_data;
-    } else {
-      /* Per-fiber gather via the typed-store inline helper
-         (ca_iter_substrate.h).  For bytes in {1,2,4,8} this uses a
-         compiler-vectorize-friendly `*dp++ = v; sp += step` loop;
-         other sizes fall back to per-element memcpy.  Lazy-alloc
-         scratch sized to max fiber bytes (slab_dims[0] constant per
-         walk → single alloc in practice). */
-      ca_size_t need = n * bytes;
-      if ( st->fiber_data_scratch_cap < need ) {
-        if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
-        st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
-        st->fiber_data_scratch_cap = need;
-      }
-      ca_stride_gather_run(st->fiber_data_scratch, src_data,
-                           bytes, n, data_step);
-      yield_ptr = st->fiber_data_scratch;
-    }
-  } else {
-    yield_ptr = st->alias_ptr + data_off;
   }
-
-  /* PROPOSAL_FIBER_DELIVERY F.1b: per-fiber contig mask delivery.
-     Symmetric to F.1a data path above.  When the source has a mask
-     (= alias_mask != NULL) and the fiber's mask is not innermost-contig
-     (= slab_mask_strides[0] != 1), gather it into fiber_mask_scratch
-     so the author can write m[i] without stride math.  Mask is
-     read-only here (= L2 WRITE never propagates to mask state), so no
-     scatter is needed in sync_slab. */
-  boolean8_t *yield_mask;
-  if ( (st->flags & CA_KERNEL_FIBER_CONTIG)
-       && st->naxes == 1 && st->slab_ndim == 1
-       && st->alias_mask != NULL ) {
-    ca_size_t   n         = st->slab_dims[0];
-    ca_size_t   mask_step = st->slab_mask_strides[0];
-    boolean8_t *src_mask  = st->alias_mask + mask_off;
-
-    if ( mask_step == 1 ) {
-      yield_mask = src_mask;
-    } else {
-      if ( st->fiber_mask_scratch_cap < (ca_size_t) n ) {
-        if ( st->fiber_mask_scratch ) xfree(st->fiber_mask_scratch);
-        st->fiber_mask_scratch     = (boolean8_t *) xmalloc(n);
-        st->fiber_mask_scratch_cap = n;
-      }
-      for ( ca_size_t i = 0; i < n; i++ ) {
-        st->fiber_mask_scratch[i] = src_mask[i * mask_step];
-      }
-      yield_mask = st->fiber_mask_scratch;
-    }
-  } else {
-    yield_mask = st->alias_mask ? st->alias_mask + mask_off : NULL;
-  }
+  char       *yield_ptr  = ki_fiber_contig_data(st, st->alias_ptr + data_off,
+                                                st->slab_strides[0]);
+  boolean8_t *yield_mask = ki_fiber_contig_mask(st,
+                             st->alias_mask ? st->alias_mask + mask_off : NULL,
+                             st->slab_mask_strides[0]);
 
   if ( out_ptr ) *out_ptr = yield_ptr;
   if ( out_mask ) *out_mask = yield_mask;

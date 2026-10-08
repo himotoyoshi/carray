@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `sort_copy`, `median`, `percentile`, `is_mode` and
+  `mask_duplicates` along an axis of a `CArray.stack` view that was
+  neither the stack axis nor the last axis read the wrong cells, and the
+  same methods on a masked view selected with an index array
+  (`a[nil, idx, nil]`) read the mask of the wrong cells. Both now give
+  the answers of the copy.
+- Fix: for C extensions: a `CA_FOR_EACH_FIBER` walk over those two kinds
+  of view now gets its fiber and its mask as contiguous runs, as the
+  header promises.
+
 - Change: for C extensions and build scripts that read
   `CArray::VERSION_CODE`: it is now `major*10000 + minor*100 + teeny`
   (`30003` for 3.0.3), so 3.0.10 is `30010` and comes before 3.1.0
