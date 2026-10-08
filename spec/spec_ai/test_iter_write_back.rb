@@ -204,6 +204,32 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A view that holds a root cell more than once (a tile, an array stacked
+  # or melded with itself) is written as `[]=` writes it: the cells the
+  # kernel left alone are not sent back over the copy it did write.
+  def test_partial_write_through_a_view_that_repeats_cells
+    views = {
+      "tile"            => ->(b) { b.tile(2, 1) },
+      "tile of tr"      => ->(b) { b.transpose.tile(1, 2) },
+      "stack self"      => ->(b) { CArray.stack([b, b]) },
+      "stack self view" => ->(b) { CArray.stack([b, b.transpose.transpose]) },
+      "meld self"       => ->(b) { CArray.meld(b, b) },
+      "slice of tile"   => ->(b) { b.tile(2, 1)[1..4, nil] },
+    }
+    views.each do |label, mk|
+      mk.call(base).ndim.times do |axis|
+        b = base
+        CArray.iw_fiber_fill_break(mk.call(b), axis, -1.0)
+        r = base
+        v = mk.call(r)
+        n = v.shape[axis]
+        idx = Array.new(v.ndim, 0); idx[axis] = nil
+        v[*idx] = -1.0
+        assert_equal r.to_a, b.to_a, "#{label} axis #{axis}"
+      end
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end

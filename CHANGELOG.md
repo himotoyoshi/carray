@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for C extensions: a `CA_KERNEL_WRITE` walk over a view that holds
+  a cell of its array more than once (`tile`, an array stacked or melded
+  with itself) lost the cells the kernel wrote when it left others
+  alone: the untouched copies were sent back over them. A walk now sends
+  back only the cells the kernel changed, as `[]=` does. A walk over a
+  conversion or multi-array view also no longer sends the whole view
+  back after every slab.
+
 - Fix: reductions along an axis of an object-type view running in
   several Ractors at once could hang the process in the garbage
   collector; each Ractor now keeps its own record of the cells it holds.

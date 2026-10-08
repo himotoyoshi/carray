@@ -713,6 +713,92 @@ ca_iter_check_init (int rc)
   return rc;   /* not reached */
 }
 
+/* Whole-view scratch.  The view is gathered into the walk's scratch,
+   by the view's own transfer (by_copy = 0) or by ca_copy_data (by_copy =
+   1, the CAStride compose-fold).  A WRITE walk sends back only the cells
+   the kernel changed (ki_scratch_push_changed), so the scratch is twice
+   the view and its second half keeps what was gathered: a cell the
+   kernel left alone must not be sent back, for it may be another copy
+   of a cell the kernel did write (a tile, a stack of one array with
+   itself) or a cell a conversion view would not bring back unchanged. */
+static void
+ki_gather_view (ca_iter_state *st, CArray *src, uint32_t flags, int by_copy)
+{
+  ca_size_t view_bytes = (ca_size_t) src->elements * src->bytes;
+  st->scratch_cap = (flags & CA_KERNEL_WRITE) ? 2 * view_bytes : view_bytes;
+  st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+  if ( src->elements > 0 ) {
+    if ( by_copy ) {
+      ca_copy_data(src, st->scratch_ptr);
+    }
+    else {
+      ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
+    }
+    if ( flags & CA_KERNEL_WRITE ) {
+      memcpy(st->scratch_ptr + view_bytes, st->scratch_ptr, view_bytes);
+    }
+  }
+}
+
+/* Send back the cells of the current slab (the whole view for a WHOLE
+   walk) that differ from what was gathered, and record them as sent.
+   The slab of a CA_SLAB_AXES walk starts at last_data_off in the
+   scratch, which is laid out row-major over the view, so a cell's
+   offset divided by the cell size is its address in the view. */
+static void
+ki_scratch_push_changed (ca_iter_state *st)
+{
+  CArray    *src        = st->src;
+  ca_size_t  bytes      = src->bytes;
+  ca_size_t  view_bytes = (ca_size_t) src->elements * bytes;
+  char      *now        = st->scratch_ptr;
+  char      *was        = st->scratch_ptr + view_bytes;
+  int        whole      = ! ( st->policy == CA_SLAB_AXES && st->level == 2 );
+  ca_size_t  n          = whole ? src->elements : st->slab_elements;
+  ca_size_t  idx[CA_RANK_MAX];
+  ca_size_t *addrs;
+  char      *vals;
+  ca_size_t  n_changed = 0;
+  ca_size_t  i;
+  int8_t     k;
+  volatile VALUE h_addrs = 0, h_vals = 0;
+
+  if ( n <= 0 ) return;
+
+  addrs = ALLOCV_N(ca_size_t, h_addrs, n);
+  vals  = (char *) ALLOCV(h_vals, n * bytes);
+  for ( k = 0; k < st->slab_ndim; k++ ) idx[k] = 0;
+
+  for ( i = 0; i < n; i++ ) {
+    ca_size_t off;
+    if ( whole ) {
+      off = i * bytes;
+    }
+    else {
+      off = st->last_data_off;
+      for ( k = 0; k < st->slab_ndim; k++ ) off += idx[k] * st->slab_strides[k];
+      for ( k = st->slab_ndim - 1; k >= 0; k-- ) {
+        if ( ++idx[k] < st->slab_dims[k] ) break;
+        idx[k] = 0;
+      }
+    }
+    if ( memcmp(now + off, was + off, bytes) != 0 ) {
+      memcpy(was + off, now + off, bytes);
+      memcpy(vals + n_changed * bytes, now + off, bytes);
+      addrs[n_changed++] = off / bytes;
+    }
+  }
+
+  if ( whole && n_changed == n ) {
+    ca_xfer_all(src, now, CA_XFER_PUT);
+  }
+  else if ( n_changed > 0 ) {
+    ca_xfer_addrs(src, n_changed, addrs, vals, CA_XFER_PUT);
+  }
+  ALLOCV_END(h_vals);
+  ALLOCV_END(h_addrs);
+}
+
 static int
 ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
                        struct _CArray   *src,
@@ -778,11 +864,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
        Decouples kernel_iterator from per-view attach/sync lifecycle
        and inherits xfer reform improvements (transform-fused, etc.)
        automatically. */
-    st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-    if ( src->elements > 0 ) {
-      ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
-    }
+    ki_gather_view(st, src, flags, 0);
     st->alias_mode          = CA_ITER_ALIAS_NONE;     /* scratch-owned, no src.detach */
     st->alias_ptr           = st->scratch_ptr;
     st->composed_strides[0] = src->bytes;
@@ -877,12 +959,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
        to ca_stride_func_copy_data which composes leaf strides up to
        the root entity and gathers in one pass — no per-intermediate
        view materialise. */
-    ca_size_t cap = src->elements * src->bytes;
-    st->scratch_cap = cap;
-    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, cap);
-    if ( cap > 0 ) {
-      ca_copy_data(src, st->scratch_ptr);
-    }
+    ki_gather_view(st, src, flags, 1);
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
   }
@@ -1830,11 +1907,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       if ( !per_fiber_fused ) {
         /* 2026-05-31 refactor: iter-owns scratch via ca_xfer_all (was
            ca_attach(src) + alias src->ptr). */
-        st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-        if ( src->elements > 0 ) {
-          ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
-        }
+        ki_gather_view(st, src, flags, 0);
         st->alias_mode = CA_ITER_ALIAS_NONE;
         st->alias_ptr  = st->scratch_ptr;
       }
@@ -1922,11 +1995,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->bytes    = src->bytes;
     st->naxes    = naxes;
 
-    st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-    if ( src->elements > 0 ) {
-      ca_xfer_all(src, st->scratch_ptr, CA_XFER_GET);
-    }
+    ki_gather_view(st, src, flags, 0);
     st->alias_mode          = CA_ITER_ALIAS_NONE;
     st->alias_ptr           = st->scratch_ptr;
     st->composed_strides[0] = src->bytes;
@@ -2251,11 +2320,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->alias_ptr  = (char *) root->ptr;
     } else if ( use_view_scratch ) {
       st->root        = NULL;
-      st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-      st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-      if ( src->elements > 0 ) {
-        ca_copy_data(src, st->scratch_ptr);
-      }
+      ki_gather_view(st, src, flags, 1);
       st->alias_mode = CA_ITER_ALIAS_NONE;
       st->alias_ptr  = st->scratch_ptr;
     } else {
@@ -2304,11 +2369,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->alias_ptr  = (char *) root->ptr;
   } else if ( use_view_scratch ) {
     st->root        = NULL;
-    st->scratch_cap = (ca_size_t) src->elements * src->bytes;
-    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-    if ( src->elements > 0 ) {
-      ca_copy_data(src, st->scratch_ptr);
-    }
+    ki_gather_view(st, src, flags, 1);
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
   } else {
@@ -2914,9 +2975,9 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
      Capture last_data_off BEFORE the outer_idx advance below; sync_slab
      consumes it for WRITE scatter.  See header field doc + PROPOSAL
      §4.3.2 hazard comment in sync_slab. */
-  if ( ki_fiber_contig_wanted(st) ) {
-    st->last_data_off = data_off;
-  }
+  /* sync_slab finds the slab here: the fiber it scatters back, and the
+     cells of a whole-view scratch it compares. */
+  st->last_data_off = data_off;
   char       *yield_ptr  = ki_fiber_contig_data(st, st->alias_ptr + data_off,
                                                 st->slab_strides[0]);
   boolean8_t *yield_mask = ki_fiber_contig_mask(st,
@@ -3039,12 +3100,9 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
        below early-returns. */
   }
 
-  /* SRC_ATTACH path (step 9 + 2026-05-31 refactor): kernel wrote into
-     iterator-owned scratch (= scratch_ptr).  Push back via xfer_all PUT
-     which routes through the view's xfer_all slot -- handles CAFake
-     (cast back), CAByteSwap (swap back), CABitfield/CABitarray (bit
-     pack back), CAReduce (broadcast across reduce window).  Inherits
-     transform-fused / partial materialise / etc. automatically.
+  /* SRC_ATTACH path: the kernel wrote into the iterator's whole-view
+     scratch.  The changed cells go back through the view's own transfer,
+     which converts, packs or scatters them as the view requires.
 
      This has to stay below the two per-fiber blocks: consulting
      src_kind first would push back the whole-view buffer while the
@@ -3052,9 +3110,7 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
      fiber_data_scratch, and would push back a NULL one for
      PER_FIBER_FUSED, which owns no whole-view buffer at all. */
   if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
-    if ( st->src->elements > 0 ) {
-      ca_xfer_all(st->src, st->scratch_ptr, CA_XFER_PUT);
-    }
+    ki_scratch_push_changed(st);
     st->write_dirty = 0;
     return;
   }
@@ -3073,11 +3129,10 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
     case CA_ITER_SRC_CASTRIDE:
       /* Two producers of CAStride + scratch: L1 non-contig, and the L2
          non-entity-root path (init_l2's use_view_scratch).  Both gathered
-         with ca_copy_data into a view row-major buffer, so both scatter
-         back the same way — ca_sync_data routes through the view's
-         xfer_all(PUT), which asks the root for the region it owns rather
-         than writing a whole-root materialise back. */
-      ca_sync_data(st->src, st->scratch_ptr);
+         with ca_copy_data into a view row-major buffer; the changed
+         cells go back through the view's own transfer, which asks the
+         root for the region it owns. */
+      ki_scratch_push_changed(st);
       break;
 
     case CA_ITER_SRC_DESCRIPTOR: {
