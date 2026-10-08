@@ -1687,6 +1687,12 @@ module CATimeLiteral
     unless h && h[:year]
       raise ArgumentError, "cannot parse time #{spec.inspect}"
     end
+    # Text left over after the format is not part of a time in that format.
+    if h[:leftover] && !h[:leftover].strip.empty?
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: #{h[:leftover].inspect} is " \
+            "left over after #{format.inspect}"
+    end
     y, m, d = h[:year], h[:mon] || 1, h[:mday] || 1
     unless (1..12).cover?(m) && Date.valid_date?(y, m, d, Date::GREGORIAN)
       raise ArgumentError,
@@ -1823,7 +1829,8 @@ module CATimeLiteral
   # first text gives the candidates; each later text drops those it does
   # not fit, until one is left. No candidate for the first text, none left
   # for a later one, or more than one left at the end raises ArgumentError.
-  # Only the texts before the choice are checked here.
+  # `texts` may be lazy: only the texts up to the choice are read, and
+  # checking the rest is left to reading them in the chosen format.
   def infer_time_format(texts)
     require 'date'
     first = texts.first
@@ -1833,9 +1840,13 @@ module CATimeLiteral
             "cannot infer a time format from #{first.inspect}; " \
             "pass a strptime format, or :mixed to guess at each cell"
     end
-    texts.each_with_index do |text, i|
+    seen_first = false
+    texts.each do |text|
       break if candidates.size == 1
-      next if i == 0
+      unless seen_first
+        seen_first = true
+        next
+      end
       left = candidates.select { |f| time_format_fits?(f, text) }
       if left.empty?
         raise ArgumentError,
@@ -1858,8 +1869,9 @@ module CATimeLiteral
   # masked), or nil when `res` is finer than a nanosecond. Each String is
   # parsed into fields here and the fields are turned into ticks for the
   # whole array at once; a cell that is not a String goes through
-  # tick_index.
-  def ticks_from_cells(x, res, format, on_error)
+  # tick_index. With a `pattern`, a String that does not match it is
+  # unparseable too, so the shape a format was chosen for is held to.
+  def ticks_from_cells(x, res, format, on_error, pattern = nil)
     require 'date'
     if CATimeUnitAlgebra::FIXED.key?(res.base)
       kind = :fixed
@@ -1883,6 +1895,9 @@ module CATimeLiteral
       next if s.nil? || UNDEF.equal?(s)
       begin
         if s.is_a?(String)
+          if pattern && !pattern.match?(s.strip)
+            raise ArgumentError, "#{s.inspect} is not in the format #{format.inspect}"
+          end
           h = parse_date_fields(s, format)
           year[i] = h[:year]
           mon[i] = h[:mon] || 1

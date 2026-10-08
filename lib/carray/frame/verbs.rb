@@ -223,7 +223,7 @@ class CAFrame
     unless string_column?(col)
       raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
     end
-    inferred_time_format(key, col)[1]&.format
+    inferred_time_format(key, col)&.format
   end
 
   # Reinterpret an integer column as time serial counts and rebind it (memo
@@ -370,46 +370,45 @@ class CAFrame
     end
   end
 
-  # :infer reads the column in the one format its text is written in, and
-  # raises for a cell that is not in it.
+  # :infer reads the column in the one format its text is written in. A cell
+  # that is not in it does not parse in it, and raises.
   private def parse_time_inferred(key, col, unit)
-    present, f = inferred_time_format(key, col)
+    f = inferred_time_format(key, col)
     return read_time_text(key, col, unit, :raise) if f.nil?
-    digits = 0
-    present.each do |i, text|
-      if f.kind == :fraction
-        m = f.pattern.match(text)
-        digits = [digits, m[:f].size].max if m
-      else
-        m = f.pattern.match?(text)
-      end
-      report_unreadable(key, col, f.format.inspect, [i], :raise) unless m
-    end
     unit ||= case f.kind
              when :date  then :D
              when :clock then :s
-             else digits > 6 ? :ns : digits > 3 ? :us : :ms
+             else fraction_unit(col, f)
              end
-    parse_time_by_format(key, col, f.format, unit, :raise)
+    parse_time_by_format(key, col, f.format, unit, :raise, f.pattern)
   end
 
-  # [[address, stripped text] of each present cell, the inferred format],
-  # the format nil when the text is written year first (or no cell is
-  # present), which needs none.
+  # The inferred format, or nil when the text is written year first (or no
+  # cell is present), which needs none. Only the cells up to the choice are
+  # looked at.
   private def inferred_time_format(key, col)
-    present = []
-    col.flatten.to_a.each_with_index do |cell, i|
-      next if missing_text?(cell)
+    texts = col.flatten.to_a.lazy.reject { |cell| missing_text?(cell) }.map do |cell|
       unless cell.is_a?(String)
         raise ArgumentError, "column #{key.inspect} holds #{cell.inspect}, not text"
       end
-      present << [i, cell.strip]
+      cell.strip
     end
-    return [present, nil] if present.empty?
+    first = texts.first
+    return nil if first.nil?
     unreadable = []
-    CA_OBJECT([present[0][1]]).__parse_time_text__(nil, unreadable)
-    return [present, nil] if unreadable.empty?
-    [present, CATimeLiteral.infer_time_format(present.map(&:last))]
+    CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
+    return nil if unreadable.empty?
+    CATimeLiteral.infer_time_format(texts)
+  end
+
+  # The unit that holds the widest fraction of a second in the column.
+  private def fraction_unit(col, f)
+    digits = 0
+    col.flatten.to_a.each do |cell|
+      next unless cell.is_a?(String) && (m = f.pattern.match(cell.strip))
+      digits = [digits, m[:f].size].max
+    end
+    digits > 6 ? :ns : digits > 3 ? :us : :ms
   end
 
   # Year-first text, read in C. A unit the reader does not write itself is
@@ -426,15 +425,21 @@ class CAFrame
     (unit.nil? || read_unit == unit) ? times : times.to_unit(unit)
   end
 
-  private def parse_time_by_format(key, col, format, unit, on_error)
-    parsed = CArray.time(col, format: format, unit: unit, on_error: :mask)
+  # With a `pattern`, a cell whose text does not match it is unparseable,
+  # checked in the same pass that reads the cells.
+  private def parse_time_by_format(key, col, format, unit, on_error, pattern = nil)
+    res = CATime::Resolution.parse(unit)
+    raw = pattern && CATimeLiteral.ticks_from_cells(col, res, format, :mask, pattern)
+    parsed = raw ? raw.time(unit: res) :
+             CArray.time(col, format: format, unit: unit, on_error: :mask)
     unless on_error == :mask
       failed = col.flatten.to_a.zip(parsed.flatten.is_masked.to_a)
       addrs = failed.each_index.select do |i|
         cell, masked = failed[i]
         masked && !missing_text?(cell)
       end
-      report_unreadable(key, col, :time, addrs, on_error) unless addrs.empty?
+      label = pattern ? format.inspect : :time
+      report_unreadable(key, col, label, addrs, on_error) unless addrs.empty?
     end
     parsed
   end

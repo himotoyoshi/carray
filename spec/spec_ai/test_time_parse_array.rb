@@ -61,6 +61,14 @@ class TestTimeParseArray < Test::Unit::TestCase
     assert_equal ["2024-01-01", "2024-01-02"], t.to_a.map(&:to_s)
   end
 
+  # Text left over after the format is not a time in that format; spaces
+  # are only spaces.
+  def test_text_left_over_after_the_format
+    t = CArray.time(CA_OBJECT(["13/02/2024xyz", "13/02/2024 "]),
+                    unit: :D, format: "%d/%m/%Y", on_error: :mask)
+    assert_equal ["UNDEF", "2024-02-13"], t.to_a.map(&:to_s)
+  end
+
   def test_a_time_beyond_int64_ticks_raises
     assert_raise(RangeError) do
       CArray.time(CA_OBJECT(["9999-12-31"]), unit: :ns, format: "%Y-%m-%d", on_error: :mask)

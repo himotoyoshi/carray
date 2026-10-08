@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.time` and `CAFrame#parse_to_time` with a strptime format
+  no longer read a text that has more after the format:
+  `"13/02/2024xyz"` with `"%d/%m/%Y"` is now unparseable (`UNDEF`, or
+  `ArgumentError` with `on_error: :raise`) instead of 2024-02-13. Trailing
+  spaces are still accepted.
+
 - New: `CAFrame#parse_to_time(name, :infer)` finds the one format a text
   column is written in: the first cell gives the candidates (day-first or
   month-first dates, month names, `YYYYMMDD`, with an optional time) and
