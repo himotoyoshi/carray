@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `sum`, `min`, `max`, `mean` and the variance family on the mask of
+  a `CArray.meld` view raised `NoMethodError`; they now answer as on the
+  mask's copy.
+
 - Fix: `each_slab`, `map_slab` and `reduce_slab` over a view (a
   transpose, a block, a lazy expression, a stack, ...) handed the block a
   slab whose derived arrays (`slab.dup`, `slab.sort_copy`, ...) read

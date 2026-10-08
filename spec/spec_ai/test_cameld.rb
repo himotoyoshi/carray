@@ -756,4 +756,13 @@ class TestCAMeld < Test::Unit::TestCase
     m[4] = UNDEF
     assert_equal [4.0, UNDEF, 6.0], plain.to_a
   end
+  def test_reductions_on_the_mask_of_a_meld
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    mk = CArray.meld(masked, CA_FLOAT64([4, 5]), axis: 0).mask
+    ref = mk.copy
+    [:sum, :min, :max, :mean].each do |op|
+      assert_equal ref.public_send(op), mk.public_send(op), op.to_s
+      assert_equal ref.public_send(op, axis: 0), mk.public_send(op, axis: 0), "#{op}(axis: 0)"
+    end
+  end
 end

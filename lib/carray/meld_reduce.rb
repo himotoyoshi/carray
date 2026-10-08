@@ -168,6 +168,8 @@ class CAMeld
   # more elaborate (min_count / fill_value / keep_axis / multi-axis /
   # mask propagation) punts to super.
   def meld_reduce_fast_path_ok?(kw)
+    # The mask of a meld is a meld built in C, with no parents list.
+    return false unless parents
     return false unless (kw.keys - [:axis]).empty?
     axis = kw[:axis]
     unless axis.nil?
