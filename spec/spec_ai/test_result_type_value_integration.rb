@@ -72,7 +72,13 @@ class TestResultTypeValueIntegration < Test::Unit::TestCase
   def test_value_plus_carray
     ca = CArray.int32(3)
     assert_equal :float64, CArray.result_type(ca, 3.14)
-    assert_equal :int64,   CArray.result_type(ca, 1_000_000)
+    # A scalar of the array's kind takes the array's type, as beside an
+    # operator; an Integer that does not fit takes the type of its value.
+    assert_equal :int32,   CArray.result_type(ca, 1_000_000)
+    assert_equal :int64,   CArray.result_type(ca, 2**40)
+    assert_equal :float32, CArray.result_type(CArray.float32(3), 0.1)
+    assert_equal (CArray.float32(3) + 0.1).data_type_name.to_sym,
+                 CArray.result_type(CArray.float32(3), 0.1)
   end
 
   def test_multiple_values

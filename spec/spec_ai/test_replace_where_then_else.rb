@@ -162,7 +162,8 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     r = cond.then_else(CA_INT32(0), i32)
     assert_equal :int32, r.data_type
     assert_equal [1, 2, 0, 0], r.to_a
-    assert_equal :int64, cond.then_else(0, i32).data_type
+    # A bare Integer takes the array's type, as it does beside an operator.
+    assert_equal :int32, cond.then_else(0, i32).data_type
   end
 
   def test_then_else_rejects_non_boolean_receiver

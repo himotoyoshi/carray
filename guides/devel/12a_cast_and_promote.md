@@ -132,7 +132,14 @@ b = (ref.data_type  == t) ? ref  : ref.to_type(t)
 
 `result_type` accepts any mix of CArrays, dtype names (Symbol / String /
 Class), Numeric literals, and MV producers, classifies each via
-`ca_arg_to_data_type`, and folds pairwise through `ca_promote_type`.
+`ca_arg_to_data_type`, and folds the non-scalar ones pairwise through
+`ca_promote_type`. A scalar (a Ruby value or a CScalar) then joins that
+type by the rule the operators use: one of the same kind takes the
+array's type (`0.1` beside float32 is float32, `1` beside int8 is int8),
+one of another kind promotes (`1.5` beside int32 is float64), and an
+Integer that does not fit the array's integer type takes the type of
+its value (int64). So `result_type(a, s)` is the type `a + s` has. With
+no non-scalar argument every argument folds by its own type.
 Returned as a Symbol; caller compares to each operand's `data_type` and
 calls `to_type` only where a change is needed (the guard avoids
 allocating a copy for the arm already at the common type).

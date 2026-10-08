@@ -464,8 +464,16 @@ class CArray
   #     data_type inferred (3 -> `:int64`, 3.14 -> `:float64`,
   #     1+2i -> `:cmplx128`, ...)
   #
-  #   Values and data_type representations promote uniformly. Integer args
-  #   are interpreted as *values*, not as data_type codes:
+  #   The arrays and data_type representations promote together. A
+  #   scalar (a value, or a CScalar) then joins their type the way it
+  #   does beside an operator: one of the same kind takes that type
+  #   (`result_type(float32_array, 0.1)` is `:float32`, as
+  #   `float32_array + 0.1` is), one of another kind promotes
+  #   (`result_type(int32_array, 1.5)` is `:float64`), and an Integer
+  #   that does not fit an integer type takes `:int64`. With no array or
+  #   data_type representation, every argument promotes by its own type.
+  #
+  #   Integer args are interpreted as *values*, not as data_type codes:
   #   `result_type(8)` returns `:int64` because the value 8 is an Integer,
   #   not because a data_type code equals 8. Use `result_type(:int64)` or
   #   `result_type(CA_INT64)` to be explicit about data_type intent.
@@ -478,6 +486,8 @@ class CArray
   #     CArray.result_type(:int32, :float32)  #=> :float32
   #     CArray.result_type(3, 3.14)           #=> :float64
   #     CArray.result_type(true, 3)           #=> :int64
+  #     CArray.result_type(CA_INT8([1]), 1)   #=> :int8
+  #     CArray.result_type(CA_INT8([1]), 300) #=> :int64
   def self.result_type(*args); end
 
   # @overload promote_list(list, data_type: nil)

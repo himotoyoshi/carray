@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.result_type` lets a scalar argument (a Ruby number, or a
+  CScalar) take the type of the arrays it is given with, as an operator
+  does: `result_type(float32_array, 0.1)` is `:float32` (was `:float64`),
+  the type of `float32_array + 0.1`, and `result_type(int8_array, 1)` is
+  `:int8` (was `:int64`). A scalar of another kind still promotes
+  (`result_type(int32_array, 1.5)` is `:float64`), and an Integer that does
+  not fit the array's type takes `:int64`. `then_else`, `select`, `choose`
+  and an Array given to `is_in` / `union` follow: `cond.then_else(0,
+  int32_array)` is int32, and `float32_array.is_in([0.1])` matches the cell
+  `eq(0.1)` matches. Called with scalars only, `result_type` is unchanged.
+
 - Fix: a masked index no longer reads or writes cell 0. `gather_nd`,
   `take_along_axis` and `axis2addr` answer `UNDEF` for a masked index (or
   coordinate tuple), as `project` does; `put_nd` and `put_along_axis` write

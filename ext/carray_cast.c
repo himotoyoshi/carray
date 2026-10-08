@@ -1871,28 +1871,71 @@ ca_promote_type (int8_t a, int8_t b)
            ca_type_name[a], ca_type_name[b]);
 }
 
-/* CArray.result_type(*args) -- common data_type each operand promotes to
-   under ca_cast_table.  Each arg is classified by ca_arg_to_data_type: a
+/* A result_type argument that is a scalar: a Ruby value (Integer, Float,
+   true, ...) or a CScalar.  The operators let a scalar take the type of the
+   array beside it, so result_type does too. */
+static int
+ca_arg_is_scalar (VALUE obj)
+{
+  if ( rb_obj_is_carray(obj) ) {
+    CArray *ca;
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
+    return ca_is_scalar(ca);
+  }
+  if ( TYPE(obj) == T_SYMBOL || TYPE(obj) == T_STRING || TYPE(obj) == T_CLASS ) {
+    return 0;
+  }
+  return ca_mv_probe_data_type(obj) < 0;
+}
+
+/* The type a scalar `obj` (of type `st`) and an array of type `at` share,
+   by the rule the operators apply: a scalar of the same kind takes the
+   array's type (0.1 beside float32 is float32, 1 beside int8 is int8); one
+   of another kind promotes (1.5 beside int32 is float64).  An Integer that
+   does not fit the array's integer type takes the type of its value, where
+   an operator would raise RangeError. */
+static int8_t
+ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st)
+{
+  if ( RB_INTEGER_TYPE_P(obj) && at >= CA_INT8 && at <= CA_UINT64 ) {
+    return ( ca_integer_range_side(obj, at) == 0 ) ? at : ca_promote_type(at, st);
+  }
+  if ( ca_cast_table2[st][at] >= 0 ) {
+    return at;
+  }
+  return ca_promote_type(at, st);
+}
+
+/* CArray.result_type(*args) -- common data_type of the operands, by the rule
+   the operators use.  Each arg is classified by ca_arg_to_data_type: a
    CArray / Symbol / String / Class gives a data_type representation, a
    Numeric / bool / nil / Object gives a value whose data_type is inferred.
-   Folds pairwise via ca_promote_type; returns a Symbol.  User doc (with
-   the value-vs-code distinction and examples) lives in
-   yard-stubs/carray_cast.rb. */
+   The non-scalar arguments fold pairwise via ca_promote_type; a scalar then
+   joins that type through ca_promote_scalar_type.  With no non-scalar
+   argument every argument folds by its own type.  Returns a Symbol.  User
+   doc lives in yard-stubs/carray_cast.rb. */
 
 static VALUE
 rb_ca_s_result_type (int argc, VALUE *argv, VALUE klass)
 {
-  int8_t cur;
+  int8_t cur = -1;
   int i;
 
   if ( argc < 1 ) {
     rb_raise(rb_eArgError, "result_type requires at least one argument");
   }
 
-  cur = ca_arg_to_data_type(argv[0]);
-  for ( i = 1; i < argc; i++ ) {
-    int8_t next = ca_arg_to_data_type(argv[i]);
-    cur = ca_promote_type(cur, next);
+  for ( i = 0; i < argc; i++ ) {
+    if ( ! ca_arg_is_scalar(argv[i]) ) {
+      int8_t t = ca_arg_to_data_type(argv[i]);
+      cur = ( cur < 0 ) ? t : ca_promote_type(cur, t);
+    }
+  }
+  for ( i = 0; i < argc; i++ ) {
+    if ( ca_arg_is_scalar(argv[i]) ) {
+      int8_t t = ca_arg_to_data_type(argv[i]);
+      cur = ( cur < 0 ) ? t : ca_promote_scalar_type(cur, argv[i], t);
+    }
   }
   /* Return Symbol for family consistency with
      CArray.value_to_data_type and ca.data_type. */

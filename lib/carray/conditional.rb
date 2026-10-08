@@ -47,9 +47,9 @@ class CArray
     end
     face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
     return face_then_else(x, y, face) if face
-    # Promote data_type from both branches via CArray.result_type
-    # (a CScalar contributes its own data_type, so CA_INT32(0) keeps int32
-    # where a bare Ruby Integer would widen to int64).  UNDEF is a missing
+    # Promote data_type from both branches via CArray.result_type, which
+    # lets a scalar branch take the type of an array branch as an operator
+    # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
     # value, not a value of some type: a branch that is UNDEF leaves the
     # type to the other.
     typed = [x, y].reject { |v| v.equal?(UNDEF) }
