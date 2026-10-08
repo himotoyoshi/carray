@@ -523,6 +523,44 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
   }
 }
 
+/* map_slab: mark in the output the cells the block's result has masked.
+   The output is an entity walked in place, so the slab starts at
+   last_data_off in its buffer and steps by slab_strides; the output gets
+   a mask only when some result has a masked cell. */
+static void
+ca_map_slab_carry_mask (ca_slab_iter_state_t *st, CArray *out, CArray *res,
+                        ca_size_t slab_elements)
+{
+  ca_iter_state *t = st->t1_out;
+  volatile VALUE h = 0;
+  boolean8_t *m;
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t i;
+  int8_t k;
+
+  if ( ! ca_has_mask(res) ) return;
+  ca_update_mask(res);
+  m = (boolean8_t *) ALLOCV(h, slab_elements);
+  ca_xfer_all(res->mask, m, CA_XFER_GET);
+  for ( i = 0; i < slab_elements && ! m[i]; i++ ) ;
+  if ( i < slab_elements ) {
+    ca_create_mask(out);
+    for ( k = 0; k < t->slab_ndim; k++ ) idx[k] = 0;
+    for ( i = 0; i < slab_elements; i++ ) {
+      if ( m[i] ) {
+        ca_size_t off = t->last_data_off;
+        for ( k = 0; k < t->slab_ndim; k++ ) off += idx[k] * t->slab_strides[k];
+        ((boolean8_t *) out->mask->ptr)[off / out->bytes] = 1;
+      }
+      for ( k = t->slab_ndim - 1; k >= 0; k-- ) {
+        if ( ++idx[k] < t->slab_dims[k] ) break;
+        idx[k] = 0;
+      }
+    }
+  }
+  ALLOCV_END(h);
+}
+
 /* Convert a Ruby Numeric scalar into bytes of slab_view's data_type and
    fill the entire slab buffer at out_ptr.  Used when the user block
    returns a scalar instead of a CArray (= broadcast over the slab).
@@ -601,10 +639,8 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
 
   TypedData_Get_Struct(st->self, CArray, &carray_data_type, src);
 
-  /* Mask transparent carry: input mask is exposed via slab_view
-     (= user's block can see slab.mask / slab.has_mask?).  Output mask
-     is intentionally NOT scattered — block return CArray mask info is
-     dropped (= simplest contract).                                     */
+  /* The input slab carries the source's mask; a CArray the block
+     returns carries its mask into the output (ca_map_slab_carry_mask). */
 
   /* Step 1: allocate output entity (same shape as src, data_type from opts). */
   st->output = rb_carray_new(st->out_data_type, src->ndim, src->dim,
@@ -740,6 +776,7 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
             c.slab_elements = slab_elements;
             ca_attach_window(1, &res, "r", ca_map_slab_cast_body, (VALUE) &c);
           }
+          ca_map_slab_carry_mask(st, out, res, slab_elements);
         }
         else if ( rb_obj_is_kind_of(result, rb_cNumeric) ||
                   result == Qtrue || result == Qfalse ||

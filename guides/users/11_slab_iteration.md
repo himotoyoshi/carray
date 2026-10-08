@@ -172,7 +172,7 @@ Derived values made inside the block (`row.sum`, `row - 1`, `row[1..-1]`, `row.m
 
 ## Masks
 
-A masked source array is passed straight through: the slab the block receives carries the mask, so masked cells show up as `UNDEF`. Any mask-aware method you call on the slab (`sum`, `mean`, `count_not_masked`, …) skips them just as it would on a whole array (see [Masks and missing values](05_masks.md)). If you would rather work on the raw stored values, strip the mask first with `.value`:
+A masked source array is passed straight through: the slab the block receives carries the mask, so masked cells show up as `UNDEF`. Any mask-aware method you call on the slab (`sum`, `mean`, `count_not_masked`, …) skips them just as it would on a whole array (see [Masks and missing values](05_masks.md)). A masked cell of the array the `map_slab` block returns is masked in the result. If you would rather work on the raw stored values, strip the mask first with `.value`:
 
 ```ruby
 masked.value.map_slab(axis: 1) { |row| row.normalize }

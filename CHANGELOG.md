@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `map_slab` carries the mask of the array the block returns into
+  its result: a cell masked there is masked in the result. It used to
+  write the value stored under the mask and drop the mask. A block that
+  returns an array without a mask (`slab.value * 2`, a scalar) gives a
+  result without one, as before.
+
 - Fix: for C extensions: a `CA_KERNEL_WRITE` walk over a view that holds
   a cell of its array more than once (`tile`, an array stacked or melded
   with itself) lost the cells the kernel wrote when it left others

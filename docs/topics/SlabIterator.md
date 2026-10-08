@@ -163,8 +163,8 @@ that derived views see the right window.
 
 The slab carries the source's mask: a masked cell of the source is
 masked in the slab, so `slab.sum` or `slab.count_masked` in the block
-see it. The output of `map_slab` takes the block's values only, not
-their mask.
+see it. A masked cell of the CArray the block returns from `map_slab`
+is masked in the output.
 
 ## Internal use — `CA_OBJECT` per-axis paths
 

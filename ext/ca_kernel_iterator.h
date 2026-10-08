@@ -352,14 +352,14 @@ typedef struct {
      gather and gathers each fiber here before yielding.  Reused across
      fibers; size grows to max slab_dims[0] * bytes.
 
-     last_data_off is captured by next_slab_axes(k) BEFORE the outer_idx
-     advance, then consumed by sync_slab(k) to compute the dst base for
-     WRITE scatter (= rebuilding from outer_idx in sync would duplicate
-     next_slab_axes logic; see PROPOSAL §4.3.2 hazard comment).
+     last_data_off is the byte offset of the current slab from alias_ptr,
+     set by next_slab_axes on its default path BEFORE the outer_idx
+     advance.  sync_slab reads it for the fiber it scatters back and for
+     the cells of a whole-view scratch it compares; the slab iterator's
+     map_slab reads it to mark the output's mask.
 
-     Phase C T3 paths (CA_ITER_ALIAS_PER_SLAB / _HOIST) yield from
-     scratch_ptr (= already contig per-slab materialise) and do NOT
-     touch these fields. */
+     The per-slab paths (CA_ITER_ALIAS_PER_SLAB / _HOIST) and the stack
+     paths do not set it. */
   char             *fiber_data_scratch;
   ca_size_t         fiber_data_scratch_cap;
   ca_size_t         last_data_off;
