@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#pivot` spreads a long frame into a wide one (one row per
+  distinct `index:` value, one column per distinct `columns:` value), and
+  `CAFrame#melt` stacks columns back into a long one. A pair no row carries
+  is UNDEF. `pivot` raises on a repeated pair unless `aggregate:` names a
+  reduction (`:mean`, `:sum`, ...), and takes several value columns
+  (`values: ["temp", "rh"]` gives `temp_<label>`, `rh_<label>`).
+  `CAFrame#pivot_grid` returns the same cells as one 2-D CArray together
+  with its row and column keys. The result of `melt` is a view of the wide
+  frame, so its value columns must share one data type.
+
 - Fix: `categorize(sort_labels: true)` takes one pass over the array, as
   `categorize` does, instead of one pass per category (876,000 cells with
   36,500 categories took 32 seconds). A lone Float NaN is now a category,

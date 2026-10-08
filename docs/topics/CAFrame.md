@@ -24,7 +24,7 @@ That escape-first stance is the whole idea:
   slices share storage with the frame they came from, so writing to one writes
   to the other. `copy` is the only way to cut the link
   ([Ownership](#ownership--columns-are-shared-views-copy-is-the-only-cut),
-  [§12](#12-view-copy-and-aliasing)).
+  [§13](#13-view-copy-and-aliasing)).
 
 ```ruby
 require "carray"
@@ -82,7 +82,7 @@ CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t").nrow   # => 3
 
 Such a frame is an ordinary one. `at`, `filter`, `head`, `sort_by_key`, `align`,
 `copy`, `to_csv` and `to_records` all work on it, reading and carrying the index
-the same way they carry a column (§12). What does not work is asking for the
+the same way they carry a column (§13). What does not work is asking for the
 index as a column — `df["t"]` raises `KeyError`, because the index is not one
 (§3) — and `to_ca`, which has no column to stack.
 
@@ -144,7 +144,7 @@ df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
 ```
 
 Which operations share and which copy is listed operation by operation in
-[§12](#12-view-copy-and-aliasing).
+[§13](#13-view-copy-and-aliasing).
 
 ---
 
@@ -1229,7 +1229,121 @@ position.
 
 ---
 
-## 11. Metadata readers
+## 11. Reshaping — `pivot`, `pivot_grid`, `melt`
+
+Observations often arrive **long**: one row per (time, station) pair. To put
+the stations side by side, spread the long frame into a **wide** one with
+`pivot`; `melt` goes the other way.
+
+```ruby
+long = CAFrame.new(
+  "time"    => CA_INT32([2, 1, 1, 2, 3]),
+  "station" => CA_OBJECT(["tokyo", "tokyo", "osaka", "osaka", "tokyo"]),
+  "temp"    => CA_FLOAT64([20.0, 10.0, 11.0, 21.0, 30.0]),
+)
+
+wide = long.pivot(index: "time", columns: "station", values: "temp")
+wide.variable_names   # => ["osaka", "tokyo"]
+wide.index.to_a       # => [1, 2, 3]
+wide["osaka"].to_a    # => [11.0, 21.0, UNDEF]
+wide["tokyo"].to_a    # => [10.0, 20.0, 30.0]
+```
+
+### `pivot` — long to wide
+
+`pivot(index:, columns:, values:)` makes each distinct value of the `index` key
+a row and each distinct value of the `columns` key a column; the cell where
+they cross holds `values` from the row that carried that pair.
+
+- Both keys are **sorted ascending**. The `index` key becomes the result's
+  index and names its row axis; the `columns` key values become column names
+  through `to_s`.
+- A pair **no row carries is UNDEF** (osaka at time 3 above), and so is a pair
+  whose value is masked. A row whose `index` or `columns` key is masked belongs
+  to no cell and is left out.
+- `index:` may name the frame's index as well as a column.
+- A value column with trailing dimensions keeps them in every output column. A
+  Face column (a time column, say) stays that Face, and so does a Face index.
+- The result is a **new frame**; it shares no storage with the long one.
+
+`values:` may be an **Array** of column names. Every one is spread over the same
+rows and columns, and the output columns are named `"<value>_<label>"`, all of
+the first value's columns before the next's:
+
+```ruby
+long.pivot(index: "time", columns: "station", values: ["temp", "rh"])
+# columns: temp_osaka, temp_tokyo, rh_osaka, rh_tokyo
+```
+
+Two output columns that would share a name raise.
+
+**Repeated pairs.** Without `aggregate:`, two rows with the same pair raise —
+`pivot` places values, it does not combine them. Pass `aggregate:` with a
+reduction name (`:mean`, `:sum`, `:max`, `:count`, …) and every pair holds that
+reduction over the rows that carry it:
+
+```ruby
+hourly.pivot(index: "day", columns: "station", values: "temp", aggregate: :mean)
+```
+
+Masked values are left out of the reduction, as in any reduction, so a pair
+whose values are all masked is UNDEF. A pair **no row carries stays UNDEF
+whatever the reduction, `:count` included** — "counted none" and "no such pair"
+stay distinguishable. `aggregate:` needs one-dimensional value columns.
+
+### `pivot_grid` — the same cells as one CArray
+
+When the next step is array arithmetic rather than named columns,
+`pivot_grid` returns the cells as a single CArray, with the two key arrays that
+label its axes:
+
+```ruby
+temp, times, stations = long.pivot_grid(index: "time", columns: "station",
+                                        values: "temp")
+temp.shape            # => [3, 2]
+stations.to_a         # => ["osaka", "tokyo"]
+temp.mean(axis: 0)    # => mean per station: [16.0, 20.0]
+```
+
+Axis 0 follows the `index` key and axis 1 the `columns` key; any trailing
+dimensions of the value column come after them. Missing pairs, masked keys,
+repeats and `aggregate:` behave as in `pivot`, and the grid keeps the value
+column's data type, Face included. It takes one value column; call it once per
+column for several.
+
+### `melt` — wide to long
+
+`melt` stacks value columns one after another into a single column, with a
+column naming where each row came from and the id columns repeated alongside:
+
+```ruby
+wide = CAFrame.new("time"  => CA_INT32([1, 2, 3]),
+                   "tokyo" => CA_FLOAT64([10, 20, 30]),
+                   "osaka" => CA_FLOAT64([11, 21, 31]))
+
+long = wide.melt(id: "time")
+long.variable_names     # => ["time", "variable", "value"]
+long["variable"].to_a   # => ["tokyo", "tokyo", "tokyo", "osaka", "osaka", "osaka"]
+long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
+```
+
+- With no `value_columns:`, every column that is not an id is melted.
+  `var_name:` and `value_name:` rename the two new columns.
+- When the frame has an index, it is carried as an id column named after the
+  row axis.
+- Masked cells stay masked.
+- The result is a **view-frame**: the value column is a `CArray.meld` of the
+  melted columns and each id column a `CArray.meld` of itself, so writing the
+  result reaches the wide frame. `copy` it if you want it detached.
+- Because it is a view, the value columns must share **one data type** and one
+  trailing shape. Mixed types raise rather than being promoted silently; `cast`
+  them first.
+
+`melt` followed by `pivot` on the same keys gives the wide frame back.
+
+---
+
+## 12. Metadata readers
 
 Each reader returns a **fresh** object — the live columns Hash is never
 exposed.
@@ -1255,7 +1369,7 @@ having its own API — e.g. `df.select(*df.variable_names[1..])` or
 
 ---
 
-## 12. View, copy, and aliasing
+## 13. View, copy, and aliasing
 
 Frame view/copy semantics follow CArray exactly:
 
@@ -1287,6 +1401,8 @@ Frame view/copy semantics follow CArray exactly:
 | `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
 | `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
 | `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
+| `df.pivot(...)` / `df.pivot_grid(...)` | a **new frame** / a **new CArray** sharing nothing — each cell is gathered from the row that carried its pair, and a missing pair has to become UNDEF (§11) |
+| `df.melt(...)` | a **view-frame** — the value column is a `CAMeld` of the melted columns and each id column a `CAMeld` of itself, so writes reach this frame; only the column naming the source is new (§11) |
 | `grouped.table { \|sub\| }` | each `sub` is a **view-frame** of that group's rows — writing it reaches the grouped frame (§9) |
 | `df.each_row` | a Hash of **raw cells** per row: a scalar cell is a Ruby value, an N-D cell is a **live view** of that row's slice (§7) |
 | `df.to_records` | plain Ruby Hashes — values normalized (`CArray` -> `Array`, UNDEF -> `nil`), so independent of the frame (§7) |
