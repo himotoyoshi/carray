@@ -645,9 +645,11 @@ class CAFrame
     return "" if text.nil?
     # With a separator longer than one character, a value can end in part of
     # it ("a:" before "::"), and the reader would find the separator inside
-    # the value; such a value is quoted too.
+    # the value; such a value is quoted too.  A value of spaces and tabs is
+    # quoted so that it is neither a blank line the reader skips (a header of
+    # one column) nor a field strip: empties.
     if text.empty? || text.include?(sep) || text.include?(quote) ||
-       text.include?("\n") || text.include?("\r") ||
+       text.include?("\n") || text.include?("\r") || text.each_byte.all? { |b| b == 0x20 || b == 0x09 } ||
        (sep.size > 1 && (text + sep).index(sep) != text.size)
       quote + text.gsub(quote, quote * 2) + quote
     else

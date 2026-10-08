@@ -234,6 +234,23 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_equal ["a", "b", UNDEF], read("s\na\nb\n\n")["s"].to_a
   end
 
+  # A header of one blank name would be a blank line the reader skips, so
+  # to_csv quotes a value of spaces and tabs.
+  def test_a_blank_name_of_a_one_column_file_round_trips
+    [" ", "\t", "  \t"].each do |name|
+      df = CAFrame.new(name => CA_INT32([1, 2, 3]))
+      back = read(df.to_csv)
+      assert_equal [name], back.variable_names, name.inspect
+      assert_equal %w[1 2 3], back[name].to_a
+    end
+  end
+
+  def test_a_blank_value_round_trips_under_strip
+    df = CAFrame.new("a" => CA_OBJECT(["x", " ", "\t"]))
+    assert_equal ["x", " ", "\t"], read(df.to_csv)["a"].to_a
+    assert_equal ["x", " ", "\t"], read(df.to_csv, strip: true)["a"].to_a
+  end
+
   def test_a_separator_in_another_encoding_says_how_to_read
     io = StringIO.new("a;b\n1;2\n".encode("UTF-16LE"))
     io.set_encoding("UTF-16LE")
