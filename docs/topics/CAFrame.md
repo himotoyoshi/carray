@@ -227,6 +227,27 @@ Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 (`:mask` / `:warn` / `:raise`) works as it does for
 [`cast`](#8-column-verbs).
 
+**A file's own spelling of missing.** An unquoted empty field, and a cell a
+short row never reached, are `UNDEF` without asking. Files that write missing
+some other way — a `-999` sentinel, `///`, `NA` — say so with `missing:`. A
+field whose text is one of the tokens becomes `UNDEF` **before** `types:`
+casts, so the sentinel never reaches the column as a number:
+
+```ruby
+CAFrame.from_csv("obs.csv", missing: ["-999", "///"],
+                 types: { "temp" => :float64 })
+# -999 and /// are UNDEF in every column; temp is float64 without a -999.0 in it
+
+CAFrame.from_csv("obs.csv", missing: { "temp" => "-999", "rh" => ["-999", "-"] })
+# per column; columns the Hash does not name keep only the empty field
+```
+
+Tokens are **Strings, compared with the field's text as read** — after
+`strip:`, whether the field was quoted or not. So `"-999"` does not match
+`-999.0`, and a number given as a token (`missing: -999`) raises instead of
+quietly matching some spellings and not others. A Hash naming a column the file
+does not have raises `KeyError`.
+
 Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
 scanner (embedded separators / newlines / `""` escapes). Columns are handed to
@@ -809,6 +830,17 @@ the CSV is UTF-8. A character the encoding cannot hold raises
 
 ```ruby
 df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+```
+
+`missing:` writes a masked cell as a given String instead of an empty field,
+for a reader that expects a sentinel. `from_csv` with the same `missing:`
+reads it back as `UNDEF`. If a real value would be written as that same text,
+the file could not tell the two apart, so `to_csv` raises and names the column
+and row:
+
+```ruby
+df.to_csv("out.csv", missing: "-999")
+CAFrame.from_csv("out.csv", missing: "-999")   # the mask comes back
 ```
 
 ### Looking at a frame — `to_table`, `p`, `puts`
