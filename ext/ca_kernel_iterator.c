@@ -1856,6 +1856,11 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
            of parent k at mask_off.  A copy, as on every other path: the
            cursor is the walk's own, and a write to it reaches nothing. */
         if ( ca_has_mask(src) ) {
+          /* The stack's mask may still read stand-ins for parents that
+             have gained a mask since; read through to those. */
+          ca_multi_parent_mask_refresh(src->mask, stack->parents,
+                                       stack->mask_standins,
+                                       stack->n_parents, 0);
           /* Zero-filled: a slot is set once its copy is made, and finish
              frees the copies whose slot is set. */
           st->stack_parent_mask_ptrs =
@@ -1863,7 +1868,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           memset(st->stack_parent_mask_ptrs, 0,
                  stack->n_parents * sizeof(boolean8_t *));
           for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-            CArray    *pm = stack->parents[kk]->mask;
+            CArray    *pm = ((CAStack *) src->mask)->parents[kk];
             ca_size_t  n  = pm->elements;
             boolean8_t *copy = (boolean8_t *) xmalloc(n > 0 ? n : 1);
             st->stack_parent_mask_ptrs[kk] = copy;

@@ -355,13 +355,30 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
 }
 
 /* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:
-   p's own mask, created if needed when p can carry one.  A parent that
-   cannot -- a value array, a mask array, a read-only (or frozen) array with
-   no mask -- gets a read-only all-false stand-in instead, stored in
-   *standin for the view to free.  Reading the view's mask then never gives
-   such a parent a mask; writing UNDEF into its part raises as a write to a
-   read-only array does. */
+   p's own mask when it has one.  A parent without one gets an all-false
+   stand-in, stored in *standin for the view to free, so that asking the
+   view about its mask does not give the parent a mask.  The stand-in of a
+   parent that cannot carry a mask -- a value array, a mask array, a
+   read-only (or frozen) array -- is read-only: writing UNDEF into its part
+   raises as a write to a read-only array does. */
 CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
+
+/* Let the stand-ins of a multi-parent view's mask give way to the parents'
+   own masks.  `mask` is the view's mask (a CAStack or CAMeld over the
+   parents' masks), `parents` / `standins` the view's.  A writable stand-in
+   is replaced when its parent has gained a mask, or, with for_write, by a
+   mask created on the parent.  The mask's own transfer functions call this
+   on entry; it does nothing inside an attach window. */
+void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
+                                          CArray **standins, int32_t n,
+                                          int for_write);
+
+/* After a write inside an attach window, which went into the stand-ins
+   the window was opened with: move what was written into a stand-in to a
+   mask created on its parent.  The next refresh then reads the parent's
+   mask in its place. */
+void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
+                                         CArray **standins, int32_t n);
 
 /* The common-type rules the operators, result_type and the search family
    share (ext/carray_cast.c): the type a scalar `obj` of type `st` takes

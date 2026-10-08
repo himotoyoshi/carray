@@ -765,4 +765,29 @@ class TestCAMeld < Test::Unit::TestCase
       assert_equal ref.public_send(op, axis: 0), mk.public_send(op, axis: 0), "#{op}(axis: 0)"
     end
   end
+  # Asking a stack or meld about its mask leaves an unmasked part alone;
+  # a mask the part gains afterwards shows through, and UNDEF written
+  # through the view reaches the part.
+  def test_mask_query_leaves_an_unmasked_part_alone
+    [->(a, b) { CArray.stack([a, b], axis: 0) },
+     ->(a, b) { CArray.stack([a, b], axis: 2) },
+     ->(a, b) { CArray.meld(a, b, axis: 0) },
+     ->(a, b) { CArray.meld(a, b, axis: 1) }].each_with_index do |mk, n|
+      a = CArray.float64(2, 3).seq; a[0] = UNDEF
+      b = CArray.float64(2, 3).seq
+      v = mk.call(a, b)
+      assert_equal true, v.has_mask?, "case #{n}"
+      v.copy; v.sum(axis: 0); v.mask.to_a
+      assert_equal false, b.has_mask?, "case #{n}: query"
+      b[1, 1] = UNDEF
+      assert_equal v.copy.to_a, v.to_a, "case #{n}: later mask"
+      assert_equal 1, v.mask.to_a.flatten.count(true) - 1, "case #{n}: later mask"
+      c = CArray.float64(2, 3).seq
+      w = mk.call(a, c)
+      w.has_mask?
+      w[*w.shape.map { |d| d - 1 }] = UNDEF
+      assert_equal true, c.has_mask?, "case #{n}: write"
+      assert_equal 1, c.count_masked, "case #{n}: write"
+    end
+  end
 end

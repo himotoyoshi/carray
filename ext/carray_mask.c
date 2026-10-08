@@ -426,16 +426,74 @@ CArray *
 ca_multi_parent_mask (CArray *p, CArray **standin)
 {
   *standin = NULL;
-  if ( ! ca_has_mask(p) &&
-       ( ca_is_value_array(p) || ca_is_mask_array(p) || ca_is_readonly(p) ) ) {
+  if ( ! ca_has_mask(p) ) {
     CArray *z = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
     MEMZERO(z->ptr, boolean8_t, z->elements);
-    ca_set_flag(z, CA_FLAG_READ_ONLY);
+    if ( ca_is_value_array(p) || ca_is_mask_array(p) || ca_is_readonly(p) ) {
+      ca_set_flag(z, CA_FLAG_READ_ONLY);
+    }
     *standin = z;
     return z;
   }
   ca_create_mask(p);
   return p->mask;
+}
+
+void
+ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
+                              CArray **standins, int32_t n, int for_write)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k;
+  /* Not inside an attach window: its buffer and its detach are those of
+     the parents it was opened with.  The attach and allocate slots run
+     before the buffer is published, and replace the stand-ins then. */
+  if ( standins == NULL || ( CAVIEW(mask)->attach > 0 && mask->ptr != NULL ) ) {
+    return;
+  }
+  /* A replaced stand-in stays allocated until the view is freed: a copy
+     of the mask (dup) may still point at it. */
+  for ( k = 0; k < n; k++ ) {
+    CArray *z = standins[k];
+    if ( z == NULL || mp->parents[k] != z
+         || ca_test_flag(z, CA_FLAG_READ_ONLY) ) {
+      continue;
+    }
+    if ( ! ( for_write || ca_has_mask(parents[k]) ) ) {
+      continue;
+    }
+    ca_create_mask(parents[k]);
+    mp->parents[k] = parents[k]->mask;
+    if ( k == 0 ) {
+      CAVIEW(mask)->parent = parents[k]->mask;
+    }
+  }
+}
+
+void
+ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
+                             CArray **standins, int32_t n)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k;
+  if ( standins == NULL ) {
+    return;
+  }
+  for ( k = 0; k < n; k++ ) {
+    CArray    *z = standins[k];
+    ca_size_t  i;
+    if ( z == NULL || mp->parents[k] != z
+         || ca_test_flag(z, CA_FLAG_READ_ONLY) ) {
+      continue;
+    }
+    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
+    if ( i == z->elements ) {
+      continue;
+    }
+    ca_create_mask(parents[k]);
+    ca_xfer_all(parents[k]->mask, z->ptr, CA_XFER_PUT);
+    MEMZERO(z->ptr, boolean8_t, z->elements);
+  }
 }
 
 void

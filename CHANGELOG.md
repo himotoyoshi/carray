@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: asking a `CArray.stack` or `CArray.meld` view about its mask
+  (`has_mask?`, `mask`, `copy`, a reduction, ...) no longer gives its
+  unmasked parents an all-unmasked mask; they are read as unmasked and
+  left alone, and a mask a parent gains later shows through. Writing UNDEF
+  through the view still gives every parent without a mask one.
+
 - Change: `map_slab` carries the mask of the array the block returns into
   its result: a cell masked there is masked in the result. It used to
   write the value stored under the mask and drop the mask. A block that

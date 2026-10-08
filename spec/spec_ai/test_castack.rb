@@ -110,12 +110,16 @@ class TestCAStack < Test::Unit::TestCase
     s = CArray.stack([a, b, c])
     s.send(:__create_mask__)
 
-    # CAStack-side horizontal propagation: all parents' roots gain mask
-    assert_true a.has_mask?
-    assert_true b.has_mask?
-    assert_true c.has_mask?
+    # The stack's mask stands in for the parents' without giving them one;
+    # UNDEF written into a part gives that parent its mask.
+    assert_false a.has_mask?
+    assert_false b.has_mask?
+    assert_false c.has_mask?
     assert_true s.has_mask?
     assert_kind_of CAStackMask, s.mask
+    s[1, 2] = UNDEF
+    assert_true b.has_mask?
+    assert_equal [10.0, 11.0, UNDEF], b.to_a
   end
 
   def test_mask_class_self_similar

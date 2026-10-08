@@ -12,8 +12,8 @@
     partial cost)
   - conditional fold_stride: counts[0] == 1 → fold to that parent;
     multi-parent → fold boundary (decline)
-  - create_mask: horizontal propagation (= all parents' roots get
-    all-zero mask if any parent has mask) + mask CAStack itself
+  - create_mask: a mask CAStack over the parents' masks, with an all-false
+    stand-in for a parent that has none (ca_multi_parent_mask)
 
 ---------------------------------------------------------------------------- */
 
@@ -172,6 +172,7 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
   ca->nosync    = 0;
 
   ca->mask_standins = NULL;
+  ca->mask_owner    = NULL;
   ca->n_parents = n_parents;
   ca->parents   = ALLOC_N(CArray *, n_parents);
   for ( i = 0; i < n_parents; i++ ) {
@@ -187,7 +188,7 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
   ca->dim[k_axis] = n_parents;
   for ( a = k_axis + 1; a < ca->ndim; a++ ) ca->dim[a] = ref->dim[a - 1];
 
-  /* mask: lazy; horizontal propagation triggers on first mask access. */
+  /* mask: lazy, built on first mask access. */
   return 0;
 }
 
@@ -243,10 +244,33 @@ ca_stack_func_clone (void *ap)
 
 /* view[..., k at k_axis, ...] = parents[k][parent_idx]
    where parent_idx = idx[] with the k_axis slot removed. */
+/* On the mask of a CAStack: let its stand-ins give way to the parents' own
+   masks (see ca_multi_parent_mask_refresh). */
+static void
+ca_stack_mask_refresh (CAStack *ca, int for_write)
+{
+  CAStack *o = (CAStack *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_refresh((CArray *) ca, o->parents, o->mask_standins,
+                                 o->n_parents, for_write);
+  }
+}
+
+static void
+ca_stack_mask_settle (CAStack *ca)
+{
+  CAStack *o = (CAStack *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_settle((CArray *) ca, o->parents, o->mask_standins,
+                                o->n_parents);
+  }
+}
+
 static void
 ca_stack_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   k_axis = ca->k_axis;
   ca_size_t k = idx[k_axis];
   if ( k < 0 || k >= ca->n_parents ) {
@@ -282,6 +306,7 @@ ca_stack_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                           void *data, int dir)
 {
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   k_axis = ca->k_axis;
   ca_size_t parent_elements = ca->parents[0]->elements;
   ca_size_t bytes = ca->bytes;
@@ -408,6 +433,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 {
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   k_axis = ca->k_axis;
   int8_t   pndim = ca->ndim - 1;
   ca_size_t native[CA_RANK_MAX], dstride[CA_RANK_MAX];
@@ -760,6 +786,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
 static void
 ca_stack_func_xfer_all (void *ap, void *data, int dir)
 {
+  ca_stack_mask_refresh((CAStack *) ap, dir == CA_XFER_PUT);
   ca_stack_xfer_parents((CAStack *) ap, (char *) data, dir, 0);
 }
 
@@ -771,6 +798,7 @@ static void
 ca_stack_func_allocate (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, 0);
   ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
 }
@@ -786,6 +814,7 @@ static void
 ca_stack_func_attach (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, 0);
   int32_t k;
   int     tag = 0;
   ca_attach_all(ca->parents, ca->n_parents);
@@ -804,6 +833,7 @@ ca_stack_func_sync (void *ap)
   CAStack *ca = (CAStack *) ap;
   ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all(ca->parents, ca->n_parents);
+  ca_stack_mask_settle(ca);
 }
 
 static void
@@ -826,6 +856,7 @@ static void
 ca_stack_func_fill_data (void *ap, void *ptr)
 {
   CAStack *ca = (CAStack *) ap;
+  ca_stack_mask_refresh(ca, 1);
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
     ca_fill(ca->parents[k], ptr);
@@ -833,12 +864,13 @@ ca_stack_func_fill_data (void *ap, void *ptr)
 }
 
 /* ------------------------------------------------------------------- */
-/* create_mask: horizontal propagation                                  */
+/* create_mask                                                          */
 /* ------------------------------------------------------------------- */
 
-/* All parents' roots gain all-zero mask (if not already), then build
-   mask CAStack from the K parent mask CArrays.  Self-similar (= CAStack
-   re-used as its own mask class). */
+/* The mask is a CAStack over the K parents' masks, a stand-in standing
+   for a parent that has none (ca_multi_parent_mask), so building it gives
+   no parent a mask.  Self-similar (= CAStack re-used as its own mask
+   class). */
 static void
 ca_stack_func_create_mask (void *ap)
 {
@@ -863,6 +895,7 @@ ca_stack_func_create_mask (void *ap)
      xfer_stride k-range check when k_axis != 0.) */
   ca->mask = (CArray *) ca_stack_new_with_axis(ca->n_parents, mask_parents,
                                                ca->k_axis);
+  ((CAStack *) ca->mask)->mask_owner = (CArray *) ca;
   ALLOCV_END(holder);
 }
 
@@ -887,6 +920,13 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
   ca_size_t lo = f->base, hi = f->base;
   ca_size_t k;
   int8_t    i;
+
+  /* The mask of a stack while it still reads stand-ins: a write must
+     reach the stack's transfer, which replaces them first. */
+  if ( ca->mask_owner != NULL
+       && ((CAStack *) ca->mask_owner)->mask_standins != NULL ) {
+    return 0;
+  }
 
   /* k_axis != 0: parent byte blocks are interleaved (not contig in view
      buffer), so the byte-box containment check and the size-1 K-axis

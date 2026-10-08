@@ -247,23 +247,30 @@ reduction family behave the same way, along the K axis or any other.
 
 ---
 
-## 8. Mask: horizontal propagation across parents
+## 8. Mask
 
 Masking a `CAStack` is self-similar — the mask of a `CAStack` is itself a
-`CAStack` over the parents' masks (class `CAStackMask`).  The distinctive
-behaviour is **horizontal propagation**: the first time the stack gains a
-mask, it forces **every parent** to acquire an (all-unmasked) mask, so all
-parents keep uniform mask capacity.
+`CAStack` over the parents' masks (class `CAStackMask`).  The stack has a
+mask as soon as any parent has one.  A parent without a mask is read as
+all-unmasked and is left alone: asking the stack about its mask, copying
+it or reducing it does not give that parent a mask.  A parent that gains a
+mask later shows through.  Writing UNDEF through the stack gives every
+parent that has none an all-unmasked mask.
 
 ```ruby
 x = CArray.float64(3) { |i| i }        # no mask
 y = CArray.float64(3) { |i| 10 + i }   # no mask
 
 s = CArray.stack([x, y])
+
+x.has_mask?   #=> false
+y.has_mask?   #=> false
+s.has_mask?   #=> false
+
 s[0, 0] = UNDEF                        # mask one cell of the stack
 
-x.has_mask?   #=> true   ← forced to gain a mask
-y.has_mask?   #=> true   ← forced too (horizontal propagation)
+x.has_mask?   #=> true
+y.has_mask?   #=> true   ← all-unmasked, given by the write
 
 puts s.inspect
 #=> <CAStack.float64(2,3): elem=6 mask=1 mem=48b
@@ -271,9 +278,8 @@ puts s.inspect
 #     [ 10.0, 11.0, 12.0 ] ]>
 ```
 
-This is on top of the ordinary vertical propagation (a masked value on the
-stack lands in the corresponding parent).  Horizontal propagation is what
-keeps the K parents interchangeable once masking is in play.
+A parent that cannot carry a mask (a value array, a read-only array) is
+read as all-unmasked too; writing UNDEF into its part raises.
 
 ---
 

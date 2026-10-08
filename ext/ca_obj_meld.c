@@ -25,7 +25,7 @@
                            (sortedness-aware O(n+K) merge is a future
                            optimisation, memo §7.3)
     fill_data:             K-fold ca_fill
-    create_mask:           horizontal propagation (mirrors CAStack)
+    create_mask:           mask CAMeld over the parents' masks (mirrors CAStack)
     fold_stride:           decline (return 0)
 
   Design ref: devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md.  Meld-axis reduce
@@ -182,6 +182,7 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
   ca->nosync    = 0;
 
   ca->mask_standins = NULL;
+  ca->mask_owner    = NULL;
   ca->n_parents = n_parents;
   ca->parents   = ALLOC_N(CArray *, n_parents);
   for ( i = 0; i < n_parents; i++ ) {
@@ -281,10 +282,33 @@ ca_meld_tail_elements (const CAMeld *ca)
 
 /* view[..., v at meld_axis, ...] = parents[k][..., v - seg_offset[k], ...]
    where k = segment_of(v). */
+/* On the mask of a CAMeld: let its stand-ins give way to the parents' own
+   masks (see ca_multi_parent_mask_refresh). */
+static void
+ca_meld_mask_refresh (CAMeld *ca, int for_write)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_refresh((CArray *) ca, o->parents, o->mask_standins,
+                                 o->n_parents, for_write);
+  }
+}
+
+static void
+ca_meld_mask_settle (CAMeld *ca)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_settle((CArray *) ca, o->parents, o->mask_standins,
+                                o->n_parents);
+  }
+}
+
 static void
 ca_meld_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t v = idx[ma];
   int32_t   k;
@@ -319,6 +343,7 @@ ca_meld_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                          void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t bytes = ca->bytes;
   ca_size_t view_div[CA_RANK_MAX];   /* row-major divisor per view axis */
@@ -616,6 +641,7 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 {
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t native[CA_RANK_MAX];
   ca_size_t s;
@@ -813,6 +839,7 @@ ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
 static void
 ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
+  ca_meld_mask_refresh((CAMeld *) ap, dir == CA_XFER_PUT);
   ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
 }
 
@@ -824,6 +851,7 @@ static void
 ca_meld_func_allocate (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 0);
   ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
 }
@@ -839,6 +867,7 @@ static void
 ca_meld_func_attach (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 0);
   int32_t k;
   int     tag = 0;
   ca_attach_all(ca->parents, ca->n_parents);
@@ -857,6 +886,7 @@ ca_meld_func_sync (void *ap)
   CAMeld *ca = (CAMeld *) ap;
   ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all(ca->parents, ca->n_parents);
+  ca_meld_mask_settle(ca);
 }
 
 static void
@@ -879,6 +909,7 @@ static void
 ca_meld_func_fill_data (void *ap, void *ptr)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 1);
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
     ca_fill(ca->parents[k], ptr);
@@ -886,7 +917,7 @@ ca_meld_func_fill_data (void *ap, void *ptr)
 }
 
 /* ------------------------------------------------------------------- */
-/* create_mask (horizontal propagation, mirrors CAStack)                */
+/* create_mask (mirrors CAStack)                                        */
 /* ------------------------------------------------------------------- */
 
 static void
@@ -907,6 +938,7 @@ ca_meld_func_create_mask (void *ap)
                                            &ca->mask_standins[k]);
   }
   ca->mask = (CArray *) ca_meld_new(ca->n_parents, mask_parents, ca->meld_axis);
+  ((CAMeld *) ca->mask)->mask_owner = (CArray *) ca;
   ALLOCV_END(holder);
 }
 
