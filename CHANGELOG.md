@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `percentile(100)` on an object array takes the last sorted value, as
+  every other `p` and the numeric arrays do, so a NaN in the data answers
+  NaN. It called `max`, which skips NaN.
+
 - Fix: `median`, `percentile` and `quantile` over the whole array return
   `UNDEF` (or the `fill_value:`) when an array without a mask has fewer
   cells than `min_count:`, as a masked array and the `axis:` form already

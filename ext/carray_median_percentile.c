@@ -555,9 +555,6 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
 static VALUE
 pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
 {
-  if ( p == 100.0 )
-    return rb_funcall(obj_call_axis(self, id_max, LONG2NUM(axis)),
-                      id_mul, 1, DBL2NUM(1.0));
   if ( n == 1 )
     return rb_funcall(obj_slice(self, axis, 0), id_mul, 1, DBL2NUM(1.0));
   double f = (n - 1) * p / 100.0;
