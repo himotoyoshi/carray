@@ -23,7 +23,12 @@ That escape-first stance is the whole idea:
 - the frame layer is a thin Ruby shell over columns; anything the frame does
   not offer, you do on the escaped column with ordinary CArray operations;
 - there is **no type-inference engine, no opaque Series wrapper, no hidden
-  index alignment** — the frame keeps names, you keep control.
+  index alignment** — the frame keeps names, you keep control;
+- **sub-frames are views, not copies.** `select`, `filter`, `head` and row
+  slices share storage with the frame they came from, so writing to one writes
+  to the other. `copy` is the only way to cut the link
+  ([Ownership](#ownership--columns-are-shared-views-copy-is-the-only-cut),
+  [§12](#12-view-copy-and-aliasing)).
 
 ```ruby
 require "carray"
@@ -129,6 +134,21 @@ materializes every column and the index. To own a single column, rebind a fresh
 copy — `df = df.append("temp", df["temp"].copy)`. **This is CArray's
 view-everywhere model lifted to a table, not a general DataFrame** — how you
 place `copy` is the dividing line.
+
+```ruby
+df   = CAFrame.new("station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
+                   "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]))
+warm = df.filter { |f| f["temp"] > 20 }
+warm["temp"][0] = 0.0
+df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- the edit reached df
+
+snap = df.copy
+snap["temp"][1] = 99.0
+df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
+```
+
+Which operations share and which copy is listed operation by operation in
+[§12](#12-view-copy-and-aliasing).
 
 ---
 
