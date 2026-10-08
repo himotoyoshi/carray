@@ -45,6 +45,19 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal 24, a.elements
   end
 
+  # A new record holds zeros, as CArray.new does, not the bytes the
+  # allocator last handed out (rake spec_ai turns off macOS's zero-on-free,
+  # which would otherwise hide the difference).
+  def test_ac1_new_records_are_zero_filled
+    junk = Array.new(50) { CArray.float64(3000) { |i| i * 1.7 } }
+    junk = nil
+    GC.start
+    20.times do
+      bytes = CARecord.new(GeoCoord, 50).parent.to_a.join.bytes
+      assert bytes.all?(&:zero?)
+    end
+  end
+
   def test_ac1_parent_is_fixlen_entity
     a = CARecord.new(GeoCoord, 5)
     p = a.parent
