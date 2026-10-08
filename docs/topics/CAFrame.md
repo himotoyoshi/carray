@@ -294,9 +294,19 @@ Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
 scanner (embedded separators / newlines / `""` escapes). Columns are handed to
 the frame as views over one backing object array, so the build is cheap.
-Options: `sep:` (default `","`), `quote:` (`'"'`), `strip:` (trim spaces from
+Options: `sep:` (default `","`, and it may be longer than one character, as
+`"::"`), `quote:` (`'"'`), `strip:` (trim spaces from
 unquoted fields, default `false` = RFC 4180 spacing), `encoding:`
 (default `"bom|utf-8"`, strips a BOM).
+
+Input that cannot be read as written **raises rather than losing data**. A
+quoted field must end at the separator or the end of the record: text after
+the closing quote (`"ab"cd`, or a space as in `"x" ,2`) raises
+`CAFrame::CSVParser::MalformedCSV` naming the record, except that `strip:`
+lets spaces through there as it does around an unquoted field. A header that
+names a column twice raises `ArgumentError`, since a frame keeps one column
+per name; name the columns yourself with `column_names` in a reading block
+(below) to read such a file.
 
 **A file in another encoding** is read by naming its encoding and the one to
 transcode to. A CSV written by Excel in Japanese is CP932 — what Windows calls
@@ -1050,7 +1060,11 @@ Notes:
   `:time` parses a text column into a `CATime` column in the finest unit its
   text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` /
   `:ns` for fractions of a second (for a format or a unit of your own, use
-  `parse_to_time`). Other targets go through `to_type`, and casting a
+  `parse_to_time`). The unit is the finest any cell shows, so one cell with
+  nanoseconds puts the column in `:ns`, which spans only 1677 to 2262; a date
+  outside it raises `RangeError` naming the column and the cell, under every
+  `on_error:`, rather than becoming `UNDEF`. `parse_to_time(name, unit: :us)`
+  reads it in a coarser unit. Other targets go through `to_type`, and casting a
   numeric column is an ordinary conversion. It rebinds a fresh column — the one edit that does
   **not** write through to frames sharing the old column.
 

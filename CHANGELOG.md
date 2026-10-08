@@ -36,6 +36,21 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.from_csv` raises `MalformedCSV` on text after a closing
+  quote (`"ab"cd`, or `"x" ,2`) instead of dropping the rest of the record;
+  `strip: true` lets spaces through there.
+- Fix: `CAFrame.from_csv` with a separator longer than one character
+  (`sep: "::"`) reads a record that contains a quote; it ended a field at
+  any one character of the separator. `to_csv` quotes a value that ends in
+  part of such a separator, so the file reads back.
+- Fix: `CAFrame.from_csv` raises `ArgumentError` on a header that names a
+  column twice; the earlier column was dropped.
+- Change: `CAFrame#cast(name => :time)` and `infer_types` / `types: :infer`
+  raise `RangeError` for a year-first date the column's unit cannot hold,
+  under every `on_error:`. One cell with nanoseconds puts a column in `:ns`
+  (1677 to 2262), and dates outside it were masked without a warning.
+  `parse_to_time(name, unit: :us)` reads such a column.
+
 - New: `CAFrame#resample(name, unit)` groups rows into time bins along a
   time column or the time index and returns a `GroupedFrame`, so
   `df.resample("time", "1 hour").mean` gives hourly means indexed by a
