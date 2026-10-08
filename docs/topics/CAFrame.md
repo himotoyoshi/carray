@@ -206,14 +206,15 @@ IO is already open (there the IO's own encoding governs, and a BOM is the
 caller's).
 
 The header row supplies column names (Strings). Every column is
-read **raw as an object column of the cell strings** unless you ask for types.
+read **raw as a `CAString` of the cell strings** unless you ask for types.
 Pass `types:` to cast named columns on the way in, `types: :infer` to cast the
 columns that read as numbers, or call [`cast`](#8-column-verbs) later. Cells
 that fail to parse become `UNDEF` automatically (**parse-mask**):
 
 ```ruby
 df = CAFrame.from_csv("obs.csv")
-df["temp"].data_type      # => :object   (raw strings)
+df["temp"].class          # => CAString   (raw strings)
+df["temp"].data_type      # => :object
 
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64, "rh" => :int32 })
 df["temp"].data_type      # => :float64
@@ -226,6 +227,22 @@ CAFrame.from_csv("obs.csv", types: { "rh" => :int32 }, on_error: :warn)
 Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 (`:mask` / `:warn` / `:raise`) works as it does for
 [`cast`](#8-column-verbs).
+
+**Cleaning text.** Because a text column is a `CAString`, the string operations
+are on the column itself, and the in-place ones write to the frame — there is
+no need to take the cells out to a Ruby Array and put them back:
+
+```ruby
+df["station"].strip!                         # trim every cell, in place
+df["code"].gsub!("-", "")
+df["num"] = df["code"].extract(/(\d+)/, '\1') # a new text column
+df.cast("num", :int32)                       # then read it as numbers
+```
+
+All the columns of a file are views over one object array, so the `CAString`
+of each column holds no copy of its own. `to_const_string` packs a column of
+read-only text into one buffer, which is lighter for a large column that is no
+longer edited.
 
 `types: :infer` casts a column to `:int64` when every cell that is not missing
 is an integer that fits, to `:float64` when every such cell is a number, to
