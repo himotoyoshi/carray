@@ -4518,7 +4518,7 @@ module MkKernel
       io.puts "      if ( r > 0 ) {"
       io.puts "        if ( dense ) {"
       if is_object
-        io.puts "          if ( ! rb_equal(buf[r].v, buf[r - 1].v) ) out_r++;"
+        io.puts "          if ( ! ca_obj_equal(buf[r].v, buf[r - 1].v) ) out_r++;"
       elsif is_fixlen
         io.puts "          if ( memcmp(buf[r].vp, buf[r - 1].vp, (size_t) buf[r].nb) != 0 ) out_r++;"
       else
@@ -5048,7 +5048,7 @@ module MkKernel
     # body: Hash form picks per-data_type-kind branch (= :int / :float /
     # :object / :fixlen); String form is uniform.
     # PROPOSAL_MKKERNEL_OBJECT_DTYPE_BRANCH Phase 4: :object branch added for
-    # CA_OBJECT (equality via rb_equal, ordering via rb_funcall(<=>)).
+    # CA_OBJECT (equality via ca_obj_equal, ordering via rb_funcall(<=>)).
     # PROPOSAL_SEARCH_SEMANTICS_UNIFY S2: :fixlen branch added for CA_FIXLEN
     # (the cell is a runtime-width byte blob; comparison is memcmp over
     # ca->bytes, the same total order fixlen bincmp uses).
@@ -7366,10 +7366,11 @@ MkKernel.reduce :count_false,
 
 MkKernel.reduce :count_equal,
   init:        "0",
-  # The object lane compares with rb_equal (= Ruby ==), not the C ==, which
-  # on two VALUEs would ask whether they are the same object.
+  # The object lane compares with ca_obj_equal (= Ruby ==, a NaN equal to
+  # nothing), not the C ==, which on two VALUEs would ask whether they are
+  # the same object.
   reduce:      { numeric: "if (v == value_arg) acc += 1",
-                 object:  "if (RTEST(rb_equal(v, value_arg))) acc += 1" },
+                 object:  "if (ca_obj_equal(v, value_arg)) acc += 1" },
   reduction_kind: :plus,         # SL.1.4 (conditional predication; clang predicates safely under reduction(+:acc))
   source:      MkKernel::ALL_NUMERIC + [:object, :fixlen],
   fixlen:      :count_equal,   # bespoke memcmp walk (a blob has no scalar C type)
@@ -7715,7 +7716,7 @@ MkKernel.search :find_value_index,
       result = (ca_size_t) -1;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,
@@ -7830,7 +7831,7 @@ MkKernel.search :bsearch,
 #
 # Per-data_type body: int uses exact `v == query_val` (eps ignored); float
 # uses `fabs(v - query_val) <= query_eps` (eps_default = FLT_EPSILON*|val|
-# or DBL_EPSILON*|val|); object uses rb_equal (eps ignored); fixlen uses
+# or DBL_EPSILON*|val|); object uses ca_obj_equal (eps ignored); fixlen uses
 # memcmp exact match (eps ignored).  Sole search implementation: the
 # no-axis (flat) surface routes here via flatten + axis 0
 # (PROPOSAL_SEARCH_SEMANTICS_UNIFY S2/S3; the legacy flat scan was removed).
@@ -7856,14 +7857,14 @@ MkKernel.search :search,
       }
     C
     object: <<~C,
-      /* CA_OBJECT search: exact equality via rb_equal.  eps is silently
+      /* CA_OBJECT search: exact equality via ca_obj_equal.  eps is silently
          ignored (= no meaningful tolerance on arbitrary Ruby objects). */
       result = (ca_size_t) -1;
       (void) query_eps;
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,
@@ -8082,7 +8083,7 @@ MkKernel.search :search_addr,
       for ( ca_size_t i = 0; i < slab_n; i++ ) {
         if ( mask_in && mask_in[i * slab_mask_stride] ) continue;
         T_LOAD v = *(T_LOAD *)(slab_ptr + i * slab_stride);
-        if ( rb_equal(v, query_val) ) { result = i; break; }
+        if ( ca_obj_equal(v, query_val) ) { result = i; break; }
       }
     C
     fixlen: <<~C,

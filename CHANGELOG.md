@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: on an object array, `count(v)`, `search(v)` and
+  `rank_index(method: :dense)` treat a Float NaN as equal to nothing, as
+  they do on a float array. Whether two NaN cells matched depended on
+  whether they held the same Float object. `unique`, `is_in` and the set
+  operations still fold every NaN into one value, on every data type.
+
 - Fix: `is_in`, `intersection`, `difference`, `union` and `locate_addr`
   match integers of mixed sign by value, as `eq` compares them: `-1` in an
   int8 array no longer matches `255` in a uint8 one. The set operations

@@ -334,4 +334,17 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
   return RTEST(rb_funcall(v, op, 1, acc));
 }
 
+/* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
+   except that a Float NaN equals nothing, itself included.  rb_equal alone
+   answers true for the same object, so whether two NaN cells matched would
+   depend on whether they held one Float or two.  (The value-hash family --
+   unique / is_in / the set operations -- folds every NaN into one value
+   instead, in its own hash.) */
+static inline int
+ca_obj_equal (VALUE a, VALUE b)
+{
+  if ( CA_OBJ_ISNAN(a) ) return 0;
+  return RTEST(rb_equal(a, b));
+}
+
 #endif /* CARRAY_INTERNAL_H */
