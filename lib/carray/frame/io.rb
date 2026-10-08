@@ -535,7 +535,10 @@ class CAFrame
   # over-long rows raise), one 2-D object array is bulk-filled, and each column
   # is a view into it (§3.6).
   def self.build_frame(names, rows)
-    ncol  = names ? names.size : (rows.map(&:size).max || 0)
+    ncol  = if names then names.size
+            elsif rows.is_a?(CArray) then rows.shape[1]
+            else rows.map(&:size).max || 0
+            end
     names ||= Array.new(ncol) { |j| "c#{j}" }
     # A frame holds one column per name, so a repeated one would keep only
     # the last of its columns.
@@ -548,10 +551,22 @@ class CAFrame
     end
 
     cols = {}
-    if rows.empty?
+    # A table the C reader built: one row per record, missing cells masked.
+    table = rows if rows.is_a?(CArray) && rows.elements > 0
+    if table.nil? && (rows.is_a?(CArray) || rows.empty?)
       names.each { |name| cols[name] = CArray.string(CArray.object(0)) }
       return new(cols)
     end
+    table ||= table_of_rows(rows, ncol)
+    # Each column is a CAString over its view of the table: the text, with
+    # the string operations (strip!, gsub, extract, ...) at hand, writing
+    # through to the same cells.
+    names.each_with_index { |name, j| cols[name] = CArray.string(table[nil, j]) }
+    new(cols)
+  end
+  private_class_method :build_frame
+
+  def self.table_of_rows(rows, ncol)
     # A missing field is UNDEF, not a Ruby nil sitting in a cell.  The
     # tokenizer says missing with nil (an unquoted empty field; a quoted
     # one is the empty string and stays a value), and an object array will
@@ -574,12 +589,7 @@ class CAFrame
       r = r.map { |cell| cell.nil? ? UNDEF : cell } if r.compact.size < ncol
       r
     end
-    table = CArray.object(rows.size, ncol) { rows }
-    # Each column is a CAString over its view of the table: the text, with
-    # the string operations (strip!, gsub, extract, ...) at hand, writing
-    # through to the same cells.
-    names.each_with_index { |name, j| cols[name] = CArray.string(table[nil, j]) }
-    new(cols)
+    CArray.object(rows.size, ncol) { rows }
   end
-  private_class_method :build_frame
+  private_class_method :table_of_rows
 end

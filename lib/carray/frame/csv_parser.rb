@@ -25,6 +25,7 @@
 #                                     column_names).
 
 require "strscan"
+require "stringio"
 
 class CAFrame
   # CSV tokenizer behind `CAFrame.from_csv`.  It produces raw String cells
@@ -69,6 +70,8 @@ class CAFrame
     # Splits records into fields. Regexps are compiled once and reused across
     # every record, so per-row cost stays low.
     class Tokenizer
+      attr_reader :sep, :quote, :strip
+
       def initialize(sep, quote, strip)
         unless sep.is_a?(String) && !sep.empty?
           raise ArgumentError, "sep: must be a non-empty String (got #{sep.inspect})"
@@ -143,6 +146,12 @@ class CAFrame
 
       def blank?
         @blank
+      end
+
+      # Count records read elsewhere (the C reader), so the record numbers
+      # in an error stay those of the file.
+      def advance(records)
+        @recno += records
       end
 
       # An empty field lies at the start or the end of the record or between
@@ -309,7 +318,16 @@ class CAFrame
     # so blank lines are kept and marked, and +result+ drops them unless the
     # file turns out to have one column -- the same rows a header would have
     # given.
+    #
+    # Without strip:, the rest of the input is read in C (CArray.__csv_split__)
+    # straight into the table, with the column count of the names, or of the
+    # first record when there are none. When C declines -- text not in
+    # UTF-8, a record it does not take, or one longer than the first in a
+    # file without names -- the text from there on is read here, which pads
+    # the earlier rows or reports what is wrong.
     def body
+      body_in_c if @rows.nil? && !@tok.strip && @io.respond_to?(:read)
+      return self if @table
       rows = (@rows ||= [])
       @blank_rows ||= []
       blank_is_row = @names.nil? || @names.size == 1
@@ -320,9 +338,57 @@ class CAFrame
       self
     end
 
+    # The text C reads at a time when the column count is known; a chunk
+    # ends at a line end, and not inside a quoted field.
+    CHUNK_BYTES = 1 << 22
+
+    # With names, the input goes to C a chunk at a time, so the text is not
+    # held whole beside its cells. Without them, the column count and which
+    # blank lines are rows are known only at the end, so it goes in whole;
+    # so it does when the IO transcodes, since read(length) does not.
+    private def body_in_c(chunk_bytes = CHUNK_BYTES)
+      chunked = @names && @io.respond_to?(:external_encoding) && @io.internal_encoding.nil?
+      ncol = @names ? @names.size : 0
+      cells = []
+      loop do
+        text = chunked ? next_chunk(chunk_bytes) : (@io.read || "")
+        break if text.nil?
+        n, flat, records = CArray.__csv_split__(text, @tok.sep, @tok.quote, ncol)
+        unless flat
+          # This chunk and the rest are read by the Ruby tokenizer, after the
+          # rows read so far.
+          @rows = ncol > 0 ? cells.each_slice(ncol).to_a : []
+          @io = StringIO.new(chunked ? text + (@io.read || "") : text)
+          return
+        end
+        ncol = n
+        cells.concat(flat)
+        @tok.advance(records)
+        break unless chunked
+      end
+      @table = CArray.object(cells.size / ncol, ncol) { cells }
+      @rows = []
+    end
+
+    # The next chunk_bytes of the input, read on to the end of its line and
+    # past any quoted field still open, in the IO's encoding; nil at EOF.
+    private def next_chunk(chunk_bytes)
+      buf = @io.read(chunk_bytes)
+      return nil if buf.nil?
+      buf.force_encoding(@io.external_encoding || Encoding.default_external)
+      if !buf.end_with?("\n") && (rest = @io.gets)
+        buf << rest
+      end
+      while buf.count(@tok.quote).odd? && (more = @io.gets)
+        buf << more
+      end
+      buf
+    end
+
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
+      return [@names, @table] if @table
       rows = @rows || []
       if @names.nil? && @blank_rows && !@blank_rows.empty? &&
          rows.map(&:size).max != 1
