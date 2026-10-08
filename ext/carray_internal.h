@@ -334,6 +334,15 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
   return RTEST(rb_funcall(v, op, 1, acc));
 }
 
+/* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:
+   p's own mask, created if needed when p can carry one.  A parent that
+   cannot -- a value array, a mask array, a read-only (or frozen) array with
+   no mask -- gets a read-only all-false stand-in instead, stored in
+   *standin for the view to free.  Reading the view's mask then never gives
+   such a parent a mask; writing UNDEF into its part raises as a write to a
+   read-only array does. */
+CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
+
 /* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
    except that a Float NaN equals nothing, itself included.  rb_equal alone
    answers true for the same object, so whether two NaN cells matched would

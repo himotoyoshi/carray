@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the mask of a `CArray.meld` or `CArray.stack` view no longer fails or
+  writes to a part that cannot carry a mask. With a value array part
+  (`x.value`) it raised `RuntimeError`; a frozen or read-only part was given
+  a mask just by reading the view. Such a part now counts as unmasked, and
+  writing `UNDEF` into it through the view raises as a write to a read-only
+  array does. A writable part still takes the mask written through the view.
+
 - Fix: on an object array, `count(v)`, `search(v)` and
   `rank_index(method: :dense)` treat a Float NaN as equal to nothing, as
   they do on a float array. Whether two NaN cells matched depended on

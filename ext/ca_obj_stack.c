@@ -171,6 +171,7 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
   ca->attach    = 0;
   ca->nosync    = 0;
 
+  ca->mask_standins = NULL;
   ca->n_parents = n_parents;
   ca->parents   = ALLOC_N(CArray *, n_parents);
   for ( i = 0; i < n_parents; i++ ) {
@@ -216,6 +217,13 @@ free_ca_stack (void *ap)
   CAStack *ca = (CAStack *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    if ( ca->mask_standins ) {
+      int32_t k;
+      for ( k = 0; k < ca->n_parents; k++ ) {
+        if ( ca->mask_standins[k] ) ca_free(ca->mask_standins[k]);
+      }
+      xfree(ca->mask_standins);
+    }
     xfree(ca->parents);
     xfree(ca->dim);
     xfree(ca);
@@ -840,9 +848,13 @@ ca_stack_func_create_mask (void *ap)
   int32_t k;
 
   mask_parents = ALLOCV_N(CArray *, holder, ca->n_parents);
+  if ( ! ca->mask_standins ) {
+    ca->mask_standins = ALLOC_N(CArray *, ca->n_parents);
+    MEMZERO(ca->mask_standins, CArray *, ca->n_parents);
+  }
   for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_create_mask(ca->parents[k]);
-    mask_parents[k] = ca->parents[k]->mask;
+    mask_parents[k] = ca_multi_parent_mask(ca->parents[k],
+                                           &ca->mask_standins[k]);
   }
   /* Build the mask stack with the parent's k_axis from the start so its
      dim[] is laid out for that axis.  (Patching ->k_axis after a default
