@@ -648,7 +648,7 @@ ca_iter_check_init (int rc)
 
   switch ( rc ) {
   case CA_ITER_ERR_NOT_CHEAP:
-    why = "the source cannot be read without materialising it";
+    why = "the iterator does not recognise this kind of source";
     break;
   case CA_ITER_ERR_POLICY:
     why = "the slab policy or the axes given do not apply to this source";

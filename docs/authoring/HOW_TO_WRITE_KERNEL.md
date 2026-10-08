@@ -1541,8 +1541,8 @@ L2 with `CA_SLAB_AXES` accepts the following source kinds:
 | Descriptor view with SHIFT inside the slab (e.g., `cawindow_neg.sum_ki(0)`) | C | per-slab materialise (FALLBACK with bound_fill) | T3 path |
 | CASelect 1-D filter (`a[mask].sum_ki(0)`) | C | per-slab materialise (single-slab walk) | T3 path |
 
-**With Phase C T3 landed, the "deliver" principle is complete**: any
-descriptor view × any slab configuration produces correct output.  For
+Any descriptor view with any slab configuration produces correct
+output.  For
 kernels using the §10 helpers, the source kind is fully invisible — the
 same kernel body works regardless of which path the iterator takes
 internally.
@@ -1671,7 +1671,7 @@ Compared to writing the same kernel with the first-generation
 | Mask gather + per-cell mask offset bookkeeping | `scratch_mask` + `slab_mask_strides` |
 | `ca_detach` / `xfree` cleanup | `ca_iter_state_finish` |
 | compose-fold for N-deep CAStride chains | iterator's `route_source` walks chain to root |
-| Per-slab materialise for INDEX/SHIFT slab axes (Phase C T3) | iterator routes through HOIST or FALLBACK gather path |
+| Per-slab materialise for INDEX/SHIFT slab axes | iterator routes through HOIST or FALLBACK gather path |
 | `init` / `next` / `sync` / `finish` lifecycle plumbing (when error reporting isn't critical) | `CA_FOR_EACH_SLAB` / `_INOUT` block macros (§6) |
 
 What remains is the **essential per-slab kernel logic** — the

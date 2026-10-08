@@ -109,34 +109,28 @@ typedef enum {
                                           mask in fiber_mask_scratch
                                           (= rev2 §3.3, (data,mask)
                                           pair). */
-#define CA_ITER_ALIAS_STACK_OUTER_K 8 /* PROPOSAL_CASTACK_XFER_OPT_LAYERING
-                                        P.2 Case A (2026-06-18): CAStack
-                                        source + CA_SLAB_AXES with axis 0
-                                        NOT in slab (= K-axis in outer
-                                        iter, e.g. view.mean(axis: 1) /
-                                        view.mean(axis: 2)).  Each slab
-                                        corresponds to a region inside
-                                        ONE parent selected by
-                                        outer_idx[K_outer_pos].  init_l2
-                                        attaches K parents (+ K parent
-                                        masks if present) and caches
-                                        their ptrs + uniform parent
-                                        native byte strides; next_slab_
-                                        axes aliases parents[k]->ptr +
-                                        parent_off directly (= zero
-                                        copy, zero scratch).  parent
-                                        entity case = eager-equivalent
-                                        memory bandwidth.  Mask aliases
-                                        parent->mask similarly.  Scoped
-                                        to slab_axes that exclude axis 0
-                                        (= axis 0 must be an outer iter
-                                        axis). */
+#define CA_ITER_ALIAS_STACK_OUTER_K 8 /* CAStack source + CA_SLAB_AXES
+                                        whose slab leaves out the stack
+                                        axis (k_axis), which is then an
+                                        outer axis.  Each slab lies inside
+                                        ONE parent, selected by
+                                        outer_idx[stack_k_outer_pos].
+                                        init_l2 attaches the K parents and
+                                        caches their ptrs and parent byte
+                                        strides; next_slab_axes reads
+                                        parents[k]->ptr + parent_off
+                                        directly.  The parents' masks are
+                                        copied at init and the cursor
+                                        points into the copy.  A fiber
+                                        that is not contiguous in its
+                                        parent is gathered (FIBER_CONTIG).
+                                        READ only. */
 #define CA_ITER_ALIAS_STACK    7     /* PROPOSAL_CASTACK_LOOP_INTERCHANGE
                                         Vector A rev2 (direct per-parent
                                         ptr access): CAStack source +
                                         CA_SLAB_AXES with slab_axes ==
-                                        [0] (= K-axis-only slab, e.g.
-                                        view.mean(axis: 0) / sum(axis: 0)).
+                                        [k_axis] (= the stack axis alone,
+                                        e.g. view.mean(axis: k_axis)).
                                         init_l2 attaches K parents up
                                         front (= O(1) per entity parent),
                                         caches parent->ptr aliases +
@@ -181,7 +175,10 @@ typedef enum {
 
 /* ---- error codes ----------------------------------------------------- */
 #define CA_ITER_OK              0
-#define CA_ITER_ERR_NOT_CHEAP   1    /* src needs materialize, step 2+   */
+#define CA_ITER_ERR_NOT_CHEAP   1    /* the classifier does not recognise
+                                        the source (an external obj_type
+                                        that did not register, see
+                                        ca_iter_register_source_kind)   */
 #define CA_ITER_ERR_POLICY      2    /* policy not implemented yet       */
 #define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported;
                                         also returned for a NULL state
@@ -193,10 +190,15 @@ typedef enum {
 /* ---- source kind (step 5+, internal routing) ------------------------- */
 #define CA_ITER_SRC_NONE       0
 #define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
-#define CA_ITER_SRC_DESCRIPTOR 2     /* CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift (step 5+) */
-#define CA_ITER_SRC_ATTACH     3     /* CAFake / CAByteSwap / CABitfield /
-                                        CABitarray / CAReduce — view's own
-                                        ca_attach materialises (step 9+).  */
+#define CA_ITER_SRC_DESCRIPTOR 2     /* CASelectAxis / CAGrid / CASelect /
+                                        CAWindow / CAShift: per-axis
+                                        descriptors (describe_axes)      */
+#define CA_ITER_SRC_ATTACH     3     /* every other view the classifier
+                                        knows (conversion views, CATile,
+                                        CARoll, CAStack, CAMeld, CARemap,
+                                        CAObject, the lazy views) and any
+                                        registered external obj_type: the
+                                        view's own transfer gathers it */
 #define CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE 4
                                      /* F-2 (PROPOSAL_F2_KERNEL_ITERATOR_ALIAS
                                         rev6): descriptor view whose innermost
@@ -268,9 +270,9 @@ typedef struct {
   ca_size_t         composed_strides[CA_RANK_MAX]; /* byte units           */
   ca_size_t         composed_base;     /* byte offset from root->ptr       */
 
-  /* --- descriptor framework cache (step 5+, descriptor sources) ---
-     For CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift,
-     init_l1_descriptor runs the view's *_describe_axes once then
+  /* --- descriptor framework cache (descriptor sources) ---
+     For CASelectAxis / CAGrid / CASelect / CAWindow / CAShift, init runs
+     the view's *_describe_axes once then
      reuses the P3 substrate (ca_axis_dispatch_prepare / _layout /
      _classify_prefix) to derive the slab layout.  Cached inline so
      next_slab walks the prefix axes without re-doing the analysis. */
@@ -310,8 +312,8 @@ typedef struct {
   uint8_t           write_dirty;
 
   /* --- CA_SLAB_AXES policy fields (Phase A capstone, T1) ---
-     Populated when init_l2 is called with policy = CA_SLAB_AXES against
-     a SRC_CASTRIDE source.  The kernel reads slab metadata directly
+     Populated when init_l2 is called with policy = CA_SLAB_AXES, for
+     every kind of source.  The kernel reads slab metadata directly
      from these fields (= per-walk metadata, unchanged across slabs).
      outer_axes / outer_dims / outer_strides drive the prefix walk;
      slab_axes_buf / slab_dims / slab_strides describe the K-D slab
@@ -405,12 +407,10 @@ typedef struct {
      here lets next_slab_axes compute mask_off without downcasting to
      CAStack (= AC3 layering goal). */
   ca_size_t         stack_parent_mask_strides[CA_RANK_MAX];
-  /* --- PROPOSAL_CASTACK_XFER_OPT_LAYERING P.2 Case A (2026-06-18) --- */
   /* When alias_mode == CA_ITER_ALIAS_STACK_OUTER_K and the CAStack
-     source carries a mask, init_l2 attaches K parent masks and caches
-     their ptrs here for parent->mask alias delivery alongside
-     parents[k]->ptr.  NULL when source has no mask.  Owned by iter
-     (xfree in finish). */
+     source carries a mask, init_l2 copies the K parent masks here, read
+     alongside parents[k]->ptr.  NULL when the source has no mask.  Owned
+     by the iterator (xfree in finish). */
   boolean8_t      **stack_parent_mask_ptrs;        /* [n_parents] or NULL */
   /* K axis position within the outer iter axis list.  Set by init_l2
      when alias_mode == CA_ITER_ALIAS_STACK_OUTER_K; next_slab_axes uses
@@ -456,10 +456,12 @@ typedef struct {
        Not implemented in Phase 1 — falls back to L1 semantics so the predicate
        stays well-defined for callers that probe ahead.
 
-   Descriptor framework views (CAGrid / CASelect / CAMapping / CAWindow /
-   CAShift / CSA) and overlay views (CAFake / CAByteSwap / CABitfield /
-   CABitarray) return 0 at every level; their alias story lands in
-   step 5 (descriptor connection via ca_axis_dispatch_for_each_slab).
+   Descriptor views (CASelectAxis / CAGrid / CASelect / CAWindow /
+   CAShift) and conversion views (CAFake / CAByteSwap / CABitfield /
+   CABitarray) return 0 at every level.  init_l2 still reads a
+   descriptor view in place when its innermost axis is a stride
+   (CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE); this predicate does not
+   report that case.
 
    ca_attach_is_alias is retained as the level=1 oracle for the Tier A
    (PROPOSAL_DELEGATE_COPY_DATA) defer site; callers that already use
@@ -2405,7 +2407,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    Both states must share slab geometry (= same slab_ndim and slab_dims),
    typically by initialising both with the same policy + axes on
    shape-equal CArrays.  Mask handling is **not** done by this macro —
-   if your input is masked, see §6.2 mask propagation discussion in
+   if your input is masked, see §8 Mask handling in
    docs/authoring/HOW_TO_WRITE_KERNEL.md.  Caller is responsible for invoking
    ca_iter_state_sync_slab on the output state after each slab.
 

@@ -226,7 +226,7 @@ fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
   cells are **skipped** (the callback is not invoked for them). You
   never touch mask pointers.
 - **Attach-safety** — input-only operands (`fsync == '0'`) are
-  **never** attached: the engine alias-checks via `ca_iter_can_alias`
+  **never** attached: the engine alias-checks via `ca_attach_is_alias`
   and, for non-alias views, uses `xmalloc` + `ca_xfer_all` to get a
   contiguous read buffer. Only output operands (`fsync == '1'`) use
   `ca_attach` + `ca_sync`. This honors the input-only-operand
