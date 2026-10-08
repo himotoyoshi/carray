@@ -239,6 +239,21 @@ df["num"] = df["code"].extract(/(\d+)/, '\1') # a new text column
 df.cast("num", :int32)                       # then read it as numbers
 ```
 
+`extract` masks a cell its pattern does not match, so the cell stays `UNDEF`
+through the `cast` instead of turning into 0; a match of the empty string is
+`""`. To make several columns of one, use `split_column`, which puts the new
+columns in the old one's place and returns a new frame:
+
+```ruby
+df = df.split_column("code", "-", into: ["kind", "num"])   # "A-12" -> "A", "12"
+```
+
+A cell is split into at most as many pieces as there are names, so with more
+separators the rest stays in the last column (`"B-7-x"` gives `"B"`, `"7-x"`),
+and with fewer the columns it does not reach are `UNDEF`; a masked cell is
+`UNDEF` in all of them. `sep` is a String or a Regexp as `String#split` takes
+it (write a group as `(?:...)`, since a capturing group adds pieces).
+
 All the columns of a file are views over one object array, so the `CAString`
 of each column holds no copy of its own. `to_const_string` packs a column of
 read-only text into one buffer, which is lighter for a large column that is no
@@ -1664,6 +1679,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df.filter(keep_masked: true) { }` | a **materialized** frame — columns and index both independent; the carried-forward UNDEF has to be written into the result, which a view cannot do (§6) |
 | `df.copy` | an **independent** frame — every column materialized |
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
+| `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
 | `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
 | `df.cast(...)` | **self** — rebinds a fresh column of the new type; does not write through to frames sharing the old column |

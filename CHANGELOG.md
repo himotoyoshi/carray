@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#split_column(name, sep, into: [...])` splits a text column
+  at a String or Regexp into the named columns, in its place, as a new
+  frame. A cell with more separators keeps the rest in the last column; the
+  columns a cell does not reach are `UNDEF`.
+- Change: `extract` on a string column masks a cell its pattern does not
+  match, where it gave `""`; a following `cast` to a number left that cell 0
+  through `to_i`. A match of the empty string is still `""`.
+
 - Change: `CAFrame.from_csv` gives each text column as a `CAString` over the
   same cells, where it was a plain object array, so the string operations
   work on the column: `df["station"].strip!` trims it in place, and
