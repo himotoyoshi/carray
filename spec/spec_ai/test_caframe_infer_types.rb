@@ -197,3 +197,72 @@ class TestCAFrameCastTime < Test::Unit::TestCase
     assert_equal expected, times(texts)
   end
 end
+
+# parse_to_time(name, :infer) and infer_time_format: the first cell gives the
+# candidate formats, later cells drop those they do not fit.
+class TestCAFrameInferTimeFormat < Test::Unit::TestCase
+  def frame(cells)
+    CAFrame.new("t" => CA_OBJECT(cells))
+  end
+
+  def format_of(cells)
+    frame(cells).infer_time_format("t")
+  end
+
+  def times(cells, **opts)
+    df = frame(cells)
+    df.parse_to_time("t", :infer, **opts)
+    df["t"].to_a.map(&:to_s)
+  end
+
+  def test_a_later_cell_decides
+    assert_equal "%d/%m/%Y", format_of(["01/02/2024", "13/02/2024"])
+    assert_equal "%m/%d/%Y", format_of(["01/02/2024", "02/01/2024", "02/13/2024"])
+    assert_equal ["2024-02-01", "UNDEF", "UNDEF", "2024-02-13"],
+                 times(["01/02/2024", "", nil, "13/02/2024"])
+  end
+
+  def test_ambiguous_to_the_end_raises
+    e = assert_raise(ArgumentError) { format_of(["01/02/2024", "03/04/2024"]) }
+    assert_match(/"%d\/%m\/%Y" or "%m\/%d\/%Y"/, e.message)
+  end
+
+  def test_formats
+    assert_equal "%d/%m/%Y %I:%M %p", format_of(["1/2/2024 3:04 PM", "13/2/2024 11:00 AM"])
+    assert_equal "%b %d, %Y", format_of(["Jan 2, 2024"])
+    assert_equal "%d %b %Y", format_of(["2 Jan 2024", "13 February 2024"])
+    assert_equal "%Y%m%d", format_of(["20240102"])
+    assert_equal "%d/%m/%y", format_of(["13/02/24"])
+  end
+
+  def test_unit_follows_the_text
+    assert_equal ["2024-02-01T15:04:00Z"], times(["1/2/2024 3:04 PM", "13/2/2024 11:00 AM"]).first(1)
+    assert_equal ["2024-02-01T12:34:56.123456Z", "2024-02-13T00:00:00.500000Z"],
+                 times(["01/02/2024 12:34:56.123456", "13/02/2024 00:00:00.5"])
+    assert_equal ["2024-01-02"], times(["Jan 2, 2024"])
+  end
+
+  def test_year_first_needs_no_format
+    assert_nil format_of(["2024-01-02", "2024/1/3 3:04"])
+    assert_equal ["2024-01-02T00:00:00Z", "2024-01-03T03:04:00Z"],
+                 times(["2024-01-02", "2024/1/3 3:04"])
+  end
+
+  # A cell not in the chosen format raises, whatever on_error says.
+  def test_a_cell_out_of_format_raises
+    [["13/02/2024", "01-02-2024"], ["13/02/2024", "31/02/2024"],
+     ["13/02/2024", "01/02/24"], ["2024-01-02", "Jan 3, 2024"]].each do |cells|
+      assert_raise(ArgumentError, cells.inspect) { times(cells, on_error: :mask) }
+    end
+  end
+
+  def test_no_candidate_for_the_first_cell
+    e = assert_raise(ArgumentError) { format_of(["hello", "13/02/2024"]) }
+    assert_match(/cannot infer a time format from "hello"/, e.message)
+  end
+
+  def test_no_present_cell
+    assert_nil format_of(["", nil])
+    assert_equal ["UNDEF", "UNDEF"], times(["", nil])
+  end
+end

@@ -1005,6 +1005,7 @@ input shape. Each rebinds the column and returns `self`; make it the index with
 # text -> time: parse date strings
 df.parse_to_time("time").set_index("time")      # written year first
 df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
+df.parse_to_time("time", :infer)                # find the one format it is in
 df.parse_to_time("time", :mixed)                # guess at each cell (slow)
 
 # serial -> time: reinterpret integer counts since an epoch
@@ -1024,12 +1025,29 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   fraction of up to nine digits) and a zone (`Z`, `+09:00`, `+0900`, `+09`;
   a time without a zone is UTC). A date in another order is not read,
   because whether `"01/02/2024"` is January or February cannot be told from
-  the text; pass a strptime `format` for it, or `:mixed` to guess at each
-  cell, which is much slower. `unit` defaults to the finest the text shows
-  without a format and to `:s` with one. Missing and unparseable cells
-  become `UNDEF` (parse-mask); `on_error: :warn` / `:raise` reports the
-  unparseable ones as `cast` does. A non-string column raises.
-  `cast(name => :time)` is the call without a format.
+  the text; pass a strptime `format` for it, `:infer`, or `:mixed` to guess
+  at each cell, which is much slower. `unit` defaults to the finest the text
+  shows without a format or with `:infer`, and to `:s` with a format.
+  Missing and unparseable cells become `UNDEF` (parse-mask);
+  `on_error: :warn` / `:raise` reports the unparseable ones as `cast` does.
+  A non-string column raises. `cast(name => :time)` is the call without a
+  format.
+
+  `:infer` finds the one format the column is written in. The first
+  present cell gives the candidate formats (day-first and month-first dates
+  with `/`, `-` or `.`, two-digit years, month names as in `Jan 2, 2024`
+  or `2 Jan 2024`, `YYYYMMDD`, each with an optional `h:mm`, `h:mm:ss`,
+  fraction of a second, or `AM` / `PM` time), and each later cell drops the
+  candidates it does not fit until one is left, so a later `13/02/2024`
+  settles whether `01/02/2024` is day-first. It raises when no candidate
+  fits the first cell, when none is left, and when more than one is left
+  at the end; a cell not in the chosen format raises too, whatever
+  `on_error` says. `infer_time_format(name)` returns the format it chose,
+  to write into the code:
+
+  ```ruby
+  df.infer_time_format("date")   # => "%d/%m/%Y"
+  ```
 - **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns

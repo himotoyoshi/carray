@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#parse_to_time(name, :infer)` finds the one format a text
+  column is written in: the first cell gives the candidates (day-first or
+  month-first dates, month names, `YYYYMMDD`, with an optional time) and
+  later cells drop those they do not fit, so `13/02/2024` further down
+  settles that `01/02/2024` is day-first. It raises when no format or more
+  than one is left, and for a cell not in the format. `infer_time_format`
+  returns the format it chose.
+
 - New: `CAFrame#cast(name => :time)` parses a text column written year
   first (`2024-01-01`, `2024/1/2 3:04`, `2024-01-01T12:00:00.5+09:00`) into
   a `CATime` column, in the finest unit its text shows (`:D` for dates

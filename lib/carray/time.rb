@@ -1775,6 +1775,84 @@ module CATimeLiteral
     end
   end
 
+  # A format :infer can choose: a pattern that fixes the shape of the text
+  # (digit counts, separators), the strptime format that reads it, and what
+  # the text carries (:date, :clock, or :fraction of a second).
+  TimeFormat = Struct.new(:pattern, :format, :kind)
+
+  INFER_DATES = [
+    ['(\d{1,2})/(\d{1,2})/\d{4}',  %w[%d/%m/%Y %m/%d/%Y]],
+    ['(\d{1,2})-(\d{1,2})-\d{4}',  %w[%d-%m-%Y %m-%d-%Y]],
+    ['(\d{1,2})\.(\d{1,2})\.\d{4}', %w[%d.%m.%Y]],
+    ['(\d{1,2})/(\d{1,2})/\d{2}',  %w[%d/%m/%y %m/%d/%y]],
+    ['\d{1,2} [A-Za-z]{3,9} \d{4}', ["%d %b %Y"]],
+    ['\d{1,2}-[A-Za-z]{3}-\d{4}',  ["%d-%b-%Y"]],
+    ['\d{1,2}-[A-Za-z]{3}-\d{2}',  ["%d-%b-%y"]],
+    ['[A-Za-z]{3,9} \d{1,2}, \d{4}', ["%b %d, %Y"]],
+    ['[A-Za-z]{3,9} \d{1,2} \d{4}', ["%b %d %Y"]],
+    ['\d{8}',                      ["%Y%m%d"]],
+  ].freeze
+
+  INFER_TIMES = [
+    ['',                                       '',             :date],
+    [' +\d{1,2}:\d{2}',                        ' %H:%M',       :clock],
+    [' +\d{1,2}:\d{2}:\d{2}',                  ' %H:%M:%S',    :clock],
+    [' +\d{1,2}:\d{2}:\d{2}\.(?<f>\d{1,9})',   ' %H:%M:%S.%N', :fraction],
+    [' +\d{1,2}:\d{2} *[AaPp][Mm]',            ' %I:%M %p',    :clock],
+    [' +\d{1,2}:\d{2}:\d{2} *[AaPp][Mm]',      ' %I:%M:%S %p', :clock],
+  ].freeze
+
+  INFER_FORMATS = INFER_DATES.flat_map { |date, formats|
+    formats.flat_map { |fmt|
+      INFER_TIMES.map { |time, tfmt, kind|
+        TimeFormat.new(/\A#{date}#{time}\z/, fmt + tfmt, kind)
+      }
+    }
+  }.freeze
+
+  # Whether `text` is in format `f`: its shape, then a reading with no
+  # leftover that names a date which exists.
+  def time_format_fits?(f, text)
+    return false unless f.pattern.match?(text)
+    h = Date._strptime(text, f.format)
+    h && !h.key?(:leftover) && h[:year] &&
+      Date.valid_date?(h[:year], h[:mon] || 1, h[:mday] || 1, Date::GREGORIAN)
+  end
+
+  # The one format of INFER_FORMATS that the texts are written in. The
+  # first text gives the candidates; each later text drops those it does
+  # not fit, until one is left. No candidate for the first text, none left
+  # for a later one, or more than one left at the end raises ArgumentError.
+  # Only the texts before the choice are checked here.
+  def infer_time_format(texts)
+    require 'date'
+    first = texts.first
+    candidates = INFER_FORMATS.select { |f| time_format_fits?(f, first) }
+    if candidates.empty?
+      raise ArgumentError,
+            "cannot infer a time format from #{first.inspect}; " \
+            "pass a strptime format, or :mixed to guess at each cell"
+    end
+    texts.each_with_index do |text, i|
+      break if candidates.size == 1
+      next if i == 0
+      left = candidates.select { |f| time_format_fits?(f, text) }
+      if left.empty?
+        raise ArgumentError,
+              "#{text.inspect} is not in the format of #{first.inspect}; " \
+              "pass a strptime format, or :mixed to guess at each cell"
+      end
+      candidates = left
+    end
+    if candidates.size > 1
+      raise ArgumentError,
+            "#{first.inspect} could be read as " \
+            "#{candidates.map { |f| f.format.inspect }.join(' or ')}, " \
+            "and no cell tells which; pass the format"
+    end
+    candidates.first
+  end
+
   # The ticks of every cell of `x` on the `res` grid, as an int64 array of
   # x's shape (missing and, under on_error: :mask, unparseable cells
   # masked), or nil when `res` is finer than a nanosecond. Each String is

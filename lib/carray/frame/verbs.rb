@@ -179,15 +179,19 @@ class CAFrame
   # Without +format+ only text written year first is read ("2024-01-01",
   # "2024/1/2 3:04", "2024-01-01T12:00:00.5Z"); a date in another order is
   # not, since whether "01/02/2024" is January or February cannot be told.
-  # For those, +format+ is a strptime format, or :mixed to guess at each
-  # cell (much slower). +unit+ is the storage resolution: without a format
-  # it defaults to the finest the text shows, with one to :s. Masked / nil
-  # and unparseable cells become UNDEF; +on_error:+ :warn / :raise reports
-  # the unparseable ones as +cast+ does. Make it the index with +set_index+
-  # afterward. +cast(name => :time)+ is the call without a format.
+  # For those, +format+ is a strptime format, :infer to find the one format
+  # the column is written in (see infer_time_format; a cell not in it
+  # raises, whatever +on_error+ says), or :mixed to guess at each cell
+  # (much slower). +unit+ is the storage resolution: without a format or
+  # with :infer it defaults to the finest the text shows, with a format to
+  # :s. Masked / nil and unparseable cells become UNDEF; +on_error:+ :warn /
+  # :raise reports the unparseable ones as +cast+ does. Make it the index
+  # with +set_index+ afterward. +cast(name => :time)+ is the call without a
+  # format.
   #
   #   df.parse_to_time("time").set_index("time")
   #   df.parse_to_time("date", "%d/%m/%Y")
+  #   df.parse_to_time("date", :infer)
   def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
@@ -202,6 +206,24 @@ class CAFrame
     end
     @columns[key] = parse_time_column(key, col, format, unit, on_error)
     self
+  end
+
+  # The strptime format parse_to_time(name, :infer) reads the column with,
+  # or nil when the text is written year first and needs none. The first
+  # present cell gives the candidates and each later cell drops those it
+  # does not fit, until one is left; ArgumentError when none fits the first
+  # cell, none is left, or more than one is left at the end (as for
+  # "01/02/2024" when no cell has a day above 12). Write the answer into the
+  # code to read the column with a format from then on.
+  #
+  #   df.infer_time_format("date")   # => "%d/%m/%Y"
+  def infer_time_format(name)
+    key = name.to_s
+    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    unless string_column?(col)
+      raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
+    end
+    inferred_time_format(key, col)[1]&.format
   end
 
   # Reinterpret an integer column as time serial counts and rebind it (memo
@@ -339,11 +361,55 @@ class CAFrame
     case format
     when nil    then read_time_text(key, col, unit, on_error)
     when String then parse_time_by_format(key, col, format, unit || :s, on_error)
+    when :infer then parse_time_inferred(key, col, unit)
     when :mixed then parse_time_by_format(key, col, nil, unit || :s, on_error)
     else
       raise ArgumentError,
-            "time format must be a strptime String or :mixed (got #{format.inspect})"
+            "time format must be a strptime String, :infer or :mixed " \
+            "(got #{format.inspect})"
     end
+  end
+
+  # :infer reads the column in the one format its text is written in, and
+  # raises for a cell that is not in it.
+  private def parse_time_inferred(key, col, unit)
+    present, f = inferred_time_format(key, col)
+    return read_time_text(key, col, unit, :raise) if f.nil?
+    digits = 0
+    present.each do |i, text|
+      if f.kind == :fraction
+        m = f.pattern.match(text)
+        digits = [digits, m[:f].size].max if m
+      else
+        m = f.pattern.match?(text)
+      end
+      report_unreadable(key, col, f.format.inspect, [i], :raise) unless m
+    end
+    unit ||= case f.kind
+             when :date  then :D
+             when :clock then :s
+             else digits > 6 ? :ns : digits > 3 ? :us : :ms
+             end
+    parse_time_by_format(key, col, f.format, unit, :raise)
+  end
+
+  # [[address, stripped text] of each present cell, the inferred format],
+  # the format nil when the text is written year first (or no cell is
+  # present), which needs none.
+  private def inferred_time_format(key, col)
+    present = []
+    col.flatten.to_a.each_with_index do |cell, i|
+      next if missing_text?(cell)
+      unless cell.is_a?(String)
+        raise ArgumentError, "column #{key.inspect} holds #{cell.inspect}, not text"
+      end
+      present << [i, cell.strip]
+    end
+    return [present, nil] if present.empty?
+    unreadable = []
+    CA_OBJECT([present[0][1]]).__parse_time_text__(nil, unreadable)
+    return [present, nil] if unreadable.empty?
+    [present, CATimeLiteral.infer_time_format(present.map(&:last))]
   end
 
   # Year-first text, read in C. A unit the reader does not write itself is
@@ -393,7 +459,7 @@ class CAFrame
     describe = ->(addr) { "row #{addr / per_row} #{cells[addr].inspect}" }
     if on_error == :raise
       raise ArgumentError,
-            "cast: column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
+            "column #{key.inspect}, #{describe[addrs[0]]} cannot be read as #{type}"
     end
     shown = addrs.first(3).map(&describe)
     shown << "..." if addrs.size > 3
