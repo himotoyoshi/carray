@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for C extensions and build scripts that read
+  `CArray::VERSION_CODE`: it is now `major*10000 + minor*100 + teeny`
+  (`30003` for 3.0.3), so 3.0.10 is `30010` and comes before 3.1.0
+  (`30100`). It was `major*100 + minor*10 + teeny`, under which 3.0.10
+  would have equalled 3.1.0. A check against an old-form value (`< 303`)
+  still turns away 3.0.2 and earlier; compare against the new form from now on.
+
 - New: `bitfield(range, type)` reads the field as an integer of `type`.
   A signed type reads the field's top bit as its sign (`0b101` in 3 bits
   is -3 as `:int8`), and a type wider than the field widens the value.

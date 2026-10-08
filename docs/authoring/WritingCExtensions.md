@@ -2493,7 +2493,7 @@ preprocessor macro. CArray exposes:
 
 ```ruby
 CArray::VERSION        # => "3.0.0"      (string)
-CArray::VERSION_CODE   # => 300          (integer, major*100 + minor*10 + teeny)
+CArray::VERSION_CODE   # => 30000        (integer, major*10000 + minor*100 + teeny)
 CArray::VERSION_MAJOR  # => 3
 CArray::VERSION_MINOR  # => 0
 CArray::VERSION_TEENY  # => 0
@@ -2504,7 +2504,7 @@ Gate the build on a minimum version in `extconf.rb`:
 ```ruby
 require 'carray/mkmf'
 
-if CArray::VERSION_CODE < 300
+if CArray::VERSION_CODE < 30000
   abort "my_ext requires CArray 3.0 or later (found #{CArray::VERSION})"
 end
 
@@ -2513,8 +2513,12 @@ if have_carray()
 end
 ```
 
-`VERSION_CODE` is the integer form to compare against (`300` for 3.0.0);
-it is monotonic across releases, so `>=` comparisons are safe.
+`VERSION_CODE` is the integer form to compare against (`30000` for 3.0.0,
+`30010` for 3.0.10, `30100` for 3.1.0); it grows with every release, so
+`>=` comparisons are safe.  Before 3.0.3 it was `major*100 + minor*10 +
+teeny` (`302` for 3.0.2); every value in that form is smaller than any in
+the current one, so a check written against the old form, such as
+`< 303`, still turns away 3.0.2 and earlier.
 
 For finer-grained *feature* detection — "does this CArray build have
 function `foo`?" — use mkmf's `have_func`:
