@@ -53,12 +53,24 @@ class CAFrame
   # +types:+. A quoted empty field ("") is the empty string, which is a value.
   # So the mask +to_csv+ writes comes back as a mask.
   #
+  # Files that spell "missing" some other way say so with +missing:+. A field
+  # whose text is one of the given tokens is UNDEF too, before +types:+
+  # casts, so a -999 sentinel never reaches the column as a number:
+  #
+  #   CAFrame.from_csv("obs.csv", missing: ["-999", "///"])        # every column
+  #   CAFrame.from_csv("obs.csv", missing: { "temp" => "-999" })   # per column
+  #
+  # Tokens are Strings and are compared with the field's text as read (after
+  # +strip:+, quoted or not), so "-999" does not match "-999.0". A Hash names
+  # the columns it applies to; the others keep only the empty field.
+  #
   # Columns are handed to the frame as CABlock views over one backing object
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
-  def self.from_csv(source, types: nil, on_error: :mask,
+  def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
+    missing = missing_tokens(missing) if missing
     names, rows =
       if parser
         parser.call(source)
@@ -78,9 +90,38 @@ class CAFrame
       end
 
     frame = build_frame(names, rows)
+    mask_missing_tokens(frame, missing) if missing
     frame.cast(types, on_error: on_error) if types
     frame
   end
+
+  # Normalize +missing:+ to a Hash of column name (or nil, every column) =>
+  # Array of token Strings, checking it before the file is read.
+  def self.missing_tokens(missing)
+    spec = missing.is_a?(Hash) ? missing : { nil => missing }
+    spec.to_h do |name, tokens|
+      tokens = Array(tokens)
+      bad = tokens.reject { |t| t.is_a?(String) }
+      unless bad.empty?
+        raise ArgumentError,
+              "missing: tokens are matched against a field's text, so give them " \
+              "as Strings (#{bad.map { |t| t.to_s.inspect }.join(', ')}, not " \
+              "#{bad.map(&:inspect).join(', ')})"
+      end
+      [name&.to_s, tokens]
+    end
+  end
+
+  def self.mask_missing_tokens(frame, missing)
+    missing.each do |name, tokens|
+      cols = name ? [frame[name]] : frame.variables
+      cols.each do |col|
+        tokens.each { |t| col[:eq, t] = UNDEF }
+      end
+    end
+  end
+
+  private_class_method :missing_tokens, :mask_missing_tokens
 
   # Drive the reading-control DSL over one open IO and hand back
   # [names, rows]. Shared by the path and the IO source, so the two cannot
@@ -143,8 +184,19 @@ class CAFrame
   # hold raises Encoding::UndefinedConversionError rather than being dropped.
   #
   #   df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+  #
+  # +missing:+ writes a masked cell as that String instead of an empty field,
+  # for a reader that expects a sentinel; +from_csv(missing:)+ with the same
+  # String reads it back as UNDEF. A cell whose value would be written as the
+  # same text raises, since the file could not tell the two apart.
+  #
+  #   df.to_csv("out.csv", missing: "-999")
   def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
-             encoding: nil)
+             encoding: nil, missing: nil)
+    unless missing.nil? || missing.is_a?(String)
+      raise ArgumentError, "missing: is the String written for a masked cell " \
+                           "(got #{missing.inspect})"
+    end
     nd = @columns.find { |_, c| c.ndim != 1 }
     if nd
       raise ArgumentError,
@@ -161,6 +213,17 @@ class CAFrame
     @columns.each do |name, col|
       names     << name
       formatted << format_csv_column(col)
+    end
+    if missing
+      formatted.each_with_index do |fcol, j|
+        i = fcol.index(missing)
+        if i
+          raise ArgumentError,
+                "to_csv: row #{i} of #{names[j].inspect} is written as " \
+                "#{missing.inspect}, the text given for a masked cell"
+        end
+        fcol.map! { |text| text.nil? ? missing : text }
+      end
     end
 
     out = +""
