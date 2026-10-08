@@ -101,12 +101,11 @@ makes `reshape` and row slices O(1).
 are composed so only the root is attached, skipping materialisation of the
 intermediate views. See [ch. 4](04_attach_lifecycle.md).
 
-**`attach!`** — a public block-form convenience that wraps an
-attach/sync/detach in `rb_ensure`. Minor: it is barely used internally (a few
-sites in `lib/carray/iterator.rb`) and is kept mainly as insurance, not as a
-load-bearing part of the lifecycle. The real machinery is `ca_attach`/`ca_sync`/
-`ca_detach`. `__attach__` / `__sync__` / `__detach__` (double underscore) are
-internal-only.
+**`attach!`** — a block-form Ruby method that wraps an attach/sync/detach in
+`rb_ensure`. It exists only in a development build (`CARRAY_DEV=1`), with
+`attach`, `__attach__`, `__sync__` and `__detach__`, for the tests that look
+inside a window; a released build has none of them, and nothing in `lib/` uses
+them. The machinery is `ca_attach` / `ca_sync` / `ca_detach` in C.
 
 ## Kernels and the author surface
 

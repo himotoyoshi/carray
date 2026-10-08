@@ -195,6 +195,6 @@ na[0, 0]                #  => 0.0          snap is independent
 
 ## Where to read more
 
-* `MemoryView.md` — full reference: every public method, the export strategy matrix, `as_strided`, `attach!`, and lifetime details.
+* `MemoryView.md` — full reference: every public method, the export strategy matrix, `as_strided`, and lifetime details.
 * `MemoryViewFormat.md` — the `format`-string reference (PEP 3118 strict at the top level).
 * [Views](06_views.md) — for the view classes (`CAWrap`, `CAStride`, `CAStride`, ...) that appear as return values from `wrap_memory_view`.

@@ -108,7 +108,7 @@ lets you take advantage of whichever is cheaper for your data source.
 `copy_data` is **optional**. When it is not defined, the engine falls
 back to a per-element loop driven by your `fetch_addr` (or
 `fetch_index`). A minimal subclass with only `def fetch_addr; end`
-therefore already supports `copy`, `attach!`, arithmetic, reduction —
+therefore already supports `copy`, arithmetic, reduction —
 everything that touches the array in bulk just runs through the slow
 per-element path.
 
@@ -657,14 +657,11 @@ the surface is the whole point.
   never escalate to whole-view `copy_data`, so lazy backings that
   cannot materialise their entire contents are safe.
 
-  This holds for the transfer path (`copy` and friends). It does
-  **not** hold today for the reduction / kernel path: `obj[roi].sum`
-  attaches the parent and calls `copy_data` for the whole array
-  regardless of the region requested. A lazy backing that cannot
-  materialise its full contents must therefore route through `copy`
-  rather than reduce a view directly.
-- **`obj.attach!` / arithmetic / reduction** — all routed through
-  `copy_data` then operate on the resulting buffer.
+  Reductions and C kernels over a view ask for the view's region in
+  the same way: `obj[roi].sum` reaches `copy_block` with the region,
+  not `copy_data` with the whole array.
+- **Arithmetic / reduction over the whole object** — routed through
+  `copy_data`, then operate on the resulting buffer.
 - **`kernel_iterator`** (3.0) — `CAObject` is accepted as a source;
   the engine attaches once and then yields contiguous slabs to the
   kernel, so even a Ruby-defined CArray can feed a C kernel through
