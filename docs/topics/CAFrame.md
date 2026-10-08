@@ -927,6 +927,39 @@ full size. `index: false` drops the index column.
 (the summary line, then the first 8 and last 2 rows) while **`puts df` is the
 whole frame**.
 
+### Checking a frame just read — `describe`
+
+`describe` summarizes the columns, **one row per column**, as a new frame
+indexed by column name — so a wide table stays readable, and the result is an
+ordinary frame to filter or print:
+
+```ruby
+puts df.describe.to_table
+```
+
+```
+column   type     count  masked  unique  min         max         mean        stddev
+-------  -------  -----  ------  ------  ----------  ----------  ----------  --------
+station  object       3       0       2  _           _           _           _
+temp     float64      2       1       2  19.0        22.1        20.55       2.192031
+time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
+```
+
+- `type` is the data type, or the Face's class for a Face column, with the
+  trailing shape of an N-D column in brackets (`float64[3]`).
+- `count` and `masked` count cells, so an N-D column counts every cell of every
+  row; `unique` is the number of distinct present values.
+- `min` / `max` / `mean` / `stddev` apply where the column's kind gives them a
+  meaning and are `UNDEF` elsewhere: real numbers and booleans get all four
+  (a boolean's mean is the share of trues), complex numbers get `mean` and
+  `stddev` (no order, and no `unique`), `CATime` and `CATimedelta` get all four
+  as times and durations, and text, categorical and record columns get the
+  counts only.
+- A column with no present cell has `UNDEF` statistics. The index is not a
+  column and is not summarized.
+
+`describe("temp", "rh")` summarizes only the named columns.
+
 ### Index
 
 ```ruby

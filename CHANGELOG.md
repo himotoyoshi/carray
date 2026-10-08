@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#describe` summarizes a frame one row per column, as a new
+  frame: type, present and masked counts, distinct values, and min / max /
+  mean / stddev where the column's kind has them (numbers, booleans, times;
+  text and categorical columns get the counts). `puts df.describe.to_table`
+  is a first look at a table that has just been read.
+
 - New: `types:` of `CAFrame.from_csv` and `CAFrame.from_records` takes
   `default:` for the columns the map does not name, so inference and
   columns set by hand combine in one call:
