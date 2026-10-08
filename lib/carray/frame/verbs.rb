@@ -223,7 +223,7 @@ class CAFrame
     unless string_column?(col)
       raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
     end
-    inferred_time_format(key, col)&.format
+    inferred_time_format(key, col)&.first&.format
   end
 
   # Reinterpret an integer column as time serial counts and rebind it (memo
@@ -370,51 +370,56 @@ class CAFrame
     end
   end
 
-  # :infer reads the column in the one format its text is written in. A cell
-  # that is not in it does not parse in it, and raises.
+  # :infer reads the column in the one format its text is written in; a cell
+  # that is not in it raises.
   private def parse_time_inferred(key, col, unit)
-    f = inferred_time_format(key, col)
+    f, fields, bad = inferred_time_format(key, col)
     return read_time_text(key, col, unit, :raise) if f.nil?
+    unless fields[8].empty?
+      cell = col.flatten[fields[8].first]
+      raise ArgumentError, "column #{key.inspect} holds #{cell.inspect}, not text"
+    end
+    report_unreadable(key, col, f.format.inspect, [bad], :raise) if bad
     unit ||= case f.kind
              when :date  then :D
              when :clock then :s
-             else fraction_unit(col, f)
+             else
+               digits = fields[9]
+               digits > 6 ? :ns : digits > 3 ? :us : :ms
              end
-    parse_time_by_format(key, col, f.format, unit, :raise, f.pattern)
+    res = CATime::Resolution.parse(unit)
+    unless CATimeLiteral.tick_kind(res)
+      return parse_time_by_format(key, col, f.format, unit, :raise)
+    end
+    CATimeLiteral.ticks_from_fields(fields, col, res, f.format, :raise).time(unit: res)
   end
 
-  # The inferred format, or nil when the text is written year first (or no
-  # cell is present), which needs none. Only the cells up to the choice are
-  # looked at.
+  # [format, fields, address of the first cell not in it] for :infer, or nil
+  # when the text is written year first (or no cell is present), which
+  # needs no format.
   private def inferred_time_format(key, col)
-    texts = col.flatten.to_a.lazy.reject { |cell| missing_text?(cell) }.map do |cell|
-      unless cell.is_a?(String)
-        raise ArgumentError, "column #{key.inspect} holds #{cell.inspect}, not text"
-      end
-      cell.strip
-    end
-    first = texts.first
+    text = time_text_of(col)
+    first = text.flatten.to_a.find { |cell| !missing_text?(cell) }
     return nil if first.nil?
+    unless first.is_a?(String)
+      raise ArgumentError, "column #{key.inspect} holds #{first.inspect}, not text"
+    end
+    first = first.strip
     unreadable = []
     CA_OBJECT([first]).__parse_time_text__(nil, unreadable)
     return nil if unreadable.empty?
-    CATimeLiteral.infer_time_format(texts)
+    CATimeLiteral.infer_time_format(text, first)
   end
 
-  # The unit that holds the widest fraction of a second in the column.
-  private def fraction_unit(col, f)
-    digits = 0
-    col.flatten.to_a.each do |cell|
-      next unless cell.is_a?(String) && (m = f.pattern.match(cell.strip))
-      digits = [digits, m[:f].size].max
-    end
-    digits > 6 ? :ns : digits > 3 ? :us : :ms
+  # The column as an object array of its text.
+  private def time_text_of(col)
+    (col.data_type == CA_OBJECT && !col.face?) ? col : col.to_type(:object)
   end
 
   # Year-first text, read in C. A unit the reader does not write itself is
   # reached by reading in the finest unit the text shows and converting.
   private def read_time_text(key, col, unit, on_error)
-    text = (col.data_type == CA_OBJECT && !col.face?) ? col : col.to_type(:object)
+    text = time_text_of(col)
     unreadable = on_error == :mask ? nil : []
     ticks, read_unit = text.__parse_time_text__(unit, unreadable) ||
                        text.__parse_time_text__(nil, unreadable)
@@ -425,22 +430,31 @@ class CAFrame
     (unit.nil? || read_unit == unit) ? times : times.to_unit(unit)
   end
 
-  # With a `pattern`, a cell whose text does not match it is unparseable,
-  # checked in the same pass that reads the cells.
-  private def parse_time_by_format(key, col, format, unit, on_error, pattern = nil)
+  # A strptime format, or nil for :mixed (a guess at each cell). The cells
+  # that do not parse are reported as on_error says; blank text is missing.
+  private def parse_time_by_format(key, col, format, unit, on_error)
     res = CATime::Resolution.parse(unit)
-    raw = pattern && CATimeLiteral.ticks_from_cells(col, res, format, :mask, pattern)
-    parsed = raw ? raw.time(unit: res) :
-             CArray.time(col, format: format, unit: unit, on_error: :mask)
-    unless on_error == :mask
+    text = time_text_of(col)
+    fields = format && CATimeLiteral.tick_kind(res) &&
+             text.__strptime_fields__(format, false)
+    if fields
+      parsed = CATimeLiteral.ticks_from_fields(fields, text, res, format, :mask)
+                            .time(unit: res)
+      return parsed if on_error == :mask
+      cells = text.flatten.to_a
+      masked = parsed.flatten
+      addrs = (fields[7] + fields[8].select { |i| UNDEF.equal?(masked[i]) })
+              .reject { |i| missing_text?(cells[i]) }.sort
+    else
+      parsed = CArray.time(col, format: format, unit: unit, on_error: :mask)
+      return parsed if on_error == :mask
       failed = col.flatten.to_a.zip(parsed.flatten.is_masked.to_a)
       addrs = failed.each_index.select do |i|
         cell, masked = failed[i]
         masked && !missing_text?(cell)
       end
-      label = pattern ? format.inspect : :time
-      report_unreadable(key, col, label, addrs, on_error) unless addrs.empty?
     end
+    report_unreadable(key, col, :time, addrs, on_error) unless addrs.empty?
     parsed
   end
 

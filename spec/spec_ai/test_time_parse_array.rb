@@ -43,6 +43,32 @@ class TestTimeParseArray < Test::Unit::TestCase
     end
   end
 
+  # Texts at the edges of what a format takes, read in C and through
+  # Date._strptime cell by cell. A cell the C reader leaves to
+  # Date._strptime (a zone named for a place, "+9") is read there.
+  def test_edges_agree_with_cell_by_cell
+    edges = ["", " ", "2024-1-2", "2024-01-02x", "2024-01-02 ", " 2024-01-02",
+             "2024-02-30", "2023-02-29", "2024-13-01", "-2024-01-02", "+2024-01-02",
+             "02024-01-02", "1/2/2024 12:00 AM", "1/2/2024 12:00 PM",
+             "1/2/2024 12:00 a.m.", "1/2/2024 13:00 PM",
+             "Tue, 02 Jan 2024 15:04:05 +0900", "Tue, 02 Jan 2024 15:04:05 +09:00",
+             "Tue, 02 Jan 2024 15:04:05 Z", "Tue, 02 Jan 2024 15:04:05 UTC",
+             "Tue, 02 Jan 2024 15:04:05 JST", "Tue, 02 Jan 2024 15:04:05 +9",
+             "Tue, 02 Jan 2024 15:04:05 UTC+9", "tue, 02 jan 2024 15:04:05 +0000",
+             "January  2, 2024", "Jan  2, 2024", "Sept 2, 2024",
+             "2024-01-02T24:00:00.5", "2024-01-02T23:59:60.123456789123",
+             "2024-01-02 23:59:59.-5", "20240102", "2024010215",
+             "12/31/99 11:59 pm", "31.12.2024 7:05", "2024/1/2  3:04:05 am"]
+    formats = ["%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%m/%d/%y %I:%M %p",
+               "%Y%m%d%H%M%S", "%Y-%m-%dT%H:%M:%S.%N", "%a, %d %b %Y %H:%M:%S %z",
+               "%B %e, %Y", "%F %T", "%D %R", "%d.%m.%Y %k:%M", "%Y/%m/%d %l:%M:%S %P"]
+    x = CA_OBJECT(edges)
+    formats.each do |format|
+      got = CArray.time(x, unit: :ms, format: format, on_error: :mask).to_a.map(&:to_s)
+      assert_equal one_by_one(x, :ms, format), got, format
+    end
+  end
+
   def test_shape_and_missing_cells
     x = CA_OBJECT([["2024-01-01", nil], ["x", "2024-01-02"]])
     t = CArray.time(x, unit: :D, on_error: :mask)

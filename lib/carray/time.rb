@@ -1781,142 +1781,117 @@ module CATimeLiteral
     end
   end
 
-  # A format :infer can choose: a pattern that fixes the shape of the text
-  # (digit counts, separators), the strptime format that reads it, and what
-  # the text carries (:date, :clock, or :fraction of a second).
-  TimeFormat = Struct.new(:pattern, :format, :kind)
+  # A format :infer can choose: a strptime format, read strictly (see
+  # __strptime_fields__), and what the text carries (:date, :clock, or
+  # :fraction of a second).
+  TimeFormat = Struct.new(:format, :kind)
 
-  INFER_DATES = [
-    ['(\d{1,2})/(\d{1,2})/\d{4}',  %w[%d/%m/%Y %m/%d/%Y]],
-    ['(\d{1,2})-(\d{1,2})-\d{4}',  %w[%d-%m-%Y %m-%d-%Y]],
-    ['(\d{1,2})\.(\d{1,2})\.\d{4}', %w[%d.%m.%Y]],
-    ['(\d{1,2})/(\d{1,2})/\d{2}',  %w[%d/%m/%y %m/%d/%y]],
-    ['\d{1,2} [A-Za-z]{3,9} \d{4}', ["%d %b %Y"]],
-    ['\d{1,2}-[A-Za-z]{3}-\d{4}',  ["%d-%b-%Y"]],
-    ['\d{1,2}-[A-Za-z]{3}-\d{2}',  ["%d-%b-%y"]],
-    ['[A-Za-z]{3,9} \d{1,2}, \d{4}', ["%b %d, %Y"]],
-    ['[A-Za-z]{3,9} \d{1,2} \d{4}', ["%b %d %Y"]],
-    ['\d{8}',                      ["%Y%m%d"]],
-  ].freeze
+  INFER_DATES = %w[%d/%m/%Y %m/%d/%Y %d-%m-%Y %m-%d-%Y %d.%m.%Y %d/%m/%y %m/%d/%y] +
+                ["%d %b %Y", "%d-%b-%Y", "%d-%b-%y", "%b %d, %Y", "%b %d %Y", "%Y%m%d"]
 
-  # A zone after a time of day: an offset, Z, UTC or GMT. Zone names that
-  # mean different offsets in different places (CST, IST) are not taken.
-  INFER_ZONE = ' *(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)'
-
+  # A space in a format matches any run of spaces, none included.
   INFER_CLOCKS = [
-    ['\d{1,2}:\d{2}',                        '%H:%M',       :clock],
-    ['\d{1,2}:\d{2}:\d{2}',                  '%H:%M:%S',    :clock],
-    ['\d{1,2}:\d{2}:\d{2}\.(?<f>\d{1,9})',   '%H:%M:%S.%N', :fraction],
-    ['\d{1,2}:\d{2} *[AaPp][Mm]',            '%I:%M %p',    :clock],
-    ['\d{1,2}:\d{2}:\d{2} *[AaPp][Mm]',      '%I:%M:%S %p', :clock],
+    ["%H:%M", :clock], ["%H:%M:%S", :clock], ["%H:%M:%S.%N", :fraction],
+    ["%I:%M %p", :clock], ["%I:%M:%S %p", :clock],
   ].freeze
 
-  # Times after a date: none, or one of INFER_CLOCKS after a space, with or
-  # without a zone.
-  INFER_TIMES = ([['', '', :date]] +
-    INFER_CLOCKS.flat_map { |pattern, fmt, kind|
-      [[" +#{pattern}", " #{fmt}", kind],
-       [" +#{pattern}#{INFER_ZONE}", " #{fmt} %z", kind]]
-    }).freeze
-
-  # A date written in Japanese, year first ("2024<year>1<month>2<day>"),
-  # takes a time with or without a space before it, in the same markers
-  # ("3<hour>4<minute>", "...5<second>") or with colons.
-  JA_YEAR, JA_MONTH, JA_DAY = "年", "月", "日"
-  JA_HOUR, JA_MINUTE, JA_SECOND = "時", "分", "秒"
-  INFER_JA_TIMES = ([['', '', :date],
-    [" *\\d{1,2}#{JA_HOUR}\\d{1,2}#{JA_MINUTE}",
-     " %H#{JA_HOUR}%M#{JA_MINUTE}", :clock],
-    [" *\\d{1,2}#{JA_HOUR}\\d{1,2}#{JA_MINUTE}\\d{1,2}#{JA_SECOND}",
-     " %H#{JA_HOUR}%M#{JA_MINUTE}%S#{JA_SECOND}", :clock]] +
-    INFER_CLOCKS.map { |pattern, fmt, kind| [" *#{pattern}", " #{fmt}", kind] }).freeze
-
-  INFER_FORMATS = (
-    INFER_DATES.flat_map { |date, formats|
-      formats.flat_map { |fmt|
-        INFER_TIMES.map { |time, tfmt, kind|
-          TimeFormat.new(/\A#{date}#{time}\z/, fmt + tfmt, kind)
-        }
-      }
-    } +
-    INFER_JA_TIMES.map { |time, tfmt, kind|
-      TimeFormat.new(/\A\d{4}#{JA_YEAR}\d{1,2}#{JA_MONTH}\d{1,2}#{JA_DAY}#{time}\z/,
-                     "%Y#{JA_YEAR}%m#{JA_MONTH}%d#{JA_DAY}#{tfmt}", kind)
-    }
+  # A time after a date: none, or a clock with or without a zone. %z takes
+  # an offset, Z, UTC or GMT, not a zone named for a place (some of those
+  # names mean different offsets in different places).
+  INFER_TIMES = ([["", :date]] +
+    INFER_CLOCKS.flat_map { |clock, kind| [[" #{clock}", kind], [" #{clock} %z", kind]] }
   ).freeze
 
-  # Whether `text` is in format `f`: its shape, then a reading with no
-  # leftover that names a date which exists.
-  def time_format_fits?(f, text)
-    return false unless text_matches?(f.pattern, text)
-    h = Date._strptime(text, f.format)
-    h && !h.key?(:leftover) && h[:year] &&
-      Date.valid_date?(h[:year], h[:mon] || 1, h[:mday] || 1, Date::GREGORIAN)
-  end
+  # A date written in Japanese, year first ("2024<year>1<month>2<day>"),
+  # takes a time in the same markers ("3<hour>4<minute>", "...5<second>")
+  # or with colons.
+  JA_YEAR, JA_MONTH, JA_DAY = "年", "月", "日"
+  JA_HOUR, JA_MINUTE, JA_SECOND = "時", "分", "秒"
+  INFER_JA_TIMES = ([["", :date]] +
+    ([["%H#{JA_HOUR}%M#{JA_MINUTE}", :clock],
+      ["%H#{JA_HOUR}%M#{JA_MINUTE}%S#{JA_SECOND}", :clock]] + INFER_CLOCKS)
+      .map { |clock, kind| [" #{clock}", kind] }).freeze
 
-  # A text in an encoding the pattern cannot meet does not match it.
-  def text_matches?(pattern, text)
-    pattern.match?(text)
-  rescue EncodingError
-    false
-  end
+  INFER_FORMATS = (
+    INFER_DATES.product(INFER_TIMES).map { |date, (time, kind)|
+      TimeFormat.new(date + time, kind)
+    } +
+    INFER_JA_TIMES.map { |time, kind|
+      TimeFormat.new("%Y#{JA_YEAR}%m#{JA_MONTH}%d#{JA_DAY}#{time}", kind)
+    }
+  ).freeze
+  INFER_FORMAT_STRINGS = INFER_FORMATS.map(&:format).freeze
 
-  # The one format of INFER_FORMATS that the texts are written in. The
-  # first text gives the candidates; each later text drops those it does
-  # not fit, until one is left. No candidate for the first text, none left
-  # for a later one, or more than one left at the end raises ArgumentError.
-  # `texts` may be lazy: only the texts up to the choice are read, and
-  # checking the rest is left to reading them in the chosen format.
-  def infer_time_format(texts)
-    require 'date'
-    first = texts.first
-    candidates = INFER_FORMATS.select { |f| time_format_fits?(f, first) }
+  # The one format of INFER_FORMATS that the text of object array `x` is
+  # written in, `first` being its first present cell, as
+  # [format, fields, address]: the fields __strptime_fields__ read in it,
+  # and the address of the first cell not in it, or nil.
+  #
+  # The first cell gives the candidates and each later cell drops those it
+  # does not fit, until one is left. Each candidate is read over the whole
+  # array once, and the candidate a later cell leaves last is the one left:
+  # no candidate for the first cell, none left (the last ones dropped by one
+  # cell), or more than one left at the end raises ArgumentError. A cell
+  # after the choice that is not in the format is returned for the caller
+  # to report.
+  def infer_time_format(x, first)
+    candidates = CArray.__strptime_fits__(first, INFER_FORMAT_STRINGS)
     if candidates.empty?
       raise ArgumentError,
             "cannot infer a time format from #{first.inspect}; " \
             "pass a strptime format, or :mixed to guess at each cell"
     end
-    seen_first = false
-    texts.each do |text|
-      break if candidates.size == 1
-      unless seen_first
-        seen_first = true
-        next
-      end
-      left = candidates.select { |f| time_format_fits?(f, text) }
-      if left.empty?
+    runs = candidates.map do |i|
+      fields = x.__strptime_fields__(INFER_FORMATS[i].format, true)
+      [INFER_FORMATS[i], fields, fields[7].first || Float::INFINITY]
+    end
+    last = runs.map(&:last).max
+    left = runs.select { |run| run[2] == last }
+    if left.size > 1
+      if last == Float::INFINITY
         raise ArgumentError,
-              "#{text.inspect} is not in the format of #{first.inspect}; " \
-              "pass a strptime format, or :mixed to guess at each cell"
+              "#{first.inspect} could be read as " \
+              "#{left.map { |run| run[0].format.inspect }.join(' or ')}, " \
+              "and no cell tells which; pass the format"
       end
-      candidates = left
-    end
-    if candidates.size > 1
       raise ArgumentError,
-            "#{first.inspect} could be read as " \
-            "#{candidates.map { |f| f.format.inspect }.join(' or ')}, " \
-            "and no cell tells which; pass the format"
+            "#{x.flatten[last].inspect} is not in the format of #{first.inspect}; " \
+            "pass a strptime format, or :mixed to guess at each cell"
     end
-    candidates.first
+    f, fields, bad = left.first
+    [f, fields, bad == Float::INFINITY ? nil : bad]
+  end
+
+  # [kind, per] for __time_ticks_from_fields__: ticks of `per` nanoseconds
+  # (:fixed) or months (:calendar), or nil when `res` is finer than a
+  # nanosecond.
+  def tick_kind(res)
+    if CATimeUnitAlgebra::FIXED.key?(res.base)
+      per = res.tick_ratio * 1_000_000_000
+      kind = :fixed
+    else
+      per = res.tick_ratio
+      kind = :calendar
+    end
+    (per.denominator == 1 && per >= 1) ? [kind, per.to_i] : nil
   end
 
   # The ticks of every cell of `x` on the `res` grid, as an int64 array of
   # x's shape (missing and, under on_error: :mask, unparseable cells
-  # masked), or nil when `res` is finer than a nanosecond. Each String is
-  # parsed into fields here and the fields are turned into ticks for the
-  # whole array at once; a cell that is not a String goes through
-  # tick_index. With a `pattern`, a String that does not match it is
-  # unparseable too, so the shape a format was chosen for is held to.
-  def ticks_from_cells(x, res, format, on_error, pattern = nil)
+  # masked), or nil when `res` is finer than a nanosecond. A strptime
+  # format that __strptime_fields__ reads is read for the whole array in C;
+  # otherwise each String is parsed into fields here. Either way the fields
+  # become ticks for the whole array at once, and a cell that is not a
+  # String goes through tick_index.
+  def ticks_from_cells(x, res, format, on_error)
     require 'date'
-    if CATimeUnitAlgebra::FIXED.key?(res.base)
-      kind = :fixed
-      per = res.tick_ratio * 1_000_000_000
-    else
-      kind = :calendar
-      per = res.tick_ratio
+    kind, per = tick_kind(res)
+    return nil unless kind
+    if format.is_a?(String)
+      text = (x.data_type == CA_OBJECT && !x.face?) ? x : x.to_type(:object)
+      fields = text.__strptime_fields__(format, false)
+      return ticks_from_fields(fields, x, res, format, on_error) if fields
     end
-    return nil unless per.denominator == 1 && per >= 1
     cells = x.flatten.to_a
     n = cells.size
     year = Array.new(n, 1970)
@@ -1931,9 +1906,6 @@ module CATimeLiteral
       next if s.nil? || UNDEF.equal?(s)
       begin
         if s.is_a?(String)
-          if pattern && !text_matches?(pattern, s.strip)
-            raise ArgumentError, "#{s.inspect} is not in the format #{format.inspect}"
-          end
           h = parse_date_fields(s, format)
           year[i] = h[:year]
           mon[i] = h[:mon] || 1
@@ -1951,14 +1923,42 @@ module CATimeLiteral
     end
     raw = CArray.__time_ticks_from_fields__(
       CA_INT64(year), CA_INT64(mon), CA_INT64(day), CA_INT64(sod),
-      CA_INT64(frac), CA_INT64(off), CA_UINT8(present), kind, per.to_i)
-    # A tick that does not fit int64 is out of range, not unparseable.
-    if raw.count_not_masked < present.count(1)
-      i = present.each_index.find { |k| present[k] == 1 && UNDEF.equal?(raw[k]) }
-      raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
-    end
+      CA_INT64(frac), CA_INT64(off), CA_UINT8(present), kind, per)
+    check_ticks_fit(raw, present, present.count(1), res) { cells }
     direct.each { |i, t| raw[i] = t }
     raw.reshape(*x.shape)
+  end
+
+  # Ticks from what __strptime_fields__ read; the cells it deferred are
+  # read one by one through tick_index.
+  def ticks_from_fields(fields, x, res, format, on_error)
+    kind, per = tick_kind(res)
+    year, mon, day, sod, frac, off, present, unreadable, deferred, = fields
+    cells = nil
+    if on_error == :raise && !unreadable.empty?
+      cells = x.flatten.to_a
+      raise ArgumentError, "cannot parse time #{cells[unreadable.first].inspect}"
+    end
+    raw = CArray.__time_ticks_from_fields__(year, mon, day, sod, frac, off,
+                                            present, kind, per)
+    check_ticks_fit(raw, present, present.sum, res) { cells ||= x.flatten.to_a }
+    unless deferred.empty?
+      cells ||= x.flatten.to_a
+      deferred.each do |i|
+        raw[i] = tick_index(cells[i], res, format)
+      rescue ArgumentError, TypeError
+        raise if on_error == :raise
+      end
+    end
+    raw.reshape(*x.shape)
+  end
+
+  # A tick that does not fit int64 is out of range, not unparseable.
+  def check_ticks_fit(raw, present, present_count, res)
+    return if raw.count_not_masked >= present_count
+    cells = yield
+    i = (0...raw.elements).find { |k| present[k] == 1 && UNDEF.equal?(raw[k]) }
+    raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
   end
 
   # Single-literal build for {.time}: a 1-element CATime, honouring
