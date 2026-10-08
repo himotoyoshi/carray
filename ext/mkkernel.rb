@@ -6705,8 +6705,30 @@ module MkKernel
       raise "ca_op_powi.h: kernel helper markers not found"
   end
 
+  # A lazy cast node (CAMonOp with op_id CAST_BASE + target) converts cell
+  # by cell through ca_cast_block, which for a numeric target is a plain C
+  # conversion (ext/carray_cast_func.rb).  It is keyed as cast_<target> at
+  # the source's data type.  Left out: a boolean target, which checks its
+  # input and raises, and a float or complex source to an integer target,
+  # where an out-of-range value or NaN has no defined C result for a
+  # second compilation to agree on.
+  CAST_SOURCES = %i[bool i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
+                    cmplx64 cmplx128].freeze
+  CAST_TARGETS = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
+                    cmplx64 cmplx128].freeze
+  CAST_INEXACT = %i[f32 f64 cmplx64 cmplx128].freeze
+
+  def self.cast_body_rows
+    CAST_SOURCES.product(CAST_TARGETS).filter_map { |src, dst|
+      next if CAST_INEXACT.include?(src) && !CAST_INEXACT.include?(dst)
+      name = DTYPES[dst][:ca].sub(/\ACA_/, "").downcase
+      ["monop", "cast_#{name}", DTYPES[src][:ca].sub(/\ACA_/, "").downcase,
+       "(#2) = (#{DTYPES[dst][:c]})(#1);"]
+    }
+  end
+
   def self.body_table_rows
-    rows = EXTRA_BODY_ROWS.map(&:dup)
+    rows = EXTRA_BODY_ROWS.map(&:dup) + cast_body_rows
     KERNELS.each do |k|
       next unless %i[monop binop triop moncmp bincmp].include?(k[:kind])
       BODY_TABLE_DTYPES.each do |src|

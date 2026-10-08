@@ -250,11 +250,24 @@ class CArray
       end
 
       def unary (n)
+        return conversion(n) if n.__op_id__ >= CAMonOp::CAST_BASE
         name = spell(MONOP_BY_ID, n.__op_id__, {})
         args = [visit(n.parent)]
         # A view over one array is masked exactly where that array is
         # (ca_obj_monop.c).
         op(:monop, name, n.data_type, args, :pass, n.__trapping__)
+      end
+
+      # A cast node is named by the type it converts to, cast_<data_type>,
+      # and its body is keyed by the type it converts from.
+      def conversion (n)
+        from = n.parent.data_type
+        name = :"cast_#{n.data_type}"
+        body = CArray.__kernel_body__(:monop, name, from) or
+          raise Refused, "monop #{name} has no body at #{from}"
+        args = [visit(n.parent)]
+        note("c", name, from, args.join(","))
+        push Op.new(:monop, name, n.data_type, args, body, :pass, n.__trapping__)
       end
 
       def binary (n)

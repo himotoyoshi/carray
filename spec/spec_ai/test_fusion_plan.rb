@@ -302,4 +302,34 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_match(/^op_powi_fc\(float64_t\)$/, CArray.__kernel_helpers__)
   end
 
+
+  # A mixed-type expression converts one operand first.  The conversion is
+  # an operation named by the type it converts to, with the C cast the walk
+  # applies, keyed by the type it converts from.
+  def test_a_conversion_is_planned
+    a = CArray.float32(3).seq!
+    b = CArray.float64(3).seq!
+    i = CArray.int32(3).seq!
+    plan = CArray::Fusion.plan(a.lazy + b.lazy)
+    cast = plan.nodes[1]
+    assert_equal [:monop, :cast_float64, :float64, [0]],
+                 [cast.kind, cast.name, cast.data_type, cast.args]
+    assert_equal "(#2) = (double)(#1);", cast.body
+    assert_equal :pass, cast.mask
+    assert_not_nil CArray::Fusion.plan(i.lazy.sin)
+    assert_not_nil CArray::Fusion.plan(CArray.boolean(3).lazy + CArray.boolean(3).lazy)
+  end
+
+  # A float or complex value converted to an integer has no defined C
+  # result out of range, so no body is offered for it.
+  def test_no_conversion_body_from_a_float_to_an_integer
+    assert_nil CArray.__kernel_body__(:monop, :cast_int32, :float64)
+    assert_nil CArray.__kernel_body__(:monop, :cast_int64, :cmplx128)
+    assert_nil CArray.__kernel_body__(:monop, :cast_boolean, :int32)
+    assert_equal "(#2) = (int64_t)(#1);",
+                 CArray.__kernel_body__(:monop, :cast_int64, :boolean)
+    assert_equal "(#2) = (float)(#1);",
+                 CArray.__kernel_body__(:monop, :cast_float32, :float64)
+  end
+
 end

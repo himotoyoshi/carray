@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: a lazy expression that mixes data types (`f32.lazy + f64.lazy`,
+  `i32.lazy.sin`) can be handed to a registered expression evaluator such
+  as carray-jit; before, such an expression was always walked by CArray.
+
 - Fix: `cond.then_else(x, UNDEF)` keeps the data type of `x` and masks the
   cells where `cond` is false (it returned an object array). The same holds
   with `UNDEF` as the first branch.

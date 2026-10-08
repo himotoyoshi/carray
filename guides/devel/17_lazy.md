@@ -205,6 +205,8 @@ An `Op` carries `kind` (`:monop`, `:binop`, `:triop`, `:moncmp`, `:bincmp`),
 `CArray.__kernel_body__`, with `#1`, `#2`, ... for the operands and the next
 number for the result), `mask` (`:pass`, `:union`, `:kleene_or`,
 `:kleene_and`) and `trapping` (a masked cell must not be computed).
+A conversion between data types is a `:monop` named `cast_<type>` for the
+type it converts to, its body keyed by the type it converts from.
 
 **The contract.** The node classes, kinds, names, mask rules and fields keep
 the meaning they have. New ones are added; none is renamed or changes meaning.
