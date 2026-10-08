@@ -61,6 +61,181 @@
 
 static int ca_str_nonfinite (const char *str, double *out);
 
+#include "ca_pow5_table.h"
+
+/* Decimal to binary64, correctly rounded, without the C library.
+
+   A validated token is read as w * 10^q with w the first 19 significant
+   digits.  Clinger's fast path answers when w and 10^q are both exact
+   doubles (one rounding).  Otherwise the Eisel-Lemire method multiplies w
+   by a 128-bit approximation of 5^q (ca_pow5_table.h) and reads the
+   significand from the top of the product, declining in the rare cases
+   where the product cannot settle the rounding.  A declined token, and one
+   with more than 19 significant digits, goes to ruby_strtod. */
+
+static const double ca_exact_pow10[23] = {
+  1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11,
+  1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22
+};
+
+#if defined(__SIZEOF_INT128__)
+static int
+ca_decimal_to_double_eisel_lemire (int64_t q, uint64_t w, uint64_t *bits)
+{
+  const uint64_t *t;
+  unsigned __int128 p;
+  uint64_t hi, lo, m;
+  int lz, upper;
+  int64_t e2;
+
+  if ( q < CA_POW5_Q_MIN ) {
+    *bits = 0;
+    return 1;
+  }
+  if ( q > CA_POW5_Q_MAX ) {
+    *bits = 0x7FFULL << 52;
+    return 1;
+  }
+  lz = __builtin_clzll(w);
+  w <<= lz;
+  t = ca_pow5_table + 2 * ( q - CA_POW5_Q_MIN );
+  p = (unsigned __int128) w * t[0];
+  hi = (uint64_t) ( p >> 64 );
+  lo = (uint64_t) p;
+  if ( ( hi & 0x1FF ) == 0x1FF ) {
+    /* The bits below the significand are all ones: the low half of the
+       table entry can carry into them. */
+    uint64_t hi2 = (uint64_t) ( ( (unsigned __int128) w * t[1] ) >> 64 );
+    lo += hi2;
+    if ( lo < hi2 ) {
+      hi++;
+    }
+    if ( ( hi & 0x1FF ) == 0x1FF && lo == UINT64_MAX && ( q < -27 || q > 55 ) ) {
+      return 0;
+    }
+  }
+  upper = (int) ( hi >> 63 );
+  m = hi >> ( upper + 9 );
+  /* floor(q * log2(10)) + 63, then the bias.  217706 / 2^16 is log2(10)
+     closely enough for every q in the table; the floor is taken by hand,
+     since >> on a negative number is the compiler's choice. */
+  {
+    int64_t t = 217706 * q;
+    int64_t log2_10_q = ( t >= 0 ) ? t / 65536 : - ( ( - t + 65535 ) / 65536 );
+    e2 = log2_10_q + 63 + upper - lz + 1023;
+  }
+  if ( e2 <= 0 ) {                                   /* subnormal */
+    if ( -e2 + 1 >= 64 ) {
+      *bits = 0;
+      return 1;
+    }
+    m >>= -e2 + 1;
+    m += m & 1;
+    m >>= 1;
+    e2 = ( m < ( 1ULL << 52 ) ) ? 0 : 1;
+    *bits = ( (uint64_t) e2 << 52 ) | ( m & ( ( 1ULL << 52 ) - 1 ) );
+    return 1;
+  }
+  if ( lo <= 1 && q >= -4 && q <= 23 && ( m & 3 ) == 1
+       && ( m << ( upper + 9 ) ) == hi ) {
+    m &= ~1ULL;                                      /* exactly halfway: to even */
+  }
+  m += m & 1;
+  m >>= 1;
+  if ( m >= ( 2ULL << 52 ) ) {
+    m = 1ULL << 52;
+    e2++;
+  }
+  m &= ~( 1ULL << 52 );
+  if ( e2 >= 0x7FF ) {
+    *bits = 0x7FFULL << 52;
+    return 1;
+  }
+  *bits = ( (uint64_t) e2 << 52 ) | m;
+  return 1;
+}
+#endif
+
+/* 1 with the value at out, 0 to hand the token to ruby_strtod. */
+static int
+ca_decimal_token_to_double_without_strtod (const char *s, long n, double *out)
+{
+  long i = 0;
+  int negative = 0, nd = 0, truncated = 0;
+  uint64_t w = 0;
+  int64_t q = 0, e = 0;
+
+  if ( s[i] == '+' || s[i] == '-' ) {
+    negative = ( s[i] == '-' );
+    i++;
+  }
+  for (; i < n && s[i] >= '0' && s[i] <= '9'; i++) {
+    unsigned d = (unsigned) ( s[i] - '0' );
+    if ( w == 0 && d == 0 ) continue;
+    if ( nd < 19 ) { w = w * 10 + d; nd++; }
+    else { q++; truncated |= ( d != 0 ); }
+  }
+  if ( i < n && s[i] == '.' ) {
+    for (i++; i < n && s[i] >= '0' && s[i] <= '9'; i++) {
+      unsigned d = (unsigned) ( s[i] - '0' );
+      if ( w == 0 && d == 0 ) { q--; continue; }
+      if ( nd < 19 ) { w = w * 10 + d; nd++; q--; }
+      else { truncated |= ( d != 0 ); }
+    }
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    int eneg = 0;
+    i++;
+    if ( s[i] == '+' || s[i] == '-' ) {
+      eneg = ( s[i] == '-' );
+      i++;
+    }
+    for (; i < n; i++) {
+      if ( e < 100000 ) {
+        e = e * 10 + ( s[i] - '0' );
+      }
+    }
+    q += eneg ? -e : e;
+  }
+  if ( truncated ) {
+    return 0;
+  }
+  if ( w == 0 ) {
+    *out = negative ? -0.0 : 0.0;
+    return 1;
+  }
+  if ( w <= ( 1ULL << 53 ) && q >= -22 && q <= 22 ) {
+    double d = (double) w;
+    d = ( q >= 0 ) ? d * ca_exact_pow10[q] : d / ca_exact_pow10[-q];
+    *out = negative ? -d : d;
+    return 1;
+  }
+#if defined(__SIZEOF_INT128__)
+  {
+    uint64_t bits;
+    double d;
+    if ( ! ca_decimal_to_double_eisel_lemire(q, w, &bits) ) {
+      return 0;
+    }
+    memcpy(&d, &bits, sizeof(d));
+    *out = negative ? -d : d;
+    return 1;
+  }
+#else
+  return 0;
+#endif
+}
+
+static double
+ca_decimal_token_to_double (const char *s, long n, const char *buf)
+{
+  double d;
+  if ( ca_decimal_token_to_double_without_strtod(s, n, &d) ) {
+    return d;
+  }
+  return ruby_strtod(buf, NULL);
+}
+
 enum {
   CA_DECIMAL_OK = 0,
   CA_DECIMAL_BLANK,
@@ -240,12 +415,12 @@ ca_decimal_float (const char *s, long n, double *out)
   if ( out == NULL ) {
     return 1;
   }
-  /* The token is validated, so ruby_strtod (locale-independent, correctly
-     rounded) sees nothing but a decimal number. */
+  /* The token is validated, so the reader sees nothing but a decimal
+     number. */
   if ( n < (long) sizeof(buf) ) {
     memcpy(buf, s, n);
     buf[n] = '\0';
-    *out = ruby_strtod(buf, NULL);
+    *out = ca_decimal_token_to_double(s, n, buf);
   }
   else {
     volatile VALUE token = rb_str_new(s, n);

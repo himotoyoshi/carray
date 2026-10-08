@@ -365,6 +365,12 @@ if Dir.glob("carray_kernels_*.c").empty?
   raise "no carray_kernels_*.c files found after mkkernel.rb; check the generator"
 end
 
+# The 5^q table the decimal-to-double reader (carray_cast.c) multiplies by.
+if ( not File.exist?("ca_pow5_table.h") ) or
+    File.stat("mk_pow5_table.rb").mtime > File.stat("ca_pow5_table.h").mtime
+  system("ruby mk_pow5_table.rb")
+end
+
 if ( not File.exist?("carray_call_cfunc.c") ) or
     ( not File.exist?("carray_call_cfunc.h") ) or
     File.stat("mk_call_cfunc.rb").mtime > File.stat("carray_call_cfunc.c").mtime

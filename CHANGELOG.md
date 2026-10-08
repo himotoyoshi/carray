@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: faster, with the same results: text read as a float (`to_type`,
+  a String stored into a float array, `CAFrame#cast`) is about eight times
+  faster. The value is still the correctly rounded double `Float()` gives.
+
 - Change: `CAFrame` raises `CAFrame::UnreadableColumn` instead of
   `ArgumentError` when a column's contents cannot be read: `cast` and
   `from_csv(types:)` under `on_error: :raise`, `parse_to_time`,

@@ -38,6 +38,7 @@ class TestInstalledHeaders < Test::Unit::TestCase
     "ca_rng_xoshiro256pp.h"     => "random generator internals",
     "carray_index_classifier.h" => "indexer internals",
     "carray_slab.h"             => "slab iterator internals",
+    "ca_pow5_table.h"           => "decimal-to-double table, generated",
   }
 
   def installed
