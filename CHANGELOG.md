@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `unmask` / `strip_mask(method: :linear)` and `CAFrame#fill(name,
+  :linear)` leave the cells that were not masked as they were: an int64
+  value above 2**53 is no longer rounded through float64, and a NaN or Inf
+  stored in such a cell is no longer turned into a masked cell. Only a
+  masked cell outside the span of the present ones stays masked.
+
 - Fix: on an object array, `pmax` / `pmin` let a Float NaN lose and
   `maximum` / `minimum` let it win, as on a float array; they raised
   `ArgumentError`, and so did `windows(...).max` / `.min` on an object
