@@ -486,7 +486,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
     g = df.parse_to_time("time").set_index("time")
     assert_equal "time", g.axis_name
     assert_kind_of CATime, g.index
-    assert_equal "2024-01-01T00:00:00Z", g.index[0].to_s
+    assert_equal "2024-01-01", g.index[0].to_s     # dates alone read as :D
   end
 
   def test_to_time_integer_unix_epoch

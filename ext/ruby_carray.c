@@ -90,6 +90,7 @@ void Init_ca_obj_byte_swap ();
 void Init_ca_face ();            /* CAFace abstract base; must precede CATime / CATimedelta / CARecord / CAConstString */
 void Init_ca_source ();          /* CASource abstract base; concrete sources live in C extensions */
 void Init_ca_obj_time ();  /* first numeric Face */
+void Init_carray_time_text ();
 void Init_ca_obj_timedelta ();   /* CATime sibling */
 void Init_ca_obj_record ();      /* composite Face for CAStruct backing */
 void Init_ca_obj_const_string ();/* read-only variable-length string Face */
@@ -345,6 +346,7 @@ Init_carray_ext (void)
                                  (datetime / timedelta / record /
                                  const_string). */
   Init_ca_obj_time();
+  Init_carray_time_text();
   Init_ca_obj_timedelta();
   Init_ca_obj_record();
   Init_ca_obj_const_string();

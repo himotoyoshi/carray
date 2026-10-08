@@ -174,16 +174,21 @@ class CAFrame
   # Parse a string column into a time column and rebind it (memo §11.2).
   # The column must be string-bearing (an object CArray of Strings, or a
   # CAString / CAConstString / CAFixlenString) — this is the "text -> time"
-  # mode, distinct from the integer-serial mode of +to_time+. Delegates to
-  # +CArray.time(col, on_error: :mask)+: +format+ picks strptime parsing
-  # (auto-detect when nil), +unit+ the storage resolution; masked / nil and
-  # unparseable cells become UNDEF (bulk column parse tolerates bad cells);
-  # +on_error:+ :warn / :raise reports them as +cast+ does. Make it the index
-  # with +set_index+ afterward. +cast(name => :time)+ does the same with the
-  # unit chosen from the text.
+  # mode, distinct from the integer-serial mode of +to_time+.
+  #
+  # Without +format+ only text written year first is read ("2024-01-01",
+  # "2024/1/2 3:04", "2024-01-01T12:00:00.5Z"); a date in another order is
+  # not, since whether "01/02/2024" is January or February cannot be told.
+  # For those, +format+ is a strptime format, or :mixed to guess at each
+  # cell (much slower). +unit+ is the storage resolution: without a format
+  # it defaults to the finest the text shows, with one to :s. Masked / nil
+  # and unparseable cells become UNDEF; +on_error:+ :warn / :raise reports
+  # the unparseable ones as +cast+ does. Make it the index with +set_index+
+  # afterward. +cast(name => :time)+ is the call without a format.
   #
   #   df.parse_to_time("time").set_index("time")
-  def parse_to_time(name, format = nil, unit: :s, on_error: :mask)
+  #   df.parse_to_time("date", "%d/%m/%Y")
+  def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
@@ -315,20 +320,47 @@ class CAFrame
     parsed
   end
 
-  # cast(name => :time): text to CATime, in the finest unit the text shows
-  # (time_unit_of).
+  # cast(name => :time): year-first text to CATime, in the finest unit the
+  # text shows.
   private def cast_time_column(key, col, on_error)
     unless string_column?(col)
       raise ArgumentError,
             "cast: column #{key.inspect} is #{col.data_type}, not text; " \
             "to_time reads a column of serial counts as time"
     end
-    parse_time_column(key, col, nil, time_unit_of(col), on_error)
+    parse_time_column(key, col, nil, nil, on_error)
   end
 
-  # Text to CATime, reporting the cells that hold something but do not
-  # parse as on_error says.
+  # Text to CATime. Without a format only year-first text is read; a
+  # strptime format, or :mixed for a guess at each cell, goes through
+  # CArray.time. Cells that hold something but do not parse are reported as
+  # on_error says.
   private def parse_time_column(key, col, format, unit, on_error)
+    case format
+    when nil    then read_time_text(key, col, unit, on_error)
+    when String then parse_time_by_format(key, col, format, unit || :s, on_error)
+    when :mixed then parse_time_by_format(key, col, nil, unit || :s, on_error)
+    else
+      raise ArgumentError,
+            "time format must be a strptime String or :mixed (got #{format.inspect})"
+    end
+  end
+
+  # Year-first text, read in C. A unit the reader does not write itself is
+  # reached by reading in the finest unit the text shows and converting.
+  private def read_time_text(key, col, unit, on_error)
+    text = (col.data_type == CA_OBJECT && !col.face?) ? col : col.to_type(:object)
+    unreadable = on_error == :mask ? nil : []
+    ticks, read_unit = text.__parse_time_text__(unit, unreadable) ||
+                       text.__parse_time_text__(nil, unreadable)
+    if unreadable && !unreadable.empty?
+      report_unreadable(key, col, :time, unreadable, on_error)
+    end
+    times = ticks.time(unit: read_unit)
+    (unit.nil? || read_unit == unit) ? times : times.to_unit(unit)
+  end
+
+  private def parse_time_by_format(key, col, format, unit, on_error)
     parsed = CArray.time(col, format: format, unit: unit, on_error: :mask)
     unless on_error == :mask
       failed = col.flatten.to_a.zip(parsed.flatten.is_masked.to_a)
@@ -341,50 +373,17 @@ class CAFrame
     parsed
   end
 
-  # The unit that holds every time in a text column: :D for dates alone,
-  # :s with a time of day, and :ms / :us / :ns for fractional seconds of up
-  # to 3 / 6 / 9 digits.
-  private def time_unit_of(col)
-    fraction = 0
-    clock = false
-    col.flatten.to_a.each do |cell|
-      next if missing_text?(cell)
-      text = cell.to_s
-      clock ||= TIME_OF_DAY.match?(text)
-      if (m = FRACTION_OF_SECOND.match(text))
-        fraction = [fraction, m[1].size].max
-      end
-    end
-    return :ns if fraction > 6
-    return :us if fraction > 3
-    return :ms if fraction > 0
-    clock ? :s : :D
-  end
-
-  TIME_OF_DAY = /\d:\d\d/
-  FRACTION_OF_SECOND = /\d:\d\d:\d\d[.,](\d+)/
-  # The text infer_types reads as time: a year-first date, with an optional
-  # time of day, fraction of a second and zone. A day-first or month-first
-  # date ("01/02/2024") is not read, since which one it is cannot be told.
-  TIME_TEXT = %r{\A\d{4}[-/]\d{2}[-/]\d{2}
-                 (?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)?
-                 (?:Z|[+-]\d{2}:?\d{2})?\z}x
-  private_constant :TIME_OF_DAY, :FRACTION_OF_SECOND, :TIME_TEXT
-
   # nil, UNDEF and a blank String are missing values.
   private def missing_text?(cell)
     cell.nil? || UNDEF.equal?(cell) || (cell.is_a?(String) && cell.strip.empty?)
   end
 
-  # Whether every present cell of a text column is a year-first date or time.
+  # Whether every present cell of a text column is year-first text, and one
+  # is present.
   private def time_text_column?(col)
-    present = false
-    col.flatten.to_a.each do |cell|
-      next if missing_text?(cell)
-      return false unless cell.is_a?(String) && TIME_TEXT.match?(cell.strip)
-      present = true
-    end
-    present
+    unreadable = []
+    ticks, = col.__parse_time_text__(nil, unreadable)
+    unreadable.empty? && ticks.count_not_masked > 0
   end
 
   # +addrs+ are flat addresses into +col+; a row holds elements / nrow cells.

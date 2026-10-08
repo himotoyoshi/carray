@@ -230,7 +230,7 @@ Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 `types: :infer` casts a column to `:int64` when every cell that is not missing
 is an integer that fits, to `:float64` when every such cell is a number, to
 `:time` when every such cell is a year-first date or time (`"2024-01-01"`,
-`"2024-01-01 12:00"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text
+`"2024/1/2 3:04"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text
 otherwise. A number with a leading zero (`"007"`) is a code and keeps its
 column as text, and so does an integer too long for `:int64` (an
 identifier), which a float would round. A day-first or month-first date
@@ -1003,8 +1003,9 @@ input shape. Each rebinds the column and returns `self`; make it the index with
 
 ```ruby
 # text -> time: parse date strings
-df.parse_to_time("time").set_index("time")
+df.parse_to_time("time").set_index("time")      # written year first
 df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
+df.parse_to_time("time", :mixed)                # guess at each cell (slow)
 
 # serial -> time: reinterpret integer counts since an epoch
 df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
@@ -1014,12 +1015,21 @@ df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial 
 df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
-- **`parse_to_time(name, format = nil, unit: :s, on_error: :mask)`** parses
-  a string-bearing column (an object `CArray` of Strings, or a `CAString` /
-  `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
-  `UNDEF` (parse-mask); `on_error: :warn` / `:raise` reports the unparseable
-  ones as `cast` does. A non-string column raises. `cast(name => :time)` is
-  the same parse with the unit chosen from the text.
+- **`parse_to_time(name, format = nil, unit: nil, on_error: :mask)`**
+  parses a string-bearing column (an object `CArray` of Strings, or a
+  `CAString` / `CAConstString` / `CAFixlenString`). Without `format` it reads
+  text written **year first** and nothing else: the date as
+  `YYYY-M-D` or `YYYY/M/D` (month and day with or without a leading zero),
+  then optionally a time of day after `T` or a space (`h:mm`, `:ss`, a
+  fraction of up to nine digits) and a zone (`Z`, `+09:00`, `+0900`, `+09`;
+  a time without a zone is UTC). A date in another order is not read,
+  because whether `"01/02/2024"` is January or February cannot be told from
+  the text; pass a strptime `format` for it, or `:mixed` to guess at each
+  cell, which is much slower. `unit` defaults to the finest the text shows
+  without a format and to `:s` with one. Missing and unparseable cells
+  become `UNDEF` (parse-mask); `on_error: :warn` / `:raise` reports the
+  unparseable ones as `cast` does. A non-string column raises.
+  `cast(name => :time)` is the call without a format.
 - **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
   as counts of `unit` resolution since `epoch` (default the Unix epoch).
   `epoch` takes any time literal (String / `Time` / Integer), so columns

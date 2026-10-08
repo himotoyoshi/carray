@@ -36,10 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
-- New: `CAFrame#cast(name => :time)` parses a text column into a `CATime`
-  column in the finest unit its text shows (`:D` for dates alone, `:s` with
-  a time of day, `:ms` and finer for fractions of a second).
-  `CAFrame#parse_to_time` takes `on_error:` as `cast` does.
+- New: `CAFrame#cast(name => :time)` parses a text column written year
+  first (`2024-01-01`, `2024/1/2 3:04`, `2024-01-01T12:00:00.5+09:00`) into
+  a `CATime` column, in the finest unit its text shows (`:D` for dates
+  alone, `:s` with a time of day, `:ms` and finer for fractions of a
+  second). `CAFrame#parse_to_time` takes `on_error:` as `cast` does.
+
+- Change: `CAFrame#parse_to_time` without a format reads only text written
+  year first, and much faster; it no longer guesses at other forms, so
+  `"01/02/2024"` or `"Jan 2, 2024"` is now `UNDEF`. Pass a strptime format
+  for those, or `:mixed` for the old guess at each cell. Without a format
+  the unit now defaults to the finest the text shows, so a column of dates
+  alone is `:D` (it was `:s`); pass `unit:` to keep another.
 
 - New: `CAFrame.from_csv(types: :infer)` (and `from_records`) casts each
   text column whose cells all read as numbers to `:int64` or `:float64`,

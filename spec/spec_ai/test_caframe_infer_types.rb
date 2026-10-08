@@ -144,4 +144,56 @@ class TestCAFrameCastTime < Test::Unit::TestCase
     df = CAFrame.new("t" => CA_FLOAT64([1.0]))
     assert_raise(ArgumentError) { df.cast("t" => :time) }
   end
+
+  def times(cells, *args, **opts)
+    df = CAFrame.new("t" => CA_OBJECT(cells))
+    df.parse_to_time("t", *args, **opts)
+    strings(df["t"])
+  end
+
+  # Year-first text without zero padding, as a spreadsheet writes it.
+  def test_year_first_without_padding
+    assert_equal ["2024-01-02T03:04:00Z", "2024-01-02T00:00:00Z"],
+                 times(["2024/1/2 3:04", "2024/1/2"])
+  end
+
+  def test_zones
+    assert_equal ["2024-01-01T03:00:00Z", "2024-01-01T13:30:00Z",
+                  "2023-12-31T23:30:00Z", "2024-01-01T12:00:00Z"],
+                 times(["2024-01-01 12:00:00+09:00", "2024-01-01 12:00 -0130",
+                        "2024-01-01T00:30+01", "2024-01-01T12:00Z"])
+  end
+
+  def test_what_is_not_read_without_a_format
+    cells = ["01/02/2024", "Jan 2, 2024", "2024-02-30", "2024-01-01 24:00",
+             "20240101", "2024-1-01/02", "2024-01-01T", "2024-01-01Z"]
+    assert_equal ["UNDEF"] * cells.size, times(cells)
+  end
+
+  def test_a_format_and_mixed
+    assert_equal ["2024-02-01T00:00:00Z"], times(["01/02/2024"], "%d/%m/%Y")
+    assert_equal ["2024-01-02T00:00:00Z"], times(["Jan 2, 2024"], :mixed)
+    assert_raise(ArgumentError) { times(["2024-01-01"], :guess) }
+  end
+
+  def test_a_unit_the_reader_does_not_write
+    assert_equal ["2024-01-01T12:00:00Z", "1969-12-31T23:00:00Z"],
+                 times(["2024-01-01 12:34:56", "1969-12-31 23:59:59"], unit: :h)
+  end
+
+  def test_a_coarser_unit_floors
+    assert_equal ["2024-01-01", "1969-12-31"],
+                 times(["2024-01-01 12:34:56", "1969-12-31 23:59:59"], unit: :D)
+  end
+
+  # The reader agrees with CArray.time on year-first text.
+  def test_agrees_with_carray_time
+    srand(1)
+    texts = Array.new(500) do
+      Time.at(rand(-4_000_000_000..8_000_000_000), rand(1000) * 1000, :usec)
+          .utc.strftime("%Y-%m-%dT%H:%M:%S.%3N")
+    end
+    expected = CArray.time(CA_OBJECT(texts), unit: :ms).to_a.map(&:to_s)
+    assert_equal expected, times(texts)
+  end
 end
