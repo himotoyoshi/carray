@@ -89,8 +89,11 @@ class TestCAFrameDescribe < Test::Unit::TestCase
 
   def test_a_record_column
     st = CArray.struct { float64 :lat; float64 :lng }
-    r = CAFrame.new("pos" => CARecord.new(st, 3)).describe.at("pos")
-    assert_equal ["CARecord", 3, 1], r.values_at("type", "count", "unique")
+    pos = CARecord.new(st, 3)
+    pos["lat"][] = [35.0, 35.0, 34.0]
+    pos["lng"][] = [139.0, 139.0, 135.0]
+    r = CAFrame.new("pos" => pos).describe.at("pos")
+    assert_equal ["CARecord", 3, 2], r.values_at("type", "count", "unique")
     assert UNDEF.equal?(r["mean"])
   end
 
