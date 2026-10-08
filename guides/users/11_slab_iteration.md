@@ -126,7 +126,7 @@ m.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 
 ## Higher-dimensional arrays
 
-Everything above extends to any number of dimensions. The slab is always 1-D; all the other axes index *which* slab.
+Everything above extends to any number of dimensions. A slab along one axis is 1-D; all the other axes index *which* slab.
 
 ```ruby
 c = CArray.int32(2, 2, 2).seq
@@ -144,7 +144,7 @@ c.reduce_slab(axis: 0) { |fiber| fiber.max }
 #       [ 6, 7 ] ]
 ```
 
-The slab iterator is single-axis only — `axis:` takes one integer, not an array of integers. If you need a multi-axis reduction expressible with the built-ins (`sum`, `prod`, `min`, `max`, `mean`, `variance`, `stddev`, `accumulate`, `count`), those accept `axis: [k1, k2, …]`; see [Reduction and statistics](04_reduction_and_statistics.md).
+`axis:` also takes an array of axes, and the block then receives a slab spanning all of them: `c.reduce_slab(axis: [0, 2]) { |s| s.max }` gives `[ 5, 7 ]`. For reductions the built-ins already cover (`sum`, `prod`, `min`, `max`, `mean`, `variance`, `stddev`, `accumulate`, `count`), pass the same `axis: [k1, k2, …]` to them directly; see [Reduction and statistics](04_reduction_and_statistics.md).
 
 ## Relation to the built-in reductions
 

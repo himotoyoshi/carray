@@ -370,23 +370,16 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
            p_in via slab_strides into the scratch, present slab_view as
            a CAStride over the carrier with contig strides.
 
-       Both paths require ALIAS T1 mode (= p_in is in src memory).
-       Non-ALIAS multi-axis T1 modes (= PER_SLAB scratch where T1 picks
-       its own gather for descriptor-framework sources) remain
-       NotImpError until a follow-on substrate phase.                   */
-    uint8_t am = st->t1->alias_mode;
-    int contig;
-    if ( am != CA_ITER_ALIAS_CONTIG &&
-         am != CA_ITER_ALIAS_STRIDED &&
-         am != CA_ITER_ALIAS_ATTACH ) {
-      rb_raise(rb_eNotImpError,
-               "multi-axis slab with non-ALIAS T1 mode not implemented yet "
-               "(alias_mode = %d)", (int) am);
-    }
-    contig = ca_slab_strides_are_row_major_contig(slab_ndim,
-                                                  st->t1->slab_dims,
-                                                  st->t1->slab_strides,
-                                                  src->bytes);
+       Path (a) needs p_in to lie in src's own buffer, which holds only
+       when src is an entity.  Any other source -- a view, whose cells the
+       iterator hands out from the root, a parent or its own scratch --
+       takes path (b): the iterator describes every slab by p_in and
+       slab_strides, whatever its mode.                                  */
+    int contig = ca_is_entity(src)
+                 && ca_slab_strides_are_row_major_contig(slab_ndim,
+                                                         st->t1->slab_dims,
+                                                         st->t1->slab_strides,
+                                                         src->bytes);
     if ( contig ) {
       /* (a) contig multi-axis ALIAS: parent=src, K-D strides match src.  */
       st->slab_view = ca_slab_build_slab_view(st->self, src->data_type,
@@ -442,7 +435,10 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
     ca_size_t strides[1];
     dim[0]     = fiber_len;
     strides[0] = src->bytes;
-    in_alias   = (in_stride == src->bytes);
+    /* A window onto src only when the fiber lies in src's own buffer:
+       an entity whose fiber is contiguous.  A view's fiber comes from
+       the root or the iterator's scratch, so it goes through a carrier. */
+    in_alias   = ca_is_entity(src) && (in_stride == src->bytes);
 
     if ( in_alias ) {
       /* ALIAS: parent = src.  ca_stride_setup auto-creates slab_view->mask

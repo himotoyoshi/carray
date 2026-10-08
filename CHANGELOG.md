@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `each_slab`, `map_slab` and `reduce_slab` over a view (a
+  transpose, a block, a lazy expression, a stack, ...) handed the block a
+  slab whose derived arrays (`slab.dup`, `slab.sort_copy`, ...) read
+  other memory, and could crash; they now read the slab's cells. A slab
+  of several axes (`axis: [0, 2]`) is now taken from every kind of source:
+  before, a lazy, stack, meld or `as_type` source, and some index-array
+  views, raised `NotImplementedError`.
+
 - Fix: `sort_copy`, `median`, `percentile`, `is_mode` and
   `mask_duplicates` along an axis of a `CArray.stack` view that was
   neither the stack axis nor the last axis read the wrong cells, and the

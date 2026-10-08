@@ -115,9 +115,8 @@ ca.map_slab(axis: 1)    { |row| ... }  # row spans axis 1
 ca.reduce_slab(axis: 1) { |row| ... }  # axis 1 collapsed in output
 ```
 
-Negative axes are supported (`axis: -1` is the innermost). The
-current surface is single-axis only; multi-axis slabs
-(`axis: [k1, k2]`) are not supported.
+Negative axes are supported (`axis: -1` is the innermost). An array of
+axes (`axis: [k1, k2]`) gives the block a slab spanning all of them.
 
 ## The slab is read-only
 
@@ -162,13 +161,10 @@ that derived views see the right window.
 
 ## Mask handling
 
-Masked source arrays currently raise `NotImplementedError`.
-Strip the mask explicitly via `ca.value` if you need to feed a
-masked source through:
-
-```ruby
-masked_ca.value.map_slab(axis: 1) { |row| row.normalize }
-```
+The slab carries the source's mask: a masked cell of the source is
+masked in the slab, so `slab.sum` or `slab.count_masked` in the block
+see it. The output of `map_slab` takes the block's values only, not
+their mask.
 
 ## Internal use — `CA_OBJECT` per-axis paths
 
