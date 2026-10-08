@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `snap_to` with a Ruby Array grid on an integer array no longer
+  truncates the grid to the array's type: a Float in the grid makes it
+  float64 (`CA_INT32([1, 2, 3]).snap_to([0.5, 1.5, 2.5])` is
+  `[1.5, 2.5, 2.5]`, was `[1, 2, 2]`), and an Integer that does not fit
+  raises `RangeError` instead of wrapping. A CArray grid is unchanged.
+
 - Fix: `count(v)` on an integer array compares a Float `v`, or a `v` array
   of a wider data type, in the type the two share, as `eq` does:
   `CA_INT32([1, 2, 3]).count(1.5)` is `0` (was `1`, the query truncated to
