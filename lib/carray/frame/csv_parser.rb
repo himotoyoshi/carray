@@ -86,7 +86,10 @@ class CAFrame
         @strip    = strip
         @sep_re   = /#{Regexp.escape(sep)}/
         @quote_re = /#{Regexp.escape(quote)}/
-        @unquoted = /[^#{Regexp.escape(sep)}]*/
+        # An unquoted field runs up to the separator. A character class says
+        # that for a one-character separator; a longer one has to be matched
+        # as a whole, or "::" would end the field at a single ":".
+        @unquoted = sep.size == 1 ? /[^#{Regexp.escape(sep)}]*/ : /(?:(?!#{Regexp.escape(sep)}).)*/m
         @inner    = /[^#{Regexp.escape(quote)}]*/
         @recno    = 0
       end
@@ -133,6 +136,16 @@ class CAFrame
               end
             end
             fields << buf
+            # A closed quoted field ends at the separator or the end of the
+            # record. Anything else there is malformed, and read on it would
+            # drop the rest of the record without a word. strip: lets spaces
+            # through, as it does around an unquoted field.
+            sc.skip(/[ \t]+/) if @strip
+            unless sc.eos? || sc.check(@sep_re)
+              raise MalformedCSV,
+                    "text #{sc.rest[0, 20].inspect} after the closing quote of field " \
+                    "#{fields.size} in record #{@recno}"
+            end
           else
             cell = sc.scan(@unquoted) || ""
             cell = cell.strip if @strip

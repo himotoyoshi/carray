@@ -516,8 +516,12 @@ class CAFrame
 
   private def quote_csv_field(text, sep, quote)
     return "" if text.nil?
+    # With a separator longer than one character, a value can end in part of
+    # it ("a:" before "::"), and the reader would find the separator inside
+    # the value; such a value is quoted too.
     if text.empty? || text.include?(sep) || text.include?(quote) ||
-       text.include?("\n") || text.include?("\r")
+       text.include?("\n") || text.include?("\r") ||
+       (sep.size > 1 && (text + sep).index(sep) != text.size)
       quote + text.gsub(quote, quote * 2) + quote
     else
       text
@@ -527,6 +531,15 @@ class CAFrame
   def self.build_frame(names, rows)
     ncol  = names ? names.size : (rows.map(&:size).max || 0)
     names ||= Array.new(ncol) { |j| "c#{j}" }
+    # A frame holds one column per name, so a repeated one would keep only
+    # the last of its columns.
+    dup = names.tally.select { |_, count| count > 1 }.keys
+    unless dup.empty?
+      raise ArgumentError,
+            "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
+            "name the columns yourself with a reading block: " \
+            "from_csv(path) { skip 1; column_names(...); body }"
+    end
 
     cols = {}
     if rows.empty?
