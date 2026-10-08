@@ -170,8 +170,9 @@ class CAFrame
       # that opened with a quote is still open -- so a quote inside an
       # unquoted field is malformed rather than a reason to swallow the lines
       # after it, and a field of many lines is read once, not re-counted.
-      def read(io, blank_is_row: false)
+      def read(io, blank_is_row: false, last_line: nil)
         loop do
+          return nil if last_line && @lineno >= last_line
           line = gets(io)
           return nil if line.nil?
           @recno += 1
@@ -307,25 +308,24 @@ class CAFrame
     end
   end
 
-  # The block reading-control DSL for CAFrame.from_csv. A file
-  # often has preamble lines, a units row, or no header at all; the block says,
-  # in order, how to consume the stream:
+  # The reading-control block for CAFrame.from_csv. A file often has
+  # preamble lines, a units row, or no header at all; the block is given the
+  # reader and says, in order, how to consume the stream:
   #
-  #   CAFrame.from_csv(path) do
-  #     skip 3          # drop 3 preamble lines
-  #     header          # next record supplies the column names
-  #     skip 1          # drop a units row
-  #     body            # the rest are data rows
+  #   CAFrame.from_csv(path) do |r|
+  #     r.skip 3          # drop 3 preamble lines
+  #     r.header          # next record supplies the column names
+  #     r.skip 1          # drop a units row
+  #     r.data            # the rest are data rows
   #   end
   #
-  #   CAFrame.from_csv(path) do   # headerless file
-  #     column_names "date", "temp", "rh"
-  #     body
-  #   end
+  #   CAFrame.from_csv(path) { it.column_names "date", "temp", "rh"; it.data }
   #
-  # The verbs are +skip+ / +header+ / +column_names+ / +body+; each returns a
+  # The verbs are +skip+ / +header+ / +column_names+ / +data+; each returns a
   # value useful inline (header returns its fields) and the ordering is the
-  # script. Without a block, from_csv runs the default +header+ then +body+.
+  # script. The reader is a parameter, not self, so a local variable named
+  # +data+ or +header+ cannot stand in for the verb. Without a block,
+  # from_csv reads by its header: / data: / column_names: (see +layout+).
   class CSVReader
     def initialize(io, sep: ",", quote: '"', strip: false)
       @io    = io
@@ -367,7 +367,7 @@ class CAFrame
       self
     end
 
-    # Consume the remaining records as data rows. A second body adds what is
+    # Consume the remaining records as data rows. A second data adds what is
     # left, which is nothing; it does not discard the rows already read.
     #
     # Without names the column count is known only once every row is read,
@@ -381,14 +381,72 @@ class CAFrame
     # UTF-8, a record it does not take, or one longer than the first in a
     # file without names -- the text from there on is read here, which pads
     # the earlier rows or reports what is wrong.
-    def body
-      body_in_c if @rows.nil? && !@tok.strip && @io.respond_to?(:read)
+    def data
+      read_data(nil)
+    end
+
+    # The header: / data: / column_names: of from_csv, as the verbs above.
+    # Lines are the file's, from 1, as an editor and an error number them;
+    # a record that starts within data: is read whole. header: defaults to
+    # line 1, or to none when column_names: is given; data: to the line after
+    # the header. data: is a first line, a Range, or "first:last" (either
+    # end may be left out).
+    def layout(header: nil, data: nil, column_names: nil)
+      header = column_names ? false : 1 if header.nil?
+      first, last = CSVReader.data_lines(data)
+      if header
+        unless header.is_a?(Integer) && header >= 1
+          raise ArgumentError, "from_csv: header: takes a line number from 1, or false " \
+                               "(got #{header.inspect})"
+        end
+        skip(header - 1 - @tok.lineno) if header - 1 > @tok.lineno
+        self.header
+      end
+      column_names(*column_names) if column_names
+      first ||= @tok.lineno + 1
+      if first <= @tok.lineno
+        raise ArgumentError, "from_csv: data: starts on line #{first}, which is not " \
+                             "after the header on line #{header}"
+      end
+      skip(first - 1 - @tok.lineno)
+      read_data(last)
+    end
+
+    # [first, last] lines of a data: setting, nil for an end left open.
+    def self.data_lines(spec)
+      first, last =
+        case spec
+        when nil     then [nil, nil]
+        when Integer then [spec, nil]
+        when Range
+          e = spec.end
+          e -= 1 if e && spec.exclude_end?
+          [spec.begin, e]
+        when /\A(\d*):(\d*)\z/
+          [$1.empty? ? nil : $1.to_i, $2.empty? ? nil : $2.to_i]
+        else
+          raise ArgumentError, "from_csv: data: takes a first line, a Range of lines, " \
+                               "or \"first:last\" (got #{spec.inspect})"
+        end
+      [first, last].each do |n|
+        next if n.nil? || (n.is_a?(Integer) && n >= 1)
+        raise ArgumentError, "from_csv: data: lines are numbered from 1 (got #{spec.inspect})"
+      end
+      if first && last && last < first
+        raise ArgumentError, "from_csv: data: #{spec.inspect} ends before it starts"
+      end
+      [first, last]
+    end
+
+    # The records from here through those starting on +last+ (nil: the end).
+    private def read_data(last)
+      body_in_c(last) if @rows.nil? && !@tok.strip && @io.respond_to?(:read)
       return self if @table
       rows = (@rows ||= [])
       @blank_rows ||= []
       blank_is_row = @names.nil? || @names.size == 1
       ncol = @names&.size
-      while (fields = @tok.read(@io, blank_is_row: blank_is_row))
+      while (fields = @tok.read(@io, blank_is_row: blank_is_row, last_line: last))
         if ncol && fields.size > ncol
           raise @tok.malformed("#{fields.size} fields, but there are #{ncol} columns")
         end
@@ -414,12 +472,16 @@ class CAFrame
     # held whole beside its cells. Without them, the column count and which
     # blank lines are rows are known only at the end, so it goes in whole;
     # so it does when the IO transcodes, since read(length) does not.
-    private def body_in_c(chunk_bytes = CHUNK_BYTES)
-      chunked = @names && @io.respond_to?(:external_encoding) && @io.internal_encoding.nil?
+    private def body_in_c(last = nil, chunk_bytes = CHUNK_BYTES)
+      chunked = last.nil? && @names && @io.respond_to?(:external_encoding) &&
+                @io.internal_encoding.nil?
       ncol = @names ? @names.size : 0
       cells = []
       loop do
-        text = chunked ? next_chunk(chunk_bytes) : (@io.read || "")
+        text = if chunked then next_chunk(chunk_bytes)
+               elsif last then lines_through(last)
+               else @io.read || ""
+               end
         break if text.nil?
         n, flat, records = CArray.__csv_split__(text, @tok.sep, @tok.quote, ncol)
         unless flat
@@ -436,6 +498,19 @@ class CAFrame
       end
       @table = CArray.object(cells.size / ncol, ncol) { cells }
       @rows = []
+    end
+
+    # The lines through +last+, read on past any quoted field still open.
+    private def lines_through(last)
+      buf = +""
+      (last - @tok.lineno).times do
+        line = @io.gets or break
+        buf << line
+      end
+      while buf.count(@tok.quote).odd? && (more = @io.gets)
+        buf << more
+      end
+      buf
     end
 
     # The next chunk_bytes of the input, read on to the end of its line and

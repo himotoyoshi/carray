@@ -177,11 +177,11 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_skip_header_units_body
     with_csv("# note1\n# note2\nstation,temp\nname,degC\nTokyo,28.5\nOsaka,29.8\n") do |path|
-      df = CAFrame.from_csv(path) do
-        skip 2
-        header
-        skip 1
-        body
+      df = CAFrame.from_csv(path) do |r|
+        r.skip 2
+        r.header
+        r.skip 1
+        r.data
       end
       assert_equal ["station", "temp"], df.variable_names
       assert_equal 2, df.nrow
@@ -191,10 +191,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_column_names_headerless
     with_csv("Tokyo,28.5\nOsaka,29.8\n") do |path|
-      df = CAFrame.from_csv(path) do
-        column_names "station", "temp"
-        body
-      end
+      df = CAFrame.from_csv(path) { it.column_names "station", "temp"; it.data }
       assert_equal ["station", "temp"], df.variable_names
       assert_equal ["Tokyo", "Osaka"], df["station"].to_a
     end
@@ -206,7 +203,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
       df = CAFrame.from_csv(path) do |csv|
         csv.header
         units = csv.header(:units)
-        csv.body
+        csv.data
       end
       assert_equal ["station", "temp"], df.variable_names
       assert_equal ["name", "degC"], units
@@ -216,7 +213,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
-      df = CAFrame.from_csv(path) { body }
+      df = CAFrame.from_csv(path) { |r| r.data }
       assert_equal ["c0", "c1", "c2"], df.variable_names
       assert_equal ["1", "4"], df["c0"].to_a
     end
@@ -224,10 +221,10 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_with_types_cast
     with_csv("skip me\nstation,temp\nTokyo,28.5\nOsaka,x\n") do |path|
-      df = CAFrame.from_csv(path, types: { "temp" => :float64 }) do
-        skip 1
-        header
-        body
+      df = CAFrame.from_csv(path, types: { "temp" => :float64 }) do |r|
+        r.skip 1
+        r.header
+        r.data
       end
       assert_equal 28.5, df["temp"][0]
       assert_equal UNDEF, df["temp"][1]
@@ -287,7 +284,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   end
 
   def test_the_reading_control_block_works_over_an_io
-    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { skip 1; body }
+    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { |r| r.skip 1; r.data }
     assert_equal ["c0", "c1"], df.variable_names
     assert_equal [["1", "2"], ["3", "4"]], df.to_ca.to_a
   end

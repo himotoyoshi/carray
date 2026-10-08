@@ -65,12 +65,12 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   end
 
   def test_column_names_rename_a_repeated_header
-    df = read("a,a\n1,2\n") { skip 1; column_names "a", "a2"; body }
+    df = read("a,a\n1,2\n") { |r| r.skip 1; r.column_names "a", "a2"; r.data }
     assert_equal [["1"], ["2"]], df.variables.map(&:to_a)
   end
 
   def test_repeated_column_names_raise
-    assert_raise(ArgumentError) { read("1,2\n") { column_names "x", "x"; body } }
+    assert_raise(ArgumentError) { read("1,2\n") { |r| r.column_names "x", "x"; r.data } }
   end
 
   # A quote inside an unquoted field used to make the reader join the lines
@@ -132,7 +132,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
         assert_equal %q{line 6003: text "e" after the closing quote of field 2 (record 3002)}, err.message
       end
     end
-    err = assert_raise(MALFORMED) { read("# x\n# y\na,b\n1,2\n1,2\"\n") { skip 2; header; body } }
+    err = assert_raise(MALFORMED) { read("# x\n# y\na,b\n1,2\n1,2\"\n") { |r| r.skip 2; r.header; r.data } }
     assert_equal [5, 3], [err.lineno, err.record]
   end
 
@@ -141,7 +141,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   def test_a_record_with_too_many_fields_names_its_line
     err = assert_raise(MALFORMED) { read("a,b\r\n1,2\r\n3,4,5\r\n") }
     assert_equal "line 3: 3 fields, but there are 2 columns", err.message
-    err = assert_raise(MALFORMED) { read("1,2\n\n3,4,5\n") { column_names "a", "b"; body } }
+    err = assert_raise(MALFORMED) { read("1,2\n\n3,4,5\n") { |r| r.column_names "a", "b"; r.data } }
     assert_equal 3, err.lineno
   end
 
@@ -180,7 +180,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   end
 
   def test_a_second_body_keeps_the_rows
-    df = read("a\n1\n2\n") { header; body; body }
+    df = read("a\n1\n2\n") { |r| r.header; r.data; r.data }
     assert_equal ["1", "2"], df["a"].to_a
   end
 
@@ -196,7 +196,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_raise(ArgumentError) { read("a\n", sep: "") }
     assert_raise(ArgumentError) { read("a\n", quote: "''") }
     assert_raise(ArgumentError) { read("a\n", sep: "\"") }
-    assert_raise(ArgumentError) { read("a\n1\n") { skip "x"; body } }
+    assert_raise(ArgumentError) { read("a\n1\n") { |r| r.skip "x"; r.data } }
   end
 
   # A line of only spaces used to be a short row in a file of several
@@ -219,9 +219,9 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # Without a header the column count is known only after the body; blank
   # lines used to be skipped even in a file of one column.
   def test_blank_lines_without_a_header
-    df = read("a\n\nc\n") { body }
+    df = read("a\n\nc\n") { |r| r.data }
     assert_equal ["a", UNDEF, "c"], df["c0"].to_a
-    df = read("a,b\n\nc,d\n  \n") { body }
+    df = read("a,b\n\nc,d\n  \n") { |r| r.data }
     assert_equal [["a", "c"], ["b", "d"]], df.variables.map(&:to_a)
   end
 

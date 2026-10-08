@@ -91,7 +91,7 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
 
   def test_works_with_the_reading_dsl
     text = "# station A\ntime,temp\n1,-999\n"
-    df = CAFrame.from_csv(StringIO.new(text), missing: "-999") { skip 1; header; body }
+    df = CAFrame.from_csv(StringIO.new(text), missing: "-999") { |r| r.skip 1; r.header; r.data }
     assert_equal [UNDEF], df["temp"].to_a
   end
 end

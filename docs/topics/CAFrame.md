@@ -390,20 +390,47 @@ that is not UTF-8 raises `invalid byte sequence in UTF-8`; both errors say to
 pass `encoding:`. Which encoding a file is in cannot be told from its bytes, so
 the message names the option, not a value.
 
-For files with a preamble, a units row, or no header, pass a **reading-control
-block** — `skip(n)` / `header` / `header(name)` / `column_names(...)` / `body`:
+For files with a title, a units row, or no header, say on which **lines** the
+header and the data are. Lines are numbered from 1, as an editor numbers them
+and as a malformed-record error names them:
 
 ```ruby
-CAFrame.from_csv("obs.csv") do
-  skip 2          # drop 2 preamble lines
-  header          # next line is the header
-  skip 1          # drop a units row
-  body            # the rest are data rows
-end
+CAFrame.from_csv("obs.csv")                              # header on line 1, data after it
+CAFrame.from_csv("obs.csv", header: 3)                   # a title above the header
+CAFrame.from_csv("obs.csv", header: 1, data: 4)          # units on lines 2-3
+CAFrame.from_csv("big.csv", data: "2:101")               # lines 2 to 101
+CAFrame.from_csv("big.csv", data: 2..101)                # the same, as a Range
+CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])   # no header line
+CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
 ```
 
-Without a block the default is `header` then `body`. A headerless file gets
-positional names `c0`, `c1`, … unless you supply `column_names`.
+`header:` is the line of the column names (default 1), or `false` for none.
+`data:` is the first line of the data (default the line after the header), a
+Range, or `"first:last"` with either end left out (`"4:"`, `":101"`). A record
+that starts within `data:` is read whole, even when a quoted field carries it
+past the last line. `column_names:` names the columns; given alone, the file
+is taken to have no header line, and given with `header:`, it replaces the
+names on that line.
+
+For anything else, pass a **reading block**. It is given the reader, which
+reads in the order the block says, with `skip(n)` / `header` /
+`header(name)` / `column_names(...)` / `data`:
+
+```ruby
+CAFrame.from_csv("obs.csv") do |r|
+  r.skip 2              # drop 2 preamble lines
+  r.header              # next line is the header
+  units = r.header(:units)   # a second header, read and returned
+  r.data                # the rest are data rows
+end
+
+CAFrame.from_csv("obs.csv") { it.skip 2; it.header; it.data }
+```
+
+The reader comes as the block's parameter rather than as `self`, so a local
+variable that happens to be named `data` or `header` cannot stand in for the
+verb; a block without a parameter raises. A block and `header:` / `data:` /
+`column_names:` cannot be given together.
 
 To swap in a different parser (the stdlib `csv`, or a typed-table source), pass
 `parser:` — a callable `source -> [headers, rows]`, handed whatever you passed

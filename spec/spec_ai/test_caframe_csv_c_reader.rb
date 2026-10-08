@@ -14,7 +14,7 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
   end
 
   def read(text, headerless: false, **opts)
-    df = headerless ? CAFrame.from_csv(StringIO.new(text), **opts) { body } : CAFrame.from_csv(StringIO.new(text), **opts)
+    df = headerless ? CAFrame.from_csv(StringIO.new(text), **opts) { |r| r.data } : CAFrame.from_csv(StringIO.new(text), **opts)
     [:ok, df.variable_names, df.variables.map(&:to_a)]
   rescue StandardError => e
     [:error, e.class, e.message]

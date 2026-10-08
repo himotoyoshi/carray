@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame.from_csv` takes `header:` (the line of the column names, or
+  `false`), `data:` (the first line of the data, a Range, or `"first:last"`)
+  and `column_names:`, with lines numbered from 1 as an editor numbers them:
+  `from_csv("obs.csv", header: 3, data: 5)`, `from_csv("big.csv", data:
+  "2:101")`.
+- Change: the reading block of `CAFrame.from_csv` is given the reader as its
+  parameter, and its `body` verb is now `data`: write `from_csv(path) { |r|
+  r.skip 2; r.header; r.data }`, or `{ it.skip 2; it.header; it.data }`. A
+  block without a parameter raises. It was run with the reader as `self`,
+  where a local variable named after a verb took its place without a word.
 - Change: `CAFrame#to_csv` writes a float32 value as the shortest decimal
   that reads back as the same float32 (`0.1` rather than
   `0.10000000149011612`), and each part of a cmplx64 value likewise.
@@ -80,7 +90,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   record; a field holding a quote is written quoted, with the quote
   doubled. A quoted field of many lines is read in linear time. With
   `strip: true`, spaces before an opening quote are skipped.
-- Fix: in the reading block of `CAFrame.from_csv`, a second `body` keeps the
+- Fix: in the reading block of `CAFrame.from_csv`, a second `data` keeps the
   rows already read; rows from a `parser:` callable are no longer changed.
   An empty `sep:`, a `quote:` that is not one character, and a `skip` that
   is not a number of lines raise `ArgumentError`.

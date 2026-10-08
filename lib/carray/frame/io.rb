@@ -47,13 +47,24 @@ class CAFrame
   #   on_error: what a +types:+ cast does with a cell that does not read
   #             (:mask default, :warn, :raise); see +cast+.
   #
-  # A block gives reading control for files with preamble lines, a units row,
-  # or no header (memo §11.2), using +skip+ / +header+ / +column_names+ /
-  # +body+ (see CSVReader). Without a block the default is +header+ then +body+.
+  # Where the header and the data are is given by line, numbered from 1 as
+  # an editor numbers them (and as an error names them):
+  #   header:   the line of the column names (default 1), or false for none
+  #   data:     the first line of the data (default the line after the
+  #             header), a Range of lines, or "first:last" with either end
+  #             left out; a record that starts in it is read whole
+  #   column_names: the names, for a file with none or to replace them; the
+  #             header then defaults to none
   #
-  #   CAFrame.from_csv("obs.csv") do
-  #     skip 2; header; skip 1; body
-  #   end
+  #   CAFrame.from_csv("obs.csv", header: 3)            # a title above
+  #   CAFrame.from_csv("obs.csv", header: 1, data: 4)   # units on lines 2-3
+  #   CAFrame.from_csv("big.csv", data: "2:101")        # the first 100 lines
+  #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
+  #
+  # A block, given the reader, reads in any other order with +skip+ /
+  # +header+ / +header(name)+ / +column_names+ / +data+ (see CSVReader):
+  #
+  #   CAFrame.from_csv("obs.csv") { |r| r.skip 2; r.header; r.skip 1; r.data }
   #
   # A missing field -- an unquoted empty one, or a cell a short row never
   # reached -- is UNDEF in the frame, whether or not the column is cast by
@@ -79,8 +90,18 @@ class CAFrame
   # array (§3.6 view-by-default); casting a column materializes it, and +copy+
   # gives an independent frame.
   def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
+                    header: nil, data: nil, column_names: nil,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
+    layout = { header: header, data: data, column_names: column_names }.compact
+    if block && !layout.empty?
+      raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
+                           "or a reading block, not both"
+    end
+    if block && block.arity != 1
+      raise ArgumentError, "from_csv: the reading block takes the reader as its " \
+                           "parameter, as in from_csv(path) { |r| r.skip 2; r.header; r.data }"
+    end
     missing = missing_tokens(missing) if missing
     names, rows =
       if parser
@@ -88,14 +109,14 @@ class CAFrame
       elsif source.respond_to?(:gets)
         with_encoding_hint("open the IO in the file's encoding, as in " \
                            "File.open(path, \"r:<file encoding>:UTF-8\")") do
-          read_csv(source, sep: sep, quote: quote, strip: strip, &block)
+          read_csv(source, sep: sep, quote: quote, strip: strip, layout: layout, &block)
         end
       else
         with_encoding_hint("it was opened as #{encoding.inspect}; pass the " \
                            "file's encoding, as in " \
                            "encoding: \"<file encoding>:UTF-8\"") do
           File.open(source, "r:#{encoding}") do |io|
-            read_csv(io, sep: sep, quote: quote, strip: strip, &block)
+            read_csv(io, sep: sep, quote: quote, strip: strip, layout: layout, &block)
           end
         end
       end
@@ -162,15 +183,10 @@ class CAFrame
   # Drive the reading-control DSL over one open IO and hand back
   # [names, rows]. Shared by the path and the IO source, so the two cannot
   # come to read a file differently.
-  def self.read_csv (io, sep:, quote:, strip:, &block)
+  def self.read_csv (io, sep:, quote:, strip:, layout:, &block)
     reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip)
     reader.reporting do
-      if block
-        block.arity == 1 ? block.call(reader) : reader.instance_exec(&block)
-      else
-        reader.header
-        reader.body
-      end
+      block ? block.call(reader) : reader.layout(**layout)
     end
     reader.result
   end
@@ -631,8 +647,8 @@ class CAFrame
     unless dup.empty?
       raise ArgumentError,
             "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
-            "name the columns yourself with a reading block: " \
-            "from_csv(path) { skip 1; column_names(...); body }"
+            "name the columns yourself: from_csv(path, header: false, data: 2, " \
+            "column_names: [...])"
     end
 
     cols = {}
