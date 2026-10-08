@@ -111,6 +111,37 @@ class TestCAFramePivot < Test::Unit::TestCase
     assert_match(/one-dimensional/, err.message)
   end
 
+  def test_pivot_spreads_several_value_columns
+    @long["rh"] = CA_FLOAT64([50, 40, 41, 51, 60])
+    wide = @long.pivot(index: "time", columns: "station", values: ["temp", "rh"])
+    assert_equal %w[temp_osaka temp_tokyo rh_osaka rh_tokyo], wide.variable_names
+    assert_equal [10.0, 20.0, 30.0], wide["temp_tokyo"].to_a
+    assert_equal [41.0, 51.0, UNDEF], wide["rh_osaka"].to_a
+  end
+
+  def test_pivot_names_a_single_value_in_an_array
+    wide = @long.pivot(index: "time", columns: "station", values: ["temp"])
+    assert_equal %w[temp_osaka temp_tokyo], wide.variable_names
+  end
+
+  def test_pivot_aggregates_each_value_column
+    @long["rh"] = CA_FLOAT64([50, 40, 41, 51, 60])
+    @long["time"][4] = 2
+    wide = @long.pivot(index: "time", columns: "station", values: ["temp", "rh"],
+                       aggregate: :max)
+    assert_equal [10.0, 30.0], wide["temp_tokyo"].to_a
+    assert_equal [40.0, 60.0], wide["rh_tokyo"].to_a
+  end
+
+  def test_pivot_raises_when_value_columns_collide_as_names
+    long = CAFrame.new("t" => CA_INT32([0, 0]), "k" => CA_OBJECT(["b_c", "c"]),
+                       "a" => CA_FLOAT64([1, 2]), "a_b" => CA_FLOAT64([3, 4]))
+    err = assert_raise(ArgumentError) do
+      long.pivot(index: "t", columns: "k", values: ["a", "a_b"])
+    end
+    assert_match(/a_b_c/, err.message)
+  end
+
   def test_pivot_names_columns_by_label_to_s
     long = CAFrame.new("t" => CA_INT32([0, 0, 1]), "id" => CA_INT32([7, 9, 7]),
                        "v" => CA_FLOAT64([1, 2, 3]))
@@ -154,6 +185,61 @@ class TestCAFramePivot < Test::Unit::TestCase
     wide = @long.pivot(index: "time", columns: "station", values: "temp")
     wide["tokyo"][0] = -1.0
     assert_equal 10.0, @long["temp"][1]
+  end
+end
+
+class TestCAFramePivotGrid < Test::Unit::TestCase
+  def setup
+    @long = CAFrame.new(
+      "time"    => CA_INT32([2, 1, 1, 2, 3]),
+      "station" => CA_OBJECT(["tokyo", "tokyo", "osaka", "osaka", "tokyo"]),
+      "temp"    => CA_FLOAT64([20.0, 10.0, 11.0, 21.0, 30.0]),
+    )
+  end
+
+  def test_pivot_grid_returns_the_cells_and_their_labels
+    grid, rows, cols = @long.pivot_grid(index: "time", columns: "station", values: "temp")
+    assert_equal [3, 2], grid.shape
+    assert_equal [1, 2, 3], rows.to_a
+    assert_equal ["osaka", "tokyo"], cols.to_a
+    assert_equal [[11.0, 10.0], [21.0, 20.0], [UNDEF, 30.0]], grid.to_a
+  end
+
+  def test_pivot_grid_matches_pivot
+    grid, = @long.pivot_grid(index: "time", columns: "station", values: "temp")
+    wide = @long.pivot(index: "time", columns: "station", values: "temp")
+    assert_equal wide["osaka"].to_a, grid[nil, 0].to_a
+    assert_equal wide["tokyo"].to_a, grid[nil, 1].to_a
+  end
+
+  def test_pivot_grid_reduces_along_an_axis
+    grid, = @long.pivot_grid(index: "time", columns: "station", values: "temp")
+    assert_equal [16.0, 20.0], grid.mean(axis: 0).to_a
+  end
+
+  def test_pivot_grid_aggregates
+    @long["time"][4] = 2
+    grid, rows, = @long.pivot_grid(index: "time", columns: "station", values: "temp",
+                                   aggregate: :sum)
+    assert_equal [1, 2], rows.to_a
+    assert_equal [[11.0, 10.0], [21.0, 50.0]], grid.to_a
+  end
+
+  def test_pivot_grid_keeps_trailing_dimensions
+    long = CAFrame.new("t" => CA_INT32([0, 1, 0]), "k" => CA_OBJECT(["a", "a", "b"]),
+                       "w" => CA_FLOAT64([[1, 2], [3, 4], [5, 6]]))
+    grid, = long.pivot_grid(index: "t", columns: "k", values: "w")
+    assert_equal [2, 2, 2], grid.shape
+    assert_equal [5.0, 6.0], grid[0, 1, nil].to_a
+    assert_equal [true, true], grid[1, 1, nil].is_masked.to_a
+  end
+
+  def test_pivot_grid_keeps_a_face
+    t = CArray.time(["2024-01-02", "2024-01-01", "2024-01-03"], unit: :D)
+    long = CAFrame.new("k" => CA_INT32([0, 1, 1]), "s" => CA_OBJECT(["a", "a", "b"]), "t" => t)
+    grid, = long.pivot_grid(index: "k", columns: "s", values: "t")
+    assert_kind_of CATime, grid
+    assert_equal "2024-01-03", grid[1, 1].to_s
   end
 end
 
