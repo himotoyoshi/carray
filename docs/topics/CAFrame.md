@@ -206,14 +206,15 @@ IO is already open (there the IO's own encoding governs, and a BOM is the
 caller's).
 
 The header row supplies column names (Strings). Every column is
-read **raw as an object column of the cell strings** unless you ask for types.
+read **raw as a `CAString` of the cell strings** unless you ask for types.
 Pass `types:` to cast named columns on the way in, `types: :infer` to cast the
 columns that read as numbers, or call [`cast`](#8-column-verbs) later. Cells
 that fail to parse become `UNDEF` automatically (**parse-mask**):
 
 ```ruby
 df = CAFrame.from_csv("obs.csv")
-df["temp"].data_type      # => :object   (raw strings)
+df["temp"].class          # => CAString   (raw strings)
+df["temp"].data_type      # => :object
 
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64, "rh" => :int32 })
 df["temp"].data_type      # => :float64
@@ -226,6 +227,37 @@ CAFrame.from_csv("obs.csv", types: { "rh" => :int32 }, on_error: :warn)
 Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 (`:mask` / `:warn` / `:raise`) works as it does for
 [`cast`](#8-column-verbs).
+
+**Cleaning text.** Because a text column is a `CAString`, the string operations
+are on the column itself, and the in-place ones write to the frame — there is
+no need to take the cells out to a Ruby Array and put them back:
+
+```ruby
+df["station"].strip!                         # trim every cell, in place
+df["code"].gsub!("-", "")
+df["num"] = df["code"].extract(/(\d+)/, '\1') # a new text column
+df.cast("num", :int32)                       # then read it as numbers
+```
+
+`extract` masks a cell its pattern does not match, so the cell stays `UNDEF`
+through the `cast` instead of turning into 0; a match of the empty string is
+`""`. To make several columns of one, use `split_column`, which puts the new
+columns in the old one's place and returns a new frame:
+
+```ruby
+df = df.split_column("code", "-", into: ["kind", "num"])   # "A-12" -> "A", "12"
+```
+
+A cell is split into at most as many pieces as there are names, so with more
+separators the rest stays in the last column (`"B-7-x"` gives `"B"`, `"7-x"`),
+and with fewer the columns it does not reach are `UNDEF`; a masked cell is
+`UNDEF` in all of them. `sep` is a String or a Regexp as `String#split` takes
+it (write a group as `(?:...)`, since a capturing group adds pieces).
+
+All the columns of a file are views over one object array, so the `CAString`
+of each column holds no copy of its own. `to_const_string` packs a column of
+read-only text into one buffer, which is lighter for a large column that is no
+longer edited.
 
 `types: :infer` casts a column to `:int64` when every cell that is not missing
 is an integer that fits, to `:float64` when every such cell is a number, to
@@ -1647,6 +1679,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df.filter(keep_masked: true) { }` | a **materialized** frame — columns and index both independent; the carried-forward UNDEF has to be written into the result, which a view cannot do (§6) |
 | `df.copy` | an **independent** frame — every column materialized |
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
+| `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
 | `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
 | `df.cast(...)` | **self** — rebinds a fresh column of the new type; does not write through to frames sharing the old column |

@@ -153,13 +153,14 @@ class CArray
 
     # @overload extract(regexp, replace = '\0')
     #   Returns a CArray whose cells are each cell's first match of `regexp`
-    #   transformed by `String#sub(regexp, replace)`; non-matching cells
-    #   become `""`.
+    #   transformed by `String#sub(regexp, replace)`. A cell that does not
+    #   match is masked (`UNDEF`), so it stays apart from a match of the empty
+    #   string, and a later `cast` to a number does not read it as 0.
     #   @param regexp [Regexp]
     #   @param replace [String]
     #   @return [CAString]
     def extract (regexp, replace = '\0')
-      string_map { |s| regexp.match(s) { |m| m[0].sub(regexp, replace) } || "" }
+      string_map { |s| regexp.match(s) { |m| m[0].sub(regexp, replace) } || UNDEF }
     end
 
     # --- inter-Face conversions (String Faces only) ----------------------

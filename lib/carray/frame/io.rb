@@ -4,8 +4,8 @@ require "carray/frame/csv_parser"
 
 class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
-  # §3.7); every column is built raw as an object CArray of the cell strings
-  # (§4.2). Casting is a separate step: pass +types:+ ({ "temp" => :float64 },
+  # §3.7); every column is built raw as a CAString of the cell strings, all
+  # over one object array (§4.2). Casting is a separate step: pass +types:+ ({ "temp" => :float64 },
   # or the array-key form of +cast+) to cast named columns on load,
   # +types: :infer+ to cast the columns +infer_types+ finds to be numbers or
   # times, or call +cast+ later. Broken cells become UNDEF automatically
@@ -549,7 +549,7 @@ class CAFrame
 
     cols = {}
     if rows.empty?
-      names.each { |name| cols[name] = CArray.object(0) }
+      names.each { |name| cols[name] = CArray.string(CArray.object(0)) }
       return new(cols)
     end
     # Short rows are padded on copies: the rows may be a parser: callable's
@@ -569,7 +569,10 @@ class CAFrame
     # to carry nil where the same column read with one carried UNDEF, and
     # the mask a to_csv had written did not survive the trip back.
     table[:eq, nil] = UNDEF
-    names.each_with_index { |name, j| cols[name] = table[nil, j] }
+    # Each column is a CAString over its view of the table: the text, with
+    # the string operations (strip!, gsub, extract, ...) at hand, writing
+    # through to the same cells.
+    names.each_with_index { |name, j| cols[name] = CArray.string(table[nil, j]) }
     new(cols)
   end
   private_class_method :build_frame
