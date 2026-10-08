@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame.from_csv(types: :infer)` (and `from_records`) casts each
+  text column whose cells all read as numbers to `:int64` or `:float64`,
+  ignoring missing cells; `CAFrame#infer_types` returns that decision as a
+  map for `cast`. A column with a leading-zero code (`"007"`) or an integer
+  too long for `:int64` stays text. Without `:infer` nothing is inferred.
+
 - New: `CAFrame#to_csv` takes `encoding:` and transcodes the text before
   writing or returning it, as in `df.to_csv("out.csv", encoding: "CP932")`
   for Excel in Japanese. Left out, the CSV is UTF-8 as before. A character

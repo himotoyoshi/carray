@@ -113,6 +113,26 @@ class CAFrame
   CAST_ON_ERROR = %i[mask warn raise].freeze
   private_constant :CAST_ON_ERROR
 
+  # The number types the text columns read as, as a map +cast+ takes:
+  # { "temp" => :float64, "count" => :int64 }. A column is listed only when
+  # every cell that is not missing reads as a number: :int64 when they are
+  # all integers that fit, :float64 otherwise. Blank, nil and masked cells
+  # are missing and say nothing; a column with none present is not listed.
+  #
+  # A number with a leading zero ("007") is a code and keeps its column as
+  # text, and so does an integer too long for int64 (an identifier), which
+  # a float would round. Columns that already have a type are not listed.
+  #
+  #   df.cast(df.infer_types)                            # what types: :infer does
+  #   df.cast(df.infer_types.merge("code" => :int32))    # with one column set by hand
+  def infer_types
+    @columns.each_with_object({}) do |(key, col), types|
+      next unless col.data_type == CA_OBJECT && !col.face?
+      type = col.__infer_decimal__
+      types[key] = type if type
+    end
+  end
+
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
   # named columns to a type, +promote+ widens the whole table until it has a

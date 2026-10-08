@@ -206,10 +206,10 @@ IO is already open (there the IO's own encoding governs, and a BOM is the
 caller's).
 
 The header row supplies column names (Strings). Every column is
-read **raw as an object column of the cell strings** — CAFrame does not guess
-types. Casting is a separate, explicit step: pass `types:` to cast named
-columns on the way in, or call [`cast`](#8-column-verbs) later. Cells that fail
-to parse become `UNDEF` automatically (**parse-mask**):
+read **raw as an object column of the cell strings** unless you ask for types.
+Pass `types:` to cast named columns on the way in, `types: :infer` to cast the
+columns that read as numbers, or call [`cast`](#8-column-verbs) later. Cells
+that fail to parse become `UNDEF` automatically (**parse-mask**):
 
 ```ruby
 df = CAFrame.from_csv("obs.csv")
@@ -226,6 +226,19 @@ CAFrame.from_csv("obs.csv", types: { "rh" => :int32 }, on_error: :warn)
 Number types are read as decimal numbers (`"010"` is ten), and `on_error:`
 (`:mask` / `:warn` / `:raise`) works as it does for
 [`cast`](#8-column-verbs).
+
+`types: :infer` casts a column to `:int64` when every cell that is not missing
+is an integer that fits, to `:float64` when every such cell is a number, and
+leaves it as text otherwise. A number with a leading zero (`"007"`) is a code
+and keeps its column as text, and so does an integer too long for `:int64`
+(an identifier), which a float would round. `df.infer_types` returns the same
+decision as a map, so it can be checked, written into the code, or adjusted:
+
+```ruby
+df = CAFrame.from_csv("obs.csv")
+df.infer_types                    # => { "temp" => :float64, "count" => :int64 }
+df.cast(df.infer_types.merge("count" => :int32))
+```
 
 Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
 records are split directly, and only quote-bearing records go through the field
