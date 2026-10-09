@@ -588,6 +588,36 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     end
   end
 
+  # A read-only Face column (categorical, CAConstString) takes the mask the
+  # other columns take, and keeps its Face; so do the other Faces.
+  def test_keep_masked_with_face_columns
+    df = CAFrame.new(
+      "c" => CA_OBJECT(%w[b a c a]).categorize,
+      "s" => CArray.const_string(%w[w x y z]),
+      "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04], unit: :D),
+      "v" => CA_FLOAT64([1, 2, 3, 4]),
+    )
+    sel = df["v"] > 1.5
+    sel[2] = UNDEF
+    sub = df.filter(keep_masked: true) { sel }
+    assert_kind_of CACategorical, sub["c"]
+    assert_kind_of CAConstString, sub["s"]
+    assert_kind_of CATime, sub["t"]
+    assert_equal ["a", UNDEF, "a"], sub["c"].to_a
+    assert_equal ["x", UNDEF, "z"], sub["s"].to_a
+    assert_equal ["2024-01-02", UNDEF, "2024-01-04"], sub["t"].to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
+    assert_equal ["a", "c", "a"], df["c"].to_a.values_at(1, 2, 3)
+  end
+
+  def test_keep_masked_with_an_nd_column
+    df = CAFrame.new("m" => CA_INT32([[1, 2], [3, 4], [5, 6]]), "v" => CA_FLOAT64([1, 2, 3]))
+    sel = df["v"] > 0
+    sel[1] = UNDEF
+    sub = df.filter(keep_masked: true) { sel }
+    assert_equal [[false, false], [true, true], [false, false]], sub["m"].is_masked.to_a
+    assert_equal [false, false, false, false, false, false], df["m"].is_masked.flatten.to_a
+  end
+
   def test_keep_masked_without_masked_selector_equals_drop
     df = CAFrame.new("a" => CA_INT32([10, 20, 30, 40]))
     drop = df.filter { |f| f["a"] > 15 }

@@ -714,11 +714,20 @@ class CAFrame
     keep       = selector.strip_mask(1)   # true where selected OR undetermined
     undet_kept = selector.is_masked[keep] # among kept rows, which were undetermined
     cols = {}
+    any_undet = undet_kept.any
     @columns.each do |name, col|
       tail = [nil] * (col.ndim - 1)
-      g = col[keep, *tail].copy
-      g[undet_kept, *tail] = UNDEF
-      cols[name] = g
+      g = col[keep, *tail]
+      if any_undet
+        # mask_where copies and masks in one step, so a read-only Face
+        # (categorical, CAConstString) takes the mask as any column does.
+        cells = CArray.boolean(*g.shape)
+        cells[] = false
+        cells[undet_kept, *tail] = true
+        cols[name] = g.mask_where(cells)
+      else
+        cols[name] = g.copy
+      end
     end
     # The index is copied along with the columns. Its values are carried over
     # unmasked (an undetermined row keeps its label, as mask_rows leaves the

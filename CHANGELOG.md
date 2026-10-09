@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame#filter(keep_masked: true)` raised "can not modify
+  read-only array" when the frame had a categorical or `CAConstString`
+  column and a row's membership was undetermined. Those columns now carry
+  the row as masked, keeping their class, as the other columns do.
+
 - Fix: `linear_section` on a one-point axis put every value at position 0.
   A value equal to the point is at 0, and any other value is now out of
   range (NaN, or `nil` for a single value), as a value outside a longer
