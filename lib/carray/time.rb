@@ -93,6 +93,19 @@ module CATimeUnitAlgebra
 
   module_function
 
+  # An operand of a time or duration operator, taken through its to_ca when
+  # it exports MemoryView and defines one (an Apache Arrow duration array, given
+  # a bridge that adds to_ca), as the core binary operators take it; other
+  # objects are returned as they are, for the operator to accept or refuse.
+  def operand(other)
+    if !other.is_a?(CArray) && other.respond_to?(:to_ca) &&
+       CArray.memory_view_available?(other)
+      other.to_ca
+    else
+      other
+    end
+  end
+
   # seconds- (fixed) or months- (calendar) per base tick.
   def base_ratio(base)
     FIXED[base] || CALENDAR[base]
@@ -816,16 +829,19 @@ class CATime
   #   cross-group calendar duration raises).  Adding two datetimes is
   #   ill-defined.
   #   @param other [CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATime]
   #   @raise [TypeError] on a non-timedelta operand.
   def +(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       (parent + CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
-      raise TypeError, "CATime + #{other.class} is not allowed (use CATimedelta)"
+      raise TypeError, "CATime + #{given.class} is not allowed (use CATimedelta)"
     end
   end
 
@@ -835,9 +851,12 @@ class CATime
   #   another {CATime} yields a {CATimedelta} at the finer of the two
   #   units (cross-group falls to the fixed unit).
   #   @param other [CATimedelta, CATime]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration or timestamp array)
   #   @return [CATime, CATimedelta]
   #   @raise [TypeError] on an unsupported operand.
   def -(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       (parent - CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
@@ -847,7 +866,7 @@ class CATime
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
       (a - b).timedelta(unit: u)
     else
-      raise TypeError, "CATime - #{other.class} is not allowed"
+      raise TypeError, "CATime - #{given.class} is not allowed"
     end
   end
 
@@ -1375,9 +1394,12 @@ class CATimedelta
   #   {CATimedelta}; a {CATime} operand delegates to
   #   {CATime#+} (commutative).
   #   @param other [CATimedelta, CATime]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration or timestamp array)
   #   @return [CATimedelta, CATime]
   #   @raise [TypeError] on incompatible operands.
   def +(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
@@ -1387,7 +1409,7 @@ class CATimedelta
     when CATime
       other + self  # commutative -> time's unit
     else
-      raise TypeError, "CATimedelta + #{other.class} is not allowed"
+      raise TypeError, "CATimedelta + #{given.class} is not allowed"
     end
   end
 
@@ -1395,9 +1417,12 @@ class CATimedelta
   #   Returns the difference of two {CATimedelta} at the finer of the two
   #   units (a cross-group pair raises).
   #   @param other [CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATimedelta]
   #   @raise [TypeError] on a non-timedelta operand.
   def -(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
@@ -1405,7 +1430,7 @@ class CATimedelta
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       (a - b).timedelta(unit: u)
     else
-      raise TypeError, "CATimedelta - #{other.class} is not allowed"
+      raise TypeError, "CATimedelta - #{given.class} is not allowed"
     end
   end
 
@@ -1441,9 +1466,12 @@ class CATimedelta
   #   {CATimedelta}, by another {CATimedelta} with matching `unit`
   #   yields a dimensionless CArray.
   #   @param other [Integer, CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATimedelta, CArray]
   #   @raise [TypeError] on incompatible operands.
   def /(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when Integer
       CATimeUnitAlgebra.trunc_divide(parent, other).timedelta(unit: unit)
@@ -1452,7 +1480,7 @@ class CATimedelta
       CATimeUnitAlgebra.trunc_divide(
         CATimeUnitAlgebra.convert_scale!(parent, unit, u),
         CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u))
-    else raise TypeError, "CATimedelta / #{other.class} is not allowed"
+    else raise TypeError, "CATimedelta / #{given.class} is not allowed"
     end
   end
 

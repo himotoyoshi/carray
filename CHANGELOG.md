@@ -699,7 +699,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   taken through `to_ca`, as `wrap_readonly` already did. Arrow nulls come
   in as masked cells, a sliced Arrow array reads correctly, and an Arrow
   time column arrives as a `CATime` (to add raw counts, pass
-  `arrow.to_ca.ticks`).
+  `arrow.to_ca.ticks`). The operators of `CATime` and `CATimedelta` take
+  such an operand the same way, so a duration or timestamp column from
+  Arrow can be added to or subtracted from them directly.
 
 - Change: `CArray.save` / `CArray.dump` and `Marshal.dump` refuse a Face
   other than a record (`CATime`, `CATimedelta`, string arrays,

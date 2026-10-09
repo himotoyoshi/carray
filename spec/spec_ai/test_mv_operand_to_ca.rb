@@ -71,4 +71,32 @@ class TestMVOperandToCa < Test::Unit::TestCase
     assert_raise(TypeError) { CArray.int32(3) + (0..2) }
   end
 
+  # The operators of CATime and CATimedelta take their operand the same way:
+  # a producer whose to_ca gives a CATimedelta (an Arrow duration array) is
+  # a duration.
+  def duration_producer
+    prod = MVBorrower::Producer.new([5, 7].pack("q*"), "q", 8)
+    prod.define_singleton_method(:to_ca) { CATimedelta.wrap(CArray.int64(2) { |i| [5, 7][i] }, unit: :ms) }
+    prod
+  end
+
+  def test_timedelta_operators_take_the_operand_through_to_ca
+    td = CATimedelta.wrap(CArray.int64(2) { 10 }, unit: :ms)
+    assert_equal([15, 17], (td + duration_producer).ticks.to_a)
+    assert_equal([5, 3], (td - duration_producer).ticks.to_a)
+    assert_equal([2, 1], (td / duration_producer).to_a)
+  end
+
+  def test_time_operators_take_the_operand_through_to_ca
+    t = CATime.wrap(CArray.int64(2) { 1_000 }, unit: :ms)
+    assert_equal([1_005, 1_007], (t + duration_producer).ticks.to_a)
+    assert_equal([995, 993], (t - duration_producer).ticks.to_a)
+  end
+
+  def test_time_operator_names_the_operand_it_was_given
+    t = CATime.wrap(CArray.int64(2) { 1_000 }, unit: :ms)
+    error = assert_raise(TypeError) { t + producer(nulls: [0]) }
+    assert_match(/MVBorrower::Producer/, error.message)
+  end
+
 end
