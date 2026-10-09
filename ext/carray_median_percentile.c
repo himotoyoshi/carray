@@ -142,7 +142,12 @@ static VALUE
 mp_axis_all_masked (VALUE self, long axis, int keep_axis)
 {
   int8_t ax = (int8_t) axis;
-  VALUE out = rb_ca_new_reduced(self, &ax, 1, CA_FLOAT64, keep_axis);
+  CArray *ca;
+  GetCArray(self, ca);
+  VALUE out = rb_ca_new_reduced(self, &ax, 1,
+                                (ca->data_type == CA_OBJECT) ? CA_OBJECT
+                                                             : CA_FLOAT64,
+                                keep_axis);
   CArray *co;
   GetCArray(out, co);
   ca_create_mask(co);
@@ -353,13 +358,62 @@ mp_object_interpolates (VALUE v)
   }
   if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
     CArray *ca;
+    ca_size_t i;
     GetCArray(v, ca);
-    if ( ca->elements == 0 ) {
-      return 1;
+    for ( i = 0; i < ca->elements; i++ ) {
+      VALUE e = rb_ca_fetch_addr(v, i);
+      if ( e != CA_UNDEF && ! rb_obj_is_kind_of(e, rb_cNumeric) ) {
+        return 0;
+      }
     }
-    return rb_obj_is_kind_of(rb_ca_fetch_addr(v, 0), rb_cNumeric) ? 1 : 0;
+    return 1;
   }
   return 0;
+}
+
+/* [object] The element an interpolation refusal names: lo itself, or the
+   first element of a CArray of them that has no arithmetic. */
+static VALUE
+mp_first_non_numeric (VALUE v)
+{
+  if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
+    CArray *ca;
+    ca_size_t i;
+    GetCArray(v, ca);
+    for ( i = 0; i < ca->elements; i++ ) {
+      VALUE e = rb_ca_fetch_addr(v, i);
+      if ( e != CA_UNDEF && ! rb_obj_is_kind_of(e, rb_cNumeric) ) {
+        return e;
+      }
+    }
+  }
+  return v;
+}
+
+/* [object] The order statistic reports a number as a Float, as the
+   numeric lanes do; an element with no arithmetic (a String, a Symbol, a
+   Date) is reported as itself, since picking it needs none.  A CArray of
+   them (the per-axis path) is promoted cell by cell. */
+static VALUE
+obj_promote (VALUE v)
+{
+  if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
+    CArray *ca;
+    ca_size_t i;
+    VALUE out = rb_ca_copy(v);
+    GetCArray(out, ca);
+    for ( i = 0; i < ca->elements; i++ ) {
+      VALUE e = rb_ca_fetch_addr(out, i);
+      if ( e != CA_UNDEF && rb_obj_is_kind_of(e, rb_cNumeric) ) {
+        rb_ca_store_addr(out, i, rb_funcall(e, id_mul, 1, DBL2NUM(1.0)));
+      }
+    }
+    return out;
+  }
+  if ( rb_obj_is_kind_of(v, rb_cNumeric) ) {
+    return rb_funcall(v, id_mul, 1, DBL2NUM(1.0));
+  }
+  return v;
 }
 
 /* [object] Refuse to interpolate between two elements that have no
@@ -375,12 +429,10 @@ mp_require_interpolable (const char *who, VALUE method, VALUE lo)
     return;
   }
   rb_raise(rb_eCADataTypeError,
-           "%s: method: :%s interpolates between two elements, which %s "
-           "does not support; use method: :lower, :higher or :nearest to "
-           "pick an element instead",
-           who, rb_id2name(SYM2ID(method)),
-           rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
-                            ? rb_ca_fetch_addr(lo, 0) : lo));
+           "%s: method: :%"PRIsVALUE" interpolates between two elements, "
+           "which %"PRIsVALUE" does not support; use method: :lower, :higher "
+           "or :nearest to pick an element instead",
+           who, rb_sym2str(method), rb_obj_class(mp_first_non_numeric(lo)));
 }
 
 /* [object] recv.mid(axis: raxis) -- e.g. min/max/sort along an axis. */
@@ -472,15 +524,14 @@ median_object_axis (VALUE self, long axis, long n, int keep_axis)
     if ( ! mp_object_interpolates(lo) ) {
       rb_raise(rb_eCADataTypeError,
                "median: an even number of elements has no middle one, and "
-               "%s cannot be averaged; use percentile(50, method: :lower) "
-               "(or :higher / :nearest) to pick an element instead",
-               rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
-                                ? rb_ca_fetch_addr(lo, 0) : lo));
+               "%"PRIsVALUE" cannot be averaged; use percentile(50, method: "
+               ":lower) (or :higher / :nearest) to pick an element instead",
+               rb_obj_class(mp_first_non_numeric(lo)));
     }
     result = rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
   } else {
     VALUE kv = obj_kth_one(self, axis, (n - 1) / 2);
-    result = rb_funcall(kv, id_mul, 1, DBL2NUM(1.0));   /* force float promote */
+    result = obj_promote(kv);   /* force float promote */
   }
   if ( keep_axis ) {
     VALUE ia[1] = { LONG2NUM(axis) };
@@ -522,29 +573,29 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
    pre-fetched).  Reached ONLY by CA_OBJECT percentile/quantile -- never
    by numeric (that path uses pct_compute) and never by median.
    The :linear / :midpoint interpolation funcalls are irreducible for
-   arbitrary objects; the *1.0 in the pick methods is float-promotion to
-   match the numeric "always Float" output contract. */
+   arbitrary objects; the pick methods report a number as a Float
+   (obj_promote) and any other element as itself. */
 static VALUE
 pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
 {
-  if ( method == sym_lower )  return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+  if ( method == sym_lower )  return obj_promote(lo);
   if ( method == sym_higher ) {
     VALUE v = (r == 0.0) ? lo : hi;
-    return rb_funcall(v, id_mul, 1, DBL2NUM(1.0));
+    return obj_promote(v);
   }
   if ( method == sym_nearest ) {
     int use_k = (r < 0.5) || (r == 0.5 && (k % 2 == 0));
-    return rb_funcall(use_k ? lo : hi, id_mul, 1, DBL2NUM(1.0));
+    return obj_promote(use_k ? lo : hi);
   }
   if ( method == sym_linear ) {
-    if ( r == 0.0 || k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    if ( r == 0.0 || k + 1 >= n ) return obj_promote(lo);
     mp_require_interpolable("percentile", method, lo);
     VALUE a = rb_funcall(lo, id_mul, 1, DBL2NUM(1.0 - r));
     VALUE b = rb_funcall(hi, id_mul, 1, DBL2NUM(r));
     return rb_funcall(a, id_plus, 1, b);
   }
   if ( method == sym_midpoint ) {
-    if ( k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    if ( k + 1 >= n ) return obj_promote(lo);
     mp_require_interpolable("percentile", method, lo);
     return rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
   }
@@ -556,7 +607,7 @@ static VALUE
 pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
 {
   if ( n == 1 )
-    return rb_funcall(obj_slice(self, axis, 0), id_mul, 1, DBL2NUM(1.0));
+    return obj_promote(obj_slice(self, axis, 0));
   double f = (n - 1) * p / 100.0;
   long k = (long) floor(f);
   double r = f - k;
@@ -572,9 +623,9 @@ static VALUE
 pct_object_one_sorted (VALUE sorted, long axis, long n, double p, VALUE method)
 {
   if ( p == 100.0 )
-    return rb_funcall(obj_slice(sorted, axis, n - 1), id_mul, 1, DBL2NUM(1.0));
+    return obj_promote(obj_slice(sorted, axis, n - 1));
   if ( n == 1 )
-    return rb_funcall(obj_slice(sorted, axis, 0), id_mul, 1, DBL2NUM(1.0));
+    return obj_promote(obj_slice(sorted, axis, 0));
   double f = (n - 1) * p / 100.0;
   long k = (long) floor(f);
   double r = f - k;

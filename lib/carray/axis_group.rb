@@ -778,7 +778,8 @@ class CAGroupIterator
       return nout == 1 ? res.reshape(*kdims) : res.map { |r| r.reshape(*kdims) }
     end
     out_shape = spec.slot_meta.map { |m| m[:kind] == :group ? m[:k] : m[:len] }
-    outs = Array.new(nout) { CArray.float64(*out_shape) }
+    out_type = value.object? ? CA_OBJECT : CA_FLOAT64   # as the flat path answers
+    outs = Array.new(nout) { CArray.new(out_type, out_shape) }
     each_band_block(ccat, gslots, bslots, gaxes) do |_vi, out_idx, _co, gi|
       result = gi.public_send(op, *args)
       if nout == 1

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: on an object array, `median` of an odd count and
+  `percentile(method: :lower / :higher / :nearest)` raised for elements
+  without `*` (Symbol, Date, ...), though they only pick an element;
+  `percentile(axis:)` interpolated a fiber of Strings to `""` when the
+  first fiber held numbers; and an empty axis or a banded `axis_group`
+  answered float64 where every other path answers an object array.
+
 - Fix: a reduction on an `axis_group` iterator dropped every keyword
   except `axis:`. A group reduction (`axis: :group`) now takes
   `min_count:` and `fill_value:` as a core reduction does and refuses any
