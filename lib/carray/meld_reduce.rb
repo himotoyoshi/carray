@@ -210,6 +210,9 @@ class CAMeld
 
   def variance_family(args, kw, sample:, sqrt:)
     return yield unless args.empty? && meld_reduce_fast_path_ok?(kw)
+    # The merge works in Float; an object array's variance stays exact
+    # (Rational, BigDecimal) on the core path.
+    return yield if object?
     axis = kw[:axis]
     # Empty-parent / short-parent handling — Welford needs n >= 2 per parent
     # to recover m2 from p.variance for sample, n >= 1 for variancep (n=1

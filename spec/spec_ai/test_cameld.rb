@@ -790,4 +790,13 @@ class TestCAMeld < Test::Unit::TestCase
       assert_equal 1, c.count_masked, "case #{n}: write"
     end
   end
+  def test_variance_of_an_object_meld_is_the_core_answer
+    a = CA_OBJECT([Rational(1, 3), Rational(1, 2)])
+    b = CA_OBJECT([Rational(2, 3), 1, Rational(5, 4)])
+    m = CArray.meld(a, b)
+    [:variance, :variancep, :stddev, :stddevp].each do |op|
+      assert_equal m.copy.send(op), m.send(op), op.to_s
+    end
+    assert_kind_of Rational, m.variance
+  end
 end

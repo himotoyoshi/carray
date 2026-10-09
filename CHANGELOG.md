@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: the variance family on a `CArray.meld` of object arrays answered a
+  Float where the copy answers an exact Rational or BigDecimal; it now
+  gives the copy's answer.
+
 - Fix: on an object array, `median` of an odd count and
   `percentile(method: :lower / :higher / :nearest)` raised for elements
   without `*` (Symbol, Date, ...), though they only pick an element;
