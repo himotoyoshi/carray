@@ -1092,7 +1092,7 @@ rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
 {
   VALUE list, kwargs;
   long n, i;
-  int  all_face = 1;
+  int  all_face = 1, any_face = 0;
   VALUE face_class = Qnil;
   CArray *ref_face = NULL;
   VALUE obj;
@@ -1109,13 +1109,24 @@ rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
     CArray *ca;
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( !ca_is_face(ca) ) { all_face = 0; break; }
-    if ( i == 0 ) {
+    if ( ca_is_face(ca) ) any_face = 1;
+    if ( !ca_is_face(ca) ) { all_face = 0; continue; }
+    if ( face_class == Qnil ) {
       face_class = rb_obj_class(p);
       ref_face   = ca;
     } else if ( rb_obj_class(p) != face_class ) {
-      all_face = 0; break;
+      all_face = 0;
     }
+  }
+
+  /* The setup strips a Face parent to its storage, so a list that is not
+     one Face class throughout would come back as raw storage presented as
+     data (CATime ticks, CAConstString (start,end) pairs). */
+  if ( any_face && !all_face ) {
+    rb_raise(rb_eArgError,
+             "CAMeld.new: cannot mix Face and non-Face (or heterogeneous "
+             "Face classes); pass a homogeneous Face list, or strip Face "
+             "manually with .parent for the storage-level layout");
   }
 
   /* A single parent shares its state with nobody, so only two or more are
@@ -1133,7 +1144,7 @@ rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
   obj = rb_obj_alloc(klass);
   rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
 
-  if ( !all_face ) return obj;
+  if ( !any_face ) return obj;
 
   for ( i = 1; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);

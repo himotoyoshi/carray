@@ -83,6 +83,8 @@ Uniform check at construction time — parents must agree on:
 - `data_type` (mismatch raises — see below)
 - byte width
 - every axis length except `meld_axis`
+- Face: either none of the pieces is a Face, or all are of one Face class
+  with compatible state (the result is then that Face)
 
 Any mismatch raises `ArgumentError`.
 

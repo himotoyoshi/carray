@@ -1128,8 +1128,9 @@ rb_ca_stack_initialize (int argc, VALUE *argv, VALUE self)
        this method)
      - then ca_face_lift re-wraps the result as the same Face class,
        carrying state from list[0]
-   For non-Face / mixed / heterogeneous lists, returns the raw CAStack
-   directly (= same result as the inherited Class#new chain).
+   A single Face parent is lifted too.  A list mixing Face and non-Face
+   parents, or two Face classes, is refused; a non-Face list returns the
+   raw CAStack (= same result as the inherited Class#new chain).
 
    Replaces the Ruby-level CAStack.new override in lib/carray/compose.rb
    (= used alias_method :__new_raw__, :new + class << self def new).
@@ -1140,7 +1141,7 @@ rb_ca_stack_s_new (int argc, VALUE *argv, VALUE klass)
 {
   VALUE list, kwargs;
   long n, i;
-  int  all_face = 1;
+  int  all_face = 1, any_face = 0;
   VALUE face_class = Qnil;
   CArray *ref_face = NULL;
   VALUE obj;
@@ -1159,13 +1160,24 @@ rb_ca_stack_s_new (int argc, VALUE *argv, VALUE klass)
     CArray *ca;
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( !ca_is_face(ca) ) { all_face = 0; break; }
-    if ( i == 0 ) {
+    if ( ca_is_face(ca) ) any_face = 1;
+    if ( !ca_is_face(ca) ) { all_face = 0; continue; }
+    if ( face_class == Qnil ) {
       face_class = rb_obj_class(p);
       ref_face   = ca;
     } else if ( rb_obj_class(p) != face_class ) {
-      all_face = 0; break;
+      all_face = 0;
     }
+  }
+
+  /* The setup strips a Face parent to its storage, so a list that is not
+     one Face class throughout would come back as raw storage presented as
+     data (CATime ticks, CAConstString (start,end) pairs). */
+  if ( any_face && !all_face ) {
+    rb_raise(rb_eArgError,
+             "CAStack.new: cannot mix Face and non-Face (or heterogeneous "
+             "Face classes); pass a homogeneous Face list, or strip Face "
+             "manually with .parent for the storage-level layout");
   }
 
   /* Allocate + initialize raw CAStack.  rb_obj_alloc calls the
@@ -1176,12 +1188,14 @@ rb_ca_stack_s_new (int argc, VALUE *argv, VALUE klass)
   obj = rb_obj_alloc(klass);
   rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
 
-  /* Single element or non-Face: no lift, return raw. */
-  if ( !all_face || n < 2 ) return obj;
+  /* Non-Face: no lift, return raw. */
+  if ( !any_face ) return obj;
 
   /* Homogeneous Face: portable + pairwise state-compatible checks,
-     then ca_face_lift to re-wrap as the same Face class. */
-  if ( !ca_face_state_portable(ref_face->obj_type, face_class) ) {
+     then ca_face_lift to re-wrap as the same Face class.  A single parent
+     shares its state with nobody, so only two or more are refused as not
+     portable; the lift applies to one parent as well. */
+  if ( n > 1 && !ca_face_state_portable(ref_face->obj_type, face_class) ) {
     rb_raise(rb_eArgError,
              "CAStack.new: %s state is not portable across multiple "
              "parents (= per-parent storage like CAConstString's buffer); "

@@ -4,7 +4,8 @@
 #   - All same Face class + portable + state-compatible → lift to Face view
 #   - Same class + portable but state mismatch → ArgumentError
 #   - Same class but not-portable (= CAConstString)             → ArgumentError
-#   - Mixed Face classes or Face+non-Face → fall through to raw CAStack
+#   - Mixed Face classes or Face+non-Face → ArgumentError
+#   - A single Face element is lifted too
 #
 # Built on top of F.S1-state (= ca_face_state_compatible) and the
 # face_state_portable? class-level predicate registered in C
@@ -110,14 +111,13 @@ class TestCAStackFaceLift < Test::Unit::TestCase
 
   # ---------------- Single element ----------------
 
-  def test_single_face_element_keeps_raw_path
-    # K=1: face lift path is bypassed (see TODO in implementation).
+  def test_single_face_element_is_lifted
+    # The setup strips a Face parent to its storage whatever their number,
+    # so a single element is lifted like two (as CArray.meld does).
     a = CATime.new(3, unit: :ns)
     s = CArray.stack([a])
-    # Raw CAStack with k_axis = 0; the parent at parents[0] is the Face,
-    # so any downstream access can re-lift via existing access touch
-    # points if needed.
-    assert_kind_of CAStack, s
+    assert_kind_of CATime, s
+    assert_kind_of CAStack, s.parent
     assert_equal [1, 3], s.shape
   end
 
