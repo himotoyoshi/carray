@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: CAFrame reads booleans from CSV: `types: { "flag" => :boolean }` (and
+  `cast("flag" => :boolean)`) reads `1` / `0` and `true` / `false` in any case,
+  with a blank field as UNDEF and other text handled by `on_error:`.
+  `types: :infer` reads a column of `true` / `false` as boolean; a column of
+  0 / 1 is still inferred as integers. `cast(name => :boolean)` on an integer
+  column now follows `on_error:` for values other than 0 and 1 instead of
+  always raising.
+
+- Change: `to_csv` writes a boolean column as `1` / `0` rather than
+  `true` / `false`. Files written before still read back as boolean with
+  `types: { name => :boolean }`.
+
 - Change: `locate_nearest_addr` now finds a match beyond the ends of the
   reference when its `direction:` names one: `:floor` takes the last value for
   a cell after it, `:ceil` the first value for a cell before it, and `:round`

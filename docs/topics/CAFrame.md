@@ -264,9 +264,12 @@ longer edited.
 
 `types: :infer` casts a column to `:int64` when every cell that is not missing
 is an integer that fits, to `:float64` when every such cell is a number, to
+`:boolean` when every such cell is `true` or `false` (in any case), to
 `:time` when every such cell is a year-first date or time (`"2024-01-01"`,
 `"2024/1/2 3:04"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text
-otherwise. A number with a leading zero (`"007"`) is a code and keeps its
+otherwise. A column of `0` and `1` is inferred as `:int64`: it could equally
+be counts, so say which with `types: { "flag" => :boolean }`, or with
+`cast("flag" => :boolean)` on the integer column. A number with a leading zero (`"007"`) is a code and keeps its
 column as text, and so does an integer too long for `:int64` (an
 identifier), which a float would round. A day-first or month-first date
 (`"01/02/2024"`) is not read as time, since which one it is cannot be told;
@@ -989,6 +992,13 @@ A float32 value is written as the shortest decimal that reads back as the
 same float32 (`0.1`, not `0.10000000149011612`, the double it widens to), and
 so is each part of a cmplx64 one; reading the file with `types:` of
 `:float32` gives the values back bit for bit.
+
+A boolean column is written as `1` / `0`, as a boolean is in every other
+serialization. Reading it back as boolean takes `types: { "flag" => :boolean }`,
+which reads `1` / `0` and also `true` / `false` in any case (the spelling
+pandas, R and spreadsheets write); a blank field is UNDEF and any other text
+follows `on_error:`. `cast("flag" => :boolean)` turns an integer column of
+0 / 1 into a boolean one by the same rule.
 
 `encoding:` transcodes the text before it is written or returned; left out,
 the CSV is UTF-8. A character the encoding cannot hold raises

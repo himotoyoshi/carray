@@ -530,6 +530,9 @@ class CAFrame
     if !col.face? && (col.data_type == CA_FLOAT32 || col.data_type == CA_CMPLX64)
       col = col.__shortest_float64__
     end
+    # A boolean goes out as 0 / 1, as it does in every other serialization;
+    # from_csv reads it back with types: { name => :boolean }.
+    col = col.to_type(:uint8) if !col.face? && col.data_type == CA_BOOLEAN
     col.to_a.map do |e|
       if UNDEF.equal?(e) || e.nil?
         nil

@@ -239,8 +239,11 @@ class CAFrame
   # { "temp" => :float64, "count" => :int64, "time" => :time }. A column is
   # listed only when every cell that is not missing reads as one type:
   # :int64 when they are all integers that fit, :float64 when they are all
-  # numbers, :time when they are all year-first dates or times
-  # ("2024-01-01", "2024-01-01 12:00:00", "2024-01-01T12:00:00.5Z").
+  # numbers, :boolean when they are all true / false (in any case), :time
+  # when they are all year-first dates or times ("2024-01-01",
+  # "2024-01-01 12:00:00", "2024-01-01T12:00:00.5Z"). 0 / 1 is :int64: a
+  # column of those is read as the integers it could equally be, and
+  # cast("name" => :boolean) turns it into a boolean.
   # Blank, nil and masked cells are missing and say nothing; a column with
   # none present is not listed.
   #
@@ -257,6 +260,7 @@ class CAFrame
     @columns.each_with_object({}) do |(key, col), types|
       next unless string_column?(col)
       type = text_for_decimal_reading(col).__infer_number_type_of_text__
+      type ||= :boolean if boolean_word_column?(col)
       type ||= :time if first_present_cell_can_be_time_text?(col) && time_text_column?(time_text_of(col))
       types[key] = type if type
     end
@@ -457,6 +461,12 @@ class CAFrame
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     return cast_time_column(key, col, on_error) if type == :time
+    if CArray.data_type_name(type) == "boolean"
+      return read_boolean_text(key, col, on_error) if string_column?(col)
+      if !col.face? && INTEGER_TYPES.include?(col.data_type)
+        return read_boolean_integers(key, col, on_error)
+      end
+    end
     unless string_column?(col) && CAST_NUMBER_TYPES.include?(CArray.data_type_name(type))
       return col.to_type(type)
     end
@@ -480,6 +490,51 @@ class CAFrame
       report_unreadable(key, col, type, unreadable, on_error)
     end
     parsed
+  end
+
+  # Text a boolean column is read from: what to_csv writes (0 / 1) and the
+  # words other tools write (true / false in any case). Surrounding spaces
+  # are ignored; a missing cell is UNDEF; anything else does not read.
+  BOOLEAN_TEXT = { "1" => true, "0" => false, "true" => true, "false" => false }.freeze
+  private_constant :BOOLEAN_TEXT
+
+  # cast(name => :boolean) on a text column. The distinct texts are judged
+  # once each and the answer is spread over the cells, so a column of many
+  # rows is not walked in Ruby.
+  private def read_boolean_text(key, col, on_error)
+    text = time_text_of(col)
+    trues, known, bad = [], [], []
+    text.unique.to_a.each do |v|
+      next if missing_text?(v)
+      case BOOLEAN_TEXT[v.to_s.strip.downcase]
+      when true  then trues << v; known << v
+      when false then known << v
+      else            bad << v
+      end
+    end
+    out = text.is_in(trues)
+    unknown = text.is_in(known).not
+    unknown = unknown.strip_mask(false) if unknown.has_mask?
+    if on_error != :mask && !bad.empty?
+      addrs = text.is_in(bad)
+      addrs = addrs.strip_mask(false) if addrs.has_mask?
+      report_unreadable(key, col, :boolean, addrs.flatten.where.to_a, on_error)
+    end
+    out[unknown] = UNDEF if unknown.any
+    out
+  end
+
+  # cast(name => :boolean) on an integer column: 0 is false, 1 is true, and
+  # any other value does not read (on_error: says what becomes of it).
+  private def read_boolean_integers(key, col, on_error)
+    bad = col.ne(0) & col.ne(1)
+    bad = bad.strip_mask(false) if bad.has_mask?
+    out = col.eq(1)
+    if bad.any
+      report_unreadable(key, col, :boolean, bad.flatten.where.to_a, on_error) unless on_error == :mask
+      out[bad] = UNDEF
+    end
+    out
   end
 
   # cast(name => :time): year-first text to CATime, in the finest unit the
@@ -624,6 +679,12 @@ class CAFrame
   end
 
   # nil, UNDEF and a blank String are missing values.
+  # Every present cell is true or false in some case, and one is present.
+  private def boolean_word_column?(col)
+    words = time_text_of(col).unique.to_a.reject { |v| missing_text?(v) }
+    !words.empty? && words.all? { |v| %w[true false].include?(v.to_s.strip.downcase) }
+  end
+
   private def missing_text?(cell)
     cell.nil? || UNDEF.equal?(cell) || (cell.is_a?(String) && cell.strip.empty?)
   end
