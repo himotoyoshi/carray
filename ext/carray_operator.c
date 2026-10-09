@@ -1065,6 +1065,32 @@ ca_binop_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
                  (char *) d->out->ptr + o * d->out->bytes, d->step_out);
 }
 
+/* A boolean array as an object array of true / false.  The ordinary cast
+   gives 1 / 0, which a logical operator on an object array reads as two
+   true values (0 is true in Ruby).  Masked cells stay masked. */
+static VALUE
+ca_boolean_as_truth_objects (VALUE vb)
+{
+  CArray *cb;
+  ca_size_t i;
+  VALUE out;
+  TypedData_Get_Struct(vb, CArray, &carray_data_type, cb);
+  out = rb_carray_new(CA_OBJECT, cb->ndim, cb->dim, 0, NULL);
+  for ( i = 0; i < cb->elements; i++ ) {
+    rb_ca_store_addr(out, i, rb_ca_fetch_addr(vb, i));
+  }
+  return out;
+}
+
+static int
+ca_value_is_type (VALUE v, int8_t data_type)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(v) ) return 0;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  return ca->data_type == data_type;
+}
+
 VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])
@@ -1075,6 +1101,17 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   ca_size_t n_kernel;
   ca_size_t i1, i2, i3;
   int fast_path;
+
+  /* A logical operator (it has a boolean kernel) between a boolean array
+     and an object array reads the boolean cells as true / false. */
+  if ( func[CA_BOOLEAN] != ca_binop_not_implement ) {
+    if ( ca_value_is_type(self, CA_BOOLEAN) && ca_value_is_type(other, CA_OBJECT) ) {
+      self = ca_boolean_as_truth_objects(self);
+    }
+    else if ( ca_value_is_type(other, CA_BOOLEAN) && ca_value_is_type(self, CA_OBJECT) ) {
+      other = ca_boolean_as_truth_objects(other);
+    }
+  }
 
   /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);

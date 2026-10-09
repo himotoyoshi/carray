@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `&`, `|`, `^` (and `and` / `or` / `xor`) between an object array and
+  a boolean array read the boolean cells as Integer 1 / 0, both true in
+  Ruby, so `CA_OBJECT([true]) & CA_BOOLEAN([false])` was `[true]`, and
+  raised with the boolean on the left. The boolean cells now take part as
+  true / false. Arithmetic still reads them as 1 / 0.
+
 - Fix: a group `count` / `count_not_masked` / `count_masked` / `elements`
   on an `axis_group` iterator over an object (or other non-numeric) array
   raised; they read only the mask and now answer. The group reductions
