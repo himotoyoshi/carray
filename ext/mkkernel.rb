@@ -2500,9 +2500,9 @@ module MkKernel
     finish_expr = if k[:output_transform] == :sqrt_clamp
                     if src == :object
                       # Object stddev outputs f64 (BigMath.sqrt is user's job).
-                      "sqrt(fmax(NUM2DBL(#{inner_var}), 0.0))"
+                      "ca_sqrt_clamp(NUM2DBL(#{inner_var}))"
                     else
-                      "sqrt(fmax(#{inner_var}, 0.0))"
+                      "ca_sqrt_clamp(#{inner_var})"
                     end
                   else
                     inner_var
@@ -6951,6 +6951,15 @@ MkKernel.reduce :max,
 # modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
 # or mostly-true `any`) a profile-driven early-break variant can be
 # added later as a separate kernel.
+MkKernel.header_block <<~C
+  /* The square root of a variance: an ε-negative from rounding becomes 0,
+     a NaN stays NaN (fmax(NaN, 0.0) is 0.0). */
+  #ifndef CARRAY_SQRT_CLAMP_DEFINED
+  #define CARRAY_SQRT_CLAMP_DEFINED
+  static inline double ca_sqrt_clamp (double v) { return sqrt(v < 0.0 ? 0.0 : v); }
+  #endif
+C
+
 MkKernel.header_block <<~C
   /* BOOL2VAL: bool -> Ruby (Qtrue/Qfalse).  Used as ruby_scalar wrapper
      for the all/any flat-reduction Ruby surface so `a.all` / `a.any`
