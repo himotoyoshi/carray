@@ -213,6 +213,46 @@ class AxisGroup
     end
   end
 
+  # The keywords a group reduction takes besides axis:.  Checked before the
+  # work, so an unknown keyword is refused rather than dropped.
+  REDUCE_KEYWORDS = [:axis, :min_count, :fill_value].freeze
+
+  def self.__check_reduce_keywords__ (op, kw)
+    unknown = kw.keys - REDUCE_KEYWORDS
+    unless unknown.empty?
+      raise ArgumentError,
+            "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+            unknown.map(&:inspect).join(", ")
+    end
+    mc = kw[:min_count]
+    unless mc.nil?
+      raise TypeError, "#{op}: min_count must be an Integer (got #{mc.class})" unless mc.is_a?(Integer)
+      raise ArgumentError, "#{op}: min_count must be non-negative (got #{mc})" if mc < 0
+    end
+    nil
+  end
+
+  # min_count: masks a group with fewer present cells; fill_value: then
+  # fills the masked cells -- as a core reduction does with each.
+  def self.__finish_reduction__ (iter, op, kw, result)
+    mc = kw[:min_count]
+    if mc && mc > 0 && result.is_a?(CArray)
+      counts = iter.count_not_masked(axis: kw[:axis])
+      result[counts.lt(mc)] = UNDEF
+    elsif mc && mc > 0
+      counts = iter.count_not_masked(axis: kw[:axis])
+      result = UNDEF if counts < mc
+    end
+    if kw.key?(:fill_value) && !kw[:fill_value].nil?
+      if result.is_a?(CArray)
+        result = result.strip_mask(kw[:fill_value]) if result.has_mask?
+      elsif result.equal?(UNDEF)
+        result = kw[:fill_value]
+      end
+    end
+    result
+  end
+
   # Parse an axis: spec into [has_group, fused_band_slot_positions].
   def self.parse_axis (axis)
     has_group = false
@@ -707,13 +747,19 @@ class CAGroupIterator
   # operation, and remains a follow-up.
   def order_stat (op, args, kw)
     has_group, fused = AxisGroup.parse_axis(kw[:axis])
-    return value.public_send(op, *args) unless has_group
+    return value.public_send(op, *args, **kw) unless has_group
     unless fused.empty?
       raise NotImplementedError,
             "axis_group: folding a band into an order statistic (axis: [:group, k]) " \
             "is not supported; order statistics gather every member of a group"
     end
-    composite_order(op, args)
+    AxisGroup.__check_reduce_keywords__(op, kw)
+    res = composite_order(op, args)
+    if op == :quantile
+      res.map { |r| AxisGroup.__finish_reduction__(self, op, kw, r) }
+    else
+      AxisGroup.__finish_reduction__(self, op, kw, res)
+    end
   end
 
   # Per-group order statistic over the composite grouping. A flat grouping (no

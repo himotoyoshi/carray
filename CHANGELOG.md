@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a reduction on an `axis_group` iterator dropped every keyword
+  except `axis:`. A group reduction (`axis: :group`) now takes
+  `min_count:` and `fill_value:` as a core reduction does and refuses any
+  other keyword (`percentile(..., method: :lower)` used to be accepted and
+  ignored); without `:group` every keyword reaches the plain reduction.
+
 - Fix: on an object array, `is_nan`, `is_inf` and `is_finite` returned
   booleans that `count(true)`, `sum`, `all` and `&` misread (`is_inf` was
   true everywhere), and `signbit` was false for `-0.0`. `is_nan` now

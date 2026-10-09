@@ -237,16 +237,18 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
   parsed = rb_funcall(rb_cAxisGroup, id_parse_axis,
                       1, (vaxis == Qundef) ? Qnil : vaxis);
   if ( RTEST(RARRAY_AREF(parsed, 0)) == 0 ) {
-    /* no :group -> plain reduction on the value (grouping not engaged) */
-    if ( vaxis == Qundef ) {
+    /* no :group -> plain reduction on the value (grouping not engaged),
+       with every keyword the caller gave */
+    if ( NIL_P(kw) ) {
       return rb_funcall(value, op_id, 0);
     }
-    else {
-      VALUE h = rb_hash_new();
-      rb_hash_aset(h, ID2SYM(rb_intern("axis")), vaxis);
-      return rb_funcallv_kw(value, op_id, 1, &h, RB_PASS_KEYWORDS);
-    }
+    return rb_funcallv_kw(value, op_id, 1, &kw, RB_PASS_KEYWORDS);
   }
+
+  /* min_count: / fill_value: are applied to the grouped result; any other
+     keyword is refused before the work is done. */
+  rb_funcall(rb_cAxisGroup, rb_intern("__check_reduce_keywords__"), 2,
+             op_sym, NIL_P(kw) ? rb_hash_new() : kw);
 
   /* group reduction */
   fused = RARRAY_AREF(parsed, 1);
@@ -259,7 +261,12 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
 
   result = rb_funcall(value, id_axis_group_reduce, 3,
                       group_axes, bundles, op_sym);
-  return group_iter_shape_output(result, group_dims, perm, squeeze);
+  result = group_iter_shape_output(result, group_dims, perm, squeeze);
+  if ( ! NIL_P(kw) ) {
+    result = rb_funcall(rb_cAxisGroup, rb_intern("__finish_reduction__"), 4,
+                        self, op_sym, kw, result);
+  }
+  return result;
 }
 
 void

@@ -35,7 +35,8 @@ g.mean(axis: :group)                          # => [4, 3]  per (station, season)
 - **Call a reduction with `axis: :group`.** This is the one keyword that turns
   the grouping on. (Without it the value is reduced plainly, ignoring the
   grouping — the same indexer can also do ordinary selection, so the grouping is
-  opt-in.)
+  opt-in.) A group reduction also takes `min_count:` and `fill_value:`, which act
+  on each group as they act on a core reduction; any other keyword is refused.
 
 The result is **slot order**: each group slot becomes an axis of length `k` (the
 number of categories), each band slot keeps its length. Above, slot 0 (station)
