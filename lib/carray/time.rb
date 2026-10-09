@@ -472,7 +472,7 @@ class CATime
     # @return [String]
     def to_s
       case unit.base
-      when :Y      then format("%04d", to_date.year)
+      when :Y      then to_date.strftime("%Y")
       when :M      then to_date.strftime("%Y-%m")
       when :W, :D  then to_date.strftime("%Y-%m-%d")
       else              to_time.iso8601(fractional_second_digits)  # :h .. :as (time shown)

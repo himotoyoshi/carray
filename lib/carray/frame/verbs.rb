@@ -519,8 +519,11 @@ class CAFrame
     res = unit && CATime::Resolution.parse(unit)
     base = res && res.count == 1 ? res.base : nil
     unreadable = on_error == :mask ? nil : []
-    ticks, read_unit = (base && text.__parse_time_text__(base, unreadable)) ||
-                       text.__parse_time_text__(nil, unreadable)
+    # Read wide: the column is time by the caller's word, so a year past
+    # 9999 and a date that stops at the month or the year (what to_csv writes
+    # for those) read too.  Trying text as time (infer_types) reads strictly.
+    ticks, read_unit = (base && text.__parse_time_text__(base, unreadable, true)) ||
+                       text.__parse_time_text__(nil, unreadable, true)
     if unreadable && !unreadable.empty?
       report_unreadable(key, col, :time, unreadable, on_error)
     end

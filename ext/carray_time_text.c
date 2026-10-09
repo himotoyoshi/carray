@@ -17,9 +17,17 @@
    and a zone is folded into UTC.  Nothing written in another order is read:
    whether "01/02/2024" is January or February cannot be told from the text.
 
+   Read wide (when the caller has said the column is time), the year may
+   also carry a sign and more than four digits, and a date may stop after
+   the month ("2024-01") or the year ("2024", four digits unless signed) --
+   what CATime writes for a unit of months or years, or for a year past
+   9999.  Text is not read
+   wide when it is being tried as time, since "2024" is as likely a number.
+
    The unit of the result is the finest the text shows, unless one is
    given: :D when no cell has a time of day, :s with one, and :ms / :us /
-   :ns when a fraction of a second has up to 3 / 6 / 9 digits.
+   :ns when a fraction of a second has up to 3 / 6 / 9 digits; read wide,
+   :M when no cell has a day and :Y when none has a month either.
    ------------------------------------------------------------------------ */
 
 enum {
@@ -33,6 +41,8 @@ typedef struct {
   int64_t nsod;        /* nanoseconds into that day, 0 <= nsod < 86400e9 */
   int     clock;       /* a time of day is written */
   int     fraction;    /* digits written after the seconds */
+  int     coarse;      /* 0 a day is written, 1 only a month, 2 only a year */
+  int64_t months;      /* months since 1970-01 */
 } ca_time_text_t;
 
 static const int64_t ca_ns_per_day = INT64_C(86400000000000);
@@ -93,13 +103,14 @@ ca_time_text_days_from_civil (int64_t y, int64_t m, int64_t d)
 }
 
 static int
-ca_time_text_read (VALUE str, ca_time_text_t *t)
+ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
 {
   const char *s = RSTRING_PTR(str);
   long n = RSTRING_LEN(str);
   long i = 0;
   int64_t year, mon, day, hour = 0, min = 0, sec = 0, frac_ns = 0;
   int64_t offset = 0;
+  int year_digits;
   char sep;
 
   while ( n > 0 && ca_time_text_is_space(s[0]) ) {
@@ -115,9 +126,36 @@ ca_time_text_read (VALUE str, ca_time_text_t *t)
 
   t->clock = 0;
   t->fraction = 0;
+  t->coarse = 0;
 
-  if ( ca_time_text_digits(s, n, &i, 4, 4, &year) == 0 ) {
+  if ( wide ) {
+    int sign = 0;
+    if ( s[i] == '+' || s[i] == '-' ) {
+      sign = ( s[i] == '-' ) ? -1 : 1;
+      i++;
+    }
+    year_digits = ca_time_text_digits(s, n, &i, 4, 12, &year);
+    if ( year_digits == 0 ) {
+      return CA_TIME_TEXT_UNREADABLE;
+    }
+    if ( sign < 0 ) {
+      year = -year;
+    }
+    /* A year alone is four digits unless signed: "20240101" is a date
+       written without separators, which is not read. */
+    if ( i == n && year_digits > 4 && sign == 0 ) {
+      return CA_TIME_TEXT_UNREADABLE;
+    }
+  }
+  else if ( ca_time_text_digits(s, n, &i, 4, 4, &year) == 0 ) {
     return CA_TIME_TEXT_UNREADABLE;
+  }
+  if ( wide && i == n ) {
+    t->coarse = 2;
+    t->months = ( year - 1970 ) * 12;
+    t->days = ca_time_text_days_from_civil(year, 1, 1);
+    t->nsod = 0;
+    return CA_TIME_TEXT_OK;
   }
   if ( i >= n || ( s[i] != '-' && s[i] != '/' ) ) {
     return CA_TIME_TEXT_UNREADABLE;
@@ -126,6 +164,16 @@ ca_time_text_read (VALUE str, ca_time_text_t *t)
   if ( ca_time_text_digits(s, n, &i, 1, 2, &mon) == 0 ) {
     return CA_TIME_TEXT_UNREADABLE;
   }
+  if ( mon < 1 || mon > 12 ) {
+    return CA_TIME_TEXT_UNREADABLE;
+  }
+  t->months = ( year - 1970 ) * 12 + ( mon - 1 );
+  if ( wide && i == n ) {
+    t->coarse = 1;
+    t->days = ca_time_text_days_from_civil(year, mon, 1);
+    t->nsod = 0;
+    return CA_TIME_TEXT_OK;
+  }
   if ( i >= n || s[i] != sep ) {
     return CA_TIME_TEXT_UNREADABLE;
   }
@@ -133,8 +181,7 @@ ca_time_text_read (VALUE str, ca_time_text_t *t)
   if ( ca_time_text_digits(s, n, &i, 1, 2, &day) == 0 ) {
     return CA_TIME_TEXT_UNREADABLE;
   }
-  if ( mon < 1 || mon > 12 || day < 1
-       || day > ca_time_text_month_days(year, mon) ) {
+  if ( day < 1 || day > ca_time_text_month_days(year, mon) ) {
     return CA_TIME_TEXT_UNREADABLE;
   }
 
@@ -279,27 +326,34 @@ ca_time_text_unit (ID unit, int64_t *per_day, int64_t *ns_per_tick)
   return 1;
 }
 
-/* CArray#__parse_time_text__(unit, report) -> [int64 ticks, unit] or nil
+/* CArray#__parse_time_text__(unit, report, wide = false)
+     -> [int64 ticks, unit] or nil
 
    Reads an object array of year-first text into tick counts since the
-   epoch.  With unit nil the unit is the finest the text shows; a unit this
-   reader does not write answers nil, and the caller parses another way.
+   epoch, wide as the grammar above says when wide is true.  With unit nil
+   the unit is the finest the text shows; a unit this reader does not write
+   answers nil, and the caller parses another way.
    With an Array as report, the addresses of cells that hold something but
    do not read are pushed onto it; blank, nil and masked cells are missing,
    not unreadable.  A cell that reads but does not fit int64 ticks of the
    unit raises RangeError. */
 static VALUE
-rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
+rb_ca_parse_time_text (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE src = self, out, vdays, vnsod, vmask;
-  CArray *ca, *co, *cdays, *cnsod, *cmask;
+  volatile VALUE src = self, out, vdays, vnsod, vmonths, vmask;
+  VALUE runit, report, rwide;
+  CArray *ca, *co, *cdays, *cnsod, *cmonths, *cmask;
   VALUE *cells;
   boolean8_t *m_in, *m_out;
-  int64_t *days, *nsod, *ticks;
-  int64_t per_day, ns_per_tick;
+  int64_t *days, *nsod, *months, *ticks;
+  int64_t per_day = 1, ns_per_tick = 1;
   ID unit;
-  int clock = 0, fraction = 0;
+  int clock = 0, fraction = 0, coarse = 2, any = 0, wide;
+  int calendar = 0;              /* 1 ticks of months, 2 of years */
   ca_size_t i;
+
+  rb_scan_args(argc, argv, "21", &runit, &report, &rwide);
+  wide = RTEST(rwide);
 
   if ( ! NIL_P(report) ) {
     Check_Type(report, T_ARRAY);
@@ -327,6 +381,8 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
   TypedData_Get_Struct(vdays, CArray, &carray_data_type, cdays);
   vnsod = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(vnsod, CArray, &carray_data_type, cnsod);
+  vmonths = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(vmonths, CArray, &carray_data_type, cmonths);
 
   cells = (VALUE *) ca->ptr;
   m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
@@ -334,6 +390,7 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
   m_out = (boolean8_t *) cmask->ptr;
   days  = (int64_t *) cdays->ptr;
   nsod  = (int64_t *) cnsod->ptr;
+  months = (int64_t *) cmonths->ptr;
   ticks = (int64_t *) co->ptr;
 
   for (i = 0; i < ca->elements; i++) {
@@ -344,7 +401,7 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
       rc = CA_TIME_TEXT_BLANK;
     }
     else if ( RB_TYPE_P(v, T_STRING) ) {
-      rc = ca_time_text_read(v, &t);
+      rc = ca_time_text_read(v, &t, wide);
     }
     else {
       rc = CA_TIME_TEXT_UNREADABLE;
@@ -353,7 +410,12 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
       m_out[i] = 0;
       days[i] = t.days;
       nsod[i] = t.nsod;
+      months[i] = t.months;
       clock |= t.clock;
+      if ( t.coarse < coarse ) {
+        coarse = t.coarse;
+      }
+      any = 1;
       if ( t.fraction > fraction ) {
         fraction = t.fraction;
       }
@@ -369,14 +431,25 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
   if ( NIL_P(runit) ) {
     const char *name = fraction > 6 ? "ns" : fraction > 3 ? "us"
                      : fraction > 0 ? "ms" : clock ? "s" : "D";
+    if ( any && ! clock && coarse > 0 ) {
+      name = ( coarse == 1 ) ? "M" : "Y";
+      calendar = coarse;
+    }
     unit = rb_intern(name);
-    ca_time_text_unit(unit, &per_day, &ns_per_tick);
+    if ( ! calendar ) {
+      ca_time_text_unit(unit, &per_day, &ns_per_tick);
+    }
   }
 
   for (i = 0; i < ca->elements; i++) {
     int64_t whole;
     if ( m_out[i] ) {
       ticks[i] = 0;
+      continue;
+    }
+    if ( calendar ) {
+      ticks[i] = ( calendar == 1 ) ? months[i]
+                 : ( months[i] >= 0 ? months[i] / 12 : -( ( 11 - months[i] ) / 12 ) );
       continue;
     }
     /* A time that reads but does not fit int64 ticks of the unit is out of
@@ -395,6 +468,7 @@ rb_ca_parse_time_text (VALUE self, VALUE runit, VALUE report)
   RB_GC_GUARD(src);
   RB_GC_GUARD(vdays);
   RB_GC_GUARD(vnsod);
+  RB_GC_GUARD(vmonths);
   RB_GC_GUARD(vmask);
   return rb_assoc_new(out, ID2SYM(unit));
 }
@@ -1085,7 +1159,7 @@ void
 Init_carray_time_text (void)
 {
   /* Internal: CAFrame reads text columns as time with this reader. */
-  rb_define_method(rb_cCArray, "__parse_time_text__", rb_ca_parse_time_text, 2);
+  rb_define_method(rb_cCArray, "__parse_time_text__", rb_ca_parse_time_text, -1);
   /* Internal: CArray.time turns parsed fields into ticks with this. */
   rb_define_singleton_method(rb_cCArray, "__time_ticks_from_fields__",
                              rb_ca_s_time_ticks_from_fields, 9);
