@@ -87,9 +87,9 @@ ca_stack_check_uniform (int32_t n_parents, CArray **parents)
     CArray *p = parents[i];
     if ( p->data_type != ref->data_type ) {
       rb_raise(rb_eArgError,
-               "CAStack parents must have uniform data_type "
-               "(parent[0]=%d, parent[%d]=%d)",
-               ref->data_type, i, p->data_type);
+               "stack: the arrays must have the same data type "
+               "(array 0 is %s, array %d is %s)",
+               ca_type_name[ref->data_type], i, ca_type_name[p->data_type]);
     }
     if ( p->ndim != ref->ndim ) {
       rb_raise(rb_eArgError,
