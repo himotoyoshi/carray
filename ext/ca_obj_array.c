@@ -1135,7 +1135,9 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
    rebuilt by that class from the parent, so what the original was told
    about itself -- that it is a value array, read-only, a mask -- has to be
    carried across here, once for every class.  An entity's copy owns new
-   memory and is none of those things. */
+   memory, so it is not a value array and its writability is its own, but
+   a copy of a mask is still a mask (its class, CArrayMask, says so) and
+   can no more hold a mask of its own than the original. */
 static void
 ca_dup_keep_state (VALUE self, VALUE other)
 {
@@ -1147,6 +1149,9 @@ ca_dup_keep_state (VALUE self, VALUE other)
   TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
   if ( ca_is_view(cs) ) {
     ca_keep_chain_flags(ca, cs);
+  }
+  else if ( ca_is_mask_array(cs) ) {
+    ca_set_flag(ca, CA_FLAG_MASK_ARRAY);
   }
 }
 

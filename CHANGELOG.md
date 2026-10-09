@@ -38,7 +38,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Fix: `dup` and `clone` of a view now keep what the view was: the copy of
   `x.value` (or of its reshape) could take UNDEF into the mask of `x`, and
-  `clone` of a frozen array answered `read_only?` false. `dup` and `clone` of
+  `clone` of a frozen array answered `read_only?` false. A copy of a mask
+  (`x.mask.dup`) is a mask again and refuses a mask of its own. `dup` and `clone` of
   a view still return another view onto the same storage; to copy a CArray,
   use `copy`.
 

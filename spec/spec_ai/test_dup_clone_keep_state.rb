@@ -46,6 +46,16 @@ class TestDupCloneKeepState < Test::Unit::TestCase
     assert_equal false, x.dup.read_only?
   end
 
+  def test_mask_array_copy_cannot_hold_a_mask
+    x = masked
+    [x.mask.dup, x.mask.clone, x[0..1].mask.dup, x.mask.reshape(3).dup].each do |m|
+      assert_equal true, m.mask_array?
+      assert_raise(TypeError) { m[0] = UNDEF }
+      assert_raise(TypeError) { m.mask = 1 }
+    end
+    assert_equal [false, true, false], x.mask.to_a
+  end
+
   def test_dup_of_masked_view_keeps_its_mask
     x = masked
     d = x[0..2].dup
