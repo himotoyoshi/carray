@@ -651,29 +651,25 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   s = ca->bytes;
   for ( i = ca->ndim - 1; i >= 0; i-- ) { native[i] = s; s *= ca->dim[i]; }
 
+  /* Structural iff strides == native and the request is a box over the
+     view's own axes.  Equal strides alone are not enough: a size-1 axis
+     gives two axes the same native stride, and a flat window reshaped back
+     to ndim has native strides yet wraps across an axis.  The request is
+     over the view's addresses; see ca_xfer_stride_request_is_axis_box
+     (carray.h).  Inside the gate the step on every axis is 1 and the region
+     stays inside each axis, which ca_meld_xfer_stride_ma_internal (handed
+     no strides) depends on. */
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( strides[i] != native[i] ) { structural = 0; break; }
+  }
+  if ( structural &&
+       ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
+    structural = 0;
   }
 
   if ( ! structural ) {
     ca_meld_xfer_stride_per_cell(ca, starts, counts, strides, data, dir);
     return;
-  }
-
-  /* Bound check on meld_axis, after the gate and not before it.  Only once
-     strides == native is established does request axis ma mean view axis ma;
-     asked earlier, strides[ma] / native[ma] is not a step along the meld axis
-     and legal requests get rejected.  Inside the gate the step is 1, so the
-     region is starts[ma] .. starts[ma] + counts[ma].  ca_meld_xfer_stride_ma_
-     internal below is handed no strides at all and depends on both facts. */
-  {
-    ca_size_t req_lo = starts[ma];
-    ca_size_t req_hi = starts[ma] + counts[ma];
-    if ( counts[ma] > 0 && ( req_lo < 0 || req_hi > ca->dim[ma] ) ) {
-      rb_raise(rb_eIndexError,
-               "CAMeld xfer_stride meld_axis (axis %d) [%lld, %lld) out of range [0, %lld)",
-               (int) ma, (long long) req_lo, (long long) req_hi, (long long) ca->dim[ma]);
-    }
   }
 
   if ( ma == 0 ) {

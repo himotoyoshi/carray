@@ -454,19 +454,23 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     s *= ca->parents[0]->dim[i];
   }
 
-  /* Structural iff strides[k] == native[k] for all k. */
+  /* Structural iff strides[k] == native[k] for all k and the request is a
+     box over the view's own axes.  Equal strides alone are not enough: a
+     size-1 axis gives two axes the same native stride, and a flat window
+     reshaped back to ndim has native strides yet wraps across an axis.  The
+     request is over the view's addresses; see
+     ca_xfer_stride_request_is_axis_box (carray.h). */
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( strides[i] != native[i] ) { structural = 0; break; }
+  }
+  if ( structural &&
+       ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
+    structural = 0;
   }
 
   if ( structural ) {
     ca_size_t k_lo = starts[k_axis];
     ca_size_t k_hi = starts[k_axis] + counts[k_axis];
-    if ( k_lo < 0 || k_hi > ca->n_parents ) {
-      rb_raise(rb_eIndexError,
-               "CAStack xfer_stride k-axis (axis %d) [%lld, %lld) out of range [0, %d)",
-               (int) k_axis, (long long) k_lo, (long long) k_hi, (int) ca->n_parents);
-    }
 
     /* dst row-major byte strides over output counts[]. */
     s = ca->bytes;
@@ -573,16 +577,27 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
         if ( strides[i] != native[v] ) { reloc = 0; break; }
       }
     }
+    /* Each output axis must stay inside the view axis it was matched to;
+       otherwise the request wraps (or the match was one of two axes sharing
+       a native stride because the other has size 1), and only the per-cell
+       walk reads it correctly. */
     if ( reloc ) {
-      ca_size_t kk_lo = starts[k_axis];
-      ca_size_t kk_hi = starts[k_axis] + counts[p];
+      for ( i = 0; i < ca->ndim; i++ ) {
+        int8_t j, v;
+        if ( counts[i] <= 1 ) continue;
+        if ( i == p ) {
+          v = k_axis;
+        }
+        else {
+          j = (i < p) ? i : (i - 1);
+          v = (j < k_axis) ? j : (j + 1);
+        }
+        if ( starts[v] + counts[i] > ca->dim[v] ) { reloc = 0; break; }
+      }
+    }
+    if ( reloc ) {
       ca_size_t odo[CA_RANK_MAX];
       int8_t    a;
-      if ( kk_lo < 0 || kk_hi > ca->n_parents ) {
-        rb_raise(rb_eIndexError,
-                 "CAStack xfer_stride k-axis [%lld, %lld) out of range [0, %d)",
-                 (long long) kk_lo, (long long) kk_hi, (int) ca->n_parents);
-      }
       if ( p == ca->ndim - 1 ) {
         /* K innermost: per-cell via the parent's xfer_index directly, escaping
            the CAStack-level addr2index dispatch hop in the per-cell fallback. */
