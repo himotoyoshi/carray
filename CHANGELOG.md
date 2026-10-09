@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CACategorical#categorize` raised; it now categorizes by the labels,
+  as for any key array (categories that have no cells are dropped). With it,
+  `CAFrame#group_by` accepts a categorical column as a key, alone or in a
+  composite key, and the result's index stays a `CACategorical`.
+
 - Fix: `CAFrame#filter(keep_masked: true)` raised "can not modify
   read-only array" when the frame had a categorical or `CAConstString`
   column and a row's membership was undetermined. Those columns now carry

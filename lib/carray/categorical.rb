@@ -585,6 +585,22 @@ class CACategorical < CAObject
     @reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
   end
 
+  # @overload categorize(labels: nil, sort_labels: false)
+  #   Returns a {CACategorical} keyed on the labels, as categorizing any
+  #   key array does: the labels that occur, in first-appearance order (or
+  #   sorted with `sort_labels:`), or the fixed `labels:` vocabulary.  A
+  #   category of `self` with no cells does not carry over; a masked cell
+  #   is excluded.
+  #   @return [CACategorical]
+  def categorize (labels: nil, sort_labels: false)
+    if labels || sort_labels
+      return label_values.categorize(labels: labels, sort_labels: sort_labels)
+    end
+    # Distinctness rides the codes; only the k labels cross the surface.
+    recoded = codes.categorize
+    CACategorical.from_codes(recoded.codes, recoded.labels.map { |c| label_at(c) })
+  end
+
   # @overload inspect
   #   Returns a short summary showing element count, category count,
   #   and vocabulary.
