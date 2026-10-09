@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: the `sum` / `mean` / `min` / `max` of a `CAFrame` group now take
+  every one-dimensional column whose type defines the reduction, instead of
+  leaving out object, boolean and fixlen columns by data type. A time column
+  now has a mean, a minimum and a maximum, a string column a minimum and a
+  maximum, a boolean or object column all four. A column whose type has no
+  such reduction is still left out.
+
 - Fix: `min` and `max` of a raw fixlen array grouped by a categorical
   (`group_by_category`) raised `invalid bytes`; they now answer per group.
 

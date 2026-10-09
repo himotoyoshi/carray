@@ -1394,10 +1394,12 @@ A `GroupedFrame` has three surfaces:
 
 ### (a) Convenience reductions
 
-`sum` / `mean` / `min` / `max` reduce **every numeric scalar column** into a
-new frame indexed by the group labels. The **key columns are skipped** — they
-are the index of the result, whatever their data type — and so are non-numeric
-and N-D columns, which a reduction has nothing to say about:
+`sum` / `mean` / `min` / `max` reduce **every one-dimensional column whose type
+defines the reduction** into a new frame indexed by the group labels: a time
+column has a mean, a minimum and a maximum but no sum, a string column a minimum
+and a maximum only, a boolean column all four. A column whose type has no such
+reduction is left out, and so are N-D columns. The **key columns are skipped** —
+they are the index of the result, whatever their data type:
 
 ```ruby
 df.group_by("station").mean       # => frame of per-station means

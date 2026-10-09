@@ -226,6 +226,40 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
   def test_empty_group_by_raises
     assert_raise(ArgumentError) { @df.group_by }
   end
+
+  # A column is in a convenience reduction when its type defines it, whatever
+  # its storage data type: a time column has a mean but no sum, a string
+  # column a minimum but no mean.
+  def test_convenience_reductions_take_every_column_whose_type_answers
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]),
+                     "t" => CArray.time(["2024-01-01", "2024-01-03", "2024-01-05"]),
+                     "v" => CA_FLOAT64([1, 2, 3]),
+                     "s" => CArray.const_string(%w[a b c]),
+                     "b" => CA_BOOLEAN([1, 0, 1]),
+                     "o" => CA_OBJECT([1, 2, 3]),
+                     "z" => CA_CMPLX128([1, 2, 3]))
+    g = df.group_by("k")
+    assert_equal %w[v b o z],         g.sum.variable_names
+    assert_equal %w[t v b o z],       g.mean.variable_names
+    assert_equal %w[t v s b o],       g.min.variable_names
+    assert_equal %w[t v s b o],       g.max.variable_names
+    mean = g.mean["t"]
+    assert_kind_of CATime, mean
+    assert_equal CArray.time(["2024-01-02", "2024-01-05"]).to_a, mean.to_a
+    assert_equal ["a", "c"], g.min["s"].to_a
+    # an empty frame keeps the same columns
+    e = df[CA_BOOLEAN([0, 0, 0])].group_by("k")
+    assert_equal %w[t v s b o], e.min.variable_names
+    assert_equal %w[t v b o z], e.mean.variable_names
+  end
+
+  def test_minimum_of_a_raw_fixlen_column_per_group
+    fx = CArray.fixlen(3, bytes: 2)
+    fx[0] = "cd"; fx[1] = "ab"; fx[2] = "ef"
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "f" => fx)
+    assert_equal ["ab", "ef"], df.group_by("k").min["f"].to_a
+    assert_equal ["ab", "ef"], fx.group_by_category(CA_INT32([1, 1, 2]).categorize).min.to_a
+  end
 end
 
 class TestCAFrameJoin < Test::Unit::TestCase

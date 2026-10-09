@@ -206,27 +206,30 @@ class GroupedFrame
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
   end
 
-  # Convenience reductions over every numeric scalar column (memo §6-4
-  # "grp.mean"). Non-numeric / N-D columns are skipped. Each takes
-  # +min_count:+ and +fill_value:+ as a core reduction does: a group with
-  # fewer than min_count present values is UNDEF, and fill_value fills the
-  # UNDEF cells.
+  # Convenience reductions over every one-dimensional column that defines
+  # the reduction. A column is in the result when its type answers the
+  # reduction -- a time column has a mean, a minimum and a maximum but no
+  # sum, a string column a minimum and a maximum only -- and left out when it
+  # does not, as are the key columns and multi-dimensional columns. Each
+  # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
+  # with fewer than min_count present values is UNDEF, and fill_value fills
+  # the UNDEF cells.
   #
   # @!method sum(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group sum of every numeric one-dimensional
-  #   column. Non-numeric and multi-dimensional columns are left out.
+  #   Returns a frame of the per-group sum of every one-dimensional column
+  #   whose type has a sum. Other columns are left out.
   #   @return [CAFrame] one row per group, indexed by the group labels.
   # @!method mean(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group arithmetic mean of every numeric
-  #   one-dimensional column, as {#sum} does.
+  #   Returns a frame of the per-group mean of every one-dimensional column
+  #   whose type has a mean, as {#sum} does.
   #   @return [CAFrame] one row per group.
   # @!method min(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group minimum of every numeric
-  #   one-dimensional column, as {#sum} does.
+  #   Returns a frame of the per-group minimum of every one-dimensional column
+  #   whose type has a minimum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   # @!method max(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group maximum of every numeric
-  #   one-dimensional column, as {#sum} does.
+  #   Returns a frame of the per-group maximum of every one-dimensional column
+  #   whose type has a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
     define_method(red) do |min_count: nil, fill_value: nil|
@@ -245,22 +248,28 @@ class GroupedFrame
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  NON_NUMERIC = [:object, :boolean, :fixlen].freeze
-  private_constant :NON_NUMERIC
-
   private def reduce_numeric(reduction, **keywords)
     cols = {}
     @frame.variable_names.each do |name|
-      # A key column is the index here, not a result column. Filtering it out
-      # by name rather than by data type is what makes a numeric key behave
-      # like a string one: NON_NUMERIC is about which columns a reduction can
-      # apply to, which happened to cover string keys and nothing else.
+      # A key column is the index here, not a result column.
       next if @key_names.include?(name)
       col = @frame[name]
-      next unless col.ndim == 1 && !NON_NUMERIC.include?(col.data_type)
+      next unless col.ndim == 1 && answers?(col, reduction)
       cols[name] = col.group_by_category(@cat).public_send(reduction, **keywords)
     end
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+  end
+
+  # Whether the column's type defines the reduction, asked of the core on one
+  # cell of it so that the answer is about the type and not the data: a
+  # refusal there is the core saying the reduction does not apply, while an
+  # error in the grouped reduction itself is left to raise. A column with no
+  # rows is asked as it is: the refusal does not depend on the cells.
+  private def answers?(col, reduction)
+    (col.elements > 0 ? col[0..0] : col).public_send(reduction)
+    true
+  rescue CArray::DataTypeError, TypeError, ArgumentError
+    false
   end
 
   private def per_group_column(in_name, proc)
