@@ -19,7 +19,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_headers_become_string_column_names
     with_csv("time,station,temp\n2024,tokyo,22.1\n") do |path|
       df = CAFrame.from_csv(path)
-      assert_equal ["time", "station", "temp"], df.variable_names
+      assert_equal ["time", "station", "temp"], df.column_names
       assert_equal 1, df.nrow
     end
   end
@@ -135,7 +135,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_a_blank_line_before_the_header_is_still_skipped
     back = CAFrame.from_csv(StringIO.new("\ns\na\n"))
-    assert_equal ["s"], back.variable_names
+    assert_equal ["s"], back.column_names
     assert_equal 1, back.nrow
   end
 
@@ -154,7 +154,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_bom_stripped_from_first_header
     with_csv("\xEF\xBB\xBFname,x\nv,1\n") do |path|
       df = CAFrame.from_csv(path)
-      assert_equal ["name", "x"], df.variable_names
+      assert_equal ["name", "x"], df.column_names
     end
   end
 
@@ -170,7 +170,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     with_csv("ignored\n") do |path|
       fake = ->(_p) { [["a", "b"], [["1", "2"], ["3", "4"]]] }
       df = CAFrame.from_csv(path, parser: fake)
-      assert_equal ["a", "b"], df.variable_names
+      assert_equal ["a", "b"], df.column_names
       assert_equal ["1", "3"], df["a"].to_a
     end
   end
@@ -183,7 +183,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
         r.skip 1
         r.data
       end
-      assert_equal ["station", "temp"], df.variable_names
+      assert_equal ["station", "temp"], df.column_names
       assert_equal 2, df.nrow
       assert_equal ["28.5", "29.8"], df["temp"].to_a
     end
@@ -192,7 +192,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_dsl_column_names_headerless
     with_csv("Tokyo,28.5\nOsaka,29.8\n") do |path|
       df = CAFrame.from_csv(path) { it.column_names "station", "temp"; it.data }
-      assert_equal ["station", "temp"], df.variable_names
+      assert_equal ["station", "temp"], df.column_names
       assert_equal ["Tokyo", "Osaka"], df["station"].to_a
     end
   end
@@ -205,7 +205,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
         units = csv.header(:units)
         csv.data
       end
-      assert_equal ["station", "temp"], df.variable_names
+      assert_equal ["station", "temp"], df.column_names
       assert_equal ["name", "degC"], units
       assert_equal ["Tokyo"], df["station"].to_a
     end
@@ -214,7 +214,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
       df = CAFrame.from_csv(path) { |r| r.data }
-      assert_equal ["c0", "c1", "c2"], df.variable_names
+      assert_equal ["c0", "c1", "c2"], df.column_names
       assert_equal ["1", "4"], df["c0"].to_a
     end
   end
@@ -248,7 +248,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
 
   def test_reads_a_stringio
     df = CAFrame.from_csv(StringIO.new(TEXT))
-    assert_equal ["a", "b", "c"], df.variable_names
+    assert_equal ["a", "b", "c"], df.column_names
     assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]], df.to_ca.to_a
   end
 
@@ -285,13 +285,13 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
 
   def test_the_reading_control_block_works_over_an_io
     df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { |r| r.skip 1; r.data }
-    assert_equal ["c0", "c1"], df.variable_names
+    assert_equal ["c0", "c1"], df.column_names
     assert_equal [["1", "2"], ["3", "4"]], df.to_ca.to_a
   end
 
   def test_keywords_work_over_an_io
     assert_equal ["a", "b"],
-                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";").variable_names
+                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";").column_names
     assert_equal :int32,
                  CAFrame.from_csv(StringIO.new(TEXT), types: { "a" => :int32 })["a"].data_type
     #  a blank cell is still UNDEF, not a filled-in number
@@ -327,7 +327,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   def test_encoding_reads_and_transcodes_a_cp932_file
     with_bytes(CP932_TEXT) do |path|
       df = CAFrame.from_csv(path, encoding: "CP932:UTF-8")
-      assert_equal ["地点", "備考"], df.variable_names
+      assert_equal ["地点", "備考"], df.column_names
       assert_equal ["①髙橋㈱"], df["備考"].to_a
     end
   end
@@ -636,8 +636,8 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_append_returns_new_frame
     r = @df.append("c", @df["a"] + @df["b"])
     assert_not_same @df, r
-    assert_equal ["a", "b", "c"], r.variable_names
-    assert_equal ["a", "b"], @df.variable_names   # original unchanged (§3.8)
+    assert_equal ["a", "b", "c"], r.column_names
+    assert_equal ["a", "b"], @df.column_names   # original unchanged (§3.8)
     assert_equal [11.0, 22.0, 33.0], r["c"].to_a
   end
 
@@ -653,8 +653,8 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
 
   def test_drop_removes_columns
     r = @df.drop("b")
-    assert_equal ["a"], r.variable_names
-    assert_equal ["a", "b"], @df.variable_names   # original unchanged (§3.8)
+    assert_equal ["a"], r.column_names
+    assert_equal ["a", "b"], @df.column_names   # original unchanged (§3.8)
   end
 
   def test_drop_missing_raises
@@ -664,7 +664,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_rename_preserves_order
     df = @df.append("c", CA_INT32([7, 8, 9]))
     r = df.rename("b" => "beta")
-    assert_equal ["a", "beta", "c"], r.variable_names
+    assert_equal ["a", "beta", "c"], r.column_names
     assert_equal [10.0, 20.0, 30.0], r["beta"].to_a
   end
 
@@ -836,7 +836,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_promote_of_an_empty_frame_is_a_no_op
     df = CAFrame.new
     assert_same df, df.promote
-    assert_equal 0, df.nvar
+    assert_equal 0, df.ncol
   end
 
   def test_cast_to_object_uses_a_face_columns_surface
@@ -862,17 +862,17 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_verbs_chain
     r = @df.append("c", CA_INT32([1, 2, 3])).cast("a", :float64).drop("b")
     assert_not_same @df, r
-    assert_equal ["a", "c"], r.variable_names
-    assert_equal ["a", "b"], @df.variable_names   # original unchanged (§3.8)
+    assert_equal ["a", "c"], r.column_names
+    assert_equal ["a", "b"], @df.column_names   # original unchanged (§3.8)
   end
 
   def test_verbs_touch_only_this_frames_membership
     # append returns a new frame; neither the receiver nor its parent changes (§3.8).
     view = @df[0..1]
     r = view.append("extra", CA_INT32([9, 9]))
-    assert_equal ["a", "b", "extra"], r.variable_names
-    assert_equal ["a", "b"], view.variable_names
-    assert_equal ["a", "b"], @df.variable_names
+    assert_equal ["a", "b", "extra"], r.column_names
+    assert_equal ["a", "b"], view.column_names
+    assert_equal ["a", "b"], @df.column_names
   end
 end
 
@@ -900,7 +900,7 @@ class TestCAFrameConvert < Test::Unit::TestCase
     assert_equal 2, e.to_a.size
   end
 
-  # --- to_ca : (nrow, nvar) matrix view (memo §11.9) --------------------
+  # --- to_ca : (nrow, ncol) matrix view (memo §11.9) --------------------
 
   def test_to_ca_is_a_view_over_the_stored_columns
     df = CAFrame.new("x" => CA_FLOAT64([1, 2, 3]), "y" => CA_FLOAT64([4, 5, 6]))
@@ -985,7 +985,7 @@ class TestCAFrameJoinAsof < Test::Unit::TestCase
   def test_asof_is_row_preserving
     j = @obs.join_asof(@radar, on: "time")
     assert_equal 4, j.nrow
-    assert_equal ["time", "t", "dbz"], j.variable_names
+    assert_equal ["time", "t", "dbz"], j.column_names
     assert_equal [10, 20, 30, 40], j["time"].to_a
   end
 
@@ -1066,7 +1066,7 @@ class TestCAFrameToTable < Test::Unit::TestCase
     df = CAFrame.new("i" => CArray.int32(100) { |i| i })
     lines = df.to_table(rows: 4).split("\n")
     assert_equal ["i", "--", "0", "1", ":", "98", "99",
-                  "(100 rows, 1 variable)"],
+                  "(100 rows, 1 column)"],
                  lines.map(&:strip)
   end
 
@@ -1085,7 +1085,7 @@ class TestCAFrameToTable < Test::Unit::TestCase
   def test_inspect_is_the_summary_line_over_a_middle_elided_table
     df = CAFrame.new("i" => CArray.int32(50) { |i| i })
     lines = df.inspect.split("\n")
-    assert_equal "#<CAFrame nrow=50 vars=[i:int32]>", lines[0]
+    assert_equal "#<CAFrame nrow=50 columns=[i:int32]>", lines[0]
     assert_equal 14, lines.size          # summary + header + rule + 8 + ellipsis + 2
     assert_equal ":", lines[11].strip    # elided middle
     assert_equal "48", lines[12].strip   # tail is the last two rows
@@ -1093,8 +1093,8 @@ class TestCAFrameToTable < Test::Unit::TestCase
     assert_nil lines.find { |l| l.include?("rows,") } # no footer, summary has it
   end
 
-  def test_inspect_of_a_frame_with_no_variables_is_the_summary_alone
-    assert_equal "#<CAFrame nrow=0 vars=[]>", CAFrame.new({}).inspect
+  def test_inspect_of_a_frame_with_no_columns_is_the_summary_alone
+    assert_equal "#<CAFrame nrow=0 columns=[]>", CAFrame.new({}).inspect
   end
 
   def test_wide_characters_count_two_cells
@@ -1114,7 +1114,7 @@ class TestCAFrameToTable < Test::Unit::TestCase
     assert_equal "24.466666666666665", df.to_table(precision: nil).split("\n")[2]
   end
 
-  def test_frame_with_no_variables_is_empty_string
+  def test_frame_with_no_columns_is_empty_string
     assert_equal "", CAFrame.new({}).to_table
   end
 end

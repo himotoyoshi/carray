@@ -146,7 +146,7 @@ class CAFrame
   # A text column from_csv reads is a CAString, whichever way the body was
   # read: the string operations (strip!, gsub!, ...) write through to it.
   def self.convert_const_string_columns_to_castring(frame)
-    frame.variable_names.each do |name|
+    frame.column_names.each do |name|
       col = frame[name]
       next unless col.is_a?(CAConstString)
       frame[name] = col.to_string
@@ -199,7 +199,7 @@ class CAFrame
   def self.mask_missing_tokens(frame, missing)
     default, per_column = missing
     per_column.each_key { |name| frame[name] }    # KeyError for a name the file lacks
-    frame.variable_names.each do |name|
+    frame.column_names.each do |name|
       col = frame[name]
       per_column.fetch(name, default).each { |t| col[:eq, t] = UNDEF }
     end
@@ -383,19 +383,19 @@ class CAFrame
 
   # +to_s+ is the whole frame, +inspect+ the middle-elided one -- so +puts df+
   # dumps everything and +p df+ stays a screenful. +inspect+ leads with the
-  # same summary line it always had (nrow, variable data types, index), so the
+  # same summary line it always had (nrow, column data types, index), so the
   # table under it needs no row-count footer.
   def to_s
     to_table(rows: nil)
   end
 
-  # The summary line (nrow, variable data types, index) followed by the
+  # The summary line (nrow, column data types, index) followed by the
   # middle-elided table.
   # @return [String]
   def inspect
     parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
     idx = @index ? " index=#{@axis_name.inspect}" : ""
-    head = "#<CAFrame nrow=#{@nrow} vars=[#{parts.join(', ')}]#{idx}>"
+    head = "#<CAFrame nrow=#{@nrow} columns=[#{parts.join(', ')}]#{idx}>"
     # The table counts the index as a column, so a frame whose only data is its
     # index has one to show.  Gate on the same thing render_table does.
     return head if @columns.empty? && @index.nil?
@@ -438,7 +438,7 @@ class CAFrame
     out << table_row(widths.map { |w| "-" * w }, widths, aligns) << "\n"
     body.each { |cells| out << table_row(cells, widths, aligns) << "\n" }
     if footer && positions.size - positions.count(nil) < @nrow
-      out << "(#{plural(@nrow, 'row')}, #{plural(@columns.size, 'variable')})\n"
+      out << "(#{plural(@nrow, 'row')}, #{plural(@columns.size, 'column')})\n"
     end
     out
   end

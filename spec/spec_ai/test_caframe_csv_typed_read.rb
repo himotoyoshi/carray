@@ -18,9 +18,9 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
   end
 
   def describe(df)
-    [:ok, df.variable_names, df.variables.map(&:class), df.variables.map(&:data_type),
-     df.variables.map { |c| c.to_a.map { |v| v.is_a?(Float) && v.nan? ? :nan : v } },
-     df.variables.map { |c| c.is_masked.to_a }]
+    [:ok, df.column_names, df.columns.map(&:class), df.columns.map(&:data_type),
+     df.columns.map { |c| c.to_a.map { |v| v.is_a?(Float) && v.nan? ? :nan : v } },
+     df.columns.map { |c| c.is_masked.to_a }]
   end
 
   def read(text, **opts)
@@ -95,7 +95,7 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     types = { "a" => :int32, "b" => :float64 }
     assert_equal read_then_cast(text, types), read(text, types: types)
     df = CAFrame.from_csv(StringIO.new(text), types: types)
-    assert_equal [:int32, :float64, :object], df.variables.map(&:data_type)
+    assert_equal [:int32, :float64, :object], df.columns.map(&:data_type)
     assert_kind_of CAString, df["c"]
   end
 

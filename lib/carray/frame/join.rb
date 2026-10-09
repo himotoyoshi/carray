@@ -56,7 +56,7 @@ class CAFrame
     join_by_addr(other, on, addr, plan)
   end
 
-  # Conform every variable to an externally supplied reference key set (the
+  # Conform every column to an externally supplied reference key set (the
   # asymmetric sibling of +join+; pandas +reindex+). Given a +reference+ array
   # of key values, each column is gathered onto it by exact key match
   # (+locate_addr+): the aligned key column (or index) becomes the reference
@@ -80,7 +80,7 @@ class CAFrame
     addr = ref.locate_addr(on_index ? @index : self[key])
 
     cols = {}
-    variable_names.each { |name| cols[name] = project_rows(self[name], addr) }
+    column_names.each { |name| cols[name] = project_rows(self[name], addr) }
     if on_index
       CAFrame.new(cols, axis_name: key, index: ref)
     else
@@ -90,7 +90,7 @@ class CAFrame
     end
   end
 
-  # Paste +other+'s variables beside this frame's, matched by **row position**
+  # Paste +other+'s columns beside this frame's, matched by **row position**
   # (memo §12-C) — a keyless column merge (the column-direction counterpart of
   # the row-stacking +concat+, and the positional counterpart of the key-aligned
   # +join+; named after the UNIX +paste+). Both frames must have the same
@@ -137,7 +137,7 @@ class CAFrame
 
     # Detect columns that appear in 2+ frames (collisions across the K inputs).
     name_count = Hash.new(0)
-    frames.each { |f| f.variable_names.each { |name| name_count[name] += 1 } }
+    frames.each { |f| f.column_names.each { |name| name_count[name] += 1 } }
     collisions = name_count.select { |_, n| n > 1 }.keys
 
     if collisions.any?
@@ -160,7 +160,7 @@ class CAFrame
 
     cols = {}
     frames.each_with_index do |f, i|
-      f.variable_names.each do |name|
+      f.column_names.each do |name|
         key = collisions.include?(name) ? "#{name}#{suffixes[i]}" : name
         if cols.key?(key)
           raise ArgumentError,
@@ -174,7 +174,7 @@ class CAFrame
   end
 
   private def join_name_plan(other, on, suffixes)
-    collisions = (variable_names & other.variable_names) - [on]
+    collisions = (column_names & other.column_names) - [on]
     return { collisions: [], lsuf: nil, rsuf: nil } if collisions.empty?
 
     if suffixes == false
@@ -208,8 +208,8 @@ class CAFrame
 
   private def join_by_addr(other, on, addr, plan)
     cols = {}
-    variable_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
-    other.variable_names.each do |name|
+    column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
+    other.column_names.each do |name|
       next if name == on
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))
     end
@@ -219,14 +219,14 @@ class CAFrame
   private def join_align(other, on, lkey, rkey, how, plan)
     common, a_idx, b_idx = CArray.align_addr(lkey, rkey, join: how)
     cols = {}
-    variable_names.each do |name|
+    column_names.each do |name|
       if name == on
         put_join_column(cols, on, common)
       else
         put_join_column(cols, join_name(name, plan[:lsuf], plan), project_rows(self[name], a_idx))
       end
     end
-    other.variable_names.each do |name|
+    other.column_names.each do |name|
       next if name == on
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], b_idx))
     end

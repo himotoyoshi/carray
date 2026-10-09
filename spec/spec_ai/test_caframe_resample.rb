@@ -71,13 +71,13 @@ class TestCAFrameResample < Test::Unit::TestCase
   end
 
   def test_the_time_column_is_not_a_result_column
-    assert_not_include @df.resample("time", "1 hour").mean.variable_names, "time"
+    assert_not_include @df.resample("time", "1 hour").mean.column_names, "time"
   end
 
   def test_the_index_as_the_time_key
     df = @df.set_index("time")
     r = df.resample("time", "1 hour").mean
-    assert_equal ["temp", "rain"], r.variable_names
+    assert_equal ["temp", "rain"], r.column_names
     assert_equal [1.5, 3.0, 4.5], r["temp"].to_a
   end
 

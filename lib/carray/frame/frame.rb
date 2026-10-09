@@ -480,20 +480,20 @@ class CAFrame
   # --- metadata readers (memo §13.2) ------------------------------------
   # Each returns a fresh object; the live columns Hash is never exposed.
 
-  # Variable (column) names in column order.  Returns +Array<String>+.
-  def variable_names
+  # Column names in column order.  Returns +Array<String>+.
+  def column_names
     @columns.keys
   end
 
-  # Variables (raw column CArrays) in column order.  Returns
-  # +Array<CArray>+.  Equivalent to +df[*variable_names]+ but built
-  # directly from the columns Hash.
-  def variables
+  # The columns (raw CArrays) in column order.  Returns +Array<CArray>+.
+  # Equivalent to +df[*column_names]+ but built directly from the columns
+  # Hash.
+  def columns
     @columns.values
   end
 
-  # Number of variables (columns).
-  def nvar
+  # Number of columns.
+  def ncol
     @columns.size
   end
 
@@ -598,10 +598,10 @@ class CAFrame
   # promote and the row count shifts by other.nrow - span.
   private def splice_rows(selector, other)
     lo, hi = contiguous_span(selector)
-    unless other.variable_names.sort == variable_names.sort
+    unless other.column_names.sort == column_names.sort
       raise ArgumentError,
-            "splice frame has columns #{other.variable_names.inspect}, " \
-            "expected the same set as #{variable_names.inspect}"
+            "splice frame has columns #{other.column_names.inspect}, " \
+            "expected the same set as #{column_names.inspect}"
     end
     new_cols = {}
     @columns.each do |name, col|

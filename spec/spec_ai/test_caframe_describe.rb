@@ -23,9 +23,9 @@ class TestCAFrameDescribe < Test::Unit::TestCase
   end
 
   def test_one_row_per_column_indexed_by_name
-    assert_equal @df.variable_names, @d.index.to_a
+    assert_equal @df.column_names, @d.index.to_a
     assert_equal "column", @d.axis_name
-    assert_equal %w[type count masked unique min max mean stddev], @d.variable_names
+    assert_equal %w[type count masked unique min max mean stddev], @d.column_names
   end
 
   def test_numbers

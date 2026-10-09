@@ -62,7 +62,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_default_type_alone
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT16([3, 4]))
     df.cast(default: :float64)
-    assert_equal [:float64, :float64], df.variable_names.map { |n| df[n].data_type }
+    assert_equal [:float64, :float64], df.column_names.map { |n| df[n].data_type }
   end
 
   def test_a_map_given_positionally
@@ -114,11 +114,11 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
 
   def test_a_raise_leaves_the_frame_as_it_was
     df = frame
-    before = df.variable_names.to_h { |n| [n, df[n]] }
+    before = df.column_names.to_h { |n| [n, df[n]] }
     assert_raise(CAFrame::UnreadableColumn) do
       df.cast({ default: :float64 }, on_error: :raise)    # "tokyo" does not read
     end
-    df.variable_names.each { |n| assert_same before[n], df[n] }
+    df.column_names.each { |n| assert_same before[n], df[n] }
   end
 
   def test_three_existing_shapes

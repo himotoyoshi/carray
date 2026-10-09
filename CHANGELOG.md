@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CAFrame` names its columns "columns" throughout:
+  `variable_names` is now `column_names`, `variables` is `columns`, `nvar` is
+  `ncol`, and `inspect` shows `columns=[...]` in place of `vars=[...]`. The old
+  names are gone; rename the calls.
+
 - Change: the `sum` / `mean` / `min` / `max` of a `CAFrame` group now take
   every one-dimensional column whose type defines the reduction, instead of
   leaving out object, boolean and fixlen columns by data type. A time column

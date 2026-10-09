@@ -65,7 +65,7 @@ df = CAFrame.new(
   "wind" => CA_FLOAT64([[1, 2], [3, 4], [5, 6]]), # (3, 2) vector column
 )
 df.nrow   # => 3
-df.nvar   # => 2
+df.ncol   # => 2
 df["wind"].shape  # => [3, 2]
 ```
 
@@ -95,8 +95,8 @@ delete the index either — it *demotes* it to an ordinary column at the front:
 df = CAFrame.new({ "a" => CA_INT32([1, 2, 3]) },
                  index: CA_INT32([10, 20, 30]), axis_name: "t")
 df.drop("a").nrow           # => 3   -- the index still holds the row count
-df.drop("a").nvar           # => 0
-df.reset_index.variable_names   # => ["t", "a"]   -- the index became a column
+df.drop("a").ncol           # => 0
+df.reset_index.column_names   # => ["t", "a"]   -- the index became a column
 ```
 
 When the last witness goes — no columns **and** no index — there is no row count
@@ -807,20 +807,20 @@ CArrays, `df.select("a", "b")` keeps a frame:
 
 ```ruby
 sub = df.select("station", "temp")   # => CAFrame with two columns
-sub.variable_names                        # => ["station", "temp"]
+sub.column_names                        # => ["station", "temp"]
 ```
 
 `select` **never collapses** — one name is still a frame (unlike `df["a"]`):
 
 ```ruby
-df.select("temp").variable_names          # => ["temp"]   (a frame, not a CArray)
+df.select("temp").column_names          # => ["temp"]   (a frame, not a CArray)
 ```
 
 Because the requested order becomes the new frame's column order, `select`
 doubles as a **column reorder**:
 
 ```ruby
-df.select("wind", "temp", "station").variable_names
+df.select("wind", "temp", "station").column_names
 # => ["wind", "temp", "station"]
 ```
 
@@ -937,11 +937,11 @@ afterwards, is the way to pin them.
 > keep it in a value the format can carry (an empty string, a sentinel) rather
 > than in `nil`.
 
-If a 2-D CArray of shape `(nrow, nvar)` is what you want, `to_ca` hands
-one over — a **view**, one column per variable in column order:
+If a 2-D CArray of shape `(nrow, ncol)` is what you want, `to_ca` hands
+one over — a **view**, one per column in column order:
 
 ```ruby
-m = df.to_ca                # CAStack view (nrow, nvar), no data copied
+m = df.to_ca                # CAStack view (nrow, ncol), no data copied
 m[0, 1] = 99.0              # writes flow back into the column
 owned = df.to_ca.copy       # independent, owned matrix
 ```
@@ -965,7 +965,7 @@ df.promote(:object).to_ca   # every column at its surface values -> object matri
 df.promote.to_ca            # already-common type; also makes writable: true pass
 ```
 
-`CArray.tabulate(df.variables)` is the eager sibling: it builds an owned
+`CArray.tabulate(df.columns)` is the eager sibling: it builds an owned
 table directly and also accepts 2-D column blocks.
 
 ```ruby
@@ -1040,7 +1040,7 @@ puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
 ```
 
 ```
-#<CAFrame nrow=1286 vars=[name:object, lat:float64, temp:int32] index="id">
+#<CAFrame nrow=1286 columns=[name:object, lat:float64, temp:int32] index="id">
   id  name              lat  temp
 ----  ----------  ---------  ----
    0  観測点0          45.0     0
@@ -1135,8 +1135,8 @@ followed by `set_index("b")`:
 ```ruby
 df.set_index("a")
 df.set_index("b")
-df.variable_names   # => ["a", "v"]   -- "a" is a column again, not lost
-df.reset_index      # => axis_name "obs" again, variable_names ["b", "a", "v"]
+df.column_names   # => ["a", "v"]   -- "a" is a column again, not lost
+df.reset_index      # => axis_name "obs" again, column_names ["b", "a", "v"]
 ```
 
 ---
@@ -1558,7 +1558,7 @@ obs.join_asof(radar, on: "time", direction: :floor, tolerance: 600)
 ### `align` — conform to a reference key set
 
 `align(key, reference)` is the **asymmetric sibling of `join`** (pandas
-`reindex`): it conforms every variable to a **caller-supplied reference** array
+`reindex`): it conforms every column to a **caller-supplied reference** array
 of key values. Each column is gathered onto the reference by exact key match;
 the aligned key column (or index) *becomes* the reference, and a reference key
 absent from the source comes back `UNDEF` in every other column.
@@ -1626,7 +1626,7 @@ possible future opt-in, kept out to stay explicit.
 
 ### `paste` — merge columns by position
 
-`paste(other)` puts `other`'s variables **beside** this frame's, matched by
+`paste(other)` puts `other`'s columns **beside** this frame's, matched by
 **row position** — a keyless column merge (the column-direction counterpart of
 the row-stacking `meld` / `concatenate`, named after the UNIX `paste`; the positional
 counterpart of the key-aligned `join`). Both frames must have the same `nrow`;
@@ -1664,7 +1664,7 @@ long = CAFrame.new(
 )
 
 wide = long.pivot(index: "time", columns: "station", values: "temp")
-wide.variable_names   # => ["osaka", "tokyo"]
+wide.column_names   # => ["osaka", "tokyo"]
 wide.index.to_a       # => [1, 2, 3]
 wide["osaka"].to_a    # => [11.0, 21.0, UNDEF]
 wide["tokyo"].to_a    # => [10.0, 20.0, 30.0]
@@ -1743,7 +1743,7 @@ wide = CAFrame.new("time"  => CA_INT32([1, 2, 3]),
                    "osaka" => CA_FLOAT64([11, 21, 31]))
 
 long = wide.melt(id: "time")
-long.variable_names     # => ["time", "variable", "value"]
+long.column_names     # => ["time", "variable", "value"]
 long["variable"].to_a   # => ["tokyo", "tokyo", "tokyo", "osaka", "osaka", "osaka"]
 long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
 ```
@@ -1771,22 +1771,22 @@ exposed.
 
 | reader | returns |
 |---|---|
-| `variable_names` | `Array<String>` of column names, in column order |
-| `variables` | `Array<CArray>` of the stored columns themselves, in column order |
-| `nvar` | number of columns |
+| `column_names` | `Array<String>` of column names, in column order |
+| `columns` | `Array<CArray>` of the stored columns themselves, in column order |
+| `ncol` | number of columns |
 | `nrow` | number of rows (axis-0 length `N`) — backed by a column, or by the index when the frame has no columns |
 | `data_types` | `Hash<String, Symbol>` of `name => data_type` |
 | `axis_name` | row-axis name (String) |
 | `index` | the index `CArray`, or `nil` |
 
 ```ruby
-df.variable_names        # => ["station", "temp", "wind"]
+df.column_names        # => ["station", "temp", "wind"]
 df.data_types       # => { "station" => :object, "temp" => :float64, "wind" => :float64 }
 ```
 
-Positional / pattern column selection composes on `variables` rather than
-having its own API — e.g. `df.select(*df.variable_names[1..])` or
-`df.select(*df.variable_names.grep(/temp/))`.
+Positional / pattern column selection composes on `columns` rather than
+having its own API — e.g. `df.select(*df.column_names[1..])` or
+`df.select(*df.column_names.grep(/temp/))`.
 
 ---
 
@@ -1828,7 +1828,7 @@ Frame view/copy semantics follow CArray exactly:
 | `grouped.table { \|sub\| }` | each `sub` is a **view-frame** of that group's rows — writing it reaches the grouped frame (§9) |
 | `df.each_row` | a Hash of **raw cells** per row: a scalar cell is a Ruby value, an N-D cell is a **live view** of that row's slice (§7) |
 | `df.to_records` | plain Ruby Hashes — values normalized (`CArray` -> `Array`, UNDEF -> `nil`), so independent of the frame (§7) |
-| `df.to_ca` | a **view** — a `CAStack` of shape `(nrow, nvar)` over the stored columns; writes flow back, `copy` for an owned matrix |
+| `df.to_ca` | a **view** — a `CAStack` of shape `(nrow, ncol)` over the stored columns; writes flow back, `copy` for an owned matrix |
 
 Because view-frames share storage, mutating a view writes through to the
 parent — the same aliasing rule as CArray views. When you need an independent

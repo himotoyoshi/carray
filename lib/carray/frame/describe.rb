@@ -33,7 +33,7 @@ class CAFrame
   # @param names [Array<String>] the columns to summarize; default all.
   # @return [CAFrame] a new frame with one row per column.
   def describe(*names)
-    names = names.empty? ? variable_names : names.map(&:to_s)
+    names = names.empty? ? column_names : names.map(&:to_s)
     rows = names.map { |name| describe_column(self[name]) }
     stats = %w[type count masked unique min max mean stddev]
     cols = stats.to_h do |stat|

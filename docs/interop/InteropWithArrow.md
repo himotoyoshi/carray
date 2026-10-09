@@ -187,7 +187,7 @@ require "carray/frame"
 
 emb = ndarray_from_arrow(fsl)            # shape [M, 3]
 f   = CAFrame.new("emb" => emb)
-f                                        # => #<CAFrame nrow=M vars=[emb:float64[3]]>
+f                                        # => #<CAFrame nrow=M columns=[emb:float64[3]]>
 f["emb"][0, nil]                         # row 0's whole vector
 ```
 

@@ -37,7 +37,7 @@ class CAFrame
     frames = frames.flatten
     check_concat_inputs(frames, verb: "meld")
     first = frames.first
-    names = first.variable_names
+    names = first.column_names
     check_column_sets(frames, names, verb: "meld")
     cols = {}
     names.each do |name|
@@ -63,7 +63,7 @@ class CAFrame
     frames = frames.flatten
     check_concat_inputs(frames, verb: "concatenate")
     first = frames.first
-    names = first.variable_names
+    names = first.column_names
     check_column_sets(frames, names, verb: "concatenate")
     cols = {}
     names.each do |name|
@@ -86,9 +86,9 @@ class CAFrame
     expected = names.sort
     frames.each_with_index do |f, i|
       next if i.zero?
-      if f.variable_names.sort != expected
+      if f.column_names.sort != expected
         raise ArgumentError,
-              "#{verb}: frame #{i} has columns #{f.variable_names.inspect}, " \
+              "#{verb}: frame #{i} has columns #{f.column_names.inspect}, " \
               "expected the same set as #{names.inspect}"
       end
     end

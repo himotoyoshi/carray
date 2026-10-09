@@ -30,7 +30,7 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
   def test_missing_key_is_union_and_nil
     recs = [{ "a" => 1, "b" => 2 }, { "a" => 3 }]
     df = CAFrame.from_records(recs)
-    assert_equal ["a", "b"], df.variable_names            # union, first-appearance order
+    assert_equal ["a", "b"], df.column_names            # union, first-appearance order
     assert_equal 2, df["b"][0]
     assert_equal UNDEF, df["b"][1]                   # missing -> UNDEF
   end
@@ -88,14 +88,14 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
   def test_symbol_keys_stringified
     recs = [{ temp: 1.0 }, { temp: 2.0 }]
     df = CAFrame.from_records(recs)
-    assert_equal ["temp"], df.variable_names
+    assert_equal ["temp"], df.column_names
     assert_equal :float64, df["temp"].data_type
   end
 
   def test_empty_records
     df = CAFrame.from_records([])
     assert_equal 0, df.nrow
-    assert_equal [], df.variable_names
+    assert_equal [], df.column_names
   end
 
   def test_non_array_raises

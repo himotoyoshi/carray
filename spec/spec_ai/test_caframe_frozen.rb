@@ -16,7 +16,7 @@ class TestCAFrameFrozen < Test::Unit::TestCase
     assert_raise(FrozenError) { d["a"] = UNDEF }
     assert_raise(FrozenError) { d[0] = UNDEF }
     assert_raise(FrozenError) { d[0] = nil }
-    assert_equal ["a", "s"], d.variable_names
+    assert_equal ["a", "s"], d.column_names
     assert_equal [0, 1, 2], d["a"].to_a
   end
 
@@ -35,10 +35,10 @@ class TestCAFrameFrozen < Test::Unit::TestCase
 
   def test_verbs_that_return_a_new_frame_still_work
     d = frozen_frame
-    assert_equal ["a", "s", "c"], d.append("c", CArray.int32(3)).variable_names
+    assert_equal ["a", "s", "c"], d.append("c", CArray.int32(3)).column_names
     x = d.dup
     x["c"] = CArray.int32(3)
-    assert_equal ["a", "s", "c"], x.variable_names
+    assert_equal ["a", "s", "c"], x.column_names
   end
 
 end

@@ -250,7 +250,7 @@ class GroupedFrame
 
   private def reduce_numeric(reduction, **keywords)
     cols = {}
-    @frame.variable_names.each do |name|
+    @frame.column_names.each do |name|
       # A key column is the index here, not a result column.
       next if @key_names.include?(name)
       col = @frame[name]

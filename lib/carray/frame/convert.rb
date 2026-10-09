@@ -23,7 +23,7 @@ class CAFrame
   end
 
   # Hand the frame over as a CArray with the minimum work (memo §11.9): a
-  # 2-D **view** of shape (nrow, nvar), one column per variable in column
+  # 2-D **view** of shape (nrow, ncol), one per column in column
   # order (§12-C). Nothing is materialised — the result is a +CAStack+ over
   # the stored columns, so reads gather from them and writes flow back
   # (§3.6). Call +copy+ on it for an independent, owned matrix; +CArray.tabulate+

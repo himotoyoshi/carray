@@ -10,7 +10,7 @@ class TestCAFrameCSVWhitespaceSep < Test::Unit::TestCase
 
   def cols(text, **opts)
     df = CAFrame.from_csv(StringIO.new(text), **opts)
-    df.variable_names.map { |n| df[n].to_a }
+    df.column_names.map { |n| df[n].to_a }
   end
 
   def test_space_separator_keeps_an_empty_field
@@ -31,7 +31,7 @@ class TestCAFrameCSVWhitespaceSep < Test::Unit::TestCase
     df = CAFrame.new("a" => a, "b" => CA_OBJECT(%w[2 y]))
     text = df.to_csv(sep: " ").encode("CP932")
     back = CAFrame.from_csv(StringIO.new(text), sep: " ")
-    assert_equal [[UNDEF, "x"], ["2", "y"]], back.variable_names.map { |n| back[n].to_a.map { |v| v == UNDEF ? v : v.encode("UTF-8") } }
+    assert_equal [[UNDEF, "x"], ["2", "y"]], back.column_names.map { |n| back[n].to_a.map { |v| v == UNDEF ? v : v.encode("UTF-8") } }
   end
 
   def test_strip_does_not_eat_a_tab_separator

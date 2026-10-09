@@ -354,7 +354,7 @@ class TestLocateNearestAddrDegenerate < Test::Unit::TestCase
     right = CAFrame.new("k" => CA_INT32([1, 7]), "w" => CA_FLOAT64([1, 2]))
     r = left.join_asof(right, on: "k")
     assert_equal 0, r.nrow
-    assert_equal %w[k v w], r.variable_names
+    assert_equal %w[k v w], r.column_names
   end
 
   def test_join_asof_with_a_masked_reference_key

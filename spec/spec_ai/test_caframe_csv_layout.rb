@@ -14,7 +14,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
   end
 
   def cells(df)
-    [df.variable_names, *df.variables.map(&:to_a)]
+    [df.column_names, *df.columns.map(&:to_a)]
   end
 
   # The same input read by the Ruby tokenizer alone.
@@ -152,7 +152,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     assert_raise(ArgumentError) { read(wide, columns: []) }
     assert_raise(ArgumentError) { read(wide, columns: [-1]) }
     assert_raise(KeyError) { read(wide, columns: %w[a], types: { "b" => :int32 }) }
-    assert_equal %w[a], read(wide, columns: %w[a], types: { "a" => :int32 }).variable_names
+    assert_equal %w[a], read(wide, columns: %w[a], types: { "a" => :int32 }).column_names
     assert_equal [%w[c a], [3], [1]], cells(read(wide, columns: %w[c a], types: { "a" => :int32, "c" => :int32 }))
   end
 

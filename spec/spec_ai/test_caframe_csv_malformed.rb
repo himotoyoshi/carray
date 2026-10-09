@@ -66,7 +66,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
 
   def test_column_names_rename_a_repeated_header
     df = read("a,a\n1,2\n") { |r| r.skip 1; r.column_names "a", "a2"; r.data }
-    assert_equal [["1"], ["2"]], df.variables.map(&:to_a)
+    assert_equal [["1"], ["2"]], df.columns.map(&:to_a)
   end
 
   def test_repeated_column_names_raise
@@ -89,7 +89,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   def test_a_space_before_an_opening_quote
     assert_raise(MALFORMED) { read(%Q{a,b\n "x",2\n}) }
     df = read(%Q{a,b\n "x" , 2\n}, strip: true)
-    assert_equal [["x"], ["2"]], df.variables.map(&:to_a)
+    assert_equal [["x"], ["2"]], df.columns.map(&:to_a)
   end
 
   # A one-line record with quotes is read by splitting at the separator;
@@ -101,7 +101,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     assert_equal [" \"q\" ", "a,,b"], df["c"].to_a
     assert_equal [UNDEF, "1"], df["d"].to_a
     df = read(%Q{a::b\n"x::y"::"z"\n}, sep: "::")
-    assert_equal [["x::y"], ["z"]], df.variables.map(&:to_a)
+    assert_equal [["x::y"], ["z"]], df.columns.map(&:to_a)
     assert_raise(MALFORMED) { read(%Q{a,b\n"x,y"z,1\n}) }
     assert_raise(MALFORMED) { read(%Q{a,b\nx"y,1\n}) }
   end
@@ -113,7 +113,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     df = read("a,b\n\"q\",x\ry\n")
     assert_equal ["x\ry"], df["b"].to_a
     df = read("a,b\n\"x\",2")
-    assert_equal [["x"], ["2"]], df.variables.map(&:to_a)
+    assert_equal [["x"], ["2"]], df.columns.map(&:to_a)
   end
 
   def test_an_unterminated_quoted_field_names_the_line_it_opens_on
@@ -203,12 +203,12 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # columns; it is a blank line there, as an empty one is.
   def test_a_line_of_spaces_is_blank_in_a_file_of_several_columns
     df = read("a,b\n1,2\n  \n\t\n3,4\n")
-    assert_equal [["1", "3"], ["2", "4"]], df.variables.map(&:to_a)
+    assert_equal [["1", "3"], ["2", "4"]], df.columns.map(&:to_a)
   end
 
   def test_a_line_of_separators_is_a_row
     df = read("a\tb\n1\t2\n\t\n", sep: "\t")
-    assert_equal [["1", UNDEF], ["2", UNDEF]], df.variables.map(&:to_a)
+    assert_equal [["1", UNDEF], ["2", UNDEF]], df.columns.map(&:to_a)
   end
 
   def test_spaces_are_a_value_in_a_file_of_one_column
@@ -222,7 +222,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     df = read("a\n\nc\n") { |r| r.data }
     assert_equal ["a", UNDEF, "c"], df["c0"].to_a
     df = read("a,b\n\nc,d\n  \n") { |r| r.data }
-    assert_equal [["a", "c"], ["b", "d"]], df.variables.map(&:to_a)
+    assert_equal [["a", "c"], ["b", "d"]], df.columns.map(&:to_a)
   end
 
   # A blank last line of a one-column file is a masked last row, since that
@@ -240,7 +240,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     [" ", "\t", "  \t"].each do |name|
       df = CAFrame.new(name => CA_INT32([1, 2, 3]))
       back = read(df.to_csv)
-      assert_equal [name], back.variable_names, name.inspect
+      assert_equal [name], back.column_names, name.inspect
       assert_equal %w[1 2 3], back[name].to_a
     end
   end
@@ -263,10 +263,10 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   def test_an_input_with_no_record_is_a_frame_without_columns
     ["", "\n", "\n\n"].each do |text|
       df = read(text)
-      assert_equal [0, []], [df.nrow, df.variable_names], text.inspect
+      assert_equal [0, []], [df.nrow, df.column_names], text.inspect
     end
     df = read(CAFrame.new({}).to_csv)
-    assert_equal [0, []], [df.nrow, df.variable_names]
+    assert_equal [0, []], [df.nrow, df.column_names]
   end
 
   # Past skipped lines, or for a named secondary header, a missing header is

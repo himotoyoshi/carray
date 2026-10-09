@@ -14,7 +14,7 @@ class TestCAFramePivot < Test::Unit::TestCase
 
   def test_pivot_places_each_value_at_its_pair
     wide = @long.pivot(index: "time", columns: "station", values: "temp")
-    assert_equal ["osaka", "tokyo"], wide.variable_names
+    assert_equal ["osaka", "tokyo"], wide.column_names
     assert_equal [1, 2, 3], wide.index.to_a
     assert_equal "time", wide.axis_name
     assert_equal [10.0, 20.0, 30.0], wide["tokyo"].to_a
@@ -114,14 +114,14 @@ class TestCAFramePivot < Test::Unit::TestCase
   def test_pivot_spreads_several_value_columns
     @long["rh"] = CA_FLOAT64([50, 40, 41, 51, 60])
     wide = @long.pivot(index: "time", columns: "station", values: ["temp", "rh"])
-    assert_equal %w[temp_osaka temp_tokyo rh_osaka rh_tokyo], wide.variable_names
+    assert_equal %w[temp_osaka temp_tokyo rh_osaka rh_tokyo], wide.column_names
     assert_equal [10.0, 20.0, 30.0], wide["temp_tokyo"].to_a
     assert_equal [41.0, 51.0, UNDEF], wide["rh_osaka"].to_a
   end
 
   def test_pivot_names_a_single_value_in_an_array
     wide = @long.pivot(index: "time", columns: "station", values: ["temp"])
-    assert_equal %w[temp_osaka temp_tokyo], wide.variable_names
+    assert_equal %w[temp_osaka temp_tokyo], wide.column_names
   end
 
   def test_pivot_aggregates_each_value_column
@@ -146,7 +146,7 @@ class TestCAFramePivot < Test::Unit::TestCase
     long = CAFrame.new("t" => CA_INT32([0, 0, 1]), "id" => CA_INT32([7, 9, 7]),
                        "v" => CA_FLOAT64([1, 2, 3]))
     wide = long.pivot(index: "t", columns: "id", values: "v")
-    assert_equal ["7", "9"], wide.variable_names
+    assert_equal ["7", "9"], wide.column_names
   end
 
   def test_pivot_raises_when_labels_collide_as_names
@@ -254,7 +254,7 @@ class TestCAFrameMelt < Test::Unit::TestCase
 
   def test_melt_stacks_value_columns
     long = @wide.melt(id: "time")
-    assert_equal ["time", "variable", "value"], long.variable_names
+    assert_equal ["time", "variable", "value"], long.column_names
     assert_equal 6, long.nrow
     assert_equal [1, 2, 3, 1, 2, 3], long["time"].to_a
     assert_equal %w[tokyo tokyo tokyo osaka osaka osaka], long["variable"].to_a
@@ -264,13 +264,13 @@ class TestCAFrameMelt < Test::Unit::TestCase
   def test_melt_takes_value_columns_and_names
     long = @wide.melt(id: "time", value_columns: ["osaka"],
                       var_name: "station", value_name: "temp")
-    assert_equal ["time", "station", "temp"], long.variable_names
+    assert_equal ["time", "station", "temp"], long.column_names
     assert_equal [11.0, 21.0, 31.0], long["temp"].to_a
   end
 
   def test_melt_carries_the_index_as_an_id_column
     long = @wide.set_index("time").melt
-    assert_equal ["time", "variable", "value"], long.variable_names
+    assert_equal ["time", "variable", "value"], long.column_names
     assert_equal [1, 2, 3, 1, 2, 3], long["time"].to_a
   end
 

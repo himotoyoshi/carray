@@ -196,7 +196,7 @@ class CAFrame
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
     ids = Array(id).map(&:to_s)
     ids.each { |name| self[name] }
-    vars = (value_columns || variable_names - ids).map(&:to_s)
+    vars = (value_columns || column_names - ids).map(&:to_s)
     raise ArgumentError, "melt: no columns to melt" if vars.empty?
     overlap = vars & ids
     unless overlap.empty?

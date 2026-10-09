@@ -13,8 +13,8 @@ class TestCAFrameConstruction < Test::Unit::TestCase
   def test_bare_inline_hash
     df = CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
     assert_equal 3, df.nrow
-    assert_equal 2, df.nvar
-    assert_equal ["a", "b"], df.variable_names
+    assert_equal 2, df.ncol
+    assert_equal ["a", "b"], df.column_names
   end
 
   def test_explicit_hash_with_options
@@ -34,7 +34,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     # An explicit column hash has no option ambiguity; symbol keys become
     # strings so the internal Hash is uniformly string-keyed.
     df = CAFrame.new({ a: CA_INT32([1, 2]) })
-    assert_equal ["a"], df.variable_names
+    assert_equal ["a"], df.column_names
     assert_equal [1, 2], df["a"].to_a
   end
 
@@ -144,12 +144,12 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
   def test_rebinding_a_name_keeps_the_column_order
     @df["a"] = CA_FLOAT64([9, 9, 9])
     assert_equal [9.0, 9.0, 9.0], @df["a"].to_a
-    assert_equal ["a", "b"], @df.variable_names
+    assert_equal ["a", "b"], @df.column_names
   end
 
   def test_a_new_name_is_added_in_place
     @df["c"] = CA_INT32([7, 8, 9])
-    assert_equal ["a", "b", "c"], @df.variable_names
+    assert_equal ["a", "b", "c"], @df.column_names
     assert_equal [7, 8, 9], @df["c"].to_a
   end
 
@@ -183,14 +183,14 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
 
   def test_nil_deletes_the_column
     @df["a"] = nil
-    assert_equal ["b"], @df.variable_names
+    assert_equal ["b"], @df.column_names
     assert_raise(KeyError) { @df["zzz"] = nil }
   end
 
   def test_deleting_every_column_releases_the_row_count
     @df["a"] = nil
     @df["b"] = nil
-    assert_equal 0, @df.nvar
+    assert_equal 0, @df.ncol
     assert_equal 0, @df.nrow
     @df["c"] = CA_INT32([1, 2])     # the frame is free to take a new N
     assert_equal 2, @df.nrow
@@ -208,7 +208,7 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
     df = CAFrame.new
     df["a"] = CA_FLOAT64([1, 2, 3])
     assert_equal 3, df.nrow
-    assert_equal ["a"], df.variable_names
+    assert_equal ["a"], df.column_names
   end
 
   def test_the_index_name_is_not_a_column
@@ -220,8 +220,8 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
   def test_membership_stays_local_to_this_frame
     view = @df[0..1]
     view["c"] = CA_INT32([1, 2])
-    assert_equal ["a", "b", "c"], view.variable_names
-    assert_equal ["a", "b"], @df.variable_names
+    assert_equal ["a", "b", "c"], view.column_names
+    assert_equal ["a", "b"], @df.column_names
   end
 
   def test_more_than_one_key_is_refused
@@ -249,7 +249,7 @@ class TestCAFrameSelect < Test::Unit::TestCase
   def test_select_returns_subset_frame
     sub = @df.select("temp", "wind")
     assert_kind_of CAFrame, sub
-    assert_equal ["temp", "wind"], sub.variable_names
+    assert_equal ["temp", "wind"], sub.column_names
     assert_equal 3, sub.nrow
   end
 
@@ -257,7 +257,7 @@ class TestCAFrameSelect < Test::Unit::TestCase
     # select never collapses (unlike df[...]); one name is still a frame.
     sub = @df.select("temp")
     assert_kind_of CAFrame, sub
-    assert_equal ["temp"], sub.variable_names
+    assert_equal ["temp"], sub.column_names
   end
 
   def test_select_columns_are_aliases
@@ -270,7 +270,7 @@ class TestCAFrameSelect < Test::Unit::TestCase
   def test_select_chains_with_filter
     sub = @df.select("station", "temp").filter { |f| f["temp"] > 20 }
     assert_kind_of CAFrame, sub
-    assert_equal ["station", "temp"], sub.variable_names
+    assert_equal ["station", "temp"], sub.column_names
     assert_equal ["tokyo", "osaka"], sub["station"].to_a
     assert_equal 2, sub.nrow
   end
@@ -661,10 +661,10 @@ class TestCAFrameCopyAndMetadata < Test::Unit::TestCase
     assert_equal 1, @df["a"][0]
   end
 
-  def test_variables_returns_fresh_array
-    v = @df.variable_names
+  def test_columns_returns_fresh_array
+    v = @df.column_names
     v << "sneaky"
-    assert_equal ["a", "b"], @df.variable_names
+    assert_equal ["a", "b"], @df.column_names
   end
 
   def test_data_types
@@ -673,7 +673,7 @@ class TestCAFrameCopyAndMetadata < Test::Unit::TestCase
 
   def test_nrow_nvar
     assert_equal 3, @df.nrow
-    assert_equal 2, @df.nvar
+    assert_equal 2, @df.ncol
   end
 end
 
@@ -683,7 +683,7 @@ class TestCAFrameIndex < Test::Unit::TestCase
     di = df.set_index("t")
     assert_equal "t", di.axis_name
     assert_equal [1, 2, 3], di.index.to_a
-    assert_equal ["v"], di.variable_names
+    assert_equal ["v"], di.column_names
   end
 
   def test_set_index_missing_column_raises
@@ -695,7 +695,7 @@ class TestCAFrameIndex < Test::Unit::TestCase
     df = CAFrame.new("t" => CA_INT32([1, 2]), "v" => CA_FLOAT64([9, 8])).set_index("t")
     r = df.reset_index
     assert_nil r.index
-    assert_equal ["t", "v"], r.variable_names
+    assert_equal ["t", "v"], r.column_names
   end
 
   def test_index_stays_1d_with_nd_columns
@@ -740,7 +740,7 @@ class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
   def test_an_out_of_range_row_is_refused_with_no_columns_to_forward_to
     [CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t"),
      CAFrame.new({})].each do |f|
-      assert_raise(IndexError, "nrow=#{f.nrow} nvar=#{f.nvar}") { f[99] = UNDEF }
+      assert_raise(IndexError, "nrow=#{f.nrow} ncol=#{f.ncol}") { f[99] = UNDEF }
     end
   end
 
@@ -755,7 +755,7 @@ class TestCAFrameRowCountIsWitnessed < Test::Unit::TestCase
   # the column set, where the table itself counts the index as a column.
   def test_inspect_shows_the_table_of_an_index_only_frame
     f = CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t")
-    assert_match(/^#<CAFrame nrow=3 vars=\[\] index="t">$/, f.inspect.lines.first.chomp)
+    assert_match(/^#<CAFrame nrow=3 columns=\[\] index="t">$/, f.inspect.lines.first.chomp)
     assert_operator f.inspect.lines.size, :>, 1
     assert_match(/10/, f.inspect)
   end
@@ -788,7 +788,7 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
     assert_equal "t", df.axis_name
     df.reset_index
     assert_equal "obs", df.axis_name
-    assert_equal ["t", "v"], df.variable_names
+    assert_equal ["t", "v"], df.column_names
   end
 
   def test_the_round_trip_is_the_identity_on_the_default_name
@@ -816,7 +816,7 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
                      index: CA_INT32([9, 8]), axis_name: "obs")
     df.reset_index
     assert_equal CAFrame::DEFAULT_AXIS_NAME, df.axis_name
-    assert_equal ["obs", "v"], df.variable_names
+    assert_equal ["obs", "v"], df.column_names
   end
 
   def test_resetting_twice_is_harmless
@@ -842,7 +842,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
     df.set_index("b")
     assert_equal [7, 8], df.index.to_a
     assert_equal "b", df.axis_name
-    assert_includes df.variable_names, "a"
+    assert_includes df.column_names, "a"
     assert_equal [1, 2], df["a"].to_a
   end
 
@@ -853,7 +853,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
     composed = frame.set_index("a")
     composed.reset_index
     composed.set_index("b")
-    assert_equal composed.variable_names, direct.variable_names
+    assert_equal composed.column_names, direct.column_names
     assert_equal composed.axis_name, direct.axis_name
     assert_equal composed.index.to_a, direct.index.to_a
   end
@@ -862,7 +862,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
     df = frame.set_index("a")
     df.set_index("b")
     assert_equal 2, df.nrow
-    assert_equal ["a", "v"], df.variable_names
+    assert_equal ["a", "v"], df.column_names
     assert_equal [10.0, 20.0], df["v"].to_a
   end
 
@@ -872,6 +872,6 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
     df.set_index("b")
     df.reset_index
     assert_equal "obs", df.axis_name
-    assert_equal ["b", "a", "v"], df.variable_names
+    assert_equal ["b", "a", "v"], df.column_names
   end
 end
