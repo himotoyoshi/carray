@@ -20,7 +20,7 @@ k").
 
 The block always receives a **1-D CArray** representing one fiber along
 `axis:`. Standard CArray operations (`sum`, `mean`, indexing, arithmetic,
-`.dup`, `.copy`) work directly on the slab.
+`.copy`) work directly on the slab.
 
 ## When to reach for the slab iterator
 
@@ -156,7 +156,7 @@ refs = []
 ca.each_slab(axis: 1) { |row| refs << row }   # refs all point at iter N-1 data
 ```
 
-In-block derived views (`row.dup`, `row[range]`, `row + 1`,
+In-block derived views (`row[range]`, `row + 1`,
 `(row > 0).as_int32`, `row.median`) read the current iter's data
 correctly. The slab is presented as a `CAStride` whose
 `(parent, base_offset, strides)` triple is updated per iteration so

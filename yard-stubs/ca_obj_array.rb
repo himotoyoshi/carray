@@ -43,9 +43,9 @@ class CArray
   #   `data_type`, shape, mask, and element data into `self`. Result
   #   is an independent entity.
   #
-  #   Note that for views, `dup`/`clone` produce a new view sharing
-  #   the parent (Ruby shallow-copy semantics); use {#copy} when an
-  #   independent owned array is required.
+  #   For views, `dup` / `clone` produce a new view sharing the parent
+  #   (Ruby shallow-copy semantics), so they do not copy. Don't use
+  #   them to copy a CArray; use {#copy}.
   #   @param other [CArray]
   #   @return [self]
   #   @api private

@@ -150,7 +150,7 @@ a[0, 0]         #  => 999    and so was a, the underlying entity
 
 For arrays from other libraries that speak the MemoryView protocol (for example Apache Arrow), use `CArray.from_memory_view(obj)` (copy) or `CArray.wrap_memory_view(obj)` (zero-copy, yielding a `CAWrap`). See MemoryView.
 
-Rule of thumb: **`to_ca`** to get a CArray out of whatever you are holding (cheap); **`copy`** when you need an independent, owned array. Avoid `dup` / `clone` for making independent copies.
+Rule of thumb: **`to_ca`** to get a CArray out of whatever you are holding (cheap); **`copy`** when you need an independent, owned array. `copy` is the only way to copy a CArray: don't use `dup`, `clone` or `to_ca` for it.
 
 ## Broadcasting
 

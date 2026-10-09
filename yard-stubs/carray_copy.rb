@@ -12,7 +12,11 @@ class CArray
   #   attributes `self` shows (`attrs`) as its own.
   #
   #   Use `copy` when you need an array you own and can mutate
-  #   without affecting any source.
+  #   without affecting any source. It is the only way to copy a
+  #   CArray: `to_ca` returns `self`, and `dup` / `clone` on a view
+  #   return another view onto the same storage, so writing to any of
+  #   them writes to the source. Don't use `dup`, `clone` or `to_ca`
+  #   to copy.
   #   @return [CArray] independent entity.
   #   @example A view's copy is independent of its source
   #     a = CArray.float64(4).seq
