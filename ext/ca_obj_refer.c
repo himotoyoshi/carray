@@ -79,9 +79,15 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
+  /* An object cell is a VALUE the GC marks: reading other bytes as one
+     marks garbage, and reading one as bytes exposes an address. */
   if (ca_is_object_type(parent) && data_type != CA_OBJECT) {
     rb_raise(rb_eRuntimeError,
              "object array can't be referred by other data type");
+  }
+  if (! ca_is_object_type(parent) && data_type == CA_OBJECT) {
+    rb_raise(rb_eRuntimeError,
+             "non-object array can't be referred as object data type");
   }
   if (parent->elements && bytes > parent_bytes * parent->elements) {
     rb_raise(rb_eRuntimeError, "bytes exceeds the data size of referent");

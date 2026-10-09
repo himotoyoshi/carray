@@ -42,6 +42,10 @@ ca_field_setup (CAStride *ca, CArray *parent,
     rb_raise(rb_eCADataTypeError,
              "CA_OBJECT can not to be a data_type for CAField");
   }
+  if ( ca_is_object_type(parent) ) {
+    rb_raise(rb_eCADataTypeError,
+             "a field can not be taken from an object array");
+  }
   if ( parent->bytes < offset + bytes ) {
     rb_raise(rb_eRuntimeError, "offset or bytes out of range");
   }

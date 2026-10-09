@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: on an object array, `is_nan`, `is_inf` and `is_finite` returned
+  booleans that `count(true)`, `sum`, `all` and `&` misread (`is_inf` was
+  true everywhere), and `signbit` was false for `-0.0`. `is_nan` now
+  answers false for an Integer or a Rational instead of raising.
+
+- Fix: `refer(:object, ...)` on a numeric array, and `field` on an object
+  array, read raw bytes as Ruby objects (or objects as bytes) and could
+  crash; both now raise.
+
+- Fix: `stddev` and `stddevp` returned 0.0 where the variance is NaN (a
+  NaN or an infinity among the values), on every data type; they now
+  return NaN.
+
 - Fix: `CACategorical#categorize` raised; it now categorizes by the labels,
   as for any key array (categories that have no cells are dropped). With it,
   `CAFrame#group_by` accepts a categorical column as a key, alone or in a
