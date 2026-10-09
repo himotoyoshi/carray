@@ -1029,6 +1029,11 @@ rb_ca_meld_initialize_copy (VALUE self, VALUE other)
   ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMeld, &cameld_data_type, cs);
   ca_meld_setup(ca, cs->n_parents, cs->parents, cs->meld_axis);
+  /* A copy of a meld's mask reads and writes the same stand-ins, so it
+     answers to the same owner: its writes reach the parents' masks.  The
+     copy holds the owner alive through the masked_array ivar that dup
+     carries over (see rb_ca_mask_array). */
+  ca->mask_owner = cs->mask_owner;
   return self;
 }
 
