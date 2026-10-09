@@ -1294,6 +1294,41 @@ class CATime
     end
   end
 
+  # inspect's name for the array: the class and the tick, which the storage
+  # type name (fixlen[8]) does not tell.
+  private def inspect_label
+    "#{self.class}[#{unit}]"
+  end
+
+  # inspect's cell: the instant as Element#to_s writes it, but with the
+  # digits of a second that some cell of the array needs, the same in every
+  # cell so that the cells line up; the unit is in the label.
+  private def inspect_cell_formatter
+    digits = inspect_second_digits
+    lambda do |e|
+      case e.unit.base
+      when :Y, :M, :W, :D then e.to_s
+      else                     e.to_time.iso8601(digits)
+      end
+    end
+  end
+
+  # The digits of a second inspect writes: 0, 3, 6 or 9, the fewest that
+  # show every present cell exactly (9 at most, as Time holds).
+  private def inspect_second_digits
+    base_digits = { ms: 3, us: 6, ns: 9, ps: 12, fs: 15, as: 18 }[unit.base]
+    return 0 unless base_digits
+    count = unit.count
+    [0, 3, 6, 9].each do |d|
+      break if d >= base_digits
+      m = 10**(base_digits - d)
+      # ticks * count is a multiple of m when ticks is one of m / gcd(m, count),
+      # which does not multiply out of int64.
+      return d if (ticks % (m / m.gcd(count))).eq(0).all
+    end
+    [base_digits, 9].min
+  end
+
 end
 
 # ============================================================================
@@ -1656,6 +1691,17 @@ class CATimedelta
             "across the calendar/fixed boundary"
     end
     CATimeUnitAlgebra.finer(unit, ou)
+  end
+
+  # inspect's name for the array: the class and the tick, which the storage
+  # type name (fixlen[8]) does not tell.
+  private def inspect_label
+    "#{self.class}[#{unit}]"
+  end
+
+  # inspect's cell: the duration in the base unit of the tick.
+  private def inspect_cell_formatter
+    lambda { |e| "#{e.value * e.unit.count}#{e.unit.base}" }
   end
 end
 

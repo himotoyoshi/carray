@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `inspect` of a `CATime` or `CATimedelta` array names the tick
+  (`<CATime[us](7)`, `<CATimedelta[10 m](2)`) where it named the storage
+  type (`fixlen[8]`), and writes each cell as `to_s` does
+  (`2024-12-01T00:01:00Z`, `2024-12-01`, `60s`) where it wrote the cell's
+  whole `inspect`. A time array writes the digits of a second that some
+  present cell needs, the same in every cell. `inspect` of a single element
+  is unchanged.
+
 - Change: on an object array, `min`, `max`, `minmax`, `min_index`,
   `max_index`, `cummin`, `cummax`, `pmin`, `pmax`, `minimum`, `maximum`
   and `elem_min` / `elem_max` compare cells with `<=>`, as `sort` already

@@ -17,13 +17,12 @@ class CArray::Inspector  # :nodoc:
       raise "can't inspect CArray of ndim == 0"
     end
     formatter  = get_formatter()
-    class_name = get_class_name()
-    type_name  = get_type_name()
+    label      = get_label()
     shape      = get_shape()
     data_spec  = get_data_spec(0, Array.new(@carray.ndim){0}, formatter, abbrev)
     info_list  = get_info_list()
     output = ["<",
-              format("%s.%s(%s)", class_name, type_name, shape.join(",")),
+              format("%s(%s)", label, shape.join(",")),
               ": ",
               info_list.join(" "),
               "\n",
@@ -34,6 +33,16 @@ class CArray::Inspector  # :nodoc:
   end
   
   private
+
+  # The name before the shape: the class and the storage type, or what a
+  # Face says instead through a private inspect_label (CATime gives its
+  # tick, which the storage type does not tell).
+  def get_label
+    if @carray.respond_to?(:inspect_label, true)
+      return @carray.send(:inspect_label)
+    end
+    return format("%s.%s", get_class_name, get_type_name)
+  end
 
   def get_class_name
     return @carray.class.to_s
@@ -110,6 +119,11 @@ class CArray::Inspector  # :nodoc:
   end
 
   def get_formatter
+    # A Face can write its cells itself through a private
+    # inspect_cell_formatter, a lambda taking the decoded cell.
+    if @carray.respond_to?(:inspect_cell_formatter, true)
+      return @carray.send(:inspect_cell_formatter)
+    end
     # A Face that defines storage_to_element decodes each cell into a surface
     # value (CATime::Element, a String, a category label, ...) that has nothing
     # to do with the storage data_type, so the formatter must follow the decoded

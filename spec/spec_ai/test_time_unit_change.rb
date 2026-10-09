@@ -16,14 +16,16 @@ class TestTimeUnitChange < Test::Unit::TestCase
 
   # -- inspect -------------------------------------------------------------
 
-  def test_inspect_of_fixlen_face
+  def test_inspect_of_fixlen
     # the FIXLEN branch of the inspect type name formats inside an
     # instance_exec on the array, where a bare format() would resolve to the
     # public CArray#format rather than Kernel#format.
+    assert_match(/fixlen\[3\]\(2\)/, CArray.fixlen(2, bytes: 3).inspect)
+    assert_match(/CAFixlenString\.fixlen\[2\]\(2\)/, CArray.fixlen_string(["ab", "cd"]).inspect)
+    # A time array names its tick in place of the storage type.
     dt = CArray.time(["2024-01-01"], unit: :D)
     assert_equal CA_FIXLEN, dt.data_type
-    assert_match(/CATime\.fixlen\[8\]\(1\)/, dt.inspect)
-    assert_match(/fixlen\[3\]\(2\)/, CArray.fixlen(2, bytes: 3).inspect)
+    assert_match(/\A<CATime\[D\]\(1\)/, dt.inspect)
   end
 
   # -- CATime#to_unit ------------------------------------------------------
