@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#cast` takes what `from_csv` and `from_records` take as
+  `types:`: `cast(:infer)`, and a map with `default:` (`:infer` or a type)
+  for the columns it does not name, where `nil` leaves a named column as it
+  is. `option_name: :types` makes an error about the map name that option,
+  for a reader that passes its own `types:` to `cast`.
+- Change: `CAFrame#cast` raises `ArgumentError` for a Symbol map key other
+  than `default:` (`cast(temp: :float64)` used to cast the column "temp");
+  name the columns with Strings.
 - Change: errors a caller can cause no longer raise `RuntimeError`. A
   shape, size, step, offset or option the operation cannot take raises
   `ArgumentError` (`b[] = c` with another shape, `reshape`, `broadcast_to`,

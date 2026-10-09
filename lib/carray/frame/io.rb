@@ -5,16 +5,13 @@ require "carray/frame/csv_parser"
 class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
   # §3.7); every column is built raw as a CAString of the cell strings, all
-  # over one object array (§4.2). Casting is a separate step: pass +types:+ ({ "temp" => :float64 },
-  # or the array-key form of +cast+) to cast named columns on load,
-  # +types: :infer+ to cast the columns +infer_types+ finds to be numbers or
-  # times, or call +cast+ later. Broken cells become UNDEF automatically
-  # (parse-mask, §6-2).
+  # over one object array (§4.2). Casting is a separate step: +types:+ takes
+  # anything +cast+ takes as a map -- { "temp" => :float64 }, :infer, or a
+  # map with +default:+ -- and casts the frame with it on load, which is the
+  # same as calling +cast+ afterwards. Broken cells become UNDEF
+  # automatically (parse-mask, §6-2).
   #
-  # +:default+ in the map sets the columns the map does not name, so the
-  # two combine in one call; a named column's entry replaces the default,
-  # and nil leaves the column as text:
-  #
+  #   CAFrame.from_csv("obs.csv", types: :infer)
   #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
   #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
   #
@@ -141,7 +138,7 @@ class CAFrame
 
     frame = build_frame(names, rows)
     mask_missing_tokens(frame, missing) if missing
-    cast_on_load(frame, types, on_error)
+    frame.cast(types, on_error: on_error, option_name: :types) unless types.nil?
     convert_const_string_columns_to_castring(frame)
     frame
   end
@@ -223,47 +220,6 @@ class CAFrame
   end
 
   private_class_method :read_csv
-
-  # The types: of from_csv / from_records: a map for cast, or :infer to
-  # cast what infer_types finds.
-  #
-  # A map may say +:default+ for the columns it does not name: :infer casts
-  # the ones infer_types finds among them, a type casts all of them. A named
-  # column takes its own entry, which replaces the default; nil leaves it as
-  # it was read.
-  def self.cast_on_load(frame, types, on_error)
-    return if types.nil?
-    types = { default: :infer } if types == :infer
-    unless types.is_a?(Hash)
-      raise ArgumentError, "types: takes a map of column types or :infer " \
-                           "(got #{types.inspect})"
-    end
-    default = nil
-    named = {}
-    types.each do |key, type|
-      if key == :default
-        default = type
-      elsif key.is_a?(Symbol)
-        raise ArgumentError, "types: takes column names (Strings) and :default " \
-                             "as keys (got #{key.inspect})"
-      else
-        Array(key).each { |name| named[name.to_s] = type }
-      end
-    end
-    named.each_key { |name| frame[name] }    # KeyError for a column that is not there
-
-    rest = frame.variable_names - named.keys
-    map =
-      case default
-      when nil    then {}
-      when :infer then rest.empty? ? {} : frame.select(*rest).infer_types
-      else             rest.to_h { |name| [name, default] }
-      end
-    map.merge!(named.compact)
-    frame.cast(map, on_error: on_error) unless map.empty?
-  end
-
-  private_class_method :cast_on_load
 
   # Re-raise a failure to decode the input with a line saying how to name the
   # file's encoding. The error and its class are kept; only the message grows.
@@ -686,7 +642,7 @@ class CAFrame
 
     cols = {}
     # Columns the C reader built as CAConstStrings over the text, for
-    # cast_on_load to read without a String per cell.
+    # cast to read without a String per cell.
     if rows.is_a?(CSVReader::ConstStringColumns)
       names.zip(rows.columns) { |name, col| cols[name] = col }
       return new(cols)

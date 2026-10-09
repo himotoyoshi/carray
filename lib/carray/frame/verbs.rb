@@ -119,15 +119,31 @@ class CAFrame
   # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
   # :ns for fractions of a second); parse_to_time takes a format and a
   # unit. Other targets use to_type.
-  # Three call shapes, disambiguated by the fact that column names are always
+  # The call shapes are told apart by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
   #   cast("temp", :float64)                     # one column (chains)
   #   cast("temp" => :float64, "rh" => :int32)   # name => type map
   #   cast(["temp", "rh"] => :float64)           # names sharing one type
+  #   cast(:infer)                               # what infer_types finds
+  #   cast(default: :infer, "code" => :int32)    # a default for the rest
   #
   # A map key may be a single name or an Array of names; the value is the
-  # target type. Returns self so calls chain.
+  # target type, or nil to leave the column as it is. The map may be given
+  # with or without braces.
+  #
+  # +default:+ in the map covers the columns the map does not name: :infer
+  # casts the ones among them that +infer_types+ finds a type for, and a type
+  # casts all of them. A named column takes its own entry, which replaces
+  # the default. +:infer+ alone is +{ default: :infer }+.
+  #
+  #   cast(default: :infer, "id" => nil)         # infer, but leave "id"
+  #   cast(default: :float64, "station" => nil)  # every other column to float64
+  #
+  # A name that is not a column raises KeyError, and a Symbol key other than
+  # +:default+ raises ArgumentError; both before any column is read. Every
+  # column is read before any is rebound, so a raise leaves the frame as it
+  # was. Returns self so calls chain.
   #
   # +on_error:+ says what to do with a text cell that holds something but
   # does not read as the number type ("x", "1.5" for an integer, "300" for
@@ -139,37 +155,79 @@ class CAFrame
   #           first few cells
   #   :raise  CAFrame::UnreadableColumn naming the column, the row and the
   #           cell; no column is rebound
-  def cast(name_or_map = nil, type = nil, on_error: :mask, **map)
+  #
+  # +option_name:+ is for a method that takes the map as one of its own
+  # options and hands it to cast, as from_csv does with +types:+. An error
+  # about the map then names that option instead of cast, and the map must
+  # be a Hash or :infer:
+  #
+  #   frame.cast(types, on_error: on_error, option_name: :types)
+  def cast(name_or_map = nil, type = nil, on_error: :mask, option_name: nil, **map)
     refuse_if_frozen
+    label = option_name ? "#{option_name}:" : "cast"
     # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
     # keywords next to on_error:.
     unless map.empty?
       unless name_or_map.nil?
-        raise ArgumentError, "cast takes a name and a type, or a map, not both"
+        raise ArgumentError, "#{label} takes a name and a type, or a map, not both"
       end
       name_or_map = map
     end
-    raise ArgumentError, "cast needs a column name or a map" if name_or_map.nil?
+    raise ArgumentError, "#{label} needs a column name or a map" if name_or_map.nil?
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
-    pairs =
+    name_or_map = { default: :infer } if name_or_map == :infer && type.nil?
+    if option_name && !name_or_map.is_a?(Hash)
+      raise ArgumentError, "#{label} takes a map of column types or :infer " \
+                           "(got #{name_or_map.inspect})"
+    end
+    types =
       if name_or_map.is_a?(Hash)
         unless type.nil?
-          raise ArgumentError, "cast(map) takes no positional type argument"
+          raise ArgumentError, "#{label} takes no positional type argument with a map"
         end
-        name_or_map.flat_map { |names, t| Array(names).map { |name| [name, t] } }
+        resolve_cast_map(name_or_map, label)
       else
-        [[name_or_map, type]]
+        { name_or_map.to_s => type }
       end
     # Read every column before rebinding any, so a raise leaves the frame as
     # it was.
-    casted = pairs.map { |name, t| [name.to_s, cast_column(name, t, on_error)] }
+    casted = types.map { |key, t| [key, cast_column(key, t, on_error)] }
     casted.each { |key, col| @columns[key] = col }
     self
   end
-
+  
+  # The name => type pairs a cast map asks for: the named columns with a
+  # type, then the columns default: covers. Checks the keys and the names
+  # before anything is read.
+  private def resolve_cast_map(map, label)
+    default = nil
+    named = {}
+    map.each do |key, t|
+      if key == :default
+        default = t
+      elsif key.is_a?(Symbol)
+        raise ArgumentError, "#{label} takes column names (Strings) and :default " \
+                             "as keys (got #{key.inspect})"
+      else
+        Array(key).each { |name| named[name.to_s] = t }
+      end
+    end
+    named.each_key do |name|
+      raise KeyError, "#{label} names no column #{name.inspect}" unless @columns.key?(name)
+    end
+    rest = @columns.keys - named.keys
+    types =
+      case default
+      when nil    then {}
+      when :infer then rest.empty? ? {} : select(*rest).infer_types
+      else             rest.to_h { |name| [name, default] }
+      end
+    types.merge!(named.compact)
+  end
+  
   CAST_ON_ERROR = %i[mask warn raise].freeze
 
   # The targets a text column is read as numbers for.
@@ -193,8 +251,8 @@ class CAFrame
   # are looked at -- an object column or a string Face (CAString,
   # CAConstString); columns that already have a type are not listed.
   #
-  #   df.cast(df.infer_types)                            # what types: :infer does
-  #   df.cast(df.infer_types.merge("code" => :int32))    # with one column set by hand
+  #   df.cast(df.infer_types)                            # what cast(:infer) does
+  #   df.cast(df.infer_types.merge("code" => :int32))    # as cast(default: :infer, "code" => :int32)
   def infer_types
     @columns.each_with_object({}) do |(key, col), types|
       next unless string_column?(col)

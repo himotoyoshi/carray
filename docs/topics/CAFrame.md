@@ -295,7 +295,9 @@ CAFrame.from_csv("obs.csv", types: { default: :float64, ["station", "note"] => n
 `types: :infer` is `types: { default: :infer }`. A map without `default:`
 casts only what it names, as before. `default:` is a Symbol and column names
 are Strings, so they cannot collide; any other Symbol key raises.
-`from_records` takes the same `types:`.
+`from_records` takes the same `types:`, and so does `cast` itself: `types:` is
+handed to `df.cast(types)`, so `df.cast(:infer)` and
+`df.cast(default: :infer, "id" => nil)` do the same to a frame already read.
 
 **A file's own spelling of missing.** An unquoted empty field, and a cell a
 short row never reached, are `UNDEF` without asking. Files that write missing
@@ -1155,6 +1157,8 @@ df = df.rename("temp" => "temperature")             # rename, preserving order
 df.cast("temp", :float64)                           # cast a column
 df.cast("temp" => :float64, "rh" => :int32)         # map form: several columns
 df.cast(["u", "v"] => :float64)                     # one type shared by several
+df.cast(:infer)                                     # what infer_types finds
+df.cast(default: :float64, "station" => nil)        # the rest float64, station as is
 df.promote                                          # every column to one common type
 df.promote(:object)                                 # ...to the widest type of all
 df.mask_eq("flag", -999)                            # mask cells equal to a sentinel
