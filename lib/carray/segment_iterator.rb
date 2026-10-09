@@ -758,7 +758,8 @@ class CASegmentIterator < CAIterator
   # reductions return their identity, ratios return UNDEF).
   def per_segment (data_type)
     out = if ! @value.face? || data_type != @value.data_type
-            CArray.new(data_type, [@k])
+            bytes = (data_type == @value.data_type) ? @value.bytes : 0
+            CArray.new(data_type, [@k], bytes: bytes)
           elsif face_output?
             # the core answered in the values' own Face, so the output is one
             # too: CATime#min hands back a CATime::Element, which only a

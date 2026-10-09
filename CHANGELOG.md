@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `min` and `max` of a raw fixlen array grouped by a categorical
+  (`group_by_category`) raised `invalid bytes`; they now answer per group.
+
 - Fix: `CAFrame.from_csv` reads an input with no record at all (an empty
   file, or only blank lines) as a frame with no columns and no rows, which is
   what `to_csv` writes for such a frame. It used to raise `MalformedCSV`. A
