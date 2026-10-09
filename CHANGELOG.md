@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.from_records` builds a column of `Complex` values as
+  `cmplx128`; it used to make it float64 with every value masked. `Rational`
+  and `BigDecimal` values now stay an object column instead of being rounded
+  to float64.
+
 - Change: `CAFrame` names its columns "columns" throughout:
   `variable_names` is now `column_names`, `variables` is `columns`, `nvar` is
   `ncol`, and `inspect` shows `columns=[...]` in place of `vars=[...]`. The old

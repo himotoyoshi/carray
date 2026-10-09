@@ -169,4 +169,22 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
     json = JSON.generate(df.to_records)
     assert_equal [{ "a" => 1, "b" => nil }], JSON.parse(json)
   end
+
+  # A Complex column used to become float64, and every value in it UNDEF.
+  def test_complex_values_build_a_complex_column
+    df = CAFrame.from_records([{ "c" => Complex(1, 2) }, { "c" => 3 }, { "c" => nil }])
+    assert_equal CA_CMPLX128, df["c"].data_type
+    assert_equal [Complex(1.0, 2.0), Complex(3.0, 0.0), UNDEF], df["c"].to_a
+    z = CAFrame.new("z" => CA_CMPLX128([1 + 2i, 3]))
+    assert_equal z["z"].to_a, CAFrame.from_records(z.to_records)["z"].to_a
+  end
+
+  # A float column would round them, so Rational and BigDecimal stay exact.
+  def test_rational_and_bigdecimal_values_stay_object
+    require "bigdecimal"
+    df = CAFrame.from_records([{ "r" => Rational(1, 3), "b" => BigDecimal("0.1") }])
+    assert_equal [:object, :object], [df["r"].data_type, df["b"].data_type]
+    assert_equal [Rational(1, 3)], df["r"].to_a
+    assert_equal [BigDecimal("0.1")], df["b"].to_a
+  end
 end

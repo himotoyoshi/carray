@@ -102,13 +102,17 @@ class CAFrame
   end
   private_class_method :build_nd_column
 
-  # :int64 if every value is an Integer, :float64 if all are Numeric (int/float
-  # mix), otherwise nil (strings / DateTime / booleans / mixed -> keep object).
+  # :int64 if every value is an Integer, :float64 for Integers and Floats,
+  # :cmplx128 when Complex values join them, otherwise nil (keep object).
+  # Other Numerics (Rational, BigDecimal) stay object: a float column would
+  # round them, and a Complex one has room for them only as floats too.
   def self.numeric_leaf_type(values)
     if values.all? { |v| v.is_a?(Integer) }
       :int64
-    elsif values.all? { |v| v.is_a?(Numeric) }
+    elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) }
       :float64
+    elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) || v.is_a?(Complex) }
+      :cmplx128
     end
   end
   private_class_method :numeric_leaf_type
