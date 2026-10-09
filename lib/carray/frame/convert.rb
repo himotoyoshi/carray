@@ -16,8 +16,12 @@ class CAFrame
   # column name => value; a scalar cell is a Ruby value, an N-D cell is a Ruby
   # Array, and a masked cell (UNDEF) is +nil+. Normalizing UNDEF -> nil and
   # CArray -> Array (unlike +each_row+, which yields the raw view with UNDEF /
-  # CArray slices) is what makes it round-trip: +from_records(df.to_records)+
-  # rebuilds the same typing, and the result is JSON-serializable.
+  # CArray slices) makes the result JSON-serializable and lets
+  # +from_records(df.to_records)+ give back the column names, the values and
+  # the mask. The rest is not in a record: +from_records+ rebuilds each type
+  # from the values (an int32 comes back int64, a time column as an object
+  # column of its elements), the index comes back as an ordinary first
+  # column, and a frame with no rows gives +[]+, which has no column names.
   def to_records
     each_row.map { |row| row.transform_values { |v| record_value(v) } }
   end

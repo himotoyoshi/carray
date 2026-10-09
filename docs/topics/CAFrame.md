@@ -476,7 +476,7 @@ df = CAFrame.from_records(records)
 ```
 
 Unlike a CSV cell (always a string), a record value is **already a typed Ruby
-object** (`Float`, `Integer`, `DateTime`, `String`). So `from_records` builds
+object** (`Float`, `Integer`, `Complex`, `DateTime`, `String`). So `from_records` builds
 each homogeneous column at its **native leaf type** — this is *arranging by the
 value's own type*, not string inference, so §4.2's rule holds: **no date-like
 string is parsed**, and anything mixed stays object.
@@ -484,8 +484,9 @@ string is parsed**, and anything mixed stays object.
 | the column's non-nil values are… | column built as |
 |---|---|
 | all `Integer` | `:int64` |
-| all `Numeric` (int/float mix) | `:float64` |
-| strings / `DateTime` / booleans / mixed | `:object` (left as is) |
+| `Integer` and `Float` | `:float64` |
+| `Integer`, `Float` and `Complex` | `:cmplx128` |
+| strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed | `:object` (left as is) |
 | equal-length numeric **arrays** | an **N-D** `(N, L)` column (see §4) |
 
 - The column set is the **union of keys** in first-appearance order; keys are
@@ -908,25 +909,34 @@ occasionally — the primary idiom is column-vectorized work, not per-row loops.
 df.to_records              # rows as an Array of plain Ruby Hashes
 ```
 
-`to_records` is the **inverse of `from_records`** and the shape
-`JSON.generate` wants. It exports rows as an `Array` of Hashes and **normalizes
-for export**: a masked cell (`UNDEF`) becomes `nil`, an N-D column cell becomes
-a Ruby `Array`, and a scalar stays a Ruby value. That normalization (which
-`each_row` does *not* do — it yields the raw view with `UNDEF` and `CArray`
-slices) is what lets it round-trip and serialize:
+`to_records` is the shape `JSON.generate` wants: rows as an `Array` of Hashes,
+**normalized for export** — a masked cell (`UNDEF`) becomes `nil`, an N-D column
+cell becomes a Ruby `Array`, and a scalar stays a Ruby value. That
+normalization (which `each_row` does *not* do — it yields the raw view with
+`UNDEF` and `CArray` slices) is what lets it serialize, and lets
+`from_records` read it back:
 
 ```ruby
-CAFrame.from_records(df.to_records)   # rebuilds the same columns
+CAFrame.from_records(df.to_records)   # the same names, values and mask
 JSON.generate(df.to_records)          # -> a JSON array of objects
 ```
 
-The **mask survives**: `nil` on the way back in is the only spelling a missing
-cell has, so it becomes `UNDEF` again in every column. The **data type is
-rebuilt from the values**, which is not always the one you started with — a
-Ruby `Integer` carries no width, so any integer column comes back `int64`, and
-a boolean column comes back as an object column of `true` / `false`. When the
-exact types matter, `to_csv` with `types:` on the way back, or `cast`
-afterwards, is the way to pin them.
+A record carries Ruby values and nothing else, so that is what comes back:
+
+- **kept** — the column names and their order, every cell's value, and the
+  mask (`nil` on the way back in is the only spelling a missing cell has, so it
+  becomes `UNDEF` again)
+- **rebuilt from the values** — the data type: a Ruby `Integer` carries no
+  width, so any integer column comes back `int64`, a `float32` column `float64`,
+  a boolean column an object column of `true` / `false`, and a time or string
+  column an object column of its elements
+- **not kept** — the index, which comes back as an ordinary first column (call
+  `set_index` again), and the columns of a frame with no rows: `to_records`
+  gives `[]`, which has no names in it
+
+When the types matter, read back with `types:` or `cast` afterwards; to keep
+types and the index together, use `to_csv` / `from_csv` with `types:`, or
+Arrow / Parquet.
 
 > **`nil` and `UNDEF` are the same thing on the way out.** In memory they are
 > distinct — a masked cell is `UNDEF`, and an object column can hold a genuine
