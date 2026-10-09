@@ -36,6 +36,23 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a frozen `CAFrame` refuses `[]=`, `set_index`, `reset_index`,
+  `cast`, `promote`, `parse_to_time`, `to_time`, `fill` and `mask_eq` with
+  `FrozenError`; `df["c"] = col` used to add the column. The verbs that
+  return a new frame work as before, and the columns' own cells can still be
+  written through the columns.
+- Change: `windows` takes a Range of Integer offsets for each axis and raises
+  `TypeError` for anything else (`nil`, an Integer, an endless range). An
+  exclusive range leaves out its end: `windows(-1...1)` is the offsets -1
+  and 0; it used to be read as `-1..1`.
+- Fix: `blocks` and `windows` over an array with no cells, and a
+  `bounds: :truncate` window wider than its source, return an empty array of
+  the reduction's type instead of raising.
+- Change: an array branch of `then_else` pairs with the condition as an
+  operator's operands do. A branch in another shape with the same number of
+  cells raises `ArgumentError` instead of being read in the condition's
+  order, and a size-1 axis broadcasts. An object or fixlen result needs the
+  condition's shape exactly.
 - Change: a `bitarray` view has no mask. The bits of one byte would share
   that byte's one mask cell, so `bitarray` raises `ArgumentError` on an
   array with a mask (read its bits with `value.bitarray`), and a bit view
