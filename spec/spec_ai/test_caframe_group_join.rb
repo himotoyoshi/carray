@@ -177,6 +177,52 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [1.0, 3.0], grp.aggregate("s" => ["v", :sum])["s"].to_a
   end
 
+  # The grouping and its index are taken when group_by is called; the values
+  # are read when a reduction is.  A later change to the key does not rename
+  # the groups.
+  def test_index_is_taken_with_the_grouping
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2, 2, 3]), "v" => CA_FLOAT64([10, 20, 30, 40, 50]))
+    g = df.group_by("k")
+    df["k"][2] = 1
+    df["k"][0] = UNDEF
+    r = g.mean
+    assert_equal [1, 2, 3], r.index.to_a
+    assert_equal [15.0, 35.0, 50.0], r["v"].to_a
+  end
+
+  def test_index_of_an_external_key_is_taken_with_the_grouping
+    key = CA_INT32([1, 1, 2])
+    df = CAFrame.new("v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by(key)
+    key[0] = 7
+    assert_equal [1, 2], g.sum.index.to_a
+  end
+
+  def test_index_after_a_splice_names_the_rows_grouped
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    df[0..1] = CAFrame.new("k" => CA_INT32([2, 2]), "v" => CA_FLOAT64([7, 8]))
+    assert_equal [1, 2], g.mean.index.to_a
+  end
+
+  def test_values_are_read_when_reduced
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    df["v"][2] = 90
+    assert_equal [15.0, 90.0], g.mean["v"].to_a
+  end
+
+  def test_results_do_not_share_an_index
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    a = g.mean
+    a.index[0] = 9
+    assert_equal [1, 2], g.sum.index.to_a
+    t = CArray.time(["2024-01-01 00:10", "2024-01-01 01:10"], unit: :m)
+    g = CAFrame.new("t" => t, "v" => CA_FLOAT64([1, 2])).resample("t", "1 hour")
+    refute g.mean.index.equal?(g.sum.index)
+  end
+
   def test_empty_group_by_raises
     assert_raise(ArgumentError) { @df.group_by }
   end

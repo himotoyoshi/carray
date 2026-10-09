@@ -1359,6 +1359,12 @@ keeps the key's data type and Face — an integer key gives an integer index, a
 Groups appear in the order their keys first appear. A composite key gives an
 object index of the key tuples.
 
+The grouping and its index are taken when `group_by` is called: changing the key
+afterwards does not move rows between groups or rename them. The **values** are
+read when a reduction is called, so a reduction after `df["v"][i] = x` sees the
+new value, in the group the row had when the grouping was taken. Group again
+after changing a key.
+
 A `GroupedFrame` has three surfaces:
 
 ### (a) Convenience reductions

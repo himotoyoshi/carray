@@ -131,14 +131,16 @@ class GroupedFrame
   # order); otherwise, for a single +key:+, the key's value at each group's
   # first row, so it keeps the key's data type and Face; otherwise an object
   # array of the labels (a composite key's tuples).
+  #
+  # The grouping and the index are taken here, so a later change to the key
+  # does not rename the groups; the values are read when a reduction is.
   def initialize(frame, cat, axis_name, key_names = [], index: nil, key: nil)
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
     @key_names = key_names
     @labels    = cat.labels          # group values, in code order
-    @index     = index
-    @key       = key
+    @index     = index || (key && key.project(group_perm[group_bounds[0...ngroup]]))
   end
 
   # Number of groups.
@@ -228,10 +230,10 @@ class GroupedFrame
     "#<GroupedFrame ngroup=#{ngroup} by=#{@axis_name.inspect}>"
   end
 
+  # Each result gets its own index.
   private def label_index
-    return @index if @index
-    return CArray.object(@labels.size) { |i| @labels[i] } unless @key
-    @key.project(group_perm[group_bounds[0...ngroup]])
+    return @index.copy if @index
+    CArray.object(@labels.size) { |i| @labels[i] }
   end
 
   NON_NUMERIC = [:object, :boolean, :fixlen].freeze
