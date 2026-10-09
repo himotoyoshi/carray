@@ -123,4 +123,29 @@ class TestLinearInterpAxisWrappers < Test::Unit::TestCase
     assert_raise(RuntimeError) { y.linear_fetch(1.0) }
   end
 
+
+  # A one-point axis has no segment: a value equal to the point is at 0,
+  # any other value is outside, NaN as for a longer axis.
+  def test_linear_section_one_point_axis
+    [:binary, :linear].each do |m|
+      a = CA_FLOAT64([5.0])
+      assert_equal 0.0, a.linear_section(5.0, method: m), m.inspect
+      assert_nil a.linear_section(4.0, method: m), m.inspect
+      got = a.linear_section(CA_FLOAT64([2, 5, 9]), method: m).to_a
+      assert_equal 0.0, got[1], m.inspect
+      assert got[0].nan? && got[2].nan?, "#{m.inspect}: #{got.inspect}"
+    end
+  end
+
+  def test_linear_section_one_point_per_fiber
+    a = CA_FLOAT64([[1.0], [5.0]])
+    got = a.linear_section(CA_FLOAT64([[1.0], [4.0]]), axis: 1).to_a.flatten
+    assert_equal 0.0, got[0]
+    assert got[1].nan?, got.inspect
+  end
+
+  def test_linear_section_one_point_inverse_of_fetch
+    a = CA_FLOAT64([5.0])
+    assert_equal 5.0, a.linear_fetch(a.linear_section(5.0))
+  end
 end

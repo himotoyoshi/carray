@@ -224,7 +224,8 @@ class CArray
   #   bracketing samples. The integer part of the returned address is
   #   the index of the lower bracket, the fractional part is the
   #   interpolation weight toward the next sample. Out-of-range `val`
-  #   returns NaN.
+  #   returns NaN. A one-point axis has no segment: `val` equal to the
+  #   point is at 0, any other value is out of range.
   #
   #   `self` is coerced to `:float64` if it is not already. When
   #   `axis: nil`, `self` is flattened to 1-D first.

@@ -8223,7 +8223,11 @@ MkKernel.search :linear_section_binary,
   body: <<~C,
     result = NAN;
     if ( slab_n <= 1 ) {
-      result = 0.0;
+      /* A one-point axis has no segment: only the point itself is in
+       * range, at 0.  An empty one has nothing in range. */
+      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+        result = 0.0;
+      }
     }
     else {
       double y0 = *(double *)(slab_ptr + 0 * slab_stride);
@@ -8311,7 +8315,11 @@ MkKernel.search :linear_section_linear,
   body: <<~C,
     result = NAN;
     if ( slab_n <= 1 ) {
-      result = 0.0;
+      /* A one-point axis has no segment: only the point itself is in
+       * range, at 0.  An empty one has nothing in range. */
+      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+        result = 0.0;
+      }
     }
     else {
       ca_size_t x1 = 0;

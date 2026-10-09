@@ -80,8 +80,8 @@ class CArray
   #   and the returned addresses are mapped back to positions in `ref` as
   #   passed.  A masked `ref` value matches nothing, as in {#locate_addr}.
   #   With one value present in `ref` there is no span: a cell matches it
-  #   only when equal to it.  With none, every cell is masked; an empty
-  #   `self` gives an empty result.
+  #   only when equal to it, as {#linear_section} says.  With none, every
+  #   cell is masked; an empty `self` gives an empty result.
   #
   #   @param ref [CArray] 1-D reference grid to match against.
   #   @param direction [Symbol] `:round`, `:floor`, or `:ceil` — rounding
@@ -103,14 +103,6 @@ class CArray
     # puts the masked ones last, and only the others are searched.
     ri = ref.sort_addr
     ri = ri[0...ref.count_not_masked] if ref.has_mask?
-    if ri.elements <= 1
-      # No span to place a value in: a single reference value matches the
-      # values equal to it, and an empty reference matches nothing.
-      idx = CArray.int64(*shape)
-      idx[] = UNDEF
-      idx[self.eq(ref[ri[0]])] = ri[0] if ri.elements == 1
-      return idx
-    end
     rs = ref[ri]
     sec = rs.linear_section(self)
     unless sec.is_a?(CArray)

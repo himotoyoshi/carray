@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `linear_section` on a one-point axis put every value at position 0.
+  A value equal to the point is at 0, and any other value is now out of
+  range (NaN, or `nil` for a single value), as a value outside a longer
+  axis is.
+
 - Fix: `locate_nearest_addr`, and `CAFrame#join_asof` with it, accept a
   masked reference value and an empty query. A masked value matches
   nothing, as in `locate_addr`; before, either case raised an error naming
