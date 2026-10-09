@@ -1,17 +1,21 @@
 /* CSV body reader for CAFrame.from_csv.
 
-   CArray.__csv_read_body_as_string_cells__(text, sep, quote, ncol) -> [ncol, cells, records]
+   CArray.__csv_read_body_as_string_cells__(text, sep, quote, ncol, keep)
+     -> [ncol, cells, records]
    reads every record of text into one flat Array of nrow * ncol cells, row
    after row: a String for a field, UNDEF for a missing one (an unquoted
-   empty field, or a cell a short row never reached).  records counts the
+   empty field, or a cell a short row never reached).  keep, when not nil,
+   is the ascending Array of the indexes of the columns to read: a row then
+   has a cell for each of them only, and the fields of the others are passed
+   over without being copied out of the text.  records counts the
    records read, blank lines included, as the Ruby tokenizer numbers them.
    With ncol 0 the column count is the first record's, as for a file with no
    header; a later record that is longer is then one this reader declines.
 
-   CArray.__csv_read_body_as_const_string_columns__(text, sep, quote, ncol)
+   CArray.__csv_read_body_as_const_string_columns__(text, sep, quote, ncol, keep)
      -> [ncol, buffer, [pairs, ...], records]
    reads the same records into one fixlen-16 (start, end) pair entity per
-   column, the layout CAConstString.wrap takes, with missing cells masked.
+   column read, the layout CAConstString.wrap takes, with missing cells masked.
    The pairs index buffer, which is text itself when no field held a doubled
    quote, and text followed by those fields' unescaped bytes otherwise, so
    the cells are not copied out of the text.
@@ -22,7 +26,8 @@
    empty, or only spaces and tabs with no separator, is not a row unless the
    file has one column.  They answer nil, for the Ruby tokenizer to read the
    text and say what is wrong, when the text is not UTF-8 or US-ASCII or has
-   an invalid byte, and when a record is malformed or longer than ncol. */
+   an invalid byte, when a record is malformed or longer than ncol, and when
+   keep names no column or one past the last. */
 
 #include "carray.h"
 #include "carray_internal.h"
@@ -72,9 +77,34 @@ typedef struct {
   ca_csv_cell_ranges cells;      /* row after row */
   ca_csv_cell_ranges pending;    /* blank lines before the first record */
   VALUE tail;              /* unescaped quoted fields, or Qnil */
+  VALUE keep;              /* the indexes of the columns to read, or Qnil */
+  char *kept;              /* keep as a byte per column, 1 for one read;
+                              NULL for every column, or before ncol is known */
   long ncol;
+  long width;              /* the cells of a row: those of the columns read */
   long records;
 } ca_csv_walk_t;
+
+/* Set w->kept and w->width from w->keep for w->ncol columns.  Returns 0 when
+   keep names no column or one past the last. */
+static int
+ca_csv_set_kept_columns (ca_csv_walk_t *w)
+{
+  long i;
+  w->kept = ALLOC_N(char, w->ncol);
+  memset(w->kept, 0, w->ncol);
+  for (i = 0; i < RARRAY_LEN(w->keep); i++) {
+    long j = NUM2LONG(rb_ary_entry(w->keep, i));
+    if ( j < 0 || j >= w->ncol ) {
+      return 0;
+    }
+    if ( ! w->kept[j] ) {
+      w->kept[j] = 1;
+      w->width++;
+    }
+  }
+  return w->width > 0;
+}
 
 /* Read every record of s into w.  Returns 0 when the text is one this
    reader declines (see the header comment).  The cell ranges it grows are
@@ -85,6 +115,9 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
 {
   long ncol = w->ncol, p = 0;
 
+  if ( ! NIL_P(w->keep) && ncol > 0 && ! ca_csv_set_kept_columns(w) ) {
+    return 0;
+  }
   while ( p < n ) {
     long next, e = ca_csv_line_end(s, n, p, &next), k, fields = 0;
     int blank = 1;
@@ -109,7 +142,9 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
     if ( blank ) {
       int64_t a = e > p ? p : -1, b = e > p ? e : -1;
       if ( ncol == 1 ) {
-        ca_csv_push_cell_range(&w->cells, a, b);
+        if ( w->kept == NULL || w->kept[0] ) {
+          ca_csv_push_cell_range(&w->cells, a, b);
+        }
       }
       else if ( ncol == 0 ) {
         /* Before the first record the column count is not known: keep the
@@ -121,24 +156,37 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
     }
 
     for (;;) {
-      int64_t a, b;
+      int64_t a = -1, b = -1;
+      /* The field of a column not read is passed over, its text not
+         unescaped. */
+      int read = w->kept == NULL || ( fields < ncol && w->kept[fields] );
       if ( ca_csv_at(s, n, p, qp, qlen) ) {
         /* A quoted field, which may run onto later lines. */
         long q = p + qlen, start = q, tail0 = -1;
         for (;;) {
           const char *hit = NULL;
-          long r;
-          for (r = q; r + qlen <= n; r++) {
-            if ( memcmp(s + r, qp, qlen) == 0 ) {
-              hit = s + r;
+          long r = q;
+          while ( r + qlen <= n ) {
+            const char *c = memchr(s + r, qp[0], n - r);
+            if ( c == NULL ) {
               break;
             }
+            r = c - s;
+            if ( ca_csv_at(s, n, r, qp, qlen) ) {
+              hit = c;
+              break;
+            }
+            r++;
           }
           if ( hit == NULL ) {
             return 0;                           /* unterminated */
           }
           if ( ca_csv_at(s, n, r + qlen, qp, qlen) ) {
             /* a doubled quote is a literal one */
+            if ( ! read ) {
+              q = r + 2 * qlen;
+              continue;
+            }
             if ( NIL_P(w->tail) ) {
               w->tail = rb_str_buf_new(256);
             }
@@ -195,7 +243,9 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
       if ( ++fields > ncol && ncol > 0 ) {
         return 0;                               /* a row too long */
       }
-      ca_csv_push_cell_range(&w->cells, a, b);
+      if ( read ) {
+        ca_csv_push_cell_range(&w->cells, a, b);
+      }
       if ( p < e && ca_csv_at(s, n, p, sp, slen) ) {
         p += slen;
         continue;
@@ -206,6 +256,23 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
       /* The first record sets the column count; the blank lines before it
          are rows of a one-column file and nothing otherwise. */
       ncol = fields;
+      if ( ! NIL_P(w->keep) ) {
+        /* Its fields were all read, the columns being unknown until now:
+           keep those of the columns read. */
+        long j, k = 0;
+        w->ncol = ncol;
+        if ( ! ca_csv_set_kept_columns(w) ) {
+          return 0;
+        }
+        for (j = 0; j < ncol; j++) {
+          if ( w->kept[j] ) {
+            w->cells.v[2 * k]     = w->cells.v[2 * j];
+            w->cells.v[2 * k + 1] = w->cells.v[2 * j + 1];
+            k++;
+          }
+        }
+        w->cells.len = k;
+      }
       if ( ncol == 1 && w->pending.len > 0 ) {
         long i;
         for (i = 0; i < w->cells.len; i++) {
@@ -216,22 +283,31 @@ ca_csv_walk_records (const char *s, long n, const char *sp, long slen,
       }
     }
     for (; fields < ncol; fields++) {
-      ca_csv_push_cell_range(&w->cells, -1, -1);
+      if ( w->kept == NULL || w->kept[fields] ) {
+        ca_csv_push_cell_range(&w->cells, -1, -1);
+      }
     }
     p = next;
   }
   w->ncol = ncol;
+  if ( NIL_P(w->keep) ) {
+    w->width = ncol;
+  }
   return ncol > 0;                              /* 0: no record */
 }
 
 /* The arguments both readers take, checked; 0 for text they decline. */
 static int
-ca_csv_check_reader_args (VALUE text, VALUE vsep, VALUE vquote, VALUE vncol, long *ncol)
+ca_csv_check_reader_args (VALUE text, VALUE vsep, VALUE vquote, VALUE vncol,
+                          VALUE keep, long *ncol)
 {
   rb_encoding *enc;
   Check_Type(text, T_STRING);
   Check_Type(vsep, T_STRING);
   Check_Type(vquote, T_STRING);
+  if ( ! NIL_P(keep) ) {
+    Check_Type(keep, T_ARRAY);
+  }
   *ncol = NUM2LONG(vncol);
   enc = rb_enc_get(text);
   if ( ( enc != rb_utf8_encoding() && enc != rb_usascii_encoding() )
@@ -254,7 +330,8 @@ static VALUE
 ca_csv_read_body_walk_and_build (VALUE varg)
 {
   ca_csv_read_body_context *c = (ca_csv_read_body_context *) varg;
-  if ( ! ca_csv_check_reader_args(c->text, c->vsep, c->vquote, c->vncol, &c->w.ncol) ) {
+  if ( ! ca_csv_check_reader_args(c->text, c->vsep, c->vquote, c->vncol, c->w.keep,
+                                  &c->w.ncol) ) {
     return Qnil;
   }
   if ( ! ca_csv_walk_records(RSTRING_PTR(c->text), RSTRING_LEN(c->text),
@@ -271,6 +348,7 @@ ca_csv_read_body_free_cell_ranges (VALUE varg)
   ca_csv_read_body_context *c = (ca_csv_read_body_context *) varg;
   xfree(c->w.cells.v);
   xfree(c->w.pending.v);
+  xfree(c->w.kept);
   return Qnil;
 }
 
@@ -278,11 +356,12 @@ ca_csv_read_body_free_cell_ranges (VALUE varg)
    ranges freed however that ends: the walk and the build both allocate,
    and so may raise. */
 static VALUE
-ca_csv_read_body (VALUE text, VALUE vsep, VALUE vquote, VALUE vncol,
+ca_csv_read_body (VALUE text, VALUE vsep, VALUE vquote, VALUE vncol, VALUE keep,
                   ca_csv_build_result build)
 {
   ca_csv_read_body_context c = {
-    text, vsep, vquote, vncol, { { NULL, 0, 0 }, { NULL, 0, 0 }, Qnil, 0, 0 }, build
+    text, vsep, vquote, vncol,
+    { { NULL, 0, 0 }, { NULL, 0, 0 }, Qnil, keep, NULL, 0, 0, 0 }, build
   };
   VALUE out = rb_ensure(ca_csv_read_body_walk_and_build, (VALUE) &c,
                         ca_csv_read_body_free_cell_ranges, (VALUE) &c);
@@ -333,10 +412,10 @@ ca_csv_build_const_string_columns (VALUE text, ca_csv_walk_t *w)
     rb_enc_copy(buffer, text);
   }
 
-  nrow = w->cells.len / w->ncol;
+  nrow = w->cells.len / w->width;
   dim[0] = (ca_size_t) nrow;
-  cols = rb_ary_new_capa(w->ncol);
-  for (j = 0; j < w->ncol; j++) {
+  cols = rb_ary_new_capa(w->width);
+  for (j = 0; j < w->width; j++) {
     CArray *pe;
     int64_t *range;
     boolean8_t *m = NULL;
@@ -345,8 +424,8 @@ ca_csv_build_const_string_columns (VALUE text, ca_csv_walk_t *w)
     TypedData_Get_Struct(col, CArray, &carray_data_type, pe);
     range = (int64_t *) pe->ptr;
     for (i = 0; i < nrow; i++) {
-      int64_t a = w->cells.v[2 * (i * w->ncol + j)];
-      int64_t b = w->cells.v[2 * (i * w->ncol + j) + 1];
+      int64_t a = w->cells.v[2 * (i * w->width + j)];
+      int64_t b = w->cells.v[2 * (i * w->width + j) + 1];
       if ( a < 0 ) {
         if ( m == NULL ) {
           ca_create_mask(pe);
@@ -363,20 +442,22 @@ ca_csv_build_const_string_columns (VALUE text, ca_csv_walk_t *w)
 }
 
 static VALUE
-rb_ca_s_csv_read_body_as_string_cells (VALUE klass, VALUE text, VALUE vsep, VALUE vquote, VALUE vncol)
+rb_ca_s_csv_read_body_as_string_cells (VALUE klass, VALUE text, VALUE vsep, VALUE vquote,
+                                       VALUE vncol, VALUE keep)
 {
-  return ca_csv_read_body(text, vsep, vquote, vncol, ca_csv_build_string_cells);
+  return ca_csv_read_body(text, vsep, vquote, vncol, keep, ca_csv_build_string_cells);
 }
 
 static VALUE
-rb_ca_s_csv_read_body_as_const_string_columns (VALUE klass, VALUE text, VALUE vsep, VALUE vquote, VALUE vncol)
+rb_ca_s_csv_read_body_as_const_string_columns (VALUE klass, VALUE text, VALUE vsep, VALUE vquote,
+                                               VALUE vncol, VALUE keep)
 {
-  return ca_csv_read_body(text, vsep, vquote, vncol, ca_csv_build_const_string_columns);
+  return ca_csv_read_body(text, vsep, vquote, vncol, keep, ca_csv_build_const_string_columns);
 }
 
 void
 Init_caframe_csv_reader (void)
 {
-  rb_define_singleton_method(rb_cCArray, "__csv_read_body_as_string_cells__", rb_ca_s_csv_read_body_as_string_cells, 4);
-  rb_define_singleton_method(rb_cCArray, "__csv_read_body_as_const_string_columns__", rb_ca_s_csv_read_body_as_const_string_columns, 4);
+  rb_define_singleton_method(rb_cCArray, "__csv_read_body_as_string_cells__", rb_ca_s_csv_read_body_as_string_cells, 5);
+  rb_define_singleton_method(rb_cCArray, "__csv_read_body_as_const_string_columns__", rb_ca_s_csv_read_body_as_const_string_columns, 5);
 }

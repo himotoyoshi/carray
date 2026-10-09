@@ -72,6 +72,16 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     end
   end
 
+  # The columns not selected are read past in C, the others in the order asked.
+  def test_selected_columns_read_as_the_ruby_tokenizer
+    inputs.each do |text|
+      [["c0"], [1, 0], [0..]].each do |columns|
+        o = { types: :infer, columns: columns }
+        assert_equal read_in_ruby(text, **o), read(text, **o), "#{columns}: #{text.inspect}"
+      end
+    end
+  end
+
   def test_reads_as_reading_untyped_and_casting
     inputs.each do |text|
       typed = read(text, types: :infer)

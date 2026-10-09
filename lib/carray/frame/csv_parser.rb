@@ -328,8 +328,8 @@ class CAFrame
   #
   #   CAFrame.from_csv(path) { it.column_names "date", "temp", "rh"; it.data }
   #
-  # The verbs are +skip+ / +header+ / +column_names+ / +data+; each returns a
-  # value useful inline (header returns its fields) and the ordering is the
+  # The verbs are +skip+ / +header+ / +column_names+ / +columns+ / +data+;
+  # each returns a value useful inline (header returns its fields) and the ordering is the
   # script. The reader is a parameter, not self, so a local variable named
   # +data+ or +header+ cannot stand in for the verb. Without a block,
   # from_csv reads by its header: / data: / column_names: (see +layout+).
@@ -387,6 +387,63 @@ class CAFrame
       self
     end
 
+    # Read only these columns: names of the header or of column_names, or
+    # indexes of the file's columns from 0 (Integers or Ranges), in the order
+    # the frame is to have them. The fields of the others are read past, so
+    # a few columns of a wide file cost little more than a narrow file.
+    def columns(*selection)
+      selection = selection.flatten
+      if selection.empty?
+        raise ArgumentError, "from_csv: columns: names no column"
+      end
+      selection.each do |c|
+        next if c.is_a?(String)
+        next if c.is_a?(Integer) && c >= 0
+        next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
+                (c.end.nil? || c.end.is_a?(Integer))
+        raise ArgumentError, "from_csv: columns: takes column names, or indexes from 0 " \
+                             "and Ranges of them (got #{c.inspect})"
+      end
+      @selection = selection
+      self
+    end
+
+    # The indexes of the selected columns, in the order asked for, among
+    # ncol columns named +names+ (nil: by index only). nil when ncol is not
+    # known yet and the selection needs it.
+    private def selected_indexes(names, ncol)
+      indexes = @selection.flat_map do |c|
+        case c
+        when String
+          j = names&.index(c)
+          raise KeyError, "from_csv: columns: names no column #{c.inspect}" if j.nil?
+          j
+        when Integer then c
+        else
+          first = c.begin || 0
+          last = c.end
+          return nil if last.nil? && ncol.nil?
+          last = ncol - 1 if last.nil?
+          last -= 1 if c.end && c.exclude_end?
+          (first..last).to_a
+        end
+      end
+      dup = indexes.tally.select { |_, k| k > 1 }.keys
+      unless dup.empty?
+        raise ArgumentError, "from_csv: columns: selects column #{dup.first} more than once"
+      end
+      if ncol && (bad = indexes.find { |j| j >= ncol })
+        raise ArgumentError, "from_csv: columns: #{bad} is past the #{ncol} columns of the file"
+      end
+      indexes
+    end
+
+    # The indexes C is to read, ascending, when it can tell which they are
+    # before it reads; nil for every column.
+    private def columns_to_read
+      @selection && selected_indexes(@names, @names&.size)&.sort
+    end
+
     private def check_column_names(names, ncol, line)
       return if names.size == ncol
       raise ArgumentError, "from_csv: column_names: gives #{names.size} " \
@@ -417,7 +474,7 @@ class CAFrame
     # or to none (false) when column_names: is given; data: is the first line
     # of the data or a Range of lines, by default from the line after the
     # header. A record that starts within data: is read whole.
-    def layout(header: nil, data: nil, column_names: nil)
+    def layout(header: nil, data: nil, column_names: nil, columns: nil)
       header = column_names ? false : 0 if header.nil?
       unless header == false || (header.is_a?(Integer) && header >= 0)
         raise ArgumentError, "from_csv: header: takes the index of a line, from 0, " \
@@ -429,6 +486,7 @@ class CAFrame
         self.header
       end
       column_names(*column_names) if column_names
+      self.columns(*(columns.is_a?(Array) ? columns : [columns])) if columns
       first ||= @tok.lineno
       if first < @tok.lineno
         raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}"
@@ -506,8 +564,9 @@ class CAFrame
     # text is read here from the start of the body.
     private def read_body_into_const_string_columns
       ncol = @names && !@names_to_check ? @names.size : 0
+      keep = columns_to_read
       text = @io.read || ""
-      n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__(text, @tok.sep, @tok.quote, ncol)
+      n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__(text, @tok.sep, @tok.quote, ncol, keep)
       unless buffer
         @rows = []
         @io = StringIO.new(text)
@@ -519,6 +578,8 @@ class CAFrame
       end
       @tok.advance(records, text.count("\n") + (text.empty? || text.end_with?("\n") ? 0 : 1))
       @table = ConstStringColumns.new(pairs.map { |pr| CAConstString.wrap(pr, buffer: buffer) })
+      @table_ncol = n
+      @table_keep = keep
       @rows = []
     end
 
@@ -533,6 +594,7 @@ class CAFrame
       # Names that have to agree with the first record leave its column
       # count to C, to be checked against them.
       ncol = @names && !@names_to_check ? @names.size : 0
+      keep = columns_to_read
       cells = []
       loop do
         text = if chunked then next_chunk(chunk_bytes)
@@ -540,11 +602,21 @@ class CAFrame
                else @io.read || ""
                end
         break if text.nil?
-        n, flat, records = CArray.__csv_read_body_as_string_cells__(text, @tok.sep, @tok.quote, ncol)
+        n, flat, records = CArray.__csv_read_body_as_string_cells__(text, @tok.sep, @tok.quote, ncol, keep)
         unless flat
           # This chunk and the rest are read by the Ruby tokenizer, after the
           # rows read so far.
-          @rows = ncol > 0 ? cells.each_slice(ncol).to_a : []
+          if keep && ncol > 0 && !cells.empty?
+            # The rows read so far hold the selected fields only; spread
+            # them back to their columns for the Ruby reader.
+            @rows = cells.each_slice(keep.size).map do |row|
+              full = Array.new(ncol)
+              keep.each_with_index { |j, k| full[j] = UNDEF.equal?(row[k]) ? nil : row[k] }
+              full
+            end
+          else
+            @rows = ncol > 0 ? cells.each_slice(ncol).to_a : []
+          end
           @io = StringIO.new(chunked ? text + (@io.read || "") : text)
           return
         end
@@ -561,7 +633,10 @@ class CAFrame
         @rows = []
         return
       end
-      @table = CArray.object(cells.size / ncol, ncol) { cells }
+      width = keep ? keep.size : ncol
+      @table = CArray.object(cells.size / width, width) { cells }
+      @table_ncol = ncol
+      @table_keep = keep
       @rows = []
     end
 
@@ -608,14 +683,33 @@ class CAFrame
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
-      return [@names, @table] if @table
+      return table_result if @table
       rows = @rows || []
       if @names.nil? && @blank_rows && !@blank_rows.empty? &&
          rows.map(&:size).max != 1
         drop = @blank_rows.to_h { |i| [i, true] }
         rows = rows.reject.with_index { |_, i| drop[i] }
       end
-      [@names, rows]
+      return [@names, rows] unless @selection
+      ncol = @names ? @names.size : (rows.map(&:size).max || 0)
+      indexes = selected_indexes(@names, ncol)
+      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      [names, rows.map { |r| r.values_at(*indexes) }]
+    end
+
+    # The table C read, its columns those selected, in the order asked for.
+    private def table_result
+      return [@names, @table] unless @selection
+      indexes = selected_indexes(@names, @table_ncol)
+      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      kept = @table_keep || (0...@table_ncol).to_a
+      order = indexes.map { |j| kept.index(j) }
+      table =
+        if order == (0...kept.size).to_a then @table
+        elsif @table.is_a?(ConstStringColumns) then ConstStringColumns.new(@table.columns.values_at(*order))
+        else @table[nil, CA_INT64(order)]
+        end
+      [names, table]
     end
   end
 end

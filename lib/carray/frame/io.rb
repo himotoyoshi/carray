@@ -56,14 +56,19 @@ class CAFrame
   #             read whole
   #   column_names: the names, for a file with none or to replace them; the
   #             header then defaults to none
+  #   columns:  the columns to read, by name or by index from 0 (Integers
+  #             and Ranges), in the order the frame has them; the others are
+  #             read past without a String made for their fields
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
   #   CAFrame.from_csv("big.csv", data: 1..100)         # the first 100 lines
   #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
+  #   CAFrame.from_csv("wide.csv", columns: %w[date temp])
   #
   # A block, given the reader, reads in any other order with +skip+ /
-  # +header+ / +header(name)+ / +column_names+ / +data+ (see CSVReader):
+  # +header+ / +header(name)+ / +column_names+ / +columns+ / +data+ (see
+  # CSVReader):
   #
   #   CAFrame.from_csv("obs.csv") { |r| r.skip 2; r.header; r.skip 1; r.data }
   #
@@ -94,10 +99,11 @@ class CAFrame
   # CAString. Casting a column materializes it, and +copy+ gives an
   # independent frame.
   def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
-                    header: nil, data: nil, column_names: nil,
+                    header: nil, data: nil, column_names: nil, columns: nil,
                     sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
-    layout = { header: header, data: data, column_names: column_names }.compact
+    layout = { header: header, data: data, column_names: column_names,
+               columns: columns }.compact
     if block && !layout.empty?
       raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or a reading block, not both"

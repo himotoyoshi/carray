@@ -418,9 +418,20 @@ header line; given with `header:`, it replaces the names on that line. There
 have to be as many names as the file has columns -- those of the header line,
 or else of the first record -- or it raises `ArgumentError`.
 
+`columns:` reads only some of the columns, in the order given: names of the
+header or of `column_names:`, or indexes from 0 (Integers and Ranges, `0..2`,
+`3..`). The fields of the others are passed over without being made into
+Strings, so a few columns of a wide file take little more time and memory than
+a narrow file would. `types:` and `missing:` then name the columns selected.
+
+```ruby
+CAFrame.from_csv("wide.csv", columns: %w[date temp rh])
+CAFrame.from_csv("raw.csv", header: false, columns: [0, 3])   # names c0, c3
+```
+
 For anything else, pass a **reading block**. It is given the reader, which
 reads in the order the block says, with `skip(n)` / `header` /
-`header(name)` / `column_names(...)` / `data`:
+`header(name)` / `column_names(...)` / `columns(...)` / `data`:
 
 ```ruby
 CAFrame.from_csv("obs.csv") do |r|
@@ -436,7 +447,7 @@ CAFrame.from_csv("obs.csv") { it.skip 2; it.header; it.data }
 The reader comes as the block's parameter rather than as `self`, so a local
 variable that happens to be named `data` or `header` cannot stand in for the
 verb; a block without a parameter raises. A block and `header:` / `data:` /
-`column_names:` cannot be given together.
+`column_names:` / `columns:` cannot be given together.
 
 To swap in a different parser (the stdlib `csv`, or a typed-table source), pass
 `parser:` — a callable `source -> [headers, rows]`, handed whatever you passed

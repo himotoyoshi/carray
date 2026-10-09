@@ -87,15 +87,38 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
     end
   end
 
+  # The fields of the columns not selected are read past in C.
+  def test_selected_columns_read_as_the_ruby_tokenizer
+    [1 << 22, 7].each do |n|
+      with_chunk_bytes(n) do
+        inputs.each do |text, opts|
+          [[0], [1, 0], [0..]].each do |columns|
+            o = opts.merge(columns: columns)
+            assert_equal read_in_ruby(text, **o), read(text, **o), "#{n} #{columns}: #{text.inspect}"
+          end
+        end
+      end
+    end
+  end
+
   def test_the_reader_itself
-    ncol, cells, records = CArray.__csv_read_body_as_string_cells__("1,2\r\n\"a,b\",\n3\n  \n\"x\ny\",\"q\"\"r\"\n", ",", "\"", 2)
+    ncol, cells, records = CArray.__csv_read_body_as_string_cells__("1,2\r\n\"a,b\",\n3\n  \n\"x\ny\",\"q\"\"r\"\n", ",", "\"", 2, nil)
     assert_equal 2, ncol
     assert_equal ["1", "2", "a,b", UNDEF, "3", UNDEF, "x\ny", "q\"r"], cells
     assert_equal 5, records
-    assert_equal [1, [UNDEF, "a", UNDEF, " "], 4], CArray.__csv_read_body_as_string_cells__("\na\n\n \n", ",", "\"", 0)
-    assert_nil CArray.__csv_read_body_as_string_cells__("a\"b,1\n", ",", "\"", 2)        # a quote in an unquoted field
-    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 2)         # a row too long
-    assert_nil CArray.__csv_read_body_as_string_cells__("1,2\n".encode("UTF-16LE"), ",", "\"", 2)
+    assert_equal [1, [UNDEF, "a", UNDEF, " "], 4], CArray.__csv_read_body_as_string_cells__("\na\n\n \n", ",", "\"", 0, nil)
+    assert_nil CArray.__csv_read_body_as_string_cells__("a\"b,1\n", ",", "\"", 2, nil)        # a quote in an unquoted field
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 2, nil)         # a row too long
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2\n".encode("UTF-16LE"), ",", "\"", 2, nil)
+    assert_equal [3, ["1", "3", "4", "6"], 2], CArray.__csv_read_body_as_string_cells__("1,2,3\n4,5,6\n", ",", "\"", 3, [0, 2])
+    assert_equal [3, ["3", "6"], 2], CArray.__csv_read_body_as_string_cells__("1,2,3\n4,5,6\n", ",", "\"", 0, [2])
+    assert_equal [3, ["q\"r", "x"], 2], CArray.__csv_read_body_as_string_cells__("\"a\"\"b\",1,\"q\"\"r\"\n,2,x\n", ",", "\"", 3, [2])
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 3, [3])   # past the last column
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 0, [3])
+    assert_nil CArray.__csv_read_body_as_string_cells__("1,2,3\n", ",", "\"", 3, [])    # no column
+    n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__("1,\"x\"\"y\",3\n4,,6\n", ",", "\"", 0, [1, 2])
+    assert_equal [3, 2], [n, records]
+    assert_equal [["x\"y", UNDEF], ["3", "6"]], pairs.map { |pr| CAConstString.wrap(pr, buffer: buffer).to_a }
   end
 
   def test_a_file_in_another_encoding_reads_in_ruby

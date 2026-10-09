@@ -124,6 +124,38 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     end
   end
 
+  def test_columns_select_by_name_and_index
+    wide = "a,b,c,d\n1,2,3,4\n5,6,7,8\n"
+    [false, true].each do |ruby|
+      check = lambda do
+        assert_equal [%w[c a], %w[3 7], %w[1 5]], cells(read(wide, columns: %w[c a]))
+        assert_equal [%w[b c d], %w[2 6], %w[3 7], %w[4 8]], cells(read(wide, columns: 1..))
+        assert_equal [%w[d a], %w[4 8], %w[1 5]], cells(read(wide, columns: [3, "a"]))
+        assert_equal [%w[c1 c3], %w[2 6], %w[4 8]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: [1, 3]))
+        assert_equal [%w[y], %w[2 6]], cells(read("1,2,3,4\n5,6,7,8\n", column_names: %w[w y x z], columns: %w[y]))
+        df = read(wide) { |r| r.header; r.columns "d"; r.data }
+        assert_equal [%w[d], %w[4 8]], cells(df)
+        # A short row reaches a selected column as a missing cell.
+        assert_equal [%w[d], [UNDEF, "8"]], cells(read("a,b,c,d\n1,2\n5,6,7,8\n", columns: %w[d]))
+      end
+      ruby ? in_ruby(&check) : check.()
+    end
+  end
+
+  def test_columns_are_checked
+    wide = "a,b,c\n1,2,3\n"
+    err = assert_raise(KeyError) { read(wide, columns: %w[a x]) }
+    assert_equal 'from_csv: columns: names no column "x"', err.message
+    err = assert_raise(ArgumentError) { read(wide, columns: [0, 3]) }
+    assert_equal "from_csv: columns: 3 is past the 3 columns of the file", err.message
+    assert_raise(ArgumentError) { read(wide, columns: [0, "a"]) }
+    assert_raise(ArgumentError) { read(wide, columns: []) }
+    assert_raise(ArgumentError) { read(wide, columns: [-1]) }
+    assert_raise(KeyError) { read(wide, columns: %w[a], types: { "b" => :int32 }) }
+    assert_equal %w[a], read(wide, columns: %w[a], types: { "a" => :int32 }).variable_names
+    assert_equal [%w[c a], [3], [1]], cells(read(wide, columns: %w[c a], types: { "a" => :int32, "c" => :int32 }))
+  end
+
   def test_a_header_past_the_end
     err = assert_raise(MALFORMED) { read("a\n1\n", header: 4) }
     assert_match(/header expected but input ended/, err.message)
