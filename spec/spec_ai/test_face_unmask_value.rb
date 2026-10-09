@@ -49,11 +49,12 @@ class TestFaceUnmaskValue < Test::Unit::TestCase
     end
   end
 
-  def test_string_is_refused_as_the_store_refuses_it
+  def test_string_is_read_as_the_store_reads_it
     x = masked_days
-    assert_raise(ArgumentError) { x[1] = "2024-01-09" }
-    assert_raise(ArgumentError) { x.unmask("2024-01-09") }
-    assert_raise(ArgumentError) { x.strip_mask("2024-01-09") }
+    assert_equal "2024-01-09", x.strip_mask("2024-01-09")[1].to_s
+    x.unmask("2024-01-09")
+    assert_equal "2024-01-09", x[1].to_s
+    assert_raise(ArgumentError) { masked_days.unmask("2024-01-09 12:00") }
   end
 
   def test_unmask_hour_unit_with_time

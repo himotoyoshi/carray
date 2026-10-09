@@ -1026,11 +1026,15 @@ class CATime
   #   different unit or shape), so the gate routes the operand through here.
   #
   #   Accepted operands: another {CATime} (unit-rescaled to self),
-  #   a {Element} (lifted to a length-1 CATime), a Ruby `Time`, and a
-  #   Ruby `DateTime` (both absolute instants converted to self's unit,
-  #   Unix epoch, UTC).  A `String` is out of scope (parsing is a separate,
-  #   opposite-direction mechanism).  A bare Integer / other type raises;
-  #   descend to `ca.parent` to compare the hidden storage directly.
+  #   a {Element} (lifted to a length-1 CATime), and an instant written
+  #   outside CArray -- a Ruby `Time`, `Date`, `DateTime`, or a `String` in
+  #   the grammar {CArray.time} reads (UTC unless it carries an offset).
+  #   Those are read at the precision they carry, not at self's unit, and
+  #   then go through the same conversion as a CATime: "2024-01-02 09:00"
+  #   against a day-unit array raises rather than matching 2024-01-02.  A
+  #   bare Integer / other type raises; descend to `ca.parent` to compare
+  #   the hidden storage directly.  An Array of any of these is a 1-D set
+  #   of instants (the value set of {#is_in}).
   #
   #   The rescale is an INSTANT conversion (convert_instant!), lossless: a
   #   coarser->finer unit always converts; a finer->coarser unit converts only
@@ -1040,7 +1044,7 @@ class CATime
   #   :D and finer, and a fixed operand coarsens to :M/:Y only when it sits on
   #   the calendar boundary (:W is the one exception -- month/year starts are
   #   not week-aligned, so :Y/:M <-> :W raises).
-  #   @param operand [CATime, CATime::Element, Time, DateTime]
+  #   @param operand [CATime, CATime::Element, Time, Date, DateTime, String, Array]
   #   @return [CATime] in self's unit.
   #   @raise [TypeError, ArgumentError] on an unreconcilable operand / unit.
   def to_comparable (operand)
@@ -1052,12 +1056,12 @@ class CATime
     when CATime::Element
       lifted = CATime.wrap(CA_INT64([operand.value]), unit: operand.unit)
       to_comparable(lifted)
-    when Time
-      # Reuse the single-literal builder; it yields a length-1 CATime
-      # in the requested (= self's) resolution.
-      CArray.time(operand, unit: unit)
-    when defined?(DateTime) && DateTime
-      to_comparable(operand.to_time.utc)
+    when Time, String, Date
+      to_comparable(CATimeLiteral.exact_instant(operand))
+    when Array
+      # A set of instants written one by one (is_in(["2024-01-02", ...])).
+      CATime.wrap(CA_INT64(operand.map { |v| to_comparable(v).parent[0] }),
+                  unit: unit)
     else
       raise TypeError,
             "CATime cannot reconcile #{operand.class} " \
@@ -1069,19 +1073,18 @@ class CATime
   #   Write-direction counterpart of storage_to_element (the store hook fired
   #   from rb_ca_obj2ptr): brings a surface value object into this Face's
   #   int64 storage (count in self's unit since the Unix epoch) so a scalar
-  #   store round-trips with a fetch.  A {Element} / `Time` / `DateTime` is
-  #   reconciled to self's unit via {#to_comparable} (same lossless
-  #   discipline: a cross-group unit or a non-exact finer->coarser cast
-  #   raises).  A bare Integer (the documented `.parent` raw-storage escape)
-  #   and a String (parsing is a separate, opposite-direction mechanism)
-  #   pass through unchanged to the storage cast.
-  #   @param surface [Element, Time, DateTime, Integer, String]
+  #   store round-trips with a fetch.  A {Element} / `Time` / `Date` /
+  #   `DateTime` / `String` is reconciled to self's unit via {#to_comparable}
+  #   (same lossless discipline: a cross-group unit or a non-exact
+  #   finer->coarser cast raises).  A bare Integer (the documented `.parent`
+  #   raw-storage escape) passes through unchanged to the storage cast.
+  #   @param surface [Element, Time, Date, DateTime, Integer, String]
   #   @return [Integer, Object] the storage-domain value, or `surface`
   #     unchanged for a pass-through type.
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
   def element_to_storage (surface)
     case surface
-    when Integer, String
+    when Integer
       surface
     else
       to_comparable(surface).parent[0]
@@ -1782,8 +1785,23 @@ module CATimeLiteral
   end
   private_class_method :parse_date_fields
 
+  # An instant written outside CArray (Time / Date / DateTime / String) as a
+  # length-1 CATime in the coarsest of :s / :ms / :us / :ns that holds it
+  # exactly, so a comparison sees the instant it names and not that instant
+  # floored onto some other grid.  Finer than a nanosecond raises.
+  def exact_instant(spec)
+    sec = epoch_seconds(spec)
+    [:s, :ms, :us, :ns].each_with_index do |u, k|
+      ticks = sec * (10 ** (3 * k))
+      if ticks.denominator == 1
+        return CATime.wrap(CA_INT64([ticks.to_i]), unit: u)
+      end
+    end
+    raise ArgumentError, "#{spec.inspect} is finer than a nanosecond"
+  end
+
   # Exact Rational seconds since the Unix epoch for a start literal (Time /
-  # DateTime / Integer unix-seconds / String).  UTC default.
+  # Date / DateTime / Integer unix-seconds / String).  UTC default.
   def epoch_seconds(spec, format = nil)
     require 'date'
     require 'time'
@@ -1813,6 +1831,8 @@ module CATimeLiteral
     else
       if defined?(DateTime) && spec.is_a?(DateTime)
         spec.to_time.to_r
+      elsif defined?(Date) && spec.is_a?(Date)
+        Rational(CATimeCivil.days_from_civil_1(spec.year, spec.month, spec.day) * 86400)
       else
         raise ArgumentError, "cannot parse time #{spec.class}"
       end

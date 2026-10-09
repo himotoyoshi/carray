@@ -85,7 +85,7 @@ class TestFaceWriteScalar < Test::Unit::TestCase
     assert_raise(TypeError) { d[0] = Time.utc(2024, 1, 1) }  # Time is not a duration
   end
 
-  # ---- bare Integer / String pass through unchanged ----
+  # ---- a bare Integer passes through; a String is read as an instant ----
 
   def test_integer_is_raw_storage_escape
     t = dt()
@@ -93,11 +93,15 @@ class TestFaceWriteScalar < Test::Unit::TestCase
     assert_equal 477338, t.parent[0]
   end
 
-  def test_string_not_silently_parsed
+  def test_string_is_read_as_an_instant_never_floored
     t = dt()
-    # String is out of scope for the write hook; behavior is unchanged from
-    # the raw storage cast (a loud failure, not a silent parse).
-    assert_raise(ArgumentError, TypeError) { t[0] = "2024-06-15T02:00Z" }
+    # A String is read in the grammar CArray.time reads, at the precision it
+    # carries; one that is not on the array's grid raises instead of being
+    # floored onto it, and text that is not a time raises.
+    t[0] = "2024-06-15T02:00Z"
+    assert_equal Time.utc(2024, 6, 15, 2), t[0].to_time
+    assert_raise(ArgumentError) { t[0] = "2024-06-15T02:30Z" }
+    assert_raise(ArgumentError) { t[0] = "not a time" }
   end
 
   # ---- bulk store paths all fire the conversion ----

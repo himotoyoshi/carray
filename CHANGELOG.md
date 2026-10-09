@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a time array compares with, searches for and stores a `String` or a
+  `Date` as well as a `Time`, so `t.eq("2024-01-02")`, `t.is_in(["2024-01-02"])`
+  and a CAFrame time index's `at("2024-01-02")` work, and `t[0] = "2024-01-02"`
+  stores it. The text is read in the grammar `CArray.time` reads. A `Time`,
+  `Date` or `String` is read at the precision it carries: one that is not on
+  the array's grid (09:00 against a day-unit array) now raises, where a `Time`
+  used to be floored onto the grid and match the day.
+
 - Fix: `dup` and `clone` of a view now keep what the view was: the copy of
   `x.value` (or of its reshape) could take UNDEF into the mask of `x`, and
   `clone` of a frozen array answered `read_only?` false. A copy of a mask

@@ -428,7 +428,9 @@ class CAFrame
 
   # The single row whose index label equals +label+, as a Ruby Hash (memo
   # §13.2b). +label+ is matched exactly against the index (+index.eq+), so any
-  # orderable / object / datetime / categorical index works. The return type is
+  # orderable / object / datetime / categorical index works, and +label+ is
+  # whatever +index.eq+ takes -- for a time index, a Time, Date or a String
+  # such as "2024-01-02". The return type is
   # a row Hash and stays that way: zero matches raise KeyError, and duplicate
   # labels raise (go through +filter { |f| f.index.eq(label) }+ for the
   # multi-row, frame-returning path). Positional access is +df[i]+.

@@ -719,14 +719,23 @@ axis.search(q)    # => [2, 3]
 
 The query may be another time array **or a single instant the axis knows
 how to convert** — a `CATime::Element` (e.g. `axis[i]`), a Ruby `Time`,
-or a Ruby `DateTime` (both absolute, UTC, Unix epoch). It may **not** be a bare
-number, which would touch the hidden storage — see §16.2.
+`Date` or `DateTime`, or a `String` in the text grammar `CArray.time` reads
+(UTC unless the text carries an offset). An Array of these is a set of
+instants (the value set of `is_in`). It may **not** be a bare number, which
+would touch the hidden storage — see §16.2.
 
 ```ruby
 require "time"
 axis.bsearch(Time.utc(2024, 6, 17))   # => 2     (Time lifted into the axis unit)
+axis.bsearch("2024-06-17")            # => 2     (text read as an instant)
 axis.bsearch(axis[3])                 # => 3     (a Element operand)
 ```
+
+A `Time` / `Date` / `String` is read at the precision it carries, not at the
+axis's unit, and then reconciled like any other operand (§10.3): against a
+daily axis, `"2024-06-17 09:00"` raises rather than matching 2024-06-17. The
+same goes for a store: `t[0] = "2024-06-17"` reads the text, and a value off
+the array's grid raises.
 
 (A timedelta axis is narrower: it accepts a timedelta array or
 `CATimedelta::Element`, but **not** `Time` / `DateTime` — those are absolute
@@ -813,7 +822,7 @@ t.linear_fetch(CA_FLOAT64([0.0, 2.5]))
 ```
 
 The query side needs nothing special: `linear_section` accepts a `CATime`, an
-`Element`, a Ruby `Time` or `DateTime` and reconciles the unit through
+`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and reconciles the unit through
 `to_comparable` (§10.3), exactly as search does. Reconciliation is lossless,
 though, so a query at a *finer* resolution than the axis has to land on the
 axis's grid — `05:00` against a `2 h` axis raises rather than sit between two

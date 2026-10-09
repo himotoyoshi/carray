@@ -125,6 +125,11 @@ class CArray
   # operand (Numo, a MemoryView producer, ...) comes in through wrap_readonly,
   # the canonical type-coercion entry, so its format's data type drives the promote.
   def promote_value_set (values)
+    # A Face that reconciles operands (CATime) reads a bare Array as values
+    # of its own kind -- instants written as Time / String / elements.
+    if values.is_a?(Array) && face? && respond_to?(:to_comparable)
+      return [self, to_comparable(values)]
+    end
     case values
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)
