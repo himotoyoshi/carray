@@ -104,6 +104,7 @@ class CAWindowIterator < CAIterator
             "windows: expected #{@source.ndim} ranges (one per axis), " \
             "got #{@ranges.size}"
     end
+    @ranges = @ranges.each_with_index.map { |r, k| window_offsets(r, k) }
 
     @sndim  = @source.ndim
     @widths = @ranges.map { |r| r.end - r.begin + 1 }
@@ -158,10 +159,37 @@ class CAWindowIterator < CAIterator
   #   the padded entity.
   #   @return [CArray]
   def sliding_view
-    @sliding_view ||= anchored_buffer.sliding_windows(*@widths)
+    @sliding_view ||= @shape.include?(0) ? no_windows : anchored_buffer.sliding_windows(*@widths)
   end
 
   private
+
+  # An axis's offsets as an inclusive Integer range, as Ruby reads the range
+  # given (`-1...1` is the offsets -1 and 0).
+  def window_offsets (r, k)
+    unless r.is_a?(Range) && r.begin.is_a?(Integer) && r.end.is_a?(Integer)
+      raise TypeError,
+            "windows: axis #{k} takes a Range of Integer offsets, got #{r.inspect}"
+    end
+    last = r.exclude_end? ? r.end - 1 : r.end
+    if last < r.begin
+      raise ArgumentError, "windows: axis #{k} offsets #{r.inspect} are empty"
+    end
+    r.begin..last
+  end
+
+  # With no anchors (an empty source, or a :truncate window wider than the
+  # source) there is nothing to slide over, and sliding_windows refuses a
+  # window wider than its buffer.  The view is then an empty one of the same
+  # shape: the source's unit tiles cut to the output and stretched along the
+  # window axes, so every reduction answers with an empty array of its type.
+  def no_windows
+    unit = @source.block_view(*[1] * @sndim)
+    cut  = @shape.each_with_index.map { |n, k| n == unit.shape[k] ? nil : 0...n }
+    unit = unit[*cut, *[nil] * @sndim] unless cut.all?(&:nil?)
+    view = unit.broadcast_to(*(@shape + @widths))
+    @source.face? ? view.face_lift(@source) : view
+  end
 
   # The stretch of the padded buffer the windows are taken from: it begins at
   # the first window and holds one window per anchor.  For a window that covers
@@ -427,7 +455,7 @@ class CAWindowIterator < CAIterator
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
-        folded = fold_by_offset(:#{op}, min_count, fill_value)
+        folded = @shape.include?(0) ? nil : fold_by_offset(:#{op}, min_count, fill_value)
         return folded unless folded.nil?
         kw = {}
         kw[:min_count]  = min_count  unless min_count.nil?

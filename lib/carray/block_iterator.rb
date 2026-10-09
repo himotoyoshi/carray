@@ -180,6 +180,15 @@ class CABlockIterator < CAIterator
       grids ||= parts.map { |r| CArray.new(r.data_type, @shape, bytes: r.bytes) }
       parts.each_index { |k| grids[k][*out_ranges] = parts[k] }
     end
+    unless grids
+      # An empty source has no region.  A view with unit tiles has no cells
+      # either; reducing it gives each output's type for the empty grid.
+      res = yield(@source.block_view(*[1] * @sndim), [1] * @sndim)
+      single = !res.is_a?(Array)
+      res = [res] unless res.is_a?(Array)
+      faces = res.map { |r| r.face? ? r : nil }
+      grids = res.map { |r| r = face_grid_part(r) if r.face?; CArray.new(r.data_type, @shape, bytes: r.bytes) }
+    end
     outs = grids.each_index.map { |k| faces[k] ? face_grid(grids[k], faces[k]) : grids[k] }
     single ? outs[0] : outs
   end
@@ -460,7 +469,7 @@ class CABlockIterator < CAIterator
       out ||= CArray.int64(*@shape)
       out[*out_ranges] = picked
     end
-    out
+    out || CArray.int64(*@shape)
   end
 
   public
