@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `bitarray` view has no mask. The bits of one byte would share
+  that byte's one mask cell, so `bitarray` raises `ArgumentError` on an
+  array with a mask (read its bits with `value.bitarray`), and a bit view
+  refuses `mask=`, `UNDEF` and masked arrays instead of masking or
+  unmasking the whole byte. `pack_bits` raises on masked cells instead of
+  writing them as bits; pack the mask with `validity_bits`.
 - Change: when an operator cannot combine its two operands, it raises
   `TypeError` instead of `RuntimeError`. Code that rescues `RuntimeError`
   around such an operation needs to rescue `TypeError`.

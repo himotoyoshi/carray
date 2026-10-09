@@ -65,19 +65,15 @@ class TestMaskViewRegressions < Test::Unit::TestCase
     assert_equal [false, true, false, false], f.mask.to_a
   end
 
-  # --- CABitarray mask round-trip ---------------------------------------
+  # --- CABitarray takes no mask ------------------------------------------
+  # A bit view of a masked array is refused, so its mask class is never
+  # instantiated.
 
-  def test_bitarray_mask_propagation
+  def test_bitarray_of_masked_array_is_refused
     a = CArray.uint8(4).seq
     a.mask = 0
     a[2] = UNDEF
-    ba = a.bitarray
-    assert_true ba.has_mask?
-    # CABitarray fans each parent byte out into 8 bit slots.
-    expected = [[false]*8, [false]*8, [true]*8, [false]*8]
-    assert_equal expected, ba.is_masked.to_a
-    GC.start
-    assert_equal expected, ba.mask.to_a
+    assert_raise(ArgumentError) { a.bitarray }
   end
 
   # A view whose mask is made while the view is being attached keeps that

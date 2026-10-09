@@ -58,9 +58,12 @@ class CArray
   #   multiple of 8) are zero-filled. The byte order matches the packed-bit
   #   convention used by Apache Arrow validity bitmaps and PEP 3118 `?` /
   #   `_Bool` at the bit level.
+  #   A masked cell has no bit to pack, so a receiver with masked cells is
+  #   refused; pack the mask separately with {#validity_bits}.
   #   @return [CArray] uint8 CArray of shape `[ceil(n / 8)]`.
-  #   @raise [ArgumentError] when the receiver is not 1-D or its
-  #     `data_type` is not one of `CA_BOOLEAN` / `CA_UINT8` / `CA_INT8`.
+  #   @raise [ArgumentError] when the receiver is not 1-D, its `data_type`
+  #     is not one of `CA_BOOLEAN` / `CA_UINT8` / `CA_INT8`, or it has
+  #     masked cells.
   def pack_bits
     unless data_type == CA_BOOLEAN || data_type == CA_UINT8 || data_type == CA_INT8
       raise ArgumentError,
@@ -71,7 +74,15 @@ class CArray
     n_bytes = (n + 7) / 8
     packed = CArray.uint8(n_bytes) { 0 }
     return packed if n == 0
-    packed.bitarray.reshape(-1)[0..n-1] = self
+    source = self
+    if has_mask?
+      if count_masked > 0
+        raise ArgumentError,
+          "pack_bits: masked cells have no bit to pack; pack the mask with validity_bits"
+      end
+      source = value
+    end
+    packed.bitarray.reshape(-1)[0..n-1] = source
     packed
   end
 

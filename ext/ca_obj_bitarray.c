@@ -96,6 +96,15 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
     rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
   }
 
+  /* The bits of one byte would share that byte's one mask cell, so a bit
+     view takes no masked array and holds no mask of its own. */
+  if ( ca_has_mask(parent) ) {
+    rb_raise(rb_eArgError,
+             "bitarray: the array has a mask, which a bit view can not "
+             "carry (its bits would share one mask per byte); "
+             "use .value.bitarray to read the bits without it");
+  }
+
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
   if ( ca == NULL ) {
@@ -127,10 +136,6 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
 
   memcpy(ca->dim, parent->dim, (ndim-1) * sizeof(ca_size_t));
   ca->dim[ndim-1] = bitlen;
-
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   return 0;
 }
@@ -490,22 +495,24 @@ ca_bitarray_func_fill_data (void *ap, void *ptr)
   ca_sync_detach(ca->parent);
 }
 
+/* Reached when a mask is about to be put on the view (mask=, storing UNDEF
+   or a masked array), or when the array it views has gained a mask since
+   the view was made. */
+NORETURN(static void ca_bitarray_func_create_mask (void *ap));
+
 static void
 ca_bitarray_func_create_mask (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
-  ca_size_t count[CA_RANK_MAX];
-  int8_t i;
-
-  for (i=0; i<ca->ndim-1; i++) {
-    count[i] = 0;
+  if ( ca_has_mask(ca->parent) ) {
+    rb_raise(rb_eArgError,
+             "bitarray: the array this view reads has gained a mask, which "
+             "a bit view can not carry (its bits would share one mask per "
+             "byte); use .value.bitarray to read the bits without it");
   }
-  count[ca->ndim-1] = ca->bitlen;
-
-  ca_create_mask(ca->parent);
-  ca->mask = (CArray *) ca_repeat_new(ca->parent->mask, ca->ndim, count);
-
-  ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
+  rb_raise(rb_eArgError,
+           "a bitarray view can not hold a mask "
+           "(its bits would share one mask per byte)");
 }
 
 ca_operation_function_t ca_bitarray_func = {
