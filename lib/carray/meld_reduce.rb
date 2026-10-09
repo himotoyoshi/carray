@@ -36,7 +36,7 @@ class CAMeld
 
   def sum(*args, **kw)
     return super unless args.empty? && meld_reduce_fast_path_ok?(kw)
-    axis = kw[:axis]
+    axis = meld_fast_path_axis(kw)
     if axis.nil?
       parents.map(&:sum).inject(:+)
     elsif meld_axis_normalized?(axis)
@@ -52,7 +52,10 @@ class CAMeld
   # @return [CArray, Numeric]
   def mean(*args, **kw)
     return super unless args.empty? && meld_reduce_fast_path_ok?(kw)
-    axis = kw[:axis]
+    # The combine divides in Float; an object array's mean stays exact
+    # (Rational, Integer division) on the core path.
+    return super if object?
+    axis = meld_fast_path_axis(kw)
     # `mean` has no identity: an empty set of contributors has no defined
     # mean (0/0 = NaN).  Punt to super, which returns UNDEF: a reduction
     # with no contributors yields the identity where one exists and UNDEF
@@ -78,7 +81,7 @@ class CAMeld
   # @return [CArray, Numeric]
   def min(*args, **kw)
     return super unless args.empty? && meld_reduce_fast_path_ok?(kw)
-    axis = kw[:axis]
+    axis = meld_fast_path_axis(kw)
     # `min` has no identity — empty parent list / all-empty parents punt to
     # super for UNDEF.
     if axis.nil?
@@ -99,7 +102,7 @@ class CAMeld
   # @return [CArray, Numeric]
   def max(*args, **kw)
     return super unless args.empty? && meld_reduce_fast_path_ok?(kw)
-    axis = kw[:axis]
+    axis = meld_fast_path_axis(kw)
     if axis.nil?
       return super if parents.all? { |p| p.elements == 0 }
       meld_combine_flat(:max)
@@ -179,7 +182,18 @@ class CAMeld
     end
     return false if has_mask?
     parents.each { |p| return false if p.has_mask? }
+    # A meld of Face arrays keeps its parents in their Face; the per-parent
+    # calls would reach the Face's own reductions, which answer in the Face's
+    # terms (or refuse), not in storage.
+    parents.each { |p| return false if p.face? }
     true
+  end
+
+  # The axis a fast path reduces along.  A 1-D meld has only the meld axis,
+  # and reducing it is reducing the whole array: the answer is a scalar, as
+  # for the flat call.
+  def meld_fast_path_axis(kw)
+    ndim == 1 ? nil : kw[:axis]
   end
 
   # The per-parent answers of a whole-array min / max, combined by core's
@@ -213,7 +227,10 @@ class CAMeld
     # The merge works in Float; an object array's variance stays exact
     # (Rational, BigDecimal) on the core path.
     return yield if object?
-    axis = kw[:axis]
+    # The merge squares the difference of means, which for complex values is
+    # not |δ|²; the core path computes the variance of a complex array.
+    return yield if complex?
+    axis = meld_fast_path_axis(kw)
     # Empty-parent / short-parent handling — Welford needs n >= 2 per parent
     # to recover m2 from p.variance for sample, n >= 1 for variancep (n=1
     # gives m2=0, fine).  Any parent below its threshold punts to super,
