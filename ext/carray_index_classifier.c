@@ -588,9 +588,9 @@ ca_classifier_dispatch_axis_arg (ca_classifier_ctx_t *ctx, int axis, VALUE arg,
     }
     ca_classifier_check_reserved_contraction_symbol(arg);  /* raises if reserved */
     rb_raise(rb_eIndexError,
-             "symbol :%s is invalid as the index for slab iterator "
+             "symbol :%"PRIsVALUE" is invalid as the index for slab iterator "
              "(use :> instead)",
-             rb_id2name(SYM2ID(arg)));
+             rb_sym2str(arg));
   }
   if ( rb_obj_is_carray(arg) ) {
     /* CArray (boolean / integer) at an axis position → GRID.

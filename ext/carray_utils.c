@@ -16,6 +16,7 @@
 #include "carray_internal.h"   /* ca_calling_method_name */
 
 #include "ruby/st.h"
+#include "ruby/thread_native.h"
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
@@ -487,6 +488,53 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
    was entered from Ruby, which is the one the user wrote.  The internal
    `_ki` twin of a public method is reported under the public name.
    Falls back to "axis" when there is no method frame. */
+/* A C copy of an ID's name that stays put.  rb_id2name points into the
+   name's String, which compaction can move while a caller is still
+   formatting a message with it; the copy is made once per ID while the
+   String is held on the stack (and so pinned), and kept for the life of
+   the process.  The table is shared by every Ractor, hence the lock. */
+static st_table              *ca_id_names = NULL;
+static rb_nativethread_lock_t ca_id_names_lock;
+
+static const char *
+ca_stable_id_name (ID id)
+{
+  st_data_t   found;
+  const char *name = NULL;
+  rb_nativethread_lock_lock(&ca_id_names_lock);
+  if ( st_lookup(ca_id_names, (st_data_t) id, &found) ) {
+    name = (const char *) found;
+  }
+  rb_nativethread_lock_unlock(&ca_id_names_lock);
+  if ( name ) {
+    return name;
+  }
+  {
+    VALUE  str = rb_id2str(id);
+    long   len;
+    char  *copy;
+    if ( NIL_P(str) ) {
+      return NULL;
+    }
+    len  = RSTRING_LEN(str);
+    copy = ALLOC_N(char, len + 1);
+    memcpy(copy, RSTRING_PTR(str), len);
+    copy[len] = '\0';
+    RB_GC_GUARD(str);
+    rb_nativethread_lock_lock(&ca_id_names_lock);
+    if ( st_lookup(ca_id_names, (st_data_t) id, &found) ) {
+      xfree(copy);
+      name = (const char *) found;
+    }
+    else {
+      st_insert(ca_id_names, (st_data_t) id, (st_data_t) copy);
+      name = copy;
+    }
+    rb_nativethread_lock_unlock(&ca_id_names_lock);
+    return name;
+  }
+}
+
 const char *
 ca_calling_method_name (void)
 {
@@ -496,13 +544,13 @@ ca_calling_method_name (void)
   if ( ! id ) {
     return "axis";
   }
-  s = rb_id2name(id);
+  s = ca_stable_id_name(id);
   if ( ! s ) {
     return "axis";
   }
   n = strlen(s);
   if ( n > 3 && strcmp(s + n - 3, "_ki") == 0 ) {
-    return rb_id2name(rb_intern2(s, (long) (n - 3)));
+    return ca_stable_id_name(rb_intern2(s, (long) (n - 3)));
   }
   return s;
 }
@@ -586,8 +634,8 @@ ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
   if ( id == rb_intern(c1) ) {
     return 1;
   }
-  rb_raise(rb_eArgError, "%s: unknown %s :%s (expected :%s or :%s)",
-           nm, arg, rb_id2name(id), c0, c1);
+  rb_raise(rb_eArgError, "%s: unknown %s :%"PRIsVALUE" (expected :%s or :%s)",
+           nm, arg, rb_id2str(id), c0, c1);
   return 0;
 }
 
@@ -796,7 +844,7 @@ rb_ca_guess_type (VALUE obj)
     }
   }
   else if ( TYPE(obj) == T_SYMBOL ) {
-    return rb_ca_guess_type(rb_str_new2(rb_id2name(SYM2ID(obj))));
+    return rb_ca_guess_type(rb_str_dup(rb_sym2str(obj)));
   }
   else if ( TYPE(obj) == T_CLASS ) {
     ca_check_data_class(obj);
@@ -1023,6 +1071,8 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 void
 Init_carray_utils (void)
 {
+  ca_id_names = st_init_numtable();
+  rb_nativethread_lock_initialize(&ca_id_names_lock);
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");

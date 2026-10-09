@@ -65,8 +65,8 @@ group_op_code (VALUE vop)
   else if ( id == rb_intern("max_addr") ) return GR_MAXADDR;
   else if ( id == rb_intern("all") )      return GR_ALL;
   else if ( id == rb_intern("any") )      return GR_ANY;
-  rb_raise(rb_eArgError, "axis_group_reduce: unsupported op :%s",
-           rb_id2name(id));
+  rb_raise(rb_eArgError, "axis_group_reduce: unsupported op :%"PRIsVALUE,
+           rb_id2str(id));
 }
 
 /* ---- per-slab-element composite-code walk, templated on the load type ----
@@ -1112,7 +1112,7 @@ group_scan_op_code (VALUE vop)
   else if ( id == rb_intern("cummax") )   return GS_CUMMAX;
   else if ( id == rb_intern("cummin") )   return GS_CUMMIN;
   else if ( id == rb_intern("cumprod") )  return GS_CUMPROD;
-  rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%s", rb_id2name(id));
+  rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%"PRIsVALUE, rb_id2str(id));
 }
 
 /* __axis_group_scan__(group_axes, bundles, op) — group-keyed segment scan of

@@ -459,8 +459,8 @@ rb_ca_parse_time_text (int argc, VALUE *argv, VALUE self)
        outside 1677..2262 without a word. */
     if ( __builtin_mul_overflow(days[i], per_day, &whole)
          || __builtin_add_overflow(whole, nsod[i] / ns_per_tick, &ticks[i]) ) {
-      rb_raise(rb_eRangeError, "time %" PRIsVALUE " does not fit int64 ticks of %s",
-               rb_inspect(cells[i]), rb_id2name(unit));
+      rb_raise(rb_eRangeError, "time %" PRIsVALUE " does not fit int64 ticks of %" PRIsVALUE,
+               rb_inspect(cells[i]), rb_id2str(unit));
     }
   }
 
