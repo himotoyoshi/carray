@@ -349,7 +349,7 @@ class TestCACategoricalFace < Test::Unit::TestCase
   def test_numeric_ops_gated
     cat = CACategorical.from_codes(CArray.uint8(3) { |i| i }, ["a", "b", "c"])
     # surface = CA_FIXLEN -> numeric kernel dispatch is gated off
-    assert_raise(RuntimeError) { cat + 1 }
+    assert_raise(TypeError) { cat + 1 }
   end
 
   # ---- keys.categorize: densify (first-appearance order) ------------------

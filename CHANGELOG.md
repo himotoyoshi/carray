@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: when an operator cannot combine its two operands, it raises
+  `TypeError` instead of `RuntimeError`. Code that rescues `RuntimeError`
+  around such an operation needs to rescue `TypeError`.
 - Fix: when an operator cannot combine its two operands, the error names a
   time, categorical, record or string column by its class
   (`'int64' and 'CATimedelta'`) instead of `'fixlen'`, the data type it
