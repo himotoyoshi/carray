@@ -56,6 +56,34 @@ class TestGroupReductionMinCount < Test::Unit::TestCase
     end
   end
 
+  # A weighted reduction counts the cells whose value and weight are both
+  # present, as CArray#wsum / #wmean do.
+  def test_weighted_reductions_count_present_pairs
+    rng = Random.new(11)
+    w = CA_FLOAT64(Array.new(40) { rng.rand(1..3).to_f })
+    Array.new(40) { |i| i }.select { rng.rand < 0.3 }.each { |i| w[i] = UNDEF }
+    g = @v.group_by_category(@cat)
+    %i[wsum wmean].each do |op|
+      [0, 1, 2, 4].each do |k|
+        [nil, -1.0].each do |fill|
+          kw = { min_count: k }
+          kw[:fill_value] = fill unless fill.nil?
+          got = g.public_send(op, w, **kw)
+          @cat.labels.size.times do |c|
+            sel = @codes.eq(@cat.labels[c])
+            want = @v[sel].copy.public_send(op, w[sel].copy, **kw)
+            assert_equal answer(want), answer(got[c]), "#{op} #{kw} group #{c}"
+          end
+        end
+      end
+    end
+    h = CA_FLOAT64([[1, 2], [3, 4], [5, 6]])
+    hw = CA_FLOAT64([[1, 1], [1, 1], [1, 1]])
+    hw[1, 1] = UNDEF
+    gh = h.group_by_category(CA_INT32([0, 0, 1]).categorize)
+    assert_equal [[2.0, UNDEF], [UNDEF, UNDEF]], gh.wmean(hw, axis: 0, min_count: 2).to_a
+  end
+
   def test_segments_and_the_axis_form
     s = CA_FLOAT64([1, 2, 3, 4, 5])
     s[1] = UNDEF                                             # 2 present values in each segment

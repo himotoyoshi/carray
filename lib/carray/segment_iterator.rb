@@ -810,14 +810,28 @@ class CASegmentIterator < CAIterator
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
+  # The present cells per segment a weighted reduction counts: those whose
+  # value and weight are both present, as CArray#wsum / #wmean count them.
+  def present_pair_count (weights, axis)
+    if axis
+      paired = @value.copy
+      paired[weights.is_masked] = UNDEF if weights.has_mask?
+      return paired.group_by_category(@cat).count_not_masked(axis: axis)
+    end
+    both = grouped.is_not_masked & scatter_weights(weights).is_not_masked
+    both.int32.segments(offsets: @bounds).sum      # one pass, unlike count(true)
+  end
+
   # min_count: and fill_value: on a value reduction, as a core reduction
   # takes them: a segment with fewer than min_count present values is
   # UNDEF, and fill_value then fills the UNDEF cells, those min_count made
   # and those the reduction answers for an empty segment.  Each reduction
   # is left to answer as it does; this only masks and fills its result.
+  # A weighted reduction counts the cells whose value and weight are both
+  # present.
   module ReductionCountAndFill
     REDUCTIONS = %i[sum accumulate max min minmax mean median percentile
-                    variance stddev variancep stddevp prod].freeze
+                    variance stddev variancep stddevp prod wsum wmean].freeze
 
     REDUCTIONS.each do |op|
       define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
@@ -831,7 +845,14 @@ class CASegmentIterator < CAIterator
         end
         result = super(*args, **kw)
         return result if (min_count.nil? || min_count == 0) && fill_value.nil?
-        short = count_not_masked(**kw).lt(min_count) if min_count && min_count > 0
+        if min_count && min_count > 0
+          present = if op == :wsum || op == :wmean
+                      present_pair_count(args[0], kw[:axis])
+                    else
+                      count_not_masked(**kw)
+                    end
+          short = present.lt(min_count)
+        end
         finish = lambda do |r|
           r[short] = UNDEF if short
           fill_value.nil? || !r.has_mask? ? r : r.strip_mask(fill_value)

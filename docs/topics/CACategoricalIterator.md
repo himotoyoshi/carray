@@ -182,11 +182,12 @@ missing-ness through the mask.
 ### Too few values: `min_count:` and `fill_value:`
 
 The value reductions (`sum`, `accumulate`, `min`, `max`, `minmax`, `mean`,
-`median`, `percentile`, `variance`, `stddev`, `variancep`, `stddevp`, `prod`)
-take `min_count:` and `fill_value:` as the core reduction of the same name
-does. A category with fewer than `min_count` present cells is masked, and
-`fill_value` then fills the masked cells, those `min_count` made and those an
-empty category gives:
+`median`, `percentile`, `variance`, `stddev`, `variancep`, `stddevp`, `prod`,
+`wsum`, `wmean`) take `min_count:` and `fill_value:` as the core reduction of
+the same name does. A category with fewer than `min_count` present cells is
+masked, and `fill_value` then fills the masked cells, those `min_count` made
+and those an empty category gives. For `wsum` and `wmean` a cell is present
+when its value and its weight both are:
 
 ```ruby
 grp.mean(min_count: 2)                     #  => [ 20.0, _, _ ]
