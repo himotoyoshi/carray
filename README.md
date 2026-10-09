@@ -4,7 +4,7 @@ Ruby/CArray is an extension library for the multi-dimensional array class. It pr
 
 ## Status
 
-3.0.x still moves: behavior can change between releases — see [CHANGELOG.md](CHANGELOG.md). 3.1 is the first release meant to be depended on. Until then, treat it as a place to try things out.
+3.0.x still moves: behavior can change between releases. 3.1 is the first release meant to be depended on. Until then, treat it as a place to try things out.
 
 ## Features
 
