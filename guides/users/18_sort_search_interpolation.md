@@ -254,7 +254,7 @@ A **masked cell in `self`** makes the monotonic grid ill-defined, so a masked `s
 
 ```ruby
 y = CA_DOUBLE([0.0, 1.0, 2.0]); y[1] = UNDEF
-y.linear_section(1.0)   # => raises RuntimeError
+y.linear_section(1.0)   # => raises ArgumentError
 ```
 
 If you need to interpolate across gaps, close them first — fill the mask with `strip_mask(fill_value)`, or rebuild the grid from the unmasked entries so it is contiguous and monotonic before calling these methods.

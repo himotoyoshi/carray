@@ -162,7 +162,7 @@ A 1-D array does not silently combine with a 2-D one — you have to say whether
 a = CArray.int32(2, 3).seq
 v = CA_INT([100, 200, 300])    #  shape [3] — one axis
 
-a + v             #  => RuntimeError: elements mismatch (6 <-> 3)
+a + v             #  => ArgumentError: shape mismatch between operands ([2, 3] and [3])
 
 a + v[:_, nil]    #  treat v as a row (shape [1, 3]) and broadcast it
 #  => [ [ 100, 201, 302 ],

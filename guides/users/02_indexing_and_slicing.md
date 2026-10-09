@@ -365,7 +365,7 @@ A source that *does* claim a shape has to agree with the target's, and a `[3, 4]
 ```ruby
 b = CArray.int32(2, 6)
 b[] = a
-#  => RuntimeError: shape mismatch writing to carray ([2, 6] <- [3, 4]);
+#  => ArgumentError: shape mismatch writing to carray ([2, 6] <- [3, 4]);
 #     shapes must agree once size-1 axes are dropped, or one side must be 1-D,
 #     or the source must be smaller and broadcastable -- use .flatten to write
 #     the values in the order they lie

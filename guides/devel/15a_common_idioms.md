@@ -420,8 +420,15 @@ rb_raise(rb_eRuntimeError,"internal: unexpected obj_type %d", ca->obj_type);
 ```
 
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
-matches Ruby convention; `RuntimeError` is for internal invariants the
-user should never hit (a bug, not a misuse).
+matches Ruby convention. A data_type an operation cannot take is
+`CArray::DataTypeError` (`rb_eCADataTypeError`). `RuntimeError` is for
+internal invariants the user should never hit (a bug, not a misuse), with
+one deliberate exception: a write to a read-only array, and a `to_ca`
+that refuses `writable: true`, raise `RuntimeError`.
+
+`NotImplementedError` is a `ScriptError`, which a bare `rescue` does not
+catch. It is kept for an operation an iterator member does not provide;
+anything a caller can get wrong raises one of the classes above.
 
 ### Don't editorialise
 

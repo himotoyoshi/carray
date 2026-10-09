@@ -48,7 +48,7 @@ Two failure classes at the boundary:
   fixed-width portable representation — see §18a.7) and for a `data_class`
   the v1.0 flat-primitive schema cannot express (bitfield members, nested
   records, fixlen/CArray-template members).
-- `load` raises `RuntimeError` on a bad magic, an unsupported version, or a
+- `load` raises `ArgumentError` on a bad magic, an unsupported version, or a
   failed corruption cross-check (`endian_marker`, `data_bytes`).
 
 ## 18a.2 File structure

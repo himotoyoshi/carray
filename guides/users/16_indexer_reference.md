@@ -102,7 +102,7 @@ v[(0..9).step(2)]                  #  => [ 0, 2, 4, 6, 8 ]
 v[(1..8).step(3)]                  #  => [ 1, 4, 7 ]
 ```
 
-A `step` of zero is a `RuntimeError`.
+A `step` of zero is a `ArgumentError`.
 
 * **Shape back:** the axis is kept at `(count, step)` length.
 * **Class back:** `CABlock`.
@@ -211,7 +211,7 @@ a[a.gt(5)]
 
 This is the form built on top of comparisons (see [Element-wise operations](03_elementwise.md)) and is the canonical way to filter elements.
 
-A boolean array of mismatched size is a `RuntimeError`.
+A boolean array of mismatched size is a `ArgumentError`.
 
 * **Shape back:** 1-D, length = number of true cells.
 * **Class back:** `CASelect`.

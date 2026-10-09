@@ -232,7 +232,7 @@ cat.codes.eq(2)           # boolean mask by code
 The numeric gate is on the categorical surface only, to catch nonsense early:
 
 ```ruby
-cat + 1                   #  => RuntimeError (numeric ops gated on the categorical)
+cat + 1                   #  => TypeError (numeric ops gated on the categorical)
 cat.codes + 1             #  => OK
 ```
 

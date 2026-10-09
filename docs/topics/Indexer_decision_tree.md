@@ -62,7 +62,7 @@ Evaluated in order; the first match wins.
 | `argv[0]` is integer CArray, `ndim == 1`, `cs.ndim == 1`     | `GRID`          | `[]`                               |
 | `argv[0]` is integer CArray (other shape)                    | `MAPPING`       | `[]`                               |
 | `argv[0]` is boolean CArray, `cs.elements == ca.elements`    | `SELECT`        | `[]` (`info.select = cs`)          |
-| `argv[0]` is boolean CArray, element count mismatch          | raises `RuntimeError` | —                            |
+| `argv[0]` is boolean CArray, element count mismatch          | raises `ArgumentError` | —                            |
 | `argv[0]` is CArray of any other data_type                   | raises `IndexError`   | —                            |
 | `argv[0]` is `String` starting with `@`                      | `ATTRIBUTE`     | `[]` (`info.symbol = :name`)       |
 | `argv[0]` is any other `String`                              | `MEMBER`        | `[]` (`info.symbol = :"field"`)    |
@@ -136,7 +136,7 @@ Each `argv[i]` is classified, populating `info.index_type[i]` and
 | `nil`                                           | `ALL`               | none                                        | —                                            |
 | `false` or `:~`                                 | rubber expansion: fill `rndim = ndim - argc + 1` axes with `ALL` (`:~` = rubber sigil, RB.1; `false` legacy) | — | —                  |
 | `Range`                                         | `BLOCK`             | `{start, count, step = ±1}` (see §3.3.1)    | range check; `start == last && excl` degenerates to `{start, 0, 1}` |
-| `Enumerator::ArithmeticSequence`                | `BLOCK`             | `{start, count, step}` (step from the seq)  | `step == 0` raises `RuntimeError`            |
+| `Enumerator::ArithmeticSequence`                | `BLOCK`             | `{start, count, step}` (step from the seq)  | `step == 0` raises `ArgumentError`            |
 | `[nil]`                                         | `ALL`               | none                                        | —                                            |
 | `[Range]`                                       | (re-enters Range path) | —                                        | —                                            |
 | `[Integer]`                                     | `BLOCK`             | `{start = k, count = 1, step = 1}`          | range check                                  |
@@ -266,16 +266,16 @@ hyperslab notation, for example, treats them differently.
 
 | trigger                                              | exception class    | message                                                                                       |
 |------------------------------------------------------|--------------------|-----------------------------------------------------------------------------------------------|
-| element-count mismatch on boolean-CArray `SELECT`    | `RuntimeError`     | `mismatch of # of elements ( %lld <=> %lld ) in reference by selection`                       |
+| element-count mismatch on boolean-CArray `SELECT`    | `ArgumentError`     | `mismatch of # of elements ( %lld <=> %lld ) in reference by selection`                       |
 | `argc == 1` with CArray of an invalid data_type      | `IndexError`       | `data_type %s is invalid for reference by selection/mapping(should be boolean or integer)`     |
 | rubber dim overflow (`argc > ndim + 1`)              | `IndexError`       | `index specification exceeds the ndim of carray (%i)`                                          |
 | arity mismatch without rubber dim                    | `IndexError`       | `%i indices given for a carray of ndim %i`                                                     |
 | integer axis out of range                            | `IndexError`       | `index out of range at %i-dim ( %lld <=> 0..%lld )`                                            |
 | `Range` / `ArithmeticSequence` endpoint out of range | `IndexError`       | `index %lld is out of range (0..%lld) at %i-dim`                                                |
-| `step == 0` (`ArithmeticSequence`)                   | `RuntimeError`     | `step in index equals to 0 in block reference`                                                 |
-| `step == 0` (`[nil, step]`)                          | `RuntimeError`     | same as above                                                                                  |
-| `step == 0` (`[Range, step]`)                        | `RuntimeError`     | same as above                                                                                  |
-| `step == 0` (`[s, c, step]`)                         | `RuntimeError`     | same as above                                                                                  |
+| `step == 0` (`ArithmeticSequence`)                   | `ArgumentError`     | `step in index equals to 0 in block reference`                                                 |
+| `step == 0` (`[nil, step]`)                          | `ArgumentError`     | same as above                                                                                  |
+| `step == 0` (`[Range, step]`)                        | `ArgumentError`     | same as above                                                                                  |
+| `step == 0` (`[s, c, step]`)                         | `ArgumentError`     | same as above                                                                                  |
 | `Array` of length other than 1, 2, 3                 | `IndexError`       | `invalid form of index range at %i-dim (should be [start[,count[,step]]], [range, step])`     |
 | `Symbol` other than `:>` in an axis position         | `IndexError`       | `symbol :%s is invalid as the index for slab iterator (use :> instead)`                       |
 | arity mismatch after rubber expansion                | `IndexError`       | `%i indices given for a carray of ndim %i`                                                     |

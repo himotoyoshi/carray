@@ -119,7 +119,7 @@ These fall outside the format and raise from `save` / `dump`:
 
 The first two raise `ArgumentError`.
 
-`load` raises `RuntimeError` on a bad magic string, an unsupported
+`load` raises `ArgumentError` on a bad magic string, an unsupported
 version, or a header whose fields disagree: the endian marker, `ndim`
 outside 1..16, a `shape` whose product is not `elements`, `data_bytes`
 or `mask_bytes` that do not match `elements`, an `element_bytes` that is

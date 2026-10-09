@@ -89,8 +89,8 @@ a.field(8, :fixlen, bytes: 6)      # 6-byte text field at offset 8
 Constraints (checked at construction):
 
 ```ruby
-a.field(-1, CA_UINT16)   # RuntimeError: negative offset
-a.field(3, CA_UINT16)    # RuntimeError: offset + bytes (5) exceeds one 4-byte record
+a.field(-1, CA_UINT16)   # ArgumentError: negative offset
+a.field(3, CA_UINT16)    # ArgumentError: offset + bytes (5) exceeds one 4-byte record
 a.field(0, CA_OBJECT)    # CArray::DataTypeError: CA_OBJECT can not be a data_type for CAField
 ```
 
@@ -197,7 +197,7 @@ parent is reflected in the field view.
 | `a.field(offset, template)` | `CARefer` subview, shape `a.shape + template.shape` |
 | `a.field(offset, data_class)` | `CARecord` carrying the class's encode/decode |
 | `a.field(name)` | field resolved by name via the record schema |
-| offset check | `offset >= 0` and `offset + bytes <= a.bytes`, else `RuntimeError` |
+| offset check | `offset >= 0` and `offset + bytes <= a.bytes`, else `ArgumentError` |
 | `:object` | rejected (`CArray::DataTypeError`) |
 | read/write | goes through to the parent's bytes in place |
 

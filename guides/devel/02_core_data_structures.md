@@ -447,7 +447,7 @@ Three of the bits carry no behaviour in their name and are easy to misread:
   clears it afterward; `ca_test_cyclic_check` raises if a nested CArray element
   already has the flag set (`carray_core.c`). It exists to turn what would be a
   system-stack overflow on a self-referential object array into a clean
-  `RuntimeError` ([ch. 5](05_mask_and_undef.md)).
+  `ArgumentError` ([ch. 5](05_mask_and_undef.md)).
 
 ## The view struct catalog (extended)
 

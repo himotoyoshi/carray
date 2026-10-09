@@ -256,8 +256,8 @@ ill-defined, so a masked `self` is rejected:
 ```ruby
 y = CA_DOUBLE([0.0, 1.0, 2.0])
 y[1] = UNDEF
-y.linear_section(1.0)   # RuntimeError: ... should not have any masked elements
-y.linear_fetch(1.0)     # RuntimeError
+y.linear_section(1.0)   # ArgumentError: ... should not have any masked elements
+y.linear_fetch(1.0)     # ArgumentError
 ```
 
 If you need to interpolate across gaps, fill or drop the masked entries
@@ -356,7 +356,7 @@ ys.linear_fetch(xs.linear_section(x_query))
 | `:binary` vs `:linear` | same function, different cost — agree on every input |
 | default search | `:binary` (`O(log n)`, `O(1)` for equispaced grids) |
 | compute / result type | `Float64` (inputs coerced) |
-| masked `self` | raises `RuntimeError` |
+| masked `self` | raises `ArgumentError` |
 | masked query | that position is UNDEF (never answered from under the mask) |
 | time axis | `linear_section` -> position; `linear_fetch` -> `CATime` in the axis's unit (§7) |
 | `axis:` | per-fiber; named axis consumed; negatives allowed |
