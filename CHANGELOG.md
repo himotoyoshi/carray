@@ -36,6 +36,56 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a column declared time (`from_csv(types: { name => :time })`,
+  `cast(name => :time)`, `parse_to_time`) reads what `to_csv` writes for
+  any `CATime`: a month (`"2024-01"`, read in months), a year (`"2024"`,
+  read in years) and a year with a sign or more than four digits. Before,
+  these cells came back masked. `types: :infer` still reads them as text
+  or numbers. A `CATime` in years now prints a negative year with four
+  digits (`"-0030"`, was `"-030"`), as the other units do.
+
+- Fix: a `GroupedFrame` from `group_by` with a single key named its groups
+  by the key as it was when a reduction ran, not when the grouping was
+  taken: after a change to the key, groups could share a name or carry
+  another group's. The index is now taken with the grouping; values are
+  still read when a reduction runs (`docs/topics/CAFrame.md` §9). Each
+  result frame also gets its own index, including after `resample`.
+
+- Fix: text read as a complex number (`from_csv`, `to_type`, `cast`) reads
+  what `Complex#to_s` writes for a part that is not finite, such as
+  `"1.0+Infinity*i"` and `"NaN+0i"`. Before, such cells came back masked,
+  so a complex column holding one did not survive `to_csv` / `from_csv`.
+
+- Fix: `to_csv` quotes a value made only of spaces and tabs. A one-column
+  frame whose column name was such a value lost its first row, and that
+  row's value became the column name, when read back with `from_csv`.
+
+- Fix: `from_csv(sep: " ")` read two spaces in a row as one separator
+  when the file was read without the fast reader (with `strip: true`, or
+  in an encoding other than UTF-8), so the columns after an empty field
+  shifted left. With `sep: "\t"` or `sep: " "`, `strip: true` no longer
+  takes the separator as padding, which shifted columns or raised
+  `MalformedCSV` on a valid file.
+
+- Fix: `unmask(value)` and `strip_mask(value)` on a `CATime` or
+  `CATimedelta` read the value as `a[i] = value` does. A `Time` was taken
+  as a count of seconds in the array's unit (a date column filled with
+  2024-01-09 showed year 4669439), and an element of the same class
+  raised `TypeError`. `CAFrame#fill(name, value)` is fixed with them.
+
+- Fix: `CArray.meld` of a single Face array (`CATime`, `CACategorical`,
+  `CAConstString`, the string Faces) returned the storage under it: ticks,
+  codes or offsets. It now keeps the Face, as it does for two or more.
+  `CAFrame#melt` with one value column, and `CAFrame.meld` of one frame,
+  are fixed with it.
+
+- Fix: `CArray.sort_addr` (the class method) ordered a `CAConstString` key
+  by its storage rather than its strings, and a `CARecord` key by its bytes
+  rather than its struct's `order_by:` members, and accepted a `CARecord`
+  whose struct declares no order. It now orders them as their own
+  `sort_addr` does, and raises for a record with no order.
+  `CAFrame#sort_by_key` in ascending order is fixed with it.
+
 - Fix: `each_slab`, `map_slab` and `reduce_slab` left their slab pointing
   at freed memory once the walk ended, unless the slab was a window onto
   an array's last axis. A slab (or `slab.dup`) kept past the walk read
