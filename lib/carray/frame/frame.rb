@@ -220,6 +220,7 @@ class CAFrame
   # write path always propagates to derived views (unchanged from
   # previous behaviour).
   def []=(*keys, value)
+    refuse_if_frozen
     if keys.size != 1
       raise ArgumentError,
             "df[...] = takes one key (a column name or a row selector); " \
@@ -243,6 +244,14 @@ class CAFrame
             "CAFrame (splice rows); got #{value.class}"
     end
     value
+  end
+
+  # Freezing a frame fixes its columns, rows and index; the columns' cells are
+  # their own arrays' to guard, as an Array's elements are.  The check comes
+  # first so a refused edit leaves the frame as it was: the edits change the
+  # column table before any instance variable.
+  private def refuse_if_frozen
+    raise FrozenError.new("can't modify frozen CAFrame: #{inspect}", receiver: self) if frozen?
   end
 
   # df["name"] = ... : the column forms of []=.  Unlike the verbs, +[]=+ can
@@ -365,6 +374,7 @@ class CAFrame
   # An index-role change: the data is unchanged, so this mutates self and
   # returns it (memo §3.8). Any existing index is replaced.
   def set_index(name)
+    refuse_if_frozen
     key = name.to_s
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     idx = @columns[key]
@@ -393,6 +403,7 @@ class CAFrame
   # Also an index-role change, so it mutates self (memo §3.8). The former
   # index becomes the first column, named after the row axis.
   def reset_index
+    refuse_if_frozen
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)
     @index     = nil

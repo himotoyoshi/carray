@@ -106,6 +106,7 @@ class CAFrame
   # mask in place; a categorical column's codes are read-only (§13.4) so this
   # raises — recode by rebuilding and rebinding instead.
   def mask_eq(name, value)
+    refuse_if_frozen
     self[name][:eq, value] = UNDEF
     self
   end
@@ -139,6 +140,7 @@ class CAFrame
   #   :raise  CAFrame::UnreadableColumn naming the column, the row and the
   #           cell; no column is rebound
   def cast(name_or_map = nil, type = nil, on_error: :mask, **map)
+    refuse_if_frozen
     # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
     # keywords next to on_error:.
     unless map.empty?
@@ -226,6 +228,7 @@ class CAFrame
   # Face-typed and numeric columns becomes a single-type table (and so the
   # way +to_ca+ can hand back a matrix for it).
   def promote(type = nil)
+    refuse_if_frozen
     return self if @columns.empty?
     type.nil? ? promote_to_common : promote_to_type(type)
     self
@@ -253,6 +256,7 @@ class CAFrame
   #   df.parse_to_time("date", "%d/%m/%Y")
   #   df.parse_to_time("date", :infer)
   def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
+    refuse_if_frozen
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
@@ -309,6 +313,7 @@ class CAFrame
   #   df.to_time("time", CATime::Grid.parse("hours since 1990-01-01"))
   #   df.to_time("time", CATime::Grid.parse("days since 1980-01-01 12:00"))
   def to_time(name, grid = nil, unit: :s, epoch: nil)
+    refuse_if_frozen
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     raw = integer_serial_column(col, key)
@@ -345,6 +350,7 @@ class CAFrame
   # (memo §13.4), so any fill on it raises — rebind a filled copy instead:
   # `df.append(name, df[name].strip_mask(method: :forward))`.
   def fill(name, method_or_value)
+    refuse_if_frozen
     key = name.to_s
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     col = @columns[key]
