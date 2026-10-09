@@ -96,7 +96,7 @@ df = CAFrame.new({ "a" => CA_INT32([1, 2, 3]) },
                  index: CA_INT32([10, 20, 30]), axis_name: "t")
 df.drop("a").nrow           # => 3   -- the index still holds the row count
 df.drop("a").nvar           # => 0
-df.reset_index.variables    # => ["t", "a"]   -- the index became a column
+df.reset_index.variable_names   # => ["t", "a"]   -- the index became a column
 ```
 
 When the last witness goes — no columns **and** no index — there is no row count
@@ -1123,8 +1123,8 @@ followed by `set_index("b")`:
 ```ruby
 df.set_index("a")
 df.set_index("b")
-df.variables        # => ["a", "v"]   -- "a" is a column again, not lost
-df.reset_index      # => axis_name "obs" again, variables ["b", "a", "v"]
+df.variable_names   # => ["a", "v"]   -- "a" is a column again, not lost
+df.reset_index      # => axis_name "obs" again, variable_names ["b", "a", "v"]
 ```
 
 ---
