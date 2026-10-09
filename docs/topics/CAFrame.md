@@ -1389,6 +1389,15 @@ and N-D columns, which a reduction has nothing to say about:
 df.group_by("station").mean       # => frame of per-station means
 ```
 
+Each takes `min_count:` and `fill_value:` as a core reduction does: a group with
+fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the
+`UNDEF` cells:
+
+```ruby
+df.group_by("station").mean(min_count: 20)                  # too few readings -> UNDEF
+df.group_by("station").sum(min_count: 1, fill_value: 0.0)
+```
+
 ### (b) `aggregate` — declarative per-column reductions
 
 Map each output name to `[input_column, reduction]`. The reduction is a
@@ -1404,6 +1413,9 @@ df.group_by("station").aggregate(
 )
 # => frame with columns temp_mean / temp_max / wind_mean, index = station labels
 ```
+
+A Symbol reduction takes its keywords as a third element:
+`"temp_mean" => ["temp", :mean, min_count: 20]`.
 
 ### (c) `table` — cross-column Ruby escape
 
@@ -1464,6 +1476,14 @@ data in this hour" stays distinguishable from a mean:
 
 ```ruby
 df.resample("time", "1 hour", fill: true).mean     # every hour, UNDEF where none
+```
+
+**Short bins.** A bin with only some of its readings still reduces. `min_count:`
+makes it `UNDEF` below a number of present values — for an hourly mean of
+10-minute data that wants all six:
+
+```ruby
+df.resample("time", "1 hour", label: :right).mean(min_count: 6)
 ```
 
 A row whose time is masked belongs to no bin. `resample` builds the bins and

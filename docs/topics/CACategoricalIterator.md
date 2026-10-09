@@ -179,6 +179,20 @@ Because the empty slot in `mean` / `variance` / … is a genuine masked cell (no
 magic number like `NaN`), a downstream calculation on `grp.mean` propagates the
 missing-ness through the mask.
 
+### Too few values: `min_count:` and `fill_value:`
+
+The value reductions (`sum`, `accumulate`, `min`, `max`, `minmax`, `mean`,
+`median`, `percentile`, `variance`, `stddev`, `variancep`, `stddevp`, `prod`)
+take `min_count:` and `fill_value:` as the core reduction of the same name
+does. A category with fewer than `min_count` present cells is masked, and
+`fill_value` then fills the masked cells, those `min_count` made and those an
+empty category gives:
+
+```ruby
+grp.mean(min_count: 2)                     #  => [ 20.0, _, _ ]
+grp.sum(min_count: 2, fill_value: -1.0)    #  => [ 40.0, -1.0, -1.0 ]
+```
+
 ### A single-value category
 
 The sample variance divides by n − 1, so it has no value for a single value:

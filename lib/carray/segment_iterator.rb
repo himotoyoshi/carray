@@ -810,6 +810,38 @@ class CASegmentIterator < CAIterator
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
+  # min_count: and fill_value: on a value reduction, as a core reduction
+  # takes them: a segment with fewer than min_count present values is
+  # UNDEF, and fill_value then fills the UNDEF cells, those min_count made
+  # and those the reduction answers for an empty segment.  Each reduction
+  # is left to answer as it does; this only masks and fills its result.
+  module ReductionCountAndFill
+    REDUCTIONS = %i[sum accumulate max min minmax mean median percentile
+                    variance stddev variancep stddevp prod].freeze
+
+    REDUCTIONS.each do |op|
+      define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
+        unless min_count.nil?
+          unless min_count.is_a?(Integer)
+            raise TypeError, "#{op}: min_count must be an Integer (got #{min_count.class})"
+          end
+          if min_count < 0
+            raise ArgumentError, "#{op}: min_count must be non-negative (got #{min_count})"
+          end
+        end
+        result = super(*args, **kw)
+        return result if (min_count.nil? || min_count == 0) && fill_value.nil?
+        short = count_not_masked(**kw).lt(min_count) if min_count && min_count > 0
+        finish = lambda do |r|
+          r[short] = UNDEF if short
+          fill_value.nil? || !r.has_mask? ? r : r.strip_mask(fill_value)
+        end
+        result.is_a?(Array) ? result.map(&finish) : finish.(result)
+      end
+    end
+  end
+  prepend ReductionCountAndFill
+
 end
 
 

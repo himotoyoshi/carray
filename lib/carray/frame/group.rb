@@ -161,16 +161,20 @@ class GroupedFrame
   # Declarative aggregation (memo §11.6). Spec maps an output column name to
   # +[input_column, reduction]+, where reduction is a Symbol (vectorized,
   # applied through the group iterator) or a Proc (per-group custom, called
-  # with the group's column slice).
+  # with the group's column slice). A Symbol reduction takes its keywords
+  # as a third element: +["temp", :mean, min_count: 6]+.
   def aggregate(spec)
     cols = {}
-    spec.each do |out_name, (in_name, reduction)|
+    spec.each do |out_name, (in_name, reduction, options)|
       out = out_name.to_s
       cols[out] =
         case reduction
         when Symbol
-          self[in_name].public_send(reduction)
+          self[in_name].public_send(reduction, **(options || {}))
         when Proc
+          if options
+            raise ArgumentError, "aggregate: a Proc reduction takes no keywords (#{out.inspect})"
+          end
           per_group_column(in_name, reduction)
         else
           raise ArgumentError,
@@ -203,26 +207,31 @@ class GroupedFrame
   end
 
   # Convenience reductions over every numeric scalar column (memo §6-4
-  # "grp.mean"). Non-numeric / N-D columns are skipped.
+  # "grp.mean"). Non-numeric / N-D columns are skipped. Each takes
+  # +min_count:+ and +fill_value:+ as a core reduction does: a group with
+  # fewer than min_count present values is UNDEF, and fill_value fills the
+  # UNDEF cells.
   #
-  # @!method sum
+  # @!method sum(min_count: nil, fill_value: nil)
   #   Returns a frame of the per-group sum of every numeric one-dimensional
   #   column. Non-numeric and multi-dimensional columns are left out.
   #   @return [CAFrame] one row per group, indexed by the group labels.
-  # @!method mean
+  # @!method mean(min_count: nil, fill_value: nil)
   #   Returns a frame of the per-group arithmetic mean of every numeric
   #   one-dimensional column, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method min
+  # @!method min(min_count: nil, fill_value: nil)
   #   Returns a frame of the per-group minimum of every numeric
   #   one-dimensional column, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method max
+  # @!method max(min_count: nil, fill_value: nil)
   #   Returns a frame of the per-group maximum of every numeric
   #   one-dimensional column, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
-    define_method(red) { reduce_numeric(red) }
+    define_method(red) do |min_count: nil, fill_value: nil|
+      reduce_numeric(red, min_count: min_count, fill_value: fill_value)
+    end
   end
 
   # @return [String]
@@ -239,7 +248,7 @@ class GroupedFrame
   NON_NUMERIC = [:object, :boolean, :fixlen].freeze
   private_constant :NON_NUMERIC
 
-  private def reduce_numeric(reduction)
+  private def reduce_numeric(reduction, **keywords)
     cols = {}
     @frame.variable_names.each do |name|
       # A key column is the index here, not a result column. Filtering it out
@@ -249,7 +258,7 @@ class GroupedFrame
       next if @key_names.include?(name)
       col = @frame[name]
       next unless col.ndim == 1 && !NON_NUMERIC.include?(col.data_type)
-      cols[name] = col.group_by_category(@cat).public_send(reduction)
+      cols[name] = col.group_by_category(@cat).public_send(reduction, **keywords)
     end
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
   end

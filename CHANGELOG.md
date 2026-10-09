@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: the value reductions of `group_by_category`, `segments` and
+  `group_by_run`, and `sum` / `mean` / `min` / `max` of a `CAFrame`'s
+  `group_by` and `resample`, take `min_count:` and `fill_value:` as the core
+  reduction does: a group with fewer than `min_count` present values is
+  UNDEF, and `fill_value` fills the UNDEF cells
+  (`df.resample("time", "1 hour", label: :right).mean(min_count: 6)`).
+  `CAFrame` `aggregate` takes them as a third element,
+  `["temp", :mean, min_count: 6]`. `quantile` takes neither, as
+  `CArray#quantile` does not.
+
 - Change: `inspect` of a `CATime` or `CATimedelta` array names the tick
   (`<CATime[us](7)`, `<CATimedelta[10 m](2)`) where it named the storage
   type (`fixlen[8]`), and writes each cell as `to_s` does
