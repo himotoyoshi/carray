@@ -349,6 +349,7 @@ class CAFrame
         raise ArgumentError, "skip takes a number of lines (got #{n.inspect})"
       end
       n.times { @tok.gets(@io) }
+      @skipped = true if n > 0
       self
     end
 
@@ -358,6 +359,15 @@ class CAFrame
     def header(name = nil)
       fields = @tok.read(@io)
       if fields.nil?
+        # An input with no record at all is a table with no columns: that is
+        # what to_csv writes for a frame without columns or index.  Once lines
+        # have been skipped to reach the header, a missing header is an error.
+        if name.nil? && !@skipped
+          @names = []
+          @header_line = @tok.lineno
+          @names_to_check = nil
+          return []
+        end
         raise CSVParser::MalformedCSV.new("header expected but input ended",
                                           lineno: @tok.lineno + 1)
       end

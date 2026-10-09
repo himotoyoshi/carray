@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.from_csv` reads an input with no record at all (an empty
+  file, or only blank lines) as a frame with no columns and no rows, which is
+  what `to_csv` writes for such a frame. It used to raise `MalformedCSV`. A
+  header expected after skipped lines still has to be there.
+
 - New: CAFrame reads booleans from CSV: `types: { "flag" => :boolean }` (and
   `cast("flag" => :boolean)`) reads `1` / `0` and `true` / `false` in any case,
   with a blank field as UNDEF and other text handled by `on_error:`.

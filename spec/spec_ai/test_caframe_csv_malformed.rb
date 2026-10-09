@@ -257,4 +257,23 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     err = assert_raise(Encoding::CompatibilityError) { CAFrame.from_csv(io) }
     assert_match(/transcoded to UTF-8/, err.message)
   end
+
+  # A frame without columns or index writes an empty header line; reading
+  # it, or an empty input, gives that frame back.
+  def test_an_input_with_no_record_is_a_frame_without_columns
+    ["", "\n", "\n\n"].each do |text|
+      df = read(text)
+      assert_equal [0, []], [df.nrow, df.variable_names], text.inspect
+    end
+    df = read(CAFrame.new({}).to_csv)
+    assert_equal [0, []], [df.nrow, df.variable_names]
+  end
+
+  # Past skipped lines, or for a named secondary header, a missing header is
+  # still an error.
+  def test_a_header_after_skipped_lines_still_has_to_be_there
+    assert_raise(MALFORMED) { read("x\n", header: 2) }
+    assert_raise(MALFORMED) { read("") { |r| r.skip 1; r.header; r.data } }
+    assert_raise(MALFORMED) { read("") { |r| r.header("units"); r.data } }
+  end
 end
