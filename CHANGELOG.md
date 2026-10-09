@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `dup` and `clone` of a view now keep what the view was: the copy of
+  `x.value` (or of its reshape) could take UNDEF into the mask of `x`, and
+  `clone` of a frozen array answered `read_only?` false. `dup` and `clone` of
+  a view still return another view onto the same storage; to copy a CArray,
+  use `copy`.
+
 - Fix: `reshape`, `flatten`, `insert_axis` and `[:_, ...]` now keep what the
   array they start from means. On `x.value` they read the mask of `x` again,
   so `x.value.sort`, `.cumsum`, `.median` and `.unique` skipped the masked

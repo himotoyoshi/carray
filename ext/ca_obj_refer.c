@@ -293,14 +293,15 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
  *   2. Match ranges of parent axes to new axes so element products
  *      agree.  Inside each matched range, root_strides must be
  *      inter-axis contiguous. */
-/* A reshape that folds builds its CAStride directly over the root, so the
-   arrays in between are no longer on its C parent chain.  Three properties
-   are answered by walking that chain (ca_is_value_array, ca_is_readonly,
-   ca_is_mask_array); carry each one across from the array being reshaped,
-   or a reshape of x.value reads the root's mask again and a reshape of a
-   broadcast view becomes writable. */
-static void
-ca_reshape_keep_chain_flags (CArray *view, CArray *src)
+/* Three properties of an array are answered by walking its C parent chain:
+   ca_is_value_array, ca_is_readonly and ca_is_mask_array.  An array that is
+   built somewhere other than as a child of `src` -- a reshape that folds
+   onto the root, the copy that dup / clone makes -- does not have `src` on
+   that chain, so carry each property across from `src`.  Without this a
+   reshape or a dup of x.value reads the mask of x again (and takes UNDEF
+   into it), and a reshape of a broadcast view becomes writable. */
+void
+ca_keep_chain_flags (CArray *view, CArray *src)
 {
   if ( ca_is_value_array(src) ) {
     if ( view->mask ) {
@@ -688,7 +689,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
                                    ca->data_type, ca->bytes,
                                    (int8_t) argc, new_dim,
                                    out_strides, out_base);
-      ca_reshape_keep_chain_flags((CArray *) cs, ca);
+      ca_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);
@@ -726,7 +727,7 @@ rb_ca_flatten (VALUE self)
       CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, out_root,
                                    ca->data_type, ca->bytes,
                                    1, dim, out_strides, out_base);
-      ca_reshape_keep_chain_flags((CArray *) cs, ca);
+      ca_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);

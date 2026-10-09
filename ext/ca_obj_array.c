@@ -1130,6 +1130,61 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+/* dup and clone go through here before each class's initialize_copy.  A
+   view's copy is another view onto the same parent (Ruby's shallow copy),
+   rebuilt by that class from the parent, so what the original was told
+   about itself -- that it is a value array, read-only, a mask -- has to be
+   carried across here, once for every class.  An entity's copy owns new
+   memory and is none of those things. */
+static void
+ca_dup_keep_state (VALUE self, VALUE other)
+{
+  CArray *ca, *cs;
+  if ( ! rb_obj_is_kind_of(other, rb_cCArray) ) {
+    return;
+  }
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
+  if ( ca_is_view(cs) ) {
+    ca_keep_chain_flags(ca, cs);
+  }
+}
+
+static VALUE
+rb_ca_initialize_dup (VALUE self, VALUE other)
+{
+  rb_call_super(1, &other);
+  ca_dup_keep_state(self, other);
+  return self;
+}
+
+/* clone freezes its result without calling #freeze, so the read-only flag
+   that CArray#freeze sets would be missing: the copy refuses writes as
+   frozen but answers read_only? false.  Set it here when the result is
+   going to be frozen (freeze: true, or freeze: omitted and the original
+   frozen). */
+static VALUE
+rb_ca_initialize_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE orig, opts, vfreeze = Qnil;
+  int will_freeze;
+
+  rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
+  rb_scan_args(argc, argv, "1:", &orig, &opts);
+  ca_dup_keep_state(self, orig);
+
+  if ( ! NIL_P(opts) ) {
+    vfreeze = rb_hash_lookup2(opts, ID2SYM(rb_intern("freeze")), Qnil);
+  }
+  will_freeze = NIL_P(vfreeze) ? OBJ_FROZEN(orig) : RTEST(vfreeze);
+  if ( will_freeze ) {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    ca_set_flag(ca, CA_FLAG_READ_ONLY);
+  }
+  return self;
+}
+
 /* A wrap borrows memory it does not own.  Object#dup would give the copy
    the wrap's class over memory the copy owns, so a subclass that names what
    it borrows (a libvips image's pixels) would name an array that borrows
@@ -1560,6 +1615,8 @@ Init_ca_obj_array (void)
 #endif
 
   rb_define_method(rb_cCArray, "initialize_copy", rb_ca_initialize_copy, 1);
+  rb_define_method(rb_cCArray, "initialize_dup", rb_ca_initialize_dup, 1);
+  rb_define_method(rb_cCArray, "initialize_clone", rb_ca_initialize_clone, -1);
   rb_define_method(rb_cCAWrap, "dup",   rb_ca_wrap_dup, 0);
   rb_define_method(rb_cCAWrap, "clone", rb_ca_wrap_clone, -1);
   rb_define_singleton_method(rb_cCArray, "wrap", rb_ca_s_wrap, -1);

@@ -27,6 +27,14 @@
 #include "carray.h"
 #include <math.h>     /* isnan, for CA_OBJ_ISNAN */
 
+/* ---- properties a copy or a folded view must carry (ca_obj_refer.c) -------
+
+   Copies VALUE_ARRAY (dropping any mask), READ_ONLY and MASK_ARRAY from
+   `src` onto `view` when `src` has them, for arrays whose C parent chain
+   does not pass through `src`.  Used by the folded reshape / flatten and by
+   CArray#initialize_dup / #initialize_clone. */
+void ca_keep_chain_flags (CArray *view, CArray *src);
+
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
    Drive the CABitarray whole-view xfer_all / xfer_addrs fast paths, which
