@@ -9414,7 +9414,11 @@ MkKernel.moncmp :is_nan,
     int:     "(#2) = 0;",
     float:   "(#2) = isnan(#1);",
     complex: "(#2) = (isnan(creal(#1)) || isnan(cimag(#1)));",
-    object:  '(#2) = rb_funcall((#1), rb_intern("nan?"), 0);',
+    # A Float answers by its bits; an Integer or a Rational is never NaN;
+    # anything else answers through its own #nan?.
+    object:  '(#2) = RB_FLOAT_TYPE_P(#1) ? isnan(RFLOAT_VALUE(#1)) : '\
+             '(RB_INTEGER_TYPE_P(#1) || RB_TYPE_P((#1), T_RATIONAL)) ? 0 : '\
+             'RTEST(rb_funcall((#1), rb_intern("nan?"), 0));',
   }
 
 MkKernel.moncmp :is_inf,
@@ -9423,7 +9427,7 @@ MkKernel.moncmp :is_inf,
     int:     "(#2) = 0;",
     float:   "(#2) = isinf(#1);",
     complex: "(#2) = (isinf(creal(#1)) || isinf(cimag(#1)));",
-    object:  '(#2) = rb_funcall((#1), rb_intern("infinite?"), 0);',
+    object:  '(#2) = RTEST(rb_funcall((#1), rb_intern("infinite?"), 0));',
   }
 
 MkKernel.moncmp :is_finite,
@@ -9432,7 +9436,7 @@ MkKernel.moncmp :is_finite,
     int:     "(#2) = 1;",
     float:   "(#2) = isfinite(#1);",
     complex: "(#2) = (isfinite(creal(#1)) && isfinite(cimag(#1)));",
-    object:  '(#2) = rb_funcall((#1), rb_intern("finite?"), 0);',
+    object:  '(#2) = RTEST(rb_funcall((#1), rb_intern("finite?"), 0));',
   }
 
 # is_invalid = !is_finite (MS.1 mask SET family redesign): NaN or Inf
@@ -9462,7 +9466,10 @@ MkKernel.moncmp :signbit,
     MkKernel::SINT_DTYPES => "(#2) = ((#1) < 0);",
     MkKernel::UINT_DTYPES => "(#2) = 0;",
     float:  "(#2) = signbit(#1);",
-    object: '(#2) = (RTEST(rb_funcall((#1), rb_intern("negative?"), 0)) ? 1 : 0);',
+    # A Float answers by its sign bit (-0.0 and -NaN are negative), as
+    # the float branch does; anything else through #negative?.
+    object: '(#2) = RB_FLOAT_TYPE_P(#1) ? (signbit(RFLOAT_VALUE(#1)) != 0) : '\
+            '(RTEST(rb_funcall((#1), rb_intern("negative?"), 0)) ? 1 : 0);',
   }
 
 # ---- P.5b.4: bincmp family (predicates returning bool) ----------------

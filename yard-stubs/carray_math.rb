@@ -870,8 +870,11 @@ class CArray
   #   Returns a boolean array that is true where an element is `NaN`.
   #   @return [CArray] `:boolean`, same shape as `self`.
   #   @raise [CArray::DataTypeError] for a boolean array.
-  #   @raise [NoMethodError] for an `:object` array whose elements do
-  #     not respond to `#nan?`.
+  #   On an `:object` array an Integer or a Rational element is never
+  #   `NaN`; other elements answer through `#nan?`.
+  #   @raise [NoMethodError] for an `:object` array with an element that
+  #     is not an Integer, a Rational or a Float and does not respond to
+  #     `#nan?`.
   def is_nan; end
 
   # @overload is_inf
