@@ -293,6 +293,33 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
  *   2. Match ranges of parent axes to new axes so element products
  *      agree.  Inside each matched range, root_strides must be
  *      inter-axis contiguous. */
+/* A reshape that folds builds its CAStride directly over the root, so the
+   arrays in between are no longer on its C parent chain.  Three properties
+   are answered by walking that chain (ca_is_value_array, ca_is_readonly,
+   ca_is_mask_array); carry each one across from the array being reshaped,
+   or a reshape of x.value reads the root's mask again and a reshape of a
+   broadcast view becomes writable. */
+static void
+ca_reshape_keep_chain_flags (CArray *view, CArray *src)
+{
+  if ( ca_is_value_array(src) ) {
+    if ( view->mask ) {
+      ca_free(view->mask);
+      view->mask = NULL;
+    }
+    ca_set_flag(view, CA_FLAG_VALUE_ARRAY);
+  }
+  if ( ca_is_readonly(src) ) {
+    ca_set_flag(view, CA_FLAG_READ_ONLY);
+    if ( view->mask ) {
+      ca_set_flag(view->mask, CA_FLAG_READ_ONLY);
+    }
+  }
+  if ( ca_is_mask_array(src) ) {
+    ca_set_flag(view, CA_FLAG_MASK_ARRAY);
+  }
+}
+
 static int
 ca_reshape_try_strides (CArray *parent,
                         const ca_size_t *new_dim,
@@ -661,6 +688,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
                                    ca->data_type, ca->bytes,
                                    (int8_t) argc, new_dim,
                                    out_strides, out_base);
+      ca_reshape_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);
@@ -698,6 +726,7 @@ rb_ca_flatten (VALUE self)
       CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, out_root,
                                    ca->data_type, ca->bytes,
                                    1, dim, out_strides, out_base);
+      ca_reshape_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);

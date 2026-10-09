@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `reshape`, `flatten`, `insert_axis` and `[:_, ...]` now keep what the
+  array they start from means. On `x.value` they read the mask of `x` again,
+  so `x.value.sort`, `.cumsum`, `.median` and `.unique` skipped the masked
+  cells (or raised) instead of reading their values; on a read-only view
+  such as a broadcast they gave a writable view onto the original array.
+
 - Fix: comparing a `CATime` or `CATimedelta` array of two or more
   dimensions with a single value (an element, a `Time`) no longer raises a
   shape mismatch; it compares every cell with that value, as a 1-D array
