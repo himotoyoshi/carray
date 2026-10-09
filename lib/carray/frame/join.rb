@@ -47,7 +47,7 @@ class CAFrame
   # locate_nearest_addr (the per-row, row-preserving counterpart of
   # align_nearest_addr); +direction:+ follows CArray (:floor = most recent
   # at-or-before, :ceil = next, :round = nearest), and rows with no match
-  # in range or beyond +tolerance:+ come back UNDEF. Same wiring as the left
+  # in that direction or beyond +tolerance:+ come back UNDEF. Same wiring as the left
   # join, only the address primitive differs.
   def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = on.to_s

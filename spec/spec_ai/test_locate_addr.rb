@@ -80,14 +80,29 @@ class TestMatchup < Test::Unit::TestCase
     assert_equal [2, 3, 1], r.to_a
   end
 
-  def test_locate_nearest_addr_oob_masks
+  # Outside the span the direction still names a match: :round the nearer
+  # end, :floor the last value for a cell after it, :ceil the first value for
+  # a cell before it.  The opposite side has no match.
+  def test_locate_nearest_addr_outside_the_span
     ref = CA_DOUBLE([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])
     s = CA_DOUBLE([12.0, 999.0, -50.0, 35.0])
-    r = s.locate_nearest_addr(ref)
-    assert_equal true, r.has_mask?
-    assert_equal [false, true, true, false], r.mask.to_a
-    assert_equal 1, r[0]   # 12 -> 10 (idx 1)
-    assert_equal 4, r[3]   # 35 -> 40 (idx 4) under :round (35 == midpoint, round-half-up)
+    assert_equal [1, 5, 0, 4], s.locate_nearest_addr(ref).to_a   # 35 -> 40, round-half-up
+    assert_equal [1, 5, UNDEF, 3], s.locate_nearest_addr(ref, direction: :floor).to_a
+    assert_equal [2, UNDEF, 0, 4], s.locate_nearest_addr(ref, direction: :ceil).to_a
+  end
+
+  def test_locate_nearest_addr_tolerance_refuses_a_far_end
+    ref = CA_DOUBLE([0.0, 10.0])
+    s = CA_DOUBLE([12.0, 999.0])
+    assert_equal [1, UNDEF], s.locate_nearest_addr(ref, direction: :floor, tolerance: 5.0).to_a
+  end
+
+  def test_locate_nearest_addr_nan_query_matches_nothing
+    ref = CA_DOUBLE([0.0, 10.0])
+    s = CA_DOUBLE([Float::NAN, 5.0])
+    [:round, :floor, :ceil].each do |d|
+      assert_equal UNDEF, s.locate_nearest_addr(ref, direction: d)[0], d.inspect
+    end
   end
 
   def test_locate_nearest_addr_masked_query_masks
@@ -253,14 +268,15 @@ class TestMatchup < Test::Unit::TestCase
     assert_equal [6], CA_FLOAT64([5.4]).locate_nearest_addr(ref, direction: :ceil).to_a
   end
 
-  # Length-1 self outside the ref range propagates as a masked cell rather
-  # than raising or collapsing to a scalar.
-  def test_locate_nearest_addr_length1_oob_masks
+  # Length-1 self outside the ref range stays an array rather than raising
+  # or collapsing to a scalar.
+  def test_locate_nearest_addr_length1_outside_the_span
     ref = CA_INT64((0..23).to_a)
     r = CA_INT64([99]).locate_nearest_addr(ref)
     assert_kind_of CArray, r
     assert_equal [1], r.shape
-    assert_equal true, r.mask[0]
+    assert_equal [23], r.to_a
+    assert_equal [UNDEF], CA_INT64([99]).locate_nearest_addr(ref, direction: :ceil).to_a
   end
 
   # Length-1 self with a tolerance too tight drops the match to UNDEF.
@@ -315,14 +331,15 @@ class TestLocateNearestAddrDegenerate < Test::Unit::TestCase
     assert_equal [2, 2, 0], CA_INT32([1, 4, 9]).locate_nearest_addr(ref, direction: :floor).to_a
   end
 
-  def test_a_single_reference_value_matches_only_itself
+  def test_a_single_reference_value_matches_every_cell_its_direction_allows
     q = CA_INT32([2, 5, 9])
-    [:round, :floor, :ceil].each do |d|
-      assert_equal [UNDEF, 0, UNDEF], q.locate_nearest_addr(CA_INT32([5]), direction: d).to_a, d.inspect
-    end
+    one = CA_INT32([5])
+    assert_equal [0, 0, 0],         q.locate_nearest_addr(one).to_a
+    assert_equal [UNDEF, 0, 0],     q.locate_nearest_addr(one, direction: :floor).to_a
+    assert_equal [0, 0, UNDEF],     q.locate_nearest_addr(one, direction: :ceil).to_a
     ref = CA_INT32([1, 5])
     ref[0] = UNDEF
-    assert_equal [UNDEF, 1, UNDEF], q.locate_nearest_addr(ref).to_a
+    assert_equal [UNDEF, 1, 1], q.locate_nearest_addr(ref, direction: :floor).to_a
   end
 
   def test_a_reference_with_nothing_present_matches_nothing
@@ -345,7 +362,8 @@ class TestLocateNearestAddrDegenerate < Test::Unit::TestCase
     k[1] = UNDEF
     right = CAFrame.new("k" => k, "w" => CA_FLOAT64([10, 20]))
     left = CAFrame.new("k" => CA_INT32([2, 6]), "v" => CA_FLOAT64([1, 2]))
-    assert_equal [UNDEF, UNDEF], left.join_asof(right, on: "k")["w"].to_a
+    assert_equal [10.0, 10.0], left.join_asof(right, on: "k", direction: :floor)["w"].to_a
+    assert_equal [UNDEF, UNDEF], left.join_asof(right, on: "k", direction: :ceil)["w"].to_a
     k = CA_INT32([1, 5, 9])
     k[1] = UNDEF
     right = CAFrame.new("k" => k, "w" => CA_FLOAT64([10, 20, 30]))

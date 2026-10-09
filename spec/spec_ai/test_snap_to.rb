@@ -157,4 +157,14 @@ class TestSnapTo < Test::Unit::TestCase
     assert_equal [1, 2, 2], CA_INT32([1, 2, 3]).snap_to(0..2).to_a
     assert_raise(RangeError) { CA_INT8([1, 2, 44]).snap_to([0, 300]) }
   end
+
+  # nil fills mask the cells outside the list whatever the direction, even
+  # where the direction alone would name an end.
+  def test_nil_fills_mask_outside_the_list_in_every_direction
+    x = CA_DOUBLE([0.5, 2.0, 9.0])
+    [:round, :floor, :ceil].each do |d|
+      r = x.snap_to([1.0, 3.0], lfill: nil, ufill: nil, direction: d)
+      assert_equal [true, false, true], r.is_masked.to_a, d.inspect
+    end
+  end
 end

@@ -83,28 +83,29 @@ class TestAlignAddr < Test::Unit::TestCase
 
   # ---- align_nearest_addr (ALIGN.2): ordered lane, reference grid -----------
 
-  # idx_k is grid-shaped: each grid point -> nearest address into arrays[k],
-  # OOB grid points masked. Grid points chosen exactly on the array values to
-  # avoid rounding ambiguity.
+  # idx_k is grid-shaped: each grid point -> nearest address into arrays[k].
+  # Grid points beyond an array's ends take the nearer end under :round, and
+  # have no match on the side the direction does not reach.
   def test_nearest_grid_align
     grid = CA_DOUBLE([0.0, 10.0, 20.0, 30.0])
     a = CA_DOUBLE([10.0, 20.0])
     b = CA_DOUBLE([20.0, 30.0])
     common, ia, ib = CArray.align_nearest_addr(a, b, grid: grid)
     assert_equal grid.to_a, common.to_a
-    assert_equal [true, false, false, true], ia.mask.to_a   # 0 and 30 OOB for a=[10,20]
-    assert_equal [0, 1], [ia[1], ia[2]]
-    assert_equal [true, true, false, false], ib.mask.to_a   # 0 and 10 OOB for b=[20,30]
-    assert_equal [0, 1], [ib[2], ib[3]]
+    assert_equal [0, 0, 1, 1], ia.to_a
+    assert_equal [0, 0, 0, 1], ib.to_a
+    _c, fa = CArray.align_nearest_addr(a, grid: grid, direction: :floor)
+    assert_equal [UNDEF, 0, 1, 1], fa.to_a
+    _c, ca = CArray.align_nearest_addr(a, grid: grid, direction: :ceil)
+    assert_equal [0, 0, 1, UNDEF], ca.to_a
   end
 
   def test_nearest_reindex_roundtrip
     grid = CA_DOUBLE([0.0, 10.0, 20.0, 30.0])
     a = CA_DOUBLE([10.0, 20.0]);  adata = CA_DOUBLE([1.0, 2.0])
-    _common, ia, = CArray.align_nearest_addr(a, grid: grid)
+    _common, ia, = CArray.align_nearest_addr(a, grid: grid, direction: :floor)
     ag = adata.project(ia)
-    assert_equal [1.0, 2.0], [ag[1], ag[2]]
-    assert_equal [true, false, false, true], ag.mask.to_a
+    assert_equal [UNDEF, 1.0, 2.0, 2.0], ag.to_a
   end
 
   def test_nearest_grid_defaults_to_first_array_verbatim

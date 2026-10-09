@@ -989,13 +989,16 @@ class TestCAFrameJoinAsof < Test::Unit::TestCase
     assert_equal [10, 20, 30, 40], j["time"].to_a
   end
 
-  def test_asof_floor_matches_at_or_before_within_range
+  def test_asof_floor_matches_the_latest_at_or_before
     j = @obs.join_asof(@radar, on: "time", direction: :floor)
-    # 20 -> radar 12 (dbz 50); 10 below range, 30/40 beyond range -> UNDEF
-    assert_equal UNDEF, j["dbz"][0]
-    assert_equal 50.0, j["dbz"][1]
-    assert_equal UNDEF, j["dbz"][2]
-    assert_equal UNDEF, j["dbz"][3]
+    # 10 has nothing at or before it; 20 -> 12; 30 and 40 -> 25, the last
+    assert_equal [UNDEF, 50.0, 60.0, 60.0], j["dbz"].to_a
+  end
+
+  def test_asof_ceil_matches_the_first_at_or_after
+    j = @obs.join_asof(@radar, on: "time", direction: :ceil)
+    # 10 -> 12, the first; 20 -> 25; 30 and 40 have nothing at or after them
+    assert_equal [50.0, 60.0, UNDEF, UNDEF], j["dbz"].to_a
   end
 
   def test_asof_tolerance_masks_far_matches

@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `locate_nearest_addr` now finds a match beyond the ends of the
+  reference when its `direction:` names one: `:floor` takes the last value for
+  a cell after it, `:ceil` the first value for a cell before it, and `:round`
+  the nearer end. These cells used to be masked. The same holds when the
+  reference has a single value. `join_asof`, `CArray.align_nearest_addr` and
+  `snap_to` follow (`snap_to` still masks or fills the cells outside the list
+  as `lfill:` / `ufill:` say). Pass `tolerance:` to refuse a match that is too
+  far away.
+
 - Change: a time array compares with, searches for and stores a `String` or a
   `Date` as well as a `Time`, so `t.eq("2024-01-02")`, `t.is_in(["2024-01-02"])`
   and a CAFrame time index's `at("2024-01-02")` work, and `t[0] = "2024-01-02"`

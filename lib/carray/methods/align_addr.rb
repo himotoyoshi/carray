@@ -85,8 +85,10 @@ class CArray
   #     b_on_grid = b_data.project(ib)
   #
   #   `direction:` (`:round` / `:floor` / `:ceil`) and `tolerance:` are
-  #   forwarded to {#locate_nearest_addr}: out-of-range grid points, and points
-  #   whose nearest value is farther than `tolerance`, come back masked.
+  #   forwarded to {#locate_nearest_addr}: grid points with no match in the
+  #   direction (before an array's first value under `:floor`, after its last
+  #   under `:ceil`), and points whose match is farther than `tolerance`, come
+  #   back masked.
   #
   #   @param arrays [Array<CArray>] one or more arrays (Array / Range coerced
   #     via `to_ca`).

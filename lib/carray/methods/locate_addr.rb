@@ -63,12 +63,12 @@ class CArray
   #   uses `linear_section` + rounding for non-exact matching against a
   #   sorted `ref`.
   #
-  #   Out-of-range cells of `self` (outside `ref`'s span) mask through the
-  #   pipeline: `linear_section` returns NaN, `mask_invalid` propagates
-  #   that as `UNDEF`, rounding and the int64 cast carry the mask, and
-  #   `project` scatters it into the final positions. `mask_invalid` runs
-  #   before rounding because `CArray#round` maps NaN to 0 and would
-  #   otherwise silently match `ref[0]`.
+  #   Outside `ref`'s span the direction still decides: `:floor` matches
+  #   a cell after the last value to that last value, `:ceil` matches a
+  #   cell before the first value to that first value, and `:round`
+  #   matches either to the nearer end.  The other side has no match
+  #   (`:floor` before the first value, `:ceil` after the last) and is
+  #   masked.  Use `tolerance:` to refuse matches that are too far away.
   #
   #   `tolerance:` (default `nil`) sets a maximum accepted absolute
   #   distance between `self[i]` and its matched `ref` value. When
@@ -79,9 +79,11 @@ class CArray
   #   `ref` need not be given in ascending order: it is sorted internally
   #   and the returned addresses are mapped back to positions in `ref` as
   #   passed.  A masked `ref` value matches nothing, as in {#locate_addr}.
-  #   With one value present in `ref` there is no span: a cell matches it
-  #   only when equal to it, as {#linear_section} says.  With none, every
-  #   cell is masked; an empty `self` gives an empty result.
+  #   With one value present in `ref`, that value is the match for
+  #   every cell the direction allows (`:floor` at or after it, `:ceil`
+  #   at or before it, `:round` all).  With none, every cell is masked;
+  #   an empty `self` gives an empty result.  A masked or NaN cell of
+  #   `self` is always masked.
   #
   #   @param ref [CArray] 1-D reference grid to match against.
   #   @param direction [Symbol] `:round`, `:floor`, or `:ceil` — rounding
@@ -89,7 +91,8 @@ class CArray
   #   @param tolerance [Numeric, nil] maximum accepted `|self - ref|`
   #     distance; cells beyond this are masked. `nil` disables the check.
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape as
-  #     `self`; out-of-range and beyond-tolerance cells are masked.
+  #     `self`; cells with no match in the direction and beyond-tolerance
+  #     cells are masked.
   #   @raise [ArgumentError] when `direction` is not one of the accepted
   #     symbols.
   def locate_nearest_addr (ref, direction: :round, tolerance: nil)
@@ -121,6 +124,24 @@ class CArray
          when :floor then masked.floor
          when :ceil  then masked.ceil
          end.int64
+    # linear_section gives no position outside ref's span (or anywhere when
+    # ref has one value), but a direction still names a match there: :floor
+    # takes the last value for a query at or after it, :ceil the first for a
+    # query at or before it, and :round the nearer end.
+    n = rs.elements
+    if n > 0
+      live = has_mask? ? is_not_masked : nil
+      unless direction == :ceil
+        at_end = ge(rs[n-1]).strip_mask(false)
+        at_end &= live if live
+        si[at_end] = n - 1
+      end
+      unless direction == :floor
+        at_start = le(rs[0]).strip_mask(false)
+        at_start &= live if live
+        si[at_start] = 0
+      end
+    end
     idx = ri.project(si)
     if tolerance
       dist = (ref.project(idx) - self).abs

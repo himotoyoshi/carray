@@ -131,9 +131,9 @@ class CArray
                                  direction: direction).reshape(*shape)
     end
 
-    # locate_nearest_addr returns int64 indices; OOB (below / above / NaN)
-    # cells come back masked. We split OOB into below / above with
-    # explicit comparisons so the two sides can be filled independently.
+    # locate_nearest_addr returns int64 indices; whether a cell outside the
+    # list gets one depends on the direction, so the two sides are split with
+    # explicit comparisons and filled here independently of it.
     idx = self.locate_nearest_addr(ref, direction: direction)
     out = ref.project(idx)
 
@@ -142,13 +142,13 @@ class CArray
 
     case lfill
     when :clamp then out[below] = ref[0]
-    when nil    then # leave masked (locate_nearest_addr already masked OOB)
+    when nil    then out[below] = UNDEF
     else             out[below] = lfill
     end
 
     case ufill
     when :clamp then out[above] = ref[-1]
-    when nil    then # leave masked
+    when nil    then out[above] = UNDEF
     else             out[above] = ufill
     end
 
