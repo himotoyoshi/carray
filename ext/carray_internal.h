@@ -346,12 +346,23 @@ int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
 #define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
 #endif
 
+/* The order of two object cells, by `<=>` as Array#min and #sort take it;
+   a pair `<=>` cannot order raises "comparison of A with B failed". */
+static inline int
+ca_obj_cmp (VALUE a, VALUE b)
+{
+  return rb_cmpint(rb_funcall(a, rb_intern("<=>"), 1, b), a, b);
+}
+
+/* op names the contest: `<` for a minimum, `>` for a maximum. */
 static inline int
 ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
 {
+  int c;
   if ( CA_OBJ_ISNAN(v) ) return 0;
   if ( CA_OBJ_ISNAN(acc) ) return 1;
-  return RTEST(rb_funcall(v, op, 1, acc));
+  c = ca_obj_cmp(v, acc);
+  return ( op == rb_intern("<") ) ? ( c < 0 ) : ( c > 0 );
 }
 
 /* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:

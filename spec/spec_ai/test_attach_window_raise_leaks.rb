@@ -361,7 +361,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
 
   {
     "sum"             => [TypeError,     ->(v) { v.sum }],
-    "min"             => [NoMethodError, ->(v) { v.min }],
+    "min"             => [ArgumentError, ->(v) { v.min }],
     "mean"            => [TypeError,     ->(v) { v.mean }],
     "variance"        => [TypeError,     ->(v) { v.variance }],
     "sort_index"      => [ArgumentError, ->(v) { v.sort_index }],

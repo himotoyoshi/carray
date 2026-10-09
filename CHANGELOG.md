@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: on an object array, `min`, `max`, `minmax`, `min_index`,
+  `max_index`, `cummin`, `cummax`, `pmin`, `pmax`, `minimum`, `maximum`
+  and `elem_min` / `elem_max` compare cells with `<=>`, as `sort` already
+  did and as Ruby's `Array#min` does. They used `<` / `>`, so an element
+  with only `<=>` could be sorted but had no minimum. A pair `<=>` cannot
+  order raises `ArgumentError` ("comparison of A with B failed"), where
+  `<` raised `NoMethodError`. A Float NaN still loses every contest.
+
 - Fix: `&`, `|`, `^` (and `and` / `or` / `xor`) between an object array and
   a boolean array read the boolean cells as Integer 1 / 0, both true in
   Ruby, so `CA_OBJECT([true]) & CA_BOOLEAN([false])` was `[true]`, and

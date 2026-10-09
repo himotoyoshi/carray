@@ -18,6 +18,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"   /* ca_obj_extremum_replaces */
 
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.
    Direct VALUE * access + FIXNUM_P fast path eliminates rb_ary_entry
@@ -836,7 +837,7 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
 
     cur = from_array ? rb_ca_fetch_index(self, idx) : rb_ca_fetch_addr(self, addr);
     if ( cur == CA_UNDEF ) return self;
-    if ( RTEST(rb_funcall(rval, rb_intern("<"), 1, cur)) ) {
+    if ( ca_obj_extremum_replaces(rval, cur, rb_intern("<")) ) {
       if ( from_array ) rb_ca_store_index(self, idx, rval);
       else              rb_ca_store_addr(self, addr, rval);
     }
@@ -889,7 +890,7 @@ rb_ca_elem_max (VALUE self, VALUE ridx, VALUE rval)
 
     cur = from_array ? rb_ca_fetch_index(self, idx) : rb_ca_fetch_addr(self, addr);
     if ( cur == CA_UNDEF ) return self;
-    if ( RTEST(rb_funcall(rval, rb_intern(">"), 1, cur)) ) {
+    if ( ca_obj_extremum_replaces(rval, cur, rb_intern(">")) ) {
       if ( from_array ) rb_ca_store_index(self, idx, rval);
       else              rb_ca_store_addr(self, addr, rval);
     }
