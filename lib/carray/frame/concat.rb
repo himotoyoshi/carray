@@ -28,6 +28,12 @@ class CAFrame
   #
   # The index is welded too when every frame has one (their +axis_name+
   # must agree); if none do, the result has no index; a mix raises.
+  #
+  # A frame with no rows adds no values, so it takes no part in the result
+  # past these checks: its column set and index still have to agree, but the
+  # data types are the other frames' (a header-only CSV reads as object
+  # columns, which would otherwise refuse or demote the rest).  When every
+  # frame is empty, the first one stands for them.
   # Column-set mismatch raises — a union-with-UNDEF mode is a possible
   # future opt-in, kept out here to stay explicit (memo §4.2).
   #
@@ -39,6 +45,8 @@ class CAFrame
     first = frames.first
     names = first.column_names
     check_column_sets(frames, names, verb: "meld")
+    index_pieces(frames, verb: "meld")
+    frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
       cols[name] = CArray.meld(frames.map { |f| f[name] }, axis: 0)
@@ -54,8 +62,9 @@ class CAFrame
   # For a view frame that shares storage with the inputs (strict same data type
   # per column, chain composability preserved) use {CAFrame.meld}.
   #
-  # Column matching, index handling, and column-set / index-mix rules
-  # match {CAFrame.meld}.
+  # Column matching, index handling, column-set / index-mix rules and the
+  # treatment of a frame with no rows match {CAFrame.meld}: an empty frame's
+  # data types take no part in the common type.
   #
   #   CAFrame.concatenate(jan, feb, mar)     # eager, independent result
   #   CAFrame.concatenate([jan, feb, mar])   # an Array is accepted too
@@ -65,6 +74,8 @@ class CAFrame
     first = frames.first
     names = first.column_names
     check_column_sets(frames, names, verb: "concatenate")
+    index_pieces(frames, verb: "concatenate")
+    frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
       cols[name] = CArray.concatenate(frames.map { |f| f[name] })
@@ -94,6 +105,13 @@ class CAFrame
     end
   end
   private_class_method :check_column_sets
+
+  # The frames that add rows, or the first frame when none does.
+  def self.frames_with_rows(frames)
+    with_rows = frames.reject { |f| f.nrow.zero? }
+    with_rows.empty? ? [frames.first] : with_rows
+  end
+  private_class_method :frames_with_rows
 
   # ---- index helpers -----------------------------------------------------
 

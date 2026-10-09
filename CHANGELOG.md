@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame.meld` and `CAFrame.concatenate` leave the data types of a
+  frame with no rows out of the result. Joining a header-only CSV (whose
+  columns read as object) to a typed frame used to make `meld` refuse and
+  `concatenate` turn every column into object. An empty frame still has to
+  have the same columns and the same index presence as the others.
+
 - Fix: `CAFrame.from_records` builds a column of `Complex` values as
   `cmplx128`; it used to make it float64 with every value masked. `Rational`
   and `BigDecimal` values now stay an object column instead of being rounded

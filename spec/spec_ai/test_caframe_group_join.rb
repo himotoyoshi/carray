@@ -1,5 +1,6 @@
 require "test/unit"
 require "carray"
+require "stringio"
 
 # CAFrame group_by / join (MEMO_DATAFRAME_ON_CARRAY.md §5, §11.6, §11.7, §13.3).
 #
@@ -720,6 +721,54 @@ class TestCAFrameConcatenate < Test::Unit::TestCase
   def test_empty_and_non_frame_raise
     assert_raise(ArgumentError) { CAFrame.concatenate }
     assert_raise(ArgumentError) { CAFrame.concatenate(CAFrame.new("t" => CA_INT32([1])), "nope") }
+  end
+end
+
+# A frame with no rows adds no values, so its data types take no part: a
+# header-only CSV reads as object columns, which used to make meld refuse and
+# concatenate demote every column to object.
+class TestCAFrameJoinEmptyFrame < Test::Unit::TestCase
+  def setup
+    @full  = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_FLOAT64([1.5, 2.5]))
+    @empty = CAFrame.from_csv(StringIO.new("a,b\n"))
+  end
+
+  def test_an_empty_frame_of_other_types_joins_in_either_place
+    [[@full, @empty], [@empty, @full], [@empty, @full, @empty]].each do |frames|
+      [:meld, :concatenate].each do |verb|
+        r = CAFrame.public_send(verb, *frames)
+        assert_equal [:int32, :float64], r.columns.map(&:data_type), verb.inspect
+        assert_equal [[1, 2], [1.5, 2.5]], r.columns.map(&:to_a), verb.inspect
+      end
+    end
+  end
+
+  def test_all_empty_frames_keep_the_first_ones_types
+    e = @full[CA_BOOLEAN([0, 0])]
+    [:meld, :concatenate].each do |verb|
+      r = CAFrame.public_send(verb, e, @empty)
+      assert_equal 0, r.nrow
+      assert_equal [:int32, :float64], r.columns.map(&:data_type)
+    end
+  end
+
+  def test_an_empty_frame_still_has_to_agree_on_columns_and_index
+    [:meld, :concatenate].each do |verb|
+      assert_raise(ArgumentError) { CAFrame.public_send(verb, @full, CAFrame.new("a" => CA_INT32([]))) }
+      indexed = CAFrame.new({ "a" => CA_INT32([]), "b" => CA_FLOAT64([]) }, index: CA_INT32([]), axis_name: "i")
+      assert_raise(ArgumentError) { CAFrame.public_send(verb, @full, indexed) }
+    end
+  end
+
+  def test_meld_still_writes_through_to_the_frames_with_rows
+    r = CAFrame.meld(@empty, @full)
+    r["a"][1] = 9
+    assert_equal [1, 9], @full["a"].to_a
+  end
+
+  def test_meld_names_the_data_types_it_refuses
+    err = assert_raise(ArgumentError) { CArray.meld([CA_INT32([1]), CA_OBJECT([2])]) }
+    assert_match(/array 0 is int32, array 1 is object/, err.message)
   end
 end
 
