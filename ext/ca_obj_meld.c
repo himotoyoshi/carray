@@ -953,6 +953,56 @@ ca_meld_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* operation table                                                      */
 /* ------------------------------------------------------------------- */
 
+/* The table's write slots: after a write, refuse a true that reached the
+   stand-in of a value array or a mask array (ca_multi_parent_mask_check).
+   Only the mask of a CAMeld has stand-ins to check. */
+static void
+ca_meld_mask_check (CAMeld *ca)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_check((CArray *) ca, o->parents, o->mask_standins,
+                               o->n_parents);
+  }
+}
+
+static void
+ca_meld_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
+{
+  ca_meld_func_xfer_index(ap, idx, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
+                         int dir)
+{
+  ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                          ca_size_t *strides, void *data, int dir)
+{
+  ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_all (void *ap, void *data, int dir)
+{
+  ca_meld_func_xfer_all(ap, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_fill_data (void *ap, void *ptr)
+{
+  ca_meld_func_fill_data(ap, ptr);
+  ca_meld_mask_check((CAMeld *) ap);
+}
+
 ca_operation_function_t ca_meld_func = {
   -1, /* CA_OBJ_MELD */
   CA_VIEW_ARRAY,
@@ -962,13 +1012,13 @@ ca_operation_function_t ca_meld_func = {
   ca_meld_func_attach,
   ca_meld_func_sync,
   ca_meld_func_detach,
-  ca_meld_func_fill_data,
+  ca_meld_put_fill_data,
   ca_meld_func_create_mask,
-  ca_meld_func_xfer_index,
-  ca_meld_func_xfer_addrs,
+  ca_meld_put_xfer_index,
+  ca_meld_put_xfer_addrs,
   ca_meld_func_fold_stride,
-  ca_meld_func_xfer_stride,
-  ca_meld_func_xfer_all,
+  ca_meld_put_xfer_stride,
+  ca_meld_put_xfer_all,
 };
 
 /* ------------------------------------------------------------------- */

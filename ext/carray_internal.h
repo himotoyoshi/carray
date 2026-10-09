@@ -369,9 +369,10 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
    p's own mask when it has one.  A parent without one gets an all-false
    stand-in, stored in *standin for the view to free, so that asking the
    view about its mask does not give the parent a mask.  The stand-in of a
-   parent that cannot carry a mask -- a value array, a mask array, a
-   read-only (or frozen) array -- is read-only: writing UNDEF into its part
-   raises as a write to a read-only array does. */
+   read-only (or frozen) parent is read-only.  The stand-in of a value
+   array or a mask array, which can never carry a mask, stays in place and
+   takes writes; writing false into it changes nothing, and a true written
+   into it is refused by ca_multi_parent_mask_check. */
 CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 
 /* Let the stand-ins of a multi-parent view's mask give way to the parents'
@@ -383,6 +384,13 @@ CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
                                           CArray **standins, int32_t n,
                                           int for_write);
+
+/* After a write to a multi-parent view's mask: a true written into the
+   stand-in of a value array or a mask array is cleared again and refused
+   with the TypeError a direct write would raise.  The parts of the write
+   that went to other parents stay written. */
+void        ca_multi_parent_mask_check (CArray *mask, CArray **parents,
+                                        CArray **standins, int32_t n);
 
 /* After a write inside an attach window, which went into the stand-ins
    the window was opened with: move what was written into a stand-in to a
