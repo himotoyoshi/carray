@@ -30,6 +30,15 @@ class CArray
   #   (so a 5-byte array written from `"be"` is `is_in(["be"])`). A
   #   `CA_FIXLEN` set given as a CArray must already be of that width.
   #
+  #   An object array keeps Ruby's own split between its two kinds of
+  #   equality. A lookup through a hash -- `is_in`, the set operations,
+  #   {#locate_addr}, {#unique} and the rest of the discovery family --
+  #   uses `eql?`, as `Array#uniq`, `Array#&` and `Set` do, so `1` and
+  #   `1.0` are different values there. A cell-by-cell comparison --
+  #   {#eq}, {#count}, {#search}, {#bsearch} -- uses `==`, as
+  #   `Array#include?` does, so they are equal there. To match by value
+  #   across Integer and Float, convert the array to a numeric type first.
+  #
   #   Masked cells of `values` do not enter the set. Masked cells of
   #   `self` stay masked in the result (membership is unknown), so
   #   `is_in` propagates `self`'s mask like an element-wise comparison.

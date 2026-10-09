@@ -164,7 +164,9 @@ class CArray
   #   compares: an integer array searched with a Float is compared in
   #   float64 (so `3.9` does not match `3`, and `eps` applies), and an
   #   Integer that does not fit an integer array raises `RangeError`.
-  #   The same holds for {#bsearch} and {#search_nearest}.
+  #   The same holds for {#bsearch} and {#search_nearest}. On an
+  #   `:object` array a cell matches when it is `==` to `val`, as {#eq}
+  #   compares (so `1` matches `1.0`, which {#is_in} does not).
   #
   #   `self` need not be sorted; this is a linear scan. For sorted
   #   data prefer {#bsearch}.

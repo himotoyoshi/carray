@@ -26,6 +26,11 @@ class CArray
   #   Mask-cardinality and value-match are distinct concepts, so the
   #   overloading is unambiguous.
   #
+  #   On an `:object` array a cell counts when it is `==` to `v` (so `1`
+  #   and `1.0` match), as {#eq} compares; the hash-based family
+  #   ({#is_in}, {#value_counts}) uses `eql?` instead, as Ruby's
+  #   `Array#uniq` does.
+  #
   #   Dispatch:
   #   - no argument: forwards to {#count_not_masked} (present-cell
   #     count).
