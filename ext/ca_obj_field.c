@@ -36,7 +36,7 @@ ca_field_setup (CAStride *ca, CArray *parent,
   CA_CHECK_BYTES(data_type, bytes);
 
   if ( offset < 0 ) {
-    rb_raise(rb_eRuntimeError, "negative offset");
+    rb_raise(rb_eArgError, "negative offset");
   }
   if ( data_type == CA_OBJECT ) {
     rb_raise(rb_eCADataTypeError,
@@ -47,7 +47,7 @@ ca_field_setup (CAStride *ca, CArray *parent,
              "a field can not be taken from an object array");
   }
   if ( parent->bytes < offset + bytes ) {
-    rb_raise(rb_eRuntimeError, "offset or bytes out of range");
+    rb_raise(rb_eArgError, "offset or bytes out of range");
   }
 
   /* strides[k] = parent->bytes × Π_{i>k} parent->dim[i].  Same shape

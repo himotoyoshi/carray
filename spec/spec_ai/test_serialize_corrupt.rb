@@ -22,7 +22,7 @@ class TestSerializeCorrupt < Test::Unit::TestCase
   end
 
   def assert_corrupt (s, pattern)
-    e = assert_raise(RuntimeError) { CArray.load(s) }
+    e = assert_raise(ArgumentError) { CArray.load(s) }
     assert_match pattern, e.message
   end
 

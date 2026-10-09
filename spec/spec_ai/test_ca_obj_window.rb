@@ -76,7 +76,7 @@ class TestCAWindow < Test::Unit::TestCase
 
   def test_an_unknown_symbol_bounds_still_raises
     a = CA_INT([[1, 2], [3, 4]])
-    assert_raise(RuntimeError) { a.window(-1..2, -1..2, bounds: :bogus) }
+    assert_raise(ArgumentError) { a.window(-1..2, -1..2, bounds: :bogus) }
     #  and the 3.0 removals keep their own message
     assert_raise(ArgumentError) { a.window(-1..2, -1..2, bounds: :reflect) }
     assert_raise(ArgumentError) { a.window(-1..2, -1..2, bounds: :periodic) }

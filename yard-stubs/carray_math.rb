@@ -1055,7 +1055,7 @@ class CArray
   #   Applies {#abs} to `self` in place, keeping `self`'s
   #   `data_type`.
   #   @return [self]
-  #   @raise [RuntimeError] for a boolean array.
+  #   @raise [CArray::DataTypeError] for a boolean array.
   def abs!; end
 
   # @overload abs_i!
@@ -1105,7 +1105,7 @@ class CArray
   #   Applies {#arg} to `self` in place, keeping `self`'s
   #   `data_type`.
   #   @return [self]
-  #   @raise [RuntimeError] for an integer or boolean array, whose
+  #   @raise [CArray::DataTypeError] for an integer or boolean array, whose
   #     `data_type` cannot hold the widened result -- {#arg} promotes it
   #     instead of raising.
   def arg!; end

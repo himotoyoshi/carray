@@ -1000,7 +1000,7 @@ extern VALUE rb_cCArrayObject;
 #define CA_CHECK_DATA_TYPE(data_type) \
   do { \
     if ( data_type <= CA_NONE || data_type >= CA_NTYPE ) { \
-      rb_raise(rb_eRuntimeError, "invalid data_type id %i", data_type);     \
+      rb_raise(rb_eArgError, "invalid data_type id %i", data_type);     \
     } \
     if ( ! ca_valid[data_type] ) { \
       rb_raise(rb_eRuntimeError, "data_type %s is disabled", ca_type_name[data_type]);    \
@@ -1009,12 +1009,12 @@ extern VALUE rb_cCArrayObject;
 
 #define CA_CHECK_DATA_TYPE_NUMERIC(data_type) \
   if ( data_type <= CA_NONE || data_type >= CA_NTYPE || !ca_valid[data_type] || data_type == CA_FIXLEN || data_type == CA_OBJECT ) { \
-    rb_raise(rb_eRuntimeError, "invalid numeric data type"); \
+    rb_raise(rb_eCADataTypeError, "invalid numeric data type"); \
   }
 
 #define CA_CHECK_RANK(ndim) \
   if ( ndim <= 0 || ndim > CA_RANK_MAX ) { \
-    rb_raise(rb_eRuntimeError, "invalid ndim"); \
+    rb_raise(rb_eArgError, "invalid ndim"); \
   }
 
 #define CA_CHECK_DIM(ndim, dim)     \
@@ -1022,7 +1022,7 @@ extern VALUE rb_cCArrayObject;
     int8_t i_; \
     for (i_=0; i_<ndim; i_++) { \
       if ( dim[i_] < 0 ) { \
-        rb_raise(rb_eRuntimeError, "negative size dimension at %i-dim", i_);  \
+        rb_raise(rb_eArgError, "negative size dimension at %i-dim", i_);  \
       } \
     } \
   }
@@ -1033,14 +1033,14 @@ extern VALUE rb_cCArrayObject;
 #define CA_CHECK_BYTES(data_type, bytes) \
   if ( data_type == CA_FIXLEN ) { \
     if ( bytes <= 0 ) {                            \
-      rb_raise(rb_eRuntimeError,                   \
+      rb_raise(rb_eArgError,                   \
                "invalid bytes (a fixlen needs bytes: of 1 or more)"); \
     } \
   } \
   else { \
     bytes = ca_sizeof[data_type]; \
     if ( bytes <= 0 ) {           \
-      rb_raise(rb_eRuntimeError, "invalid bytes"); \
+      rb_raise(rb_eArgError, "invalid bytes"); \
     } \
   }
 
@@ -1059,7 +1059,7 @@ extern VALUE rb_cCArrayObject;
     int8_t i; \
     for (i=0; i<ca->ndim; i++) { \
       if ( idx[i] < 0 || idx[i] >= ca->dim[i] )  { \
-        rb_raise(rb_eRuntimeError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
+        rb_raise(rb_eIndexError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
       } \
     } \
   }

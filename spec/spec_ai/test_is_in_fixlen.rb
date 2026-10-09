@@ -79,7 +79,7 @@ class TestIsInFixlen < Test::Unit::TestCase
   # A numeric set never reaches the guard: result_type refuses to promote
   # fixlen and int32 to a common type first, which is the right place.
   def test_a_genuine_data_type_mismatch_is_refused_at_the_promotion
-    e = assert_raise(RuntimeError) { @raw.is_in(CA_INT32([1])) }
+    e = assert_raise(CArray::DataTypeError) { @raw.is_in(CA_INT32([1])) }
     assert_match(/int32/,  e.message)
     assert_match(/fixlen/, e.message)
   end

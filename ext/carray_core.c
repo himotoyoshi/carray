@@ -823,7 +823,7 @@ ca_set_cyclic_check(void *ap)
   /* ca.data_type == CA_OBJECT */
   if ( ca_is_object_type(ca) ) {
     if ( ca->flags & CA_FLAG_CYCLE_CHECK ) {
-      rb_raise(rb_eRuntimeError, "cyclic reference is not allowed in CArray");
+      rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
     }
     ca_set_flag(ca, CA_FLAG_CYCLE_CHECK);
   }
@@ -851,7 +851,7 @@ ca_test_cyclic_check(void *ap, void *ptr)
       CArray *cv;
       TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
       if ( ca_test_flag(cv, CA_FLAG_CYCLE_CHECK) ) {
-        rb_raise(rb_eRuntimeError, "cyclic reference is not allowed in CArray");
+        rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
       }
     }
   }
@@ -2755,7 +2755,7 @@ rb_ca_members (VALUE self)
 {
   volatile VALUE data_class = rb_ca_data_class(self);
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   else {
     return rb_obj_clone(rb_const_get(data_class, rb_intern("MEMBERS")));
@@ -2778,7 +2778,7 @@ rb_ca_face_field (VALUE self, VALUE sym)
   CArray *ca;
 
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -2820,7 +2820,7 @@ rb_ca_face_field (VALUE self, VALUE sym)
       if ( TYPE(sym) != T_STRING ) {
         sym = rb_funcall(sym, rb_intern("to_s"), 0);
       }
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "can't find data_member named <%s>", StringValuePtr(sym));
     }
     Check_Type(info, T_ARRAY);
@@ -2880,7 +2880,7 @@ rb_ca_fields (VALUE self)
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
   list = rb_ary_new2(RARRAY_LEN(member_names));
@@ -2903,7 +2903,7 @@ rb_ca_fields_at (int argc, VALUE *argv, VALUE self)
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   member_names = rb_ary_new4(argc, argv);
   list = rb_ary_new2(RARRAY_LEN(member_names));

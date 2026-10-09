@@ -2195,7 +2195,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       return rb_ca_is_not_masked(self);
     }
     else {
-      rb_raise(rb_eRuntimeError, "array can not be compared with UNDEF");
+      rb_raise(rb_eArgError, "array can not be compared with UNDEF");
     }
   }
 

@@ -375,7 +375,7 @@ class TestSigilRetirementAndReservation < Test::Unit::TestCase
   def test_single_alpha_reserved_for_contraction
     a = CArray.int32(3, 4).seq
     %i[i j k a z].each do |sym|
-      e = assert_raise(NotImplementedError) { a[sym, nil] }
+      e = assert_raise(IndexError) { a[sym, nil] }
       assert_match(/reserved for future contraction notation/, e.message)
     end
   end

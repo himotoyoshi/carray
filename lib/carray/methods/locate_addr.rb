@@ -42,7 +42,7 @@ class CArray
   #     numeric lane.
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape as
   #     `self`; unmatched cells are masked.
-  #   @raise [RuntimeError] when `self` and `ref` have no common data type.
+  #   @raise [CArray::DataTypeError] when `self` and `ref` have no common data type.
   def locate_addr (ref)
     ref = ref.to_ca unless ref.is_a?(CArray)
     # Put self and ref in a common lane via the single-source promotion rule

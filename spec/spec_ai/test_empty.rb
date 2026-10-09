@@ -137,8 +137,8 @@ class TestCArrayEmpty < Test::Unit::TestCase
   end
 
   def test_empty_dim_refused_as_new_refuses_it
-    from_new = assert_raise(RuntimeError) { CArray.new(:int64, []) }
-    from_empty = assert_raise(RuntimeError) { CArray.empty(:int64, []) }
+    from_new = assert_raise(ArgumentError) { CArray.new(:int64, []) }
+    from_empty = assert_raise(ArgumentError) { CArray.empty(:int64, []) }
     assert_equal from_new.message, from_empty.message
   end
 

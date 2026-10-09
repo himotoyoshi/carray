@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: errors a caller can cause no longer raise `RuntimeError`. A
+  shape, size, step, offset or option the operation cannot take raises
+  `ArgumentError` (`b[] = c` with another shape, `reshape`, `broadcast_to`,
+  a zero step, a negative dimension, an unknown data type name, a corrupt
+  `_CARRAY3` stream for `load`); a data type it cannot take raises
+  `CArray::DataTypeError` (`result_type` without a common type, `abs!` /
+  `arg!` whose result type differs); an integer array cast to boolean with
+  a value other than 0 or 1 raises `RangeError`; an object that is not a
+  CArray where one is needed raises `TypeError`; `a[:x]` raises
+  `IndexError` and `df[:x]` `ArgumentError` (both were
+  `NotImplementedError`). Code that rescues `RuntimeError` around these
+  needs the new class. A write to a read-only array and a `to_ca` that
+  refuses `writable: true` still raise `RuntimeError`.
 - Change: a frozen `CAFrame` refuses `[]=`, `set_index`, `reset_index`,
   `cast`, `promote`, `parse_to_time`, `to_time`, `fill` and `mask_eq` with
   `FrozenError`; `df["c"] = col` used to add the column. The verbs that

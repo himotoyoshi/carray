@@ -1924,7 +1924,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   }
   else {
     volatile VALUE inspect = rb_inspect(CLASS_OF(obj));
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "given object '%s' can't be wrapped as carray",
              StringValuePtr(inspect));
   }
@@ -2482,7 +2482,7 @@ ca_promote_type (int8_t a, int8_t b)
     /* b should be cast to a */
     return a;
   }
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eCADataTypeError,
            "can't promote data_types '%s' and '%s' to a common type",
            ca_type_name[a], ca_type_name[b]);
 }
@@ -2828,7 +2828,7 @@ rb_ca_cast_with (VALUE self, VALUE other)
     rb_ca_cast_self_or_other(&self, &other);
   }
   else {
-    rb_raise(rb_eRuntimeError, "first argument should be a carray");
+    rb_raise(rb_eTypeError, "first argument should be a carray");
   }
   return rb_assoc_new(self, other);
 }
@@ -2990,7 +2990,7 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     vend = rb_funcall(v, id_end_cast, 0);
     step = ( argc >= 2 ) ? argv[1] : Qnil;
     if ( RTEST(step) && RTEST(rb_funcall(step, id_op_eq, 1, INT2FIX(0))) ) {
-      rb_raise(rb_eRuntimeError, "step should not be 0");
+      rb_raise(rb_eArgError, "step should not be 0");
     }
     if ( data_type == CA_OBJECT && !RTEST(step) ) {
       VALUE va = rb_funcall(v, id_to_a_cast, 0);   /* CA_OBJECT(v.to_a) */

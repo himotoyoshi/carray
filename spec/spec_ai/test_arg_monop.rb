@@ -202,6 +202,6 @@ class TestArgMonop < Test::Unit::TestCase
 
   def test_arg_bang_raises_for_complex
     a = CA_CMPLX64([Complex(3, 4)])
-    assert_raise(RuntimeError) { a.arg! }
+    assert_raise(CArray::DataTypeError) { a.arg! }
   end
 end

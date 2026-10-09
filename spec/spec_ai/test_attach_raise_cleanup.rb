@@ -20,18 +20,18 @@ class TestAttachRaiseCleanup < Test::Unit::TestCase
 
   def test_not_attached_after_failed_attach
     _, f = faked
-    assert_raise(RuntimeError) { f.to_a }
+    assert_raise(RangeError) { f.to_a }
     assert_equal false, f.attached?
   end
 
   def test_second_read_raises_again
     _, f = faked
-    2.times { assert_raise(RuntimeError) { f.to_a } }
+    2.times { assert_raise(RangeError) { f.to_a } }
   end
 
   def test_reads_current_parent_once_fixed
     s, f = faked
-    assert_raise(RuntimeError) { f.to_a }
+    assert_raise(RangeError) { f.to_a }
     s[3] = 1
     assert_equal [false, true, false, true, false, true], f.to_a
   end
@@ -41,7 +41,7 @@ class TestAttachRaiseCleanup < Test::Unit::TestCase
     big[0, 3] = 2
     s = big[0, nil]
     f = s.fake(CA_BOOLEAN)
-    assert_raise(RuntimeError) { f.to_a }
+    assert_raise(RangeError) { f.to_a }
     assert_equal false, s.attached?
   end
 
@@ -50,7 +50,7 @@ class TestAttachRaiseCleanup < Test::Unit::TestCase
     s, f = faked
     s[0] = UNDEF
     a = CArray.float64(6) { |i| i.to_f }
-    2.times { assert_raise(RuntimeError) { a[f] } }
+    2.times { assert_raise(RangeError) { a[f] } }
   end
 
   # Views over several parents attach every parent first; when one of
@@ -59,7 +59,7 @@ class TestAttachRaiseCleanup < Test::Unit::TestCase
     col = CArray.int32(4, 6) { |i, j| j % 2 }[nil, 1]
     bad = CArray.int32(4) { 2 }.fake(CA_BOOLEAN)
     st = CArray.stack([col.fake(CA_BOOLEAN), bad])
-    assert_raise(RuntimeError) { st.to_a }
+    assert_raise(RangeError) { st.to_a }
     assert_equal false, col.attached?
     assert_equal false, st.attached?
   end
@@ -68,7 +68,7 @@ class TestAttachRaiseCleanup < Test::Unit::TestCase
     col = CArray.int32(4, 6) { |i, j| j % 2 }[nil, 1]
     bad = CArray.int32(4) { 2 }.fake(CA_BOOLEAN)
     m = CArray.meld(col.fake(CA_BOOLEAN), bad)
-    assert_raise(RuntimeError) { m.to_a }
+    assert_raise(RangeError) { m.to_a }
     assert_equal false, col.attached?
     assert_equal false, m.attached?
   end

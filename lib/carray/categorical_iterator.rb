@@ -584,9 +584,9 @@ class CArray
   #   `grp.labels` is `[0, 1, ...]` in position order.
   #
   #   @return [CACategoricalIterator] one category per run, in order.
-  #   @raise [RuntimeError] when `self` is not 1-D.
+  #   @raise [ArgumentError] when `self` is not 1-D.
   def group_by_run
-    raise "group_by_run: 1-D only (got #{ndim}-D)" unless ndim == 1
+    raise ArgumentError, "group_by_run: 1-D only (got #{ndim}-D)" unless ndim == 1
     if elements == 0
       code = CArray.int64(0)
     else

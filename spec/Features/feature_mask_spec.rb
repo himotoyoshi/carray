@@ -136,7 +136,7 @@ describe "Feature: Masking" do
     a = CArray.int32(3,3)
     a.mask = 0
     ### can't set mask to value array
-    expect { a.value.mask = 1 }.to raise_error(RuntimeError)
+    expect { a.value.mask = 1 }.to raise_error(TypeError)
   end
 
   example "mask" do
@@ -144,7 +144,7 @@ describe "Feature: Masking" do
     a = CArray.int32(3,3)
     a.mask = 0
     ### can't set mask to mask array
-    expect { a.mask.mask = 1 }.to raise_error(RuntimeError)
+    expect { a.mask.mask = 1 }.to raise_error(TypeError)
   end
 
   example "mask=" do

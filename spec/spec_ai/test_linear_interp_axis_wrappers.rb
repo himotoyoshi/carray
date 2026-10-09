@@ -119,8 +119,8 @@ class TestLinearInterpAxisWrappers < Test::Unit::TestCase
   def test_self_mask_raises
     y = CA_DOUBLE([0.0, 1.0, 2.0])
     y[1] = UNDEF
-    assert_raise(RuntimeError) { y.linear_section(1.0) }
-    assert_raise(RuntimeError) { y.linear_fetch(1.0) }
+    assert_raise(ArgumentError) { y.linear_section(1.0) }
+    assert_raise(ArgumentError) { y.linear_fetch(1.0) }
   end
 
 

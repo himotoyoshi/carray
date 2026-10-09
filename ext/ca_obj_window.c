@@ -1519,7 +1519,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
       cbounds = StringValuePtr(rbounds);
       if ( rfval == CA_UNDEF && strncmp(cbounds, "fill", 4) 
                              && strncmp(cbounds, "mask", 4) ) {
-        rb_raise(rb_eRuntimeError, "conflicted bounds and fill_value");
+        rb_raise(rb_eArgError, "conflicted bounds and fill_value");
       }
       if ( ! strncmp(cbounds, "ruby", 4) ) {
         bounds = CA_BOUNDS_RUBY;
@@ -1550,7 +1550,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
         bounds = CA_BOUNDS_FILL;
       }
       else {
-        rb_raise(rb_eRuntimeError, 
+        rb_raise(rb_eArgError, 
                  "unknown option value '%s' for :bounds", cbounds);        
       }
       break;
@@ -1558,7 +1558,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
       bounds = NUM2INT(rbounds);
       break;
     default:
-      rb_raise(rb_eRuntimeError, "invalid option value for :bounds");
+      rb_raise(rb_eArgError, "invalid option value for :bounds");
     }
   }
 

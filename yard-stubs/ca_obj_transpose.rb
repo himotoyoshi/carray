@@ -29,7 +29,7 @@ class CArray
   #   @param imap [Array<Integer>] permutation of `0 ... ndim`.
   #   @return [CATranspose]
   #   @raise [ArgumentError] when `imap.length != ndim`.
-  #   @raise [RuntimeError] when an entry of `imap` is out of range
+  #   @raise [ArgumentError] when an entry of `imap` is out of range
   #     or duplicated.
   def transpose(*imap); end
 

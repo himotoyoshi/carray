@@ -300,7 +300,7 @@ puts
                  *p2 = q;
                }
                else {
-                 rb_raise(rb_eRuntimeError, "out of range to cast to boolean (0 or 1)");
+                 rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
                }
              }
              p1++; p2++; m++;
@@ -313,7 +313,7 @@ puts
                *p2 = q;
              }
              else {
-               rb_raise(rb_eRuntimeError, "out of range to cast to boolean (0 or 1)");
+               rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
              }
              p1++; p2++; 
            }

@@ -359,7 +359,7 @@ class CArray
   #   primitive the binary operators use.
   #   @param other [CArray, Object] the second operand.
   #   @return [Array(CArray, CArray)]
-  #   @raise [RuntimeError] when the two data_types have no common type.
+  #   @raise [CArray::DataTypeError] when the two data_types have no common type.
   def cast_with(other); end
 
   # `coerce` is documented with its definition in ext/carray_operator.c;
@@ -398,10 +398,9 @@ class CArray
   #     `nil` keeps the source type (or `:object` when `other` is `nil`).
   #   @return [CArray]
   #   @raise [RuntimeError] when `other` is read-only, its MemoryView is
-  #     read-only, its `to_ca` refuses `writable: true`, or it cannot be
-  #     wrapped as a CArray.
-  #   @raise [TypeError] when `other#to_ca` returns something that is not a
-  #     CArray.
+  #     read-only, or its `to_ca` refuses `writable: true`.
+  #   @raise [TypeError] when `other` cannot be wrapped as a CArray, or
+  #     `other#to_ca` returns something that is not a CArray.
   #   @raise [ArgumentError] when `other#to_ca` does not accept `writable:`.
   #   @raise [TypeError] when `other` is a Face and `data_type` differs from
   #     its surface type.
@@ -483,7 +482,7 @@ class CArray
   #   @param args [Array<CArray, Symbol, String, Class, Object>] operands.
   #   @return [Symbol]
   #   @raise [ArgumentError] when called with no arguments.
-  #   @raise [RuntimeError] when two inputs are mutually incompatible
+  #   @raise [CArray::DataTypeError] when two inputs are mutually incompatible
   #     (e.g. `:object` with `:fixlen`).
   #   @example
   #     CArray.result_type(:int32, :float32)  #=> :float32

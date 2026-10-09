@@ -82,35 +82,35 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   /* An object cell is a VALUE the GC marks: reading other bytes as one
      marks garbage, and reading one as bytes exposes an address. */
   if (ca_is_object_type(parent) && data_type != CA_OBJECT) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eCADataTypeError,
              "object array can't be referred by other data type");
   }
   if (! ca_is_object_type(parent) && data_type == CA_OBJECT) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eCADataTypeError,
              "non-object array can't be referred as object data type");
   }
   if (parent->elements && bytes > parent_bytes * parent->elements) {
-    rb_raise(rb_eRuntimeError, "bytes exceeds the data size of referent");
+    rb_raise(rb_eArgError, "bytes exceeds the data size of referent");
   }
   if (bytes < parent_bytes && parent_bytes % bytes != 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "bytes of reference array must be a multiple of that of referent");
   }
   if (bytes > parent_bytes && bytes % parent_bytes != 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "bytes of reference array must be a multiple of that of referent");
   }
   if (offset < 0) {
-    rb_raise(rb_eRuntimeError, "negative offset is not permitted for CARefer");
+    rb_raise(rb_eArgError, "negative offset is not permitted for CARefer");
   }
   elements = ca_shape_elements(ndim, dim, bytes);
   if (offset > parent->elements) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "data size of reference array must not exceed that of referent");
   }
   if ((bytes * elements + parent_bytes * offset) >
       (parent_bytes * parent->elements)) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "data size of reference array must not exceed that of referent");
   }
 
@@ -451,7 +451,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
     if (NIL_P(rdim)) {
       if (ca->bytes != bytes) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "specify dimension shape for different byte size");
       } else {
         rdim = rb_ca_dim(self);
@@ -573,7 +573,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     if ( (FIXNUM_P(argv[i]) && FIX2LONG(argv[i]) == -1)
          || argv[i] == sym_tilde ) {
       if (placeholder_idx >= 0) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "reshape: only one auto-infer placeholder (-1 / :~) allowed");
       }
       placeholder_idx = i;
@@ -598,7 +598,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
         src = (i < ca->ndim) ? i : ca->ndim - (argc - i);
       }
       if (src < 0 || src >= ca->ndim) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "reshape: nil at axis %d has no source dim", i);
       }
       new_dim[i] = ca->dim[src];
@@ -619,14 +619,14 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     prod = 0;
   }
   else if ( overflow ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "reshape: the shape has more elements than an array can hold");
   }
 
   /* Resolve placeholder dim from the leftover total. */
   if (placeholder_idx >= 0) {
     if (prod == 0 || ca->elements % prod != 0) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "reshape: cannot infer dim for `-1` placeholder");
     }
     new_dim[placeholder_idx] = ca->elements / prod;
@@ -638,7 +638,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
        a subset), and on non-contiguous parents the compose-fold
        path corrupts data outright — hence the raise. */
     if (prod != ca->elements) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "reshape: cannot reshape array of %lld elements into a shape "
                "of %lld elements (use -1 / :~ to infer a dim)",
                (long long) ca->elements, (long long) prod);

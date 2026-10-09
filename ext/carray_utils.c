@@ -56,7 +56,7 @@ ca_set_iterator (int n, ...)
         max = ca->elements;
       }
       else if ( max != ca->elements ) {
-        rb_raise(rb_eRuntimeError, "data size mismatch in operation");
+        rb_raise(rb_eArgError, "data size mismatch in operation");
       }
     }
   }
@@ -95,7 +95,7 @@ ca_get_loop_count (int n, ...)
   }
 
   if ( elements == -1 ) {
-    rb_raise(rb_eRuntimeError, "no data to process");
+    rb_raise(rb_eArgError, "no data to process");
   }
   return elements;
 }
@@ -171,7 +171,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
     excl  = RTEST(x.exclude_end);
     step  = NUM2SIZE(x.step);
     if ( step == 0 ) {
-      rb_raise(rb_eRuntimeError, "step should not be 0");
+      rb_raise(rb_eArgError, "step should not be 0");
     }
     if ( last < 0 ) {
       last += size;
@@ -207,7 +207,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       if ( NIL_P(arg0) ) {              /* [nil,k] */
         step  = NUM2SIZE(arg1);
         if ( step == 0 ) {
-          rb_raise(rb_eRuntimeError, "step should not be 0");
+          rb_raise(rb_eArgError, "step should not be 0");
         }
         start = 0;
         count = (size-1)/llabs(step) + 1;
@@ -224,7 +224,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         excl  = RTEST(RANGE_EXCL(arg0));
         step  = NUM2SIZE(arg1);
         if ( step == 0 ) {
-          rb_raise(rb_eRuntimeError, "step should not be 0");
+          rb_raise(rb_eArgError, "step should not be 0");
         }
         if ( last < 0 ) {
           last += size;
@@ -258,7 +258,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         excl  = RTEST(x.exclude_end);
         step  = NUM2SIZE(x.step);
         if ( step == 0 ) {
-          rb_raise(rb_eRuntimeError, "step should not be 0");
+          rb_raise(rb_eArgError, "step should not be 0");
         }
         if ( last < 0 ) {
           last += size;
@@ -299,7 +299,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       count = NUM2SIZE(rb_ary_entry(arg, 1));
       step  = NUM2SIZE(rb_ary_entry(arg, 2));
       if ( step == 0 ) {
-        rb_raise(rb_eRuntimeError, "step should not be 0");
+        rb_raise(rb_eArgError, "step should not be 0");
       }
       bound = start + (count - 1)*step;
       CA_CHECK_INDEX(start, size);
@@ -309,11 +309,11 @@ ca_parse_range (VALUE arg, ca_size_t size,
       *pstep   = step;
     }
     else {
-      rb_raise(rb_eRuntimeError, "unknown range specification");
+      rb_raise(rb_eArgError, "unknown range specification");
     }
   }
   else {
-    rb_raise(rb_eRuntimeError, "unknown range specification");
+    rb_raise(rb_eArgError, "unknown range specification");
   }
 }
 
@@ -431,11 +431,11 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       *pstep   = step;
     }
     else {
-      rb_raise(rb_eRuntimeError, "unknown range specification");
+      rb_raise(rb_eArgError, "unknown range specification");
     }
   }
   else {
-    rb_raise(rb_eRuntimeError, "unknown range specification");
+    rb_raise(rb_eArgError, "unknown range specification");
   }
 }
 
@@ -459,13 +459,13 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
       k += size0;
     }
     if ( k < 0 || k >= size0 ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eIndexError,
                "window index out of range");
     }
     return k;
   case CA_BOUNDS_STRICT:
     if ( k < 0 || k >= size0 ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eIndexError,
                "window index out of range");
     }
     return k;
@@ -478,7 +478,7 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
     k = k % (2*size0);
     return ( k < size0 ) ? k : 2*size0-1-k;
   default:
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "unknown window boundary specified (%i)", bounds);
   }
 }
@@ -574,11 +574,11 @@ ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes)
   }
   for ( i = 0; i < ndim; i++ ) {
     if ( __builtin_mul_overflow(elements, dim[i], &elements) ) {
-      rb_raise(rb_eRuntimeError, "too large byte length");
+      rb_raise(rb_eArgError, "too large byte length");
     }
   }
   if ( __builtin_mul_overflow(elements, (bytes > 0 ? bytes : 1), &total) ) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
+    rb_raise(rb_eArgError, "too large byte length");
   }
   return elements;
 }
@@ -831,7 +831,7 @@ rb_ca_guess_type (VALUE obj)
     /* Check before narrowing to int8_t, so the message names the id given. */
     long id = FIX2LONG(obj);
     if ( id <= CA_NONE || id >= CA_NTYPE ) {
-      rb_raise(rb_eRuntimeError, "invalid data_type id %ld", id);
+      rb_raise(rb_eArgError, "invalid data_type id %ld", id);
     }
     return (int8_t) id;
   }
@@ -857,7 +857,7 @@ rb_ca_guess_type (VALUE obj)
   }
 
   inspect = rb_inspect(obj);
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eArgError,
            "<%s> is unknown data_type representation", StringValuePtr(inspect));
 }
 

@@ -176,7 +176,7 @@ group_iter_shape_output (VALUE result, VALUE group_dims, VALUE perm, VALUE squee
   nband = cr->ndim - 1;
   nd    = ng + nband;
   if ( nd > CA_RANK_MAX ) {
-    rb_raise(rb_eRuntimeError, "axis_group: output ndim %ld too large", nd);
+    rb_raise(rb_eArgError, "axis_group: output ndim %ld too large", nd);
   }
   for ( i = 0; i < ng; i++ ) {
     dims[i] = RARRAY_AREF(group_dims, i);

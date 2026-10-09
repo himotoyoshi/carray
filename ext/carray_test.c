@@ -54,7 +54,7 @@ ca_check_ndim (void *ap, int ndim)
   CArray *ca = (CArray *) ap;
   if ( ! ca_is_scalar(ca) ) {
     if ( ca->ndim != ndim ) {
-      rb_raise(rb_eRuntimeError, "ndim mismatch");
+      rb_raise(rb_eArgError, "ndim mismatch");
     }
   }
 }
@@ -66,11 +66,11 @@ ca_check_shape (void *ap, int ndim, ca_size_t *dim)
   int i;
   if ( ! ca_is_scalar(ca) ) {
     if ( ca->ndim != ndim ) {
-      rb_raise(rb_eRuntimeError, "shape mismatch");
+      rb_raise(rb_eArgError, "shape mismatch");
     }
     for (i=0; i<ndim; i++) {
       if ( ca->dim[i] != dim[i] ) {
-        rb_raise(rb_eRuntimeError, "shape mismatch");
+        rb_raise(rb_eArgError, "shape mismatch");
       }
     }
   }
@@ -92,7 +92,7 @@ ca_check_same_ndim (void *ap1, void *ap2)
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
   if ( ca1->ndim != ca2->ndim ) {
-    rb_raise(rb_eRuntimeError, "ndim mismatch");
+    rb_raise(rb_eArgError, "ndim mismatch");
   }
 }
 
@@ -102,7 +102,7 @@ ca_check_same_elements (void *ap1, void *ap2)
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
   if ( ca1->elements != ca2->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch");
+    rb_raise(rb_eArgError, "elements mismatch");
   }
 }
 
@@ -114,11 +114,11 @@ ca_check_same_shape (void *ap1, void *ap2)
   int i;
   if ( ( ! ca_is_scalar(ca1) ) && ( ! ca_is_scalar(ca2) ) ) {
     if ( ca1->ndim != ca2->ndim ) {
-      rb_raise(rb_eRuntimeError, "shape mismatch");
+      rb_raise(rb_eArgError, "shape mismatch");
     }
     for (i=0; i<ca1->ndim; i++) {
       if ( ca1->dim[i] != ca2->dim[i] ) {
-        rb_raise(rb_eRuntimeError, "shape mismatch");
+        rb_raise(rb_eArgError, "shape mismatch");
       }
     }
   }
@@ -131,7 +131,7 @@ ca_check_index (void *ap, ca_size_t *idx)
   int i;
   for (i=0; i<ca->ndim; i++) {
     if ( idx[i] < 0 || idx[i] >= ca->dim[i] ) {
-      rb_raise(rb_eRuntimeError, "invalid index");
+      rb_raise(rb_eIndexError, "invalid index");
     }
   }
 }
@@ -140,7 +140,7 @@ void
 rb_check_carray_object (VALUE arg)
 {
   if ( ! rb_obj_is_carray(arg) ) {
-    rb_raise(rb_eRuntimeError, "CArray required");
+    rb_raise(rb_eTypeError, "CArray required");
   }
 }
 
@@ -188,7 +188,7 @@ rb_ca_is_type (VALUE arg, int type)
 {
   CArray *ca;
   if ( ! rb_obj_is_carray(arg) ) {
-    rb_raise(rb_eRuntimeError, "CArray required");
+    rb_raise(rb_eTypeError, "CArray required");
   }
   TypedData_Get_Struct(arg, CArray, &carray_data_type, ca);
   return ca->data_type == type;

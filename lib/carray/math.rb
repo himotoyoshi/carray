@@ -84,7 +84,7 @@ module CAMath
   #   arguments. At least one argument must be a CArray.
   #   @param argv [Array<CArray, Numeric>] operands.
   #   @return [CArray] fresh CArray holding the running min.
-  #   @raise [RuntimeError] when no CArray argument is present.
+  #   @raise [ArgumentError] when no CArray argument is present.
   def min (*argv)
     if ary = argv.find{|x| x.is_a?(CArray) }
       out = ary.copy
@@ -93,7 +93,7 @@ module CAMath
         out.pmin!(x)
       end
     else
-      raise "args should contain more than one CArray object"
+      raise ArgumentError, "args should contain more than one CArray object"
     end
     return out
   end
@@ -103,7 +103,7 @@ module CAMath
   #   arguments. At least one argument must be a CArray.
   #   @param argv [Array<CArray, Numeric>] operands.
   #   @return [CArray] fresh CArray holding the running max.
-  #   @raise [RuntimeError] when no CArray argument is present.
+  #   @raise [ArgumentError] when no CArray argument is present.
   def max (*argv)
     if ary = argv.find{|x| x.is_a?(CArray) }
       out = ary.copy
@@ -112,7 +112,7 @@ module CAMath
         out.pmax!(x)
       end
     else
-      raise "args should contain more than one CArray object"
+      raise ArgumentError, "args should contain more than one CArray object"
     end
     return out
   end

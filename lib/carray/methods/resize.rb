@@ -21,7 +21,7 @@ class CArray
   #   @param fill_value [Object] value for the extended area.
   #   @return [CArray] resized copy.
   def resize (*newdim, fill_value: 0)
-    raise "ndim mismatch" if newdim.size != ndim
+    raise ArgumentError, "ndim mismatch" if newdim.size != ndim
     offset = Array.new(ndim, 0)
     newdim = newdim.each_with_index.map do |d, i|
       case d
@@ -32,7 +32,7 @@ class CArray
         offset[i] = size - shape[i] if d < 0
         size
       else
-        raise "invalid dimension size"
+        raise ArgumentError, "invalid dimension size"
       end
     end
     face_parent = self.face? ? self : nil

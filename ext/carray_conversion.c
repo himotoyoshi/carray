@@ -442,7 +442,7 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
       rb_funcall(io, rb_intern("write"), 1, buf);
     }
     else {
-      rb_raise(rb_eRuntimeError, "IO like object should have 'write' method");
+      rb_raise(rb_eTypeError, "IO like object should have 'write' method");
     }
   }
 
@@ -479,7 +479,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
   switch ( TYPE(io) ) {
   case T_STRING:
     if ( ca_length(ca) != RSTRING_LEN(io) ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
                (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
@@ -528,7 +528,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
       return self;
     }
     else {
-      rb_raise(rb_eRuntimeError, "IO like object should have 'read' method");
+      rb_raise(rb_eTypeError, "IO like object should have 'read' method");
     }
   }
 

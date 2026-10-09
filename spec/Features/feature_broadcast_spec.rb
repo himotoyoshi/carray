@@ -55,7 +55,7 @@ describe "CArray.broadcast" do
 
     expect {
       aa, bb, cc = CArray.broadcast(a,b,c)
-    }.to raise_error(RuntimeError)
+    }.to raise_error(ArgumentError)
   end
   
   example "1 elements array" do 

@@ -763,7 +763,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
 
   def test_promote_object_admits_a_fixlen_column
     df = CAFrame.new("s" => CA_FIXLEN(["ab", "cd"], bytes: 2), "x" => CA_FLOAT64([1, 2]))
-    assert_raise(RuntimeError) { df.to_ca }        # no common type as stored
+    assert_raise(CArray::DataTypeError) { df.to_ca }        # no common type as stored
     assert_equal [["ab", 1.0], ["cd", 2.0]], df.promote(:object).to_ca.to_a
   end
 

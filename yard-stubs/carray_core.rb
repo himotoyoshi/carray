@@ -10,7 +10,7 @@ class CArray
   #   Only valid when `self` carries a `data_class` (e.g. a
   #   `CARecord`).
   #   @return [Array<Symbol>]
-  #   @raise [RuntimeError] if `self` has no `data_class`.
+  #   @raise [TypeError] if `self` has no `data_class`.
   def members; end
 
   # @overload fields
@@ -18,7 +18,7 @@ class CArray
   #   declaration order. Each entry is a CArray sharing storage with
   #   `self`.
   #   @return [Array<CArray>]
-  #   @raise [RuntimeError] if `self` has no `data_class`.
+  #   @raise [TypeError] if `self` has no `data_class`.
   def fields; end
 
   # @overload fields_at(*names)
@@ -27,7 +27,7 @@ class CArray
   #   @param names [Array<Symbol, String, Integer>] member names or
   #     positional indices.
   #   @return [Array<CArray>]
-  #   @raise [RuntimeError] if `self` has no `data_class`.
+  #   @raise [TypeError] if `self` has no `data_class`.
   def fields_at(*names); end
 
   # @!endgroup

@@ -506,12 +506,12 @@ ca_create_mask (void *ap)
   }
 
   if ( ca_is_value_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask array for the value array");
   }
 
   if ( ca_is_mask_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask array for the mask array");
   }
 
@@ -923,7 +923,7 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
             elements = slist[i]->elements;
           }
           else if ( ! ca_is_scalar(slist[i]) ) {
-            rb_raise(rb_eRuntimeError,
+            rb_raise(rb_eArgError,
                      "# of elements is different among the given arrays");
           }
         }
@@ -1194,12 +1194,12 @@ rb_ca_set_mask (VALUE self, VALUE rval)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_value_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask for the value array");
   }
 
   if ( ca_is_mask_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask for the mask array");
   }
 

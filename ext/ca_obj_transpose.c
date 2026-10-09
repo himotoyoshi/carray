@@ -37,11 +37,11 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
   for (i = 0; i < ndim; i++) {
     idim = imap[i];
     if (idim < 0 || idim >= ndim) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "specified %i-th dimension number out of range", i);
     }
     if (map[idim] != -1) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "specified %i-th dimension number is duplicated", i);
     }
     map[idim] = i;

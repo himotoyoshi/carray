@@ -39,7 +39,7 @@ ca_broadcast_refuse_write (VALUE dst, VALUE src)
 {
   volatile VALUE dst_s = rb_inspect(rb_funcall(dst, rb_intern("shape"), 0));
   volatile VALUE src_s = rb_inspect(rb_funcall(src, rb_intern("shape"), 0));
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eArgError,
            "shape mismatch writing to carray (%s <- %s); shapes must agree "
            "once size-1 axes are dropped, or one side must be 1-D, or the "
            "source must be smaller and broadcastable -- use .flatten to "
@@ -119,7 +119,7 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
   TypedData_Get_Struct(src, CArray, &carray_data_type, cs);
 
   if (cs->ndim != ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast: ndim mismatch (%d vs %d)",
              (int) cs->ndim, (int) ndim);
   }
@@ -143,7 +143,7 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
       needs_broadcast = 1;
     }
     else {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "broadcast: cannot broadcast axis %d (%lld vs %lld)",
                i, (long long) cs->dim[i], (long long) target_dim[i]);
     }
@@ -272,7 +272,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   target_ndim = (int8_t) argc;
 
   if (target_ndim < cs->ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast_to: target ndim %d smaller than source ndim %d",
              (int) target_ndim, (int) cs->ndim);
   }
@@ -340,7 +340,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
     else {
       /* sd == -1 (source exhausted) with dd > 1, or sd > 1 with
          dd > 1 and not equal: cannot broadcast. */
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "broadcast_to: cannot broadcast axis %d "
                "(source %s, target %lld)",
                t_idx,
@@ -351,7 +351,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
 
   if (s_idx >= 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast_to: %d source axes left unmatched", s_idx + 1);
   }
 

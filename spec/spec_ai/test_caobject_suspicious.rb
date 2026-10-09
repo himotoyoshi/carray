@@ -12,7 +12,7 @@
 #   5. read_only / 書き込み禁止経路 (FrozenError 経路 + flag inheritance)
 #   6. dup の foot-gun (ivar 共有: Ruby Object#dup の標準動作だが要注意)
 #   7. bulk callback contract: copy_data は **必須** (fallback なし、未定義は NoMethodError)
-#   8. fixlen は bytes: 1 以上を要求する (省略と 0 は RuntimeError、3.0.3 から)
+#   8. fixlen は bytes: 1 以上を要求する (省略と 0 は ArgumentError)
 #
 # 実行: ruby -Iext -Ilib spec_ai/test_caobject_suspicious.rb
 #
@@ -109,7 +109,7 @@ class TestParentOption < Test::Unit::TestCase
   end
 
   def test_rejects_non_carray
-    assert_raise(RuntimeError) {
+    assert_raise(TypeError) {
       Class.new(CAObject) {
         def initialize; super(CA_INT32, [3], parent: "not a carray"); end
         def fetch_addr(a); 0; end
@@ -213,7 +213,7 @@ class TestMaskBehavior < Test::Unit::TestCase
     # to_ca 自体は copy_data が走るので例外なし (UNDEF 経路を通らない)
     no_create.to_ca
     # 単発 [] は fetch_addr が UNDEF を返し、mask 作成を試みて raise
-    err = assert_raise(RuntimeError) { no_create[0] }
+    err = assert_raise(TypeError) { no_create[0] }
     assert_match(/can't create mask for CAObject/, err.message)
   end
 
@@ -397,13 +397,13 @@ class TestConstructorFixlen < Test::Unit::TestCase
       def initialize; super(CA_FIXLEN, [3]); end
       def fetch_addr(a); "x"; end
     }
-    e = assert_raise(RuntimeError) { klass.new }
+    e = assert_raise(ArgumentError) { klass.new }
     assert_match(/bytes: of 1 or more/, e.message)
     zero = Class.new(CAObject) {
       def initialize; super(CA_FIXLEN, [3], bytes: 0); end
       def fetch_addr(a); "x"; end
     }
-    assert_raise(RuntimeError) { zero.new }
+    assert_raise(ArgumentError) { zero.new }
   end
 
   def test_fixlen_with_bytes_ok

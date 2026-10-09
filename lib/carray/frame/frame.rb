@@ -165,7 +165,7 @@ class CAFrame
               "CArray df[] key must be boolean or integer (got #{key.data_type})"
       end
     when Symbol
-      raise NotImplementedError, "df[symbol] is reserved for predicate keys"
+      raise ArgumentError, "df[symbol] is reserved for predicate keys"
     else
       raise ArgumentError, "unsupported df[] key: #{key.class}"
     end

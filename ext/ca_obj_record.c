@@ -332,7 +332,7 @@ rb_ca_record_s_data_class_dsl (int argc, VALUE *argv, VALUE klass)
   }
   rb_scan_args(argc, argv, "1", &given);
   if ( ! NIL_P(current) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "data_class already fixed to %"PRIsVALUE
              "; CARecord subclass data_class is immutable once set",
              current);
@@ -406,7 +406,7 @@ ca_check_data_class (VALUE rtype)
 {
   if ( ! rb_obj_is_data_class(rtype) ) {
     VALUE inspect = rb_inspect(rtype);
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "<%s> is not a data_class, which should has the features\n" \
              " * constant data_class::DATA_SIZE    -> integer\n" \
              " * constant data_class::MEMBERS      -> array of string\n" \

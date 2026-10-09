@@ -44,18 +44,18 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
   }
   for (i = 0; i < ndim; i++) {
     if (count[i] < 0) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "negative size for %i-th dimension specified", i);
     }
     if (count[i]) nrpt *= count[i];
     else          data_ndim += 1;
   }
   if (data_ndim != parent->ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "mismatch in ndim between original array and determined by # of dummies");
   }
   if (((double) parent->elements) * nrpt > CA_LENGTH_MAX) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
+    rb_raise(rb_eArgError, "too large byte length");
   }
   (void) total_elements_d;
 
@@ -166,7 +166,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
       TypedData_Get_Struct(argv[0], CArray, &carray_data_type, ct);
     }
     if ( ct->ndim < ca->ndim ) {
-      rb_raise(rb_eRuntimeError, "invalid ndim to template");
+      rb_raise(rb_eArgError, "invalid ndim to template");
     }
     args = rb_ary_new();
     ndim = 0;

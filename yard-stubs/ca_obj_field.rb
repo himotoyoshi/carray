@@ -18,7 +18,7 @@ class CArray
   #   @param bytes [Integer, nil] element size; required for `:fixlen`,
   #     inferred otherwise.
   #   @return [CAField]
-  #   @raise [RuntimeError] when `offset` is negative or the
+  #   @raise [ArgumentError] when `offset` is negative or the
   #     `offset + bytes` window falls outside one parent record.
   # @overload field(offset, template)
   #   Returns a CARefer over a {CAField}: takes `template.elements *

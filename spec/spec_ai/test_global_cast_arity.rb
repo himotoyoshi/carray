@@ -107,8 +107,8 @@ class TestGlobalCastArity < Test::Unit::TestCase
     assert_equal [0, 2, 4], CA_INT32(0...6, 2).to_a
   end
 
-  def test_a_zero_step_is_still_a_runtime_error
-    assert_raise(RuntimeError) { CA_INT32(0..6, 0) }
+  def test_a_zero_step_is_an_argument_error
+    assert_raise(ArgumentError) { CA_INT32(0..6, 0) }
   end
 
   # --- the fixlen sibling, which has always checked its own arity ----------

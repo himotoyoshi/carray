@@ -16,14 +16,14 @@ class TestToTypeRaiseCleanup < Test::Unit::TestCase
 
   def test_view_detached_after_failed_cast
     v = column
-    assert_raise(RuntimeError) { v.to_type(CA_BOOLEAN) }
+    assert_raise(RangeError) { v.to_type(CA_BOOLEAN) }
     assert_equal false, v.attached?
   end
 
   def test_view_reads_current_parent_after_failed_cast
     big = CArray.int32(4, 4) { 2 }
     v = big[nil, 1]
-    assert_raise(RuntimeError) { v.to_type(CA_BOOLEAN) }
+    assert_raise(RangeError) { v.to_type(CA_BOOLEAN) }
     big[nil, 1] = 1
     assert_equal [true] * 4, v.to_type(CA_BOOLEAN).to_a
   end
@@ -32,7 +32,7 @@ class TestToTypeRaiseCleanup < Test::Unit::TestCase
     big = CArray.int32(4, 4) { 2 }
     big[0, 1] = UNDEF
     v = big[nil, 1]
-    assert_raise(RuntimeError) { v.to_type(CA_BOOLEAN) }
+    assert_raise(RangeError) { v.to_type(CA_BOOLEAN) }
     assert_equal false, v.attached?
   end
 end

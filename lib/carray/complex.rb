@@ -115,12 +115,12 @@ class CArray
   #   Sets the imaginary-part slot to `val` (complex arrays only).
   #   @param val [CArray, Numeric] value to broadcast.
   #   @return [Object] `val`.
-  #   @raise [RuntimeError] when `self` is not a complex array.
+  #   @raise [CArray::DataTypeError] when `self` is not a complex array.
   def imag= (val)
     if complex?
       imag[] = val
     else
-      raise "not a complex array"
+      raise CArray::DataTypeError, "not a complex array"
     end
   end
 

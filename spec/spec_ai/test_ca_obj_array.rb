@@ -65,14 +65,14 @@ class TestOverflowProtection < Test::Unit::TestCase
     # Attempt to create an array so large it exceeds CA_LENGTH_MAX
     # CA_LENGTH_MAX is 0x7fffffffffffffff for 64-bit
     # double(2^30, 2^30, 2^30) = 8 * 2^90 bytes -> exceeds CA_LENGTH_MAX
-    err = assert_raise(RuntimeError) do
+    err = assert_raise(ArgumentError) do
       CArray.double(2**30, 2**30, 2**30)
     end
     assert_match(/too large byte length/, err.message)
   end
 
   def test_negative_dimension_raises
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       CArray.int(-1)
     end
   end

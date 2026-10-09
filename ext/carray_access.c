@@ -230,7 +230,7 @@ ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
 {
   volatile VALUE ary0;
   if ( level > CA_RANK_MAX ) {
-    rb_raise(rb_eRuntimeError, "too deep level array for conversion to carray");
+    rb_raise(rb_eArgError, "too deep level array for conversion to carray");
   }
 
   if ( TYPE(ary) == T_ARRAY ) {
@@ -280,7 +280,7 @@ ary_flatten_upto_level (VALUE ary, int max_level, int level,
   int32_t i;
 
   if ( TYPE(ary) != T_ARRAY ) {
-    rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
+    rb_raise(rb_eArgError, "invalid shape array for conversion to carray");
   }
 
   if ( level == max_level ) {
@@ -324,7 +324,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
     }
 
     if ( total != ca->elements ) {
-      rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
+      rb_raise(rb_eArgError, "invalid shape array for conversion to carray");
     }
     else {
       volatile VALUE out = rb_ary_new2(0);
@@ -707,7 +707,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
                  rb_ary_flatten_for_elements(rval, ca->elements, ca);
     ca_size_t i;
     if ( NIL_P(list) ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "failed to guess data size of given array");
     }
     else {
@@ -1790,7 +1790,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
                                  info.index[i].symbol.spec));
         break;
       default:
-        rb_raise(rb_eRuntimeError, "unknown index spec");
+        rb_raise(rb_eIndexError, "unknown index spec");
       }
     }
     break;
@@ -1858,7 +1858,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
         rb_ary_store(rindex, i, ID2SYM(info.index[i].symbol.id));
         break;
       default:
-        rb_raise(rb_eRuntimeError, "unknown index spec");
+        rb_raise(rb_eIndexError, "unknown index spec");
       }
     }
     return rindex;

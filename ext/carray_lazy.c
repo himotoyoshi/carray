@@ -1413,7 +1413,7 @@ NORETURN(static void ca_mask_of_operands_func_create_mask (void *ap));
 static void
 ca_mask_of_operands_func_create_mask (void *ap)
 {
-  rb_raise(rb_eRuntimeError, "can not create mask array for the mask array");
+  rb_raise(rb_eTypeError, "can not create mask array for the mask array");
 }
 
 ca_operation_function_t ca_mask_of_operands_func = {

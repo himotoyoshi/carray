@@ -145,12 +145,12 @@ ca_grid_check_protos (CArray *parent, int8_t ndim, const cag_axis_t *protos)
   length = parent->bytes;
   for (k = 0; k < ndim; k++) {
     if (protos[k].count < 0) {
-      rb_raise(rb_eRuntimeError, "negative size for %d-th dimension", k);
+      rb_raise(rb_eArgError, "negative size for %d-th dimension", k);
     }
     length *= protos[k].count;
   }
   if (length > CA_LENGTH_MAX) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
+    rb_raise(rb_eArgError, "too large byte length");
   }
 
   for (k = 0; k < ndim; k++) {

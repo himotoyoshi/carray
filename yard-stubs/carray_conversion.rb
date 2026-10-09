@@ -67,7 +67,8 @@ class CArray
   #   `read(n, buf = nil)`.
   #   @param io [String, IO, #read]
   #   @return [self]
-  #   @raise [RuntimeError] on short read or size mismatch.
+  #   @raise [RuntimeError] on a short read.
+  #   @raise [ArgumentError] when a String source is not the array's size.
   #   @raise [CArray::DataTypeError] if `self.data_type` is
   #     `:object`.
   def load_binary(io); end

@@ -112,7 +112,7 @@ class TestAbsDtypeChangingMonop < Test::Unit::TestCase
     # 3.0 capability: data_type change in-place is ill-defined; complex abs!
     # raises with explicit migration message.  Migration: use non-bang
     # form `a = a.abs` to get a fresh f64 array.
-    assert_raise(RuntimeError) { a.abs! }
+    assert_raise(CArray::DataTypeError) { a.abs! }
   end
 
   # ---- CAMath.abs module function ----

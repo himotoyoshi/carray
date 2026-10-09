@@ -1386,7 +1386,7 @@ ca_object_func_create_mask (void *ap)
     rb_funcall(ca->self, rb_intern("create_mask"), 0);
   }
   else {
-    rb_raise(rb_eRuntimeError, "can't create mask for CAObject");
+    rb_raise(rb_eTypeError, "can't create mask for CAObject");
   }
   ca_create_mask(ca->data);
   {
@@ -1496,7 +1496,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
                   &rorderable, &rcomparable);
 
   if ( ( ! NIL_P(rparent) ) && ( ! rb_obj_is_carray(rparent) ) ) {
-    rb_raise(rb_eRuntimeError, "option :parent should be a carray");
+    rb_raise(rb_eTypeError, "option :parent should be a carray");
   }
 
   /* :storage is meaningful only under face: true (= it documents the

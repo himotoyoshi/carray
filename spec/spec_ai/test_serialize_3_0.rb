@@ -264,11 +264,11 @@ class TestSerialize30 < Test::Unit::TestCase
 
   def test_bad_magic_raises
     io = StringIO.new(("garbage" + "\x00" * HDR).b)
-    assert_raises(RuntimeError) { CArray.load(io) }
+    assert_raises(ArgumentError) { CArray.load(io) }
   end
 
   def test_truncated_header_raises
     io = StringIO.new("_CARRAY3\x00\x00".b)
-    assert_raises(RuntimeError) { CArray.load(io) }
+    assert_raises(ArgumentError) { CArray.load(io) }
   end
 end

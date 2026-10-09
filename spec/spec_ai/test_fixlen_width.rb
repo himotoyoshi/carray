@@ -29,7 +29,7 @@ class TestFixlenWidth < Test::Unit::TestCase
 
   def test_zero_or_missing_width_is_refused
     REFUSED.each do |label, make|
-      e = assert_raise(RuntimeError, label) { make.call }
+      e = assert_raise(ArgumentError, label) { make.call }
       assert_match(/bytes: of 1 or more/, e.message, label)
     end
   end

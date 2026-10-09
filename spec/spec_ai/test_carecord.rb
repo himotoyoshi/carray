@@ -204,7 +204,7 @@ class TestCARecord < Test::Unit::TestCase
     klass = Class.new(CARecord) do
       data_class GeoCoord
     end
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       klass.instance_eval { data_class Pixel }
     end
   end

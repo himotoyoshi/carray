@@ -13,12 +13,12 @@ class TestIntegerEdges < Test::Unit::TestCase
   # and every read past the first cell would leave the buffer.
   def test_a_view_whose_cell_count_overflows_is_refused
     a = CA_INT8([7])
-    assert_raise(RuntimeError) { a.reshape(274177, 67280421310721) }
-    assert_raise(RuntimeError) { a.refer(CA_INT8, [274177, 67280421310721]) }
-    assert_raise(RuntimeError) { (a.lazy + 1).reshape(274177, 67280421310721) }
-    assert_raise(RuntimeError) { CArray.int8(0).reshape(2**32, 2**32) }
-    assert_raise(RuntimeError) { CA_INT8([7, 8]).tile(2**63 - 1) }
-    assert_raise(RuntimeError) { CArray.float64(2**60) }
+    assert_raise(ArgumentError) { a.reshape(274177, 67280421310721) }
+    assert_raise(ArgumentError) { a.refer(CA_INT8, [274177, 67280421310721]) }
+    assert_raise(ArgumentError) { (a.lazy + 1).reshape(274177, 67280421310721) }
+    assert_raise(ArgumentError) { CArray.int8(0).reshape(2**32, 2**32) }
+    assert_raise(ArgumentError) { CA_INT8([7, 8]).tile(2**63 - 1) }
+    assert_raise(ArgumentError) { CArray.float64(2**60) }
   end
 
   def test_an_empty_shape_is_empty_whatever_its_other_extents

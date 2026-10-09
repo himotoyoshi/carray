@@ -19,7 +19,7 @@ class TestShapeStrictStore < Test::Unit::TestCase
 
   def test_cross_shape_source_is_refused
     t = CArray.int32(3, 2)
-    assert_raise(RuntimeError) { t[] = CArray.int32(2, 3).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(2, 3).seq }
   end
 
   def test_flatten_is_the_escape
@@ -87,12 +87,12 @@ class TestShapeStrictStore < Test::Unit::TestCase
   def test_stretch_is_one_sided
     # the source may be repeated; the container never grows
     t = CArray.int32(1, 3, 4)
-    assert_raise(RuntimeError) { t[] = CArray.int32(5, 3, 4).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(5, 3, 4).seq }
   end
 
   def test_larger_source_is_refused
     t = CArray.int32(3, 4)
-    assert_raise(RuntimeError) { t[] = CArray.int32(5, 4).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(5, 4).seq }
   end
 
   # ---------- lanes left alone ----------
@@ -187,7 +187,7 @@ class TestShapeStrictInPlace < Test::Unit::TestCase
 
   def test_cross_shape_operand_is_refused
     a = CArray.int32(3, 2).seq
-    assert_raise(RuntimeError) { a.add!(CArray.int32(2, 3).seq) }
+    assert_raise(ArgumentError) { a.add!(CArray.int32(2, 3).seq) }
   end
 
   def test_smaller_operand_is_repeated
@@ -198,6 +198,6 @@ class TestShapeStrictInPlace < Test::Unit::TestCase
 
   def test_ternary_in_place_follows_the_same_rule
     a = CArray.float64(3, 2).seq
-    assert_raise(RuntimeError) { a.fma!(CArray.float64(2, 3).seq, a.copy) }
+    assert_raise(ArgumentError) { a.fma!(CArray.float64(2, 3).seq, a.copy) }
   end
 end

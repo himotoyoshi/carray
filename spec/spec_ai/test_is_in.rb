@@ -232,7 +232,7 @@ class TestIsIn < Test::Unit::TestCase
   end
 
   def test_incompatible_dtype_raises
-    assert_raise(RuntimeError) do
+    assert_raise(CArray::DataTypeError) do
       CA_INT32([1]).union(CArray.new(CA_FIXLEN, [1], bytes: 3))
     end
   end

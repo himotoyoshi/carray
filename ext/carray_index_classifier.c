@@ -178,9 +178,8 @@ ca_classifier_check_reserved_contraction_symbol (VALUE sym)
        && ( ( name[0] >= 'a' && name[0] <= 'z' )
             || ( name[0] >= 'A' && name[0] <= 'Z' ) )
        && name[0] != '_' /* :_ is iterator marker, handled separately */ ) {
-    rb_raise(rb_eNotImpError,
-             "symbol :%s is reserved for future contraction notation "
-             "(not yet implemented)",
+    rb_raise(rb_eIndexError,
+             "symbol :%s is reserved for future contraction notation",
              name);
   }
 }
@@ -274,7 +273,7 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
   excl  = RTEST(iv_excl);
 
   if ( step == 0 ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "step in index equals to 0 in block reference");
   }
 
@@ -381,7 +380,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       ca_size_t start = 0, last, count, step, bound;
       step = NUM2SIZE(a1);
       if ( step == 0 ) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "step in index equals to 0 in block reference");
       }
       last = dim - 1;
@@ -411,7 +410,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       excl  = RTEST(iv_excl);
       step  = NUM2SIZE(a1);
       if ( step == 0 ) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "step in index equals to 0 in block reference");
       }
       if ( start < 0 ) start += dim;
@@ -493,7 +492,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     count = NUM2SIZE(rb_ary_entry(arg, 1));
     step  = NUM2SIZE(rb_ary_entry(arg, 2));
     if ( step == 0 ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "step in index equals to 0 in block reference");
     }
     /* A count and a step whose last cell lies past the range of an index
@@ -770,7 +769,7 @@ ca_classifier_try_argc1_special (ca_classifier_ctx_t *ctx)
     }
     if ( ca_is_boolean_type(cs) ) {
       if ( ctx->ca_elements != cs->elements ) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "mismatch of # of elements ( %" PRId64 " <=> %" PRId64 " ) "
                  "in reference by selection",
                  (ca_size_t) cs->elements,
@@ -1027,7 +1026,7 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
                                     info.index[i].symbol.spec));
             break;
           default:
-            rb_raise(rb_eRuntimeError, "unknown index spec");
+            rb_raise(rb_eIndexError, "unknown index spec");
         }
       }
       break;

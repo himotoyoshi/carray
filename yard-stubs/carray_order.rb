@@ -133,7 +133,7 @@ class CArray
   #   with `UNDEF` at positions where the value is not present.
   #   @param val [Numeric, CArray]
   #   @return [Integer, CArray, nil]
-  #   @raise [RuntimeError] if `self` has any masked element.
+  #   @raise [ArgumentError] if `self` has any masked element.
   # @overload bsearch(val, axis:)
   #   Per-fiber binary search along `axis`. Returns a CArray of
   #   axis-local positions, one per fiber.

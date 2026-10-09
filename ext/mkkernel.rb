@@ -5748,7 +5748,7 @@ module MkKernel
     when :raise
       io.puts "  /* mask_self: :raise -- global reject if self has any masked element. */"
       io.puts "  if ( ca_is_any_masked(src) ) {"
-      io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: self should not have any masked elements", ca_calling_method_name());]
+      io.puts %Q[    rb_raise(rb_eArgError, "%s: self should not have any masked elements", ca_calling_method_name());]
       io.puts "  }"
     when :skip, :ignore
       # body handles mask_in or ignores it
@@ -6015,11 +6015,15 @@ module MkKernel
           int8_t  in_dt;
           TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
           in_dt = ca->data_type;
+          if ( ca_monop_#{name}_out_data_type[in_dt] <= CA_NONE ) {
+            rb_raise(rb_eCADataTypeError,
+                     "#{name}!: source data_type :%s not supported", ca_type_name[in_dt]);
+          }
           if ( ca_monop_#{name}_out_data_type[in_dt] != in_dt ) {
-            rb_raise(rb_eRuntimeError,
-                     "#{name}!: in-place form is not available when output "
-                     "data_type differs from input (input data_type %d -> output data_type %d); "
-                     "use non-bang form", in_dt, ca_monop_#{name}_out_data_type[in_dt]);
+            rb_raise(rb_eCADataTypeError,
+                     "#{name}!: #{name} of :%s is :%s, which cannot be written back in place; "
+                     "use #{name}", ca_type_name[in_dt],
+                     ca_type_name[ca_monop_#{name}_out_data_type[in_dt]]);
           }
           return rb_ca_call_monop_bang(self, ca_monop_#{name});
         }

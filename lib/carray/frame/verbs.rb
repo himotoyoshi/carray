@@ -623,7 +623,7 @@ class CAFrame
     cols = @columns.values
     begin
       promoted = CArray.promote_list(cols)
-    rescue ArgumentError, RuntimeError => e
+    rescue ArgumentError, TypeError, CArray::DataTypeError => e
       raise ArgumentError,
             "#{e.message} -- promote(:object) brings every column to its " \
             "surface values, which any column set can share; a numeric target " \

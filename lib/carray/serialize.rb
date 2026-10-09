@@ -199,15 +199,15 @@ class CArray::Serializer   # :nodoc:
   #   @param opt [Hash] `:data_type` overrides the element type for a
   #     bare `CA_FIXLEN` payload.
   #   @return [CArray]
-  #   @raise [RuntimeError] on a bad magic string, corrupt header, or
+  #   @raise [ArgumentError] on a bad magic string, corrupt header, or
   #     unsupported version.
   def load (**opt)
     buf = @io.read(HEADER_BYTES)
     unless buf && buf.bytesize == HEADER_BYTES
-      raise "not a CArray binary data (truncated header)"
+      raise ArgumentError, "not a CArray binary data (truncated header)"
     end
     if buf[0, 8] != MAGIC
-      raise "not a CArray binary data (bad magic)"
+      raise ArgumentError, "not a CArray binary data (bad magic)"
     end
 
     # The byte order is self-describing via endian_marker at offset 8:
@@ -218,21 +218,21 @@ class CArray::Serializer   # :nodoc:
     when 0x01 then file_endian = CA_BIG_ENDIAN
     when 0x04 then file_endian = CA_LITTLE_ENDIAN
     else
-      raise "corrupt CArray binary data (endian marker mismatch)"
+      raise ArgumentError, "corrupt CArray binary data (endian marker mismatch)"
     end
     h = self.class.unpack_header(buf, file_endian)
 
     if h[:endian_marker] != ENDIAN_MARKER
-      raise "corrupt CArray binary data (endian marker mismatch)"
+      raise ArgumentError, "corrupt CArray binary data (endian marker mismatch)"
     end
     if h[:version_major] != VERSION_MAJOR
-      raise "unsupported CArray binary version #{h[:version_major]}.#{h[:version_minor]}"
+      raise ArgumentError, "unsupported CArray binary version #{h[:version_major]}.#{h[:version_minor]}"
     end
     if h[:header_bytes] != HEADER_BYTES
-      raise "unsupported CArray binary header size #{h[:header_bytes]}"
+      raise ArgumentError, "unsupported CArray binary header size #{h[:header_bytes]}"
     end
     if h[:data_bytes] != h[:elements] * h[:element_bytes]
-      raise "corrupt CArray binary data (data_bytes cross-check failed)"
+      raise ArgumentError, "corrupt CArray binary data (data_bytes cross-check failed)"
     end
     check_header(h)
 
@@ -258,11 +258,11 @@ class CArray::Serializer   # :nodoc:
     if h[:trailer_bytes] > 0
       trailer_raw = @io.read(h[:trailer_bytes])
       unless trailer_raw && trailer_raw.bytesize == h[:trailer_bytes]
-        raise "corrupt CArray binary data (truncated trailer)"
+        raise ArgumentError, "corrupt CArray binary data (truncated trailer)"
       end
       trailer = decode_trailer(trailer_raw)
       unless trailer.is_a?(Hash)
-        raise "corrupt CArray binary data (trailer is not a mapping)"
+        raise ArgumentError, "corrupt CArray binary data (trailer is not a mapping)"
       end
       ca = apply_trailer(ca, trailer)
     end
@@ -290,28 +290,28 @@ class CArray::Serializer   # :nodoc:
   def check_header (h)
     ndim = h[:ndim]
     unless ndim >= 1 && ndim <= CA_RANK_MAX
-      raise "corrupt CArray binary data (ndim #{ndim} out of 1..#{CA_RANK_MAX})"
+      raise ArgumentError, "corrupt CArray binary data (ndim #{ndim} out of 1..#{CA_RANK_MAX})"
     end
     dim = h[:shape][0, ndim]
     if dim.any?(&:negative?) || dim.inject(:*) != h[:elements]
-      raise "corrupt CArray binary data (shape #{dim.inspect} does not " \
+      raise ArgumentError, "corrupt CArray binary data (shape #{dim.inspect} does not " \
             "hold #{h[:elements]} elements)"
     end
     fixlen = CArray.data_type_code(CA_FIXLEN)
     if h[:data_type_code] != fixlen &&
        h[:data_type_code] <= CArray.data_type_code(CA_OBJECT) &&
        h[:element_bytes] != CArray.sizeof(h[:data_type_code])
-      raise "corrupt CArray binary data (element_bytes #{h[:element_bytes]} " \
+      raise ArgumentError, "corrupt CArray binary data (element_bytes #{h[:element_bytes]} " \
             "for data type #{CArray.data_type_name(h[:data_type_code]) rescue h[:data_type_code]})"
     end
     mask_bytes = (h[:has_mask] != 0) ? h[:elements] : 0
     if h[:mask_bytes] != mask_bytes
-      raise "corrupt CArray binary data (mask_bytes cross-check failed)"
+      raise ArgumentError, "corrupt CArray binary data (mask_bytes cross-check failed)"
     end
     if @io.respond_to?(:size) && @io.respond_to?(:pos)
       declared = h[:data_bytes] + mask_bytes + h[:trailer_bytes]
       if @io.size - @io.pos < declared
-        raise "corrupt CArray binary data (declares #{declared} bytes after " \
+        raise ArgumentError, "corrupt CArray binary data (declares #{declared} bytes after " \
               "the header, the source holds #{@io.size - @io.pos})"
       end
     end
@@ -385,7 +385,7 @@ class CArray::Serializer   # :nodoc:
     members = schema.is_a?(Hash) ? schema["members"] : nil
     unless schema.is_a?(Hash) &&
            (members.nil? || members.is_a?(Array) && members.all?(Hash))
-      raise "corrupt CArray binary data (data_class schema is not a " \
+      raise ArgumentError, "corrupt CArray binary data (data_class schema is not a " \
             "mapping with a list of member mappings)"
     end
     name = schema["name"]
@@ -420,7 +420,7 @@ class CArray::Serializer   # :nodoc:
       members.each do |m|
         sym = PEP_TO_SYMBOL[m["type"]]
         unless sym
-          raise "unknown data_class member type #{m["type"].inspect} in CArray binary data"
+          raise ArgumentError, "unknown data_class member type #{m["type"].inspect} in CArray binary data"
         end
         member sym, m["name"], :offset => m["offset"]
       end

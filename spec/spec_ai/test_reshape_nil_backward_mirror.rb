@@ -26,7 +26,7 @@ class TestReshapeNilBackwardMirror < Test::Unit::TestCase
     # only preserving value is dim[1]=3.
     assert_equal [2, 3, 4], a.reshape(nil, 3, nil).dim
     # The pre-3.0 shrinking form (nil, 2, nil → 16 ≠ 24) now raises.
-    assert_raise(RuntimeError) { a.reshape(nil, 2, nil) }
+    assert_raise(ArgumentError) { a.reshape(nil, 2, nil) }
   end
 
   def test_all_nil_identity
@@ -59,7 +59,7 @@ class TestReshapeNilBackwardMirror < Test::Unit::TestCase
     # and at i=2 → dim[ndim-(3-2)]=dim[0]=3 → [3,3,3] = 27 ≠ 3.
     # That fails at refer size check, not at the nil resolution step.
     b = CArray.int32(3).seq
-    assert_raise(RuntimeError) { b.reshape(nil, nil, nil) }
+    assert_raise(ArgumentError) { b.reshape(nil, nil, nil) }
   end
 
   def test_view_shares_data

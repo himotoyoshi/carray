@@ -53,7 +53,7 @@ class CAFrame
     refuse_unshared_columns(cols) if writable
     begin
       CArray.stack(cols, axis: 1)
-    rescue ArgumentError, RuntimeError => e
+    rescue ArgumentError, TypeError, CArray::DataTypeError => e
       # The columns have no common type (a text or Face column beside a
       # numeric one). Point at the frame-level verb that gives them one.
       raise e.class,

@@ -193,14 +193,14 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   # ============== ITERATOR contraction reservation (PROPOSAL §1.6) ==============
   def test_contraction_reserved_alphabet
     # v1 raises IndexError "use :_ instead".
-    # v2 raises NotImplementedError "reserved for future contraction notation".
-    # The two differ deliberately; here we assert v2's behavior directly
+    # v2 raises IndexError "reserved for future contraction notation".
+    # The messages differ deliberately; here we assert v2's behavior directly
     # rather than via differential cmp.
     [:i, :j, :k, :a, :z, :A, :Z].each do |sym|
-      assert_raise(NotImplementedError) do
+      assert_raise(IndexError) do
         CArray._scan_index_v2([3, 3], [sym, sym])
       end
-      e = assert_raise(NotImplementedError) do
+      e = assert_raise(IndexError) do
         CArray._scan_index_v2([3, 3], [sym, sym])
       end
       assert_match(/reserved for future contraction notation/, e.message)
@@ -269,7 +269,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   def test_select_size_mismatch
     a = CArray.int(3, 3).seq!
     mask = a.eq(4)
-    cmp [3, 4], [mask]    # RuntimeError mismatch
+    cmp [3, 4], [mask]    # ArgumentError mismatch
   end
 
   def test_carray_invalid_data_type
@@ -431,7 +431,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e2 = (CArray._scan_index_v2([5], [[0, 3, 0]]) rescue $!)
     assert_equal e1.class, e2.class
     assert_equal e1.message, e2.message
-    assert_equal RuntimeError, e2.class
+    assert_equal ArgumentError, e2.class
   end
 
   def test_error_msg_invalid_form
@@ -482,7 +482,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e2 = (CArray._scan_index_v2([3, 4], [mask]) rescue $!)
     assert_equal e1.class, e2.class
     assert_equal e1.message, e2.message
-    assert_equal RuntimeError, e2.class
+    assert_equal ArgumentError, e2.class
     assert_match(/mismatch of # of elements/, e2.message)
   end
 
@@ -535,7 +535,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   def test_contraction_all_lowercase_alphabet
     RESERVED_CONTRACTION_SYMBOLS.each do |sym|
       next if sym == :_       # not in this set anyway
-      e = assert_raise(NotImplementedError, "axis-position :#{sym}") do
+      e = assert_raise(IndexError, "axis-position :#{sym}") do
         CArray._scan_index_v2([3, 3], [sym, sym])
       end
       assert_match(/reserved for future contraction notation/, e.message,
@@ -548,7 +548,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     # dispatch (= unchanged from v1).  Single-char alphabet at argv[0]
     # falls through the strlen>1 gate and hits the axis loop, where it
     # then triggers the contraction-reserved raise.
-    assert_raise(NotImplementedError) do
+    assert_raise(IndexError) do
       CArray._scan_index_v2([3, 3], [:i, :>])   # :i at axis 0
     end
     # METHOD_CALL preserved for multi-char Symbol at argv[0]
@@ -557,7 +557,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
 
   def test_contraction_single_char_non_alpha_still_indexerror
     # `:0`, `:+` etc. single char, non-alphabet — NOT in reservation set,
-    # must raise IndexError (v1-compatible) not NotImplementedError.
+    # must raise IndexError with the v1 message.
     [:"0", :"+", :"!", :"?"].each do |sym|
       e1 = (CArray.scan_index([3, 3], [0, sym]) rescue $!)
       e2 = (CArray._scan_index_v2([3, 3], [0, sym]) rescue $!)

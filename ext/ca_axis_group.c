@@ -322,7 +322,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   GetCArray(self, src);
 
   if ( src->ndim <= 0 ) {
-    rb_raise(rb_eRuntimeError, "axis_group_reduce: scalar source");
+    rb_raise(rb_eArgError, "axis_group_reduce: scalar source");
   }
 
   /* --- group (slab) axes --- */
@@ -1155,7 +1155,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   GetCArray(self, src);
 
   if ( src->ndim <= 0 ) {
-    rb_raise(rb_eRuntimeError, "axis_group_scan: scalar source");
+    rb_raise(rb_eArgError, "axis_group_scan: scalar source");
   }
 
   /* --- group (slab) axes (same validation as reduce) --- */
@@ -1291,7 +1291,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: case CA_OBJECT: break;
   default:
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eCADataTypeError,
              "axis_group_scan: unsupported source data_type %d",
              src->data_type);
   }

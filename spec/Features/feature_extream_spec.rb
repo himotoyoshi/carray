@@ -33,9 +33,9 @@ describe "TestCArrayExtream " do
     # ---
     # a fixlen cell is at least one byte wide (3.0.3)
     expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 1) }.not_to raise_error()
-    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 0) }.to raise_error(RuntimeError)
-    expect { CArray.new(CA_FIXLEN, [3,3]) }.to raise_error(RuntimeError)
-    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => -1) }.to raise_error(RuntimeError)
+    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => 0) }.to raise_error(ArgumentError)
+    expect { CArray.new(CA_FIXLEN, [3,3]) }.to raise_error(ArgumentError)
+    expect { CArray.new(CA_FIXLEN, [3,3], :bytes => -1) }.to raise_error(ArgumentError)
   end
 
   example "large_rank_array" do
@@ -45,13 +45,13 @@ describe "TestCArrayExtream " do
 
     # ---
     dim = [2] * (CA_RANK_MAX+1)
-    expect { CArray.int8(*dim) }.to raise_error(RuntimeError)
+    expect { CArray.int8(*dim) }.to raise_error(ArgumentError)
   end
 
   example "negative_dimension_size" do
     # ---
-    expect { CArray.int8(-1) }.to raise_error(RuntimeError)
-    expect { CArray.int8(-1, -1) }.to raise_error(RuntimeError)
+    expect { CArray.int8(-1) }.to raise_error(ArgumentError)
+    expect { CArray.int8(-1, -1) }.to raise_error(ArgumentError)
   end
 
 end

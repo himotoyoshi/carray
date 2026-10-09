@@ -33,7 +33,7 @@ class TestSelectRaiseCleanup < Test::Unit::TestCase
   def test_raising_selector_raises
     s = CArray.int32(6) { 1 }
     s[3] = 2
-    assert_raise(RuntimeError) { CArray.float64(6)[s.fake(CA_BOOLEAN)] }
+    assert_raise(RangeError) { CArray.float64(6)[s.fake(CA_BOOLEAN)] }
   end
 
   # The view struct alone (about 130 bytes a call when it leaks), so the
