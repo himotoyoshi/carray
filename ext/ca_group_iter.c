@@ -259,6 +259,11 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
   perm       = RARRAY_AREF(plan, 3);
   squeeze    = RARRAY_AREF(plan, 4);
 
+  /* a count reads only the mask, so a payload the kernel cannot read
+     (object, fixlen, ...) is counted through a boolean stand-in */
+  if ( op_id == rb_intern("count") || op_id == rb_intern("count_not_masked") ) {
+    value = rb_funcall(rb_cAxisGroup, rb_intern("__count_stand_in__"), 1, value);
+  }
   result = rb_funcall(value, id_axis_group_reduce, 3,
                       group_axes, bundles, op_sym);
   result = group_iter_shape_output(result, group_dims, perm, squeeze);

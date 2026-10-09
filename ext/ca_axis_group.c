@@ -476,9 +476,9 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: break;
   default:
-    rb_raise(rb_eRuntimeError,
-             "axis_group_reduce: unsupported source data_type %d",
-             src->data_type);
+    rb_raise(rb_eCADataTypeError,
+             "axis_group: %"PRIsVALUE" over a group is not supported for data type %s",
+             rb_sym2str(vop), ca_type_name[src->data_type]);
   }
 
   /* output data type per op */

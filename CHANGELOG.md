@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a group `count` / `count_not_masked` / `count_masked` / `elements`
+  on an `axis_group` iterator over an object (or other non-numeric) array
+  raised; they read only the mask and now answer. The group reductions
+  that read the values raise `CArray::DataTypeError` naming the type
+  (was `RuntimeError` with an internal type number).
+
 - New: `CAFrame.from_csv(columns: [...])` reads only the columns named, or
   given by index from 0 (Integers and Ranges), in that order. The fields of
   the other columns are passed over without being made into Strings, so a

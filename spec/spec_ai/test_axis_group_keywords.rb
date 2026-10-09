@@ -36,4 +36,19 @@ class TestAxisGroupKeywords < Test::Unit::TestCase
     assert_equal @h.percentile(50, method: :lower), @g.percentile(50, method: :lower)
   end
 
+  # A group count reads only the mask, so it answers for a payload the
+  # group kernel cannot read; the reductions that read it are refused by
+  # data type.
+  def test_object_payload
+    o = CA_OBJECT([[1], [2], [3], [4]])
+    o[1, 0] = UNDEF
+    g = o[o.axis_group(CA_INT32([0, 0, 1, 1]).categorize, nil)]
+    f = o.to_type(:float64)
+    gf = f[f.axis_group(CA_INT32([0, 0, 1, 1]).categorize, nil)]
+    [:count_not_masked, :count, :count_masked, :elements].each do |op|
+      assert_equal gf.send(op, axis: :group).to_a, g.send(op, axis: :group).to_a, op.to_s
+    end
+    e = assert_raise(CArray::DataTypeError) { g.sum(axis: :group) }
+    assert_match(/object/, e.message)
+  end
 end

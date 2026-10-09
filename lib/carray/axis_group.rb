@@ -232,6 +232,15 @@ class AxisGroup
     nil
   end
 
+  # A boolean array carrying value's mask: what a count reads, for a value
+  # whose payload the group kernel cannot read.
+  def self.__count_stand_in__ (value)
+    return value if value.boolean? || value.integer? || value.float?
+    stand_in = CArray.boolean(*value.shape)
+    stand_in.mask = value.mask if value.has_mask?
+    stand_in
+  end
+
   # min_count: masks a group with fewer present cells; fill_value: then
   # fills the masked cells -- as a core reduction does with each.
   def self.__finish_reduction__ (iter, op, kw, result)
