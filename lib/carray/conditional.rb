@@ -35,7 +35,10 @@ class CArray
   #   @param y [CArray, Numeric, Object] false-branch value(s).
   #   @return [CArray] new array with the same shape as `self`, or a
   #     lazy view (CATriOp) when an operand is lazy.
-  #   @raise [ArgumentError] when `self` is not a boolean CArray.
+  #   @raise [ArgumentError] when `self` is not a boolean CArray, or when
+  #     an array branch's shape does not pair with `self`'s as an
+  #     operator's operands would (equal, or size-1 axes of the same ndim;
+  #     an object or fixlen result needs `self`'s shape exactly).
   def then_else (x, y)
     # Guard: self must be boolean.  Integer / float receiver would be
     # silently reinterpreted by the indexer setter (`result[self] = ...`)
@@ -45,8 +48,12 @@ class CArray
       raise ArgumentError,
             "then_else: receiver must be a boolean CArray (data_type == CA_BOOLEAN), got #{self.data_type}"
     end
+    reshaped = [x, y].any? { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
     face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
-    return face_then_else(x, y, face) if face
+    if face
+      refuse_branch_shape(x, y) if reshaped
+      return face_then_else(x, y, face)
+    end
     # Promote data_type from both branches via CArray.result_type, which
     # lets a scalar branch take the type of an array branch as an operator
     # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
@@ -55,6 +62,13 @@ class CArray
     typed = [x, y].reject { |v| v.equal?(UNDEF) }
     dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
     return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
+    # A branch shaped unlike the condition goes through the lazy select,
+    # which pairs the shapes by the operator rule (equal, or size-1 axes
+    # with the same ndim) and refuses the rest.
+    if reshaped
+      refuse_branch_shape(x, y) if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
+      return lazy_then_else(x, y, dt).copy
+    end
     # A CScalar (scalar? CArray) is treated as a scalar value, not as a
     # self-shaped operand: full CArray -> gather/copy, scalar -> broadcast.
     y_full = y.is_a?(CArray) && !y.scalar?
@@ -80,6 +94,14 @@ class CArray
   private def lazy_then_else? (x, y, dt)
     return false if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
     [self, x, y].any? { |v| v.is_a?(CArray) && v.__lazy_view__? }
+  end
+
+  # The types the lazy select cannot carry keep the strict form: a full
+  # branch must have the condition's shape.
+  private def refuse_branch_shape (x, y)
+    bad = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
+    raise ArgumentError,
+          "then_else: branch shape #{bad.shape.inspect} does not match the condition's #{shape.inspect}"
   end
 
   private def lazy_then_else (x, y, dt)

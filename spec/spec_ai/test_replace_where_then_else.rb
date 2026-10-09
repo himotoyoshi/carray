@@ -173,6 +173,25 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     end
   end
 
+  def test_then_else_branch_shape_follows_the_operator_rule
+    a = CArray.int32(3, 2).seq
+    cond = a.gt(1)
+    # The same element count in another shape is refused, as by the lazy form.
+    [CArray.int32(2, 3), CArray.int32(6), CArray.int32(5)].each do |b|
+      assert_raise(ArgumentError) { cond.then_else(a, b) }
+      assert_raise(ArgumentError) { cond.then_else(b, a) }
+      assert_raise(ArgumentError) { cond.lazy.then_else(a, b) }
+    end
+    # A size-1 axis with the same ndim broadcasts.
+    r = cond.then_else(a, CArray.int32(1, 2) { 9 })
+    assert_equal [[9, 9], [2, 3], [4, 5]], r.to_a
+    assert_equal r.to_a, cond.lazy.then_else(a, CArray.int32(1, 2) { 9 }).copy.to_a
+    # Types the lazy select cannot carry need the condition's shape.
+    assert_raise(ArgumentError) do
+      cond.then_else(CArray.object(3, 2) { 1 }, CArray.object(2, 3) { 2 })
+    end
+  end
+
   def test_indexer_setter_pair
     # a.replace_where(cond, b) is the functional sibling of `a[cond] = b`.
     a = CArray.int32(6) {|i| i }
