@@ -36,6 +36,33 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CArray.meld` reductions answer as on a copy: `min` / `max` /
+  `stddev` / `stddevp` with `axis: 0` on a 1-D meld no longer raise; `mean`
+  of an object meld stays exact (Rational, Integer division) instead of
+  returning a Float; the variance family of a complex meld no longer
+  returns a wrong complex value; `mean` / `stddev` of a meld of `CATime` /
+  `CATimedelta` no longer raise.
+- Fix: a copy of the mask of a `CArray.stack` / `CArray.meld`
+  (`s.mask.dup`) writes to the parents' masks. Before, what it wrote did
+  not reach the parents and was lost at the next write through `s.mask`.
+- Fix: a stack or meld with a value array (`a.value`) among its parents
+  takes writes when another parent is masked. Before, every write raised
+  "can not store data to read-only array". Writing UNDEF into the value
+  array's cells raises `TypeError`, as writing it into the value array
+  does.
+- Change: `CArray.stack([face])` of a single Face array (CATime,
+  CAConstString, ...) returns that Face, as `CArray.meld` does; it used to
+  return the raw storage. `CArray.meld`, `CAMeld.new` and `CAStack.new`
+  raise `ArgumentError` for a list mixing Face and non-Face arrays, or two
+  Face classes, as `CArray.stack` already did; they used to return the raw
+  storage.
+- Fix: a view of a `CArray.stack` / `CArray.meld` that swaps a length-1
+  axis with another (`stack([r1, r2]).transpose(1, 0, 2)` with `r1` of
+  shape `[1, 3]`), or that reshapes a flat window back to rows
+  (`s.reshape(9)[1..6].reshape(2, 3)`), returns the right cells. Before,
+  reads returned other values or memory outside the parents, and writes
+  landed outside the parents' buffers.
+
 - New: `CAFrame#cast` takes what `from_csv` and `from_records` take as
   `types:`: `cast(:infer)`, and a map with `default:` (`:infer` or a type)
   for the columns it does not name, where `nil` leaves a named column as it
