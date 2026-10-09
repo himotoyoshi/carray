@@ -250,7 +250,7 @@ median_fill (double *op, int8_t dt, const char *base,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "median: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -852,7 +852,7 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
              "use a numeric or object array");
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
-    rb_raise(rb_eCADataTypeError, "median: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
 
   long min_count = NIL_P(rmin_count) ? 0
                   : ca_integer_arg(rmin_count, "min_count", NULL);
@@ -930,7 +930,7 @@ pct_fill (double *op, int8_t dt, const char *base, int from_sorted,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -999,7 +999,7 @@ pct_fill_masked (CArray *co, int8_t dt, const char *base, const boolean8_t *sm,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -1292,7 +1292,7 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
              "percentile: not defined for fixlen; use a numeric or object array");
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
 
   long min_count = NIL_P(rmin_count) ? 0
                   : ca_integer_arg(rmin_count, "min_count", NULL);

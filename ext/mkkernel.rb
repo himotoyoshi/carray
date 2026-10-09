@@ -3572,7 +3572,7 @@ module MkKernel
       wio.puts "      /* W-A3 commit-or-raise: shape strict match */"
       wio.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
       wio.puts "        if ( cv->dim[i] != src->dim[i] ) {"
-      wio.puts %Q[          rb_raise(rb_eArgError, "%s: w shape mismatch (W-A3 candidate, dim[%d]=%ld != self.dim[%d]=%ld; expected scalar / [M=self.dim[axes[0]]] / self.shape)", ca_calling_method_name(), (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
+      wio.puts %Q[          rb_raise(rb_eArgError, "%s: weights shape mismatch (dim[%d]=%ld != self.dim[%d]=%ld; expected a scalar, a 1-D array along the reduced axis, or self.shape)", ca_calling_method_name(), (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
       wio.puts "        }"
       wio.puts "      }"
       wio.puts "      /* W-A3 path: use cv directly (= existing) */"
@@ -3687,7 +3687,7 @@ module MkKernel
     # axis is allowed.  Variadic `a.sum(0, 1)` raises here with a migration
     # hint pointing at the kwarg form.
     io.puts "  if ( argc > 0 ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "%s: positional axis arguments are no longer accepted (got %d); use axis: kwarg, e.g. a.#{name}(axis: 0) or a.#{name}(axis: [0, 1])", ca_calling_method_name(), argc);]
+    io.puts %Q[    rb_raise(rb_eArgError, "%s: positional axis arguments are no longer accepted (got %d); use the axis: keyword, e.g. a.%s(axis: 0) or a.%s(axis: [0, 1])", ca_calling_method_name(), argc, ca_calling_method_name(), ca_calling_method_name());]
     io.puts "  }"
 
     if weights_io

@@ -828,7 +828,12 @@ rb_ca_guess_type (VALUE obj)
   VALUE inspect;
 
   if ( TYPE(obj) == T_FIXNUM ) {
-    return NUM2SIZE(obj);
+    /* Check before narrowing to int8_t, so the message names the id given. */
+    long id = FIX2LONG(obj);
+    if ( id <= CA_NONE || id >= CA_NTYPE ) {
+      rb_raise(rb_eRuntimeError, "invalid data_type id %ld", id);
+    }
+    return (int8_t) id;
   }
   else if ( TYPE(obj) == T_STRING ) {
     const char *name0;

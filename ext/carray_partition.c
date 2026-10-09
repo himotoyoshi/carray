@@ -216,9 +216,9 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   if ( cat->data_type != CA_BOOLEAN &&
        (cat->data_type < CA_INT8 || cat->data_type > CA_FLOAT64) ) {
     rb_raise(rb_eCADataTypeError,
-             "partition_copy: data_type %d not supported "
-             "(expected one of: bool, i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, object)",
-             cat->data_type);
+             "partition_copy: source data_type :%s not supported "
+             "(expected boolean, an integer or float type, or object)",
+             ca_type_name[cat->data_type]);
   }
 
   volatile VALUE vout = rb_ca_template_with_type(target,

@@ -85,13 +85,14 @@ typedef struct {
 static inline ca_size_t
 ca_classifier_normalize_axis_index (ca_size_t k, ca_size_t dim, int axis, int range_check)
 {
+  ca_size_t given = k;
   if ( k < 0 ) {
     k += dim;
   }
   if ( range_check && ( k < 0 || k >= dim ) ) {
     rb_raise(rb_eIndexError,
              "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-             axis, (ca_size_t) k, (ca_size_t) (dim - 1));
+             axis, (ca_size_t) given, (ca_size_t) (dim - 1));
   }
   return k;
 }
@@ -357,12 +358,13 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     }
     /* [Integer] */
     {
-      ca_size_t start = NUM2SIZE(a0);
+      ca_size_t given = NUM2SIZE(a0);
+      ca_size_t start = given;
       if ( start < 0 ) start += dim;
       if ( start < 0 || start >= dim ) {
         rb_raise(rb_eIndexError,
                  "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) start, (ca_size_t) (dim - 1));
+                 axis, (ca_size_t) given, (ca_size_t) (dim - 1));
       }
       info->index[axis].block.start = start;
       info->index[axis].block.count = 1;

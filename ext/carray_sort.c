@@ -402,9 +402,10 @@ axis2addr_body (void *user_data, void *ptr, ca_size_t n)
     ca_size_t norm = (raw < 0) ? (raw + c->axis_size) : raw;
     if ( norm < 0 || norm >= c->axis_size ) {
       rb_raise(rb_eRangeError,
-               "axis2addr: indices[%lld] = %lld out of range [0, %lld) "
-               "(after negative normalize)",
-               (long long) k, (long long) raw, (long long) c->axis_size);
+               "%s: index %lld at position %lld is out of range for an axis "
+               "of length %lld",
+               ca_calling_method_name(), (long long) raw, (long long) k,
+               (long long) c->axis_size);
     }
     /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
     ca_size_t addr = 0;
