@@ -2223,6 +2223,19 @@ ca_operand_from_memory_view (VALUE obj)
   return rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
 }
 
+/* The name a coercion error gives an operand: its data type, or for a Face
+   its class.  A Face reports the data type of its storage ("fixlen" for a
+   time, a categorical, a record or a string column), which says nothing
+   about what the operand is. */
+static const char *
+ca_coerce_operand_name (VALUE obj, CArray *ca)
+{
+  if ( ca_is_face(ca) ) {
+    return rb_obj_classname(obj);
+  }
+  return ca_type_name[ca->data_type];
+}
+
 void
 rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 {
@@ -2367,8 +2380,8 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 
   rb_raise(rb_eRuntimeError,
            "can't coerce carray with data_types of '%s' and '%s'",
-           ca_type_name[ca->data_type],
-           ca_type_name[cb->data_type]);
+           ca_coerce_operand_name(*self, ca),
+           ca_coerce_operand_name(*other, cb));
 }
 
 /* CArray.cast_self_or_other(self, other) — promote self and other
@@ -2799,8 +2812,8 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
 
   rb_raise(rb_eRuntimeError,
            "can't coerce carray with data_types of '%s' and '%s'",
-           ca_type_name[ca->data_type],
-           ca_type_name[cb->data_type]);
+           ca_coerce_operand_name(*self, ca),
+           ca_coerce_operand_name(*other, cb));
 }
 
 /* CArray#cast_with(other) -- coerce self and other to a common

@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: when an operator cannot combine its two operands, the error names a
+  time, categorical, record or string column by its class
+  (`'int64' and 'CATimedelta'`) instead of `'fixlen'`, the data type it
+  stores its values in.
 - New: the value reductions of `group_by_category`, `segments` and
   `group_by_run`, and `sum` / `mean` / `min` / `max` of a `CAFrame`'s
   `group_by` and `resample`, take `min_count:` and `fill_value:` as the core
