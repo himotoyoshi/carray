@@ -30,6 +30,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "ca_obj_face.h"  /* CA_WRAPPER_LIFT */
 
 NORETURN(static void ca_broadcast_refuse_write (VALUE dst, VALUE src));
 
@@ -303,6 +304,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
     }
     obj = ca_wrap_struct(view);
     rb_ca_set_parent(obj, self);
+    CA_WRAPPER_LIFT(obj, self, cs);
     return obj;
   }
 
@@ -366,6 +368,8 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
   obj = ca_wrap_struct(view);
   rb_ca_set_parent(obj, self);
+  /* The Face stays on top, as for every view. */
+  CA_WRAPPER_LIFT(obj, self, cs);
   return obj;
 }
 

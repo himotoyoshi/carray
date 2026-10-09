@@ -761,8 +761,15 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
          its own space (unit alignment / instant lift), whatever the operand
          type -- Face CArray, our Scalar, a Ruby Time / DateTime, etc.  The
          reference's to_comparable raises if it cannot reconcile it. */
+      int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
       other = rb_funcall(self_ref, rb_intern("to_comparable"), 1, other);
       other = rb_ca_strip_face_value(other);
+      /* to_comparable lifts a scalar operand to a length-1 array; unwrap it
+         so the comparison stays array-vs-scalar instead of a shape check
+         against [1] (which only a 1-D reference would pass). */
+      if ( other_was_scalar && RTEST(rb_obj_is_carray(other)) ) {
+        other = rb_ca_fetch_addr(other, 0);
+      }
     }
     else {
       rb_raise(rb_eArgError,

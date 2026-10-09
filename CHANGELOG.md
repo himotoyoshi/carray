@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: comparing a `CATime` or `CATimedelta` array of two or more
+  dimensions with a single value (an element, a `Time`) no longer raises a
+  shape mismatch; it compares every cell with that value, as a 1-D array
+  already did.
+- Fix: `broadcast_to` on a Face (`CATime`, the string faces,
+  `CACategorical`, ...) returns the same Face instead of a plain array of
+  its storage.
 - Fix: `CArray.meld` reductions answer as on a copy: `min` / `max` /
   `stddev` / `stddevp` with `axis: 0` on a 1-D meld no longer raise; `mean`
   of an object meld stays exact (Rational, Integer division) instead of

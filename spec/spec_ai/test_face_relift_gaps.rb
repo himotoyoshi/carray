@@ -139,4 +139,28 @@ class TestFaceReliftGaps < Test::Unit::TestCase
     assert_equal %w[ab dd cd dd], cond.then_else(c, "dd").to_a
   end
 
+  def test_broadcast_to_keeps_the_face
+    t = days[0..3].reshape(1, 4).broadcast_to(2, 4)
+    assert_kind_of CATime, t
+    assert_equal "2024-01-02", t[1, 2].to_s
+    assert t.read_only?
+    assert_kind_of CATimedelta, ticks[0..3].reshape(1, 4).broadcast_to(3, 4)
+    assert_kind_of CAConstString, strings[0..3].reshape(1, 4).broadcast_to(2, 4)
+    c = CA_OBJECT(%w[x y x z]).categorize.reshape(1, 4).broadcast_to(2, 4)
+    assert_kind_of CACategorical, c
+    assert_equal "z", c[1, 3]
+  end
+
+  # to_comparable lifts a scalar to a length-1 array; a 2-D reference
+  # compared it against shape [1] and refused.
+  def test_scalar_compare_on_multi_dimensional_time
+    t = days[0..3].reshape(2, 2)
+    assert_equal [[true, false], [false, false]], t.eq(t[0, 0]).to_a
+    assert_equal [[true, false], [true, false]], t.lt(t[0, 1]).to_a
+    assert_equal [[true, false], [true, false]], (t < Time.utc(2024, 1, 3)).to_a
+    assert_equal [[true, false], [false, false]], t.eq(days[0..3].to_unit(:h)[0]).to_a
+    d = ticks[0..3].reshape(2, 2)
+    assert_equal [[false, true], [false, false]], d.eq(d[0, 1]).to_a
+  end
+
 end
