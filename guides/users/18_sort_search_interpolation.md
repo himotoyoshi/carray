@@ -297,14 +297,15 @@ addr = mine.locate_addr(ref)
 #  => [ 2, 4, _ ]    99 is not in ref → UNDEF
 ```
 
-`locate_nearest_addr(ref, direction: :round, tolerance: nil)` is the continuous sibling: it uses `linear_section` + rounding for non-exact matching against a sorted reference (`direction:` selects `:round` / `:floor` / `:ceil`). Pass `tolerance:` to mask results whose distance `|ref[addr] - self|` exceeds the given bound — useful when snapping observations onto a coarser reference axis, where a far-away hit should be rejected rather than snapped:
+`locate_nearest_addr(ref, direction: :round, tolerance: nil)` is the continuous sibling: it uses `linear_section` + rounding for non-exact matching against a sorted reference (`direction:` selects `:round` / `:floor` / `:ceil`). The direction also decides what happens beyond the reference's ends: `:round` takes the nearer end, `:floor` takes the last value for a cell after it, and `:ceil` takes the first value for a cell before it. A cell on the side the direction cannot reach (`:floor` before the first value, `:ceil` after the last) is masked. Pass `tolerance:` to mask results whose distance `|ref[addr] - self|` exceeds the given bound — useful when snapping observations onto a coarser reference axis, where a far-away hit should be rejected rather than snapped:
 
 ```ruby
 ref = CA_FLOAT64([10, 20, 30, 40, 50])
 sel = CA_FLOAT64([15, 33, 100])
 
-sel.locate_nearest_addr(ref)                   #  => [ 1, 2, _ ]
-sel.locate_nearest_addr(ref, tolerance: 5.0)   #  => [ 1, 2, _ ]
+sel.locate_nearest_addr(ref)                   #  => [ 1, 2, 4 ]  # 100 -> the last value
+sel.locate_nearest_addr(ref, direction: :ceil) #  => [ 1, 3, _ ]  # nothing at or after 100
+sel.locate_nearest_addr(ref, tolerance: 5.0)   #  => [ 1, 2, _ ]  # 100 is 50 away
 sel.locate_nearest_addr(ref, tolerance: 4.0)   #  => [ _, 2, _ ]  # 15 rejected (|20-15| > 4)
 ```
 

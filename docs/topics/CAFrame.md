@@ -1534,8 +1534,10 @@ The same policy governs `paste`.
 
 `join_asof` matches each left row to the **nearest** `other` row by the key —
 for irregular time series. `direction:` follows CArray (`:floor` = most recent
-at-or-before, `:ceil` = next, `:round` = nearest); rows out of range or beyond
-`tolerance:` come back `UNDEF`:
+at-or-before, `:ceil` = first at-or-after, `:round` = nearest). A row with no
+such row in `other` (before the first key under `:floor`, after the last under
+`:ceil`) comes back `UNDEF`, and so does a row whose match is farther than
+`tolerance:` — use it to refuse a stale match past the end of `other`:
 
 ```ruby
 obs.join_asof(radar, on: "time", direction: :floor, tolerance: 600)
