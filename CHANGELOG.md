@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `locate_nearest_addr`, and `CAFrame#join_asof` with it, accept a
+  masked reference value and an empty query. A masked value matches
+  nothing, as in `locate_addr`; before, either case raised an error naming
+  `linear_section`. A reference with a single value matched every query
+  to it; it now matches only the values equal to it, as a value outside
+  the reference's range is masked.
+
 - Fix: a column declared time (`from_csv(types: { name => :time })`,
   `cast(name => :time)`, `parse_to_time`) reads what `to_csv` writes for
   any `CATime`: a month (`"2024-01"`, read in months), a year (`"2024"`,

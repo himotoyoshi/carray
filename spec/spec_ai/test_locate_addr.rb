@@ -289,3 +289,67 @@ class TestMatchup < Test::Unit::TestCase
     assert_equal [UNDEF, 1], CA_UINT64([2**64 - 1, 1]).locate_addr(CA_INT64([-1, 1])).to_a
   end
 end
+
+# locate_nearest_addr when there is nothing to search or nothing to place:
+# an empty query, a masked reference value, a reference of one value.
+class TestLocateNearestAddrDegenerate < Test::Unit::TestCase
+
+  def test_empty_query_is_empty
+    r = CArray.int32(0).locate_nearest_addr(CA_INT32([1, 7]))
+    assert_equal CA_INT64, r.data_type
+    assert_equal [0], r.shape
+  end
+
+  def test_a_masked_reference_value_matches_nothing
+    ref = CA_INT32([1, 5, 9])
+    ref[1] = UNDEF
+    q = CA_INT32([1, 4, 5, 9])
+    assert_equal [0, 0, 0, 2], q.locate_nearest_addr(ref, direction: :floor).to_a
+    assert_equal [0, 2, 2, 2], q.locate_nearest_addr(ref, direction: :ceil).to_a
+  end
+
+  def test_masked_reference_values_out_of_order
+    ref = CA_INT32([9, 0, 1, 0])
+    ref[1] = UNDEF
+    ref[3] = UNDEF
+    assert_equal [2, 2, 0], CA_INT32([1, 4, 9]).locate_nearest_addr(ref, direction: :floor).to_a
+  end
+
+  def test_a_single_reference_value_matches_only_itself
+    q = CA_INT32([2, 5, 9])
+    [:round, :floor, :ceil].each do |d|
+      assert_equal [UNDEF, 0, UNDEF], q.locate_nearest_addr(CA_INT32([5]), direction: d).to_a, d.inspect
+    end
+    ref = CA_INT32([1, 5])
+    ref[0] = UNDEF
+    assert_equal [UNDEF, 1, UNDEF], q.locate_nearest_addr(ref).to_a
+  end
+
+  def test_a_reference_with_nothing_present_matches_nothing
+    ref = CA_INT32([1, 5])
+    ref[] = UNDEF
+    assert_equal [UNDEF, UNDEF], CA_INT32([1, 5]).locate_nearest_addr(ref).to_a
+    assert_equal [UNDEF, UNDEF], CA_INT32([1, 5]).locate_nearest_addr(CArray.int32(0)).to_a
+  end
+
+  def test_join_asof_on_an_empty_frame
+    left = CAFrame.new("k" => CArray.int32(0), "v" => CArray.float64(0))
+    right = CAFrame.new("k" => CA_INT32([1, 7]), "w" => CA_FLOAT64([1, 2]))
+    r = left.join_asof(right, on: "k")
+    assert_equal 0, r.nrow
+    assert_equal %w[k v w], r.variable_names
+  end
+
+  def test_join_asof_with_a_masked_reference_key
+    k = CA_INT32([1, 5])
+    k[1] = UNDEF
+    right = CAFrame.new("k" => k, "w" => CA_FLOAT64([10, 20]))
+    left = CAFrame.new("k" => CA_INT32([2, 6]), "v" => CA_FLOAT64([1, 2]))
+    assert_equal [UNDEF, UNDEF], left.join_asof(right, on: "k")["w"].to_a
+    k = CA_INT32([1, 5, 9])
+    k[1] = UNDEF
+    right = CAFrame.new("k" => k, "w" => CA_FLOAT64([10, 20, 30]))
+    assert_equal [10.0, 10.0], left.join_asof(right, on: "k")["w"].to_a
+  end
+
+end
