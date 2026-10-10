@@ -5,7 +5,7 @@
 Four things to know before you start:
 
 - **A column is a `CArray`.** `df["temp"]` is the stored array itself, not a wrapper.
-- **Missing values are masked cells.** A column carries its mask as any CArray does, and the frame's verbs follow it. A masked cell reads as `UNDEF`, and assigning `UNDEF` masks a cell.
+- **Missing values are masked cells.** A column carries its mask as any CArray does, and the frame's verbs follow it. A masked cell reads as `UNDEF`, and assigning `UNDEF` masks a cell. So an integer column with a missing value **stays an integer column**; it is not turned into floats to hold a NaN.
 - **Sub-frames are views, not copies.** `select`, `filter`, `head` and row slices write through to the original frame. `df.copy` makes an independent frame (see [Sub-frames share data](#sub-frames-share-data-with-the-original-frame)).
 - **A column can be N-D.** A vector or a profile per row is one column. This is covered in its own chapter, [N-D columns](#n-d-columns); everything before it can be read with ordinary 1-D columns in mind.
 
@@ -62,6 +62,8 @@ means.join(meta, on: "station").to_csv("summary.csv")            # Combining, Ex
 13. [Read-only frames](#read-only-frames)
 14. [N-D columns](#n-d-columns)
 
+[Appendix: finding the verb for a task](#appendix-finding-the-verb-for-a-task)
+
 ---
 
 ## The model
@@ -105,6 +107,8 @@ snap = df.copy
 snap["temp"][1] = 99.0
 df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
 ```
+
+**Note.** Most DataFrame libraries take the opposite direction: a selection or a filter behaves as an independent copy, and writing to it never reaches the frame it came from — recent pandas does this with Copy-on-Write, R copies a data frame when it is modified, and Polars operations return new frames. CAFrame keeps CArray's model instead: a sub-frame is a view, and `copy` is where you cut the link. Code carried over from those libraries that writes to a filtered frame will change the original here.
 
 Which operations share and which copy is listed operation by operation in [View, copy and sharing](#view-copy-and-sharing). To make a frame refuse writes altogether, see [Read-only frames](#read-only-frames).
 
@@ -187,7 +191,7 @@ df = CAFrame.from_csv("obs.csv", types: :infer)                     # each colum
 
 With `types: :infer`, each text column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text otherwise (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
 
-An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF`. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframefrom_csv).
+An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF` — in an integer column too, which stays integer. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframefrom_csv).
 
 ### Other formats
 
