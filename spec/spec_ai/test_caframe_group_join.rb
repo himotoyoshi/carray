@@ -986,3 +986,54 @@ class TestCAFrameJoinNDKey < Test::Unit::TestCase
     assert_equal [[1.0, 2.0], [3.0, 4.0], [UNDEF, UNDEF]], l.join(r, on: "k")["v"].to_a
   end
 end
+
+# join_asof's tolerance: is a duration for a time key.
+class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
+  def setup
+    t = ->(a, unit = :s) { CArray.time(a, unit: unit) }
+    @obs   = CAFrame.new("time" => t.(["2024-01-01 00:10", "2024-01-01 00:30", "2024-01-01 00:05"]),
+                         "x" => CA_INT64([1, 2, 3]))
+    @radar = CAFrame.new("time" => t.(["2024-01-01 00:20", "2024-01-01 00:00", "2024-01-01 00:09"]),
+                         "y" => CA_INT64([10, 20, 30]))
+  end
+
+  def test_string_duration
+    assert_equal [30, 10, 20], @obs.join_asof(@radar, on: "time", tolerance: "10 minutes")["y"].to_a
+    assert_equal [30, UNDEF, 20], @obs.join_asof(@radar, on: "time", tolerance: "5 minutes")["y"].to_a
+    assert_equal [30, UNDEF, UNDEF], @obs.join_asof(@radar, on: "time", tolerance: "1 minute")["y"].to_a
+  end
+
+  def test_timedelta_value_matches_the_string
+    td = CATimedelta::Element.new(300, :s)
+    assert_equal @obs.join_asof(@radar, on: "time", tolerance: "5 minutes")["y"].to_a,
+                 @obs.join_asof(@radar, on: "time", tolerance: td)["y"].to_a
+  end
+
+  def test_duration_does_not_depend_on_the_key_unit
+    coarse = CAFrame.new("time" => CArray.time(["2024-01-01 00:10", "2024-01-01 00:30"], unit: :m),
+                         "x" => CA_INT64([1, 2]))
+    assert_equal [30, 10], coarse.join_asof(@radar, on: "time", tolerance: "10 minutes")["y"].to_a
+    assert_equal [30, UNDEF], coarse.join_asof(@radar, on: "time", tolerance: "1 minute")["y"].to_a
+  end
+
+  def test_bare_number_refused_for_a_time_key
+    e = assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", tolerance: 600) }
+    assert_match(/time key needs a duration such as "10 minutes"/, e.message)
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", tolerance: "soon") }
+  end
+
+  def test_numeric_key_takes_a_number_and_refuses_a_duration
+    l = CAFrame.new("k" => CA_FLOAT64([5, 1.2]))
+    r = CAFrame.new("k" => CA_FLOAT64([4, 0, 1]), "y" => CA_INT64([1, 2, 3]))
+    assert_equal [UNDEF, 3], l.join_asof(r, on: "k", tolerance: 0.5)["y"].to_a
+    e = assert_raise(ArgumentError) { l.join_asof(r, on: "k", tolerance: "10 minutes") }
+    assert_match(/is a duration, but the key is float64; give a number/, e.message)
+  end
+
+  def test_locate_nearest_addr_takes_the_duration_too
+    a = CArray.time(["2024-01-01 00:10"], unit: :s)
+    ref = CArray.time(["2024-01-01 00:00", "2024-01-01 00:20"], unit: :s)
+    assert_equal [UNDEF], a.locate_nearest_addr(ref, tolerance: "5 minutes").to_a
+    assert_equal [0], a.locate_nearest_addr(ref, direction: :floor, tolerance: "10 minutes").to_a
+  end
+end

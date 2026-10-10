@@ -309,6 +309,12 @@ sel.locate_nearest_addr(ref, tolerance: 5.0)   #  => [ 1, 2, _ ]  # 100 is 50 aw
 sel.locate_nearest_addr(ref, tolerance: 4.0)   #  => [ _, 2, _ ]  # 15 rejected (|20-15| > 4)
 ```
 
+For time arrays the distance is a duration, so `tolerance:` is too: a string such as `"10 minutes"`, or a `CATimedelta` value. A bare number is refused there, because its length would depend on the unit the times are stored in.
+
+```ruby
+obs.locate_nearest_addr(steps, direction: :floor, tolerance: "10 minutes")
+```
+
 ### Reusing an address array
 
 The point of returning bare addresses — rather than gathering values in one shot — is that the same address array can drive many lookups:

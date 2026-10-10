@@ -88,13 +88,16 @@ class CArray
   #   @param ref [CArray] 1-D reference grid to match against.
   #   @param direction [Symbol] `:round`, `:floor`, or `:ceil` — rounding
   #     applied to the fractional position.
-  #   @param tolerance [Numeric, nil] maximum accepted `|self - ref|`
-  #     distance; cells beyond this are masked. `nil` disables the check.
+  #   @param tolerance [Numeric, String, CATimedelta::Element, nil] maximum
+  #     accepted `|self - ref|` distance; cells beyond this are masked.
+  #     For a time key it is a duration: a String such as `"10 minutes"` or
+  #     a CATimedelta value (a bare number is refused, since its length
+  #     would depend on the key's unit). `nil` disables the check.
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape as
   #     `self`; cells with no match in the direction and beyond-tolerance
   #     cells are masked.
   #   @raise [ArgumentError] when `direction` is not one of the accepted
-  #     symbols.
+  #     symbols, or `tolerance` is not a duration for a time key.
   def locate_nearest_addr (ref, direction: :round, tolerance: nil)
     unless [:round, :floor, :ceil].include?(direction)
       raise ArgumentError,
@@ -145,9 +148,36 @@ class CArray
     idx = ri.project(si)
     if tolerance
       dist = (ref.project(idx) - self).abs
-      idx[dist > tolerance] = UNDEF
+      idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
     end
     idx
+  end
+
+  # The tolerance in the units of the distance. A time key measures its
+  # distance as a CATimedelta, so its tolerance is a duration: a String in
+  # the spelling CArray.time takes for a unit ("10 minutes"), or a
+  # CATimedelta value. A bare number would mean a different length in each
+  # unit, so it is refused there; any other key takes a number.
+  private def nearest_tolerance(tolerance, dist)
+    unless dist.is_a?(CATimedelta)
+      if tolerance.is_a?(String)
+        raise ArgumentError,
+              "tolerance: #{tolerance.inspect} is a duration, but the key is " \
+              "#{data_type_name}; give a number"
+      end
+      return tolerance
+    end
+    case tolerance
+    when String
+      res = CATime::Resolution.parse(tolerance)
+      CATimedelta::Element.new(res.count, res.base)
+    when CATimedelta::Element
+      tolerance
+    else
+      raise ArgumentError,
+            "tolerance: a time key needs a duration such as \"10 minutes\" " \
+            "or a CATimedelta value (got #{tolerance.inspect})"
+    end
   end
 
   # @!endgroup

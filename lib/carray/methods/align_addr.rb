@@ -96,8 +96,10 @@ class CArray
   #     `nil` uses the first array verbatim.
   #   @param direction [:round, :floor, :ceil] rounding rule for the nearest
   #     match.
-  #   @param tolerance [Numeric, nil] maximum accepted distance; farther grid
-  #     points are masked. `nil` disables the check.
+  #   @param tolerance [Numeric, String, CATimedelta::Element, nil] maximum
+  #     accepted distance; farther grid points are masked. For time keys it
+  #     is a duration (`"10 minutes"` or a CATimedelta value), as in
+  #     {#locate_nearest_addr}. `nil` disables the check.
   #   @return [Array<CArray>] `[common, idx_0, idx_1, ...]`.
   #   @raise [ArgumentError] when no array is given (or `direction` is invalid,
   #     raised by {#locate_nearest_addr}).

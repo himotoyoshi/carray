@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `tolerance:` of `locate_nearest_addr`, `CArray.align_nearest_addr`
+  and `CAFrame#join_asof` takes a duration string for time keys
+  (`tolerance: "10 minutes"`), in the spelling `CArray.time` uses for a unit.
+  A `CATimedelta` value still works. A bare number with a time key now
+  raises `ArgumentError` naming these forms, instead of a `TypeError` about
+  the storage; a numeric key still takes a number.
+
 - Fix: `CAFrame#join` with an N-D key column (`join(other, on: "wind")` where
   `"wind"` is `(N, 2)`) matched the key cell by cell and returned misplaced
   values instead of failing. It now raises `ArgumentError`, as `group_by`
