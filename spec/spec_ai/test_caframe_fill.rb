@@ -157,3 +157,20 @@ class TestCAFrameFill < Test::Unit::TestCase
     assert_equal [big + 1, big + 2, big + 5], df["x"].to_a
   end
 end
+
+class TestCAFrameFillLinearIndexType < Test::Unit::TestCase
+  def test_linear_refuses_a_text_index_and_names_it
+    df = CAFrame.new({ "v" => CA_FLOAT64([1, 2, 4]) }, axis_name: "k",
+                     index: CA_OBJECT(["a", "b", "c"]))
+    e = assert_raise(ArgumentError) { df.fill("v", :linear) }
+    assert_match(/the index "k" is object, not numeric or time/, e.message)
+    assert_match(/unmask\(method: :linear\)/, e.message)
+  end
+
+  def test_linear_suggests_axis_for_an_nd_column
+    df = CAFrame.new({ "w" => CA_FLOAT64([[1, 2], [3, 4]]) }, axis_name: "k",
+                     index: CA_OBJECT(["a", "b"]))
+    e = assert_raise(ArgumentError) { df.fill("w", :linear) }
+    assert_match(/unmask\(method: :linear, axis: 0\)/, e.message)
+  end
+end

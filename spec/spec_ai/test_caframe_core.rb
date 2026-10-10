@@ -875,3 +875,21 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
     assert_equal ["b", "a", "v"], df.column_names
   end
 end
+
+class TestCAFrameRowAndFilterMessages < Test::Unit::TestCase
+  def setup
+    @df = CAFrame.new("x" => CA_INT64([1, 2, 3]),
+                      "w" => CA_FLOAT64([[1, 2], [3, 4], [5, 6]]))
+  end
+
+  def test_negative_row_out_of_range_names_the_given_position
+    e = assert_raise(IndexError) { @df[-4] }
+    assert_equal "row index -4 out of range (nrow=3)", e.message
+    assert_equal 3, @df[-1]["x"]
+  end
+
+  def test_filter_refuses_an_nd_mask
+    e = assert_raise(ArgumentError) { @df.filter { |f| f["w"] > 2 } }
+    assert_equal "filter mask has shape [3, 2], expected [3] (one value per row)", e.message
+  end
+end

@@ -401,9 +401,9 @@ class CAFrame
       raise ArgumentError,
             "filter block must return a boolean CArray (got #{mask.class})"
     end
-    unless mask.shape[0] == @nrow
+    unless mask.shape == [@nrow]
       raise ArgumentError,
-            "filter mask has axis-0 length #{mask.shape[0]}, expected nrow #{@nrow}"
+            "filter mask has shape #{mask.shape.inspect}, expected [#{@nrow}] (one value per row)"
     end
     select_rows(mask, keep_masked: keep_masked)
   end
@@ -572,10 +572,11 @@ class CAFrame
   end
 
   private def row(i)
-    i += @nrow if i < 0
-    unless i >= 0 && i < @nrow
+    pos = i < 0 ? i + @nrow : i
+    unless pos >= 0 && pos < @nrow
       raise IndexError, "row index #{i} out of range (nrow=#{@nrow})"
     end
+    i = pos
     h = {}
     h[@axis_name] = elem_at(@index, i) if @index
     @columns.each { |name, col| h[name] = elem_at(col, i) }

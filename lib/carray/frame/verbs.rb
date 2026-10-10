@@ -610,6 +610,14 @@ class CAFrame
     if @index.nil?
       return col.unmask(method: :linear, **(col.ndim > 1 ? { axis: 0 } : {}))
     end
+    unless @index.numeric? || @index.is_a?(CATime) || @index.is_a?(CATimedelta)
+      along = col.ndim > 1 ? ", axis: 0" : ""
+      raise ArgumentError,
+            "fill(#{key.inspect}, :linear): the index #{@axis_name.inspect} is " \
+            "#{@index.data_type_name}, not numeric or time, so it cannot be the x of " \
+            "the interpolation; to interpolate by row position, use " \
+            "df[#{key.inspect}].unmask(method: :linear#{along})"
+    end
     # With the index as x, an N-D column is filled one trailing position at a
     # time; each position is a 1-D view, so the fill writes through to it.
     if col.ndim > 1
