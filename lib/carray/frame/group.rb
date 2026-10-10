@@ -100,18 +100,27 @@ class CAFrame
   end
 
   private def key_column(key)
-    case key
-    when String
-      self[key]
-    when CArray
-      unless key.shape[0] == nrow
-        raise ArgumentError,
-              "external group key length #{key.shape[0]} != nrow #{nrow}"
-      end
-      key
-    else
-      raise ArgumentError, "group key must be a column name or CArray (got #{key.class})"
+    col = case key
+          when String
+            self[key]
+          when CArray
+            unless key.shape[0] == nrow
+              raise ArgumentError,
+                    "external group key length #{key.shape[0]} != nrow #{nrow}"
+            end
+            key
+          else
+            raise ArgumentError, "group key must be a column name or CArray (got #{key.class})"
+          end
+    # A key gives each row one value.  An N-D one would be categorized cell
+    # by cell, making groups of cells rather than of rows.
+    unless col.ndim == 1
+      name = key.is_a?(String) ? "#{key.inspect} " : ""
+      raise ArgumentError,
+            "group_by: the key #{name}has shape #{col.shape.inspect}, not one value per row; " \
+            "group by one of its components (e.g. df[name][nil, 0])"
     end
+    col
   end
 end
 
