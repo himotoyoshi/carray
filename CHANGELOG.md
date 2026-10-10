@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#protect` makes a frame read-only and returns it: frozen as by
+  `freeze`, and the cells and masks of every column and of the index refuse
+  writes made through the frame. The arrays the frame was built from are not
+  changed and stay writable; their writes show through. `copy` gives a
+  writable frame again. `CAFrame#protected?` tells whether a frame was
+  protected.
+
 - Change: `CArray.time` refuses text with a time after the date that it does
   not read as a time of day (`"2024-01-01T0130"`, `"2024-01-01T25"`); it used
   to read it as midnight. `on_error: :mask` masks such a cell. An hour alone

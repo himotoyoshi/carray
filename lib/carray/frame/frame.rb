@@ -254,6 +254,44 @@ class CAFrame
     raise FrozenError.new("can't modify frozen CAFrame: #{inspect}", receiver: self) if frozen?
   end
 
+  # Make this frame read-only and return it.  It is +freeze+ extended to the
+  # cells: the column set, the rows and the index are fixed as by +freeze+,
+  # and the cells and masks of every column and of the index refuse writes
+  # made through this frame.
+  #
+  # Each column (and the index) is replaced by a read-only view of itself, so
+  # the arrays the frame was built from are left as they were: whoever holds
+  # them can still write, and the writes show through this frame.  Frames
+  # derived from a protected frame by views (+select+, +filter+, a row slice)
+  # read through those views and refuse cell writes too, but are not frozen.
+  # +copy+ gives a frame that can be written again.
+  #
+  # Calling it on a protected frame returns the frame unchanged.  A frame
+  # frozen with +freeze+ cannot be protected afterwards, because its columns
+  # can no longer be replaced: raises +FrozenError+.
+  def protect
+    return self if protected?
+    refuse_if_frozen
+    @columns = @columns.transform_values { |col| read_only_view(col) }
+    @index   = read_only_view(@index) if @index
+    @protected = true
+    freeze
+  end
+
+  # True if this frame was made read-only by +protect+.  A +dup+ is not frozen
+  # and so not protected, though its columns stay the read-only views it
+  # shares; a +clone+ keeps both.
+  def protected?
+    frozen? && @protected == true
+  end
+
+  private def read_only_view(col)
+    return col if col.read_only?
+    view = col.refer
+    view.set_read_only_flag
+    view
+  end
+
   # df["name"] = ... : the column forms of []=.  Unlike the verbs, +[]=+ can
   # only ever mutate the receiver -- Ruby hands the right-hand side back as
   # the value of an assignment, so there is no way to return a new frame.

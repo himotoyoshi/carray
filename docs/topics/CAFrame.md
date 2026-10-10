@@ -146,6 +146,44 @@ df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
 Which operations share and which copy is listed operation by operation in
 [§13](#13-view-copy-and-aliasing).
 
+### Read-only frames — `freeze` and `protect`
+
+`freeze` fixes a frame's column set, rows and index: `df["c"] = ...`,
+`df[sel] = ...` and the in-place verbs (`fill`, `mask_eq`, `cast`,
+`set_index`, ...) raise `FrozenError`. The cells are left to the columns, as an
+Array's elements are left to them by `Array#freeze` — `df["temp"][0] = v` still
+writes.
+
+`protect` goes further: it freezes the frame and also makes the cells and masks
+of every column and of the index refuse writes made through it. It changes the
+frame and returns it, as `freeze` does.
+
+```ruby
+temp = CA_FLOAT64([22.1, 25.3, 19.0])
+df   = CAFrame.new("temp" => temp).protect
+df.protected?              # => true
+df["temp"][0] = 0.0        # raises: can not modify read-only array
+df["temp"][0] = UNDEF      # raises as well -- masks are cells too
+
+temp[0] = 0.0              # the array it was built from is still writable
+df["temp"][0]              # => 0.0  -- and the write shows through
+```
+
+Each column, and the index, is replaced by a read-only view of itself, so
+nothing about the arrays the frame was built from changes: whoever holds them
+can still write. `df["temp"]` returns that view, not `temp` itself. A column
+that is already read-only (a categorical, a `CAConstString`) is kept as it is.
+
+- Frames derived from a protected frame by views (`select`, `filter`, a row
+  slice) read through the read-only views and refuse cell writes too; they are
+  not frozen.
+- `copy` gives a frame that can be written again.
+- `dup` is not frozen, so it is not protected, though its columns are the same
+  read-only views; `clone` keeps both.
+- A frame already frozen with `freeze` cannot be protected afterwards — its
+  columns can no longer be replaced — and `protect` raises `FrozenError`.
+  Call `protect` instead of `freeze`.
+
 ---
 
 ## 2. Construction
@@ -2001,6 +2039,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
 | `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
+| `df.protect` | **self**, frozen — each column and the index replaced by a read-only view of itself; the arrays it was built from stay writable and their writes show through (§1) |
 | `df.cast(...)` | **self** — rebinds a fresh column of the new type; does not write through to frames sharing the old column |
 | `df.promote(...)` | **self** — same as `cast`, applied to every column (fresh columns, common type) |
 | `df.parse_to_time(...)` / `df.to_time(...)` | **self** — as `cast`: rebinds that column to a fresh time column |
