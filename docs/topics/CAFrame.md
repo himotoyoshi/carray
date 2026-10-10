@@ -1643,7 +1643,7 @@ the result. `copy` the result if you want it detached.
 Both are deliberately strict (same columns only) — a union-with-`UNDEF` mode is a
 possible future opt-in, kept out to stay explicit.
 
-### `CAFrame.stack` / `split` — layers
+### `CAFrame.stack` / `unstack` — layers
 
 `CAFrame.stack` puts frames of the **same shape** on top of each other as
 layers: the rows stay as they are, and each column gains an axis that runs
@@ -1680,14 +1680,14 @@ stacked column, which it refuses.
   (`days = CArray.time([...])`), with `s["temp"][nil, k]` matching `days[k]` — the
   same way as any N-D column's trailing axes (§4).
 
-`split(axis:)` is the inverse: one frame per position on that axis, each with
-this frame's index and views of its columns, and `CAFrame.stack(*s.split(axis: 1))`
+`unstack(axis:)` is the inverse: one frame per position on that axis, each with
+this frame's index and views of its columns, and `CAFrame.stack(*s.unstack(axis: 1))`
 gives the same frame back. Every column must have the axis with the same length;
 a column without it has no layer to give each frame, so it raises rather than
 repeating the column in every frame.
 
 ```ruby
-s.split(axis: 1)    # => [day1's frame, day2's frame, day3's frame]
+s.unstack(axis: 1)  # => [day1's frame, day2's frame, day3's frame]
 ```
 
 ### `paste` — merge columns by position
@@ -1888,7 +1888,7 @@ Frame view/copy semantics follow CArray exactly:
 | `CAFrame.meld(...)` | a **view-frame** — each column a `CAMeld` over the inputs; writes flow both ways (§10) |
 | `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
 | `CAFrame.stack(...)` | a **view-frame** — each column a `CAStack` over the inputs' columns; writes reach them (§10) |
-| `df.split(axis:)` | **view-frames** — each column a view of one layer of this frame's column, with this frame's index (§10) |
+| `df.unstack(axis:)` | **view-frames** — each column a view of one layer of this frame's column, with this frame's index (§10) |
 | `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
 | `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | a **new frame** / a **new CArray** sharing nothing — each cell is gathered from the row that carried its pair, and a missing pair has to become UNDEF (§11) |

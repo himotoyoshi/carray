@@ -10,8 +10,8 @@
 # Both are class methods (symmetric N-ary; no frame is privileged), like
 # +CArray.meld+ / +CArray.concatenate+, not instance verbs.
 #
-# +CAFrame.stack+ and +CAFrame#split+ add and take away a layer axis instead
-# of rows, as +CArray.stack+ and +CArray#split+ do for one array.
+# +CAFrame.stack+ and +CAFrame#unstack+ add and take away a layer axis
+# instead of rows.
 
 class CAFrame
   # Weld frames along the row axis, view-style.  Each output column is
@@ -101,10 +101,10 @@ class CAFrame
   #
   # Every frame must have the same columns, the same number of rows and the
   # same index (by value) under the same axis name, or none; the result
-  # takes the first frame's.  +split+ is the inverse:
+  # takes the first frame's.  +unstack+ is the inverse:
   #
   #   s = CAFrame.stack(jan1, jan2, jan3)    # temp:float64 -> temp:float64[3]
-  #   CAFrame.stack(*s.split(axis: 1))       # the same frame again
+  #   CAFrame.stack(*s.unstack(axis: 1))       # the same frame again
   def self.stack(*frames, axis: 1)
     frames = frames.flatten
     check_concat_inputs(frames, verb: "stack")
@@ -143,22 +143,22 @@ class CAFrame
   # without it has no layer to give each frame.  Each frame's columns are
   # views of this frame's, and each has this frame's index.
   #
-  #   s.split(axis: 1)    # => [frame of layer 0, frame of layer 1, ...]
-  def split(axis:)
-    self.class.send(:check_layer_axis, axis, "split")
+  #   s.unstack(axis: 1)    # => [frame of layer 0, frame of layer 1, ...]
+  def unstack(axis:)
+    self.class.send(:check_layer_axis, axis, "unstack")
     if @columns.empty?
-      raise ArgumentError, "split: the frame has no columns to split"
+      raise ArgumentError, "unstack: the frame has no columns to unstack"
     end
     length = nil
     @columns.each do |name, col|
       unless axis < col.ndim
         raise ArgumentError,
-              "split: column #{name.inspect} is #{col.ndim}-D and has no axis #{axis}"
+              "unstack: column #{name.inspect} is #{col.ndim}-D and has no axis #{axis}"
       end
       length ||= col.shape[axis]
       unless col.shape[axis] == length
         raise ArgumentError,
-              "split: column #{name.inspect} has #{col.shape[axis]} along axis #{axis}, " \
+              "unstack: column #{name.inspect} has #{col.shape[axis]} along axis #{axis}, " \
               "the others #{length}"
       end
     end

@@ -50,7 +50,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - New: `CAFrame.stack(*frames, axis: 1)` puts frames of the same shape on
   top of each other as layers: the rows stay, and each column gains an axis
   over the frames (`temp:float64` becomes `temp:float64[K]`), as a view.
-  `CAFrame#split(axis:)` is the inverse, one frame per layer. The frames
+  `CAFrame#unstack(axis:)` is the inverse, one frame per layer. The frames
   must have the same columns, number of rows and index; the layers carry no
   labels.
 

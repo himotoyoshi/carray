@@ -2,9 +2,9 @@ require "test/unit"
 require "carray"
 
 # CAFrame.stack puts frames of the same shape on top of each other as layers:
-# each column gains an axis over the frames, the rows stay.  split is the
+# each column gains an axis over the frames, the rows stay.  unstack is the
 # inverse.
-class TestCAFrameStackSplit < Test::Unit::TestCase
+class TestCAFrameStackUnstack < Test::Unit::TestCase
   def frame(k)
     CAFrame.new({ "temp" => CA_FLOAT64([10, 20, 30]) + k,
                   "rh"   => CA_INT32([50, 60, 70]) + k,
@@ -39,8 +39,8 @@ class TestCAFrameStackSplit < Test::Unit::TestCase
     assert_equal 6, CAFrame.meld(@s, @s).nrow
   end
 
-  def test_split_is_the_inverse
-    parts = @s.split(axis: 1)
+  def test_unstack_is_the_inverse
+    parts = @s.unstack(axis: 1)
     assert_equal 3, parts.size
     parts.each_with_index do |part, k|
       assert_equal @frames[k].column_names, part.column_names
@@ -51,8 +51,8 @@ class TestCAFrameStackSplit < Test::Unit::TestCase
     back.column_names.each { |n| assert_equal @s[n].to_a, back[n].to_a }
   end
 
-  def test_split_pieces_are_views
-    @s.split(axis: 1)[0]["rh"][1] = -1
+  def test_unstack_pieces_are_views
+    @s.unstack(axis: 1)[0]["rh"][1] = -1
     assert_equal(-1, @frames[0]["rh"][1])
   end
 
@@ -77,12 +77,12 @@ class TestCAFrameStackSplit < Test::Unit::TestCase
     assert_raise(ArgumentError) { CAFrame.stack(*@frames, axis: -1) }
     assert_raise(ArgumentError) { CAFrame.stack(*@frames, axis: 2) }   # temp is 1-D
     assert_raise(TypeError)     { CAFrame.stack(*@frames, axis: 1.0) }
-    assert_raise(ArgumentError) { @s.split(axis: 0) }
+    assert_raise(ArgumentError) { @s.unstack(axis: 0) }
   end
 
-  def test_split_needs_the_axis_in_every_column
-    assert_raise(ArgumentError) { @frames[0].split(axis: 1) }   # temp has no axis 1
-    assert_raise(ArgumentError) { @s.split(axis: 2) }          # only v has it
+  def test_unstack_needs_the_axis_in_every_column
+    assert_raise(ArgumentError) { @frames[0].unstack(axis: 1) }   # temp has no axis 1
+    assert_raise(ArgumentError) { @s.unstack(axis: 2) }          # only v has it
   end
 
   def test_group_by_refuses_a_key_with_more_than_one_value_per_row
