@@ -37,8 +37,8 @@ class TestAxisGroupKeywords < Test::Unit::TestCase
   end
 
   # A group count reads only the mask, so it answers for a payload the
-  # group kernel cannot read; the reductions that read it are refused by
-  # data type.
+  # group kernel cannot read; the reductions that read it answer as the core
+  # does over each group.
   def test_object_payload
     o = CA_OBJECT([[1], [2], [3], [4]])
     o[1, 0] = UNDEF
@@ -48,7 +48,8 @@ class TestAxisGroupKeywords < Test::Unit::TestCase
     [:count_not_masked, :count, :count_masked, :elements].each do |op|
       assert_equal gf.send(op, axis: :group).to_a, g.send(op, axis: :group).to_a, op.to_s
     end
-    e = assert_raise(CArray::DataTypeError) { g.sum(axis: :group) }
-    assert_match(/object/, e.message)
+    sum = g.sum(axis: :group)
+    assert_equal CA_OBJECT, sum.data_type
+    assert_equal [[1], [7]], sum.to_a
   end
 end

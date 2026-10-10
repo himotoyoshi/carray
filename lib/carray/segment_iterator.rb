@@ -575,12 +575,13 @@ class CASegmentIterator < CAIterator
   end
 
   # Whether the axis-group scan kernel gives the core's answer. It reads
-  # numeric storage, not a Face, and answers cumsum / cumprod in float64 (an
+  # an integer, float, boolean or object payload (not a complex, not a Face),
+  # and answers cumsum / cumprod in float64 (an
   # object stays an object), cummax / cummin in the value's data type and
   # cumcount in int64 -- which is not the core's answer for every data type
   # (the core counts a boolean's running sum in uint64).
   def kernel_scans? (op, answer)
-    return false if @value.face? || answer.face?
+    return false if @value.face? || answer.face? || @value.complex?
     kernel_type =
       case op
       when :cumcount         then CA_INT64

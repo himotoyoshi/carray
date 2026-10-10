@@ -82,6 +82,14 @@ answer in the source's own data type — an extremum does not grow magnitude, so
 an int64 past float64's mantissa comes back exact — and a boolean source answers
 as its 0/1 numeric storage, as in the core.
 
+The scatter kernels read an integer or float payload. Any other payload — a
+boolean, complex, object, or a [Face](CAFace.md) such as a `CATime` column — is
+reduced group by group by the core, so the data type, the Face and a refusal
+are the core's: a boolean's `sum` is uint64, an object's `mean` stays exact, a
+time column's `min` is a time and its `sum` is refused in the core's words.
+Folding a band into the statistic (`axis: [:group, k]`) needs the kernels, and
+is refused for such a payload.
+
 **Position: `min_addr` / `max_addr`, not `min_index`.** A group preserves source
 order, so a *within-group* index is weak; the group returns the **flat source
 address** of the winning cell instead, which you can index back into the raveled
@@ -127,14 +135,14 @@ data[station, nil].cumsum(axis: :group)
 data[station].cumcount(axis: :group)
 ```
 
-The output data type follows the reduce siblings: `cumsum` / `cumprod` are `float64` (the
-running value grows, so integer-preserving sums are a deliberate non-goal, as on
-the reduce side); `cummax` / `cummin` **preserve the source data type** (extrema do
-not grow magnitude — `int` stays `int`); `cumcount` is `int64`, 1-based (running
-count of present cells, inclusive). An `object` source produces an `object`
-result for `cumsum` / `cumprod` / `cummax` / `cummin` (`cumsum` / `cumprod` seed
-the empty group with `0` / `1`; `cummax` / `cummin` seed from the first member),
-and `int64` for `cumcount`.
+Each running value answers as the core scan of the same name does over the
+group's members. `cumsum` / `cumprod` of an integer or float source are
+`float64`; `cummax` / `cummin` **preserve the source data type** (extrema do not
+grow magnitude — `int` stays `int`); `cumcount` is `int64`, 1-based (running
+count of present cells, inclusive). A boolean's `cumsum` / `cummax` are uint64,
+as in the core; a complex source stays complex; an `object` source stays
+`object`; a Face keeps its Face (`cummin` of a time column is a time), and a
+scan the core refuses (`cumsum` of a time column) is refused here.
 
 A scan cannot fold a band **into** the statistic (`axis: [:group, k]`) — that
 would collapse an axis, and a scan preserves the source shape. Without

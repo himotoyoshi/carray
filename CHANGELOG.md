@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `axis_group` reductions and running values (`v[cat].sum(axis:
+  :group)`, `.cumsum(axis: :group)` and their siblings) answer for a boolean,
+  complex, object or Face payload as the core does over each group: a time
+  column's `min` is a time, an object's `mean` is exact, a complex `sum` is
+  complex. They used to be refused, or fail with an internal error. A
+  reduction the core refuses (`sum` of a time column) is refused in the core's
+  words. Folding a band into the statistic (`axis: [:group, k]`) is still
+  refused for such a payload.
+
+- Change: an `axis_group` reduction or running value over a boolean payload
+  has the core's data type: `sum`, `cumsum` and `cummax` give uint64 (they gave
+  float64, float64 and boolean), as `CArray#sum`, `#cumsum` and `#cummax` do.
+
 - Fix: storing an array of a Face (`CATime`, `CATimedelta`, a categorical, a
   const string) into an object array stores its values, as `to_type(:object)`
   gives them; it stored the bytes of its storage (`obj[] = times` held strings
