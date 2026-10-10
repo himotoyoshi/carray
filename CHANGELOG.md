@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `refer` to a wider type, for example two `float64` read as one
+  `complex128` or one 16-byte `fixlen` cell, read and wrote the wrong
+  elements when the parent's elements were not adjacent in memory: a
+  `transpose`, a `flip`, an index selection or a stepped slice. Bulk reads
+  returned neighbouring values of the original array. Reading or writing a
+  single cell (`c[i]`, `c[i] = v`) went outside a temporary buffer, and a
+  write reached only the first of the parent elements. The result now
+  matches referring a `copy` of the parent.
 - Fix: `CAFrame#parse_to_time` without a format, `parse_to_time(name,
   :infer)`, `cast(name => :time)` and `infer_types` read year-first text at
   hour 24 (`"2024-01-01 24:00:00"`) as the next midnight, as a strptime

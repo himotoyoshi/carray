@@ -301,6 +301,38 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
     out_strides[k] = composed;
   }
 
+  /* A leaf cell wider than the remainder of its first parent element
+     (CARefer reinterpreting two float64 as one complex128) covers several
+     consecutive parent elements, and the folded access reads the cell as
+     one run of bytes from out_base.  That is only true when those parent
+     elements are adjacent in parent->parent's memory as well: every cell
+     must fit inside the parent's trailing row-major contiguous block.
+     Cell starts are flat0 + sum idx[k]*advance[k], so their residues
+     modulo the block size C step by g = gcd(C, advance...); every cell
+     fits when (flat0 mod g) + span <= g. */
+  if ( sub_byte + leaf->bytes > parent->bytes ) {
+    ca_size_t span = (sub_byte + leaf->bytes + parent->bytes - 1)
+                     / parent->bytes;
+    ca_size_t block = 1;
+    ca_size_t g, flat0 = leaf->base_offset / parent->bytes;
+    if ( parent->ndim > 0
+         && parent->strides[parent->ndim - 1] == parent->bytes ) {
+      block = parent->dim[parent->ndim - 1];
+      for (m = parent->ndim - 2; m >= 0; m--) {
+        if ( parent->strides[m] != parent->strides[m + 1] * parent->dim[m + 1] )
+          break;
+        block *= parent->dim[m];
+      }
+    }
+    g = block;
+    for (k = 0; k < leaf->ndim; k++) {
+      ca_size_t a = leaf->strides[k] / parent->bytes;
+      if ( a < 0 ) a = -a;
+      while ( a != 0 ) { ca_size_t r = g % a; g = a; a = r; }
+    }
+    if ( g == 0 || (flat0 % g) + span > g ) return 0;
+  }
+
   return 1;
 }
 
@@ -521,19 +553,30 @@ ca_stride_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       ca_xfer_index(ca->parent, pidx, data, dir);
     }
     else {
-      /* ALLOCV: the parent's fetch/store can raise (a CAObject parent runs
+      /* Byte-mismatched reinterpret.  The cell covers the parent elements
+         from off / pbytes through the one holding its last byte: one for a
+         narrower cell (CAField .real / .imag), several for a wider one
+         (CARefer reading two float64 as one complex128).  Read all of
+         them; a store writes back all of them.
+         ALLOCV: the parent's fetch/store can raise (a CAObject parent runs
          Ruby), and a raise must not leak the scratch. */
       volatile VALUE holder;
-      char *scratch = ALLOCV_N(char, holder, pbytes);
+      ca_size_t addr = off / pbytes;
+      ca_size_t sub  = off % pbytes;
+      ca_size_t span = (sub + ca->bytes + pbytes - 1) / pbytes;
+      ca_size_t i;
+      char *scratch = ALLOCV_N(char, holder, span * pbytes);
+      for (i = 0; i < span; i++) {
+        ca_fetch_addr(ca->parent, addr + i, scratch + i * pbytes);
+      }
       if (dir == CA_XFER_GET) {
-        ca_fetch_addr(ca->parent, off / pbytes, scratch);
-        memcpy(data, scratch + (off % pbytes), ca->bytes);
+        memcpy(data, scratch + sub, ca->bytes);
       }
       else {
-        /* read-modify-write the parent cell for sub-byte reinterpret */
-        ca_fetch_addr(ca->parent, off / pbytes, scratch);
-        memcpy(scratch + (off % pbytes), data, ca->bytes);
-        ca_store_addr(ca->parent, off / pbytes, scratch);
+        memcpy(scratch + sub, data, ca->bytes);
+        for (i = 0; i < span; i++) {
+          ca_store_addr(ca->parent, addr + i, scratch + i * pbytes);
+        }
       }
       ALLOCV_END(holder);
     }
