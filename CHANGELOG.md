@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#stack_columns(columns, into:, shape: nil)` makes columns
+  side by side in a file (a value per month, say) one N-D column, as a view;
+  `CAFrame#unstack_column(name, into: nil)` splits it back. The columns are
+  a Range of names (the frame's columns from one to the other), an Array or
+  a Regexp; `shape:` arranges them on more than one axis, as
+  `shape: [12, 3]` for month by maximum, minimum and mean.
+
 - New: a `CAFrame` group's `sum` / `mean` / `min` / `max` and `aggregate`
   reduce an N-D column along the rows, so each group keeps the trailing
   shape: a profile column `(N, L)` gives each group's profile `(groups, L)`.

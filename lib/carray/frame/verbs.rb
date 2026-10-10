@@ -101,6 +101,142 @@ class CAFrame
     rebuild(rebuilt)
   end
 
+  # Stack several columns into one N-D column: the columns side by side in a
+  # file -- a value per month, say -- become one column whose trailing axis
+  # (or axes, with +shape:+) runs over them.  The columns are given in the
+  # frame's order:
+  #
+  #   df.stack_columns("G02_002".."G02_013", into: "precip")   # 12 columns
+  #   df.stack_columns(%w[t_max t_min t_mean], into: "temp")
+  #   df.stack_columns(/\Ahour_\d+\z/, into: "temp")
+  #   df.stack_columns("G02_015".."G02_050", into: "temp", shape: [12, 3])
+  #
+  # A Range of names means the columns of this frame from the first name to
+  # the last, in the frame's order -- not the names Ruby would count between
+  # the two -- and an exclusive Range leaves the last one out.  An Array is
+  # taken in its own order, a Regexp in the frame's.  +shape:+ arranges the
+  # stacked columns in row-major order (the last axis runs fastest) and must
+  # hold exactly that many.  Columns that are themselves N-D keep their axes
+  # after the new ones.
+  #
+  # The new column is a view of the old ones, so writes reach them; it takes
+  # the place of the first of them, and the others leave the frame.  The
+  # trailing axes carry no labels: keep what position k means (the months)
+  # alongside.  +unstack_column+ is the inverse.
+  #
+  # @return [CAFrame] a new frame; the other columns are shared.
+  def stack_columns(selection, into:, shape: nil)
+    names = columns_selected(selection, "stack_columns")
+    target = into.to_s
+    taken = [target] & (@columns.keys - names)
+    unless taken.empty?
+      raise ArgumentError, "stack_columns: #{target.inspect} is already a column"
+    end
+    parts = names.map { |n| @columns[n] }
+    trailing = parts.first.shape[1..]
+    parts.each_with_index do |c, i|
+      next if c.shape[1..] == trailing
+      raise ArgumentError,
+            "stack_columns: #{names[i].inspect} has shape #{c.shape.inspect}, " \
+            "#{names.first.inspect} has #{parts.first.shape.inspect}"
+    end
+    layer = shape ? Array(shape) : [names.size]
+    unless layer.all? { |d| d.is_a?(Integer) && d > 0 } && layer.inject(:*) == names.size
+      raise ArgumentError,
+            "stack_columns: shape: #{layer.inspect} does not hold the #{names.size} columns"
+    end
+    col = CArray.stack(parts, axis: 1)
+    col = col.reshape(nrow, *layer, *trailing) if layer.size > 1
+    rebuilt = {}
+    @columns.each do |k, v|
+      if k == names.first
+        rebuilt[target] = col
+      elsif ! names.include?(k)
+        rebuilt[k] = v
+      end
+    end
+    rebuild(rebuilt)
+  end
+
+  # Split an N-D column into one column per position on its trailing axes --
+  # the inverse of +stack_columns+.  The new columns are views of the N-D
+  # column, in row-major order, and take its place in the frame.  +into:+
+  # names them (as many names as positions); without it they are named
+  # after the column and the position, "temp_0", or "temp_6_2" with two
+  # axes.  The frame does not remember the names the columns had before
+  # +stack_columns+, so pass them as +into:+ to get them back.
+  #
+  # @return [CAFrame] a new frame; the other columns are shared.
+  def unstack_column(name, into: nil)
+    key = name.to_s
+    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    if col.ndim < 2
+      raise ArgumentError, "unstack_column: #{key.inspect} is one-dimensional; there is nothing to unstack"
+    end
+    trailing = col.shape[1..]
+    count = trailing.inject(:*)
+    positions = trailing.size == 1 ? (0...count).map { |k| [k] } :
+                  trailing.map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map(&:flatten) }
+    names = if into
+              Array(into).map(&:to_s)
+            else
+              positions.map { |pos| "#{key}_#{pos.join('_')}" }
+            end
+    unless names.size == count && names.uniq.size == count
+      raise ArgumentError,
+            "unstack_column: into: names #{names.size} columns, each once; #{key.inspect} has #{count} positions"
+    end
+    taken = names & (@columns.keys - [key])
+    unless taken.empty?
+      raise ArgumentError, "unstack_column: #{taken.inspect} already a column"
+    end
+    rebuilt = {}
+    @columns.each do |k, v|
+      if k == key
+        positions.each_with_index { |pos, j| rebuilt[names[j]] = v[nil, *pos] }
+      else
+        rebuilt[k] = v
+      end
+    end
+    rebuild(rebuilt)
+  end
+
+  # The names a column selection picks: a Range of names spans the frame's
+  # columns from one to the other, an Array is taken as given, a Regexp
+  # matches in the frame's order.
+  private def columns_selected(selection, verb)
+    keys = @columns.keys
+    names = case selection
+            when Range
+              from, to = selection.begin, selection.end
+              unless from.is_a?(String) && to.is_a?(String)
+                raise ArgumentError, "#{verb}: a Range of column names takes two names (got #{selection.inspect})"
+              end
+              i = keys.index(from) or raise KeyError, "#{verb}: no column #{from.inspect}"
+              j = keys.index(to)   or raise KeyError, "#{verb}: no column #{to.inspect}"
+              if j < i
+                raise ArgumentError, "#{verb}: #{to.inspect} comes before #{from.inspect} in the frame"
+              end
+              keys[i..(selection.exclude_end? ? j - 1 : j)]
+            when Array
+              selection.map(&:to_s).each do |n|
+                raise KeyError, "#{verb}: no column #{n.inspect}" unless @columns.key?(n)
+              end
+            when Regexp
+              keys.grep(selection)
+            else
+              raise ArgumentError,
+                    "#{verb}: columns are a Range of names, an Array of names or a Regexp (got #{selection.class})"
+            end
+    if names.empty?
+      raise ArgumentError, "#{verb}: #{selection.inspect} selects no column"
+    end
+    if names.uniq.size != names.size
+      raise ArgumentError, "#{verb}: #{selection.inspect} names a column more than once"
+    end
+    names
+  end
+
   # Mask cells of a column that equal +value+ (sentinel -> mask, memo §11.4).
   # In-place on the column (write-through, §4.3): numeric/object columns
   # mask in place; a categorical column's codes are read-only (§13.4) so this

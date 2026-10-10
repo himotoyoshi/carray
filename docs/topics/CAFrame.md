@@ -797,6 +797,42 @@ df = df.append("speed",
 > `df["wind"][nil, 0]` is explicit on purpose, keeping `df[...]` a clean
 > column/row selector.
 
+### From columns side by side — `stack_columns` / `unstack_column`
+
+A file often lays a series out as columns side by side: a value per month,
+one per hour, or per month three values (maximum, minimum, mean).
+`stack_columns` makes them one N-D column, and `unstack_column` splits it back:
+
+```ruby
+df = df.stack_columns("G02_002".."G02_013", into: "precip")            # int32[12]
+df = df.stack_columns("G02_015".."G02_050", into: "temp", shape: [12, 3])
+df["temp"][nil, 6, 0]                  # July's maximum, every row
+df["precip"].sum(axis: 1)              # the year's total, every row
+df = df.unstack_column("temp", into: names)   # the 36 columns again
+```
+
+- The columns are a **Range of names**, an **Array** or a **Regexp**. A Range
+  means this frame's columns from the first name to the last, in the frame's
+  order (not the names Ruby would count between the two), and `...` leaves the
+  last one out; an Array is taken in its own order; a Regexp matches in the
+  frame's order. A name that is not a column, a Range that runs backwards, or a
+  column named twice raises.
+- `shape:` arranges the columns in row-major order — the last axis runs
+  fastest — and must hold exactly as many: 36 columns of maximum, minimum, mean
+  for each month are `shape: [12, 3]`. Without it the columns make one axis.
+- The new column is a **view** of the old ones, and takes the place of the
+  first of them; the others leave the returned frame. Writing to it — masking a
+  missing-value code with `df["temp"][:eq, 999999] = UNDEF`, say — writes the
+  columns it was made from. Columns of different data types are read at a
+  common type, and N-D columns keep their axes after the new ones.
+- The new axes carry **no labels**, like any trailing axis: keep what each
+  position means alongside (`months = [1, 2, 3, 12]` for a column that has only
+  those months).
+- `unstack_column` puts one column per position in the N-D column's place, in
+  row-major order, as views. `into:` names them; without it they are named
+  `"temp_0"`, or `"temp_6_2"` with two axes. The frame does not remember the
+  names the columns had, so pass them as `into:` to get them back.
+
 ---
 
 ## 5. `select`
@@ -1870,6 +1906,8 @@ Frame view/copy semantics follow CArray exactly:
 | `df.filter(keep_masked: true) { }` | a **materialized** frame — columns and index both independent; the carried-forward UNDEF has to be written into the result, which a view cannot do (§6) |
 | `df.copy` | an **independent** frame — every column materialized |
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
+| `df.stack_columns(...)` | a **new frame** — the other columns shared, the new N-D column a view of the stacked ones (§4) |
+| `df.unstack_column(...)` | a **new frame** — the other columns shared, the new columns views of the N-D column (§4) |
 | `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
 | `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
