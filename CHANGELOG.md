@@ -65,6 +65,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   rather than UNDEF, and a column of array cells holding nothing but `nil` is
   an object column, as a scalar one is.
 
+- Fix: `CAFrame#to_table` shows the elements of an N-D cell as scalar cells
+  are shown: floats rounded to `precision:`, a time as its date and time, a
+  masked element as `_`.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a

@@ -1169,7 +1169,9 @@ puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
 constraints — it is text to be looked at, not read back. Numeric columns are
 right-aligned and everything else left-aligned, a **masked cell shows as `_`**
 (the marker CArray's own inspect uses), and an **N-D column** — which `to_csv`
-rejects, having no flat cell — shows each row's slice as an Array literal.
+rejects, having no flat cell — shows each row's slice as a bracketed list,
+each element as a scalar cell of its kind would be (rounded to `precision`, a
+masked element as `_`, a time as its date), a string keeping its quotes.
 Column widths are counted in terminal cells, so a CJK name occupies two per
 character and the columns stay square.
 

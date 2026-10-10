@@ -491,17 +491,31 @@ class CAFrame
     "#{n} #{noun}#{n == 1 ? '' : 's'}"
   end
 
-  # Render one N-D cell the way Array#inspect would, except that a masked
-  # element prints as the table's missing marker rather than as UNDEF.
-  private def format_nested_cell(v)
+  # Render one N-D cell as a bracketed list.  Each element is shown as a
+  # scalar cell of its kind would be -- floats rounded to +precision+, a
+  # masked element as the table's missing marker -- except that a String
+  # keeps its quotes, so the list stays readable when one holds a comma.
+  private def format_nested_cell(v, precision)
     case v
-    when Array then "[" + v.map { |x| format_nested_cell(x) }.join(", ") + "]"
-    else UNDEF.equal?(v) || v.nil? ? "_" : v.inspect
+    when Array  then "[" + v.map { |x| format_nested_cell(x, precision) }.join(", ") + "]"
+    when String then v.inspect
+    else format_scalar_cell(v, precision)
     end
   end
 
   private def format_table_cell(col, i, precision)
     e = elem_at(col, i)
+    if e.is_a?(CArray)
+      # An N-D cell renders its elements, and a masked element among them
+      # takes the same marker a masked scalar does -- UNDEF's own inspect
+      # would put a second spelling of "missing" in the same table.
+      format_nested_cell(e.to_a, precision)
+    else
+      format_scalar_cell(e, precision)
+    end
+  end
+
+  private def format_scalar_cell(e, precision)
     if UNDEF.equal?(e) || e.nil?
       "_"
     elsif e.is_a?(Float) && precision
@@ -509,11 +523,6 @@ class CAFrame
       # sets the column width for every other row and makes the table hard
       # to read. precision: nil prints the value as Ruby renders it.
       e.round(precision).to_s
-    elsif e.is_a?(CArray)
-      # An N-D cell renders its elements, and a masked element among them
-      # takes the same marker a masked scalar does -- UNDEF's own inspect
-      # would put a second spelling of "missing" in the same table.
-      format_nested_cell(e.to_a)
     elsif e.is_a?(String)
       e
     elsif e.respond_to?(:iso8601)
