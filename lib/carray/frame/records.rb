@@ -85,22 +85,37 @@ class CAFrame
   end
   private_class_method :mask_missing
 
-  # Stack equal-length array cells into an (N, L) column via an object 2-D fill
-  # + to_type (nil rows -> UNDEF, int/float by leaf). Ragged lengths or
-  # non-numeric leaves fall back to a 1-D object column of the raw cells.
+  # Stack array cells of one shape into an (N, *shape) column via an object
+  # fill + to_type (nil rows -> UNDEF, int/float by leaf); a cell may itself
+  # be nested, an (N, L, M) column from [[..], [..]] cells.  Cells of
+  # different shapes, nesting that is not rectangular, or non-numeric leaves
+  # fall back to a 1-D object column of the raw cells.
   def self.build_nd_column(values, present, n)
-    lengths = present.map { |v| v.is_a?(CArray) ? v.shape[0] : v.size }
-    len = lengths.first
-    unless lengths.all? { |x| x == len }
+    shapes = present.map { |v| v.is_a?(CArray) ? v.shape : nested_shape(v) }
+    shape = shapes.first
+    unless shape && shapes.all? { |x| x == shape }
       return mask_missing(CArray.object(n) { values })
     end
 
-    nested = values.map { |v| v.nil? ? Array.new(len) : (v.is_a?(CArray) ? v.to_a : v) }
-    type = numeric_leaf_type(nested.flatten.compact)
-    table = CArray.object(n, len) { nested }
+    blank = shape.reverse.inject(nil) { |cell, d| Array.new(d) { cell } }
+    nested = values.map { |v| v.nil? ? blank : (v.is_a?(CArray) ? v.to_a : v) }
+    leaves = nested.flatten.compact
+    type = leaves.empty? ? nil : numeric_leaf_type(leaves)
+    table = CArray.object(n, *shape) { nested }
     type ? table.to_type(type) : mask_missing(table)
   end
   private_class_method :build_nd_column
+
+  # The shape of a rectangular nested Array, or nil when it is not
+  # rectangular.  A leaf (anything but an Array) has shape [].
+  def self.nested_shape(v)
+    return [] unless v.is_a?(Array)
+    inner = v.map { |e| nested_shape(e) }
+    return [v.size] if v.empty?
+    return nil unless inner.first && inner.all? { |x| x == inner.first }
+    [v.size, *inner.first]
+  end
+  private_class_method :nested_shape
 
   # :int64 if every value is an Integer, :float64 for Integers and Floats,
   # :cmplx128 when Complex values join them, otherwise nil (keep object).

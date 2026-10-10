@@ -91,7 +91,9 @@ class CAFrame
     if UNDEF.equal?(v)
       nil
     elsif v.is_a?(CArray)
-      v.to_a.map { |e| UNDEF.equal?(e) ? nil : e }
+      record_value(v.to_a)
+    elsif v.is_a?(Array)
+      v.map { |e| record_value(e) }
     else
       v
     end

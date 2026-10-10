@@ -59,6 +59,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   used to carry values across components and rows, and `:linear` on a frame
   with an index raised.
 
+- Fix: `CAFrame.from_records` reads array cells nested to one shape
+  (`[[1, 2], [3, 4]]`) as an `(N, 2, 2)` column; every value used to come
+  back UNDEF. `to_records` writes a masked cell of such a column as `nil`
+  rather than UNDEF, and a column of array cells holding nothing but `nil` is
+  an object column, as a scalar one is.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a

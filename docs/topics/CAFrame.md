@@ -487,7 +487,7 @@ string is parsed**, and anything mixed stays object.
 | `Integer` and `Float` | `:float64` |
 | `Integer`, `Float` and `Complex` | `:cmplx128` |
 | strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed | `:object` (left as is) |
-| equal-length numeric **arrays** | an **N-D** `(N, L)` column (see §4) |
+| numeric **arrays** of one shape | an **N-D** `(N, L)` column, `(N, L, M)` for nested ones (see §4) |
 
 - The column set is the **union of keys** in first-appearance order; keys are
   stringified (String- or Symbol-keyed records both work).
@@ -502,10 +502,13 @@ df = CAFrame.from_records(records,
                           types: { %w[prefNumber humidity] => :int32 })
 ```
 
-An equal-length **array cell** across every record becomes one N-D column —
-`{ "temp" => [min, mean, max] }` over `N` records is a single `(N, 3)` column
-(see [N-D columns](#4-n-d-columns)). Ragged lengths or non-numeric leaves fall
-back to an object column.
+An **array cell** of one shape across every record becomes one N-D column —
+`{ "temp" => [min, mean, max] }` over `N` records is a single `(N, 3)` column,
+and a nested cell `[[1, 2], [3, 4]]` gives an `(N, 2, 2)` one (see
+[N-D columns](#4-n-d-columns)). Cells of different shapes, nesting that is not
+rectangular, or non-numeric leaves fall back to an object column; so do cells
+with no value at all (every element `nil`, or empty arrays), as a scalar column
+of `nil` does.
 
 ---
 
