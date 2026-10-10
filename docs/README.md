@@ -55,7 +55,8 @@ CArray can present.
 | [CAFarray](objects/CAFarray.md) | Guide | Column-major (Fortran-order) view |
 | [CAStack](objects/CAStack.md) | Guide | Outer-axis stack view of K uniform parents (`stack` / `meld` / `montage`) |
 | [Lazy](topics/Lazy.md) | Guide | Lazy element-wise views — `.lazy` / `CArray.lazy` / `CArray.fuse` |
-| [CAFrame](topics/CAFrame.md) | Guide (provisional) | A lightweight DataFrame over named CArray columns |
+| [CAFrame](topics/CAFrame.md) | Guide | A lightweight DataFrame over named CArray columns |
+| [CAFrameCSV](topics/CAFrameCSV.md) | Guide | Reading and writing CSV with a CAFrame (`from_csv` / `to_csv`) |
 
 ## Iterators and reductions
 
