@@ -1519,7 +1519,7 @@ then `fill(name, :linear)` if values should be interpolated.
 
 ---
 
-## 10. Combining frames — `join`, `align`, `meld`, `paste`
+## 10. Combining frames — `join`, `align`, `meld`, `stack`, `paste`
 
 Join delegates to CArray addressing primitives: the key yields an address
 array, and each column is gathered by `project` (length-preserving,
@@ -1595,9 +1595,9 @@ Because the reference is external, `align` stays a pure gather with no
 interpolation or resampling — fill the `UNDEF` gaps afterward with an explicit
 step (`fill`, §8, or your own column math on the escaped columns).
 
-### `CAFrame.meld` / `CAFrame.concatenate` — stack rows
+### `CAFrame.meld` / `CAFrame.concatenate` — rows after rows
 
-Both stack frames along the **row axis** (vertical): same columns, more rows.
+Both put frames one after another along the **row axis**: same columns, more rows.
 They are the **symmetric sibling of `join`** — no frame is privileged — so they
 are class methods (mirroring `CArray.meld` / `CArray.concatenate`), not `df.join`.
 
@@ -1626,6 +1626,10 @@ Everything else is shared between the two:
   none; a mix raises.
 - A single-frame call is not special-cased: `CAFrame.meld(df)` returns a view
   sharing `df`'s columns, `CAFrame.concatenate(df)` returns an independent copy.
+- A frame with **no rows** adds no values, so its data types take no part in the
+  result: a header-only CSV reads as object columns, and joined to a typed frame
+  it neither makes `meld` refuse nor turns `concatenate`'s columns into object.
+  It still has to have the same columns, and an index exactly when the others do.
 
 Because `meld` shares storage, writes flow **both ways**: writing a row of the
 result reaches whichever input frame owns that row, and writing an input reaches
@@ -1633,6 +1637,53 @@ the result. `copy` the result if you want it detached.
 
 Both are deliberately strict (same columns only) — a union-with-`UNDEF` mode is a
 possible future opt-in, kept out to stay explicit.
+
+### `CAFrame.stack` / `split` — layers
+
+`CAFrame.stack` puts frames of the **same shape** on top of each other as
+layers: the rows stay as they are, and each column gains an axis that runs
+over the frames. Several files of the same table — one per day, say — become
+one frame whose columns hold every day:
+
+```ruby
+s = CAFrame.stack(day1, day2, day3)   # temp:float64 -> temp:float64[3]
+s["temp"]                             # (nrow, 3): row by day
+s["temp"][nil, 1]                     # day2's column
+s["temp"][0..9, nil]                  # a block of rows over every day
+s["temp"].mean(axis: 1)               # each row's mean over the days
+```
+
+This is what N-D columns give for nothing: row verbs (`filter`, `sort_by`,
+`meld`, `head`) work on the stack unchanged, and the work across layers is a
+column reduction along the layer axis. `group_by` takes one value per row, so
+group by a component — `s.group_by(s["station"][nil, 0])` — rather than by a
+stacked column, which it refuses.
+
+- `axis:` counts a column's own axes, 0 being the row axis, so it starts at 1
+  and defaults to 1: the layer axis comes right after the rows in **every**
+  column (`v:float64[2]` becomes `float64[3, 2]`). Axis 0 is refused — rows
+  are joined by `meld` / `concatenate` — and so is a negative axis, which would
+  name a different axis in columns of different dimensions.
+- Every frame must have the same columns, the same number of rows, and the same
+  index **by value** under the same axis name (or none). Stacked rows have to be
+  the same rows; frames whose rows differ are refused rather than put together
+  row by row. The result takes the first frame's index.
+- The result is a **view**: each column is a `CAStack` over the frames' columns,
+  and writes reach them. `copy` it for an independent frame. A column whose data
+  type differs between the frames is read at a common type.
+- The layers carry **no labels**. Keep them alongside as an array of your own
+  (`days = CArray.time([...])`), with `s["temp"][nil, k]` matching `days[k]` — the
+  same way as any N-D column's trailing axes (§4).
+
+`split(axis:)` is the inverse: one frame per position on that axis, each with
+this frame's index and views of its columns, and `CAFrame.stack(*s.split(axis: 1))`
+gives the same frame back. Every column must have the axis with the same length;
+a column without it has no layer to give each frame, so it raises rather than
+repeating the column in every frame.
+
+```ruby
+s.split(axis: 1)    # => [day1's frame, day2's frame, day3's frame]
+```
 
 ### `paste` — merge columns by position
 
@@ -1831,6 +1882,8 @@ Frame view/copy semantics follow CArray exactly:
 | `df[sel] = frame` | **self** — rebuilds each column as a `CAMeld` of [rows before the span, a snapshot of `other`'s column, rows after it]. The spliced span is independent of `other`; the rows on either side still share storage with the original columns (§3) |
 | `CAFrame.meld(...)` | a **view-frame** — each column a `CAMeld` over the inputs; writes flow both ways (§10) |
 | `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
+| `CAFrame.stack(...)` | a **view-frame** — each column a `CAStack` over the inputs' columns; writes reach them (§10) |
+| `df.split(axis:)` | **view-frames** — each column a view of one layer of this frame's column, with this frame's index (§10) |
 | `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
 | `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | a **new frame** / a **new CArray** sharing nothing — each cell is gathered from the row that carried its pair, and a missing pair has to become UNDEF (§11) |

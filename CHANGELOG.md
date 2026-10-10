@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame.stack(*frames, axis: 1)` puts frames of the same shape on
+  top of each other as layers: the rows stay, and each column gains an axis
+  over the frames (`temp:float64` becomes `temp:float64[K]`), as a view.
+  `CAFrame#split(axis:)` is the inverse, one frame per layer. The frames
+  must have the same columns, number of rows and index; the layers carry no
+  labels.
+
+- Fix: `CAFrame#group_by` refuses a key with more than one value per row (an
+  N-D column). It used to group the cells rather than the rows and then fail
+  in the reductions; group by a component such as `df["k"][nil, 0]`.
+
 - Fix: `CAFrame.meld` and `CAFrame.concatenate` leave the data types of a
   frame with no rows out of the result. Joining a header-only CSV (whose
   columns read as object) to a typed frame used to make `meld` refuse and

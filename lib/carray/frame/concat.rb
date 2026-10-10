@@ -9,6 +9,9 @@
 #
 # Both are class methods (symmetric N-ary; no frame is privileged), like
 # +CArray.meld+ / +CArray.concatenate+, not instance verbs.
+#
+# +CAFrame.stack+ and +CAFrame#split+ add and take away a layer axis instead
+# of rows, as +CArray.stack+ and +CArray#split+ do for one array.
 
 class CAFrame
   # Weld frames along the row axis, view-style.  Each output column is
@@ -82,6 +85,108 @@ class CAFrame
     end
     new(cols, axis_name: first.axis_name, index: concatenate_index(frames))
   end
+
+  # Stack frames of the same shape as layers.  Each output column is
+  # +CArray.stack+ of that column across the frames along +axis+, counted in
+  # the column's own axes (0 is the row axis, so +axis+ starts at 1): a
+  # scalar column of K frames becomes a column of shape (nrow, K).  The rows
+  # stay as they are, so row verbs work on the stack unchanged and a layer is
+  # a column axis -- +s["temp"][nil, k]+ is frame k's column, and
+  # +s["temp"].mean(axis: 1)+ reduces across the layers.
+  #
+  # The result is a view frame: its columns are CAStack views over the
+  # frames' columns, and writes reach them.  Call +copy+ for an independent
+  # frame.  The layers carry no labels; keep them alongside (the dates of the
+  # files, say) as an array of your own.
+  #
+  # Every frame must have the same columns, the same number of rows and the
+  # same index (by value) under the same axis name, or none; the result
+  # takes the first frame's.  +split+ is the inverse:
+  #
+  #   s = CAFrame.stack(jan1, jan2, jan3)    # temp:float64 -> temp:float64[3]
+  #   CAFrame.stack(*s.split(axis: 1))       # the same frame again
+  def self.stack(*frames, axis: 1)
+    frames = frames.flatten
+    check_concat_inputs(frames, verb: "stack")
+    check_layer_axis(axis, "stack")
+    first = frames.first
+    names = first.column_names
+    check_column_sets(frames, names, verb: "stack")
+    frames.each_with_index do |f, i|
+      next if i.zero?
+      unless f.nrow == first.nrow
+        raise ArgumentError,
+              "stack: frame #{i} has #{f.nrow} rows, frame 0 has #{first.nrow}"
+      end
+    end
+    indexes, = index_pieces(frames, verb: "stack")
+    if indexes && ! indexes.all? { |x| x.to_a == indexes.first.to_a }
+      raise ArgumentError, "stack: the frames' indexes differ; stacked rows have to be the same rows"
+    end
+    cols = {}
+    names.each do |name|
+      parts = frames.map { |f| f[name] }
+      if axis > parts.first.ndim
+        raise ArgumentError,
+              "stack: axis #{axis} out of range for column #{name.inspect} " \
+              "(a #{parts.first.ndim}-D column takes 1 to #{parts.first.ndim})"
+      end
+      cols[name] = CArray.stack(parts, axis: axis)
+    end
+    new(cols, axis_name: first.axis_name, index: first.index)
+  end
+
+  # Split the frame along a column axis into an Array of frames, one per
+  # position on that axis -- the inverse of {CAFrame.stack}.  +axis+ counts
+  # the columns' own axes (0 is the row axis, so it starts at 1).  Every
+  # column must have that axis, and the same length along it: a column
+  # without it has no layer to give each frame.  Each frame's columns are
+  # views of this frame's, and each has this frame's index.
+  #
+  #   s.split(axis: 1)    # => [frame of layer 0, frame of layer 1, ...]
+  def split(axis:)
+    self.class.send(:check_layer_axis, axis, "split")
+    if @columns.empty?
+      raise ArgumentError, "split: the frame has no columns to split"
+    end
+    length = nil
+    @columns.each do |name, col|
+      unless axis < col.ndim
+        raise ArgumentError,
+              "split: column #{name.inspect} is #{col.ndim}-D and has no axis #{axis}"
+      end
+      length ||= col.shape[axis]
+      unless col.shape[axis] == length
+        raise ArgumentError,
+              "split: column #{name.inspect} has #{col.shape[axis]} along axis #{axis}, " \
+              "the others #{length}"
+      end
+    end
+    (0...length).map do |k|
+      cols = @columns.to_h do |name, col|
+        idx = [nil] * col.ndim
+        idx[axis] = k
+        [name, col[*idx]]
+      end
+      CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    end
+  end
+
+  def self.check_layer_axis(axis, verb)
+    unless axis.is_a?(Integer)
+      raise TypeError, "#{verb}: axis must be an Integer (got #{axis.inspect})"
+    end
+    if axis == 0
+      raise ArgumentError,
+            "#{verb}: axis 0 is the row axis; rows are joined by meld or concatenate"
+    end
+    if axis < 0
+      raise ArgumentError,
+            "#{verb}: axis counts a column's axes from 1 (got #{axis}); " \
+            "a negative axis would mean a different axis in columns of different ndim"
+    end
+  end
+  private_class_method :check_layer_axis
 
   # ---- shared validators -------------------------------------------------
 
