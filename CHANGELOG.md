@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
+  column becoming an N-D column over them: a long table of one observation per
+  row (a station's levels, a day's hours) becomes one row per station, as a
+  view. `CAFrame#unstack_rows` spreads them back. Every group must have the
+  same number of rows; the new axis carries no labels.
+
 - New: `CAFrame#stack_columns(columns, into:, shape: nil)` makes columns
   side by side in a file (a value per month, say) one N-D column, as a view;
   `CAFrame#unstack_column(name, into: nil)` splits it back. The columns are

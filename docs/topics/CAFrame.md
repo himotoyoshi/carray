@@ -833,6 +833,57 @@ df = df.unstack_column("temp", into: names)   # the 36 columns again
   `"temp_0"`, or `"temp_6_2"` with two axes. The frame does not remember the
   names the columns had, so pass them as `into:` to get them back.
 
+### From rows of a group — `stack_rows` / `unstack_rows`
+
+A long table often lays a series out as rows: one observation per row, several
+rows per station (a sounding's levels, a day's hours). `stack_rows` makes each
+group's rows one row, every other column becoming an N-D column over them, and
+`unstack_rows` spreads them back:
+
+```ruby
+long                                   # station, level, temp: 6 rows
+# station  level   temp
+# tokyo     1000   15.0
+# tokyo      850    5.0
+# tokyo      500  -20.0
+# osaka     1000   17.0
+# osaka      850    7.0
+# osaka      500  -18.0
+
+n = long.stack_rows(by: "station")
+# station  level             temp
+# tokyo    [1000, 850, 500]  [15.0, 5.0, -20.0]
+# osaka    [1000, 850, 500]  [17.0, 7.0, -18.0]
+
+n["temp"].min(axis: 1)                 # each station's lowest temperature
+n.unstack_rows                         # the 6 rows again, station as the index
+```
+
+- `by:` takes the key columns as `group_by` does, and the key becomes the
+  **index**. The frame's own index, if it has one, is stacked as a column named
+  after the row axis.
+- A group's rows are stacked **in the order they are in the frame**; `sort_by`
+  first for another order. A column that tells the rows apart (`level` here) is
+  stacked like any other, so what position k means stays in the frame as a
+  column — the new axis carries no label.
+- Every group has to have the **same number of rows**, and every row a key.
+  Filling a short group with `UNDEF` at its end would put its values at the
+  wrong positions — a station missing the 850 hPa row would have its 500 hPa
+  value where 850 belongs — so it raises. Lining the rows up by a value of
+  theirs is `pivot_grid`'s work (§11).
+- The result is a **view**: writes reach the long frame.
+- `unstack_rows` spreads **every** N-D column along its first trailing axis,
+  repeating the other columns and the index once per position; the N-D columns
+  have to agree on that length. The index stays the index (`reset_index` turns
+  it back into a column). An N-D column the frame had before `stack_rows` — a
+  wind vector, `(N, 2)` — is `(groups, rows, 2)` after it and spreads back to
+  `(N, 2)`; but on a frame that was never stacked, `unstack_rows` spreads such a
+  column's components into rows, so set it aside first.
+
+`stack_columns` and `stack_rows` meet in the same place: one makes an N-D
+column of values a file lays side by side, the other of values it lays one
+under another.
+
 ---
 
 ## 5. `select`
@@ -1908,6 +1959,8 @@ Frame view/copy semantics follow CArray exactly:
 | `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
 | `df.stack_columns(...)` | a **new frame** — the other columns shared, the new N-D column a view of the stacked ones (§4) |
 | `df.unstack_column(...)` | a **new frame** — the other columns shared, the new columns views of the N-D column (§4) |
+| `df.stack_rows(by:)` | a **view-frame** — each N-D column a view of a column's rows, gathered by group (§4) |
+| `df.unstack_rows` | a **view-frame** — N-D columns reshaped, the others and the index gathered once per position (§4) |
 | `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
 | `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |

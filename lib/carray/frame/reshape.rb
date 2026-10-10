@@ -225,6 +225,91 @@ class CAFrame
     CAFrame.new(out)
   end
 
+  # Stack each group's rows into one row: the rows sharing a value of +by+
+  # become one row, and every other column becomes an N-D column whose new
+  # axis runs over the group's rows, in the order they are in the frame.  A
+  # long table of one observation per row -- a station's readings at several
+  # levels -- becomes one row per station:
+  #
+  #   long.stack_rows(by: "station")
+  #   # station  level             temp
+  #   # tokyo    [1000, 850, 500]  [15.0, 5.0, -20.0]
+  #
+  # The key becomes the index, as in +group_by+.  A column that tells the rows
+  # apart (+level+ here) is stacked like any other, so what position k means
+  # stays in the frame as a column of its own; the new axis carries no label.
+  # Sort first (+sort_by+) when the rows are to be stacked in another order.
+  #
+  # Every group has to have the same number of rows: filling a short group
+  # with UNDEF at its end would put its values at the wrong positions (a
+  # station missing one level would have the next level's value in its
+  # place), and lining the rows up by a value of theirs is +pivot_grid+'s
+  # work.  A row whose key is masked belongs to no group and is refused too.
+  # The frame's own index, if it has one, is stacked as a column named after
+  # the row axis.  +unstack_rows+ is the inverse.
+  #
+  # @param by [String, Array<String>] the key columns, as for +group_by+.
+  # @return [CAFrame] one row per group, indexed by the group labels.
+  def stack_rows(by:)
+    keys = Array(by).map { |k| k.is_a?(Symbol) ? k.to_s : k }
+    raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
+    frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
+    grouped = frame.group_by(*keys)
+    perm    = grouped.__send__(:group_perm)
+    bounds  = grouped.__send__(:group_bounds).to_a
+    sizes   = bounds.each_cons(2).map { |a, b| b - a }
+    stacked = sizes.sum
+    if stacked != frame.nrow
+      raise ArgumentError,
+            "stack_rows: #{frame.nrow - stacked} rows have no value of the key; " \
+            "every row has to belong to a group"
+    end
+    unless sizes.uniq.size <= 1
+      raise ArgumentError,
+            "stack_rows: the groups have #{sizes.uniq.sort.join(', ')} rows; " \
+            "stacked rows need the same number in every group"
+    end
+    count = sizes.first || 0
+    perm  = stacked.zero? ? CArray.int64(0) : perm[0...stacked]
+    cols = {}
+    frame.columns.zip(frame.column_names).each do |col, name|
+      next if keys.include?(name)
+      rows = col[perm, *([nil] * (col.ndim - 1))]
+      cols[name] = rows.reshape(sizes.size, count, *col.shape[1..])
+    end
+    axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
+    CAFrame.new(cols, axis_name: axis, index: grouped.__send__(:label_index))
+  end
+
+  # Unstack the rows +stack_rows+ stacked: every N-D column is spread back
+  # into rows along its first trailing axis, and every other column, and the
+  # index, repeats once per position.  The N-D columns have to agree on the
+  # length of that axis.  The index stays the index; +reset_index+ turns it
+  # back into a column.
+  #
+  # @return [CAFrame] a frame of +nrow * length+ rows.
+  def unstack_rows
+    stacked = @columns.select { |_, c| c.ndim >= 2 }
+    if stacked.empty?
+      raise ArgumentError, "unstack_rows: the frame has no N-D column to unstack"
+    end
+    lengths = stacked.transform_values { |c| c.shape[1] }
+    unless lengths.values.uniq.size == 1
+      raise ArgumentError,
+            "unstack_rows: the N-D columns differ in length along their first axis #{lengths}"
+    end
+    count  = lengths.values.first
+    repeat = CArray.int64(nrow * count).seq / count
+    cols = @columns.to_h do |name, col|
+      if col.ndim >= 2
+        [name, col.reshape(nrow * count, *col.shape[2..])]
+      else
+        [name, col[repeat]]
+      end
+    end
+    CAFrame.new(cols, axis_name: @axis_name, index: @index && @index[repeat])
+  end
+
   # A column, or the index when +name+ is the row axis name (pivot and resample
   # keys may be either).
   private def column_or_index(name)
