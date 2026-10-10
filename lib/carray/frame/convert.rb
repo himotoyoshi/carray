@@ -34,7 +34,7 @@ class CAFrame
   # is the eager sibling that builds one directly.
   #
   # Only same-shape scalar (1-D) columns qualify. An N-D column has no single
-  # matrix form and raises — escape it per column with +df["name"]+. A mixed
+  # matrix form and raises — take it per column with +df["name"]+. A mixed
   # data type set is promoted to a common type (+result_type+, §12-F) through
   # lazy cast lanes, so the promotion costs no buffer either.
   #
@@ -52,7 +52,7 @@ class CAFrame
     if nd
       raise ArgumentError,
             "to_ca needs all-scalar (1-D) columns; #{nd.first.inspect} is " \
-            "#{nd.last.ndim}-D — escape per column with df[name]"
+            "#{nd.last.ndim}-D — take it per column with df[name]"
     end
     refuse_unshared_columns(cols) if writable
     begin

@@ -135,7 +135,7 @@ class CAFrame
     if keys.size > 1
       unless keys.all? { |k| k.is_a?(String) }
         raise ArgumentError,
-              "multi-key df[...] escapes columns; every key must be a String " \
+              "df[...] with several keys returns columns; every key must be a String " \
               "(use df.select(...) for a subset frame)"
       end
       return keys.map { |k| @columns.fetch(k) { raise KeyError, "no column #{k.inspect}" } }
@@ -308,7 +308,7 @@ class CAFrame
       mask_column(key)
     elsif value.is_a?(CAFrame)
       raise ArgumentError,
-            "df[name] = takes a column, not a CAFrame; escape one with " \
+            "df[name] = takes a column, not a CAFrame; take one with " \
             "other[\"name\"], or splice rows with df[rows] = other"
     else
       rebind_column(key, value)
@@ -559,7 +559,7 @@ class CAFrame
     if col.is_a?(CAFrame)
       raise ArgumentError,
             "a CAFrame cannot be a column (it answers to_ca as a 2-D matrix); " \
-            "escape a column with df[\"name\"] or df.to_ca first"
+            "take a column with df[\"name\"] or df.to_ca first"
     end
     unless col.respond_to?(:to_ca)
       raise ArgumentError, "column must be a CArray or Array (got #{col.class})"
