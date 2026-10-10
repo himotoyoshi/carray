@@ -238,6 +238,31 @@ are `UNDEF` in the result. The iterator does **not** mix in `Enumerable`, so onl
 the methods documented here are defined — a name that is not defined is a plain
 `NoMethodError`, not a wrong answer.
 
+The result of `map` has the value's data type, or `data_type:` when you give
+one. A [Face](CAFace.md) value gives a result in the same Face (a `CATime`
+column maps to a `CATime`); a read-only Face — a categorical, a const string —
+cannot be written cell by cell, so its result is an object array of the surface
+values.
+
+### Running values within a category
+
+`cumsum`, `cumprod`, `cummax`, `cummin` and `cumcount` are the running
+counterparts of the reductions: the result is shaped like the source, and each
+cell holds its category's running value up to and including it, in source
+order. A cell in no category is `UNDEF`; a masked cell inside a category holds
+the running value, as `CArray#cumsum` does.
+
+```ruby
+grp.cumsum     #  => [10.0, 30.0, 30.0, 70.0]
+grp.cumcount   #  => [1, 2, 1, 2]
+```
+
+Each answers as the core scan of the same name does over the category's
+members: the data type is the core's (`cumsum` of a boolean is uint64), a Face
+keeps its Face (`cummin` of a `CATime` column is a `CATime`), and a scan the
+core refuses (`cumsum` of a `CATime` column) is refused here, in the core's
+words.
+
 ## N-dimensional value and categorical
 
 `value` and `cat` may be N-dimensional; both are read flat, so the result is
@@ -325,6 +350,21 @@ slower than the other reductions, which run once over the whole value.
 
 `quantile` does not take `axis:`; use `percentile` for each fraction. Neither
 do `count(v)`, `count_masked`, `elements`, and the index and address members.
+
+The running values (`cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`) and
+`map` take `axis:` too, when the categorical classifies the positions along the
+axis (its shape is `[value.shape[axis]]`). They keep the source shape: each cell
+holds its category's running value along the axis, per fiber, and `map` hands
+the block each category's positions along the axis with every other axis kept.
+
+```ruby
+temp.group_by_category(day).cummax(axis: 0)   # running maximum per station,
+                                              # within weekdays and within weekends
+temp.group_by_category(day).map(axis: 0) { |g| g - g.mean }
+```
+
+A categorical shaped otherwise is refused, since a running value follows the
+positions along the axis.
 
 `wsum` / `wmean` want a weight array of the value's shape exactly; broadcast it
 yourself before passing it.

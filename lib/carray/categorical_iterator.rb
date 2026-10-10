@@ -510,6 +510,64 @@ class CACategoricalIterator < CASegmentIterator
   end
   private :axis_by_core, :axis_moments_by_core, :group_cells
 
+  # A running statistic along an axis, for a categorical that classifies the
+  # positions along it (case A): each cell holds its group's running value up
+  # to it along the axis, per fiber. The answer is the core's, as the flat
+  # form's is; the kernel runs when it answers in the core's data type, and
+  # otherwise each group's positions are scanned by the core along the axis.
+  # Read when called, as the other axis: members are.
+  def axis_scan (op, axis)
+    h    = @value
+    axis = checked_axis(axis, op)
+    classified_along!(op, axis)
+    answer = core_scan_answer(op)
+    if kernel_scans?(op, answer)
+      bundle = @k > 0 ? [@cat.codes, @k, [axis]]
+                      : [CArray.int64(h.shape[axis]).fill(-1), 1, [axis]]
+      return h.__axis_group_scan__([axis], [bundle], op)
+    end
+    each_group_along(axis, ->(shape) { blank_like(answer, shape) }) do |g|
+      g.public_send(op, axis: axis)
+    end
+  end
+
+  # #map along an axis (case A): the block receives each group's positions
+  # along the axis, every other axis kept, and its answer goes back to them.
+  def axis_map (axis, data_type, &block)
+    axis = checked_axis(axis, :map)
+    classified_along!(:map, axis)
+    each_group_along(axis, ->(shape) { blank_output(shape, data_type) }, &block)
+  end
+
+  # Yields each group's positions along +axis+ as a view of the value and
+  # writes the block's answer back to them; a position in no group is UNDEF.
+  def each_group_along (axis, blank)
+    h   = @value
+    out = blank.call(h.shape)
+    out[] = UNDEF
+    @k.times do |c|
+      sel = @cat.codes.eq(c)
+      sel = sel.strip_mask(false) if sel.has_mask?
+      next if sel.count(true).zero?
+      idx = [nil] * h.ndim
+      idx[axis] = sel.where
+      out[*idx] = surface_for(out, yield(h[*idx]))
+    end
+    out
+  end
+
+  # A running value or a transform along an axis follows the positions along
+  # it, so the categorical has to classify those positions.
+  def classified_along! (op, axis)
+    n = @value.shape[axis]
+    return if @cat.codes.shape == [n]
+    raise ArgumentError,
+          "#{op}(axis: #{axis}): needs a categorical that classifies the " \
+          "positions along axis #{axis} (shape [#{n}]); got shape " \
+          "#{@cat.codes.shape.inspect}"
+  end
+  private :axis_scan, :axis_map, :each_group_along, :classified_along!
+
   # Axis-aware wsum + wmean fused (single kernel call, both outputs).  Returns
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit
   # broadcast on the call site for 1-D or band-shape weights).  A cell

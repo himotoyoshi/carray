@@ -472,24 +472,23 @@ class CASegmentIterator < CAIterator
   #   cells). Returns a NEW CArray shaped like the source `value`; the original
   #   is not modified (`value[] = grp.map { ... }` for in-place). Excluded cells
   #   (in no segment) are UNDEF in the result.
+  #
+  #   The result has the value's data type, or `data_type:` when it is given.
+  #   A Face value gives a result of the same Face; a read-only Face (a
+  #   categorical, a const string), which cannot be written cell by cell,
+  #   gives an object array of its surface values.
+  #
+  #   `axis:` is for a categorical group-by whose categorical classifies the
+  #   positions along that axis: the block receives each category's positions
+  #   along it, every other axis kept. A segment iterator has no axis: form.
   #   @yieldparam members [CArray]
   #   @return [CArray] shaped like the source value
-  def map (data_type: nil)
-    raise LocalJumpError, "no block given (yield)" unless block_given?
-    dt = data_type || grouped.data_type
+  def map (data_type: nil, axis: nil, &block)
+    raise LocalJumpError, "no block given (yield)" unless block
+    return axis_map(axis, data_type, &block) if axis
     # Apply the block per segment, assembled in grouped (segment-contiguous)
     # order: a same-length result scatters cell for cell, a scalar broadcasts.
-    transformed = CArray.new(dt, [grouped.elements])
-    @k.times do |c|
-      lo, hi = @bounds[c], @bounds[c + 1]
-      transformed[lo...hi] = yield(grouped[lo...hi]) if hi > lo
-    end
-    # Scatter back to source positions via the permutation (grouped-order source
-    # indices). Excluded cells are absent from perm and stay UNDEF.
-    out = CArray.new(dt, @src_shape)
-    out[] = UNDEF
-    out.reshape(codes.elements)[perm] = transformed
-    out
+    scatter_segments(->(shape) { blank_output(shape, data_type) }, &block)
   end
 
   # ---- segment scan: within-segment running statistics ------------------
@@ -498,34 +497,36 @@ class CASegmentIterator < CAIterator
   # collapses each segment to one value) a scan preserves the source shape,
   # each cell holding its segment's running statistic up to and including that
   # cell, in source (row-major) order.  A segment is a partition (each cell is
-  # in at most one segment), so the running value is single-valued.  Each
-  # routes straight through the fused C kernel __axis_group_scan__ (the same one
-  # CAGroupIterator drives) with the whole source as a single grouped axis and
-  # the segment of each cell (#codes) as the single bundle -- which yields
-  # SOURCE-ORDER output directly, so no inverse permutation is needed.
+  # in at most one segment), so the running value is single-valued.
   # A cell in no segment is UNDEF.  A masked cell inside a segment holds the
-  # running value, as `CArray#cumsum` does.  Mirroring the reductions (sum / mean), a scan
-  # takes no axis argument.  cumsum / cumprod -> float64, cummax / cummin
-  # preserve the value data type, cumcount -> int64 (1-based within-segment
-  # ordinal); an object value data type is carried by the kernel's object branch.
+  # running value, as `CArray#cumsum` does.
+  #
+  # Each answers as the core scan of the same name does over the segment: the
+  # data type is the core's (`cumsum` of a boolean is uint64, of an integer
+  # float64), a Face keeps its Face (`cummin` of a time column is a time), and
+  # a scan the core refuses (`cumsum` of a time column) raises in the core's
+  # words.  When the fused C kernel __axis_group_scan__ answers in that data
+  # type, it runs with the whole source as a single grouped axis and the
+  # segment of each cell (#codes) as the single bundle, emitting in source
+  # order; otherwise each segment is scanned by the core and scattered back.
 
   # @!method cumsum
-  #   Per-segment inclusive running sum (float64), source-shaped.
+  #   Per-segment inclusive running sum, source-shaped.
   #   @return [CArray]
   # @!method cumprod
-  #   Per-segment inclusive running product (float64), source-shaped.
+  #   Per-segment inclusive running product, source-shaped.
   #   @return [CArray]
   # @!method cummax
-  #   Per-segment inclusive running maximum (value data type), source-shaped.
+  #   Per-segment inclusive running maximum, source-shaped.
   #   @return [CArray]
   # @!method cummin
-  #   Per-segment inclusive running minimum (value data type), source-shaped.
+  #   Per-segment inclusive running minimum, source-shaped.
   #   @return [CArray]
   # @!method cumcount
   #   Per-segment 1-based within-segment ordinal (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { scan(op) }
+    define_method(op) { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }
   end
 
   private
@@ -544,19 +545,92 @@ class CASegmentIterator < CAIterator
     @elements || raise(ArgumentError, @no_flat)
   end
 
-  # Drive a segment scan through the axis-group scan kernel: the whole value as
-  # one grouped axis, the flat codes as the single bundle.  The kernel emits in
-  # source order, so the flat result reshapes straight back to the source shape.
+  # A segment scan. When the axis-group scan kernel answers in the core's data
+  # type, it runs with the whole value as one grouped axis and the flat codes
+  # as the single bundle; it emits in source order, so the flat result
+  # reshapes straight back to the source shape. Otherwise each segment is
+  # scanned by the core and scattered back.
   #
   # With no segment at all the kernel has no group to size, so it is given
   # one that no cell belongs to: every cell comes back UNDEF, as it does when
   # there are segments and a cell is in none of them.
   def scan (op)
+    # An empty Face has no cell to ask the core about, and nothing to scan.
+    return blank_output(@src_shape) if @value.face? && @value.elements.zero?
+    answer = core_scan_answer(op)
+    unless kernel_scans?(op, answer)
+      return scatter_segments(->(shape) { blank_like(answer, shape) }) { |s| s.public_send(op) }
+    end
     bundle = @k > 0 ? [codes, @k, [0]]
                     : [CArray.int64(@value.elements).fill(-1), 1, [0]]
     scan_source.reshape(@value.elements)
                .__axis_group_scan__([0], [bundle], op)
                .reshape(*@src_shape)
+  end
+
+  # The core's scan of one cell of the value: the scan answers in its data
+  # type and Face. A scan the core refuses raises here, in the core's words.
+  def core_scan_answer (op)
+    (@core_scan_answer ||= {})[op] ||= core_probe.public_send(op)
+  end
+
+  # Whether the axis-group scan kernel gives the core's answer. It reads
+  # numeric storage, not a Face, and answers cumsum / cumprod in float64 (an
+  # object stays an object), cummax / cummin in the value's data type and
+  # cumcount in int64 -- which is not the core's answer for every data type
+  # (the core counts a boolean's running sum in uint64).
+  def kernel_scans? (op, answer)
+    return false if @value.face? || answer.face?
+    kernel_type =
+      case op
+      when :cumcount         then CA_INT64
+      when :cumsum, :cumprod then @value.data_type == CA_OBJECT ? CA_OBJECT : CA_FLOAT64
+      else @value.data_type
+      end
+    answer.data_type == kernel_type
+  end
+
+  # Applies the block to each segment's members in grouped order and scatters
+  # the answers back to the source cells; a cell in no segment is UNDEF.
+  # +blank+ builds an empty array of a given shape that can hold the answers.
+  def scatter_segments (blank)
+    out = blank.call(@src_shape)
+    out[] = UNDEF
+    return out if grouped.elements.zero?
+    transformed = blank.call([grouped.elements])
+    @k.times do |c|
+      lo, hi = @bounds[c], @bounds[c + 1]
+      transformed[lo...hi] = surface_for(transformed, yield(grouped[lo...hi])) if hi > lo
+    end
+    out.reshape(@value.elements)[perm] = transformed
+    out
+  end
+
+  # A blank array for #map: of +data_type+ when one is given, otherwise of the
+  # same kind as the value.
+  def blank_output (shape, data_type = nil)
+    data_type ? CArray.new(data_type, shape) : blank_like(@value, shape)
+  end
+
+  # An answer as +out+ can hold it. A Face goes into an object array as its
+  # surface values; stored as it is, the object array would receive its
+  # storage bytes.
+  def surface_for (out, answer)
+    return answer unless out.data_type == CA_OBJECT && answer.is_a?(CArray) && answer.face?
+    answer.to_a
+  end
+
+  # A blank array of +shape+ of the same kind as +model+: its data type, or its
+  # Face. A read-only Face cannot be written cell by cell, so its values are
+  # held as the surface objects they are.
+  def blank_like (model, shape)
+    if ! model.face?
+      CArray.new(model.data_type, shape, bytes: model.bytes)
+    elsif model.read_only?
+      CArray.new(CA_OBJECT, shape)
+    else
+      CArray.new(model.parent.data_type, shape, bytes: model.parent.bytes).face_lift(model)
+    end
   end
 
   # The values as they were when the iterator was built, in source order.
@@ -796,6 +870,14 @@ class CASegmentIterator < CAIterator
   end
 
   def axis_order_stat (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_scan (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_map (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 

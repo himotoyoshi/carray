@@ -36,6 +36,26 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: the running values of a categorical group-by (`cumsum`, `cumprod`,
+  `cummax`, `cummin`, `cumcount`) and its `map` take `axis:` when the
+  categorical classifies the positions along that axis, so an N-D value
+  (a frame's (N, L) column) can be scanned or transformed per category along
+  the rows. They used to refuse any value with more cells than the
+  categorical.
+
+- Fix: the running values and `map` of a categorical group-by (and of
+  `segments`) answer for every value the core scans answer for: a `CATime`
+  column's `cummin` is a `CATime`, a `CATimedelta` column's `cumsum` a
+  `CATimedelta`, a complex column's `cumsum` complex, and `map` of a `CATime`
+  column a `CATime`; they used to fail with an internal error. A scan the
+  core refuses (`cumsum` of a `CATime`) is refused in the core's words. `map`
+  of a categorical or const string column gives an object array of its
+  values rather than of storage bytes.
+
+- Change: the running values of a boolean column grouped by a categorical
+  have the core's data type: `cumsum` and `cummax` give uint64 (they gave
+  float64 and boolean), as `CArray#cumsum` and `#cummax` do.
+
 - New: `CAFrame#protect` makes a frame read-only and returns it: frozen as by
   `freeze`, and the cells and masks of every column and of the index refuse
   writes made through the frame. The arrays the frame was built from are not
