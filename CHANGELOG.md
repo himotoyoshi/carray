@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: storing an array of a Face (`CATime`, `CATimedelta`, a categorical, a
+  const string) into an object array stores its values, as `to_type(:object)`
+  gives them; it stored the bytes of its storage (`obj[] = times` held strings
+  of tick bytes). A const string stored into a fixlen string array stores its
+  strings; it stored empty strings.
+
+- Change: storing an array of a Face into a plain array that is not an object
+  array (an integer, float or fixlen array) is refused, rather than storing
+  the bytes of the Face's storage. Convert it first (`to_type(:object)` gives
+  its values; a time column's `ticks` gives its counts). A fixlen string or a
+  record still goes into a fixlen array of its width as its bytes.
+
 - New: the running values of a categorical group-by (`cumsum`, `cumprod`,
   `cummax`, `cummin`, `cumcount`) and its `map` take `axis:` when the
   categorical classifies the positions along that axis, so an N-D value

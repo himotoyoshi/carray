@@ -591,6 +591,51 @@ ca_store_all_list_body (VALUE arg)
   return Qnil;
 }
 
+/* A Face source stored into an array that is not the same Face.  Its cells
+   are surface values, and its storage means nothing to the destination: a
+   CATime's ticks are not times to an object array, and a categorical's codes
+   are not its labels.  So an object destination, or a Face that does not
+   reconcile a Face source itself (a fixlen string taking a const string),
+   receives the values (to_type(:object)), and any other plain destination
+   refuses rather than receive storage bytes.  A destination of the same Face
+   class, or one that reconciles a Face (to_comparable), is left to
+   ca_face_convert_store_rval. */
+static VALUE
+ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
+{
+  CArray *cr;
+
+  if ( ! rb_obj_is_carray(rval) ) {
+    return rval;
+  }
+  GetCArray(rval, cr);
+  if ( ! ca_is_face(cr) ) {
+    return rval;
+  }
+  if ( ca_is_face(ca) ) {
+    if ( rb_obj_class(self) == rb_obj_class(rval)
+         || rb_respond_to(self, rb_intern("to_comparable")) ) {
+      return rval;
+    }
+  }
+  else if ( ca->data_type != CA_OBJECT ) {
+    /* A fixlen string or a record is its bytes: storage and surface are
+       the same, so a plain array of that type takes them as they are.  A
+       const string's bytes are ranges into a pool of its own, and it is the
+       read-only Face that says so. */
+    CArray *storage = ca_strip_face(cr);
+    if ( storage->data_type == cr->data_type && storage->bytes == cr->bytes
+         && ! ca_is_readonly(cr) ) {
+      return rval;
+    }
+    rb_raise(rb_eTypeError,
+             "can not store a %s array into %s array "
+             "(to_type(:object) gives its values)",
+             rb_obj_classname(rval), ca_type_name[ca->data_type]);
+  }
+  return rb_funcall(rval, rb_intern("to_type"), 1, INT2NUM(CA_OBJECT));
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -607,6 +652,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rval = ca_face_source_for_store(self, ca, rval);
 
  retry:
 
@@ -1540,6 +1586,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
  retry:
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rval = ca_face_source_for_store(self, ca, rval);
 
   /* Face store: bring a surface value object (Scalar / Time / DateTime) into
      the storage domain while self is still the Face.  Store-side views strip

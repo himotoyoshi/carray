@@ -828,6 +828,16 @@ then the Ruby fallback. The contract of the hook:
 - an unconvertible value (e.g. a cross-unit-group instant) → raise,
   never a silent mis-store.
 
+A Face **array** stored into an array that is not the same Face goes the
+other way: its cells are surface values, and its storage means nothing to
+the destination. An object destination receives the values, as
+`to_type(:object)` gives them (`obj[] = times` holds `CATime::Element`s, not
+ticks); so does a Face destination that does not reconcile a Face source
+itself (a fixlen string taking a const string). Any other plain destination
+refuses, rather than receive storage bytes. A fixlen string or a record,
+whose storage is its surface, still goes into a plain fixlen array of its
+width as its bytes.
+
 time/timedelta implement the hook by delegating to the same
 `to_comparable` unit algebra the reference side uses, so read and write
 stay in lockstep: `dt[0] = dt[2]; dt[0] == dt[2]` holds by
