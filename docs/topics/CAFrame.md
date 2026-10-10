@@ -295,8 +295,6 @@ Positional or pattern selection of columns is done on `column_names` rather than
 | boolean `CArray` | row filter → **sub-frame** |
 | integer `CArray` | row gather → **sub-frame** |
 
-**What `df[...]` returns is decided by the type of the key alone, never by the values in the frame.**
-
 Besides `df[...]`, this chapter covers `head` / `tail`, `at` (a row by its label), `select` (a frame of some columns) and `each_row`. Writing with `df[...] =` is in [Editing columns](#adding-removing-and-renaming-columns) and [Masking, deleting and splicing rows](#masking-deleting-and-splicing-rows).
 
 ### Columns by name
@@ -462,7 +460,7 @@ df.filter(keep_masked: true) { |f| f["temp"] > 24 }  # they survive, masked
 
 The surviving undetermined rows arrive with their **data cells masked** and their **index value present**, so the row stays identifiable and a later, better-informed pass can judge it again. Rows whose condition is true carry their values through unchanged either way.
 
-**`keep_masked: true` returns a new frame, not a sub-frame**: a view could not show those rows masked without masking them in the original frame too. This holds whether or not the condition actually has a masked cell, so whether the result shares data never depends on the data.
+**`keep_masked: true` returns a new frame, not a sub-frame**: a view could not show those rows masked without masking them in the original frame too. It is a new frame even when no cell of the condition is masked.
 
 ### `sort_by_key` — reorder rows by key columns
 
@@ -766,7 +764,7 @@ To drop rows **without** changing the frame in place, take a filtered sub-frame 
 > - `= UNDEF` masks **in place**, so every alias and derived view sees the change.
 > - `= nil` rebinds each column to a **row-gather view of its former self** (`col[keep]`), so the remaining rows **still share storage with the original columns**: writing through the frame after a delete reaches a column taken out before it, and the other way around. Nothing is copied; the original full-length buffers stay alive behind the views, so `copy` if you want to free them.
 > - `= other` rebuilds each column with `CArray.meld` of three pieces: a view of the rows before the span, a **snapshot** of `other`'s column, and a view of the rows after it.
->   - The **spliced rows are independent of `other`**: writing them never reaches `other`, and `other`'s later writes never reach the frame. This holds **even when `other` has as many rows as the span** — splicing changes the frame's structure and always takes a snapshot, unlike CArray's element write `ca[sel] = other`. (If it wrote through only when the counts matched, the same expression would copy or not depending on the number of rows.)
+>   - The **spliced rows are independent of `other`**: writing them never reaches `other`, and `other`'s later writes never reach the frame. This holds **even when `other` has as many rows as the span** — splicing changes the frame's structure and always takes a snapshot, unlike CArray's element write `ca[sel] = other`.
 >   - The **rows outside the span still share storage with the original columns**, as with `= nil`. A column taken out before the splice keeps its own length and its own values in the replaced span, but writes to the rows on either side of the span go both ways. `copy` the result to detach it.
 
 ---
@@ -1547,6 +1545,119 @@ s.unstack(axis: 1)  # => [day1's frame, day2's frame, day3's frame]
 | `to_records` | the cell becomes a Ruby `Array`, which `from_records` reads back as the same N-D column |
 | `to_csv` | raises — a CSV cell is flat; `unstack_column` first |
 | `to_ca` | raises when any column is N-D, even if every column has the same shape; take the column with `df["name"]` |
+
+---
+
+## Appendix: finding the verb for a task
+
+The chapters are ordered by how a frame is used. This appendix is ordered by what you want to do; each entry links to the section that explains it.
+
+### Reading and looking
+
+| I want to… | use |
+|---|---|
+| make a frame from arrays I already have | [`CAFrame.new`](#caframenew) |
+| read parsed JSON (an Array of objects) | [`CAFrame.from_records`](#caframefrom_records) |
+| read a CSV, with types guessed from the text | [`CAFrame.from_csv(types: :infer)`](#caframefrom_csv) |
+| see what types the text columns could be, before converting | [`infer_types`](#finding-the-types--infer_types) |
+| glance at a frame | [`p df`](#printing--p-puts-to_table) |
+| check every column just read: types, counts, masked cells, ranges | [`describe`](#checking-a-frame-just-read--describe) |
+| know the number of rows, the column names, the types | [`nrow` / `column_names` / `data_types`](#size-names-and-types) |
+
+### Picking rows and columns
+
+| I want to… | use |
+|---|---|
+| take a column as an array | [`df["temp"]`](#columns-by-name) |
+| take several columns as local variables | [`t, rh = df["temp", "rh"]`](#columns-by-name) |
+| keep a frame of some columns, or reorder them | [`select`](#a-frame-of-some-columns--select) |
+| look at one row | [`df[i]`](#one-row-as-a-hash) |
+| look up the row of a station or a time | [`at`](#one-row-by-its-label--at) |
+| see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
+| keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
+| keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
+| keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |
+| sort by one or more columns | [`sort_by_key`](#sort_by_key--reorder-rows-by-key-columns) |
+| sort by a computed value, e.g. nearest to a target | [`sort_by`](#sort_by--sort-by-a-computed-key) |
+
+### Fixing columns
+
+| I want to… | use |
+|---|---|
+| add a derived column | [`append`](#adding-removing-and-renaming-columns) |
+| remove or rename columns | [`drop` / `rename`](#adding-removing-and-renaming-columns) |
+| turn text into numbers | [`cast`](#changing-a-columns-type) |
+| be told when a cell does not read as a number, instead of getting `UNDEF` | [`cast(..., on_error: :raise)`](#changing-a-columns-type) |
+| bring every column to one type, e.g. to make a matrix | [`promote`](#changing-a-columns-type) |
+| split a code like `"A-12"` into two columns | [`split_column`](#splitting-a-text-column--split_column) |
+| turn date strings into times | [`parse_to_time`](#text--parse_to_time) |
+| find which format a column of dates is written in | [`infer_time_format`](#text--parse_to_time) |
+| turn "hours since 1990-01-01" into times | [`to_time`](#counts-since-an-epoch--to_time) |
+| make a `-999` sentinel a missing value | [`mask_eq`](#masking-and-filling-cells) |
+| fill gaps by carrying the last value, or by interpolating in time | [`fill`](#masking-and-filling-cells) |
+| mask whole rows, e.g. a period when a sensor was faulty | [`df[sel] = UNDEF`](#masking-deleting-and-splicing-rows) |
+| delete rows from the frame itself | [`df[sel] = nil`](#masking-deleting-and-splicing-rows) |
+| replace a span of rows with corrected ones | [`df[span] = other`](#masking-deleting-and-splicing-rows) |
+| make times or stations the row labels | [`set_index`](#set_index--reset_index) |
+
+### Aggregating
+
+| I want to… | use |
+|---|---|
+| a mean of every column per station | [`group_by(...).mean`](#the-same-reduction-for-every-column) |
+| named results with a reduction of my own per column | [`aggregate`](#a-reduction-per-column--aggregate) |
+| a result per group that combines several columns | [`table`](#computing-across-columns--table) |
+| hourly totals from 10-minute data | [`resample`](#time-bins--resample) |
+| hourly values labelled by the end of the hour, as for precipitation | [`resample(..., label: :right)`](#time-bins--resample) |
+| a row for every hour, `UNDEF` where there was no data | [`resample(..., fill: true)`](#time-bins--resample) |
+| refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
+
+### Combining
+
+| I want to… | use |
+|---|---|
+| add station metadata to observations by a key | [`join`](#join--match-rows-by-key) |
+| keep only the rows found in both frames | [`join(how: :inner)`](#join--match-rows-by-key) |
+| match each observation to the latest radar time before it | [`join_asof`](#join_asof--the-nearest-key) |
+| put a series onto a complete time grid, gaps becoming rows | [`align`](#align--conform-to-a-reference-key-set) |
+| put one month's frame after another, as a view | [`CAFrame.meld`](#caframemeld--caframeconcatenate--rows-after-rows) |
+| the same, as an independent frame, or with differing types | [`CAFrame.concatenate`](#caframemeld--caframeconcatenate--rows-after-rows) |
+| put columns of frames with the same rows side by side | [`paste`](#paste--columns-side-by-side) |
+
+### Reshaping
+
+| I want to… | use |
+|---|---|
+| spread stations into columns | [`pivot`](#pivot--long-to-wide) |
+| the same, combining repeated readings | [`pivot(aggregate:)`](#repeated-pairs--aggregate) |
+| the same cells as one array, for array arithmetic | [`pivot_grid`](#pivot_grid--the-same-cells-as-one-carray) |
+| turn columns per station back into rows | [`melt`](#melt--wide-to-long) |
+
+### N-D columns
+
+| I want to… | use |
+|---|---|
+| keep a vector or a profile per row | [N-D columns](#n-d-columns) |
+| filter or sort on one component of a vector | [`df["wind"][nil, 0]`](#working-with-a-component) |
+| make twelve monthly columns one column | [`stack_columns`](#from-columns-side-by-side--stack_columns--unstack_column) |
+| make a sounding's levels one row per station | [`stack_rows`](#from-rows-of-a-group--stack_rows--unstack_rows) |
+| hold several days' frames of the same table as layers | [`CAFrame.stack`](#layers--caframestack--unstack) |
+
+### Writing out
+
+| I want to… | use |
+|---|---|
+| JSON | [`to_records`](#ruby-records--to_records) |
+| a CSV file | [`to_csv`](#csv--to_csv) |
+| one numeric matrix | [`to_ca`](#a-matrix--to_ca) |
+
+### Sharing and safety
+
+| I want to… | use |
+|---|---|
+| work on part of a frame without touching the original | [`copy`](#view-copy-and-sharing) |
+| know whether a result shares data with its source | [View, copy and sharing](#view-copy-and-sharing) |
+| hand a frame to code that should only read it | [`protect`](#read-only-frames) |
 
 ---
 
