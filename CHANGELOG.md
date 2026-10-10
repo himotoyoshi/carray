@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.time` refuses text with a time after the date that it does
+  not read as a time of day (`"2024-01-01T0130"`, `"2024-01-01T25"`); it used
+  to read it as midnight. `on_error: :mask` masks such a cell. An hour alone
+  after the date (`"2024-01-01T05"`, with or without a zone) is read, here and
+  by `CAFrame.from_csv(types:)`, `cast` and `parse_to_time`, so
+  `types: :infer` now infers a column of such text as `:time`.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a

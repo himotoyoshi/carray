@@ -153,6 +153,13 @@ becoming 2019-03-03. Note that `"201909"` is a valid **YYMMDD** to Ruby
 (2020-19-09), so it is refused too — name the layout with
 `format: "%Y%m"` for a compact year-month.
 
+An **hour alone after the date** (`"2024-01-01T05"`, with or without a zone —
+ISO 8601 reduced to the hour) is read too, which `Date._parse` passes over.
+And text with a time after the date that does not come back as a time of day
+is **refused** rather than read as midnight: `"2024-01-01T0130"` (a compact
+time after a dashed date) and `"2024-01-01T25"` raise, as any unreadable cell
+does unless `on_error: :mask` is given.
+
 ### 2.3 Rebasing relative indices (`origin:`)
 
 `CArray#time` takes an `origin:` for the common "index relative to a

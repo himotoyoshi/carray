@@ -1379,7 +1379,8 @@ df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
   text written **year first** and nothing else: the date as
   `YYYY-M-D` or `YYYY/M/D` (month and day with or without a leading zero),
   then optionally a time of day after `T` or a space (`h:mm`, `:ss`, a
-  fraction of up to nine digits) and a zone (`Z`, `+09:00`, `+0900`, `+09`;
+  fraction of up to nine digits, or after `T` the hour alone as `hh`) and a
+  zone (`Z`, `+09:00`, `+0900`, `+09`;
   a time without a zone is UTC). A date in another order is not read,
   because whether `"01/02/2024"` is January or February cannot be told from
   the text; pass a strptime `format` for it, `:infer`, or `:mixed` to guess

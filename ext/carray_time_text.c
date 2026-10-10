@@ -9,7 +9,7 @@
      date    YYYY sep M sep D           sep is '-' or '/', the same twice;
                                         month and day take one or two digits
      time    ( 'T' | ' '+ ) h ':' mm ( ':' ss ( ( '.' | ',' ) fraction )? )?
-                                        hour takes one or two digits,
+           | 'T' hh                     hour takes one or two digits,
                                         fraction one to nine
      zone    ' '? ( 'Z' | ( '+' | '-' ) hh ( ':'? mm )? )   after a time only
 
@@ -186,7 +186,8 @@ ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
   }
 
   if ( i < n ) {
-    if ( s[i] == 'T' ) {
+    int by_t = ( s[i] == 'T' ), hour_digits;
+    if ( by_t ) {
       i++;
     }
     else if ( s[i] == ' ' ) {
@@ -197,33 +198,39 @@ ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
     else {
       return CA_TIME_TEXT_UNREADABLE;
     }
-    if ( ca_time_text_digits(s, n, &i, 1, 2, &hour) == 0 ) {
+    hour_digits = ca_time_text_digits(s, n, &i, 1, 2, &hour);
+    if ( hour_digits == 0 ) {
       return CA_TIME_TEXT_UNREADABLE;
     }
     if ( i >= n || s[i] != ':' ) {
-      return CA_TIME_TEXT_UNREADABLE;
-    }
-    i++;
-    if ( ca_time_text_digits(s, n, &i, 2, 2, &min) == 0 ) {
-      return CA_TIME_TEXT_UNREADABLE;
-    }
-    if ( i < n && s[i] == ':' ) {
-      i++;
-      if ( ca_time_text_digits(s, n, &i, 2, 2, &sec) == 0 ) {
+      /* 'T' hh alone is an hour (ISO 8601 reduced to the hour). */
+      if ( ! ( by_t && hour_digits == 2 ) ) {
         return CA_TIME_TEXT_UNREADABLE;
       }
-      if ( i < n && ( s[i] == '.' || s[i] == ',' ) ) {
-        int64_t f;
-        int digits;
+    }
+    else {
+      i++;
+      if ( ca_time_text_digits(s, n, &i, 2, 2, &min) == 0 ) {
+        return CA_TIME_TEXT_UNREADABLE;
+      }
+      if ( i < n && s[i] == ':' ) {
         i++;
-        digits = ca_time_text_digits(s, n, &i, 1, 9, &f);
-        if ( digits == 0 ) {
+        if ( ca_time_text_digits(s, n, &i, 2, 2, &sec) == 0 ) {
           return CA_TIME_TEXT_UNREADABLE;
         }
-        t->fraction = digits;
-        frac_ns = f;
-        while ( digits++ < 9 ) {
-          frac_ns *= 10;
+        if ( i < n && ( s[i] == '.' || s[i] == ',' ) ) {
+          int64_t f;
+          int digits;
+          i++;
+          digits = ca_time_text_digits(s, n, &i, 1, 9, &f);
+          if ( digits == 0 ) {
+            return CA_TIME_TEXT_UNREADABLE;
+          }
+          t->fraction = digits;
+          frac_ns = f;
+          while ( digits++ < 9 ) {
+            frac_ns *= 10;
+          }
         }
       }
     }

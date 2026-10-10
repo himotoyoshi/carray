@@ -1746,8 +1746,12 @@ module CATimeLiteral
 
   # Date fields of a String literal, UTC.  Ruby's Date._parse does not read
   # the calendar-grid forms CATime#to_s prints -- "2019-09" comes back as a
-  # month of 20 with a zone, and a bare "2019" as a month and a day -- so
-  # those two are read here and everything else is left to Date._parse.
+  # month of 20 with a zone, and a bare "2019" as a month and a day -- nor an
+  # hour alone after the date ("2024-01-01T05", ISO 8601 reduced to the
+  # hour), so those are read here and everything else is left to Date._parse.
+  # Date._parse passes over what it cannot read, so text with a time after
+  # the date that comes back without an hour is refused rather than read as
+  # midnight.
   #
   # What Date._parse returns is then checked, because an out-of-range field
   # used to flow into the civil kernel and normalise into a different date:
@@ -1759,10 +1763,15 @@ module CATimeLiteral
       if format                             then Date._strptime(spec, format)
       elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
       elsif spec =~ /\A(\d{4})\z/           then { year: $1.to_i }
+      elsif (hour = hour_only_fields(spec)) then hour
       else                                       Date._parse(spec)
       end
     unless h && h[:year]
       raise ArgumentError, "cannot parse time #{spec.inspect}"
+    end
+    if !format && !h[:hour] &&
+       (spec =~ /\d\s*T\s*\d/ || spec =~ /\A\s*[+-]?\d{4,}[-\/]\d{1,2}[-\/]\d{1,2}\s+\d/)
+      raise ArgumentError, "cannot parse time #{spec.inspect}: the time after the date is not read"
     end
     # Text left over after the format is not part of a time in that format.
     if h[:leftover] && !h[:leftover].strip.empty?
@@ -1784,6 +1793,23 @@ module CATimeLiteral
     h
   end
   private_class_method :parse_date_fields
+
+  # "YYYY-MM-DDThh" with an optional zone ("Z", "+hh", "+hhmm", "+hh:mm").
+  def hour_only_fields(spec)
+    m = /\A(\d{4})-(\d{2})-(\d{2})T(\d{2})(?:(Z)|([+-])(\d{2})(?::?(\d{2}))?)?\z/.match(spec)
+    return nil unless m
+    h = { year: m[1].to_i, mon: m[2].to_i, mday: m[3].to_i, hour: m[4].to_i }
+    raise ArgumentError, "cannot parse time #{spec.inspect}: hour #{h[:hour]}" if h[:hour] > 23
+    if m[6]
+      oh, om = m[7].to_i, m[8].to_i
+      raise ArgumentError, "cannot parse time #{spec.inspect}: offset" if oh > 23 || om > 59
+      h[:offset] = (oh * 3600 + om * 60) * (m[6] == "-" ? -1 : 1)
+    elsif m[5]
+      h[:offset] = 0
+    end
+    h
+  end
+  private_class_method :hour_only_fields
 
   # An instant written outside CArray (Time / Date / DateTime / String) as a
   # length-1 CATime in the coarsest of :s / :ms / :us / :ns that holds it
