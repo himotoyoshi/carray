@@ -308,23 +308,22 @@ class CAFrame
       raise ArgumentError, "stack_rows: on: #{on.inspect} has shape #{place.shape.inspect}, not one value per row"
     end
     grouped = frame.group_by(*keys)
-    perm    = grouped.__send__(:group_perm)
     bounds  = grouped.__send__(:group_bounds).to_a
     groups  = bounds.size - 1
     if bounds.last != frame.nrow
       raise ArgumentError,
-            "stack_rows: #{frame.nrow - bounds.last} rows have no value of the key; " \
-            "every row has to belong to a group"
+            "stack_rows: every row has to belong to a group; " \
+            "the key has no value for #{frame.nrow - bounds.last} of #{frame.nrow} rows"
     end
     if place.has_mask? && place.count_masked > 0
       raise ArgumentError,
-            "stack_rows: #{place.count_masked} rows have no value of #{on.inspect}; " \
-            "every row has to have a place"
+            "stack_rows: every row has to have a place; " \
+            "#{on.inspect} has no value for #{place.count_masked} of #{frame.nrow} rows"
     end
     positions = place.categorize                       # labels in order of first appearance
     count     = positions.labels.size
-    group_of  = CArray.int64(frame.nrow)
-    groups.times { |g| group_of[perm[bounds[g]...bounds[g + 1]]] = g }
+    # A row's group is its code in the grouping (the groups run in code order).
+    group_of  = grouped.__send__(:group_codes).int64
     slot = group_of * count + positions.codes.int64
     rows = CArray.int64(groups * count)
     rows[] = UNDEF
@@ -337,8 +336,10 @@ class CAFrame
             "#{on}=#{positions.labels[at % count].inspect}"
     end
     rows[slot] = CArray.int64(frame.nrow).seq if frame.nrow > 0
+    # The row where each value of on: first appears.
     first = CArray.int64(count)
-    count.times { |k| first[k] = positions.codes.eq(k).where[0] }
+    first[] = frame.nrow
+    first.scatter_min!(positions.codes.int64, CArray.int64(frame.nrow).seq) if frame.nrow > 0
     cols = {}
     frame.column_names.each do |name|
       next if keys.include?(name)

@@ -316,6 +316,10 @@ class GroupedFrame
     group_perm[group_bounds[k]...group_bounds[k + 1]]
   end
 
+  private def group_codes
+    @cat.codes
+  end
+
   private def group_perm
     @group_perm ||= @cat.sort_addr
   end
