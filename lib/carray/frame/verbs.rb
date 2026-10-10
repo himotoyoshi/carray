@@ -552,9 +552,12 @@ class CAFrame
     key = name.to_s
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     col = @columns[key]
+    # An N-D column is filled down the rows: each position on its trailing
+    # axes is a series of its own.
+    along = col.ndim > 1 ? { axis: 0 } : {}
     case method_or_value
-    when :ffill  then col.unmask(method: :forward)
-    when :bfill  then col.unmask(method: :backward)
+    when :ffill  then col.unmask(method: :forward, **along)
+    when :bfill  then col.unmask(method: :backward, **along)
     when :linear then fill_linear_column(key, col)
     when Symbol
       raise ArgumentError,
@@ -577,7 +580,16 @@ class CAFrame
     end
     # Without an index coordinate x is the cell position, which is exactly what
     # the core scan already interpolates against -- time columns included.
-    return col.unmask(method: :linear) if @index.nil?
+    if @index.nil?
+      return col.unmask(method: :linear, **(col.ndim > 1 ? { axis: 0 } : {}))
+    end
+    # With the index as x, an N-D column is filled one trailing position at a
+    # time; each position is a 1-D view, so the fill writes through to it.
+    if col.ndim > 1
+      col.shape[1..].map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map { |e| Array(e).flatten } }
+         .each { |pos| fill_linear_column(key, col[nil, *Array(pos)]) }
+      return
+    end
     # The same fill as the core, with the index as x.
     filled = col.send(:__linear_fill_along__, @index)
     if time_face

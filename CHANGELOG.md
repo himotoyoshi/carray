@@ -54,6 +54,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   (`["temp", :percentile, 90.0, min_count: 3]`). A reduction that takes an
   argument could not be given one before.
 
+- Fix: `CAFrame#fill(name, :ffill / :bfill / :linear)` on an N-D column fills
+  down the rows, each position on the trailing axes a series of its own. It
+  used to carry values across components and rows, and `:linear` on a frame
+  with an index raised.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a

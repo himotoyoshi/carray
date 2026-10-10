@@ -1459,6 +1459,9 @@ df.fill("temp", 0.0)        # constant fill
 - **`:ffill` / `:bfill`** carry the nearest present value; leading (for `:ffill`)
   or trailing (for `:bfill`) cells with nothing to carry stay masked. Works for
   any column type.
+- An **N-D column** is filled **down the rows**: each position on its trailing
+  axes is a series of its own, so a value is carried or interpolated only from
+  the rows above and below it, never from a neighbouring component.
 - **`:linear`** interpolates a numeric column against the frame's **index**
   coordinate when one is set (else the cell position) — this is where the index
   earns its keep. Cells outside the present range stay masked; a column with
