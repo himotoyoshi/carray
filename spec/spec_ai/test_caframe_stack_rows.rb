@@ -80,4 +80,44 @@ class TestCAFrameStackRows < Test::Unit::TestCase
     mixed = CAFrame.new("a" => CA_INT32([[1, 2], [3, 4]]), "b" => CA_INT32([[1, 2, 3], [4, 5, 6]]))
     assert_raise(ArgumentError) { mixed.unstack_rows }
   end
+
+  # on: lines the rows up by a column's values; a group without a row for a
+  # value has UNDEF there, as pivot leaves a missing cell.
+  def test_on_lines_rows_up_and_masks_the_missing_ones
+    long = CAFrame.new("station" => CA_OBJECT(%w[tokyo tokyo tokyo osaka osaka]),
+                       "level"   => CA_INT32([1000, 850, 500, 1000, 500]),
+                       "temp"    => CA_FLOAT64([15, 5, -20, 17, -18]),
+                       "label"   => CArray.const_string(%w[a b c d e]),
+                       "wind"    => CA_FLOAT64([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]))
+    n = long.stack_rows(by: "station", on: "level")
+    assert_equal %w[tokyo osaka], n.index.to_a
+    assert_equal [[1000, 850, 500], [1000, 850, 500]], n["level"].to_a
+    assert_equal [[15.0, 5.0, -20.0], [17.0, UNDEF, -18.0]], n["temp"].to_a
+    assert_equal [%w[a b c], ["d", UNDEF, "e"]], n["label"].to_a
+    assert_equal [[7.0, 8.0], [UNDEF, UNDEF], [9.0, 10.0]], n["wind"][1, nil, nil].to_a
+    # a new frame: the missing cells are new
+    n["temp"][0, 0] = 99.0
+    assert_equal 15.0, long["temp"][0]
+  end
+
+  def test_on_takes_the_values_in_order_of_first_appearance
+    long = CAFrame.new("st" => CA_OBJECT(%w[b b a a a]),
+                       "lv" => CA_INT32([500, 1000, 1000, 850, 500]),
+                       "v"  => CA_INT32([1, 2, 3, 4, 5]))
+    n = long.stack_rows(by: "st", on: "lv")
+    assert_equal [500, 1000, 850], n["lv"].to_a[0]
+    assert_equal [[1, 2, UNDEF], [5, 3, 4]], n["v"].to_a
+  end
+
+  def test_on_refuses_two_rows_for_one_place
+    long = CAFrame.new("st" => CA_OBJECT(%w[a a]), "lv" => CA_INT32([1, 1]), "v" => CA_INT32([1, 2]))
+    err = assert_raise(ArgumentError) { long.stack_rows(by: "st", on: "lv") }
+    assert_match(/more than one row for "a", lv=1/, err.message)
+    masked = CAFrame.new("st" => CA_OBJECT(%w[a a]), "lv" => CA_INT32([1, 2]), "v" => CA_INT32([1, 2]))
+    masked["lv"][1] = UNDEF
+    assert_raise(ArgumentError) { masked.stack_rows(by: "st", on: "lv") }
+    assert_raise(ArgumentError) { masked.stack_rows(by: "st", on: "st") }
+    empty = masked[CA_BOOLEAN([0, 0])].stack_rows(by: "st", on: "lv")
+    assert_equal [0, 0], empty["v"].shape
+  end
 end

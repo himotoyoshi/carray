@@ -866,12 +866,26 @@ n.unstack_rows                         # the 6 rows again, station as the index
   first for another order. A column that tells the rows apart (`level` here) is
   stacked like any other, so what position k means stays in the frame as a
   column — the new axis carries no label.
-- Every group has to have the **same number of rows**, and every row a key.
-  Filling a short group with `UNDEF` at its end would put its values at the
-  wrong positions — a station missing the 850 hPa row would have its 500 hPa
-  value where 850 belongs — so it raises. Lining the rows up by a value of
-  theirs is `pivot_grid`'s work (§11).
-- The result is a **view**: writes reach the long frame.
+- Every row needs a key. Without `on:` the rows are stacked **by position**, so
+  every group has to have the **same number of rows**: filling a short group
+  with `UNDEF` at its end would put its values at the wrong positions — a
+  station missing the 850 hPa row would have its 500 hPa value where 850
+  belongs — so it raises.
+- With **`on:`** a column says which rows go together. Position k is the k-th
+  value of that column **in the order it first appears** in the frame
+  (`sort_by` first for another order), a group without a row for a value has
+  `UNDEF` there, as `pivot` leaves a missing cell, and a group with two rows for
+  one value raises. The `on:` column is stacked too, the same values in every
+  row:
+
+  ```ruby
+  long.stack_rows(by: "station", on: "level")   # osaka has no 850 hPa row
+  # station  level             temp
+  # tokyo    [1000, 850, 500]  [15.0, 5.0, -20.0]
+  # osaka    [1000, 850, 500]  [17.0, _, -18.0]
+  ```
+- Without `on:` the result is a **view**, and writes reach the long frame. With
+  `on:` it is a new frame, since the missing cells are new.
 - `unstack_rows` spreads **every** N-D column along its first trailing axis,
   repeating the other columns and the index once per position; the N-D columns
   have to agree on that length. The index stays the index (`reset_index` turns
@@ -1960,6 +1974,7 @@ Frame view/copy semantics follow CArray exactly:
 | `df.stack_columns(...)` | a **new frame** — the other columns shared, the new N-D column a view of the stacked ones (§4) |
 | `df.unstack_column(...)` | a **new frame** — the other columns shared, the new columns views of the N-D column (§4) |
 | `df.stack_rows(by:)` | a **view-frame** — each N-D column a view of a column's rows, gathered by group (§4) |
+| `df.stack_rows(by:, on:)` | a **new frame** — the rows lined up by a column's values, the missing cells `UNDEF` (§4) |
 | `df.unstack_rows` | a **view-frame** — N-D columns reshaped, the others and the index gathered once per position (§4) |
 | `df.split_column(...)` | a **new frame** — the other columns shared, the new ones fresh `CAString` columns built from the split column (§2) |
 | `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |

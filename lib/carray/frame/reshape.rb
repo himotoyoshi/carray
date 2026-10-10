@@ -240,20 +240,31 @@ class CAFrame
   # stays in the frame as a column of its own; the new axis carries no label.
   # Sort first (+sort_by+) when the rows are to be stacked in another order.
   #
-  # Every group has to have the same number of rows: filling a short group
-  # with UNDEF at its end would put its values at the wrong positions (a
-  # station missing one level would have the next level's value in its
-  # place), and lining the rows up by a value of theirs is +pivot_grid+'s
-  # work.  A row whose key is masked belongs to no group and is refused too.
-  # The frame's own index, if it has one, is stacked as a column named after
-  # the row axis.  +unstack_rows+ is the inverse.
+  # Without +on:+ the rows are stacked by position, so every group has to
+  # have the same number of rows: filling a short group with UNDEF at its end
+  # would put its values at the wrong positions (a station missing one level
+  # would have the next level's value in its place).  With +on:+ a column
+  # says which rows go together: position k is the k-th value of that column
+  # in the order it first appears in the frame, a group without a row for it
+  # has UNDEF there, as +pivot+ leaves a missing cell, and a group with two
+  # rows for it is refused.  The +on:+ column is stacked too, the same values
+  # in every row.  A row whose key or +on:+ value is masked belongs nowhere
+  # and is refused.  The frame's own index, if it has one, is stacked as a
+  # column named after the row axis.  +unstack_rows+ is the inverse.
+  #
+  # Without +on:+ the result is a view, and writes reach this frame.  With
+  # +on:+ it is a new frame, since the missing cells are new.
+  #
+  #   long.stack_rows(by: "station", on: "level")
   #
   # @param by [String, Array<String>] the key columns, as for +group_by+.
+  # @param on [String, nil] the column whose values line the rows up.
   # @return [CAFrame] one row per group, indexed by the group labels.
-  def stack_rows(by:)
+  def stack_rows(by:, on: nil)
     keys = Array(by).map { |k| k.is_a?(Symbol) ? k.to_s : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
+    return stack_rows_on(frame, keys, on.to_s) if on
     grouped = frame.group_by(*keys)
     perm    = grouped.__send__(:group_perm)
     bounds  = grouped.__send__(:group_bounds).to_a
@@ -279,6 +290,65 @@ class CAFrame
     end
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
     CAFrame.new(cols, axis_name: axis, index: grouped.__send__(:label_index))
+  end
+
+  private def stack_rows_on(frame, keys, on)
+    if keys.include?(on)
+      raise ArgumentError, "stack_rows: #{on.inspect} is a key; on: names another column"
+    end
+    place = frame[on]
+    unless place.ndim == 1
+      raise ArgumentError, "stack_rows: on: #{on.inspect} has shape #{place.shape.inspect}, not one value per row"
+    end
+    grouped = frame.group_by(*keys)
+    perm    = grouped.__send__(:group_perm)
+    bounds  = grouped.__send__(:group_bounds).to_a
+    groups  = bounds.size - 1
+    if bounds.last != frame.nrow
+      raise ArgumentError,
+            "stack_rows: #{frame.nrow - bounds.last} rows have no value of the key; " \
+            "every row has to belong to a group"
+    end
+    if place.has_mask? && place.count_masked > 0
+      raise ArgumentError,
+            "stack_rows: #{place.count_masked} rows have no value of #{on.inspect}; " \
+            "every row has to have a place"
+    end
+    positions = place.categorize                       # labels in order of first appearance
+    count     = positions.labels.size
+    group_of  = CArray.int64(frame.nrow)
+    groups.times { |g| group_of[perm[bounds[g]...bounds[g + 1]]] = g }
+    slot = group_of * count + positions.codes.int64
+    rows = CArray.int64(groups * count)
+    rows[] = UNDEF
+    seen = CArray.int64(groups * count)
+    seen.scatter_add!(slot, 1) if frame.nrow > 0
+    if frame.nrow > 0 && seen.max > 1
+      at = seen.gt(1).where[0]
+      raise ArgumentError,
+            "stack_rows: more than one row for #{grouped.labels[at / count].inspect}, " \
+            "#{on}=#{positions.labels[at % count].inspect}"
+    end
+    rows[slot] = CArray.int64(frame.nrow).seq if frame.nrow > 0
+    first = CArray.int64(count)
+    count.times { |k| first[k] = positions.codes.eq(k).where[0] }
+    cols = {}
+    frame.column_names.each do |name|
+      next if keys.include?(name)
+      col  = frame[name]
+      src  = name == on ? (CArray.int64(groups * count).seq % count).then { |k| first[k] } : rows
+      cols[name] = gather_rows(col, src).reshape(groups, count, *col.shape[1..])
+    end
+    axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
+    CAFrame.new(cols, axis_name: axis, index: grouped.__send__(:label_index))
+  end
+
+  # The rows +rows+ names of +col+, a masked entry giving a masked row.
+  private def gather_rows(col, rows)
+    inner = col.shape[1..].inject(1, :*)
+    return col.project(rows) if inner == 1
+    addr = (rows[nil, :_] * inner + CArray.int64(inner).seq[:_, nil]).reshape(rows.elements * inner)
+    col.project(addr)
   end
 
   # Unstack the rows +stack_rows+ stacked: every N-D column is spread back
