@@ -4,16 +4,12 @@
 
   Face mechanism — shared op helper signatures + lift/strip entry points.
 
-  Phase 1 (= PROPOSAL_CAFACE_PHASE_1.md): skeleton.
-  Phase 2 (= PROPOSAL_CAFACE_PHASE_2.md F.2.1): replace shared op helpers
-  with thin-forward to parent.
-
   This header provides signatures for (1) shared op helpers (= thin-forward
   for storage ops, alias-based since Face is data-layout identical to
   parent), (2) `rb_ca_face_template` (struct duplicate + parent swap),
   (3) `ca_face_lift` (= wrap hook at the tail of user-facing access
-  methods), (4) `ca_strip_face` (= Face-stripping helper at kernel_iterator
-  entry).
+  methods), (4) `ca_strip_face` (= Face-stripping helper for code that
+  must see the storage).
 
   A Face is a "mask of a semantic type" (= identity layered on a storage
   type such as int64, with no value conversion), sibling to CAFake which
@@ -57,20 +53,21 @@ void ca_face_xfer_all   (void *ap, void *data, int dir);
 
 /* -- lift / strip helpers -- */
 
-/* Struct duplicate + parent + shape swap (= MEMO §4.3; consumed by Face
-   subclass lift / clone / dup machinery in Phase 2). */
+/* Struct duplicate + parent + shape swap.  The primitive under
+   ca_face_lift; also called directly where a result is re-wrapped under
+   a Face without going through a view (partition, generated reduce). */
 VALUE   rb_ca_face_template (VALUE original_face, CArray *new_parent,
                               ca_size_t *new_dim);
 
-/* At the tail of user-facing access methods, `if parent is a Face, wrap
-   the result as a Face`. Deployed in Phase 1 for `ca[...]`
-   (= rb_ca_aref / rb_ca_store); planned for block / refer / reshape /
-   transpose / sort etc. in Phase 2. */
+/* At the tail of view-creating methods, `if the receiver is a Face, wrap
+   the result as a Face`.  Reached through CA_FACE_LIFT_IF_FACE, which
+   each view-creating method deploys at its return path. */
 VALUE   ca_face_lift (VALUE view, VALUE face_parent);
 
-/* Follow the Face flag down to parent, e.g. at kernel_iterator entry.
-   No call sites in Phase 1; wired into SRC_* path init_l2 in Phase 2
-   (F.2.6). */
+/* Follow the Face flag down to the first non-Face parent, for code that
+   must talk to the storage (store, mask, MemoryView export).  The kernel
+   iterator strips Faces at entry with its own loop, which also strips
+   lazy markers. */
 CArray *ca_strip_face (CArray *src);
 
 /* VALUE-level counterpart: walks the Face parent ivar chain to the root
@@ -101,15 +98,11 @@ void Init_ca_face (void);
 extern int8_t CA_OBJ_RECORD;
 VALUE   rb_ca_record_get_data_class (CArray *ca);
 
-/* -- Convenience macro for view-creating method deployment (F.2.13) --
+/* -- Convenience macro for view-creating method deployment --
    Insert at the tail of each view-creating Ruby method (= rb_ca_transpose
    / rb_ca_reshape / etc.) just before return. `ca` is self's CArray *,
    `obj` is the view result, `self` is the calling VALUE. Achieves Face
-   transparency in a single C-level line, subclass-agnostic.
-
-   Macroises the pattern hand-written at the tail of `rb_ca_fetch_method`
-   in Phase 1; applied uniformly to view-creating methods from Phase 2
-   F.2.13 onward. */
+   transparency in a single C-level line, subclass-agnostic. */
 #define CA_FACE_LIFT_IF_FACE(obj, self, ca) do {                  \
   if ( ca_is_face(ca) && rb_obj_is_kind_of((obj), rb_cCArray) ) { \
     (obj) = ca_face_lift((obj), (self));                          \
@@ -127,14 +120,13 @@ VALUE   rb_ca_record_get_data_class (CArray *ca);
 
    The flag test comes first and covers both bits in one mask, so an
    ordinary array leaves through a single AND.  That matters: `[]` is the
-   hottest method this is deployed on (see devel/bench_index_percall.rb).
+   hottest method this is deployed on.
 
    NOT interchangeable with CA_FACE_LIFT_IF_FACE.  Face is lifted at ~24
    sites, including ones a marker must not follow it through -- `copy` owns
    its data, `sort` reorders values, `value` and `strip_mask` change what
    the mask means.  Deploy this only where the result is a view whose shape
-   was fixed at construction and which only moves positions
-   (PROPOSAL_LAZY_MARKER_LIFT section 4). */
+   was fixed at construction and which only moves positions. */
 #define CA_WRAPPER_LIFT(obj, self, ca) do {                          \
   if ( ca_test_flag((ca), CA_FLAG_IS_FACE | CA_FLAG_IS_LAZY_MARKER)  \
        && rb_obj_is_kind_of((obj), rb_cCArray) ) {                   \

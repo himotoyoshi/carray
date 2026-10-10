@@ -213,7 +213,7 @@ both are transparently consumed by every view-creating method, by
 | Path | Class hierarchy | Storage type | Hot path | Effort |
 |---|---|---|---|---|
 | **C-level Face** | `MyFace < CAFace < CAView` | Any (int64, float64, FIXLEN, …) | C struct + op table; per-cell access is dispatcher-direct | ~250 lines C |
-| **CAObject Face** | `MyFace < CAObject` (flag set via `face: true`) | Any | Ruby-level method definitions; per-cell access still C-fast (Face mode bypasses CAObject's per-cell Ruby callback) | ~30 lines Ruby |
+| **CAObject Face** | `MyFace < CAObject` (flag set via `face: true`) | Any | Ruby-level method definitions; per-cell access still C-fast (Face mode bypasses CAObject's per-cell Ruby callback) | 6 lines Ruby at minimum, plus the domain methods |
 
 ### A complete Face is six lines of Ruby
 
@@ -278,7 +278,7 @@ new C-level Face.
 typedef struct {
   /* === CAView prefix (must match field-for-field) === */
   int16_t    obj_type;
-  int8_t     data_type;      /* the storage data_type, e.g. CA_INT64 */
+  int8_t     data_type;      /* the surface data_type: CA_FIXLEN (§2.5) */
   int8_t     ndim;
   int32_t    flags;          /* CA_FLAG_IS_FACE is set in setup */
   ca_size_t  bytes;
@@ -286,6 +286,7 @@ typedef struct {
   ca_size_t *dim;
   char      *ptr;
   CArray    *mask;
+  char      *_pool;          /* pool-framework buffer; NULL = legacy path */
   CArray    *parent;
   uint32_t   attach;
   uint8_t    nosync;
@@ -345,40 +346,42 @@ inheritance. The chain is purely a type-tag-relationship marker.
 ```c
 ca_operation_function_t ca_time_func = {
   -1,                              /* obj_type, filled by ca_install_obj_type */
-  CA_VIRTUAL_ARRAY,
-  free_ca_time,                  /* subclass-specific (frees tail) */
-  ca_time_func_clone,        /* subclass-specific (knows tail size) */
-  ca_time_func_allocate,     /* subclass-specific (alias parent->ptr) */
+  CA_VIEW_ARRAY,
+  free_ca_time,                    /* subclass-specific (frees tail) */
+  ca_time_func_clone,              /* subclass-specific (knows tail size) */
+  ca_time_func_allocate,           /* subclass-specific (alias parent->ptr) */
   ca_face_attach,                  /* shared helper */
   ca_face_sync,                    /* shared helper */
   ca_face_detach,                  /* shared helper */
   ca_face_fill_data,               /* shared helper */
-  ca_time_func_create_mask,  /* subclass-specific (refer to parent mask) */
+  ca_view_func_create_mask,        /* generic view mask (over the parent's) */
   ca_face_xfer_index,              /* shared helper */
   ca_face_xfer_addrs,              /* shared helper */
   NULL,                            /* fold_stride: identity Face is not foldable */
   ca_face_xfer_stride,             /* shared helper */
   ca_face_xfer_all,                /* shared helper */
+  .fill_addrs  = ca_face_fill_addrs,   /* shared helper */
+  .fill_stride = ca_face_fill_stride,  /* shared helper */
 };
 ```
 
-Eight of the fourteen slots are shared `ca_face_*` helpers declared
+Ten of the fifteen slots are shared `ca_face_*` helpers declared
 in `ext/ca_obj_face.h`. They implement the storage-transparent
 default: attach forwards to the parent and aliases `parent->ptr`,
 sync forwards, detach releases the alias and detaches the parent,
-xfer slots delegate to the parent's xfer routines, fill_data
-delegates to `ca_fill`.
+xfer slots delegate to the parent's xfer routines, and the three fill
+slots delegate to the parent's fill. `create_mask` is the generic view
+slot `ca_view_func_create_mask`, which builds the Face's mask over the
+parent's, and `fold_stride` is `NULL`.
 
-The six subclass-specific slots cover the things that must know about
-the tail or the data_type:
+The three subclass-specific slots cover the things that must know about
+the tail:
 
 - `free_object` — frees the tail.
 - `clone` — duplicates with the correct tail size.
 - `allocate` — establishes the alias to `parent->ptr`. The alias is
   the entire reason Face is "free": no buffer is malloced, no bytes
   are copied; the Face just sees the parent's buffer as its own.
-- `create_mask` — usually a `CARefer` over the parent's mask, so the
-  Face inherits the parent's mask without copying.
 
 ### 4.4 The setup function
 
@@ -388,27 +391,30 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 {
   if ( parent->data_type != CA_INT64 ) {
     rb_raise(rb_eTypeError,
-             "CATime requires int64 storage");
+             "CATime requires int64 storage (parent.data_type != CA_INT64)");
+  }
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
   ca->obj_type  = CA_OBJ_TIME;
-  /* NonNumericFace: surface = CA_FIXLEN gates mkkernel numeric ops
-     (= dispatch hits ca_*_not_implement stub → TypeError).  Storage
-     remains parent->data_type (= CA_INT64); bytes = 8 must be set
-     explicitly for FIXLEN.  See §2.5 for the surface vs storage
-     choice. */
-  ca->data_type = CA_FIXLEN;
-  ca->flags     = CA_FLAG_IS_FACE;     /* <-- the gate */
+  ca->data_type = CA_FIXLEN;           /* NonNumeric surface (§2.5) */
+  ca->flags     = CA_FLAG_IS_FACE | CA_FLAG_FACE_ORDERABLE_STORAGE;
   ca->ndim      = parent->ndim;
-  ca->bytes     = sizeof(int64_t);
+  ca->bytes     = sizeof(int64_t);     /* FIXLEN needs bytes set explicitly */
   ca->elements  = parent->elements;
   ca->ptr       = NULL;                /* alias is set in allocate */
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, parent->ndim);
+  if ( ! ca->_pool ) {
+    ca->dim     = ALLOC_N(ca_size_t, parent->ndim);
+  }
   memcpy(ca->dim, parent->dim, sizeof(ca_size_t) * parent->ndim);
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->unit      = unit;
+  ca->count     = count;
   if ( ca_has_mask(parent) ) ca_create_mask((CArray *) ca);
   if ( ca_is_scalar(parent) ) ca_set_flag(ca, CA_FLAG_SCALAR);
   if ( ca_test_flag(parent, CA_FLAG_READ_ONLY) )
@@ -417,12 +423,31 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 }
 ```
 
-The critical line is `ca->flags = CA_FLAG_IS_FACE`. Every Face
+The critical bit is `CA_FLAG_IS_FACE` in `ca->flags`. Every Face
 subclass sets this flag in setup; downstream Face-aware machinery
-detects Face-ness from the flag alone. A Numeric Face writes
+detects Face-ness from the flag alone. The other flags on the same line
+open operation families (§6.3): CATime adds
+`CA_FLAG_FACE_ORDERABLE_STORAGE` because its int64 storage sorts in the
+same order as the instants it encodes. A Numeric Face writes
 `ca->data_type = parent->data_type` (= the storage type); a NonNumeric
 Face — `CATime` and `CATimedelta` both — writes
 `ca->data_type = CA_FIXLEN` to opt into the mkkernel gate.
+
+The constructor calls setup twice: first with `ca == NULL`, which runs
+the checks before anything is allocated, then on the struct returned by
+`ca_array_alloc`:
+
+```c
+CATime *
+ca_time_new (CArray *parent, int8_t unit, int64_t count)
+{
+  CATime *ca;
+  ca_time_setup(NULL, parent, unit, count);
+  ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
+  ca_time_setup(ca, parent, unit, count);
+  return ca;
+}
+```
 
 ### 4.5 The `Init_` function
 
@@ -494,6 +519,14 @@ end
 
 The `face: true` option is what installs the flag. `CAObject`'s
 constructor honours it; nothing else in user code has to change.
+
+The flags that open the ordering families (§6.3) are keyword options
+next to it: `orderable_storage: true` sets
+`CA_FLAG_FACE_ORDERABLE_STORAGE` and `comparable_storage: true` sets
+`CA_FLAG_FACE_COMPARABLE_STORAGE`. Both require `face: true`. Without
+them, `sort`, `min`, `max`, search and the value-hash family raise on
+the Face — including on a Numeric Face such as `CACircular` below,
+whose angles do not declare that storage order is their order.
 
 ### 5.2 Worked example — `CACircular`
 
@@ -958,6 +991,9 @@ void ca_face_attach     (void *ap);
 void ca_face_sync       (void *ap);
 void ca_face_detach     (void *ap);
 void ca_face_fill_data  (void *ap, void *ptr);
+void ca_face_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr);
+void ca_face_fill_stride(void *ap, ca_size_t base, int8_t ndim,
+                         ca_size_t *counts, ca_size_t *steps, void *ptr);
 
 void ca_face_xfer_index (void *ap, ca_size_t *idx,
                          void *data, int dir);
@@ -1081,8 +1117,8 @@ allowed to assume them.
 6. **Both legs.** Face is a two-leg mask: reads return the parent's
    value (optionally re-wrapped by `storage_to_element` for scalars and
    by `ca_face_lift` for view-returning paths); writes accept Ruby
-   values (optionally translated by an explicit setter the subclass
-   defines) and store them through to the parent. Read-only Face is
+   values (optionally translated by `element_to_storage`, §6.2) and
+   store them through to the parent. Read-only Face is
    a degenerate case, not the structural rule.
 7. **`Face.parent.data_type == storage` across the chain.** For a
    NonNumericFace (surface = `CA_FIXLEN`), the lift hook rewrites

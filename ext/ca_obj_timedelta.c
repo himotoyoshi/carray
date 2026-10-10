@@ -27,7 +27,7 @@ extern void   ca_time_extract_unit (VALUE unit, int8_t *base, int64_t *count);
 typedef struct {
   /* === CAView prefix === */
   int16_t    obj_type;
-  int8_t     data_type;        /* fixed to CA_INT64 */
+  int8_t     data_type;        /* surface: CA_FIXLEN (storage is the int64 parent) */
   int8_t     ndim;
   int32_t    flags;            /* CA_FLAG_IS_FACE set */
   ca_size_t  bytes;            /* fixed to sizeof(int64_t) */

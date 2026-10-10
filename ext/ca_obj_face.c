@@ -694,7 +694,7 @@ rb_ca_face_lift_method (VALUE self, VALUE face_parent)
 
 /* ca_face_reconcile_comparison(pself, pother) — Face gate for the element-
  * wise comparison operators (< <= > >=, eq, ne; <=> composes from > and <).
- * Mirrors the search query gate (PROPOSAL_FACE_ORDERING_GATE): when the LHS
+ * Mirrors the search query gate (docs/authoring/FaceOrderingSearch.md): when the LHS
  * is a Face over NUMERIC storage, memcmp on the surface fixlen bytes would
  * mis-order the storage, so descend to storage (ORDERABLE licenses that the
  * numeric order equals the surface order) and reconcile the RHS:

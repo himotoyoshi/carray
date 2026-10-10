@@ -74,9 +74,11 @@ VALUE   ca_face_lift    (VALUE storage_result, VALUE original_face);
         /* Wrap the result of a view-creating method so the Face
            stays on top of the chain (property 3 — "outermost"). */
 
-VALUE   rb_ca_face_template (VALUE original_face, VALUE new_storage);
+VALUE   rb_ca_face_template (VALUE original_face, CArray *new_parent,
+                             ca_size_t *new_dim);
         /* Build a new Face instance from `original_face`, replacing
-           its storage parent with `new_storage`.  This is the one
+           its storage parent with `new_parent` and its shape with
+           `new_dim`.  This is the one
            core path that raw-memcpys a CArray struct and must reset
            the CAView prefix including _pool ([ch. 3]). */
 ```
@@ -93,6 +95,9 @@ void  ca_face_attach     (void *ca);   /* ca_attach(ca->parent) + alias */
 void  ca_face_sync       (void *ca);   /* ca_sync(ca->parent) */
 void  ca_face_detach     (void *ca);   /* ca_detach(ca->parent) */
 void  ca_face_fill_data  (void *ca, void *val);
+void  ca_face_fill_addrs (void *ca, ca_size_t n, ca_size_t *addrs, void *val);
+void  ca_face_fill_stride(void *ca, ca_size_t base, int8_t ndim,
+                          ca_size_t *counts, ca_size_t *steps, void *val);
 void  ca_face_xfer_index (void *ca, ca_size_t *idx, void *data, int dir);
 void  ca_face_xfer_addrs (void *ca, ca_size_t n, ca_size_t *addrs,
                           void *data, int dir);
@@ -153,10 +158,10 @@ an external gem add a Face without recompiling the core.
 ## The portable-state table
 
 ```c
-extern uint8_t face_state_portable_table[CA_OBJ_TYPE_MAX];
+extern int8_t ca_face_state_portable_table[CA_OBJ_TYPE_MAX];
 ```
 
-`face_state_portable_table[obj_type] == 1` means the Face's state can be carried
+`ca_face_state_portable_table[obj_type] == 1` means the Face's state can be carried
 over several parents — the multi-parent constructors (CAStack, `concatenate`,
 `stack`, `meld`) read it, and nothing else does. A `0` means the state is tied to
 a specific parent buffer and those constructors must reject it. A `CAString` is
@@ -169,22 +174,25 @@ CAConstStrings would mean reconciling K independent byte pools — which is why
 CAStack et al. reject it. The portable escape hatch is `to_fixlen_string`, which
 copies each cell into a fixed-width slot.
 
-`CATime` and `CATimedelta` set `1` — their state is purely in the surface
-data_type wrapper (the unit), carried alongside via Marshal-friendly metadata.
+`CATime` and `CATimedelta` set `1` — their state is two numbers in the
+struct tail (the tick base `unit` and the multiplier `count`), which do not
+point into any parent buffer.
 
-`CARecord` is deliberately left *unregistered* in the C table: portability is a
+An obj_type that registers nothing holds `-1`. `CARecord` is deliberately
+left *unregistered* in the C table: portability is a
 property of the record's schema (its member types), which a single per-obj_type
 flag cannot express. Resolution therefore defers to the concrete record class —
 a class-level `face_state_portable?` if one is defined, otherwise the default
 (portable). No such predicate is defined today, so a CARecord currently resolves
 to portable.
 
-## Open: Marshal / dump_binary identity preservation
+## Open: serialising a Face
 
-Carrying a Face's *class identity* through `dump_binary` / `Marshal` round-trips —
-so a dumped `CATime` reloads as a `CATime`, including anonymous
-subclasses — is **deferred**. `dump_binary` itself is largely untouched in 3.0;
-the Face-identity question is out of scope, left to a later dump_binary phase.
+`Marshal.dump` and `CArray.save` refuse a Face with a `TypeError` today
+rather than write its storage and lose the Face; the message points at
+`.parent` to save the storage explicitly. Carrying the Face itself — so a
+saved `CATime` reloads as a `CATime` with its `unit` and `count`, including
+anonymous subclasses — is **deferred** to a later serialisation phase.
 
 ## Where to go next
 
