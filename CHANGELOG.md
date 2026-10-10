@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame#join` with an N-D key column (`join(other, on: "wind")` where
+  `"wind"` is `(N, 2)`) matched the key cell by cell and returned misplaced
+  values instead of failing. It now raises `ArgumentError`, as `group_by`
+  already did; join on one component (`df["wind"][nil, 0]`) instead.
+  `join_asof` and `align` refuse an N-D key with the same message.
+
 - Fix: `axis_group` reductions and running values (`v[cat].sum(axis:
   :group)`, `.cumsum(axis: :group)` and their siblings) answer for a boolean,
   complex, object or Face payload as the core does over each group: a time

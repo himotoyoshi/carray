@@ -28,8 +28,8 @@ class CAFrame
   # raise instead. Rename afterward with +rename+ if needed (§12-C).
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = on.to_s
-    lkey = self[on]
-    rkey = other[on]
+    lkey = join_key(self[on], on, "join")
+    rkey = join_key(other[on], on, "join")
     plan = join_name_plan(other, on, suffixes)
 
     case how
@@ -52,7 +52,9 @@ class CAFrame
   def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = on.to_s
     plan = join_name_plan(other, on, suffixes)
-    addr = self[on].locate_nearest_addr(other[on], direction: direction, tolerance: tolerance)
+    lkey = join_key(self[on], on, "join_asof")
+    rkey = join_key(other[on], on, "join_asof")
+    addr = lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
     join_by_addr(other, on, addr, plan)
   end
 
@@ -76,8 +78,12 @@ class CAFrame
   def align(key, reference)
     key = key.to_s
     ref = reference.is_a?(CArray) ? reference : reference.to_ca
+    unless ref.ndim == 1
+      raise ArgumentError,
+            "align: the reference has shape #{ref.shape.inspect}; give one key value per row of the result"
+    end
     on_index = !@columns.key?(key) && @axis_name == key && @index
-    addr = ref.locate_addr(on_index ? @index : self[key])
+    addr = ref.locate_addr(on_index ? @index : join_key(self[key], key, "align"))
 
     cols = {}
     column_names.each { |name| cols[name] = project_rows(self[name], addr) }
@@ -171,6 +177,15 @@ class CAFrame
       end
     end
     new(cols, axis_name: first.axis_name, index: first.index)
+  end
+
+  # The key column of a join, checked to give each row one value. An N-D key
+  # would be matched cell by cell rather than row by row.
+  private def join_key(col, on, verb)
+    return col if col.ndim == 1
+    raise ArgumentError,
+          "#{verb}: the key #{on.inspect} has shape #{col.shape.inspect}, not one value per row; " \
+          "#{verb} on one of its components (e.g. df[name][nil, 0])"
   end
 
   private def join_name_plan(other, on, suffixes)

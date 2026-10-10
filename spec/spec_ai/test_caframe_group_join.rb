@@ -944,3 +944,45 @@ class TestCAFrameSort < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df.sort_by { |f| [] } }            # empty
   end
 end
+
+# A join key gives each row one value: an N-D key column is refused by every
+# key-matching verb rather than matched cell by cell.
+class TestCAFrameJoinNDKey < Test::Unit::TestCase
+  def setup
+    @left  = CAFrame.new("wind" => CA_FLOAT64([[1.2, -0.3], [2.1, 0.5], [0.0, 0.0]]),
+                         "t"    => CA_FLOAT64([1, 2, 3]))
+    @right = CAFrame.new("wind" => CA_FLOAT64([[1.2, -0.3], [9, 9]]),
+                         "z"    => CA_INT64([1, 2]))
+  end
+
+  def test_join_refuses_nd_key
+    [:left, :inner, :outer, :right].each do |how|
+      e = assert_raise(ArgumentError) { @left.join(@right, on: "wind", how: how) }
+      assert_match(/join: the key "wind" has shape \[3, 2\], not one value per row/, e.message)
+    end
+  end
+
+  def test_join_refuses_nd_key_on_the_right_only
+    l = CAFrame.new("wind" => CA_FLOAT64([1, 2, 3]))
+    e = assert_raise(ArgumentError) { l.join(@right, on: "wind") }
+    assert_match(/has shape \[2, 2\]/, e.message)
+  end
+
+  def test_join_asof_refuses_nd_key
+    e = assert_raise(ArgumentError) { @left.join_asof(@right, on: "wind") }
+    assert_match(/join_asof: the key "wind" has shape \[3, 2\]/, e.message)
+  end
+
+  def test_align_refuses_nd_key_and_nd_reference
+    e = assert_raise(ArgumentError) { @left.align("wind", CA_FLOAT64([1.2])) }
+    assert_match(/align: the key "wind" has shape \[3, 2\]/, e.message)
+    e = assert_raise(ArgumentError) { @left.align("t", CA_FLOAT64([[1, 2]])) }
+    assert_match(/align: the reference has shape \[1, 2\]/, e.message)
+  end
+
+  def test_nd_payload_still_gathers
+    l = CAFrame.new("k" => CA_INT64([1, 2, 5]))
+    r = CAFrame.new("k" => CA_INT64([1, 2]), "v" => CA_FLOAT64([[1, 2], [3, 4]]))
+    assert_equal [[1.0, 2.0], [3.0, 4.0], [UNDEF, UNDEF]], l.join(r, on: "k")["v"].to_a
+  end
+end
