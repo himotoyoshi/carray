@@ -1747,7 +1747,9 @@ Everything else is shared between the two:
 - A frame with **no rows** adds no values, so its data types take no part in the
   result: a header-only CSV reads as object columns, and joined to a typed frame
   it neither makes `meld` refuse nor turns `concatenate`'s columns into object.
-  It still has to have the same columns, and an index exactly when the others do.
+  It still has to have the same columns, the same trailing dimensions in its
+  N-D columns (a shape, not a type the others can settle), and an index exactly
+  when the others do.
 
 Because `meld` shares storage, writes flow **both ways**: writing a row of the
 result reaches whichever input frame owns that row, and writing an input reaches

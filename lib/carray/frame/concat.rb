@@ -33,7 +33,8 @@ class CAFrame
   # must agree); if none do, the result has no index; a mix raises.
   #
   # A frame with no rows adds no values, so it takes no part in the result
-  # past these checks: its column set and index still have to agree, but the
+  # past these checks: its column set, its N-D columns' trailing dimensions
+  # and its index still have to agree, but the
   # data types are the other frames' (a header-only CSV reads as object
   # columns, which would otherwise refuse or demote the rest).  When every
   # frame is empty, the first one stands for them.
@@ -49,6 +50,7 @@ class CAFrame
     names = first.column_names
     check_column_sets(frames, names, verb: "meld")
     index_pieces(frames, verb: "meld")
+    check_trailing_shapes(frames, names, verb: "meld")
     frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
@@ -78,6 +80,7 @@ class CAFrame
     names = first.column_names
     check_column_sets(frames, names, verb: "concatenate")
     index_pieces(frames, verb: "concatenate")
+    check_trailing_shapes(frames, names, verb: "concatenate")
     frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
@@ -120,7 +123,7 @@ class CAFrame
       end
     end
     indexes, = index_pieces(frames, verb: "stack")
-    if indexes && ! indexes.all? { |x| x.to_a == indexes.first.to_a }
+    if indexes && ! indexes.all? { |x| same_index_values?(x, indexes.first) }
       raise ArgumentError, "stack: the frames' indexes differ; stacked rows have to be the same rows"
     end
     cols = {}
@@ -210,6 +213,31 @@ class CAFrame
     end
   end
   private_class_method :check_column_sets
+
+  # A column's trailing dimensions are its shape, not a type the other
+  # frames can settle, so a frame with no rows has to agree on them too.
+  def self.check_trailing_shapes(frames, names, verb:)
+    names.each do |name|
+      trailing = frames.first[name].shape[1..]
+      frames.each_with_index do |f, i|
+        next if i.zero? || f[name].shape[1..] == trailing
+        raise ArgumentError,
+              "#{verb}: column #{name.inspect} has trailing dimensions " \
+              "#{f[name].shape[1..].inspect} in frame #{i}, #{trailing.inspect} in frame 0"
+      end
+    end
+  end
+  private_class_method :check_trailing_shapes
+
+  # Two indexes hold the same rows when their values agree cell by cell; a
+  # NaN label matches a NaN label, and a masked cell a masked cell.
+  def self.same_index_values?(a, b)
+    return false unless a.shape == b.shape
+    a.to_a.zip(b.to_a).all? do |x, y|
+      x.equal?(y) || x == y || (x.is_a?(Float) && y.is_a?(Float) && x.nan? && y.nan?)
+    end
+  end
+  private_class_method :same_index_values?
 
   # The frames that add rows, or the first frame when none does.
   def self.frames_with_rows(frames)
