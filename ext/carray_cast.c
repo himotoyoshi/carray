@@ -2645,8 +2645,8 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     if ( RB_TYPE_P(data_type, T_CLASS) || RB_TYPE_P(data_type, T_MODULE) ) {
       rb_raise(rb_eArgError,
                "promote_list: data_type must be a primitive Symbol "
-               "(Class targets are not supported; use auto-detect or "
-               "strip Face manually)");
+               "(Class targets are not supported; leave data_type out to "
+               "keep a Face)");
     }
   }
 
@@ -2708,9 +2708,9 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
       /* Mixed: at least one Face and at least one non-Face,
          OR mixed Face classes.  Both are rejected. */
       rb_raise(rb_eArgError,
-               "promote_list: cannot mix Face and non-Face (or heterogeneous "
-               "Face classes); pass a homogeneous Face list, or strip Face "
-               "manually with .parent for the storage-level layout");
+               "promote_list: cannot mix Face and non-Face arrays (or arrays "
+               "of different Face classes) in one list; convert them to one "
+               "Face class, or none, first");
     }
   }
 
@@ -2718,9 +2718,9 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     /* Homogeneous Face: validate portability, then pass through. */
     if ( n > 1 && ! ca_face_state_portable(ref_face->obj_type, face_class) ) {
       rb_raise(rb_eArgError,
-               "promote_list: %s state is not portable across multiple "
-               "elements (= per-parent storage like CAConstString's buffer); "
-               "strip Face manually with .parent for a storage-level list",
+               "promote_list: %s state is not portable across several "
+               "arrays (each keeps its values in storage of its own); "
+               "convert them first (a CAConstString with to_string)",
                rb_class2name(face_class));
     }
     /* Return a fresh Array so callers can mutate without aliasing. */
