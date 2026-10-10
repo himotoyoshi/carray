@@ -43,6 +43,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   by `CAFrame.from_csv(types:)`, `cast` and `parse_to_time`, so
   `types: :infer` now infers a column of such text as `:time`.
 
+- New: `group_by_category(...).median(axis:)` and `percentile(p, axis:)` give
+  each group's order statistic along the axis, as the core's `median` and
+  `percentile` answer for the group's cells; an empty group is UNDEF. They
+  make one core call per group, so many groups take longer than the other
+  `axis:` reductions. `quantile` still takes no `axis:`.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a
@@ -59,7 +65,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `shape: [12, 3]` for month by maximum, minimum and mean.
 
 - New: a `CAFrame` group's `sum` / `mean` / `min` / `max` and `aggregate`
-  reduce an N-D column along the rows, so each group keeps the trailing
+  (including `median` and `percentile`) reduce an N-D column along the rows, so each group keeps the trailing
   shape: a profile column `(N, L)` gives each group's profile `(groups, L)`.
   N-D columns used to be left out of the reductions, and `aggregate` raised
   on them.

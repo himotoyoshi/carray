@@ -473,11 +473,11 @@ class CACategoricalIterator < CASegmentIterator
   # A read-only Face's answers (a const string's records index a pool of
   # their own) cannot be put together, so they are collected as the surface
   # values they are, as the flat form does.
-  def axis_by_core (axis, op)
+  def axis_by_core (axis, op, *args)
     h    = @value
     axis = checked_axis(axis, op)
     groups  = (0...[@k, 1].max).map { |c| group_cells(h, axis, c, @k.zero?) }
-    answers = groups.map { |g| g.__send__(op, axis: axis) }
+    answers = groups.map { |g| g.__send__(op, *args, axis: axis) }
     if answers.first.face? && answers.first.read_only?
       answers = answers.map { |a| CArray.object(*a.shape) { a.to_a } }
     end
@@ -592,12 +592,10 @@ class CACategoricalIterator < CASegmentIterator
           "band-only cat.shape=#{band.inspect}."
   end
 
-  # Order-stat axis: is deferred to Phase 4 (per-fiber counting-sort C kernel).
-  # Called from median / percentile / variance / stddev when axis: is given.
-  def axis_order_stat_defer! (op)
-    raise NotImplementedError,
-          "CACategoricalIterator##{op}(axis:) is not implemented — order " \
-          "statistics are available without axis:."
+  # median / percentile along an axis: the core's own order statistic of each
+  # group's cells, stacked -- the axis_by_core path, one core call per group.
+  def axis_order_stat (axis, op, *args)
+    axis_by_core(axis, op, *args)
   end
 end
 

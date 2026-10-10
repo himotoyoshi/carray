@@ -315,12 +315,16 @@ with all three named.
 ### Which reductions take it
 
 `sum`, `mean`, `min`, `max`, `minmax`, `prod`, `accumulate`, `count`,
-`count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, and
-`wsum(w)` / `wmean(w)`.
+`count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, `median`,
+`percentile(p)`, and `wsum(w)` / `wmean(w)`.
 
-The order statistics — `median`, `percentile`, `quantile` — do not: each group of
-each fiber would need its own sort. They are available without `axis:`. So are
-`count(v)`, `count_masked`, `elements`, and the index and address members.
+`median` and `percentile` with `axis:` take each group's cells and ask the core
+for its order statistic along the axis, one call per group, so the answer is
+the core's — an empty group is `UNDEF`, as for `mean`. With many groups this is
+slower than the other reductions, which run once over the whole value.
+
+`quantile` does not take `axis:`; use `percentile` for each fraction. Neither
+do `count(v)`, `count_masked`, `elements`, and the index and address members.
 
 `wsum` / `wmean` want a weight array of the value's shape exactly; broadcast it
 yourself before passing it.

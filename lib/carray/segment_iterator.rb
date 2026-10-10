@@ -207,7 +207,7 @@ class CASegmentIterator < CAIterator
   #   Returns per-segment medians as float64.  Empty segments are MASKED.
   #   @return [CArray]
   def median(axis: nil)
-    axis_order_stat_defer!(:median) if axis
+    return axis_order_stat(axis, :median) if axis
     percentile(50.0)
   end
 
@@ -219,7 +219,7 @@ class CASegmentIterator < CAIterator
   #   @param p [Numeric] percentile in 0..100.
   #   @return [CArray]
   def percentile (p, axis: nil)
-    axis_order_stat_defer!(:percentile) if axis
+    return axis_order_stat(axis, :percentile, p) if axis
     unless MONOID_TYPES.include?(grouped.data_type)
       return per_segment(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
     end
@@ -795,7 +795,7 @@ class CASegmentIterator < CAIterator
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
-  def axis_order_stat_defer! (*)
+  def axis_order_stat (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 

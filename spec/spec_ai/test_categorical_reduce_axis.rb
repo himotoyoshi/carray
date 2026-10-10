@@ -438,21 +438,26 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_raise(ArgumentError) { h.group_by_category(cat).sum(axis: 0) }
   end
 
-  # --- deferred: order stats raise cleanly with axis: ---------------------
+  # --- order stats with axis: are each group's core order statistic -------
 
-  def test_axis_on_true_order_stat_raises_deferred_message
-    # median / percentile need a sort per group (genuine order statistics) and
-    # stay deferred to a future demand-driven phase; variance / stddev /
-    # variancep / stddevp are 2-pass centred aggregates (no order needed) and
-    # land in Phase 2 (see PROPOSAL §5).
-    h = CArray.float64(6, 2, 3) { |i, y, x| (i + 1).to_f }
-    codes = CArray.int32(6, 2, 3) { |i, y, x| i / 2 }
+  def test_axis_order_stats_are_each_groups_core_answer
+    h = CArray.float64(6, 2, 3) { |i, y, x| ((i * 7 + y * 3 + x) % 5).to_f }
+    codes = CArray.int32(6, 2, 3) { |i, y, x| (i + x) % 3 }
     cat = CACategorical.from_codes(codes, [:a, :b, :c])
     grp = h.group_by_category(cat)
-    err = assert_raise(NotImplementedError) { grp.median(axis: 0) }
-    assert err.message =~ /axis.*deferred|Phase 4|order stat/i
-    err = assert_raise(NotImplementedError) { grp.percentile(50.0, axis: 0) }
-    assert err.message =~ /axis.*deferred|Phase 4|order stat/i
+    { grp.median(axis: 0) => 50.0, grp.percentile(90.0, axis: 0) => 90.0 }.each do |got, p|
+      3.times do |c|
+        local = h.copy
+        local[codes.ne(c)] = UNDEF
+        assert_equal local.percentile(p, axis: 0).to_a, got[c, nil, nil].to_a
+      end
+    end
+  end
+
+  def test_axis_median_of_an_empty_group_is_undef
+    h = CArray.float64(4, 2).seq!
+    cat = CACategorical.from_codes(CA_INT32([0, 0, 0, 0]), [:a, :b])
+    assert_equal [[3.0, 4.0], [UNDEF, UNDEF]], h.group_by_category(cat).median(axis: 0).to_a
   end
 
   # --- Phase 2: mean / min / max / minmax / count / prod ---------------------
