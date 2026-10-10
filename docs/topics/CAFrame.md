@@ -1404,16 +1404,20 @@ A `GroupedFrame` has three surfaces:
 
 ### (a) Convenience reductions
 
-`sum` / `mean` / `min` / `max` reduce **every one-dimensional column whose type
-defines the reduction** into a new frame indexed by the group labels: a time
-column has a mean, a minimum and a maximum but no sum, a string column a minimum
-and a maximum only, a boolean column all four. A column whose type has no such
-reduction is left out, and so are N-D columns. The **key columns are skipped** —
-they are the index of the result, whatever their data type:
+`sum` / `mean` / `min` / `max` reduce **every column whose type defines the
+reduction** into a new frame indexed by the group labels: a time column has a
+mean, a minimum and a maximum but no sum, a string column a minimum and a
+maximum only, a boolean column all four. A column whose type has no such
+reduction is left out. The **key columns are skipped** — they are the index of
+the result, whatever their data type:
 
 ```ruby
 df.group_by("station").mean       # => frame of per-station means
 ```
+
+An **N-D column** is reduced along the rows, so each group keeps the trailing
+shape: a profile column `(N, 20)` gives `(groups, 20)` — each station's mean
+profile — and a wind column `(N, 2)` each station's mean vector.
 
 Each takes `min_count:` and `fill_value:` as a core reduction does: a group with
 fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the
@@ -1427,17 +1431,18 @@ df.group_by("station").sum(min_count: 1, fill_value: 0.0)
 ### (b) `aggregate` — declarative per-column reductions
 
 Map each output name to `[input_column, reduction]`. The reduction is a
-**Symbol** (a vectorized reduction applied through the group iterator) or a
-**Proc** (per-group custom, called with the group's column slice — this is how
-N-D columns reduce):
+**Symbol** (a vectorized reduction applied through the group iterator; an N-D
+column is reduced along the rows, as above) or a **Proc** (per-group custom,
+called with the group's column slice):
 
 ```ruby
 df.group_by("station").aggregate(
   "temp_mean" => ["temp", :mean],
   "temp_max"  => ["temp", :max],
-  "wind_mean" => ["wind", ->(c) { c.mean(axis: 0) }],   # N-D column, per group
+  "wind_mean" => ["wind", :mean],                       # N-D column -> (groups, 2)
+  "wind_peak" => ["wind", ->(c) { c.abs.max }],         # any per-group computation
 )
-# => frame with columns temp_mean / temp_max / wind_mean, index = station labels
+# => frame with columns temp_mean / temp_max / wind_mean / wind_peak, index = station labels
 ```
 
 A Symbol reduction takes its keywords as a third element:

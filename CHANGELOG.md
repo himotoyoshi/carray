@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: a `CAFrame` group's `sum` / `mean` / `min` / `max` and `aggregate`
+  reduce an N-D column along the rows, so each group keeps the trailing
+  shape: a profile column `(N, L)` gives each group's profile `(groups, L)`.
+  N-D columns used to be left out of the reductions, and `aggregate` raised
+  on them.
+
+- Fix: the `axis:` form of `sum` / `mean` / `min` / `max` / `minmax` / `prod`
+  on a categorical group iterator (`group_by_category`) answers for boolean,
+  object and Face values (a time's mean is a time); it used to raise
+  `numeric value required`.
+
 - New: `CAFrame.stack(*frames, axis: 1)` puts frames of the same shape on
   top of each other as layers: the rows stay, and each column gains an axis
   over the frames (`temp:float64` becomes `temp:float64[K]`), as a view.

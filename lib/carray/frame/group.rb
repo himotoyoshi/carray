@@ -179,7 +179,7 @@ class GroupedFrame
       cols[out] =
         case reduction
         when Symbol
-          self[in_name].public_send(reduction, **(options || {}))
+          group_reduce(@frame[in_name], reduction, **(options || {}))
         when Proc
           if options
             raise ArgumentError, "aggregate: a Proc reduction takes no keywords (#{out.inspect})"
@@ -215,34 +215,35 @@ class GroupedFrame
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
   end
 
-  # Convenience reductions over every one-dimensional column that defines
-  # the reduction. A column is in the result when its type answers the
-  # reduction -- a time column has a mean, a minimum and a maximum but no
-  # sum, a string column a minimum and a maximum only -- and left out when it
-  # does not, as are the key columns and multi-dimensional columns. Each
+  # Convenience reductions over every column that defines the reduction. A
+  # column is in the result when its type answers the reduction -- a time
+  # column has a mean, a minimum and a maximum but no sum, a string column a
+  # minimum and a maximum only -- and left out when it does not, as are the
+  # key columns. An N-D column is reduced along the rows, so each group keeps
+  # its trailing shape: a (N, L) column gives (groups, L). Each
   # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
   # with fewer than min_count present values is UNDEF, and fill_value fills
   # the UNDEF cells.
   #
   # @!method sum(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group sum of every one-dimensional column
-  #   whose type has a sum. Other columns are left out.
+  #   Returns a frame of the per-group sum of every column whose type has a
+  #   sum, an N-D one per group along the rows. Other columns are left out.
   #   @return [CAFrame] one row per group, indexed by the group labels.
   # @!method mean(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group mean of every one-dimensional column
-  #   whose type has a mean, as {#sum} does.
+  #   Returns a frame of the per-group mean of every column whose type has
+  #   a mean, as {#sum} does.
   #   @return [CAFrame] one row per group.
   # @!method min(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group minimum of every one-dimensional column
-  #   whose type has a minimum, as {#sum} does.
+  #   Returns a frame of the per-group minimum of every column whose type has
+  #   a minimum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   # @!method max(min_count: nil, fill_value: nil)
-  #   Returns a frame of the per-group maximum of every one-dimensional column
-  #   whose type has a maximum, as {#sum} does.
+  #   Returns a frame of the per-group maximum of every column whose type has
+  #   a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
     define_method(red) do |min_count: nil, fill_value: nil|
-      reduce_numeric(red, min_count: min_count, fill_value: fill_value)
+      reduce_columns(red, min_count: min_count, fill_value: fill_value)
     end
   end
 
@@ -257,16 +258,27 @@ class GroupedFrame
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  private def reduce_numeric(reduction, **keywords)
+  private def reduce_columns(reduction, **keywords)
     cols = {}
     @frame.column_names.each do |name|
       # A key column is the index here, not a result column.
       next if @key_names.include?(name)
       col = @frame[name]
-      next unless col.ndim == 1 && answers?(col, reduction)
-      cols[name] = col.group_by_category(@cat).public_send(reduction, **keywords)
+      next unless answers?(col, reduction)
+      cols[name] = group_reduce(col, reduction, **keywords)
     end
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+  end
+
+  # A column's group reduction. An N-D column is reduced along the rows, so
+  # each group keeps the trailing shape: a profile column (N, L) gives (G, L).
+  private def group_reduce(col, reduction, **keywords)
+    it = col.group_by_category(@cat)
+    if col.ndim > 1 && !keywords.key?(:axis)
+      it.public_send(reduction, axis: 0, **keywords)
+    else
+      it.public_send(reduction, **keywords)
+    end
   end
 
   # Whether the column's type defines the reduction, asked of the core on one

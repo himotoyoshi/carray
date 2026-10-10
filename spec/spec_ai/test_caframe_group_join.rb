@@ -87,11 +87,37 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     end
   end
 
-  def test_mean_shortcut_over_numeric_scalar_columns
+  def test_mean_shortcut_over_numeric_columns
     m = @df.group_by("station").mean
-    # the key "station" is the index; N-D "wind" has no reduction; only "temp".
-    assert_equal ["temp"], m.column_names
+    # the key "station" is the index; an N-D column is reduced along the rows,
+    # so "wind" keeps its two components per group
+    assert_equal ["temp", "wind"], m.column_names
     assert_equal [20.55, 27.65, 15.0], m["temp"].to_a
+    assert_equal [[3.0, 4.0], [5.0, 6.0], [9.0, 10.0]], m["wind"].to_a
+  end
+
+  # An N-D column of any type: its per-group answer has the trailing shape,
+  # in the type the core gives (a time column's mean is a time).
+  def test_group_reductions_of_n_d_columns
+    df = CAFrame.new("k" => CA_INT32([1, 2, 1, 2]),
+                     "p" => CA_FLOAT64([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]),
+                     "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04
+                                           2024-01-05 2024-01-06 2024-01-07 2024-01-08]).reshape(4, 2),
+                     "b" => CA_BOOLEAN([[1, 0], [1, 1], [0, 0], [1, 0]]),
+                     "s" => CArray.const_string(%w[a b c d e f g h]).reshape(4, 2))
+    df["p"][1, 1] = UNDEF
+    g = df.group_by("k")
+    assert_equal [[4.0, 5.0, 6.0], [7.0, 11.0, 9.0]], g.mean["p"].to_a
+    assert_equal [[8.0, 10.0, 12.0], [14.0, UNDEF, 18.0]], g.sum(min_count: 2)["p"].to_a
+    assert_kind_of CATime, g.mean["t"]
+    assert_equal CArray.time(%w[2024-01-03 2024-01-04 2024-01-05 2024-01-06]).reshape(2, 2).to_a,
+                 g.mean["t"].to_a
+    assert_equal %w[p b], g.sum.column_names                    # a time has no sum, a string no sum
+    assert_equal [[0.5, 0.0], [1.0, 0.5]], g.mean["b"].to_a
+    assert_equal [%w[a b], %w[c d]], g.min["s"].to_a
+    a = g.aggregate("pmax" => ["p", :max, { min_count: 2 }], "pv" => ["p", :variance])
+    assert_equal [[7.0, 8.0, 9.0], [10.0, UNDEF, 12.0]], a["pmax"].to_a
+    assert_equal [2, 3], a["pv"].shape
   end
 
   # The key column is the result's index, so it must not also come back as a
