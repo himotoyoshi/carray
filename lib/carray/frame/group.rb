@@ -99,25 +99,27 @@ class CAFrame
     end
   end
 
-  private def key_column(key)
+  # The column a group key names, checked: +verb+ is the method the caller
+  # called, for the messages.
+  private def key_column(key, verb = "group_by")
     col = case key
           when String
-            self[key]
+            @columns.fetch(key) { raise KeyError, "#{verb}: no column #{key.inspect}" }
           when CArray
             unless key.shape[0] == nrow
               raise ArgumentError,
-                    "external group key length #{key.shape[0]} != nrow #{nrow}"
+                    "#{verb}: the key has #{key.shape[0]} values for #{nrow} rows"
             end
             key
           else
-            raise ArgumentError, "group key must be a column name or CArray (got #{key.class})"
+            raise ArgumentError, "#{verb}: a group key is a column name or a CArray (got #{key.class})"
           end
     # A key gives each row one value.  An N-D one would be categorized cell
     # by cell, making groups of cells rather than of rows.
     unless col.ndim == 1
       name = key.is_a?(String) ? "#{key.inspect} " : ""
       raise ArgumentError,
-            "group_by: the key #{name}has shape #{col.shape.inspect}, not one value per row; " \
+            "#{verb}: the key #{name}has shape #{col.shape.inspect}, not one value per row; " \
             "group by one of its components (e.g. df[name][nil, 0])"
     end
     col

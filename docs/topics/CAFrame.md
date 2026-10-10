@@ -827,7 +827,8 @@ df = df.unstack_column("temp", into: names)   # the 36 columns again
   first of them; the others leave the returned frame. Writing to it — masking a
   missing-value code with `df["temp"][:eq, 999999] = UNDEF`, say — writes the
   columns it was made from. Columns of different data types are read at a
-  common type, and N-D columns keep their axes after the new ones.
+  common type, and N-D columns keep their axes after the new ones. `into:` is
+  the new column's name, a String.
 - The new axes carry **no labels**, like any trailing axis: keep what each
   position means alongside (`months = [1, 2, 3, 12]` for a column that has only
   those months).
@@ -835,6 +836,12 @@ df = df.unstack_column("temp", into: names)   # the 36 columns again
   row-major order, as views. `into:` names them; without it they are named
   `"temp_0"`, or `"temp_6_2"` with two axes. The frame does not remember the
   names the columns had, so pass them as `into:` to get them back.
+- When `into:` names as many columns as the **first** trailing axis is long,
+  the column is split along that axis only, and each new column keeps the axes
+  after it: a `(n, 2, 3)` column with two names gives two `(n, 3)` columns.
+  This undoes `stack_columns` of columns that were themselves N-D.
+- A column whose trailing axes hold no position (a `(n, 0)` column) has nothing
+  to split into and raises.
 
 ### From rows of a group — `stack_rows` / `unstack_rows`
 
@@ -866,7 +873,8 @@ n.unstack_rows                         # the 6 rows again, station as the index
   value per row — and the key becomes the **index**. A computed key folds
   consecutive rows: `h.stack_rows(by: h["time"].floor(unit: :D))` makes an
   hourly series one row per day, each column `[24]`. The frame's own index, if
-  it has one, is stacked as a column named after the row axis.
+  it has one, is stacked as a column named after the row axis. A frame with no
+  column besides the key, and no index, has nothing to stack and raises.
 - A group's rows are stacked **in the order they are in the frame**; `sort_by`
   first for another order. A column that tells the rows apart (`level` here) is
   stacked like any other, so what position k means stays in the frame as a

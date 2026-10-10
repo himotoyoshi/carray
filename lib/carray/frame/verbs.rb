@@ -117,17 +117,18 @@ class CAFrame
   # taken in its own order, a Regexp in the frame's.  +shape:+ arranges the
   # stacked columns in row-major order (the last axis runs fastest) and must
   # hold exactly that many.  Columns that are themselves N-D keep their axes
-  # after the new ones.
+  # after the new ones.  +into:+ is the new column's name, a String.
   #
   # The new column is a view of the old ones, so writes reach them; it takes
   # the place of the first of them, and the others leave the frame.  The
   # trailing axes carry no labels: keep what position k means (the months)
-  # alongside.  +unstack_column+ is the inverse.
+  # alongside.  +unstack_column+ goes the other way; +stack_columns+ of the
+  # columns it gives, into the same name, gives this column back.
   #
   # @return [CAFrame] a new frame; the other columns are shared.
   def stack_columns(selection, into:, shape: nil)
     names = columns_selected(selection, "stack_columns")
-    target = into.to_s
+    target = column_name_arg(into, "stack_columns")
     taken = [target] & (@columns.keys - names)
     unless taken.empty?
       raise ArgumentError, "stack_columns: #{target.inspect} is already a column"
@@ -159,12 +160,20 @@ class CAFrame
   end
 
   # Split an N-D column into one column per position on its trailing axes --
-  # the inverse of +stack_columns+.  The new columns are views of the N-D
+  # the other way from +stack_columns+.  The new columns are views of the N-D
   # column, in row-major order, and take its place in the frame.  +into:+
   # names them (as many names as positions); without it they are named
   # after the column and the position, "temp_0", or "temp_6_2" with two
   # axes.  The frame does not remember the names the columns had before
   # +stack_columns+, so pass them as +into:+ to get them back.
+  #
+  # When +into:+ names as many columns as the first trailing axis is long,
+  # the column is split along that axis only, and each new column keeps the
+  # axes after it: a (n, 2, 3) column with two names gives two (n, 3)
+  # columns.  This undoes +stack_columns+ of columns that were N-D.
+  #
+  # A column whose trailing axes hold no position has nothing to split into
+  # and is refused.
   #
   # @return [CAFrame] a new frame; the other columns are shared.
   def unstack_column(name, into: nil)
@@ -175,13 +184,20 @@ class CAFrame
     end
     trailing = col.shape[1..]
     count = trailing.inject(:*)
-    positions = trailing.size == 1 ? (0...count).map { |k| [k] } :
-                  trailing.map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map(&:flatten) }
-    names = if into
-              Array(into).map(&:to_s)
-            else
-              positions.map { |pos| "#{key}_#{pos.join('_')}" }
-            end
+    if count == 0
+      raise ArgumentError,
+            "unstack_column: #{key.inspect} has shape #{col.shape.inspect}; " \
+            "its trailing axes hold no position to split into"
+    end
+    given = into && Array(into).map { |n| column_name_arg(n, "unstack_column") }
+    if given && trailing.size > 1 && given.size == trailing.first
+      positions = (0...trailing.first).map { |k| [k] }
+      count = trailing.first
+    else
+      positions = trailing.size == 1 ? (0...count).map { |k| [k] } :
+                    trailing.map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map(&:flatten) }
+    end
+    names = given || positions.map { |pos| "#{key}_#{pos.join('_')}" }
     unless names.size == count && names.uniq.size == count
       raise ArgumentError,
             "unstack_column: into: names #{names.size} columns, each once; #{key.inspect} has #{count} positions"
@@ -193,12 +209,23 @@ class CAFrame
     rebuilt = {}
     @columns.each do |k, v|
       if k == key
-        positions.each_with_index { |pos, j| rebuilt[names[j]] = v[nil, *pos] }
+        rest = [nil] * (v.ndim - 1 - positions.first.size)
+        positions.each_with_index { |pos, j| rebuilt[names[j]] = v[nil, *pos, *rest] }
       else
         rebuilt[k] = v
       end
     end
     rebuild(rebuilt)
+  end
+
+  # A column name given as an argument: a non-empty String, as the frame's
+  # column keys are.
+  private def column_name_arg(name, verb)
+    unless name.is_a?(String)
+      raise TypeError, "#{verb}: a column name is a String (got #{name.inspect})"
+    end
+    raise ArgumentError, "#{verb}: a column name can not be empty" if name.empty?
+    name
   end
 
   # The names a column selection picks: a Range of names spans the frame's

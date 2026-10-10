@@ -255,7 +255,10 @@ class CAFrame
   # rows for it is refused.  The +on:+ column is stacked too, the same values
   # in every row.  A row whose key or +on:+ value is masked belongs nowhere
   # and is refused.  The frame's own index, if it has one, is stacked as a
-  # column named after the row axis.  +unstack_rows+ is the inverse.
+  # column named after the row axis.  A frame with no column besides the key
+  # (and no index) has nothing to stack and is refused.  +unstack_rows+ goes
+  # the other way; +stack_rows+ on its result, by the same keys, gives this
+  # frame back.
   #
   # Without +on:+ the result is a view, and writes reach this frame.  With
   # +on:+ it is a new frame, since the missing cells are new.
@@ -271,7 +274,24 @@ class CAFrame
     keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? k.to_s : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
-    return stack_rows_on(frame, keys, on.to_s) if on
+    keys.each { |k| frame.__send__(:key_column, k, "stack_rows") }
+    # With nothing but the key there is no column to stack, and the result
+    # would keep no record of how many rows each group had.
+    if (frame.column_names - keys).empty?
+      raise ArgumentError, "stack_rows: the frame has no column besides the key to stack"
+    end
+    if keys.size != 1 || !keys.first.is_a?(String)
+      if frame.column_names.include?("group") && !keys.include?("group")
+        raise ArgumentError,
+              "stack_rows: the result's rows are named \"group\" when the key is not " \
+              "one column, and \"group\" is a column; rename it first"
+      end
+    end
+    if on
+      on = column_name_arg(on, "stack_rows")
+      raise KeyError, "stack_rows: no column #{on.inspect}" unless frame.column_names.include?(on)
+      return stack_rows_on(frame, keys, on)
+    end
     grouped = frame.group_by(*keys)
     perm    = grouped.__send__(:group_perm)
     bounds  = grouped.__send__(:group_bounds).to_a
@@ -279,8 +299,8 @@ class CAFrame
     stacked = sizes.sum
     if stacked != frame.nrow
       raise ArgumentError,
-            "stack_rows: #{frame.nrow - stacked} rows have no value of the key; " \
-            "every row has to belong to a group"
+            "stack_rows: every row has to belong to a group; " \
+            "the key has no value for #{frame.nrow - stacked} of #{frame.nrow} rows"
     end
     unless sizes.uniq.size <= 1
       raise ArgumentError,
