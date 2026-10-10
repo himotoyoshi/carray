@@ -349,6 +349,7 @@ class CACategoricalIterator < CASegmentIterator
   # this one thing was the odd choice; a caller who wants a fused kernel's
   # four answers shares them by keeping the result.
   def axis_moments (axis, op)
+    return axis_moments_by_core(axis, op) unless MONOID_TYPES.include?(@value.data_type)
     h = @value
     axis = checked_axis(axis, op)
     band = h.shape.dup; band.delete_at(axis)
@@ -418,6 +419,7 @@ class CACategoricalIterator < CASegmentIterator
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
   # Matches flat #mean per fiber.
   def axis_mean (axis)
+    return axis_by_core(axis, :mean) unless MONOID_TYPES.include?(@value.data_type)
     m   = axis_moments(axis, :mean)
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN
@@ -461,6 +463,53 @@ class CACategoricalIterator < CASegmentIterator
     out
   end
 
+  # The axis: reductions for a value the fused kernels cannot read (boolean,
+  # object, a Face): each group's cells are reduced by the core's own
+  # reduction along the axis and the answers stacked, so the data type, the
+  # refusals and the empty-group answer are the core's -- a time column's mean
+  # is a time, its sum is refused, an empty group's sum is the identity.
+  # Classified along the axis (case A), a group is its positions on the axis,
+  # taken by index; otherwise its cells are kept by masking the rest of a copy.
+  # A read-only Face's answers (a const string's records index a pool of
+  # their own) cannot be put together, so they are collected as the surface
+  # values they are, as the flat form does.
+  def axis_by_core (axis, op)
+    h    = @value
+    axis = checked_axis(axis, op)
+    groups  = (0...[@k, 1].max).map { |c| group_cells(h, axis, c, @k.zero?) }
+    answers = groups.map { |g| g.__send__(op, axis: axis) }
+    if answers.first.face? && answers.first.read_only?
+      answers = answers.map { |a| CArray.object(*a.shape) { a.to_a } }
+    end
+    out = CArray.stack(answers, axis: 0).copy
+    @k.zero? ? out[0...0, *([nil] * (out.ndim - 1))].copy : out
+  end
+
+  def axis_moments_by_core (axis, op)
+    BAND_ONLY_KEYS.fetch(op, [:count]).to_h do |key|
+      [key, axis_by_core(axis, key == :count ? :count_not_masked : key)]
+    end
+  end
+
+  def group_cells (h, axis, c, none)
+    codes = @cat.codes
+    if codes.shape == [h.shape[axis]]
+      sel = none ? CArray.boolean(codes.elements) { false } : codes.eq(c)
+      sel = sel.strip_mask(false) if sel.has_mask?
+      idx = [nil] * h.ndim
+      idx[axis] = sel.where
+      h[*idx]
+    else
+      full_c  = resolve_axis_codes(codes, h.shape, axis)
+      exclude = none ? CArray.boolean(*h.shape) { true } : full_c.eq(c).not
+      exclude = exclude | full_c.is_masked if full_c.has_mask?
+      local = h.copy
+      local[exclude] = UNDEF
+      local
+    end
+  end
+  private :axis_by_core, :axis_moments_by_core, :group_cells
+
   # Axis-aware wsum + wmean fused (single kernel call, both outputs).  Returns
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit
   # broadcast on the call site for 1-D or band-shape weights).  A cell
@@ -488,6 +537,7 @@ class CACategoricalIterator < CASegmentIterator
   # Axis-aware prod: dedicated kernel (identity 1.0, separate from moments to
   # avoid conflating with sum's zero-identity memset).
   def axis_prod (axis)
+    return axis_by_core(axis, :prod) unless MONOID_TYPES.include?(@value.data_type)
     h = @value
     axis = checked_axis(axis, :prod)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)

@@ -894,4 +894,29 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     err = assert_raise(ArgumentError) { g.sum(axis: -3) }
     assert_equal "sum: axis -3 out of range for ndim 2", err.message
   end
+
+  # The axis: form of sum / mean / min / max / minmax / prod used to read
+  # only numeric values (`numeric value required`); a boolean, object or Face
+  # value is reduced by the core per group, in the core's own types.
+  def test_axis_reductions_of_non_numeric_values
+    cat = CA_OBJECT(%w[a b a b]).categorize
+    b = CA_BOOLEAN([[1, 0], [1, 1], [0, 0], [1, 0]])
+    assert_equal [[1, 0], [2, 1]], b.group_by_category(cat).sum(axis: 0).to_a
+    assert_equal [[0.5, 0.0], [1.0, 0.5]], b.group_by_category(cat).mean(axis: 0).to_a
+    o = CA_OBJECT([[1, 2], [3, 4], [5, 6], [7, 8]])
+    assert_equal [[6, 8], [10, 12]], o.group_by_category(cat).sum(axis: 0).to_a
+    assert_equal [[5, 12], [21, 32]], o.group_by_category(cat).prod(axis: 0).to_a
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04
+                       2024-01-05 2024-01-06 2024-01-07 2024-01-08]).reshape(4, 2)
+    lo, hi = t.group_by_category(cat).minmax(axis: 0)
+    assert_kind_of CATime, lo
+    assert_equal t[0, nil].to_a, lo[0, nil].to_a
+    assert_equal t[3, nil].to_a, hi[1, nil].to_a
+    assert_raise(TypeError) { t.group_by_category(cat).sum(axis: 0) }   # the core refuses
+    s = CArray.const_string(%w[a b c d e f g h]).reshape(4, 2)
+    assert_equal [%w[a b], %w[c d]], s.group_by_category(cat).min(axis: 0).to_a
+    # classified cell by cell (the same shape as the values)
+    c = CA_INT32([[0, 1], [1, 1], [0, 0]]).categorize
+    assert_equal [[1, 0], [1, 1]], CA_BOOLEAN([[1, 0], [1, 1], [0, 0]]).group_by_category(c).sum(axis: 0).to_a
+  end
 end
