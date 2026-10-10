@@ -62,7 +62,7 @@ class CAFrame
   #   unknown reduction or a multi-dimensional value column with it, or when
   #   two output columns would share a name.
   def pivot(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate)
+    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot")
     labels = Array.new(plan[:nc]) { |j| plan[:clab][j].to_s }
     value_names = values.is_a?(Array) ? values.map(&:to_s) : nil
     names =
@@ -108,7 +108,7 @@ class CAFrame
   #   and the axis-1 key values; the grid is new, not a view of +self+.
   # @raise [ArgumentError] as {#pivot}.
   def pivot_grid(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate)
+    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot_grid")
     val  = pivot_value(plan, values.to_s)
     grid = project_rows(val, plan[:source]).reshape(plan[:nr], plan[:nc], *val.shape[1..])
     [grid, plan[:rlab], plan[:clab]]
@@ -117,9 +117,14 @@ class CAFrame
   # Everything pivot needs that does not depend on the value column: the
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
-  private def pivot_plan(index, columns, aggregate)
+  private def pivot_plan(index, columns, aggregate, verb)
     rkey = column_or_index(index)
     ckey = column_or_index(columns)
+    { "index" => [index, rkey], "columns" => [columns, ckey] }.each do |kw, (name, key)|
+      next if key.ndim == 1
+      raise ArgumentError,
+            "#{verb}: #{kw}: #{name.inspect} has shape #{key.shape.inspect}, not one value per row"
+    end
     rlab = rkey.unique(sort: true)
     clab = ckey.unique(sort: true)
     nr = rlab.elements
