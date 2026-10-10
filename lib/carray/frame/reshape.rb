@@ -214,6 +214,13 @@ class CAFrame
             "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}); " \
             "cast them to one type first"
     end
+    shapes = pieces.map { |c| c.shape.drop(1) }.uniq
+    unless shapes.size == 1
+      raise ArgumentError,
+            "melt: value columns differ in shape after the row axis " \
+            "(#{vars.zip(pieces.map { |c| c.shape.drop(1) }).to_h}); " \
+            "they are stacked into one column, so they need one shape"
+    end
 
     k = vars.size
     out = {}
