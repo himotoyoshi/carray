@@ -38,6 +38,13 @@ class CArray
 
   # @!group Copy and conversion
 
+  # On a Face (`CATime`, `CACategorical`, `CAConstString`, ...) the
+  # bytes are its storage, and none of its state is written: not the
+  # unit of a `CATime`, not the labels of a `CACategorical`. A
+  # `CAConstString` cell is a `(start, end)` pair into its own byte
+  # pool, so its strings are not written at all; call
+  # `to_fixlen_string` first to dump the text.
+  #
   # @overload dump_binary
   #   Returns a new binary String containing the raw element bytes of
   #   `self` in row-major order.
@@ -60,6 +67,10 @@ class CArray
   #   @return [String]
   def to_s; end
 
+  # On a Face the bytes are read into its storage, and its state is
+  # the receiver's own: load into a Face set up with the same state
+  # (unit, labels) that was in force when the bytes were dumped.
+  #
   # @overload load_binary(io)
   #   Reads `ca_length(self)` bytes from `io` and overwrites the
   #   element data of `self` in row-major order. `io` may be a

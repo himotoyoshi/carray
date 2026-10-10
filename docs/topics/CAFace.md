@@ -1138,6 +1138,22 @@ allowed to assume them.
 
 ---
 
+## 8.5 Saving a Face
+
+`Marshal.dump` and `CArray.save` refuse a Face with a `TypeError`: both
+formats record what an array is, and they have no place yet for a
+Face's state. The message points at `.parent` to save the storage.
+
+`dump_binary` writes element bytes with no header, so it records no
+state for any array, and on a Face it writes the storage. The state is
+not written: the unit of a `CATime`, the labels of a `CACategorical`.
+`load_binary` reads the bytes back into the receiver's storage, so load
+into a Face set up with the same state. A `CAConstString` cell is a
+`(start, end)` pair into its own byte pool, so `dump_binary` writes no
+text at all; call `to_fixlen_string` first.
+
+---
+
 ## 9. Existing Face subclasses
 
 | Class | Path | Storage | Surface | Domain | Defined in |
