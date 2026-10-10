@@ -859,9 +859,11 @@ n["temp"].min(axis: 1)                 # each station's lowest temperature
 n.unstack_rows                         # the 6 rows again, station as the index
 ```
 
-- `by:` takes the key columns as `group_by` does, and the key becomes the
-  **index**. The frame's own index, if it has one, is stacked as a column named
-  after the row axis.
+- `by:` takes the keys as `group_by` does — column names, or a CArray of one
+  value per row — and the key becomes the **index**. A computed key folds
+  consecutive rows: `h.stack_rows(by: h["time"].floor(unit: :D))` makes an
+  hourly series one row per day, each column `[24]`. The frame's own index, if
+  it has one, is stacked as a column named after the row axis.
 - A group's rows are stacked **in the order they are in the frame**; `sort_by`
   first for another order. A column that tells the rows apart (`level` here) is
   stacked like any other, so what position k means stays in the frame as a

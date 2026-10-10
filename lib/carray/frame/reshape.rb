@@ -257,11 +257,13 @@ class CAFrame
   #
   #   long.stack_rows(by: "station", on: "level")
   #
-  # @param by [String, Array<String>] the key columns, as for +group_by+.
+  # @param by [String, CArray, Array] the keys, as for +group_by+: column
+  #   names, or a CArray of one value per row (a day computed from a time
+  #   column, say), or several of them.
   # @param on [String, nil] the column whose values line the rows up.
   # @return [CAFrame] one row per group, indexed by the group labels.
   def stack_rows(by:, on: nil)
-    keys = Array(by).map { |k| k.is_a?(Symbol) ? k.to_s : k }
+    keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? k.to_s : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
     return stack_rows_on(frame, keys, on.to_s) if on

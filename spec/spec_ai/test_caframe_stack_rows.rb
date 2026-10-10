@@ -120,4 +120,16 @@ class TestCAFrameStackRows < Test::Unit::TestCase
     empty = masked[CA_BOOLEAN([0, 0])].stack_rows(by: "st", on: "lv")
     assert_equal [0, 0], empty["v"].shape
   end
+
+  # by: takes a CArray key as group_by does: an hourly series becomes one row
+  # per day.  It used to be split into its elements.
+  def test_a_computed_key_folds_consecutive_rows
+    h = CAFrame.new("time" => CArray.time_series("2024-01-01", count: 48, unit: :h),
+                    "v"    => CA_FLOAT64((1..48).to_a))
+    d = h.stack_rows(by: h["time"].floor(unit: :D))
+    assert_equal 2, d.nrow
+    assert_equal [2, 24], d["v"].shape
+    assert_equal [24.0, 48.0], d["v"].max(axis: 1).to_a
+    assert_equal CArray.time(%w[2024-01-01 2024-01-02]).to_a, d.index.to_a
+  end
 end
