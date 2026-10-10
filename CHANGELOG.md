@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: `CAFrame#protect` makes a frame read-only and returns it: frozen as by
+  `freeze`, and the cells and masks of every column and of the index refuse
+  writes made through the frame. The arrays the frame was built from are not
+  changed and stay writable; their writes show through. `copy` gives a
+  writable frame again. `CAFrame#protected?` tells whether a frame was
+  protected.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a
