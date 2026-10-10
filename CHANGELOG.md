@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame#parse_to_time` without a format, `parse_to_time(name,
+  :infer)`, `cast(name => :time)` and `infer_types` read year-first text at
+  hour 24 (`"2024-01-01 24:00:00"`) as the next midnight, as a strptime
+  format and `CArray.time` already did. They made the cell `UNDEF`, or
+  raised under `:infer`. `24:30` and `24:00:01` are still not read.
+
 - New: `tolerance:` of `locate_nearest_addr`, `CArray.align_nearest_addr`
   and `CAFrame#join_asof` takes a duration string for time keys
   (`tolerance: "10 minutes"`), in the spelling `CArray.time` uses for a unit.

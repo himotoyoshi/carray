@@ -19,6 +19,20 @@ class TestTimeHour24 < Test::Unit::TestCase
     assert_equal [true, true, false], t.is_masked.to_a
   end
 
+  def test_year_first_text_reads_24_00_as_the_next_midnight
+    t = parse(["2024-01-01 24:00:00", "2024-01-01T24:00", "2024-01-01 24:30",
+               "2024-01-01 24:00:01"], nil)
+    assert_equal ["2024-01-02T00:00:00Z", "2024-01-02T00:00:00Z", "UNDEF", "UNDEF"],
+                 t.to_a.map(&:to_s)
+  end
+
+  def test_infer_reads_year_first_24_00
+    assert_equal ["2024-01-02T00:00:00Z", "2024-01-02T01:00:00Z"],
+                 parse(["2024-01-01 24:00:00", "2024-01-02 01:00:00"], :infer).to_a.map(&:to_s)
+    df = CAFrame.new("t" => CA_OBJECT(["2024-01-01 24:00:00"]))
+    assert_equal({ "t" => :time }, df.infer_types)
+  end
+
   def test_on_error_raise_names_the_cell
     df = CAFrame.new("t" => CA_OBJECT(["13/02/2024 24:30"]))
     assert_raise(CAFrame::UnreadableColumn) { df.parse_to_time("t", "%d/%m/%Y %H:%M", on_error: :raise) }

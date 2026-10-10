@@ -172,7 +172,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   end
 
   def test_what_is_not_read_without_a_format
-    cells = ["01/02/2024", "Jan 2, 2024", "2024-02-30", "2024-01-01 24:00",
+    cells = ["01/02/2024", "Jan 2, 2024", "2024-02-30", "2024-01-01 24:30",
              "20240101", "2024-1-01/02", "2024-01-01T", "2024-01-01Z"]
     assert_equal ["UNDEF"] * cells.size, times(cells)
   end

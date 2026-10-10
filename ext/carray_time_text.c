@@ -234,7 +234,12 @@ ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
         }
       }
     }
-    if ( hour > 23 || min > 59 || sec > 59 ) {
+    if ( hour > 24 || min > 59 || sec > 59 ) {
+      return CA_TIME_TEXT_UNREADABLE;
+    }
+    /* Hour 24 is the end of the day, 24:00:00, and nothing past it, as in
+       the strptime reader below. */
+    if ( hour == 24 && ( min || sec || frac_ns ) ) {
       return CA_TIME_TEXT_UNREADABLE;
     }
     t->clock = 1;
