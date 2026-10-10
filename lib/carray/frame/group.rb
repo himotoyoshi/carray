@@ -170,19 +170,21 @@ class GroupedFrame
   # Declarative aggregation (memo §11.6). Spec maps an output column name to
   # +[input_column, reduction]+, where reduction is a Symbol (vectorized,
   # applied through the group iterator) or a Proc (per-group custom, called
-  # with the group's column slice). A Symbol reduction takes its keywords
-  # as a third element: +["temp", :mean, min_count: 6]+.
+  # with the group's column slice). A Symbol reduction takes its arguments
+  # after it, as in a call: +["temp", :percentile, 90.0]+, and its keywords
+  # last: +["temp", :mean, min_count: 6]+.
   def aggregate(spec)
     cols = {}
-    spec.each do |out_name, (in_name, reduction, options)|
+    spec.each do |out_name, (in_name, reduction, *args)|
       out = out_name.to_s
+      options = args.last.is_a?(Hash) ? args.pop : {}
       cols[out] =
         case reduction
         when Symbol
-          group_reduce(@frame[in_name], reduction, **(options || {}))
+          group_reduce(@frame[in_name], reduction, *args, **options)
         when Proc
-          if options
-            raise ArgumentError, "aggregate: a Proc reduction takes no keywords (#{out.inspect})"
+          unless args.empty? && options.empty?
+            raise ArgumentError, "aggregate: a Proc reduction takes no arguments (#{out.inspect})"
           end
           per_group_column(in_name, reduction)
         else
@@ -272,12 +274,12 @@ class GroupedFrame
 
   # A column's group reduction. An N-D column is reduced along the rows, so
   # each group keeps the trailing shape: a profile column (N, L) gives (G, L).
-  private def group_reduce(col, reduction, **keywords)
+  private def group_reduce(col, reduction, *args, **keywords)
     it = col.group_by_category(@cat)
     if col.ndim > 1 && !keywords.key?(:axis)
-      it.public_send(reduction, axis: 0, **keywords)
+      it.public_send(reduction, *args, axis: 0, **keywords)
     else
-      it.public_send(reduction, **keywords)
+      it.public_send(reduction, *args, **keywords)
     end
   end
 

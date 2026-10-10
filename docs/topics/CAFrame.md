@@ -1549,7 +1549,8 @@ df.group_by("station").aggregate(
 # => frame with columns temp_mean / temp_max / wind_mean / wind_peak, index = station labels
 ```
 
-A Symbol reduction takes its keywords as a third element:
+A Symbol reduction takes its arguments after it, as in a call, and its keywords
+last: `"temp_p90" => ["temp", :percentile, 90.0]`,
 `"temp_mean" => ["temp", :mean, min_count: 20]`.
 
 ### (c) `table` — cross-column Ruby escape

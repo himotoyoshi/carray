@@ -49,6 +49,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   make one core call per group, so many groups take longer than the other
   `axis:` reductions. `quantile` still takes no `axis:`.
 
+- New: `CAFrame` `aggregate` passes arguments after the reduction, as in a
+  call: `"p90" => ["temp", :percentile, 90.0]`, with keywords last
+  (`["temp", :percentile, 90.0, min_count: 3]`). A reduction that takes an
+  argument could not be given one before.
+
 - New: `CAFrame#stack_rows(by:)` makes each group's rows one row, every other
   column becoming an N-D column over them: a long table of one observation per
   row (a station's levels, a day's hours) becomes one row per station, as a
