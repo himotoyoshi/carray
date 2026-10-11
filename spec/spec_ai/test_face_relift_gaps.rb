@@ -163,4 +163,13 @@ class TestFaceReliftGaps < Test::Unit::TestCase
     assert_equal [[false, true], [false, false]], d.eq(d[0, 1]).to_a
   end
 
+  # shift fills with a surface value of the Face, as a store takes it.
+  def test_shift_fills_with_a_surface_value
+    d = days
+    assert_equal %w[2024-01-09 2024-01-01 2024-01-03 2024-01-02 2024-01-04],
+                 shown(d.shift(1, fill_value: d[4]))
+    t = ticks
+    assert_equal [0, 256, 255, 1, 300], t.shift(1, fill_value: 0).ticks.to_a
+  end
+
 end

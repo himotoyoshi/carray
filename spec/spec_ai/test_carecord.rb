@@ -478,6 +478,43 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal [true, true], a.eq(a.parent).to_a   # bytes, as a store takes
   end
 
+  # A struct element is taken wherever a record array takes a value.
+  def test_struct_elements_are_stored_through_every_path
+    g = ->(lat) { GeoCoord.new(lat, 0.0) }
+    a = CARecord.new(GeoCoord, 4)
+    a[1..2] = g.(1.0)
+    assert_equal [0.0, 1.0, 1.0, 0.0], a["lat"].to_a
+    a[CA_INT([0, 3])] = g.(2.0)
+    assert_equal [2.0, 1.0, 1.0, 2.0], a["lat"].to_a
+    a[] = [g.(1.0), g.(2.0), g.(3.0), g.(4.0)]
+    assert_equal [1.0, 2.0, 3.0, 4.0], a["lat"].to_a
+    a[] = a.to_a.reverse
+    assert_equal [4.0, 3.0, 2.0, 1.0], a["lat"].to_a
+    a[] = a.to_type(CA_OBJECT).flip(0)
+    assert_equal [1.0, 2.0, 3.0, 4.0], a["lat"].to_a
+    b = CARecord.new(GeoCoord, 2, 2)
+    b[1, nil] = g.(5.0)
+    assert_equal [[0.0, 0.0], [5.0, 5.0]], b["lat"].to_a
+  end
+
+  def test_struct_element_fills_masked_records
+    g = GeoCoord.new(9.0, 0.0)
+    a = CARecord.new(GeoCoord, 3)
+    a[1] = UNDEF
+    assert_equal [0.0, 9.0, 0.0], a.strip_mask(g)["lat"].to_a
+    a.unmask(g)
+    assert_equal [0.0, 9.0, 0.0], a["lat"].to_a
+    assert_equal [9.0, 0.0, 9.0],
+                 a.shift(1, fill_value: g)["lat"].to_a
+  end
+
+  def test_struct_element_of_another_class_is_refused
+    a = CARecord.new(GeoCoord, 3)
+    e = assert_raise(TypeError) { a[0] = Swapped.new(1.0, 2.0) }
+    assert_match(/Swapped/, e.message)
+    assert_raise(TypeError) { a[0..1] = Swapped.new(1.0, 2.0) }
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

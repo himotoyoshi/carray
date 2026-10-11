@@ -438,6 +438,26 @@ ca_record_state_compatible (CArray *a, CArray *b)
   return (ra->data_class == rb->data_class) ? 1 : 0;
 }
 
+/* Write hook: a struct element becomes its bytes, on every store path (a
+   block or index store writes to the storage, below the Face, where the
+   element itself could not be cast).  A struct of another data_class is
+   refused; anything else is left to the fixlen store (a String is bytes). */
+static VALUE
+ca_record_element_to_storage (VALUE self, VALUE obj)
+{
+  volatile VALUE data_class = rb_ca_data_class(self);
+  if ( rb_obj_is_kind_of(obj, data_class) ) {
+    return rb_funcall(obj, rb_intern("encode"), 0);
+  }
+  if ( RB_TYPE_P(obj, T_OBJECT) && ! RB_TYPE_P(obj, T_STRING)
+       && RTEST(rb_obj_is_data_class(rb_obj_class(obj))) ) {
+    rb_raise(rb_eTypeError,
+             "can not store a %"PRIsVALUE" into a record array of %"PRIsVALUE,
+             rb_obj_class(obj), data_class);
+  }
+  return obj;
+}
+
 /* ------------------------------------------------------------------------- */
 
 void
@@ -466,6 +486,8 @@ Init_ca_obj_record (void)
   /* The record's bytes are its members: a MemoryView consumer reads them
      through the T{...} struct format built from the data_class. */
   ca_face_register_memory_view(CA_OBJ_RECORD, 1);
+  ca_face_register_element_to_storage(CA_OBJ_RECORD,
+                                      ca_record_element_to_storage);
 
   rb_define_alloc_func(rb_cCARecord, rb_ca_record_s_allocate);
   rb_define_method(rb_cCARecord, "initialize_copy",
