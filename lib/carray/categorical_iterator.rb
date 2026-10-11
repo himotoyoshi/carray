@@ -666,6 +666,11 @@ class CArray
   #   @return [CACategoricalIterator]
   #   @raise [ArgumentError] when element counts differ.
   def group_by_category (cat)
+    unless cat.is_a?(CACategorical)
+      raise TypeError,
+            "group_by_category: expects a CACategorical (got #{cat.class}); " \
+            "classify the values first with .categorize"
+    end
     CACategoricalIterator.new(self, cat)
   end
 

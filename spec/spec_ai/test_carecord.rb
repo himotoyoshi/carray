@@ -532,6 +532,55 @@ class TestCARecord < Test::Unit::TestCase
     assert_raise(RuntimeError) { v["lat"][0] = 5.0 }
   end
 
+  # The discovery family answers for records by their bytes, as nunique and
+  # mask_duplicates already did; anything that sorts needs order_by:.
+  def discovery_fixture
+    a = CARecord.new(GeoCoord, 4)
+    a["lat"][] = [2.0, 1.0, 2.0, 3.0]
+    a["lng"][] = [1.0, 0.0, 1.0, 5.0]
+    a
+  end
+
+  def lats (r)
+    r["lat"].to_a
+  end
+
+  def test_discovery_family_takes_records_by_bytes
+    a = discovery_fixture
+    one = CARecord.new(GeoCoord, 1); one["lat"][0] = 1.0
+    assert_equal [2.0, 1.0, 3.0], lats(a.unique)
+    assert_kind_of CARecord, a.unique
+    values, counts = a.value_counts
+    assert_equal [2.0, 1.0, 3.0], lats(values)
+    assert_equal [2, 1, 1], counts.to_a
+    assert_equal 3, a.nunique
+    assert_equal [2.0], lats(a.mode)
+    assert_equal [false, true, false, false], a.is_in(one).to_a
+    assert_equal [false, true, false, false], a.is_in(one.parent).to_a
+    assert_equal [1.0], lats(a.intersection(one))
+    assert_equal [2.0, 3.0], lats(a.difference(one))
+    assert_equal 2, a.count(GeoCoord.new(2.0, 1.0))
+    assert_equal [true, false, true, false], a.categorize.codes.eq(0).to_a
+  end
+
+  def test_discovery_family_refuses_records_of_another_data_class
+    a = discovery_fixture
+    q = CARecord.new(Swapped, 1)
+    assert_raise(TypeError) { a.is_in(q) }
+    assert_raise(TypeError) { a.intersection(q) }
+    assert_raise(TypeError) { a.count(q) }
+    assert_raise(TypeError) { a.count(Swapped.new(1.0, 0.0)) }
+  end
+
+  def test_sorted_discovery_needs_order_by
+    a = discovery_fixture
+    assert_raise(ArgumentError) { a.unique(sort: true) }
+    ordered = CArray.struct(order_by: [:lat]) { float64 :lat; float64 :lng }
+    b = CARecord.new(ordered, 4)
+    b["lat"][] = [2.0, 1.0, 2.0, 3.0]
+    assert_equal [1.0, 2.0, 3.0], lats(b.unique(sort: true))
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

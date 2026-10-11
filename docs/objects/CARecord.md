@@ -169,6 +169,27 @@ order = a["lat"].sort_index         # sort by lat numerically
 a[order]                            # records in lat order
 ```
 
+## Equality and discovery — by the bytes
+
+A record is its bytes, so two records are equal exactly when their bytes are:
+a NaN member equals itself, `0.0` and `-0.0` differ, and padding bytes count.
+`eq` / `ne`, the struct element's `==` and the discovery family (`unique`,
+`value_counts`, `nunique`, `mode`, `is_in`, `intersection` / `difference` /
+`union`, `mask_duplicates`, `categorize`, `count(v)`, `locate_addr`) all use
+this equality:
+
+```ruby
+a.unique                    # distinct records, first-appearance order
+a.count(Site.new(1.0, 5.0)) # records equal to this one
+a.is_in(b)                  # b: a record array of the same struct
+```
+
+They take records of the same `data_class` (whatever the record array's class)
+or a plain fixlen array of the same width, and refuse records of another
+struct.  A variant that sorts (`unique(sort: true)`, `value_counts(sort:
+:value)`) needs `order_by:`; `mode` without one returns the modal records in
+first-appearance order.
+
 ## Serialization
 
 `dump_binary` / `load_binary` round-trip the record **bytes** (byte-exact, via

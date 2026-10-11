@@ -166,10 +166,31 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
   if ( ca_is_face(src) ) {
     volatile VALUE self_ref = self;
     int query_was_scalar = ! rb_obj_is_carray(rval);
-    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    if ( src->obj_type == CA_OBJ_RECORD ) {
+      /* A record is its bytes: a struct element counts as its encoding, a
+         record array as its storage (of the same data_class only). */
+      if ( query_was_scalar ) {
+        rval = ca_face_element_to_storage(self, src, rval);
+      }
+      else {
+        CArray *op;
+        GetCArray(rval, op);
+        if ( ca_is_face(op) ) {
+          if ( op->obj_type != CA_OBJ_RECORD
+               || rb_ca_data_class(rval) != rb_ca_data_class(self) ) {
+            rb_raise(rb_eTypeError,
+                     "count(v): can not take a %s operand for a record array "
+                     "of %"PRIsVALUE, rb_obj_classname(rval),
+                     rb_ca_data_class(self));
+          }
+          rval = rb_ca_strip_face_value(rval);
+        }
+      }
+    }
+    else if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
       ca_face_refuse_order("count(v)", self, "count");
     }
-    if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
+    else if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
       if ( ! query_was_scalar ) {
         rval = ca_face_operand_descend(rval, "count(v)");
       }

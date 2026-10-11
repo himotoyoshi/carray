@@ -110,7 +110,10 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
   CArray *ca;
   GetCArray(self, ca);
   if ( ca_is_face(ca) ) {
-    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    /* A record is its bytes: two records are the same value exactly when
+       their bytes are, so the fixlen lane answers for it. */
+    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
+         || ca->obj_type == CA_OBJ_RECORD ) {
       *pface = self;
       return rb_ca_strip_face_value(self);
     }
@@ -148,6 +151,24 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     return operand;
   }
   GetCArray(reference, ca);
+  if ( ca->obj_type == CA_OBJ_RECORD ) {
+    /* Records meet records of the same data_class, or plain fixlen bytes. */
+    if ( rb_obj_is_carray(operand) ) {
+      CArray *op;
+      GetCArray(operand, op);
+      if ( ca_is_face(op) ) {
+        if ( op->obj_type != CA_OBJ_RECORD
+             || rb_ca_data_class(operand) != rb_ca_data_class(reference) ) {
+          rb_raise(rb_eTypeError,
+                   "%s: can not take a %s operand for a record array of "
+                   "%"PRIsVALUE, name, rb_obj_classname(operand),
+                   rb_ca_data_class(reference));
+        }
+        return rb_ca_strip_face_value(operand);
+      }
+    }
+    return operand;
+  }
   if ( ! ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE)
        && rb_respond_to(reference, rb_intern("to_comparable")) ) {
     return rb_ca_strip_face_value(rb_funcall(reference,

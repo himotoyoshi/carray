@@ -120,7 +120,11 @@ class CArray
   def __mode_flat
     values, counts = value_counts
     return values if values.elements == 0
-    values[counts.eq(counts.max)].sort
+    modes = values[counts.eq(counts.max)]
+    # Records are sorted only by the members their struct declares in
+    # order_by:; without one the modes stay in first-appearance order.
+    return modes if is_a?(CARecord) && data_class.order_by.nil?
+    modes.sort
   end
 
 end

@@ -452,7 +452,7 @@ ca_record_element_to_storage (VALUE self, VALUE obj)
   if ( RB_TYPE_P(obj, T_OBJECT) && ! RB_TYPE_P(obj, T_STRING)
        && RTEST(rb_obj_is_data_class(rb_obj_class(obj))) ) {
     rb_raise(rb_eTypeError,
-             "can not store a %"PRIsVALUE" into a record array of %"PRIsVALUE,
+             "a %"PRIsVALUE" is not an element of a record array of %"PRIsVALUE,
              rb_obj_class(obj), data_class);
   }
   return obj;

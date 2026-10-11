@@ -37,6 +37,9 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     [m, CArray::DataTypeError]
   }.to_h
 
+  # A record of one two-byte string member, ordered by it.
+  MatrixRecord = CArray.struct(order_by: [:s]) { fixlen :s, bytes: 2 }
+
   # Every Face is built over the same logical values: ab, cd, ab (or their time
   # equivalent), so one set of expectations covers the whole matrix.
   FACES = [
@@ -128,6 +131,21 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
                       "min"             => ArgumentError,
                       "linear_fetch"    => ArgumentError }.merge(
                       TestFaceFamilyMatrix::NO_REDUCTIONS) },
+
+    { name:         "CARecord",
+      build:        -> {
+        r = CARecord.new(TestFaceFamilyMatrix::MatrixRecord, 3)
+        r["s"][] = %w[ab cd ab]
+        r
+      },
+      value_class:  CARecord,
+      element:      TestFaceFamilyMatrix::MatrixRecord,
+      space:        ->(a) { a.data_class },
+      unique:       -> { %w[ab cd].map { |x| TestFaceFamilyMatrix::MatrixRecord.new(x) } },
+      cross:        nil,
+      integer_storage: false,
+      # a record has no numeric lane; its members do (r["s"])
+      raises:       TestFaceFamilyMatrix::NO_REDUCTIONS },
   ]
 
   # Members whose result carries VALUES: the class, the space and the decoded
@@ -457,10 +475,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
 
   # Faces in tree that the matrix does not exercise, with the reason.  Naming
   # one here is a claim that has to be paid off, not a way to stay quiet.
-  DOCUMENTED_OMISSIONS = {
-    "CARecord" => "discovery wiring is still future work; its ordering is " \
-                  "its own (test_record_order.rb)",
-  }
+  DOCUMENTED_OMISSIONS = {}
 
   # CAObject subclasses that are not Faces (they never opt in).
   NON_FACE_CAOBJECT_SUBCLASSES = [].freeze
