@@ -363,7 +363,7 @@ df.tail(3)     # last 3 rows
 
 ### One row by its label — `at`
 
-`at(label)` returns the single row whose index label equals `label`, as a Ruby `Hash` — the counterpart of `df[i]` that looks the row up by label instead of position. The frame must have an index (see [The index](#the-index)). The label is matched exactly, so any index type works: numbers, strings and other objects, times, categoricals.
+`at(label)` returns the single row whose index label equals `label`, as a Ruby `Hash` — the counterpart of `df[i]` that looks the row up by label instead of position. The frame must have an index (see [The index](#the-index)). The label is matched exactly, so any index type works: numbers, strings and other objects, times, categoricals. A time index also takes the label as a `Time`, a `Date` or a String such as `"2024-01-02"`, and `at(Float::NAN)` finds a NaN label — such as the one `group_by` gives rows whose key is NaN.
 
 ```ruby
 byname = df.set_index("station")
@@ -378,6 +378,7 @@ byname.at("osaka")             # => { "station" => "osaka", "temp" => 25.3 }
 
 ```ruby
 df.filter { |f| f.index.eq(label) }   # every row whose label matches
+df.filter { |f| f.index.is_nan }      # every row whose label is NaN (eq is false for NaN)
 ```
 
 **Rows with no label.** An `:outer` / `:right` [`join`](#join--match-rows-by-key) and [`align`](#align--conform-to-a-reference-key-set) can leave a row whose index cell is masked. Such a row has no label, so `at` cannot reach it: `at(UNDEF)` raises `ArgumentError`. (Two undefined labels are not the same label, so there would be no single row to return; `join` and `align` match keys the same way.) Reach those rows by their mask instead:
@@ -480,8 +481,11 @@ df.sort_by_key("time")                             # by the index (its axis name
 ```
 
 - Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys (default `:asc`).
-- **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end.
-- Descending order works for **every data type**, not only numbers.
+- **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end, whichever the direction.
+- **NaN** counts as larger than every number: it comes last in ascending order and first in descending order. To keep it at the end either way, mask it first (`df["temp"][:is_nan] = UNDEF`) and let `masked_position:` place it.
+- A key can be any column whose values have an order — numbers, text, times — in either direction. Two kinds of column cannot be keys:
+  - a **categorical** column, whose codes are not in the order of its labels. Sort by its labels with `df.sort_by { |f| f["k"].to_type(:object) }`;
+  - a **complex** column, since complex numbers have no order. Sort by a part of it, e.g. `df.sort_by { |f| f["z"].abs }`.
 
 ### `sort_by` — sort by a computed key
 
@@ -865,6 +869,7 @@ grp.labels                 # => group key values, in code order
 
 - **The result's index** is the group's key value. With a single key it keeps the key's data type and Face — an integer key gives an integer index, a `CATime` key a `CATime` index — so the result can be joined or aligned on it. A composite key gives an object index of the key tuples.
 - **Groups appear in the order their keys first appear.**
+- **Keys are compared as values**: all NaN keys are one group, `-0.0` and `0.0` one group, and a composite key compares each of its columns the same way.
 - **A row whose key is masked belongs to no group**, as `filter` drops a row whose condition is undetermined. With a composite key, one masked component is enough. So the group sizes need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) to account for the difference, or fill them first (`df.fill("k", value)`) to group them together.
 - **When things are read.** The grouping and its labels are fixed when `group_by` is called: changing a key afterwards does not move rows between groups. The **values** are read when a reduction is called, so a reduction after `df["v"][i] = x` sees the new value, in the group the row had when `group_by` was called. Group again after changing a key.
 
@@ -1013,6 +1018,16 @@ The key stays a column, and the result keeps the left frame's index:
 
 When the other frame's key is unique, `:left` gives one row per left row, in order: the left columns and index are this frame's own. When a left row matches several right rows, it repeats, and the left columns are views of this frame's picked by row, so a write still reaches this frame.
 
+**How keys are compared.** The two key columns need not have the same type; values are matched as values:
+
+- numbers of different types: an `int64` key `2` matches a `float64` key `2.0`, and a negative signed value never matches a large unsigned one;
+- time keys in different units: a day key matches an hour key at midnight of that day, from either side. The result's key column is the left key for `:left` and `:inner`, the right key for `:right`, and in the finer of the two units for `:outer`, which holds the keys of both;
+- a time key and a column of `Time`, `Date` or date-string values (an object or string column, as from a CSV not yet parsed): the values are read as instants;
+- fixed-width strings of different widths (`CArray.fixlen_string`);
+- NaN matches NaN; a masked key matches nothing.
+
+Two exceptions: an object column compares Ruby objects with `eql?`, so `1` and `1.0` there are different keys (cast the column to a number first), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
+
 The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first).
 
 **Column-name collisions.** A non-key column present on both sides collides (the key `on` is kept once, never suffixed). By default both sides get a suffix — `temp` → `temp_left` / `temp_right`:
@@ -1041,6 +1056,8 @@ obs.join_asof(radar, on: "time", direction: :floor, tolerance: "10 minutes")
 
 - **`tolerance:` is the same kind of quantity as the key.** For a numeric key it is a number (`tolerance: 0.5`). For a time key it is a duration: a String in the spellings `CArray.time(unit:)` takes (`"10 minutes"`), or a `CATimedelta` value (`CATimedelta::Element.new(600, :s)`). A bare number is refused for a time key, since its length would depend on the unit the column is stored in; a duration means the same length whatever that unit is.
 - Neither frame needs to be sorted by the key; the result keeps the left frame's row order.
+- Each left row gets **one** row of the other frame. When several rows there share a key, `:floor` takes the **last** of them (the latest entry for that time) and `:ceil` the **first**; `:round` takes the first on an exact match, and otherwise does what `:floor` or `:ceil` does on its nearer side. Remove the duplicates first when the choice matters.
+- A masked or NaN key in either frame matches nothing. Keys of different types or units are compared as `join` compares them.
 - `on:` must name a column in both frames; the index cannot be the key (unlike `align`). `reset_index` first if the key is the index.
 - Like a `:left` `join`, the result shares this frame's columns and index; the other frame's columns are gathered into new arrays.
 
@@ -1060,7 +1077,7 @@ gapped.align("time", reftime)
 
 - `key` may be a column name or the index's axis name.
 - When a key value appears more than once in the frame, the **first** row with it is taken.
-- `reference` is a `CArray` (or `Array`). Its values are matched against the key **by value**, so the types must be comparable: a `DateTime` object key matches by `eql?` / `hash`, a time or integer key natively (and faster).
+- `reference` is a `CArray` or a Ruby `Array`. Its values are matched against the key **by value**, as `join` compares keys. An `Array` is read as values of the key's kind: `[1, 2.5]` against a float key gives float keys, and `[Time.utc(2024, 1, 2), "2024-01-03"]` against a time key gives times, so the key column keeps its type.
 - `align` only gathers; it does not interpolate or resample. Fill the gaps afterward with [`fill`](#masking-and-filling-cells) or your own column arithmetic.
 
 ### `CAFrame.meld` / `CAFrame.concatenate` — rows after rows
@@ -1128,7 +1145,7 @@ wide["tokyo"].to_a    # => [10.0, 20.0, 30.0]
 `pivot(index:, columns:, values:)` makes each distinct value of the `index` key a row and each distinct value of the `columns` key a column; the cell where they cross holds the `values` cell of the row that has that pair.
 
 - `index:` may name the frame's index as well as a column.
-- Both keys are **sorted ascending**. The `index` key becomes the result's index and names its row axis; the `columns` key values become column names through `to_s`.
+- Both keys are **sorted ascending**, NaN last. The `index` key becomes the result's index and names its row axis; the `columns` key values become column names through `to_s`. A key whose values cannot be put in order — `nil` beside numbers, numbers beside strings — raises; fill or cast it first.
 - A pair **no row has is `UNDEF`** (osaka at time 3 above), and so is a pair whose value is masked. A row whose `index` or `columns` key is masked belongs to no cell.
 - A Face column (a time column, say) stays that Face, and so does a Face index.
 - It is a **new frame**; it shares no storage with the long one.
