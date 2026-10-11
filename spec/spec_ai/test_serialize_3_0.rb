@@ -224,6 +224,21 @@ class TestSerialize30 < Test::Unit::TestCase
     assert_equal 6, rc2.data_class::DATA_SIZE
   end
 
+  # A member declared with endian: keeps its byte order through the schema,
+  # in a file of either byte order.
+  def test_anonymous_data_class_keeps_member_endian
+    tmp = CArray.struct { int32 :v, endian: :big; int32 :w }
+    rc = CARecord.new(tmp, 2)
+    rc["v"][] = [1, 2]
+    rc["w"][] = [3, 4]
+    [CA_LITTLE_ENDIAN, CA_BIG_ENDIAN].each do |e|
+      rc2 = CArray.load(CArray.dump(rc, :endian => e))
+      assert_equal :big, rc2.data_class.field_info("v").endian
+      assert_equal [1, 2], rc2["v"].to_a
+      assert_equal [3, 4], rc2["w"].to_a
+    end
+  end
+
   # ---- endian override ----
 
   def test_endian_override_round_trip

@@ -130,4 +130,17 @@ class TestCAStructEndian < Test::Unit::TestCase
     end
   end
 
+  # A record array's column reads an endian member as its element does.
+  def test_record_column_of_an_endian_member
+    s = CArray.struct(order_by: [:v]) { int32 :v, endian: :big; int32 :w }
+    r = CARecord.new(s, 3)
+    r["v"][] = [3, 1, 2]
+    r["w"][] = [30, 10, 20]
+    assert_equal [3, 1, 2], r.to_a.map { |e| e[:v] }
+    assert_equal [3, 1, 2], r["v"].to_a
+    assert_equal [1, 2, 3], r.sort["v"].to_a
+    assert_equal [10, 20, 30], r.sort["w"].to_a
+    assert_equal [3, 1, 2], r.swap_bytes.swap_bytes["v"].to_a
+  end
+
 end

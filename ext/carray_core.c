@@ -2871,6 +2871,31 @@ rb_ca_face_field (VALUE self, VALUE sym)
         return obj;
       }
     }
+    /* `endian:` is not an option of #field; the member's byte order is a
+       view over the field, as CAStruct#[] reads it. */
+    {
+      volatile VALUE opts = rb_ary_entry(info, 2);
+      volatile VALUE endian = Qnil;
+      if ( RB_TYPE_P(opts, T_HASH) ) {
+        endian = rb_hash_aref(opts, ID2SYM(rb_intern("endian")));
+      }
+      if ( ! NIL_P(endian) ) {
+        volatile VALUE field_opts = rb_hash_dup(opts);
+        rb_hash_delete(field_opts, ID2SYM(rb_intern("endian")));
+        if ( RHASH_SIZE(field_opts) > 0 ) {
+          obj = rb_funcall(receiver, rb_intern("field"), 3,
+                           rb_ary_entry(info, 0), rb_ary_entry(info, 1),
+                           field_opts);
+        }
+        else {
+          obj = rb_funcall(receiver, rb_intern("field"), 2,
+                           rb_ary_entry(info, 0), rb_ary_entry(info, 1));
+        }
+        obj = rb_funcall(obj, rb_intern("endian"), 1, endian);
+        rb_hash_aset(member, sym, obj);
+        return obj;
+      }
+    }
     obj = rb_apply(receiver, rb_intern("field"), info);
     rb_hash_aset(member, sym, obj);
     return obj;

@@ -351,7 +351,9 @@ class CArray::Serializer   # :nodoc:
               "(nested struct / template / fixlen are not expressible in the " \
               "v1.0 Layer 1 schema); use Marshal.dump(ca)"
       end
-      { "name" => f.name, "type" => pep, "offset" => f.offset, "bytes" => f.bytes }
+      m = { "name" => f.name, "type" => pep, "offset" => f.offset, "bytes" => f.bytes }
+      m["endian"] = f.endian.to_s if f.endian
+      m
     end
 
     schema = {
@@ -422,7 +424,15 @@ class CArray::Serializer   # :nodoc:
         unless sym
           raise ArgumentError, "unknown data_class member type #{m["type"].inspect} in CArray binary data"
         end
-        member sym, m["name"], :offset => m["offset"]
+        opt = { :offset => m["offset"] }
+        if m.key?("endian")
+          endian = %w[big little native preserve].find { |e| e == m["endian"] }
+          unless endian
+            raise ArgumentError, "unknown data_class member endian #{m["endian"].inspect} in CArray binary data"
+          end
+          opt[:endian] = endian.to_sym
+        end
+        member sym, m["name"], opt
       end
     end
   end
