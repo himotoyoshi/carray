@@ -35,6 +35,14 @@ class TestRecordOrder < Test::Unit::TestCase
     assert_raise(CAStruct::DefinitionError) {
       CArray.struct(order_by: [:inner]) { struct(:inner) { int32 :a } }
     }
+    assert_raise(CAStruct::DefinitionError) {
+      CArray.struct(order_by: [:v]) { array :v, type: CArray.int32(2) }
+    }
+    assert_raise(CAStruct::DefinitionError) {
+      CArray.struct(order_by: [:z]) { cmplx64 :z }
+    }
+    by_string = CArray.struct(order_by: [:s]) { fixlen :s, bytes: 2 }
+    assert_equal %w[s], by_string.order_by
   end
 
   def test_records_compare_by_the_declared_members

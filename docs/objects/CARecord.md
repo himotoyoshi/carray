@@ -158,8 +158,9 @@ a[1] < a[0]                 # => true   (the records compare too)
 `sort`, `sort_copy`, `sort_addr`, `sort_index`, `rank_index`, `order`, `min`,
 `max`, `minmax`, `min_index`, `max_index`, `partition_copy`, `partition_index`
 and the comparison operators follow it.  NaN sorts after every number, and a
-masked record stays masked.  `order_by:` names members that hold values; a
-nested record is not one (order by its members instead).
+masked record stays masked.  `order_by:` names members that hold one ordered
+value; a nested record (order by its members instead), an array member and a
+complex member are refused.
 
 A struct declared without `order_by:` has no order: those methods raise.  To
 sort by one field without declaring an order, sort that field's projection:

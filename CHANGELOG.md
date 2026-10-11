@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.struct(order_by:)` refuses an array member or a complex
+  member; before, it was accepted and sorting raised an internal error or
+  comparing two elements returned an array.
+
 - New: a `CARecord` answers `unique`, `value_counts`, `mode`, `is_in`,
   `intersection` / `difference` / `union`, `categorize`, `count(v)` and
   `locate_addr` by its records' bytes, as `nunique` and `mask_duplicates`

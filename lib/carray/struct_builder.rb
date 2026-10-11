@@ -313,7 +313,8 @@ class CAStruct::Builder  # :nodoc:
   end
 
   # The `order_by:` members, as member names.  Each has to be a member of
-  # this struct, and one that holds a value rather than a nested record.
+  # this struct that holds one ordered value: not a nested record, an array
+  # member or a complex number.
   def order_keys (table)
     keys = Array(@order_by).map(&:to_s)
     if keys.empty?
@@ -327,6 +328,14 @@ class CAStruct::Builder  # :nodoc:
       if type.is_a?(Class) && type <= CAStruct
         raise CAStruct::DefinitionError,
               "order_by: #{key.inspect} is a nested record; order by its members instead"
+      end
+      if type.is_a?(CArray)
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is an array member, which has no order"
+      end
+      if [:cmplx64, :cmplx128].include?(type)
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is complex, which has no order"
       end
     end
     keys.freeze
