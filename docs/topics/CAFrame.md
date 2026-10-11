@@ -256,7 +256,7 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 - `count` and `masked` count cells; `unique` is the number of distinct present values. A `masked` count you did not expect is the usual sign that a column was read with the wrong type.
 - `min` / `max` / `mean` / `stddev` apply where the column's kind gives them a meaning and are `UNDEF` elsewhere:
   - real numbers and booleans get all four (a boolean's mean is the share of trues);
-  - complex numbers get `mean` and `stddev` (no order, and no `unique`);
+  - complex numbers get `mean` and `stddev` (they have no order);
   - `CATime` and `CATimedelta` get all four, as times and durations;
   - text, categorical and record columns get the counts only.
 - A column with no present cell has `UNDEF` statistics. The index is not a column and is not summarized.

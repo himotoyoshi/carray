@@ -26,10 +26,13 @@ class CArray
   #   For `CA_OBJECT` / `CA_FIXLEN` distinctness follows Ruby
   #   `eql?` / `hash`; note that Ruby does not collapse distinct NaN
   #   objects, so a `CA_OBJECT` array of Float NaN is not collapsed
-  #   (unlike the numeric path).
+  #   (unlike the numeric path). Complex values follow the float rules
+  #   in each component; the values come back with -0.0 written as 0.0
+  #   and every NaN as one NaN.
   #
   #   @param sort [Boolean] when true, return the distinct values
-  #     sorted ascending instead of in first-appearance order.
+  #     sorted ascending instead of in first-appearance order. A complex
+  #     array has no order and raises {CArray::DataTypeError}.
   #   A time array (`CATime` / `CATimedelta`) answers with its own type on
   #   its own unit: the distinct values are values, so the array comes back
   #   as itself rather than as raw storage ticks.
@@ -80,6 +83,12 @@ class CArray
     # collapsed and -0.0 / +0.0 normalized; object keys on rb_hash + rb_eql and
     # fixlen on a byte-hash + memcmp, both reproducing Ruby Hash distinctness.
     # Masked cells are skipped in the kernel.
+    if sort && complex?
+      raise CArray::DataTypeError,
+            "unique(sort: true): a #{data_type_name} value has no order " \
+            "(complex numbers are not ordered); unique without sort: gives " \
+            "the values in first-appearance order"
+    end
     levels = __unique_flat__
     sort ? levels.sort : levels
   end

@@ -65,12 +65,20 @@ class CArray
   #   Only meaningful for discrete / binned data: raw float is almost all
   #   unique, so every value is modal and the per-axis Array grows to the
   #   fiber length. Bin first. Same NaN / mask semantics as {#is_mode}.
+  #   A complex array raises {CArray::DataTypeError}, since the modes
+  #   are listed in ascending order; {#is_mode} marks its modal cells.
   #
   #   @param axis [Integer, nil] axis to take the mode along; `nil` uses
   #     the whole array.
   #   @return [CArray, Array<CArray>] 1-D CArray (flat) or an Array of
   #     reduced CArrays, one per mode rank (per-axis).
   def mode (axis: nil)
+    if complex?
+      raise CArray::DataTypeError,
+            "mode: the modes are listed in ascending order, and a " \
+            "#{data_type_name} value has no order (complex numbers are not " \
+            "ordered); is_mode marks the cells that hold a mode"
+    end
     return __mode_flat if axis.nil?
     k = normalize_axis(axis, "mode")
 

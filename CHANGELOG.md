@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a complex array works with the methods that find values by
+  equality — `unique`, `value_counts`, `nunique`, `mask_duplicates`,
+  `is_mode`, `factorize`, `is_in`, `locate_addr`, the set operations,
+  `categorize` and `CAFrame#group_by` on a complex key. They raised
+  `DataTypeError` naming an internal method. Every NaN is one value and
+  -0.0 equals 0.0 in each component. `unique(sort: true)`, `mode` and
+  `categorize(sort_labels: true)` refuse a complex array, which has no
+  order.
 - Change: reading a nested struct member of a `CAStruct` element gives an
   element over the parent's bytes, so `s[:in][:a] = 5` writes to `s`, as
   writing to an array member already did; it gave a copy and the write was

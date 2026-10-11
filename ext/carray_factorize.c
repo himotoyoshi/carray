@@ -102,13 +102,67 @@
    discovery surface rather than this gate (see
    devel/PROPOSAL_DISCOVERY_FAMILY_FACE_GATE.md §4). */
 
+/* A complex array as hash keys: its cells as fixlen blobs of the same
+   width, each component written so that equal values have equal bytes
+   (-0.0 as 0.0, every NaN as one NaN), with the mask kept.  The fixlen lane
+   then answers equality for complex values. */
+static VALUE
+fz_complex_key (VALUE self)
+{
+  volatile VALUE out;
+  CArray *ca, *co;
+  ca_size_t i, n;
+  GetCArray(self, ca);
+  out = rb_carray_new(CA_FIXLEN, ca->ndim, ca->dim, ca->bytes, NULL);
+  GetCArray(out, co);
+  ca_copy_data(ca, co->ptr);
+  n = 2 * ca->elements;
+  if ( ca->data_type == CA_CMPLX128 ) {
+    double *p = (double *) co->ptr;
+    for ( i = 0; i < n; i++ ) {
+      if ( p[i] != p[i] ) p[i] = NAN;
+      else if ( p[i] == 0.0 ) p[i] = 0.0;
+    }
+  }
+  else {
+    float *p = (float *) co->ptr;
+    for ( i = 0; i < n; i++ ) {
+      if ( p[i] != p[i] ) p[i] = (float) NAN;
+      else if ( p[i] == 0.0f ) p[i] = 0.0f;
+    }
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask(co, ca);
+  }
+  return out;
+}
+
+/* The members whose output carries no values (a mask, a count) read a
+   complex array through its keys and need nothing back. */
+static VALUE
+fz_complex_as_key (VALUE self)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  if ( ! ca_is_face(ca) && ca_is_complex_type(ca) ) {
+    return fz_complex_key(self);
+  }
+  return self;
+}
+
 /* Descend `self` when it is an ORDERABLE Face; *pface keeps the pre-strip Face
-   for the re-lift (Qnil when there is nothing to put back). */
+   for the re-lift (Qnil when there is nothing to put back).  A complex array
+   is turned into hash keys (fz_complex_key) and *pface keeps it, so the
+   re-lift reads the values back as complex. */
 static VALUE
 fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
+  if ( ! ca_is_face(ca) && ca_is_complex_type(ca) ) {
+    *pface = self;
+    return fz_complex_key(self);
+  }
   if ( ca_is_face(ca) ) {
     /* A record is its bytes: two records are the same value exactly when
        their bytes are, so the fixlen lane answers for it. */
@@ -151,6 +205,19 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     return operand;
   }
   GetCArray(reference, ca);
+  if ( ! ca_is_face(ca) ) {
+    /* A complex reference: the operand becomes keys of the same kind, in the
+       reference's complex type. */
+    CArray *op;
+    if ( ! rb_obj_is_carray(operand) ) {
+      return operand;
+    }
+    GetCArray(operand, op);
+    if ( op->data_type != ca->data_type ) {
+      operand = rb_ca_to_type(operand, INT2NUM(ca->data_type), Qnil);
+    }
+    return fz_complex_key(operand);
+  }
   if ( ca->obj_type == CA_OBJ_RECORD ) {
     /* Records meet records of the same data_class, or plain fixlen bytes. */
     if ( rb_obj_is_carray(operand) ) {
@@ -178,12 +245,20 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
   return ca_face_operand_descend(operand, name);
 }
 
-/* Put the Face back on a value-carrying output. */
+/* Put the Face back on a value-carrying output, or read complex keys back
+   as complex values. */
 static VALUE
 fz_face_relift (VALUE out, VALUE face)
 {
+  CArray *cf, *co;
   if ( NIL_P(face) ) {
     return out;
+  }
+  GetCArray(face, cf);
+  if ( ! ca_is_face(cf) ) {
+    GetCArray(out, co);
+    return rb_ca_copy(rb_ca_refer_new(out, cf->data_type, co->ndim, co->dim,
+                                      cf->bytes, 0));
   }
   return ca_face_lift(out, face);
 }
@@ -1026,7 +1101,7 @@ fz_mask_duplicates_body (VALUE arg)
 static VALUE
 rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
 {
-  return fz_run(fz_mask_duplicates_body, self, vaxis, Qnil, 0);
+  return fz_run(fz_mask_duplicates_body, fz_complex_as_key(self), vaxis, Qnil, 0);
 }
 
 /* @overload __unique_flat__
@@ -2377,7 +2452,7 @@ fz_nunique_body (VALUE arg)
 static VALUE
 rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
 {
-  return fz_run(fz_nunique_body, self, vaxis, vkeep, 0);
+  return fz_run(fz_nunique_body, fz_complex_as_key(self), vaxis, vkeep, 0);
 }
 
 /* @overload __is_mode__(axis)
@@ -2588,7 +2663,7 @@ fz_is_mode_body (VALUE arg)
 static VALUE
 rb_ca_is_mode (VALUE self, VALUE vaxis)
 {
-  return fz_run(fz_is_mode_body, self, vaxis, Qnil, 0);
+  return fz_run(fz_is_mode_body, fz_complex_as_key(self), vaxis, Qnil, 0);
 }
 
 /* Ascending comparison for the modal-value sort, NaN ordered last so a

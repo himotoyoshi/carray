@@ -58,9 +58,9 @@ class TestCAFrameDescribe < Test::Unit::TestCase
     assert_in_delta 2.0 / 3, r["mean"], 1e-12
   end
 
-  def test_complex_has_no_order_and_no_unique
+  def test_complex_has_no_order
     r = row("z")
-    assert UNDEF.equal?(r["unique"])
+    assert_equal 3, r["unique"]
     assert UNDEF.equal?(r["min"])
     assert_equal Complex(2, 0), r["mean"]
   end

@@ -23,8 +23,8 @@ class CArray
   #   Distinctness is the family's hash-key judgement (see {#unique}):
   #   `==` for numeric with all NaN collapsed to one value and
   #   -0.0 / +0.0 the same value; `eql?` / `hash` for `CA_OBJECT` and
-  #   `CA_FIXLEN`. Complex is not a lane the factorizer takes and raises
-  #   {CArray::DataTypeError}.
+  #   `CA_FIXLEN`. Complex values compare by value, with NaN and -0.0
+  #   treated the same way in each component.
   #
   #   There is no `sort:` here, unlike {#unique} and {#value_counts}:
   #   the codes index the levels, so reordering the vocabulary would

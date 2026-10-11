@@ -636,6 +636,8 @@ class CArray
   #   @return [CACategorical]
   #   @raise [ArgumentError] when explicit `labels` contain
   #     duplicates.
+  #   @raise [CArray::DataTypeError] when `sort_labels: true` discovers
+  #     the labels of a complex array, which have no order.
   # The order sort_labels: puts two labels in: as sort orders the cells of an
   # array, a Float NaN after every other value; two labels <=> cannot order
   # are refused, by name.
@@ -659,9 +661,16 @@ class CArray
     # lane). Distinctness is the hash-key judgement shared with the discovery
     # family: Float NaN collapses to one category and -0.0 == +0.0, while mixed
     # Integer / Float keys stay distinct (eql?, so 1 and 1.0 are separate
-    # categories). The discovery path below is reserved for an explicit labels
-    # list and the data types the factorize kernel does not take (complex).
-    if labels.nil? && (integer? || float? || object? || fixlen? || boolean?)
+    # categories). Complex values are distinct by value with the same NaN and
+    # -0.0 rules, and have no order, so sort_labels refuses them. The discovery
+    # path below is reserved for an explicit labels list.
+    if labels.nil? && sort_labels && complex?
+      raise CArray::DataTypeError,
+            "categorize(sort_labels: true): a #{data_type_name} value has no " \
+            "order (complex numbers are not ordered); without sort_labels: the " \
+            "labels are in first-appearance order"
+    end
+    if labels.nil? && (integer? || float? || complex? || object? || fixlen? || boolean?)
       codes, levels = __factorize_appearance__
       levels = levels.to_a
       return CACategorical.from_codes(codes, levels) unless sort_labels

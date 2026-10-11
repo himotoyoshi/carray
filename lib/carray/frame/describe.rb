@@ -22,7 +22,7 @@ class CAFrame
   # meaning, and are UNDEF elsewhere:
   #
   #   real numbers, boolean   min  max  mean  stddev
-  #   complex                           mean  stddev   (no order, no unique)
+  #   complex                           mean  stddev   (no order)
   #   CATime, CATimedelta     min  max  mean  stddev   (as times / durations)
   #   anything else (text, categorical, records ...)   unique only
   #
@@ -68,7 +68,7 @@ class CAFrame
     type += col.shape[1..].inspect if col.ndim > 1
     row = { "type" => type,
             "count" => col.count_not_masked, "masked" => col.count_masked,
-            "unique" => kind == :complex ? UNDEF : col.nunique }
+            "unique" => col.nunique }
     ordered = kind == :ordered
     row["min"]    = ordered ? col.min : UNDEF
     row["max"]    = ordered ? col.max : UNDEF
