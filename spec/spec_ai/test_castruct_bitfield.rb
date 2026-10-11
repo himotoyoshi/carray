@@ -82,8 +82,8 @@ class TestCAStructBitfield < Test::Unit::TestCase
               flag_a: 1, flag_b: 0, version: 42,
               payload: 0xDEADBEEF)
     assert_equal(0x1234,     r.header)
-    assert_equal(1,          r.flag_a)
-    assert_equal(0,          r.flag_b)
+    assert_equal(true,       r.flag_a)
+    assert_equal(false,      r.flag_b)
     assert_equal(42,         r.version)
     assert_equal(0xDEADBEEF, r.payload)
   end
@@ -101,8 +101,8 @@ class TestCAStructBitfield < Test::Unit::TestCase
               payload: 0xDEADBEEF)
     r.version = 17
     assert_equal(0xCAFE,     r.header)
-    assert_equal(0,          r.flag_a)
-    assert_equal(0,          r.flag_b)
+    assert_equal(false,      r.flag_a)
+    assert_equal(false,      r.flag_b)
     assert_equal(17,         r.version)
     assert_equal(0xDEADBEEF, r.payload)
   end
@@ -115,9 +115,9 @@ class TestCAStructBitfield < Test::Unit::TestCase
     }
     r = s.new
     r.a = 1; r.c = 1
-    assert_equal(1, r.a)
-    assert_equal(0, r.b)
-    assert_equal(1, r.c)
+    assert_equal(true,  r.a)
+    assert_equal(false, r.b)
+    assert_equal(true,  r.c)
   end
 
   def test_round_trip_8bit_field
@@ -170,7 +170,7 @@ class TestCAStructBitfield < Test::Unit::TestCase
     r = s.new(tag: 7, flag: 1)
     pairs = []
     r.each_pair { |k, v| pairs << [k, v] }
-    assert_equal([[:tag, 7], [:flag, 1]], pairs)
+    assert_equal([[:tag, 7], [:flag, true]], pairs)
   end
 
   def test_bit_member_eql_round_trip

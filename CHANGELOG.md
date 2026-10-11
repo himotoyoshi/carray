@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CAStruct` element reads a `boolean` member and a 1-bit `bit`
+  member as `true` / `false`, as a `CARecord` column of the member already
+  did; it read `1` / `0`. Writing takes `true`, `false`, `1` or `0`; any
+  other value raises `CArray::DataTypeError` (before, `2` was stored as `1`
+  and `nil` as `0`).
+
 - Change: `CAFrame#at` on a numeric index takes a number only. A String or
   `true` / `false` now raises `ArgumentError`; before, a float index read
   `"2.5"` as 2.5 while an integer index matched nothing for `"2"` and

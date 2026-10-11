@@ -69,11 +69,11 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
 
   def test_bitfield_member_roundtrip
     r = S.new(flag: 1, version: 42)
-    assert_equal 1,  r.flag
+    assert_equal true, r.flag
     assert_equal 42, r.version
     r[:flag] = 0
     r[:version] = 7
-    assert_equal 0, r.flag
+    assert_equal false, r.flag
     assert_equal 7, r.version
   end
 

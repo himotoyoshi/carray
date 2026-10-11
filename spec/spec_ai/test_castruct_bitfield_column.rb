@@ -95,9 +95,9 @@ class TestCAStructBitfieldColumn < Test::Unit::TestCase
     s  = make_struct
     rs = populate(s)
     rs["flag_a"][1] = 1
-    assert_equal 1, rs[1].flag_a
+    assert_equal true, rs[1].flag_a
     # Other bits in the same packed byte must be untouched.
-    assert_equal 1, rs[1].flag_b
+    assert_equal true, rs[1].flag_b
     assert_equal 20, rs[1].version
     # Neighbouring byte-typed members untouched.
     assert_equal 0x2000, rs[1].header
@@ -108,7 +108,7 @@ class TestCAStructBitfieldColumn < Test::Unit::TestCase
     s  = make_struct
     rs = populate(s)
     rs["flag_a"][nil] = 1
-    4.times { |i| assert_equal 1, rs[i].flag_a }
+    4.times { |i| assert_equal true, rs[i].flag_a }
     # flag_b/version/header/payload should all be unchanged
     assert_equal [false, true, true, false],            rs["flag_b"].to_a
     assert_equal [10, 20, 30, 40],        rs["version"].to_a

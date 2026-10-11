@@ -36,7 +36,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_no_args_initializes_zeros
     r = S.new
     assert_equal 0, r[:head]
-    assert_equal 0, r[:flag]
+    assert_equal false, r[:flag]
     assert_equal 0, r[:ver]
     assert_equal 0, r[:payload]
   end
@@ -44,7 +44,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_empty_hash_initializes_zeros
     r = S.new({})
     assert_equal 0, r[:head]
-    assert_equal 0, r[:flag]
+    assert_equal false, r[:flag]
   end
 
   # --- Hash init -----------------------------------------------------
@@ -53,7 +53,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
     r = S.new(head: 0x1234, flag: 1, ver: 42,
               payload: 0xDEADBEEF, tag: "abcd")
     assert_equal 0x1234,     r[:head]
-    assert_equal 1,          r[:flag]
+    assert_equal true,          r[:flag]
     assert_equal 42,         r[:ver]
     assert_equal 0xDEADBEEF, r[:payload]
     assert_equal "abcd",     r[:tag]
@@ -62,7 +62,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_hash_init_partial_zeros_remaining
     r = S.new(head: 0xCAFE)
     assert_equal 0xCAFE, r[:head]
-    assert_equal 0,      r[:flag]
+    assert_equal false,      r[:flag]
     assert_equal 0,      r[:ver]
   end
 
@@ -83,7 +83,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_positional_init_all_fields
     r = S.new(0xCAFE, 0, 7, 0xBABEFACE, "wxyz")
     assert_equal 0xCAFE,     r[:head]
-    assert_equal 0,          r[:flag]
+    assert_equal false,          r[:flag]
     assert_equal 7,          r[:ver]
     assert_equal 0xBABEFACE, r[:payload]
     assert_equal "wxyz",     r[:tag]
@@ -92,7 +92,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_positional_init_partial
     r = S.new(0xCAFE, 1)
     assert_equal 0xCAFE, r[:head]
-    assert_equal 1,      r[:flag]
+    assert_equal true,      r[:flag]
     assert_equal 0,      r[:ver]    # remaining zeros
     assert_equal 0,      r[:payload]
   end
@@ -189,7 +189,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
     # primitive (uint16), bit (1+7), endian (uint32 BE), fixlen (4 bytes)
     r = S.new(0xABCD, 1, 33, 0x12345678, "abcd")
     assert_equal 0xABCD,     r[:head]
-    assert_equal 1,          r[:flag]
+    assert_equal true,          r[:flag]
     assert_equal 33,         r[:ver]
     assert_equal 0x12345678, r[:payload]
     assert_equal "abcd",     r[:tag]

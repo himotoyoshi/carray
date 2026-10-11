@@ -37,16 +37,16 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
       bit :c, bits: 6
     }
     r = s.new(head: 0xCAFE, a: 1, b: 0, c: 42)
-    assert_equal 1,    r[:a]
-    assert_equal 0,    r[:b]
+    assert_equal true,  r[:a]
+    assert_equal false, r[:b]
     assert_equal 42,   r[:c]
     assert_equal 0xCAFE, r[:head]   # neighbour primitive untouched
 
     r[:a] = 0
     r[:b] = 1
     r[:c] = 17
-    assert_equal 0,    r[:a]
-    assert_equal 1,    r[:b]
+    assert_equal false, r[:a]
+    assert_equal true,  r[:b]
     assert_equal 17,   r[:c]
     assert_equal 0xCAFE, r[:head]   # still untouched
   end
@@ -127,12 +127,25 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
   def test_bitfield_value_truncates_to_bits
     # Writing too-wide a value silently truncates to the field's
     # bit width (matches CABitfield semantics).
+    s = CArray.struct(pack: 1) { bit :f, bits: 2 }
+    r = s.new
+    r[:f] = 99
+    assert_equal 3, r[:f]   # 99 & 0x3 == 3
+    r[:f] = 256
+    assert_equal 0, r[:f]   # 256 & 0x3 == 0
+  end
+
+  def test_one_bit_field_is_a_boolean
+    # A 1-bit field reads and writes as a boolean, as a record array's
+    # column of it does: true / false / 1 / 0 are taken, anything else is not.
     s = CArray.struct(pack: 1) { bit :flag, bits: 1 }
     r = s.new
-    r[:flag] = 99
-    assert_equal 1, r[:flag]   # 99 & 0x1 == 1
-    r[:flag] = 256
-    assert_equal 0, r[:flag]   # 256 & 0x1 == 0
+    r[:flag] = true
+    assert_equal true, r[:flag]
+    r[:flag] = 0
+    assert_equal false, r[:flag]
+    assert_raise(CArray::DataTypeError) { r[:flag] = 99 }
+    assert_raise(CArray::DataTypeError) { r[:flag] = nil }
   end
 
   # ===== Endian-swapped reads / writes ================================
@@ -262,7 +275,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     r = s.new(flag: 1)
     assert_equal r[:flag], r["flag"]
     r["flag"] = 0
-    assert_equal 0, r[:flag]
+    assert_equal false, r[:flag]
   end
 
   def test_symbol_and_string_lookup_parity_for_endian

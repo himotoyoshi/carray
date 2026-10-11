@@ -54,7 +54,7 @@ ca_struct_read_primitive_fast (const char *p, int type_code)
   case CA_BOOLEAN: {
     int8_t v;
     memcpy(&v, p, 1);
-    return v ? INT2FIX(1) : INT2FIX(0);
+    return v ? Qtrue : Qfalse;
   }
   case CA_INT8: {
     int8_t v;
@@ -116,7 +116,15 @@ ca_struct_write_primitive_fast (char *p, int type_code, VALUE val)
 {
   switch (type_code) {
   case CA_BOOLEAN: {
-    int8_t v = RTEST(val) && val != INT2FIX(0) ? 1 : 0;
+    /* The values a boolean array takes: true / false / 1 / 0. */
+    int8_t v;
+    if      ( val == Qtrue  || val == INT2FIX(1) ) v = 1;
+    else if ( val == Qfalse || val == INT2FIX(0) ) v = 0;
+    else {
+      rb_raise(rb_eCADataTypeError,
+               "can't cast object '%"PRIsVALUE"' to <boolean>",
+               rb_inspect(val));
+    }
     memcpy(p, &v, 1);
     return;
   }
@@ -201,8 +209,10 @@ ca_struct_read_bitfield_fast (const char *p, int view_bytes,
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   uint64_t val  = (word >> bit_in_word) & mask;
-  /* Returned as an unsigned Integer; bit-fields don't carry a sign
+  /* A 1-bit field is a boolean, as a record array's column of it is.
+     Wider fields are unsigned Integers; bit-fields don't carry a sign
      bit in carray's CABitfield convention either. */
+  if (bits == 1) return val ? Qtrue : Qfalse;
   if (bits <= 31) return INT2FIX((long) val);
   if (bits <= 32) return ULONG2NUM((unsigned long) val);
   return ULL2NUM(val);
@@ -212,7 +222,19 @@ static void
 ca_struct_write_bitfield_fast (char *p, int view_bytes,
                                int bit_in_word, int bits, VALUE val)
 {
-  uint64_t v    = NUM2ULL(val);
+  uint64_t v;
+  if ( bits == 1 ) {
+    if      ( val == Qtrue  || val == INT2FIX(1) ) v = 1;
+    else if ( val == Qfalse || val == INT2FIX(0) ) v = 0;
+    else {
+      rb_raise(rb_eCADataTypeError,
+               "can't cast object '%"PRIsVALUE"' to <boolean>",
+               rb_inspect(val));
+    }
+  }
+  else {
+    v = NUM2ULL(val);
+  }
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   v &= mask;

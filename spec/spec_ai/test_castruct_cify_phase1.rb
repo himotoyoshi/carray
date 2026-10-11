@@ -214,9 +214,13 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
   def test_boolean_round_trip
     r = S_ALL_PRIMS.new
     r[:bo] = 1
-    assert_equal 1, r[:bo]
+    assert_equal true, r[:bo]
     r[:bo] = 0
-    assert_equal 0, r[:bo]
+    assert_equal false, r[:bo]
+    r[:bo] = true
+    assert_equal true, r[:bo]
+    assert_raise(CArray::DataTypeError) { r[:bo] = 2 }
+    assert_raise(CArray::DataTypeError) { r[:bo] = nil }
   end
 
   # --- Sibling fields stay isolated (no aliasing across offsets) ------
@@ -267,11 +271,11 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
       bit :version, bits: 7
     }
     r = s.new(head: 0x1234, flag: 1, version: 42)
-    assert_equal 1,  r[:flag]
+    assert_equal true, r[:flag]
     assert_equal 42, r[:version]
     r[:version] = 7
     assert_equal 7, r[:version]
-    assert_equal 1, r[:flag]    # neighbour unchanged
+    assert_equal true, r[:flag]    # neighbour unchanged
   end
 
   def test_endian_member_still_works_via_dispatch_table
