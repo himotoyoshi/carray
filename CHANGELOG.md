@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: storing a `fixlen` array into `fixlen` cells of another width read
+  past the end of a narrower source and wrote stray bytes, and a wider one
+  was reinterpreted rather than cut per cell. Each cell is now padded with
+  NUL or cut to the destination's width, as a String stored there is.
+  `CArray.concatenate` and `CAFrame.concatenate` of fixlen pieces of
+  different widths join at the widest width, so no string is cut.
+
 - Fix: `refer` to a wider type, for example two `float64` read as one
   `complex128` or one 16-byte `fixlen` cell, read and wrote the wrong
   elements when the parent's elements were not adjacent in memory: a

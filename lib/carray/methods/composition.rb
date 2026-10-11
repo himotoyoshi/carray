@@ -146,12 +146,16 @@ class CArray
     # result with face_lift, rather than special-casing data_class / DATA_SIZE
     # here (= which only ever handled CARecord and silently corrupted plain
     # fixlen / numeric Faces by leaving bytes nil).
-    face_parent = list[0].face? ? list[0] : nil
+    # The Face is re-wrapped from the widest piece: a fixlen Face carries
+    # its cell width, and the result is as wide as its widest piece.
+    face_parent = list[0].face? ? list.max_by(&:bytes) : nil
     if face_parent
       list = list.map { |x| s = x; s = s.parent while s.face?; s }
     end
     data_type = list[0].data_type
-    bytes     = (data_type == :fixlen) ? list[0].bytes : nil
+    # Fixlen pieces of different widths join at the widest, so no cell is
+    # cut; each narrower piece is padded with NUL as it is pasted.
+    bytes     = (data_type == :fixlen) ? list.map(&:bytes).max : nil
     # promote_list guarantees a non-empty list of CArrays, so the reference
     # shape is simply the first element (a CScalar carries shape [1], so a
     # leading scalar is fine; the scalar-expansion pass below broadcasts it).

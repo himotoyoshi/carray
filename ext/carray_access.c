@@ -689,6 +689,17 @@ rb_ca_store_all (VALUE self, VALUE rval)
     ca_broadcast_to_destination(self, &rval);
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
+    /* Fixlen cells of another width are fitted cell by cell, padded with
+       NUL or cut to the destination's width, as a String or an Array of
+       Strings stored into fixlen cells is.  Copied as they are, the bytes
+       would be read past the end of a narrower source. */
+    if ( ca->data_type == CA_FIXLEN && cv->data_type == CA_FIXLEN
+         && ca->bytes != cv->bytes ) {
+      rval = rb_ca_to_type(rb_ca_strip_face_value(rval), INT2NUM(CA_FIXLEN),
+                           SIZE2NUM(ca->bytes));
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+    }
+
     /* Source delivery via ca_xfer_all into a local scratch instead of
        ca_attach(cv).  This routes through ca_*_func_xfer_all's per-region
        partial-materialise path, avoiding a ca_attach(root) silent
