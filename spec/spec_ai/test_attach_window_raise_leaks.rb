@@ -263,7 +263,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     [[v], -> { v == v.copy }]
   end
 
-  releases("sort_addr_elements_do_not_compare", TypeError) do
+  releases("sort_addr_elements_do_not_compare", ArgumentError) do
     o = CArray.object(4, 6).seq!
     o[1, 1] = "s"
     v = o[nil, 0..4]
