@@ -365,6 +365,8 @@ df.tail(3)     # last 3 rows
 
 `at(label)` returns the single row whose index label equals `label`, as a Ruby `Hash` — the counterpart of `df[i]` that looks the row up by label instead of position. The frame must have an index (see [The index](#the-index)). The label is matched exactly, so any index type works: numbers, strings and other objects, times, categoricals. A time index also takes the label as a `Time`, a `Date` or a String such as `"2024-01-02"`, and `at(Float::NAN)` finds a NaN label — such as the one `group_by` gives rows whose key is NaN.
 
+In an **object** index, `at` compares labels with Ruby's `==`, so `at(1.0)` finds a label `1`. `join`, `align` and `group_by` compare object keys with `eql?`, as a Ruby `Hash` does, so there `1` and `1.0` are different keys. When numbers are kept in an object column, cast it to a numeric type (`df.cast("k", :float64)`) and both agree.
+
 ```ruby
 byname = df.set_index("station")
 byname.at("osaka")             # => { "station" => "osaka", "temp" => 25.3 }
@@ -1026,7 +1028,7 @@ When the other frame's key is unique, `:left` gives one row per left row, in ord
 - fixed-width strings of different widths (`CArray.fixlen_string`);
 - NaN matches NaN; a masked key matches nothing.
 
-Two exceptions: an object column compares Ruby objects with `eql?`, so `1` and `1.0` there are different keys (cast the column to a number first), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
+Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
 
 The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first).
 
