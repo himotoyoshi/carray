@@ -664,6 +664,7 @@ class CArray
   #   per category of `cat`.  Requires `self.elements == cat.elements`.
   #   @param cat [CACategorical] the classifier.
   #   @return [CACategoricalIterator]
+  #   @raise [TypeError] when `cat` is not a CACategorical.
   #   @raise [ArgumentError] when element counts differ.
   def group_by_category (cat)
     unless cat.is_a?(CACategorical)
