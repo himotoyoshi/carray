@@ -2733,10 +2733,14 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
 
   /* All primitive: result_type to determine common data_type, then
      wrap_readonly each element. */
+  /* The arrays are joined value for value, so a list mixing signed and
+     unsigned integers takes a type that holds both (uint8 with int8 is
+     int16, not uint8, where -1 would read as 255): the rule equality
+     matches such a pair by. */
   common = ca_arg_to_data_type(rb_ary_entry(list, 0));
   for ( i = 1; i < n; i++ ) {
     int8_t next = ca_arg_to_data_type(rb_ary_entry(list, i));
-    common = ca_promote_type(common, next);
+    common = ca_value_match_type(ca_promote_type(common, next), common, next);
   }
   {
     VALUE common_sym = rb_ca_data_type_to_sym(common);

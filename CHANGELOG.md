@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray.concatenate`, `CArray.stack`, `CArray.promote_list` and
+  `CAFrame.concatenate` give a list mixing signed and unsigned integers a
+  type that holds both: `uint8` with `int8` is now `int16` (it was `uint8`,
+  where `-1` read as `255`), and `uint64` with `int64` is `:object`.
+  Arithmetic between such arrays is unchanged.
+
 - Fix: `CAFrame#align` with an Array reference compared it as Ruby objects,
   so `1` did not match a float key's `1.0` and the key column became
   `:object`; the Array is now read as values of the key's kind, as `is_in`
