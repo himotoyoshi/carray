@@ -29,8 +29,8 @@
    APPLY(qp, v) := one of:
      OP_ADD  *(qp) += (v)
      OP_SUB  *(qp) -= (v)
-     OP_MIN_FLT  if ((v) < *(qp) || *(qp) != *(qp)) *(qp) = (v)   (fmin policy)
-     OP_MAX_FLT  if ((v) > *(qp) || *(qp) != *(qp)) *(qp) = (v)
+     OP_MIN_FLT  a NaN loses (CA_EXTREMUM_REPLACES, carray_internal.h)
+     OP_MAX_FLT  likewise
      OP_MIN_INT  if ((v) < *(qp)) *(qp) = (v)
      OP_MAX_INT  if ((v) > *(qp)) *(qp) = (v)
 */
@@ -39,8 +39,8 @@
 #define OP_SUB(qp, v)     (*(qp) -= (v))
 #define OP_MUL(qp, v)     (*(qp) *= (v))
 #define OP_REPLACE(qp, v) (*(qp)  = (v))
-#define OP_MIN_FLT(qp, v) do { if ((v) < *(qp) || *(qp) != *(qp)) *(qp) = (v); } while (0)
-#define OP_MAX_FLT(qp, v) do { if ((v) > *(qp) || *(qp) != *(qp)) *(qp) = (v); } while (0)
+#define OP_MIN_FLT(qp, v) do { if ( CA_EXTREMUM_REPLACES((v), *(qp), <) ) *(qp) = (v); } while (0)
+#define OP_MAX_FLT(qp, v) do { if ( CA_EXTREMUM_REPLACES((v), *(qp), >) ) *(qp) = (v); } while (0)
 #define OP_MIN_INT(qp, v) do { if ((v) < *(qp)) *(qp) = (v); } while (0)
 #define OP_MAX_INT(qp, v) do { if ((v) > *(qp)) *(qp) = (v); } while (0)
 
