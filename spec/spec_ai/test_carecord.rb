@@ -515,6 +515,23 @@ class TestCARecord < Test::Unit::TestCase
     assert_raise(TypeError) { a[0..1] = Swapped.new(1.0, 2.0) }
   end
 
+  # A field of a frozen or read-only record array refuses writes, and a
+  # frozen view still projects its fields.
+  def test_fields_of_a_frozen_record_array_are_read_only
+    a = CARecord.new(GeoCoord, 3)
+    a["lat"]                       # cached before the freeze
+    a.freeze
+    assert_raise(RuntimeError) { a["lat"][] = 5.0 }
+    assert_raise(RuntimeError) { a["lng"][0] = 5.0 }
+    assert_raise(RuntimeError) { a.flip(0)["lat"][0] = 5.0 }
+    assert_raise(RuntimeError) { a.fields[0][1] = 5.0 }
+    assert_equal [0.0, 0.0, 0.0], a["lat"].to_a
+    v = CARecord.new(GeoCoord, 3)[1..2]
+    v.freeze
+    assert_equal [0.0, 0.0], v["lat"].to_a
+    assert_raise(RuntimeError) { v["lat"][0] = 5.0 }
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

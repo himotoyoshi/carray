@@ -2777,8 +2777,8 @@ rb_ca_members (VALUE self)
    (= Face strip): the @member cache lives on self (the Face) while the
    actual field view is the CAField on the parent.  A plain FIXLEN entity
    keeps self == receiver. */
-VALUE
-rb_ca_face_field (VALUE self, VALUE sym)
+static VALUE
+ca_face_field_lookup (VALUE self, VALUE sym)
 {
   volatile VALUE data_class = rb_ca_data_class(self);
   volatile VALUE member;
@@ -2803,7 +2803,9 @@ rb_ca_face_field (VALUE self, VALUE sym)
        is local to the derived view; field views are still on its parent
        (which itself is on the entity). */
     member = rb_hash_new();
-    rb_ivar_set(self, rb_intern("member"), member);
+    if ( ! OBJ_FROZEN(self) ) {
+      rb_ivar_set(self, rb_intern("member"), member);
+    }
   }
 
   if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
@@ -2900,6 +2902,22 @@ rb_ca_face_field (VALUE self, VALUE sym)
     rb_hash_aset(member, sym, obj);
     return obj;
   }
+}
+
+/* A field is a view on the record array's storage, below the Face, so the
+   read-only state of the record array (frozen, or a read-only view) is not
+   on its parent chain; the field carries it itself. */
+VALUE
+rb_ca_face_field (VALUE self, VALUE sym)
+{
+  volatile VALUE obj = ca_face_field_lookup(self, sym);
+  CArray *ca, *co;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_readonly(ca) && rb_obj_is_carray(obj) ) {
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+    ca_set_flag(co, CA_FLAG_READ_ONLY);
+  }
+  return obj;
 }
 
 /* @overload fields
