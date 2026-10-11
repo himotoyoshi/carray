@@ -1322,12 +1322,12 @@ fz_is_in_body (VALUE arg)
   GetCArray(rvalues, cv);
   if ( cv->data_type != dt ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: values data type (%s) must match self (%s)",
+             "is_in: values data type (%s) must match self (%s)",
              ca_type_name[cv->data_type], ca_type_name[dt]);
   }
   if ( dt == CA_FIXLEN && cv->bytes != ca->bytes ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: a fixlen value is a cell-width blob, so the values "
+             "is_in: a fixlen value is a cell-width blob, so the values "
              "must be %ld bytes wide like self, not %ld",
              (long) ca->bytes, (long) cv->bytes);
   }
@@ -1494,9 +1494,16 @@ fz_locate_addr_body (VALUE arg)
     rb_raise(rb_eArgError, "__locate_addr__: ref must be a CArray");
   }
   GetCArray(rref, cr);
-  if ( cr->data_type != dt || (dt == CA_FIXLEN && cr->bytes != ca->bytes) ) {
+  if ( cr->data_type != dt ) {
     rb_raise(rb_eCADataTypeError,
-             "__locate_addr__: ref data type must match self (%d)", dt);
+             "locate_addr: ref data type (%s) must match self (%s)",
+             ca_type_name[cr->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && cr->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "locate_addr: a fixlen value is a cell-width blob, so ref "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) cr->bytes);
   }
   if ( cr->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__locate_addr__: ref need ndim >= 1");
@@ -1966,8 +1973,16 @@ fz_set_union_body (VALUE arg)
     rb_raise(rb_eArgError, "__union__: other must be a CArray");
   }
   GetCArray(rother, co);
-  if ( co->data_type != dt || (dt == CA_FIXLEN && co->bytes != ca->bytes) ) {
-    rb_raise(rb_eCADataTypeError, "__union__: other data type must match self (%d)", dt);
+  if ( co->data_type != dt ) {
+    rb_raise(rb_eCADataTypeError,
+             "union: other data type (%s) must match self (%s)",
+             ca_type_name[co->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && co->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "union: a fixlen value is a cell-width blob, so other "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) co->bytes);
   }
   if ( co->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__union__: other need ndim >= 1");

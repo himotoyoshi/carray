@@ -135,6 +135,10 @@ class CArray
        respond_to?(:in_common_unit_with)
       return in_common_unit_with(values)
     end
+    # Two fixed-width string arrays of different widths meet at the wider.
+    if values.is_a?(CArray) && data_type == CA_FIXLEN && values.data_type == CA_FIXLEN
+      return fixlen_widened_with(values)
+    end
     # A Face that reconciles operands (CATime) reads a bare Array as values
     # of its own kind -- instants written as Time / String / elements.
     if values.is_a?(Array) && face? && respond_to?(:to_comparable)
@@ -171,6 +175,23 @@ class CArray
       t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
       [coerce_self(t), elems.to_ca.to_type(t)]
     end
+  end
+
+  # [self, other] at one cell width when both are fixed-width string arrays
+  # (CAFixlenString) of different widths: the narrower is padded with NUL to
+  # the wider, as concatenate joins them, so a string matches whatever width
+  # it is held at.  Raw fixlen cells of different widths are values of
+  # different lengths, not padded strings, and are left as they are (the
+  # lookup refuses them, naming the widths).
+  def fixlen_widened_with (other)
+    return [self, other] if bytes == other.bytes
+    return [self, other] unless is_a?(CAFixlenString) && other.is_a?(CAFixlenString)
+    w = [bytes, other.bytes].max
+    [widen_fixlen_string(self, w), widen_fixlen_string(other, w)]
+  end
+
+  def widen_fixlen_string (x, w)
+    x.bytes == w ? x : x.to_fixlen_string(bytes: w)
   end
 
   def coerce_self (t)

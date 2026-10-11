@@ -1,3 +1,5 @@
+require "carray/methods/is_in"   # fixlen_widened_with
+
 class CArray
 
   # @!group Sorting and searching
@@ -65,6 +67,10 @@ class CArray
       return q.locate_addr(ref)
     end
     ref = ref.to_ca unless ref.is_a?(CArray)
+    if data_type == CA_FIXLEN && ref.data_type == CA_FIXLEN && bytes != ref.bytes
+      a, b = fixlen_widened_with(ref)
+      return a.locate_addr(b) unless a.equal?(self) && b.equal?(ref)
+    end
     # Put self and ref in a common lane via the single-source promotion rule
     # (CArray.result_type), so a fractional query against an int ref is compared
     # at the promoted type instead of truncating (1.5 no longer matches 1).

@@ -115,4 +115,22 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     e = assert_raise(ArgumentError) { CAFrame.new("a" => n).sort_by_key("a") }
     assert_match(/comparison of Integer with nil failed/, e.message)
   end
+
+  # Fixed-width strings of different widths are the same strings; a join
+  # meets them at the wider width, from either side.  Raw fixlen cells of
+  # different widths are values of different lengths and are refused,
+  # naming the widths.
+  def test_fixed_width_string_keys_of_different_widths
+    a = CArray.fixlen_string(%w[a b c])
+    b = CArray.fixlen_string(%w[aa b cc])
+    assert_equal [UNDEF, 1, UNDEF], a.locate_addr(b).to_a
+    assert_equal [UNDEF, 1, UNDEF], b.locate_addr(a).to_a
+    l = CAFrame.new("k" => a, "x" => CA_INT32([1, 2, 3]))
+    r = CAFrame.new("k" => b, "y" => CA_INT32([7, 8, 9]))
+    assert_equal [UNDEF, 8, UNDEF], l.join(r, on: "k")["y"].to_a
+    assert_equal [UNDEF, 2, UNDEF], r.join(l, on: "k")["x"].to_a
+    assert_equal [UNDEF, 8, UNDEF, 7, 9], l.join(r, on: "k", how: :outer)["y"].to_a
+    e = assert_raise(CArray::DataTypeError) { a.parent.locate_addr(b.parent) }
+    assert_match(/1 bytes wide like self, not 2/, e.message)
+  end
 end
