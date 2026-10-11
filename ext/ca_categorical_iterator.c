@@ -35,6 +35,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* CA_EXTREMUM_REPLACES */
 #include <stdlib.h>   /* qsort */
 #include <math.h>     /* floor */
 
@@ -150,7 +151,7 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
 #define CAT_NAN_NEVER(v)  (0)
 #define CAT_NAN_CHECK(v)  ((v) != (v))
 
-#define REDUCEAT_MOMENTS_BODY(T, ISNAN)                                          \
+#define REDUCEAT_MOMENTS_BODY(T)                                                 \
   do {                                                                          \
     const T *gp = (const T *) grouped->ptr;                                     \
     T *minv = (T *) minp, *maxv = (T *) maxp;                                   \
@@ -159,17 +160,16 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
       ca_size_t hi = (c + 1 < k) ? (ca_size_t) offs[c+1] : n;                   \
       ca_size_t j, cnt = 0;                                                     \
       double sacc = 0.0;                                                        \
-      T mn = 0, mx = 0; int seen = 0, seen_num = 0;                             \
+      T mn = 0, mx = 0; int seen = 0;                                           \
       for ( j = lo; j < hi; j++ ) {                                             \
         if ( gm && gm[j] ) continue;            /* masked value cell */         \
         { T v = gp[j];                                                          \
           sacc += (double) v;                                                   \
-          if ( ! ISNAN(v) ) {                                                   \
-            if ( ! seen_num ) { mn = v; mx = v; seen_num = 1; }                 \
-            else { if ( v < mn ) mn = v; if ( v > mx ) mx = v; }                \
+          if ( ! seen ) { mn = v; mx = v; seen = 1; }                           \
+          else {                                                                \
+            if ( CA_EXTREMUM_REPLACES(v, mn, <) ) mn = v;                       \
+            if ( CA_EXTREMUM_REPLACES(v, mx, >) ) mx = v;                       \
           }                                                                     \
-          else if ( ! seen ) { mn = v; mx = v; }  /* held until a number lands */\
-          seen = 1;                                                             \
           cnt++; }                                                              \
       }                                                                         \
       countp[c] = (int64_t) cnt;                                                \
@@ -221,16 +221,16 @@ rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
   maxm = (boolean8_t *) maxs->mask->ptr;
 
   switch ( grouped->data_type ) {
-  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t, CAT_NAN_NEVER);    break;
-  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t, CAT_NAN_NEVER);   break;
-  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t, CAT_NAN_NEVER);   break;
-  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t, CAT_NAN_NEVER);  break;
-  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t, CAT_NAN_NEVER);   break;
-  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t, CAT_NAN_NEVER);  break;
-  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t, CAT_NAN_NEVER);   break;
-  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t, CAT_NAN_NEVER);  break;
-  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t, CAT_NAN_CHECK); break;
-  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t, CAT_NAN_CHECK); break;
+  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t);    break;
+  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t);   break;
+  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t);   break;
+  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t);  break;
+  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t);   break;
+  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t);  break;
+  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t);   break;
+  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t);  break;
+  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t); break;
+  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t); break;
   default:
     rb_raise(rb_eCADataTypeError,
              "__reduceat_moments__: numeric value required (got data_type %d)",
@@ -873,7 +873,7 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
   (empty group cell → 0 + masked, matching __reduceat_moments__).
 --------------------------------------------------------------------------- */
 
-#define FIBER_SCATTER_BODY(H_T, C_T, ISNAN)                                   \
+#define FIBER_SCATTER_BODY(H_T, C_T)                                          \
   do {                                                                        \
     const H_T *hp   = (const H_T *) h->ptr;                                   \
     const C_T *cp   = (const C_T *) codes->ptr;                               \
@@ -895,18 +895,11 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
           if ( c < 0 || c >= K ) continue;  /* out-of-vocabulary */           \
           out_off = c * band_size + out_outer + inn;                          \
           v = hp[off];                                                        \
-          /* NaN loses every contest, as in the flat twin and the core. min \
-             and max are seeded together and only ever move on a number, so a \
-             NaN sitting in min means this cell has met nothing but NaN yet. */\
           if ( countp[out_off] == 0 ) {                                       \
             minv[out_off] = v; maxv[out_off] = v;                             \
-          } else if ( ! ISNAN(v) ) {                                          \
-            if ( ISNAN(minv[out_off]) ) {                                     \
-              minv[out_off] = v; maxv[out_off] = v;                           \
-            } else {                                                          \
-              if ( v < minv[out_off] ) minv[out_off] = v;                     \
-              if ( v > maxv[out_off] ) maxv[out_off] = v;                     \
-            }                                                                 \
+          } else {                                                            \
+            if ( CA_EXTREMUM_REPLACES(v, minv[out_off], <) ) minv[out_off] = v;\
+            if ( CA_EXTREMUM_REPLACES(v, maxv[out_off], >) ) maxv[out_off] = v;\
           }                                                                   \
           countp[out_off]++;                                                  \
           sump[out_off] += (double) v;                                        \
@@ -915,16 +908,16 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
     }                                                                         \
   } while (0)
 
-#define FIBER_SCATTER_DISPATCH_C(H_T, ISNAN)                                  \
+#define FIBER_SCATTER_DISPATCH_C(H_T)                                         \
   switch ( codes->data_type ) {                                               \
-  case CA_INT8:    FIBER_SCATTER_BODY(H_T, int8_t, ISNAN);    break;                 \
-  case CA_UINT8:   FIBER_SCATTER_BODY(H_T, uint8_t, ISNAN);   break;                 \
-  case CA_INT16:   FIBER_SCATTER_BODY(H_T, int16_t, ISNAN);   break;                 \
-  case CA_UINT16:  FIBER_SCATTER_BODY(H_T, uint16_t, ISNAN);  break;                 \
-  case CA_INT32:   FIBER_SCATTER_BODY(H_T, int32_t, ISNAN);   break;                 \
-  case CA_UINT32:  FIBER_SCATTER_BODY(H_T, uint32_t, ISNAN);  break;                 \
-  case CA_INT64:   FIBER_SCATTER_BODY(H_T, int64_t, ISNAN);   break;                 \
-  case CA_UINT64:  FIBER_SCATTER_BODY(H_T, uint64_t, ISNAN);  break;                 \
+  case CA_INT8:    FIBER_SCATTER_BODY(H_T, int8_t);    break;                 \
+  case CA_UINT8:   FIBER_SCATTER_BODY(H_T, uint8_t);   break;                 \
+  case CA_INT16:   FIBER_SCATTER_BODY(H_T, int16_t);   break;                 \
+  case CA_UINT16:  FIBER_SCATTER_BODY(H_T, uint16_t);  break;                 \
+  case CA_INT32:   FIBER_SCATTER_BODY(H_T, int32_t);   break;                 \
+  case CA_UINT32:  FIBER_SCATTER_BODY(H_T, uint32_t);  break;                 \
+  case CA_INT64:   FIBER_SCATTER_BODY(H_T, int64_t);   break;                 \
+  case CA_UINT64:  FIBER_SCATTER_BODY(H_T, uint64_t);  break;                 \
   default:                                                                    \
     ca_detach(h); ca_detach(codes);                                           \
     rb_raise(rb_eCADataTypeError,                                             \
@@ -1023,16 +1016,16 @@ rb_ca_fiber_scatter_moments (VALUE self, VALUE rcodes, VALUE raxis, VALUE rk,
   memset(maxp,   0, (size_t) total * (size_t) h->bytes);
 
   switch ( h->data_type ) {
-  case CA_INT8:    FIBER_SCATTER_DISPATCH_C(int8_t, CAT_NAN_NEVER);    break;
-  case CA_UINT8:   FIBER_SCATTER_DISPATCH_C(uint8_t, CAT_NAN_NEVER);   break;
-  case CA_INT16:   FIBER_SCATTER_DISPATCH_C(int16_t, CAT_NAN_NEVER);   break;
-  case CA_UINT16:  FIBER_SCATTER_DISPATCH_C(uint16_t, CAT_NAN_NEVER);  break;
-  case CA_INT32:   FIBER_SCATTER_DISPATCH_C(int32_t, CAT_NAN_NEVER);   break;
-  case CA_UINT32:  FIBER_SCATTER_DISPATCH_C(uint32_t, CAT_NAN_NEVER);  break;
-  case CA_INT64:   FIBER_SCATTER_DISPATCH_C(int64_t, CAT_NAN_NEVER);   break;
-  case CA_UINT64:  FIBER_SCATTER_DISPATCH_C(uint64_t, CAT_NAN_NEVER);  break;
-  case CA_FLOAT32: FIBER_SCATTER_DISPATCH_C(float32_t, CAT_NAN_CHECK); break;
-  case CA_FLOAT64: FIBER_SCATTER_DISPATCH_C(float64_t, CAT_NAN_CHECK); break;
+  case CA_INT8:    FIBER_SCATTER_DISPATCH_C(int8_t);    break;
+  case CA_UINT8:   FIBER_SCATTER_DISPATCH_C(uint8_t);   break;
+  case CA_INT16:   FIBER_SCATTER_DISPATCH_C(int16_t);   break;
+  case CA_UINT16:  FIBER_SCATTER_DISPATCH_C(uint16_t);  break;
+  case CA_INT32:   FIBER_SCATTER_DISPATCH_C(int32_t);   break;
+  case CA_UINT32:  FIBER_SCATTER_DISPATCH_C(uint32_t);  break;
+  case CA_INT64:   FIBER_SCATTER_DISPATCH_C(int64_t);   break;
+  case CA_UINT64:  FIBER_SCATTER_DISPATCH_C(uint64_t);  break;
+  case CA_FLOAT32: FIBER_SCATTER_DISPATCH_C(float32_t); break;
+  case CA_FLOAT64: FIBER_SCATTER_DISPATCH_C(float64_t); break;
   default:
     ca_detach(h); ca_detach(codes);
     rb_raise(rb_eCADataTypeError,
