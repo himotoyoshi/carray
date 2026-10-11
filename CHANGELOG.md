@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CAFrame#align` with an Array reference compared it as Ruby objects,
+  so `1` did not match a float key's `1.0` and the key column became
+  `:object`; the Array is now read as values of the key's kind, as `is_in`
+  reads one. A time key (`CATime`) matched no row when the other side held
+  Time, Date or String values -- an Array, an `:object` column, a string
+  column -- in `align`, `join` and `locate_addr`; they are now read as
+  instants, from either side.
+
 - Fix: a composite key in `CAFrame#group_by` (and `stack_rows(by:)`) put
   each row whose key had a NaN component in a group of its own; it now
   compares every component as a single key does, so NaN is one value and

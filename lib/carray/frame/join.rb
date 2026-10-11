@@ -6,6 +6,8 @@
 # +project+ (length-preserving, miss -> UNDEF, Face-lift, read-only safe).
 # The frame layer just distributes that address to every column.
 
+require "carray/methods/is_in"   # promote_value_set, for align's Array reference
+
 class CAFrame
   # Default disambiguation for non-key columns present on both sides (§12-C):
   # left gets "_left", right gets "_right". +_left+/+_right+ read clearer than
@@ -75,17 +77,22 @@ class CAFrame
   #   df.align("time", reftime)   # reftime = a CArray of reference key values
   #
   # +key+ may be a column name or the index axis name. +reference+ is a CArray
-  # (or Array); its keys are matched against the source key by value, so their
-  # data types must be comparable (a DateTime object key matches by eql?/hash).
+  # or an Array; its keys are matched against the source key by value.  An
+  # Array is read as values of the key's kind, as +is_in+ reads one: numbers
+  # against a numeric key, Time / Date / String instants against a time key.
   def align(key, reference)
     key = key.to_s
-    ref = reference.is_a?(CArray) ? reference : reference.to_ca
+    on_index = !@columns.key?(key) && @axis_name == key && @index
+    keys = on_index ? @index : join_key(self[key], key, "align")
+    # An Array reference is read as values of the key's kind, as is_in reads
+    # one: 1 and 2.5 against a float key are numbers, and Time or String
+    # values against a time key are instants.
+    ref = reference.is_a?(CArray) ? reference : keys.send(:promote_value_set, reference)[1]
     unless ref.ndim == 1
       raise ArgumentError,
             "align: the reference has shape #{ref.shape.inspect}; give one key value per row of the result"
     end
-    on_index = !@columns.key?(key) && @axis_name == key && @index
-    addr = ref.locate_addr(on_index ? @index : join_key(self[key], key, "align"))
+    addr = ref.locate_addr(keys)
 
     cols = {}
     column_names.each { |name| cols[name] = project_rows(self[name], addr) }

@@ -31,6 +31,10 @@ class CArray
   #   (`-1` never matches `255`). Cross-family input (numeric against
   #   fixlen) raises.
   #
+  #   A time key (`CATime`) reads values that are not time arrays -- Time,
+  #   Date or String objects, in an Array, an `:object` array or a string
+  #   array -- as instants, on either side of the lookup, as {#is_in} does.
+  #
   #   Typical use is time-axis lookup: compute the address once against a
   #   reference axis, then reuse it to gather from many `ref`-shaped
   #   variables without repeating the lookup.
@@ -44,6 +48,17 @@ class CArray
   #     `self`; unmatched cells are masked.
   #   @raise [CArray::DataTypeError] when `self` and `ref` have no common data type.
   def locate_addr (ref)
+    # A time key (any Face that reconciles operands) against values that do
+    # not -- Time, Date or String objects, a string column -- reads them as
+    # values of its kind, whichever side they are on.
+    if respond_to?(:to_comparable) && !ref.respond_to?(:to_comparable)
+      ref = values_in_face(self, ref)
+      return CArray.int64(*shape).fill(UNDEF) unless ref
+    elsif ref.respond_to?(:to_comparable) && !respond_to?(:to_comparable)
+      q = values_in_face(ref, self)
+      return CArray.int64(*shape).fill(UNDEF) unless q
+      return q.locate_addr(ref)
+    end
     ref = ref.to_ca unless ref.is_a?(CArray)
     # Put self and ref in a common lane via the single-source promotion rule
     # (CArray.result_type), so a fractional query against an int ref is compared
@@ -145,6 +160,20 @@ class CArray
       idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
     end
     idx
+  end
+
+  # The values of +other+, which has no to_comparable, read as values of +face+'s
+  # kind (instants written as Time / Date / String for a time key), in an
+  # array of +other+'s shape; a masked cell stays masked.  nil when every
+  # cell is masked: there is nothing to read.
+  private def values_in_face(face, other)
+    return face.to_comparable(other) if other.is_a?(Array)
+    vals = other.flatten.to_a
+    filler = vals.find { |v| !UNDEF.equal?(v) }
+    return nil if filler.equal?(nil) && vals.all? { |v| UNDEF.equal?(v) }
+    out = face.to_comparable(vals.map { |v| UNDEF.equal?(v) ? filler : v })
+    out[other.is_masked.flatten] = UNDEF if other.has_mask?
+    out.reshape(*other.shape)
   end
 
   # The keys locate_nearest_addr orders by: the storage of the sorted
