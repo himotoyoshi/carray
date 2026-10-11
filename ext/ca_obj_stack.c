@@ -688,6 +688,10 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
   ca_size_t bytes = ca->bytes;
   int32_t k;
 
+  /* The walk below visits a parent's first cell before it tests the
+     counts. */
+  if ( ca->elements == 0 ) return;
+
   if ( k_axis == 0 ) {
     ca_size_t parent_bytes_total = ca->parents[0]->elements * bytes;
     for ( k = 0; k < ca->n_parents; k++ ) {
