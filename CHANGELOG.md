@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `sort_addr` (and `CArray.sort_addr`, `CAFrame#sort_by_key`) raised
+  `TypeError: no implicit conversion from nil to integer` on an `:object`
+  array holding a Float NaN; it now places NaN last, as `sort` does. A pair
+  `<=>` cannot order, such as an Integer and nil, raises the same
+  "comparison of Integer with nil failed" that `sort` raises.
+
 - Change: `union` of two `CATime` (or `CATimedelta`) arrays of different
   units returns the finer unit, which holds the values of both; it used to
   return the receiver's unit and raised when the other array's values did

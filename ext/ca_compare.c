@@ -14,6 +14,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "ca_compare.h"
+#include "carray_internal.h"   /* ca_obj_cmp, CA_OBJ_ISNAN */
 #include <math.h>
 
 #define DEFINE_ELEM_CMP(type)                          \
@@ -53,13 +54,18 @@ DEFINE_ELEM_CMP(uint64_t)
 DEFINE_ELEM_CMP_FLOAT(float32_t)
 DEFINE_ELEM_CMP_FLOAT(float64_t)
 
-/* CA_OBJECT: compare via Ruby Comparable (`<=>`). */
+/* CA_OBJECT: compare by `<=>`, as sort orders object cells: a Float NaN
+   after every other value, and a pair `<=>` cannot order raises
+   "comparison of A with B failed". */
 static int
 elem_cmp_VALUE (const void *va, const void *vb)
 {
   const VALUE *a = (const VALUE *) va;
   const VALUE *b = (const VALUE *) vb;
-  return NUM2INT(rb_funcall(*a, rb_intern("<=>"), 1, *b));
+  int nan_a = CA_OBJ_ISNAN(*a);
+  int nan_b = CA_OBJ_ISNAN(*b);
+  if ( nan_a || nan_b ) return nan_a - nan_b;
+  return ca_obj_cmp(*a, *b);
 }
 
 /* FIXLEN / retired / otherwise unorderable data_types: callers must handle

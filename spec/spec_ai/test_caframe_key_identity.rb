@@ -103,4 +103,16 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     assert_equal [true, false], d.is_in(m).to_a
     assert_equal [true], m.is_in(d).to_a
   end
+
+  # An object key orders as sort orders object cells: NaN last, and a pair
+  # <=> cannot order raises the comparison error sort raises.
+  def test_object_key_with_nan_or_nil_sorts_as_sort_does
+    a = CA_OBJECT([2.0, NAN, 1.0])
+    assert_equal [2, 0, 1], a.sort_addr.to_a
+    assert_equal [2, 0, 1], CArray.sort_addr(a).to_a
+    assert_equal [1.0, 2.0], CAFrame.new("a" => a).sort_by_key("a")["a"].to_a[0, 2]
+    n = CA_OBJECT([2, nil, 1])
+    e = assert_raise(ArgumentError) { CAFrame.new("a" => n).sort_by_key("a") }
+    assert_match(/comparison of Integer with nil failed/, e.message)
+  end
 end
