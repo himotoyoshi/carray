@@ -660,6 +660,13 @@ class CAStruct::Builder  # :nodoc:
             "bit member requires bits: as an Integer in 1..64 (got #{bits.inspect})"
     end
     total_bit_offset = @offset * 8 + @bit_offset
+    # A bit member is read from one word of up to 8 bytes starting at the
+    # byte it begins in, so it may not reach past the 64th bit of that word.
+    if (total_bit_offset % 8) + bits > 64
+      raise CAStruct::DefinitionError,
+            "bit member #{name.to_s.inspect} (bits: #{bits}) starts at bit " \
+            "#{total_bit_offset % 8} of a byte and would span more than 8 bytes"
+    end
     mem = Member.new(name.to_s, :bitfield,
                      {:bits       => bits,
                       :bit_offset => total_bit_offset,
