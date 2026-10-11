@@ -454,16 +454,13 @@ class CAStruct
     return ["<", self.class.inspect, " ", table.inspect[1..-2], ">"].join
   end
 
-  # Value comparison against another record of the same class.  Unlike
-  # `eql?`, which compares the raw bytes, this compares the decoded members.
+  # Equality with another record of the same class, by the record's bytes
+  # (the same as {#eql?}): a struct is its bytes, so a NaN member equals
+  # itself, 0.0 and -0.0 differ, and so do records whose padding bytes
+  # differ.  A record array's `eq` compares records the same way.
   # @return [Boolean]
   def == (other)
-    case other
-    when self.class
-      return @data == other.__data__
-    else
-      return false
-    end
+    other.is_a?(self.class) && encode == other.encode
   end
 
   # Order against a record of the same class, by the members the struct

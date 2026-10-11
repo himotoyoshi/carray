@@ -169,4 +169,20 @@ class TestCAStructHygiene < Test::Unit::TestCase
     assert_equal 3, g[:x]
   end
 
+  # == compares the record's bytes, as eql? and a record array's eq do.
+  def test_equality_is_by_bytes
+    st = CArray.struct { float64 :v }
+    nan = st.new(Float::NAN)
+    assert_equal true, nan == st.decode(nan.encode)
+    assert_equal false, st.new(0.0) == st.new(-0.0)
+    padded = CArray.struct { int8 :a; int32 :b }
+    p1 = padded.new(1, 2)
+    bytes = p1.encode.dup
+    bytes.setbyte(1, 0xff)
+    p2 = padded.decode(bytes)
+    assert_equal p1.values, p2.values
+    assert_equal false, p1 == p2
+    assert_equal p1.eql?(p2), p1 == p2
+  end
+
 end
