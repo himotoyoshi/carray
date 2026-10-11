@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CAStruct` element's `each` and `each_pair` return an Enumerator
+  without a block and `self` with one, and `to_h` gives a Hash of member name
+  to value (it raised `TypeError`). `CAStruct#to_ptr`, which always raised
+  `NoMethodError`, is removed.
+
 - Fix: `min` / `max` of a `CARecord` take several axes (`axis: [0, 1]`), as
   the numeric reductions do, so `windows(...).min` / `.max` of a record array
   works; it raised "axis must be one Integer".

@@ -185,4 +185,16 @@ class TestCAStructHygiene < Test::Unit::TestCase
     assert_equal p1.eql?(p2), p1 == p2
   end
 
+  def test_each_each_pair_and_to_h
+    st = CArray.struct { int32 :x; float64 :y }
+    s = st.new(1, 2.0)
+    assert_equal [1, 2.0], s.each.to_a
+    assert_equal [[:x, 1], [:y, 2.0]], s.each_pair.to_a
+    assert_same s, s.each { }
+    assert_same s, s.each_pair { }
+    assert_equal({ x: 1, y: 2.0 }, s.to_h)
+    assert_equal 2, s.each.size
+    refute_respond_to s, :to_ptr
+  end
+
 end

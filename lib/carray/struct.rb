@@ -391,13 +391,16 @@ class CAStruct
   end
 
   # @overload each { |value| ... }
-  #   Yields each member value in declaration order.
+  #   Yields each member value in declaration order (an Enumerator
+  #   without a block).
   #   @yieldparam value [Object]
   #   @return [self]
   def each
+    return to_enum(:each) { length } unless block_given?
     members.each do |name|
       yield(self[name])
     end
+    self
   end
 
   # @overload each_pair { |name, value| ... }
@@ -407,9 +410,19 @@ class CAStruct
   #   @yieldparam value [Object]
   #   @return [self]
   def each_pair
+    return to_enum(:each_pair) { length } unless block_given?
     members.each do |name|
       yield(name.intern, self[name])
     end
+    self
+  end
+
+  # @overload to_h
+  #   Returns the members as a Hash of member name (Symbol) to value, in
+  #   declaration order.
+  #   @return [Hash{Symbol => Object}]
+  def to_h
+    each_pair.to_h
   end
 
   # @overload length
@@ -561,13 +574,6 @@ class CAStruct
   #   @return [CAStruct]
   def swap_bytes
     return CARecord.wrap(@data, self.class).swap_bytes[0]
-  end
-
-  # @overload to_ptr
-  #   Returns a `Fiddle::Pointer` to the backing storage.
-  #   @return [Fiddle::Pointer]
-  def to_ptr
-    return @data.to_ptr
   end
 
 end
