@@ -400,6 +400,43 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal GeoCoord, b.data_class
   end
 
+  # A view of a record array has the Face on top and the storage under it,
+  # with no Face in between (CAFace.md §8.3).
+  def faces_in_chain (a)
+    n = 0
+    while a.kind_of?(CArray)
+      n += 1 if a.face?
+      a = a.parent
+    end
+    n
+  end
+
+  def test_value_of_a_subclass_keeps_its_class
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    a["lat"][] = [1.0, 2.0, 3.0]
+    a[1] = UNDEF
+    v = a.value
+    assert_kind_of klass, v
+    assert_equal 1, faces_in_chain(v)
+    assert_equal false, v.has_mask?
+    assert_equal [1.0, 2.0, 3.0], v["lat"].to_a
+  end
+
+  def test_value_and_grid_have_one_face
+    a = CARecord.new(GeoCoord, 2, 3)
+    assert_equal 1, faces_in_chain(a.value)
+    assert_equal 1, faces_in_chain(a[CA_INT([1, 4])])
+  end
+
+  def test_refer_as_its_own_data_class_keeps_the_subclass
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    r = a.refer(GeoCoord, [3])
+    assert_kind_of klass, r
+    assert_equal 1, faces_in_chain(r)
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

@@ -490,16 +490,27 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     ndim = RARRAY_LEN(rdim);
     for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
+    /* When rtype is a data_class the result is a record array.  It is
+       built on the storage, never on a Face, so that a Face stays on top
+       of the chain: re-reading a record array as its own data_class lifts
+       it (keeping its class), any other data_class wraps a new CARecord. */
+    if ( rb_obj_is_data_class(rtype) ) {
+      volatile VALUE base = rb_ca_strip_face_value(self);
+      CArray *base_ca;
+      TypedData_Get_Struct(base, CArray, &carray_data_type, base_ca);
+      cr = ca_refer_new(base_ca, data_type, ndim, dim, bytes, offset);
+      obj = ca_wrap_struct(cr);
+      rb_ca_set_parent(obj, base);
+      if ( ca->obj_type == CA_OBJ_RECORD
+           && rb_ca_data_class(self) == rtype ) {
+        return ca_face_lift(obj, self);
+      }
+      return rb_funcall(rb_const_get(rb_cObject, rb_intern("CARecord")),
+                        rb_intern("wrap"), 2, obj, rtype);
+    }
     cr = ca_refer_new((CArray *) ca, data_type, ndim, dim, bytes, offset);
     obj = ca_wrap_struct(cr);
     rb_ca_set_parent(obj, self);
-    /* When rtype is a data_class, wrap the result in CARecord so
-       the data_class is carried even if self is not itself a Face. */
-    if ( rb_obj_is_data_class(rtype) ) {
-      obj = rb_funcall(rb_const_get(rb_cObject, rb_intern("CARecord")),
-                       rb_intern("wrap"), 2, obj, rtype);
-      return obj;
-    }
   }
   CA_WRAPPER_LIFT(obj, self, ca);
   return obj;

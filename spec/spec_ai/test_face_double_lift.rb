@@ -49,6 +49,11 @@ class TestFaceDoubleLift < Test::Unit::TestCase
     "reshape"   => ->(f) { f[0..5].reshape(2, 3) },
     "transpose" => ->(f) { f[0..5].reshape(2, 3).transpose },
     "nested3"   => ->(f) { f[0..4][0..3][0..2] },
+    # 2-D indexing that goes through a flattened view of the receiver
+    "gather_2d"     => ->(f) { f.reshape(2, 3)[CA_INT32([1, 4])] },
+    "mapping_2d"    => ->(f) { f.reshape(2, 3)[CA_INT32([[1, 4], [0, 5]])] },
+    "range_2d"      => ->(f) { f.reshape(2, 3)[1..3] },
+    "value"         => ->(f) { f.value },
   }.freeze
 
   # AC-7 (forgot-to-lift net): every view-op on every Face returns a Face.

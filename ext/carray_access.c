@@ -1028,7 +1028,13 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
     return rb_ca_remap_new(self, rmapper);
   }
 
-  /* (b) Normalize chain fallback. */
+  /* (b) Normalize chain fallback.  A Face is flattened through its storage
+     and put on top of the result, so no Face is left in the middle of the
+     chain (CAFace.md 8.3). */
+  if ( ca_is_face(ca) ) {
+    result = rb_ca_fancy_index_chain(rb_ca_strip_face_value(self), rmapper);
+    return ca_face_lift(result, self);
+  }
   flat_self    = rb_ca_refer_new_flatten(self);
   flat_mapper  = (cm->ndim == 1) ? rmapper : rb_ca_flatten(rmapper);
   grid_argv[0] = flat_mapper;
@@ -1148,8 +1154,20 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     /* Re-enter against a flattened view of self.  rb_ca_refer_new_flatten
        is an internal builder and hands back a bare refer, so a marker
        receiver would be dropped here and the result would never be lifted
-       at the tail.  Put it back on before the re-entry.  (A Face survives
-       on its own -- the internal builder still lifts those.) */
+       at the tail.  Put it back on before the re-entry.
+
+       A Face is flattened through its storage and put on top once at the
+       end; re-entering against the flattened Face would build the view on
+       it and leave a Face in the middle of the chain (CAFace.md 8.3). */
+    if ( ca_is_face(ca) ) {
+      volatile VALUE flat =
+        rb_ca_refer_new_flatten(rb_ca_strip_face_value(self));
+      obj = rb_ca_fetch_method(argc, argv, flat);
+      if ( rb_obj_is_kind_of(obj, rb_cCArray) ) {
+        obj = ca_face_lift(obj, self);
+      }
+      return obj;
+    }
     self = rb_ca_refer_new_flatten(self);
     if ( ca_is_lazy_marker(ca) ) {
       extern VALUE rb_ca_lazy_marker_new (VALUE cary);
