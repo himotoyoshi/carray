@@ -195,12 +195,19 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
         continue;
       }
       if ( ! orderable ) {
-        rb_raise(rb_eArgError,
-                 "sort_addr: Face-typed input (%s) is not orderable by "
-                 "storage; use ca.parent to descend to storage",
-                 rb_obj_classname(argv[j]));
+        ca_face_refuse_order("sort_addr", argv[j], "order");
       }
       argv[j] = stripped;
+    }
+    {
+      CArray *k;
+      TypedData_Get_Struct(argv[j], CArray, &carray_data_type, k);
+      if ( ca_is_complex_type(k) ) {
+        rb_raise(rb_eCADataTypeError,
+                 "sort_addr: a %s key has no order (complex numbers are not "
+                 "ordered); sort by its real part, imaginary part or abs",
+                 ca_type_name[k->data_type]);
+      }
     }
   }
 

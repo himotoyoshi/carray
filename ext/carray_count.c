@@ -167,10 +167,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     volatile VALUE self_ref = self;
     int query_was_scalar = ! rb_obj_is_carray(rval);
     if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      rb_raise(rb_eArgError,
-               "count(v): Face-typed input (%s) is not orderable by storage; "
-               "use ca.parent to count the raw storage",
-               rb_obj_classname(self));
+      ca_face_refuse_order("count(v)", self, "count");
     }
     if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
       if ( ! query_was_scalar ) {

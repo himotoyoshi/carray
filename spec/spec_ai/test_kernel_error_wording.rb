@@ -15,7 +15,7 @@ class TestKernelErrorWording < Test::Unit::TestCase
   def test_names_the_called_method
     assert_match(/\Acumsum: positional axis/, message { CA_FLOAT64([1]).cumsum(0) })
     assert_match(/\Asum: positional axis/,    message { CA_FLOAT64([1]).sum(0) })
-    assert_match(/\Amin: Face-typed input/,   message { CA_OBJECT(%w[b a]).categorize.min })
+    assert_match(/\Amin: CACategorical is not orderable/, message { CA_OBJECT(%w[b a]).categorize.min })
     refute_match(/_ki\b/, message { CA_CMPLX128([1]).sort })
   end
 

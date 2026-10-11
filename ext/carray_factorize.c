@@ -123,9 +123,9 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
        argument. */
     rb_raise(rb_eArgError,
              "%s: %s is not orderable by storage (a cell encodes the value "
-             "rather than being it); convert it first -- #to_string for a "
-             "string Face -- or pass .parent to work in storage space",
-             name, rb_obj_classname(self));
+             "rather than being it); convert it first -- %s -- or pass "
+             ".parent to work in storage space",
+             name, rb_obj_classname(self), ca_face_conversion_hint(self));
   }
   *pface = Qnil;
   return self;

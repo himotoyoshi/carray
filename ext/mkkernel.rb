@@ -4600,10 +4600,7 @@ module MkKernel
     io.puts "    CArray *_sc;"
     io.puts "    GetCArray(_st, _sc);"
     io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
-    io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
-    io.puts %Q[               rb_obj_classname(_face));]
+    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), _face, "order");]
     io.puts "    }"
     io.puts "    self = _st;"
     io.puts "    src = _sc;"
@@ -4626,10 +4623,7 @@ module MkKernel
     io.puts "    CArray *_sc;"
     io.puts "    GetCArray(_st, _sc);"
     io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
-    io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
-    io.puts %Q[               rb_obj_classname(_face));]
+    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), _face, "order");]
     io.puts "    }"
     if relift
       io.puts "    _reduce_face = _face;"
@@ -5671,10 +5665,7 @@ module MkKernel
     io.puts "     -- no per-Face Ruby override needed. */"
     io.puts "  if ( ca_is_face(src) ) {"
     io.puts "    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {"
-    io.puts %Q[      rb_raise(rb_eArgError,]
-    io.puts %Q[               "%s: Face-typed input (%s) is not orderable "]
-    io.puts %Q[               "by storage; use ca.parent to descend to storage", ca_calling_method_name(),]
-    io.puts %Q[               rb_obj_classname(self));]
+    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), self, "order");]
     io.puts "    }"
     io.puts "    self_was_face = 1;"
     io.puts "    self_face_comparable = ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE);"

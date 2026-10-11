@@ -897,10 +897,7 @@ ca_linear_prep (VALUE self, VALUE raxis, const char *name, long *axis_out)
      float-numeric flag is needed. */
   if ( ca_is_face(ca) ) {
     if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      rb_raise(rb_eArgError,
-               "%s: Face-typed input (%s) is not orderable by storage; "
-               "use ca.parent to descend to storage",
-               name, rb_obj_classname(self));
+      ca_face_refuse_order(name, self, "order");
     }
     self = rb_ca_strip_face_value(self);
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);

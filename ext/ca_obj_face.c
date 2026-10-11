@@ -623,6 +623,31 @@ ca_face_class_has_portable_method (VALUE klass)
   return ( owner != rb_singleton_class(rb_cCArray) ) ? 1 : 0;
 }
 
+/* The conversion a refusal of a Face whose cells encode its values points
+   at: a string Face gives its strings with #to_string, any other its values
+   with to_type(:object). */
+const char *
+ca_face_conversion_hint (VALUE face)
+{
+  return rb_respond_to(face, rb_intern("to_string"))
+    ? "#to_string gives its strings"
+    : "to_type(:object) gives its values";
+}
+
+/* Refuse to order (or, with verb "count", to count by value) a Face whose
+   storage does not hold its values in order, pointing at what does: its
+   values, or its storage when that is what is meant. */
+void
+ca_face_refuse_order (const char *name, VALUE face, const char *verb)
+{
+  rb_raise(rb_eArgError,
+           "%s: %s is not orderable by storage (a cell encodes the value "
+           "rather than being it); %s its values instead -- %s -- or pass "
+           ".parent to %s its storage",
+           name, rb_obj_classname(face), verb,
+           ca_face_conversion_hint(face), verb);
+}
+
 VALUE
 ca_face_operand_descend (VALUE operand, const char *name)
 {
@@ -641,9 +666,9 @@ ca_face_operand_descend (VALUE operand, const char *name)
            "%s: cannot take a %s operand: its storage is not its surface "
            "(a cell encodes the value rather than being it), so comparing "
            "the storage would compare the encoding. Convert the operand to "
-           "the receiver's space first -- #to_string for a string Face -- "
+           "the receiver's space first -- %s -- "
            "or pass .parent on both sides to work in storage space",
-           name, rb_obj_classname(operand));
+           name, rb_obj_classname(operand), ca_face_conversion_hint(operand));
   return Qnil;   /* not reached */
 }
 
@@ -732,10 +757,7 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   }
 
   if ( ! ca_test_flag(sc, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    rb_raise(rb_eArgError,
-             "comparison: Face operand (%s) is not orderable by storage; "
-             "use ca.parent to descend to storage",
-             rb_obj_classname(self));
+    ca_face_refuse_order("comparison", self, "compare");
   }
 
   {

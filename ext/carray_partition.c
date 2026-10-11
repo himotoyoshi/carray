@@ -353,10 +353,7 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
       TypedData_Get_Struct(st, CArray, &carray_data_type, sc);
       if ( sc->data_type != CA_FIXLEN
            && ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-        rb_raise(rb_eArgError,
-                 "partition_copy: Face-typed input (%s) is not orderable "
-                 "by storage; use ca.parent to descend to storage",
-                 rb_obj_classname(self));
+        ca_face_refuse_order("partition_copy", self, "order");
       }
       face = self;
       self = st;

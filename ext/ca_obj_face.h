@@ -264,6 +264,15 @@ int ca_face_state_portable (int obj_type, VALUE klass);
    cells *are* the values it shows.  Anything else -- a byte range, a code, a
    tick -- is refused rather than compared as bytes.  Non-Face operands are
    returned untouched.  `name` opens the message. */
+/* Refuse to order (verb "order") or count by value (verb "count") a Face
+   whose storage does not hold its values in order, naming the conversion. */
+NORETURN(void ca_face_refuse_order (const char *name, VALUE face,
+                                    const char *verb));
+
+/* The conversion a refusal of a Face whose cells encode its values points
+   at (#to_string for a string Face, to_type(:object) for any other). */
+const char *ca_face_conversion_hint (VALUE face);
+
 VALUE ca_face_operand_descend (VALUE operand, const char *name);
 
 #define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                \
