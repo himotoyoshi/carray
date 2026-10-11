@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: reading a nested struct member of a `CAStruct` element gives an
+  element over the parent's bytes, so `s[:in][:a] = 5` writes to `s`, as
+  writing to an array member already did; it gave a copy and the write was
+  lost. Code that kept `x = s[:in]` as an independent value now sees later
+  changes to `s`; take `s[:in].dup` for a copy.
+
 - Change: an integer array of 32 bits or more and a `float32` array are
   matched (`is_in`, `locate_addr`, the set operations, `CAFrame#join`,
   `search`) and joined (`CArray.concatenate`, `CArray.stack`,

@@ -476,12 +476,14 @@ rb_ca_struct_aref (VALUE self, VALUE name)
   if (rb_const_defined(klass, rb_intern("FAST_PRIMITIVES"))) {
     VALUE fast_table = rb_const_get(klass, rb_intern("FAST_PRIMITIVES"));
     VALUE entry = rb_hash_aref(fast_table, name_s);
-    if (!NIL_P(entry)) {
+    VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
+    CArray *ca;
+    TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
+    /* The fast path reads ca->ptr, which only an entity holds.  A nested
+       element's @data is a view on its parent's bytes and goes through the
+       dispatch procs below, which reach them through field views. */
+    if (!NIL_P(entry) && ca_is_entity(ca)) {
       int kind = NUM2INT(rb_ary_entry(entry, 0));
-      VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
-      CArray *ca;
-      TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
-      /* @data is a CScalar entity, so ca->ptr is always valid. */
       switch (kind) {
       case FAST_KIND_PRIMITIVE: {
         /* [kind, offset, type_code] */
@@ -555,11 +557,12 @@ rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
   if (rb_const_defined(klass, rb_intern("FAST_PRIMITIVES"))) {
     VALUE fast_table = rb_const_get(klass, rb_intern("FAST_PRIMITIVES"));
     VALUE entry = rb_hash_aref(fast_table, name_s);
-    if (!NIL_P(entry)) {
+    VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
+    CArray *ca;
+    TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
+    /* Only an entity @data is written through ca->ptr (see the reader). */
+    if (!NIL_P(entry) && ca_is_entity(ca)) {
       int kind = NUM2INT(rb_ary_entry(entry, 0));
-      VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
-      CArray *ca;
-      TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
       switch (kind) {
       case FAST_KIND_PRIMITIVE: {
         ca_size_t offset    = NUM2SIZE(rb_ary_entry(entry, 1));

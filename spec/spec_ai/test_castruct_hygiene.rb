@@ -212,4 +212,27 @@ class TestCAStructHygiene < Test::Unit::TestCase
     assert_equal s, st.decode(s.encode)
   end
 
+  # A nested member reads as an element over the parent's bytes: writing to
+  # it writes to the parent, as writing to an array member does.
+  def test_nested_member_is_a_view_on_the_parent
+    inner = CArray.struct { int32 :a; int32 :b }
+    outer = CArray.struct { int32 :k; struct :in, type: inner; array :v, type: CArray.int32(2) }
+    s = outer.new(1, inner.new(2, 3))
+    s[:in][:a] = 5
+    assert_equal [5, 3], s[:in].values
+    x = s[:in]
+    x[:b] = 7
+    assert_equal [5, 7], s[:in].values
+    s[:v][1] = 9
+    assert_equal [0, 9], s[:v].to_a
+    deep = CArray.struct { struct :o, type: outer }.new
+    deep[:o][:in][:b] = 42
+    assert_equal 42, deep[:o][:in][:b]
+    c = s[:in].dup                  # a copy owns its bytes
+    c[:a] = 0
+    assert_equal 5, s[:in][:a]
+    s.freeze
+    assert_raise(FrozenError) { s[:in][:a] = 1 }
+  end
+
 end

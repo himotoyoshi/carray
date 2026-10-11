@@ -234,8 +234,17 @@ class CAStruct::Builder  # :nodoc:
   end
 
   # @!visibility private
+  # A nested member reads as an element of the nested struct over the
+  # parent's own bytes (a field view), so writing to it writes to the
+  # parent, as writing to an array member does.  A frozen parent gives a
+  # frozen nested element.
   def self.build_nested_struct_dispatcher (offset, nested_class)
-    reader = ->(data) { nested_class.decode(data.field(offset, nested_class)) }
+    reader = ->(data) {
+      element = nested_class.allocate
+      element.instance_variable_set(:@data, data.field(offset, nested_class).parent)
+      element.freeze if data.frozen?
+      element
+    }
     writer = ->(data, val) { data.field(offset, nested_class)[0] = val }
     [reader, writer].freeze
   end
