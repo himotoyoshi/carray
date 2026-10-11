@@ -84,19 +84,32 @@ class CAFrame
     if cols.size == 1
       cols.first.categorize
     else
-      # Composite key: one object cell per row holding the tuple of key
-      # values, categorized by content (the codes are composed from the
-      # per-column keys).
-      n = nrow
-      key = CArray.object(n) { |i| cols.map { |c| c[i] } }
-      # One undetermined component makes the whole tuple undetermined, the same
-      # answer a single masked key cell gets. Left as a value, the UNDEF inside
-      # the tuple would intern as an ordinary distinct key and the row would
-      # form a group of its own.
-      undetermined = CArray.boolean(n) { |i| key[i].any? { |v| UNDEF.equal?(v) } }
-      key[undetermined] = UNDEF if undetermined.any
-      key.categorize
+      composite_categorical(cols)
     end
+  end
+
+  # A composite key.  Each column is categorized on its own, so a component
+  # compares exactly as a single key does (NaN is one value, -0.0 is 0.0, a
+  # masked cell matches nothing); a row's group is then the tuple of its
+  # component codes, and a group's label the tuple of the component labels.
+  # One masked component leaves the row in no group, as a masked single key.
+  private def composite_categorical(cols)
+    cats  = cols.map(&:categorize)
+    sizes = cats.map { |c| c.labels.size }
+    tuple = if sizes.inject(1, :*) <= 2**62
+              cats.drop(1).inject(cats[0].codes.int64) { |acc, c| acc * c.labels.size + c.codes.int64 }
+            else
+              codes = cats.map(&:codes)
+              t = CArray.object(nrow) { |i| codes.map { |c| c[i] } }
+              nrow.times { |i| t[i] = UNDEF if t[i].any? { |x| UNDEF.equal?(x) } }
+              t
+            end
+    rows = tuple.categorize
+    labels = rows.labels.map do |code|
+      parts = code.is_a?(Array) ? code : sizes.reverse.map { |n| code, d = code.divmod(n); d }.reverse
+      parts.each_with_index.map { |d, j| cats[j].labels[d] }
+    end
+    CACategorical.from_codes(rows.codes, labels)
   end
 
   # The column a group key names, checked: +verb+ is the method the caller

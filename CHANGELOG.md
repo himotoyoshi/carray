@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a composite key in `CAFrame#group_by` (and `stack_rows(by:)`) put
+  each row whose key had a NaN component in a group of its own; it now
+  compares every component as a single key does, so NaN is one value and
+  `-0.0` is `0.0`.
+
 - Fix: a reduction, scan, sort or search could read freed memory and crash
   when a garbage collection ran during it and the array it was given had
   been converted for the call: `linear_section` with an integer query of
