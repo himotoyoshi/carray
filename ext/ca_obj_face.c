@@ -752,7 +752,21 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   storage = ca_strip_face(sc);
   if ( storage->data_type == CA_FIXLEN ) {
     /* genuine fixlen semantics: memcmp is the correct comparison, leave
-       the Face(s) in place (same result as a plain fixlen array). */
+       the Face(s) in place (same result as a plain fixlen array).  Two
+       record arrays compare only under the same data_class, the rule a
+       store follows; a plain fixlen operand is compared as bytes. */
+    if ( sc->obj_type == CA_OBJ_RECORD
+         && rb_obj_is_kind_of(other, rb_cCArray) ) {
+      CArray *oc;
+      TypedData_Get_Struct(other, CArray, &carray_data_type, oc);
+      if ( oc->obj_type == CA_OBJ_RECORD
+           && rb_ca_data_class(self) != rb_ca_data_class(other) ) {
+        rb_raise(rb_eTypeError,
+                 "can not compare a record array of %"PRIsVALUE
+                 " with a record array of %"PRIsVALUE,
+                 rb_ca_data_class(self), rb_ca_data_class(other));
+      }
+    }
     return;
   }
 

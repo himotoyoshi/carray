@@ -466,6 +466,18 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal [1.0, 1.0, 3.0], r["lat"].to_a
   end
 
+  def test_eq_compares_records_of_the_same_data_class_only
+    a = CARecord.new(GeoCoord, 2)
+    b = CARecord.new(GeoCoord, 2)
+    b["lat"][1] = 1.0
+    assert_equal [true, false], a.eq(b).to_a
+    assert_equal [false, true], a.ne(b).to_a
+    q = CARecord.new(Swapped, 2)
+    assert_raise(TypeError) { a.eq(q) }
+    assert_raise(TypeError) { a.ne(q) }
+    assert_equal [true, true], a.eq(a.parent).to_a   # bytes, as a store takes
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup
