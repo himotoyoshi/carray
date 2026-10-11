@@ -131,6 +131,96 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   return co;
 }
 
+/* rk.__count_below__(q, inclusive) -- for each cell of q, how many values
+ * of the sorted array rk are below it (at or below it when inclusive).
+ * rk is 1-D, ascending, with no masked or NaN value; q has rk's data type
+ * (any shape, read in address order).  The count is the insertion position
+ * of the cell among rk's values, found by binary search; a masked or NaN
+ * cell gets an arbitrary count, for the caller to mask.  Returns an int64
+ * array of q's shape.  Numeric and boolean types only. */
+
+/* The search keeps a base and a length and moves the base by a comparison
+   rather than branching on it, which keeps the loop free of mispredicted
+   branches; the last comparison adds the cell at the base. */
+#define CA_COUNT_BELOW_LOOP(T, CMP)                                   \
+  {                                                                   \
+    const T *r = (const T *) cr->ptr;                                 \
+    const T *x = (const T *) cq->ptr;                                 \
+    for ( i = 0; i < m; i++ ) {                                       \
+      T v = x[i];                                                     \
+      const T *base = r;                                              \
+      ca_size_t len = n;                                              \
+      if ( len == 0 ) { out[i] = 0; continue; }                       \
+      while ( len > 1 ) {                                             \
+        ca_size_t half = len / 2;                                     \
+        base = (base[half] CMP v) ? base + half : base;               \
+        len -= half;                                                  \
+      }                                                               \
+      out[i] = (int64_t) (base - r) + ((*base CMP v) ? 1 : 0);        \
+    }                                                                 \
+  }
+
+#define CA_COUNT_BELOW(T)                                             \
+  if ( inclusive ) CA_COUNT_BELOW_LOOP(T, <=)                         \
+  else             CA_COUNT_BELOW_LOOP(T, <)
+
+static VALUE
+rb_ca_count_below (VALUE self, VALUE vq, VALUE vinclusive)
+{
+  volatile VALUE vout;
+  CArray *cr, *cq, *co;
+  ca_size_t n, m, i;
+  int64_t *out;
+  int inclusive = RTEST(vinclusive);
+
+  GetCArray(self, cr);
+  rb_check_carray_object(vq);
+  GetCArray(vq, cq);
+  if ( cr->ndim != 1 ) {
+    rb_raise(rb_eArgError, "__count_below__: the reference must be 1-D");
+  }
+  if ( cr->data_type != cq->data_type ) {
+    rb_raise(rb_eCADataTypeError,
+             "__count_below__: the reference and the query must have one data type");
+  }
+  switch ( cr->data_type ) {
+  case CA_BOOLEAN: case CA_INT8: case CA_UINT8: case CA_INT16: case CA_UINT16:
+  case CA_INT32: case CA_UINT32: case CA_INT64: case CA_UINT64:
+  case CA_FLOAT32: case CA_FLOAT64:
+    break;
+  default:
+    rb_raise(rb_eCADataTypeError, "__count_below__: no order for %s",
+             ca_type_name[cr->data_type]);
+  }
+
+  n = cr->elements;
+  m = cq->elements;
+  vout = rb_carray_new(CA_INT64, cq->ndim, cq->dim, 0, NULL);
+  GetCArray(vout, co);
+  out = (int64_t *) co->ptr;
+
+  ca_attach_n(2, cr, cq); /* window: nothing raises inside */
+  switch ( cr->data_type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_COUNT_BELOW(uint8_t);  break;
+  case CA_INT8:    CA_COUNT_BELOW(int8_t);   break;
+  case CA_INT16:   CA_COUNT_BELOW(int16_t);  break;
+  case CA_UINT16:  CA_COUNT_BELOW(uint16_t); break;
+  case CA_INT32:   CA_COUNT_BELOW(int32_t);  break;
+  case CA_UINT32:  CA_COUNT_BELOW(uint32_t); break;
+  case CA_INT64:   CA_COUNT_BELOW(int64_t);  break;
+  case CA_UINT64:  CA_COUNT_BELOW(uint64_t); break;
+  case CA_FLOAT32: CA_COUNT_BELOW(float);    break;
+  case CA_FLOAT64: CA_COUNT_BELOW(double);   break;
+  }
+  ca_detach_n(2, cr, cq);
+
+  return vout;
+}
+
+#undef CA_COUNT_BELOW
+#undef CA_COUNT_BELOW_LOOP
+
 /* project(idx, lval=nil, uval=nil) — gather: for each element of `idx`,
  * pick `self[idx[i]]`.  Returns an entity CArray shaped like `idx`.
  *
@@ -932,6 +1022,7 @@ Init_carray_order (void)
   id_sym_linear   = rb_intern("linear");
 
   rb_define_method(rb_cCArray,  "project", rb_ca_project, -1);
+  rb_define_private_method(rb_cCArray, "__count_below__", rb_ca_count_below, 2);
 
   /* Search family (dual API: index / addr) -- see the trampoline
      comment block above for the axis: kwarg dispatch contract. */

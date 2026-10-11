@@ -140,15 +140,14 @@ class CArray
     n = rs.elements
     rk, qk = nearest_keys(rs, self)
     # The position of each cell among the sorted references is counted, not
-    # interpolated: le = how many are at or below it, lt = how many below.
+    # interpolated: :floor takes the last reference at or below it, :ceil the
+    # first at or above it.
     # Counting keeps an integer key exact past 2**53 and an infinite one in
     # its place, where an interpolated position would not.
-    le = nearest_count_below(rk, qk, true)
-    lt = nearest_count_below(rk, qk, false)
     si = case direction
-         when :floor then le - 1
-         when :ceil  then lt
-         when :round then nearest_round(rk, qk, le, lt)
+         when :floor then nearest_count_below(rk, qk, true) - 1
+         when :ceil  then nearest_count_below(rk, qk, false)
+         when :round then nearest_round(rk, qk, nearest_count_below(rk, qk, false))
          end
     si[si.lt(0) | si.ge(n)] = UNDEF
     si[qk.is_nan.strip_mask(false)] = UNDEF if qk.float?
@@ -201,10 +200,12 @@ class CArray
   end
 
   # For each query key, how many of the sorted reference keys are below it
-  # (inclusive: at or below).  The two are sorted together, a tie putting
-  # the reference first when it counts; the references met before a query
-  # are what it is counted against.
+  # (inclusive: at or below).  A numeric key is binary-searched in C; an
+  # object key is sorted together with the references, a tie putting the
+  # reference first when it counts, and counted against the references met
+  # before it.
   private def nearest_count_below(rk, qk, inclusive)
+    return rk.send(:__count_below__, qk, inclusive) unless rk.data_type == CA_OBJECT
     n, m = rk.elements, qk.elements
     keys = CArray.concatenate([rk, qk])
     tag  = CArray.int8(n + m)
@@ -219,17 +220,18 @@ class CArray
   end
 
   # :round -- an exact match takes its first reference; otherwise the
-  # nearer of the two neighbours, the upper one on a tie.
-  private def nearest_round(rk, qk, le, lt)
-    n  = rk.elements
+  # nearer of the two neighbours, the upper one on a tie.  +lt+ counts the
+  # references below each key, so the upper neighbour is at lt and an exact
+  # match is the reference there.
+  private def nearest_round(rk, qk, lt)
     lo = rk.project(lt - 1)
     hi = rk.project(lt)
     upper = (hi - qk).le(qk - lo).strip_mask(false)
     upper[lo.is_masked] = true if lo.has_mask?
     upper[hi.is_masked] = false if hi.has_mask?
+    upper[hi.eq(qk).strip_mask(false)] = true
     si = lt - 1
     si[upper] = lt[upper]
-    si[le.gt(lt)] = lt[le.gt(lt)]
     si
   end
 
