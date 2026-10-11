@@ -467,6 +467,8 @@ class CAStruct
     return ["<", self.class.inspect, " ", table.inspect[1..-2], ">"].join
   end
 
+  alias to_s inspect
+
   # Equality with another record of the same class, by the record's bytes
   # (the same as {#eql?}): a struct is its bytes, so a NaN member equals
   # itself, 0.0 and -0.0 differ, and so do records whose padding bytes

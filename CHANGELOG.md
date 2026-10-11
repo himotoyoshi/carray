@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CARecord` and a `CAStruct` element show their members:
+  `inspect` of a record array and the element's `to_s` (and so a CAFrame's
+  table) print `<S "a" => 1, ...>` instead of raw bytes or an object
+  address. `CAFrame#to_csv` refuses a record column, which has no text form
+  that reads back; write its members as columns.
+
 - Change: assigning `UNDEF` to a member of a `CAStruct` element raises
   `TypeError` for every member kind; an array, fixlen or nested member used
   to mask the whole element. Mask the record in its `CARecord` instead

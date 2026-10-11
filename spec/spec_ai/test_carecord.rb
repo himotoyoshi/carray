@@ -607,6 +607,19 @@ class TestCARecord < Test::Unit::TestCase
     assert_kind_of MixedRecords, c
   end
 
+  # Shown and written as members, never as raw bytes or an object address.
+  def test_records_are_shown_by_their_members
+    a = CARecord.new(GeoCoord, 2)
+    a["lat"][] = [1.0, 2.0]
+    assert_match(/lat.*1\.0/, a.inspect)
+    refute_match(/\\x/, a.inspect)
+    assert_equal a[0].inspect, a[0].to_s
+    df = CAFrame.new("r" => a)
+    refute_match(/#<.*0x/, df.inspect)
+    e = assert_raise(ArgumentError) { df.to_csv }
+    assert_match(/record column "r"/, e.message)
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

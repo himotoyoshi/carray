@@ -148,11 +148,8 @@ class CArray::Inspector  # :nodoc:
                         x.real.inspect, (x.imag >= 0) ? "+" : "-", x.imag.abs.inspect) }
     when CA_FIXLEN
       if @carray.data_class
-        if @carray.bytes <= 6
-          lambda{|x| "%s" % x.encode.dump }
-        else
-          lambda{|x| "%s" % (x.encode.chomp[0, 5]+"...").dump }
-        end
+        # A record shows its members, as the element's own inspect does.
+        lambda{|x| x.inspect }
       else
         if @carray.bytes <= 6
           lambda{|x| "%s" % x.dump }

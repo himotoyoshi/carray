@@ -295,6 +295,16 @@ class CAFrame
             "to_csv needs all-scalar (1-D) columns; #{nd.first.inspect} is " \
             "#{nd.last.ndim}-D — export it per column or via to_records + JSON"
     end
+    # A record cell has no text form that reads back; its members do.
+    rec = @columns.find { |_, c| c.is_a?(CARecord) }
+    if rec
+      name, col = rec
+      member = col.members.first
+      raise ArgumentError,
+            "to_csv cannot write the record column #{name.inspect}; write its " \
+            "members as columns, e.g. df[#{"#{name}_#{member}".inspect}] = " \
+            "df[#{name.inspect}][#{member.inspect}]"
+    end
 
     names     = []
     formatted = []
