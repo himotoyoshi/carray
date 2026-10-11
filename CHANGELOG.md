@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an integer array of 32 bits or more and a `float32` array are
+  matched (`is_in`, `locate_addr`, the set operations, `CAFrame#join`,
+  `search`) and joined (`CArray.concatenate`, `CArray.stack`,
+  `CAFrame.concatenate`) in `float64` rather than `float32`, which holds
+  integers exactly only up to 2**24: `16777217` no longer matches
+  `16777216.0`. Smaller integers with `float32` stay `float32`, and
+  arithmetic is unchanged.
+
 - Fix: `CArray.save` / `CArray.dump` with `endian:` naming the other byte
   order no longer swaps a record member declared with `endian:`, and
   `CArray.load` does not swap it back; it was reversed in the file, so a

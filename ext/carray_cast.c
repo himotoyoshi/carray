@@ -2488,17 +2488,29 @@ ca_promote_type (int8_t a, int8_t b)
 }
 
 /* The type in which values of types `a` and `b`, whose common type is `t`,
-   are matched for equality.  It is `t`, except for an integer pair of mixed
-   sign whose common type is unsigned (uint8 with int8 is uint8, where -1
-   would read as 255): there the match moves to a signed type that holds
-   every value of both, or, for 64 bits, where no numeric type does, to
-   object, whose Integers compare by value.  `eq` answers the same pair by
-   value. */
+   are matched for equality.  It is `t`, except where `t` cannot hold every
+   value of both: an integer pair of mixed sign whose common type is
+   unsigned (uint8 with int8 is uint8, where -1 would read as 255) moves to
+   a signed type that holds both, or, for 64 bits, where no numeric type
+   does, to object, whose Integers compare by value; and an integer of 32
+   bits or more beside a float32 (or cmplx64) moves to double precision.  `eq` answers the
+   mixed-sign pair by value. */
 int8_t
 ca_value_match_type (int8_t t, int8_t a, int8_t b)
 {
   int signed_a = ( a == CA_INT8 || a == CA_INT16 || a == CA_INT32 || a == CA_INT64 );
   int signed_b = ( b == CA_INT8 || b == CA_INT16 || b == CA_INT32 || b == CA_INT64 );
+  int wide_a = ( a == CA_INT32 || a == CA_UINT32 || a == CA_INT64 || a == CA_UINT64 );
+  int wide_b = ( b == CA_INT32 || b == CA_UINT32 || b == CA_INT64 || b == CA_UINT64 );
+  /* An integer of 32 bits or more beside a single-precision float: float32
+     holds integers only up to 2**24 (every value of a 16-bit integer, not of
+     a 32-bit one), so the match moves to double precision, which holds every
+     value of a 32-bit integer and of a float32 (a 64-bit integer only up to
+     2**53). */
+  if ( wide_a || wide_b ) {
+    if ( t == CA_FLOAT32 ) return CA_FLOAT64;
+    if ( t == CA_CMPLX64 ) return CA_CMPLX128;
+  }
   if ( ! signed_a && ! signed_b ) return t;
   switch ( t ) {
   case CA_UINT8:  return CA_INT16;

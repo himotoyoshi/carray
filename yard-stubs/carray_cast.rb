@@ -504,7 +504,8 @@ class CArray
   #   (CATime with different units); a list of primitives is
   #   promoted via {.result_type} + {.wrap_readonly}, except that a list
   #   mixing signed and unsigned integers takes a type that holds both
-  #   (`uint8` with `int8` is `int16`, 64-bit pairs are `:object`), since
+  #   (`uint8` with `int8` is `int16`, 64-bit pairs are `:object`), and an
+  #   integer of 32 bits or more beside `float32` takes `float64`, since
   #   the arrays are joined value for value; a mix of Face and non-Face,
   #   or heterogeneous Face classes, is rejected.
   #

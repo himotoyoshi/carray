@@ -35,4 +35,16 @@ class TestPromoteListMixedSign < Test::Unit::TestCase
     assert_equal [255, -1], c["k"].to_a
     assert_equal 2, c.group_by("k").sum.nrow
   end
+
+  # An integer of 32 bits or more beside a float32 is matched and joined in
+  # float64: float32 holds integers exactly only up to 2**24.
+  def test_wide_integers_beside_float32_keep_their_values
+    assert_equal [false], CA_INT64([16_777_217]).is_in(CA_FLOAT32([16_777_216.0])).to_a
+    assert_equal [false], CA_INT32([16_777_217]).is_in(CA_FLOAT32([16_777_216.0])).to_a
+    assert_equal [true],  CA_INT32([16_777_216]).is_in(CA_FLOAT32([16_777_216.0])).to_a
+    c = CArray.concatenate([CA_INT32([16_777_217]), CA_FLOAT32([1.5])])
+    assert_equal :float64, c.data_type
+    assert_equal [16_777_217.0, 1.5], c.to_a
+    assert_equal :float32, CArray.concatenate([CA_INT16([1]), CA_FLOAT32([1.5])]).data_type
+  end
 end
