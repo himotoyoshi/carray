@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `union` of two `CATime` (or `CATimedelta`) arrays of different
+  units returns the finer unit, which holds the values of both; it used to
+  return the receiver's unit and raised when the other array's values did
+  not fit it. `intersection` and `difference` still return the receiver's
+  unit.
+- Fix: two time keys of different units, `:D` and `:h` say, raised or
+  matched depending on which one was the receiver in `is_in`,
+  `locate_addr`, `align` and `CAFrame#join`; they now meet in the finer
+  unit (a month and a day meet in days), whichever side they are on.
+  Durations of a calendar and a fixed-length unit still cannot be compared,
+  and now say so.
+
 - Change: `CArray.concatenate`, `CArray.stack`, `CArray.promote_list` and
   `CAFrame.concatenate` give a list mixing signed and unsigned integers a
   type that holds both: `uint8` with `int8` is now `int16` (it was `uint8`,

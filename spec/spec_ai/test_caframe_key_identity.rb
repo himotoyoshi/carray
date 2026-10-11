@@ -78,4 +78,29 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     i = CAFrame.new("k" => CA_INT64([1, 2, 3]), "x" => CA_INT32([0, 1, 2]))
     assert_equal [2, UNDEF], i.align("k", [3, 1.5])["x"].to_a
   end
+
+  # Two time keys of different units meet in the finer unit, so the answer
+  # does not depend on which side is the receiver.
+  def test_time_keys_of_different_units_either_way
+    d = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"], unit: :D)
+    h = CArray.time(["2024-01-01T00", "2024-01-02T00", "2024-01-02T01"], unit: :h)
+    assert_equal [true, true, false], d.is_in(h).to_a
+    assert_equal [true, true, false], h.is_in(d).to_a
+    assert_equal [0, 1, UNDEF], d.locate_addr(h).to_a
+    assert_equal [0, 1, UNDEF], h.locate_addr(d).to_a
+    a = ->(k) { CAFrame.new("k" => k, "x" => CA_INT32([1, 2, 3])) }
+    b = ->(k) { CAFrame.new("k" => k, "y" => CA_INT32([7, 8, 9])) }
+    %i[left inner outer right].each do |how|
+      assert_equal a.(d).join(b.(h), on: "k", how: how)["y"].to_a,
+                   a.(h).join(b.(d), on: "k", how: how)["y"].to_a, how.to_s
+    end
+    assert_equal [7, 8, UNDEF, 9], a.(d).join(b.(h), on: "k", how: :outer)["y"].to_a
+  end
+
+  def test_month_and_day_keys
+    d = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
+    m = CArray.time(["2024-01"], unit: :M)
+    assert_equal [true, false], d.is_in(m).to_a
+    assert_equal [true], m.is_in(d).to_a
+  end
 end

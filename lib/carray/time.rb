@@ -1047,6 +1047,19 @@ class CATime
   #   @param operand [CATime, CATime::Element, Time, Date, DateTime, String, Array]
   #   @return [CATime] in self's unit.
   #   @raise [TypeError, ArgumentError] on an unreconcilable operand / unit.
+  # Returns `[self, other]` in one unit that holds every value of both
+  # exactly: the finer grid of two same-group units, or the fixed-length one
+  # of a calendar / fixed pair (a month begins on a day).  A lookup between
+  # two arrays of different units (is_in, the set operations, locate_addr and
+  # the joins on them) meets there, so it does not depend on which array is
+  # the receiver.
+  # @api private
+  def in_common_unit_with (other)
+    return [self, other] if other.unit == unit
+    u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
+    [to_unit(u), other.to_unit(u)]
+  end
+
   def to_comparable (operand)
     case operand
     when CATime
@@ -1649,6 +1662,23 @@ class CATimedelta
   #   @param operand [CATimedelta, CATimedelta::Element]
   #   @return [CATimedelta] in self's unit.
   #   @raise [TypeError, ArgumentError] on an unreconcilable operand / unit.
+  # Returns `[self, other]` in one unit, the finer grid of the two, which
+  # holds every value of both exactly.  A lookup between two duration
+  # arrays of different units meets there, so it does not depend on which
+  # array is the receiver.  A calendar and a fixed-length duration have no
+  # common unit and raise.
+  # @api private
+  def in_common_unit_with (other)
+    return [self, other] if other.unit == unit
+    unless CATimeUnitAlgebra.same_group?(unit, other.unit)
+      raise ArgumentError,
+            "cannot compare a #{unit} duration with a #{other.unit} duration: " \
+            "a calendar length (months, years) has no fixed length in days"
+    end
+    u = CATimeUnitAlgebra.finer(unit, other.unit)
+    [to_unit(u), other.to_unit(u)]
+  end
+
   def to_comparable (operand)
     case operand
     when CATimedelta

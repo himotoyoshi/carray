@@ -51,6 +51,11 @@ class CArray
     # A time key (any Face that reconciles operands) against values that do
     # not -- Time, Date or String objects, a string column -- reads them as
     # values of its kind, whichever side they are on.
+    if ref.is_a?(CArray) && ref.class == self.class &&
+       respond_to?(:in_common_unit_with) && ref.unit != unit
+      a, b = in_common_unit_with(ref)
+      return a.locate_addr(b)
+    end
     if respond_to?(:to_comparable) && !ref.respond_to?(:to_comparable)
       ref = values_in_face(self, ref)
       return CArray.int64(*shape).fill(UNDEF) unless ref

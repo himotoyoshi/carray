@@ -76,6 +76,7 @@ class CArray
   def intersection (other, sort: false)
     a, b = promote_value_set(other)
     r = a.__send__(:__intersection__, b)
+    r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
     sort ? r.sort : r
   end
 
@@ -90,13 +91,17 @@ class CArray
   def difference (other, sort: false)
     a, b = promote_value_set(other)
     r = a.__send__(:__difference__, b)
+    r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
     sort ? r.sort : r
   end
 
   # @overload union(other, sort: false)
   #   Returns a 1-D CArray of the distinct values appearing in either
   #   `self` or `other`, in self-then-other first-appearance order.
-  #   See {#intersection} for the shared semantics and options.
+  #   See {#intersection} for the shared semantics and options.  Two time
+  #   arrays of different units give their union in the finer unit, which
+  #   holds the values of both ({#intersection} and {#difference} answer in
+  #   `self`'s unit, since their values are `self`'s).
   #
   #   @param other [CArray, Array, Range] promoted with `self`.
   #   @param sort [Boolean] when true, return the values sorted ascending
@@ -125,6 +130,11 @@ class CArray
   # operand (Numo, a MemoryView producer, ...) comes in through wrap_readonly,
   # the canonical type-coercion entry, so its format's data type drives the promote.
   def promote_value_set (values)
+    # Two time arrays of different units meet in the finer one.
+    if values.is_a?(CArray) && values.class == self.class &&
+       respond_to?(:in_common_unit_with)
+      return in_common_unit_with(values)
+    end
     # A Face that reconciles operands (CATime) reads a bare Array as values
     # of its own kind -- instants written as Time / String / elements.
     if values.is_a?(Array) && face? && respond_to?(:to_comparable)
