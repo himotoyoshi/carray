@@ -36,6 +36,35 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: a `CARecord` answers `unique`, `value_counts`, `mode`, `is_in`,
+  `intersection` / `difference` / `union`, `categorize`, `count(v)` and
+  `locate_addr` by its records' bytes, as `nunique` and `mask_duplicates`
+  already did; these raised before. A variant that sorts needs the struct's
+  `order_by:`, except `mode`, which keeps first-appearance order.
+- Change: a `CARecord` store, `then_else`, `eq` / `ne` or discovery method
+  given records of another struct raises `TypeError`; before, a store read
+  their bytes as this struct's members. Records of the same struct are taken
+  whatever the record array's class, so a `CARecord` subclass and `CARecord`
+  of one struct now store into each other.
+- Change: `CArray.struct` refuses a `bit` member that would span more than
+  8 bytes (`bits:` plus its offset within its first byte above 64); before,
+  its high bits were lost on write.
+- Fix: a `CARecord` loaded by `Marshal.load` lost its storage: its values
+  changed or the process crashed after a GC.
+- Fix: `#value` of a `CARecord` subclass stopped with an internal error.
+- Fix: a `CARecord` column of a member declared with `endian:` raised
+  `ArgumentError`, and so did sorting and `swap_bytes`; `CArray.dump` /
+  `CArray.load` read such a member back in host byte order.
+- Fix: a `CARecord` takes a struct element through every store: a range or
+  index store, `a[] = a.to_a`, an object array of elements, `strip_mask`,
+  `unmask` and `shift(fill_value:)`. `shift(fill_value:)` on any Face, a
+  `CATime` included, takes a value of the Face.
+- Fix: a `CAStruct` element's `dup` and `clone` no longer share its bytes,
+  `swap_bytes` swaps each member instead of reversing the whole record, and
+  `freeze` stops writes. The fields of a frozen `CARecord` refuse writes.
+- Change: `group_by_category` given anything but a `CACategorical` raises
+  `TypeError` naming what it got (it raised `NoMethodError`).
+
 - Change: a `CAStruct` element reads a `boolean` member and a 1-bit `bit`
   member as `true` / `false`, as a `CARecord` column of the member already
   did; it read `1` / `0`. Writing takes `true`, `false`, `1` or `0`; any
