@@ -168,10 +168,13 @@ class CARecord
       i = rank.flatten.public_send(index_op)
       return i.equal?(UNDEF) ? UNDEF : flatten[i]
     end
-    unless axis.is_a?(Integer)
-      raise ArgumentError, "#{index_op.to_s.sub('_index', '')}: axis must be one Integer for a CARecord"
+    name = index_op.to_s.sub("_index", "")
+    if axis.is_a?(Array)
+      axes = axis.map { |k| normalize_axis(k, name) }.uniq
+      return record_extreme(index_op, axes[0], keep_axis) if axes.size == 1
+      return record_extreme_over(index_op, axes, keep_axis)
     end
-    axis += ndim if axis < 0
+    axis = normalize_axis(axis, name)
     idx   = rank.public_send(index_op, axis: axis)
     empty = idx.is_masked
     picked_shape = shape.dup
@@ -182,6 +185,24 @@ class CARecord
     end
     return out if keep_axis
     out.reshape(*(shape[0...axis] + shape[axis + 1..-1]))
+  end
+
+  # Over several axes: the reduced axes are moved last and merged into one.
+  def record_extreme_over (index_op, axes, keep_axis)
+    keep = (0...ndim).to_a - axes
+    kept_shape = shape.values_at(*keep)
+    if keep.empty?
+      r = record_extreme(index_op, nil, false)
+      return r unless keep_axis
+      out = flatten[0..0].copy
+      out[0] = r
+      return out.reshape(*([1] * ndim))
+    end
+    merged = transpose(*(keep + axes))
+               .reshape(*kept_shape, shape.values_at(*axes).inject(:*))
+    out = merged.send(:record_extreme, index_op, keep.size, false)
+    return out unless keep_axis
+    out.reshape(*shape.each_with_index.map { |n, k| axes.include?(k) ? 1 : n })
   end
 
 end

@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `min` / `max` of a `CARecord` take several axes (`axis: [0, 1]`), as
+  the numeric reductions do, so `windows(...).min` / `.max` of a record array
+  works; it raised "axis must be one Integer".
+
 - Change: `CArray.struct(order_by:)` refuses an array member or a complex
   member; before, it was accepted and sorting raised an internal error or
   comparing two elements returned an array.

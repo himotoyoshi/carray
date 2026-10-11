@@ -80,6 +80,18 @@ class TestRecordOrder < Test::Unit::TestCase
     assert_equal pairs(r.sort), pairs(r.sort_copy)
   end
 
+  # Several axes at once, as the numeric reductions take them; the window
+  # and block iterators reduce a window through this form.
+  def test_min_max_over_several_axes
+    m = records.reshape(2, 2)              # [[3,1],[-1,2]] by lat
+    assert_equal [-1.0, 0], m.min(axis: [0, 1]).values
+    assert_equal [3.0, 1],  m.max(axis: [1, 0]).values
+    assert_equal [1, 1],    m.min(axis: [0, 1], keep_axis: true).shape
+    assert_equal pairs(m.min(axis: 1)), pairs(m.min(axis: [1]))
+    w = records.windows(-1..1)
+    assert_equal [[-1.0, 2], [-1.0, 0], [-1.0, 0], [-1.0, 0]], pairs(w.min)
+  end
+
   def test_min_max
     r = records
     assert_equal [-1.0, 0], r.min.values
