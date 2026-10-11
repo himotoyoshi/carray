@@ -112,7 +112,7 @@ class TestCAFrameStackRows < Test::Unit::TestCase
   def test_on_refuses_two_rows_for_one_place
     long = CAFrame.new("st" => CA_OBJECT(%w[a a]), "lv" => CA_INT32([1, 1]), "v" => CA_INT32([1, 2]))
     err = assert_raise(ArgumentError) { long.stack_rows(by: "st", on: "lv") }
-    assert_match(/more than one row for "a", lv=1/, err.message)
+    assert_match(/more than one row for st="a", lv=1/, err.message)
     masked = CAFrame.new("st" => CA_OBJECT(%w[a a]), "lv" => CA_INT32([1, 2]), "v" => CA_INT32([1, 2]))
     masked["lv"][1] = UNDEF
     assert_raise(ArgumentError) { masked.stack_rows(by: "st", on: "lv") }

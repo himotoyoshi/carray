@@ -636,6 +636,22 @@ class CArray
   #   @return [CACategorical]
   #   @raise [ArgumentError] when explicit `labels` contain
   #     duplicates.
+  # The order sort_labels: puts two labels in: as sort orders the cells of an
+  # array, a Float NaN after every other value; two labels <=> cannot order
+  # are refused, by name.
+  private def label_order(a, b)
+    na = a.is_a?(Float) && a.nan?
+    nb = b.is_a?(Float) && b.nan?
+    return (na ? 1 : 0) - (nb ? 1 : 0) if na || nb
+    c = a <=> b
+    if c.nil?
+      raise ArgumentError,
+            "categorize(sort_labels: true): cannot order the labels " \
+            "#{a.inspect} and #{b.inspect}"
+    end
+    c
+  end
+
   def categorize(labels: nil, sort_labels: false)
     # Automatic appearance-order vocabulary: one linear pass (C
     # __factorize_appearance__) returns both codes and levels directly, over the
@@ -652,7 +668,7 @@ class CArray
       # Sort the k levels as Ruby sorts them, then renumber every code through
       # the rank in one gather. The sentinel of an excluded cell is out of the
       # rank's range, so project makes it UNDEF and from_codes writes it back.
-      order = (0...levels.size).sort { |i, j| levels[i] <=> levels[j] }
+      order = (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
       rank = CArray.new(codes.data_type, [levels.size])
       order.each_with_index { |old, new_code| rank[old] = new_code }
       return CACategorical.from_codes(rank.project(codes), order.map { |i| levels[i] })
@@ -664,7 +680,7 @@ class CArray
       # masked keys stay excluded), so the non-masked cells are the levels.
       # Only the final list is Ruby, since labels are Ruby objects.
       labels_arr = mask_duplicates[:is_not_masked].to_a
-      labels_arr.sort! if sort_labels
+      labels_arr.sort! { |a, b| label_order(a, b) } if sort_labels
     else
       labels_arr = labels.respond_to?(:to_a) ? labels.to_a : Array(labels)
       if labels_arr.uniq.size != labels_arr.size

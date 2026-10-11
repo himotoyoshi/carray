@@ -114,6 +114,19 @@ class CAFrame
     [grid, plan[:rlab], plan[:clab]]
   end
 
+  # The distinct values of a pivot key, ascending.  Keys that cannot be put
+  # in order (nil beside numbers, numbers beside strings) are refused,
+  # naming the key.
+  private def pivot_sorted_keys(key, kw, name, verb)
+    key.unique(sort: true)
+  rescue ArgumentError => e
+    raise unless e.message.start_with?("sort:")
+    raise ArgumentError,
+          "#{verb}: #{kw}: #{name.inspect} holds values that cannot be put in order " \
+          "(#{e.message.sub(/\Asort: /, "")}); its keys are sorted to make the " \
+          "#{kw == "index" ? "rows" : "columns"}"
+  end
+
   # Everything pivot needs that does not depend on the value column: the
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
@@ -125,8 +138,8 @@ class CAFrame
       raise ArgumentError,
             "#{verb}: #{kw}: #{name.inspect} has shape #{key.shape.inspect}, not one value per row"
     end
-    rlab = rkey.unique(sort: true)
-    clab = ckey.unique(sort: true)
+    rlab = pivot_sorted_keys(rkey, "index", index, verb)
+    clab = pivot_sorted_keys(ckey, "columns", columns, verb)
     nr = rlab.elements
     nc = clab.elements
 
@@ -310,9 +323,13 @@ class CAFrame
             "the key has no value for #{frame.nrow - stacked} of #{frame.nrow} rows"
     end
     unless sizes.uniq.size <= 1
+      # One group of each size, so the message says where to look.
+      examples = sizes.each_with_index.uniq { |n, _| n }.map do |n, g|
+        "#{group_key_desc(keys, grouped.labels[g])} has #{n}"
+      end
       raise ArgumentError,
-            "stack_rows: the groups have #{sizes.uniq.sort.join(', ')} rows; " \
-            "stacked rows need the same number in every group"
+            "stack_rows: the groups have different numbers of rows " \
+            "(#{examples.join(', ')}); stacked rows need the same number in every group"
     end
     count = sizes.first || 0
     perm  = stacked.zero? ? CArray.int64(0) : perm[0...stacked]
@@ -324,6 +341,13 @@ class CAFrame
     end
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
     CAFrame.new(cols, axis_name: axis, index: grouped.__send__(:label_index))
+  end
+
+  # A group's key written as name=value, one pair per key column (a key
+  # given as a CArray has no name and is written "key").
+  private def group_key_desc(keys, label)
+    values = keys.size == 1 ? [label] : label
+    keys.zip(values).map { |k, v| "#{k.is_a?(String) ? k : "key"}=#{v.inspect}" }.join(", ")
   end
 
   private def stack_rows_on(frame, keys, on)
@@ -359,7 +383,7 @@ class CAFrame
     if frame.nrow > 0 && seen.max > 1
       at = seen.gt(1).where[0]
       raise ArgumentError,
-            "stack_rows: more than one row for #{grouped.labels[at / count].inspect}, " \
+            "stack_rows: more than one row for #{group_key_desc(keys, grouped.labels[at / count])}, " \
             "#{on}=#{positions.labels[at % count].inspect}"
     end
     rows[slot] = CArray.int64(frame.nrow).seq if frame.nrow > 0
