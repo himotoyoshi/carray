@@ -326,6 +326,20 @@ class CAStruct
     end
   end
 
+  # A copy owns its bytes (dup and clone of the struct object would
+  # otherwise share the one-record array behind it).
+  def initialize_copy (other)
+    super
+    @data = @data.copy
+  end
+
+  # Freezing an element also stops writes to its bytes.
+  # @return [self]
+  def freeze
+    @data.freeze
+    super
+  end
+
   protected
 
   def __data__
@@ -516,6 +530,7 @@ class CAStruct
   #   @return [self]
   #   @raise [CAStruct::DecodeError] on an unsupported input.
   def decode (data)
+    raise FrozenError.new("can't modify frozen #{self.class}", receiver: self) if frozen?
     case data
     when String
       @data.load_binary(data)
@@ -537,18 +552,18 @@ class CAStruct
   end
 
   # @overload swap_bytes!
-  #   Byte-swaps `self` in place (endian flip).
+  #   Byte-swaps each member of `self` in place (endian flip).
   #   @return [self]
   def swap_bytes!
-    @data[] = @data.swap_bytes
-    return self
+    decode(swap_bytes.encode)
   end
 
   # @overload swap_bytes
-  #   Returns a fresh byte-swapped copy of `self`.
+  #   Returns a fresh copy of `self` with each member byte-swapped, as
+  #   a record array's swap_bytes swaps its records.
   #   @return [CAStruct]
   def swap_bytes
-    return self.class.decode(@data.swap_bytes.dump_binary)
+    return CARecord.wrap(@data, self.class).swap_bytes[0]
   end
 
   # @overload to_ptr

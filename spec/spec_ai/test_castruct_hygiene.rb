@@ -128,4 +128,45 @@ class TestCAStructHygiene < Test::Unit::TestCase
     assert_kind_of(CAStruct::DefinitionError, caught)
   end
 
+  # An element owns its bytes: a copy does not write into the original.
+  def test_dup_and_clone_copy_the_bytes
+    st = CArray.struct { int32 :x; float64 :y }
+    a = st.new(1, 2.0)
+    [a.dup, a.clone].each do |b|
+      b[:x] = 99
+      assert_equal 1, a[:x]
+      assert_equal 99, b[:x]
+    end
+  end
+
+  # swap_bytes swaps each member, as a record array's swap_bytes does,
+  # rather than reversing the whole record.
+  def test_swap_bytes_swaps_each_member
+    st = CArray.struct { int32 :x; cmplx64 :z }
+    s = st.new(1, Complex(1.0, 0.0))
+    t = s.swap_bytes
+    assert_equal 16777216, t[:x]
+    assert_equal s, t.swap_bytes
+    r = CARecord.new(st, 1); r[0] = s
+    assert_equal r.swap_bytes[0], t
+    s.swap_bytes!
+    assert_equal t, s
+  end
+
+  # A frozen element refuses every write.
+  def test_frozen_element_refuses_writes
+    st = CArray.struct { int32 :x; float64 :y; fixlen :s, bytes: 4 }
+    f = st.new(1, 2.0, "abcd").freeze
+    assert_raise(FrozenError) { f[:x] = 5 }
+    assert_raise(FrozenError) { f[:y] = 5.0 }
+    assert_raise(FrozenError) { f[:s] = "wxyz" }
+    assert_raise(FrozenError) { f.decode(st.new(7).encode) }
+    assert_raise(FrozenError) { f.swap_bytes! }
+    assert_equal [1, 2.0, "abcd"], f.values
+    assert_equal 1, f.dup[:x]
+    g = f.dup
+    g[:x] = 3
+    assert_equal 3, g[:x]
+  end
+
 end

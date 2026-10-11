@@ -514,7 +514,11 @@ static VALUE
 rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
 {
   VALUE klass = rb_obj_class(self);
-  VALUE name_s = ca_struct_resolve_name(klass, name);
+  VALUE name_s;
+
+  /* The fast path writes into the record's bytes directly. */
+  rb_check_frozen(self);
+  name_s = ca_struct_resolve_name(klass, name);
 
   /* Fast path (see rb_ca_struct_aref for the absent-FAST_PRIMITIVES
      rationale and entry-shape contract). */
