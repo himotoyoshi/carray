@@ -20,6 +20,13 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     iterator.sliding_view.send(op, axis: axes, **kw)
   end
 
+  # Checks that the fold, not the delegation, answers.  With the fast paths
+  # switched off (CARRAY_GENERAL_PATH=1) the delegation answers everything,
+  # which is what that run is for.
+  def assert_folds (folded)
+    assert_not_nil folded if CArray.__fast_paths_enabled__
+  end
+
   def assert_agrees (iterator, op, **kw)
     got  = iterator.send(op, **kw)
     want = delegated(iterator, op, **kw)
@@ -149,7 +156,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
       assert_agrees(iterator, op)
     end
     # sum still has an identity to answer with.
-    assert_not_nil iterator.send(:fold_by_offset, :sum, nil, nil)
+    assert_folds iterator.send(:fold_by_offset, :sum, nil, nil)
     assert_agrees(iterator, :sum)
   end
 
@@ -157,7 +164,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.float64(30, 30).seq!
     [:skip, :nearest].each do |bounds|
       iterator = source.windows(-1..1, -1..1, bounds: bounds)
-      assert_not_nil iterator.send(:fold_by_offset, :sum, 9, nil)
+      assert_folds iterator.send(:fold_by_offset, :sum, 9, nil)
       [1, 4, 9, 10].each do |wanted|
         [:sum, :mean, :min].each { |op| assert_agrees(iterator, op, min_count: wanted) }
       end
@@ -189,7 +196,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.float64(40, 40).seq!
     assert_nil source.windows(-3..3, -3..3).send(:fold_by_offset, :sum, nil, nil)
     assert_nil source.windows(-1..1, -3..3).send(:fold_by_offset, :sum, nil, nil)
-    assert_not_nil source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil, nil)
+    assert_folds source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil, nil)
     assert_agrees(source.windows(-3..3, -3..3), :sum)
   end
 

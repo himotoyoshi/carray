@@ -281,6 +281,15 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check,
   sh "ruby -I ext -I lib -r test/unit -r ./spec/spec_ai/attach_balance.rb -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
 end
 
+desc "Run spec_ai with every fast path switched off (development builds only)"
+task :spec_ai_general do
+  # A fast path answers by a different algorithm what a general path also
+  # answers.  CARRAY_GENERAL_PATH=1 makes a development build take the
+  # general path everywhere, so this run and spec_ai compare the two.
+  ENV["CARRAY_GENERAL_PATH"] = "1"
+  Rake::Task[:spec_ai].invoke
+end
+
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"
 task :spec_unit => :build_ext do
   # Carried over from 2.x, and test-unit rather than RSpec, so neither the

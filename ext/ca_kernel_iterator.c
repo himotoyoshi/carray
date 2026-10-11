@@ -1065,7 +1065,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          and use per-fiber ca_xfer_stride which routes to the view's
          X.1 OOB-fused per-region fast path. */
       if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-           && raw_ndim == src->ndim ) {
+           && raw_ndim == src->ndim && ca_fast_paths_enabled() ) {
         int8_t    fiber_ax = axes[0];
         ca_size_t row_byte_strides[CA_RANK_MAX];
         {
@@ -1173,7 +1173,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          once, row by row, and the slabs are walked in the copy. */
       int whole_view = slab_has_non_stride && ! slab_has_index
                        && ! in_slab[src->ndim - 1]
-                       && ! ( flags & CA_KERNEL_WRITE );
+                       && ! ( flags & CA_KERNEL_WRITE )
+                       && ca_fast_paths_enabled();
       if ( slab_has_non_stride && ! whole_view ) {
         /* C.1 scope: READ-only.  WRITE = future sub-step (C.1c). */
         if ( flags & CA_KERNEL_WRITE ) {
@@ -1294,7 +1295,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
            manual gather path (= outer + non-innermost-slab hoist,
            inner pure STRIDE linear memcpy).  Else (innermost INDEX /
            SHIFT-anywhere): use the engine fallback (A). */
-        int specialised_eligible = (sp > 0);
+        int specialised_eligible = (sp > 0) && ca_fast_paths_enabled();
         if ( specialised_eligible ) {
           int8_t inner_view_ax = st->slab_axes_buf[sp - 1];
           if ( raw_descs[inner_view_ax].kind != CA_AXIS_KIND_STRIDE ) {
@@ -1639,7 +1640,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !ca_has_mask(src)
            && !(flags & CA_KERNEL_WRITE)
-           && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis ) {
+           && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
+           && ca_fast_paths_enabled() ) {
         CAStack *stack = (CAStack *) src;
         int8_t   parent_ndim = src->ndim - 1;
         int8_t   sp = 0, op = 0;
@@ -1758,7 +1760,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          counterpart. */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !(flags & CA_KERNEL_WRITE)
-           && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis] ) {
+           && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
+           && ca_fast_paths_enabled() ) {
         CAStack *stack = (CAStack *) src;
         int8_t   k_axis = stack->k_axis;
         int8_t   parent_ndim = src->ndim - 1;
@@ -1894,7 +1897,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          is called on demand in next_slab_axes).  Predicate is stubbed
          in F.6.1 (returns 0); F.6.2+ enables specific source kinds. */
       int per_fiber_fused = 0;
-      if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1 ) {
+      if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
+           && ca_fast_paths_enabled() ) {
         int8_t    fiber_ax        = axes[0];
         ca_size_t fiber_ax_stride = row_byte_strides[fiber_ax];
         if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,

@@ -5,6 +5,16 @@
 
 class CArray
 
+  # A fast path answers by a different algorithm what a general path also
+  # answers.  A development build defines this in C, false when run with
+  # CARRAY_GENERAL_PATH=1 so the test suite takes the general paths (see
+  # ext/carray_internal.h); a release build has no switch.
+  unless respond_to?(:__fast_paths_enabled__)
+    def self.__fast_paths_enabled__ # :nodoc:
+      true
+    end
+  end
+
   # String fallback for the global cast functions CA_INT32(data) etc.  The C
   # dispatcher (ext/carray_cast.c) handles every other input class in C and
   # delegates only String here, because the whitespace / `,` / `;` /

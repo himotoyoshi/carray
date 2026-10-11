@@ -439,4 +439,25 @@ ca_obj_equal (VALUE a, VALUE b)
   return RTEST(rb_equal(a, b));
 }
 
+/* ---- fast paths (carray_core.c) --------------------------------------------
+
+   A fast path answers what a general path also answers, by a different
+   algorithm.  Each one tests ca_fast_paths_enabled() alongside its own
+   condition, so a development build run with CARRAY_GENERAL_PATH=1 in the
+   environment takes the general path everywhere and the test suite
+   compares the two.  A release build has no switch: the test is the
+   constant 1 and costs nothing.
+
+   A branch that only lends a pointer, or drops to memcpy when the data is
+   contiguous, runs the same code either way and does not test this.
+
+---------------------------------------------------------------------------- */
+
+#ifdef CARRAY_DEV_BUILD
+extern int ca_fast_paths_on;
+#define ca_fast_paths_enabled() (ca_fast_paths_on)
+#else
+#define ca_fast_paths_enabled() (1)
+#endif
+
 #endif /* CARRAY_INTERNAL_H */

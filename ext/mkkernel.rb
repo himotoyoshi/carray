@@ -2768,7 +2768,8 @@ module MkKernel
         if ( naxes == 1
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
-             && ca_attach_is_alias(ca) ) {
+             && ca_attach_is_alias(ca)
+             && ca_fast_paths_enabled() ) {
           int8_t    __li_ax    = slab_axes[0];
           ca_size_t __li_M     = ca->dim[__li_ax];
           ca_size_t __li_INNER = 1;
@@ -2818,7 +2819,8 @@ module MkKernel
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
-             && ((CAStack *) ca)->k_axis == 0 ) {
+             && ((CAStack *) ca)->k_axis == 0
+             && ca_fast_paths_enabled() ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           ca_size_t __li_M     = ca->dim[__li_ax];
@@ -2883,7 +2885,8 @@ module MkKernel
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis > 0
              && ( slab_axes[0] > ((CAStack *) ca)->k_axis
-                  || slab_axes[0] + 1 == ((CAStack *) ca)->k_axis ) ) {
+                  || slab_axes[0] + 1 == ((CAStack *) ca)->k_axis )
+             && ca_fast_paths_enabled() ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           int8_t    __li_kax   = (int8_t) __li_st->k_axis;
@@ -3025,7 +3028,8 @@ module MkKernel
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis > 0
-             && slab_axes[0] + 1 < ((CAStack *) ca)->k_axis ) {
+             && slab_axes[0] + 1 < ((CAStack *) ca)->k_axis
+             && ca_fast_paths_enabled() ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           int8_t    __li_kax   = (int8_t) __li_st->k_axis;
@@ -3409,7 +3413,8 @@ module MkKernel
     io.puts "    if ( naxes == ca->ndim && ca->ndim >= 1 && !keep_axis &&"
     io.puts "         ca->elements > 0 &&"
     io.puts "         ( min_count < 0 || ca->elements >= min_count ) &&" if k[:mask_policy] == :min_count
-    io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) ) {"
+    io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) &&"
+    io.puts "         ca_fast_paths_enabled() ) {"
     io.puts "      #{fn}_t __ctx;"
     io.puts "      __ctx.chunk = NULL;"
     io.puts "      __ctx.ca    = ca;"
