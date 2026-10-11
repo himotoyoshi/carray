@@ -3,8 +3,13 @@ require "carray"
 
 # A NaN loses every contest of a minimum or a maximum: it never displaces a
 # number, the first number displaces it, and only a set of nothing but NaN
-# answers NaN.  Of two equal values the first one stays, so of -0.0 and 0.0
-# the one met first is the answer.
+# answers NaN.
+#
+# Which of -0.0 and 0.0 a minimum answers is not settled: the core keeps the
+# first of two equal values when it walks the cells in order, but its
+# vectorised reductions split the cells into lanes, so on a long array the
+# answer depends on where the zeros sit.  The inputs below are short enough
+# that every family walks them in order and keeps the first.
 #
 # The core reductions decide this with CA_EXTREMUM_REPLACES.  Each family
 # below answers min / max over groups of cells of its own; this checks every
