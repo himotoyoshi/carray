@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a reduction, scan, sort or search could read freed memory and crash
+  when a garbage collection ran during it and the array it was given had
+  been converted for the call: `linear_section` with an integer query of
+  more than about 600,000 values, `bsearch` / `search` with a query of
+  another type, `order`, and others under memory pressure.
+
 - Fix: `locate_nearest_addr`, and `join_asof`, `align_nearest_addr` and
   `snap_to` built on it, chose the wrong reference in three cases: a NaN
   reference value was matched (it now matches nothing, like a masked one),

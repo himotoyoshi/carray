@@ -3729,13 +3729,14 @@ module MkKernel
         io.print varg_decl unless varg_decl.empty?
         if use_result_var
           io.puts "      result = #{name}_ki_native_#{s}(self, src, slab_axes, naxes, keep_axis#{extra_call});"
+          io.puts "      RB_GC_GUARD(self);"
           io.puts "      break;"
         else
-          io.puts "      return #{name}_ki_native_#{s}(self, src, slab_axes, naxes, keep_axis#{extra_call});"
+          io.puts "      CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, slab_axes, naxes, keep_axis#{extra_call}));"
         end
         io.puts "    }"
       else
-        io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, slab_axes, naxes, keep_axis);"
+        io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, slab_axes, naxes, keep_axis));"
       end
     end
     case k[:fallback]
@@ -3760,9 +3761,10 @@ module MkKernel
       end
       if use_result_var
         io.puts "      result = #{name}_ki_native_f64(vsrc, casted, slab_axes, naxes, keep_axis#{extra_call});"
+        io.puts "      RB_GC_GUARD(vsrc);"
         io.puts "      break;"
       else
-        io.puts "      return #{name}_ki_native_f64(vsrc, casted, slab_axes, naxes, keep_axis#{extra_call});"
+        io.puts "      CA_RETURN_KEEPING(vsrc, #{name}_ki_native_f64(vsrc, casted, slab_axes, naxes, keep_axis#{extra_call}));"
       end
       io.puts "    }"
     when :raise
@@ -3950,7 +3952,7 @@ module MkKernel
       io.puts "    switch ( fsrc->data_type ) {"
       k[:source].each do |s|
         si = DTYPES[s]
-        io.puts "      case #{si[:ca]}: return #{name}_ki_native_#{s}(vflat, fsrc, 0);"
+        io.puts "      case #{si[:ca]}: CA_RETURN_KEEPING(vflat, #{name}_ki_native_#{s}(vflat, fsrc, 0));"
       end
       case k[:fallback]
       when :wrap_to_f64
@@ -3958,7 +3960,7 @@ module MkKernel
         io.puts "        VALUE   vsrc = rb_ca_wrap_readonly(vflat, INT2NUM(CA_FLOAT64));"
         io.puts "        CArray *casted;"
         io.puts "        GetCArray(vsrc, casted);"
-        io.puts "        return #{name}_ki_native_f64(vsrc, casted, 0);"
+        io.puts "        CA_RETURN_KEEPING(vsrc, #{name}_ki_native_f64(vsrc, casted, 0));"
         io.puts "      }"
       when :raise
         io.puts "      default:"
@@ -3985,7 +3987,7 @@ module MkKernel
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
       si = DTYPES[s]
-      io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, axis);"
+      io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, axis));"
     end
     case k[:fallback]
     when :wrap_to_f64
@@ -3993,7 +3995,7 @@ module MkKernel
       io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
       io.puts "      CArray *casted;"
       io.puts "      GetCArray(vsrc, casted);"
-      io.puts "      return #{name}_ki_native_f64(vsrc, casted, axis);"
+      io.puts "      CA_RETURN_KEEPING(vsrc, #{name}_ki_native_f64(vsrc, casted, axis));"
       io.puts "    }"
     when :raise
       io.puts "    default:"
@@ -4745,7 +4747,7 @@ module MkKernel
         si = DTYPES[s]
         native_extra  = mask_sentinel ? ", masked_last" : ""
         native_extra += rank ? ", dense" : ""
-        io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, axis, do_stable#{native_extra});"
+        io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, axis, do_stable#{native_extra}));"
       end
       io.puts "    default:"
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
@@ -4860,7 +4862,7 @@ module MkKernel
       k[:source].each do |s|
         si = DTYPES[s]
         native_extra = mask_sentinel ? ", masked_last" : ""
-        io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, axis, kth#{native_extra});"
+        io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, axis, kth#{native_extra}));"
       end
       io.puts "    default:"
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
@@ -5412,7 +5414,9 @@ module MkKernel
         */
         CArray *cv;
         GetCArray(rval, cv);
-        VALUE   vsrc_val = rval;
+        /* volatile: once the query is wrapped below, only cv is used, and
+           the wrapper must stay reachable while its cells are read. */
+        volatile VALUE vsrc_val = rval;
         #{coerce_bc}
 
         /* base_shape = self.shape with axis removed.  base_to_self[bk] =
@@ -5762,7 +5766,7 @@ module MkKernel
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
       si = DTYPES[s]
-      io.puts "    case #{si[:ca]}: return #{name}_ki_native_#{s}(self, src, rval, axis#{extra_arg});"
+      io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, rval, axis#{extra_arg}));"
     end
     io.puts "    default:"
     io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]

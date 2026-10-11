@@ -339,6 +339,17 @@ VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);
 
+/* Return the value of `call`, keeping the array `v` reachable until the call
+   has returned.  A kernel reads its source through the CArray pointer only,
+   so a view made just to be passed in (a flattened or common-type view)
+   would otherwise be left to a garbage collection that runs while its
+   cells are read: `return kernel(v, ...)` lets the compiler drop `v`. */
+#define CA_RETURN_KEEPING(v, call) do {  \
+    VALUE ca_kept_result_ = (call);      \
+    RB_GC_GUARD(v);                      \
+    return ca_kept_result_;              \
+  } while (0)
+
 /* A NaN loses every contest of an extremum (min / max / minmax / the
    positions / the running cummin / cummax / pmin / pmax): it never displaces
    another value, the first number displaces it, and nothing but NaN answers
