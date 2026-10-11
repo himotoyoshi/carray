@@ -437,6 +437,35 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal 1, faces_in_chain(r)
   end
 
+  # Records are read at their data_class's offsets, so a store takes records
+  # of the same data_class whatever the record array's class, and refuses
+  # any other data_class.
+  Swapped = CArray.struct { float64 :lng; float64 :lat } unless defined?(Swapped)
+  Narrow  = CArray.struct { int32 :z } unless defined?(Narrow)
+
+  def test_store_refuses_records_of_another_data_class
+    a = CARecord.new(GeoCoord, 3)
+    q = CARecord.new(Swapped, 3)
+    n = CARecord.new(Narrow, 3)
+    assert_raise(TypeError) { a[] = q }
+    assert_raise(TypeError) { a[0..1] = q[0..1] }
+    assert_raise(TypeError) { a[] = n }
+    assert_raise(TypeError) { CA_BOOLEAN([1, 0, 1]).then_else(a, q) }
+  end
+
+  def test_store_takes_records_of_the_same_data_class_across_classes
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    b = CARecord.new(GeoCoord, 3)
+    b["lat"][] = [1.0, 2.0, 3.0]
+    a[] = b
+    assert_equal [1.0, 2.0, 3.0], a["lat"].to_a
+    b[1..2] = a[0..1]
+    assert_equal [1.0, 1.0, 2.0], b["lat"].to_a
+    r = CA_BOOLEAN([1, 0, 1]).then_else(a, b)
+    assert_equal [1.0, 1.0, 3.0], r["lat"].to_a
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

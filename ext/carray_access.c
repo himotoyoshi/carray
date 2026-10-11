@@ -612,6 +612,24 @@ ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
   if ( ! ca_is_face(cr) ) {
     return rval;
   }
+  if ( ca_is_face(ca) && ca->obj_type == CA_OBJ_RECORD ) {
+    /* A record is read at its data_class's member offsets, so records of
+       another data_class (of the same size or not) are refused; the class
+       of the record array (a subclass or CARecord itself) does not matter. */
+    if ( cr->obj_type == CA_OBJ_RECORD
+         && rb_ca_data_class(self) == rb_ca_data_class(rval) ) {
+      return rval;
+    }
+    if ( cr->obj_type == CA_OBJ_RECORD ) {
+      rb_raise(rb_eTypeError,
+               "can not store a record array of %"PRIsVALUE
+               " into a record array of %"PRIsVALUE,
+               rb_ca_data_class(rval), rb_ca_data_class(self));
+    }
+    rb_raise(rb_eTypeError,
+             "can not store a %s array into a record array of %"PRIsVALUE,
+             rb_obj_classname(rval), rb_ca_data_class(self));
+  }
   if ( ca_is_face(ca) ) {
     if ( rb_obj_class(self) == rb_obj_class(rval)
          || rb_respond_to(self, rb_intern("to_comparable")) ) {
