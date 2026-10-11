@@ -581,6 +581,32 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal [1.0, 2.0, 3.0], lats(b.unique(sort: true))
   end
 
+  # Marshal carries a record array of a named struct whatever its members
+  # are, mask and subclass included.
+  Inner = CArray.struct { int16 :p; int16 :q } unless defined?(Inner)
+  Mixed = CArray.struct {
+    fixlen :s, bytes: 3
+    bit :f, bits: 1
+    bit :g, bits: 5
+    struct :in, type: Inner
+    array :v, type: CArray.int32(2)
+  } unless defined?(Mixed)
+
+  def test_marshal_round_trip_of_every_member_kind
+    a = CARecord.new(Mixed, 3)
+    a["s"][] = %w[abc def ghi]
+    a["g"][] = [1, 2, 3]
+    a[1] = UNDEF
+    b = Marshal.load(Marshal.dump(a))
+    assert_equal Mixed, b.data_class
+    assert_equal ["abc", UNDEF, "ghi"], b["s"].to_a
+    assert_equal [1, UNDEF, 3], b["g"].to_a
+    klass = Class.new(CARecord) { data_class Mixed }
+    TestCARecord.const_set(:MixedRecords, klass) unless defined?(MixedRecords)
+    c = Marshal.load(Marshal.dump(MixedRecords.new(2)))
+    assert_kind_of MixedRecords, c
+  end
+
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup

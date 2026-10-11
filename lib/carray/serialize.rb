@@ -341,7 +341,8 @@ class CArray::Serializer   # :nodoc:
         raise ArgumentError,
               "CArray.save cannot serialise data_class #{klass.inspect}: " \
               "member #{f.name.inspect} is a bitfield (the v1.0 Layer 1 " \
-              "schema is flat-primitive only); use Marshal.dump(ca)"
+              "schema is flat-primitive only); Marshal.dump(ca) carries it " \
+              "when the struct is named (assigned to a constant)"
       end
       pep = SYMBOL_TO_PEP[f.type]
       unless pep
@@ -349,7 +350,8 @@ class CArray::Serializer   # :nodoc:
               "CArray.save cannot serialise data_class #{klass.inspect}: " \
               "member #{f.name.inspect} has non-primitive type #{f.type.inspect} " \
               "(nested struct / template / fixlen are not expressible in the " \
-              "v1.0 Layer 1 schema); use Marshal.dump(ca)"
+              "v1.0 Layer 1 schema); Marshal.dump(ca) carries it " \
+              "when the struct is named (assigned to a constant)"
       end
       m = { "name" => f.name, "type" => pep, "offset" => f.offset, "bytes" => f.bytes }
       m["endian"] = f.endian.to_s if f.endian
@@ -629,6 +631,9 @@ class CArray
       ca
     when "portable"
       CArray.load(StringIO.new(rest[0]))
+    when "record"
+      data_class, storage = rest
+      CARecord.wrap(array_from_marshal_payload(storage), data_class)
     else
       raise TypeError, "unrecognised CArray Marshal payload"
     end
@@ -692,9 +697,15 @@ end
 
 class CARecord
 
-  # A record array keeps marshal_dump: it round-trips with its class.
+  # A record array keeps marshal_dump: it round-trips with its class.  A
+  # named struct is written by name with the record bytes, so every kind of
+  # member (nested, fixlen, bit, array) travels.  An anonymous struct has no
+  # name to write: it goes through the binary format, whose schema
+  # describes flat numeric members only.
   def marshal_dump
-    CArray.instance_method(:marshal_dump).bind_call(self)
+    return CArray.instance_method(:marshal_dump).bind_call(self) unless data_class.name
+    ["record", data_class,
+     CArray.instance_method(:marshal_dump).bind_call(copy.parent)]
   end
 
 end

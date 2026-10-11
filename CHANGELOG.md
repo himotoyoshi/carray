@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `Marshal.dump` of a `CARecord` whose struct is named carries any
+  member kind (fixlen, nested, bit, array); it raised for those, suggesting
+  `Marshal.dump` itself. A struct that is not assigned to a constant still
+  goes through the binary format and takes flat numeric members only.
+
 - Change: a `CAStruct` element's `each` and `each_pair` return an Enumerator
   without a block and `self` with one, and `to_h` gives a Hash of member name
   to value (it raised `TypeError`). `CAStruct#to_ptr`, which always raised
