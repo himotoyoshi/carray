@@ -241,8 +241,9 @@ big-endian file is big-endian header, data, and all.  The order is
 **self-describing** via `endian_marker` at offset 8; there is no separate
 endian byte.
 
-A writer emits everything in the host's native order (it never swaps on
-write).  A reader decides once, for the whole file:
+A writer emits the host's native order unless `:endian` names the other
+one, in which case it swaps on write.  A reader decides once, for the whole
+file:
 
 1. Read the 4 raw bytes at offset 8 and interpret them as a host
    `uint32`.  The writer stored `0x01020304` in file order, so it reads
@@ -254,6 +255,11 @@ write).  A reader decides once, for the whole file:
    integer *and* every data element on read.  A record (a `fixlen`
    element with a `data_class` in the trailer) is swapped member by
    member, each by its own type.  The int8 mask is never swapped.
+
+A record member declared with `endian:` is the one exception: its bytes
+are in the declared order on every machine and in every file, so neither
+the writer nor the reader swaps it (the trailer schema carries the
+declaration).
 
 Besides fixing the byte order, `endian_marker` doubles as a header
 corruption cross-check: a valid file always reads it back as

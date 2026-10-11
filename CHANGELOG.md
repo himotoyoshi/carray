@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CArray.save` / `CArray.dump` with `endian:` naming the other byte
+  order no longer swaps a record member declared with `endian:`, and
+  `CArray.load` does not swap it back; it was reversed in the file, so a
+  machine of the file's byte order, or another reader, got a wrong value.
+
 - Change: `is_in`, `locate_addr`, `intersection`, `union`, `difference`,
   `CAFrame#join` and `CAFrame#align` read a `CAConstString` or a
   `CACategorical` given as the values to look in by its strings or labels.

@@ -180,7 +180,7 @@ class CArray::Serializer   # :nodoc:
 
     @io.write(self.class.pack_header(header, file_endian))
 
-    data_ca = swap ? ca.swap_bytes : ca
+    data_ca = swap ? to_other_byte_order(ca) : ca
     data_ca.dump_binary(@io)
 
     if has_mask
@@ -271,7 +271,7 @@ class CArray::Serializer   # :nodoc:
     # swapped member by member, as the writer swapped it, and only its
     # data_class says where the members are.  Swapping the bare fixlen
     # first reversed the whole record.
-    ca[] = ca.swap_bytes if swap
+    ca[] = to_other_byte_order(ca) if swap
 
     if mask
       ca.mask = 0
@@ -282,6 +282,19 @@ class CArray::Serializer   # :nodoc:
   end
 
   private
+
+  # `ca` in the other byte order.  A member declared with `endian:` holds its
+  # bytes in that order on every machine and in every file, so it is left as
+  # it is; only the members in machine order are swapped.
+  def to_other_byte_order (ca)
+    swapped = ca.swap_bytes
+    declared = ca.respond_to?(:data_class) && ca.data_class &&
+               ca.data_class.fields.select(&:endian)
+    return swapped if !declared || declared.empty?
+    swapped = swapped.copy
+    declared.each { |f| swapped[f.name][] = ca[f.name].value }
+    swapped
+  end
 
   # The header fields that describe the same array have to agree, and a
   # source whose size is known has to hold what the header declares --

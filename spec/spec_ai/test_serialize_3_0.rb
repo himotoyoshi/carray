@@ -239,6 +239,25 @@ class TestSerialize30 < Test::Unit::TestCase
     end
   end
 
+  # A file in the other byte order swaps the members in machine order only:
+  # a declared member's bytes are the same in either file, so a machine of
+  # the file's byte order reads it without swapping.
+  def test_declared_members_keep_their_bytes_in_either_file
+    tmp = CArray.struct { int32 :v, endian: :big; int32 :w; int16 :u, endian: :little }
+    rc = CARecord.new(tmp, 1)
+    rc["v"][0] = 1; rc["w"][0] = 2; rc["u"][0] = 5
+    data = [CA_LITTLE_ENDIAN, CA_BIG_ENDIAN].map { |e|
+      CArray.dump(rc, :endian => e).byteslice(HDR, 10).bytes
+    }
+    little, big = data
+    assert_equal [0, 0, 0, 1], big[0, 4]           # v: big in both
+    assert_equal little[0, 4], big[0, 4]
+    assert_equal [5, 0], big[8, 2]                 # u: little in both
+    assert_equal little[8, 2], big[8, 2]
+    assert_equal [0, 0, 0, 2], big[4, 4]           # w: the file's order
+    assert_equal [2, 0, 0, 0], little[4, 4]
+  end
+
   # ---- endian override ----
 
   def test_endian_override_round_trip
