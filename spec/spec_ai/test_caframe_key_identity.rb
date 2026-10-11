@@ -174,4 +174,17 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     j["x"][1] = 99
     assert_equal [99, 6], l["x"].to_a
   end
+
+  # at finds a NaN label, as join and group_by match NaN keys.
+  def test_at_finds_a_nan_label
+    s = CAFrame.new("k" => CA_DOUBLE([NAN, 1.0]), "v" => CA_INT64([1, 2])).set_index("k")
+    assert_equal 1, s.at(NAN)["v"]
+    o = CAFrame.new("k" => CA_OBJECT([NAN, 1]), "v" => CA_INT64([1, 2])).set_index("k")
+    assert_equal 1, o.at(0.0 / 0.0)["v"]
+    g = CAFrame.new("a" => CA_DOUBLE([NAN, NAN, 1.0]), "v" => CA_INT64([1, 2, 3])).group_by("a").sum
+    assert_equal 3.0, g.at(NAN)["v"]
+    d = CAFrame.new("k" => CA_DOUBLE([NAN, NAN]), "v" => CA_INT64([1, 2])).set_index("k")
+    e = assert_raise(ArgumentError) { d.at(NAN) }
+    assert_match(/f\.index\.is_nan/, e.message)
+  end
 end

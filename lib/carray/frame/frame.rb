@@ -468,7 +468,8 @@ class CAFrame
   # §13.2b). +label+ is matched exactly against the index (+index.eq+), so any
   # orderable / object / datetime / categorical index works, and +label+ is
   # whatever +index.eq+ takes -- for a time index, a Time, Date or a String
-  # such as "2024-01-02". The return type is
+  # such as "2024-01-02".  A NaN label finds the NaN label, as join and
+  # group_by match NaN keys. The return type is
   # a row Hash and stays that way: zero matches raise KeyError, and duplicate
   # labels raise (go through +filter { |f| f.index.eq(label) }+ for the
   # multi-row, frame-returning path). Positional access is +df[i]+.
@@ -485,16 +486,21 @@ class CAFrame
             "at(UNDEF): an undefined label identifies no row; " \
             "use filter { |f| f.index.is_masked } for the rows with no label"
     end
-    pos = @index.eq(label).where
+    # A NaN label is the NaN value, as join and group_by take it: eq answers
+    # false for NaN against anything, itself included.
+    nan = label.is_a?(Float) && label.nan?
+    hit = nan ? @index.is_in([label]) : @index.eq(label)
+    pos = hit.where
     case pos.elements
     when 0
       raise KeyError, "no row with index label #{label.inspect}"
     when 1
       row(pos[0])
     else
+      test = nan ? "f.index.is_nan" : "f.index.eq(label)"
       raise ArgumentError,
             "index label #{label.inspect} matches #{pos.elements} rows; " \
-            "use filter { |f| f.index.eq(label) } for duplicate labels"
+            "use filter { |f| #{test} } for duplicate labels"
     end
   end
 
