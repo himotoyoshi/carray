@@ -328,16 +328,15 @@ class TestCAFrameJoin < Test::Unit::TestCase
 
   def test_inner_join
     j = @df.join(@meta, on: "station", how: :inner)
-    assert_equal ["tokyo", "osaka"], j["station"].to_a
-    assert_equal [35.7, 34.7], j["lat"].to_a
+    assert_equal ["tokyo", "osaka", "tokyo"], j["station"].to_a
+    assert_equal [35.7, 34.7, 35.7], j["lat"].to_a
   end
 
   def test_outer_join
     j = @df.join(@meta, on: "station", how: :outer)
-    assert_equal ["tokyo", "osaka", "kyoto"], j["station"].to_a
-    assert_equal 22.1, j["temp"][0]
-    assert_equal UNDEF, j["temp"][2] # kyoto has no left row
-    assert_equal 35.0, j["lat"][2]
+    assert_equal ["tokyo", "osaka", "tokyo", "kyoto"], j["station"].to_a
+    assert_equal [22.1, 25.3, 19.0, UNDEF], j["temp"].to_a  # kyoto has no left row
+    assert_equal 35.0, j["lat"][3]
   end
 
   def test_left_join_keeps_index
@@ -351,9 +350,9 @@ class TestCAFrameJoin < Test::Unit::TestCase
     assert_equal [100, 200, 300], j.index.to_a
   end
 
-  def test_align_join_carries_left_index_by_a_idx
-    # Index rides a_idx just like the left columns: rows with no left match
-    # (outer/right) become UNDEF, staying consistent with the left join.
+  def test_outer_join_carries_left_index
+    # The index rides the left rows just like the left columns: rows with no
+    # left match (outer/right) become UNDEF.
     d = CAFrame.new(
       "id" => CA_INT32([100, 200, 300]),
       "station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
@@ -361,10 +360,8 @@ class TestCAFrameJoin < Test::Unit::TestCase
     ).set_index("id")
     j = d.join(@meta, on: "station", how: :outer)
     assert_equal "id", j.axis_name
-    # aligned key order: tokyo, osaka, kyoto -> left ids 100, 200, (miss)
-    assert_equal 100, j.index[0]
-    assert_equal 200, j.index[1]
-    assert_equal UNDEF, j.index[2]
+    # every left row, then kyoto, which has no left row
+    assert_equal [100, 200, 300, UNDEF], j.index.to_a
   end
 
   def test_inner_join_carries_left_index
@@ -374,8 +371,8 @@ class TestCAFrameJoin < Test::Unit::TestCase
       "temp" => CA_FLOAT64([1, 2, 3]),
     ).set_index("id")
     j = d.join(@meta, on: "station", how: :inner)
-    # common = tokyo, osaka; a_idx picks left rows 0 and 1 -> ids 100, 200
-    assert_equal [100, 200], j.index.to_a
+    # every left row has a match, so every left id stays
+    assert_equal [100, 200, 300], j.index.to_a
   end
 
   def test_collision_auto_suffixes_both_sides

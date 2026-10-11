@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CAFrame#join` matches rows as SQL joins do. Each pair of a left
+  and a right row with the same key gives one row, so a key on 2 left rows
+  and 3 right rows gives 6; before, `:left` took only the first matching
+  right row and `:inner` / `:outer` / `:right` kept one row per distinct
+  key, dropping the rest without a word. A masked key matches nothing and,
+  like a NULL key, stays as an unmatched row in `:left`, `:right` and
+  `:outer` (`:right` and `:outer` dropped it). When the other frame's key is
+  unique, `:left` gives the same rows as before.
+
 - Fix: fixed-width string arrays (`CArray.fixlen_string`) of different
   widths can be matched by `is_in`, `locate_addr`, the set operations and
   `CAFrame#join`: the narrower is padded to the wider, so `"b"` in a 1-byte

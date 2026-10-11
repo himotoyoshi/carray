@@ -1,4 +1,4 @@
-require "carray/methods/is_in"   # fixlen_widened_with
+require "carray/methods/is_in"   # fixlen_widened_with, values_in_face
 
 class CArray
 
@@ -170,20 +170,6 @@ class CArray
       idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
     end
     idx
-  end
-
-  # The values of +other+, which has no to_comparable, read as values of +face+'s
-  # kind (instants written as Time / Date / String for a time key), in an
-  # array of +other+'s shape; a masked cell stays masked.  nil when every
-  # cell is masked: there is nothing to read.
-  private def values_in_face(face, other)
-    return face.to_comparable(other) if other.is_a?(Array)
-    vals = other.flatten.to_a
-    filler = vals.find { |v| !UNDEF.equal?(v) }
-    return nil if filler.equal?(nil) && vals.all? { |v| UNDEF.equal?(v) }
-    out = face.to_comparable(vals.map { |v| UNDEF.equal?(v) ? filler : v })
-    out[other.is_masked.flatten] = UNDEF if other.has_mask?
-    out.reshape(*other.shape)
   end
 
   # The keys locate_nearest_addr orders by: the storage of the sorted

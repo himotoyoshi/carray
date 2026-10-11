@@ -144,6 +144,12 @@ class CArray
     if values.is_a?(Array) && face? && respond_to?(:to_comparable)
       return [self, to_comparable(values)]
     end
+    # ...and so does an array of values that are not of its kind (an object
+    # column of Time values, a string column).
+    if values.is_a?(CArray) && respond_to?(:to_comparable) &&
+       !values.respond_to?(:to_comparable)
+      return [self, values_in_face(self, values) || to_comparable([])]
+    end
     case values
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)
@@ -192,6 +198,20 @@ class CArray
 
   def widen_fixlen_string (x, w)
     x.bytes == w ? x : x.to_fixlen_string(bytes: w)
+  end
+
+  # The values of +other+, which has no to_comparable, read as values of +face+'s
+  # kind (instants written as Time / Date / String for a time key), in an
+  # array of +other+'s shape; a masked cell stays masked.  nil when every
+  # cell is masked: there is nothing to read.
+  private def values_in_face(face, other)
+    return face.to_comparable(other) if other.is_a?(Array)
+    vals = other.flatten.to_a
+    filler = vals.find { |v| !UNDEF.equal?(v) }
+    return nil if filler.equal?(nil) && vals.all? { |v| UNDEF.equal?(v) }
+    out = face.to_comparable(vals.map { |v| UNDEF.equal?(v) ? filler : v })
+    out[other.is_masked.flatten] = UNDEF if other.has_mask?
+    out.reshape(*other.shape)
   end
 
   def coerce_self (t)

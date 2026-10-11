@@ -133,4 +133,45 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     e = assert_raise(CArray::DataTypeError) { a.parent.locate_addr(b.parent) }
     assert_match(/1 bytes wide like self, not 2/, e.message)
   end
+
+  # join matches rows as SQL joins do: one row per matching pair, a masked
+  # key matching nothing.
+  def rows_of(j)
+    j.nrow.times.map { |i| j.column_names.map { |c| j[c][i] } }
+  end
+
+  def test_join_is_many_to_many
+    obs  = CAFrame.new("station" => CA_OBJECT(%w[A B A C]), "temp" => CA_INT64([10, 20, 30, 40]))
+    meta = CAFrame.new("station" => CA_OBJECT(%w[A A B D]), "sensor" => CA_OBJECT(%w[a1 a2 b1 d1]))
+    pairs = [["A", 10, "a1"], ["A", 10, "a2"], ["B", 20, "b1"], ["A", 30, "a1"], ["A", 30, "a2"]]
+    assert_equal pairs, rows_of(obs.join(meta, on: "station", how: :inner))
+    assert_equal pairs + [["C", 40, UNDEF]], rows_of(obs.join(meta, on: "station"))
+    assert_equal pairs + [["C", 40, UNDEF], ["D", UNDEF, "d1"]],
+                 rows_of(obs.join(meta, on: "station", how: :outer))
+    assert_equal [["A", 10, "a1"], ["A", 30, "a1"], ["A", 10, "a2"], ["A", 30, "a2"],
+                  ["B", 20, "b1"], ["D", UNDEF, "d1"]],
+                 rows_of(obs.join(meta, on: "station", how: :right))
+  end
+
+  def test_join_masked_keys_match_nothing_and_stay_unmatched
+    l = CAFrame.new("k" => CA_INT64([1, 0, 2]), "x" => CA_INT64([1, 2, 3]))
+    l["k"][1] = UNDEF
+    r = CAFrame.new("k" => CA_INT64([2, 0]), "y" => CA_INT64([7, 8]))
+    r["k"][1] = UNDEF
+    assert_equal [[1, 1, UNDEF], [UNDEF, 2, UNDEF], [2, 3, 7]], rows_of(l.join(r, on: "k"))
+    assert_equal [[2, 3, 7]], rows_of(l.join(r, on: "k", how: :inner))
+    assert_equal [[2, 3, 7], [UNDEF, UNDEF, 8]], rows_of(l.join(r, on: "k", how: :right))
+    assert_equal 4, l.join(r, on: "k", how: :outer).nrow
+  end
+
+  def test_left_join_shares_the_left_columns
+    l = CAFrame.new("k" => CA_INT64([1, 2]), "x" => CA_INT64([5, 6]))
+    r = CAFrame.new("k" => CA_INT64([2, 3]), "y" => CA_INT64([7, 8]))
+    assert_same l["x"], l.join(r, on: "k")["x"]
+    r2 = CAFrame.new("k" => CA_INT64([1, 1]), "y" => CA_INT64([7, 8]))
+    j = l.join(r2, on: "k")
+    assert_equal [5, 5, 6], j["x"].to_a
+    j["x"][1] = 99
+    assert_equal [99, 6], l["x"].to_a
+  end
 end

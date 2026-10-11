@@ -993,23 +993,25 @@ obs.join(meta, on: "station")                    # left join (default)
 obs.join(meta, on: "station", how: :inner)       # :inner / :outer / :right
 ```
 
+Rows are matched as SQL joins match them: each pair of a left row and a right row with the same key gives one result row. A key held by 2 left rows and 3 right rows gives 6 rows. A masked key matches nothing, like a NULL key in SQL.
+
 Choose `how:` by which rows you want to keep:
 
-- **`:left`** (default) — add the other frame's columns to a table you keep as it is, e.g. station metadata added to observations. Every left row stays; a row with no match gets `UNDEF` in the new columns.
-- **`:inner`** — only rows whose key is in both frames.
-- **`:outer`** — every row of both, e.g. to see which keys each side is missing.
-- **`:right`** — every row of the other frame; it is the reference.
+- **`:left`** (default) — add the other frame's columns, e.g. station metadata added to observations. Every left row appears: once per matching right row, or once with `UNDEF` in the new columns when nothing matches.
+- **`:inner`** — only the matching pairs.
+- **`:outer`** — the matching pairs, every left row with no match, then every right row with no match, e.g. to see which keys each side is missing.
+- **`:right`** — every right row, as `:left` keeps every left row.
 
 The key stays a column, and the result keeps the left frame's index:
 
-| `how:` | rows kept | index | a row only on the right |
+| `how:` | rows | order | a row only on the right |
 |---|---|---|---|
-| `:left` (default) | every left row | the left index | — |
-| `:inner` | rows on both sides | the left index | — |
-| `:outer` | every row of both | the left index | its index is masked |
-| `:right` | every right row | the left index | its index is masked |
+| `:left` (default) | the pairs, and each unmatched left row | left rows, each one's matches in right order | — |
+| `:inner` | the pairs | left rows, each one's matches in right order | — |
+| `:outer` | the pairs, each unmatched left row, each unmatched right row | as `:left`, then the unmatched right rows | its index is masked |
+| `:right` | the pairs, and each unmatched right row | right rows, each one's matches in left order | its index is masked |
 
-For `:inner`, `:outer` and `:right`, the key values of both sides are aligned into one set, which becomes the `on` column.
+When the other frame's key is unique, `:left` gives one row per left row, in order: the left columns and index are this frame's own. When a left row matches several right rows, it repeats, and the left columns are views of this frame's picked by row, so a write still reaches this frame.
 
 The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first).
 
@@ -1281,7 +1283,7 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df.append` / `drop` / `rename` | every column | — | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
 | `df.paste(other)` | the columns of both frames | — | [paste](#paste--columns-side-by-side) |
 | `df.dup` / `clone` | every column and the index | — (adding or dropping a name affects only the new frame) | — |
-| `df.join(..., how: :left)` / `df.join_asof(...)` | this frame's columns and index | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
+| `df.join(..., how: :left / :inner)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
 | `df.split_column(...)` | the other columns | text columns built from the split one | [split_column](#splitting-a-text-column--split_column) |
 | `df.stack_columns(...)` / `unstack_column(...)` | the other columns | a view of the stacked or split columns | [From columns side by side](#from-columns-side-by-side--stack_columns--unstack_column) |
 
@@ -1292,7 +1294,7 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df.copy` | — |
 | `df.filter(keep_masked: true) { }` | [keep_masked](#rows-whose-condition-is-undetermined--keep_masked) |
 | `CAFrame.concatenate(...)` | [concatenate](#caframemeld--caframeconcatenate--rows-after-rows) |
-| `df.join(..., how: :inner / :outer / :right)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
+| `df.join(..., how: :outer / :right)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | [pivot](#pivot--long-to-wide) |
 | `df.to_records` | [to_records](#ruby-records--to_records) |
 | `df.stack_rows(by:, on:)` | [From rows of a group](#from-rows-of-a-group--stack_rows--unstack_rows) |

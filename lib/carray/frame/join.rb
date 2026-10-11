@@ -15,13 +15,21 @@ class CAFrame
   DEFAULT_JOIN_SUFFIXES = ["_left", "_right"].freeze
   private_constant :DEFAULT_JOIN_SUFFIXES
 
-  # Join +other+ on a shared key column.
+  # Join +other+ on a shared key column, as SQL joins: each pair of a left
+  # row and a right row with the same key gives one row, so a key on k left
+  # rows and m right rows gives k * m rows.  A masked key matches nothing.
   #
-  #   how: :left  (default) — keep all left rows; right columns gathered per
-  #                           left row (locate_addr), misses become UNDEF.
-  #   how: :inner/:outer/:right — set-align both key sets (align_addr) and
-  #                           gather both sides; the aligned key values form
-  #                           the +on+ column.
+  #   how: :left  (default) — every pair, and each left row with no match
+  #                           once, its right columns UNDEF.
+  #   how: :inner — every pair.
+  #   how: :right — every pair, and each right row with no match once.
+  #   how: :outer — every pair, each unmatched left row, then each unmatched
+  #                 right row.
+  #
+  # Rows come in left-row order (right-row order for :right), the pairs of
+  # one row in the other side's order.  The left columns are views of this
+  # frame's, picked by row, wherever every row comes from the left (:left,
+  # :inner); the right columns are gathered into new arrays.
   #
   # A non-key column present on both sides collides. The key column (+on+) is
   # kept once, never suffixed. By default the collision is resolved by suffixing
@@ -34,14 +42,10 @@ class CAFrame
     rkey = join_key(other[on], on, "join")
     plan = join_name_plan(other, on, suffixes)
 
-    case how
-    when :left
-      join_left(other, on, lkey, rkey, plan)
-    when :inner, :outer, :right
-      join_align(other, on, lkey, rkey, how, plan)
-    else
+    unless %i[left inner outer right].include?(how)
       raise ArgumentError, "unknown join mode #{how.inspect}"
     end
+    join_pairs(other, on, lkey, rkey, how, plan)
   end
 
   # As-of (nearest-key) left join for irregular series (memo §11.7). Each
@@ -226,10 +230,6 @@ class CAFrame
     cols[name] = col
   end
 
-  private def join_left(other, on, lkey, rkey, plan)
-    join_by_addr(other, on, lkey.locate_addr(rkey), plan)
-  end
-
   private def join_by_addr(other, on, addr, plan)
     cols = {}
     column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
@@ -240,25 +240,89 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end
 
-  private def join_align(other, on, lkey, rkey, how, plan)
-    common, a_idx, b_idx = CArray.align_addr(lkey, rkey, join: how)
+  # The rows of a key join: li / ri are the left / right row of each result
+  # row, UNDEF on the side a row has no match on.
+  private def join_pairs(other, on, lkey, rkey, how, plan)
+    # Both keys get a code in one set of distinct values, compared as the
+    # lookups compare them (type, unit and width reconciled); a masked key
+    # gets none and matches nothing.
+    common = CArray.align_addr(lkey, rkey, join: :outer)[0]
+    lcode  = lkey.locate_addr(common)
+    rcode  = rkey.locate_addr(common)
+    if how == :right
+      ri, li = join_expand(rcode, lcode, common.elements, true)
+    else
+      li, ri = join_expand(lcode, rcode, common.elements, how != :inner)
+      if how == :outer
+        lcount = lcode.bincount(length: common.elements)
+        alone  = rcode.is_masked | lcount.project(rcode).strip_mask(0).eq(0)
+        alone  = alone.strip_mask(true)
+        extra  = CArray.int64(rcode.elements).seq[alone]
+        if extra.elements > 0
+          undef_rows = CArray.int64(extra.elements).fill(UNDEF)
+          li = CArray.concatenate([li, undef_rows])
+          ri = CArray.concatenate([ri, extra])
+          code = CArray.concatenate([lcode.project(li[0...(li.elements - extra.elements)]),
+                                     rcode.project(extra)])
+        end
+      end
+    end
+    every_left = how == :left || how == :inner
+    identity   = every_left && li.elements == nrow &&
+                 (nrow == 0 || li.eq(CArray.int64(nrow).seq).all)
     cols = {}
     column_names.each do |name|
-      if name == on
-        put_join_column(cols, on, common)
-      else
-        put_join_column(cols, join_name(name, plan[:lsuf], plan), project_rows(self[name], a_idx))
+      col = if identity          then self[name]
+            elsif every_left     then self[name][li, *([nil] * (self[name].ndim - 1))]
+            elsif name == on     then nil
+            else                      project_rows(self[name], li)
+            end
+      if name == on && col.nil?
+        col = how == :right ? project_rows(rkey, ri) :
+                              common.project(code || lcode.project(li))
       end
+      name = join_name(name, plan[:lsuf], plan) unless name == on
+      put_join_column(cols, name, col)
     end
     other.column_names.each do |name|
       next if name == on
-      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], b_idx))
+      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
     end
-    # Carry the left index the same way its columns are gathered (by a_idx),
-    # so it stays consistent with the left join; rows with no left match
-    # (outer/right) become UNDEF.
-    new_index = @index && project_rows(@index, a_idx)
+    new_index = if @index.nil?  then nil
+                elsif identity  then @index
+                elsif every_left then @index[li]
+                else                  project_rows(@index, li)
+                end
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+  end
+
+  # Pairs a side's rows (codes +acode+) with the other side's (+bcode+), in
+  # a-row order and, for one a-row, in b-row order.  An a-row with no match
+  # comes once with no b-row when +keep_alone+.  Returns [ai, bi].
+  private def join_expand(acode, bcode, k, keep_alone)
+    na, nb = acode.elements, bcode.elements
+    # b's rows by code, each code's rows in b-row order.
+    border = CArray.sort_addr(bcode, CArray.int64(nb).seq)
+    bcount = bcode.bincount(length: k).int64
+    bstart = bcount.cumsum.int64 - bcount
+    matches = bcount.project(acode).strip_mask(0)
+    reps = keep_alone ? matches.pmax(1) : matches
+    total = reps.sum.to_i
+    return [CArray.int64(0), CArray.int64(0)] if total == 0
+    # Each a-row repeated reps times: mark where each run starts and count.
+    rows  = CArray.int64(na).seq[reps.gt(0)]
+    first = (reps.cumsum.int64 - reps)[reps.gt(0)]
+    mark  = CArray.int64(total).fill(0)
+    mark[first] = 1
+    run   = mark.cumsum.int64 - 1
+    ai    = rows[run]
+    j     = CArray.int64(total).seq - first[run]
+    bi    = CArray.int64(total).fill(UNDEF)
+    hit   = matches.project(ai).gt(0)
+    if hit.any
+      bi[hit] = border.project(bstart.project(acode.project(ai[hit])) + j[hit])
+    end
+    [ai, bi]
   end
 
   private def project_rows(col, addr)
