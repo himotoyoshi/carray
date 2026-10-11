@@ -385,6 +385,29 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal a["lng"].to_a, w["lng"].to_a
   end
 
+  # Marshal loads a record array into an empty instance through
+  # initialize_copy; the loaded array must hold on to its storage.
+  def test_marshal_round_trip_keeps_the_storage
+    a = CARecord.new(GeoCoord, 2, 3)
+    a["lat"][] = CArray.float64(2, 3).seq
+    a["lng"][] = CArray.float64(2, 3).seq * 10
+    b = Marshal.load(Marshal.dump(a))
+    assert_kind_of CArray, b.parent
+    GC.start
+    Array.new(20000) { CArray.int8(48).seq! }
+    assert_equal a["lat"].to_a, b["lat"].to_a
+    assert_equal a["lng"].to_a, b["lng"].to_a
+    assert_equal GeoCoord, b.data_class
+  end
+
+  def test_dup_shares_the_storage
+    a = CARecord.new(GeoCoord, 3)
+    b = a.dup
+    assert_same a.parent, b.parent
+    b["lat"][1] = 5.0
+    assert_equal 5.0, a["lat"][1]
+  end
+
   # =========================================================================
   # AC12 — fetch_method path → GeoCoord.decode(bytes) fires
   # =========================================================================

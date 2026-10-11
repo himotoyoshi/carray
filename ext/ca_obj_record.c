@@ -362,6 +362,10 @@ rb_ca_record_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_RECORD, cs->parent->ndim);
   }
   ca_record_setup(ca, cs->parent, cs->data_class);
+  /* Marshal loads into an empty instance through here without copying
+     ivars, so the parent pin is set from `other`, not inherited. */
+  rb_ca_set_parent(self, rb_ca_parent(other));
+  rb_ivar_set(self, rb_intern("member"), rb_hash_new());
   return self;
 }
 
