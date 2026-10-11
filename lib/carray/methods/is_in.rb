@@ -150,6 +150,12 @@ class CArray
        !values.respond_to?(:to_comparable)
       return [self, values_in_face(self, values) || to_comparable([])]
     end
+    # The same from the other side: values of a time array looked for in an
+    # array that is not one.
+    if values.is_a?(CArray) && values.respond_to?(:to_comparable) &&
+       !respond_to?(:to_comparable)
+      return [values_in_face(values, self) || values.to_comparable([]), values]
+    end
     case values
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)

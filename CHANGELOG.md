@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `CATime#eq` and the other comparisons raised "cannot reconcile
+  CArray" against an `:object` or string array of `Time`, `Date` or
+  date-string values; the values are now read as instants, as `is_in` and
+  `join` read them.
+- Fix: `sort_addr` (and `CAFrame#sort_by_key`) on a complex array raised
+  `NotImplementedError`, which `rescue => e` does not catch; it now raises
+  `CArray::DataTypeError`, as `sort` does.
+- Fix: `categorize(sort_labels: true)` raised on labels containing NaN; NaN
+  is now placed last, as `sort` places it.
+
 - Fix: `CAFrame#at(Float::NAN)` raised `KeyError` even when the index held
   a NaN label, such as the one `group_by` gives a NaN key; it now finds the
   NaN label, as `join` and `group_by` match NaN keys.

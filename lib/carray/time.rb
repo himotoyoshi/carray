@@ -221,7 +221,7 @@ module CATimeUnitAlgebra
   # fine->coarse divides only when every value is exact; cross-group ALWAYS
   # raises -- a :M / :Y duration has no fixed ratio to days (a month is
   # calendar-variable), so it genuinely cannot scale to seconds.
-  def convert_scale!(storage, from, to)
+  def convert_scale!(storage, from, to, instant: false)
     a = res(from); b = res(to)
     return storage if a == b
     r = ratio(a, b)
@@ -234,6 +234,11 @@ module CATimeUnitAlgebra
     scaled = widen(storage, r.numerator)    # coarse -> fine: lossless multiply
     return scaled if r.denominator == 1
     unless (scaled % r.denominator).eq(0).all
+      if instant
+        raise ArgumentError,
+              "cannot convert times in #{a} to #{b} without loss: " \
+              "some are not on the #{b} grid (they would be moved to it)"
+      end
       raise ArgumentError,
             "cannot scale duration #{a} to #{b} without loss: " \
             "some values are not a whole multiple of #{b} " \
@@ -284,7 +289,7 @@ module CATimeUnitAlgebra
   def convert_instant!(storage, from, to)
     a = res(from); b = res(to)
     return storage if a == b
-    return convert_scale!(storage, a, b) if ratio(a, b)   # same group
+    return convert_scale!(storage, a, b, instant: true) if ratio(a, b)   # same group
     if CALENDAR.key?(a.base)
       convert_instant_calendar_to_fixed(storage, a, b)   # widen
     else
@@ -1075,6 +1080,13 @@ class CATime
       # A set of instants written one by one (is_in(["2024-01-02", ...])).
       CATime.wrap(CA_INT64(operand.map { |v| to_comparable(v).parent[0] }),
                   unit: unit)
+    when CArray
+      # An array that is not a time array: each value read as an instant (an
+      # object column of Time values, a string column), a masked cell kept
+      # masked.
+      require "carray/methods/is_in"
+      send(:values_in_face, self, operand) ||
+        CArray.int64(*operand.shape).fill(UNDEF).time(unit: unit)
     else
       raise TypeError,
             "CATime cannot reconcile #{operand.class} " \
