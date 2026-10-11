@@ -1584,11 +1584,6 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
   if ( rb_obj_is_carray(val) ) {
     CArray *cval;
     GetCArray(val, cval);
-    /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
-       the scalar path (ca_face_element_to_storage) for a bulk CArray source.
-       Guarded on self having to_comparable so a Face without a reconcile
-       algebra (e.g. a fixlen-storage Face, whose same-storage store already
-       takes the storage xfer branch) is left to the existing store path. */
     /* An object array holding struct elements (a record array's
        to_type(:object)) goes in as its values, each through the write
        hook; masked cells come back as UNDEF and stay masked. */
@@ -1596,6 +1591,11 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
       return ca_face_convert_store_rval(self, ca,
                                         rb_funcall(val, rb_intern("to_a"), 0));
     }
+    /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
+       the scalar path (ca_face_element_to_storage) for a bulk CArray source.
+       Guarded on self having to_comparable so a Face without a reconcile
+       algebra (e.g. a fixlen-storage Face, whose same-storage store already
+       takes the storage xfer branch) is left to the existing store path. */
     if ( ca_is_face(cval) && rb_respond_to(self, rb_intern("to_comparable")) ) {
       volatile VALUE reconciled = rb_funcall(self, rb_intern("to_comparable"),
                                              1, val);
