@@ -187,4 +187,17 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     e = assert_raise(ArgumentError) { d.at(NAN) }
     assert_match(/f\.index\.is_nan/, e.message)
   end
+
+  # A numeric index is looked up with a number.
+  def test_at_on_a_numeric_index_takes_a_number
+    f = ->(k) { CAFrame.new("k" => k, "v" => CA_INT64([10, 20])).set_index("k") }
+    assert_equal 20, f.(CA_FLOAT64([1, 2.5])).at(2.5)["v"]
+    assert_equal 20, f.(CA_INT64([1, 2])).at(2.0)["v"]
+    ["2", true].each do |label|
+      e = assert_raise(ArgumentError) { f.(CA_INT64([1, 2])).at(label) }
+      assert_match(/the label must be a number/, e.message)
+    end
+    assert_raise(ArgumentError) { f.(CA_FLOAT64([1, 2.5])).at("2.5") }
+    assert_equal 20, f.(CA_BOOLEAN([true, false])).at(false)["v"]
+  end
 end

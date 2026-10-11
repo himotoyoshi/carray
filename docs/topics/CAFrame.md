@@ -365,6 +365,8 @@ df.tail(3)     # last 3 rows
 
 `at(label)` returns the single row whose index label equals `label`, as a Ruby `Hash` — the counterpart of `df[i]` that looks the row up by label instead of position. The frame must have an index (see [The index](#the-index)). The label is matched exactly, so any index type works: numbers, strings and other objects, times, categoricals. A time index also takes the label as a `Time`, a `Date` or a String such as `"2024-01-02"`, and `at(Float::NAN)` finds a NaN label — such as the one `group_by` gives rows whose key is NaN.
 
+A **numeric** index is looked up with a number: `at(2.5)`, `at(2)`. A String or `true` / `false` raises, so a label read from text is converted first — `at(Float(s))`.
+
 In an **object** index, `at` compares labels with Ruby's `==`, so `at(1.0)` finds a label `1`. `join`, `align` and `group_by` compare object keys with `eql?`, as a Ruby `Hash` does, so there `1` and `1.0` are different keys. When numbers are kept in an object column, cast it to a numeric type (`df.cast("k", :float64)`) and both agree.
 
 ```ruby

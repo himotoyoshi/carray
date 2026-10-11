@@ -469,7 +469,8 @@ class CAFrame
   # orderable / object / datetime / categorical index works, and +label+ is
   # whatever +index.eq+ takes -- for a time index, a Time, Date or a String
   # such as "2024-01-02".  A NaN label finds the NaN label, as join and
-  # group_by match NaN keys. The return type is
+  # group_by match NaN keys.  A numeric index takes a number; a String or
+  # true / false raises. The return type is
   # a row Hash and stays that way: zero matches raise KeyError, and duplicate
   # labels raise (go through +filter { |f| f.index.eq(label) }+ for the
   # multi-row, frame-returning path). Positional access is +df[i]+.
@@ -488,6 +489,14 @@ class CAFrame
     end
     # A NaN label is the NaN value, as join and group_by take it: eq answers
     # false for NaN against anything, itself included.
+    # A numeric index is looked up with a number: a String or true/false would
+    # be read differently by each numeric type, or not at all.
+    if !@index.face? && (@index.integer? || @index.float? || @index.complex?) &&
+       !label.is_a?(Numeric)
+      raise ArgumentError,
+            "at: the index is #{@index.data_type}, so the label must be a number " \
+            "(got #{label.inspect}); convert it first, e.g. at(Float(s)) or at(Integer(s))"
+    end
     nan = label.is_a?(Float) && label.nan?
     hit = nan ? @index.is_in([label]) : @index.eq(label)
     pos = hit.where
