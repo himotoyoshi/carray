@@ -23,7 +23,7 @@ class TestRefusalMessagesOrder < Test::Unit::TestCase
 
   def test_a_record_refusal_points_at_its_values
     g = CArray.struct { float64 :lat }
-    e = assert_raise(ArgumentError) { CARecord.new(g, 2).unique }
+    e = assert_raise(ArgumentError) { CArray.fixlen_string(%w[ab]).is_in(CARecord.new(g, 2)) }
     assert_match(/to_type\(:object\) gives its values/, e.message)
     e = assert_raise(ArgumentError) { CArray.fixlen_string(%w[a]).locate_addr(CArray.const_string(%w[a])) }
     assert_match(/#to_string gives its strings/, e.message)
