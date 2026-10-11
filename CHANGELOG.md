@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `locate_nearest_addr`, and `join_asof`, `align_nearest_addr` and
+  `snap_to` built on it, chose the wrong reference in three cases: a NaN
+  reference value was matched (it now matches nothing, like a masked one),
+  an infinite key missed an exact match or was placed wrongly, and an
+  integer key beyond 2**53 (a nanosecond `CATime`, for example) could pick
+  a neighbouring row. Two time keys of different units, which raised in one
+  direction, are now compared in the finer unit either way.
+
 - Fix: storing a `fixlen` array into `fixlen` cells of another width read
   past the end of a narrower source and wrote stray bytes, and a wider one
   was reinterpreted rather than cut per cell. Each cell is now padded with

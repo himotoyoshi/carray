@@ -123,9 +123,8 @@ class CArray
       return out
     end
 
-    # `locate_nearest_addr` (via `linear_section`) accepts a 1-D `val` only;
-    # flatten multi-D input and reshape the result back to preserve the
-    # element-wise semantic on any shape.
+    # Multi-D input is snapped as its flattened cells and given its shape
+    # back.
     if ndim > 1
       return reshape(-1).snap_to(ref, lfill: lfill, ufill: ufill,
                                  direction: direction).reshape(*shape)

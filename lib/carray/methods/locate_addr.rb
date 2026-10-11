@@ -59,9 +59,11 @@ class CArray
 
   # @overload locate_nearest_addr(ref, direction: :round, tolerance: nil)
   #   Returns, for each element of `self`, the flat address into `ref` of
-  #   the nearest reference value. Continuous sibling of {#locate_addr};
-  #   uses `linear_section` + rounding for non-exact matching against a
-  #   sorted `ref`.
+  #   the nearest reference value. Continuous sibling of {#locate_addr}:
+  #   each cell is placed among the sorted reference values by comparing
+  #   it with them, so an integer key is exact at any size and an infinite
+  #   one keeps its place.  `:round` takes the nearer neighbour, the upper
+  #   one on a tie.
   #
   #   Outside `ref`'s span the direction still decides: `:floor` matches
   #   a cell after the last value to that last value, `:ceil` matches a
@@ -78,7 +80,8 @@ class CArray
   #
   #   `ref` need not be given in ascending order: it is sorted internally
   #   and the returned addresses are mapped back to positions in `ref` as
-  #   passed.  A masked `ref` value matches nothing, as in {#locate_addr}.
+  #   passed.  A masked or NaN `ref` value matches nothing.  Two time keys
+  #   of different units are compared in the finer of the two.
   #   With one value present in `ref`, that value is the match for
   #   every cell the direction allows (`:floor` at or after it, `:ceil`
   #   at or before it, `:round` all).  With none, every cell is masked;
@@ -106,51 +109,99 @@ class CArray
     end
     return CArray.int64(*shape) if elements == 0
     # A masked reference value matches nothing, as in locate_addr: sorting
-    # puts the masked ones last, and only the others are searched.
+    # puts the masked ones last, and only the others are searched.  A NaN
+    # one has no place among the others either; it sorts after them.
     ri = ref.sort_addr
     ri = ri[0...ref.count_not_masked] if ref.has_mask?
+    if ref.float? && ri.elements > 0
+      ri = ri[0...(ri.elements - ref[ri].is_nan.count(true))]
+    end
+    if ri.elements == 0
+      out = CArray.int64(*shape)
+      out[] = UNDEF
+      return out
+    end
     rs = ref[ri]
-    sec = rs.linear_section(self)
-    unless sec.is_a?(CArray)
-      # A single-element (scalar-like) self makes linear_section collapse to
-      # its scalar-query path, which returns a bare Float (or nil when out of
-      # range) instead of a CArray.  Rebuild a self-shaped float64 CArray so
-      # the mask_invalid -> direction -> project pipeline stays array-valued
-      # and the returned addr array matches self's shape.
-      fill = CArray.float64(*shape)
-      fill[] = sec.nil? ? UNDEF : sec
-      sec = fill
-    end
-    masked = sec.mask_invalid
-    si = case direction
-         when :round then masked.round
-         when :floor then masked.floor
-         when :ceil  then masked.ceil
-         end.int64
-    # linear_section gives no position outside ref's span (or anywhere when
-    # ref has one value), but a direction still names a match there: :floor
-    # takes the last value for a query at or after it, :ceil the first for a
-    # query at or before it, and :round the nearer end.
     n = rs.elements
-    if n > 0
-      live = has_mask? ? is_not_masked : nil
-      unless direction == :ceil
-        at_end = ge(rs[n-1]).strip_mask(false)
-        at_end &= live if live
-        si[at_end] = n - 1
-      end
-      unless direction == :floor
-        at_start = le(rs[0]).strip_mask(false)
-        at_start &= live if live
-        si[at_start] = 0
-      end
-    end
+    rk, qk = nearest_keys(rs, self)
+    # The position of each cell among the sorted references is counted, not
+    # interpolated: le = how many are at or below it, lt = how many below.
+    # Counting keeps an integer key exact past 2**53 and an infinite one in
+    # its place, where an interpolated position would not.
+    le = nearest_count_below(rk, qk, true)
+    lt = nearest_count_below(rk, qk, false)
+    si = case direction
+         when :floor then le - 1
+         when :ceil  then lt
+         when :round then nearest_round(rk, qk, le, lt)
+         end
+    si[si.lt(0) | si.ge(n)] = UNDEF
+    si[qk.is_nan.strip_mask(false)] = UNDEF if qk.float?
+    si = si.reshape(*shape)
+    si[is_masked] = UNDEF if has_mask?
     idx = ri.project(si)
     if tolerance
       dist = (ref.project(idx) - self).abs
       idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
     end
     idx
+  end
+
+  # The keys locate_nearest_addr orders by: the storage of the sorted
+  # reference and of the query, in one numeric type.  A Face key is first
+  # brought into the reference's space (two time keys of different units
+  # into the finer of the two, which holds both exactly); plain keys meet at
+  # the type CArray.result_type gives, an integer pair of mixed sign at one
+  # that holds both.
+  private def nearest_keys(rs, q)
+    if rs.face? || q.face?
+      if rs.respond_to?(:to_unit) && q.class == rs.class && q.unit != rs.unit
+        u  = CATimeUnitAlgebra.finer(rs.unit, q.unit)
+        rs = rs.to_unit(u)
+        q  = q.to_unit(u)
+      elsif rs.respond_to?(:to_comparable)
+        q = rs.to_comparable(q)
+      end
+      rs = rs.parent while rs.face?
+      q  = q.parent while q.face?
+    end
+    t = value_match_type(CArray.result_type(q, rs), rs.data_type)
+    rk = (rs.data_type == t) ? rs : rs.to_type(t)
+    qk = (q.data_type  == t) ? q  : q.to_type(t)
+    [rk, qk.flatten]
+  end
+
+  # For each query key, how many of the sorted reference keys are below it
+  # (inclusive: at or below).  The two are sorted together, a tie putting
+  # the reference first when it counts; the references met before a query
+  # are what it is counted against.
+  private def nearest_count_below(rk, qk, inclusive)
+    n, m = rk.elements, qk.elements
+    keys = CArray.concatenate([rk, qk])
+    tag  = CArray.int8(n + m)
+    tag[0...n]   = inclusive ? 0 : 1
+    tag[n...n+m] = inclusive ? 1 : 0
+    perm  = CArray.sort_addr(keys, tag)
+    seen  = perm.lt(n).cumsum.int64
+    query = perm.ge(n)
+    count = CArray.int64(m)
+    count[perm[query] - n] = seen[query]
+    count
+  end
+
+  # :round -- an exact match takes its first reference; otherwise the
+  # nearer of the two neighbours, the upper one on a tie.
+  private def nearest_round(rk, qk, le, lt)
+    n  = rk.elements
+    lo = rk.project(lt - 1)
+    hi = rk.project(lt)
+    upper = (hi - qk).le(qk - lo).strip_mask(false)
+    upper[lo.is_masked] = true if lo.has_mask?
+    upper[hi.is_masked] = false if hi.has_mask?
+    si = lt - 1
+    si[upper] = lt[upper]
+    si[le.gt(lt)] = lt[le.gt(lt)]
+    si
   end
 
   # The tolerance in the units of the distance. A time key measures its
