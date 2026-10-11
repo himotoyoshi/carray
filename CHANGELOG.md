@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `is_in`, `locate_addr`, `intersection`, `union`, `difference`,
+  `CAFrame#join` and `CAFrame#align` read a `CAConstString` or a
+  `CACategorical` given as the values to look in by its strings or labels.
+  They raised `ArgumentError` when the receiver was another kind of array (a
+  fixed-width string column, say), though the other way round worked.
+  `count`, `search` and `bsearch` still refuse one, naming the conversion.
+
 - Change: a `CARecord` and a `CAStruct` element show their members:
   `inspect` of a record array and the element's `to_s` (and so a CAFrame's
   table) print `<S "a" => 1, ...>` instead of raw bytes or an object

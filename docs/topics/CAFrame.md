@@ -1027,7 +1027,7 @@ When the other frame's key is unique, `:left` gives one row per left row, in ord
 - numbers of different types: an `int64` key `2` matches a `float64` key `2.0`, and a negative signed value never matches a large unsigned one;
 - time keys in different units: a day key matches an hour key at midnight of that day, from either side. The result's key column is the left key for `:left` and `:inner`, the right key for `:right`, and in the finer of the two units for `:outer`, which holds the keys of both;
 - a time key and a column of `Time`, `Date` or date-string values (an object or string column, as from a CSV not yet parsed): the values are read as instants;
-- fixed-width strings of different widths (`CArray.fixlen_string`);
+- text held in different ways: fixed-width strings of different widths (`CArray.fixlen_string`), a `CAConstString` or a categorical column against a plain text column — each is read by its strings;
 - NaN matches NaN; a masked key matches nothing.
 
 Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).

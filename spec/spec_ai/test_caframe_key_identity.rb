@@ -200,4 +200,16 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
     assert_raise(ArgumentError) { f.(CA_FLOAT64([1, 2.5])).at("2.5") }
     assert_equal 20, f.(CA_BOOLEAN([true, false])).at(false)["v"]
   end
+
+  # A const string or categorical key is read by its values, from either
+  # side of a join.
+  def test_join_reads_const_string_and_categorical_keys_by_value
+    fix = CArray.fixlen_string(%w[a b c])
+    [CArray.const_string(%w[b z]), CA_OBJECT(%w[b z]).categorize].each do |other|
+      l = CAFrame.new("k" => fix, "x" => CA_INT32([1, 2, 3]))
+      r = CAFrame.new("k" => other, "y" => CA_INT32([7, 8]))
+      assert_equal [UNDEF, 7, UNDEF], l.join(r, on: "k")["y"].to_a
+      assert_equal [2, UNDEF], r.join(l, on: "k")["x"].to_a
+    end
+  end
 end

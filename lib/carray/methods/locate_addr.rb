@@ -1,4 +1,4 @@
-require "carray/methods/is_in"   # fixlen_widened_with, values_in_face
+require "carray/methods/is_in"   # fixlen_widened_with, values_in_face, values_for_lookup
 
 class CArray
 
@@ -67,6 +67,7 @@ class CArray
       return q.locate_addr(ref)
     end
     ref = ref.to_ca unless ref.is_a?(CArray)
+    ref = values_for_lookup(ref)
     if data_type == CA_FIXLEN && ref.data_type == CA_FIXLEN && bytes != ref.bytes
       a, b = fixlen_widened_with(ref)
       return a.locate_addr(b) unless a.equal?(self) && b.equal?(ref)

@@ -135,6 +135,7 @@ class CArray
        respond_to?(:in_common_unit_with)
       return in_common_unit_with(values)
     end
+    values = values_for_lookup(values) if values.is_a?(CArray)
     # Two fixed-width string arrays of different widths meet at the wider.
     if values.is_a?(CArray) && data_type == CA_FIXLEN && values.data_type == CA_FIXLEN
       return fixlen_widened_with(values)
@@ -186,6 +187,23 @@ class CArray
       t = CArray.result_type(self, *elems)
       t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
       [coerce_self(t), elems.to_ca.to_type(t)]
+    end
+  end
+
+  # +other+ as a lookup against self reads it.  A string array whose cells
+  # hold ranges into a pool of its own (CAConstString) is read by its
+  # strings, and a categorical by its labels, since their storage is not
+  # their values; anything else, or the same kind of array as self, is
+  # taken as it is.  A record is left to be refused.
+  def values_for_lookup (other)
+    return other if other.send(:__orderable_storage__)
+    return other if face? && other.class == self.class
+    if other.respond_to?(:to_string)
+      other.to_string
+    elsif other.is_a?(CACategorical)
+      other.to_type(:object)
+    else
+      other
     end
   end
 

@@ -26,14 +26,25 @@ class TestFaceOperandGate < Test::Unit::TestCase
 
   # ---- the operand side ------------------------------------------------
 
+  # The lookups that take a set of values to look in read a const string
+  # by its strings, as converting it would: the answer is the one
+  # to_string gives, never one taken from the encoding.
   { :is_in        => ->(a, b) { a.is_in(b) },
-    :count        => ->(a, b) { a.count(b) },
     :intersection => ->(a, b) { a.intersection(b) },
     :union        => ->(a, b) { a.union(b) },
     :difference   => ->(a, b) { a.difference(b) },
+    :locate_addr  => ->(a, b) { a.locate_addr(b) },
+  }.each do |name, op|
+    define_method("test_#{name}_reads_a_const_string_operand_by_its_strings") do
+      assert_equal op.call(codes, allow.to_string).to_a, op.call(codes, allow).to_a
+    end
+  end
+
+  # The verbs that take a query value still refuse one, pointing at the
+  # conversion.
+  { :count        => ->(a, b) { a.count(b) },
     :search       => ->(a, b) { a.search(b) },
     :bsearch      => ->(a, b) { a.bsearch(b) },
-    :locate_addr  => ->(a, b) { a.locate_addr(b) },
   }.each do |name, op|
     define_method("test_#{name}_refuses_a_const_string_operand") do
       err = assert_raise(ArgumentError) { op.call(codes, allow) }
