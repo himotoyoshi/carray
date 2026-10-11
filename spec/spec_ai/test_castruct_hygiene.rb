@@ -197,4 +197,19 @@ class TestCAStructHygiene < Test::Unit::TestCase
     refute_respond_to s, :to_ptr
   end
 
+  # An element has no mask: UNDEF is refused for every kind of member.
+  def test_undef_is_refused_for_every_member
+    inner = CArray.struct { int16 :p }
+    st = CArray.struct {
+      int32 :k; fixlen :s, bytes: 2
+      array :v, type: CArray.int32(2); struct :in, type: inner
+    }
+    s = st.new(1, "ab")
+    %i[k s v in].each do |m|
+      assert_raise(TypeError, m.to_s) { s[m] = UNDEF }
+    end
+    assert_equal "ab", s[:s]
+    assert_equal s, st.decode(s.encode)
+  end
+
 end

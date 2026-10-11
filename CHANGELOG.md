@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: assigning `UNDEF` to a member of a `CAStruct` element raises
+  `TypeError` for every member kind; an array, fixlen or nested member used
+  to mask the whole element. Mask the record in its `CARecord` instead
+  (`a[i] = UNDEF`).
+
 - Fix: `Marshal.dump` of a `CARecord` whose struct is named carries any
   member kind (fixlen, nested, bit, array); it raised for those, suggesting
   `Marshal.dump` itself. A struct that is not assigned to a constant still

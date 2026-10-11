@@ -542,6 +542,14 @@ rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
   rb_check_frozen(self);
   name_s = ca_struct_resolve_name(klass, name);
 
+  /* An element is one record of values: it has no mask to hold UNDEF.  A
+     record is masked in its record array (a[i] = UNDEF). */
+  if ( val == CA_UNDEF ) {
+    rb_raise(rb_eTypeError,
+             "a struct element has no masked state; mask the record in its "
+             "record array instead");
+  }
+
   /* Fast path (see rb_ca_struct_aref for the absent-FAST_PRIMITIVES
      rationale and entry-shape contract). */
   if (rb_const_defined(klass, rb_intern("FAST_PRIMITIVES"))) {
