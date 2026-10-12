@@ -73,6 +73,11 @@ class CArray
   #   @return [CArray, Array<CArray>] 1-D CArray (flat) or an Array of
   #     reduced CArrays, one per mode rank (per-axis).
   def mode (axis: nil)
+    # An error from the methods mode is made of (sort, ...) names mode.
+    CArray.__answer_as__(:mode) { mode_answered(axis) }
+  end
+
+  private def mode_answered (axis)
     if complex?
       raise CArray::DataTypeError,
             "mode: the modes are listed in ascending order, and a " \

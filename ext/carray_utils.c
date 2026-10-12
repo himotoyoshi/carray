@@ -535,12 +535,56 @@ ca_stable_id_name (ID id)
   }
 }
 
+/* The method a delegating method answers for.  A method that does its work
+   by calling others (median calls partition_index, mode calls sort) runs
+   them under ca_answer_as_caller, so an error they raise names the method
+   the user called.  The outermost one wins. */
+static _Thread_local const char *ca_answering_name = NULL;
+
+static VALUE
+ca_answer_restore (VALUE unused)
+{
+  ca_answering_name = NULL;
+  return Qnil;
+}
+
+VALUE
+ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg)
+{
+  if ( ca_answering_name ) {
+    return body(arg);
+  }
+  ca_answering_name = ca_calling_method_name();
+  return rb_ensure(body, arg, ca_answer_restore, Qnil);
+}
+
+/* CArray.__answer_as__(name) { ... }: the same for a method written in Ruby. */
+static VALUE
+rb_ca_s_answer_as_body (VALUE unused)
+{
+  return rb_yield(Qnil);
+}
+
+static VALUE
+rb_ca_s_answer_as (VALUE klass, VALUE name)
+{
+  if ( ca_answering_name ) {
+    return rb_yield(Qnil);
+  }
+  ca_answering_name = ca_stable_id_name(rb_to_id(name));
+  return rb_ensure(rb_ca_s_answer_as_body, Qnil, ca_answer_restore, Qnil);
+}
+
 const char *
 ca_calling_method_name (void)
 {
-  ID id = rb_frame_this_func();
+  ID id;
   const char *s;
   size_t n;
+  if ( ca_answering_name ) {
+    return ca_answering_name;
+  }
+  id = rb_frame_this_func();
   if ( ! id ) {
     return "axis";
   }
@@ -610,6 +654,18 @@ ca_integer_arg (VALUE v, const char *arg, const char *name)
              name ? name : ca_calling_method_name(), arg, rb_obj_class(v));
   }
   return NUM2LONG(v);
+}
+
+void
+ca_obj_compare_refused (VALUE a, VALUE b)
+{
+  /* The right-hand value is written as Ruby's own comparison error writes
+     it: inspected when it is nil, true, false or a number, its class
+     otherwise. */
+  volatile VALUE rhs = ( RB_SPECIAL_CONST_P(b) || RB_FLOAT_TYPE_P(b) )
+                       ? rb_inspect(b) : rb_class_name(rb_obj_class(b));
+  rb_raise(rb_eArgError, "%s: comparison of %"PRIsVALUE" with %"PRIsVALUE" failed",
+           ca_calling_method_name(), rb_class_name(rb_obj_class(a)), rhs);
 }
 
 void
@@ -1142,6 +1198,8 @@ Init_carray_utils (void)
                              rb_ca_s_min_count_need, 3);
   rb_define_singleton_method(rb_cCArray, "__reduce_fill__",
                              rb_ca_s_reduce_fill, 2);
+  rb_define_singleton_method(rb_cCArray, "__answer_as__",
+                             rb_ca_s_answer_as, 1);
 
 }
 

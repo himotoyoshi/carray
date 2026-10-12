@@ -322,7 +322,7 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
 /* Ruby entry: partition_copy(kth, axis: nil, masked_position: :last).
    No axis means the whole array, as for sort_copy: flatten first. */
 static VALUE
-rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
+rb_ca_partition_copy_body (int argc, VALUE *argv, VALUE self)
 {
   VALUE vkth, rkw = Qnil;
   VALUE vaxis = Qnil;
@@ -427,6 +427,24 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
 }
 
 /* ----------------------------------------------------------------------- */
+
+
+typedef struct { int argc; VALUE *argv; VALUE self; } pc_call_t;
+
+static VALUE
+pc_answer_body (VALUE p)
+{
+  pc_call_t *c = (pc_call_t *) p;
+  return rb_ca_partition_copy_body(c->argc, c->argv, c->self);
+}
+
+/* An error raised by the methods this one calls names this one. */
+static VALUE
+rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
+{
+  pc_call_t c = { argc, argv, self };
+  return ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+}
 
 void
 Init_carray_partition (void)

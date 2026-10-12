@@ -4148,8 +4148,7 @@ module MkKernel
       io.puts "  if ( !nan_a ) {"
       io.puts %Q{    VALUE r = rb_funcall(pa->v, rb_intern("<=>"), 1, pb->v);}
       io.puts "    if ( NIL_P(r) ) {"
-      io.puts %Q{      rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),}
-      io.puts "               rb_obj_classname(pa->v), rb_obj_classname(pb->v));"
+      io.puts "      ca_obj_compare_refused(pa->v, pb->v);"
       io.puts "    }"
       io.puts "    int c = NUM2INT(r);"
       io.puts "    if ( c > 0 ) return 1;"
@@ -7768,8 +7767,7 @@ MkKernel.search :bsearch,
         if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
         VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
         if ( NIL_P(r) ) {
-          rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),
-                   rb_obj_classname(v), rb_obj_classname(query_val));
+          ca_obj_compare_refused(v, query_val);
         }
         int c = NUM2INT(r);
         if ( c < 0 ) lo = mid + 1;
@@ -8005,8 +8003,7 @@ MkKernel.search :bsearch_addr,
         if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
         VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
         if ( NIL_P(r) ) {
-          rb_raise(rb_eArgError, "%s: comparison of %s with %s failed", ca_calling_method_name(),
-                   rb_obj_classname(v), rb_obj_classname(query_val));
+          ca_obj_compare_refused(v, query_val);
         }
         int c = NUM2INT(r);
         if ( c < 0 ) lo = mid + 1;

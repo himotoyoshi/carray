@@ -66,6 +66,9 @@ class CArray
       return CArray.int64(*shape).fill(UNDEF) unless q
       return q.locate_addr(ref)
     end
+    unless ref.is_a?(CArray) || ref.respond_to?(:to_ca)
+      raise TypeError, "locate_addr: the reference is an array of values (got #{ref.class})"
+    end
     ref = ref.to_ca unless ref.is_a?(CArray)
     ref = values_for_lookup(ref)
     if data_type == CA_FIXLEN && ref.data_type == CA_FIXLEN && bytes != ref.bytes

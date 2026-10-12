@@ -236,7 +236,7 @@ class CASegmentIterator < CAIterator
   #   @return [Array<CArray>]
   def quantile
     unless MONOID_TYPES.include?(grouped.data_type)
-      return [0, 25, 50, 75, 100].map { |p| percentile(p) }
+      return CArray.__answer_as__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
     end
     outs = Array.new(5) { CArray.float64(@k) }
     grouped.send(:__reduceat_quantile__, @offsets, *outs)
@@ -557,6 +557,10 @@ class CASegmentIterator < CAIterator
   # one that no cell belongs to: every cell comes back UNDEF, as it does when
   # there are segments and a cell is in none of them.
   def scan (op)
+    CArray.__answer_as__(op) { scan_answered(op) }
+  end
+
+  def scan_answered (op)
     # An empty Face has no cell to ask the core about, and nothing to scan.
     return blank_output(@src_shape) if @value.face? && @value.elements.zero?
     answer = core_scan_answer(op)
@@ -932,7 +936,8 @@ class CASegmentIterator < CAIterator
         # The segment reduction already leaves an empty segment as the core
         # does, so only a min_count asking for more is applied here.
         need = CArray.__min_count_need__(op, min_count, 0)
-        result = super(*args, **kw)
+        # an error from the core reductions a member is made of names the member
+        result = CArray.__answer_as__(op) { super(*args, **kw) }
         return result if need == 0 && fill_value.nil?
         if need > 0
           present = if op == :wsum || op == :wmean

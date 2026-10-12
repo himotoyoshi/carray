@@ -308,6 +308,7 @@ VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
 
 /* carray_utils.c */
 const char *ca_calling_method_name (void);
+VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
@@ -409,12 +410,20 @@ int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
 #define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
 #endif
 
-/* The order of two object cells, by `<=>` as Array#min and #sort take it;
-   a pair `<=>` cannot order raises "comparison of A with B failed". */
+/* A pair `<=>` cannot order: ArgumentError "<method>: comparison of A with
+   B failed", naming the method the user called.  Every object comparison
+   that refuses a pair raises through here. */
+NORETURN(void ca_obj_compare_refused (VALUE a, VALUE b));
+
+/* The order of two object cells, by `<=>` as Array#min and #sort take it. */
 static inline int
 ca_obj_cmp (VALUE a, VALUE b)
 {
-  return rb_cmpint(rb_funcall(a, rb_intern("<=>"), 1, b), a, b);
+  VALUE r = rb_funcall(a, rb_intern("<=>"), 1, b);
+  if ( NIL_P(r) ) {
+    ca_obj_compare_refused(a, b);
+  }
+  return rb_cmpint(r, a, b);
 }
 
 /* op names the contest: `<` for a minimum, `>` for a maximum. */

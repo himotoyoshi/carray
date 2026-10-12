@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a pair of object cells that `<=>` cannot order raises
+  "<method>: comparison of A with B failed" naming the method you called,
+  from every method and iterator. `median`, `percentile`, `quantile`,
+  `partition_copy` and `mode` named a method they are made of
+  (`partition_index:`, `sort:`), and `min`, `max` and the running extrema
+  named none. `locate_addr` with a reference that is not an array of values
+  raises `TypeError` instead of `NoMethodError`.
+
 - Change: `CArray::DataTypeError` is a `TypeError`, so `rescue TypeError`
   catches it. A time array's refusals of `sum`, `prod`, `variance` and the
   other operations it does not define raise it, as every other array does
