@@ -156,61 +156,29 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
   /* Face gate, mirroring the search / linear family (ext/carray_order.c):
      descend an ORDERABLE Face to its storage so the equality runs on the
      numeric storage, and let the reference reconcile the query into its own
-     space -- a COMPARABLE Face compares directly (strip a Face query, take a
-     plain one as-is), a unit-bearing one calls its own to_comparable for any
-     query type (Face CArray, Element, Time, DateTime).  A Face that counts
+     space (ca_face_reconcile_operand).  A Face that counts
      by other means never arrives here: CACategorical / CAConstString define
      their own #count in Ruby.  Placed after the mask-state branches above,
      which read the mask the Face already shares with its storage, and before
      the broadcast branch, so a reconciled query array recurses as storage. */
   if ( ca_is_face(src) ) {
-    volatile VALUE self_ref = self;
     int query_was_scalar = ! rb_obj_is_carray(rval);
-    if ( src->obj_type == CA_OBJ_RECORD ) {
-      /* A record is its bytes: a struct element counts as its encoding, a
-         record array as its storage (of the same data_class only). */
-      if ( query_was_scalar ) {
-        rval = ca_face_element_to_storage(self, src, rval);
-      }
-      else {
-        CArray *op;
-        GetCArray(rval, op);
-        if ( ca_is_face(op) ) {
-          if ( op->obj_type != CA_OBJ_RECORD
-               || rb_ca_data_class(rval) != rb_ca_data_class(self) ) {
-            rb_raise(rb_eTypeError,
-                     "count(v): can not take a %s operand for a record array "
-                     "of %"PRIsVALUE, rb_obj_classname(rval),
-                     rb_ca_data_class(self));
-          }
-          rval = rb_ca_strip_face_value(rval);
-        }
-      }
+    if ( src->obj_type == CA_OBJ_RECORD && query_was_scalar ) {
+      /* A record is its bytes: a struct element counts as its encoding. */
+      rval = ca_face_element_to_storage(self, src, rval);
     }
-    else if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      ca_face_refuse_order("count(v)", self, "count");
-    }
-    else if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
-      if ( ! query_was_scalar ) {
-        rval = ca_face_operand_descend(rval, "count(v)");
+    else {
+      if ( src->obj_type != CA_OBJ_RECORD
+           && ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+        ca_face_refuse_order("count(v)", self, "count");
       }
-    }
-    else if ( rb_respond_to(self_ref, rb_intern("to_comparable")) ) {
-      rval = rb_ca_strip_face_value(rb_funcall(self_ref,
-                                               rb_intern("to_comparable"),
-                                               1, rval));
-      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so a
-         scalar query still answers with a count rather than a length-1 array
-         from the broadcast branch below. */
+      rval = ca_face_reconcile_operand(self, rval, "count(v)");
+      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so
+         a scalar query still answers with a count rather than a length-1
+         array from the broadcast branch below. */
       if ( query_was_scalar && rb_obj_is_carray(rval) ) {
         rval = rb_ca_fetch_addr(rval, 0);
       }
-    }
-    else {
-      rb_raise(rb_eArgError,
-               "count(v): non-comparable Face (%s) has no to_comparable to "
-               "reconcile the query; use ca.parent to count the raw storage",
-               rb_obj_classname(self));
     }
     self = rb_ca_strip_face_value(self);
     GetCArray(self, src);

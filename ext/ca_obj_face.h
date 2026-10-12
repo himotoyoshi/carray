@@ -294,6 +294,13 @@ const char *ca_face_conversion_hint (VALUE face);
 
 VALUE ca_face_operand_descend (VALUE operand, const char *name);
 
+/* Bring an operand into the storage space of a Face reference (a record's
+   own data_class, a COMPARABLE Face's plain values, or the reference's
+   to_comparable), refusing what the reference cannot read.  See
+   ca_obj_face.c. */
+VALUE ca_face_reconcile_operand (VALUE reference, VALUE operand,
+                                 const char *name);
+
 #define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                  \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                         \

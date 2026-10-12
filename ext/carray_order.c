@@ -925,44 +925,13 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
   rb_check_arity(argc, 1, 1);
   VALUE val = argv[0];
 
-  /* Query gate (generic, mirror search + reference flip
-     PROPOSAL_TO_COMPARABLE_RECEIVER_FLIP): the reference axis Face reconciles
-     the query into its own space.  A COMPARABLE axis is directly comparable
-     -> strip a Face query, take a plain query as-is.  A non-COMPARABLE Face
-     axis calls its own to_comparable(query) for ANY query type (Face CArray,
-     our Scalar, a Ruby Time / DateTime, ...), then strips; it raises if it
-     cannot reconcile the query.  `self` is still the pre-strip axis Face
-     here, so it carries the unit for to_comparable and its COMPARABLE flag. */
-  {
-    int val_is_face = 0, self_is_face = 0, self_comparable = 0;
+  /* Query gate: the reference axis, still a Face here, reconciles the query
+     into its own space (ca_face_reconcile_operand). */
+  if ( rb_obj_is_carray(self) ) {
     CArray *sca;
-    if ( rb_obj_is_kind_of(val, rb_cCArray) ) {
-      CArray *vca;
-      TypedData_Get_Struct(val, CArray, &carray_data_type, vca);
-      val_is_face = ca_is_face(vca);
-    }
     TypedData_Get_Struct(self, CArray, &carray_data_type, sca);
     if ( ca_is_face(sca) ) {
-      self_is_face = 1;
-      self_comparable = ca_test_flag(sca, CA_FLAG_FACE_COMPARABLE_STORAGE);
-    }
-    if ( self_comparable ) {
-      if ( val_is_face ) {
-        val = ca_face_operand_descend(val, "linear_section");
-      }
-    }
-    else if ( self_is_face ) {
-      if ( rb_respond_to(self, rb_intern("to_comparable")) ) {
-        val = rb_funcall(self, rb_intern("to_comparable"), 1, val);
-        val = rb_ca_strip_face_value(val);
-      }
-      else {
-        rb_raise(rb_eArgError,
-                 "linear_section: non-comparable Face axis (%s) has no "
-                 "to_comparable to reconcile the query; use ca.parent to "
-                 "search the hidden storage explicitly",
-                 rb_obj_classname(self));
-      }
+      val = ca_face_reconcile_operand(self, val, "linear_section");
     }
   }
 

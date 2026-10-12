@@ -693,6 +693,65 @@ ca_face_operand_descend (VALUE operand, const char *name)
   return Qnil;   /* not reached */
 }
 
+/* Bring `operand` into the storage space of `reference`, a Face, so the
+   two can be compared, searched, counted or hashed cell by cell.  Every
+   family that takes an operand against a Face goes through here; the
+   family keeps its own gate on the reference (ORDERABLE, a record's own
+   rules) and its own handling of a scalar operand afterwards.
+
+   - A record reference takes records of its own data_class (stripped to
+     their bytes) and plain operands as they are; any other Face operand is
+     refused with TypeError.
+   - A COMPARABLE reference stores its values as they are, so a plain
+     operand is taken as it is and a Face operand must be COMPARABLE too
+     (ca_face_operand_descend).
+   - A reference with to_comparable brings any operand into its own space
+     (a unit, an instant), and refuses what it cannot convert.
+   - Any other reference has no way to read the operand in its space, and
+     refuses it. */
+VALUE
+ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
+{
+  CArray *ca;
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, ca);
+  if ( ca->obj_type == CA_OBJ_RECORD ) {
+    if ( RTEST(rb_obj_is_carray(operand)) ) {
+      CArray *op;
+      TypedData_Get_Struct(operand, CArray, &carray_data_type, op);
+      if ( ca_is_face(op) ) {
+        if ( op->obj_type != CA_OBJ_RECORD ) {
+          rb_raise(rb_eTypeError,
+                   "%s: can not take a %s operand for a record array of "
+                   "%"PRIsVALUE, name, rb_obj_classname(operand),
+                   rb_ca_data_class(reference));
+        }
+        if ( rb_ca_data_class(operand) != rb_ca_data_class(reference) ) {
+          rb_raise(rb_eTypeError,
+                   "%s: can not take a record array of %"PRIsVALUE
+                   " for a record array of %"PRIsVALUE, name,
+                   rb_ca_data_class(operand), rb_ca_data_class(reference));
+        }
+        return rb_ca_strip_face_value(operand);
+      }
+    }
+    return operand;
+  }
+  if ( ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
+    return ca_face_operand_descend(operand, name);
+  }
+  if ( rb_respond_to(reference, rb_intern("to_comparable")) ) {
+    return rb_ca_strip_face_value(rb_funcall(reference,
+                                             rb_intern("to_comparable"),
+                                             1, operand));
+  }
+  rb_raise(rb_eArgError,
+           "%s: %s is not comparable by storage and has no to_comparable "
+           "to bring the operand into its space; pass .parent on both "
+           "sides to work in storage space",
+           name, rb_obj_classname(reference));
+  return Qnil;   /* not reached */
+}
+
 int
 ca_face_state_portable (int obj_type, VALUE klass)
 {
@@ -819,16 +878,14 @@ rb_ca_face_lift_method (VALUE self, VALUE face_parent)
  * mis-order the storage, so descend to storage (ORDERABLE licenses that the
  * numeric order equals the surface order) and reconcile the RHS:
  *
- *   - RHS is a Face: COMPARABLE self strips it; else it must respond to
- *     to_comparable (reconcile to self's reference, e.g. unit alignment,
- *     which may raise on loss); else raise.
- *   - RHS is plain (bare number / non-Face array / Scalar): a direct storage
- *     compare, which only a COMPARABLE self licenses -- a non-COMPARABLE
- *     Face (e.g. a unit-bearing CATime) rejects it.
+ *   the RHS goes through ca_face_reconcile_operand: a COMPARABLE self takes
+ *   a plain RHS or a COMPARABLE Face, a self with to_comparable brings any
+ *   RHS into its space, and anything else is refused.
  *
- * A Face over FIXLEN storage (CARecord / string faces) is left untouched:
+ * A Face over FIXLEN storage (CARecord / string faces) keeps its Face:
  * memcmp on its bytes is already the correct order/equality, same as a plain
- * fixlen array.  Both operands are rebound to storage via *pself / *pother.
+ * fixlen array; only the RHS is reconciled.  Both operands are rebound via
+ * *pself / *pother.
  * No-op when self is not a Face. */
 void
 ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
@@ -846,22 +903,10 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
 
   storage = ca_strip_face(sc);
   if ( storage->data_type == CA_FIXLEN ) {
-    /* genuine fixlen semantics: memcmp is the correct comparison, leave
-       the Face(s) in place (same result as a plain fixlen array).  Two
-       record arrays compare only under the same data_class, the rule a
-       store follows; a plain fixlen operand is compared as bytes. */
-    if ( sc->obj_type == CA_OBJ_RECORD
-         && rb_obj_is_kind_of(other, rb_cCArray) ) {
-      CArray *oc;
-      TypedData_Get_Struct(other, CArray, &carray_data_type, oc);
-      if ( oc->obj_type == CA_OBJ_RECORD
-           && rb_ca_data_class(self) != rb_ca_data_class(other) ) {
-        rb_raise(rb_eTypeError,
-                 "can not compare a record array of %"PRIsVALUE
-                 " with a record array of %"PRIsVALUE,
-                 rb_ca_data_class(self), rb_ca_data_class(other));
-      }
-    }
+    /* genuine fixlen semantics: memcmp is the correct comparison, so self
+       keeps its Face (same result as a plain fixlen array) and only the
+       operand is brought to bytes of the same meaning. */
+    *pother = ca_face_reconcile_operand(self, other, "comparison");
     return;
   }
 
@@ -870,46 +915,14 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   }
 
   {
-    VALUE self_ref = self;   /* reference before stripping (for to_comparable) */
-    int   comparable = ca_test_flag(sc, CA_FLAG_FACE_COMPARABLE_STORAGE);
-    int   other_is_face = 0;
-
-    if ( rb_obj_is_kind_of(other, rb_cCArray) ) {
-      CArray *oc;
-      TypedData_Get_Struct(other, CArray, &carray_data_type, oc);
-      other_is_face = ca_is_face(oc);
+    int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
+    other = ca_face_reconcile_operand(self, other, "comparison");
+    /* to_comparable lifts a scalar operand to a length-1 array; unwrap it
+       so the comparison stays array-vs-scalar instead of a shape check
+       against [1] (which only a 1-D reference would pass). */
+    if ( other_was_scalar && RTEST(rb_obj_is_carray(other)) ) {
+      other = rb_ca_fetch_addr(other, 0);
     }
-
-    if ( comparable ) {
-      /* directly comparable Face reference: strip a Face operand, take a
-         plain operand as-is (storage compare is licensed). */
-      if ( other_is_face ) {
-        other = rb_ca_strip_face_value(other);
-      }
-    }
-    else if ( rb_respond_to(self_ref, rb_intern("to_comparable")) ) {
-      /* non-COMPARABLE Face reference: the reference brings the operand into
-         its own space (unit alignment / instant lift), whatever the operand
-         type -- Face CArray, our Scalar, a Ruby Time / DateTime, etc.  The
-         reference's to_comparable raises if it cannot reconcile it. */
-      int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
-      other = rb_funcall(self_ref, rb_intern("to_comparable"), 1, other);
-      other = rb_ca_strip_face_value(other);
-      /* to_comparable lifts a scalar operand to a length-1 array; unwrap it
-         so the comparison stays array-vs-scalar instead of a shape check
-         against [1] (which only a 1-D reference would pass). */
-      if ( other_was_scalar && RTEST(rb_obj_is_carray(other)) ) {
-        other = rb_ca_fetch_addr(other, 0);
-      }
-    }
-    else {
-      rb_raise(rb_eArgError,
-               "comparison: non-comparable Face reference (%s) has no "
-               "to_comparable to reconcile the operand; use ca.parent to "
-               "compare the hidden storage explicitly",
-               rb_obj_classname(self_ref));
-    }
-
     *pself  = rb_ca_strip_face_value(self);
     *pother = other;
   }

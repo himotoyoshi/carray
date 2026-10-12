@@ -1599,9 +1599,7 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
        algebra (e.g. a fixlen-storage Face, whose same-storage store already
        takes the storage xfer branch) is left to the existing store path. */
     if ( ca_is_face(cval) && rb_respond_to(self, rb_intern("to_comparable")) ) {
-      volatile VALUE reconciled = rb_funcall(self, rb_intern("to_comparable"),
-                                             1, val);
-      return rb_funcall(reconciled, rb_intern("parent"), 0);
+      return ca_face_reconcile_operand(self, val, "[]=");
     }
     /* Bare storage escape, integer storage: integer cells only (see above). */
     {

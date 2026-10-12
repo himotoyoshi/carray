@@ -230,14 +230,9 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
 }
 
 /* Bring `operand` into the space of `reference` (the *pre-strip* Face) and
-   descend it, so both sides hash in one storage space.
-
-   `to_comparable` exists because a Face can carry a *unit* -- an alternative
-   space for the same value -- so a reference that defines it reconciles any
-   operand type through it (and refuses what it cannot convert, which is how a
-   bare storage number stays out).  A reference with one space only (COMPARABLE,
-   or a Face with no unit algebra at all, e.g. CAString) has nothing to
-   reconcile between: descending both sides is the whole job. */
+   descend it, so both sides hash in one storage space
+   (ca_face_reconcile_operand).  A complex reference instead turns the
+   operand into keys of its own complex type. */
 static VALUE
 fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
 {
@@ -259,31 +254,7 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     }
     return fz_complex_key(operand);
   }
-  if ( ca->obj_type == CA_OBJ_RECORD ) {
-    /* Records meet records of the same data_class, or plain fixlen bytes. */
-    if ( rb_obj_is_carray(operand) ) {
-      CArray *op;
-      GetCArray(operand, op);
-      if ( ca_is_face(op) ) {
-        if ( op->obj_type != CA_OBJ_RECORD
-             || rb_ca_data_class(operand) != rb_ca_data_class(reference) ) {
-          rb_raise(rb_eTypeError,
-                   "%s: can not take a %s operand for a record array of "
-                   "%"PRIsVALUE, name, rb_obj_classname(operand),
-                   rb_ca_data_class(reference));
-        }
-        return rb_ca_strip_face_value(operand);
-      }
-    }
-    return operand;
-  }
-  if ( ! ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE)
-       && rb_respond_to(reference, rb_intern("to_comparable")) ) {
-    return rb_ca_strip_face_value(rb_funcall(reference,
-                                             rb_intern("to_comparable"),
-                                             1, operand));
-  }
-  return ca_face_operand_descend(operand, name);
+  return ca_face_reconcile_operand(reference, operand, name);
 }
 
 /* Put the Face back on a value-carrying output, or read complex keys back

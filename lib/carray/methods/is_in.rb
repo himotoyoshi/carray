@@ -145,6 +145,13 @@ class CArray
     if values.is_a?(Array) && face? && respond_to?(:to_comparable)
       return [self, to_comparable(values)]
     end
+    # A single value (a Time, an element, a bare number) is a set of one,
+    # read the same way; a bare number is refused like any other operand
+    # that is not of its kind.
+    if !values.is_a?(CArray) && !values.is_a?(Range) && face? &&
+       respond_to?(:to_comparable)
+      return [self, to_comparable([values])]
+    end
     # ...and so does an array of values that are not of its kind (an object
     # column of Time values, a string column).
     if values.is_a?(CArray) && respond_to?(:to_comparable) &&

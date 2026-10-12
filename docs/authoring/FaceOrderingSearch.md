@@ -132,8 +132,12 @@ method, not a flag. The split is deliberate:
 ## 4. The search flow (C dispatcher, not per-Face Ruby)
 
 The whole point of the flags + `to_comparable` is that a Face needs **no
-per-method Ruby override**. The dispatcher (in `emit_search_dispatch` and
-`rb_ca_linear_section_m`) implements the decision generically:
+per-method Ruby override**. One C part, `ca_face_reconcile_operand` in
+`ext/ca_obj_face.c`, makes the operand decision for every family that takes
+an operand against a Face -- search, `linear_section`, `count(v)`, the
+comparison operators, the value-hash family and a bulk store into a unit
+Face -- so a pair of arrays is taken by all of them or refused by all of
+them:
 
 ```
 reference (self):
@@ -141,8 +145,13 @@ reference (self):
     Face and ORDERABLE              -> strip to storage; remember COMPARABLE
 
 operand (query / rhs), driven by the reference:
-    reference COMPARABLE            -> strip a Face operand; take a plain
-                                       operand as-is                 (direct)
+    reference a record              -> a record of the same data_class
+                                       (stripped) or a plain operand;
+                                       any other Face raises TypeError
+    reference COMPARABLE            -> strip a COMPARABLE Face operand; take
+                                       a plain operand as-is; raise for a
+                                       Face whose storage encodes its values
+                                                                     (direct)
     reference a non-COMPARABLE Face -> reference.to_comparable(operand), strip
                                        (ANY operand type: Face CArray, Element,
                                        Time, DateTime, ...; raises if the
