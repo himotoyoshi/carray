@@ -15,6 +15,8 @@
 #   __face_storage__ (Ruby).  A loop of its own that walks the parents is a
 #   second copy, and the first place one goes wrong when a Face gains a
 #   wrapper of a different kind.
+# - In Ruby, an empty array of a Face's kind is __blank_like__, and a value is
+#   written into a Face by storing the Face, not by writing its storage.
 #
 # The generated carray_kernels_*.c are not read; their templates in
 # ext/mkkernel.rb are.
@@ -38,6 +40,10 @@ RULES = [
 RUBY_RULES = [
   [/\.parent\s+while\s+\w+\.face\?/,
    "a hand loop down to the storage: use __face_storage__"],
+  [/CArray\.new\([^)]*\)\s*\.face_lift\(/m,
+   "a blank Face built by hand: use __blank_like__"],
+  [/(?:\.|\b)parent(\.value)?\[[^\]]*\]\s*=(?!=)/,
+   "a write into a Face's storage: store the Face (a Face of its own class is taken as it is)"],
 ]
 
 files = Dir[File.join(ROOT, "ext", "*.{c,h}")].reject { |f| File.basename(f).start_with?("carray_kernels_") }
