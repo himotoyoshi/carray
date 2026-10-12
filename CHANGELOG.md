@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `median`, `percentile` and `quantile` of an object array answer
+  in the elements' own terms. A pick is the element itself and an average
+  or interpolation uses their arithmetic with an exact weight, so
+  `CA_OBJECT([1, 2]).median` is `3/2` and a Rational or BigDecimal answer
+  is exact. Numbers were reported as Float before. For a Float answer,
+  convert the array with `to_type(:float64)` first.
+- Fix: a window's `min` and `max` over a window holding only NaN came from
+  another window's values on the fast path; they are NaN, as the core
+  answers.
+- Fix: `segments(...).wsum` and `.wmean` with object weights lost a
+  Rational weight to float64.
+
 - Fix: a group's `wmean` (`a[cat].wmean(w, axis: :group)`) took
   `fill_value:` as a weight and value both, so an empty group came back
   UNDEF and a short one as 1.0; it now fills the result as every other

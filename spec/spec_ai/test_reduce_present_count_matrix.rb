@@ -34,14 +34,20 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
   def builders
     per_row = ->(r) { r }
     {
-      CASlabIterator        => [->(d) { d[nil, :>] },                         ->(d) { CArray.float64(P, L) { 1.0 } }, per_row],
-      CABlockIterator       => [->(d) { d.flatten.copy.blocks(L) },            ->(d) { CArray.float64(L) { 1.0 } },    per_row],
+      CASlabIterator        => [->(d) { d[nil, :>] },                         ->(d) { ones(d, P, L) }, per_row],
+      CABlockIterator       => [->(d) { d.flatten.copy.blocks(L) },            ->(d) { ones(d, L) },    per_row],
       CAWindowIterator      => [->(d) { d.flatten.copy.windows(0..L - 1, bounds: :truncate) },
-                                ->(d) { CArray.float64(L) { 1.0 } }, ->(r) { (0...P).map { |i| r[i * L] } }],
-      CASegmentIterator     => [->(d) { d.flatten.copy.segments(lengths: [L] * P) }, ->(d) { CArray.float64(P * L) { 1.0 } }, per_row],
-      CACategoricalIterator => [->(d) { d.flatten.copy.group_by_category(labels) }, ->(d) { CArray.float64(P * L) { 1.0 } }, per_row],
-      CAGroupIterator       => [->(d) { d.flatten.copy[labels] },              ->(d) { CArray.float64(P * L) { 1.0 } }, per_row],
+                                ->(d) { ones(d, L) }, ->(r) { (0...P).map { |i| r[i * L] } }],
+      CASegmentIterator     => [->(d) { d.flatten.copy.segments(lengths: [L] * P) }, ->(d) { ones(d, P * L) }, per_row],
+      CACategoricalIterator => [->(d) { d.flatten.copy.group_by_category(labels) }, ->(d) { ones(d, P * L) }, per_row],
+      CAGroupIterator       => [->(d) { d.flatten.copy[labels] },              ->(d) { ones(d, P * L) }, per_row],
     }
+  end
+
+  # Weights of the data's own kind: an object array is weighted by objects,
+  # so an exact value stays exact.
+  def ones (d, *shape)
+    d.data_type == CA_OBJECT ? CArray.object(*shape) { 1 } : CArray.float64(*shape) { 1.0 }
   end
 
   def call (obj, op, w, kw)
@@ -55,8 +61,13 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
   end
 
   def data (type)
-    d = CArray.float64(P, L) { |i, j| (i + 1) * 10.0 + j + 1 }
-    d = d.to_type(type) unless type == :float64
+    d = if type == :rational
+          # an object array of exact values: every path answers exactly
+          CArray.object(P, L) { |i, j| Rational(i * 10 + j + 1, j + 2) }
+        else
+          CArray.float64(P, L) { |i, j| (i + 1) * 10.0 + j + 1 }
+        end
+    d = d.to_type(type) unless type == :float64 || type == :rational
     NP.each_with_index { |n, i| (n...L).each { |j| d[i, j] = UNDEF } }
     d
   end
@@ -79,7 +90,8 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
   def same (a, b)
     return a.zip(b).all? { |x, y| same(x, y) } if a.is_a?(Array) && b.is_a?(Array) && a.size == b.size
     return a.equal?(b) if a.equal?(UNDEF) || b.equal?(UNDEF)
-    return (a.nan? && b.nan?) || (a - b).abs <= 1e-9 * [a.abs, 1].max if a.is_a?(Float) || b.is_a?(Float)
+    return false unless a.class == b.class
+    return (a.nan? && b.nan?) || (a - b).abs <= 1e-9 * [a.abs, 1].max if a.is_a?(Float)
     a == b
   end
 
@@ -93,7 +105,7 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
     assert_include reductions, :wmean
   end
 
-  %i[float64 int32 object].each do |type|
+  %i[float64 int32 object rational].each do |type|
     define_method("test_each_piece_answers_as_the_core_#{type}") do
       d = data(type)
       diffs = []
@@ -114,7 +126,7 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
                   end
             (0...P).each do |i|
               piece = d[i, nil].copy
-              args = op == :wsum || op == :wmean ? [CArray.float64(L) { 1.0 }] : (ARGS[op] || [])
+              args = op == :wsum || op == :wmean ? [ones(d, L)] : (ARGS[op] || [])
               want = piece.public_send(op, *args, **kw)
               want = want.to_a if want.is_a?(CArray)
               want = want.map { |x| x.is_a?(CArray) ? x.to_a : x } if want.is_a?(Array)
@@ -149,5 +161,16 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
     v = CA_OBJECT([1, 2, 3])
     c = CArray.object(3) { "a" }.categorize(labels: %w[a b])
     assert_equal [2, UNDEF], v[c].wmean(CA_OBJECT([1, 1, 1]), axis: :group).to_a
+  end
+
+  def test_a_window_holding_only_nan_has_a_nan_extremum
+    n = Float::NAN
+    [CA_FLOAT64([3, n, 1, 2, n, n, 0, 0]), CA_OBJECT([3, n, 1, 2, n, n, 0, 0])].each do |a|
+      a[6] = UNDEF
+      a[7] = UNDEF
+      w = a.windows(0..1, bounds: :truncate)
+      assert_equal w.reduce { |x| x.min }.to_a.map(&:to_s), w.min.to_a.map(&:to_s)
+      assert_equal w.reduce { |x| x.max }.to_a.map(&:to_s), w.max.to_a.map(&:to_s)
+    end
   end
 end

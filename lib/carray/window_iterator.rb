@@ -530,6 +530,9 @@ class CAWindowIterator < CAIterator
     return nil if @source.face?
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
     return nil if neutral_value(op).nil?
+    # pmin / pmax let NaN lose, so a window holding only NaN would fold to the
+    # neutral value; the core answers NaN there.
+    return nil if (op == :min || op == :max) && source_has_nan?
 
     folded = op == :mean ? fold_mean : accumulate_offsets(op)
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
@@ -594,6 +597,11 @@ class CAWindowIterator < CAIterator
       along = axis_cell_counts(k)
       along[0].zero? || along[@shape[k] - 1].zero?
     end
+  end
+
+  def source_has_nan?
+    return false unless @source.float? || @source.data_type == CA_OBJECT
+    @source.is_nan.any
   end
 
   # A result only where the window held `need` cells (CArray.__min_count_need__).

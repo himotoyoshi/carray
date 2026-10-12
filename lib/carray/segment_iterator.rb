@@ -421,8 +421,9 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wsum (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wsum)[0] if axis
-    wg = scatter_weights(weights)
-    return kernel_weighted(wg)[0] if MONOID_TYPES.include?(grouped.data_type)
+    kernel = MONOID_TYPES.include?(grouped.data_type)
+    wg = scatter_weights(weights, kernel)
+    return kernel_weighted(wg)[0] if kernel
     fold_weighted(:wsum, wg, 0.0) { |v, ws| v.wsum(ws) }
   end
 
@@ -434,8 +435,9 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wmean (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wmean)[1] if axis
-    wg = scatter_weights(weights)
-    return kernel_weighted(wg)[1] if MONOID_TYPES.include?(grouped.data_type)
+    kernel = MONOID_TYPES.include?(grouped.data_type)
+    wg = scatter_weights(weights, kernel)
+    return kernel_weighted(wg)[1] if kernel
     fold_weighted(:wmean, wg, UNDEF) { |v, ws| v.wmean(ws) }
   end
 
@@ -679,14 +681,16 @@ class CASegmentIterator < CAIterator
   # @grouped), so wsum / wmean can pair each segment's values with its weights.
   # Weights are coerced to float64; the same counting-sort scatter propagates
   # the weight mask and skips excluded cells, so wg lines up with @grouped.
-  def scatter_weights (weights)
+  # The weighted kernel reads float64 weights; the per-segment fallback hands
+  # them to the core as they are, so an object weight stays exact.
+  def scatter_weights (weights, as_float64 = true)
     unless weights.elements == codes.elements
       raise ArgumentError,
             "wsum/wmean: weights.elements (#{weights.elements}) != " \
             "value.elements (#{codes.elements})"
     end
-    wf = weights.float64
-    wg = CArray.float64(grouped.elements)
+    wf = as_float64 ? weights.float64 : weights
+    wg = CArray.new(wf.data_type, [grouped.elements], bytes: wf.bytes)
     codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
                 @offsets.copy, wg, @k)
     wg
