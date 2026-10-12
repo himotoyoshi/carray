@@ -1483,17 +1483,18 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE rtype, rdim, ropt, rbytes = Qnil, rrdonly = Qnil,
                  rparent = Qnil, rface = Qnil, rstorage = Qnil, rdata,
-                 rorderable = Qnil, rcomparable = Qnil;
+                 rorderable = Qnil, rcomparable = Qnil, rnumeric = Qnil;
   CAObject *ca;
   int8_t data_type, ndim;
   ca_size_t dim[CA_RANK_MAX];
   ca_size_t bytes;
   int i;
+  int storage_named = 0;   /* :storage given by the caller */
 
   rb_scan_args(argc, argv, "21", (VALUE *) &rtype, (VALUE *) &rdim, (VALUE *) &ropt);
-  rb_scan_options(ropt, "bytes,read_only,parent,face,storage,orderable_storage,comparable_storage",
+  rb_scan_options(ropt, "bytes,read_only,parent,face,storage,orderable_storage,comparable_storage,numeric",
                   &rbytes, &rrdonly, &rparent, &rface, &rstorage,
-                  &rorderable, &rcomparable);
+                  &rorderable, &rcomparable, &rnumeric);
 
   if ( ( ! NIL_P(rparent) ) && ( ! rb_obj_is_carray(rparent) ) ) {
     rb_raise(rb_eTypeError, "option :parent should be a carray");
@@ -1517,6 +1518,16 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
              "meaningful with face: true");
   }
 
+  if ( ! NIL_P(rnumeric) && ! RTEST(rface) ) {
+    rb_raise(rb_eArgError,
+             "CAObject: :numeric is only meaningful with face: true");
+  }
+  if ( ! NIL_P(rnumeric) && ! NIL_P(rstorage) ) {
+    rb_raise(rb_eArgError,
+             "CAObject: give either :numeric or :storage, not both "
+             "(:storage declares a surface of its own)");
+  }
+
   /* face: true requires :parent.  Under Face semantics the parent is the
      true storage owner and CAObject itself carries the semantic identity.
      The declared data_type is the SURFACE (= what dispatch sees);
@@ -1532,6 +1543,28 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   }
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
+
+  /* Without :storage the data_type argument names the storage of a Face.
+     A numeric storage is gated by default: the surface becomes CA_FIXLEN,
+     so arithmetic, math and reductions raise instead of computing on the
+     stored numbers, which the Face exists to give another meaning.
+     numeric: true lets them through.  An object or fixlen storage keeps
+     its own data_type: fixlen kernels already raise, and an object cell
+     may not be read as bytes. */
+  storage_named = ! NIL_P(rstorage);
+  if ( RTEST(rface) && NIL_P(rstorage) ) {
+    if ( data_type == CA_OBJECT || data_type == CA_FIXLEN ) {
+      if ( ! NIL_P(rnumeric) ) {
+        rb_raise(rb_eArgError,
+                 "CAObject Face: :numeric applies to a numeric storage only "
+                 "(the storage is %s)", ca_type_name[data_type]);
+      }
+    }
+    else if ( ! RTEST(rnumeric) ) {
+      rstorage = INT2NUM(data_type);
+      data_type = CA_FIXLEN;
+    }
+  }
 
   Check_Type(rdim, T_ARRAY);
   CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
@@ -1560,17 +1593,11 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
     ca->parent = cp;
     rb_ca_set_parent(self, rparent);
 
-    /* Face mode invariants.  The check the author opts into depends on
-       whether :storage is explicit:
-       - :storage omitted  → "surface == storage" contract:
-                             surface (= declared data_type) must equal
-                             parent.data_type.  This catches typos for
-                             Numeric Face authors who didn't intend
-                             surface/storage to differ.
-       - :storage given    → "surface != storage" opted-in:
-                             surface is free (= e.g. CA_FIXLEN for
-                             NonNumeric Face), :storage must agree with
-                             parent.data_type, and bytes must match. */
+    /* Face mode invariants: bytes match the parent's, and the storage
+       (:storage, or the data_type argument when :storage was omitted)
+       is the parent's data_type.  The surface is the data_type argument
+       under :storage, CA_FIXLEN for a gated numeric storage (decided
+       above), and the storage itself otherwise. */
     if ( RTEST(rface) ) {
       if ( bytes != cp->bytes ) {
         rb_raise(rb_eTypeError,
@@ -1579,12 +1606,12 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
                  (long long) bytes, (long long) cp->bytes);
       }
       if ( NIL_P(rstorage) ) {
-        /* surface == storage contract */
+        /* The data_type argument names the storage. */
         if ( cp->data_type != data_type ) {
           rb_raise(rb_eTypeError,
                    "CAObject Face: parent data_type mismatch "
                    "(declared=%d, parent=%d).  Use :storage option to "
-                   "opt into surface != storage (NonNumeric Face).",
+                   "declare a surface that differs from the storage.",
                    (int) data_type, (int) cp->data_type);
         }
       }
@@ -1596,9 +1623,19 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
                                    &declared_storage, &declared_storage_bytes);
         if ( cp->data_type != declared_storage ) {
           rb_raise(rb_eTypeError,
-                   "CAObject Face: :storage mismatch "
-                   "(declared=%d, parent.data_type=%d)",
+                   storage_named
+                   ? "CAObject Face: :storage mismatch "
+                     "(declared=%d, parent.data_type=%d)"
+                   : "CAObject Face: parent data_type mismatch "
+                     "(declared=%d, parent=%d)",
                    (int) declared_storage, (int) cp->data_type);
+        }
+        /* An object cell is a VALUE: reading it under another surface hands
+           out its address, and writing one forges it. */
+        if ( ca_is_object_type(cp) && data_type != CA_OBJECT ) {
+          rb_raise(rb_eTypeError,
+                   "CAObject Face: an object storage can't be given "
+                   "another surface data_type");
         }
       }
       ca_set_flag(ca, CA_FLAG_IS_FACE);

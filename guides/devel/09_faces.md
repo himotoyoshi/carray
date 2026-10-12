@@ -150,7 +150,10 @@ The same substrate supports two implementation styles:
 - **Ruby-level `CAObject` subclass** — for user-defined Faces. Requires **zero
   storage callbacks**: a complete Face is roughly six lines of `initialize`, with
   all per-cell I/O delegated to the parent CArray at native C speed. This is
-  the path an external gem author normally takes.
+  the path an external gem author normally takes. Over a numeric storage it
+  gets the `CA_FIXLEN` surface unless it passes `numeric: true`, so a Face
+  whose stored numbers are not its values refuses arithmetic rather than
+  computing it.
 
 The runtime obj_type install ([ch. 1](01_architecture_overview.md)) is what lets
 an external gem add a Face without recompiling the core.

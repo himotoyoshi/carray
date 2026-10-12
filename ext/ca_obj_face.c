@@ -443,6 +443,31 @@ rb_ca_face_s_allocate_forbidden (VALUE klass)
            "(CATime / CATimedelta / ...)");
 }
 
+VALUE
+ca_face_storage_value (CArray *ca, VALUE raw)
+{
+  CArray *storage;
+  CArray  as_storage;
+  if ( ca->data_type != CA_FIXLEN || TYPE(raw) != T_STRING ) {
+    return raw;
+  }
+  storage = ca_strip_face(ca);
+  if ( storage == NULL
+       || storage->data_type == CA_FIXLEN
+       || ca_is_object_type(storage)
+       || RSTRING_LEN(raw) != storage->bytes ) {
+    return raw;
+  }
+  if ( storage->data_type == CA_BOOLEAN ) {
+    return *(uint8_t *) RSTRING_PTR(raw) ? Qtrue : Qfalse;
+  }
+  /* The cell lives in a String's buffer, not in the storage: read it
+     through a stand-in that carries only the storage's type. */
+  as_storage.data_type = storage->data_type;
+  as_storage.bytes     = storage->bytes;
+  return ca_ptr2obj(&as_storage, RSTRING_PTR(raw));
+}
+
 /* Face-local C dispatch table for storage_to_element (the read/decode
    direction).  Sized to CA_OBJ_TYPE_MAX so any registered obj_type can be
    indexed directly; file-scope zero-init leaves unregistered slots NULL. */

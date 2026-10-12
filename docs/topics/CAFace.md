@@ -117,8 +117,8 @@ A Face declares one of two surface choices at setup time:
 
 | | surface `data_type` | mkkernel numeric dispatch | example |
 |---|---|---|---|
-| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | an angle in radians (`examples/face/ca_circular.rb`): the surface value *is* the stored number |
-| **NonNumeric Face** | `CA_FIXLEN` | hits `ca_*_not_implement` stub → `rb_eCADataTypeError` | `CATime`, `CATimedelta` (`dt + dt`, `sqrt(dur)` are nonsense) |
+| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | a latitude column: `lat + 0.5` and `lat.mean` are right on the stored numbers |
+| **NonNumeric Face** | `CA_FIXLEN` | hits `ca_*_not_implement` stub → `rb_eCADataTypeError` | `CATime`, `CATimedelta` (`dt + dt`, `sqrt(dur)` are nonsense); an angle in radians (`examples/face/ca_circular.rb`: the arithmetic mean of angles is not their mean) |
 
 The NonNumeric variant leverages the fact that mkkernel emits
 `ca_*_not_implement` raise stubs for `CA_FIXLEN` slots — by declaring
@@ -133,6 +133,12 @@ Choosing between the two:
   (`+` `-` `*` `sum` etc. preserve domain semantics), choose Numeric.
 - If they do not (time + time, sqrt(epoch), bitwise(offset),
   …), choose NonNumeric — silent nonsense becomes a loud TypeError.
+
+A Numeric Face adds little beyond its name and its own methods: views
+carry it, but the result of any operation is a plain array. A Face whose
+stored numbers are not its values is wrong under Numeric without a
+warning, so NonNumeric is the default a CAObject Face gets (§5.4), and
+Numeric is chosen with `numeric: true`.
 
 Note that "some of them make sense" is not Numeric: the dispatch is
 all-or-nothing, so a Face whose `+` is meaningful but whose `sqrt` is not
@@ -230,8 +236,7 @@ every storage op directly to it.
 class MyPrice < CAObject
   def initialize(parent, currency: :usd)
     @currency = currency
-    super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64,
-          parent: parent, face: true)
+    super(CA_INT64, parent.dim, parent: parent, face: true)
   end
 end
 ```
@@ -501,7 +506,7 @@ class MyFace < CAObject
   def initialize(parent, *args, **opts)
     @semantic_state = ...                    # whatever state the Face needs
 
-    super(STORAGE_DTYPE,                     # e.g. CA_INT64, CA_FLOAT64
+    super(STORAGE_DTYPE,                     # parent.data_type: CA_INT64, CA_FLOAT64, ...
           parent.dim,
           parent: parent,
           face: true)                        # <-- sets CA_FLAG_IS_FACE
@@ -525,8 +530,9 @@ next to it: `orderable_storage: true` sets
 `CA_FLAG_FACE_ORDERABLE_STORAGE` and `comparable_storage: true` sets
 `CA_FLAG_FACE_COMPARABLE_STORAGE`. Both require `face: true`. Without
 them, `sort`, `min`, `max`, search and the value-hash family raise on
-the Face — including on a Numeric Face such as `CACircular` below,
-whose angles do not declare that storage order is their order.
+the Face — including on a Numeric Face — unless the Face declares that
+storage order is its order. `CACircular` below does not: an angle near
+2π is next to one near 0.
 
 ### 5.2 Worked example — `CACircular`
 
@@ -559,6 +565,7 @@ end
 
 raw = CArray.float64(5) { |i| i * Math::PI / 4 }
 cc  = CACircular.new(raw, range: :rad)
+cc.mean                      # => raises (NonNumeric, the default)
 cc.circular_mean             # => π/2
 cc[1..3].circular_mean       # view chain preserves the Face
 cc.flip.range                # => :rad (ivar carried via copy_state)
@@ -577,48 +584,53 @@ cc.flip.range                # => :rad (ivar carried via copy_state)
   carried via the optional `copy_state` callback. Without it, a
   sliced view's ivars are nil.
 
-### 5.4 NonNumeric Face from CAObject — the `:storage` opt-in
+### 5.4 NonNumeric by default — `numeric: true` and `:storage`
 
-To declare a CAObject-based Face as NonNumeric (= make `face_arr + x`
-etc. raise upfront instead of dispatching per-cell through Ruby `:+`),
-pass surface = `CA_FIXLEN` as the data_type argument and the actual
-storage type via the `:storage` option:
+A CAObject Face over a numeric storage is NonNumeric unless it says
+otherwise. Passing the parent's `data_type` gives it the `CA_FIXLEN`
+surface, so `face_arr + x` and the reductions raise upfront instead of
+computing on the stored numbers:
 
 ```ruby
 class MyTagArray < CAObject
   def initialize(parent_int64)
-    super(CA_FIXLEN, parent_int64.dim,
-          bytes:   8,
-          storage: CA_INT64,         # explicit: parent is int64
-          parent:  parent_int64,
-          face:    true)
+    super(CA_INT64, parent_int64.dim, parent: parent_int64, face: true)
   end
 end
 
 raw = CArray.int64(5) { |i| i }
 arr = MyTagArray.new(raw)
+arr.data_type    # => :fixlen
 arr * 2          # => raises (mkkernel CA_FIXLEN slot is not_implement)
 arr.sum          # => raises
+arr[1]           # => 1  (an element is the stored value)
 arr[0..2].parent.data_type   # => :int64  (storage invariant maintained)
 ```
 
-The mechanism is the same surface-vs-storage split that
-`CATime` uses internally — only that the C-level Face puts
-both values in its struct, while the CAObject path puts surface in
-the `data_type` argument and storage in `:storage`. See `§2.5
-Numeric vs NonNumeric surface — the FIXLEN gate` for the rationale.
+`numeric: true` opts into the Numeric surface instead (surface ==
+storage, §2.5). A surface of another kind is passed as `data_type`
+with the storage named by `:storage`; the default above is the same
+as `super(CA_FIXLEN, dim, bytes: 8, storage: CA_INT64, parent:,
+face: true)`. The mechanism is the same surface-vs-storage split that
+`CATime` uses internally — only that the C-level Face puts both values
+in its struct. See §2.5 for the rationale.
 
 #### Contract
 
-| `:storage` | declared `data_type` | parent.data_type | Result |
-|---|---|---|---|
-| omitted | must equal | parent.data_type | Numeric Face (= legacy, surface == storage) |
-| explicit | free (CA_FIXLEN or other) | must equal `:storage` | NonNumeric or numeric, surface != storage allowed |
-| explicit but `face: true` omitted | — | — | `ArgumentError` (`:storage` only meaningful in Face mode) |
-| explicit but mismatch with parent | — | — | `TypeError` |
+| call | surface | numeric ops |
+|---|---|---|
+| `super(parent.data_type, …, face: true)`, numeric storage | `CA_FIXLEN` | raise |
+| the same with `numeric: true` | the storage | compute |
+| `super(parent.data_type, …, face: true)`, object or fixlen storage | the storage | as the storage does |
+| `super(surface, …, storage: parent.data_type, face: true)` | `surface` | as `surface` does |
 
-`bytes` (or `:bytes`) must always match `parent.bytes`; this is the
-memory-layout invariant the lift mechanism depends on.
+A storage that is not `parent.data_type` raises `TypeError`, as does a
+surface other than `CA_OBJECT` over an object storage (an object cell
+is a VALUE, not bytes to hand out). `:numeric` over an object or fixlen
+storage, `:numeric` together with `:storage`, and either of them
+without `face: true` raise `ArgumentError`. `bytes` (or `:bytes`) must
+always match `parent.bytes`; this is the memory-layout invariant the
+lift mechanism depends on.
 
 #### Recovering permitted operations
 
@@ -762,9 +774,16 @@ Ruby-as-thin-surface" direction is intentional: external-gem Faces
 that omit `ca_face_register_storage_to_element` still work via the
 `rb_funcall` fallback by defining `def storage_to_element` in Ruby.
 
-For NonNumericFace (FIXLEN surface), the per-cell fetch delivers an
-8-byte raw `String` to the wrapper; the wrapper decodes it as the
-parent storage type:
+A Ruby `storage_to_element` receives the cell's **storage value**: an
+Integer for an int64 storage, a Float for float64, `true` / `false` for
+boolean — whether the surface is the storage or the `CA_FIXLEN` gate.
+Only a fixlen storage arrives as a `String` of its bytes. A Face that
+defines no hook returns that storage value as its element.
+
+A C function registered with `ca_face_register_storage_to_element`
+receives the cell as it was read: under the `CA_FIXLEN` gate, a
+`String` of the storage's bytes, which it decodes itself without a
+Ruby value in between:
 
 ```c
 static VALUE
@@ -776,7 +795,7 @@ rb_ca_time_storage_to_element (VALUE self, VALUE raw)
   if (TYPE(raw) == T_STRING) {
     memcpy(&epoch, RSTRING_PTR(raw), sizeof(int64_t));
   } else {
-    epoch = NUM2LL(raw);   /* Numeric Face surface delivers Integer */
+    epoch = NUM2LL(raw);   /* an Integer passed by a Ruby caller */
   }
   VALUE obj = TypedData_Make_Struct(rb_cCATimeElement,
                                     CATimeElement,

@@ -132,7 +132,14 @@ class CArray::Inspector  # :nodoc:
     if @carray.face? and @carray.respond_to?(:storage_to_element)
       return lambda { |x| x.inspect }
     end
-    case @carray.data_type
+    data_type = @carray.data_type
+    # The same Faces behind a gated (fixlen) surface hand back the value of
+    # their storage, so they take the storage's formatter.
+    if @carray.face? and data_type == CA_FIXLEN and not @carray.data_class
+      storage = @carray.parent.data_type
+      data_type = storage unless storage == CA_FIXLEN
+    end
+    case data_type
     when CA_BOOLEAN
       # Boolean cells fetch as true/false; show compact 1/0 (masked = _).
       # The type name in the inspect header distinguishes this from an int array.

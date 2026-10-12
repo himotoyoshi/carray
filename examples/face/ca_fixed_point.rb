@@ -3,11 +3,10 @@
 # CAFixedPoint — a NonNumeric Face that stores values as int64 with a
 # decimal scale (= e.g. prices in cents, durations in millis).
 #
-# This is the canonical reference for the Z-pilot `:storage` opt-in:
-# a Ruby Face whose surface declares `CA_FIXLEN` so that all mkkernel
-# numeric dispatch is gated off, and whose Ruby override layer routes
-# the permitted operations (+, -, *, /, sum, mean, comparison, …)
-# through the int64 parent.
+# A Ruby Face over int64 is NonNumeric by default: its surface is
+# `CA_FIXLEN`, so all mkkernel numeric dispatch is gated off, and its
+# Ruby override layer routes the permitted operations (+, -, *, /, sum,
+# mean, comparison, …) through the int64 parent.
 #
 # Why NonNumeric for fixed-point? The whole raison d'être of fixed-point
 # is to avoid Float round-trip drift.  A Numeric Face (surface = INT64)
@@ -48,9 +47,7 @@ class CAFixedPoint < CAObject
     raise ArgumentError, "scale must be positive Integer" unless scale.is_a?(Integer) && scale > 0
     @scale = scale
     @frac_digits = Math.log10(scale).round
-    super(CA_FIXLEN, parent_int64.dim,
-          bytes: 8, storage: CA_INT64,
-          parent: parent_int64, face: true)
+    super(CA_INT64, parent_int64.dim, parent: parent_int64, face: true)
   end
 
   attr_reader :scale, :frac_digits
@@ -61,8 +58,7 @@ class CAFixedPoint < CAObject
   end
 
   def storage_to_element(raw)
-    int_val = raw.is_a?(String) ? raw.unpack1('q') : raw
-    Scalar.new(int_val, @scale)
+    Scalar.new(raw, @scale)
   end
 
   # Per-cell wrap.  C-struct Scalar would be faster, but a plain Ruby

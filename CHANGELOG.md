@@ -36,6 +36,17 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: for authors of a Face written in Ruby on `CAObject`. A Face
+  over a numeric storage (`super(CA_FLOAT64, dim, parent:, face: true)`)
+  now refuses arithmetic, math and reductions, as a `CA_FIXLEN` surface
+  does, and a cast to a numeric type raises until it defines
+  `#to_numeric`. Pass `numeric: true` to keep them computing on the
+  stored numbers. Reading a cell gives the stored value, and a Ruby
+  `storage_to_element` receives that value (an Integer, a Float, `true`)
+  rather than a `String` of its bytes, also for a Face that names
+  `:storage`. An object or fixlen storage is unchanged, except that an
+  object storage can no longer be given a surface of another type.
+  Faces written in C are not affected.
 - Fix: comparing, searching or counting against a Face whose cells are its
   values (`CAString`, `CAFixlenString`) took an operand whose cells only
   encode its values (a time, a categorical, a `CAConstString`) and compared

@@ -301,6 +301,15 @@ VALUE ca_face_operand_descend (VALUE operand, const char *name);
 VALUE ca_face_reconcile_operand (VALUE reference, VALUE operand,
                                  const char *name);
 
+/* The storage value of a cell read through a Face.  A gated (CA_FIXLEN)
+   surface over a numeric storage delivers the cell as its bytes; they are
+   read back as the storage data_type (a boolean as true / false).  A
+   fixlen or object storage, and anything not a String, comes back as it
+   came.  This is what a Ruby storage_to_element receives, and the element
+   of a Face that defines none.  A C function registered for the obj_type
+   receives the cell as it was read, the bytes under a gated surface. */
+VALUE ca_face_storage_value (CArray *ca, VALUE raw);
+
 #define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                  \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                         \
@@ -310,6 +319,7 @@ VALUE ca_face_reconcile_operand (VALUE reference, VALUE operand,
     }                                                                        \
     else {                                                                   \
       static ID _id_storage_to_element = 0;                                   \
+      (obj) = ca_face_storage_value((ca), (obj));                            \
       if ( _id_storage_to_element == 0 ) _id_storage_to_element = rb_intern("storage_to_element"); \
       if ( rb_respond_to((self), _id_storage_to_element) ) {                  \
         (obj) = rb_funcall((self), _id_storage_to_element, 1, (obj));         \

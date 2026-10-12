@@ -326,13 +326,14 @@ super(data_type, dim, **options)
 
 | Argument     | Meaning                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
-| `data_type`  | A CArray data_type symbol (`:float64`, `:int32`, …), `CA_OBJECT`, or a fixlen struct class. Under `face: true` this is the *surface* `data_type` the dispatcher sees (= may be `CA_FIXLEN` to gate numeric ops); see §3.5. |
+| `data_type`  | A CArray data_type symbol (`:float64`, `:int32`, …), `CA_OBJECT`, or a fixlen struct class. Under `face: true` it names the storage, which must be `parent.data_type`, unless `:storage` is given; then it is the *surface* `data_type` the dispatcher sees. See §3.5. |
 | `dim`        | Shape as an array, e.g. `[100, 200]`.                                                         |
 | `:bytes`     | Element size in bytes. **Should** be passed for `CA_FIXLEN` (see note below); otherwise inferred from `data_type`. Under `face: true`, must equal `parent.bytes`. |
 | `:read_only` | If truthy, marks the array as read-only (`CA_FLAG_READ_ONLY`).                                |
 | `:parent`    | Optional CArray. When this `CAObject` is logically derived from a single parent, pass it here (§3.4). Required when `face: true` (= storage owner). |
 | `:face`      | If truthy, declares the instance a Face (= `CA_FLAG_IS_FACE` set). Requires `:parent`. See §3.5 for the Face contract. |
-| `:storage`   | Only valid with `face: true`. Documents and validates `parent.data_type` when the *surface* `data_type` differs from storage (= NonNumeric Face). See §3.5. |
+| `:storage`   | Only valid with `face: true`. Names the storage (`parent.data_type`) so that `data_type` can name a different surface. See §3.5. |
+| `:numeric`   | Only valid with `face: true` and a numeric storage, and not with `:storage`. `true` lets arithmetic, math and reductions compute on the stored numbers (a Numeric Face). See §3.5. |
 
 **Note on `CA_FIXLEN` + `:bytes`.** Omitting `:bytes` for a `CA_FIXLEN`
 array does *not* raise. It silently produces a degenerate `bytes = 0`
@@ -441,7 +442,7 @@ multi-source (multiple block arguments, list of CArrays) and don't fit
 the single canonical-parent slot. Use `:parent` only when there is a clear
 single antecedent.
 
-### 3.5 Face mode (`face: true` + optional `:storage`)
+### 3.5 Face mode (`face: true`)
 
 `CAObject` is the Ruby-level path for defining a Face — a semantic
 identity layered on top of a storage CArray. The `face: true` option
@@ -466,13 +467,13 @@ domain methods you want — zero storage-callback boilerplate. See
 both define a fully functional Face without a single `fetch_*` /
 `store_*` / `copy_data` method.
 
-Face mode adds two contract knobs to the `super` call:
+Over a numeric storage, a Face is NonNumeric unless it says otherwise.
 
-#### Numeric Face — surface = storage (default)
+#### NonNumeric Face — the default over a numeric storage
 
-When the parent storage operations make algebraic sense on the Face
-(`+`, `-`, `*`, `sum`, …), declare a Numeric Face by passing the
-same `data_type` as the parent:
+Pass the parent's `data_type`. The surface becomes `CA_FIXLEN`, so
+arithmetic, math and reductions raise instead of computing on the
+stored numbers:
 
 ```ruby
 class CACircular < CAObject
@@ -483,52 +484,82 @@ class CACircular < CAObject
           face:   true)
   end
 end
-```
 
-The contract `data_type == parent.data_type` is enforced; mismatches
-raise `TypeError`. This is the safety guard against typos for the
-common case where you intended surface to equal storage.
-
-#### NonNumeric Face — surface = `CA_FIXLEN`, storage explicit
-
-When numeric ops on the Face are categorically nonsense (e.g. a tag
-array, a categorical index, a text-offset table), opt into the
-*FIXLEN surface* by passing `data_type = CA_FIXLEN` and naming the
-actual storage via `:storage`:
-
-```ruby
-class MyTagArray < CAObject
-  def initialize(parent_int64)
-    super(CA_FIXLEN, parent_int64.dim,
-          bytes:   8,
-          storage: CA_INT64,         # explicit: parent is int64
-          parent:  parent_int64,
-          face:    true)
-  end
-end
-
-raw = CArray.int64(5) { |i| i }
-arr = MyTagArray.new(raw)
-arr * 2          # => raises (mkkernel CA_FIXLEN slot is not_implement)
-arr.sum          # => raises
-arr.cumsum       # => raises
-arr[0..2].parent.data_type   # => :int64  (storage invariant maintained)
+cc = CACircular.new(CA_FLOAT64([0.1, 2 * Math::PI - 0.1]))
+cc.data_type     # => :fixlen
+cc + 1           # => raises
+cc.mean          # => raises  (the arithmetic mean of angles is not their mean)
+cc[0]            # => 0.1     (an element is the stored value)
+cc.to_a          # => [0.1, 6.183...]
+cc[0..1].parent.data_type   # => :float64  (storage invariant maintained)
 ```
 
 The mechanism: mkkernel emits `ca_*_not_implement` raise stubs for
 the `CA_FIXLEN` slot of every numeric / math / reduction operation,
-so declaring surface = `CA_FIXLEN` makes those operations refuse
-upfront. The storage stays at `parent.data_type`, accessible via
-the `parent` escape hatch for permitted operations.
+so a `CA_FIXLEN` surface makes those operations refuse upfront. A
+cast to a numeric type (`to_type(:float64)`) raises as well until the
+Face defines `#to_numeric` (see [`CAFace.md`](CAFace.md) §2.5). The
+storage stays at `parent.data_type`, reachable through `#parent`.
+
+Reading a cell gives the stored value (`cc[0]` above). A Face that
+defines `storage_to_element` receives that value and returns its own
+element.
+
+#### Numeric Face — `numeric: true`
+
+When every numeric operation on the stored numbers is also right for
+the Face, say so with `numeric: true`. The surface is then the
+storage `data_type`, and the operations compute as on a plain array:
+
+```ruby
+class CALatitude < CAObject
+  def initialize(parent_float64)
+    super(CA_FLOAT64, parent_float64.dim,
+          parent: parent_float64,
+          face:   true,
+          numeric: true)
+  end
+end
+
+lat = CALatitude.new(CA_FLOAT64([10.0, 20.0]))
+lat + 0.5        # => a plain CArray [10.5, 20.5]
+lat.mean         # => 15.0
+```
+
+The result of an operation is a plain CArray: a Face is carried
+through views, not through computation.
+
+#### A surface of your own — `:storage`
+
+To declare a surface other than these two, pass it as `data_type`
+and name the storage with `:storage`:
+
+```ruby
+super(CA_FIXLEN, parent_int64.dim,
+      bytes:   8,
+      storage: CA_INT64,
+      parent:  parent_int64,
+      face:    true)
+```
+
+This is the same NonNumeric Face as the default, written out.
 
 #### Contract summary
 
-| `:storage` | declared `data_type` | parent.data_type | Result |
-|---|---|---|---|
-| omitted | == parent.data_type required | — | Numeric Face (= legacy contract, surface == storage) |
-| explicit | free (`CA_FIXLEN` or other) | == `:storage` required | Numeric or NonNumeric Face, surface != storage allowed |
-| explicit, `face: true` omitted | — | — | `ArgumentError` (`:storage` only meaningful in Face mode) |
-| explicit, parent mismatch | — | — | `TypeError` |
+| call | surface | arithmetic, math, reductions |
+|---|---|---|
+| `super(parent.data_type, …, face: true)`, numeric storage | `CA_FIXLEN` | raise |
+| the same with `numeric: true` | the storage | compute |
+| `super(parent.data_type, …, face: true)`, object or fixlen storage | the storage | as the storage does |
+| `super(surface, …, storage: parent.data_type, face: true)` | `surface` | as `surface` does |
+
+Refused:
+
+- a storage that is not `parent.data_type` (`TypeError`);
+- a surface other than `CA_OBJECT` over an object storage (`TypeError`:
+  an object cell is not read as bytes);
+- `:numeric` over an object or fixlen storage, `:numeric` together with
+  `:storage`, and either of them without `face: true` (`ArgumentError`).
 
 `:bytes` always must equal `parent.bytes` under `face: true`
 (memory-layout invariant the lift mechanism depends on).
@@ -541,8 +572,8 @@ predicates) come back via Ruby method overrides that route through
 `parent`:
 
 ```ruby
-class MyTagArray < CAObject
-  # ... super(...) above ...
+class MyFace < CAObject
+  # ... super(...) as above ...
 
   def sort(*a, **o)
     sorted = parent.sort(*a, **o)

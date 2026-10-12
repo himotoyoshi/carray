@@ -29,13 +29,14 @@ There are two kinds:
 
 - **`ca_circular.rb`** — angles over a circular range (`:rad` / `:deg`), with
   circular statistics: `circular_mean`, `resultant_length`,
-  `circular_variance`, `circular_stddev`. A Numeric Face, so surface and
-  storage are both float64.
+  `circular_variance`, `circular_stddev`. A NonNumeric Face, the default:
+  the arithmetic mean of angles is not their mean, so `cc.mean` raises and
+  `circular_mean` answers instead.
 - **`ca_fixed_point.rb`** — fixed point over int64 storage at a fixed scale,
   which structurally avoids the round-trip drift you get from accumulating
   in float: share prices, currency, measurements. A NonNumeric Face
-  (surface is `CA_FIXLEN`) and the reference implementation of the
-  `:storage` opt-in. NonNumeric is the point: it is what gates the float64
+  (surface is `CA_FIXLEN`) that brings the meaningful operations back as
+  Ruby overrides. NonNumeric is the point: it is what gates the float64
   promotion that `* Float` would otherwise cause.
 
 ### Composite Face (on `CARecord`)
@@ -139,19 +140,13 @@ gated — and that is the reason to make this one NonNumeric.
 
 The full account is in [CAFace.md](../../docs/topics/CAFace.md) §3–§5.
 
-**Numeric Face** (`CACircular` and the like, surface = storage):
+Construct with `super(parent.data_type, parent.dim, parent: parent,
+face: true)`. Over a numeric storage that gives a NonNumeric Face; pass
+`numeric: true` for a Numeric one.
 
-- construct with
-  `super(STORAGE_DTYPE, parent.dim, parent: parent, face: true)`
-- most numeric operations pass straight through the storage path; where the
-  Face would be lost, override and re-wrap
-- right when there is no structural risk such as FP drift, and you trust the
-  user's grasp of the domain
+**NonNumeric Face** (`CACircular`, `CAFixedPoint` and the like, surface =
+`CA_FIXLEN`, the default):
 
-**NonNumeric Face** (`CAFixedPoint` and the like, surface = `CA_FIXLEN`):
-
-- construct with
-  `super(CA_FIXLEN, parent.dim, bytes: B, storage: STORAGE, parent: parent, face: true)`
 - every numeric operation is gated (the `CA_FIXLEN` slot in mkkernel rejects
   it automatically); bring back the ones you want with Ruby overrides that
   go through `parent.X`
@@ -164,14 +159,23 @@ The full account is in [CAFace.md](../../docs/topics/CAFace.md) §3–§5.
   cast other than `:object`, which is how it says "this value is not a
   number".
 - right when you want to rule out a class of silent bugs structurally: float
-  promotion, a unit quietly falling apart
+  promotion, a unit quietly falling apart, the mean of angles
+
+**Numeric Face** (`numeric: true`, surface = storage):
+
+- every numeric operation passes straight through the storage path, and its
+  result is a plain array: a view keeps the Face, a computation drops it
+- right only when every operation on the stored numbers is also right for
+  the Face (a latitude column), which leaves the Face little beyond its name
+  and its own methods
 
 Both kinds:
 
 - expose semantic state with `attr_reader`
 - override `copy_state(src)` so ivars carry, and state survives a sliced view
-- override `storage_to_element(raw)` to control what `cc[i]` wraps into
-  (optional; for a hot path you want in C there is also
+- override `storage_to_element(raw)` to control what `cc[i]` wraps into;
+  `raw` is the stored value (an Integer, a Float, ...), and without the
+  hook `cc[i]` is that value (for a hot path you want in C there is also
   `ca_face_register_storage_to_element`)
 - no value conversion happens — Face mode bypasses the callbacks
 - add whatever semantic methods you like

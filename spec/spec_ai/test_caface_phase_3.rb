@@ -98,7 +98,7 @@ class TestCAFacePhase3 < Test::Unit::TestCase
     cc = TestCACircular.new(raw, range: :rad)
     assert_kind_of TestCACircular, cc
     assert_equal true, cc.face?
-    assert_equal CA_FLOAT64, cc.data_type
+    assert_equal CA_FIXLEN, cc.data_type      # gated by default
     assert_equal :rad, cc.range
   end
 

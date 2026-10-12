@@ -81,12 +81,12 @@ class TestFaceDoubleLift < Test::Unit::TestCase
   def test_user_stacked_face_preserved
     td  = CA_INT64([10, 20, 30, 40]).timedelta(unit: "1 day")
     # The Tag mirrors its parent's surface -- CATimedelta is NonNumeric
-    # (CA_FIXLEN), so a Face stacked on it decodes the storage itself.
+    # (CA_FIXLEN) -- and receives the int64 storage value.
     tag = Class.new(CAObject) do
       def initialize (parent)
         super(CA_FIXLEN, parent.dim, bytes: 8, parent: parent, face: true)
       end
-      def storage_to_element (raw) ; raw.unpack1("q") ; end
+      def storage_to_element (raw) ; raw ; end
     end.new(td)
     v = tag[1..2]
     assert v.face?,               "top Tag Face lost"
