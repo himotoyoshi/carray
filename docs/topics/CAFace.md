@@ -858,8 +858,11 @@ registered via `ca_face_register_element_to_storage` and falls back to
 a Ruby method `element_to_storage(surface)`.
 
 Unlike the read hook, the write hook is not placed at each return
-site. It fires in one place, `rb_ca_obj2ptr` — the single funnel every
-surface-value store passes through — just before the storage cast:
+site. It runs **once for each stored value**, in one of two places.
+`[]=` converts the value as it enters, while the destination is still the
+Face, and stores the result into the storage; every other store (`fill`,
+`elem_store`, a fill value) converts in `rb_ca_obj2ptr`, just before the
+storage cast:
 
 ```c
 if ( ca_face_safe_check(ca) ) {
@@ -874,9 +877,11 @@ then the Ruby fallback. The contract of the hook:
 
 - a recognized surface value object (for time/timedelta: `Element`,
   `Time`, `DateTime`) → a storage-domain value in the Face's unit;
-- a bare `Integer` / `String` it does not recognize → returned
-  unchanged, so the existing storage cast (and the `.parent` raw-store
-  escape) is preserved;
+- a value it does not recognize → either returned unchanged, so the
+  storage cast takes it (time/timedelta keep this for a bare `Integer`, a
+  raw count of ticks), or refused with a raise — a Face for which a bare
+  number has no meaning (a unit-bearing quantity) may refuse it, since the
+  hook never sees its own output a second time;
 - an unconvertible value (e.g. a cross-unit-group instant) → raise,
   never a silent mis-store.
 

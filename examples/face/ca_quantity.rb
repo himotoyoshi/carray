@@ -91,16 +91,11 @@ class CAQuantity < CAObject
   def copy_state(src);         @unit = src.unit;               end
   def storage_to_element(raw); Value.new(raw, @unit);           end
 
-  # A Value is converted to this array's unit. A plain number is taken as
-  # already in it: the core passes stored values back through this hook
-  # (a single-cell store converts twice, and grouped reductions write their
-  # results through it), so a number cannot be refused here.
+  # A bare number has no unit, so it is refused; write the storage
+  # directly (`q.parent[i] = x`) to store one in this array's unit.
   def element_to_storage(v)
-    case v
-    when Value   then v.to(@unit).value
-    when Numeric then v
-    else raise TypeError, "store a CAQuantity::Value, not #{v.class}"
-    end
+    raise TypeError, "store a CAQuantity::Value, not #{v.class}" unless v.is_a?(Value)
+    v.to(@unit).value
   end
 
   # A query of another unit is converted before the ordering family

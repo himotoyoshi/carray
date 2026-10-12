@@ -481,6 +481,7 @@ ca_id_expression_evaluator (void)
 
 typedef struct {
   VALUE  self;
+  VALUE  dest;   /* what is stored into: self, or a Face's storage */
   ID     mid;
   int    argc;
   VALUE *argv;
@@ -492,7 +493,7 @@ ca_store_method_call_body (VALUE arg)
 {
   ca_store_method_call_ctx_t *c = (ca_store_method_call_ctx_t *) arg;
   volatile VALUE idx = rb_funcallv_public(c->self, c->mid, c->argc, c->argv);
-  return rb_ca_store(c->self, idx, c->rval);
+  return rb_ca_store(c->dest, idx, c->rval);
 }
 
 /* The casting stores below convert into the destination inside a window,
@@ -1632,9 +1633,10 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
 static VALUE
 rb_ca_store_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj = Qnil, rval;
+  volatile VALUE obj = Qnil, rval, dest;
   CArray *ca;
   CAIndexInfo info;
+  int converted = 0;   /* rval has been through the Face's write hook */
 
   rb_ca_modify(self);
 
@@ -1650,7 +1652,11 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
      the storage domain while self is still the Face.  Store-side views strip
      the Face to storage, so this is the only point that sees it. */
   if ( ca_is_face(ca) ) {
-    rval = ca_face_convert_store_rval(self, ca, rval);
+    /* Once: a retry below comes back here with rval already converted. */
+    if ( ! converted ) {
+      rval = ca_face_convert_store_rval(self, ca, rval);
+      converted = 1;
+    }
     /* A CArray source is storage now, so the destination has to be too.
        A block store descends on its own (its view is built on the storage);
        a whole, boolean or address store kept the Face and cast the storage
@@ -1688,31 +1694,40 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
+  /* A value or a Ruby Array converted above is in the storage domain now.
+     Stored through the Face it would meet the write hook a second time
+     (rb_ca_obj2ptr converts too), so a positional store goes into the
+     storage, which has the Face's shape.  A predicate (:sym) is still
+     asked of the Face; a member store keeps the Face for its data_class. */
+  dest = self;
+  if ( converted && ca_is_face(ca) && ! rb_obj_is_carray(rval) ) {
+    dest = rb_ca_strip_face_value(self);
+  }
+
   switch ( info.type ) {
   case CA_REG_ADDRESS_COMPLEX:
     self = rb_ca_refer_new_flatten(self);
     goto retry;
   case CA_REG_ADDRESS:
-    obj = rb_ca_store_address(self, &info, rval);
+    obj = rb_ca_store_address(dest, &info, rval);
     break;
   case CA_REG_FLATTEN:
-    self = rb_ca_refer_new_flatten(self);
-    obj = rb_ca_store_all(self, rval);
+    obj = rb_ca_store_all(rb_ca_refer_new_flatten(dest), rval);
     break;
   case CA_REG_POINT:
-    obj = rb_ca_store_point(self, &info, rval);
+    obj = rb_ca_store_point(dest, &info, rval);
     break;
   case CA_REG_ALL:
-    obj = rb_ca_store_all(self, rval);
+    obj = rb_ca_store_all(dest, rval);
     break;
   case CA_REG_BLOCK: {
     volatile VALUE block;
-    block = rb_ca_ref_block(self, &info);
+    block = rb_ca_ref_block(dest, &info);
     obj   = rb_ca_store_all(block, rval); 
     break;
   }
   case CA_REG_SELECT: {
-    obj = rb_ca_select_new(self, argv[0]);
+    obj = rb_ca_select_new(dest, argv[0]);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
@@ -1725,17 +1740,17 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_REPEAT: {
-    obj = rb_ca_repeat(argc, argv, self);
+    obj = rb_ca_repeat(argc, argv, dest);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
   case CA_REG_MAPPING: {
-    obj = rb_ca_fancy_index_chain(self, argv[0]);
+    obj = rb_ca_fancy_index_chain(dest, argv[0]);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
   case CA_REG_GRID: {
-    obj = rb_ca_grid(argc, argv, self);
+    obj = rb_ca_grid(argc, argv, dest);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
@@ -1743,6 +1758,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     ca_store_method_call_ctx_t c;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     c.self = self;
+    c.dest = dest;
     c.mid  = SYM2ID(info.symbol);
     c.argc = (int)(argc-1);
     c.argv = argv+1;

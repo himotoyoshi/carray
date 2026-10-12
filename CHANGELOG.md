@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: for authors of a Face. A value stored with `[]=` reached the Face's
+  `element_to_storage` twice, the second time as the storage value the
+  first call returned, so a hook that refused anything but its own
+  element made the store raise. Each stored value now goes through the
+  hook once. A hook may therefore refuse a bare number.
 - Fix: `a.mask = m` with a mask of another shape (a `(4)` or a `(2,3)` mask
   on a `(3,2)` array) copied cells by count, or left part of the old mask
   in place. It now takes the shapes a store `a[] = m` takes and refuses the
