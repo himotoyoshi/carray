@@ -36,172 +36,6 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
-- Change: an index out of range in `[]` and `[]=` reports the method, the
-  index given, the length and the axis
-  (`[]: index 5 is out of range for length 3 on axis 0`), in place of
-  `index out of range at 0-dim ( 5 <=> 0..2 )`.
-- Change (C extensions): `CA_CHECK_INDEX` raises its IndexError through
-  `ca_index_out_of_range`, so the message names the method and the index
-  given (it reported the index after adding the length). The unused
-  `CA_CHECK_BOUND` is removed.
-
-- Change: a pair of object cells that `<=>` cannot order raises
-  "<method>: comparison of A with B failed" naming the method you called,
-  from every method and iterator. `median`, `percentile`, `quantile`,
-  `partition_copy` and `mode` named a method they are made of
-  (`partition_index:`, `sort:`), and `min`, `max` and the running extrema
-  named none. `locate_addr` with a reference that is not an array of values
-  raises `TypeError` instead of `NoMethodError`.
-
-- Change: `CArray::DataTypeError` is a `TypeError`, so `rescue TypeError`
-  catches it. A time array's refusals of `sum`, `prod`, `variance` and the
-  other operations it does not define raise it, as every other array does
-  for an operation its type does not take (they raised `TypeError`). The
-  wrong kind of operand, as in `time + 1`, is still a plain `TypeError`.
-- Change: errors a caller can cause no longer raise `RuntimeError`. A
-  retired data type (`CArray.new(:float128, ...)`) raises
-  `CArray::DataTypeError`; a Ruby Array as a `grid` axis and a value
-  `CAMath` cannot handle raise `TypeError`; a lazy expression too deep to
-  evaluate, a short read in `load_binary` from an IO, and an array of
-  another size in a bang operation on a `CScalar` raise `ArgumentError`.
-- Fix: `sum`, `mean`, `variance`, `minmax`, `wsum` and `mode(axis:)` refused
-  a view class installed by another gem that had not registered with
-  `ca_iter_register_source_kind` (C extensions only); it is attached and
-  answered as `sort` and `cumsum` already did, so registering is optional.
-
-- Fix: an operation that writes into an array while reading an argument
-  that shares its memory reads the argument as it was before the
-  operation. In-place operators (`add!`, `mul!`, `fma!` and the rest),
-  `scatter_*!` (values, addresses and the values' mask), `put_nd` with a
-  masked index, `inherit_mask`, `inherit_mask_replace` and `mask=` read
-  cells they had already written: `a[1..5].add!(a[0..4])` produced a
-  running sum, and `a[8..].inherit_mask(a[0..991])` spread one masked
-  cell over a quarter of the array. For C extensions, the same holds for
-  the sweep engine (`ca_call_cfunc_*`, `ca_call_cslab_*`) and for the
-  kernel iterator's paired walks (the INOUT forms and
-  `ca_iter_state_init_l2_paired`); two walks opened separately must still
-  be given a copy by the caller.
-
-- Change: `take_along_axis` and `axis2addr` raise IndexError for an index
-  out of range, and `addr2index` raises IndexError for an address out of
-  range and counts a negative address from the end, as every other index
-  does. They raised RangeError and ArgumentError before.
-
-- Change: `median`, `percentile` and `quantile` of an object array answer
-  in the elements' own terms. A pick is the element itself and an average
-  or interpolation uses their arithmetic with an exact weight, so
-  `CA_OBJECT([1, 2]).median` is `3/2` and a Rational or BigDecimal answer
-  is exact. Numbers were reported as Float before. For a Float answer,
-  convert the array with `to_type(:float64)` first.
-- Fix: a window's `min` and `max` over a window holding only NaN came from
-  another window's values on the fast path; they are NaN, as the core
-  answers.
-- Fix: `segments(...).wsum` and `.wmean` with object weights lost a
-  Rational weight to float64.
-
-- Fix: a group's `wmean` (`a[cat].wmean(w, axis: :group)`) took
-  `fill_value:` as a weight and value both, so an empty group came back
-  UNDEF and a short one as 1.0; it now fills the result as every other
-  reduction does.
-- Fix: `segments(...).wsum` and `.wmean` of an object array answered in
-  float64, losing a Rational or a BigDecimal; they answer as `wsum` and
-  `wmean` on the array do.
-
-- Fix: an arithmetic, math, comparison-kernel or reduction call that a Face
-  does not define (`f + g`, `f.sqrt`, `f.sum`, `f.median`, ...) is refused
-  with the method and the Face's class, and points at `to_type(:object)` for
-  its values and `.parent` for its storage. It said "data_type :fixlen not
-  supported", or "invalid data type for monop" with no method named. A plain
-  array whose data type has no such kernel names the method and the type.
-  The exception classes are unchanged.
-- New: a window's `median`, `percentile` and `quantile` answer under the
-  default `bounds: :skip`, leaving the UNDEF margin out of each window as
-  the other reductions do. They raised before.
-- Fix: every iterator reduction takes `min_count:` and `fill_value:` where
-  the same reduction on an array does. Before this, `blocks` refused them on
-  `median`, `percentile`, `wsum`, `wmean`, the counts and the positions,
-  `windows` on `wsum`, `wmean` and the counts, and `segments` and
-  `group_by_category` on the counts and the positions. `blocks(n).percentile(p,
-  min_count: k)` read the keywords as a second percentile.
-- Fix: a group's counts (`a[cat].count_not_masked(axis: :group, min_count: k)`
-  and the like) now answer as an array's do: a count of the mask compares
-  `min_count:` with the cells of the group, and `count(v)` with its present
-  cells. They were the other way round.
-- Fix: the weighted mean of an empty group on an object array raised
-  ZeroDivisionError; it is UNDEF.
-
-- Fix: for authors of a Face. A value stored with `[]=` reached the Face's
-  `element_to_storage` twice, the second time as the storage value the
-  first call returned, so a hook that refused anything but its own
-  element made the store raise. Each stored value now goes through the
-  hook once. A hook may therefore refuse a bare number.
-- Fix: `a.mask = m` with a mask of another shape (a `(4)` or a `(2,3)` mask
-  on a `(3,2)` array) copied cells by count, or left part of the old mask
-  in place. It now takes the shapes a store `a[] = m` takes and refuses the
-  rest, before the array gains a mask.
-
-- Fix: a lazy `&`, `|`, `^`, `and` or `xor` between a boolean array and an
-  object array read the boolean cells as 1 and 0, so `b.lazy | o` gave
-  numbers where `b | o` gives true and false. The lazy form now reads them
-  as true and false, as the eager form does.
-- Change: `==` on a Face (a time, string or categorical array) compares the
-  values it holds. Two time arrays of different units holding the same
-  instants, two const strings over different pools and two categoricals
-  with differently ordered labels are now `==`. A Face equals only a Face
-  of its own class: a time array is no longer `==` to a timedelta or a
-  byte array that happens to hold the same bytes, and a `CAString` is no
-  longer `==` to an object array of the same strings (compare
-  `to_type(:object)` for that). `eql?`, the Hash key relation, also asks
-  for the same class, the same state (unit, labels) and the same storage.
-- Fix: `clip` on a time array returned a plain object array mixing elements
-  and `Time` values; it now returns a time array, and its bounds and fill
-  values are read as times. A record array clips by the members it is
-  ordered by, a const string array clips its strings, and a
-  categorical array refuses `clip` and `minmax` as it refuses `min`, naming
-  the conversion that gives its values (both used to fail with an internal
-  data type error). `minmax` on a Face defined in Ruby now answers in that
-  Face, as `min` and `max` do.
-- Fix: `resize(fill_value:)` and `insert_block { ... }` on a Face (a time
-  or record array) wrote the fill value into the storage as it was, so a
-  `Time` filled a time array with a date millions of years off. The value is
-  now written as a value of the array, as `shift(fill_value:)` and `unmask`
-  write it; a const string array still resizes but refuses a fill value, and
-  the new cells of a categorical are UNDEF unless the fill value is one of
-  its labels (a zero code used to read as the first label). A Face written into a
-  Face of its own class is now taken as it is (a Face defined in Ruby
-  without `to_comparable` used to refuse it), and `CAFrame#fill(:linear)`
-  interpolates any Face that defines `linear_fetch`, as `unmask(method:
-  :linear)` does, not only a time column. `locate_nearest_addr` now takes and refuses operands as `search`
-  does: it used to compare the storage of a categorical or `CAConstString`
-  reference.
-- Change: for authors of a Face written in Ruby on `CAObject`. A Face
-  over a numeric storage (`super(CA_FLOAT64, dim, parent:, face: true)`)
-  now refuses arithmetic, math and reductions, as a `CA_FIXLEN` surface
-  does, and a cast to a numeric type raises until it defines
-  `#to_numeric`. Pass `numeric: true` to keep them computing on the
-  stored numbers. Reading a cell gives the stored value, and a Ruby
-  `storage_to_element` receives that value (an Integer, a Float, `true`)
-  rather than a `String` of its bytes, also for a Face that names
-  `:storage`. An object or fixlen storage is unchanged, except that an
-  object storage can no longer be given a surface of another type.
-  Faces written in C are not affected.
-- Fix: comparing, searching or counting against a Face whose cells are its
-  values (`CAString`, `CAFixlenString`) took an operand whose cells only
-  encode its values (a time, a categorical, a `CAConstString`) and compared
-  the encoding, giving wrong answers silently. A string or categorical
-  operand is now read by its values, as `is_in` and the set operations
-  already read it, and a time operand is refused. A Face that neither holds
-  its values in its cells nor defines `to_comparable` now refuses a plain
-  operand in `is_in` and the set operations too, as comparison, search and
-  `count(v)` already did, and one whose cells are its values takes a set as
-  an array of its storage type would. `CATime#is_in` and the set operations take a
-  single value (a `Time`, an element) as a set of one instead of answering
-  `false` everywhere, and refuse a bare number as search does.
-- Fix: a Face that keeps state of its own (a Ruby Face carrying it with
-  `copy_state`) kept it in views, copies and `sort`, but lost it in the
-  arrays `min(axis:)`, `max(axis:)`, `cummax`, `cummin` and
-  `partition_copy` build. It is now carried there too.
-
 - New: `CAFrame.from_csv` reads messy tables: `types: :infer` (numbers,
   booleans, year-first dates and times), `types: { default: ... }`,
   `missing:` tokens, `on_error:` (`:mask`, `:warn`, `:raise`), `columns:` to
@@ -225,14 +59,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   consecutive runs of cells, with `CArray.segment_offsets` /
   `segment_index` to convert between lengths, boundaries and segment
   numbers. The scans, `map`, `median` and `percentile` of
-  `group_by_category` take `axis:`.
+  `group_by_category` take `axis:`, and a window's `median`, `percentile`
+  and `quantile` answer under the default `bounds: :skip`.
 
 - New: `bitfield(range, type)` reads a field as a signed or wider integer;
   `set_attrs(hash)`; `order(kind:)`; `tolerance: "10 minutes"` for time keys
   in `locate_nearest_addr` and `CAFrame#join_asof`. A `CARecord` answers
   `unique`, `value_counts`, `mode`, `is_in`, the set operations,
-  `categorize`, `count(v)` and `locate_addr`. The reductions of `a[nil, :>]`
-  take `min_count:` and `fill_value:`, as the other iterators do.
+  `categorize`, `count(v)` and `locate_addr`.
 
 - New: for whoever registers a `CArray.expression_evaluator` (carray-jit):
   mixed data types, integer powers, comparisons, `then_else`, `shift`, and
@@ -255,28 +89,27 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   result.
 
 - Change: errors a caller can cause no longer raise `RuntimeError`: a bad
-  shape, step, axis, option or data type raises `ArgumentError`, `TypeError`,
-  `RangeError` or `CArray::DataTypeError`, and an out-of-range axis raises
-  `ArgumentError` everywhere (some places raised `IndexError`). A write to a
-  read-only array still raises `RuntimeError`. Messages name the method you
-  called. Update a `rescue` that matched the old class or wording.
+  shape, step, axis, option or data type raises `ArgumentError`,
+  `TypeError`, `RangeError` or `CArray::DataTypeError`, and every index out
+  of range raises `IndexError` (`take_along_axis`, `axis2addr` and
+  `addr2index` raised others). `CArray::DataTypeError` is now a
+  `TypeError`. A write to a read-only array still raises `RuntimeError`.
+  Messages name the method you called and the value you gave. Update a
+  `rescue` that matched the old class or wording.
 
 - Change: arguments that were truncated or ignored now raise: an axis,
-  `min_count:`, `kth` or `n` that is not an Integer; a misspelt keyword
-  (`dump`, `save`, `load`, `CArray.struct`, `result_type`, ...); a Symbol
-  column name in `cast` and `types:`; `windows` given anything but Ranges
-  (an exclusive range now leaves out its end); `CA_INT32(0, 2)`; a fixlen
-  array without `bytes:`; `inherit_mask` given a non-CArray; `min_count:` or
-  `fill_value:` to `all` / `any` of `windows`, `blocks` and an axis group, as
-  to the core `all` / `any`; a misspelt keyword to `all` / `any` / `none`
-  with `skip_masked: false` and to object `wsum` / `wmean`. A negative axis
-  counts from the end everywhere. The indexer's method form (`a[:eq, 0]`)
-  calls public methods only.
+  `min_count:`, `kth` or `n` that is not an Integer; a misspelt keyword; a
+  keyword a method does not take (`min_count:` to `all` / `any` of an
+  iterator, as to the core); a Symbol column name in `cast` and `types:`;
+  `windows` given anything but Ranges (an exclusive range now leaves out
+  its end); `CA_INT32(0, 2)`; a fixlen array without `bytes:`. A negative
+  axis counts from the end everywhere. The indexer's method form
+  (`a[:eq, 0]`) calls public methods only.
 
 - Change: a Hash passed as a positional argument is an argument, as in
-  Ruby 3, and is no longer read as keywords: `a.sum({axis: 0})` raises
-  (write `a.sum(axis: 0)` or `a.sum(**opts)`). An object array of Hashes can
-  now be searched and counted (`search({a: 1})`, `count({a: 1})`).
+  Ruby 3, not keywords: `a.sum({axis: 0})` raises (write `a.sum(axis: 0)`
+  or `a.sum(**opts)`). An object array of Hashes can now be searched and
+  counted.
 
 - Change: values that cannot be held raise instead of being bent: storing
   `nil` into a numeric or boolean array, an Integer operand the array's type
@@ -353,12 +186,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   was floored. `union` of two units gives the finer unit. `inspect` shows
   the tick and each cell as `to_s` does.
 
+- Change: `==` on a Face (a time, string or categorical array) compares the
+  values it holds, and only with a Face of its own class: time arrays of
+  different units holding the same instants are `==`, and a `CAString` is
+  no longer `==` to an object array of the same strings (compare
+  `to_type(:object)` for that).
+
 - Change: Faces (`CATime`, `CATimedelta`, `CACategorical`, string arrays):
   `.lazy` returns the Face and computes eagerly; storing one into a
   non-object plain array raises (convert with `to_type(:object)` or
   `ticks`); `CArray.save`, `dump` and `Marshal.dump` refuse one, and a
   `CAWrap` (save `.parent` or `.copy`); `CArray.stack([face])` returns the
   Face, and mixing Faces raises.
+
+- Change: for whoever writes a Face: the hooks are renamed
+  `storage_to_element` / `element_to_storage`, and a stored value goes
+  through `element_to_storage` once (it went through twice). A Face written
+  in Ruby on `CAObject` over a numeric storage refuses arithmetic, math and
+  reductions unless it passes `numeric: true`.
 
 - Change: views: a view of a frozen array is read-only rather than frozen
   (`RuntimeError`, `frozen?` false), so `sort`, selections and lazy
@@ -373,8 +218,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Change: on an object array, `min`, `max`, `cummin`, `pmin` and the rest
   compare with `<=>`, as `sort` does; a pair that cannot be ordered raises
-  `ArgumentError`. `&`, `|` and `^` with a boolean array read its cells as
-  `true` / `false`.
+  `ArgumentError`. `median`, `percentile` and `quantile` answer in the
+  elements' own arithmetic (`CA_OBJECT([1, 2]).median` is `3/2`; convert
+  with `to_type(:float64)` for a Float). `&`, `|` and `^` with a boolean
+  array read its cells as `true` / `false`, eager and lazy.
 
 - Change: smaller behaviour changes: `locate_nearest_addr` (and `join_asof`,
   `snap_to`) with `direction:` matches beyond the reference's ends (limit it
@@ -390,34 +237,33 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Change: for C extensions: `CArray::VERSION_CODE` is
   `major*10000 + minor*100 + teeny` (`30003`); the `CA_FOR_EACH_ELEMENT`
-  macros and `CA_WITH_BUFFER` are removed (use `ca_call_cslab_N_r`,
-  `ca_call_cfunc_N_r` or `rb_ca_call_with_buffer`); the `_INOUT` and `_PAIR`
-  fiber macros raise on a shape mismatch; the Face hooks are
-  `storage_to_element` / `element_to_storage`; kernels are built with
-  `-fwrapv`. Rebuild the extension.
+  macros, `CA_WITH_BUFFER` and `CA_CHECK_BOUND` are removed (use
+  `ca_call_cslab_N_r`, `ca_call_cfunc_N_r` or `rb_ca_call_with_buffer`);
+  the `_INOUT` and `_PAIR` fiber macros raise on a shape mismatch; kernels
+  are built with `-fwrapv`. Rebuild the extension.
 
 - Change: faster, with the same results: `from_csv` with `types:` (two to
   five times), text to float (eight times), `CAConstString#to_string`,
   reductions over gathered, `shift` and `window` views, a repeated
   `CArray.fuse` block, and selecting from a lazy expression.
 
-- Fix: wrong answers that came without an error. `refer` to a wider type on
-  a transposed, flipped or stepped parent read neighbouring values; views
-  of a stack or meld that swap a length-1 axis or reshape a flat window,
+- Fix: wrong answers that came without an error. An in-place operation
+  reading an argument that shares its memory read cells it had already
+  written (`a[1..5].add!(a[0..4])` gave a running sum; `scatter_*!`,
+  `inherit_mask` and `mask=` too); `refer` to a wider type on a transposed
+  or stepped parent read neighbouring values; views of a stack or meld,
   and a slice of a lazy expression, returned other cells; a Float operand
-  of an integer array was truncated (`count(1.5)` found `1`); signed and
-  unsigned integers were compared by bytes in `is_in` and the set
-  operations; a masked index read cell 0 in `gather_nd` and `put_nd`
-  overwrote it; `stddev` of NaN data was 0.0; on an object array `is_inf`
-  was true everywhere.
+  of an integer array was truncated (`count(1.5)` found `1`); `mask=` with
+  another shape copied cells by count; a masked index read cell 0 in
+  `gather_nd`; `stddev` of NaN data was 0.0.
 
 - Fix: wrong answers that came without an error, time and strings: time
   keys of different units matched or not depending on the side in `is_in`,
   `join` and `align`; `locate_nearest_addr` picked a wrong row for a NaN,
-  an infinite or a nanosecond key; `unmask(time)` read a `Time` as a count;
-  `CAConstString` comparisons compared buffer positions; `CArray.sort_addr`
-  ordered a const string by its storage; `x.value.reshape` regained the
-  mask of `x`.
+  an infinite or a nanosecond key; `unmask(time)`, `resize(fill_value:)`
+  and `insert_block` read a `Time` as a count; `CAConstString` comparisons
+  compared buffer positions; a `CAString` compared against a time,
+  categorical or const string compared their encodings.
 
 - Fix: writes that were lost now reach the array: through a grid, selection
   or `select_axis` over a reshaped transpose, through a stack or meld of
@@ -437,6 +283,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   an array could stay attached, and after 32 such errors every lazy
   expression failed with "all 32 slots in use".
 
+- Fix: iterator reductions answer as the same reduction on an array: every
+  one takes `min_count:` and `fill_value:` (`blocks(n).percentile(p,
+  min_count: k)` read them as a second percentile), a group's counts apply
+  `min_count:` to the right cells, a group's `wmean` no longer takes
+  `fill_value:` as a weight, a window of only NaN gives NaN, and object
+  weights in `segments` stay exact.
+
 - Fix: `CAFrame` round trips through CSV and records: quotes, separators of
   several characters or spaces, lines of spaces, a duplicated header name,
   complex `Infinity` / `NaN`, months and years, hour 24, a one-column file
@@ -446,16 +299,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `group_by` takes a categorical key and treats NaN in a composite key as
   one value.
 
-- Fix: types and Faces kept through operations: complex arrays work with
-  `unique`, `is_in` and the rest of that family; the reductions of
-  `windows` and `blocks`, `partition_copy`, `then_else` and `mask_eq` return
-  the Face; `axis_group` and categorical reductions and scans take boolean,
-  complex, object and Face values; `meld` reductions answer as on a copy;
-  fixlen strings of different widths match; `atan2`, `hypot` and others keep
-  float32 and integer types. A record member declared with `endian:` reads,
-  sorts, saves and loads correctly. A time array's `fill_value:` is a time
-  (or a duration) on every reduction path, as for `strip_mask`; a
-  categorical `variance(axis:)` of an object array stays object.
+- Fix: Faces stay Faces: the reductions of `windows` and `blocks`,
+  `partition_copy`, `then_else`, `clip`, `mask_eq` and `meld` return the
+  Face, and a Face's own state survives `min(axis:)`, `cummax` and
+  `partition_copy`. `axis_group` and categorical reductions take boolean,
+  complex, object and Face values; a time array's `fill_value:` is a time
+  on every path. `CAFrame#fill(:linear)` interpolates any Face that defines
+  `linear_fetch`. A categorical refuses `clip` and `minmax` as it refuses
+  `min`.
+
+- Fix: types kept through operations: complex arrays work with `unique`,
+  `is_in` and the rest of that family; `meld` reductions answer as on a
+  copy; fixlen strings of different widths match; `atan2`, `hypot` and
+  others keep float32 and integer types; a record member declared with
+  `endian:` reads, sorts, saves and loads correctly.
 
 - Fix: NaN and masked cells are treated the same everywhere: NaN is last in
   object sorts and `categorize`, loses `min` / `max`, and is found by
@@ -476,8 +333,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - Fix: for C extensions: a `CA_KERNEL_WRITE` walk over a view that holds a
   cell more than once keeps the cells the kernel wrote; a walk left with
   `break` writes back its slab; writes through a `CAGrid`, `CAWindow` or
-  `CAShift` over a view reach the array; a NULL source to
-  `ca_iter_state_init_l1` / `_l2` returns an error. Rebuild the extension.
+  `CAShift` over a view reach the array; the sweep engine and paired walks
+  read an argument sharing the output's memory as it was; a view class
+  that is not registered with `ca_iter_register_source_kind` is still
+  accepted. Rebuild the extension.
 
 ## 3.0.2
 
