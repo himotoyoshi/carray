@@ -40,8 +40,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   or record array) wrote the fill value into the storage as it was, so a
   `Time` filled a time array with a date millions of years off. The value is
   now written as a value of the array, as `shift(fill_value:)` and `unmask`
-  write it; a const string or categorical array, whose cells cannot be
-  written, still resizes but refuses a fill value. A Face written into a
+  write it; a const string array still resizes but refuses a fill value, and
+  the new cells of a categorical are UNDEF unless the fill value is one of
+  its labels (a zero code used to read as the first label). A Face written into a
   Face of its own class is now taken as it is (a Face defined in Ruby
   without `to_comparable` used to refuse it), and `CAFrame#fill(:linear)`
   interpolates any Face that defines `linear_fetch`, as `unmask(method:

@@ -317,6 +317,27 @@ class CACategorical < CAObject
   #   an all-false result.
   #   @param label [Object] category to match.
   #   @return [CArray]
+  # @overload resize(*newdim, fill_value: UNDEF)
+  #   Returns a categorical resized to `newdim` (see {CArray#resize}).
+  #   The new cells are excluded (UNDEF) unless `fill_value` names one of
+  #   the labels, since a zero code would read as the first label.
+  #   @raise [ArgumentError] when `fill_value` is not a label.
+  def resize (*newdim, fill_value: UNDEF)
+    CACategorical.from_codes(codes.resize(*newdim, fill_value: code_for_fill(fill_value)),
+                             labels)
+  end
+
+  # @overload insert_block(offset, bsize, &block)
+  #   Returns a categorical with a block inserted (see
+  #   {CArray#insert_block}). The inserted cells are excluded (UNDEF)
+  #   unless the block returns one of the labels.
+  #   @raise [ArgumentError] when the block returns something that is not
+  #     a label.
+  def insert_block (offset, bsize, &block)
+    fill = block ? code_for_fill(block.call) : UNDEF
+    CACategorical.from_codes(codes.insert_block(offset, bsize) { fill }, labels)
+  end
+
   def eq(label)
     codes.eq(@labels.index(label) || @labels.size)
   end
@@ -463,6 +484,14 @@ class CACategorical < CAObject
   # that has none. Every code-to-label path goes through here rather than
   # indexing @labels itself, because two decodes are two chances to disagree,
   # and disagreeing is how #unique came to contradict #to_a on the same cell.
+  # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
+  def code_for_fill (value)
+    return UNDEF if UNDEF.equal?(value)
+    code = labels.index(value)
+    raise ArgumentError, "#{value.inspect} is not one of the labels #{labels.inspect}" unless code
+    code
+  end
+
   def label_at (code)
     (code < 0 || code >= @labels.size) ? nil : @labels[code]
   end

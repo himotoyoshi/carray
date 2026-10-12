@@ -56,6 +56,17 @@ class TestFaceFillValue < Test::Unit::TestCase
     assert_equal ["ab", "cd", ""], CArray.fixlen_string(%w[ab cd]).resize(3).to_a
   end
 
+  def test_a_categorical_leaves_new_cells_undefined_unless_given_a_label
+    k = CArray.string(%w[b a b]).categorize
+    assert_equal ["b", "a", "b", UNDEF], k.resize(4).to_a
+    assert_equal ["b", "a", "b", "a"], k.resize(4, fill_value: "a").to_a
+    assert_raise(ArgumentError) { k.resize(4, fill_value: "z") }
+    assert_equal ["b", UNDEF, "a", "b"], k.insert_block([1], [1]).to_a
+    assert_equal ["b", "b", "a", "b"], k.insert_block([1], [1]) { "b" }.to_a
+    c = CArray.const_string(%w[ab cd])
+    assert_equal ["ab", "cd", ""], c.resize(3).to_a
+  end
+
   def test_insert_block_writes_the_block_value_as_a_value_of_the_array
     t = time("2024-01-01", "2024-01-02")
     assert_equal %w[2024-01-09 2024-01-01 2024-01-02],
