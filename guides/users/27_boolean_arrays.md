@@ -324,7 +324,7 @@ Masks are stored as boolean arrays too (see [Masks and missing values](05_masks.
 ## Conversions
 
 ```ruby
-b.to_type(CA_INT32)   #  => int32 [ 1, 0, 1 ]     (widen to integer for numeric use)
+b.to_type(:int32)     #  => int32 [ 1, 0, 1 ]     (widen to integer for numeric use)
 b.int32               #  => same
 b.to_a                #  => [true, false, true]   (Ruby-land; see the two
                       #     representations above)
