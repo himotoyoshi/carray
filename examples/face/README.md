@@ -38,6 +38,12 @@ There are two kinds:
   (surface is `CA_FIXLEN`) that brings the meaningful operations back as
   Ruby overrides. NonNumeric is the point: it is what gates the float64
   promotion that `* Float` would otherwise cause.
+- **`ca_quantity.rb`** — a float array with one physical unit (`:cm`, `:km`,
+  `:hPa`, `:K`, ...). A NonNumeric Face that brings back the operations which
+  stay in the unit (`+ -` with unit conversion, scaling by a plain number,
+  `sum`, `mean`, `median`, `stddev`, ...) and returns quantities from them;
+  ordering comes from the core through `orderable_storage` and
+  `to_comparable`. `h * h` (cm²), `variance` and `sqrt` stay refused.
 
 ### Composite Face (on `CARecord`)
 
