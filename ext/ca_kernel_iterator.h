@@ -176,9 +176,9 @@ typedef enum {
 /* ---- error codes ----------------------------------------------------- */
 #define CA_ITER_OK              0
 #define CA_ITER_ERR_NOT_CHEAP   1    /* the classifier does not recognise
-                                        the source (an external obj_type
-                                        that did not register, see
-                                        ca_iter_register_source_kind)   */
+                                        the source (a view with no attach
+                                        slot; any other external obj_type
+                                        is delivered by attaching it)    */
 #define CA_ITER_ERR_POLICY      2    /* policy not implemented yet       */
 #define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported;
                                         also returned for a NULL state
@@ -214,13 +214,13 @@ typedef enum {
    The classifier recognises the core's own view classes by comparing
    their operation table against a list compiled into the engine.  A view
    class installed by a companion gem through ca_install_obj_type matches
-   nothing on that list, so without this hook it classifies as
-   CA_ITER_SRC_NONE and every kernel that goes through the iterator
-   refuses the array with CA_ITER_ERR_NOT_CHEAP.  An external author
-   declares the routing here instead, once, in the class's Init:
+   nothing on that list; it is delivered as CA_ITER_SRC_ATTACH (the view's
+   own attach gathers it), and so is one that registers here, once, in the
+   class's Init:
 
      ca_iter_register_source_kind(CA_OBJ_MY_VIEW, CA_ITER_SRC_ATTACH);
 
+   Registering states the routing rather than changing it.
    CA_ITER_SRC_ATTACH is the only kind that may be registered.  It is the
    one whose contract an external class can meet on its own: func_attach
    materialises (or aliases) src->ptr and func_sync scatters back — the

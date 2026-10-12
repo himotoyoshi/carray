@@ -334,6 +334,12 @@ ca_iter_classify_source (CArray *src)
   if ( attach == ca_moncmp_func.attach      ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_triop_func.attach       ) return CA_ITER_SRC_ATTACH;
 
+  /* Anything else is a view class installed from outside that did not
+     register.  Attaching is the one thing every view can do, and it is
+     what a registration would declare, so the array is delivered that way
+     rather than refused. */
+  if ( attach != NULL ) return CA_ITER_SRC_ATTACH;
+
   return CA_ITER_SRC_NONE;
 }
 

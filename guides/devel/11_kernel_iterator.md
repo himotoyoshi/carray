@@ -669,11 +669,11 @@ CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarra
 
 The classifier reads these off the source's op table, which only works for the
 view classes compiled into the engine. A class installed from outside declares
-its kind instead, with `ca_iter_register_source_kind(obj_type,
-CA_ITER_SRC_ATTACH)` in its `Init_`; without it the source classifies as
-`CA_ITER_SRC_NONE` and every kernel refuses it with `CA_ITER_ERR_NOT_CHEAP`. The
-declaration is the one part of this routing an external author touches, so it is
-additive rather than free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a
+its kind with `ca_iter_register_source_kind(obj_type, CA_ITER_SRC_ATTACH)` in its
+`Init_`; without it the source is delivered the same way, by attaching it, so the
+declaration states the routing rather than changing it. It is the one part of
+this routing an external author touches, so it is additive rather than
+free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a
 standalone view", step 6.
 
 `alias_mode`:

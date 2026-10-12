@@ -3,13 +3,10 @@
 #
 # The classifier recognises carray's own views by comparing their
 # operation table against a list compiled into the engine.  A class
-# installed by a companion gem matches nothing there, so before this hook
-# existed it classified as CA_ITER_SRC_NONE and every kernel that goes
-# through the iterator refused the array (CA_ITER_ERR_NOT_CHEAP, rc=1).
-# The break was uneven, which is what made it hard to read from the
-# outside: an entity-typed external source still worked (it is caught by
-# ca_is_entity first) and a slice of the offending view worked (the
-# CABlock is classified on its own obj_type), but the whole array failed.
+# installed by a companion gem matches nothing there.  It was refused
+# (CA_ITER_ERR_NOT_CHEAP, rc=1) until it registered; it is now delivered by
+# attaching it, which is what the registration declares, so registering
+# states the routing rather than changing it.
 #
 # The fixture (spec_ai/ext_iter_source_kind/) is a pair of identical
 # conversion-layer views over an int32 parent — CAIterOffset registers,
@@ -98,12 +95,11 @@ class TestIterSourceKindUnregistered < Test::Unit::TestCase
     @view   = CAIterOffsetUnregistered.wrap(@parent, 100)
   end
 
-  # The state a companion gem is in without the hook.  Pinned so the
-  # registration in the twin class above is doing the work, not something
-  # else the fixture happens to provide.
-  def test_kernels_refuse_an_unregistered_external_view
-    assert_raise(RuntimeError) { @view.sum }
-    assert_raise(RuntimeError) { @view.mean }
+  # Without the hook the view is attached, as a registered one is.
+  def test_kernels_deliver_an_unregistered_external_view
+    assert_equal 621, @view.sum
+    assert_equal 103.5, @view.mean
+    assert_equal [[101, 102, 103], [104, 105, 106]], @view.sort(axis: 1).to_a
   end
 
   # ... while everything that does not route through the iterator is
@@ -138,7 +134,7 @@ class TestIterSourceKindRegistration < Test::Unit::TestCase
     rescue ArgumentError
     end
     view = CAIterOffsetUnregistered.wrap(CA_INT32([1, 2, 3]), 100)
-    assert_raise(RuntimeError) { view.sum }
+    assert_equal 306, view.sum
   end
 
   def test_obj_type_is_range_checked

@@ -452,13 +452,9 @@ re-snapshots so a `dup` gets independent `indices`).
 **6 — Tell the kernel iterator how to read it.** The classifier in
 `ca_iter_classify_source` ([ch. 11](11_kernel_iterator.md)) recognises the core's
 own views by comparing their op table against a list compiled into the engine. A
-class you installed with `ca_install_obj_type` matches nothing on that list, so it
-classifies as `CA_ITER_SRC_NONE` and **every kernel that goes through the iterator
-refuses the array** — `sum`, `mean`, `cumsum`, `sort_index`, the lot, each raising
-from init with `rc=1` (`CA_ITER_ERR_NOT_CHEAP`). The break is uneven and reads
-like a bug elsewhere: a slice of the view still works (the CABlock is classified
-on its own obj_type), and so does an entity underneath it, but the whole array
-does not. Declare the routing in your `Init_`:
+class you installed with `ca_install_obj_type` matches nothing on that list, so
+the iterator delivers it by attaching it (`CA_ITER_SRC_ATTACH`). You can state
+that routing in your `Init_`; it changes nothing but makes the choice explicit:
 
 ```c
 CA_OBJ_MINE = ca_install_obj_type(rb_cCAMine, &camine_data_type,
