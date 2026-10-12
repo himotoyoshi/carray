@@ -1496,7 +1496,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
 static int
 ca_bang_input_may_overlap (CArray *target, CArray *input)
 {
-  return input != target && ca_root_array(input) == ca_root_array(target);
+  return input != target && ca_shares_root(input, target);
 }
 
 /* Bang (in-place) variant.  Invariant: the input-only operand (= other)

@@ -212,6 +212,9 @@
 
    The kernel then runs through AT_RUN, and an address out of range
    raising part way still leaves the cells already written.
+
+   An address or value array that shares self's root is copied first:
+   read in place, it would show the kernel cells it has already written.
 */
 /* Body shared by arithmetic and replace setups.  Caller precondition:
    the data_type gate has already run (arithmetic = numeric only, replace
@@ -220,6 +223,10 @@
 #define AT_SETUP_BODY(name, allow_bool_scalar) \
   raddrs = rb_ca_wrap_readonly(raddrs, INT2NUM(CA_SIZE)); \
   TypedData_Get_Struct(raddrs, CArray, &carray_data_type, ci); \
+  if ( ca_shares_root(ci, ca) ) { \
+    raddrs = rb_ca_copy(raddrs); \
+    TypedData_Get_Struct(raddrs, CArray, &carray_data_type, ci); \
+  } \
   n = ci->elements; \
   if ( n == 0 ) return self; \
   vals_scalar = (RB_FLOAT_TYPE_P(rvals) || FIXNUM_P(rvals) \
@@ -238,6 +245,10 @@
   else { \
     rvals = rb_ca_wrap_readonly(rvals, INT2NUM(ca->data_type)); \
     TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv); \
+    if ( ca_shares_root(cv, ca) ) { \
+      rvals = rb_ca_copy(rvals); \
+      TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv); \
+    } \
     if ( cv->elements != n ) { \
       rb_raise(rb_eArgError, \
         name ": vals length (%lld) doesn't match addrs length (%lld)", \

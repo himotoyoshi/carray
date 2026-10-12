@@ -552,6 +552,15 @@ ca_root_array (void *ap)
   }
 }
 
+/* Whether two arrays may share memory: their cells live in the same
+   root.  An operation that writes one while reading the other must read
+   from a copy taken before it writes. */
+int
+ca_shares_root (void *ap, void *aq)
+{
+  return ca_root_array(ap) == ca_root_array(aq);
+}
+
 static VALUE
 rb_ca_root_array (VALUE self)
 {

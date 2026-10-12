@@ -633,12 +633,20 @@ ca_setup_mask (void *ap, CArray *mask)
 /* The overlay reads each source's mask into the destination's.  A
    source's mask can be made or read by calling Ruby (a CAObject's mask
    hooks) and raise, so every mask is made first and the lot are read
-   inside one attach window. */
+   inside one attach window.
+
+   A source whose cells live in the destination's root has its mask read
+   into a snapshot before the destination's mask is made, cleared or
+   written: the destination's mask may be that same memory, and the word
+   OR would otherwise read bytes it has already set. */
 typedef struct {
-  CArray   **list;      /* [0] the destination mask, then the sources' */
-  char      *scalar;    /* per entry: the source is a scalar */
-  int        k;
-  ca_size_t  elements;
+  CArray     **list;      /* [0] the destination mask, then the attached sources' */
+  boolean8_t **snap;      /* per source: its mask read in advance, or NULL */
+  CArray     **att;       /* per source: its attached mask when not snapped */
+  char        *scalar;    /* per source: the source is a scalar */
+  int          k;         /* entries in list */
+  int          ns;        /* sources */
+  ca_size_t    elements;
 } ca_mask_overlay_t;
 
 static VALUE
@@ -647,8 +655,8 @@ ca_mask_overlay_body (VALUE arg)
   ca_mask_overlay_t *o = (ca_mask_overlay_t *) arg;
   boolean8_t *ma = (boolean8_t *) o->list[0]->ptr;
   int i;
-  for (i=1; i<o->k; i++) {
-    boolean8_t *ms = (boolean8_t *) o->list[i]->ptr;
+  for (i=0; i<o->ns; i++) {
+    boolean8_t *ms = o->snap[i] ? o->snap[i] : (boolean8_t *) o->att[i]->ptr;
     /* scalar masked source -> broadcast to all (memset); array source
        -> pure word OR (ca_mask_word_or).  A defensive `if (*ms)` is
        unnecessary: under the {0,1} invariant, `*ma |= *ms` equals
@@ -665,12 +673,15 @@ ca_mask_overlay_body (VALUE arg)
   return Qnil;
 }
 
-void
-ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
+/* overwrite: the destination's mask is cleared before the sources are
+   OR'd in (and left alone when it has none and no source has a mask). */
+static void
+ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
+                           CArray **slist, int overwrite)
 {
-  CArray *ca = (CArray *) ap;
   CArray *cs;
   ca_mask_overlay_t o;
+  volatile VALUE *holders;
   char *modes;
   int i, some_has_mask = 0;
 
@@ -682,23 +693,35 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
   }
 
   if ( ! some_has_mask ) {
+    if ( overwrite ) {
+      ca_update_mask(ca);
+      if ( ca->mask ) {
+        boolean8_t zero = 0;
+        ca_fill(ca->mask, &zero);
+      }
+    }
     return;
   }
-
-  ca_create_mask(ca);
 
   if ( elements > ca->elements ) {
     elements = ca->elements;
   }
 
   o.list     = ALLOCA_N(CArray *, n + 1);
-  o.scalar   = ALLOCA_N(char, n + 1);
+  o.snap     = ALLOCA_N(boolean8_t *, n);
+  o.att      = ALLOCA_N(CArray *, n);
+  o.scalar   = ALLOCA_N(char, n);
+  holders    = ALLOCA_N(VALUE, n);
   modes      = ALLOCA_N(char, n + 2);
   o.elements = elements;
-  o.k        = 0;
-  o.list[o.k]   = ca->mask;
-  o.scalar[o.k] = 0;
-  modes[o.k++]  = 'w';
+  o.ns       = 0;
+  for (i=0; i<n; i++) {
+    holders[i] = 0;
+  }
+  ca_update_mask(ca);
+
+  /* Every source mask is made, and those in the destination's root are
+     read, before the destination's mask is touched. */
   for (i=0; i<n; i++) {
     cs = slist[i];
     if ( ! cs ) {
@@ -708,12 +731,49 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
     if ( ! cs->mask ) {
       continue;
     }
-    o.list[o.k]   = cs->mask;
-    o.scalar[o.k] = (char) ca_is_scalar(cs);
-    modes[o.k++]  = 'r';
+    o.scalar[o.ns] = (char) ca_is_scalar(cs);
+    o.att[o.ns]    = NULL;
+    o.snap[o.ns]   = NULL;
+    if ( ca_shares_root(cs, ca) || ca_shares_root(cs->mask, ca) ||
+         ( ca->mask && ca_shares_root(cs->mask, ca->mask) ) ) {
+      o.snap[o.ns] = ALLOCV_N(boolean8_t, holders[o.ns], cs->mask->elements);
+      ca_xfer_all(cs->mask, (char *) o.snap[o.ns], CA_XFER_GET);
+    }
+    else {
+      o.att[o.ns] = cs->mask;
+    }
+    o.ns++;
+  }
+
+  ca_create_mask(ca);
+  if ( overwrite ) {
+    boolean8_t zero = 0;
+    ca_fill(ca->mask, &zero);
+  }
+
+  o.k = 0;
+  o.list[o.k]  = ca->mask;
+  modes[o.k++] = 'w';
+  for (i=0; i<o.ns; i++) {
+    if ( o.att[i] ) {
+      o.list[o.k]  = o.att[i];
+      modes[o.k++] = 'r';
+    }
   }
   modes[o.k] = '\0';
   ca_attach_window(o.k, o.list, modes, ca_mask_overlay_body, (VALUE) &o);
+
+  for (i=0; i<n; i++) {
+    if ( holders[i] ) {
+      ALLOCV_END(holders[i]);
+    }
+  }
+}
+
+void
+ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
+{
+  ca_copy_mask_overlay_core((CArray *) ap, elements, n, slist, 0);
 }
 
 void
@@ -732,7 +792,7 @@ ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
   }
   va_end(args);
 
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
+  ca_copy_mask_overlay_core(ca, elements, n, slist, 0);
 
   ALLOCV_END(holder);
 }
@@ -740,15 +800,7 @@ ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
 void
 ca_copy_mask_overwrite_n (void *ap, ca_size_t elements, int n, CArray **slist)
 {
-  CArray *ca = (CArray *) ap;
-
-  ca_update_mask(ca);
-  if ( ca->mask ) {
-    boolean8_t zero = 0;
-    ca_fill(ca->mask, &zero);
-  }
-
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
+  ca_copy_mask_overlay_core((CArray *) ap, elements, n, slist, 1);
 }
 
 void
@@ -767,13 +819,7 @@ ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...)
   }
   va_end(args);
 
-  ca_update_mask(ca);
-  if ( ca->mask ) {
-    boolean8_t zero = 0;
-    ca_fill(ca->mask, &zero);
-  }
-
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
+  ca_copy_mask_overlay_core(ca, elements, n, slist, 1);
 
   ALLOCV_END(holder);
 }
@@ -1260,6 +1306,15 @@ rb_ca_set_mask (VALUE self, VALUE rval)
        Checked before the mask exists, so a refused one leaves none. */
     ca_broadcast_to_destination(self, &rmask);
     TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
+    /* A new mask taken from self's own root, or from self's mask, is
+       read from a copy: making and writing self's mask would change it
+       before it is read. */
+    ca_update_mask(ca);
+    if ( ca_shares_root(cv, ca) ||
+         ( ca->mask && ca_shares_root(cv, ca->mask) ) ) {
+      rmask = rb_ca_copy(rmask);
+      TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
+    }
     if ( ! ca_is_boolean_type(cv) ) {
       cv = ca_wrap_readonly(rmask, CA_BOOLEAN);
     }

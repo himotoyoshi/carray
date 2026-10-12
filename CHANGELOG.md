@@ -52,10 +52,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `ca_iter_register_source_kind` (C extensions only); it is attached and
   answered as `sort` and `cumsum` already did, so registering is optional.
 
-- Fix: an in-place operator (`add!`, `mul!`, `fma!` and the rest) whose
-  argument shares memory with the receiver answers what the plain operator
-  answers. `a[1..5].add!(a[0..4])` produced a running sum, reading cells it
-  had already written.
+- Fix: an operation that writes into an array while reading an argument
+  that shares its memory reads the argument as it was before the
+  operation. In-place operators (`add!`, `mul!`, `fma!` and the rest),
+  `scatter_*!` (values, addresses and the values' mask), `put_nd` with a
+  masked index, `inherit_mask`, `inherit_mask_replace` and `mask=` read
+  cells they had already written: `a[1..5].add!(a[0..4])` produced a
+  running sum, and `a[8..].inherit_mask(a[0..991])` spread one masked
+  cell over a quarter of the array. For C extensions, the same holds for
+  the sweep engine (`ca_call_cfunc_*`, `ca_call_cslab_*`) and for the
+  kernel iterator's paired walks (the INOUT forms and
+  `ca_iter_state_init_l2_paired`); two walks opened separately must still
+  be given a copy by the caller.
 
 - Change: `take_along_axis` and `axis2addr` raise IndexError for an index
   out of range, and `addr2index` raises IndexError for an address out of

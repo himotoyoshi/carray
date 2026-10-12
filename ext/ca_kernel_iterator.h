@@ -640,7 +640,15 @@ void ca_iter_state_finish (ca_iter_state *st);
    or a write-back through a source's slots): each is open in the
    caller's frame, and the raise would jump over the other's finish.  If
    opening `st` raises, or is declined (the code is returned), `first` is
-   finished here, so the caller has nothing left to close. */
+   finished here, so the caller has nothing left to close.
+
+   When `st` writes (CA_KERNEL_WRITE), `first` reads, both walk by
+   CA_SLAB_AXES, and their arrays live in the same root, `first` is
+   reopened on a copy of its array taken before anything is written, so
+   the kernel reads the values the input held when the walk began.  Two
+   walks opened separately with ca_iter_state_init_l2 know nothing of
+   each other: a read walk over memory a write walk writes into must be
+   given a copy by the caller. */
 int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
                                    ca_iter_state    *first,
                                    struct _CArray   *src,

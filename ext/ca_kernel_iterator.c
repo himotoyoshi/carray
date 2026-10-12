@@ -32,6 +32,11 @@
 #include <string.h>
 #include <ruby/ractor.h>
 
+/* Private flags bit, kept in ca_iter_state.flags like
+   CA_ITER_FLAG_WALK_MAY_RAISE below: src is a copy the walk owns (see
+   ca_iter_reopen_on_copy), freed when the walk finishes. */
+#define CA_ITER_FLAG_OWNS_SRC 0x40000000u
+
 /* Data scratch.  A scratch of object cells holds VALUEs no Ruby object
    owns while the kernel calls Ruby for each cell, so it is filled with
    Qnil and held for the GC until finish releases it.
@@ -3276,6 +3281,14 @@ ca_iter_state_finish (ca_iter_state *st)
        NONE, scratch_ptr xfree'd above), so no src.detach needed. */
     ca_detach(st->src);
   }
+  if ( st->flags & CA_ITER_FLAG_OWNS_SRC ) {
+    CArray *own = st->src;
+    st->flags &= ~CA_ITER_FLAG_OWNS_SRC;
+    if ( ca_is_object_type(own) ) {
+      ca_gc_release_buffer(own->ptr);
+    }
+    ca_free(own);
+  }
   st->src       = NULL;
   st->alias_ptr = NULL;
 }
@@ -3327,6 +3340,7 @@ ca_iter_state_close (ca_iter_state *st)
    macros, so growing it would overrun states built against an older
    header. */
 #define CA_ITER_FLAG_WALK_MAY_RAISE 0x80000000u
+
 
 typedef struct {
   ca_iter_state    *st;
@@ -3552,6 +3566,70 @@ ca_iter_state_sync_slab (ca_iter_state *st)
   ca_iter_protect(st, ca_iter_call_sync_slab, (VALUE) &c);
 }
 
+typedef struct {
+  ca_iter_state *st;
+  CArray        *src;
+  CArray        *copy;
+} ca_iter_reopen_t;
+
+static VALUE
+ca_iter_reopen_copy (VALUE arg)
+{
+  ca_iter_reopen_t *r = (ca_iter_reopen_t *) arg;
+  r->copy = ca_copy(r->src);
+  return Qnil;
+}
+
+/* A read walk whose source lives in the root a paired write walk writes
+   into would read cells the kernel has already written: an aliased fiber
+   is the written memory itself, and a gathered one is read from the root
+   after earlier fibers were written back.  Such a read walk is reopened
+   on a copy of its source, taken before anything is written and owned by
+   the walk.  Returns the init's rc; a raise finishes `first` first. */
+static int
+ca_iter_reopen_on_copy (ca_iter_state *first)
+{
+  ca_iter_reopen_t r;
+  ca_iter_call_t c;
+  int8_t axes[CA_RANK_MAX];
+  int8_t naxes = first->naxes;
+  uint32_t flags = first->flags & ~(CA_ITER_FLAG_WALK_MAY_RAISE
+                                    | CA_ITER_FLAG_OWNS_SRC);
+  ca_slab_policy_t policy = first->policy;
+  int tag = 0;
+
+  memcpy(axes, first->slab_axes_buf, (size_t) naxes);
+  r.st = first; r.src = first->src; r.copy = NULL;
+  rb_protect(ca_iter_reopen_copy, (VALUE) &r, &tag);
+  if ( tag ) {
+    ca_iter_state_finish(first);
+    rb_jump_tag(tag);
+  }
+  if ( ca_is_object_type(r.copy) ) {
+    /* the walk overwrites the cells that held these VALUEs */
+    ca_gc_hold_buffer(r.copy->ptr, r.copy->elements);
+  }
+  ca_iter_state_finish(first);
+
+  c.st = first; c.src = r.copy; c.policy = policy;
+  c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
+  rb_protect(ca_iter_call_init_l2, (VALUE) &c, &tag);
+  if ( tag || c.rc != CA_ITER_OK ) {
+    ca_iter_state_finish(first);
+    if ( ca_is_object_type(r.copy) ) {
+      ca_gc_release_buffer(r.copy->ptr);
+    }
+    ca_free(r.copy);
+    if ( tag ) {
+      rb_jump_tag(tag);
+    }
+    return c.rc;
+  }
+  first->flags |= CA_ITER_FLAG_OWNS_SRC;
+  ca_iter_mark_walk_may_raise(first);
+  return CA_ITER_OK;
+}
+
 int
 ca_iter_state_init_l2_paired (ca_iter_state    *st,
                               ca_iter_state    *first,
@@ -3563,6 +3641,15 @@ ca_iter_state_init_l2_paired (ca_iter_state    *st,
 {
   ca_iter_call_t c;
   int tag = 0;
+  if ( (flags & CA_KERNEL_WRITE) && first->src != NULL &&
+       ! (first->flags & CA_KERNEL_WRITE) &&
+       policy == CA_SLAB_AXES && first->policy == CA_SLAB_AXES &&
+       ca_shares_root(first->src, src) ) {
+    int rc = ca_iter_reopen_on_copy(first);
+    if ( rc != CA_ITER_OK ) {
+      return rc;
+    }
+  }
   c.st = st; c.src = src; c.policy = policy;
   c.axes = axes; c.naxes = naxes; c.flags = flags; c.rc = CA_ITER_OK;
   rb_protect(ca_iter_call_init_l2, (VALUE) &c, &tag);

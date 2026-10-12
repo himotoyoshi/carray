@@ -181,6 +181,9 @@ CArray *ca_lazy_operation_mask (CArray *operation, int mode);
    (carray_attribute.c). */
 CArray *ca_root_array (void *ap);
 
+/* Whether two arrays' cells live in the same root (carray_attribute.c). */
+int ca_shares_root (void *ap, void *aq);
+
 /* The create_mask slot of a view whose cells map one-to-one onto its
    parent's in address order: the mask is the parent's mask seen in the
    view's shape (carray_mask.c).  Installed directly in operation tables. */

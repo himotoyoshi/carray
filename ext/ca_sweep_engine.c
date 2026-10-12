@@ -85,6 +85,26 @@ ca_sweep_pair_operands (ca_sweep_state_t *st)
   return donor;
 }
 
+/* Non-zero when INPUT k_op lives in the same root as an OUTPUT other
+ * than itself.  Read in place, or chunk by chunk after earlier chunks
+ * were written, it would show the kernel cells already written; such an
+ * input is read whole before the walk.  An input that is the output
+ * itself is read in place: each cell is read before it is written. */
+static int
+ca_sweep_input_overlaps_output (ca_sweep_state_t *st, int k_op)
+{
+  int j;
+  CArray *ca = st->cx[k_op];
+  if (st->fsync[k_op] != '0' || ca_is_scalar(ca)) return 0;
+  for (j = 0; j < st->n_ops; j++) {
+    if (st->fsync[j] == '1' && st->cx[j] != ca &&
+        ca_shares_root(ca, st->cx[j])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 /* Non-zero when any INPUT operand carries a mask.  Asks, allocates
  * nothing. */
 static int
@@ -146,12 +166,14 @@ ca_sweep_acquire_body (VALUE arg)
   /* Per-operand acquire:
    *   OUTPUT (fsync == '1')       -> ca_attach + base = ca->ptr
    *   INPUT alias                 -> ca_attach + base = ca->ptr
-   *   INPUT non-alias non-scalar  -> xmalloc scratch + ca_xfer_all
+   *   INPUT non-alias non-scalar,
+   *   or sharing an OUTPUT's root -> xmalloc scratch + ca_xfer_all
    * INPUT non-alias never attaches the operand itself; the scratch
    * copy carries the values into the kernel. */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
-    if (st->fsync[k_op] == '1' || ca_attach_is_alias(ca)) {
+    if (st->fsync[k_op] == '1' ||
+        (ca_attach_is_alias(ca) && ! ca_sweep_input_overlaps_output(st, k_op))) {
       ca_attach(ca);
       st->attached[k_op] = 1;
       st->base[k_op]     = (char *) ca->ptr;
@@ -344,13 +366,14 @@ ca_sweep_acquire_chunked_body (VALUE arg)
   /* per-operand acquire:
    *   OUTPUT (fsync == '1') : ca_attach + base_orig = ca->ptr (legitimate)
    *   INPUT  alias          : ca_attach + base_orig = ca->ptr (zero-copy)
-   *   INPUT  non-alias non-scalar : arena chunk scratch of chunk_n_max bytes
+   *   INPUT  non-alias non-scalar,
+   *   or sharing an OUTPUT's root : arena chunk scratch of chunk_n_max bytes
    *   INPUT  scalar         : ca_attach + base_orig = ca->ptr (1 cell)
    */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
     if (st->fsync[k_op] == '1' || ca_is_scalar(ca) ||
-        ca_attach_is_alias(ca)) {
+        (ca_attach_is_alias(ca) && ! ca_sweep_input_overlaps_output(st, k_op))) {
       ca_attach(ca);
       st->attached[k_op]  = 1;
       st->base_orig[k_op] = (char *) ca->ptr;
@@ -436,6 +459,16 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
     /* all-scalar: single 1-cell chunk */
     st->inner       = 1;
     st->chunk_n_max = 1;
+  }
+
+  /* An INPUT sharing an OUTPUT's root is read whole before anything is
+     written: the walk becomes a single chunk, so its data and its mask
+     are gathered before the first flush. */
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    if (ca_sweep_input_overlaps_output(st, k_op) && st->n_kernel > 0) {
+      st->chunk_n_max = st->n_kernel;
+      break;
+    }
   }
 
   /* Refusals come first, while nothing is held. */
