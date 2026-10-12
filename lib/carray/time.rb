@@ -932,32 +932,11 @@ class CATime
 
   # @!group Reductions
 
-  # min / max are order-structure reductions: they ride the core reduce
-  # Face gate (ORDERABLE storage descent + output re-lift, see
-  # ext/mkkernel.rb face_gate: :relift), so no Ruby override is needed --
-  # the inherited CArray#min / #max handle the Element / CATime return
-  # shapes directly.  minmax is the paired form; it has no core gate, so
-  # re-lift both extremes here.  They are actual elements, so they keep the
-  # storage unit (no rounding, unlike mean).
-
-  # @overload minmax(*axes, **opts)
-  #   Returns the earliest and latest time as a `[min, max]` pair (§8).
-  #   @return [Array(Element, Element), Array(CATime, CATime)]
-  def minmax(*args, **opts)
-    with_surface_fill(opts) do |o|
-      lo, hi = parent.minmax(*args, **o)
-      [relift_extremum(lo), relift_extremum(hi)]
-    end
-  end
-
-  def relift_extremum(r)
-    case r
-    when Integer then Element.new(r, unit)
-    when CArray  then r.time(unit: unit)
-    else r
-    end
-  end
-  private :relift_extremum
+  # min / max / minmax are order-structure reductions: they ride the core
+  # reduce Face gate (ORDERABLE storage descent + output re-lift, see
+  # ext/mkkernel.rb face_gate: :relift), so the inherited methods return the
+  # Element / CATime shapes directly.  The extremes are actual elements, so
+  # they keep the storage unit (no rounding, unlike mean).
 
   # The centroid / spread / order reductions report on the array's own grid:
   # they run on the storage ticks and round the result back to the nearest
@@ -1110,6 +1089,7 @@ class CATime
   end
 
   def to_comparable (operand)
+    require 'date'   # Date is one of the operand kinds below
     case operand
     when CATime
       return operand if operand.unit == unit
@@ -1679,29 +1659,9 @@ class CATimedelta
     raise TypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
   end
 
-  # min / max ride the core reduce Face gate (ORDERABLE storage descent +
-  # output re-lift, see ext/mkkernel.rb face_gate: :relift); the inherited
-  # CArray#min / #max return the Element / CATimedelta shapes directly.
-  # minmax has no core gate, so re-lift both extremes here.
-
-  # @overload minmax(*axes, **opts)
-  #   Returns the shortest and longest duration as a `[min, max]` pair.
-  #   @return [Array(Element, Element), Array(CATimedelta, CATimedelta)]
-  def minmax(*args, **opts)
-    with_surface_fill(opts) do |o|
-      lo, hi = parent.minmax(*args, **o)
-      [relift_extremum(lo), relift_extremum(hi)]
-    end
-  end
-
-  def relift_extremum(r)
-    case r
-    when Integer then Element.new(r, unit)
-    when CArray  then r.timedelta(unit: unit)
-    else r
-    end
-  end
-  private :relift_extremum
+  # min / max / minmax ride the core reduce Face gate (ORDERABLE storage
+  # descent + output re-lift); the inherited methods return the Element /
+  # CATimedelta shapes directly.
   # @!endgroup
 
   # sort / partition ride the core sort Face gate (ORDERABLE storage

@@ -4657,7 +4657,24 @@ module MkKernel
   # per-axis CArray -> ca_face_relift_entity (tail, mask and copy_state).
   # All-masked full reductions leave CA_UNDEF untouched.
   def self.emit_reduce_face_relift(io)
-    io.puts "  if ( _reduce_face != Qnil && result != CA_UNDEF && result != Qnil ) {"
+    io.puts "  if ( _reduce_face != Qnil && RB_TYPE_P(result, T_ARRAY) ) {"
+    io.puts "    /* a multi-output reduction (minmax): re-lift each output. */"
+    io.puts "    long _i;"
+    io.puts "    for ( _i = 0; _i < RARRAY_LEN(result); _i++ ) {"
+    io.puts "      VALUE _r = rb_ary_entry(result, _i);"
+    io.puts "      if ( _r == CA_UNDEF || _r == Qnil ) continue;"
+    io.puts "      if ( rb_obj_is_kind_of(_r, rb_cCArray) ) {"
+    io.puts "        _r = ca_face_relift_entity(_reduce_face, _r);"
+    io.puts "      }"
+    io.puts "      else {"
+    io.puts "        CArray *_fca;"
+    io.puts "        GetCArray(_reduce_face, _fca);"
+    io.puts "        CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(_r, _reduce_face, _fca);"
+    io.puts "      }"
+    io.puts "      rb_ary_store(result, _i, _r);"
+    io.puts "    }"
+    io.puts "  }"
+    io.puts "  else if ( _reduce_face != Qnil && result != CA_UNDEF && result != Qnil ) {"
     io.puts "    if ( rb_obj_is_kind_of(result, rb_cCArray) ) {"
     io.puts "      /* per-axis: re-lift the storage result as a Face of the same class. */"
     io.puts "      result = ca_face_relift_entity(_reduce_face, result);"
@@ -7130,6 +7147,7 @@ MkKernel.reduce :minmax,
   ruby_scalar:     :auto,
   fallback:        :raise,
   mask_policy:     :min_count,   # FM.1.5: match existing min / max behaviour
+  face_gate:       :relift,
   public_method: :minmax    # bind public name `minmax` -> rb_ca_minmax_ki
                               # (= surface-name override, no actual legacy)
 
