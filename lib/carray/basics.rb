@@ -142,21 +142,6 @@ class CArray
     return template(:boolean) { 1 }
   end
 
-  # Sub-region copy (paste / crop), the old C `ca_paste` / `ca_clip` pair.
-  # `clip` is reserved for value clamping (clamp to a min/max range), so
-  # the read-out side is `crop`.  Kept together as a pair (crop is rare, but paste is reached
-  # often -- concatenate / mosaic / resize / bit_string all use it).  Both
-  # accept negative offsets.
-
-  # @overload paste(offset, src)
-  #   Sets `self` at `offset` by copying `src`. Out-of-bounds cells
-  #   (`src` extending past `self`'s edge or before its origin) are
-  #   silently dropped via CAWindow's interior-only PUT scatter.
-  #   @param offset [Array<Integer>] starting indices, length equal
-  #     to `self.ndim`.
-  #   @param src [CArray] source array.
-  #   @return [self]
-  #   @raise [ArgumentError] when `offset.length != self.ndim`.
   # A Face is clipped in its own terms: its comparisons decide which cells are
   # out of range (a time array reads its bounds as times, a record array
   # orders by its declared members, a Face that cannot be ordered refuses),
@@ -179,6 +164,21 @@ class CArray
     face? ? out.face_lift(self) : out
   end
 
+  # Sub-region copy (paste / crop), the old C `ca_paste` / `ca_clip` pair.
+  # `clip` is reserved for value clamping (clamp to a min/max range), so
+  # the read-out side is `crop`.  Kept together as a pair (crop is rare, but paste is reached
+  # often -- concatenate / mosaic / resize / bit_string all use it).  Both
+  # accept negative offsets.
+
+  # @overload paste(offset, src)
+  #   Sets `self` at `offset` by copying `src`. Out-of-bounds cells
+  #   (`src` extending past `self`'s edge or before its origin) are
+  #   silently dropped via CAWindow's interior-only PUT scatter.
+  #   @param offset [Array<Integer>] starting indices, length equal
+  #     to `self.ndim`.
+  #   @param src [CArray] source array.
+  #   @return [self]
+  #   @raise [ArgumentError] when `offset.length != self.ndim`.
   def paste (offset, src)
     raise ArgumentError, "offset length must equal ndim" if offset.length != ndim
     # A zero-length source covers no cell, so there is nothing to write --
