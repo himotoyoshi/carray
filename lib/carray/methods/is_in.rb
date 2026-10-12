@@ -164,6 +164,19 @@ class CArray
        !respond_to?(:to_comparable)
       return [values_in_face(values, self) || values.to_comparable([]), values]
     end
+    # A Face whose storage is not of its surface type.  When its cells are
+    # its values, the set meets it as it would meet an array of the storage
+    # type, and the Face stays while that type does not change.  Any other
+    # Face leaves the set to the lookup, which brings it into the Face's
+    # space or refuses it.
+    if face? && (storage = __face_storage__).data_type != data_type
+      unless __comparable_storage__
+        set = values.is_a?(Range) ? values.to_a : values
+        return [self, set.is_a?(CArray) ? set : CArray.wrap_readonly(set)]
+      end
+      s, set = storage.send(:promote_value_set, values)
+      return [s.equal?(storage) ? self : s, set]
+    end
     case values
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)

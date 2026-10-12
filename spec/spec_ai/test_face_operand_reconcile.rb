@@ -11,9 +11,6 @@ require "carray"
 #     cells encode its values in order (a time);
 #   - a Face with to_comparable brings any operand into its own space;
 #   - any other Face refuses the operand.
-#
-# The value-hash family promotes a plain operand in Ruby first, so for plain
-# operands only the families that take the operand as it is are checked.
 
 class TestFaceOperandReconcile < Test::Unit::TestCase
 
@@ -39,24 +36,21 @@ class TestFaceOperandReconcile < Test::Unit::TestCase
     end
   end
 
-  TAKEN_AS_IT_IS = {
+  FAMILIES = {
     "eq"           => ->(r, o) { r.eq(o) },
     "<"            => ->(r, o) { r < o },
     "search"       => ->(r, o) { r.search(o) },
     "count"        => ->(r, o) { r.count(o) },
-  }
-
-  FAMILIES = TAKEN_AS_IT_IS.merge(
     "is_in"        => ->(r, o) { r.is_in(o) },
     "intersection" => ->(r, o) { r.intersection(o) },
-  )
+  }
 
   def time (*s)
     CArray.time(s, unit: :D)
   end
 
-  def refused (receiver, operand, families = FAMILIES)
-    families.each do |name, op|
+  def refused (receiver, operand)
+    FAMILIES.each do |name, op|
       assert_raise(ArgumentError, "#{name}: #{receiver.class} / #{operand.class}") {
         op.call(receiver, operand)
       }
@@ -89,8 +83,8 @@ class TestFaceOperandReconcile < Test::Unit::TestCase
   def test_face_without_a_way_to_read_the_operand_refuses_everything
     ticks = OrderedTicks.new(CA_INT64([3, 1]))
     refused(ticks, PlainTicks.new(CA_INT64([3, 1])))
-    refused(ticks, CA_INT64([3, 1]), TAKEN_AS_IT_IS)
-    refused(ticks, 2, TAKEN_AS_IT_IS)
+    refused(ticks, CA_INT64([3, 1]))
+    refused(ticks, 2)
   end
 
   def test_comparable_face_takes_plain_operands_and_its_own_kind
@@ -101,6 +95,19 @@ class TestFaceOperandReconcile < Test::Unit::TestCase
       assert_equal [1, 0], plain.count(operand).to_a
     end
     assert_equal [true, false], plain.is_in(PlainTicks.new(CA_INT64([3, 9]))).to_a
+  end
+
+  # A set meets a Face whose cells are its values as it would meet an array
+  # of the Face's storage type: an int64 set keeps the Face, and a float set
+  # answers in float as it does for a plain int64 array.
+  def test_comparable_face_meets_a_set_as_its_storage_type_would
+    plain = PlainTicks.new(CA_INT64([3, 1]))
+    base  = CA_INT64([3, 1])
+    [CA_INT64([3, 9]), CA_FLOAT64([3.0, 9.5]), [3, 9], 3, (2..3)].each do |set|
+      assert_equal base.is_in(set).to_a, plain.is_in(set).to_a, set.inspect
+      assert_equal base.intersection(set).to_a, plain.intersection(set).to_a, set.inspect
+    end
+    assert_kind_of PlainTicks, plain.intersection(CA_INT64([3, 9]))
   end
 
   def test_time_takes_a_single_value_as_a_set_of_one

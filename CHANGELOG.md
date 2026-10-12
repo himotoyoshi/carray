@@ -55,7 +55,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   already read it, and a time operand is refused. A Face that neither holds
   its values in its cells nor defines `to_comparable` now refuses a plain
   operand in `is_in` and the set operations too, as comparison, search and
-  `count(v)` already did. `CATime#is_in` and the set operations take a
+  `count(v)` already did, and one whose cells are its values takes a set as
+  an array of its storage type would. `CATime#is_in` and the set operations take a
   single value (a `Time`, an element) as a set of one instead of answering
   `false` everywhere, and refuse a bare number as search does.
 - Fix: a Face that keeps state of its own (a Ruby Face carrying it with
