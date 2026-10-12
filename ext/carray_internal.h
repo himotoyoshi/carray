@@ -336,6 +336,25 @@ ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
   return 0;
 }
 
+/* ---- An index into n places ----------------------------------------------
+
+   A negative index counts from the end; one outside 0...n after that raises
+   IndexError, naming the method the user called, `what` the index is (an
+   "index", an "address") and the value given.  Every index door decides
+   this here. */
+
+NORETURN(void ca_index_out_of_range (ca_size_t idx, ca_size_t n, const char *what));
+
+static inline ca_size_t
+ca_index_in_range (ca_size_t idx, ca_size_t n, const char *what)
+{
+  ca_size_t i = ( idx < 0 ) ? idx + n : idx;
+  if ( i < 0 || i >= n ) {
+    ca_index_out_of_range(idx, n, what);
+  }
+  return i;
+}
+
 /* ---- How many cells a result cell needs ---------------------------------
 
    A reduction's result cell is UNDEF when fewer cells contribute to it than

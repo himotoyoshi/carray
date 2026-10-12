@@ -612,6 +612,13 @@ ca_integer_arg (VALUE v, const char *arg, const char *name)
   return NUM2LONG(v);
 }
 
+void
+ca_index_out_of_range (ca_size_t idx, ca_size_t n, const char *what)
+{
+  rb_raise(rb_eIndexError, "%s: %s %lld is out of range for length %lld",
+           ca_calling_method_name(), what, (long long) idx, (long long) n);
+}
+
 /* The min_count: keyword of a reduction: nil (not given) is -1, any other
    value an Integer of at least 0.  An error names `name`, or the method the
    user called when NULL.  See ca_too_few_present. */

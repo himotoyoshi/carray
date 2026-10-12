@@ -71,12 +71,12 @@ class TestAxis2Addr < Test::Unit::TestCase
 
   def test_oob_positive_raises
     a = CA_FLOAT64([10, 20, 30])
-    assert_raise(RangeError) { a.axis2addr(CA_INT([5])) }
+    assert_raise(IndexError) { a.axis2addr(CA_INT([5])) }
   end
 
   def test_oob_negative_after_normalize_raises
     a = CA_FLOAT64([10, 20, 30])
-    assert_raise(RangeError) { a.axis2addr(CA_INT([-10])) }
+    assert_raise(IndexError) { a.axis2addr(CA_INT([-10])) }
   end
 
   def test_axis_out_of_range_raises

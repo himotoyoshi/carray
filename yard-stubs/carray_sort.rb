@@ -184,7 +184,7 @@ class CArray
   #
   #   `indices` data_type: any integer kind (zero-copy when
   #   already `:int64`). Negative indices: Python-style
-  #   (`-1` == last). Out-of-range indices raise `RangeError`.
+  #   (`-1` == last). Out-of-range indices raise `IndexError`.
   #   Negative `axis:` is Python-style.  A masked index gives a
   #   masked address (its stored value is not read), so
   #   `take_along_axis` answers `UNDEF` there and `put_along_axis`
@@ -195,7 +195,7 @@ class CArray
   #     interpreted.
   #   @return [CArray] `:int64` view-flat addresses, same shape as
   #     `indices`.
-  #   @raise [RangeError] when an index is out of range after
+  #   @raise [IndexError] when an index is out of range after
   #     negative normalization.
   #   @raise [ArgumentError] for shape / ndim / data_type
   #     violations.

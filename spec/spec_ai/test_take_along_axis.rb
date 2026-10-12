@@ -108,12 +108,12 @@ class TestTakeAlongAxis < Test::Unit::TestCase
 
   def test_oob_positive_raises
     a = CA_FLOAT64([10,20,30])
-    assert_raise(RangeError) { a.take_along_axis(CA_INT([5])) }
+    assert_raise(IndexError) { a.take_along_axis(CA_INT([5])) }
   end
 
   def test_oob_negative_after_normalize_raises
     a = CA_FLOAT64([10,20,30])
-    assert_raise(RangeError) { a.take_along_axis(CA_INT([-10])) }
+    assert_raise(IndexError) { a.take_along_axis(CA_INT([-10])) }
   end
 
   # ---- negative indices (Q3 accept) --------------------------------------

@@ -2041,12 +2041,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
   /* Scalar path (Integer input): returns Ruby Array of N Integers.
    * Preserves legacy shape for callers like `i, j = ca.addr2index(k)`. */
   if ( rb_obj_is_kind_of(raddr, rb_cInteger) ) {
-    ca_size_t addr = NUM2SIZE(raddr);
-    if ( addr < 0 || addr >= elements ) {
-      rb_raise(rb_eArgError,
-               "address %" PRId64 " is out of range (0..%" PRId64 ")",
-               (ca_size_t) addr, (ca_size_t) (elements - 1));
-    }
+    ca_size_t addr = ca_index_in_range(NUM2SIZE(raddr), elements, "address");
     out = rb_ary_new2(ndim);
     for (i = ndim - 1; i >= 0; i--) {
       rb_ary_store(out, i, SIZE2NUM(addr % dim[i]));
@@ -2095,12 +2090,11 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
           continue;
         }
         addr = src[j];
-        if ( addr < 0 || addr >= elements ) {
+        if ( addr < -elements || addr >= elements ) {
           ca_detach(cin);
-          rb_raise(rb_eArgError,
-                   "address %" PRId64 " is out of range (0..%" PRId64 ")",
-                   (ca_size_t) addr, (ca_size_t) (elements - 1));
+          ca_index_out_of_range(addr, elements, "address");
         }
+        addr = ca_index_in_range(addr, elements, "address");
         for (k = ndim - 1; k >= 0; k--) {
           p_out[k][j] = addr % dim[k];
           addr /= dim[k];

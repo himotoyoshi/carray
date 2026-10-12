@@ -419,6 +419,11 @@ rb_raise(rb_eRangeError,  "value out of range for %s", ca_type_name[data_type]);
 rb_raise(rb_eRuntimeError,"internal: unexpected obj_type %d", ca->obj_type);
 ```
 
+An index into `n` places goes through `ca_index_in_range(idx, n, "index")`
+(`carray_internal.h`): a negative index counts from the end, and one
+outside after that raises `IndexError` naming the method the user called.
+`spec/spec_ai/test_index_out_of_range.rb` lists the doors.
+
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
 matches Ruby convention. A data_type an operation cannot take is
 `CArray::DataTypeError` (`rb_eCADataTypeError`). `RuntimeError` is for

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `take_along_axis` and `axis2addr` raise IndexError for an index
+  out of range, and `addr2index` raises IndexError for an address out of
+  range and counts a negative address from the end, as every other index
+  does. They raised RangeError and ArgumentError before.
+
 - Change: `median`, `percentile` and `quantile` of an object array answer
   in the elements' own terms. A pick is the element itself and an average
   or interpolation uses their arithmetic with an exact weight, so

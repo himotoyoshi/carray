@@ -372,7 +372,7 @@ rb_ca_sort_addr (int argc, VALUE *argv, VALUE self)
  *
  * indices data_type: any integer kind (zero-copy if already CA_SIZE).
  * Negative indices: Python-style (-1 = last), normalized internally.
- * OOB indices: raises RangeError.  Default axis: 0; negative axis
+ * OOB indices: raises IndexError.  Default axis: 0; negative axis
  * Python-style.
  *
  * Returns: CArray of CA_SIZE, same shape as indices.
@@ -404,16 +404,7 @@ axis2addr_body (void *user_data, void *ptr, ca_size_t n)
       c->out_ptr[k] = 0;
       goto advance;
     }
-    /* Negative normalize + OOB check. */
-    ca_size_t raw  = idx_ptr[k];
-    ca_size_t norm = (raw < 0) ? (raw + c->axis_size) : raw;
-    if ( norm < 0 || norm >= c->axis_size ) {
-      rb_raise(rb_eRangeError,
-               "%s: index %lld at position %lld is out of range for an axis "
-               "of length %lld",
-               ca_calling_method_name(), (long long) raw, (long long) k,
-               (long long) c->axis_size);
-    }
+    ca_size_t norm = ca_index_in_range(idx_ptr[k], c->axis_size, "index");
     /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
     ca_size_t addr = 0;
     for ( int8_t j = 0; j < ndim; j++ ) {

@@ -82,9 +82,10 @@ class CArray
   #   Array of length `self.ndim`, so `i, j = ca.addr2index(x)` unpacks
   #   uniformly for scalar and vector inputs.
   #   @param addr [Integer, CArray] a flat address in `0...elements`,
-  #     or a CArray of such addresses (arbitrary shape).
+  #     or a CArray of such addresses (arbitrary shape).  A negative
+  #     address counts from the end.
   #   @return [Array<Integer>, Array<CArray>] one entry per axis.
-  #   @raise [ArgumentError] when any `addr` is out of range.
+  #   @raise [IndexError] when any `addr` is out of range.
   def addr2index(addr); end
 
   # @overload index2addr(*index)
@@ -106,8 +107,8 @@ class CArray
   #   @param addr [Integer, CArray] a flat address or a CArray of them.
   #   @param shape [Array<Integer>] the row-major shape defining the grid.
   #   @return [Array<Integer>, Array<CArray>] one entry per axis.
-  #   @raise [ArgumentError] when any `addr` is out of range or `shape:`
-  #     is missing.
+  #   @raise [IndexError] when any `addr` is out of range.
+  #   @raise [ArgumentError] when `shape:` is missing.
   def self.addr2index(addr, shape:); end
 
   # @overload index2addr(*index, shape:)
