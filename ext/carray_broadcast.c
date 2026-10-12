@@ -173,20 +173,48 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
    raises). */
 NORETURN(static void ca_broadcast_refuse (VALUE self, VALUE other));
 
-/* Report a pair that cannot be brought to a common shape.  Naming both
-   shapes is the point of the message: the caller wrote two arrays that
-   cannot be combined, and the only remedy is to say which two. */
+/* Report a pair that cannot be brought to a common shape.  The message
+   names both shapes and points to the remedy that fits the pair: when
+   the ndim differs, the missing axes are added with :_; when the
+   element counts are equal, .flatten pairs the values in the order
+   they lie. */
 static void
 ca_broadcast_refuse (VALUE self, VALUE other)
 {
+  CArray *ca, *cb;
   volatile VALUE self_s  = rb_inspect(rb_funcall(self,  rb_intern("shape"), 0));
   volatile VALUE other_s = rb_inspect(rb_funcall(other, rb_intern("shape"), 0));
+  const char *flatten_hint;
+  int i;
+
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+
+  flatten_hint = (ca->elements == cb->elements)
+    ? "; to pair the values in the order they lie, use .flatten on both sides"
+    : "";
+
+  if (ca->ndim != cb->ndim) {
+    rb_raise(rb_eArgError,
+             "shape mismatch between operands (%s and %s): the operands "
+             "have different numbers of axes, and axes are not added "
+             "implicitly -- add size-1 axes with :_ so both have the same "
+             "number (x[:_, nil] makes a 1-D x a row, x[nil, :_] a column)%s",
+             StringValueCStr(self_s), StringValueCStr(other_s),
+             flatten_hint);
+  }
+
+  for (i = 0; i < ca->ndim; i++) {
+    if (ca->dim[i] != cb->dim[i] && ca->dim[i] != 1 && cb->dim[i] != 1) {
+      break;
+    }
+  }
   rb_raise(rb_eArgError,
-           "shape mismatch between operands (%s and %s); shapes must "
-           "agree, or differ only in size-1 axes with equal ndim -- use "
-           ".flatten on both sides to operate on the values in the order "
-           "they lie",
-           StringValueCStr(self_s), StringValueCStr(other_s));
+           "shape mismatch between operands (%s and %s): axis %d has "
+           "sizes %lld and %lld; each axis must have the same size, or "
+           "size 1 on one side%s",
+           StringValueCStr(self_s), StringValueCStr(other_s), i,
+           (long long) ca->dim[i], (long long) cb->dim[i], flatten_hint);
 }
 
 void
