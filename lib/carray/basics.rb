@@ -157,6 +157,19 @@ class CArray
   #   @param src [CArray] source array.
   #   @return [self]
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
+  # A Face is clipped in its own terms: its comparisons decide which cells are
+  # out of range (a time array reads its bounds as times, a record array
+  # orders by its declared members, a Face that cannot be ordered refuses),
+  # and its store writes the bound or the fill value into them.
+  private def __face_clip__ (min, max, fill_value, lfill, ufill)
+    lfill = fill_value if lfill.nil?
+    ufill = fill_value if ufill.nil?
+    out = copy
+    out[self < min] = lfill.nil? ? min : lfill unless min.nil?
+    out[self > max] = ufill.nil? ? max : ufill unless max.nil?
+    out
+  end
+
   # An array of +shape+ of the same kind as self: its data type and cell
   # width, or its Face over a zero storage.  Nothing is written into it, so
   # it can be built for a read-only Face too.
@@ -321,6 +334,7 @@ class CArray
     if min.nil? && max.nil?
       raise ArgumentError, "clip: at least one of (min, max) must be given"
     end
+    return __face_clip__(min, max, fill_value, lfill, ufill) if face?
     if !min.nil? && !max.nil?
       reversed = if min.is_a?(CArray) then min.gt(max).any
                  elsif max.is_a?(CArray) then max.lt(min).any

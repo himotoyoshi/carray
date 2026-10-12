@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `clip` on a time array returned a plain object array mixing elements
+  and `Time` values; it now returns a time array, and its bounds and fill
+  values are read as times. A record array clips by the members it is
+  ordered by, a const string array clips its strings, and a
+  categorical array refuses `clip` and `minmax` as it refuses `min`, naming
+  the conversion that gives its values (both used to fail with an internal
+  data type error). `minmax` on a Face defined in Ruby now answers in that
+  Face, as `min` and `max` do.
 - Fix: `resize(fill_value:)` and `insert_block { ... }` on a Face (a time
   or record array) wrote the fill value into the storage as it was, so a
   `Time` filled a time array with a date millions of years off. The value is

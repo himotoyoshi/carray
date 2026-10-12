@@ -129,6 +129,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       # code order is the vocabulary's, not the labels', so it is not ORDERABLE
       raises:       { "sort"            => ArgumentError,
                       "min"             => ArgumentError,
+                      "clip"            => ArgumentError,
                       "linear_fetch"    => ArgumentError }.merge(
                       TestFaceFamilyMatrix::NO_REDUCTIONS) },
 
@@ -158,6 +159,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     "difference"      => ->(a) { a.difference(a[1..1]) },
     "union"           => ->(a) { a.union(a[0..0]) },
     "sort"            => ->(a) { a.sort },
+    "clip"            => ->(a) { a.clip(a.min, a.max) },
     "mask_duplicates" => ->(a) { a.mask_duplicates },
     "strip_mask"      => ->(a) { a.strip_mask(method: :forward) },
   }

@@ -182,6 +182,13 @@ class CAConstString
     to_string.minmax(*args, **kw).map { |r| const_string_lift(r) }
   end
 
+  # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
+  #   Clips the strings in byte order (see {CArray#clip}).
+  #   @return [CAConstString]
+  def clip (*args, **kw)
+    const_string_lift(to_string.clip(*args, **kw))
+  end
+
   # @overload min_index(axis: nil)
   #   @return [Integer, CArray] where the byte-smallest string sits.
   def min_index (*args, **kw)

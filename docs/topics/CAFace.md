@@ -946,7 +946,7 @@ Every gap found so far is one of these. The middle one is the dangerous one.
 |---|---|---|
 | view-creating (`[]`, `reshape`, `sort`, `flip`, …) | yes (lift macro, §6) | nothing |
 | scalar read / store | — | `storage_to_element` / `element_to_storage` (6.1 / 6.2) |
-| `min` / `max` / sort / partition / rank | ORDERABLE | nothing (`minmax` has no core gate: re-lift the pair in Ruby) |
+| `min` / `max` / `minmax` / `clip` / sort / partition / rank | ORDERABLE | nothing |
 | search / `linear_section` / `count(v)` | ORDERABLE + (COMPARABLE or `to_comparable`) | the one `to_comparable` |
 | value-hash discovery (`unique`, `value_counts`, `mode`, `is_in`, set operations, `locate_addr`, `categorize`) | ORDERABLE + same | nothing |
 | gap-fill (`unmask` / `strip_mask` with `method:`) | hold is byte-generic (any Face); `:linear` defers to your `linear_fetch` | nothing, once `linear_fetch` is decided |
@@ -1228,7 +1228,7 @@ dispatch table's existing `ca_*_not_implement` stubs do the gating.
 and letting it through also lets through `sqrt` of a duration and a
 variance in squared ticks. So it gates the surface too and defines the
 handful of meaningful operations (`+ - * /`, `abs`, unary `-`, `sum`,
-`mean`, `median`, `stddev`, `minmax`) itself. Turning one into a plain
+`mean`, `median`, `stddev`) itself; `min` / `max` / `minmax` come from the core order gate. Turning one into a plain
 number is `#ticks`, which says which unit it is counting.
 
 `docs/CATime.md` is the user-facing reference for these two
