@@ -40,6 +40,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   index given, the length and the axis
   (`[]: index 5 is out of range for length 3 on axis 0`), in place of
   `index out of range at 0-dim ( 5 <=> 0..2 )`.
+- Change (C extensions): `CA_CHECK_INDEX` raises its IndexError through
+  `ca_index_out_of_range`, so the message names the method and the index
+  given (it reported the index after adding the length). The unused
+  `CA_CHECK_BOUND` is removed.
 
 - Change: a pair of object cells that `<=>` cannot order raises
   "<method>: comparison of A with B failed" naming the method you called,

@@ -1044,25 +1044,23 @@ extern VALUE rb_cCArrayObject;
     } \
   }
 
+/* An index into `n` places, counted from the end when negative, outside of
+   which IndexError is raised naming the method the user called, `what` the
+   index is ("index", "address") and the value given. */
+NORETURN(void ca_index_out_of_range (ca_size_t idx, ca_size_t n, const char *what));
+
+/* Normalise `index` in place against `dim` (a negative one counts from the
+   end) and raise through ca_index_out_of_range when it falls outside. */
 #define CA_CHECK_INDEX(index, dim) \
   do { \
-    if ( index < 0 ) {       \
-      index += (dim);     \
+    ca_size_t ca_check_index_given_ = (index); \
+    if ( (index) < 0 ) {       \
+      (index) += (dim);     \
     } \
-    if ( index < 0 || index >= (dim) ) { \
-      rb_raise(rb_eIndexError, "index out of range ( %" PRId64 " <=> 0..%" PRId64 " )", (int64_t) index, (int64_t) dim-1); \
+    if ( (index) < 0 || (index) >= (dim) ) { \
+      ca_index_out_of_range(ca_check_index_given_, (dim), "index"); \
     } \
   } while (0)
-
-#define CA_CHECK_BOUND(ca, idx) \
-  { \
-    int8_t i; \
-    for (i=0; i<ca->ndim; i++) { \
-      if ( idx[i] < 0 || idx[i] >= ca->dim[i] )  { \
-        rb_raise(rb_eIndexError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
-      } \
-    } \
-  }
 
 /* -------------------------------------------------------------------- */
 

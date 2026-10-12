@@ -352,7 +352,7 @@ ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
    "index", an "address") and the value given.  Every index door decides
    this here. */
 
-NORETURN(void ca_index_out_of_range (ca_size_t idx, ca_size_t n, const char *what));
+/* ca_index_out_of_range is declared in carray.h (CA_CHECK_INDEX uses it). */
 
 static inline ca_size_t
 ca_index_in_range (ca_size_t idx, ca_size_t n, const char *what)

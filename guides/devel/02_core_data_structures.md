@@ -573,7 +573,6 @@ CA_CHECK_RANK(ndim)                  /* 0 < ndim <= CA_RANK_MAX */
 CA_CHECK_DIM(ndim, dim)              /* every dim[i] >= 0 */
 CA_CHECK_BYTES(data_type, bytes)     /* resolves bytes for non-FIXLEN */
 CA_CHECK_INDEX(index, dim)           /* normalises negative, range-checks */
-CA_CHECK_BOUND(ca, idx)              /* multi-dim bounds check */
 ```
 
 The two limits the macros enforce:

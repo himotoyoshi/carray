@@ -5,8 +5,8 @@
 # way (the end of a Range).
 #
 # The rb_eIndexError raises that remain are each something else (an index of
-# the wrong form, a reserved symbol, the C macro CA_CHECK_INDEX of the public
-# header) or a door a later round will move.  This lint is a ratchet: it
+# the wrong form, a reserved symbol) or a door a later round will move.
+# CA_CHECK_INDEX in the public header raises through the part as well.  This lint is a ratchet: it
 # records how many each tracked file has and fails when a file gains one.
 # A new one is a hand-written bound check -- call the part -- or another kind
 # of index error; then raise the count below.
@@ -25,7 +25,6 @@ COUNTS = {
   "ca_obj_stride.c" => 1,
   "ca_obj_tile.c" => 1,
   "ca_obj_window.c" => 1,
-  "carray.h" => 2,
   "carray_access.c" => 18,
   "carray_index_classifier.c" => 13,
   "carray_test.c" => 1,

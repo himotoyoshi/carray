@@ -434,7 +434,7 @@ build on the primitives above:
 - **Mask helpers** ([ch. 11](11_kernel_iterator.md)) — `CA_FOR_EACH_UNMASKED`
   / `CA_FOR_EACH_INDEX_UNMASKED` / `CA_COUNT_UNMASKED` / `CA_MASK_GET`.
 - **Validation macros** — `CA_CHECK_DATA_TYPE` / `CA_CHECK_RANK` /
-  `CA_CHECK_DIM` / `CA_CHECK_BYTES` / `CA_CHECK_INDEX` / `CA_CHECK_BOUND`.
+  `CA_CHECK_DIM` / `CA_CHECK_BYTES` / `CA_CHECK_INDEX`.
 - **Kernel flags** (frozen author tokens) — `CA_KERNEL_WRITE` /
   `CA_KERNEL_NO_MASK` / `CA_KERNEL_FIBER_CONTIG` / `CA_SLAB_AXES` /
   `CA_ITER_OK` / `CA_ITER_ERR_*`.
