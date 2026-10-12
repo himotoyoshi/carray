@@ -65,7 +65,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `set_attrs(hash)`; `order(kind:)`; `tolerance: "10 minutes"` for time keys
   in `locate_nearest_addr` and `CAFrame#join_asof`. A `CARecord` answers
   `unique`, `value_counts`, `mode`, `is_in`, the set operations,
-  `categorize`, `count(v)` and `locate_addr`.
+  `categorize`, `count(v)` and `locate_addr`. The reductions of `a[nil, :>]`
+  take `min_count:` and `fill_value:`, as the other iterators do.
 
 - New: for whoever registers a `CArray.expression_evaluator` (carray-jit):
   mixed data types, integer powers, comparisons, `then_else`, `shift`, and
@@ -99,7 +100,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   (`dump`, `save`, `load`, `CArray.struct`, `result_type`, ...); a Symbol
   column name in `cast` and `types:`; `windows` given anything but Ranges
   (an exclusive range now leaves out its end); `CA_INT32(0, 2)`; a fixlen
-  array without `bytes:`; `inherit_mask` given a non-CArray. A negative axis
+  array without `bytes:`; `inherit_mask` given a non-CArray; `min_count:` or
+  `fill_value:` to `all` / `any` of `windows`, `blocks` and an axis group, as
+  to the core `all` / `any`; a misspelt keyword to `all` / `any` / `none`
+  with `skip_masked: false` and to object `wsum` / `wmean`. A negative axis
   counts from the end everywhere. The indexer's method form (`a[:eq, 0]`)
   calls public methods only.
 
@@ -278,7 +282,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   complex, object and Face values; `meld` reductions answer as on a copy;
   fixlen strings of different widths match; `atan2`, `hypot` and others keep
   float32 and integer types. A record member declared with `endian:` reads,
-  sorts, saves and loads correctly.
+  sorts, saves and loads correctly. A time array's `fill_value:` is a time
+  (or a duration) on every reduction path, as for `strip_mask`; a
+  categorical `variance(axis:)` of an object array stays object.
 
 - Fix: NaN and masked cells are treated the same everywhere: NaN is last in
   object sorts and `categorize`, loses `min` / `max`, and is found by

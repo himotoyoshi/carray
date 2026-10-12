@@ -280,19 +280,13 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  # @!method all(min_count: nil, fill_value: nil)
+  # @!method all
   #   Whether every cell of each tile is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `all` does not.
   #   @return [CArray] tile-grid shaped
-  # @!method any(min_count: nil, fill_value: nil)
+  # @!method any
   #   Whether any cell of each tile is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `any` does not.
   #   @return [CArray] tile-grid shaped
   # @!method variancep(min_count: nil, fill_value: nil)
   #   Per-tile population variance (divisor `n`).
@@ -308,7 +302,7 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
       if FACE_WINNER_INDEX.key?(op) && @source.face?
@@ -319,6 +313,10 @@ class CABlockIterator < CAIterator
       kw[:fill_value] = fill_value unless fill_value.nil?
       fold(op, **kw)
     end
+  end
+
+  [:all, :any].each do |op|
+    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
   end
 
   # A Face's minimum and maximum are cells of the Face, so they are gathered

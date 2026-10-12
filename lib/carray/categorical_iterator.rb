@@ -439,7 +439,7 @@ class CACategoricalIterator < CASegmentIterator
   # Cost: K axis-reductions over an h-shaped local (most cells masked away for
   # each c) — bounded by K, typically small.  A fused per-fiber variance
   # kernel is a natural follow-on if bench demands it.
-  def axis_by_masked_copy (axis, op, out_data_type = CA_FLOAT64)
+  def axis_by_masked_copy (axis, op, out_data_type = core_reduce_type(op))
     h = @value
     axis = checked_axis(axis, op)
     full_c    = resolve_axis_codes(@cat.codes, h.shape, axis)
@@ -456,7 +456,7 @@ class CACategoricalIterator < CASegmentIterator
       exclude = in_c.not
       exclude = exclude | codes_bad if codes_bad
       h_local[exclude] = UNDEF
-      slice = h_local.__send__(op, axis: axis)   # float64, band shape, mask carries n<contract
+      slice = h_local.__send__(op, axis: axis)   # band shape, mask carries n<contract
       slot_idx[0] = c
       out[*slot_idx] = slice
     end

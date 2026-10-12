@@ -403,7 +403,48 @@ module CATimeUnitAlgebra
   end
 end
 
+# A reduction of a time Face takes `fill_value:` as a value of the Face (an
+# Element, or what an assignment to the Face accepts), the same as
+# `strip_mask` and `[]=` read it.  The reduction runs on the storage, so the
+# fill goes in after the result is a Face again: a whole reduction keeps its
+# axes for that, so the fill lands in a typed cell, and is then taken out.
+module CATimeSurfaceFill
+
+  private
+
+  def with_surface_fill (opts)
+    fill = opts[:fill_value]
+    return yield(opts) if fill.nil? || fill.equal?(UNDEF)
+    o = opts.reject { |k, _| k == :fill_value }
+    o[:keep_axis] = true
+    r = yield(o)
+    kept = nil
+    unless opts[:keep_axis]
+      axes = opts[:axis].nil? ? (0...ndim).to_a :
+               Array(opts[:axis]).map { |a| a < 0 ? a + ndim : a }
+      kept = shape.each_with_index.reject { |_, i| axes.include?(i) }.map(&:first)
+    end
+    surface_fill(r, fill, kept)
+  end
+
+  # `kept` is the shape to return to, or nil to keep the reduced axes.
+  def surface_fill (r, fill, kept)
+    case r
+    when Array then r.map { |x| surface_fill(x, fill, kept) }
+    when CArray
+      r = r.strip_mask(fill) if r.has_mask?
+      if kept.nil?      then r
+      elsif kept.empty? then r[*Array.new(r.ndim, 0)]
+      else                   r.reshape(*kept)
+      end
+    else r
+    end
+  end
+
+end
+
 class CATime
+  include CATimeSurfaceFill
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATime Face with the given `unit`. The
@@ -620,6 +661,7 @@ class CATime
 end
 
 class CATimedelta
+  include CATimeSurfaceFill
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATimedelta Face with the given `unit`.
@@ -902,8 +944,10 @@ class CATime
   #   Returns the earliest and latest time as a `[min, max]` pair (§8).
   #   @return [Array(Element, Element), Array(CATime, CATime)]
   def minmax(*args, **opts)
-    lo, hi = parent.minmax(*args, **opts)
-    [relift_extremum(lo), relift_extremum(hi)]
+    with_surface_fill(opts) do |o|
+      lo, hi = parent.minmax(*args, **o)
+      [relift_extremum(lo), relift_extremum(hi)]
+    end
   end
 
   def relift_extremum(r)
@@ -1316,7 +1360,9 @@ class CATime
   # the centroid of month numbers (a caller wanting the day-space answer
   # writes to_unit(:D) first) -- and the result is rounded back to a tick.
   def reduce_on_own_grid(op, kind, args, opts)
-    round_and_relift(parent.public_send(op, *args, **opts), kind)
+    with_surface_fill(opts) do |o|
+      round_and_relift(parent.public_send(op, *args, **o), kind)
+    end
   end
 
   # Round-to-nearest onto the storage grid, then wear the Face again.  An
@@ -1524,7 +1570,7 @@ class CATimedelta
   #   or as a {CATimedelta} view for per-axis reduction.
   #   @return [Element, CATimedelta]
   def sum(*args, **opts)
-    round_and_relift(parent.sum(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.sum(*args, **o)) }
   end
 
   # @overload accumulate(*args, **opts)
@@ -1532,7 +1578,7 @@ class CATimedelta
   #   {#sum} does in float64.
   #   @return [Element, CATimedelta]
   def accumulate(*args, **opts)
-    round_and_relift(parent.accumulate(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.accumulate(*args, **o)) }
   end
 
   # @overload cumsum(axis: nil)
@@ -1558,7 +1604,7 @@ class CATimedelta
   #   Returns the mean duration rounded to the nearest unit count.
   #   @return [Element, CATimedelta]
   def mean(*args, **opts)
-    round_and_relift(parent.mean(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.mean(*args, **o)) }
   end
 
   # median / percentile / quantile / stddev / stddevp report on this array's
@@ -1570,7 +1616,7 @@ class CATimedelta
   #   Returns the median duration on `self`'s unit.
   #   @return [Element, CATimedelta]
   def median(*args, **opts)
-    round_and_relift(parent.median(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.median(*args, **o)) }
   end
 
   # @overload percentile(*p, axis: nil, **opts)
@@ -1579,7 +1625,7 @@ class CATimedelta
   #   two or more give an Array).
   #   @return [Element, CATimedelta, Array<Element>, Array<CATimedelta>]
   def percentile(*args, **opts)
-    round_and_relift(parent.percentile(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.percentile(*args, **o)) }
   end
 
   # @overload quantile(axis: nil, **opts)
@@ -1587,7 +1633,7 @@ class CATimedelta
   #   `self`'s unit.
   #   @return [Array<Element>, Array<CATimedelta>]
   def quantile(*args, **opts)
-    round_and_relift(parent.quantile(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.quantile(*args, **o)) }
   end
 
   # @overload stddev(axis: nil, **opts)
@@ -1596,7 +1642,7 @@ class CATimedelta
   #   the precision matters.
   #   @return [Element, CATimedelta]
   def stddev(*args, **opts)
-    round_and_relift(parent.stddev(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.stddev(*args, **o)) }
   end
 
   # @overload stddevp(axis: nil, **opts)
@@ -1604,7 +1650,7 @@ class CATimedelta
   #   {#stddev}.
   #   @return [Element, CATimedelta]
   def stddevp(*args, **opts)
-    round_and_relift(parent.stddevp(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.stddevp(*args, **o)) }
   end
 
   def round_and_relift(r)
@@ -1642,8 +1688,10 @@ class CATimedelta
   #   Returns the shortest and longest duration as a `[min, max]` pair.
   #   @return [Array(Element, Element), Array(CATimedelta, CATimedelta)]
   def minmax(*args, **opts)
-    lo, hi = parent.minmax(*args, **opts)
-    [relift_extremum(lo), relift_extremum(hi)]
+    with_surface_fill(opts) do |o|
+      lo, hi = parent.minmax(*args, **o)
+      [relift_extremum(lo), relift_extremum(hi)]
+    end
   end
 
   def relift_extremum(r)

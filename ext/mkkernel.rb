@@ -3476,12 +3476,13 @@ module MkKernel
     io.puts "  GetCArray(self, src);"
 
     if k[:object_escape]
-      # CA_OBJECT escape: forward argc/argv (weights + trailing options hash,
-      # untouched) to the Ruby composition helper.  Intercept before any arg
-      # parsing so the helper owns the full original signature.
-      io.puts "  if ( src->data_type == CA_OBJECT ) {"
-      io.puts "    return rb_funcallv(self, rb_intern(\"#{k[:object_escape]}\"), argc, argv);"
-      io.puts "  }"
+      # CA_OBJECT escape: the Ruby composition helper gets the original
+      # argc/argv (weights + trailing options hash, untouched).  The escape
+      # itself comes after the options and axes are checked below, so a
+      # wrong keyword or axis is reported here, in this method's name, as
+      # on the numeric path.
+      io.puts "  int    escape_argc = argc;"
+      io.puts "  VALUE *escape_argv = argv;"
     end
 
     if k[:face_gate]
@@ -3515,6 +3516,16 @@ module MkKernel
     io.puts "  int keep_axis = RTEST(rkeep_axis);"
     io.puts "  int8_t slab_axes[CA_RANK_MAX];"
     io.puts "  int8_t naxes = rb_ca_parse_reduce_axes_kw(raxis, src, slab_axes);"
+    if k[:object_escape]
+      io.puts "  if ( src->data_type == CA_OBJECT ) {"
+      if min_count
+        io.puts "    if ( ! NIL_P(rmin_count) && ca_integer_arg(rmin_count, \"min_count\", NULL) < 0 ) {"
+        io.puts %Q[      rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %lld)", ca_calling_method_name(), (long long) ca_integer_arg(rmin_count, "min_count", NULL));]
+        io.puts "    }"
+      end
+      io.puts "    return rb_funcallv(self, rb_intern(\"#{k[:object_escape]}\"), escape_argc, escape_argv);"
+      io.puts "  }"
+    end
     emit_lazy_evaluated(io, unless_streaming:
       reduce_streams?(k) ? "naxes == src->ndim && src->ndim >= 1 && ! keep_axis && ! ca_has_mask(src)" : nil)
 
@@ -3784,17 +3795,25 @@ module MkKernel
       io.puts "  ca_detach(cw);"
     end
 
+    relift = (k[:face_gate] == :relift)
     if min_count
-      # Apply fill_value through the one rule the per-axis result uses.
-      io.puts "  if ( ! NIL_P(rfval) ) {"
+      # Apply fill_value through the one rule the per-axis result uses.  A
+      # Face's fill is a value of the Face, so it goes in after the re-lift
+      # below, as an assignment to the Face would put it.
+      io.puts relift ? "  if ( ! NIL_P(rfval) && _reduce_face == Qnil ) {" : "  if ( ! NIL_P(rfval) ) {"
       io.puts "    result = ca_reduce_fill(result, rfval, fill_whole);"
       io.puts "  }"
     end
 
-    if k[:face_gate] == :relift
+    if relift
       # Descended through emit_reduce_face_gate: re-lift the storage result
       # back into the Face before returning.
       emit_reduce_face_relift(io)
+      if min_count
+        io.puts "  if ( ! NIL_P(rfval) && _reduce_face != Qnil ) {"
+        io.puts "    result = ca_reduce_fill(result, rfval, fill_whole);"
+        io.puts "  }"
+      end
     end
 
     if use_result_var

@@ -152,12 +152,24 @@ class CASlabIterator < CAIterator
   # @!method max_addr
   #   Per-slab flat source address of the maximum.
   #   @return [CArray] one flat address per slab
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  #
+  # Each takes `min_count:` and `fill_value:` and passes them to the core
+  # reduction, as the other iterators do; `all` and `any` take neither, as
+  # the core ones do not.
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp, :minmax, :min_index, :max_index,
    :min_addr, :max_addr].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
-      def #{op}
-        @reference.#{op}(axis: @slab_axes)
+      def #{op} (min_count: nil, fill_value: nil)
+        @reference.#{op}(axis: @slab_axes, **reduce_options(min_count, fill_value))
+      end
+    RUBY
+  end
+
+  [:all, :any].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        @reference.#{op}(axis: @slab_axes, **CAIterator.reduce_keywords(:#{op}, kw))
       end
     RUBY
   end
@@ -210,26 +222,28 @@ class CASlabIterator < CAIterator
   # masked source raises (the known per-axis masked limitation); strip the mask
   # with `ca.value` first if needed.
 
-  # @overload median
+  # @overload median(min_count: nil, fill_value: nil)
   #   Per-slab median.
   #   @return [CArray]
-  def median
+  def median (min_count: nil, fill_value: nil)
+    opts = reduce_options(min_count, fill_value)
     if @slab_axes.size == 1
-      @reference.median(axis: @slab_axes[0])
+      @reference.median(axis: @slab_axes[0], **opts)
     else
-      @reference.reduce_slab(axis: @slab_axes) { |s| s.median }
+      @reference.reduce_slab(axis: @slab_axes) { |s| s.median(**opts) }
     end
   end
 
-  # @overload percentile(*pers)
+  # @overload percentile(*pers, min_count: nil, fill_value: nil)
   #   Per-slab percentile(s). One argument returns one CArray; several return an
   #   array of CArrays (as `CArray#percentile`).
   #   @return [CArray, Array<CArray>]
-  def percentile (*pers)
+  def percentile (*pers, min_count: nil, fill_value: nil)
+    opts = reduce_options(min_count, fill_value)
     if @slab_axes.size == 1
-      @reference.percentile(*pers, axis: @slab_axes[0])
+      @reference.percentile(*pers, axis: @slab_axes[0], **opts)
     else
-      rs = pers.map { |p| @reference.reduce_slab(axis: @slab_axes) { |s| s.percentile(p) } }
+      rs = pers.map { |p| @reference.reduce_slab(axis: @slab_axes) { |s| s.percentile(p, **opts) } }
       pers.size == 1 ? rs[0] : rs
     end
   end
@@ -279,18 +293,18 @@ class CASlabIterator < CAIterator
   # the same shape as the reference (one weight per cell). Core wsum / wmean
   # accept multi-axis, so this covers multi-axis slabs directly.
 
-  # @overload wsum(weights)
+  # @overload wsum(weights, min_count: nil, fill_value: nil)
   #   Per-slab weighted sum, `weights` shaped like the reference.
   #   @return [CArray]
-  def wsum (weights)
-    @reference.wsum(weights, axis: @slab_axes)
+  def wsum (weights, min_count: nil, fill_value: nil)
+    @reference.wsum(weights, axis: @slab_axes, **reduce_options(min_count, fill_value))
   end
 
-  # @overload wmean(weights)
+  # @overload wmean(weights, min_count: nil, fill_value: nil)
   #   Per-slab weighted mean, `weights` shaped like the reference.
   #   @return [CArray]
-  def wmean (weights)
-    @reference.wmean(weights, axis: @slab_axes)
+  def wmean (weights, min_count: nil, fill_value: nil)
+    @reference.wmean(weights, axis: @slab_axes, **reduce_options(min_count, fill_value))
   end
 
   # ---- segment scan: within-slab running statistics ---------------------
@@ -332,6 +346,14 @@ class CASlabIterator < CAIterator
 
   # The single slab axis for the order surface (core sort takes one integer
   # axis). A multi-axis slab has no single sort axis, so raise.
+  # The reduction keywords that were given, for the core call.
+  def reduce_options (min_count, fill_value)
+    opts = {}
+    opts[:min_count]  = min_count  unless min_count.nil?
+    opts[:fill_value] = fill_value unless fill_value.nil?
+    opts
+  end
+
   def single_sort_axis (op)
     return @slab_axes[0] if @slab_axes.size == 1
     raise ArgumentError,

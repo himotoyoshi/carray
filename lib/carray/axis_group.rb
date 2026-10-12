@@ -217,8 +217,12 @@ class AxisGroup
   # work, so an unknown keyword is refused rather than dropped.
   REDUCE_KEYWORDS = [:axis, :min_count, :fill_value].freeze
 
+  # all / any take axis: only, as the core ones do.
+  LOGICAL_REDUCE_KEYWORDS = [:axis].freeze
+
   def self.__check_reduce_keywords__ (op, kw)
-    unknown = kw.keys - REDUCE_KEYWORDS
+    allowed = [:all, :any].include?(op.to_sym) ? LOGICAL_REDUCE_KEYWORDS : REDUCE_KEYWORDS
+    unknown = kw.keys - allowed
     unless unknown.empty?
       raise ArgumentError,
             "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +

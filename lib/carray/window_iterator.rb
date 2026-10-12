@@ -402,19 +402,13 @@ class CAWindowIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # @!method all(min_count: nil, fill_value: nil)
+  # @!method all
   #   Whether every cell of each rolling is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `all` does not.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # @!method any(min_count: nil, fill_value: nil)
+  # @!method any
   #   Whether any cell of each rolling is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `any` does not.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
   # @!method variancep(min_count: nil, fill_value: nil)
   #   Rolling population variance (divisor `n`).
@@ -451,7 +445,7 @@ class CAWindowIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
@@ -461,6 +455,19 @@ class CAWindowIterator < CAIterator
         kw[:min_count]  = min_count  unless min_count.nil?
         kw[:fill_value] = fill_value unless fill_value.nil?
         sliding_view.#{op}(axis: @window_axes, **kw)
+      end
+    RUBY
+  end
+
+  # all / any take no min_count: or fill_value:, as the core ones do not.
+  [:all, :any].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        if kw.empty?
+          folded = @shape.include?(0) ? nil : fold_by_offset(:#{op}, nil)
+          return folded unless folded.nil?
+        end
+        sliding_view.#{op}(axis: @window_axes, **CAIterator.reduce_keywords(:#{op}, kw))
       end
     RUBY
   end
