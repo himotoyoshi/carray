@@ -236,19 +236,13 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
     fill = NULL;
     fill_mask = 1;
   }
-  else if ( ca_is_face(ca) ) {
-    /* A Face's fill is a surface value (a struct, an instant): its write
-       hook turns it into the storage value the fill cell holds. */
-    rfval = ca_face_element_to_storage(self, ca, rfval);
-    rcs = rb_cscalar_new_with_value(ca_strip_face(ca)->data_type, ca->bytes,
-                                    rfval);
-    TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
-    fill = cs->ptr;
-  }
   else {
-    rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a struct, an instant for a Face):
+       rb_ca_obj2ptr writes it as one cell of the storage. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
+    rb_ca_obj2ptr(self, rfval, fill);
   }
 
   if ( NIL_P(rroll) ) {

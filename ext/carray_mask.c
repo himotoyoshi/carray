@@ -1389,19 +1389,12 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* A Face's surface is not its storage: the fill value goes through the
-       Face's write hook, as a store does, and is cast in the storage
-       data_type. */
-    int8_t conv_type = ca->data_type;
-    if ( ca_is_face(ca) ) {
-      CArray *root = ca;
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-      if (root) conv_type = root->data_type;
-      rfval = ca_face_element_to_storage(self, ca, rfval);
-    }
-    rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a struct, an instant for a Face):
+       rb_ca_obj2ptr writes it as one cell of the storage. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
+    rb_ca_obj2ptr(self, rfval, fval);
   }
 
   ca_unmask(ca, fval);
@@ -1455,19 +1448,12 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* A Face's surface is not its storage: the fill value goes through the
-       Face's write hook, as a store does, and is cast in the storage
-       data_type. */
-    int8_t conv_type = ca->data_type;
-    if ( ca_is_face(ca) ) {
-      CArray *root = ca;
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-      if (root) conv_type = root->data_type;
-      rfval = ca_face_element_to_storage(self, ca, rfval);
-    }
-    rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a struct, an instant for a Face):
+       rb_ca_obj2ptr writes it as one cell of the storage. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
+    rb_ca_obj2ptr(self, rfval, fval);
   }
 
   co = ca_unmask_copy(ca, fval);

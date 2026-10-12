@@ -559,8 +559,7 @@ ca_store_all_list_body (VALUE arg)
   CArray *cast_target = ca;
   memset(&shadow, 0, sizeof(CArray));
   if ( ca_is_face(ca) ) {
-    CArray *root = ca;
-    while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
+    CArray *root = ca_strip_face(ca);
     if (root) {
       shadow.data_type = root->data_type;
       shadow.bytes     = ca->bytes;
@@ -987,9 +986,8 @@ rb_ca_ref_block (VALUE self, CAIndexInfo *info)
        data_type to the storage data_type (chain bottom) so the write path
        casts in the storage type. */
     if ( ca_is_face(ca) ) {
-      CArray *blk_ca, *root = ca;
+      CArray *blk_ca, *root = ca_strip_face(ca);
       TypedData_Get_Struct(blk, CArray, &carray_data_type, blk_ca);
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
       if (root && root->data_type != blk_ca->data_type) {
         blk_ca->data_type = root->data_type;
       }

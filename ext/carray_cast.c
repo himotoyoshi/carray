@@ -987,7 +987,7 @@ ca_face_safe_check (CArray *ca)
 static inline int8_t
 ca_storage_type_of (CArray *ca)
 {
-  while (ca_face_safe_check(ca)) ca = ((CAView *) ca)->parent;
+  if ( ca_face_safe_check(ca) ) ca = ca_strip_face(ca);
   return ca ? ca->data_type : CA_FIXLEN;
 }
 
