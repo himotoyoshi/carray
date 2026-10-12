@@ -176,6 +176,11 @@ int     ca_is_lazy_view (void *ap);
 
 CArray *ca_lazy_operation_mask (CArray *operation, int mode);
 
+/* The array whose memory a view's cells live in: the entity at the end of
+   its parent chain, or the first view that has several parents
+   (carray_attribute.c). */
+CArray *ca_root_array (void *ap);
+
 /* The create_mask slot of a view whose cells map one-to-one onto its
    parent's in address order: the mask is the parent's mask seen in the
    view's shape (carray_mask.c).  Installed directly in operation tables. */

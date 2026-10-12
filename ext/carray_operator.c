@@ -1487,6 +1487,18 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   return out;
 }
 
+/* An input of a bang operation that lives in the same root as the target
+   may share memory with it, and read in place it would show the kernel
+   cells the kernel has already written (`a[1..5].add!(a[0..4])` would
+   become a running sum).  Such an input is gathered whole before the
+   kernel runs.  The target itself (`a.add!(a)`) reads each cell before
+   writing it, so it is read in place. */
+static int
+ca_bang_input_may_overlap (CArray *target, CArray *input)
+{
+  return input != target && ca_root_array(input) == ca_root_array(target);
+}
+
 /* Bang (in-place) variant.  Invariant: the input-only operand (= other)
    must not be attached; self IS the output (write target, attach
    legitimate).  Same fast/slow pattern as rb_ca_call_binop, applied to
@@ -1540,13 +1552,15 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
     volatile VALUE h2 = Qnil;
     char *p2 = NULL;
     int   a2 = 0;
+    int   in_place2 = ca_attach_is_alias(ca2) &&
+                      ! ca_bang_input_may_overlap(ca1, ca2);
     ca_binop_call_t k;
     CArray *held[2];
     (void) h2;
 
-    /* other is input only: materialised via ca_xfer_all when it is not
-       alias-cheap -- before self is attached, since a gather can raise. */
-    if ( ! ca_attach_is_alias(ca2) ) {
+    /* other is input only: materialised via ca_xfer_all when it cannot be
+       read in place -- before self is attached, since a gather can raise. */
+    if ( ! in_place2 ) {
       p2 = ALLOCV_N(char, h2, ca2->elements * ca2->bytes);
       ca_xfer_all(ca2, p2, CA_XFER_GET);
     }
@@ -1555,7 +1569,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
                          kernel runs through ca_op_guarded when it can */
     ca_mask_overlay_attached(ca1, 2, ca1, ca2, NULL);
 
-    if ( ca_attach_is_alias(ca2) ) {
+    if ( in_place2 ) {
       ca_attach(ca2);   /* window: an alias attach, which cannot raise */
       p2 = ca2->ptr;
       a2 = 1;
@@ -1896,11 +1910,16 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
     /* Threshold dispatch on the input-only operands (ca2 / ca3).  Self
        (ca1) IS the output (attached + ca_sync as usual).  >= 2 non-alias
        input arrays → chunked, else 1-shot ALLOCV. */
+    /* An input that may share memory with self is gathered whole, never
+       read in place or per chunk: either would read cells already
+       written. */
+    int overlap2 = ca_bang_input_may_overlap(ca1, ca2);
+    int overlap3 = ca_bang_input_may_overlap(ca1, ca3);
     int nonalias_arrays = 0;
     int use_chunked;
     if ( s2 == 1 && !ca_attach_is_alias(ca2) ) nonalias_arrays++;
     if ( s3 == 1 && !ca_attach_is_alias(ca3) ) nonalias_arrays++;
-    use_chunked = (nonalias_arrays >= 2);
+    use_chunked = (nonalias_arrays >= 2) && !overlap2 && !overlap3;
 
     if ( !use_chunked ) {
       volatile VALUE h2 = Qnil, h3 = Qnil;
@@ -1910,9 +1929,18 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
       CArray *held[3];
       (void) h2; (void) h3;
 
+      int in_place2 = ca_attach_is_alias(ca2) && !overlap2;
+      int in_place3 = ca_attach_is_alias(ca3) && !overlap3;
+
       /* The gathers can raise, so they run before self is attached. */
-      EAGER_GATHER_INPUT(ca2, p2, h2);
-      EAGER_GATHER_INPUT(ca3, p3, h3);
+      if ( ! in_place2 ) {
+        p2 = ALLOCV_N(char, h2, ca2->elements * ca2->bytes);
+        ca_xfer_all(ca2, p2, CA_XFER_GET);
+      }
+      if ( ! in_place3 ) {
+        p3 = ALLOCV_N(char, h3, ca3->elements * ca3->bytes);
+        ca_xfer_all(ca3, p3, CA_XFER_GET);
+      }
 
       /* self IS the output (= write target; attach legit per refined
          invariant) */
@@ -1920,8 +1948,17 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
                            kernel runs through ca_op_guarded */
       ca_mask_overlay_attached(ca1, 3, ca1, ca2, ca3);
 
-      EAGER_ATTACH_INPUT(ca2, p2, attached2);
-      EAGER_ATTACH_INPUT(ca3, p3, attached3);
+      attached2 = attached3 = 0;
+      if ( in_place2 ) {
+        ca_attach(ca2);   /* window: an alias attach, cannot raise */
+        p2 = (char *) ca2->ptr;
+        attached2 = 1;
+      }
+      if ( in_place3 ) {
+        ca_attach(ca3);   /* window: as above */
+        p3 = (char *) ca3->ptr;
+        attached3 = 1;
+      }
 
       k.f  = func[ca1->data_type];
       k.n  = ca1->elements;

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an in-place operator (`add!`, `mul!`, `fma!` and the rest) whose
+  argument shares memory with the receiver answers what the plain operator
+  answers. `a[1..5].add!(a[0..4])` produced a running sum, reading cells it
+  had already written.
+
 - Change: `take_along_axis` and `axis2addr` raise IndexError for an index
   out of range, and `addr2index` raises IndexError for an address out of
   range and counts a negative address from the end, as every other index
