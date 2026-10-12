@@ -34,7 +34,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.3 (unreleased)
+## 3.0.3
 
 - New: `CAFrame.from_csv` reads messy tables: `types: :infer` (numbers,
   booleans, year-first dates and times), `types: { default: ... }`,
