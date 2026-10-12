@@ -124,4 +124,16 @@ class TestComposeAxisKwarg < Test::Unit::TestCase
     assert_equal 23.0,  v[0, 2, 3]
     assert_equal 123.0, v[1, 2, 3]
   end
+
+  # A nil axis is the same as omitting it, for every join.
+  def test_nil_axis_is_the_same_as_omitting_it
+    a = CA_INT32([[1, 2, 3], [4, 5, 6]])
+    b = CA_INT32([[7, 8, 9], [10, 11, 12]])
+    assert_equal CArray.meld(a, b).to_a,            CArray.meld(a, b, axis: nil).to_a
+    assert_equal a.meld(b).to_a,                    a.meld(b, axis: nil).to_a
+    assert_equal CArray.concatenate([a, b]).to_a,   CArray.concatenate([a, b], axis: nil).to_a
+    assert_equal a.concatenate(b).to_a,             a.concatenate(b, axis: nil).to_a
+    assert_equal CArray.stack([a, b]).to_a,         CArray.stack([a, b], axis: nil).to_a
+    assert_equal a.stack(b).to_a,                   a.stack(b, axis: nil).to_a
+  end
 end

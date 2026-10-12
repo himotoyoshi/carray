@@ -80,9 +80,10 @@ CArray broadcasting only stretches size-1 axes. It never invents new axes to mak
 v = CA_INT([100, 200, 300])    #  shape [3] — one axis
 
 a + v
-#  => ArgumentError: shape mismatch between operands ([2, 3] and [3]);
-#     shapes must agree, or differ only in size-1 axes with equal ndim
-#     -- use .flatten on both sides to operate on the values in the order they lie
+#  => ArgumentError: shape mismatch between operands ([2, 3] and [3]):
+#     the operands have different numbers of axes, and axes are not added
+#     implicitly -- add size-1 axes with :_ so both have the same number
+#     (x[:_, nil] makes a 1-D x a row, x[nil, :_] a column)
 ```
 
 This is a deliberate choice: a 1-D array of length 3 could mean either a row or a column, so CArray asks you to say which.

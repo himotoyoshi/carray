@@ -438,21 +438,26 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_raise(ArgumentError) { h.group_by_category(cat).sum(axis: 0) }
   end
 
-  # --- deferred: order stats raise cleanly with axis: ---------------------
+  # --- order stats with axis: are each group's core order statistic -------
 
-  def test_axis_on_true_order_stat_raises_deferred_message
-    # median / percentile need a sort per group (genuine order statistics) and
-    # stay deferred to a future demand-driven phase; variance / stddev /
-    # variancep / stddevp are 2-pass centred aggregates (no order needed) and
-    # land in Phase 2 (see PROPOSAL §5).
-    h = CArray.float64(6, 2, 3) { |i, y, x| (i + 1).to_f }
-    codes = CArray.int32(6, 2, 3) { |i, y, x| i / 2 }
+  def test_axis_order_stats_are_each_groups_core_answer
+    h = CArray.float64(6, 2, 3) { |i, y, x| ((i * 7 + y * 3 + x) % 5).to_f }
+    codes = CArray.int32(6, 2, 3) { |i, y, x| (i + x) % 3 }
     cat = CACategorical.from_codes(codes, [:a, :b, :c])
     grp = h.group_by_category(cat)
-    err = assert_raise(NotImplementedError) { grp.median(axis: 0) }
-    assert err.message =~ /axis.*deferred|Phase 4|order stat/i
-    err = assert_raise(NotImplementedError) { grp.percentile(50.0, axis: 0) }
-    assert err.message =~ /axis.*deferred|Phase 4|order stat/i
+    { grp.median(axis: 0) => 50.0, grp.percentile(90.0, axis: 0) => 90.0 }.each do |got, p|
+      3.times do |c|
+        local = h.copy
+        local[codes.ne(c)] = UNDEF
+        assert_equal local.percentile(p, axis: 0).to_a, got[c, nil, nil].to_a
+      end
+    end
+  end
+
+  def test_axis_median_of_an_empty_group_is_undef
+    h = CArray.float64(4, 2).seq!
+    cat = CACategorical.from_codes(CA_INT32([0, 0, 0, 0]), [:a, :b])
+    assert_equal [[3.0, 4.0], [UNDEF, UNDEF]], h.group_by_category(cat).median(axis: 0).to_a
   end
 
   # --- Phase 2: mean / min / max / minmax / count / prod ---------------------
@@ -608,7 +613,7 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
           var_ref[c, *band_ix]  = UNDEF
           varp_ref[c, *band_ix] = UNDEF
         elsif n == 1
-          var_ref[c, *band_ix]  = 0.0
+          var_ref[c, *band_ix]  = UNDEF
           varp_ref[c, *band_ix] = 0.0
         else
           mean = vs.sum(0.0) / n
@@ -629,7 +634,8 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
   end
 
   def test_variance_axis_empty_and_single_cell_contracts
-    # Empty group → UNDEF (both variance and variancep); single cell → 0.0.
+    # Empty group → UNDEF (both variance and variancep); single cell → UNDEF
+    # for the sample variance, 0.0 for the population one.
     h = CArray.float64(6, 2, 3) { |i, y, x| (i + 1).to_f }
     # Set codes so group 2 has 1 cell at (0,0) and 0 cells at (0,1)
     codes = CArray.int32(6, 2, 3) { |i, y, x|
@@ -642,7 +648,8 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     cat = CACategorical.from_codes(codes, [:a, :b, :c])
     grp = h.group_by_category(cat)
     var = grp.variance(axis: 0)
-    assert_in_delta 0.0, var[2, 0, 0], 1e-12,           "single-cell → 0.0"
+    assert var.mask[2, 0, 0],                           "single-cell → UNDEF"
+    assert_in_delta 0.0, grp.variancep(axis: 0)[2, 0, 0], 1e-12, "single-cell variancep → 0.0"
     assert var.has_mask? && var.mask[2, 0, 1],          "empty → UNDEF"
   end
 
@@ -774,6 +781,27 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     h = CA_DOUBLE([[1, 2], [3, 4], [5, 6], [7, 8]])
     assert_equal([[1, 1], [2, 2]], h.group_by_category(cat).count(axis: 0).to_a)
   end
+
+  # An integer or float payload is counted by the fused kernel, any other by
+  # walking the codes. Both count a NaN cell as present and leave out masked
+  # values and masked codes, for each of the three classifier shapes.
+  def test_count_agrees_between_a_numeric_and_any_other_payload
+    h = CA_DOUBLE([[1, Float::NAN, 3], [4, 5, 6], [7, 8, Float::NAN], [10, 11, 12]])
+    h[2, 0] = UNDEF
+    c = h.to_type(CA_CMPLX128)
+    c[2, 0] = UNDEF
+    { "case A"    => [[0, 1, 1, 0], 0],
+      "case B"    => [[[0, 1, 1], [1, 0, 1], [1, 1, 0], [0, 0, 1]], 0],
+      "band-only" => [[0, 1, 1], 0] }.each do |name, (rows, axis)|
+      codes = CA_UINT8(rows)
+      codes[*[0] * codes.ndim] = UNDEF
+      cat = CACategorical.from_codes(codes, ["a", "b"])
+      numeric = h.group_by_category(cat).count(axis: axis)
+      other   = c.group_by_category(cat).count(axis: axis)
+      assert_equal other.to_a, numeric.to_a, name
+      assert_equal CA_INT64, numeric.data_type, name
+    end
+  end
   # ---- band-only is reachable at every rank --------------------------------
   #
   # The three accepted classifier shapes were told apart by rank. For a 2-D
@@ -823,10 +851,77 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
                  h.group_by_category(cat).sum(axis: 0).to_a)
   end
 
+  # A band-only classifier puts each fiber in one group whole, so its answers
+  # come from the core reductions along the axis. They must agree with the
+  # same codes broadcast to the full shape (case B, the fused kernel): NaN
+  # cells, masked cells, a fiber masked throughout, a masked code, and a
+  # group no fiber falls in.
+  def test_band_only_agrees_with_the_same_codes_broadcast
+    n = Float::NAN
+    h = CA_DOUBLE([[1, n, 3, 4], [5, 6, n, 8], [9, 10, 11, n]])   # [3, 4], reduce axis 0
+    h[1, 0] = UNDEF
+    h[nil, 3] = UNDEF                                             # fiber 3 masked throughout
+    codes = CA_UINT8([0, 2, 0, 2])                                # group 1 is empty
+    codes[1] = UNDEF                                              # fiber 1 belongs to no group
+    labels = ["a", "b", "c"]
+    band = CACategorical.from_codes(codes, labels)
+    full = CACategorical.from_codes(band.codes.reshape(1, 4).broadcast_to(3, 4).copy, labels)
+    gb = h.group_by_category(band)
+    gf = h.group_by_category(full)
+    %i[sum mean min max count count_not_masked].each do |op|
+      a = gb.send(op, axis: 0)
+      b = gf.send(op, axis: 0)
+      assert_equal b.data_type, a.data_type, op.to_s
+      assert_equal b.is_masked.to_a, a.is_masked.to_a, op.to_s
+      assert_equal b.to_a.to_s, a.to_a.to_s, op.to_s   # to_s so that NaN compares equal
+    end
+    assert_equal gf.minmax(axis: 0).map { |x| x.to_a.to_s }, gb.minmax(axis: 0).map { |x| x.to_a.to_s }
+  end
+
   def test_case_a_at_rank_two_still_matches_the_reference
     h   = CA_DOUBLE([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
     cat = CA_INT32([0, 0, 1, 1]).categorize                            # [4]
     assert_equal(CategoricalReduceAxisRef.sum_ref(h, cat, 0).to_a,
                  h.group_by_category(cat).sum(axis: 0).to_a)
+  end
+
+  # A negative axis counts from the end, as for every other axis: reduction.
+  def test_negative_axis_counts_from_the_end
+    h   = CArray.float64(3, 4).seq
+    cat = CArray.int32(3, 4).seq.mod(2).categorize
+    w   = CArray.float64(3, 4).seq
+    g   = h.group_by_category(cat)
+    %i[sum mean min max prod variance stddev accumulate count_not_masked].each do |op|
+      assert_equal g.send(op, axis: 1).to_a, g.send(op, axis: -1).to_a, op.to_s
+      assert_equal g.send(op, axis: 0).to_a, g.send(op, axis: -2).to_a, op.to_s
+    end
+    assert_equal g.wsum(w, axis: 1).to_a, g.wsum(w, axis: -1).to_a
+    err = assert_raise(ArgumentError) { g.sum(axis: -3) }
+    assert_equal "sum: axis -3 out of range for ndim 2", err.message
+  end
+
+  # The axis: form of sum / mean / min / max / minmax / prod used to read
+  # only numeric values (`numeric value required`); a boolean, object or Face
+  # value is reduced by the core per group, in the core's own types.
+  def test_axis_reductions_of_non_numeric_values
+    cat = CA_OBJECT(%w[a b a b]).categorize
+    b = CA_BOOLEAN([[1, 0], [1, 1], [0, 0], [1, 0]])
+    assert_equal [[1, 0], [2, 1]], b.group_by_category(cat).sum(axis: 0).to_a
+    assert_equal [[0.5, 0.0], [1.0, 0.5]], b.group_by_category(cat).mean(axis: 0).to_a
+    o = CA_OBJECT([[1, 2], [3, 4], [5, 6], [7, 8]])
+    assert_equal [[6, 8], [10, 12]], o.group_by_category(cat).sum(axis: 0).to_a
+    assert_equal [[5, 12], [21, 32]], o.group_by_category(cat).prod(axis: 0).to_a
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04
+                       2024-01-05 2024-01-06 2024-01-07 2024-01-08]).reshape(4, 2)
+    lo, hi = t.group_by_category(cat).minmax(axis: 0)
+    assert_kind_of CATime, lo
+    assert_equal t[0, nil].to_a, lo[0, nil].to_a
+    assert_equal t[3, nil].to_a, hi[1, nil].to_a
+    assert_raise(CArray::DataTypeError) { t.group_by_category(cat).sum(axis: 0) }   # the core refuses
+    s = CArray.const_string(%w[a b c d e f g h]).reshape(4, 2)
+    assert_equal [%w[a b], %w[c d]], s.group_by_category(cat).min(axis: 0).to_a
+    # classified cell by cell (the same shape as the values)
+    c = CA_INT32([[0, 1], [1, 1], [0, 0]]).categorize
+    assert_equal [[1, 0], [1, 1]], CA_BOOLEAN([[1, 0], [1, 1], [0, 0]]).group_by_category(c).sum(axis: 0).to_a
   end
 end

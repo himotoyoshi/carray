@@ -159,10 +159,11 @@ class TestWindowIterator30OrderStats < Test::Unit::TestCase
     assert_in_delta b[1, 2], out[1, 2], 1e-12
   end
 
-  def test_skip_order_stat_rejects
+  def test_skip_order_stat_leaves_the_margin_out
     a = CArray.float64(8).seq(1)
-    assert_raise(ArgumentError) { a.windows(-1..1).median }
-    assert_raise(ArgumentError) { a.windows(-1..1).percentile(50) }
+    w = a.windows(-1..1)
+    assert_equal [1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 7.5], w.median.to_a
+    assert_equal w.median.to_a, w.percentile(50).to_a
   end
 
   def test_percentile_and_quantile

@@ -115,6 +115,43 @@ class CArray
   #     `:stable`.
   def sort_addr(axis: nil, kind: :quick, masked_position: :last); end
 
+  # @overload sort_index(axis: nil, kind: :quick, masked_position: :last)
+  #   Returns, for each fiber along `axis`, the positions within the
+  #   fiber that put it in ascending order: `:int64`, shaped like
+  #   `self`. For a 1-D array, `a[a.sort_index]` is `a` sorted.
+  #
+  #   Without `axis:` (or with `axis: nil`) `self` is flattened and
+  #   treated as one fiber, as {#sort} does: the result is 1-D with
+  #   `self.elements` entries, and `a.flatten[a.sort_index]` is
+  #   `a.sort`.
+  #
+  #   The sort is **stable**: cells that compare equal keep their
+  #   input order, whichever `kind:` is chosen, so sorting by one key
+  #   and then stably by another orders by the second key first and
+  #   the first within it. `kind:` is a performance characteristic
+  #   only:
+  #
+  #   - `:quick` (default) — introsort with mergesort escape.
+  #   - `:stable` — bottom-up mergesort.
+  #
+  #   NaN and masked cells cannot be compared with the rest and are
+  #   placed at one end of each fiber: NaN after the numbers, masked
+  #   cells at the end `masked_position:` names (`:last`, default, or
+  #   `:first`). Relative order within the masked cells is unspecified.
+  #
+  #   Takes numeric data types, boolean, `CA_FIXLEN` (byte order),
+  #   `CA_OBJECT` (`<=>` per pair), and an ordered Face such as
+  #   `CATime`. Complex values have no order.
+  #   @param axis [Integer, nil] axis along which fibers run; negative
+  #     counts from the end. `nil` sorts the whole array.
+  #   @param kind [Symbol] `:quick` or `:stable`.
+  #   @param masked_position [Symbol] `:last` (default) or `:first`.
+  #   @return [CArray] `:int64` positions within each fiber.
+  #   @raise [ArgumentError] when `kind:` is neither `:quick` nor
+  #     `:stable`, or `axis` is out of range.
+  #   @raise [CArray::DataTypeError] for a complex `data_type`.
+  def sort_index(axis: nil, kind: :quick, masked_position: :last); end
+
   # @!group Index and address conversion
 
   # @overload axis2addr(indices, axis: 0)
@@ -147,15 +184,18 @@ class CArray
   #
   #   `indices` data_type: any integer kind (zero-copy when
   #   already `:int64`). Negative indices: Python-style
-  #   (`-1` == last). Out-of-range indices raise `RangeError`.
-  #   Negative `axis:` is Python-style.
+  #   (`-1` == last). Out-of-range indices raise `IndexError`.
+  #   Negative `axis:` is Python-style.  A masked index gives a
+  #   masked address (its stored value is not read), so
+  #   `take_along_axis` answers `UNDEF` there and `put_along_axis`
+  #   writes nothing there.
   #
   #   @param indices [CArray] integer-typed axis-local positions.
   #   @param axis [Integer] axis along which `indices` are
   #     interpreted.
   #   @return [CArray] `:int64` view-flat addresses, same shape as
   #     `indices`.
-  #   @raise [RangeError] when an index is out of range after
+  #   @raise [IndexError] when an index is out of range after
   #     negative normalization.
   #   @raise [ArgumentError] for shape / ndim / data_type
   #     violations.

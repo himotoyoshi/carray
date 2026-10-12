@@ -60,7 +60,7 @@ class TestInsertAxisRepeat < Test::Unit::TestCase
     # broadcast on store is one-sided: the source may be repeated, the
     # container may not grow.
     t = CArray.int32(1, 3, 4)
-    assert_raise(RuntimeError) { t[] = CArray.int32(5, 3, 4).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(5, 3, 4).seq }
   end
 
   def test_empty_positions_raises

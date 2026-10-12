@@ -685,4 +685,118 @@ class TestCAMeld < Test::Unit::TestCase
     assert_equal 15, v.reshape(3, 5).to_a.flatten.size
   end
 
+  # A bang operation opens the meld and writes its cells back on the way
+  # out.  A parent that is not an alias of its root -- a selection, a
+  # CAObject -- takes the cells into the buffer its attach handed out and
+  # pushes them on from there, once.
+  def test_bang_writes_reach_parents_that_are_selections
+    x = CArray.int32(6).seq
+    CArray.meld(x[x > 2], x[x < 3]).add!(100)
+    assert_equal [100, 101, 102, 103, 104, 105], x.to_a
+    x = CArray.int32(6).seq
+    CArray.meld(x[x > 2], x[x < 3]).seq!(50)
+    assert_equal [53, 54, 55, 50, 51, 52], x.to_a
+  end
+
+  def test_bang_writes_reach_selections_along_an_inner_axis
+    x = CArray.int32(2, 6).seq
+    CArray.meld(x[nil, x[0, nil] > 2], x[nil, x[0, nil] < 3], axis: 1).add!(100)
+    assert_equal (CArray.int32(2, 6).seq + 100).to_a, x.to_a
+  end
+
+  class PushCounter < CAObject
+    attr_reader :src, :pushes
+    def initialize (n)
+      @src = CArray.int32(n).seq
+      @pushes = []
+      super(CA_INT32, [n])
+    end
+    def copy_data (d)     ; d[] = @src ; end
+    def sync_data (d)     ; @pushes << d.to_a ; @src[] = d ; end
+    def fetch_addr (a)    ; @src[a] ; end
+    def store_addr (a, v) ; @src[a] = v ; end
+  end
+
+  def test_bang_writes_push_a_caobject_parent_once
+    a = PushCounter.new(3)
+    b = PushCounter.new(3)
+    CArray.meld(a, b).map! { |v| v + 10 }
+    assert_equal [10, 11, 12], a.src.to_a
+    assert_equal [[10, 11, 12]], a.pushes
+    assert_equal [10, 11, 12], b.src.to_a
+  end
+
+  def test_flat_min_max_with_an_all_nan_parent
+    nan = Float::NAN
+    [CA_FLOAT64, CA_FLOAT32].each do |t|
+      m = CArray.meld(CArray.new(t, [2]) { nan }, CArray.new(t, [2]).seq(1))
+      assert_equal m.copy.min, m.min
+      assert_equal m.copy.max, m.max
+    end
+    assert_equal 1, CArray.meld(CA_OBJECT([3, 4]), CA_OBJECT([1, 2])).min
+  end
+
+  def test_mask_over_parents_that_cannot_carry_one
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    value  = CA_FLOAT64([4, 5]).value
+    frozen = CA_FLOAT64([6, 7]).freeze
+    m = CArray.meld([masked, value, frozen])
+    assert_equal [false, true, false, false, false, false, false], m.mask.to_a
+    assert_equal 1 + 3 + 4 + 5 + 6 + 7, m.sum
+    refute frozen.has_mask?
+    assert_raise(RuntimeError) { m[3] = UNDEF }
+    stacked = CArray.stack([masked, CA_FLOAT64([1, 2, 3]).value])
+    assert_equal 1 + 3 + 1 + 2 + 3, stacked.sum
+  end
+
+  def test_undef_written_through_the_view_reaches_a_writable_parent
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    plain  = CA_FLOAT64([4, 5, 6])
+    m = CArray.meld([masked, plain])
+    m[4] = UNDEF
+    assert_equal [4.0, UNDEF, 6.0], plain.to_a
+  end
+  def test_reductions_on_the_mask_of_a_meld
+    masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
+    mk = CArray.meld(masked, CA_FLOAT64([4, 5]), axis: 0).mask
+    ref = mk.copy
+    [:sum, :min, :max, :mean].each do |op|
+      assert_equal ref.public_send(op), mk.public_send(op), op.to_s
+      assert_equal ref.public_send(op, axis: 0), mk.public_send(op, axis: 0), "#{op}(axis: 0)"
+    end
+  end
+  # Asking a stack or meld about its mask leaves an unmasked part alone;
+  # a mask the part gains afterwards shows through, and UNDEF written
+  # through the view reaches the part.
+  def test_mask_query_leaves_an_unmasked_part_alone
+    [->(a, b) { CArray.stack([a, b], axis: 0) },
+     ->(a, b) { CArray.stack([a, b], axis: 2) },
+     ->(a, b) { CArray.meld(a, b, axis: 0) },
+     ->(a, b) { CArray.meld(a, b, axis: 1) }].each_with_index do |mk, n|
+      a = CArray.float64(2, 3).seq; a[0] = UNDEF
+      b = CArray.float64(2, 3).seq
+      v = mk.call(a, b)
+      assert_equal true, v.has_mask?, "case #{n}"
+      v.copy; v.sum(axis: 0); v.mask.to_a
+      assert_equal false, b.has_mask?, "case #{n}: query"
+      b[1, 1] = UNDEF
+      assert_equal v.copy.to_a, v.to_a, "case #{n}: later mask"
+      assert_equal 1, v.mask.to_a.flatten.count(true) - 1, "case #{n}: later mask"
+      c = CArray.float64(2, 3).seq
+      w = mk.call(a, c)
+      w.has_mask?
+      w[*w.shape.map { |d| d - 1 }] = UNDEF
+      assert_equal true, c.has_mask?, "case #{n}: write"
+      assert_equal 1, c.count_masked, "case #{n}: write"
+    end
+  end
+  def test_variance_of_an_object_meld_is_the_core_answer
+    a = CA_OBJECT([Rational(1, 3), Rational(1, 2)])
+    b = CA_OBJECT([Rational(2, 3), 1, Rational(5, 4)])
+    m = CArray.meld(a, b)
+    [:variance, :variancep, :stddev, :stddevp].each do |op|
+      assert_equal m.copy.send(op), m.send(op), op.to_s
+    end
+    assert_kind_of Rational, m.variance
+  end
 end

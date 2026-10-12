@@ -167,19 +167,44 @@ class CABlockIterator < CAIterator
   # below a full tile, so `min_count:` marks them UNDEF with no masking.  The
   # output data type is seeded from the first region (all regions share it).
   def assemble
-    outs = nil
+    grids = nil
+    faces = nil
+    single = true
     each_region do |strip_ranges, tiles, out_ranges|
       view = @source[*strip_ranges].block_view(*tiles)
       res  = yield(view, tiles)
-      if res.is_a?(Array)
-        outs ||= res.map { |r| CArray.new(r.data_type, @shape) }
-        res.each_index { |k| outs[k][*out_ranges] = res[k] }
-      else
-        outs ||= CArray.new(res.data_type, @shape)
-        outs[*out_ranges] = res
-      end
+      single = false if res.is_a?(Array)
+      res  = [res] unless res.is_a?(Array)
+      faces ||= res.map { |r| r.face? ? r : nil }
+      parts = res.map { |r| r.face? ? face_grid_part(r) : r }
+      grids ||= parts.map { |r| CArray.new(r.data_type, @shape, bytes: r.bytes) }
+      parts.each_index { |k| grids[k][*out_ranges] = parts[k] }
     end
-    outs
+    unless grids
+      # An empty source has no region.  A view with unit tiles has no cells
+      # either; reducing it gives each output's type for the empty grid.
+      res = yield(@source.block_view(*[1] * @sndim), [1] * @sndim)
+      single = !res.is_a?(Array)
+      res = [res] unless res.is_a?(Array)
+      faces = res.map { |r| r.face? ? r : nil }
+      grids = res.map { |r| r = face_grid_part(r) if r.face?; CArray.new(r.data_type, @shape, bytes: r.bytes) }
+    end
+    outs = grids.each_index.map { |k| faces[k] ? face_grid(grids[k], faces[k]) : grids[k] }
+    single ? outs[0] : outs
+  end
+
+  # A region result that is a Face (a CATime mean, a CATimedelta stddev) is
+  # assembled on its storage and the Face is put back on the whole grid;
+  # assembling the Face itself would copy its surface bytes into an array that
+  # no longer knows it is one.  A CAConstString's storage points into its own
+  # buffer, which the regions do not share, so it is assembled as strings.
+  def face_grid_part (r)
+    r.is_a?(CAConstString) ? r.to_string.parent : r.parent
+  end
+
+  def face_grid (grid, face)
+    return CArray.const_string(grid, encoding: face.encoding) if face.is_a?(CAConstString)
+    grid.face_lift(face)
   end
 
   # Fold every region with a single core reduction `op` (the tier-1 shape).
@@ -255,19 +280,13 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  # @!method all(min_count: nil, fill_value: nil)
+  # @!method all
   #   Whether every cell of each tile is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `all` does not.
   #   @return [CArray] tile-grid shaped
-  # @!method any(min_count: nil, fill_value: nil)
+  # @!method any
   #   Whether any cell of each tile is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `any` does not.
   #   @return [CArray] tile-grid shaped
   # @!method variancep(min_count: nil, fill_value: nil)
   #   Per-tile population variance (divisor `n`).
@@ -283,15 +302,29 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp].each do |op|
     define_method(op) do |min_count: nil, fill_value: nil|
+      if FACE_WINNER_INDEX.key?(op) && @source.face?
+        return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
+      end
       kw = {}
       kw[:min_count]  = min_count  unless min_count.nil?
       kw[:fill_value] = fill_value unless fill_value.nil?
       fold(op, **kw)
     end
   end
+
+  [:all, :any].each do |op|
+    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
+  end
+
+  # A Face's minimum and maximum are cells of the Face, so they are gathered
+  # from the source by the winner's address.  Assembling the per-region results
+  # instead copies the Face's storage into an array that no longer knows it is
+  # one: a CATime came back as 8-byte strings.
+  FACE_WINNER_INDEX = { min: :min_index, max: :max_index }.freeze
+  private_constant :FACE_WINNER_INDEX
 
   # ---- count family and elements ----------------------------------------
 
@@ -300,15 +333,16 @@ class CABlockIterator < CAIterator
   #   partial edge tile); `count(UNDEF)` counts masked cells; `count(v)` counts
   #   cells equal to `v`.
   #   @return [CArray] tile-grid shaped
-  def count (*args)
-    return count_not_masked if args.empty?
+  def count (*args, **kw)
+    return count_not_masked(**kw) if args.empty?
+    kw = CAIterator.reduce_keywords(:count, kw)
     out = nil
     each_region do |strip_ranges, tiles, out_ranges|
       view = @source[*strip_ranges].block_view(*tiles)
       # block_view is a CAStride, so #count is not shadowed; dispatch
       # CArray#count explicitly anyway, matching the family regularity.
-      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes)
-      out ||= CArray.new(red.data_type, @shape)
+      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes, **kw)
+      out ||= CArray.new(red.data_type, @shape, bytes: red.bytes)
       out[*out_ranges] = red
     end
     out
@@ -318,16 +352,21 @@ class CABlockIterator < CAIterator
   #   Per-tile count of present (non-masked) cells.  For a partial edge tile
   #   this is the real cell count (the OOB cells are not present).
   #   @return [CArray]
-  def count_not_masked
-    fold(:count_not_masked)
+  def count_not_masked (**kw)
+    fold(:count_not_masked, **CAIterator.reduce_keywords(:count_not_masked, kw))
   end
 
   # @overload count_masked
   #   Per-tile count of masked cells.  Equals `elements - count_not_masked`;
   #   the OOB cells of a partial edge tile count here.
   #   @return [CArray]
-  def count_masked
-    elements - count_not_masked
+  def count_masked (**kw)
+    kw   = CAIterator.reduce_keywords(:count_masked, kw)
+    need = CArray.__min_count_need__(:count_masked, kw[:min_count], 0)
+    out  = elements - count_not_masked
+    # A count of the mask reads every cell of the tile.
+    out[elements.lt(need)] = UNDEF if need > 0
+    CArray.__reduce_fill__(out, kw[:fill_value])
   end
 
   # @overload elements
@@ -349,6 +388,10 @@ class CABlockIterator < CAIterator
   #   Per-tile `[min, max]` (two tile-grid-shaped CArrays, a single fused pass).
   #   @return [Array<CArray>]
   def minmax (min_count: nil, fill_value: nil)
+    if @source.face?
+      return [min(min_count: min_count, fill_value: fill_value),
+              max(min_count: min_count, fill_value: fill_value)]
+    end
     kw = {}
     kw[:min_count]  = min_count  unless min_count.nil?
     kw[:fill_value] = fill_value unless fill_value.nil?
@@ -364,8 +407,9 @@ class CABlockIterator < CAIterator
   #   @return [CArray]
   [:min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
-      def #{op}
-        assemble { |view, _| view.#{op}(axis: @tile_axes) }
+      def #{op} (**kw)
+        kw = CAIterator.reduce_keywords(:#{op}, kw)
+        assemble { |view, _| view.#{op}(axis: @tile_axes, **kw) }
       end
     RUBY
   end
@@ -376,26 +420,49 @@ class CABlockIterator < CAIterator
   #   minima. Unlike `min_index` (the tile-local position) this indexes back
   #   into the original array. An all-masked tile is a masked cell.
   #   @return [CArray] tile-grid shaped int64
-  def min_addr; winner_addr(:min_index); end
+  def min_addr (**kw); winner_addr(:min_index, kw); end
 
   # @overload max_addr
   #   Per-tile flat source address of the maximum. See {#min_addr}.
   #   @return [CArray] tile-grid shaped int64
-  def max_addr; winner_addr(:max_index); end
+  def max_addr (**kw); winner_addr(:max_index, kw); end
 
   private
+
+  # Per-tile minimum or maximum of a Face source, gathered from the source by
+  # the winner's address so the result is the Face itself.  An all-masked tile,
+  # and with `min_count` a tile with too few present cells, is a masked cell.
+  def face_winner (idx_op, min_count, fill_value)
+    addr = winner_addr(idx_op)
+    need = CArray.__min_count_need__(idx_op == :min_index ? :min : :max, min_count, 0)
+    addr[count_not_masked.lt(need)] = UNDEF if need > 0
+    src   = @source.reshape(@source.elements)
+    empty = addr.is_masked
+    return src[addr].copy unless empty.any
+    # A masked index drops the cell rather than masking it, so an empty tile
+    # needs a placeholder address.  Pointing it at a masked cell of the source
+    # carries the mask through the gather, which a read-only Face (whose copy
+    # cannot be written) needs.  Otherwise mask the placeholder afterwards.
+    if fill_value.nil? && src.has_mask? && (hole = src.is_masked.where).elements > 0
+      return src[addr.strip_mask(hole[0])].copy
+    end
+    out = src[addr.strip_mask(0)].copy
+    out[empty] = fill_value.nil? ? UNDEF : fill_value
+    out
+  end
 
   # Per-tile source address of the winner. The tile-local flat index (min_index /
   # max_index) is looked up in a source-address companion tiled the same way, so
   # the tile geometry is reused rather than recomputed. An all-masked tile yields
   # a masked index; it is gathered at 0 and re-masked in the result.
-  def winner_addr (idx_op)
+  def winner_addr (idx_op, kw = {})
+    kw    = CAIterator.reduce_keywords(idx_op, kw)
     saddr = CArray.int64(*@source.shape).seq!
     out = nil
     each_region do |strip_ranges, tiles, out_ranges|
       vview = @source[*strip_ranges].block_view(*tiles)
       sview = saddr[*strip_ranges].block_view(*tiles)
-      mi    = vview.public_send(idx_op, axis: @tile_axes)  # tile-local flat index
+      mi    = vview.public_send(idx_op, axis: @tile_axes, **kw.slice(:min_count))  # tile-local flat index
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
       safe  = mi.copy
@@ -407,7 +474,7 @@ class CABlockIterator < CAIterator
       out ||= CArray.int64(*@shape)
       out[*out_ranges] = picked
     end
-    out
+    CArray.__reduce_fill__(out || CArray.int64(*@shape), kw[:fill_value])
   end
 
   public
@@ -441,15 +508,17 @@ class CABlockIterator < CAIterator
   #   Per-tile weighted sum; `weights` is shaped like one full tile (`Π b_i`).
   #   At a partial edge tile the weight kernel is sliced to the present cells.
   #   @return [CArray]
-  def wsum (weights)
-    weighted(weights) { |view, w| view.wsum(w, axis: @tile_axes) }
+  def wsum (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wsum, kw)
+    weighted(weights) { |view, w| view.wsum(w, axis: @tile_axes, **kw) }
   end
 
   # @overload wmean(weights)
   #   Per-tile weighted mean; `weights` shaped like one full tile.
   #   @return [CArray]
-  def wmean (weights)
-    weighted(weights) { |view, w| view.wmean(w, axis: @tile_axes) }
+  def wmean (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wmean, kw)
+    weighted(weights) { |view, w| view.wmean(w, axis: @tile_axes, **kw) }
   end
 
   private
@@ -479,21 +548,22 @@ class CABlockIterator < CAIterator
   # Core per-axis order statistics take a single integer axis, so a 1-D tile
   # delegates straight to the C path; a multi-axis tile is materialized per
   # region and its tile axes flattened into one before the single-axis core
-  # order-stat.  A masked source raises (the known per-axis masked limitation);
-  # strip the mask with `ca.value` first if needed.
+  # order-stat.  Masked cells are left out, as in `CArray#median(axis:)`.
 
   # @overload median
   #   Per-tile median.  @return [CArray]
-  def median
-    order_stat { |v, axis| v.median(axis: axis) }
+  def median (**kw)
+    kw = CAIterator.reduce_keywords(:median, kw)
+    order_stat { |v, axis| v.median(axis: axis, **kw) }
   end
 
   # @overload percentile(*pers)
   #   Per-tile percentile(s).  One argument returns one CArray, several an array
   #   of CArrays (as `CArray#percentile`).
   #   @return [CArray, Array<CArray>]
-  def percentile (*pers)
-    order_stat { |v, axis| v.percentile(*pers, axis: axis) }
+  def percentile (*pers, **kw)
+    kw = CAIterator.reduce_keywords(:percentile, kw)
+    order_stat { |v, axis| v.percentile(*pers, axis: axis, **kw) }
   end
 
   # @overload quantile
@@ -585,7 +655,7 @@ class CABlockIterator < CAIterator
   #   @return [CArray, Enumerator] source-shaped
   def map
     return to_enum(:map) unless block_given?
-    pout = CArray.new(padded_source.data_type, padded_source.shape)
+    pout = CArray.new(padded_source.data_type, padded_source.shape, bytes: padded_source.bytes)
     pgv  = pout.block_view(*@sizes)
     tgv  = tile_grid_view
     nils = Array.new(@sndim, nil)
@@ -640,7 +710,7 @@ class CABlockIterator < CAIterator
       tile    = tgv[*g, *nils]
       scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
       unless pout
-        pout = CArray.new(scanned.data_type, padded_source.shape)
+        pout = CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
         pout[] = UNDEF
         pgv  = pout.block_view(*@sizes)
       end
@@ -659,7 +729,7 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = CArray.new(@source.data_type, pshape)
+        pad = CArray.new(@source.data_type, pshape, bytes: @source.bytes)
         pad[] = UNDEF
         pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
         pad

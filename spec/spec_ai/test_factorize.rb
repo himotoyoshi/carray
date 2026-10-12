@@ -136,10 +136,9 @@ class TestFactorize < Test::Unit::TestCase
     assert_equal codes[0], codes[2]
   end
 
-  def test_complex_is_refused
-    assert_raise(CArray::DataTypeError) do
-      CArray.cmplx128(3) { |i| Complex(i, 0) }.factorize
-    end
+  def test_complex
+    assert_round_trip CA_CMPLX128([Complex(1, 2), 3, Complex(1, 2)]), "cmplx128"
+    assert_round_trip CA_CMPLX64([Complex(1, 2), 3, Complex(1, 2)]), "cmplx64"
   end
 
   # The reason a caller reaches for this rather than #unique: the codes are a

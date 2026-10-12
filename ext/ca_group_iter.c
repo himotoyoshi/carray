@@ -40,10 +40,14 @@ static ID id_axis_group_reduce, id_reshape, id_transpose, id_labels;
 static VALUE
 rb_ca_register_axis_group_classes (VALUE klass, VALUE cat, VALUE ag)
 {
+  static int registered = 0;
   rb_cCategorical = cat;
   rb_cAxisGroup   = ag;
-  rb_gc_register_address(&rb_cCategorical);
-  rb_gc_register_address(&rb_cAxisGroup);
+  if ( ! registered ) {               /* one GC root per address, not per call */
+    rb_gc_register_address(&rb_cCategorical);
+    rb_gc_register_address(&rb_cAxisGroup);
+    registered = 1;
+  }
   return Qnil;
 }
 
@@ -172,7 +176,7 @@ group_iter_shape_output (VALUE result, VALUE group_dims, VALUE perm, VALUE squee
   nband = cr->ndim - 1;
   nd    = ng + nband;
   if ( nd > CA_RANK_MAX ) {
-    rb_raise(rb_eRuntimeError, "axis_group: output ndim %ld too large", nd);
+    rb_raise(rb_eArgError, "axis_group: output ndim %ld too large", nd);
   }
   for ( i = 0; i < ng; i++ ) {
     dims[i] = RARRAY_AREF(group_dims, i);
@@ -233,16 +237,18 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
   parsed = rb_funcall(rb_cAxisGroup, id_parse_axis,
                       1, (vaxis == Qundef) ? Qnil : vaxis);
   if ( RTEST(RARRAY_AREF(parsed, 0)) == 0 ) {
-    /* no :group -> plain reduction on the value (grouping not engaged) */
-    if ( vaxis == Qundef ) {
+    /* no :group -> plain reduction on the value (grouping not engaged),
+       with every keyword the caller gave */
+    if ( NIL_P(kw) ) {
       return rb_funcall(value, op_id, 0);
     }
-    else {
-      VALUE h = rb_hash_new();
-      rb_hash_aset(h, ID2SYM(rb_intern("axis")), vaxis);
-      return rb_funcallv_kw(value, op_id, 1, &h, RB_PASS_KEYWORDS);
-    }
+    return rb_funcallv_kw(value, op_id, 1, &kw, RB_PASS_KEYWORDS);
   }
+
+  /* min_count: / fill_value: are applied to the grouped result; any other
+     keyword is refused before the work is done. */
+  rb_funcall(rb_cAxisGroup, rb_intern("__check_reduce_keywords__"), 2,
+             op_sym, NIL_P(kw) ? rb_hash_new() : kw);
 
   /* group reduction */
   fused = RARRAY_AREF(parsed, 1);
@@ -253,9 +259,19 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
   perm       = RARRAY_AREF(plan, 3);
   squeeze    = RARRAY_AREF(plan, 4);
 
+  /* a count reads only the mask, so a payload the kernel cannot read
+     (object, fixlen, ...) is counted through a boolean stand-in */
+  if ( op_id == rb_intern("count") || op_id == rb_intern("count_not_masked") ) {
+    value = rb_funcall(rb_cAxisGroup, rb_intern("__count_stand_in__"), 1, value);
+  }
   result = rb_funcall(value, id_axis_group_reduce, 3,
                       group_axes, bundles, op_sym);
-  return group_iter_shape_output(result, group_dims, perm, squeeze);
+  result = group_iter_shape_output(result, group_dims, perm, squeeze);
+  if ( ! NIL_P(kw) ) {
+    result = rb_funcall(rb_cAxisGroup, rb_intern("__finish_reduction__"), 4,
+                        self, op_sym, kw, result);
+  }
+  return result;
 }
 
 void

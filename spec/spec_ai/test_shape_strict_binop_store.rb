@@ -19,7 +19,7 @@ class TestShapeStrictStore < Test::Unit::TestCase
 
   def test_cross_shape_source_is_refused
     t = CArray.int32(3, 2)
-    assert_raise(RuntimeError) { t[] = CArray.int32(2, 3).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(2, 3).seq }
   end
 
   def test_flatten_is_the_escape
@@ -87,12 +87,12 @@ class TestShapeStrictStore < Test::Unit::TestCase
   def test_stretch_is_one_sided
     # the source may be repeated; the container never grows
     t = CArray.int32(1, 3, 4)
-    assert_raise(RuntimeError) { t[] = CArray.int32(5, 3, 4).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(5, 3, 4).seq }
   end
 
   def test_larger_source_is_refused
     t = CArray.int32(3, 4)
-    assert_raise(RuntimeError) { t[] = CArray.int32(5, 4).seq }
+    assert_raise(ArgumentError) { t[] = CArray.int32(5, 4).seq }
   end
 
   # ---------- lanes left alone ----------
@@ -187,7 +187,7 @@ class TestShapeStrictInPlace < Test::Unit::TestCase
 
   def test_cross_shape_operand_is_refused
     a = CArray.int32(3, 2).seq
-    assert_raise(RuntimeError) { a.add!(CArray.int32(2, 3).seq) }
+    assert_raise(ArgumentError) { a.add!(CArray.int32(2, 3).seq) }
   end
 
   def test_smaller_operand_is_repeated
@@ -198,6 +198,36 @@ class TestShapeStrictInPlace < Test::Unit::TestCase
 
   def test_ternary_in_place_follows_the_same_rule
     a = CArray.float64(3, 2).seq
-    assert_raise(RuntimeError) { a.fma!(CArray.float64(2, 3).seq, a.copy) }
+    assert_raise(ArgumentError) { a.fma!(CArray.float64(2, 3).seq, a.copy) }
+  end
+end
+
+# Setting a mask is a store into the mask: the array owns the shape.
+
+class TestShapeStrictMask < Test::Unit::TestCase
+
+  SHAPES = [[6], [3, 2], [2, 3], [4], [3, 1], [1, 2], [1, 3, 2], [3, 2, 1], [1]]
+
+  def test_mask_takes_the_shapes_a_store_takes
+    SHAPES.each do |shape|
+      src = CArray.boolean(*shape) { |*i| i.sum.odd? }
+      stored = begin; t = CArray.boolean(3, 2); t[] = src; t.to_a; rescue ArgumentError; :refused; end
+      masked = begin; a = CArray.int32(3, 2); a.mask = src; a.is_masked.to_a; rescue ArgumentError; :refused; end
+      assert_equal stored, masked, shape.inspect
+    end
+  end
+
+  def test_mask_of_another_shape_is_refused
+    a = CArray.int32(3, 2)
+    assert_raise(ArgumentError) { a.mask = CArray.boolean(4) }
+    assert_raise(ArgumentError) { a.mask = CArray.boolean(2, 3) }
+    assert_raise(ArgumentError) { a.mask = [true, false] }
+    assert_equal false, a.has_mask?
+  end
+
+  def test_ruby_array_is_poured_in_by_count_and_undef_masks
+    a = CArray.int32(3, 2)
+    a.mask = [[true, false, true], [false, true, UNDEF]]
+    assert_equal [[true, false], [true, false], [true, true]], a.is_masked.to_a
   end
 end

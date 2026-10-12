@@ -13,6 +13,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_iter_substrate.h"  /* ca_xfer_stride_transform_fused */
 #include "ca_monop_dispatch.h"  /* CA_MONOP_BYTE_SWAP dispatch id */
 #include "ca_obj_face.h"        /* CA_FACE_LIFT_IF_FACE for CARecord parent */
@@ -198,6 +199,12 @@ ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
     rb_raise(rb_eCADataTypeError, "object array can't be byte-swapped");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_BYTE_SWAP;
   ca->data_type = parent->data_type;
   ca->flags     = 0;
@@ -229,7 +236,9 @@ ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
 CAByteSwap *
 ca_byte_swap_new (CArray *parent, VALUE data_class)
 {
-  CAByteSwap *ca = (CAByteSwap *) ca_array_alloc(CA_OBJ_BYTE_SWAP, parent->ndim);
+  CAByteSwap *ca;
+  ca_byte_swap_setup(NULL, parent, data_class);
+  ca = (CAByteSwap *) ca_array_alloc(CA_OBJ_BYTE_SWAP, parent->ndim);
   ca_byte_swap_setup(ca, parent, data_class);
   return ca;
 }
@@ -319,12 +328,12 @@ ca_byte_swap_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_byte_swap_apply_one(ca, (char *) data);
   }
   else {
-    char v[32];
-    char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+    volatile VALUE holder;
+    char *buf = ALLOCV_N(char, holder, ca->bytes);
     memcpy(buf, data, ca->bytes);
     ca_byte_swap_apply_one(ca, buf);
     ca_store_index(ca->parent, idx, buf);
-    if ( buf != v ) xfree(buf);
+    ALLOCV_END(holder);
   }
 }
 
@@ -405,6 +414,7 @@ static void
 ca_byte_swap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                                ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAByteSwap *ca = (CAByteSwap *) ap;
   char      *d = (char *) data;
   int        is_struct = ( ca->data_type == CA_FIXLEN && RTEST(ca->data_class) );
@@ -471,10 +481,17 @@ static void
 ca_byte_swap_func_sync (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  /* Swap is involutive, so applying it once to the view buffer
-     restores the parent byte order before the copy-back. */
-  ca_byte_swap_apply(ca, ca->ptr);
-  memcpy(ca->parent->ptr, ca->ptr, ca_length(ca));
+  /* Swap is involutive, so applying it once to a copy of the view buffer
+     restores the parent byte order.  Not the view buffer in place: the
+     window stays open after a sync, and a second sync (a stack holding
+     this view twice) would swap it again.  The swap of a record calls
+     Ruby, so it runs on the copy and reaches the parent only whole. */
+  volatile VALUE holder;
+  char *tmp = ALLOCV_N(char, holder, ca_length(ca));
+  memcpy(tmp, ca->ptr, ca_length(ca));
+  ca_byte_swap_apply(ca, tmp);
+  memcpy(ca->parent->ptr, tmp, ca_length(ca));
+  ALLOCV_END(holder);
   ca_sync(ca->parent);
 }
 
@@ -509,8 +526,8 @@ static void
 ca_byte_swap_func_fill_data (void *ap, void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( !ca_byte_swap_apply_one(ca, buf) ) {
     /* Bare CA_FIXLEN fill: broadcast the raw bytes into the view
@@ -523,13 +540,12 @@ ca_byte_swap_func_fill_data (void *ap, void *ptr)
         memcpy(ca->ptr + i * ca->bytes, ptr, ca->bytes);
       }
     }
-    ca_sync(ca);
-    ca_detach(ca);
-    if ( buf != v ) xfree(buf);
+    ca_sync_detach(ca);
+    ALLOCV_END(holder);
     return;
   }
   ca_fill(ca->parent, buf);
-  if ( buf != v ) xfree(buf);
+  ALLOCV_END(holder);
 }
 
 /* fill_data with a region.  Swapping is per value, not per cell, so the one
@@ -543,8 +559,8 @@ ca_byte_swap_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                                ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( ca_byte_swap_apply_one(ca, buf) ) {
     ca_fill_stride(ca->parent, base, ndim, counts, steps, buf);
@@ -552,7 +568,7 @@ ca_byte_swap_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   else {
     ca_fill_stride_default(ca, base, ndim, counts, steps, ptr);
   }
-  if ( buf != v ) xfree(buf);
+  ALLOCV_END(holder);
 }
 
 static void
@@ -560,8 +576,8 @@ ca_byte_swap_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                               void *ptr)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  char v[32];
-  char *buf = (ca->bytes <= 32) ? v : xmalloc(ca->bytes);
+  volatile VALUE holder;
+  char *buf = ALLOCV_N(char, holder, ca->bytes);
   memcpy(buf, ptr, ca->bytes);
   if ( ca_byte_swap_apply_one(ca, buf) ) {
     ca_fill_addrs(ca->parent, n, addrs, buf);
@@ -569,23 +585,7 @@ ca_byte_swap_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   else {
     ca_fill_addrs_default(ca, n, addrs, ptr);
   }
-  if ( buf != v ) xfree(buf);
-}
-
-static void
-ca_byte_swap_func_create_mask (void *ap)
-{
-  CAByteSwap *ca = (CAByteSwap *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  /* Mask is byte-wide (boolean), so the swap is a no-op for the
-     mask itself.  Share the parent's mask via a CARefer to keep the
-     two in lockstep. */
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  ALLOCV_END(holder);
 }
 
 ca_operation_function_t ca_byte_swap_func = {
@@ -598,7 +598,7 @@ ca_operation_function_t ca_byte_swap_func = {
   ca_byte_swap_func_sync,
   ca_byte_swap_func_detach,
   ca_byte_swap_func_fill_data,
-  ca_byte_swap_func_create_mask,
+  ca_view_func_create_mask,
   ca_byte_swap_func_xfer_index,
   ca_byte_swap_func_xfer_addrs,
   NULL,                       /* fold_stride: never fold — value-conversion boundary */
@@ -658,6 +658,7 @@ rb_ca_byte_swap_initialize_copy (VALUE self, VALUE other)
 {
   CAByteSwap *ca, *cs;
   TypedData_Get_Struct(self,  CAByteSwap, &cabyteswap_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAByteSwap, &cabyteswap_data_type, cs);
   if ( ca_func[CA_OBJ_BYTE_SWAP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_BYTE_SWAP, cs->parent->ndim);
@@ -732,10 +733,9 @@ rb_ca_swap_bytes_bang (VALUE self)
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  ca_attach(ca);
+  ca_attach(ca);   /* window: nothing raises inside */
   ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements, ca->ptr);
-  ca_sync(ca);
-  ca_detach(ca);
+  ca_sync_detach(ca);
   return self;
 }
 

@@ -42,9 +42,9 @@ class TestNormalizeAxisClassMethod < Test::Unit::TestCase
     assert_match(/^myop: axis 5 out of range for ndim 3/, err.message)
   end
 
-  def test_class_method_default_name_is_axis
+  def test_class_method_default_name_is_the_method_called
     err = assert_raise(ArgumentError) { CArray.normalize_axis(5, 3) }
-    assert_match(/^axis: axis 5 out of range for ndim 3/, err.message)
+    assert_match(/^normalize_axis: axis 5 out of range for ndim 3/, err.message)
   end
 
   # ---------------- insertion-position pattern ----------------

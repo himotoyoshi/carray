@@ -33,6 +33,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* CA_EXTREMUM_REPLACES, ca_obj_extremum_replaces */
 #include "ca_kernel_iterator.h"
 #include <math.h>
 
@@ -64,8 +65,8 @@ group_op_code (VALUE vop)
   else if ( id == rb_intern("max_addr") ) return GR_MAXADDR;
   else if ( id == rb_intern("all") )      return GR_ALL;
   else if ( id == rb_intern("any") )      return GR_ANY;
-  rb_raise(rb_eArgError, "axis_group_reduce: unsupported op :%s",
-           rb_id2name(id));
+  rb_raise(rb_eArgError, "axis_group_reduce: unsupported op :%"PRIsVALUE,
+           rb_id2str(id));
 }
 
 /* ---- per-slab-element composite-code walk, templated on the load type ----
@@ -206,16 +207,16 @@ group_op_code (VALUE vop)
    only while nothing else has landed, the first number displaces it, and a
    group of nothing but NaN answers NaN (for a position, UNDEF).  `v` is the
    widened load, so testing it for NaN is the same question for every source
-   type and costs an integer body nothing.  seen_num[] says whether a number
-   has landed; cnt[] still says whether anything has. */
+   type and costs an integer body nothing.  The replacement test is the
+   shared CA_EXTREMUM_REPLACES; the first member is taken whatever it is.
+   seen_num[] says whether a number has landed (the positions read it);
+   cnt[] says whether anything has. */
 #define GMINMAX(T, A, CMP)                                                     \
   do {                                                                         \
     A *acc = (A *) co->ptr;                                                     \
     A  av  = (A) rv;                                                            \
-    if ( v == v ) {                                                             \
-      if ( ! seen_num[o] ) { acc[o] = av; seen_num[o] = 1; }                     \
-      else if ( av CMP acc[o] ) acc[o] = av;                                     \
-    } else if ( cnt[o] == 0 ) acc[o] = av;                                       \
+    if ( cnt[o] == 0 || CA_EXTREMUM_REPLACES(av, acc[o], CMP) ) acc[o] = av;    \
+    if ( v == v ) seen_num[o] = 1;                                              \
     cnt[o] += 1;                                                                \
   } while (0)
 
@@ -310,7 +311,7 @@ group_op_code (VALUE vop)
    Empty / all-masked groups follow the CArray zero-contribution contract: an
    identity-bearing op returns its identity (sum 0, prod 1, count 0, all true,
    any false), a ratio / extremum returns UNDEF.  Sample variance / stddev:
-   n == 0 UNDEF, n == 1 -> 0.0, n >= 2 the formula.
+   n < 2 UNDEF, n >= 2 the formula.
 */
 static VALUE
 rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
@@ -321,7 +322,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   GetCArray(self, src);
 
   if ( src->ndim <= 0 ) {
-    rb_raise(rb_eRuntimeError, "axis_group_reduce: scalar source");
+    rb_raise(rb_eArgError, "axis_group_reduce: scalar source");
   }
 
   /* --- group (slab) axes --- */
@@ -393,9 +394,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
       VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
       rb_ary_push((VALUE) keep, vbuf);
-      ca_attach(bundle_ca[bi]);
-      memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
-      ca_detach(bundle_ca[bi]);
+      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
       bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
     }
 
@@ -477,9 +476,9 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: break;
   default:
-    rb_raise(rb_eRuntimeError,
-             "axis_group_reduce: unsupported source data_type %d",
-             src->data_type);
+    rb_raise(rb_eCADataTypeError,
+             "axis_group: %"PRIsVALUE" over a group is not supported for data type %s",
+             rb_sym2str(vop), ca_type_name[src->data_type]);
   }
 
   /* output data type per op */
@@ -618,8 +617,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* Empty / all-masked groups follow the same zero-contribution contract as
      CArray reductions (ERI, matching the categorical sibling): an identity-
      bearing op returns its identity (sum 0, prod 1, count 0, all true, any
-     false), a ratio / extremum returns UNDEF. Sample variance/stddev: n==0
-     UNDEF, n==1 -> 0.0 (the n=1 contract), n>=2 the formula. */
+     false), a ratio / extremum returns UNDEF. Sample variance/stddev: n<2
+     UNDEF (n-1 is zero), n>=2 the formula. */
   if ( op == GR_COUNT ) {
     int64_t *out = (int64_t *) co->ptr;
     for ( ca_size_t o = 0; o < nout; o++ ) out[o] = (int64_t) cnt[o];
@@ -664,8 +663,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
         break;
       case GR_VARIANCE:
       case GR_STDDEV:
-        if ( cnt[o] == 0 ) { out[o] = 0.0; MARK_UNDEF(o); }
-        else if ( cnt[o] == 1 ) { out[o] = 0.0; }         /* n=1 contract */
+        if ( cnt[o] < 2 ) { out[o] = 0.0; MARK_UNDEF(o); }
         else { double var = sumsq[o] / ( (double) cnt[o] - 1.0 );
                out[o] = ( op == GR_STDDEV ) ? sqrt(var) : var; }
         break;
@@ -854,7 +852,9 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
    emits its own value: a per-group `seen` byte initialises the accumulator
    lazily on first hit — no sentinel like HUGE_VAL, which an integer data type could
    not represent.  CMP is > for max, < for min: a later member replaces the
-   running extremum when `rv CMP acc`.  A cell masked within its group holds the
+   running extremum when CA_EXTREMUM_REPLACES (a NaN never does, and a
+   number displaces a leading NaN, as the core cummax / cummin and the
+   reduce twins above do).  A cell masked within its group holds the
    current extremum once a member has been seen (output NOT masked, like sum);
    before any member the extremum is undefined so the cell stays UNDEF (the
    CArray reduction contract: empty max/min has no value — deliberately NOT the
@@ -895,7 +895,9 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
           }                                                                   \
           T rv = *(T *)(p + sw_doff[e]);                                      \
           if ( ! seen[code] ) { acce[code] = rv; seen[code] = 1; }            \
-          else if ( rv CMP acce[code] ) { acce[code] = rv; }                  \
+          else if ( CA_EXTREMUM_REPLACES(rv, acce[code], CMP) ) {             \
+            acce[code] = rv;                                                  \
+          }                                                                   \
           outp[addr] = acce[code];                                            \
         }                                                                     \
       }                                                                       \
@@ -933,19 +935,19 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
    both unmasked (matching core object cumsum / cumprod); cummax / cummin hold
    the running VALUE only once a member has been seen and stay UNDEF before that
    (no identity for arbitrary objects).  GW_SKIP (excluded) stays UNDEF.  accn /
-   seen are reset at each band; acco carries the running VALUE. */
+   seen are reset at each band; acco carries the running VALUE.
+   Expanded only in group_scan_object_body, whose walk state is c->st. */
 #define GROUP_SCAN_OBJECT_WALK(EMIT, HOLD)                                    \
   do {                                                                        \
-    ca_iter_state st;                                                         \
     char       *p;                                                            \
     boolean8_t *m;                                                            \
     ca_size_t   b = 0;                                                        \
     int         ready = 0;                                                    \
-    CA_FOR_EACH_SLAB(st, ca, axes, (int8_t) ngroup, CA_KERNEL_READ, p, m) {   \
-      ca_size_t SE = st.slab_elements;                                        \
+    CA_FOR_EACH_SLAB(c->st, ca, axes, (int8_t) ngroup, CA_KERNEL_READ, p, m) {\
+      ca_size_t SE = c->st.slab_elements;                                     \
       if ( SE > 0 ) {                                                         \
         if ( ! ready ) {                                                      \
-          group_scan_build_plan(&st, m, n_bundles, bundle_codes, bundle_k,   \
+          group_scan_build_plan(&c->st, m, n_bundles, bundle_codes, bundle_k,\
                                 bundle_placeval, bundle_nconsumed,            \
                                 bundle_slot, bundle_cstride, ngroup,          \
                                 grstride, sw_code, sw_doff, sw_moff, sw_addr);\
@@ -970,6 +972,137 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
     }                                                                         \
   } while (0)
 
+/* Marks output cell o UNDEF, creating the output mask on first use.  Used
+   by the scan walks, in functions that hold the output as `co` and the mask
+   pointer as `omask`. */
+#define MARK_OUT_UNDEF(o) do {                   \
+    if ( ! omask ) {                             \
+      ca_create_mask(co);                        \
+      omask = (boolean8_t *) co->mask->ptr;      \
+    }                                            \
+    omask[o] = 1;                                \
+  } while (0)
+
+/* The CA_OBJECT lane of __axis_group_scan__.  Every cell calls into Ruby,
+   so the walk can raise part way; its state lives in the caller's frame, in
+   c->st, and ca_iter_ensure finishes it however this body leaves.  The
+   buffers are ALLOCV-backed, so the unwind collects them. */
+typedef struct {
+  ca_iter_state st;
+  CArray     *ca;
+  CArray     *co;
+  int         op;
+  int8_t     *axes;
+  long        ngroup;
+  int         n_bundles;
+  int32_t   **bundle_codes;
+  ca_size_t  *bundle_k;
+  ca_size_t  *bundle_placeval;
+  int        *bundle_nconsumed;
+  int       (*bundle_slot)[CA_RANK_MAX];
+  ca_size_t (*bundle_cstride)[CA_RANK_MAX];
+  ca_size_t  *grstride;
+  ca_size_t  *band_addr;
+  ca_size_t   K_total;
+  ca_size_t  *sw_code;
+  ca_size_t  *sw_doff;
+  ca_size_t  *sw_moff;
+  ca_size_t  *sw_addr;
+  ca_size_t  *accn;
+  char       *seen;
+  VALUE      *acco;
+} group_scan_object_t;
+
+static VALUE
+group_scan_object_body (VALUE arg)
+{
+  group_scan_object_t *c = (group_scan_object_t *) arg;
+  CArray     *ca               = c->ca;
+  CArray     *co               = c->co;
+  int         op               = c->op;
+  int8_t     *axes             = c->axes;
+  long        ngroup           = c->ngroup;
+  int         n_bundles        = c->n_bundles;
+  int32_t   **bundle_codes     = c->bundle_codes;
+  ca_size_t  *bundle_k         = c->bundle_k;
+  ca_size_t  *bundle_placeval  = c->bundle_placeval;
+  int        *bundle_nconsumed = c->bundle_nconsumed;
+  int       (*bundle_slot)[CA_RANK_MAX]    = c->bundle_slot;
+  ca_size_t (*bundle_cstride)[CA_RANK_MAX] = c->bundle_cstride;
+  ca_size_t  *grstride         = c->grstride;
+  ca_size_t  *band_addr        = c->band_addr;
+  ca_size_t   K_total          = c->K_total;
+  ca_size_t  *sw_code          = c->sw_code;
+  ca_size_t  *sw_doff          = c->sw_doff;
+  ca_size_t  *sw_moff          = c->sw_moff;
+  ca_size_t  *sw_addr          = c->sw_addr;
+  ca_size_t  *accn             = c->accn;
+  char       *seen             = c->seen;
+  VALUE      *acco             = c->acco;
+  boolean8_t *omask            = NULL;
+
+  if ( op == GS_CUMCOUNT ) {                    /* int64 1-based running count */
+    int64_t *outi = (int64_t *) co->ptr;
+    GROUP_SCAN_OBJECT_WALK(
+      accn[code] += 1; outi[addr] = (int64_t) accn[code];,
+      outi[addr] = (int64_t) accn[code];
+    );
+  }
+  else {                                        /* object running VALUE */
+    VALUE *outo = (VALUE *) co->ptr;
+    switch ( op ) {
+    case GS_CUMSUM:
+      /* Identity 0 (matching the core object cumsum): a group's acc is lazily
+         seeded to 0 (Fixnum, so 0 + ev promotes to ev's class), so a cell
+         masked before any present member holds 0 unmasked and an all-masked
+         group yields 0 everywhere.  seen doubles as the per-band init flag. */
+      GROUP_SCAN_OBJECT_WALK(
+        if ( ! seen[code] ) { acco[code] = INT2FIX(0); seen[code] = 1; }
+        acco[code] = rb_funcall(acco[code], rb_intern("+"), 1, ev);
+        outo[addr] = acco[code];,
+        if ( ! seen[code] ) { acco[code] = INT2FIX(0); seen[code] = 1; }
+        outo[addr] = acco[code];
+      );
+      break;
+    case GS_CUMPROD:
+      /* Identity 1, same lazy-init as cumsum. */
+      GROUP_SCAN_OBJECT_WALK(
+        if ( ! seen[code] ) { acco[code] = INT2FIX(1); seen[code] = 1; }
+        acco[code] = rb_funcall(acco[code], rb_intern("*"), 1, ev);
+        outo[addr] = acco[code];,
+        if ( ! seen[code] ) { acco[code] = INT2FIX(1); seen[code] = 1; }
+        outo[addr] = acco[code];
+      );
+      break;
+    case GS_CUMMAX:
+      /* No identity: seed from the first member, hold only once seen; a cell
+         masked before any member stays UNDEF (empty-max contract). */
+      GROUP_SCAN_OBJECT_WALK(
+        if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
+        else if ( ca_obj_extremum_replaces(ev, acco[code], rb_intern(">")) ) {
+          acco[code] = ev;
+        }
+        outo[addr] = acco[code];,
+        if ( seen[code] ) { outo[addr] = acco[code]; }
+        else { MARK_OUT_UNDEF(addr); }
+      );
+      break;
+    case GS_CUMMIN:
+      GROUP_SCAN_OBJECT_WALK(
+        if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
+        else if ( ca_obj_extremum_replaces(ev, acco[code], rb_intern("<")) ) {
+          acco[code] = ev;
+        }
+        outo[addr] = acco[code];,
+        if ( seen[code] ) { outo[addr] = acco[code]; }
+        else { MARK_OUT_UNDEF(addr); }
+      );
+      break;
+    }
+  }
+  return Qnil;
+}
+
 static int
 group_scan_op_code (VALUE vop)
 {
@@ -979,7 +1112,7 @@ group_scan_op_code (VALUE vop)
   else if ( id == rb_intern("cummax") )   return GS_CUMMAX;
   else if ( id == rb_intern("cummin") )   return GS_CUMMIN;
   else if ( id == rb_intern("cumprod") )  return GS_CUMPROD;
-  rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%s", rb_id2name(id));
+  rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%"PRIsVALUE, rb_id2str(id));
 }
 
 /* __axis_group_scan__(group_axes, bundles, op) — group-keyed segment scan of
@@ -1022,7 +1155,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   GetCArray(self, src);
 
   if ( src->ndim <= 0 ) {
-    rb_raise(rb_eRuntimeError, "axis_group_scan: scalar source");
+    rb_raise(rb_eArgError, "axis_group_scan: scalar source");
   }
 
   /* --- group (slab) axes (same validation as reduce) --- */
@@ -1096,9 +1229,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
       VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
       rb_ary_push((VALUE) keep, vbuf);
-      ca_attach(bundle_ca[bi]);
-      memcpy(RSTRING_PTR(vbuf), bundle_ca[bi]->ptr, nbytes);
-      ca_detach(bundle_ca[bi]);
+      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
       bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
     }
 
@@ -1160,7 +1291,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   case CA_INT32:   case CA_UINT32: case CA_INT64: case CA_UINT64:
   case CA_FLOAT32: case CA_FLOAT64: case CA_OBJECT: break;
   default:
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eCADataTypeError,
              "axis_group_scan: unsupported source data_type %d",
              src->data_type);
   }
@@ -1232,75 +1363,23 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   double     acc_init = ( op == GS_CUMPROD ) ? 1.0 : 0.0;
 
   boolean8_t *omask = NULL;
-  #define MARK_OUT_UNDEF(o) do {                   \
-      if ( ! omask ) {                             \
-        ca_create_mask(co);                        \
-        omask = (boolean8_t *) co->mask->ptr;      \
-      }                                            \
-      omask[o] = 1;                                \
-    } while (0)
 
   if ( src->data_type == CA_OBJECT ) {
-    if ( op == GS_CUMCOUNT ) {                    /* int64 1-based running count */
-      int64_t *outi = (int64_t *) co->ptr;
-      GROUP_SCAN_OBJECT_WALK(
-        accn[code] += 1; outi[addr] = (int64_t) accn[code];,
-        outi[addr] = (int64_t) accn[code];
-      );
-    }
-    else {                                        /* object running VALUE */
-      VALUE *outo = (VALUE *) co->ptr;
+    group_scan_object_t c;
+    if ( op != GS_CUMCOUNT ) {
       acco = ALLOCV_N(VALUE, h_acco, K_total);
-      switch ( op ) {
-      case GS_CUMSUM:
-        /* Identity 0 (matching the core object cumsum): a group's acc is lazily
-           seeded to 0 (Fixnum, so 0 + ev promotes to ev's class), so a cell
-           masked before any present member holds 0 unmasked and an all-masked
-           group yields 0 everywhere.  seen doubles as the per-band init flag. */
-        GROUP_SCAN_OBJECT_WALK(
-          if ( ! seen[code] ) { acco[code] = INT2FIX(0); seen[code] = 1; }
-          acco[code] = rb_funcall(acco[code], rb_intern("+"), 1, ev);
-          outo[addr] = acco[code];,
-          if ( ! seen[code] ) { acco[code] = INT2FIX(0); seen[code] = 1; }
-          outo[addr] = acco[code];
-        );
-        break;
-      case GS_CUMPROD:
-        /* Identity 1, same lazy-init as cumsum. */
-        GROUP_SCAN_OBJECT_WALK(
-          if ( ! seen[code] ) { acco[code] = INT2FIX(1); seen[code] = 1; }
-          acco[code] = rb_funcall(acco[code], rb_intern("*"), 1, ev);
-          outo[addr] = acco[code];,
-          if ( ! seen[code] ) { acco[code] = INT2FIX(1); seen[code] = 1; }
-          outo[addr] = acco[code];
-        );
-        break;
-      case GS_CUMMAX:
-        /* No identity: seed from the first member, hold only once seen; a cell
-           masked before any member stays UNDEF (empty-max contract). */
-        GROUP_SCAN_OBJECT_WALK(
-          if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
-          else if ( NUM2INT(rb_funcall(ev, rb_intern("<=>"), 1, acco[code])) > 0 ) {
-            acco[code] = ev;
-          }
-          outo[addr] = acco[code];,
-          if ( seen[code] ) { outo[addr] = acco[code]; }
-          else { MARK_OUT_UNDEF(addr); }
-        );
-        break;
-      case GS_CUMMIN:
-        GROUP_SCAN_OBJECT_WALK(
-          if ( ! seen[code] ) { acco[code] = ev; seen[code] = 1; }
-          else if ( NUM2INT(rb_funcall(ev, rb_intern("<=>"), 1, acco[code])) < 0 ) {
-            acco[code] = ev;
-          }
-          outo[addr] = acco[code];,
-          if ( seen[code] ) { outo[addr] = acco[code]; }
-          else { MARK_OUT_UNDEF(addr); }
-        );
-        break;
-      }
     }
+    c.ca = ca;  c.co = co;  c.op = op;
+    c.axes = axes;  c.ngroup = ngroup;
+    c.n_bundles = n_bundles;  c.bundle_codes = bundle_codes;
+    c.bundle_k = bundle_k;  c.bundle_placeval = bundle_placeval;
+    c.bundle_nconsumed = bundle_nconsumed;
+    c.bundle_slot = bundle_slot;  c.bundle_cstride = bundle_cstride;
+    c.grstride = grstride;  c.band_addr = band_addr;  c.K_total = K_total;
+    c.sw_code = sw_code;  c.sw_doff = sw_doff;
+    c.sw_moff = sw_moff;  c.sw_addr = sw_addr;
+    c.accn = accn;  c.seen = seen;  c.acco = acco;
+    ca_iter_ensure(1, &c.st, group_scan_object_body, (VALUE) &c);
   }
   else {                                          /* native data type dispatch */
     switch ( op ) {
@@ -1330,7 +1409,6 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
       break;
     }
   }
-  #undef MARK_OUT_UNDEF
 
   ALLOCV_END(h_band2); ALLOCV_END(h_code);  ALLOCV_END(h_doff);
   ALLOCV_END(h_moff);  ALLOCV_END(h_addr);  ALLOCV_END(h_accd);

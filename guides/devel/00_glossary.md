@@ -83,7 +83,7 @@ separate-allocation path; the two coexist per-instance. See
 
 **attach** — make a view's `ptr` valid: allocate, then gather the parent's data
 into it. `ca_is_attached(ca)` is defined as `(ca->ptr != NULL)` and used as the
-ownership marker. The contract is R1–R5, stated in `ext/carray.h` and copied into
+ownership marker. The contract is R1–R6, stated in `ext/carray.h` and copied into
 [ch. 4](04_attach_lifecycle.md): attach is **not transitive** — attaching a child
 does not attach its parent — and it hands you a buffer, not a live array.
 
@@ -101,12 +101,11 @@ makes `reshape` and row slices O(1).
 are composed so only the root is attached, skipping materialisation of the
 intermediate views. See [ch. 4](04_attach_lifecycle.md).
 
-**`attach!`** — a public block-form convenience that wraps an
-attach/sync/detach in `rb_ensure`. Minor: it is barely used internally (a few
-sites in `lib/carray/iterator.rb`) and is kept mainly as insurance, not as a
-load-bearing part of the lifecycle. The real machinery is `ca_attach`/`ca_sync`/
-`ca_detach`. `__attach__` / `__sync__` / `__detach__` (double underscore) are
-internal-only.
+**`attach!`** — a block-form Ruby method that wraps an attach/sync/detach in
+`rb_ensure`. It exists only in a development build (`CARRAY_DEV=1`), with
+`attach`, `__attach__`, `__sync__` and `__detach__`, for the tests that look
+inside a window; a released build has none of them, and nothing in `lib/` uses
+them. The machinery is `ca_attach` / `ca_sync` / `ca_detach` in C.
 
 ## Kernels and the author surface
 
@@ -183,9 +182,9 @@ a runtime-installed obj_type. CATime, CATimedelta, CARecord, CAConstString
 are Faces. See [ch. 9](09_faces.md).
 
 **portable table** — `face_state_portable_table[obj_type]`: whether a Face's
-state can cross process/parent boundaries (Marshal, MemoryView, multi-parent
-constructors). CAConstString is `0` (its buffer is per-parent), which is why it
-is rejected by CAStack et al.
+state can be carried over several parents (the multi-parent constructors).
+CAConstString is `0` (its buffer is per-parent), which is why it is rejected by
+CAStack et al.
 
 ## C conventions at a glance
 

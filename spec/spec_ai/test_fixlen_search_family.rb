@@ -155,6 +155,6 @@ class TestFixlenSearchFamily < Test::Unit::TestCase
   def test_bsearch_raises_on_masked_self
     f = sorted_1d
     f.mask = [0, 1, 0, 0]
-    assert_raise(RuntimeError) { f.bsearch_ki("cat", 0) }
+    assert_raise(ArgumentError) { f.bsearch_ki("cat", 0) }
   end
 end

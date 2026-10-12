@@ -11,8 +11,9 @@ run on the numeric storage.
 The gate is a separate axis from the FIXLEN choice of `CAFace.md` §2.5: it keys
 on `CA_FLAG_IS_FACE` and never reads `data_type`, so a Numeric Face — one whose
 surface `data_type` *is* its numeric storage type — is refused at these kernels
-exactly like a FIXLEN one until it sets `ORDERABLE`. `CATimedelta` is the
-in-tree case: `int64` on both sides, and it still has to opt in (§2).
+exactly like a FIXLEN one until it sets `ORDERABLE`. A `CAObject` Face built
+with `numeric: true` over `int64` is such a Face: `sort` and `bsearch` still
+raise on it until it passes `orderable_storage: true` (§6.2).
 
 This document explains the opt-in mechanism that lets a Face participate in
 those kernels — two flags and one template method — and the C-level policy
@@ -132,8 +133,12 @@ method, not a flag. The split is deliberate:
 ## 4. The search flow (C dispatcher, not per-Face Ruby)
 
 The whole point of the flags + `to_comparable` is that a Face needs **no
-per-method Ruby override**. The dispatcher (in `emit_search_dispatch` and
-`rb_ca_linear_section_m`) implements the decision generically:
+per-method Ruby override**. One C part, `ca_face_reconcile_operand` in
+`ext/ca_obj_face.c`, makes the operand decision for every family that takes
+an operand against a Face -- search, `linear_section`, `count(v)`, the
+comparison operators, the value-hash family and a bulk store into a unit
+Face -- so a pair of arrays is taken by all of them or refused by all of
+them:
 
 ```
 reference (self):
@@ -141,8 +146,15 @@ reference (self):
     Face and ORDERABLE              -> strip to storage; remember COMPARABLE
 
 operand (query / rhs), driven by the reference:
-    reference COMPARABLE            -> strip a Face operand; take a plain
-                                       operand as-is                 (direct)
+    reference a record              -> a record of the same data_class
+                                       (stripped) or a plain operand;
+                                       any other Face raises TypeError
+    reference COMPARABLE            -> strip a COMPARABLE Face operand; take
+                                       a plain operand as-is; read a string
+                                       or categorical Face by its values;
+                                       raise for a Face whose storage
+                                       encodes its values in order (a time)
+                                                                     (direct)
     reference a non-COMPARABLE Face -> reference.to_comparable(operand), strip
                                        (ANY operand type: Face CArray, Element,
                                        Time, DateTime, ...; raises if the
@@ -327,7 +339,7 @@ ORDERABLE plus the cast is sufficient.
 | unit-bearing (time, timedelta) | ORDERABLE | define it (reference reconciles the operand) | ✓ | ✓ via reconcile; bare storage value → raise |
 | single-interpretation relabel | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; plain query OK |
 | transparent over object storage (`CAString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; the cell *is* the value |
-| fixlen storage, bytes with no string reading (`CARecord`) | none | — | ✓ by **memcmp** (default) | reject (numeric-only) |
+| fixlen storage, bytes with no string reading (`CARecord`) | none | — | by the struct's `order_by:` members (Ruby, not the gate); none declared → raise | reject (numeric-only) |
 | fixlen storage read as strings (`CAFixlenString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; a String query is padded to the cell width |
 | non-orderable numeric storage | none | — | reject | reject |
 
@@ -335,11 +347,11 @@ ORDERABLE plus the cast is sufficient.
 then relies on the storage's `data_type`:
 
 - **fixlen storage → memcmp**, the default order for fixlen (the same order a
-  plain fixlen array sorts by). A fixed-width string Face sorts correctly; a
-  struct/record Face gets a deterministic *byte* order (arbitrary across fields,
-  but a valid total order). No flag is needed — memcmp is the default, never
-  something you have to opt into. (A future `CA_FLAG_FACE_ORDER_AS_OBJECT` will
-  let a Face opt *out* of memcmp and order by its scalar `<=>` instead.)
+  plain fixlen array sorts by). A fixed-width string Face sorts correctly.
+  `CARecord` does not reach the gate: its ordering members are Ruby methods
+  that rank the records by the members the struct names in `order_by:`, and
+  raise when it names none — the bytes of a record are no order of its
+  values.
 - **numeric storage → requires ORDERABLE**, so the numeric order equals the
   surface order. A non-orderable numeric Face raises (numeric-sorting it would
   reorder the surface silently).

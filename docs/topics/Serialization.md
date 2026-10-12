@@ -102,8 +102,7 @@ CArray.load("packed.ca", data_type: CA_FLOAT64)
 
 ### What cannot be serialized
 
-Two things fall outside the format and raise `ArgumentError` from `save`
-/ `dump`:
+These fall outside the format and raise from `save` / `dump`:
 
 - an **object array** (`CA_OBJECT`, arbitrary Ruby objects per cell) —
   it has no fixed-width raw representation (see
@@ -111,11 +110,23 @@ Two things fall outside the format and raise `ArgumentError` from `save`
 - a **`data_class`** whose layout the v1.0 trailer schema cannot express
   — a bitfield member, or a non-primitive member (nested record, CArray
   template, fixlen).  Layer 1 describes flat, primitive-typed members
-  only (see [The trailer](#the-trailer)).
+  only (see [The trailer](#the-trailer));
+- a **Face other than a record** (`CATime`, `CATimedelta`, a string
+  array, a categorical, ...) — `TypeError`.  The file would carry its
+  storage without what makes it the Face (a unit, the string buffer, the
+  labels).  Save `.parent` to keep the storage; `Marshal` refuses the
+  same arrays.
 
-`load` raises `RuntimeError` on a bad magic string, an unsupported
-version, or a failed corruption cross-check (endian marker or
-`data_bytes`).
+The first two raise `ArgumentError`.
+
+`load` raises `ArgumentError` on a bad magic string, an unsupported
+version, or a header whose fields disagree: the endian marker, `ndim`
+outside 1..16, a `shape` whose product is not `elements`, `data_bytes`
+or `mask_bytes` that do not match `elements`, an `element_bytes` that is
+not the size of a fixed-width data type, or a file (or String) shorter
+than the header declares.  A trailer that is cut short or is not a
+mapping, and a `data_class` schema whose members fall outside the record
+or overlap its end, are refused as corrupt as well.
 
 ---
 
@@ -230,8 +241,9 @@ big-endian file is big-endian header, data, and all.  The order is
 **self-describing** via `endian_marker` at offset 8; there is no separate
 endian byte.
 
-A writer emits everything in the host's native order (it never swaps on
-write).  A reader decides once, for the whole file:
+A writer emits the host's native order unless `:endian` names the other
+one, in which case it swaps on write.  A reader decides once, for the whole
+file:
 
 1. Read the 4 raw bytes at offset 8 and interpret them as a host
    `uint32`.  The writer stored `0x01020304` in file order, so it reads
@@ -240,8 +252,14 @@ write).  A reader decides once, for the whole file:
    decides: `0x01` = big-endian file, `0x04` = little-endian file.
    Anything else means the file is corrupt or not `_CARRAY3`.
 2. If the file's order differs from the host, byte-swap every header
-   integer *and* every data element on read.  The int8 mask is never
-   swapped.
+   integer *and* every data element on read.  A record (a `fixlen`
+   element with a `data_class` in the trailer) is swapped member by
+   member, each by its own type.  The int8 mask is never swapped.
+
+A record member declared with `endian:` is the one exception: its bytes
+are in the declared order on every machine and in every file, so neither
+the writer nor the reader swaps it (the trailer schema carries the
+declaration).
 
 Besides fixing the byte order, `endian_marker` doubles as a header
 corruption cross-check: a valid file always reads it back as

@@ -10,7 +10,8 @@
 
   Dispatch by data_type:
     numeric (i8..f64, +complex) -> ca_bincmp_<op>_<type> kernel
-    boolean / fixlen / object   -> not implemented (raise)
+    fixlen                      -> ca_bincmp_<op>_fixlen (memcmp)
+    object                      -> ca_bincmp_<op>_VALUE
 
   CAREFUL: the binop in-place trick (= pull left into the output
   buffer) is structurally unavailable here — the output is
@@ -33,7 +34,6 @@
 
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
                                 ca_size_t *target_dim);
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 extern void *ca_lazy_arena_acquire (ca_size_t bytes);
 extern void  ca_lazy_arena_release (void *ptr);
 
@@ -78,6 +78,11 @@ typedef struct CABinCmp {
                                 `eps` name is retained to keep the
                                 `__eps__` Ruby accessor stable across
                                 the dual purpose. */
+  int8_t    sign_fix;        /* 0, or the side (1 left, 2 right) of an
+                                int64 operand compared with a uint64 one:
+                                the kernel compares both as uint64 and
+                                the cells where it is negative are
+                                answered after */
   CArray   *operands[2];      /* {left, right}; what parents points at */
 } CABinCmp;
 
@@ -143,6 +148,15 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
+  ca->sign_fix  = 0;
+  if ( left->data_type == CA_INT64 && right->data_type == CA_UINT64 ) {
+    ca->common_dt = CA_UINT64;
+    ca->sign_fix  = 1;
+  }
+  else if ( left->data_type == CA_UINT64 && right->data_type == CA_INT64 ) {
+    ca->common_dt = CA_UINT64;
+    ca->sign_fix  = 2;
+  }
   ca->eps       = eps;
   ca->operands[0] = left;
   ca->operands[1] = right;
@@ -223,25 +237,6 @@ ca_bincmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_bincmp_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_bincmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                            void *data, int dir)
-{
-  CABinCmp *ca = (CABinCmp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_addrs PUT)");
-  }
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_bincmp_func_xfer_index(ca, idx, out + i, CA_XFER_GET);
-  }
-}
-
 /* Test / observability counters — bumped from the xfer_stride hot
    path so specs can assert scratch acquisition and leaf in-place
    hit rates without materialising the view. */
@@ -296,59 +291,37 @@ ca_bincmp_try_leaf_inplace (CArray *op, int8_t common_dt,
   return 1;
 }
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                             ca_size_t *strides, void *data, int dir)
+ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
 {
-  CABinCmp *bc = (CABinCmp *) ap;
-  ca_size_t slab_n;
+  ca_size_t slab_n = req->n;
   int8_t    k;
   void     *left_scratch, *right_scratch;
-  ca_size_t operand_bytes;
-  ca_size_t operand_strides[CA_RANK_MAX];
+  ca_size_t left_bytes, right_bytes;
   ca_size_t right_step;
   int       is_contig;
   int       left_is_inplace  = 0;   /* skip release for leaf-opt path */
   int       right_is_inplace = 0;
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_stride PUT)");
-  }
   ca_bincmp_materialise_call_count++;
 
-  slab_n = 1;
-  for ( k = 0; k < bc->ndim; k++ ) slab_n *= counts[k];
+  /* An operand's own bytes, not ca_sizeof[common_dt]: a fixlen cell has no
+     width in ca_sizeof, and the two fixlen operands may differ in width. */
+  left_bytes  = bc->parent->bytes;
+  right_bytes = bc->right->bytes;
 
-  operand_bytes = ca_sizeof[bc->common_dt];
-
-  /* An operand cell is operand_bytes wide where this view's is one byte
-     (CA_BOOLEAN), so the caller's strides cannot be handed to the operand
-     pull the way a binop hands them on -- they have to be restated at the
-     operand's cell size.  strides[k] / bytes is the index step, which is
-     what the two spaces share.
-
-     is_contig says the caller asked for the row-major slab that xfer_all
-     and attach send.  Only then does an operand's own buffer hold the
-     wanted cells in the packed order the kernel reads them in, so it is
-     also the only case the leaf in-place path is good for. */
-  {
-    ca_size_t native = bc->bytes;
-    is_contig = 1;
-    for ( k = bc->ndim - 1; k >= 0; k-- ) {
-      operand_strides[k] = strides[k] / bc->bytes * operand_bytes;
-      if ( strides[k] != native ) {
-        is_contig = 0;
-      }
-      native *= bc->dim[k];
-    }
-  }
+  /* The leaf in-place path reads an operand's own buffer, which holds the
+     wanted cells in the order the kernel reads them only for the row-major
+     slab that xfer_all and attach send. */
+  is_contig = ca_lazy_req_is_packed(req, bc);
 
   /* === 1. pull LEFT (leaf in-place read or arena scratch) === */
   {
     char *left_inplace = NULL;
     if ( is_contig &&
          ca_bincmp_try_leaf_inplace(bc->parent, bc->common_dt,
-                                     starts, counts, operand_bytes,
+                                     req->starts, req->counts, left_bytes,
                                      &left_inplace) ) {
       /* Leaf-opt path: use parent->ptr + byte_offset directly. */
       left_scratch = left_inplace;
@@ -358,10 +331,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     else {
       left_scratch = ( bc->common_dt == CA_OBJECT )
                        ? ca_lazy_arena_acquire_object(slab_n)
-                       : ca_lazy_arena_acquire(slab_n * operand_bytes);
+                       : ca_lazy_arena_acquire(slab_n * left_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->parent, starts, counts, operand_strides, left_scratch,
-                     CA_XFER_GET);
+      ca_lazy_req_pull(bc->parent, req, left_scratch, CA_XFER_GET);
     }
   }
 
@@ -378,7 +350,7 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     for ( k = 0; k < bc->right->ndim; k++ ) one_counts[k] = 1;
 
     if ( ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
-                                     one_starts, one_counts, operand_bytes,
+                                     one_starts, one_counts, right_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
       right_is_inplace = 1;
@@ -386,10 +358,10 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     }
     else {
       ca_size_t one_strides[CA_RANK_MAX];
-      for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = operand_bytes;
+      for ( k = 0; k < bc->right->ndim; k++ ) one_strides[k] = right_bytes;
       right_scratch = ( bc->common_dt == CA_OBJECT )
                         ? ca_lazy_arena_acquire_object(1)
-                        : ca_lazy_arena_acquire(operand_bytes);
+                        : ca_lazy_arena_acquire(right_bytes);
       ca_bincmp_scratch_acquire_count++;
       ca_xfer_stride(bc->right, one_starts, one_counts, one_strides,
                      right_scratch, CA_XFER_GET);
@@ -401,7 +373,7 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     char *right_inplace = NULL;
     if ( is_contig &&
          ca_bincmp_try_leaf_inplace(bc->right, bc->common_dt,
-                                     starts, counts, operand_bytes,
+                                     req->starts, req->counts, right_bytes,
                                      &right_inplace) ) {
       right_scratch = right_inplace;
       right_is_inplace = 1;
@@ -410,10 +382,9 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     else {
       right_scratch = ( bc->common_dt == CA_OBJECT )
                         ? ca_lazy_arena_acquire_object(slab_n)
-                        : ca_lazy_arena_acquire(slab_n * operand_bytes);
+                        : ca_lazy_arena_acquire(slab_n * right_bytes);
       ca_bincmp_scratch_acquire_count++;
-      ca_xfer_stride(bc->right, starts, counts, operand_strides, right_scratch,
-                     CA_XFER_GET);
+      ca_lazy_req_pull(bc->right, req, right_scratch, CA_XFER_GET);
     }
     right_step = 1;
   }
@@ -423,14 +394,16 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    * Kernel signature (ext/carray.h):
    *   fn(n, m, ptr1, b1, i1, ptr2, b2, i2, ptr3, b3, i3)
    *
-   * Per inspection of generated ca_bincmp_<op>_<data_type>, the `b*` args
-   * are declared but unused (kernel computes ptr + k*i*sizeof(T)).  We
-   * pass 0 for the base arguments.
+   * The `b*` args are the cell widths.  The typed kernels step by
+   * sizeof(T) and ignore them; the fixlen kernels step and compare by
+   * them.
    *
-   * Non-trapping: m=NULL (= SIMD fast path).  Mask propagation handled
-   * by create_mask at view construction time.
+   * m=NULL (= SIMD fast path) except for object operands, whose cells
+   * call Ruby: those skip the masked cells, as the eager comparison
+   * does.  The output mask comes from create_mask.
    */
   {
+    boolean8_t *slab_mask = NULL;
     ca_bincmp_func_t fn = ca_bincmp_kernel_lookup(bc->op_id, bc->common_dt);
     if ( fn == NULL ) {
       if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);
@@ -439,15 +412,57 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                "CABinCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) bc->op_id, (int) bc->common_dt);
     }
-    fn(slab_n, NULL,
-       (char *) left_scratch,  0, 1,
-       (char *) right_scratch, 0, right_step,
-       (char *) data,          0, 1,
+    if ( bc->common_dt == CA_OBJECT ) {
+      slab_mask = ca_lazy_req_mask(req, 2, bc->operands);
+    }
+    fn(slab_n, slab_mask,
+       (char *) left_scratch,  left_bytes,  1,
+       (char *) right_scratch, right_bytes, right_step,
+       (char *) data,          1,           1,
        bc->eps);   /* Runtime tolerance for IS_CLOSE / IS_EQUIV. */
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
+  }
+
+  if ( bc->sign_fix ) {
+    const int64_t *sp = (const int64_t *)
+                        ( bc->sign_fix == 1 ? left_scratch : right_scratch );
+    ca_size_t step = ( bc->sign_fix == 1 ) ? 1 : right_step;
+    boolean8_t answer =
+      (boolean8_t) ca_bincmp_answer_when_negative(bc->op_id, bc->sign_fix);
+    ca_size_t i;
+    for ( i = 0; i < slab_n; i++ ) {
+      if ( sp[i * step] < 0 ) ((boolean8_t *) data)[i] = answer;
+    }
   }
 
   if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);
   if ( ! left_is_inplace  ) ca_lazy_arena_release(left_scratch);
+}
+
+static void
+ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                            ca_size_t *strides, void *data, int dir)
+{
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_bincmp_eval((CABinCmp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_bincmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                           void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_bincmp_eval((CABinCmp *) ap, &req, data);
 }
 
 static void
@@ -513,45 +528,12 @@ ca_bincmp_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CABinCmp is read-only (fill_data)");
 }
 
-/* mask = left.mask | right.mask, materialised as boolean8_t.
-   Mirrors CABinOp's create_mask policy. */
+/* mask = left.mask | right.mask, computed on each read (CAMaskOfOperands). */
 static void
 ca_bincmp_func_create_mask (void *ap)
 {
   CABinCmp *bc = (CABinCmp *) ap;
-  CArray *l = bc->parent;
-  CArray *r = bc->right;
-  CArray *lm = NULL, *rm = NULL;
-  boolean8_t *dst;
-  ca_size_t i, n;
-  int has_l, has_r;
-
-  has_l = ca_has_mask(l);
-  has_r = ca_has_mask(r);
-  if ( ! has_l && ! has_r ) return;
-
-  if ( has_l ) lm = l->mask;
-  if ( has_r ) rm = r->mask;
-
-  bc->mask = (CArray *) carray_new(CA_BOOLEAN, bc->ndim, bc->dim, 0, NULL);
-  dst = (boolean8_t *) bc->mask->ptr;
-  n = bc->elements;
-
-  if ( has_l ) ca_attach(lm);
-  if ( has_r ) ca_attach(rm);
-
-  for ( i = 0; i < n; i++ ) {
-    boolean8_t a = has_l ? ((boolean8_t *) lm->ptr)[i] : 0;
-    boolean8_t b = 0;
-    if ( has_r ) {
-      ca_size_t ri = bc->right_is_scalar ? 0 : i;
-      b = ((boolean8_t *) rm->ptr)[ri];
-    }
-    dst[i] = (boolean8_t)( a | b );
-  }
-
-  if ( has_l ) ca_detach(lm);
-  if ( has_r ) ca_detach(rm);
+  bc->mask = ca_lazy_operation_mask((CArray *) bc, CA_LAZY_MASK_OR);
 }
 
 ca_operation_function_t ca_bincmp_func = {
@@ -605,26 +587,58 @@ rb_ca_bincmp_new (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   return obj;
 }
 
+/* An operand taken to data type dt: a scalar by value, an array through a
+   cast view so the expression stays lazy. */
+static VALUE
+ca_bincmp_cast_operand (VALUE v, int8_t dt)
+{
+  CArray *ca;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  if ( ca->data_type == dt ) return v;
+  if ( rb_obj_is_cscalar(v) ) {
+    return rb_funcall(v, rb_intern("to_type"), 1, INT2NUM(dt));
+  }
+  return rb_funcall(rb_const_get(rb_cObject, rb_intern("CAMonOp")),
+                    rb_intern("__build__"), 2,
+                    v, INT2NUM(CA_MONOP_CAST_BASE + dt));
+}
+
 VALUE
 rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     signed_side = 0;
   volatile VALUE l_resolved, r_resolved;
 
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
-  /* Scalar wrap — same policy as CABinOp. */
-  if ( ! rb_obj_is_carray(l_resolved) ) {
-    rb_check_carray_object(r_resolved);
-    TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
-    l_resolved = ca_lazy_wrap_scalar(l_resolved, r);
+  switch ( ca_bincmp_integer_prepare(&l_resolved, &r_resolved, op_id,
+                                     &signed_side) ) {
+  case 1: return rb_ca_bincmp_build(l_resolved, l_resolved, CA_BINCMP_EQ, eps);
+  case 2: return rb_ca_bincmp_build(l_resolved, l_resolved, CA_BINCMP_NE, eps);
+  case 3:
+    /* The unsigned operand goes to uint64 and the signed one to int64;
+       ca_bincmp_setup reads that pair as a comparison to correct. */
+    l_resolved = ca_bincmp_cast_operand(l_resolved,
+                     ( signed_side == 1 ) ? CA_INT64 : CA_UINT64);
+    r_resolved = ca_bincmp_cast_operand(r_resolved,
+                     ( signed_side == 2 ) ? CA_INT64 : CA_UINT64);
+    break;
   }
-  if ( ! rb_obj_is_carray(r_resolved) ) {
-    rb_check_carray_object(l_resolved);
-    TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
-    r_resolved = ca_lazy_wrap_scalar(r_resolved, l);
+
+  /* A scalar beside the array (a Ruby value or a CScalar) is wrapped and
+     promoted as the eager comparison does it. */
+  if ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ||
+       rb_obj_is_cscalar(l_resolved) || rb_obj_is_cscalar(r_resolved) ) {
+    int l_scalar = ! rb_obj_is_carray(l_resolved) || rb_obj_is_cscalar(l_resolved);
+    int r_scalar = ! rb_obj_is_carray(r_resolved) || rb_obj_is_cscalar(r_resolved);
+    if ( ! signed_side ) {
+      rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
+    }
+    l_resolved = ca_lazy_settle_scalar(l_resolved, l_scalar);
+    r_resolved = ca_lazy_settle_scalar(r_resolved, r_scalar);
   }
 
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
@@ -633,6 +647,10 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   /* Cast both operands to the common data_type. */
   ca_bincmp_kernel_input_data_types(op_id, l->data_type, r->data_type,
                                  &l_in_dt, &r_in_dt);
+  if ( signed_side ) {
+    l_in_dt = l->data_type;
+    r_in_dt = r->data_type;
+  }
 
   if ( l_in_dt != l->data_type ) {
     VALUE cast_op = INT2NUM(CA_MONOP_CAST_BASE + l_in_dt);
@@ -655,10 +673,10 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
 
   if ( l->elements != r->elements ) {
-    if ( r->elements == 1 && l->elements > 1 ) {
+    if ( r->elements == 1 ) {
       /* CScalar right: handled via right_is_scalar */
     }
-    else if ( l->elements == 1 && r->elements > 1 ) {
+    else if ( l->elements == 1 ) {
       /* Comparison ops commute under negation (LT/GT/LE/GE flip to
          their counterpart, EQ/NE are commutative), but here we
          broadcast the left scalar up instead of swapping, so op_id
@@ -696,6 +714,17 @@ rb_ca_bincmp_s_build (int argc, VALUE *argv, VALUE klass)
   op_id = (uint16_t) NUM2UINT(op_id_val);
   if ( argc >= 4 ) eps = NUM2DBL(eps_val);
   return rb_ca_bincmp_build(l_cary, r_cary, op_id, eps);
+}
+
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: object cells, which call Ruby.  CArray::Fusion
+   reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_bincmp_trapping (VALUE self)
+{
+  CABinCmp *bc;
+  TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
+  return ( bc->common_dt == CA_OBJECT ) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -777,6 +806,7 @@ rb_ca_bincmp_initialize_copy (VALUE self, VALUE other)
 {
   CABinCmp *ca, *cs;
   TypedData_Get_Struct(self,  CABinCmp, &cabincmp_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABinCmp, &cabincmp_data_type, cs);
   if ( ca_func[CA_OBJ_BINCMP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_BINCMP, cs->parent->ndim);
@@ -820,6 +850,7 @@ Init_ca_obj_bincmp (void)
                              rb_ca_bincmp_s_build, -1);
 
   rb_define_method(rb_cCABinCmp, "__op_id__",     rb_ca_bincmp_op_id, 0);
+  rb_define_method(rb_cCABinCmp, "__trapping__", rb_ca_bincmp_trapping, 0);
   rb_define_method(rb_cCABinCmp, "__bincmp_right__",
                                   rb_ca_bincmp_right, 0);
   rb_define_method(rb_cCABinCmp, "__eps__",       rb_ca_bincmp_eps, 0);

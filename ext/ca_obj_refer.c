@@ -79,29 +79,38 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
+  /* An object cell is a VALUE the GC marks: reading other bytes as one
+     marks garbage, and reading one as bytes exposes an address. */
   if (ca_is_object_type(parent) && data_type != CA_OBJECT) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eCADataTypeError,
              "object array can't be referred by other data type");
   }
+  if (! ca_is_object_type(parent) && data_type == CA_OBJECT) {
+    rb_raise(rb_eCADataTypeError,
+             "non-object array can't be referred as object data type");
+  }
   if (parent->elements && bytes > parent_bytes * parent->elements) {
-    rb_raise(rb_eRuntimeError, "bytes exceeds the data size of referent");
+    rb_raise(rb_eArgError, "bytes exceeds the data size of referent");
   }
   if (bytes < parent_bytes && parent_bytes % bytes != 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "bytes of reference array must be a multiple of that of referent");
   }
   if (bytes > parent_bytes && bytes % parent_bytes != 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "bytes of reference array must be a multiple of that of referent");
   }
   if (offset < 0) {
-    rb_raise(rb_eRuntimeError, "negative offset is not permitted for CARefer");
+    rb_raise(rb_eArgError, "negative offset is not permitted for CARefer");
   }
-  elements = 1;
-  for (i = 0; i < ndim; i++) elements *= dim[i];
+  elements = ca_shape_elements(ndim, dim, bytes);
+  if (offset > parent->elements) {
+    rb_raise(rb_eArgError,
+             "data size of reference array must not exceed that of referent");
+  }
   if ((bytes * elements + parent_bytes * offset) >
       (parent_bytes * parent->elements)) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "data size of reference array must not exceed that of referent");
   }
 
@@ -113,6 +122,12 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   }
   /* base_offset is in bytes: `offset` is in parent-element units. */
   base_offset = offset * parent_bytes;
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
 
   /* CAREFUL: initialise mask0 before ca_stride_setup — the setup
      may dispatch to ca_refer_func_create_mask, which writes to
@@ -134,7 +149,9 @@ ca_refer_new (CArray *parent,
               int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
               ca_size_t offset)
 {
-  CARefer *ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
+  CARefer *ca;
+  ca_refer_setup(NULL, parent, data_type, ndim, dim, bytes, offset);
+  ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
   ca_refer_setup(ca, parent, data_type, ndim, dim, bytes, offset);
   return ca;
 }
@@ -172,10 +189,7 @@ ca_refer_func_create_mask (void *ap)
   ca_size_t parent_bytes = ca->parent->bytes;
   ca_size_t parent_offset;
 
-  ca_update_mask(ca->parent);
-  if (! ca->parent->mask) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   parent_offset = ca->base_offset / parent_bytes;
 
@@ -200,9 +214,12 @@ ca_refer_func_create_mask (void *ap)
     ca->mask0 =
       (CArray *) ca_repeat_new(ca->parent->mask, ca->parent->ndim + 1, count);
     ca_unset_flag(ca->mask0, CA_FLAG_READ_ONLY);
+    /* mask0 has ratio cells per parent element, so the offset is counted
+       in those. */
     ca->mask =
       (CArray *) ca_refer_new(ca->mask0,
-                              CA_BOOLEAN, ca->ndim, ca->dim, 0, parent_offset);
+                              CA_BOOLEAN, ca->ndim, ca->dim, 0,
+                              parent_offset * ratio);
   }
   else {
     /* Spanned reinterpret: ratio = bytes / parent_bytes parent
@@ -232,6 +249,7 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
 {
   CARefer *ca, *cs;
   TypedData_Get_Struct(self,  CARefer, &carefer_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CARefer, &carefer_data_type, cs);
   if ( ca_func[CA_OBJ_REFER].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_REFER, cs->ndim);
@@ -275,6 +293,34 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
  *   2. Match ranges of parent axes to new axes so element products
  *      agree.  Inside each matched range, root_strides must be
  *      inter-axis contiguous. */
+/* Three properties of an array are answered by walking its C parent chain:
+   ca_is_value_array, ca_is_readonly and ca_is_mask_array.  An array that is
+   built somewhere other than as a child of `src` -- a reshape that folds
+   onto the root, the copy that dup / clone makes -- does not have `src` on
+   that chain, so carry each property across from `src`.  Without this a
+   reshape or a dup of x.value reads the mask of x again (and takes UNDEF
+   into it), and a reshape of a broadcast view becomes writable. */
+void
+ca_keep_chain_flags (CArray *view, CArray *src)
+{
+  if ( ca_is_value_array(src) ) {
+    if ( view->mask ) {
+      ca_free(view->mask);
+      view->mask = NULL;
+    }
+    ca_set_flag(view, CA_FLAG_VALUE_ARRAY);
+  }
+  if ( ca_is_readonly(src) ) {
+    ca_set_flag(view, CA_FLAG_READ_ONLY);
+    if ( view->mask ) {
+      ca_set_flag(view->mask, CA_FLAG_READ_ONLY);
+    }
+  }
+  if ( ca_is_mask_array(src) ) {
+    ca_set_flag(view, CA_FLAG_MASK_ARRAY);
+  }
+}
+
 static int
 ca_reshape_try_strides (CArray *parent,
                         const ca_size_t *new_dim,
@@ -401,8 +447,11 @@ ca_reshape_try_strides (CArray *parent,
   return 1;
 }
 
+/* `refer` with its options given apart from argv, for callers in C that
+   build the options themselves (a Hash at the end of argv is read as
+   options only when the Ruby caller passed keywords). */
 static VALUE
-rb_ca_refer (int argc, VALUE *argv, VALUE self)
+rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
   volatile VALUE obj = Qnil;
   CArray *ca;
@@ -415,7 +464,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if (argc == 0) {
+  if (argc == 0 && NIL_P(ropt)) {
     data_type = ca->data_type;
     bytes     = ca->bytes;
     ndim      = ca->ndim;
@@ -425,37 +474,55 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     rb_ca_set_parent(obj, self);
   }
   else {
-    volatile VALUE rtype, rdim, ropt, rbytes = Qnil, roffset = Qnil;
-    ropt = rb_pop_options(&argc, &argv);
+    volatile VALUE rtype, rdim, rbytes = Qnil, roffset = Qnil;
     rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &rdim);
     rb_scan_options(ropt, "bytes,offset", &rbytes, &roffset);
     if (NIL_P(rbytes)) rbytes = rb_ca_bytes(self);
     rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
     if (NIL_P(rdim)) {
       if (ca->bytes != bytes) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "specify dimension shape for different byte size");
       } else {
         rdim = rb_ca_dim(self);
       }
     }
     Check_Type(rdim, T_ARRAY);
+    CA_CHECK_RANK(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
     for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
+    /* When rtype is a data_class the result is a record array.  It is
+       built on the storage, never on a Face, so that a Face stays on top
+       of the chain: re-reading a record array as its own data_class lifts
+       it (keeping its class), any other data_class wraps a new CARecord. */
+    if ( rb_obj_is_data_class(rtype) ) {
+      volatile VALUE base = rb_ca_strip_face_value(self);
+      CArray *base_ca;
+      TypedData_Get_Struct(base, CArray, &carray_data_type, base_ca);
+      cr = ca_refer_new(base_ca, data_type, ndim, dim, bytes, offset);
+      obj = ca_wrap_struct(cr);
+      rb_ca_set_parent(obj, base);
+      if ( ca->obj_type == CA_OBJ_RECORD
+           && rb_ca_data_class(self) == rtype ) {
+        return ca_face_lift(obj, self);
+      }
+      return rb_funcall(rb_const_get(rb_cObject, rb_intern("CARecord")),
+                        rb_intern("wrap"), 2, obj, rtype);
+    }
     cr = ca_refer_new((CArray *) ca, data_type, ndim, dim, bytes, offset);
     obj = ca_wrap_struct(cr);
     rb_ca_set_parent(obj, self);
-    /* When rtype is a data_class, wrap the result in CARecord so
-       the data_class is carried even if self is not itself a Face. */
-    if ( rb_obj_is_data_class(rtype) ) {
-      obj = rb_funcall(rb_const_get(rb_cObject, rb_intern("CARecord")),
-                       rb_intern("wrap"), 2, obj, rtype);
-      return obj;
-    }
   }
   CA_WRAPPER_LIFT(obj, self, ca);
   return obj;
+}
+
+static VALUE
+rb_ca_refer (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_refer_kw(argc, argv, ropt, self);
 }
 
 VALUE
@@ -483,7 +550,7 @@ rb_ca_refer_new (VALUE self,
   rb_ary_store(list, 2, ropt);
 
   {
-    volatile VALUE obj = rb_ca_refer(3, (VALUE *) RARRAY_CONST_PTR(list), self);
+    volatile VALUE obj = rb_ca_refer_kw(2, (VALUE *) RARRAY_CONST_PTR(list), ropt, self);
     CArray *co;
 
     /* CAREFUL: this is the internal builder -- some fifteen call sites want
@@ -535,6 +602,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
   CARefer *cr;
   ca_size_t new_dim[CA_RANK_MAX];
   ca_size_t prod = 1;
+  int overflow = 0, zero = 0;
   int placeholder_idx = -1;     /* axis with `-1` or `:~` infer placeholder */
   int i;
   volatile VALUE obj;
@@ -553,7 +621,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     if ( (FIXNUM_P(argv[i]) && FIX2LONG(argv[i]) == -1)
          || argv[i] == sym_tilde ) {
       if (placeholder_idx >= 0) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "reshape: only one auto-infer placeholder (-1 / :~) allowed");
       }
       placeholder_idx = i;
@@ -578,7 +646,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
         src = (i < ca->ndim) ? i : ca->ndim - (argc - i);
       }
       if (src < 0 || src >= ca->ndim) {
-        rb_raise(rb_eRuntimeError,
+        rb_raise(rb_eArgError,
                  "reshape: nil at axis %d has no source dim", i);
       }
       new_dim[i] = ca->dim[src];
@@ -586,13 +654,27 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     else {
       new_dim[i] = NUM2SIZE(argv[i]);
     }
-    prod *= new_dim[i];
+    /* A product too large to count cannot equal the element count; an
+       extent of zero anywhere makes it zero whatever it overflowed to. */
+    if ( __builtin_mul_overflow(prod, new_dim[i], &prod) ) {
+      overflow = 1;
+    }
+    if ( new_dim[i] == 0 ) {
+      zero = 1;
+    }
+  }
+  if ( zero ) {
+    prod = 0;
+  }
+  else if ( overflow ) {
+    rb_raise(rb_eArgError,
+             "reshape: the shape has more elements than an array can hold");
   }
 
   /* Resolve placeholder dim from the leftover total. */
   if (placeholder_idx >= 0) {
     if (prod == 0 || ca->elements % prod != 0) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "reshape: cannot infer dim for `-1` placeholder");
     }
     new_dim[placeholder_idx] = ca->elements / prod;
@@ -604,7 +686,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
        a subset), and on non-contiguous parents the compose-fold
        path corrupts data outright — hence the raise. */
     if (prod != ca->elements) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "reshape: cannot reshape array of %lld elements into a shape "
                "of %lld elements (use -1 / :~ to infer a dim)",
                (long long) ca->elements, (long long) prod);
@@ -627,6 +709,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
                                    ca->data_type, ca->bytes,
                                    (int8_t) argc, new_dim,
                                    out_strides, out_base);
+      ca_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);
@@ -664,6 +747,7 @@ rb_ca_flatten (VALUE self)
       CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, out_root,
                                    ca->data_type, ca->bytes,
                                    1, dim, out_strides, out_base);
+      ca_keep_chain_flags((CArray *) cs, ca);
       obj = ca_wrap_struct(cs);
       rb_ca_set_parent(obj, self);
       CA_WRAPPER_LIFT(obj, self, ca);
@@ -725,7 +809,7 @@ rb_ca_insert_axis (int argc, VALUE *argv, VALUE self)
     gap_count[i] = 0;
   }
   for (i = 0; i < argc; i++) {
-    int raw = NUM2INT(argv[i]);
+    int raw = (int) ca_axis_integer(argv[i], "insert_axis");
     int g   = (raw < 0) ? raw + ngap : raw;
     if (g < 0 || g >= ngap) {
       rb_raise(rb_eArgError,

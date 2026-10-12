@@ -196,8 +196,7 @@ class TestMapSlabBeta2 < Test::Unit::TestCase
     assert_equal [100.0, 101.0, 102.0, 103.0], out[0, 0, nil].to_a
   end
 
-  # β.xb mask carry: input mask is visible to the block; output mask is
-  # currently dropped (= simplest contract for first cut).
+  # The input mask is visible to the block.
   def test_masked_source_carries_input_mask
     a = CArray.float64(3, 4).seq!
     a[0, 0] = UNDEF
@@ -205,6 +204,21 @@ class TestMapSlabBeta2 < Test::Unit::TestCase
     seen_masks = []
     a.map_slab(axis: 1) { |row| seen_masks << row.mask.to_a; row.sum }
     assert_equal [[true, false, false, false], [false, false, true, false], [false, false, false, false]], seen_masks
+  end
+
+  # A masked cell of the block's result is masked in the output, along any
+  # axis or axes; a result without a mask gives an output without one.
+  def test_result_mask_reaches_the_output
+    a = CArray.float64(2, 3, 4).seq!
+    a[(a % 7).eq(3)] = UNDEF
+    [0, 1, 2, [0, 2], [1, 2], [0, 1, 2]].each do |ax|
+      assert_equal (a * 2).to_a, a.map_slab(axis: ax) { |s| s * 2 }.to_a, "axis #{ax}"
+      assert_equal (a * 2).to_a, a.transpose.map_slab(axis: ax) { |s| s * 2 }.transpose.to_a,
+                   "transposed axis #{ax}"
+    end
+    plain = CArray.float64(2, 3).seq!
+    assert_equal false, plain.map_slab(axis: 1) { |r| r * 2 }.has_mask?
+    assert_equal false, a.map_slab(axis: 1) { |r| r.value * 2 }.has_mask?
   end
 
   # ---- block-side reflection: source semantics preserved

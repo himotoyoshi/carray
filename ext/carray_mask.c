@@ -185,16 +185,67 @@ ca_mask_word_count (const boolean8_t *m, ca_size_t n)
 
 enum { CA_MASK_SCAN_ANY, CA_MASK_SCAN_ALL, CA_MASK_SCAN_COUNT };
 
+/* The block walk runs under ca_lazy_arena_protect: the transfer from a
+   virtual mask can raise, and the arena must be left however it ends. */
+typedef struct {
+  boolean8_t *scratch;     /* first: released by ca_lazy_arena_release_held */
+  CArray     *mask;
+  int         op;
+  ca_size_t   rows;
+  ca_size_t   inner;
+  ca_size_t  *native;
+  ca_size_t   result;
+} ca_mask_scan_t;
+
+static VALUE
+ca_mask_scan_virtual_body (VALUE arg)
+{
+  ca_mask_scan_t *sc   = (ca_mask_scan_t *) arg;
+  CArray         *mask = sc->mask;
+  int8_t          ndim = mask->ndim;
+  ca_size_t       outer = mask->dim[0];
+  ca_size_t       off;
+  int8_t          k;
+
+  sc->scratch = (boolean8_t *) ca_lazy_arena_acquire(sc->rows * sc->inner);
+
+  for (off = 0; off < outer; off += sc->rows) {
+    ca_size_t nrow = (outer - off < sc->rows) ? (outer - off) : sc->rows;
+    ca_size_t n    = nrow * sc->inner;
+    ca_size_t starts[CA_RANK_MAX] = {0};
+    ca_size_t counts[CA_RANK_MAX];
+
+    starts[0] = off;
+    counts[0] = nrow;
+    for (k = 1; k < ndim; k++) {
+      counts[k] = mask->dim[k];
+    }
+
+    ca_xfer_stride(mask, starts, counts, sc->native, sc->scratch, CA_XFER_GET);
+
+    if ( sc->op == CA_MASK_SCAN_ANY ) {
+      if ( ca_mask_word_any(sc->scratch, n) )     { sc->result = 1; break; }
+    }
+    else if ( sc->op == CA_MASK_SCAN_ALL ) {
+      if ( ! ca_mask_word_all_set(sc->scratch, n) ) { sc->result = 0; break; }
+    }
+    else {  /* CA_MASK_SCAN_COUNT — no early exit */
+      sc->result += ca_mask_word_count(sc->scratch, n);
+    }
+  }
+  return Qnil;
+}
+
 static ca_size_t
 ca_mask_scan_virtual (CArray *mask, int op)
 {
-  int8_t      ndim  = mask->ndim;
-  ca_size_t   outer = mask->dim[0];
-  ca_size_t   inner = 1;
-  ca_size_t   native[CA_RANK_MAX];
-  ca_size_t   rows, off, result = 0;
-  boolean8_t *scratch;
-  int8_t      k;
+  int8_t         ndim  = mask->ndim;
+  ca_size_t      outer = mask->dim[0];
+  ca_size_t      inner = 1;
+  ca_size_t      native[CA_RANK_MAX];
+  ca_size_t      rows;
+  ca_mask_scan_t sc;
+  int8_t         k;
 
   for (k = 1; k < ndim; k++) {
     inner *= mask->dim[k];
@@ -212,41 +263,18 @@ ca_mask_scan_virtual (CArray *mask, int op)
   if ( rows < 1 )     rows = 1;
   if ( rows > outer ) rows = outer;
 
-  if ( op == CA_MASK_SCAN_ALL ) {
-    result = 1;   /* vacuously all-set until a non-set cell is found */
-  }
+  sc.scratch = NULL;
+  sc.mask    = mask;
+  sc.op      = op;
+  sc.rows    = rows;
+  sc.inner   = inner;
+  sc.native  = native;
+  /* ALL is vacuously all-set until a non-set cell is found */
+  sc.result  = ( op == CA_MASK_SCAN_ALL ) ? 1 : 0;
 
-  ca_lazy_arena_enter();
-  scratch = (boolean8_t *) ca_lazy_arena_acquire(rows * inner);
-
-  for (off = 0; off < outer; off += rows) {
-    ca_size_t nrow = (outer - off < rows) ? (outer - off) : rows;
-    ca_size_t n    = nrow * inner;
-    ca_size_t starts[CA_RANK_MAX] = {0};
-    ca_size_t counts[CA_RANK_MAX];
-
-    starts[0] = off;
-    counts[0] = nrow;
-    for (k = 1; k < ndim; k++) {
-      counts[k] = mask->dim[k];
-    }
-
-    ca_xfer_stride(mask, starts, counts, native, scratch, CA_XFER_GET);
-
-    if ( op == CA_MASK_SCAN_ANY ) {
-      if ( ca_mask_word_any(scratch, n) )     { result = 1; break; }
-    }
-    else if ( op == CA_MASK_SCAN_ALL ) {
-      if ( ! ca_mask_word_all_set(scratch, n) ) { result = 0; break; }
-    }
-    else {  /* CA_MASK_SCAN_COUNT — no early exit */
-      result += ca_mask_word_count(scratch, n);
-    }
-  }
-
-  ca_lazy_arena_release(scratch);
-  ca_lazy_arena_exit();
-  return result;
+  ca_lazy_arena_protect(ca_mask_scan_virtual_body, ca_lazy_arena_release_held,
+                        (VALUE) &sc);
+  return sc.result;
 }
 
 boolean8_t *
@@ -323,7 +351,7 @@ ca_is_any_masked (void *ap)
          non-zero word (the typical "all zero, no mask actually set" hot
          pattern).  An O(n) scan cache is not viable here: the mask is
          dynamic and a view chain can introduce a mask mid-chain. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       flag = ca_mask_word_any((boolean8_t *) ca->mask->ptr, ca->elements);
       ca_detach(ca->mask);
     }
@@ -350,7 +378,7 @@ ca_is_all_masked (void *ap)
       /* cheap mask: O(1) alias attach + word-level all_set with early exit.
          The word check uses (w == 0x0101...01ULL) under the {0,1}
          invariant; returns on the first non-fully-set word. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       flag = ca_mask_word_all_set((boolean8_t *) ca->mask->ptr, ca->elements);
       ca_detach(ca->mask);
     }
@@ -361,6 +389,19 @@ ca_is_all_masked (void *ap)
   }
 
   return flag;
+}
+
+/* The create_mask slot of a view whose cells map one-to-one onto its
+   parent's in address order (a cast, a byte swap, a Face over its storage):
+   the mask is the parent's mask seen in the view's shape. */
+
+void
+ca_view_func_create_mask (void *ap)
+{
+  CAView *ca = (CAView *) ap;
+  ca_create_mask(ca->parent);
+  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
+                                     CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
 /* create mask array if array has mask but has not mask array */
@@ -374,30 +415,161 @@ ca_update_mask (void *ap)
   }
 }
 
+static VALUE
+ca_create_mask_attach (VALUE arg)
+{
+  ca_attach((CArray *) arg);   /* window: released by the view's detach */
+  return Qnil;
+}
+
+CArray *
+ca_multi_parent_mask (CArray *p, CArray **standin)
+{
+  *standin = NULL;
+  if ( ! ca_has_mask(p) ) {
+    CArray *z = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
+    MEMZERO(z->ptr, boolean8_t, z->elements);
+    if ( ca_is_readonly(p) ) {
+      ca_set_flag(z, CA_FLAG_READ_ONLY);
+    }
+    *standin = z;
+    return z;
+  }
+  ca_create_mask(p);
+  return p->mask;
+}
+
+/* A value array or a mask array: a parent that can never be given a mask,
+   whose stand-in therefore stays in place for good. */
+static int
+ca_multi_parent_mask_unmaskable (CArray *p)
+{
+  return ca_is_value_array(p) || ca_is_mask_array(p);
+}
+
+void
+ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
+                              CArray **standins, int32_t n, int for_write)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k;
+  /* Not inside an attach window: its buffer and its detach are those of
+     the parents it was opened with.  The attach and allocate slots run
+     before the buffer is published, and replace the stand-ins then. */
+  if ( standins == NULL || ( CAVIEW(mask)->attach > 0 && mask->ptr != NULL ) ) {
+    return;
+  }
+  /* A replaced stand-in stays allocated until the view is freed: a copy
+     of the mask (dup) may still point at it. */
+  for ( k = 0; k < n; k++ ) {
+    CArray *z = standins[k];
+    if ( z == NULL || mp->parents[k] != z
+         || ca_test_flag(z, CA_FLAG_READ_ONLY)
+         || ca_multi_parent_mask_unmaskable(parents[k]) ) {
+      continue;
+    }
+    if ( ! ( for_write || ca_has_mask(parents[k]) ) ) {
+      continue;
+    }
+    ca_create_mask(parents[k]);
+    mp->parents[k] = parents[k]->mask;
+    if ( k == 0 ) {
+      CAVIEW(mask)->parent = parents[k]->mask;
+    }
+  }
+}
+
+void
+ca_multi_parent_mask_check (CArray *mask, CArray **parents,
+                            CArray **standins, int32_t n)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k;
+  if ( standins == NULL ) {
+    return;
+  }
+  for ( k = 0; k < n; k++ ) {
+    CArray    *z = standins[k];
+    ca_size_t  i;
+    if ( z == NULL || mp->parents[k] != z
+         || ! ca_multi_parent_mask_unmaskable(parents[k]) ) {
+      continue;
+    }
+    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
+    if ( i == z->elements ) {
+      continue;
+    }
+    MEMZERO(z->ptr, boolean8_t, z->elements);
+    rb_raise(rb_eTypeError, "can not create mask array for the %s array",
+             ca_is_value_array(parents[k]) ? "value" : "mask");
+  }
+}
+
+void
+ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
+                             CArray **standins, int32_t n)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k;
+  if ( standins == NULL ) {
+    return;
+  }
+  ca_multi_parent_mask_check(mask, parents, standins, n);
+  for ( k = 0; k < n; k++ ) {
+    CArray    *z = standins[k];
+    ca_size_t  i;
+    if ( z == NULL || mp->parents[k] != z
+         || ca_test_flag(z, CA_FLAG_READ_ONLY)
+         || ca_multi_parent_mask_unmaskable(parents[k]) ) {
+      continue;
+    }
+    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
+    if ( i == z->elements ) {
+      continue;
+    }
+    ca_create_mask(parents[k]);
+    ca_xfer_all(parents[k]->mask, z->ptr, CA_XFER_PUT);
+    MEMZERO(z->ptr, boolean8_t, z->elements);
+  }
+}
+
 void
 ca_create_mask (void *ap)
 {
   CArray *ca = (CArray *) ap;
 
+  if ( ca->mask ) {
+    return;
+  }
+
   if ( ca_is_value_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask array for the value array");
   }
 
   if ( ca_is_mask_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask array for the mask array");
   }
 
-  if ( ! ca->mask ) {
-    ca_func[ca->obj_type].create_mask(ca);
-    ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
-    if ( ca_is_view(ca) ) {
-      if ( CAVIEW(ca)->attach ) {
-        ca_attach(ca->mask);
-        if ( ca_is_view(ca->mask) ) {
-          CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
-        }
+  ca_func[ca->obj_type].create_mask(ca);
+  ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
+  if ( ca_is_view(ca) ) {
+    if ( CAVIEW(ca)->attach ) {
+      /* The new mask joins its view's level.  Its attach reads the
+         parent's mask, which can raise (a Ruby-backed parent); the mask
+         then comes off again, since the view's sync and detach would
+         find it attached to nothing. */
+      int tag = 0;
+      rb_protect(ca_create_mask_attach, (VALUE) ca->mask, &tag);
+      if ( tag ) {
+        CArray *mask = ca->mask;
+        ca->mask = NULL;
+        ca_free(mask);
+        rb_jump_tag(tag);
+      }
+      if ( ca_is_view(ca->mask) ) {
+        CAVIEW(ca->mask)->attach = CAVIEW(ca)->attach;
       }
     }
   }
@@ -415,6 +587,20 @@ ca_clear_mask (void *ap)
   }
 }
 
+typedef struct {
+  CArray *ca;
+  CArray *mask;
+} ca_setup_mask_t;
+
+/* Pushing the cells into ca's mask can raise (a CAObject's mask hooks). */
+static VALUE
+ca_setup_mask_body (VALUE arg)
+{
+  ca_setup_mask_t *c = (ca_setup_mask_t *) arg;
+  ca_sync_data(c->ca->mask, c->mask->ptr);
+  return Qnil;
+}
+
 void
 ca_setup_mask (void *ap, CArray *mask)
 {
@@ -423,12 +609,13 @@ ca_setup_mask (void *ap, CArray *mask)
   ca_update_mask(ca);
 
   if ( mask ) {
+    ca_setup_mask_t c;
     if ( ! ca->mask ) {
       ca_create_mask(ca);
     }
-    ca_attach(mask);
-    ca_sync_data(ca->mask, mask->ptr);
-    ca_detach(mask);
+    c.ca   = ca;
+    c.mask = mask;
+    ca_attach_window(1, &c.mask, "r", ca_setup_mask_body, (VALUE) &c);
   }
   else if ( ca->mask ) {
     boolean8_t zero = 0;
@@ -443,12 +630,59 @@ ca_setup_mask (void *ap, CArray *mask)
 
  */
 
-void
-ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
+/* The overlay reads each source's mask into the destination's.  A
+   source's mask can be made or read by calling Ruby (a CAObject's mask
+   hooks) and raise, so every mask is made first and the lot are read
+   inside one attach window.
+
+   A source whose cells live in the destination's root has its mask read
+   into a snapshot before the destination's mask is made, cleared or
+   written: the destination's mask may be that same memory, and the word
+   OR would otherwise read bytes it has already set. */
+typedef struct {
+  CArray     **list;      /* [0] the destination mask, then the attached sources' */
+  boolean8_t **snap;      /* per source: its mask read in advance, or NULL */
+  CArray     **att;       /* per source: its attached mask when not snapped */
+  char        *scalar;    /* per source: the source is a scalar */
+  int          k;         /* entries in list */
+  int          ns;        /* sources */
+  ca_size_t    elements;
+} ca_mask_overlay_t;
+
+static VALUE
+ca_mask_overlay_body (VALUE arg)
 {
-  CArray *ca = (CArray *) ap;
+  ca_mask_overlay_t *o = (ca_mask_overlay_t *) arg;
+  boolean8_t *ma = (boolean8_t *) o->list[0]->ptr;
+  int i;
+  for (i=0; i<o->ns; i++) {
+    boolean8_t *ms = o->snap[i] ? o->snap[i] : (boolean8_t *) o->att[i]->ptr;
+    /* scalar masked source -> broadcast to all (memset); array source
+       -> pure word OR (ca_mask_word_or).  A defensive `if (*ms)` is
+       unnecessary: under the {0,1} invariant, `*ma |= *ms` equals
+       `if (*ms) *ma = 1`.  Post-condition: the mask byte stays in {0,1}. */
+    if ( o->scalar[i] ) {
+      if ( *ms ) {
+        memset(ma, 1, o->elements);
+      }
+    }
+    else {
+      ca_mask_word_or(ma, ms, o->elements);
+    }
+  }
+  return Qnil;
+}
+
+/* overwrite: the destination's mask is cleared before the sources are
+   OR'd in (and left alone when it has none and no source has a mask). */
+static void
+ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
+                           CArray **slist, int overwrite)
+{
   CArray *cs;
-  boolean8_t *ma, *ms;
+  ca_mask_overlay_t o;
+  volatile VALUE *holders;
+  char *modes;
   int i, some_has_mask = 0;
 
   for (i=0; i<n; i++) {
@@ -458,47 +692,88 @@ ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
     }
   }
 
-  if ( some_has_mask ) {
-
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
+  if ( ! some_has_mask ) {
+    if ( overwrite ) {
+      ca_update_mask(ca);
+      if ( ca->mask ) {
+        boolean8_t zero = 0;
+        ca_fill(ca->mask, &zero);
+      }
     }
-
-    if ( elements > ca->elements ) {
-      elements = ca->elements;
-    }
-
-    ca_attach(ca->mask);
-    for (i=0; i<n; i++) {
-      cs = slist[i];
-      if ( ! cs ) {
-        continue;
-      }
-      ca_update_mask(cs);
-      if ( ! cs->mask ) {
-        continue;
-      }
-      ca_attach(cs->mask);
-      ma = (boolean8_t *) ca->mask->ptr;
-      ms = (boolean8_t *) cs->mask->ptr;
-      /* scalar masked source -> broadcast to all (memset); array source
-         -> pure word OR (ca_mask_word_or).  A defensive `if (*ms)` is
-         unnecessary: under the {0,1} invariant, `*ma |= *ms` equals
-         `if (*ms) *ma = 1`.  Post-condition: the mask byte stays in {0,1}. */
-      if ( ca_is_scalar(cs) ) {
-        if ( *ms ) {
-          memset(ma, 1, elements);
-        }
-      }
-      else {
-        ca_mask_word_or(ma, ms, elements);
-      }
-      ca_detach(cs->mask);
-    }
-    ca_sync(ca->mask);
-    ca_detach(ca->mask);
+    return;
   }
+
+  if ( elements > ca->elements ) {
+    elements = ca->elements;
+  }
+
+  o.list     = ALLOCA_N(CArray *, n + 1);
+  o.snap     = ALLOCA_N(boolean8_t *, n);
+  o.att      = ALLOCA_N(CArray *, n);
+  o.scalar   = ALLOCA_N(char, n);
+  holders    = ALLOCA_N(VALUE, n);
+  modes      = ALLOCA_N(char, n + 2);
+  o.elements = elements;
+  o.ns       = 0;
+  for (i=0; i<n; i++) {
+    holders[i] = 0;
+  }
+  ca_update_mask(ca);
+
+  /* Every source mask is made, and those in the destination's root are
+     read, before the destination's mask is touched. */
+  for (i=0; i<n; i++) {
+    cs = slist[i];
+    if ( ! cs ) {
+      continue;
+    }
+    ca_update_mask(cs);
+    if ( ! cs->mask ) {
+      continue;
+    }
+    o.scalar[o.ns] = (char) ca_is_scalar(cs);
+    o.att[o.ns]    = NULL;
+    o.snap[o.ns]   = NULL;
+    if ( ca_shares_root(cs, ca) || ca_shares_root(cs->mask, ca) ||
+         ( ca->mask && ca_shares_root(cs->mask, ca->mask) ) ) {
+      o.snap[o.ns] = ALLOCV_N(boolean8_t, holders[o.ns], cs->mask->elements);
+      ca_xfer_all(cs->mask, (char *) o.snap[o.ns], CA_XFER_GET);
+    }
+    else {
+      o.att[o.ns] = cs->mask;
+    }
+    o.ns++;
+  }
+
+  ca_create_mask(ca);
+  if ( overwrite ) {
+    boolean8_t zero = 0;
+    ca_fill(ca->mask, &zero);
+  }
+
+  o.k = 0;
+  o.list[o.k]  = ca->mask;
+  modes[o.k++] = 'w';
+  for (i=0; i<o.ns; i++) {
+    if ( o.att[i] ) {
+      o.list[o.k]  = o.att[i];
+      modes[o.k++] = 'r';
+    }
+  }
+  modes[o.k] = '\0';
+  ca_attach_window(o.k, o.list, modes, ca_mask_overlay_body, (VALUE) &o);
+
+  for (i=0; i<n; i++) {
+    if ( holders[i] ) {
+      ALLOCV_END(holders[i]);
+    }
+  }
+}
+
+void
+ca_copy_mask_overlay_n (void *ap, ca_size_t elements, int n, CArray **slist)
+{
+  ca_copy_mask_overlay_core((CArray *) ap, elements, n, slist, 0);
 }
 
 void
@@ -506,33 +781,26 @@ ca_copy_mask_overlay (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray *);
   }
   va_end(args);
 
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
+  ca_copy_mask_overlay_core(ca, elements, n, slist, 0);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 }
 
 void
 ca_copy_mask_overwrite_n (void *ap, ca_size_t elements, int n, CArray **slist)
 {
-  CArray *ca = (CArray *) ap;
-
-  ca_update_mask(ca);
-  if ( ca->mask ) {
-    boolean8_t zero = 0;
-    ca_fill(ca->mask, &zero);
-  }
-
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
+  ca_copy_mask_overlay_core((CArray *) ap, elements, n, slist, 1);
 }
 
 void
@@ -540,25 +808,20 @@ ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...)
 {
   CArray *ca = (CArray *) ap;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray*)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray*);
   }
   va_end(args);
 
-  ca_update_mask(ca);
-  if ( ca->mask ) {
-    boolean8_t zero = 0;
-    ca_fill(ca->mask, &zero);
-  }
+  ca_copy_mask_overlay_core(ca, elements, n, slist, 1);
 
-  ca_copy_mask_overlay_n(ca, elements, n, slist);
-
-  xfree(slist);
+  ALLOCV_END(holder);
 }
 
 void
@@ -582,7 +845,7 @@ ca_count_masked (void *ap)
   if ( ca->mask ) {
     if ( ca_attach_is_alias(ca->mask) ) {
       /* cheap mask: O(1) alias attach + word-bulk count. */
-      ca_attach(ca->mask);
+      ca_attach(ca->mask);   /* window: nothing raises inside */
       m = (boolean8_t *) ca->mask->ptr;
       count = ca_mask_word_count(m, ca->elements);
       ca_detach(ca->mask);
@@ -644,7 +907,7 @@ ca_unmask (void *ap, char *fill_value)
       ca_fill(ca->mask, &zero);
     }
     else {
-      ca_attach(ca);
+      ca_attach(ca);   /* window: nothing raises inside */
 
       switch ( ca->bytes ) {
       case 1:  proc_fill_bang_width(uint8_t);  break;
@@ -654,8 +917,7 @@ ca_unmask (void *ap, char *fill_value)
       default: proc_fill_bang_bytes();         break;  /* cmplx128 (16) + fixlen */
       }
 
-      ca_sync(ca);
-      ca_detach(ca);
+      ca_sync_detach(ca);
     }
   }
 }
@@ -677,17 +939,21 @@ ca_unmask_copy_fill (VALUE arg)
 
   ca_copy_data(ca, co->ptr);
 
+  /* Only the mask is needed now that the values are in co, so read the
+     mask alone rather than producing the view's cells a second time. */
   if ( a->fill_value && ca_has_mask(ca) ) {
-    ca_attach(ca);
+    volatile VALUE holder = 0;
+    ca_update_mask(ca);
+    m = ALLOCV_N(boolean8_t, holder, ca->elements);
+    ca_copy_data(ca->mask, (char *) m);
     q = co->ptr;
-    m = (boolean8_t *) ca->mask->ptr;
     for (i=0; i<ca->elements; i++) {
-      if ( *m ) {
+      if ( m[i] ) {
         memcpy(q, a->fill_value, ca->bytes);
       }
-      m++; q+=co->bytes;
+      q+=co->bytes;
     }
-    ca_detach(ca);
+    ALLOCV_END(holder);
   }
   return Qnil;
 }
@@ -709,16 +975,12 @@ ca_invert_mask (void *ap)
   CArray *ca = (CArray *) ap;
   boolean8_t *m;
 
-  ca_update_mask(ca);
+  ca_create_mask(ca);
 
-  if ( ! ca->mask ) {
-    ca_create_mask(ca);
-  }
-
-  ca_attach(ca->mask);
+  ca_attach(ca->mask);   /* window: nothing raises inside */
   m = (boolean8_t *) ca->mask->ptr;
   ca_mask_word_not(m, m, ca->elements);   /* in-place 1 - m, LSB-XOR word loop */
-  ca_detach(ca->mask);
+  ca_sync_detach(ca->mask);
 
   return;
 }
@@ -727,9 +989,10 @@ boolean8_t *
 ca_allocate_mask_iterator_n (int n, CArray **slist)
 {
   boolean8_t *m, *mp, *ms;
-  CArray *cs;
+  CArray *cs, **masks;
+  char *scalar;
   ca_size_t j, elements = -1;
-  int i, some_has_mask = 0;
+  int i, k = 0, some_has_mask = 0;
 
   for (i=0; i<n; i++) {
     if ( slist[i] ) {
@@ -743,7 +1006,7 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
             elements = slist[i]->elements;
           }
           else if ( ! ca_is_scalar(slist[i]) ) {
-            rb_raise(rb_eRuntimeError,
+            rb_raise(rb_eArgError,
                      "# of elements is different among the given arrays");
           }
         }
@@ -758,13 +1021,18 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
      (degenerate call); guard so the alloc/memset never see a negative size
      (which would wrap to a huge bound).  Also silences GCC's VRP warnings. */
   if ( elements < 0 ) elements = 0;
-  m = xmalloc(sizeof(boolean8_t)*elements);
-  memset(m, 0, elements);
 
   if ( ! some_has_mask ) {
+    m = xmalloc(sizeof(boolean8_t)*elements);
+    memset(m, 0, elements);
     return m;
   }
 
+  /* The sources' masks, made and attached before the result is allocated:
+     making or reading one can call Ruby (a CAObject's mask hooks) and
+     raise, and then nothing is left attached or allocated. */
+  masks  = ALLOCA_N(CArray *, n);
+  scalar = ALLOCA_N(char, n);
   for (i=0; i<n; i++) {
     cs = slist[i];
     if ( ! cs ) {
@@ -774,10 +1042,17 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
     if ( ! cs->mask ) {
       continue;
     }
-    ca_attach(cs->mask);
-    ms = (boolean8_t *) cs->mask->ptr;
+    masks[k]    = cs->mask;
+    scalar[k++] = (char) ca_is_scalar(cs);
+  }
+  ca_attach_all(masks, k);   /* window: nothing raises inside */
+
+  m = xmalloc(sizeof(boolean8_t)*elements);
+  memset(m, 0, elements);
+  for (i=0; i<k; i++) {
+    ms = (boolean8_t *) masks[i]->ptr;
     mp = m;
-    if ( ca_is_scalar(cs) ) {
+    if ( scalar[i] ) {
       if ( *ms ) {
         for (j=0; j<elements; j++) {
           *mp = 1;
@@ -788,7 +1063,9 @@ ca_allocate_mask_iterator_n (int n, CArray **slist)
     else {
       ca_mask_word_or(mp, ms, elements);   /* m[j] |= ms[j], word-bulk OR */
     }
-    ca_detach(cs->mask);
+  }
+  while ( k > 0 ) {
+    ca_detach(masks[--k]);
   }
   return m;
 }
@@ -798,10 +1075,11 @@ ca_allocate_mask_iterator (int n, ...)
 {
   boolean8_t *m;
   CArray **slist;
+  volatile VALUE holder;
   va_list args;
   int i;
 
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   va_start(args, n);
   for (i=0; i<n; i++) {
     slist[i] = va_arg(args, CArray *);
@@ -810,7 +1088,7 @@ ca_allocate_mask_iterator (int n, ...)
 
   m = ca_allocate_mask_iterator_n(n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return m;
 }
@@ -964,12 +1242,15 @@ rb_ca_mask_array (VALUE self)
 
   ca_update_mask(ca);
   if ( ca->mask ) {
-    obj = TypedData_Wrap_Struct(ca_mask_class[ca->obj_type],
-                                ca_mask_typeddata[ca->obj_type], ca->mask);	
-    rb_ivar_set(obj, rb_intern("masked_array"), self);
-    if ( OBJ_FROZEN(self) ) {
-      rb_ca_freeze(obj);
+    /* The mask is reached from its array, not through a parent link, so
+       ca_is_readonly on the mask never sees the array's read-only state.
+       Pass it on here, where the mask is handed out. */
+    if ( ca_is_readonly(ca) ) {
+      ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
     }
+    obj = TypedData_Wrap_Struct(ca_mask_class[ca->obj_type],
+                                ca_mask_typeddata[ca->obj_type], ca->mask);
+    rb_ivar_set(obj, rb_intern("masked_array"), self);
     return obj;
   }
   else {
@@ -996,30 +1277,54 @@ rb_ca_set_mask (VALUE self, VALUE rval)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_value_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask for the value array");
   }
 
   if ( ca_is_mask_array(ca) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "can not create mask for the mask array");
   }
 
-  ca_update_mask(ca);
-  if ( ! ca->mask ) {
-    ca_create_mask(ca);
+  if ( TYPE(rmask) == T_ARRAY ) {
+    /* Flattened as a store into a boolean array of this shape flattens
+       it, and then taken as a 1-D boolean array (UNDEF becomes a masked
+       cell, as in any boolean array made from it). */
+    CArray shape = *ca;
+    shape.data_type = CA_BOOLEAN;
+    shape.bytes     = ca_sizeof[CA_BOOLEAN];
+    rmask = rb_ary_flatten_for_elements(rmask, ca->elements, &shape);
+    if ( NIL_P(rmask) ) {
+      rb_raise(rb_eArgError, "failed to guess data size of given array");
+    }
+    rmask = rb_ca_wrap_readonly(rmask, INT2NUM(CA_BOOLEAN));
   }
 
   if ( rb_obj_is_carray(rmask) ) {
+    /* The array owns the shape, as in a store: the new mask agrees with
+       it, is 1-D or squeezes to it, or broadcasts along size-1 axes.
+       Checked before the mask exists, so a refused one leaves none. */
+    ca_broadcast_to_destination(self, &rmask);
     TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
-    if ( ! ca_is_boolean_type(cv) ) {
-      cv = ca_wrap_readonly(rval, CA_BOOLEAN);
+    /* A new mask taken from self's own root, or from self's mask, is
+       read from a copy: making and writing self's mask would change it
+       before it is read. */
+    ca_update_mask(ca);
+    if ( ca_shares_root(cv, ca) ||
+         ( ca->mask && ca_shares_root(cv, ca->mask) ) ) {
+      rmask = rb_ca_copy(rmask);
+      TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
     }
+    if ( ! ca_is_boolean_type(cv) ) {
+      cv = ca_wrap_readonly(rmask, CA_BOOLEAN);
+    }
+    ca_create_mask(ca);
     ca_setup_mask(ca, cv);
     ca_copy_mask_overlay(ca, ca->elements, 1, cv);
     return rval;
   }
   else {
+    ca_create_mask(ca);
     return rb_ca_store_all(rb_ca_mask_array(self), rmask);
   }
 }
@@ -1035,39 +1340,36 @@ with <code>self</code>. The returned array has 1 for the masked elements and
 VALUE
 rb_ca_is_masked (VALUE self)
 {
-  volatile VALUE mask;
-  CArray *ca, *cm, *co;
+  volatile VALUE out;
+  CArray *ca, *co;
   boolean8_t zero = 0;
-  boolean8_t *m, *p;
+  boolean8_t *p;
   ca_size_t i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);
   }
   else {
-    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
   }
+  out = ca_wrap_struct(co);   /* owned by Ruby before anything can raise */
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
     ca_fill(co, &zero);
   }
   else {
-    mask = rb_ca_mask_array(self);
-    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);
-    m = (boolean8_t *) cm->ptr;
+    /* Copied straight into the result, then normalised in place. */
+    ca_copy_data(ca->mask, co->ptr);
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
-      *p = ( *m ) ? 1 : 0;
-      m++; p++;
+      p[i] = ( p[i] ) ? 1 : 0;
     }
-    ca_detach(cm);
   }
 
-  return ca_wrap_struct(co);
+  return out;
 }
 
 /* @overload is_not_masked
@@ -1081,39 +1383,52 @@ The returned array has 0 for the masked elements and
 VALUE
 rb_ca_is_not_masked (VALUE self)
 {
-  volatile VALUE mask;
-  CArray *ca, *cm, *co;
+  volatile VALUE out;
+  CArray *ca, *co;
   boolean8_t one = 1;
-  boolean8_t *m, *p;
+  boolean8_t *p;
   ca_size_t i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_scalar(ca) ) {
-    co = (CArray *) cscalar_new(CA_BOOLEAN, ca->bytes, NULL);        
+    co = (CArray *)cscalar_new(CA_BOOLEAN, ca->bytes, NULL);
   }
   else {
-    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);    
+    co = carray_new(CA_BOOLEAN, ca->ndim, ca->dim, ca->bytes, NULL);
   }
+  out = ca_wrap_struct(co);   /* owned by Ruby before anything can raise */
 
   ca_update_mask(ca);
   if ( ! ca->mask ) {
     ca_fill(co, &one);
   }
   else {
-    mask = rb_ca_mask_array(self);
-    TypedData_Get_Struct(mask, CArray, &carray_data_type, cm);
-    ca_attach(cm);
-    m = (boolean8_t *) cm->ptr;
+    /* Copied straight into the result, then normalised in place. */
+    ca_copy_data(ca->mask, co->ptr);
     p = (boolean8_t *) co->ptr;
     for (i=0; i<ca->elements; i++) {
-      *p = ( *m ) ? 0 : 1;
-      m++; p++;
+      p[i] = ( p[i] ) ? 0 : 1;
     }
-    ca_detach(cm);
   }
 
-  return ca_wrap_struct(co);
+  return out;
+}
+
+VALUE
+rb_ca_scan_mask_count (VALUE self, VALUE axis)
+{
+  VALUE present = rb_funcall(self, rb_intern("is_not_masked"), 0);
+  VALUE count;
+  if ( NIL_P(axis) ) {
+    count = rb_funcall(present, rb_intern("cumsum"), 0);
+  }
+  else {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis);
+    count = rb_funcallv_kw(present, rb_intern("cumsum"), 1, &kw, RB_PASS_KEYWORDS);
+  }
+  return rb_funcall(count, rb_intern("to_type"), 1, INT2NUM(CA_INT64));
 }
 
 /* @overload unmask (fill_value = nil)
@@ -1139,19 +1454,20 @@ rb_ca_unmask_method (int argc, VALUE *argv, VALUE self)
     rfval = argv[0];
   }
 
+  /* Filling with UNDEF leaves the cells undefined, as storing UNDEF does. */
+  if ( rfval == CA_UNDEF ) {
+    return self;
+  }
+
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* Face has surface != storage; the fill value is cast in the storage data_type. */
-    int8_t conv_type = ca->data_type;
-    if ( ca_is_face(ca) ) {
-      CArray *root = ca;
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-      if (root) conv_type = root->data_type;
-    }
-    rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a struct, an instant for a Face):
+       rb_ca_obj2ptr writes it as one cell of the storage. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
+    rb_ca_obj2ptr(self, rfval, fval);
   }
 
   ca_unmask(ca, fval);
@@ -1196,19 +1512,21 @@ rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)
     rfval = argv[0];
   }
 
+  /* Filling with UNDEF leaves the cells undefined, as storing UNDEF does:
+     the copy keeps the mask. */
+  if ( rfval == CA_UNDEF ) {
+    return rb_ca_copy(self);
+  }
+
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( rfval != CA_UNSPECIFIED ) {
-    /* Face has surface != storage; the fill value is cast in the storage data_type. */
-    int8_t conv_type = ca->data_type;
-    if ( ca_is_face(ca) ) {
-      CArray *root = ca;
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-      if (root) conv_type = root->data_type;
-    }
-    rcs = rb_cscalar_new_with_value(conv_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a struct, an instant for a Face):
+       rb_ca_obj2ptr writes it as one cell of the storage. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cv);
     fval = cv->ptr;
+    rb_ca_obj2ptr(self, rfval, fval);
   }
 
   co = ca_unmask_copy(ca, fval);
@@ -1243,6 +1561,7 @@ VALUE
 rb_ca_invert_mask (VALUE self)
 {
   CArray *ca;
+  rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ca_invert_mask(ca);
   return self;
@@ -1274,13 +1593,44 @@ rb_ca_s_guard_undef(int argc, VALUE *argv, VALUE klass)
 
 /* mask_eq(v) — return form of "mask cells equal to v".
    Equivalent to: obj = copy; obj[:eq, v] = UNDEF; obj */
+/* Masks a copy of self at the cells the store key `argv` selects.  A
+   read-only Face (CAConstString, CACategorical) copies read-only, so the
+   mask goes on a copy of its storage and the Face is put back; a predicate
+   key (`:eq, v`) is evaluated on the Face, where it compares values rather
+   than storage. */
+static VALUE
+ca_mask_copy_where (VALUE self, int argc, VALUE *argv)
+{
+  CArray *ca;
+  volatile VALUE obj;
+  VALUE *all_args = ALLOCA_N(VALUE, argc + 1);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_face(ca) && ca_is_readonly(ca) ) {
+    obj = rb_ca_copy(rb_ca_strip_face_value(self));
+    if ( argc >= 1 && SYMBOL_P(argv[0]) ) {
+      all_args[0] = rb_funcallv(self, SYM2ID(argv[0]), argc - 1, argv + 1);
+      all_args[1] = CA_UNDEF;
+      rb_funcallv(obj, rb_intern("[]="), 2, all_args);
+    }
+    else {
+      memcpy(all_args, argv, argc * sizeof(VALUE));
+      all_args[argc] = CA_UNDEF;
+      rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
+    }
+    return rb_funcall(obj, rb_intern("face_lift"), 1, self);
+  }
+  obj = rb_ca_copy(self);
+  memcpy(all_args, argv, argc * sizeof(VALUE));
+  all_args[argc] = CA_UNDEF;
+  rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
+  return obj;
+}
+
 static VALUE
 rb_ca_mask_eq (VALUE self, VALUE v)
 {
-  volatile VALUE obj = rb_ca_copy(self);
-  rb_funcall(obj, rb_intern("[]="), 3,
-             ID2SYM(rb_intern("eq")), v, CA_UNDEF);
-  return obj;
+  VALUE args[2] = { ID2SYM(rb_intern("eq")), v };
+  return ca_mask_copy_where(self, 2, args);
 }
 
 /* mask_invalid — return form of "mask NaN/Inf cells".
@@ -1288,10 +1638,8 @@ rb_ca_mask_eq (VALUE self, VALUE v)
 static VALUE
 rb_ca_mask_invalid (VALUE self)
 {
-  volatile VALUE obj = rb_ca_copy(self);
-  rb_funcall(obj, rb_intern("[]="), 2,
-             ID2SYM(rb_intern("is_invalid")), CA_UNDEF);
-  return obj;
+  VALUE args[1] = { ID2SYM(rb_intern("is_invalid")) };
+  return ca_mask_copy_where(self, 1, args);
 }
 
 /* mask_where(*args) — generic return form predicate masking.
@@ -1300,17 +1648,10 @@ rb_ca_mask_invalid (VALUE self)
 static VALUE
 rb_ca_mask_where (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj;
-  VALUE *all_args;
   if (argc == 0) {
     rb_raise(rb_eArgError, "mask_where requires at least 1 argument");
   }
-  obj = rb_ca_copy(self);
-  all_args = ALLOCA_N(VALUE, argc + 1);
-  memcpy(all_args, argv, argc * sizeof(VALUE));
-  all_args[argc] = CA_UNDEF;
-  rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
-  return obj;
+  return ca_mask_copy_where(self, argc, argv);
 }
 
 /* @overload inherit_mask (*others):
@@ -1324,6 +1665,7 @@ static VALUE
 rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
 {
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
 
@@ -1331,7 +1673,7 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  slist = xmalloc(sizeof(CArray *)*argc);
+  slist = ALLOCV_N(CArray *, holder, argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
@@ -1343,7 +1685,7 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
   }
   ca_copy_mask_overlay_n(ca, ca->elements, argc, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1363,6 +1705,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
 {
   VALUE other;
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
   va_list rothers;
@@ -1372,7 +1715,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
@@ -1387,7 +1730,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
 
   ca_copy_mask_overlay_n(ca, ca->elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1403,6 +1746,7 @@ static VALUE
 rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
 {
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
 
@@ -1410,7 +1754,7 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  slist = xmalloc(sizeof(CArray *)*argc);
+  slist = ALLOCV_N(CArray *, holder, argc);
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
@@ -1422,7 +1766,7 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
   }
   ca_copy_mask_overwrite_n(ca, ca->elements, argc, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -1442,6 +1786,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 {
   VALUE other;
   CArray **slist;
+  volatile VALUE holder;
   CArray *ca, *cs;
   int i;
   va_list rothers;
@@ -1451,7 +1796,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   va_start(rothers, n);
-  slist = xmalloc(sizeof(CArray *)*n);
+  slist = ALLOCV_N(CArray *, holder, n);
   for (i=0; i<n; i++) {
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
@@ -1466,34 +1811,34 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 
   ca_copy_mask_overwrite_n(ca, ca->elements, n, slist);
 
-  xfree(slist);
+  ALLOCV_END(holder);
 
   return self;
 }
 
-/* Helper: build a fill-valued int64 CArray whose shape is ca's shape
-   with the listed axes removed.  Used by count_masked/count_not_masked
-   when there is no mask. */
+/* The no-mask answer of count_masked / count_not_masked along `axes`:
+   every reduced cell holds `fill`.  A reduction over every axis is the
+   number itself. */
 static VALUE
-ca_make_reduced_int64 (CArray *ca, int argc, VALUE *argv, ca_size_t fill_val)
+ca_count_uniform (CArray *ca, const int8_t *axes, int8_t naxes, ca_size_t fill)
 {
   ca_size_t dim[CA_RANK_MAX];
   int8_t    ndim = 0;
   int       i, j;
-  int64_t   v = (int64_t) fill_val;
+  int64_t   v = (int64_t) fill;
   VALUE     result;
   CArray   *co;
 
+  if ( naxes == ca->ndim ) {
+    return SIZE2NUM(fill);
+  }
   for (i = 0; i < ca->ndim; i++) {
     int is_axis = 0;
-    for (j = 0; j < argc; j++) {
-      int ax = NUM2INT(argv[j]);
-      if (ax < 0) ax += ca->ndim;
-      if (ax == i) { is_axis = 1; break; }
+    for (j = 0; j < naxes; j++) {
+      if ( axes[j] == i ) { is_axis = 1; break; }
     }
     if (!is_axis) dim[ndim++] = ca->dim[i];
   }
-
   result = rb_carray_new(CA_INT64, ndim, dim, 0, NULL);
   TypedData_Get_Struct(result, CArray, &carray_data_type, co);
   ca_fill(co, &v);
@@ -1507,111 +1852,95 @@ ca_make_reduced_int64 (CArray *ca, int argc, VALUE *argv, ca_size_t fill_val)
 extern VALUE rb_ca_count_true_ki  (int argc, VALUE *argv, VALUE self);
 extern VALUE rb_ca_count_false_ki (int argc, VALUE *argv, VALUE self);
 
-/* count_masked(*axis) -- number of masked elements, optionally reduced
-   along axes (no args -> Integer; axis args -> int64 CArray with those
-   axes collapsed).
+/* count_masked / count_not_masked -- the number of masked (present)
+   cells, over every axis (an Integer) or along `axis:` (an int64 CArray).
+   The keywords are those of the count kernels (axis:, keep_axis:,
+   min_count:, fill_value:), checked by them: the mask is counted with
+   count_true_ki / count_false_ki.  Without a mask the answer is known
+   from the shape; an axis: alone takes that short cut after the same
+   axis check the kernels make, and any other keyword runs the kernel on
+   an all-false view that occupies one cell.
 
    Public (non-static) linkage so rb_ca_count in carray_count.c can forward
    count(UNDEF) here directly without going through Ruby method dispatch. */
+static VALUE
+ca_count_by_mask (int argc, VALUE *argv, VALUE self, int masked)
+{
+  CArray *ca;
+  VALUE   kw_hash = Qnil, mask_obj;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rb_scan_args(argc, argv, "0:", &kw_hash);
+
+  if ( ! ca_has_mask(ca) ) {
+    VALUE axis_val = Qnil;
+    int   only_axis = 1;
+    if ( ! NIL_P(kw_hash) ) {
+      VALUE given = rb_hash_lookup2(kw_hash, ID2SYM(rb_intern("axis")), Qundef);
+      axis_val  = ( given == Qundef ) ? Qnil : given;
+      only_axis = ( RHASH_SIZE(kw_hash) == ( given == Qundef ? 0u : 1u ) );
+    }
+    if ( only_axis ) {
+      int8_t    axes[CA_RANK_MAX];
+      int8_t    naxes = rb_ca_parse_reduce_axes_kw(axis_val, ca, axes);
+      ca_size_t vol = 1;
+      int       i;
+      for ( i = 0; i < naxes; i++ ) vol *= ca->dim[axes[i]];
+      return ca_count_uniform(ca, axes, naxes, masked ? 0 : vol);
+    }
+    {
+      ca_size_t one[CA_RANK_MAX];
+      VALUE     shape = rb_ary_new_capa(ca->ndim), cell;
+      boolean8_t zero = 0;
+      CArray   *cc;
+      int       i;
+      for ( i = 0; i < ca->ndim; i++ ) {
+        one[i] = 1;
+        rb_ary_push(shape, SIZE2NUM(ca->dim[i]));
+      }
+      cell = rb_carray_new(CA_BOOLEAN, ca->ndim, one, 0, NULL);
+      TypedData_Get_Struct(cell, CArray, &carray_data_type, cc);
+      ca_fill(cc, &zero);
+      mask_obj = rb_funcallv(cell, rb_intern("broadcast_to"),
+                             (int) RARRAY_LEN(shape), RARRAY_CONST_PTR(shape));
+    }
+  }
+  else {
+    mask_obj = rb_ca_mask_array(self);
+  }
+  if ( NIL_P(kw_hash) ) {
+    return masked ? rb_ca_count_true_ki(0, NULL, mask_obj)
+                  : rb_ca_count_false_ki(0, NULL, mask_obj);
+  }
+  {
+    VALUE kargv[1] = { kw_hash };
+    return masked ? rb_ca_count_true_ki(1, kargv, mask_obj)
+                  : rb_ca_count_false_ki(1, kargv, mask_obj);
+  }
+}
+
 VALUE
 rb_ca_count_masked (int argc, VALUE *argv, VALUE self)
 {
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  /* Accepts the axis: kwarg only (positional axis is not accepted),
-     matching the aggregate _ki family. */
-  VALUE kw_hash, axis_val = Qnil;
-  rb_scan_args(argc, argv, "0:", &kw_hash);
-  rb_scan_options(kw_hash, "axis", &axis_val);
-
-  /* No mask -> nothing is masked.  Short-circuit without materialising a
-     zero mask (axis form returns a zero-filled reduced int64 array). */
-  if (!ca_has_mask(ca)) {
-    if (NIL_P(axis_val)) {
-      return SIZE2NUM(0);
-    }
-    VALUE axis_ary = (TYPE(axis_val) == T_ARRAY) ? axis_val : rb_ary_new3(1, axis_val);
-    return ca_make_reduced_int64(ca, (int) RARRAY_LEN(axis_ary),
-                                 (VALUE *) RARRAY_CONST_PTR(axis_ary), 0);
-  }
-
-  /* Masked count = count of `true` in the mask, routed through the
-     count_true_ki kernel for both the flat (no axis -> scalar Integer) and
-     per-axis (-> reduced CArray) forms.  The scalar C primitive
-     ca_count_masked stays separately for internal C callers (grid /
-     median / order) that need a raw ca_size_t without Ruby allocation. */
-  VALUE mask_obj = rb_ca_mask_array(self);
-  if (NIL_P(axis_val)) {
-    return rb_ca_count_true_ki(0, NULL, mask_obj);
-  }
-  VALUE kw = rb_hash_new();
-  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
-  VALUE kargv[1] = { kw };
-  return rb_ca_count_true_ki(1, kargv, mask_obj);
+  return ca_count_by_mask(argc, argv, self, 1);
 }
 
-/* @overload count_not_masked(*axis)
-
-(Masking, Statistics)
-Returns the number of not-masked elements, optionally reduced along axes.
-With no arguments returns an Integer.  With axis arguments returns a
-CArray of int64 with the specified axes collapsed.
-*/
-/* C-callable entry: skip rb_scan_args (call-frame state dependency).
- * axis_val = Qnil       -> scalar Integer count over whole array
- * axis_val = Integer/Array -> reduced CArray int64
- * For ext authors who need to call count_not_masked from C. */
-VALUE
-rb_ca_count_not_masked_c (VALUE self, VALUE axis_val)
-{
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-
-  /* No mask -> every element is not-masked.  Short-circuit without
-     materialising a mask (no axis -> elements; axis form -> reduced int64
-     filled with the product of the reduced-axis extents). */
-  if (!ca_has_mask(ca)) {
-    if (NIL_P(axis_val)) {
-      return SIZE2NUM(ca->elements);
-    }
-    VALUE axis_ary = (TYPE(axis_val) == T_ARRAY) ? axis_val : rb_ary_new3(1, axis_val);
-    int n_axes = (int) RARRAY_LEN(axis_ary);
-    VALUE *axes_argv = (VALUE *) RARRAY_CONST_PTR(axis_ary);
-    ca_size_t axis_vol = 1;
-    int j;
-    for (j = 0; j < n_axes; j++) {
-      int ax = NUM2INT(axes_argv[j]);
-      if (ax < 0) ax += ca->ndim;
-      axis_vol *= ca->dim[ax];
-    }
-    return ca_make_reduced_int64(ca, n_axes, axes_argv, axis_vol);
-  }
-
-  /* Not-masked count = count of `false` in the mask, routed through the
-     count_false_ki kernel for both the flat (no axis -> scalar Integer) and
-     per-axis (-> reduced CArray) forms.  The scalar C primitive
-     ca_count_not_masked (= elements - ca_count_masked) stays separately for
-     internal C callers (median / order) that need a raw ca_size_t. */
-  VALUE mask_obj = rb_ca_mask_array(self);
-  if (NIL_P(axis_val)) {
-    return rb_ca_count_false_ki(0, NULL, mask_obj);
-  }
-  VALUE kw = rb_hash_new();
-  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
-  VALUE kargv[1] = { kw };
-  return rb_ca_count_false_ki(1, kargv, mask_obj);
-}
-
-/* Ruby binding entry: parses (axis: kwarg) -> forwards to _c. */
 VALUE
 rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self)
 {
-  /* Accepts the axis: kwarg only. */
-  VALUE kw_hash, axis_val = Qnil;
-  rb_scan_args(argc, argv, "0:", &kw_hash);
-  rb_scan_options(kw_hash, "axis", &axis_val);
-  return rb_ca_count_not_masked_c(self, axis_val);
+  return ca_count_by_mask(argc, argv, self, 0);
+}
+
+/* count_not_masked(axis: axis_val) for C callers. */
+VALUE
+rb_ca_count_not_masked_c (VALUE self, VALUE axis_val)
+{
+  VALUE kw;
+  if ( NIL_P(axis_val) ) {
+    return ca_count_by_mask(0, NULL, self, 0);
+  }
+  kw = rb_hash_new();
+  rb_hash_aset(kw, ID2SYM(rb_intern("axis")), axis_val);
+  return rb_funcall_with_block_kw(self, rb_intern("count_not_masked"), 1, &kw, Qnil, RB_PASS_KEYWORDS);
 }
 
 /* ============================================================================
@@ -1833,6 +2162,43 @@ Init_carray_mask_fast_paths (void)
 }
 
 
+/* The Ruby forms of inherit_mask take CArray arguments only: refuse a
+   keyword and any argument that is not a CArray, which the C API would
+   pass over as maskless.  Returns the arguments without the keyword Hash. */
+static VALUE
+ca_inherit_mask_check_args (int argc, VALUE *argv, const char *name)
+{
+  VALUE rest, ropt;
+  long i;
+  rb_scan_args(argc, argv, "*:", &rest, &ropt);
+  rb_reject_options(ropt);
+  for (i=0; i<RARRAY_LEN(rest); i++) {
+    VALUE v = RARRAY_AREF(rest, i);
+    if ( ! rb_obj_is_carray(v) ) {
+      rb_raise(rb_eTypeError, "%s: argument %ld must be a CArray (got %s)",
+               name, i, rb_obj_classname(v));
+    }
+  }
+  return rest;
+}
+
+static VALUE
+rb_ca_inherit_mask_ruby (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE rest = ca_inherit_mask_check_args(argc, argv, "inherit_mask");
+  return rb_ca_inherit_mask_method((int) RARRAY_LEN(rest),
+                                   (VALUE *) RARRAY_CONST_PTR(rest), self);
+}
+
+static VALUE
+rb_ca_inherit_mask_replace_ruby (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE rest = ca_inherit_mask_check_args(argc, argv,
+                                                   "inherit_mask_replace");
+  return rb_ca_inherit_mask_replace_method((int) RARRAY_LEN(rest),
+                                           (VALUE *) RARRAY_CONST_PTR(rest), self);
+}
+
 void
 Init_carray_mask (void)
 {
@@ -1869,9 +2235,9 @@ Init_carray_mask (void)
   rb_define_method(rb_cCArray, "mask_invalid", rb_ca_mask_invalid, 0);
   rb_define_method(rb_cCArray, "mask_where",   rb_ca_mask_where,  -1);
 
-  rb_define_method(rb_cCArray, "inherit_mask",  rb_ca_inherit_mask_method, -1);
+  rb_define_method(rb_cCArray, "inherit_mask",  rb_ca_inherit_mask_ruby, -1);
   rb_define_method(rb_cCArray, "inherit_mask_replace",
-                                       rb_ca_inherit_mask_replace_method, -1);
+                                       rb_ca_inherit_mask_replace_ruby, -1);
 
   rb_define_method(rb_cCArray, "count_masked",     rb_ca_count_masked, -1);
   rb_define_method(rb_cCArray, "count_not_masked", rb_ca_count_not_masked, -1);

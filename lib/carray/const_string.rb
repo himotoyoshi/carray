@@ -182,6 +182,13 @@ class CAConstString
     to_string.minmax(*args, **kw).map { |r| const_string_lift(r) }
   end
 
+  # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
+  #   Clips the strings in byte order (see {CArray#clip}).
+  #   @return [CAConstString]
+  def clip (*args, **kw)
+    const_string_lift(to_string.clip(*args, **kw))
+  end
+
   # @overload min_index(axis: nil)
   #   @return [Integer, CArray] where the byte-smallest string sits.
   def min_index (*args, **kw)
@@ -315,6 +322,32 @@ class CAConstString
     to_string.categorize(labels: labels, sort_labels: sort_labels)
   end
 
+  # ---- comparison operators ---------------------------------------------
+  #
+  # The core operators compare storage, and a storage cell is a byte range:
+  # `x < "dd"` compared where each string sits in the buffer and answered
+  # true everywhere.  They read the strings here instead.  `eq` has a native
+  # byte scan and stays; `<=>` composes from `>` and `<`, so it follows.
+
+  # @!method ne(other)
+  #   @return [CArray] boolean, true where the strings differ.
+  # @!method lt(other)
+  #   @return [CArray] boolean, true where self sorts before `other`.
+  # @!method le(other)
+  #   @return [CArray] boolean, true where self sorts before or equals `other`.
+  # @!method gt(other)
+  #   @return [CArray] boolean, true where self sorts after `other`.
+  # @!method ge(other)
+  #   @return [CArray] boolean, true where self sorts after or equals `other`.
+  [:ne, :lt, :le, :gt, :ge].each do |op|
+    define_method(op) { |other| to_string.public_send(op, string_operand(other)) }
+  end
+
+  alias <  lt
+  alias <= le
+  alias >  gt
+  alias >= ge
+
   # A CAConstString operand has to be decoded too; anything else (a CAString,
   # an object array, an Array) already compares as strings.
   private def string_operand (other)
@@ -329,4 +362,17 @@ class CAConstString
     x.is_a?(CArray) ? CArray.const_string(x, encoding: encoding) : x
   end
 
+end
+
+class CAConstString
+  # The decimal readers of CAFrame#infer_types / #cast, read from the buffer
+  # without a String per cell.
+  def __infer_number_type_of_text__
+    CArray.__const_string_infer_number_type_of_text__(self)
+  end
+
+  def __read_text_as_number__(type, report = nil)
+    out = CArray.__const_string_read_text_as_number__(self, type, report)
+    out && ndim > 1 ? out.reshape(*shape) : out
+  end
 end

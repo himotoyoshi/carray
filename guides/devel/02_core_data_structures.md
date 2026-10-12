@@ -447,7 +447,7 @@ Three of the bits carry no behaviour in their name and are easy to misread:
   clears it afterward; `ca_test_cyclic_check` raises if a nested CArray element
   already has the flag set (`carray_core.c`). It exists to turn what would be a
   system-stack overflow on a self-referential object array into a clean
-  `RuntimeError` ([ch. 5](05_mask_and_undef.md)).
+  `ArgumentError` ([ch. 5](05_mask_and_undef.md)).
 
 ## The view struct catalog (extended)
 
@@ -573,7 +573,6 @@ CA_CHECK_RANK(ndim)                  /* 0 < ndim <= CA_RANK_MAX */
 CA_CHECK_DIM(ndim, dim)              /* every dim[i] >= 0 */
 CA_CHECK_BYTES(data_type, bytes)     /* resolves bytes for non-FIXLEN */
 CA_CHECK_INDEX(index, dim)           /* normalises negative, range-checks */
-CA_CHECK_BOUND(ca, idx)              /* multi-dim bounds check */
 ```
 
 The two limits the macros enforce:

@@ -12,8 +12,11 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 #include "ruby/io.h"
+#include "ruby/util.h"            /* ruby_strtod */
+#include <math.h>
 
 /* to_a dispatch:
      numeric / boolean data type + entity or attach-able view -> fast path
@@ -175,19 +178,34 @@ rb_ca_to_a_loop_universal (VALUE self, int32_t level, ca_size_t *idx, VALUE ary)
  * fast path, so all view kinds land in the data type-direct leaf loop when
  * the data type is numeric or boolean; CA_OBJECT / CA_FIXLEN fall through
  * to the universal fetch_index walk. */
+/* The universal walk reads each cell through the fetch path, which
+   decodes -- an object cell, a Face's element -- and can raise, so it runs
+   inside an attach window.  The fast path only copies numbers out. */
+typedef struct {
+  VALUE self;
+  VALUE ary;
+} ca_to_a_ctx_t;
+
+static VALUE
+ca_to_a_universal (VALUE arg)
+{
+  ca_to_a_ctx_t *c = (ca_to_a_ctx_t *) arg;
+  ca_size_t idx[CA_RANK_MAX];
+  rb_ca_to_a_loop_universal(c->self, 0, idx, c->ary);
+  return Qnil;
+}
+
 VALUE
 rb_ca_to_a (VALUE self)
 {
   volatile VALUE ary;
   CArray *ca;
-  ca_size_t idx[CA_RANK_MAX];
   int data_type, fast_eligible;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   ary = rb_ca_is_empty(self) ? rb_ary_new() : rb_ary_new2(ca->dim[0]);
-  ca_attach(ca);
 
-  /* After ca_attach, ca->ptr is a contig row-major buffer (alias for
+  /* Once attached, ca->ptr is a contig row-major buffer (alias for
      contig views, materialised otherwise) and ca->mask matches, so the
      fast path handles every view kind.  CA_OBJECT / CA_FIXLEN stay on
      the universal path because their ptr is VALUE / byte string and
@@ -210,16 +228,21 @@ rb_ca_to_a (VALUE self)
                       || data_type == CA_BOOLEAN);
 
   if ( fast_eligible ) {
-    int has_mask = (ca->mask != NULL);
-    const boolean8_t *mask_base = has_mask
-        ? (const boolean8_t *) ca->mask->ptr : NULL;
+    int has_mask;
+    const boolean8_t *mask_base;
+    ca_attach(ca);   /* window: nothing raises inside */
+    has_mask  = (ca->mask != NULL);
+    mask_base = has_mask ? (const boolean8_t *) ca->mask->ptr : NULL;
     to_a_fast_recurse(ca, 0, ca->ptr, mask_base, ary,
                       data_type, ca->bytes, has_mask);
+    ca_detach(ca);
   }
   else if ( ca->elements > 0 ) {
-    rb_ca_to_a_loop_universal(self, 0, idx, ary);
+    ca_to_a_ctx_t c;
+    c.self = self;
+    c.ary  = ary;
+    ca_attach_window(1, &ca, "r", ca_to_a_universal, (VALUE) &c);
   }
-  ca_detach(ca);
   return ary;
 }
 
@@ -227,6 +250,90 @@ rb_ca_to_a (VALUE self)
 #undef TO_A_LEAF_LOOP_MASKED
 #undef TO_A_DISPATCH_LEAF
 #undef TO_A_DISPATCH_LEAF_MASKED
+
+/* convert yields inside the window over self and the output, so the loop
+   runs through ca_attach_window.  An output mask made part way (the first
+   UNDEF from the block) is attached inside the loop, and closed by an
+   ensure of its own. */
+
+typedef struct {
+  VALUE    self;
+  VALUE    obj;
+  CArray  *ca;
+  CArray  *co;
+  int      has_mask;
+  int      co_mask_attached;
+} ca_convert_ctx_t;
+
+static VALUE
+ca_convert_loop (VALUE arg)
+{
+  ca_convert_ctx_t *c = (ca_convert_ctx_t *) arg;
+  CArray *ca = c->ca, *co = c->co;
+  ca_size_t i, n = ca->elements;
+  ca_size_t sbytes = ca->bytes, dbytes = co->bytes;
+  const char *src_ptr = ca->ptr;
+  char *dst_ptr = co->ptr;
+  boolean8_t *dst_mask = NULL;
+
+  if ( c->has_mask ) {
+    const boolean8_t *src_mask = (const boolean8_t *) ca->mask->ptr;
+    dst_mask = (boolean8_t *) co->mask->ptr;
+    memset(dst_mask, 0, (size_t) n);
+    for (i = 0; i < n; i++) {
+      if ( ! src_mask[i] ) {
+        VALUE val = rb_ca_ptr2obj(c->self, (void *) (src_ptr + i * sbytes));
+        VALUE ret = rb_yield(val);
+        if ( ret == CA_UNDEF ) {
+          dst_mask[i] = 1;
+        }
+        else {
+          rb_ca_obj2ptr(c->obj, ret, dst_ptr + i * dbytes);
+        }
+      }
+      else {
+        dst_mask[i] = 1;
+      }
+    }
+  }
+  else {
+    for (i = 0; i < n; i++) {
+      VALUE val = rb_ca_ptr2obj(c->self, (void *) (src_ptr + i * sbytes));
+      VALUE ret = rb_yield(val);
+      if ( ret == CA_UNDEF ) {
+        if ( ! co->mask ) {
+          ca_create_mask(co);
+          ca_attach(co->mask);   /* window: closed by the ensure in ca_convert_body */
+          c->co_mask_attached = 1;
+          dst_mask = (boolean8_t *) co->mask->ptr;
+          memset(dst_mask, 0, (size_t) n);
+        }
+        dst_mask[i] = 1;
+      }
+      else {
+        rb_ca_obj2ptr(c->obj, ret, dst_ptr + i * dbytes);
+      }
+    }
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_convert_close_mask (VALUE arg)
+{
+  ca_convert_ctx_t *c = (ca_convert_ctx_t *) arg;
+  if ( c->co_mask_attached ) {
+    c->co_mask_attached = 0;
+    ca_sync_detach(c->co->mask);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_convert_body (VALUE arg)
+{
+  return rb_ensure(ca_convert_loop, arg, ca_convert_close_mask, arg);
+}
 
 /* CArray#convert(data_type=nil, bytes: nil) { |elem| ... } — map every cell
  * through the block, into a new array whose data type is chosen by argv via
@@ -240,89 +347,29 @@ static VALUE
 rb_ca_convert (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj;
-  CArray *ca, *co;
-  ca_size_t i, n, sbytes, dbytes;
-  int has_mask;
-  const boolean8_t *src_mask = NULL;
-  boolean8_t *dst_mask = NULL;
-  const char *src_ptr;
-  char *dst_ptr;
+  ca_convert_ctx_t c;
+  CArray *list[2];
 
   rb_need_block();
 
   obj = rb_apply(self, rb_intern("template"), rb_ary_new4(argc, argv));
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, c.ca);
+  TypedData_Get_Struct(obj, CArray, &carray_data_type, c.co);
+  c.self             = self;
+  c.obj              = obj;
+  c.has_mask         = ca_has_mask(c.ca);
+  c.co_mask_attached = 0;
 
-  n = ca->elements;
-  has_mask = ca_has_mask(ca);
-  sbytes = ca->bytes;
-  dbytes = co->bytes;
-
-  /* Attach every storage touched by ptr (self, obj, and either side's
-     mask) — parent → child order per the R4 attach protocol. */
-  ca_attach(ca);
-  ca_attach(co);
-  if ( has_mask ) {
-    ca_attach(ca->mask);
-    if ( ! co->mask ) {
-      ca_create_mask(co);
-    }
-    ca_attach(co->mask);
-    src_mask = (const boolean8_t *) ca->mask->ptr;
-    dst_mask = (boolean8_t *) co->mask->ptr;
-    memset(dst_mask, 0, (size_t) n);
-  }
-  src_ptr = ca->ptr;
-  dst_ptr = co->ptr;
-
-  if ( has_mask ) {
-    for (i = 0; i < n; i++) {
-      if ( ! src_mask[i] ) {
-        VALUE val = rb_ca_ptr2obj(self, (void *) (src_ptr + i * sbytes));
-        VALUE ret = rb_yield(val);
-        if ( ret == CA_UNDEF ) {
-          dst_mask[i] = 1;
-        }
-        else {
-          rb_ca_obj2ptr(obj, ret, dst_ptr + i * dbytes);
-        }
-      }
-      else {
-        dst_mask[i] = 1;
-      }
-    }
-  }
-  else {
-    for (i = 0; i < n; i++) {
-      VALUE val = rb_ca_ptr2obj(self, (void *) (src_ptr + i * sbytes));
-      VALUE ret = rb_yield(val);
-      if ( ret == CA_UNDEF ) {
-        if ( ! co->mask ) {
-          ca_create_mask(co);
-          ca_attach(co->mask);
-          dst_mask = (boolean8_t *) co->mask->ptr;
-          memset(dst_mask, 0, (size_t) n);
-        }
-        dst_mask[i] = 1;
-      }
-      else {
-        rb_ca_obj2ptr(obj, ret, dst_ptr + i * dbytes);
-      }
-    }
+  /* Attaching an array attaches its mask, so the output's mask is made
+     before the window opens when the source already has one. */
+  if ( c.has_mask && ! c.co->mask ) {
+    ca_create_mask(c.co);
   }
 
-  if ( co->mask ) {
-    ca_sync(co->mask);
-    ca_detach(co->mask);
-  }
-  if ( has_mask ) {
-    ca_detach(ca->mask);
-  }
-  ca_sync(co);
-  ca_detach(co);
-  ca_detach(ca);
+  list[0] = c.ca;
+  list[1] = c.co;
+  ca_attach_window(2, list, "rw", ca_convert_body, (VALUE) &c);
 
   return obj;
 }
@@ -395,7 +442,7 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
       rb_funcall(io, rb_intern("write"), 1, buf);
     }
     else {
-      rb_raise(rb_eRuntimeError, "IO like object should have 'write' method");
+      rb_raise(rb_eTypeError, "IO like object should have 'write' method");
     }
   }
 
@@ -422,6 +469,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
 {
   CArray *ca;
 
+  rb_ca_modify(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_object_type(ca) ) {
@@ -431,7 +479,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
   switch ( TYPE(io) ) {
   case T_STRING:
     if ( ca_length(ca) != RSTRING_LEN(io) ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
                (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
@@ -447,13 +495,13 @@ rb_ca_load_binary (VALUE self, VALUE io)
         const ca_size_t CHUNK = 65536;
         volatile VALUE scratch = rb_str_buf_new(CHUNK < total ? CHUNK : total);
         ca_size_t off = 0;
-        ca_allocate(ca);
+        ca_allocate(ca);   /* window: an entity, whose allocate holds nothing */
         while ( off < total ) {
           ca_size_t want = (total - off < CHUNK) ? (total - off) : CHUNK;
           VALUE r = rb_funcall(io, id_read, 2, SIZE2NUM(want), scratch);
           if ( NIL_P(r) || RSTRING_LEN(r) != want ) {
             ca_detach(ca);
-            rb_raise(rb_eRuntimeError,
+            rb_raise(rb_eArgError,
                      "short read from IO at offset %" PRId64 " "
                      "(got %" PRId64 " bytes, expected %" PRId64 ")",
                      (ca_size_t) off,
@@ -463,15 +511,14 @@ rb_ca_load_binary (VALUE self, VALUE io)
           memcpy(ca->ptr + off, RSTRING_PTR(r), want);
           off += want;
         }
-        ca_sync(ca);
-        ca_detach(ca);
+        ca_sync_detach(ca);
       }
       else {
         /* ca_sync_data scatters in one pass, so buffer the full read
            and recurse via T_STRING. */
         volatile VALUE buf = rb_funcall(io, id_read, 1, SIZE2NUM(total));
         if ( NIL_P(buf) || RSTRING_LEN(buf) != total ) {
-          rb_raise(rb_eRuntimeError,
+          rb_raise(rb_eArgError,
                    "short read from IO (got %" PRId64 " bytes, expected %" PRId64 ")",
                    (ca_size_t) (NIL_P(buf) ? 0 : RSTRING_LEN(buf)),
                    (ca_size_t) total);
@@ -481,11 +528,87 @@ rb_ca_load_binary (VALUE self, VALUE io)
       return self;
     }
     else {
-      rb_raise(rb_eRuntimeError, "IO like object should have 'read' method");
+      rb_raise(rb_eTypeError, "IO like object should have 'read' method");
     }
   }
 
   return self;
+}
+
+/* The double nearest to the shortest decimal that reads back as x, the
+   float32 value, as from_csv reads text into float32: strtod, then the cast
+   to float.  Its digits are those of the decimal (at most 9, which a double
+   holds), so Float#to_s writes them. */
+static double
+ca_float32_shortest (float x)
+{
+  char buf[32];
+  int lo = 1, hi = 9;
+  double best;
+  if ( isnan(x) || isinf(x) ) {
+    return (double) x;
+  }
+  /* Nine significant digits always read back; search for the fewest.  More
+     digits round closer to x, so the digit counts that read back are those
+     from some count up. */
+  best = 0.0;
+  while ( lo < hi ) {
+    int mid = (lo + hi) / 2;
+    double d;
+    snprintf(buf, sizeof(buf), "%.*e", mid - 1, (double) x);
+    d = ruby_strtod(buf, NULL);
+    if ( (float) d == x ) {
+      best = d;
+      hi = mid;
+    }
+    else {
+      lo = mid + 1;
+    }
+  }
+  if ( lo == 9 ) {
+    snprintf(buf, sizeof(buf), "%.8e", (double) x);
+    best = ruby_strtod(buf, NULL);
+  }
+  return best;
+}
+
+/* float32 -> float64 and cmplx64 -> cmplx128, each value replaced by the
+   double its shortest decimal reads as, for to_csv to write that decimal.
+   The mask is kept. */
+static VALUE
+rb_ca_shortest_float64 (VALUE self)
+{
+  volatile VALUE out, holder = 0;
+  CArray *ca, *co;
+  ca_size_t i, n;
+  int8_t type;
+
+  GetCArray(self, ca);
+  if ( ca->data_type == CA_FLOAT32 ) {
+    type = CA_FLOAT64;
+  }
+  else if ( ca->data_type == CA_CMPLX64 ) {
+    type = CA_CMPLX128;
+  }
+  else {
+    rb_raise(rb_eCADataTypeError, "__shortest_float64__ takes float32 or cmplx64");
+  }
+  n = ca->elements * (ca->data_type == CA_CMPLX64 ? 2 : 1);
+  out = rb_carray_new_safe(type, ca->ndim, ca->dim, 0, NULL);
+  GetCArray(out, co);
+  {
+    float *src = ALLOCV_N(float, holder, n > 0 ? n : 1);
+    double *dst = (double *) co->ptr;
+    ca_copy_data(ca, (char *) src);
+    for (i = 0; i < n; i++) {
+      dst[i] = ca_float32_shortest(src[i]);
+    }
+    ALLOCV_END(holder);
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask_overlay(co, co->elements, 1, ca);
+  }
+  return out;
 }
 
 /* [MOVED] str_format (2.0-era per-element formatter) is replaced by the Ruby
@@ -504,6 +627,7 @@ Init_carray_conversion (void)
   rb_define_method(rb_cCArray, "dump_binary", rb_ca_dump_binary, -1);
   rb_define_method(rb_cCArray, "to_s", rb_ca_to_s, 0);
   rb_define_method(rb_cCArray, "load_binary", rb_ca_load_binary, 1);
+  rb_define_method(rb_cCArray, "__shortest_float64__", rb_ca_shortest_float64, 0);
 
   /* CAREFUL: do not bind #to_ary — implicit array coercion in Ruby core
      (splat / multiple assignment / Array()) then triggers on any CArray

@@ -76,26 +76,7 @@ class CArray
       end
 
     source = along ? self : (ndim > 1 ? flatten : self)
-    source[*gather_args(repeat_index(counts), along)]
-  end
-
-  #  The source index of every position in the result: element i appears
-  #  at the `counts[i]` positions starting at the exclusive prefix sum.
-  #
-  #  Marking those starts with +1 and running a cumulative sum turns the
-  #  marks back into indices, and does the right thing with a zero
-  #  count for free -- two elements then share a start, that position
-  #  carries 2, and the sum steps over the one that was asked for zero
-  #  times.
-  private def repeat_index (counts)
-    total = counts.sum.to_i
-    return CArray.int64(0) if total.zero?
-    starts = counts.cumsum.int64 - counts
-    marks  = CArray.int64(total)
-    #  A trailing zero count starts one past the end; it marks nothing,
-    #  which is what a zero count means.
-    marks.scatter_add!(starts[starts.lt(total)], 1)
-    marks.cumsum.int64 - 1
+    source[*gather_args(CArray.segment_index(lengths: counts), along)]
   end
 
   #  One index argument per axis: the gathered index on the axis being

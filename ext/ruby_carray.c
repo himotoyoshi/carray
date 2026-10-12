@@ -44,6 +44,7 @@ void Init_carray_access ();
 void Init_carray_index_classifier ();
 void Init_carray_element ();
 void Init_carray_scatter ();     /* scatter_*! family */
+void Init_carray_segment ();     /* segment lengths / offsets / index */
 void Init_ca_axis_group ();      /* devel/MEMO_AXIS_GROUP.md — axis-group reduction kernel */
 void Init_ca_group_iter ();      /* devel/MEMO_AXIS_GROUP.md — axis-group [] surface */
 void Init_carray_bincount ();    /* bincount dedicated kernel */
@@ -89,6 +90,8 @@ void Init_ca_obj_byte_swap ();
 void Init_ca_face ();            /* CAFace abstract base; must precede CATime / CATimedelta / CARecord / CAConstString */
 void Init_ca_source ();          /* CASource abstract base; concrete sources live in C extensions */
 void Init_ca_obj_time ();  /* first numeric Face */
+void Init_carray_time_text ();
+void Init_caframe_csv_reader ();
 void Init_ca_obj_timedelta ();   /* CATime sibling */
 void Init_ca_obj_record ();      /* composite Face for CAStruct backing */
 void Init_ca_obj_const_string ();/* read-only variable-length string Face */
@@ -169,7 +172,7 @@ Init_carray_ext (void)
   /* -- Exception class -- */
 
   rb_eCADataTypeError =
-    rb_define_class_under(rb_cCArray, "DataTypeError", rb_eStandardError);
+    rb_define_class_under(rb_cCArray, "DataTypeError", rb_eTypeError);
 
   /* -- CA module -- namespace for misc utilities related to CArray */
 
@@ -286,6 +289,7 @@ Init_carray_ext (void)
   Init_carray_index_classifier();
   Init_carray_element();
   Init_carray_scatter();
+  Init_carray_segment();
   Init_ca_axis_group();    /* devel/MEMO_AXIS_GROUP.md — axis-group reduction kernel */
   Init_carray_bincount();
   Init_carray_factorize();
@@ -343,6 +347,8 @@ Init_carray_ext (void)
                                  (datetime / timedelta / record /
                                  const_string). */
   Init_ca_obj_time();
+  Init_carray_time_text();
+  Init_caframe_csv_reader();
   Init_ca_obj_timedelta();
   Init_ca_obj_record();
   Init_ca_obj_const_string();

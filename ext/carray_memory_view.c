@@ -16,8 +16,11 @@
   - CArray.wrap_memory_view (zero-copy; contiguous only)
 
   Format-string contract:
-  - Producer emits PEP 3118 strict; consumer is Postel-permissive
-    (accepts synonyms other producers emit).
+  - Producer emits Ruby's vocabulary (ruby/memory_view.h), records
+    included; only the types Ruby cannot spell ('?', 'Zf' / 'Zd', "Ns")
+    stay PEP 3118.  The consumer is Postel-permissive (accepts synonyms
+    other producers emit).  A record's member names, which Ruby's format
+    cannot carry, are CARecord#memory_view_field_names.
   - See docs/interop/MemoryViewFormat.md for the format-string contract.
   - See devel/DESIGN_MemoryView.md for the design rationale.
   - See docs/interop/MemoryView.md for the user-facing MV API.
@@ -26,6 +29,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"   /* ca_strip_face for Face producers */
+#include "carray_internal.h"
 #include "ruby/memory_view.h"
 #include <string.h>
 
@@ -55,12 +59,10 @@ typedef struct {
 
 /* ---------------- obj_type strategy ---------------- */
 
-/* Strategy = label only; ca_mv_get is alias-only and all CAStride-family
-   strategies share the same code path (compose-to-root + entity->ptr +
-   composed_strides).  The labels are kept for ca_mv_runtime_types[]
-   readability and reject diagnostics.  CA_MV_ATTACH stays defined but is
-   structurally unreachable -- ca_mv_check_alias_chain rejects every
-   obj_type that maps to it. */
+/* Strategy = label only.  The export is alias-only and is decided by
+   ca_mv_compose_to_entity alone; the labels say which classes get a
+   MemoryView registration and keep ca_mv_runtime_types[] readable.
+   Every class labelled CA_MV_ATTACH is refused by that resolver. */
 typedef enum {
   CA_MV_REJECT,
   CA_MV_DIRECT,   /* entity / wrap / scalar; ca->ptr valid as-is */
@@ -72,9 +74,8 @@ typedef enum {
   CA_MV_ATTACH,   /* unreachable: rejected by alias-chain check */
 } ca_mv_strategy_t;
 
-/* Resolved at Init_carray_memory_view.  The order is the same as
-   ca_mv_runtime_types[] below.  Runtime obj_type ids are stored here so
-   ca_mv_strategy_for can match them with a simple linear scan. */
+/* Resolved at Init_carray_memory_view.  Runtime obj_type ids are stored
+   here so ca_mv_reject_reason_for can name the class it refuses. */
 static ca_mv_runtime_type_t ca_mv_runtime_types[CA_MV_NUM_RUNTIME_OBJ_TYPES] = {
   { "CAFarray",    "CA_OBJ_FARRAY",    -1, Qnil, /* CA_MV_FARRAY  */ 4 },
   { "CATranspose", "CA_OBJ_TRANSPOSE", -1, Qnil, /* CA_MV_TRANS   */ 5 },
@@ -143,69 +144,68 @@ ca_mv_format_for (int8_t data_type)
   }
 }
 
-/* PEP 3118 single-character specifier for a primitive data_type, for
-   use inside a `T{...}` struct format body.  This is the context the
-   distinct entry point was kept for: `T{...}` is a PEP 3118 construct
-   with no Ruby counterpart, so a record body stays in PEP's vocabulary
-   even though the top level now publishes Ruby's.  A consumer reading
-   the body reads it as PEP, and a bridge that forwards the record
-   whole -- as pycall-memoryview does -- keeps it intact.
-
-   Returns NULL for non-primitive (CA_FIXLEN / CA_OBJECT) or for the
-   retired float128 / cmplx256 enum slots. */
-static const char *
-ca_mv_pep3118_char (int8_t data_type)
-{
-  switch (data_type) {
-  case CA_INT8:   return "b";
-  case CA_UINT8:  return "B";
-  case CA_INT16:  return "h";
-  case CA_UINT16: return "H";
-  default:        return ca_mv_format_for(data_type);
-  }
-}
-
-/* Build (or fetch from cache) the PEP 3118 struct format string for
-   a data_class.  Walks MEMBER_TABLE in MEMBERS order and emits
-   "T{<fmt>:<name>:<fmt>:<name>:}".  Returns Qnil if the class
-   contains a member type the producer cannot express (nested
-   sub-struct class, CArray template, :fixlen, :object).
-
-   The result is frozen and cached on the data_class via
-   @__mv_struct_format__ so successive calls are O(1) and the
-   underlying RSTRING_PTR is stable (the cached String is rooted by
-   the class, which outlives any MV produced from it). */
-/* Helper: resolve a MEMBER_TABLE member-type slot to (fmt, bytes).
-   Returns 1 on success, 0 if the type is not expressible in PEP 3118
-   struct format (nested class, CArray template, :fixlen, :object,
-   :bitfield).  Does NOT raise — :bitfield in particular is checked
-   before rb_ca_guess_type so the struct-format walk can give up
-   gracefully on bit-bearing structs. */
+/* The Ruby MemoryView specifier for one record member, written into `out`
+   with its byte order as ruby/memory_view.h writes it: a suffix ('<' / '>')
+   on an integer, its own letter on a float ('e' / 'E' little, 'g' / 'G'
+   big).  A member without a declared byte order is in the machine's.
+   Returns 0 for a member the format has no item for: a nested struct, an
+   array member, :fixlen, :object, a bit member, or a complex member with a
+   declared byte order (Ruby has no complex specifier to suffix). */
 static int
-ca_mv_struct_member_resolve (VALUE info, const char **fmt_out, ca_size_t *bytes_out)
+ca_mv_record_member_spec (VALUE info, char *out, size_t outlen,
+                          ca_size_t *bytes_out)
 {
   VALUE type = rb_ary_entry(info, 1);
+  VALUE opts = rb_ary_entry(info, 2);
+  VALUE endian = Qnil;
+  const char *base;
+  int8_t dt;
   if (!SYMBOL_P(type)) return 0;
   ID type_id = SYM2ID(type);
-  /* Reject explicitly unsupported symbol types up front (so
-     rb_ca_guess_type never sees them and never raises). */
   if (type_id == rb_intern("bitfield") ||
       type_id == rb_intern("fixlen")   ||
       type_id == rb_intern("object")) {
     return 0;
   }
-  int8_t dt = rb_ca_guess_type(rb_sym2str(type));
-  const char *fmt = ca_mv_pep3118_char(dt);
-  if (!fmt) return 0;
-  *fmt_out   = fmt;
+  dt = rb_ca_guess_type(rb_sym2str(type));
+  base = ca_mv_format_for(dt);
+  if (!base) return 0;
+  if (RB_TYPE_P(opts, T_HASH)) {
+    endian = rb_hash_aref(opts, ID2SYM(rb_intern("endian")));
+  }
+  if ( SYMBOL_P(endian) && ( SYM2ID(endian) == rb_intern("big")
+                             || SYM2ID(endian) == rb_intern("little") ) ) {
+    int big = ( SYM2ID(endian) == rb_intern("big") );
+    switch (dt) {
+    case CA_FLOAT32: base = big ? "g" : "e"; break;
+    case CA_FLOAT64: base = big ? "G" : "E"; break;
+    case CA_CMPLX64: case CA_CMPLX128: return 0;
+    case CA_BOOLEAN: case CA_INT8: case CA_UINT8: break;   /* one byte */
+    default:
+      snprintf(out, outlen, "%s%s", base, big ? ">" : "<");
+      *bytes_out = (ca_size_t) ca_sizeof[dt];
+      return 1;
+    }
+  }
+  snprintf(out, outlen, "%s", base);
   *bytes_out = (ca_size_t) ca_sizeof[dt];
   return 1;
 }
 
+/* Build (or fetch from cache) the Ruby MemoryView format of a record: the
+   members' specifiers in their byte order in the record, with "x<N>" for
+   the padding between them and after the last.  Ruby's format has no
+   member names; the record array gives them as #memory_view_field_names,
+   one per specifier.  Returns Qnil for a record the format cannot describe:
+   a member it has no item for (see above), or members that overlap or come
+   out of offset order (a union).
+
+   The result is frozen and cached on the data_class, so the pointer
+   handed to a view stays valid while the class lives. */
 static VALUE
 ca_mv_struct_format_for_data_class (VALUE data_class)
 {
-  ID iv = rb_intern("@__mv_struct_format__");
+  ID iv = rb_intern("@__mv_record_format__");
   if (rb_ivar_defined(data_class, iv)) {
     VALUE cached = rb_ivar_get(data_class, iv);
     /* Qfalse is a sentinel meaning "tried, found unsupported". */
@@ -216,61 +216,36 @@ ca_mv_struct_format_for_data_class (VALUE data_class)
   VALUE table   = rb_const_get(data_class, rb_intern("MEMBER_TABLE"));
   long  n       = RARRAY_LEN(members);
   long  i;
-  VALUE buf     = rb_str_buf_new(2 + 6 * n);
+  VALUE buf     = rb_str_buf_new(4 * n + 8);
   ca_size_t cursor = 0;
   ca_size_t data_size = NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
-
-  rb_str_buf_cat_ascii(buf, "T{");
+  char spec[16], pad[32];
 
   for (i = 0; i < n; i++) {
-    VALUE name   = rb_ary_entry(members, i);
-    VALUE info   = rb_hash_aref(table, name);
+    VALUE info = rb_hash_aref(table, rb_ary_entry(members, i));
+    ca_size_t offset, mb;
     if (NIL_P(info)) goto unsupported;
-    ca_size_t offset = NUM2SIZE(rb_ary_entry(info, 0));
-
-    const char *fmt;
-    ca_size_t   mb;
-    if (!ca_mv_struct_member_resolve(info, &fmt, &mb)) goto unsupported;
-
-    /* If alignment or explicit padding has left a gap before this
-       member, emit "<N>x:" to account for it.  PEP 3118 uses 'x'
-       as the pad-byte specifier.  The canonical form elides the name
-       slot after the pad spec (padding is anonymous by definition);
-       consumers MUST accept both elided and named (legacy "<N>x:_:")
-       forms. */
+    offset = NUM2SIZE(rb_ary_entry(info, 0));
+    if (offset < cursor) goto unsupported;
+    if (!ca_mv_record_member_spec(info, spec, sizeof(spec), &mb)) goto unsupported;
     if (offset > cursor) {
-      char pad_decl[32];
-      snprintf(pad_decl, sizeof(pad_decl), "%lldx:",
-               (long long) (offset - cursor));
-      rb_str_buf_cat_ascii(buf, pad_decl);
-      cursor = offset;
+      snprintf(pad, sizeof(pad), "x%lld", (long long) (offset - cursor));
+      rb_str_buf_cat_ascii(buf, pad);
     }
-
-    rb_str_buf_cat_ascii(buf, fmt);
-    rb_str_buf_cat_ascii(buf, ":");
-    /* MEMBERS entries are strings; emit verbatim. */
-    rb_str_buf_append(buf, rb_String(name));
-    rb_str_buf_cat_ascii(buf, ":");
-    cursor += mb;
+    rb_str_buf_cat_ascii(buf, spec);
+    cursor = offset + mb;
   }
-
-  /* Trailing padding (DATA_SIZE > last member's end).  Elided form
-     (see the alignment-gap branch above for rationale). */
+  if (cursor > data_size) goto unsupported;
   if (cursor < data_size) {
-    char pad_decl[32];
-    snprintf(pad_decl, sizeof(pad_decl), "%lldx:",
-             (long long) (data_size - cursor));
-    rb_str_buf_cat_ascii(buf, pad_decl);
+    snprintf(pad, sizeof(pad), "x%lld", (long long) (data_size - cursor));
+    rb_str_buf_cat_ascii(buf, pad);
   }
 
-  rb_str_buf_cat_ascii(buf, "}");
   rb_obj_freeze(buf);
   rb_ivar_set(data_class, iv, buf);
   return buf;
 
 unsupported:
-  /* Cache Qfalse to remember "we tried and gave up" — avoids
-     re-walking MEMBER_TABLE on every wrap call. */
   rb_ivar_set(data_class, iv, Qfalse);
   return Qnil;
 }
@@ -282,7 +257,7 @@ ca_mv_data_type_exportable (int8_t data_type)
 }
 
 /* Same as ca_mv_data_type_exportable, but also accepts CA_FIXLEN:
-   - with a data_class -> emit PEP 3118 "T{...}" struct format
+   - with a data_class -> emit the record's Ruby format (members in order)
    - without a data_class -> emit PEP 3118 "Ns" fixed-bytes format */
 static int
 ca_mv_ca_exportable (CArray *ca, VALUE obj)
@@ -424,35 +399,6 @@ ca_mv_carray_bytes_for (int8_t data_type, ssize_t item_size)
                                   : (ca_size_t) ca_sizeof[data_type];
 }
 
-/* ---------------- strategy lookup ---------------- */
-
-static ca_mv_strategy_t
-ca_mv_strategy_for (int16_t obj_type)
-{
-  /* compile-time enum members */
-  if (obj_type == CA_OBJ_ARRAY ||
-      obj_type == CA_OBJ_ARRAY_WRAP ||
-      obj_type == CA_OBJ_SCALAR) return CA_MV_DIRECT;
-  if (obj_type == CA_OBJ_REFER)  return CA_MV_REFER;
-  if (obj_type == CA_OBJ_BLOCK)  return CA_MV_BLOCK;
-  if (obj_type == CA_OBJ_SELECT) return CA_MV_ATTACH;
-  if (obj_type == CA_OBJ_REPEAT) return CA_MV_REPEAT;
-  if (obj_type == CA_OBJ_OBJECT) return CA_MV_REJECT;
-  /* Plain CAStride (created via #as_strided, or wrap_memory_view from
-     a strided producer).  Reuse the CA_MV_TRANS handler since it
-     already reads strides[] / base_offset directly from the CAStride
-     layout -- no CATranspose-specific code in that path anymore. */
-  if (obj_type == CA_OBJ_STRIDE) return CA_MV_TRANS;
-
-  /* runtime-assigned obj_types */
-  for (int i = 0; i < CA_MV_NUM_RUNTIME_OBJ_TYPES; i++) {
-    if (ca_mv_runtime_types[i].id == obj_type) {
-      return (ca_mv_strategy_t) ca_mv_runtime_types[i].strategy;
-    }
-  }
-  return CA_MV_REJECT;
-}
-
 /* ---------------- helpers ---------------- */
 
 static int
@@ -507,6 +453,8 @@ typedef struct {
   int          depth;        /* 0 = the view itself, 1 = parent, 2 = grand-, ... */
   const char  *class_name;   /* class name of the offending link */
   const char  *reason;       /* short explanation */
+  int          face;         /* refused because it is a Face: a copy is
+                                refused too, so no copy is suggested */
 } ca_mv_reject_t;
 
 static bool ca_mv_stride_is_contig (CAStride *ca);   /* defined below */
@@ -551,6 +499,18 @@ ca_mv_reject_reason_for (CArray *ca)
   return "this kind of view is not alias-capable";
 }
 
+/* The entities whose bytes the producer exports: CArray, CAWrap and
+   CScalar.  An entity installed from outside the core (ca_install_obj_type,
+   e.g. a CASource subclass) may hold its bytes elsewhere (cold at rest),
+   so neither it nor a view onto it is exported. */
+static inline bool
+ca_mv_is_core_entity (CArray *ca)
+{
+  return ca->obj_type == CA_OBJ_ARRAY ||
+         ca->obj_type == CA_OBJ_ARRAY_WRAP ||
+         ca->obj_type == CA_OBJ_SCALAR;
+}
+
 /* Resolve ca to an (entity, composed_strides, composed_base) triple
    suitable for zero-copy strided export.  Uses ca_stride_compose_to_root
    to fold the CAStride parent chain (alias-eligible OR not, as long
@@ -569,15 +529,31 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
                          ca_size_t *out_strides,
                          ca_size_t *out_base)
 {
-  /* Face (= CARecord etc.) is a 1:1 alias of parent->ptr, so
-     storage-layer-wise it is identical to the parent's entity / castride
-     layer.  Strip Face, descend to parent, and feed the subsequent
-     compose.  data_class / format come separately from the Face tail via
-     rb_ca_data_class universal dispatch. */
+  rej->face = 0;
+  /* A Face is a 1:1 alias of its storage, so it is exported as that
+     storage -- but only a Face that registered its bytes as carrying its
+     values (ca_face_register_memory_view).  The format comes from the Face
+     (data_class for a CARecord); the layout from the storage below. */
   if (ca_is_face(ca)) {
+    if (! ca_face_memory_view_exportable(ca)) {
+      rej->depth = 0;
+      rej->class_name = ca_mv_class_name_of(ca);
+      rej->reason = "a Face whose storage bytes do not carry its values "
+                    "without the Face; export its storage instead "
+                    "(e.g. .ticks, .codes)";
+      rej->face = 1;
+      return false;
+    }
     ca = ca_strip_face(ca);
   }
   if (ca_is_entity(ca)) {
+    if (! ca_mv_is_core_entity(ca)) {
+      rej->depth = 0;
+      rej->class_name = ca_mv_class_name_of(ca);
+      rej->reason = "installed outside the core; its bytes are not "
+                    "exported";
+      return false;
+    }
     *out_entity = ca;
     *out_base = 0;
     return true;
@@ -599,6 +575,12 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
     } else {
       rej->reason = ca_mv_reject_reason_for(root);
     }
+    return false;
+  }
+  if (! ca_mv_is_core_entity(root)) {
+    rej->depth = -1;
+    rej->class_name = ca_mv_class_name_of(root);
+    rej->reason = "installed outside the core; its bytes are not exported";
     return false;
   }
   *out_entity = root;
@@ -641,30 +623,46 @@ ca_mv_available_p (VALUE obj)
   if (! ca_mv_extract(obj, &ca)) return false;
   if (! ca_mv_ca_exportable(ca, obj)) return false;
   if (ca_has_mask(ca)) return false;
-  /* An entity whose obj_type has no strategy of its own is one installed
-     from outside the core (ca_install_obj_type).  It reaches this callback
-     only because it inherits CArray's MemoryView registration, and
-     ca_mv_get would then reject it — say so here rather than advertising
-     an export that cannot be produced.  Built-in entities (CArray /
-     CAWrap / CScalar) map to DIRECT and are unaffected. */
-  if (ca_is_entity(ca) && ca_mv_strategy_for(ca->obj_type) == CA_MV_REJECT) {
-    return false;
-  }
-  /* Wrap-via-MV exports are zero-copy: require an alias chain to
-     entity.  Non-alias views (CASelect, CAFake, etc.) and CAStride
+  /* The same resolver decides the export in ca_mv_get, so what this
+     says is what the export does.  Wrap-via-MV exports are zero-copy:
+     require an alias chain to a core entity.  Non-alias views (CASelect, CAFake, etc.) and CAStride
      chains broken by a non-contig link cannot be wrapped without a
      snapshot, which has wrong semantics for MV consumers. */
   return ca_mv_check_alias_chain(ca, &rej);
+}
+
+/* "Ns" format for a plain CA_FIXLEN of N bytes.  The Strings are kept in
+   a table keyed by N for the life of the process, so the pointer stays
+   valid for any view, and a frozen array (which cannot take an ivar) is
+   exported like any other. */
+static VALUE ca_mv_fixlen_formats = Qnil;
+
+static VALUE
+ca_mv_fixlen_format (ca_size_t bytes)
+{
+  VALUE key = SIZE2NUM(bytes);
+  VALUE fmt;
+  if ( NIL_P(ca_mv_fixlen_formats) ) {
+    ca_mv_fixlen_formats = rb_hash_new();
+    rb_gc_register_mark_object(ca_mv_fixlen_formats);
+  }
+  fmt = rb_hash_lookup(ca_mv_fixlen_formats, key);
+  if ( NIL_P(fmt) ) {
+    fmt = rb_obj_freeze(rb_sprintf("%lds", (long) bytes));
+    rb_hash_aset(ca_mv_fixlen_formats, key, fmt);
+  }
+  return fmt;
 }
 
 static bool
 ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
 {
   CArray *ca;
-  ca_mv_strategy_t strategy;
+  CArray *storage;
   ssize_t *shape = NULL;
   ssize_t *strides = NULL;
   void *data_ptr = NULL;
+  const char *format;
   int writable_request;
 
   if (! ca_mv_extract(obj, &ca)) return false;
@@ -678,11 +676,10 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
      Object#freeze on a subclass). */
   if (writable_request && OBJ_FROZEN(obj)) return false;
 
-  /* Resolve the chain to (entity, composed_strides, composed_base).
-     If ca isn't a CAStride family member, only entity-class is
-     accepted here.  The CAStride-family case below uses composed_strides
-     / composed_base directly; the DIRECT case ignores them (entity owns
-     ca->ptr already, no compose needed). */
+  /* Resolve the chain to (entity, composed_strides, composed_base) with
+     the resolver available_p uses, so the two cannot disagree.  The
+     layout is the storage's: a Face that got through is a 1:1 alias of
+     it. */
   CArray *resolved_entity = NULL;
   ca_size_t composed_strides[CA_RANK_MAX];
   ca_size_t composed_base = 0;
@@ -693,73 +690,66 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
       return false;
     }
   }
+  storage = ca_is_face(ca) ? ca_strip_face(ca) : ca;
 
   /* SIMPLE consumer on non-contig view would need a snapshot -- not
      offered (consumers wanting a snapshot use from_memory_view). */
   {
     int wants_strides_early = (flags & RUBY_MEMORY_VIEW_STRIDES) ? 1 : 0;
     if (!wants_strides_early &&
-        ca_mv_is_castride_family(ca) &&
-        !ca_mv_stride_is_contig((CAStride *) ca)) {
+        ca_mv_is_castride_family(storage) &&
+        !ca_mv_stride_is_contig((CAStride *) storage)) {
       return false;
     }
   }
 
-  strategy = ca_mv_strategy_for(ca->obj_type);
+  /* Format string, resolved before shape / strides are allocated since
+     building it can raise.  Primitive types use the top-level table;
+     CA_FIXLEN + data_class emits the record's format, cached on the class,
+     so the pointer is stable until the class is GC'd. */
+  if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
+    VALUE klass = rb_ca_data_class(obj);
+    VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
+    format = RSTRING_PTR(fmt);
+  }
+  else if (ca->data_type == CA_FIXLEN) {
+    /* Plain CA_FIXLEN (no data_class): PEP 3118 "Ns" fixed-bytes. */
+    format = RSTRING_PTR(ca_mv_fixlen_format(ca->bytes));
+  }
+  else {
+    format = ca_mv_format_for(ca->data_type);
+  }
 
-  switch (strategy) {
-  case CA_MV_DIRECT:
-    /* Entity / wrap / scalar: ca->ptr is the entity's own buffer, always
-       valid.  No attach needed. */
-    data_ptr = ca->ptr;
-    if (ca->ndim >= 1) {
+  if (ca_is_entity(storage)) {
+    /* Entity / wrap / scalar: its own buffer, always valid.  No attach
+       needed.  A CScalar is exported with ndim 0 and no shape, so none is
+       taken: release frees only what the view carries. */
+    data_ptr = storage->ptr;
+    if (ca->ndim >= 1 && storage->obj_type != CA_OBJ_SCALAR) {
       shape = ca_mv_alloc_shape(ca);
       strides = ca_mv_alloc_strides_contiguous(ca, shape, true);
     }
-    break;
+  }
+  else {
+    /* A CAStride-family view (CARefer / CABlock / CAFarray / CATranspose
+       / CARepeat / CAField / plain CAStride) composed to an entity.
+       Expose `entity->ptr + composed_base` as data_ptr and
+       composed_strides as strides, both in entity byte space.  The entity
+       owns its bytes (always valid via view->obj's parent chain while the
+       consumer holds the view).
 
-  /* All CAStride-family views (CARefer / CABlock / CAFarray / CATranspose
-     / CARepeat / plain CAStride) reach this point only after
-     ca_mv_compose_to_entity succeeded -- the producer is alias-only by
-     ca_mv_available_p contract.  Expose `entity->ptr + composed_base` as
-     data_ptr and composed_strides as strides, both in entity byte space.
-     The entity owns its bytes (always valid via view->obj's parent chain
-     while the consumer holds the view).
-
-     CAREFUL: do not ca_attach the view here (nor ca_sync / ca_detach at
-     release).  Exposure is alias-only: the consumer writes directly into
-     root bytes, so a sync would scatter bytes back to root as a no-op
-     chain -- and that chain triggers ca_update_mask / ca_sync(mask)
-     recursion that can raise on an invariant violation.  Raising from a
-     release callback is fatal during GC sweep (newobj_of during sweep ->
-     BUG). */
-  case CA_MV_REFER:
-  case CA_MV_BLOCK:
-  case CA_MV_FARRAY:
-  case CA_MV_TRANS:
-  case CA_MV_REPEAT: {
+       CAREFUL: do not ca_attach the view here (nor ca_sync / ca_detach at
+       release).  Exposure is alias-only: the consumer writes directly into
+       root bytes, so a sync would scatter bytes back to root as a no-op
+       chain -- and that chain triggers ca_update_mask / ca_sync(mask)
+       recursion that can raise on an invariant violation.  Raising from a
+       release callback is fatal during GC sweep (newobj_of during sweep ->
+       BUG). */
     int8_t k;
     shape = ca_mv_alloc_shape(ca);
     strides = (ssize_t *) xmalloc(sizeof(ssize_t) * ca->ndim);
     for (k = 0; k < ca->ndim; k++) strides[k] = (ssize_t) composed_strides[k];
     data_ptr = resolved_entity->ptr + composed_base;
-    break;
-  }
-
-  case CA_MV_ATTACH:
-    /* Should be unreachable: ca_mv_check_alias_chain rejects every
-       obj_type that maps to ATTACH (CASelect / CAMapping / CAGrid /
-       CAShift / CAWindow / CAFake / CAReduce).  Materialise is no
-       longer offered via wrap_memory_view; from_memory_view gives a
-       snapshot copy instead. */
-    rb_raise(rb_eRuntimeError,
-             "[BUG] ATTACH strategy reached in ca_mv_get for %s; "
-             "alias-chain check should have rejected it",
-             ca_mv_class_name_of(ca));
-
-  case CA_MV_REJECT:
-  default:
-    return false;
   }
 
   view->obj = obj;
@@ -770,37 +760,11 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
      views compute Σ (shape[k]-1)*|strides[k]| + item_size themselves. */
   view->byte_size = (ssize_t) ca_length(ca);
   view->readonly = ca_is_readonly(ca) ? true : false;
-  /* Format string: primitive types use the top-level PEP 3118 table;
-     CA_FIXLEN + data_class emits a PEP 3118 "T{...}" struct format
-     whose lifetime is bound to the class via @__mv_struct_format__,
-     so the view->format pointer is stable until the class is GC'd. */
-  if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
-    VALUE klass = rb_ca_data_class(obj);
-    VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
-    view->format = RSTRING_PTR(fmt);
-  }
-  else if (ca->data_type == CA_FIXLEN) {
-    /* Plain CA_FIXLEN (no data_class): emit PEP 3118 "Ns" fixed-bytes.
-       Cache the format String on the source object so RSTRING_PTR stays
-       stable for the view's lifetime; the source object is anchored as
-       view->obj. */
-    VALUE fmt_str = rb_attr_get(obj, rb_intern("__mv_fixlen_format__"));
-    if (NIL_P(fmt_str)) {
-      char fmt_buf[32];
-      snprintf(fmt_buf, sizeof(fmt_buf), "%lds", (long) ca->bytes);
-      fmt_str = rb_str_new_cstr(fmt_buf);
-      rb_obj_freeze(fmt_str);
-      rb_ivar_set(obj, rb_intern("__mv_fixlen_format__"), fmt_str);
-    }
-    view->format = RSTRING_PTR(fmt_str);
-  }
-  else {
-    view->format = ca_mv_format_for(ca->data_type);
-  }
+  view->format = format;
   view->item_size = (ssize_t) ca->bytes;
   view->item_desc.components = NULL;
   view->item_desc.length = 0;
-  view->ndim = (ca->obj_type == CA_OBJ_SCALAR) ? 0 : (ssize_t) ca->ndim;
+  view->ndim = (storage->obj_type == CA_OBJ_SCALAR) ? 0 : (ssize_t) ca->ndim;
   view->shape = (view->ndim == 0) ? NULL : shape;
   view->strides = (view->ndim == 0) ? NULL : strides;
   view->sub_offsets = NULL;
@@ -1075,6 +1039,25 @@ ca_mv_extract_type_and_mask_kwargs (int argc, VALUE *argv,
   return data_type;
 }
 
+/* ca_mv_acquire_and_validate as an rb_protect body. */
+typedef struct {
+  VALUE             src;
+  rb_memory_view_t *view;
+  int8_t            explicit_data_type;
+  int8_t           *data_type;
+  int8_t           *ndim;
+  ca_size_t        *dim;
+} ca_mv_acquire_args_t;
+
+static VALUE
+ca_mv_acquire_body (VALUE arg)
+{
+  ca_mv_acquire_args_t *a = (ca_mv_acquire_args_t *) arg;
+  ca_mv_acquire_and_validate(a->src, a->view, a->explicit_data_type,
+                             a->data_type, a->ndim, a->dim);
+  return Qnil;
+}
+
 /* Acquire and validate a mask MemoryView against the data side's shape.
    Returns an allocated holder (caller owns; release via the imported
    holder TypedData dfree path) with view active on success.
@@ -1255,8 +1238,21 @@ rb_ca_s_wrap_memory_view (int argc, VALUE *argv, VALUE klass)
   holder = ALLOC(ca_mv_imported_holder_t);
   holder->valid = false;
 
-  ca_mv_acquire_and_validate(obj, &holder->view, explicit_data_type,
-                             &data_type, &ndim, dim);
+  /* Acquisition raises on a producer it cannot take (and releases the
+     view itself first); the holder is not a Ruby object yet, so it is
+     freed here. */
+  {
+    ca_mv_acquire_args_t a;
+    int tag = 0;
+    a.src = obj;  a.view = &holder->view;
+    a.explicit_data_type = explicit_data_type;
+    a.data_type = &data_type;  a.ndim = &ndim;  a.dim = dim;
+    rb_protect(ca_mv_acquire_body, (VALUE) &a, &tag);
+    if ( tag ) {
+      xfree(holder);
+      rb_jump_tag(tag);
+    }
+  }
   holder->valid = true;
   v = &holder->view;
 
@@ -1530,17 +1526,18 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
   }
   if (! ca_mv_check_alias_chain(ca, &rej)) {
     const char *where;
-    if      (rej.depth == 0) where = "this view";
+    if      (rej.depth <  0) where = "the root";
+    else if (rej.depth == 0) where = "this view";
     else if (rej.depth == 1) where = "parent";
     else                     where = NULL;   /* ancestor[N] */
     if (where) {
-      return rb_sprintf("%s is %s (%s); zero-copy wrap not possible. "
-                        "Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot.",
-                        where, rej.class_name, rej.reason);
+      return rb_sprintf("%s is %s (%s); zero-copy wrap not possible.%s",
+                        where, rej.class_name, rej.reason,
+                        rej.face ? "" : " Export arr.copy for a snapshot.");
     } else {
-      return rb_sprintf("ancestor[%d] is %s (%s); zero-copy wrap not possible. "
-                        "Use CArray.from_memory_view(arr) or arr.to_ca for a snapshot.",
-                        rej.depth - 1, rej.class_name, rej.reason);
+      return rb_sprintf("ancestor[%d] is %s (%s); zero-copy wrap not possible.%s",
+                        rej.depth - 1, rej.class_name, rej.reason,
+                        rej.face ? "" : " Export arr.copy for a snapshot.");
     }
   }
   return Qnil;
@@ -1566,8 +1563,8 @@ rb_ca_s_parse_memory_view_format (VALUE klass, VALUE fmt_v, VALUE item_size_v)
 
 /* Test hook: return the MV format string the producer would emit
    for `obj`, without actually building the rb_memory_view_t.  Used
-   by spec_ai to verify PEP 3118 struct format emission for CAStruct
-   arrays.  Returns nil if obj isn't exportable. */
+   by spec_ai to verify the record format emitted for CAStruct arrays.
+   Returns nil if obj isn't exportable. */
 static VALUE
 rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
 {
@@ -1578,22 +1575,28 @@ rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
     return ca_mv_struct_format_for_data_class(rb_ca_data_class(obj));
   }
   if (ca->data_type == CA_FIXLEN) {
-    /* Plain CA_FIXLEN: emit "Ns" via the same caching scheme used by
-       the real producer (ca_mv_get).  Reusing the cache keeps the
-       returned String identity-equal to the one the producer hands out
-       via view->format, which test code may rely on. */
-    VALUE fmt_str = rb_attr_get(obj, rb_intern("__mv_fixlen_format__"));
-    if (NIL_P(fmt_str)) {
-      char fmt_buf[32];
-      snprintf(fmt_buf, sizeof(fmt_buf), "%lds", (long) ca->bytes);
-      fmt_str = rb_str_new_cstr(fmt_buf);
-      rb_obj_freeze(fmt_str);
-      rb_ivar_set(obj, rb_intern("__mv_fixlen_format__"), fmt_str);
-    }
-    return fmt_str;
+    /* Plain CA_FIXLEN: the same "Ns" String the producer (ca_mv_get)
+       hands out via view->format. */
+    return ca_mv_fixlen_format(ca->bytes);
   }
   const char *fmt = ca_mv_format_for(ca->data_type);
   return fmt ? rb_str_new_cstr(fmt) : Qnil;
+}
+
+/* CARecord#memory_view_field_names: the names of the record's members,
+   one per specifier of the record's MemoryView format, in that order.
+   Ruby's format has no place for them, so a bridge that writes a format
+   which does (PEP 3118 "T{...}") asks the exporting object for them under
+   this name.  nil when the record has no MemoryView format. */
+static VALUE
+rb_ca_record_memory_view_field_names (VALUE self)
+{
+  VALUE data_class = rb_ca_data_class(self);
+  if ( NIL_P(data_class)
+       || NIL_P(ca_mv_struct_format_for_data_class(data_class)) ) {
+    return Qnil;
+  }
+  return rb_ary_dup(rb_const_get(data_class, rb_intern("MEMBERS")));
 }
 
 /* ---------------- Init ---------------- */
@@ -1647,4 +1650,7 @@ Init_carray_memory_view (void)
                              rb_ca_s_parse_memory_view_format, 2);
   rb_define_singleton_method(rb_cCArray, "__memory_view_format__",
                              rb_ca_s_memory_view_format, 1);
+  rb_define_method(rb_const_get(rb_cObject, rb_intern("CARecord")),
+                   "memory_view_field_names",
+                   rb_ca_record_memory_view_field_names, 0);
 }

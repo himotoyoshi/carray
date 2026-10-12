@@ -83,6 +83,8 @@ Uniform check at construction time — parents must agree on:
 - `data_type` (mismatch raises — see below)
 - byte width
 - every axis length except `meld_axis`
+- Face: either none of the pieces is a Face, or all are of one Face class
+  with compatible state (the result is then that Face)
 
 Any mismatch raises `ArgumentError`.
 
@@ -308,10 +310,11 @@ promotion.
 
 ## 9. Masks
 
-A `CAMeld`'s mask is built by horizontal propagation: if any parent
-has (or gains) a mask, the CAMeld's `create_mask` walks all parents,
-ensures each has a mask, and builds a CAMeld-shaped mask by welding
-the per-parent masks along the same `meld_axis`.
+A `CAMeld` has a mask as soon as any parent has one; its mask welds the
+parents' masks along the same `meld_axis`.  A parent without a mask is
+read as all-unmasked and is left alone (asking, copying or reducing does
+not give it a mask); a mask it gains later shows through.  Writing UNDEF
+through the meld gives every parent that has none a mask.
 
 Reads through the masked view see the per-parent mask correctly.
 Reductions on a masked CAMeld currently take the SRC_ATTACH slow

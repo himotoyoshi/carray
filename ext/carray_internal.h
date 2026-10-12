@@ -25,6 +25,15 @@
 #define CARRAY_INTERNAL_H
 
 #include "carray.h"
+#include <math.h>     /* isnan, for CA_OBJ_ISNAN */
+
+/* ---- properties a copy or a folded view must carry (ca_obj_refer.c) -------
+
+   Copies VALUE_ARRAY (dropping any mask), READ_ONLY and MASK_ARRAY from
+   `src` onto `view` when `src` has them, for arrays whose C parent chain
+   does not pass through `src`.  Used by the folded reshape / flatten and by
+   CArray#initialize_dup / #initialize_clone. */
+void ca_keep_chain_flags (CArray *view, CArray *src);
 
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
@@ -54,13 +63,20 @@ void ca_bit_pack   (const boolean8_t *src, ca_size_t elements, ca_size_t pbytes,
    The pool is global static state, so this is single-owner by construction.
    Thread-safety is a non-goal: operating on one array family from more than
    one thread is the caller's responsibility, not something this pool guards
-   against. */
+   against.
+
+   A region that can raise -- one that transfers from a view, or calls Ruby
+   through an object lane -- goes through ca_lazy_arena_protect, never a
+   bare _enter / _exit pair: a skipped _exit is process-wide. */
 
 void    ca_lazy_arena_enter   (void);
 void    ca_lazy_arena_exit    (void);
 void   *ca_lazy_arena_acquire (ca_size_t bytes);
 void   *ca_lazy_arena_acquire_object (ca_size_t n_elements);
 void    ca_lazy_arena_release (void *ptr);
+VALUE   ca_lazy_arena_protect (VALUE (*body)(VALUE),
+                               VALUE (*cleanup)(VALUE), VALUE arg);
+VALUE   ca_lazy_arena_release_held (VALUE arg);
 
 /* ---- CA_OBJECT GC guard (carray_lazy.c) ----------------------------------
 
@@ -77,12 +93,56 @@ void    ca_lazy_arena_release (void *ptr);
 int     ca_gc_hold_push   (void *ptr, ca_size_t n_elements);
 void    ca_gc_hold_pop_to (int depth);
 
+/* A buffer of object cells whose lifetime is not nested in the others' --
+   a kernel iterator's scratch lives from init to finish, and two walks
+   opened together may close in either order.  Registered buffers are
+   marked until released, in any order; releasing one that was never
+   registered does nothing.  The cells must be valid VALUEs when it is
+   registered. */
+void    ca_gc_hold_buffer    (void *ptr, ca_size_t n_elements);
+void    ca_gc_release_buffer (void *ptr);
+
+/* Copy the attributes src shows onto dst (a new entity with src's values). */
+void    rb_ca_inherit_attr (VALUE dst, VALUE src);
+
+/* A String read as a decimal number of an integer or float data_type
+   (carray_cast.c): _to answers 1 / 0 (UNDEF), _store raises. */
+int     ca_decimal_string_to (VALUE str, int8_t data_type, void *out);
+void    ca_decimal_string_store (VALUE str, int8_t data_type, void *out);
+
+/* Give `ca` a mask holding `m` (one byte per cell) when any cell is set,
+   and leave it without one otherwise. */
+static inline void
+ca_mask_from_bytes (CArray *ca, const boolean8_t *m)
+{
+  ca_size_t i;
+  for (i = 0; i < ca->elements; i++) {
+    if ( m[i] ) {
+      ca_create_mask(ca);
+      memcpy(ca->mask->ptr, m, ca->elements);
+      return;
+    }
+  }
+}
+
 /* ---- Attaching several parents (carray_core.c) ---------------------------
 
-   Attach all of list[0..n-1] or none: if one attach raises, those already
-   attached are detached before the raise propagates. */
+   ca_attach_all attaches all of list[0..n-1] or none: if one attach raises,
+   those already attached are detached before the raise propagates.
+
+   ca_sync_all syncs every one of list[0..n-1], carrying on past one that
+   raises so that the others still receive what was written, and raises
+   the first exception once all have been tried.
+
+   ca_attach_window opens list[0..n-1] ('r' attach, 'w' attach + sync,
+   'a' allocate + sync), runs body(arg), and closes every array however body
+   leaves.  Any window inside which Ruby runs or something raises goes
+   through it; see the definition for what a raise does to 'w' and 'a'. */
 
 void    ca_attach_all (CArray **list, int32_t n);
+void    ca_sync_all   (CArray **list, int32_t n);
+VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
+                          VALUE (*body)(VALUE), VALUE arg);
 
 /* ---- Filling a result Ruby does not own yet (carray_copy.c) ---------------
 
@@ -100,6 +160,98 @@ void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
    consume the source without materialising it. */
 
 int     ca_is_lazy_view (void *ap);
+
+/* The mask of an element-wise lazy operation over several operands
+   (CABinOp, CABinCmp, CATriOp), computed from the operands' masks on each
+   read so that it follows them as the values do; NULL when no operand has
+   a mask yet.  `mode` is CA_LAZY_MASK_OR, one of the KLEENE modes for
+   the boolean `|` and `&`, whose masked cells an unmasked operand can
+   decide, or CA_LAZY_MASK_SELECT for select, masked where its condition
+   is or where the branch the condition chooses is (carray_lazy.c). */
+
+#define CA_LAZY_MASK_OR           0
+#define CA_LAZY_MASK_KLEENE_OR    1
+#define CA_LAZY_MASK_KLEENE_AND   2
+#define CA_LAZY_MASK_SELECT       3
+
+CArray *ca_lazy_operation_mask (CArray *operation, int mode);
+
+/* The array whose memory a view's cells live in: the entity at the end of
+   its parent chain, or the first view that has several parents
+   (carray_attribute.c). */
+CArray *ca_root_array (void *ap);
+
+/* Whether two arrays' cells live in the same root (carray_attribute.c). */
+int ca_shares_root (void *ap, void *aq);
+
+/* The create_mask slot of a view whose cells map one-to-one onto its
+   parent's in address order: the mask is the parent's mask seen in the
+   view's shape (carray_mask.c).  Installed directly in operation tables. */
+
+void    ca_view_func_create_mask (void *ap);
+
+/* Running count of the present cells of any data type along axis (Qnil:
+   the flattened array), read off the mask alone (carray_mask.c).  The
+   cumcount kernel answers with it for a data type it does not load. */
+
+VALUE   rb_ca_scan_mask_count (VALUE self, VALUE axis);
+
+/* The registered expression evaluator's answer for a lazy expression the
+   caller is about to compute whole, or Qnil to go on with self (see
+   carray_lazy.c). */
+
+VALUE   ca_lazy_evaluated (VALUE self);
+
+/* A request to an element-wise lazy view (CAMonOp, CABinOp, CAMonCmp,
+   CABinCmp, CATriOp): either a region of the view's addresses -- the
+   xfer_stride form, strides in bytes of the view's cells -- or a list of
+   addresses.  The view answers either with one evaluation: it pulls each
+   operand over the same cells with ca_lazy_req_pull and runs its kernel
+   once over the n cells (carray_lazy.c). */
+
+typedef struct {
+  ca_size_t  n;
+  ca_size_t *addrs;                       /* list form when non-NULL */
+  ca_size_t *starts, *counts, *strides;   /* region form */
+  ca_size_t  bytes;                       /* cell width the strides use */
+  int8_t     ndim;
+} ca_lazy_req_t;
+
+void    ca_lazy_req_region (ca_lazy_req_t *req, void *view, ca_size_t *starts,
+                            ca_size_t *counts, ca_size_t *strides);
+void    ca_lazy_req_addrs  (ca_lazy_req_t *req, ca_size_t n, ca_size_t *addrs);
+int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
+void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
+                            void *buf, int dir);
+boolean8_t *ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops);
+VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
+
+/* Non-zero iff the array a view's cells come from -- the parent, or the
+   root a CAStride-family parent folds to -- computes them rather than
+   lending memory (ca_obj_stride.c).  Depends only on what the arrays are,
+   never on whether they are attached, so the attach / sync / detach slots
+   of one view all take the same branch. */
+
+int     ca_parent_lends_no_memory (void *ap);
+
+/* Transfers of the descriptor views (CAGrid, CASelect, CASelectAxis,
+   CAWindow) whose parent holds no ptr (ca_axis_dispatch.c).
+
+   ca_axis_view_xfer_all serves an xfer_all slot: `fast` is the view's
+   transfer against parent->ptr, and region_ok says whether the view's
+   xfer_stride answers a whole-view request without going cell by cell.
+   ca_axis_view_attach_owned / ca_axis_view_sync_owned are the attach and
+   sync of such a view over a parent with no memory to lend: the view owns
+   its buffer and the parent is never attached.  attach_owned also serves
+   any view that owns its buffer and fills it through its own transfers
+   (CARemap, CAStack, CAMeld): it publishes the buffer only once filled. */
+
+typedef void (*ca_axis_view_fast_t) (void *ap, char *data, int dir);
+
+void    ca_axis_view_xfer_all     (void *ap, ca_axis_view_fast_t fast,
+                                   int region_ok, void *data, int dir);
+void    ca_axis_view_attach_owned (void *ap);
+void    ca_axis_view_sync_owned   (void *ap);
 
 /* ---- per-obj_type view constructors --------------------------------------
 
@@ -129,6 +281,9 @@ void     ca_block_sync_base_offset (CABlock *cb);
 /* ca_obj_select.c */
 VALUE    rb_ca_select_new (VALUE cary, VALUE select);
 VALUE    rb_ca_select_new_share (VALUE cary, VALUE select);
+/* An owned, unmasked copy of a boolean selector: a masked cell becomes
+   false.  Shared by CASelect and CASelectAxis. */
+CArray  *ca_select_snapshot (CArray *select);
 
 /* ca_obj_mapping.c */
 VALUE    rb_ca_mapping_new (VALUE cary, CArray *mapper);
@@ -149,5 +304,232 @@ CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 
 /* carray_broadcast.c */
 void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
+VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
+
+/* carray_utils.c */
+const char *ca_calling_method_name (void);
+VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
+long        ca_integer_arg (VALUE v, const char *arg, const char *name);
+ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
+void        ca_check_index_array (VALUE v);
+void        ca_check_integer_fits (VALUE v, int8_t data_type);
+int         ca_integer_range_side (VALUE v, int8_t data_type);
+int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
+                                       int op_id, int *signed_side);
+int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
+long        ca_axis_integer (VALUE raxis, const char *name);
+VALUE       ca_fill_as (VALUE fill, int8_t data_type);
+/* ---- Face MemoryView export (ca_obj_face.c) -------------------------------
+
+   A Face registers 1 when its storage bytes carry its values without the
+   Face (CARecord, CAFixlenString); the MemoryView producer refuses every
+   other Face.  Unregistered Faces are refused. */
+
+void    ca_face_register_memory_view (int obj_type, int exportable);
+int     ca_face_memory_view_exportable (CArray *ca);
+
+/* ---- Empty regions ---------------------------------------------------------
+
+   A region with a zero count on some axis has no cells.  The per-cell walks
+   visit their first cell before they test the counts, so every region
+   transfer returns on an empty region before it walks: a zero-cell caller
+   buffer has no room for that first cell. */
+
+static inline int
+ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
+{
+  int8_t k;
+  for ( k = 0; k < ndim; k++ ) {
+    if ( counts[k] <= 0 ) return 1;
+  }
+  return 0;
+}
+
+/* ---- An index into n places ----------------------------------------------
+
+   A negative index counts from the end; one outside 0...n after that raises
+   IndexError, naming the method the user called, `what` the index is (an
+   "index", an "address") and the value given.  Every index door decides
+   this here. */
+
+/* ca_index_out_of_range is declared in carray.h (CA_CHECK_INDEX uses it). */
+
+static inline ca_size_t
+ca_index_in_range (ca_size_t idx, ca_size_t n, const char *what)
+{
+  ca_size_t i = ( idx < 0 ) ? idx + n : idx;
+  if ( i < 0 || i >= n ) {
+    ca_index_out_of_range(idx, n, what);
+  }
+  return i;
+}
+
+/* The same for an index on axis `axis` of a multi-axis index. */
+NORETURN(void ca_index_out_of_range_at (ca_size_t idx, ca_size_t n, int axis));
+
+static inline ca_size_t
+ca_index_in_range_at (ca_size_t idx, ca_size_t n, int axis)
+{
+  ca_size_t i = ( idx < 0 ) ? idx + n : idx;
+  if ( i < 0 || i >= n ) {
+    ca_index_out_of_range_at(idx, n, axis);
+  }
+  return i;
+}
+
+/* ---- How many cells a result cell needs ---------------------------------
+
+   A reduction's result cell is UNDEF when fewer cells contribute to it than
+   it needs.  It needs `least` cells -- 0 for an operation with an identity
+   (sum, prod, accumulate, count, wsum: an empty cell is the identity), 1 for
+   one without (mean, min, max, median, ...), 2 for a sample variance -- or
+   `min_count` cells when that is given and asks for more.  A min_count below
+   zero means it was not given.  Every reduction decides this here. */
+
+static inline int
+ca_too_few_present (ca_size_t present, ca_size_t min_count, ca_size_t least)
+{
+  return present < ( min_count > least ? min_count : least );
+}
+
+long        ca_min_count_arg (VALUE v, const char *name);
+VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
+int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
+                              const char *c1, const char *name);
+
+/* Return the value of `call`, keeping the array `v` reachable until the call
+   has returned.  A kernel reads its source through the CArray pointer only,
+   so a view made just to be passed in (a flattened or common-type view)
+   would otherwise be left to a garbage collection that runs while its
+   cells are read: `return kernel(v, ...)` lets the compiler drop `v`. */
+#define CA_RETURN_KEEPING(v, call) do {  \
+    VALUE ca_kept_result_ = (call);      \
+    RB_GC_GUARD(v);                      \
+    return ca_kept_result_;              \
+  } while (0)
+
+/* A NaN loses every contest of an extremum (min / max / minmax / the
+   positions / the running cummin / cummax / pmin / pmax): it never displaces
+   another value, the first number displaces it, and nothing but NaN answers
+   NaN.  The two tests below are that rule for a typed cell and for an object
+   cell (a stored Float NaN); each says whether `v` takes the place of the
+   running `acc`.  CMP / op is `>` for a maximum, `<` for a minimum.  On an
+   integer type `v == v` is always true and folds away. */
+
+#define CA_EXTREMUM_REPLACES(v, acc, CMP) \
+  ( (v) == (v) && ( !((acc) == (acc)) || (v) CMP (acc) ) )
+
+#ifndef CA_OBJ_ISNAN
+#define CA_OBJ_ISNAN(v) (RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v)))
+#endif
+
+/* A pair `<=>` cannot order: ArgumentError "<method>: comparison of A with
+   B failed", naming the method the user called.  Every object comparison
+   that refuses a pair raises through here. */
+NORETURN(void ca_obj_compare_refused (VALUE a, VALUE b));
+
+/* The order of two object cells, by `<=>` as Array#min and #sort take it. */
+static inline int
+ca_obj_cmp (VALUE a, VALUE b)
+{
+  VALUE r = rb_funcall(a, rb_intern("<=>"), 1, b);
+  if ( NIL_P(r) ) {
+    ca_obj_compare_refused(a, b);
+  }
+  return rb_cmpint(r, a, b);
+}
+
+/* op names the contest: `<` for a minimum, `>` for a maximum. */
+static inline int
+ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
+{
+  int c;
+  if ( CA_OBJ_ISNAN(v) ) return 0;
+  if ( CA_OBJ_ISNAN(acc) ) return 1;
+  c = ca_obj_cmp(v, acc);
+  return ( op == rb_intern("<") ) ? ( c < 0 ) : ( c > 0 );
+}
+
+/* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:
+   p's own mask when it has one.  A parent without one gets an all-false
+   stand-in, stored in *standin for the view to free, so that asking the
+   view about its mask does not give the parent a mask.  The stand-in of a
+   read-only (or frozen) parent is read-only.  The stand-in of a value
+   array or a mask array, which can never carry a mask, stays in place and
+   takes writes; writing false into it changes nothing, and a true written
+   into it is refused by ca_multi_parent_mask_check. */
+CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
+
+/* Let the stand-ins of a multi-parent view's mask give way to the parents'
+   own masks.  `mask` is the view's mask (a CAStack or CAMeld over the
+   parents' masks), `parents` / `standins` the view's.  A writable stand-in
+   is replaced when its parent has gained a mask, or, with for_write, by a
+   mask created on the parent.  The mask's own transfer functions call this
+   on entry; it does nothing inside an attach window. */
+void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
+                                          CArray **standins, int32_t n,
+                                          int for_write);
+
+/* After a write to a multi-parent view's mask: a true written into the
+   stand-in of a value array or a mask array is cleared again and refused
+   with the TypeError a direct write would raise.  The parts of the write
+   that went to other parents stay written. */
+void        ca_multi_parent_mask_check (CArray *mask, CArray **parents,
+                                        CArray **standins, int32_t n);
+
+/* After a write inside an attach window, which went into the stand-ins
+   the window was opened with: move what was written into a stand-in to a
+   mask created on its parent.  The next refresh then reads the parent's
+   mask in its place. */
+void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
+                                         CArray **standins, int32_t n);
+
+/* The common-type rules the operators, result_type and the search family
+   share (ext/carray_cast.c): the type a scalar `obj` of type `st` takes
+   beside an array of type `at`, and the type two types are matched for
+   equality in (a mixed-sign integer pair widened so that each value is
+   kept). */
+int8_t      ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st);
+int8_t      ca_value_match_type (int8_t t, int8_t a, int8_t b);
+
+/* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
+   except that a Float NaN equals nothing, itself included.  rb_equal alone
+   answers true for the same object, so whether two NaN cells matched would
+   depend on whether they held one Float or two.  (The value-hash family --
+   unique / is_in / the set operations -- folds every NaN into one value
+   instead, in its own hash.) */
+static inline int
+ca_obj_equal (VALUE a, VALUE b)
+{
+  if ( CA_OBJ_ISNAN(a) ) return 0;
+  return RTEST(rb_equal(a, b));
+}
+
+/* ---- fast paths (carray_core.c) --------------------------------------------
+
+   A fast path answers what a general path also answers, by a different
+   algorithm.  Each one tests ca_fast_paths_enabled() alongside its own
+   condition, so a development build run with CARRAY_GENERAL_PATH=1 in the
+   environment takes the general path everywhere and the test suite
+   compares the two.  A release build has no switch: the test is the
+   constant 1 and costs nothing.
+
+   A branch that only lends a pointer, or drops to memcpy when the data is
+   contiguous, runs the same code either way and does not test this.
+
+---------------------------------------------------------------------------- */
+
+#ifdef CARRAY_DEV_BUILD
+extern int ca_fast_paths_on;
+#define ca_fast_paths_enabled() (ca_fast_paths_on)
+#else
+#define ca_fast_paths_enabled() (1)
+#endif
+
+/* A logical operator between a boolean array and an object array reads the
+   boolean cells as true / false (carray_operator.c).  Shared by the eager
+   binop and the lazy builder. */
+void ca_binop_read_boolean_as_truth (int logical, volatile VALUE *pa,
+                                     volatile VALUE *pb);
 
 #endif /* CARRAY_INTERNAL_H */

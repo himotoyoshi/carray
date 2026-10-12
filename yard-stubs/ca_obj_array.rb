@@ -43,9 +43,9 @@ class CArray
   #   `data_type`, shape, mask, and element data into `self`. Result
   #   is an independent entity.
   #
-  #   Note that for views, `dup`/`clone` produce a new view sharing
-  #   the parent (Ruby shallow-copy semantics); use {#copy} when an
-  #   independent owned array is required.
+  #   For views, `dup` / `clone` produce a new view sharing the parent
+  #   (Ruby shallow-copy semantics), so they do not copy. Don't use
+  #   them to copy a CArray; use {#copy}.
   #   @param other [CArray]
   #   @return [self]
   #   @api private
@@ -66,7 +66,7 @@ class CArray
     #   @return [Class]
     # @overload fixlen(*shape, bytes:) { ... }
     #   Equivalent to `CArray.new(:fixlen, shape, bytes: bytes) { ... }`.
-    #   The `bytes:` keyword is required for `:fixlen`.
+    #   The `bytes:` keyword is required for `:fixlen`, and is 1 or more.
     #   @param shape [Array<Integer>]
     #   @param bytes [Integer]
     #   @return [CArray]

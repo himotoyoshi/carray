@@ -152,6 +152,10 @@ folding onto duplicate coordinates, compute the flat addresses yourself
 - **Negative indices** wrap per axis (`-1` == last), the standard CArray
   rule.
 - **Out of range** on any axis raises `IndexError`.
+- **A masked coordinate** has no position: `gather_nd` answers `UNDEF`
+  for that tuple (for each cell of its sub-array when `K < ndim`), and
+  `put_nd` writes nothing there. A tuple is masked when any of its
+  coordinates is.
 - **`K`** (the last axis of the stacked form, or the length of the
   per-axis list) must satisfy `1 <= K <= self.ndim`.
 - The result is a freshly materialised CArray. Gather duplicates are

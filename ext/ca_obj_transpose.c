@@ -37,11 +37,11 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
   for (i = 0; i < ndim; i++) {
     idim = imap[i];
     if (idim < 0 || idim >= ndim) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "specified %i-th dimension number out of range", i);
     }
     if (map[idim] != -1) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "specified %i-th dimension number is duplicated", i);
     }
     map[idim] = i;
@@ -58,6 +58,12 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
     strides[i] = parent_byte_stride[imap[i]];
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_TRANSPOSE, parent,
                   parent->data_type, parent->bytes,
                   ndim, newdim, strides, 0);
@@ -67,7 +73,9 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
 CAStride *
 ca_trans_new (CArray *parent, ca_size_t *imap)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_TRANSPOSE, parent->ndim);
+  CAStride *ca;
+  ca_trans_setup(NULL, parent, imap);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_TRANSPOSE, parent->ndim);
   ca_trans_setup(ca, parent, imap);
   return ca;
 }
@@ -126,6 +134,7 @@ rb_ca_trans_initialize_copy (VALUE self, VALUE other)
 {
   CAStride *ca, *cs;
   TypedData_Get_Struct(self,  CAStride, &castride_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAStride, &castride_data_type, cs);
   if ( ca_func[CA_OBJ_TRANSPOSE].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TRANSPOSE, cs->ndim);

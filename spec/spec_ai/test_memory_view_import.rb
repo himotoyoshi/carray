@@ -93,6 +93,18 @@ class TestMemoryViewImport < Test::Unit::TestCase
     assert_true(ca2.read_only?)
   end
 
+  # Loading into a read-only wrap refuses before reading anything, so the
+  # producer's memory is left as it was.
+  def test_load_binary_into_readonly_wrap_leaves_the_source
+    require "stringio"
+    src = CArray.int32(3).seq.freeze
+    ca  = CArray.wrap_memory_view(src)
+    bytes = [9, 9, 9].pack("l*")
+    assert_raise(RuntimeError) { ca.load_binary(StringIO.new(bytes)) }
+    assert_raise(RuntimeError) { ca.load_binary(bytes) }
+    assert_equal [0, 1, 2], src.to_a
+  end
+
   def test_wrap_source_anchored_via_ivar
     ca = CArray.int32(100).seq
     ca2 = CArray.wrap_memory_view(ca)

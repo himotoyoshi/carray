@@ -598,7 +598,7 @@ cat.codes.value.refer(CA_INT8).to_a
 `CACategorical`'s surface is `CA_FIXLEN`, so raw arithmetic is refused:
 
 ```ruby
-cat + 1               # => RuntimeError (numeric ops gated)
+cat + 1               # => TypeError (numeric ops gated)
 ```
 
 Numeric operations on category codes are a category error — even if

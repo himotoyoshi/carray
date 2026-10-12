@@ -13,7 +13,67 @@ class CAFrame
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
     cat  = grouping_categorical(keys)
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
-    GroupedFrame.new(self, cat, axis, keys.grep(String))
+    key  = keys.size == 1 ? key_column(keys.first) : nil
+    GroupedFrame.new(self, cat, axis, keys.grep(String), key: key)
+  end
+
+  # Group rows into time bins of length +unit+ along the time column (or the
+  # time index) +name+, for the reductions GroupedFrame offers:
+  #
+  #   df.resample("time", "1 hour").mean
+  #   df.resample("time", "1 day", fill: true).aggregate("rain" => ["rain", :sum])
+  #
+  # The result's index is the bin labels as a CATime, in time order, and its
+  # row axis is named after +name+.
+  #
+  # +label: :left+ (the default) makes each bin start at its label and hold
+  # the times at or after it: [00:00, 01:00) is labelled 00:00. +label: :right+
+  # makes it end at its label and hold the times up to and including it:
+  # (00:00, 01:00] is labelled 01:00, the convention for a value that
+  # describes the hour before it. +origin:+ shifts the bins as +CATime#floor+
+  # does ("1 hour" with origin 00:30 gives 00:30, 01:30, ...).
+  #
+  # Without +fill:+, a bin with no rows does not appear. With +fill: true+
+  # every bin from the first to the last is a row, and an empty one reduces
+  # as an empty reduction does: UNDEF for +mean+, 0 for +count+ and +sum+.
+  # A row whose time is masked belongs to no bin.
+  #
+  # @param name [String] the time column, or the index's axis name.
+  # @param unit [String, Symbol, CATime::Resolution] the bin length.
+  # @param origin [nil, Time, String, CATime::Element] where bins start.
+  # @param label [:left, :right] which end of a bin names it and is closed.
+  # @param fill [Boolean] whether bins with no rows are rows of the result.
+  # @return [GroupedFrame]
+  # @raise [ArgumentError] when the column is not a CATime, or +label:+ is
+  #   neither :left nor :right.
+  def resample(name, unit, origin: nil, label: :left, fill: false)
+    name = name.to_s
+    time = column_or_index(name)
+    unless time.is_a?(CATime)
+      raise ArgumentError, "resample: #{name.inspect} is not a time column (got #{time.class})"
+    end
+    bins =
+      case label
+      when :left  then time.floor(unit: unit, origin: origin)
+      when :right then time.ceil(unit: unit, origin: origin)
+      else
+        raise ArgumentError, "resample: label: must be :left or :right (got #{label.inspect})"
+      end
+    grid = fill && bins.count_not_masked > 0 ? resample_grid(bins, unit) : bins.unique(sort: true)
+    cat = CACategorical.from_codes(bins.locate_addr(grid), grid.to_a)
+    GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [], index: grid)
+  end
+
+  # Every bin from the first occupied one to the last. A fixed-length bin
+  # steps from the first bin, so an origin's phase is kept; a month or a year
+  # cannot be stepped on a finer grid and is laid on its own unit, where
+  # bins start on the calendar boundary anyway.
+  private def resample_grid(bins, unit)
+    if %i[Y M].include?(CATime::Resolution.parse(unit).base)
+      CArray.time_range(bins.min, bins.max, unit: unit)
+    else
+      CArray.time_range(bins.min, bins.max, unit: bins.unit, step: unit)
+    end
   end
 
   # Number of rows currently selected — used by group per-group view-frames
@@ -24,34 +84,58 @@ class CAFrame
     if cols.size == 1
       cols.first.categorize
     else
-      # Composite key: one object cell per row holding the tuple of key
-      # values, categorized by content (the codes are composed from the
-      # per-column keys).
-      n = nrow
-      key = CArray.object(n) { |i| cols.map { |c| c[i] } }
-      # One undetermined component makes the whole tuple undetermined, the same
-      # answer a single masked key cell gets. Left as a value, the UNDEF inside
-      # the tuple would intern as an ordinary distinct key and the row would
-      # form a group of its own.
-      undetermined = CArray.boolean(n) { |i| key[i].any? { |v| UNDEF.equal?(v) } }
-      key[undetermined] = UNDEF if undetermined.any
-      key.categorize
+      composite_categorical(cols)
     end
   end
 
-  private def key_column(key)
-    case key
-    when String
-      self[key]
-    when CArray
-      unless key.shape[0] == nrow
-        raise ArgumentError,
-              "external group key length #{key.shape[0]} != nrow #{nrow}"
-      end
-      key
-    else
-      raise ArgumentError, "group key must be a column name or CArray (got #{key.class})"
+  # A composite key.  Each column is categorized on its own, so a component
+  # compares exactly as a single key does (NaN is one value, -0.0 is 0.0, a
+  # masked cell matches nothing); a row's group is then the tuple of its
+  # component codes, and a group's label the tuple of the component labels.
+  # One masked component leaves the row in no group, as a masked single key.
+  private def composite_categorical(cols)
+    cats  = cols.map(&:categorize)
+    sizes = cats.map { |c| c.labels.size }
+    tuple = if sizes.inject(1, :*) <= 2**62
+              cats.drop(1).inject(cats[0].codes.int64) { |acc, c| acc * c.labels.size + c.codes.int64 }
+            else
+              codes = cats.map(&:codes)
+              t = CArray.object(nrow) { |i| codes.map { |c| c[i] } }
+              nrow.times { |i| t[i] = UNDEF if t[i].any? { |x| UNDEF.equal?(x) } }
+              t
+            end
+    rows = tuple.categorize
+    labels = rows.labels.map do |code|
+      parts = code.is_a?(Array) ? code : sizes.reverse.map { |n| code, d = code.divmod(n); d }.reverse
+      parts.each_with_index.map { |d, j| cats[j].labels[d] }
     end
+    CACategorical.from_codes(rows.codes, labels)
+  end
+
+  # The column a group key names, checked: +verb+ is the method the caller
+  # called, for the messages.
+  private def key_column(key, verb = "group_by")
+    col = case key
+          when String
+            @columns.fetch(key) { raise KeyError, "#{verb}: no column #{key.inspect}" }
+          when CArray
+            unless key.shape[0] == nrow
+              raise ArgumentError,
+                    "#{verb}: the key has #{key.shape[0]} values for #{nrow} rows"
+            end
+            key
+          else
+            raise ArgumentError, "#{verb}: a group key is a column name or a CArray (got #{key.class})"
+          end
+    # A key gives each row one value.  An N-D one would be categorized cell
+    # by cell, making groups of cells rather than of rows.
+    unless col.ndim == 1
+      name = key.is_a?(String) ? "#{key.inspect} " : ""
+      raise ArgumentError,
+            "#{verb}: the key #{name}has shape #{col.shape.inspect}, not one value per row; " \
+            "group by one of its components (e.g. df[name][nil, 0])"
+    end
+    col
   end
 end
 
@@ -66,12 +150,21 @@ class GroupedFrame
   # +key_names+ are the frame columns the grouping was keyed on. They become
   # the result's index, so the reduction shortcuts must not also return them as
   # reduced columns; an external CArray key contributes no name.
-  def initialize(frame, cat, axis_name, key_names = [])
+  #
+  # The result's index is +index:+ when given (one entry per group, in code
+  # order); otherwise, for a single +key:+, the key's value at each group's
+  # first row, so it keeps the key's data type and Face; otherwise an object
+  # array of the labels (a composite key's tuples).
+  #
+  # The grouping and the index are taken here, so a later change to the key
+  # does not rename the groups; the values are read when a reduction is.
+  def initialize(frame, cat, axis_name, key_names = [], index: nil, key: nil)
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
     @key_names = key_names
     @labels    = cat.labels          # group values, in code order
+    @index     = index || (key && key.project(group_perm[group_bounds[0...ngroup]]))
   end
 
   # Number of groups.
@@ -92,16 +185,22 @@ class GroupedFrame
   # Declarative aggregation (memo §11.6). Spec maps an output column name to
   # +[input_column, reduction]+, where reduction is a Symbol (vectorized,
   # applied through the group iterator) or a Proc (per-group custom, called
-  # with the group's column slice).
+  # with the group's column slice). A Symbol reduction takes its arguments
+  # after it, as in a call: +["temp", :percentile, 90.0]+, and its keywords
+  # last: +["temp", :mean, min_count: 6]+.
   def aggregate(spec)
     cols = {}
-    spec.each do |out_name, (in_name, reduction)|
+    spec.each do |out_name, (in_name, reduction, *args)|
       out = out_name.to_s
+      options = args.last.is_a?(Hash) ? args.pop : {}
       cols[out] =
         case reduction
         when Symbol
-          self[in_name].public_send(reduction)
+          group_reduce(@frame[in_name], reduction, *args, **options)
         when Proc
+          unless args.empty? && options.empty?
+            raise ArgumentError, "aggregate: a Proc reduction takes no arguments (#{out.inspect})"
+          end
           per_group_column(in_name, reduction)
         else
           raise ArgumentError,
@@ -133,27 +232,36 @@ class GroupedFrame
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
   end
 
-  # Convenience reductions over every numeric scalar column (memo §6-4
-  # "grp.mean"). Non-numeric / N-D columns are skipped.
+  # Convenience reductions over every column that defines the reduction. A
+  # column is in the result when its type answers the reduction -- a time
+  # column has a mean, a minimum and a maximum but no sum, a string column a
+  # minimum and a maximum only -- and left out when it does not, as are the
+  # key columns. An N-D column is reduced along the rows, so each group keeps
+  # its trailing shape: a (N, L) column gives (groups, L). Each
+  # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
+  # with fewer than min_count present values is UNDEF, and fill_value fills
+  # the UNDEF cells.
   #
-  # @!method sum
-  #   Returns a frame of the per-group sum of every numeric one-dimensional
-  #   column. Non-numeric and multi-dimensional columns are left out.
+  # @!method sum(min_count: nil, fill_value: nil)
+  #   Returns a frame of the per-group sum of every column whose type has a
+  #   sum, an N-D one per group along the rows. Other columns are left out.
   #   @return [CAFrame] one row per group, indexed by the group labels.
-  # @!method mean
-  #   Returns a frame of the per-group arithmetic mean of every numeric
-  #   one-dimensional column, as {#sum} does.
+  # @!method mean(min_count: nil, fill_value: nil)
+  #   Returns a frame of the per-group mean of every column whose type has
+  #   a mean, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method min
-  #   Returns a frame of the per-group minimum of every numeric
-  #   one-dimensional column, as {#sum} does.
+  # @!method min(min_count: nil, fill_value: nil)
+  #   Returns a frame of the per-group minimum of every column whose type has
+  #   a minimum, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method max
-  #   Returns a frame of the per-group maximum of every numeric
-  #   one-dimensional column, as {#sum} does.
+  # @!method max(min_count: nil, fill_value: nil)
+  #   Returns a frame of the per-group maximum of every column whose type has
+  #   a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
-    define_method(red) { reduce_numeric(red) }
+    define_method(red) do |min_count: nil, fill_value: nil|
+      reduce_columns(red, min_count: min_count, fill_value: fill_value)
+    end
   end
 
   # @return [String]
@@ -161,26 +269,45 @@ class GroupedFrame
     "#<GroupedFrame ngroup=#{ngroup} by=#{@axis_name.inspect}>"
   end
 
+  # Each result gets its own index.
   private def label_index
+    return @index.copy if @index
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  NON_NUMERIC = [:object, :boolean, :fixlen].freeze
-  private_constant :NON_NUMERIC
-
-  private def reduce_numeric(reduction)
+  private def reduce_columns(reduction, **keywords)
     cols = {}
-    @frame.variable_names.each do |name|
-      # A key column is the index here, not a result column. Filtering it out
-      # by name rather than by data type is what makes a numeric key behave
-      # like a string one: NON_NUMERIC is about which columns a reduction can
-      # apply to, which happened to cover string keys and nothing else.
+    @frame.column_names.each do |name|
+      # A key column is the index here, not a result column.
       next if @key_names.include?(name)
       col = @frame[name]
-      next unless col.ndim == 1 && !NON_NUMERIC.include?(col.data_type)
-      cols[name] = col.group_by_category(@cat).public_send(reduction)
+      next unless answers?(col, reduction)
+      cols[name] = group_reduce(col, reduction, **keywords)
     end
     CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+  end
+
+  # A column's group reduction. An N-D column is reduced along the rows, so
+  # each group keeps the trailing shape: a profile column (N, L) gives (G, L).
+  private def group_reduce(col, reduction, *args, **keywords)
+    it = col.group_by_category(@cat)
+    if col.ndim > 1 && !keywords.key?(:axis)
+      it.public_send(reduction, *args, axis: 0, **keywords)
+    else
+      it.public_send(reduction, *args, **keywords)
+    end
+  end
+
+  # Whether the column's type defines the reduction, asked of the core on one
+  # cell of it so that the answer is about the type and not the data: a
+  # refusal there is the core saying the reduction does not apply, while an
+  # error in the grouped reduction itself is left to raise. A column with no
+  # rows is asked as it is: the refusal does not depend on the cells.
+  private def answers?(col, reduction)
+    (col.elements > 0 ? col[0..0] : col).public_send(reduction)
+    true
+  rescue CArray::DataTypeError, TypeError, ArgumentError
+    false
   end
 
   private def per_group_column(in_name, proc)
@@ -201,19 +328,18 @@ class GroupedFrame
   end
 
   private def group_address(k)
-    start = group_offsets[k]
-    group_perm[start...(start + group_sizes[k])]
+    group_perm[group_bounds[k]...group_bounds[k + 1]]
+  end
+
+  private def group_codes
+    @cat.codes
   end
 
   private def group_perm
     @group_perm ||= @cat.sort_addr
   end
 
-  private def group_offsets
-    @group_offsets ||= @cat.reduceat_index
-  end
-
-  private def group_sizes
-    @group_sizes ||= @cat.category_sizes
+  private def group_bounds
+    @group_bounds ||= CArray.segment_offsets(lengths: @cat.category_sizes)
   end
 end

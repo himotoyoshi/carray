@@ -12,6 +12,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 #include "ca_obj_face.h"
 #include <math.h>
 #include <float.h>
@@ -46,6 +47,83 @@ VALUE rb_ca_count_not_masked (int argc, VALUE *argv, VALUE self);
                                     cell; a short String query is padded
                                     out to the cell width) */
 
+static VALUE rb_ca_count (int argc, VALUE *argv, VALUE self);
+
+/* count(v: CArray): the per-cell counts, run with v attached. */
+
+typedef struct {
+  VALUE          self;
+  VALUE          rval;
+  CArray        *cv;
+  CArray        *cout;
+  ca_size_t      base_elements;
+  int            inner_argc;
+  VALUE         *inner_axes;
+  volatile VALUE opt_hash;
+} ca_count_each_ctx_t;
+
+static VALUE
+ca_count_each_body (VALUE arg)
+{
+  ca_count_each_ctx_t *c = (ca_count_each_ctx_t *) arg;
+  CArray    *cout = c->cout;
+  int64_t   *out_ptr = (int64_t *) cout->ptr;
+  boolean8_t *out_mask = NULL;
+  ca_size_t  v_elements = c->cv->elements;
+  ca_size_t  base_elements = c->base_elements;
+  /* inner_argv layout: [vk_scalar, axis..., axis..., [opt_hash]]
+     inner_call_argc = 1 (vk) + inner_argc (axes) + (opt_hash ? 1 : 0). */
+  int inner_call_argc = 1 + c->inner_argc + (NIL_P(c->opt_hash) ? 0 : 1);
+  VALUE inner_argv[CA_RANK_MAX + 2];
+  for (int j = 0; j < c->inner_argc; j++) inner_argv[1 + j] = c->inner_axes[j];
+  if ( ! NIL_P(c->opt_hash) ) inner_argv[1 + c->inner_argc] = c->opt_hash;
+
+  for (ca_size_t k = 0; k < v_elements; k++) {
+    /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
+       takes a ca_size_t addr (not a Ruby VALUE). */
+    VALUE vk = rb_ca_fetch_addr(c->rval, k);
+    inner_argv[0] = vk;
+    VALUE sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+
+    /* Place sub into output[..., k] slot.
+       Output stride for v-axis = 1, base stride = v_elements. */
+    if ( sub == CA_UNDEF ) {
+      if ( ! out_mask ) {
+        ca_create_mask(cout);
+        out_mask = (boolean8_t *) cout->mask->ptr;
+      }
+      for (ca_size_t i = 0; i < base_elements; i++) {
+        out_ptr[i * v_elements + k] = 0;
+        out_mask[i * v_elements + k] = 1;
+      }
+    } else if ( rb_obj_is_kind_of(sub, rb_cInteger) ) {
+      /* Full reduction: sub is a single integer. */
+      out_ptr[k] = NUM2LL(sub);
+    } else if ( rb_obj_is_kind_of(sub, rb_cCArray) ) {
+      CArray *csub;
+      GetCArray(sub, csub);
+      ca_attach(csub);   /* window: the inner count answered an entity; nothing raises inside */
+      int64_t *sub_ptr = (int64_t *) csub->ptr;
+      boolean8_t *sub_mask = (csub->mask) ? (boolean8_t *) csub->mask->ptr : NULL;
+      for (ca_size_t i = 0; i < base_elements; i++) {
+        out_ptr[i * v_elements + k] = sub_ptr[i];
+        if ( sub_mask && sub_mask[i] ) {
+          if ( ! out_mask ) {
+            ca_create_mask(cout);
+            out_mask = (boolean8_t *) cout->mask->ptr;
+          }
+          out_mask[i * v_elements + k] = 1;
+        }
+      }
+      ca_detach(csub);
+    } else {
+      rb_raise(rb_eRuntimeError,
+               "count(v: CArray): unexpected sub-result type");
+    }
+  }
+  return Qnil;
+}
+
 static VALUE
 rb_ca_count (int argc, VALUE *argv, VALUE self)
 {
@@ -57,10 +135,11 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
      ladder.  kwargs reach a -1 C method as a trailing options hash, so a
      bare `count(axis: k)` arrives as argc==1 with argv[0] a Hash; discount
      that trailing hash (same convention as the CArray-broadcast branch
-     below) before deciding there is no positional value.  argv is forwarded
-     verbatim so the axis: kwarg passes through. */
+     below) before deciding there is no positional value.  A Hash passed
+     positionally is the value to count.  argv is forwarded verbatim so the
+     axis: kwarg passes through. */
   {
-    int has_opts = ( argc >= 1 &&
+    int has_opts = ( argc >= 1 && rb_keyword_given_p() &&
                      rb_obj_is_kind_of(argv[argc - 1], rb_cHash) );
     if ( argc - (has_opts ? 1 : 0) < 1 ) {
       return rb_ca_count_not_masked(argc, argv, self);
@@ -78,43 +157,29 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
   /* Face gate, mirroring the search / linear family (ext/carray_order.c):
      descend an ORDERABLE Face to its storage so the equality runs on the
      numeric storage, and let the reference reconcile the query into its own
-     space -- a COMPARABLE Face compares directly (strip a Face query, take a
-     plain one as-is), a unit-bearing one calls its own to_comparable for any
-     query type (Face CArray, Element, Time, DateTime).  A Face that counts
+     space (ca_face_reconcile_operand).  A Face that counts
      by other means never arrives here: CACategorical / CAConstString define
      their own #count in Ruby.  Placed after the mask-state branches above,
      which read the mask the Face already shares with its storage, and before
      the broadcast branch, so a reconciled query array recurses as storage. */
   if ( ca_is_face(src) ) {
-    volatile VALUE self_ref = self;
     int query_was_scalar = ! rb_obj_is_carray(rval);
-    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      rb_raise(rb_eArgError,
-               "count(v): Face-typed input (%s) is not orderable by storage; "
-               "use ca.parent to count the raw storage",
-               rb_obj_classname(self));
+    if ( src->obj_type == CA_OBJ_RECORD && query_was_scalar ) {
+      /* A record is its bytes: a struct element counts as its encoding. */
+      rval = ca_face_element_to_storage(self, src, rval);
     }
-    if ( ca_test_flag(src, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
-      if ( ! query_was_scalar ) {
-        rval = ca_face_operand_descend(rval, "count(v)");
+    else {
+      if ( src->obj_type != CA_OBJ_RECORD
+           && ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+        ca_face_refuse_order("count(v)", self, "count");
       }
-    }
-    else if ( rb_respond_to(self_ref, rb_intern("to_comparable")) ) {
-      rval = rb_ca_strip_face_value(rb_funcall(self_ref,
-                                               rb_intern("to_comparable"),
-                                               1, rval));
-      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so a
-         scalar query still answers with a count rather than a length-1 array
-         from the broadcast branch below. */
+      rval = ca_face_reconcile_operand(self, rval, "count(v)");
+      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so
+         a scalar query still answers with a count rather than a length-1
+         array from the broadcast branch below. */
       if ( query_was_scalar && rb_obj_is_carray(rval) ) {
         rval = rb_ca_fetch_addr(rval, 0);
       }
-    }
-    else {
-      rb_raise(rb_eArgError,
-               "count(v): non-comparable Face (%s) has no to_comparable to "
-               "reconcile the query; use ca.parent to count the raw storage",
-               rb_obj_classname(self));
     }
     self = rb_ca_strip_face_value(self);
     GetCArray(self, src);
@@ -145,14 +210,26 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cv;
     GetCArray(rval, cv);
 
+    /* A query of a wider type than an integer array is counted in the type
+       the two share, as `eq` compares: each v[k] below is then a value of
+       that type, not one truncated to the array's. */
+    if ( ca_is_integer_type(src) &&
+         ( ca_is_integer_type(cv) || ca_is_float_type(cv) ) ) {
+      int8_t qt = ca_promote_type(src->data_type, cv->data_type);
+      if ( qt != src->data_type ) {
+        self = rb_ca_wrap_readonly(self, INT2NUM(qt));
+        GetCArray(self, src);
+      }
+    }
+
     /* Pop trailing options hash (min_count / fill_value) before axes
        parsing so parse_reduce_axes only sees Integer axes.  The opts
        are forwarded verbatim via inner_argv to the recursive count(). */
     int    inner_argc = argc - 1;
     VALUE *inner_axes = argv + 1;
     volatile VALUE opt_hash = Qnil;
-    if ( inner_argc > 0 && rb_obj_is_kind_of(inner_axes[inner_argc - 1],
-                                              rb_cHash) ) {
+    if ( inner_argc > 0 && rb_keyword_given_p() &&
+         rb_obj_is_kind_of(inner_axes[inner_argc - 1], rb_cHash) ) {
       opt_hash = inner_axes[inner_argc - 1];
       inner_argc--;
     }
@@ -199,64 +276,34 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cout;
     GetCArray(vout, cout);
 
-    /* Iterate v in flat order, call self.count(vk, *axes, **opts)
-       recursively, place result at output[..., k]. */
-    ca_attach(cv);
-    int64_t *out_ptr = (int64_t *) cout->ptr;
-    boolean8_t *out_mask = NULL;
-    ca_size_t v_elements = cv->elements;
-    /* inner_argv layout: [vk_scalar, axis..., axis..., [opt_hash]]
-       inner_call_argc = 1 (vk) + inner_argc (axes) + (opt_hash ? 1 : 0). */
-    int inner_call_argc = 1 + inner_argc + (NIL_P(opt_hash) ? 0 : 1);
-    VALUE inner_argv[CA_RANK_MAX + 2];
-    for (int j = 0; j < inner_argc; j++) inner_argv[1 + j] = inner_axes[j];
-    if ( ! NIL_P(opt_hash) ) inner_argv[1 + inner_argc] = opt_hash;
-
-    for (ca_size_t k = 0; k < v_elements; k++) {
-      /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
-         takes a ca_size_t addr (not a Ruby VALUE). */
-      VALUE vk = rb_ca_fetch_addr(rval, k);
-      inner_argv[0] = vk;
-      VALUE sub = rb_ca_count(inner_call_argc, inner_argv, self);
-
-      /* Place sub into output[..., k] slot.
-         Output stride for v-axis = 1, base stride = v_elements. */
-      if ( sub == CA_UNDEF ) {
-        if ( ! out_mask ) {
-          ca_create_mask(cout);
-          out_mask = (boolean8_t *) cout->mask->ptr;
-        }
-        for (ca_size_t i = 0; i < base_elements; i++) {
-          out_ptr[i * v_elements + k] = 0;
-          out_mask[i * v_elements + k] = 1;
-        }
-      } else if ( rb_obj_is_kind_of(sub, rb_cInteger) ) {
-        /* Full reduction: sub is a single integer. */
-        out_ptr[k] = NUM2LL(sub);
-      } else if ( rb_obj_is_kind_of(sub, rb_cCArray) ) {
-        CArray *csub;
-        GetCArray(sub, csub);
-        ca_attach(csub);
-        int64_t *sub_ptr = (int64_t *) csub->ptr;
-        boolean8_t *sub_mask = (csub->mask) ? (boolean8_t *) csub->mask->ptr : NULL;
-        for (ca_size_t i = 0; i < base_elements; i++) {
-          out_ptr[i * v_elements + k] = sub_ptr[i];
-          if ( sub_mask && sub_mask[i] ) {
-            if ( ! out_mask ) {
-              ca_create_mask(cout);
-              out_mask = (boolean8_t *) cout->mask->ptr;
-            }
-            out_mask[i * v_elements + k] = 1;
-          }
-        }
-        ca_detach(csub);
-      } else {
-        ca_detach(cv);
-        rb_raise(rb_eRuntimeError,
-                 "count(v: CArray): unexpected sub-result type");
-      }
+    /* The options are checked by the recursive count() below, which an
+       empty v never reaches: check them once with a stand-in query, so a
+       misspelt keyword raises whatever v holds. */
+    if ( cv->elements == 0 && ! NIL_P(opt_hash) &&
+         src->data_type != CA_FIXLEN ) {
+      VALUE probe_argv[CA_RANK_MAX + 2];
+      int   j;
+      probe_argv[0] = INT2FIX(0);
+      for (j = 0; j < inner_argc; j++) probe_argv[1 + j] = inner_axes[j];
+      probe_argv[1 + inner_argc] = opt_hash;
+      rb_ca_count(inner_argc + 2, probe_argv, self);
     }
-    ca_detach(cv);
+
+    /* Iterate v in flat order, call self.count(vk, *axes, **opts)
+       recursively, place result at output[..., k].  v is held attached
+       for the fetches while Ruby runs, so the loop is a window body. */
+    {
+      ca_count_each_ctx_t c;
+      c.self          = self;
+      c.rval          = rval;
+      c.cv            = cv;
+      c.cout          = cout;
+      c.base_elements = base_elements;
+      c.inner_argc    = inner_argc;
+      c.inner_axes    = inner_axes;
+      c.opt_hash      = opt_hash;
+      ca_attach_window(1, &cv, "r", ca_count_each_body, (VALUE) &c);
+    }
     return vout;
   }
 
@@ -293,6 +340,12 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eTypeError,
                "count(v) on numeric array: v must be numeric, got %s",
                rb_obj_classname(rval));
+    }
+    /* A Float query on an integer array is compared as a float, as `eq`
+       compares and `search` searches: 1.5 must not match 1.  An Integer
+       query keeps the array's type and is refused when it does not fit. */
+    if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
+      self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
     }
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);

@@ -98,6 +98,20 @@ class TestMkKernelTriop < Test::Unit::TestCase
   # fms  -- fused multiply-subtract
   # =================================================================
 
+  # float32 fma / fms round once, at float32 width.  a*b + c below lies
+  # just above a float32 midpoint; computing in double first lands on the
+  # midpoint and the second rounding goes to even (= 1 ulp low).
+  def test_fma_float32_rounds_once
+    a = CA_FLOAT32([1 + 2.0**-12])
+    c = CA_FLOAT32([2.0**-60])
+    assert_equal [1 + 2.0**-11 + 2.0**-23], a.fma(a, c).to_a
+    assert_equal [1 + 2.0**-11 + 2.0**-23], a.lazy.fma(a, c).to_ca.to_a
+    assert_equal [1 + 2.0**-11 + 2.0**-23], a.fms(a, -c).to_a
+    b = a.copy
+    b.fma!(a, c)
+    assert_equal [1 + 2.0**-11 + 2.0**-23], b.to_a
+  end
+
   def test_fms_float
     a = CA_FLOAT64([1.0, 2.0, 3.0])
     b = CA_FLOAT64([10.0, 20.0, 30.0])

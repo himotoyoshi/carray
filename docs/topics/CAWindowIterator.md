@@ -215,7 +215,7 @@ masked reduction path; `:nearest` and `:truncate` run on the plain unmasked
 | **Full-window-only** but keep the shape (edges undefined) | `:skip` + `min_count: <window size>` (`+ fill_value:`) | edges → `UNDEF` (or a fill) instead of a shorter fold |
 | **Zero-padded convolution** (image / FIR filters) | construct with `fill_value: 0.0`, then `correlate` / `convolve` | same result as the `:skip` default but ~20 % faster (unmasked 0-margin vs the masked path — a 0 tap and a skipped tap are equal in a sum) |
 | **Edge-extended convolution** | `bounds: :nearest`, then `correlate` / `convolve` | replicates the edge instead of zero |
-| **Median / percentile filter** | `bounds: :nearest` or `:truncate` | order statistics require an unmasked margin (`:skip` raises) |
+| **Median / percentile filter** | any; `:nearest` or `:truncate` for no masked cells | under `:skip` the margin is left out of each window, as for the other reductions |
 
 Rule of thumb: reach for `:skip` when the *renormalized* edge (dividing by the
 available cells) is what you mean; reach for `:nearest` / `:truncate` /

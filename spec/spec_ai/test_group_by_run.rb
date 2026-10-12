@@ -85,6 +85,6 @@ class TestGroupByRun < Test::Unit::TestCase
   end
 
   def test_2d_rejected
-    assert_raise(RuntimeError) { CArray.double(2, 3).group_by_run }
+    assert_raise(ArgumentError) { CArray.double(2, 3).group_by_run }
   end
 end

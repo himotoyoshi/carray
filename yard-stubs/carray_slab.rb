@@ -28,7 +28,8 @@ class CArray
   #   Returns a new CArray built by replacing each slab of `self` with the
   #   block's result.  The block receives the slab view and must return a
   #   value of the same shape as the slab (a CArray or scalar); the results
-  #   are written into the output at the same positions.
+  #   are written into the output at the same positions, and a masked
+  #   cell of the block's result is masked in the output.
   #   @param axis [Integer, Array<Integer>, nil] the slab axis or axes.
   #   @param data_type [Symbol, Integer, Class, nil] output data type
   #     (defaults to `self`'s data type).

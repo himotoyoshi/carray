@@ -101,6 +101,135 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A view whose cells are picked per axis (CAGrid, CASelectAxis, CAWindow)
+  # over a parent that is itself a view: the walk writes into the parent's
+  # attach buffer, which is the parent only for an entity, so the walk
+  # syncs it before letting go.  Only the axes along which these views
+  # take a write are walked (an index axis in the slab is refused).
+  DESCRIPTOR_OVER_VIEW = {
+    "grid of transpose"        => [->(b) { b.transpose[CA_SIZE([0, 2, 3]), nil] }, [1]],
+    "select_axis of transpose" => [->(b) { b.transpose[CA_BOOLEAN([1, 0, 1, 1]), nil] }, [1]],
+    "window of block"          => [->(b) { b[nil, 1..3].window(0..1, 0..1) }, [0, 1]],
+    "grid of fake"             => [->(b) { b.fake(:float64)[CA_SIZE([0, 2]), nil] }, [0, 1]],
+  }
+
+  def test_a_view_picking_cells_of_a_view_receives_the_write
+    DESCRIPTOR_OVER_VIEW.each do |name, (mk, axes)|
+      n = mk.call(base).elements
+      axes.each do |axis|
+        %i[iw_fiber_fill iw_slab_fill].each do |entry|
+          assert_equal n, cells_reached(mk, entry, axis), "#{name} #{entry} axis #{axis}"
+        end
+      end
+    end
+  end
+
+  # A shifted view walked with its shift axis outside the slab: the walk
+  # gathers the whole view, and has to scatter all of it back.
+  def test_a_shifted_view_receives_the_write_along_its_other_axis
+    {
+      "shift"     => [->(b) { b.shift(1, 0) }, 1],
+      "window"    => [->(b) { b.window(0..2, -1..2) }, 0],
+      "shift of transpose" => [->(b) { b.transpose.shift(1, 0) }, 1],
+    }.each do |name, (mk, axis)|
+      %i[iw_fiber_fill iw_slab_fill].each do |entry|
+        b = base
+        CArray.send(entry, mk.call(b), axis, -1.0)
+        want = base
+        mk.call(want)[] = -1.0
+        assert_equal want.to_a, b.to_a, "#{name} #{entry} axis #{axis}"
+      end
+    end
+  end
+
+  # The mask cursor of a READ walk is the walk's own copy: writing to it
+  # reaches nothing.  A CAStack walked along a parent's own axis used to
+  # hand out its parents' live masks.
+  def test_a_read_walks_mask_cursor_is_its_own
+    {
+      "entity" => ->(a, b) { a },
+      "stack"  => ->(a, b) { CArray.stack([a, b]) },
+    }.each do |name, mk|
+      a = base
+      a[2, 3] = UNDEF
+      b = base
+      b[2, 3] = UNDEF
+      src = mk.call(a, b)
+      (0...src.ndim).each do |axis|
+        assert_equal true, CArray.iw_read_poke_mask(src, axis), "#{name} axis #{axis}"
+        assert_equal [1, 1], [a.count_masked, b.count_masked], "#{name} axis #{axis}"
+      end
+    end
+  end
+
+  # next_slab_strided hands out the mask on every source the WHOLE walk
+  # takes; on an entity and a CAStride it used to give none.
+  def test_a_strided_walk_hands_out_the_mask
+    {
+      "entity"    => ->(b) { b },
+      "block"     => ->(b) { b[0..1, nil] },
+      "transpose" => ->(b) { b.transpose },
+      "select"    => ->(b) { b[CA_SIZE([0, 2]), nil] },
+    }.each do |name, mk|
+      b = base
+      b[0, 1] = UNDEF
+      v = mk.call(b)
+      want = v.is_masked.to_a.flatten.map { |x| x ? 1 : 0 }
+      assert_equal want, CArray.iw_strided_mask(v), name
+    end
+  end
+
+  # The INOUT forms refuse a pair of different shapes before walking.
+  def test_inout_refuses_a_shape_mismatch
+    a = CArray.float64(2, 3, 4).seq!
+    [CArray.float64(2, 4, 3), CArray.float64(2, 3, 5), CArray.float64(24)].each do |out|
+      before = out.to_a
+      assert_raise(ArgumentError) { CArray.iw_inout_copy(a, out, 0) }
+      assert_equal before, out.to_a
+    end
+    out = CArray.float64(2, 3, 4)
+    CArray.iw_inout_copy(a, out, 1)
+    assert_equal a.to_a, out.to_a
+  end
+
+  # The fiber a body leaves with `break` is written back, whether the
+  # walk hands out the destination's own memory or a gathered copy.
+  def test_the_fiber_left_with_break_is_written_back
+    [[->(b) { b }, 1], [->(b) { b }, 0], [->(b) { b.transpose }, 1],
+     [->(b) { b.fake(:float64) }, 0]].each do |mk, axis|
+      b = base
+      CArray.iw_fiber_fill_break(mk.call(b), axis, -1.0)
+      assert_equal mk.call(base).shape[axis],
+                   b.to_a.flatten.count(-1.0), "axis #{axis}"
+    end
+  end
+
+  # A view that holds a root cell more than once (a tile, an array stacked
+  # or melded with itself) is written as `[]=` writes it: the cells the
+  # kernel left alone are not sent back over the copy it did write.
+  def test_partial_write_through_a_view_that_repeats_cells
+    views = {
+      "tile"            => ->(b) { b.tile(2, 1) },
+      "tile of tr"      => ->(b) { b.transpose.tile(1, 2) },
+      "stack self"      => ->(b) { CArray.stack([b, b]) },
+      "stack self view" => ->(b) { CArray.stack([b, b.transpose.transpose]) },
+      "meld self"       => ->(b) { CArray.meld(b, b) },
+      "slice of tile"   => ->(b) { b.tile(2, 1)[1..4, nil] },
+    }
+    views.each do |label, mk|
+      mk.call(base).ndim.times do |axis|
+        b = base
+        CArray.iw_fiber_fill_break(mk.call(b), axis, -1.0)
+        r = base
+        v = mk.call(r)
+        n = v.shape[axis]
+        idx = Array.new(v.ndim, 0); idx[axis] = nil
+        v[*idx] = -1.0
+        assert_equal r.to_a, b.to_a, "#{label} axis #{axis}"
+      end
+    end
+  end
+
   def test_sound_readonly_destination_is_refused
     assert_equal 4, CArray.iw_init_rc(base.lazy + 1, 0, WRITE)
   end
@@ -140,6 +269,13 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 2, CArray.iw_init_rc(base[base.gt(0)], 1, WRITE), "1-D view, axis 1"
     assert_equal 3, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
+  end
+
+  # The header promises CA_ITER_ERR_FLAGS for a NULL source.
+  def test_null_source_is_refused
+    [[1, 0], [1, WRITE], [2, 0], [2, WRITE]].each do |level, flags|
+      assert_equal 3, CArray.iw_null_src_rc(level, flags), "L#{level} flags #{flags}"
+    end
   end
 
   def test_a_rejected_init_says_so

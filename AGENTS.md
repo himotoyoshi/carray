@@ -32,7 +32,7 @@ Most of these run without error, which is what makes them expensive.
 | to hand data to another library | `to_a` | MemoryView: `CArray.wrap_memory_view` / `CArray.from_memory_view` |
 | to work along an axis | a Ruby loop over cells | `each_slab`, `windows`, `blocks`, `group_by_category` |
 | a dataframe | pandas idioms; a Hash of arrays; copying defensively | `CAFrame`, in the core. `df.filter { \|f\| f["a"].gt(1) }` returns a frame of views, and writing into it reaches the original — pandas would have handed you a copy |
-| matrix products, decompositions, solving | reaching for `np.dot` / `np.linalg`, or writing it out by hand | not in the core — the carray-linalg gem (`CArray::Linalg.matmul`, `.solve`, `.svd`). The core stays free of a BLAS dependency on purpose |
+| matrix products, decompositions, solving | reaching for `np.dot` / `np.linalg`, or writing it out by hand | not in the core — the carray-linalg gem (`CA::Linalg.matmul`, `.solve`, `.svd`). The core stays free of a BLAS dependency on purpose |
 
 When a case is not listed, look it up before inventing a spelling:
 `docs/` for topic reference, `guides/devel/` for the developer's guide.

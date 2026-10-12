@@ -213,6 +213,57 @@ class AxisGroup
     end
   end
 
+  # The keywords a group reduction takes besides axis:.  Checked before the
+  # work, so an unknown keyword is refused rather than dropped.
+  REDUCE_KEYWORDS = [:axis, :min_count, :fill_value].freeze
+
+  # all / any take axis: only, as the core ones do.
+  LOGICAL_REDUCE_KEYWORDS = [:axis].freeze
+
+  def self.__check_reduce_keywords__ (op, kw)
+    allowed = [:all, :any].include?(op.to_sym) ? LOGICAL_REDUCE_KEYWORDS : REDUCE_KEYWORDS
+    unknown = kw.keys - allowed
+    unless unknown.empty?
+      raise ArgumentError,
+            "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+            unknown.map(&:inspect).join(", ")
+    end
+    CArray.__min_count_need__(op, kw[:min_count], 0)
+    nil
+  end
+
+  # A boolean array carrying value's mask: what a count reads, for a value
+  # whose payload the group kernel cannot read.
+  def self.__count_stand_in__ (value)
+    return value if value.boolean? || value.integer? || value.float?
+    stand_in = CArray.boolean(*value.shape)
+    stand_in.mask = value.mask if value.has_mask?
+    stand_in
+  end
+
+  # A count of the mask reads every cell of the group, as the core's does.
+  MASK_COUNTS = [:count, :count_not_masked, :count_masked].freeze
+
+  # min_count: masks a group with fewer contributing cells (present cells,
+  # or every cell for a count of the mask); fill_value: then fills the masked
+  # cells -- as a core reduction does with each.
+  def self.__finish_reduction__ (iter, op, kw, result)
+    need = CArray.__min_count_need__(op, kw[:min_count], 0)
+    if need > 0
+      counts = if MASK_COUNTS.include?(op.to_sym)
+                 iter.elements(axis: kw[:axis])
+               else
+                 iter.count_not_masked(axis: kw[:axis])
+               end
+      if result.is_a?(CArray)
+        result[counts.lt(need)] = UNDEF
+      elsif counts < need
+        result = UNDEF
+      end
+    end
+    CArray.__reduce_fill__(result, kw[:fill_value])
+  end
+
   # Parse an axis: spec into [has_group, fused_band_slot_positions].
   def self.parse_axis (axis)
     has_group = false
@@ -348,11 +399,9 @@ class CAGroupIterator
     end
     v = args.first
     return count_masked(**kw) if v.equal?(UNDEF)
-    # a masked cell equals nothing, and eq marks it UNDEF; drop that to false
-    # so it is simply not counted
-    hit = value.eq(v)
-    hit = hit.strip_mask(false) if hit.has_mask?
-    self.class.__build__(hit.int64, spec).sum(**kw).int64
+    # eq leaves a masked cell UNDEF, so the sum leaves it out and its
+    # min_count: counts the present cells, as the core count(v) does
+    self.class.__build__(value.eq(v).int64, spec).sum(**kw).int64
   end
 
   alias __all_folded__ all
@@ -383,7 +432,30 @@ class CAGroupIterator
 
   # Per-group count of value-masked cells = elements - count_not_masked.
   def count_masked (**kw)
-    elements(**kw) - count_not_masked(**kw)
+    has_group, = AxisGroup.parse_axis(kw[:axis])
+    return value.count_masked(**kw) unless has_group
+    AxisGroup.__check_reduce_keywords__(:count_masked, kw)
+    plain = { axis: kw[:axis] }
+    AxisGroup.__finish_reduction__(self, :count_masked, kw,
+                                   elements(**plain) - count_not_masked(**plain))
+  end
+
+  # The scatter kernel reads an integer or float payload, and answers there
+  # as the core does. Any other payload -- boolean, complex, object, a Face --
+  # is reduced group by group by the core, through the composite categorical,
+  # so the data type, the Face and a refusal are the core's: a boolean's sum
+  # is uint64, a time column's minimum a time, its sum refused.
+  [:sum, :accumulate, :prod, :mean, :min, :max,
+   :variance, :stddev, :variancep, :stddevp].each do |op|
+    alias_method :"__#{op}_by_kernel__", op
+    define_method(op) do |**kw|
+      has_group, = AxisGroup.parse_axis(kw[:axis])
+      if ! has_group || kernel_reads_value?
+        __send__(:"__#{op}_by_kernel__", **kw)
+      else
+        reduce_by_core(op, kw)
+      end
+    end
   end
 
   # Per-group [min, max] pair (matching CArray#minmax).
@@ -427,13 +499,21 @@ class CAGroupIterator
   # (no present pair) is UNDEF (matching CArray#wmean); a present group whose
   # weights sum to zero yields NaN/Inf (core's 0/0).
   def wmean (weights, **kw)
+    has_group, = AxisGroup.parse_axis(kw[:axis])
+    return value.wmean(weights, **kw) unless has_group
+    AxisGroup.__check_reduce_keywords__(:wmean, kw)
+    plain = { axis: kw[:axis] }
     prod = value * weights
-    num  = self.class.__build__(prod, spec).sum(**kw)
-    den  = self.class.__build__(value * 0 + weights, spec).sum(**kw)
-    cnt  = self.class.__build__(prod, spec).count_not_masked(**kw)
-    out  = num / den
-    out[cnt.eq(0)] = UNDEF          # no present pair -> masked (empty group)
-    out
+    num  = self.class.__build__(prod, spec).sum(**plain)
+    den  = self.class.__build__(value * 0 + weights, spec).sum(**plain)
+    cnt  = self.class.__build__(prod, spec).count_not_masked(**plain)
+    # No present pair is UNDEF (an empty group), set on the denominator so
+    # the division never meets an empty group's 0 / 0.
+    den  = den.copy
+    den[cnt.eq(0)] = UNDEF
+    # min_count: counts the present pairs, as the core wmean does.
+    pairs = self.class.__build__(prod, spec)
+    AxisGroup.__finish_reduction__(pairs, :wmean, kw, num / den)
   end
 
   # ---- segment scan: within-group running statistics ---------------------
@@ -569,12 +649,13 @@ class CAGroupIterator
     raise LocalJumpError, "no block given (yield)" unless block
     ccat, _kd, gslots, bslots, gaxes = composite_layout
     return value.group_by_category(ccat).map(data_type: data_type, &block) if bslots.empty?
-    dt  = data_type || value.data_type
-    out = CArray.new(dt, value.shape)
+    out = nil
     each_band_block(ccat, gslots, bslots, gaxes) do |val_idx, _oi, _co, gi|
-      out[*val_idx] = gi.map(data_type: dt, &block)
+      result = gi.map(data_type: data_type, &block)
+      out ||= blank_of(result, value.shape)
+      out[*val_idx] = result
     end
-    out
+    out || (data_type ? CArray.new(data_type, value.shape) : blank_of(value, value.shape))
   end
 
   # @overload reduce { |members| ... }
@@ -622,7 +703,7 @@ class CAGroupIterator
   # askable. Asking a one-cell array of the same data type lets the core's own
   # refusal through, unworded by us.
   def boolean_payload! (op)
-    CArray.new(value.data_type, [1]).public_send(op)
+    CArray.new(value.data_type, [1], bytes: value.bytes).public_send(op)
     nil
   end
 
@@ -696,8 +777,69 @@ class CAGroupIterator
             "axis_group scan: folding a band into a scan (axis: [:group, k]) " \
             "is not supported; a scan preserves the source shape"
     end
+    return scan_by_core(op) unless kernel_scans?(op)
     group_axes, bundles, = spec.reduce_plan([])
     value.__axis_group_scan__(group_axes, bundles, op)
+  end
+
+  # Whether the scatter kernels read this payload: an integer or a float,
+  # not a Face. They answer there in the core's data types.
+  def kernel_reads_value?
+    ! value.face? && (value.integer? || value.float?)
+  end
+
+  # Whether the scan kernel gives the core's answer: it reads an integer,
+  # float, boolean or object payload (not a complex, not a Face), and answers cumsum / cumprod in
+  # float64 (an object in object), cummax / cummin in the payload's data type
+  # and cumcount in int64 -- not the core's answer for a boolean's running sum.
+  def kernel_scans? (op)
+    return false if value.face? || value.complex?
+    return true if value.object? || op == :cumcount
+    core = CArray.new(value.data_type, [1], bytes: value.bytes).public_send(op).data_type
+    kernel = [:cumsum, :cumprod].include?(op) ? CA_FLOAT64 : value.data_type
+    core == kernel
+  end
+
+  # A scan the kernel does not answer as the core does: each group block is
+  # grouped through the composite categorical, whose scans are the core's.
+  def scan_by_core (op)
+    ccat, _kd, gslots, bslots, gaxes = composite_layout
+    return value.group_by_category(ccat).public_send(op) if bslots.empty?
+    out = nil
+    each_band_block(ccat, gslots, bslots, gaxes) do |val_idx, _oi, _co, gi|
+      result = gi.public_send(op)
+      out ||= blank_of(result, value.shape)
+      out[*val_idx] = result
+    end
+    out || blank_of(value, value.shape)
+  end
+
+  # A reduction of a payload the scatter kernel does not read, group by
+  # group through the composite categorical. Folding a band into the
+  # statistic needs the kernel.
+  def reduce_by_core (op, kw)
+    _, fused = AxisGroup.parse_axis(kw[:axis])
+    unless fused.empty?
+      raise ArgumentError,
+            "axis_group #{op}: folding a band into the statistic " \
+            "(axis: [:group, k]) is not supported for a #{value.class} of " \
+            "data type #{value.data_type_name}"
+    end
+    AxisGroup.__check_reduce_keywords__(op, kw)
+    AxisGroup.__finish_reduction__(self, op, kw, composite_order(op, []))
+  end
+
+  # An array of +shape+ of the same kind as +model+ -- its data type, or its
+  # Face -- with every cell UNDEF. A read-only Face cannot be written cell by
+  # cell, so its values are held in an object array.
+  def blank_of (model, shape)
+    out = if model.face? && model.read_only?
+            CArray.new(CA_OBJECT, shape)
+          else
+            model.__send__(:__blank_like__, shape)
+          end
+    out[] = UNDEF
+    out
   end
 
   # Dispatch an order statistic (median / percentile / quantile). No :group ->
@@ -707,13 +849,19 @@ class CAGroupIterator
   # operation, and remains a follow-up.
   def order_stat (op, args, kw)
     has_group, fused = AxisGroup.parse_axis(kw[:axis])
-    return value.public_send(op, *args) unless has_group
+    return value.public_send(op, *args, **kw) unless has_group
     unless fused.empty?
       raise NotImplementedError,
             "axis_group: folding a band into an order statistic (axis: [:group, k]) " \
             "is not supported; order statistics gather every member of a group"
     end
-    composite_order(op, args)
+    AxisGroup.__check_reduce_keywords__(op, kw)
+    res = composite_order(op, args)
+    if op == :quantile
+      res.map { |r| AxisGroup.__finish_reduction__(self, op, kw, r) }
+    else
+      AxisGroup.__finish_reduction__(self, op, kw, res)
+    end
   end
 
   # Per-group order statistic over the composite grouping. A flat grouping (no
@@ -732,15 +880,15 @@ class CAGroupIterator
       return nout == 1 ? res.reshape(*kdims) : res.map { |r| r.reshape(*kdims) }
     end
     out_shape = spec.slot_meta.map { |m| m[:kind] == :group ? m[:k] : m[:len] }
-    outs = Array.new(nout) { CArray.float64(*out_shape) }
+    outs = nil
     each_band_block(ccat, gslots, bslots, gaxes) do |_vi, out_idx, _co, gi|
-      result = gi.public_send(op, *args)
-      if nout == 1
-        outs[0][*out_idx] = result.reshape(*kdims)
-      else
-        result.each_with_index { |r, q| outs[q][*out_idx] = r.reshape(*kdims) }
-      end
+      results = gi.public_send(op, *args)
+      results = [results] unless results.is_a?(Array)    # quantile answers five
+      # each output takes the kind the categorical answered in
+      outs ||= results.map { |r| blank_of(r, out_shape) }
+      results.each_with_index { |r, q| outs[q][*out_idx] = r.reshape(*kdims) }
     end
+    outs ||= Array.new(nout) { blank_of(value, out_shape) }
     nout == 1 ? outs[0] : outs
   end
 

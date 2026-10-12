@@ -14,7 +14,8 @@
 #   ORDERABLE_STORAGE (commit 1): storage native order == surface order.
 #     Faces that declare it (CATime / CATimedelta) may descend to
 #     storage for the sort family (sort_addr / sort_index / partition /
-#     rank).  Non-orderable Faces (CARecord, exotic user Faces) still raise.
+#     rank).  Non-orderable Faces (exotic user Faces) still raise; a
+#     CARecord orders by its struct's order_by: members (record_order.rb).
 #
 #   COMPARABLE_STORAGE + to_comparable (commit 2): external query may be
 #     compared against storage.  Governs the search family.
@@ -45,10 +46,12 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     CArray.int64(5) { |i| [3, 1, 4, 1, 5].to_a[i] * 1000 }.timedelta(unit: :ms)
   end
 
-  # CARecord over a struct: fixlen storage, so the sort family descends to
-  # the fixlen bytes and orders by memcmp (the default for fixlen storage).
-  def rec_ref
-    s = CArray.struct(pack: 1) { uint16 :h; uint32 :p }
+  # CARecord over a struct that declares its order: by h, then p.  Without
+  # order_by: a record array has no order (the bytes are none).
+  def rec_ref (order_by: [:h, :p])
+    opt = { pack: 1 }
+    opt[:order_by] = order_by if order_by
+    s = CArray.struct(opt) { uint16 :h; uint32 :p }
     rs = CARecord.new(s, 4)
     rs[0] = s.new(h: 3, p: 10)
     rs[1] = s.new(h: 1, p: 20)
@@ -133,26 +136,34 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     assert_equal (0..23).to_a, idx.to_a
   end
 
-  # ----- fixlen Face sorts by memcmp (default for fixlen storage) ----
+  # ----- a record array sorts by the members its struct declares ----
 
-  def test_sort_index_on_fixlen_face_is_memcmp
-    # rec_ref packs {uint16 h; uint32 p}; memcmp orders big-endian-agnostic
-    # by the raw bytes.  h = [3,1,2,1], p = [10,20,30,5]; the two h=1 rows
-    # tie-break on p (20 vs 5), so 3 (p=5) precedes 1 (p=20).
+  def test_sort_index_on_a_record_follows_order_by
+    # h = [3,1,2,1], p = [10,20,30,5]; the two h=1 rows tie-break on p
+    # (20 vs 5), so 3 (p=5) precedes 1 (p=20).
     idx = rec_ref.sort_index
     assert_kind_of CArray, idx
     refute rec_ref.class == idx.class          # index is plain, not a Face
     assert_equal [3, 1, 2, 0], idx.to_a
-  end
-
-  def test_sort_addr_on_fixlen_face_is_memcmp
     assert_equal [3, 1, 2, 0], rec_ref.sort_addr.to_a
   end
 
-  def test_partition_index_on_fixlen_face_works
+  def test_order_by_names_the_member_order
+    # by p alone: 5, 10, 20, 30
+    assert_equal [3, 0, 1, 2], rec_ref(order_by: [:p]).sort_index.to_a
+  end
+
+  def test_partition_index_on_a_record_works
     idx = rec_ref.partition_index(1)
     assert_kind_of CArray, idx
     assert_equal (0..3).to_a, idx.to_a.sort   # a valid permutation
+  end
+
+  def test_a_record_without_order_by_has_no_order
+    r = rec_ref(order_by: nil)
+    assert_raise(ArgumentError) { r.sort_index }
+    assert_raise(ArgumentError) { r.sort_addr }
+    assert_raise(ArgumentError) { r.partition_index(1) }
   end
 
   # ----- non-orderable NUMERIC Face still rejects sort family --------

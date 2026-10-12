@@ -177,4 +177,9 @@ class TestFlip < Test::Unit::TestCase
     a = CArray.float64(4, 5)
     assert_raise(ArgumentError) { a.flip(0, foo: 1) }
   end
+
+  def test_nil_is_the_same_as_no_axis
+    a = CArray.float64(4, 5).seq
+    assert_equal a.flip.to_a, a.flip(nil).to_a
+  end
 end

@@ -115,14 +115,12 @@ class TestACABitarrayBulkPath < Test::Unit::TestCase
 
   # ---- Mask path regression preservation (= §5.C / §6.4) ----
 
-  def test_bitarray_with_masked_parent_preserves_mask_semantics
+  # A bit view takes no masked array (its bits would share one mask per
+  # byte), so the masked path is refused before any transfer.
+  def test_bitarray_with_masked_parent_is_refused
     parent = CArray.uint8(8) { 0xFF }
     parent[3] = UNDEF
-    v = parent.bitarray
-    # to_ca via masked path should match xfer_all and xfer_addrs whole-view
-    bytes_all  = CArray.bench_xfer_all_get(v, 1)
-    bytes_addr = CArray.bench_xfer_addrs_get(v, 1)
-    assert_equal bytes_all, bytes_addr
+    assert_raise(ArgumentError) { parent.bitarray }
   end
 
   # ---- Cross-path consistency: xfer_all == xfer_stride == xfer_addrs ----

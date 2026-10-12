@@ -57,14 +57,16 @@ class TestCAConstStringOrdering < Test::Unit::TestCase
 
   def test_addresses_and_indices
     assert_equal [[1, 2], [3, 0]], @cs.sort_addr.to_a
-    assert_equal [[1, 0], [0, 1]], @cs.sort_index.to_a
-    assert_equal [[1, 0], [0, 1]], @cs.rank_index.to_a
+    assert_equal [1, 2, 3, 0], @cs.sort_index.to_a
+    assert_equal [[3, 0], [1, 2]], @cs.rank_index.to_a
+    assert_equal [[1, 0], [0, 1]], @cs.sort_index(axis: 0).to_a
+    assert_equal [[1, 0], [0, 1]], @cs.rank_index(axis: 0).to_a
     assert_equal [[3, 0], [1, 2]], @cs.order.to_a
   end
 
   def test_partition
-    assert_equal [["fig", "apple"], ["pear", "kiwi"]], @cs.partition_copy(1).to_a
-    assert_equal [[1, 0], [0, 1]], @cs.partition_index(1).to_a
+    assert_equal [["fig", "apple"], ["pear", "kiwi"]], @cs.partition_copy(1, axis: 0).to_a
+    assert_equal [[1, 0], [0, 1]], @cs.partition_index(1, axis: 0).to_a
   end
 
   # ---------------- and the same as reading the strings ----------------
@@ -155,7 +157,7 @@ class TestCAConstStringOrdering < Test::Unit::TestCase
 
   def test_an_n_dimensional_result_keeps_its_shape
     assert_equal [2, 2], @cs.to_string.to_const_string.shape
-    assert_equal [2, 2], @cs.partition_copy(1).shape
+    assert_equal [2, 2], @cs.partition_copy(1, axis: 0).shape
   end
 
 end

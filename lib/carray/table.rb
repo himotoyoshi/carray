@@ -16,7 +16,7 @@ class CArray
     #   are silently ignored.
     #   @param list [Array<Symbol, String>, nil] column names.
     #   @return [Array<Symbol, String>, nil] the assigned list.
-    #   @raise [RuntimeError] when `list.size != dim1`.
+    #   @raise [ArgumentError] when `list.size != dim1`.
     def column_names= (list)
       if self.empty?
         return
@@ -25,7 +25,7 @@ class CArray
       elsif list.empty? 
         return
       elsif list and list.size != dim1
-        raise "column_names list size is invalid (#{list.size} <=> #{dim1} )"
+        raise ArgumentError, "column_names list size is invalid (#{list.size} <=> #{dim1} )"
       else
         @column_names = list
       end

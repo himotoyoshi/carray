@@ -107,7 +107,10 @@ class TestDiscoveryFaceGate < Test::Unit::TestCase
     assert_equal [false, true, false], d.is_in(h).to_a
     assert_equal [19724],              d.intersection(h).parent.to_a
     assert_equal [19723, 19725],       d.difference(h).parent.to_a
-    assert_equal [19723, 19724, 19725, 19727], d.union(h).parent.to_a
+    # The union holds h's values too, so it is in the finer unit, h.
+    u = d.union(h)
+    assert_equal "h", u.unit.to_s
+    assert_equal [473352, 473376, 473400, 473448], u.parent.to_a
   end
 
   def test_cross_unit_locate_addr_uses_the_reference_as_the_reference

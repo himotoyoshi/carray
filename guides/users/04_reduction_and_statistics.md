@@ -31,6 +31,13 @@ a.stddev       #  => 2.581988897471611
 a.stddevp      #  => 2.23606797749979
 ```
 
+A single value has no sample variance, since one less than the count is zero: `variance` and `stddev` answer `UNDEF` there, while the population pair answers `0.0`.
+
+```ruby
+CA_DOUBLE([3]).variance    #  => UNDEF
+CA_DOUBLE([3]).variancep   #  => 0.0
+```
+
 ## The type of the answer
 
 Most reductions answer in `float64` whatever the array's own type is. That is why the results above print with a `.0`, and it holds for integer input too: the sum of an `int32` array is a Float, not an Integer. A total does not fit in the type of the things being totalled — widening is what keeps it from wrapping. `min` and `max` are the exceptions, since the answer is one of the elements and comes back in the array's own type.

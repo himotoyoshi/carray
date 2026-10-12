@@ -47,13 +47,13 @@ class TestReshapeMinusOnePlaceholder < Test::Unit::TestCase
 
   def test_two_minus_one_raises
     a = CArray.int32(12).seq
-    assert_raise(RuntimeError) { a.reshape(-1, -1) }
+    assert_raise(ArgumentError) { a.reshape(-1, -1) }
   end
 
   def test_unresolvable_minus_one_raises
     a = CArray.int32(12).seq  # 12 elements
     # 5 * x = 12 has no integer solution.
-    assert_raise(RuntimeError) { a.reshape(5, -1) }
+    assert_raise(ArgumentError) { a.reshape(5, -1) }
   end
 
   def test_view_shares_data

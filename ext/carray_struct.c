@@ -16,7 +16,8 @@
                             (primitive / bitfield / endian-swap)
     DISPATCH_TABLE hit   -> Proc invoked via rb_funcall("call")
                             (nested struct / CArray template / fixlen)
-    miss                 -> send(name) / send(name=)
+    a Symbol, or a name that is not a member, raises: a member is
+    s["name"] or s[position], and its accessor s.name
 
 ---------------------------------------------------------------------------- */
 
@@ -54,7 +55,7 @@ ca_struct_read_primitive_fast (const char *p, int type_code)
   case CA_BOOLEAN: {
     int8_t v;
     memcpy(&v, p, 1);
-    return v ? INT2FIX(1) : INT2FIX(0);
+    return v ? Qtrue : Qfalse;
   }
   case CA_INT8: {
     int8_t v;
@@ -116,7 +117,15 @@ ca_struct_write_primitive_fast (char *p, int type_code, VALUE val)
 {
   switch (type_code) {
   case CA_BOOLEAN: {
-    int8_t v = RTEST(val) && val != INT2FIX(0) ? 1 : 0;
+    /* The values a boolean array takes: true / false / 1 / 0. */
+    int8_t v;
+    if      ( val == Qtrue  || val == INT2FIX(1) ) v = 1;
+    else if ( val == Qfalse || val == INT2FIX(0) ) v = 0;
+    else {
+      rb_raise(rb_eCADataTypeError,
+               "can't cast object '%"PRIsVALUE"' to <boolean>",
+               rb_inspect(val));
+    }
     memcpy(p, &v, 1);
     return;
   }
@@ -201,8 +210,10 @@ ca_struct_read_bitfield_fast (const char *p, int view_bytes,
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   uint64_t val  = (word >> bit_in_word) & mask;
-  /* Returned as an unsigned Integer; bit-fields don't carry a sign
+  /* A 1-bit field is a boolean, as a record array's column of it is.
+     Wider fields are unsigned Integers; bit-fields don't carry a sign
      bit in carray's CABitfield convention either. */
+  if (bits == 1) return val ? Qtrue : Qfalse;
   if (bits <= 31) return INT2FIX((long) val);
   if (bits <= 32) return ULONG2NUM((unsigned long) val);
   return ULL2NUM(val);
@@ -212,7 +223,19 @@ static void
 ca_struct_write_bitfield_fast (char *p, int view_bytes,
                                int bit_in_word, int bits, VALUE val)
 {
-  uint64_t v    = NUM2ULL(val);
+  uint64_t v;
+  if ( bits == 1 ) {
+    if      ( val == Qtrue  || val == INT2FIX(1) ) v = 1;
+    else if ( val == Qfalse || val == INT2FIX(0) ) v = 0;
+    else {
+      rb_raise(rb_eCADataTypeError,
+               "can't cast object '%"PRIsVALUE"' to <boolean>",
+               rb_inspect(val));
+    }
+  }
+  else {
+    v = NUM2ULL(val);
+  }
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   v &= mask;
@@ -384,6 +407,45 @@ ca_struct_resolve_name (VALUE klass, VALUE name)
   return rb_funcall(name, rb_intern("to_s"), 0);
 }
 
+/* The member an element's `[]` / `[]=` names: a String naming a member,
+   or an Integer position.  A Symbol is not a member name here -- the
+   member is s["name"] or the accessor s.name -- and a name that is not a
+   member raises rather than calling a method of that name. */
+static VALUE
+ca_struct_member_name (VALUE klass, VALUE name)
+{
+  VALUE name_s;
+  if ( SYMBOL_P(name) ) {
+    VALUE str = rb_sym2str(name);
+    if ( ! NIL_P(rb_hash_aref(rb_const_get(klass, rb_intern("MEMBER_TABLE")),
+                              str)) ) {
+      rb_raise(rb_eTypeError,
+               "a struct member is named by a String (s[\"%"PRIsVALUE"\"]) or "
+               "read by its accessor (s.%"PRIsVALUE"), not by a Symbol",
+               str, str);
+    }
+    rb_raise(rb_eTypeError,
+             "a struct member is named by a String, not by a Symbol "
+             "(%"PRIsVALUE" has no member %"PRIsVALUE" either)",
+             klass, rb_inspect(str));
+  }
+  if ( ! RB_TYPE_P(name, T_STRING) && ! RB_TYPE_P(name, T_FIXNUM) ) {
+    rb_raise(rb_eTypeError,
+             "a struct member is named by a String or an Integer position "
+             "(got %s)", rb_obj_classname(name));
+  }
+  name_s = ca_struct_resolve_name(klass, name);
+  if ( NIL_P(name_s)
+       || NIL_P(rb_hash_aref(rb_const_get(klass, rb_intern("MEMBER_TABLE")),
+                             name_s)) ) {
+    rb_raise(rb_eArgError, "%"PRIsVALUE" has no member %"PRIsVALUE
+             " (members: %"PRIsVALUE")",
+             klass, rb_inspect(name),
+             rb_inspect(rb_const_get(klass, rb_intern("MEMBERS"))));
+  }
+  return name_s;
+}
+
 /* ---------------------------------------------------------------------
    Shared write-dispatch helper reused by `[]=` and `initialize`.
    Returns 1 if the member was written, 0 if neither table contained
@@ -446,7 +508,7 @@ static VALUE
 rb_ca_struct_aref (VALUE self, VALUE name)
 {
   VALUE klass = rb_obj_class(self);
-  VALUE name_s = ca_struct_resolve_name(klass, name);
+  VALUE name_s = ca_struct_member_name(klass, name);
 
   /* Fast path.  FAST_PRIMITIVES may be absent on subclasses built
      outside Builder — fall through to the dispatch table in that
@@ -454,12 +516,14 @@ rb_ca_struct_aref (VALUE self, VALUE name)
   if (rb_const_defined(klass, rb_intern("FAST_PRIMITIVES"))) {
     VALUE fast_table = rb_const_get(klass, rb_intern("FAST_PRIMITIVES"));
     VALUE entry = rb_hash_aref(fast_table, name_s);
-    if (!NIL_P(entry)) {
+    VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
+    CArray *ca;
+    TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
+    /* The fast path reads ca->ptr, which only an entity holds.  A nested
+       element's @data is a view on its parent's bytes and goes through the
+       dispatch procs below, which reach them through field views. */
+    if (!NIL_P(entry) && ca_is_entity(ca)) {
       int kind = NUM2INT(rb_ary_entry(entry, 0));
-      VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
-      CArray *ca;
-      TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
-      /* @data is a CScalar entity, so ca->ptr is always valid. */
       switch (kind) {
       case FAST_KIND_PRIMITIVE: {
         /* [kind, offset, type_code] */
@@ -502,8 +566,9 @@ rb_ca_struct_aref (VALUE self, VALUE name)
     return rb_funcall(reader, rb_intern("call"), 1, data_val);
   }
 
-  /* Unknown name: fall back to send(name) for computed members. */
-  return rb_funcall(self, rb_to_id(name), 0);
+  rb_raise(rb_eArgError, "%"PRIsVALUE" has no reader for member %"PRIsVALUE,
+           klass, name_s);
+  return Qnil;
 }
 
 /* ---------------------------------------------------------------------
@@ -514,18 +579,31 @@ static VALUE
 rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
 {
   VALUE klass = rb_obj_class(self);
-  VALUE name_s = ca_struct_resolve_name(klass, name);
+  VALUE name_s;
+
+  /* The fast path writes into the record's bytes directly. */
+  rb_check_frozen(self);
+  name_s = ca_struct_member_name(klass, name);
+
+  /* An element is one record of values: it has no mask to hold UNDEF.  A
+     record is masked in its record array (a[i] = UNDEF). */
+  if ( val == CA_UNDEF ) {
+    rb_raise(rb_eTypeError,
+             "a struct element has no masked state; mask the record in its "
+             "record array instead");
+  }
 
   /* Fast path (see rb_ca_struct_aref for the absent-FAST_PRIMITIVES
      rationale and entry-shape contract). */
   if (rb_const_defined(klass, rb_intern("FAST_PRIMITIVES"))) {
     VALUE fast_table = rb_const_get(klass, rb_intern("FAST_PRIMITIVES"));
     VALUE entry = rb_hash_aref(fast_table, name_s);
-    if (!NIL_P(entry)) {
+    VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
+    CArray *ca;
+    TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
+    /* Only an entity @data is written through ca->ptr (see the reader). */
+    if (!NIL_P(entry) && ca_is_entity(ca)) {
       int kind = NUM2INT(rb_ary_entry(entry, 0));
-      VALUE data_val = rb_ivar_get(self, rb_intern("@data"));
-      CArray *ca;
-      TypedData_Get_Struct(data_val, CArray, &carray_data_type, ca);
       switch (kind) {
       case FAST_KIND_PRIMITIVE: {
         ca_size_t offset    = NUM2SIZE(rb_ary_entry(entry, 1));
@@ -565,9 +643,9 @@ rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
     return val;
   }
 
-  /* Unknown name: fall back to send("name=", val). */
-  VALUE setter_name = rb_str_plus(rb_obj_as_string(name), rb_str_new_cstr("="));
-  return rb_funcall(self, rb_intern_str(setter_name), 1, val);
+  rb_raise(rb_eArgError, "%"PRIsVALUE" has no writer for member %"PRIsVALUE,
+           klass, name_s);
+  return Qnil;
 }
 
 /* ---------------------------------------------------------------------

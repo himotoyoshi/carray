@@ -48,7 +48,7 @@ Two failure classes at the boundary:
   fixed-width portable representation — see §18a.7) and for a `data_class`
   the v1.0 flat-primitive schema cannot express (bitfield members, nested
   records, fixlen/CArray-template members).
-- `load` raises `RuntimeError` on a bad magic, an unsupported version, or a
+- `load` raises `ArgumentError` on a bad magic, an unsupported version, or a
   failed corruption cross-check (`endian_marker`, `data_bytes`).
 
 ## 18a.2 File structure
@@ -151,6 +151,12 @@ raw writer without materialising a swapped copy. On the read side, `load`
 detects the file order and swaps header integers and data elements into the
 host order when they differ. The int8 mask is byte-order neutral and is
 never swapped.
+
+A record member declared with `endian:` is the one exception to
+single-endian data: its bytes are in the declared order on every machine and
+in every file, so neither the writer nor the reader swaps it. A record with
+such a member is swapped into a copy (the swap view, then the declared
+members copied back), not streamed through the view.
 
 ## 18a.4 Data type codes
 

@@ -186,10 +186,38 @@ class TestClipDualFill < Test::Unit::TestCase
     assert_equal 99.0, result[4]
   end
 
+  # The side given no fill still clamps.
   def test_lfill_only
     a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
-    result = a.clip(0, 2, lfill: -9)
-    assert_equal [-9.0, 0.0, 1.0, 2.0, 3.0], result.to_a
+    assert_equal [-9.0, 0.0, 1.0, 2.0, 2.0], a.clip(0, 2, lfill: -9).to_a
+    assert_equal [0.0, 0.0, 1.0, 2.0, 99.0], a.clip(0, 2, ufill: 99).to_a
+    assert_equal [UNDEF, 0.0, 1.0, 2.0, 2.0], a.clip(0, 2, lfill: UNDEF).to_a
+  end
+
+  def test_min_above_max_raises
+    a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
+    assert_raise(ArgumentError) { a.clip(2, 0) }
+    assert_raise(ArgumentError) { a.clip(2, 0, -1) }
+    assert_raise(ArgumentError) { CA_INT32([1, 2]).clip(2, 0) }
+    assert_raise(ArgumentError) { CA_OBJECT([1, 2]).clip(2, 0) }
+    assert_raise(ArgumentError) { a.lazy.clip(2, 0) }
+    assert_raise(ArgumentError) { a.clip(CA_FLOAT64([0, 0, 0, 0, 3]), 2) }
+    assert_equal [1.0, 1.0, 1.0, 1.0, 1.0], a.clip(1, 1).to_a
+  end
+
+  # A cell is checked only where both bounds are present.
+  def test_min_above_max_skips_masked_bound
+    lo = CA_FLOAT64([0, 0, 0, 0, 9]); lo[4] = UNDEF
+    a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
+    assert_equal [0.0, 0.0, 1.0, 2.0, UNDEF], a.clip(lo, 2).to_a
+  end
+
+  # A NaN bound bounds nothing, in a scalar and in a cell.
+  def test_nan_bound_bounds_nothing
+    a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
+    assert_equal [-1.0, 0.0, 1.0, 2.0, 2.0], a.clip(Float::NAN, 2).to_a
+    lo = CA_FLOAT64([0, Float::NAN, 0, 0, 0])
+    assert_equal [0.0, 0.0, 1.0, 2.0, 2.0], a.clip(lo, 2).to_a
   end
 
   def test_no_bound_raises

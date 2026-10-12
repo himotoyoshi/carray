@@ -6,11 +6,9 @@
 #     removed; per-slab block scalar return; per-element fiber inject
 #   - mask transparent carry (= same plumbing as data side, inherited
 #     from β.xb)
-#   - Restriction: ALIAS mode only AND slab must be row-major contig in
-#     src memory (= innermost K axes of contig source, or equivalent).
-#     Non-contig multi-axis slabs raise NotImplementedError (β.xc')
-#   - map_slab multi-axis: still raises NotImplementedError (= WRITE-side
-#     scatter for K-D output is deferred)
+#   - Any source and any axes: a slab that is not contiguous in the
+#     source's own buffer is gathered into the iterator's scratch
+#     (test_slab_iter_view_source.rb walks every kind of source)
 
 require 'test/unit'
 require 'carray'

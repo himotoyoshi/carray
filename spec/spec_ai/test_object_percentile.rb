@@ -190,4 +190,16 @@ class TestObjectPercentile < Test::Unit::TestCase
     # Array.from positional should flatten
     assert_equal [1.0, 3.0, 5.0], a.percentile([0, 50, 100])
   end
+
+  def test_percentile_100_takes_the_last_sorted_value_like_any_other_p
+    nan = Float::NAN
+    a = CA_OBJECT([3.0, nan, 1.0, 2.0])
+    assert a.percentile(100).nan?
+    assert a.percentile([0, 100])[1].nan?
+    assert CA_FLOAT64([3.0, nan, 1.0, 2.0]).percentile(100).nan?
+    assert_equal 3.0, CA_OBJECT([3.0, 1.0, 2.0]).percentile(100)
+    r = CA_OBJECT([[3.0, nan], [1.0, 2.0]]).percentile(100, axis: 1)
+    assert r[0].nan?
+    assert_equal 2.0, r[1]
+  end
 end

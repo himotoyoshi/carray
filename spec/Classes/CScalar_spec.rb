@@ -29,7 +29,7 @@ describe "CScalar#[]" do
   example "select" do  
     a = CA_DOUBLE(3.0)
     idx = CA_BOOLEAN([true,false,true,false,true])
-    expect { a[idx] }.to raise_error(RuntimeError)
+    expect { a[idx] }.to raise_error(ArgumentError)
   end
 
   example "mapping" do  

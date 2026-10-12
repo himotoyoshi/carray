@@ -65,12 +65,25 @@ class CArray
   #   Only meaningful for discrete / binned data: raw float is almost all
   #   unique, so every value is modal and the per-axis Array grows to the
   #   fiber length. Bin first. Same NaN / mask semantics as {#is_mode}.
+  #   A complex array raises {CArray::DataTypeError}, since the modes
+  #   are listed in ascending order; {#is_mode} marks its modal cells.
   #
   #   @param axis [Integer, nil] axis to take the mode along; `nil` uses
   #     the whole array.
   #   @return [CArray, Array<CArray>] 1-D CArray (flat) or an Array of
   #     reduced CArrays, one per mode rank (per-axis).
   def mode (axis: nil)
+    # An error from the methods mode is made of (sort, ...) names mode.
+    CArray.__answer_as__(:mode) { mode_answered(axis) }
+  end
+
+  private def mode_answered (axis)
+    if complex?
+      raise CArray::DataTypeError,
+            "mode: the modes are listed in ascending order, and a " \
+            "#{data_type_name} value has no order (complex numbers are not " \
+            "ordered); is_mode marks the cells that hold a mode"
+    end
     return __mode_flat if axis.nil?
     k = normalize_axis(axis, "mode")
 
@@ -120,7 +133,11 @@ class CArray
   def __mode_flat
     values, counts = value_counts
     return values if values.elements == 0
-    values[counts.eq(counts.max)].sort
+    modes = values[counts.eq(counts.max)]
+    # Records are sorted only by the members their struct declares in
+    # order_by:; without one the modes stay in first-appearance order.
+    return modes if is_a?(CARecord) && data_class.order_by.nil?
+    modes.sort
   end
 
 end

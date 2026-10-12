@@ -12,12 +12,13 @@
     - single INDIRECT axis (boolean), other axes AP (nil/Integer/Range)
     - parent must be an entity CArray (no CAStride parent)
     - selector copied at construction (fully static, fragility-free)
-    - selector must not have a mask (hard reject)
+    - a masked selector cell selects nothing (same rule as CASelect)
     - slab copy uses straightforward nested-loop memcpy (no SIMD fast paths)
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_select_snapshot */
 
 typedef struct {
   /* CAView prefix (mirrors carray.h ca_virtual layout) */
@@ -112,9 +113,11 @@ static int8_t CA_OBJ_SELECT_AXIS;
 
 /* Benchmark-only bypass flag: when non-zero, rb_ca_grid skips the
    CASelectAxis dispatch hook and falls through to the pre-CSA CAGrid path.
-   Exposed to Ruby as CArray._csa_bypass=.  Production code never touches it. */
+   Exposed to Ruby as CArray._csa_bypass= in development builds.
+   Production code never touches it. */
 int ca_csa_dispatch_bypass = 0;
 
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_s_csa_bypass_eq (VALUE klass, VALUE val)
 {
@@ -129,6 +132,7 @@ rb_ca_s_csa_bypass_p (VALUE klass)
   (void) klass;
   return ca_csa_dispatch_bypass ? Qtrue : Qfalse;
 }
+#endif
 
 static VALUE rb_cCASelectAxis;
 static VALUE rb_cCASelectAxisMask;
@@ -175,22 +179,18 @@ ca_select_axis_setup (CASelectAxis *ca, CArray *parent, int8_t indirect_axis,
              (int) indirect_axis,
              (long long) parent->dim[indirect_axis]);
   }
-  if ( ca_has_mask(selector) ) {
-    rb_raise(rb_eArgError,
-             "CASelectAxis: selector boolean array must not have a mask. "
-             "Use `selector.strip_mask(false)` etc. to flatten first.");
-  }
-
   /* Validate AP axes */
   for ( k = 0; k < ndim; k++ ) {
     if ( k == indirect_axis ) continue;
     if ( ap_step[k] == 0 ) {
       rb_raise(rb_eArgError, "CASelectAxis: ap_step[%d] is 0", (int) k);
     }
-    if ( ap_count[k] <= 0 ) {
-      rb_raise(rb_eArgError, "CASelectAxis: ap_count[%d] must be positive", (int) k);
+    if ( ap_count[k] < 0 ) {
+      rb_raise(rb_eArgError, "CASelectAxis: ap_count[%d] is negative", (int) k);
     }
-    {
+    /* A zero count (an axis of length zero) selects no cells: the view is
+       empty and there is no first or last index to check. */
+    if ( ap_count[k] > 0 ) {
       ca_size_t start_v = ap_start[k];
       ca_size_t last_v  = ap_start[k] + (ap_count[k] - 1) * ap_step[k];
       if ( start_v < 0 || start_v >= parent->dim[k] ) {
@@ -222,8 +222,9 @@ ca_select_axis_setup (CASelectAxis *ca, CArray *parent, int8_t indirect_axis,
 
   /* Copy selector (view owns its own copy; immune to external mutation).
      The selector is small (1 axis length), so the copy cost is acceptable,
-     and it avoids the fragility CASelect has from live references. */
-  ca->selector = ca_copy(selector);
+     and it avoids the fragility CASelect has from live references.  A
+     masked selector cell selects nothing, as it does for CASelect. */
+  ca->selector = ca_select_snapshot(selector);
 
   /* Allocate dim and AP arrays (pool path: already wired by pool_init). */
   if ( ! ca->_pool ) {
@@ -548,6 +549,7 @@ static void
 ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                                  ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CASelectAxis *ca = (CASelectAxis *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;
@@ -710,18 +712,21 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 }
 
+/* A parent with no memory to lend (ca_parent_lends_no_memory) is never
+   attached: the view owns its buffer, filled and drained through xfer_all,
+   which asks the parent for the selected cells only.  The predicate asks
+   what the parent is, not whether it is attached now, so attach, sync and
+   detach all take the same branch. */
+
 static void
 ca_select_axis_func_allocate (void *ap)
 {
   CASelectAxis *ca = (CASelectAxis *) ap;
-  ca_attach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_attach(ca->parent);
+  }
   ca->ptr = xmalloc(ca_length(ca));
 }
-
-/* attach / sync / copy_data / sync_data / fill_data all go through the
-   common descriptor engine.  This file holds only describe_axes for
-   translating CSA state into the shared descriptor; the engine in
-   ext/ca_axis_dispatch.c does the rest. */
 
 static void
 ca_select_axis_func_attach (void *ap)
@@ -729,6 +734,12 @@ ca_select_axis_func_attach (void *ap)
   CASelectAxis *ca = (CASelectAxis *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
+
   ca_attach(ca->parent);
   ca_select_axis_describe_axes(ca, desc, pdims);
   ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
@@ -741,6 +752,12 @@ ca_select_axis_func_sync (void *ap)
   CASelectAxis *ca = (CASelectAxis *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
+
   ca_select_axis_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, ca->ptr);
@@ -756,16 +773,16 @@ ca_select_axis_func_detach (void *ap)
     ca->ptr = NULL;
   }
   /* indices[] lives for the view's lifetime; freed in free_ca_select_axis. */
-  ca_detach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_detach(ca->parent);
+  }
 }
 
-/* xfer_all: fast path on parent->ptr, with no silent transitive attach
-   of the parent.  A cold parent uses a proper 2-pass (materialise the
-   parent into scratch, expose it as parent->ptr, run the fast path, then
-   write scratch back for PUT). */
+/* The transfer against parent->ptr, for ca_axis_view_xfer_all. */
 static void
-ca_select_axis_func_run_fast_path (CASelectAxis *ca, char *data, int dir)
+ca_select_axis_func_run_fast_path (void *ap, char *data, int dir)
 {
+  CASelectAxis *ca = (CASelectAxis *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
   ca_select_axis_describe_axes(ca, desc, pdims);
@@ -781,27 +798,7 @@ ca_select_axis_func_run_fast_path (CASelectAxis *ca, char *data, int dir)
 static void
 ca_select_axis_func_xfer_all (void *ap, void *data, int dir)
 {
-  CASelectAxis *ca = (CASelectAxis *) ap;
-  if ( ca->parent->ptr ) {
-    ca_select_axis_func_run_fast_path(ca, (char *) data, dir);
-    return;
-  }
-  /* Proper 2-pass cold fallback. */
-  {
-    volatile VALUE holder;
-    CArray   *parent = ca->parent;
-    ca_size_t plen   = parent->elements * parent->bytes;
-    char     *parent_scratch = ALLOCV_N(char, holder, plen);
-    char     *parent_ptr_saved = parent->ptr;
-    ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
-    parent->ptr = parent_scratch;
-    ca_select_axis_func_run_fast_path(ca, (char *) data, dir);
-    if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
-    }
-    parent->ptr = parent_ptr_saved;
-    ALLOCV_END(holder);
-  }
+  ca_axis_view_xfer_all(ap, ca_select_axis_func_run_fast_path, 1, data, dir);
 }
 
 static void
@@ -824,21 +821,17 @@ ca_select_axis_func_fill_data (void *ap, void *val)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, val);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
 ca_select_axis_func_create_mask (void *ap)
 {
   CASelectAxis *ca = (CASelectAxis *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = ca_select_axis_new(ca->parent->mask, ca->indirect_axis,
                                 ca->selector,
                                 ca->ap_start, ca->ap_count, ca->ap_step);
@@ -878,6 +871,7 @@ rb_ca_select_axis_initialize_copy (VALUE self, VALUE other)
 {
   CASelectAxis *ca, *cs;
   TypedData_Get_Struct(self,  CASelectAxis, &caselectaxis_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CASelectAxis, &caselectaxis_data_type, cs);
   if ( ca_func[CA_OBJ_SELECT_AXIS].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_SELECT_AXIS, cs->parent->ndim);
@@ -887,6 +881,7 @@ rb_ca_select_axis_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only Ruby ctor:
    CASelectAxis._new_debug(parent, indirect_axis, selector,
                             ap_start_arr, ap_count_arr, ap_step_arr)
@@ -937,6 +932,7 @@ rb_ca_select_axis_s_new_debug (VALUE klass, VALUE rparent, VALUE rindirect,
   rb_ivar_set(obj, rb_intern("_selector"), rselector);
   return obj;
 }
+#endif
 
 /* ------------------------------------------------------------------- */
 /* Indexer dispatch hook: called from rb_ca_grid                       */
@@ -1188,7 +1184,7 @@ rb_ca_select_axis_dispatch_attach_debug (VALUE self)
   TypedData_Get_Struct(self, CASelectAxis, &caselectaxis_data_type, ca);
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   buf = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                                 ca->elements, NULL);
   ca_detach(ca->parent);
@@ -1222,11 +1218,10 @@ rb_ca_select_axis_dispatch_scatter_debug (VALUE self, VALUE in_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, RSTRING_PTR(in_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 
@@ -1250,11 +1245,10 @@ rb_ca_select_axis_dispatch_fill_value_debug (VALUE self, VALUE val_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_select_axis_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, RSTRING_PTR(val_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 #endif /* CARRAY_DEV_BUILD */
@@ -1281,9 +1275,11 @@ Init_ca_obj_select_axis (void)
   rb_define_alloc_func(rb_cCASelectAxis, rb_ca_select_axis_s_allocate);
   rb_define_method(rb_cCASelectAxis, "initialize_copy",
                                      rb_ca_select_axis_initialize_copy, 1);
+#ifdef CARRAY_DEV_BUILD
   /* Debug-only ctor for testing; not part of the public API. */
   rb_define_singleton_method(rb_cCASelectAxis, "_new_debug",
                              rb_ca_select_axis_s_new_debug, 6);
+#endif
 
 #ifdef CARRAY_DEV_BUILD
   /* debug accessors (dev-only, stripped in release).
@@ -1300,7 +1296,9 @@ Init_ca_obj_select_axis (void)
                    rb_ca_select_axis_dispatch_fill_value_debug, 1);
 #endif
 
+#ifdef CARRAY_DEV_BUILD
   /* Benchmark-only bypass setter on CArray class. */
   rb_define_singleton_method(rb_cCArray, "_csa_bypass=", rb_ca_s_csa_bypass_eq, 1);
   rb_define_singleton_method(rb_cCArray, "_csa_bypass?", rb_ca_s_csa_bypass_p, 0);
+#endif
 }

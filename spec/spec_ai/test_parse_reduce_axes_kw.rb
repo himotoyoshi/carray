@@ -76,19 +76,19 @@ class TestParseReduceAxesKw < Test::Unit::TestCase
   # -- Error cases ----------------------------------------------------
 
   def test_axis_out_of_range_positive
-    assert_raise(IndexError) do
+    assert_raise(ArgumentError) do
       CArray.test_parse_reduce_axes_kw(@a3, axis: 3)
     end
   end
 
   def test_axis_out_of_range_negative
-    assert_raise(IndexError) do
+    assert_raise(ArgumentError) do
       CArray.test_parse_reduce_axes_kw(@a3, axis: -4)
     end
   end
 
   def test_array_axis_out_of_range
-    assert_raise(IndexError) do
+    assert_raise(ArgumentError) do
       CArray.test_parse_reduce_axes_kw(@a3, axis: [0, 5])
     end
   end

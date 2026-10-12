@@ -446,4 +446,17 @@ class TestAxisGroupScan < Test::Unit::TestCase
       assert_equal flat, band, "flat vs band (#{op})"
     end
   end
+
+  def test_running_extremum_lets_a_leading_nan_lose
+    nan = Float::NAN
+    cat = CA_INT32([0, 0, 1, 1, 2, 2]).categorize
+    f = CA_FLOAT64([nan, 3.0, 5, 4, 1, 2]).group_by_category(cat)
+    r = f.cummax.to_a
+    assert r[0].nan?
+    assert_equal [3.0, 5.0, 5.0, 1.0, 2.0], r[1..]
+    assert_equal [3.0, 5.0, 4.0, 1.0, 1.0], f.cummin.to_a[1..]
+    o = CA_OBJECT([nan, 3.0, 5, 4, 1, 2]).group_by_category(cat).cummax.to_a
+    assert o[0].nan?
+    assert_equal [3.0, 5, 5, 1, 2], o[1..]
+  end
 end

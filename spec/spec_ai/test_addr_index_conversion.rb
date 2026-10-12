@@ -37,8 +37,9 @@ class TestAddrIndexConversion < Test::Unit::TestCase
 
   def test_addr2index_scalar_oob_raises
     a = CArray.int32(3, 4)
-    assert_raise(ArgumentError) { a.addr2index(12) }
-    assert_raise(ArgumentError) { a.addr2index(-1) }
+    assert_raise(IndexError) { a.addr2index(12) }
+    assert_raise(IndexError) { a.addr2index(-13) }
+    assert_equal [2, 3], a.addr2index(-1)
   end
 
   def test_addr2index_scalar_tuple_unpack
@@ -74,7 +75,7 @@ class TestAddrIndexConversion < Test::Unit::TestCase
 
   def test_addr2index_carray_oob_raises
     a = CArray.int32(20, 60)
-    assert_raise(ArgumentError) { a.addr2index(CA_INT32([9999])) }
+    assert_raise(IndexError) { a.addr2index(CA_INT32([9999])) }
   end
 
   def test_addr2index_mask_propagates

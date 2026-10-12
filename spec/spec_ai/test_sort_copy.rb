@@ -181,11 +181,14 @@ class TestPartitionCopy < Test::Unit::TestCase
     assert_raise(ArgumentError) { a.partition_copy(-6) }
   end
 
-  def test_default_axis_is_zero
+  # No axis means the whole array, as for sort_copy.
+  def test_default_is_the_whole_array
     a = CArray.int32(3, 4) { |i, j| (j * 3 + i) % 7 }
-    p_default = a.partition_copy(1)
-    p_axis0 = a.partition_copy(1, axis: 0)
-    assert_equal p_axis0.to_a, p_default.to_a
+    assert_equal a.flatten.partition_copy(1, axis: 0).to_a, a.partition_copy(1).to_a
+    assert_equal a.partition_copy(1).to_a, a.partition_copy(1, axis: nil).to_a
+    # partition leaves the cells around kth in no particular order.
+    assert_equal [12], a.partition(1).shape
+    assert_equal a.partition_copy(1)[1], a.partition(1)[1]
   end
 
   def test_all_numeric_dtypes_kth

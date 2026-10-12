@@ -11,7 +11,7 @@
   runs (cast-before invariant, mirrors CABinOp).  Output data_type is
   always the common data_type (preserve).
 
-  Scope: fma / fms / clip (see ext/mkkernel.rb :fma / :fms / :clip).
+  Scope: fma / fms / clip / select (see ext/mkkernel.rb).
   None of the currently-defined triops trap on integer zero divisor.
 
 ---------------------------------------------------------------------------- */
@@ -29,6 +29,7 @@ enum {
   CA_TRIOP_FMA  = 0,   /* a * b + c  (single-rounding on float)     */
   CA_TRIOP_FMS  = 1,   /* a * b - c  (single-rounding on float)     */
   CA_TRIOP_CLIP = 2,   /* min(max(a, lo), hi), NaN-preserving        */
+  CA_TRIOP_SELECT = 3, /* a ? b : c  (lazy then_else)                 */
 
   CA_TRIOP_COUNT
 };
@@ -40,6 +41,7 @@ enum {
 extern ca_triop_func_t ca_triop_fma        [CA_NTYPE];
 extern ca_triop_func_t ca_triop_fms        [CA_NTYPE];
 extern ca_triop_func_t ca_triop_clip       [CA_NTYPE];
+extern ca_triop_func_t ca_triop_select     [CA_NTYPE];
 
 /* ------------------------------------------------------------------- */
 /* Dispatch API                                                         */
@@ -49,7 +51,8 @@ extern ca_triop_func_t ca_triop_clip       [CA_NTYPE];
    not implemented at the requested data_type. */
 ca_triop_func_t ca_triop_kernel_lookup_vvv (uint16_t op_id, int8_t common_dt);
 
-/* 3-way promotion: common data_type of (dt1, dt2, dt3).                 */
+/* 3-way promotion: common data_type of (dt1, dt2, dt3).  For select it is
+   that of the two branches (dt2, dt3); the condition is converted to it. */
 int8_t ca_lazy_promote_triop (uint16_t op_id, int8_t dt1, int8_t dt2, int8_t dt3);
 
 /* Each operand's cast-target data_type (= common data_type for all three,

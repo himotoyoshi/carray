@@ -103,7 +103,7 @@ class TestResultType < Test::Unit::TestCase
   end
 
   def test_unknown_data_type_string_raises
-    assert_raise(RuntimeError) { CArray.result_type(:no_such_type) }
+    assert_raise(ArgumentError) { CArray.result_type(:no_such_type) }
   end
 
   # ---------- consistency with operator coercion ----------

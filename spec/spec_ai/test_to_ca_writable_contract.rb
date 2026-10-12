@@ -192,7 +192,7 @@ class TestToCaWritableContract < Test::Unit::TestCase
 
   def test_legacy_ca_hook_is_no_longer_duck_typed
     base = CArray.int32(3).seq
-    assert_raise(RuntimeError) do
+    assert_raise(TypeError) do
       CArray.wrap_writable(LegacyCaHookSource.new(base))
     end
     # wrap_readonly treats it as an ordinary object: a 1-element

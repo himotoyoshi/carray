@@ -115,9 +115,17 @@ For a pure typedef (≈ 9/10 cases):
                             ndim, dim, strides, base_offset);
    }
    ```
-3. **Construction path**: `ca_<mine>_new` allocates the CAStride struct via
+3. **Construction path**: `ca_<mine>_new` calls `ca_<mine>_setup(NULL, ...)`
+   first, then allocates the CAStride struct via
    `ca_array_alloc(CA_OBJ_<MINE>, ndim)` ([ch. 3](03_memory_management.md)) and
-   calls `ca_<mine>_setup`. `rb_ca_<mine>_new` is the VALUE wrapper.
+   calls `ca_<mine>_setup` on it. `rb_ca_<mine>_new` is the VALUE wrapper.
+
+   The first call runs the checks only: `ca_stride_setup` returns after its
+   own checks when `ca` is `NULL`, and the setup above passes that through.
+   The struct belongs to no Ruby object until it is wrapped, so a check that
+   raised after the allocation would leave the struct behind. Put your own
+   checks before the `ca_stride_setup` call, and write to `ca` only after it
+   (returning early when `ca` is `NULL`).
 4. **Register the obj_type**. Built-in obj_types (CARefer, CABlock, CARepeat) are
    installed in `carray_core.c:Init_carray_core`; runtime obj_types (CATranspose,
    CAFarray, …) via `ca_install_obj_type` in your `Init_ca_obj_<mine>`. The
@@ -175,13 +183,14 @@ int       ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
                            ca_size_t *strides, ca_size_t base_offset);
         /* Initialise an already-allocated CAStride. Returns 0 on
            success, raises on validation failure. Used by every
-           CAStride-subclass setup function. */
+           CAStride-subclass setup function. With ca == NULL it runs
+           the validation only and returns 0. */
 
 CAStride *ca_stride_new   (int8_t obj_type, CArray *parent,
                            int8_t data_type, ca_size_t bytes,
                            int8_t ndim, ca_size_t *dim,
                            ca_size_t *strides, ca_size_t base_offset);
-        /* C-level allocate + setup. */
+        /* C-level validate + allocate + setup. */
 
 VALUE     rb_ca_stride_new (VALUE cary,
                             int8_t data_type, ca_size_t bytes,

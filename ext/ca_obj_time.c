@@ -14,6 +14,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"
 
 /* unit enum (base epoch is 1970-01-01) */
@@ -36,7 +37,7 @@ enum {
 typedef struct {
   /* === CAView prefix === */
   int16_t    obj_type;
-  int8_t     data_type;        /* fixed to CA_INT64 */
+  int8_t     data_type;        /* surface: CA_FIXLEN (storage is the int64 parent) */
   int8_t     ndim;
   int32_t    flags;            /* CA_FLAG_IS_FACE set */
   ca_size_t  bytes;            /* fixed to sizeof(int64_t) */
@@ -182,6 +183,12 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
              "CATime requires int64 storage (parent.data_type != CA_INT64)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_TIME;
   /* The surface data_type is CA_FIXLEN, not CA_INT64: this routes
      mkkernel dispatch onto the ca_*_not_implement stubs so numeric
@@ -227,7 +234,9 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 CATime *
 ca_time_new (CArray *parent, int8_t unit, int64_t count)
 {
-  CATime *ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
+  CATime *ca;
+  ca_time_setup(NULL, parent, unit, count);
+  ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
   ca_time_setup(ca, parent, unit, count);
   return ca;
 }
@@ -266,18 +275,6 @@ ca_time_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_time_func_create_mask (void *ap)
-{
-  CATime *ca = (CATime *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_time_func = {
   -1, /* CA_OBJ_TIME — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -288,7 +285,7 @@ ca_operation_function_t ca_time_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_time_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
@@ -422,16 +419,16 @@ rb_ca_time_unit (VALUE self)
   return ca_time_resolution(ca->count, ca->unit);
 }
 
-/* storage_to_scalar implemented in C to avoid per-cell Ruby method dispatch
-   on the fetch hot path.  CAREFUL: there must be no Ruby `storage_to_scalar`
+/* storage_to_element implemented in C to avoid per-cell Ruby method dispatch
+   on the fetch hot path.  CAREFUL: there must be no Ruby `storage_to_element`
    def in lib/carray/time.rb — require order would let a Ruby version
-   shadow this C method (the Ruby `scalar_to_storage` write hook is a
+   shadow this C method (the Ruby `element_to_storage` write hook is a
    distinct method and does not collide).
    Since the Face surface is CA_FIXLEN, fetch delivers an 8-byte raw
    String.  Decode it as the parent int64 (= storage), then construct
    CATime::Element(epoch, unit). */
 static VALUE
-rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_time_storage_to_element (VALUE self, VALUE raw)
 {
   CATime *ca;
   CATimeElement *s;
@@ -443,7 +440,7 @@ rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
   if ( TYPE(raw) == T_STRING ) {
     if ( RSTRING_LEN(raw) != (long) sizeof(int64_t) ) {
       rb_raise(rb_eArgError,
-               "CATime#storage_to_scalar: expected %lu bytes, got %ld",
+               "CATime#storage_to_element: expected %lu bytes, got %ld",
                (unsigned long) sizeof(int64_t), RSTRING_LEN(raw));
     }
     memcpy(&epoch, RSTRING_PTR(raw), sizeof(int64_t));
@@ -476,6 +473,7 @@ rb_ca_time_initialize_copy (VALUE self, VALUE other)
 {
   CATime *ca, *cs;
   TypedData_Get_Struct(self,  CATime, &catime_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATime, &catime_data_type, cs);
   if ( ca_func[CA_OBJ_TIME].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TIME, cs->parent->ndim);
@@ -517,12 +515,12 @@ Init_ca_obj_time (void)
   rb_define_singleton_method(rb_cCATime, "__wrap__",
                                      rb_ca_time_wrap_method, 2);
   rb_define_method(rb_cCATime, "unit", rb_ca_time_unit, 0);
-  rb_define_method(rb_cCATime, "storage_to_scalar",
-                                     rb_ca_time_storage_to_scalar, 1);
-  /* Registers the C-level fast path so CA_FACE_STORAGE_TO_SCALAR_IF_FACE can
+  rb_define_method(rb_cCATime, "storage_to_element",
+                                     rb_ca_time_storage_to_element, 1);
+  /* Registers the C-level fast path so CA_FACE_STORAGE_TO_ELEMENT_IF_FACE can
      skip rb_funcall on the hot path. */
-  ca_face_register_storage_to_scalar(CA_OBJ_TIME,
-                                     rb_ca_time_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_TIME,
+                                     rb_ca_time_storage_to_element);
   ca_face_register_state_compatible(CA_OBJ_TIME,
                                     ca_time_state_compatible);
   /* unit is pure metadata (= no per-parent buffer), so the Face wrap can

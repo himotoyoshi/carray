@@ -154,8 +154,8 @@ static void
 ca_fake_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAFake *ca = (CAFake *) ap;
-  char sbuf[32];
-  char *v = (ca->parent->bytes <= 32) ? sbuf : xmalloc(ca->parent->bytes);
+  volatile VALUE holder;
+  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
   if ( dir == CA_XFER_GET ) {
     ca_fetch_index(ca->parent, idx, v);
     ca_ptr2ptr(ca->parent, v, ca, data);
@@ -164,7 +164,7 @@ ca_fake_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_ptr2ptr(ca, data, ca->parent, v);
     ca_store_index(ca->parent, idx, v);
   }
-  if ( v != sbuf ) xfree(v);
+  ALLOCV_END(holder);
 }
 
 /* Batched address gather/scatter.  CAFake is a 1:1 reinterpret-cast
@@ -237,6 +237,7 @@ static void
 ca_fake_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAFake   *ca = (CAFake *) ap;
   int8_t    ndim = ca->ndim;
   ca_size_t pstrides[CA_RANK_MAX];
@@ -365,17 +366,11 @@ static void
 ca_fake_func_fill_data (void *ap, void *ptr)
 {
   CAFake *ca = (CAFake *) ap;
-  if ( ca->parent->bytes <= 32 ) {
-    char v[32];
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill(ca->parent, v);
-  }
-  else {
-    char *v = xmalloc(ca->parent->bytes);
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill(ca->parent, v);
-    xfree(v);
-  }
+  volatile VALUE holder;
+  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
+  ca_ptr2ptr(ca, ptr, ca->parent, v);
+  ca_fill(ca->parent, v);
+  ALLOCV_END(holder);
 }
 
 /* Same as fill_data, with a region: convert the one value once and pass the
@@ -389,47 +384,22 @@ ca_fake_func_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                           ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
   CAFake *ca = (CAFake *) ap;
-  if ( ca->parent->bytes <= 32 ) {
-    char v[32];
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill_stride(ca->parent, base, ndim, counts, steps, v);
-  }
-  else {
-    char *v = xmalloc(ca->parent->bytes);
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill_stride(ca->parent, base, ndim, counts, steps, v);
-    xfree(v);
-  }
+  volatile VALUE holder;
+  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
+  ca_ptr2ptr(ca, ptr, ca->parent, v);
+  ca_fill_stride(ca->parent, base, ndim, counts, steps, v);
+  ALLOCV_END(holder);
 }
 
 static void
 ca_fake_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
   CAFake *ca = (CAFake *) ap;
-  if ( ca->parent->bytes <= 32 ) {
-    char v[32];
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill_addrs(ca->parent, n, addrs, v);
-  }
-  else {
-    char *v = xmalloc(ca->parent->bytes);
-    ca_ptr2ptr(ca, ptr, ca->parent, v);
-    ca_fill_addrs(ca->parent, n, addrs, v);
-    xfree(v);
-  }
-}
-
-static void
-ca_fake_func_create_mask (void *ap)
-{
-  CAFake *ca = (CAFake *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  volatile VALUE holder;
+  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
+  ca_ptr2ptr(ca, ptr, ca->parent, v);
+  ca_fill_addrs(ca->parent, n, addrs, v);
+  ALLOCV_END(holder);
 }
 
 ca_operation_function_t ca_fake_func = {
@@ -442,7 +412,7 @@ ca_operation_function_t ca_fake_func = {
   ca_fake_func_sync,
   ca_fake_func_detach,
   ca_fake_func_fill_data,
-  ca_fake_func_create_mask,
+  ca_view_func_create_mask,
   ca_fake_func_xfer_index,
   ca_fake_func_xfer_addrs,
   NULL,                       /* fold_stride: never-fold (transform boundary) */
@@ -522,6 +492,7 @@ rb_ca_fake_initialize_copy (VALUE self, VALUE other)
   CAFake *ca, *cs;
 
   TypedData_Get_Struct(self,  CAFake, &cafake_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAFake, &cafake_data_type, cs);
 
   if ( ca_func[CA_OBJ_FAKE].pool_init ) {

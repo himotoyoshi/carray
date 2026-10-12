@@ -20,6 +20,13 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     iterator.sliding_view.send(op, axis: axes, **kw)
   end
 
+  # Checks that the fold, not the delegation, answers.  With the fast paths
+  # switched off (CARRAY_GENERAL_PATH=1) the delegation answers everything,
+  # which is what that run is for.
+  def assert_folds (folded)
+    assert_not_nil folded if CArray.__fast_paths_enabled__
+  end
+
   def assert_agrees (iterator, op, **kw)
     got  = iterator.send(op, **kw)
     want = delegated(iterator, op, **kw)
@@ -149,7 +156,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
       assert_agrees(iterator, op)
     end
     # sum still has an identity to answer with.
-    assert_not_nil iterator.send(:fold_by_offset, :sum, nil, nil)
+    assert_folds iterator.send(:fold_by_offset, :sum, nil, nil)
     assert_agrees(iterator, :sum)
   end
 
@@ -157,7 +164,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.float64(30, 30).seq!
     [:skip, :nearest].each do |bounds|
       iterator = source.windows(-1..1, -1..1, bounds: bounds)
-      assert_not_nil iterator.send(:fold_by_offset, :sum, 9, nil)
+      assert_folds iterator.send(:fold_by_offset, :sum, 9, nil)
       [1, 4, 9, 10].each do |wanted|
         [:sum, :mean, :min].each { |op| assert_agrees(iterator, op, min_count: wanted) }
       end
@@ -189,7 +196,7 @@ class TestWindowOffsetFold < Test::Unit::TestCase
     source = CArray.float64(40, 40).seq!
     assert_nil source.windows(-3..3, -3..3).send(:fold_by_offset, :sum, nil, nil)
     assert_nil source.windows(-1..1, -3..3).send(:fold_by_offset, :sum, nil, nil)
-    assert_not_nil source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil, nil)
+    assert_folds source.windows(-2..2, -2..2).send(:fold_by_offset, :sum, nil, nil)
     assert_agrees(source.windows(-3..3, -3..3), :sum)
   end
 
@@ -274,6 +281,32 @@ class TestWindowOffsetFold < Test::Unit::TestCase
   def test_a_masked_result_is_never_produced_from_an_unmasked_source
     source = CArray.float64(10, 10).seq!
     assert_equal 0, source.windows(-1..1, -1..1).sum.count_masked
+  end
+
+  # min_count is the core's rule: a value the core refuses is refused here
+  # too, and one it accepts gives the core's answer.
+  def test_min_count_follows_the_core
+    source = CArray.float64(4, 5).seq!
+    source[0, 0] = UNDEF
+    win  = source.windows(-1..1, -1..1)
+    # What windows asks the core when it does not fold by offset.
+    axes = win.instance_variable_get(:@window_axes)
+    core = ->(op, mc) { win.send(:sliding_view).send(op, axis: axes, min_count: mc) }
+    %i[sum prod min max mean].each do |op|
+      [-1, 1.5, true, "2"].each do |mc|
+        expected = begin
+                     core.(op, mc)
+                     nil
+                   rescue => e
+                     e.class
+                   end
+        assert_not_nil expected, "the core accepted #{op} min_count: #{mc.inspect}"
+        assert_raise(expected, "#{op} min_count: #{mc.inspect}") { win.send(op, min_count: mc) }
+      end
+      [0, 2, 9].each do |mc|
+        assert_equal core.(op, mc).to_a, win.send(op, min_count: mc).to_a, "#{op} min_count: #{mc}"
+      end
+    end
   end
 
 end

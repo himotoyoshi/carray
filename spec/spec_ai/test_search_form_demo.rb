@@ -229,7 +229,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
   def test_mask_self_raise_case_a
     a = CArray.float64(5).seq!(0, 1)
     a.mask = [0, 0, 1, 0, 0]
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       a.find_value_index_ki(2.0, 0)
     end
   end
@@ -239,7 +239,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     a.mask = 0
     a[0, 0] = UNDEF
     val = CArray.float64(3).seq!(0, 1)
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       a.find_value_index_ki(val, 1)
     end
   end

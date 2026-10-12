@@ -29,6 +29,16 @@ class CAIterator
   attr_reader :ndim, :shape
   alias dim shape
 
+  # The keywords a member passes on to a core reduction over its own axes.
+  # The member sets `axis:`, so one from the caller is refused; the rest go
+  # to the core, which checks them.
+  def self.reduce_keywords (op, kw) # :nodoc:
+    if kw.key?(:axis)
+      raise ArgumentError, "#{op}: unknown keyword: :axis (the iterator sets the axes)"
+    end
+    kw
+  end
+
   # The required reduction surface, modelled on the two reference members
   # CASlabIterator and CACategoricalIterator (the surface they both provide).
   # Declared abstract so a later member
@@ -144,7 +154,7 @@ class CAIterator
   #   @yieldparam piece [CArray] next piece.
   #   @yieldreturn [Object] updated accumulator.
   #   @return [Object] the final accumulator.
-  [
+  REQUIRED_SURFACE = [
     :sum, :accumulate, :prod, :mean, :min, :max,                      # tier 1
     :variance, :stddev, :all, :any,
     :variancep, :stddevp, :minmax,                                    # tier 2
@@ -153,7 +163,9 @@ class CAIterator
     :median, :percentile, :quantile,                                 # tier 3
     :count, :count_not_masked, :count_masked, :elements,             # count family
     :each, :reduce,                                                   # generic iterate
-  ].each do |name|
+  ].freeze
+
+  REQUIRED_SURFACE.each do |name|
     define_method(name) do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} must implement ##{name}"
     end

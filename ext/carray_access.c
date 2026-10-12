@@ -36,10 +36,7 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
   }
 
   if ( rval == CA_UNDEF ) { /* set mask of the element at the index 'idx' */
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_store_index(ca->mask, idx, &one);
   }
   else {                   /* unset mask and set value of the element at the index 'idx' */
@@ -51,16 +48,12 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 64) {
-      char v[64];
+    {
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_index(ca, idx, v);
-    }
-    else {
-      char *v = xmalloc(ca->bytes);
-      rb_ca_obj2ptr(self, rval, v);
-      ca_store_index(ca, idx, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
   }
 
@@ -79,16 +72,12 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 64) {
-    char v[64];
+  {
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_index(ca, idx, v);
     out = rb_ca_ptr2obj(self, v);
-  }
-  else {
-    char *v = xmalloc(ca->bytes);
-    ca_fetch_index(ca, idx, v);
-    out = rb_ca_ptr2obj(self, v);
-    xfree(v);
+    ALLOCV_END(holder);
   }
 
   /* check if the element is masked */
@@ -101,8 +90,8 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
     }
   }
 
-  /* Face scalar decode (invoked if the subclass defines storage_to_scalar(raw)) */
-  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+  /* Face scalar decode (invoked if the subclass defines storage_to_element(raw)) */
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false, not Integer 0/1.  Bulk paths
      (to_a / cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
@@ -131,10 +120,7 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
   }
 
   if ( rval == CA_UNDEF ) { /* set mask at the element */
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_store_addr(ca->mask, addr, &one);
   }
   else {                   /* set value at the element */
@@ -144,16 +130,12 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
     }
 
     /* store value */
-    if ( ca->bytes <= 64) {
-      char v[64];
+    {
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_addr(ca, addr, v);
-    }
-    else {
-      char *v = xmalloc(ca->bytes);
-      rb_ca_obj2ptr(self, rval, v);
-      ca_store_addr(ca, addr, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
   }
 
@@ -172,16 +154,12 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   }
 
   /* fetch value from the element */
-  if ( ca->bytes <= 64) {
-    char v[64];
+  {
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_addr(ca, addr, v);
     out = rb_ca_ptr2obj(self, v);
-  }
-  else {
-    char *v = xmalloc(ca->bytes);
-    ca_fetch_addr(ca, addr, v);
-    out = rb_ca_ptr2obj(self, v);
-    xfree(v);
+    ALLOCV_END(holder);
   }
 
   /* check if the element is masked */
@@ -195,7 +173,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
   }
 
   /* Face scalar decode */
-  CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false (see rb_ca_fetch_index). */
   if ( ca->data_type == CA_BOOLEAN &&
@@ -220,21 +198,19 @@ rb_ca_fill (VALUE self, VALUE rval)
 
   if ( rval == CA_UNDEF ) {
     boolean8_t one = 1;
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     ca_fill(ca->mask, &one);
   }
   else {
-    char *fval = xmalloc(ca->bytes);
+    volatile VALUE holder;
+    char *fval = ALLOCV_N(char, holder, ca->bytes);
     boolean8_t zero = 0;
     rb_ca_obj2ptr(self, rval, fval);
     if ( ca_has_mask(ca) ) {
       ca_fill(ca->mask, &zero);
     }
     ca_fill(ca, fval);
-    xfree(fval);
+    ALLOCV_END(holder);
   }
 
   return self;
@@ -254,7 +230,7 @@ ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
 {
   volatile VALUE ary0;
   if ( level > CA_RANK_MAX ) {
-    rb_raise(rb_eRuntimeError, "too deep level array for conversion to carray");
+    rb_raise(rb_eArgError, "too deep level array for conversion to carray");
   }
 
   if ( TYPE(ary) == T_ARRAY ) {
@@ -304,7 +280,7 @@ ary_flatten_upto_level (VALUE ary, int max_level, int level,
   int32_t i;
 
   if ( TYPE(ary) != T_ARRAY ) {
-    rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
+    rb_raise(rb_eArgError, "invalid shape array for conversion to carray");
   }
 
   if ( level == max_level ) {
@@ -321,7 +297,7 @@ ary_flatten_upto_level (VALUE ary, int max_level, int level,
   }
 }
 
-static VALUE
+VALUE
 rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
 {
   CArray *ca = (CArray *) ap;
@@ -348,7 +324,7 @@ rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
     }
 
     if ( total != ca->elements ) {
-      rb_raise(rb_eRuntimeError, "invalid shape array for conversion to carray");
+      rb_raise(rb_eArgError, "invalid shape array for conversion to carray");
     }
     else {
       volatile VALUE out = rb_ary_new2(0);
@@ -500,6 +476,184 @@ ca_id_expression_evaluator (void)
   return id;
 }
 
+/* `a[:sym, args] = v` computes the index by calling Ruby with self held
+   attached for the reads, then stores through it. */
+
+typedef struct {
+  VALUE  self;
+  VALUE  dest;   /* what is stored into: self, or a Face's storage */
+  ID     mid;
+  int    argc;
+  VALUE *argv;
+  VALUE  rval;
+} ca_store_method_call_ctx_t;
+
+static VALUE
+ca_store_method_call_body (VALUE arg)
+{
+  ca_store_method_call_ctx_t *c = (ca_store_method_call_ctx_t *) arg;
+  volatile VALUE idx = rb_funcallv_public(c->self, c->mid, c->argc, c->argv);
+  return rb_ca_store(c->dest, idx, c->rval);
+}
+
+/* The casting stores below convert into the destination inside a window,
+   and a conversion from Ruby objects can raise part way.  Such a window
+   attaches rather than allocates: the cells converted before the raise
+   are then pushed back with the others left as they were -- what an
+   entity destination, which has no separate buffer, shows as well.  A
+   cast that cannot raise keeps the cheaper allocate. */
+
+typedef struct {
+  CArray         *ca;
+  CArray         *cv;        /* CArray source, delivered into scratch */
+  char           *scratch;
+  boolean8_t     *mscratch;  /* cv's mask, or NULL when it has none */
+  CArray         *ico;       /* Ruby Array source: an object descriptor */
+  volatile VALUE  list;
+  int             has_mask;
+} ca_store_all_ctx_t;
+
+static const char *
+ca_store_all_mode (CArray *cv)
+{
+  return ( cv->data_type == CA_OBJECT ) ? "w" : "a";
+}
+
+/* The window has attached ca's mask, and the one created here joins it,
+   so the mask is written in its buffer. */
+static VALUE
+ca_store_all_cast_body (VALUE arg)
+{
+  ca_store_all_ctx_t *c = (ca_store_all_ctx_t *) arg;
+  CArray *ca = c->ca;
+  if ( c->mscratch ) {
+    if ( ! ca->mask ) {
+      ca_create_mask(ca);
+    }
+    memcpy(ca->mask->ptr, c->mscratch, ca->elements);
+  }
+  else if ( ca->mask ) {
+    memset(ca->mask->ptr, 0, ca->elements);
+  }
+  if ( ca->mask ) {
+    ca_cast_block_with_mask(ca->elements, c->cv, c->scratch, ca, ca->ptr,
+                            (boolean8_t*)ca->mask->ptr);
+  }
+  else {
+    ca_cast_block(ca->elements, c->cv, c->scratch, ca, ca->ptr);
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_store_all_list_body (VALUE arg)
+{
+  ca_store_all_ctx_t *c = (ca_store_all_ctx_t *) arg;
+  CArray *ca = c->ca;
+  VALUE   list = c->list;
+  ca_size_t i;
+  /* Face has surface != storage; the cast runs in the storage
+     data_type.  Passing ca directly makes the cast table see FIXLEN
+     and report non-implemented, so pass a shadow CArray (storage
+     data_type, ptr aliased to ca). */
+  CArray shadow;
+  CArray *cast_target = ca;
+  memset(&shadow, 0, sizeof(CArray));
+  if ( ca_is_face(ca) ) {
+    CArray *root = ca_strip_face(ca);
+    if (root) {
+      shadow.data_type = root->data_type;
+      shadow.bytes     = ca->bytes;
+      shadow.elements  = ca->elements;
+      shadow.ptr       = ca->ptr;
+      cast_target = &shadow;
+    }
+  }
+  if ( c->has_mask ) {
+    boolean8_t *m;
+    m = (boolean8_t *)ca->mask->ptr;
+    for (i=0; i<ca->elements; i++) {
+      if ( rb_ary_entry(list,i) == CA_UNDEF ) {
+        *m = 1;
+      }
+      else {
+        *m = 0;
+      }
+      m++;
+    }
+    ca_cast_block_with_mask(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list),
+                            cast_target, ca->ptr,
+                            (boolean8_t*)ca->mask->ptr);
+  }
+  else {
+    ca_cast_block(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
+  }
+  return Qnil;
+}
+
+/* A Face source stored into an array that is not the same Face.  Its cells
+   are surface values, and its storage means nothing to the destination: a
+   CATime's ticks are not times to an object array, and a categorical's codes
+   are not its labels.  So an object destination, or a Face that does not
+   reconcile a Face source itself (a fixlen string taking a const string),
+   receives the values (to_type(:object)), and any other plain destination
+   refuses rather than receive storage bytes.  A destination of the same Face
+   class, or one that reconciles a Face (to_comparable), is left to
+   ca_face_convert_store_rval. */
+static VALUE
+ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
+{
+  CArray *cr;
+
+  if ( ! rb_obj_is_carray(rval) ) {
+    return rval;
+  }
+  GetCArray(rval, cr);
+  if ( ! ca_is_face(cr) ) {
+    return rval;
+  }
+  if ( ca_is_face(ca) && ca->obj_type == CA_OBJ_RECORD ) {
+    /* A record is read at its data_class's member offsets, so records of
+       another data_class (of the same size or not) are refused; the class
+       of the record array (a subclass or CARecord itself) does not matter. */
+    if ( cr->obj_type == CA_OBJ_RECORD
+         && rb_ca_data_class(self) == rb_ca_data_class(rval) ) {
+      return rval;
+    }
+    if ( cr->obj_type == CA_OBJ_RECORD ) {
+      rb_raise(rb_eTypeError,
+               "can not store a record array of %"PRIsVALUE
+               " into a record array of %"PRIsVALUE,
+               rb_ca_data_class(rval), rb_ca_data_class(self));
+    }
+    rb_raise(rb_eTypeError,
+             "can not store a %s array into a record array of %"PRIsVALUE,
+             rb_obj_classname(rval), rb_ca_data_class(self));
+  }
+  if ( ca_is_face(ca) ) {
+    if ( rb_obj_class(self) == rb_obj_class(rval)
+         || rb_respond_to(self, rb_intern("to_comparable")) ) {
+      return rval;
+    }
+  }
+  else if ( ca->data_type != CA_OBJECT ) {
+    /* A fixlen string or a record is its bytes: storage and surface are
+       the same, so a plain array of that type takes them as they are.  A
+       const string's bytes are ranges into a pool of its own, and it is the
+       read-only Face that says so. */
+    CArray *storage = ca_strip_face(cr);
+    if ( storage->data_type == cr->data_type && storage->bytes == cr->bytes
+         && ! ca_is_readonly(cr) ) {
+      return rval;
+    }
+    rb_raise(rb_eTypeError,
+             "can not store a %s array into %s array "
+             "(to_type(:object) gives its values)",
+             rb_obj_classname(rval), ca_type_name[ca->data_type]);
+  }
+  return rb_funcall(rval, rb_intern("to_type"), 1, INT2NUM(CA_OBJECT));
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -516,6 +670,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rval = ca_face_source_for_store(self, ca, rval);
 
  retry:
 
@@ -552,6 +707,17 @@ rb_ca_store_all (VALUE self, VALUE rval)
     ca_broadcast_to_destination(self, &rval);
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
 
+    /* Fixlen cells of another width are fitted cell by cell, padded with
+       NUL or cut to the destination's width, as a String or an Array of
+       Strings stored into fixlen cells is.  Copied as they are, the bytes
+       would be read past the end of a narrower source. */
+    if ( ca->data_type == CA_FIXLEN && cv->data_type == CA_FIXLEN
+         && ca->bytes != cv->bytes ) {
+      rval = rb_ca_to_type(rb_ca_strip_face_value(rval), INT2NUM(CA_FIXLEN),
+                           SIZE2NUM(ca->bytes));
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+    }
+
     /* Source delivery via ca_xfer_all into a local scratch instead of
        ca_attach(cv).  This routes through ca_*_func_xfer_all's per-region
        partial-materialise path, avoiding a ca_attach(root) silent
@@ -564,29 +730,50 @@ rb_ca_store_all (VALUE self, VALUE rval)
        scales with the view, not the root.  (The dst-side ca_sync_data is
        already an xfer_all PUT.) */
     {
-      volatile VALUE scratch_holder;
+      volatile VALUE scratch_holder, mscratch_holder = 0;
       ca_size_t      cv_bytes = cv->bytes * cv->elements;
       char          *scratch  = ALLOCV_N(char, scratch_holder, cv_bytes);
+      boolean8_t    *mscratch = NULL;
       ca_xfer_all(cv, scratch, CA_XFER_GET);
 
+      /* The source's mask is taken now as well, before anything is
+         written: the source may read through to the destination's mask
+         (`c[] = c.flip(0)`, or a lazy expression over c whose mask is
+         built from c's on demand), and the writes below clear it. */
+      if ( ca_has_mask(cv) ) {
+        mscratch = ALLOCV_N(boolean8_t, mscratch_holder, cv->elements);
+        ca_xfer_all(cv->mask, mscratch, CA_XFER_GET);
+      }
+
       if ( ca->data_type != cv->data_type ) {
-        ca_allocate(ca);
-        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
-        if ( ca->mask ) {
-          ca_cast_block_with_mask(ca->elements, cv, scratch, ca, ca->ptr,
-                                  (boolean8_t*)ca->mask->ptr);
-        }
-        else {
-          ca_cast_block(ca->elements, cv, scratch, ca, ca->ptr);
-        }
-        ca_sync(ca);
-        ca_detach(ca);
+        ca_store_all_ctx_t c;
+        c.ca       = ca;
+        c.cv       = cv;
+        c.scratch  = scratch;
+        c.mscratch = mscratch;
+        ca_attach_window(1, &ca, ca_store_all_mode(cv), ca_store_all_cast_body,
+                         (VALUE) &c);
       }
       else {
-        ca_copy_mask_overwrite(ca, ca->elements, 1, cv);
+        if ( mscratch ) {
+          if ( ! ca->mask ) {
+            ca_create_mask(ca);
+          }
+          ca_sync_data(ca->mask, (char *) mscratch);
+        }
+        else {
+          ca_update_mask(ca);
+          if ( ca->mask ) {
+            boolean8_t zero = 0;
+            ca_fill(ca->mask, &zero);
+          }
+        }
         ca_sync_data(ca, scratch);
       }
 
+      if ( mscratch ) {
+        ALLOCV_END(mscratch_holder);
+      }
       ALLOCV_END(scratch_holder);
     }
   }
@@ -595,7 +782,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
                  rb_ary_flatten_for_elements(rval, ca->elements, ca);
     ca_size_t i;
     if ( NIL_P(list) ) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "failed to guess data size of given array");
     }
     else {
@@ -612,54 +799,19 @@ rb_ca_store_all (VALUE self, VALUE rval)
           break;
         }
       }
-      /* Use ca_allocate() instead of ca_attach() here because rb_ca_store_all()
-         overwrites ALL elements of the array from a Ruby Array. There is no need
-         to copy parent data (which ca_attach would do), since every element will
-         be replaced. Mask handling is also safe: ca_create_mask() above and
-         ca_copy_mask_overwrite() handle mask allocation and propagation internally,
-         so ca_allocate()'s simpler path (no parent data copy) is sufficient. */
-      ca_allocate(ca);
+      /* Every element is replaced, so there would be no need to gather the
+         old values -- but converting a Ruby object can raise part way, and
+         then the cells already converted are pushed back with the rest
+         left as they were, which needs the old values in the buffer.  So
+         this window attaches (see ca_store_all_mode). */
       {
-        /* Face has surface != storage; the cast runs in the storage
-           data_type.  Passing ca directly makes the cast table see FIXLEN
-           and report non-implemented, so pass a shadow CArray (storage
-           data_type, ptr aliased to ca). */
-        CArray shadow;
-        CArray *cast_target = ca;
-        memset(&shadow, 0, sizeof(CArray));
-        if ( ca_is_face(ca) ) {
-          CArray *root = ca;
-          while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
-          if (root) {
-            shadow.data_type = root->data_type;
-            shadow.bytes     = ca->bytes;
-            shadow.elements  = ca->elements;
-            shadow.ptr       = ca->ptr;
-            cast_target = &shadow;
-          }
-        }
-        if ( has_mask ) {
-          boolean8_t *m;
-          m = (boolean8_t *)ca->mask->ptr;
-          for (i=0; i<ca->elements; i++) {
-            if ( rb_ary_entry(list,i) == CA_UNDEF ) {
-              *m = 1;
-            }
-            else {
-              *m = 0;
-            }
-            m++;
-          }
-          ca_cast_block_with_mask(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list),
-                                  cast_target, ca->ptr,
-                                  (boolean8_t*)ca->mask->ptr);
-        }
-        else {
-          ca_cast_block(ca->elements, &ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
-        }
+        ca_store_all_ctx_t c;
+        c.ca       = ca;
+        c.ico      = &ico;
+        c.list     = list;
+        c.has_mask = has_mask;
+        ca_attach_window(1, &ca, "w", ca_store_all_list_body, (VALUE) &c);
       }
-      ca_sync(ca);
-      ca_detach(ca);
     }
   }
   else if ( rb_respond_to(rval, id_to_ca) ) {
@@ -835,9 +987,8 @@ rb_ca_ref_block (VALUE self, CAIndexInfo *info)
        data_type to the storage data_type (chain bottom) so the write path
        casts in the storage type. */
     if ( ca_is_face(ca) ) {
-      CArray *blk_ca, *root = ca;
+      CArray *blk_ca, *root = ca_strip_face(ca);
       TypedData_Get_Struct(blk, CArray, &carray_data_type, blk_ca);
-      while (root && ca_is_face(root)) root = ((CAView *) root)->parent;
       if (root && root->data_type != blk_ca->data_type) {
         blk_ca->data_type = root->data_type;
       }
@@ -894,7 +1045,13 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
     return rb_ca_remap_new(self, rmapper);
   }
 
-  /* (b) Normalize chain fallback. */
+  /* (b) Normalize chain fallback.  A Face is flattened through its storage
+     and put on top of the result, so no Face is left in the middle of the
+     chain (CAFace.md 8.3). */
+  if ( ca_is_face(ca) ) {
+    result = rb_ca_fancy_index_chain(rb_ca_strip_face_value(self), rmapper);
+    return ca_face_lift(result, self);
+  }
   flat_self    = rb_ca_refer_new_flatten(self);
   flat_mapper  = (cm->ndim == 1) ? rmapper : rb_ca_flatten(rmapper);
   grid_argv[0] = flat_mapper;
@@ -1014,8 +1171,20 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     /* Re-enter against a flattened view of self.  rb_ca_refer_new_flatten
        is an internal builder and hands back a bare refer, so a marker
        receiver would be dropped here and the result would never be lifted
-       at the tail.  Put it back on before the re-entry.  (A Face survives
-       on its own -- the internal builder still lifts those.) */
+       at the tail.  Put it back on before the re-entry.
+
+       A Face is flattened through its storage and put on top once at the
+       end; re-entering against the flattened Face would build the view on
+       it and leave a Face in the middle of the chain (CAFace.md 8.3). */
+    if ( ca_is_face(ca) ) {
+      volatile VALUE flat =
+        rb_ca_refer_new_flatten(rb_ca_strip_face_value(self));
+      obj = rb_ca_fetch_method(argc, argv, flat);
+      if ( rb_obj_is_kind_of(obj, rb_cCArray) ) {
+        obj = ca_face_lift(obj, self);
+      }
+      return obj;
+    }
     self = rb_ca_refer_new_flatten(self);
     if ( ca_is_lazy_marker(ca) ) {
       extern VALUE rb_ca_lazy_marker_new (VALUE cary);
@@ -1053,8 +1222,10 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_grid(argc, argv, self);
     break;
   case CA_REG_METHOD_CALL: {
+    /* a[:eq, 0] is a[a.eq(0)]: a public method of the array, as a call
+       written out would reach (a[:puts] does not run Kernel#puts). */
     volatile VALUE idx;
-    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
     obj = rb_ca_fetch(self, idx);
     break;
   }
@@ -1358,7 +1529,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
     break;
   case CA_REG_METHOD_CALL: {
     volatile VALUE idx;
-    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
     obj = rb_ca_fetch(self, idx);
     break;
   }
@@ -1403,7 +1574,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
      of letting the storage cast truncate it, and the bulk path must not be
      the looser door.
    - an Array is mapped structure-preserving (leaves converted),
-   - a scalar goes through the write hook (ca_face_scalar_to_storage), which
+   - a scalar goes through the write hook (ca_face_element_to_storage), which
      leaves a bare Integer / String unchanged.
 
    Idempotent: an already-converted Integer passes through, so re-running on
@@ -1414,15 +1585,26 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
   if ( rb_obj_is_carray(val) ) {
     CArray *cval;
     GetCArray(val, cval);
+    /* An object array holding struct elements (a record array's
+       to_type(:object)) goes in as its values, each through the write
+       hook; masked cells come back as UNDEF and stay masked. */
+    if ( ca->obj_type == CA_OBJ_RECORD && cval->data_type == CA_OBJECT ) {
+      return ca_face_convert_store_rval(self, ca,
+                                        rb_funcall(val, rb_intern("to_a"), 0));
+    }
     /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
-       the scalar path (ca_face_scalar_to_storage) for a bulk CArray source.
+       the scalar path (ca_face_element_to_storage) for a bulk CArray source.
        Guarded on self having to_comparable so a Face without a reconcile
        algebra (e.g. a fixlen-storage Face, whose same-storage store already
        takes the storage xfer branch) is left to the existing store path. */
     if ( ca_is_face(cval) && rb_respond_to(self, rb_intern("to_comparable")) ) {
-      volatile VALUE reconciled = rb_funcall(self, rb_intern("to_comparable"),
-                                             1, val);
-      return rb_funcall(reconciled, rb_intern("parent"), 0);
+      return ca_face_reconcile_operand(self, val, "[]=");
+    }
+    /* A Face of the same class and a compatible state holds values of the
+       same kind in the same encoding: it goes in as its storage. */
+    if ( ca_is_face(cval) && rb_obj_class(val) == rb_obj_class(self)
+         && ca_face_state_compatible(self, ca, val, cval) ) {
+      return rb_ca_strip_face_value(val);
     }
     /* Bare storage escape, integer storage: integer cells only (see above). */
     {
@@ -1445,15 +1627,16 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     }
     return out;
   }
-  return ca_face_scalar_to_storage(self, ca, val);
+  return ca_face_element_to_storage(self, ca, val);
 }
 
 static VALUE
 rb_ca_store_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj = Qnil, rval;
+  volatile VALUE obj = Qnil, rval, dest;
   CArray *ca;
   CAIndexInfo info;
+  int converted = 0;   /* rval has been through the Face's write hook */
 
   rb_ca_modify(self);
 
@@ -1463,12 +1646,31 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
  retry:
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  rval = ca_face_source_for_store(self, ca, rval);
 
   /* Face store: bring a surface value object (Scalar / Time / DateTime) into
      the storage domain while self is still the Face.  Store-side views strip
      the Face to storage, so this is the only point that sees it. */
   if ( ca_is_face(ca) ) {
-    rval = ca_face_convert_store_rval(self, ca, rval);
+    /* Once: a retry below comes back here with rval already converted. */
+    if ( ! converted ) {
+      rval = ca_face_convert_store_rval(self, ca, rval);
+      converted = 1;
+    }
+    /* A CArray source is storage now, so the destination has to be too.
+       A block store descends on its own (its view is built on the storage);
+       a whole, boolean or address store kept the Face and cast the storage
+       to the Face's surface type, which an int64 tick cannot become.  A Face
+       whose surface type is its storage's (a string or record Face) needs
+       no descent, and keeps its own index forms (a record's field name). */
+    if ( rb_obj_is_carray(rval) ) {
+      CArray *cr;
+      GetCArray(rval, cr);
+      if ( ! ca_is_face(cr) && ca_strip_face(ca)->data_type != ca->data_type ) {
+        self = rb_ca_strip_face_value(self);
+        TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+      }
+    }
   }
 
   /* newaxis (:_) interception on store.  Build the newaxis view (a
@@ -1492,31 +1694,40 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
+  /* A value or a Ruby Array converted above is in the storage domain now.
+     Stored through the Face it would meet the write hook a second time
+     (rb_ca_obj2ptr converts too), so a positional store goes into the
+     storage, which has the Face's shape.  A predicate (:sym) is still
+     asked of the Face; a member store keeps the Face for its data_class. */
+  dest = self;
+  if ( converted && ca_is_face(ca) && ! rb_obj_is_carray(rval) ) {
+    dest = rb_ca_strip_face_value(self);
+  }
+
   switch ( info.type ) {
   case CA_REG_ADDRESS_COMPLEX:
     self = rb_ca_refer_new_flatten(self);
     goto retry;
   case CA_REG_ADDRESS:
-    obj = rb_ca_store_address(self, &info, rval);
+    obj = rb_ca_store_address(dest, &info, rval);
     break;
   case CA_REG_FLATTEN:
-    self = rb_ca_refer_new_flatten(self);
-    obj = rb_ca_store_all(self, rval);
+    obj = rb_ca_store_all(rb_ca_refer_new_flatten(dest), rval);
     break;
   case CA_REG_POINT:
-    obj = rb_ca_store_point(self, &info, rval);
+    obj = rb_ca_store_point(dest, &info, rval);
     break;
   case CA_REG_ALL:
-    obj = rb_ca_store_all(self, rval);
+    obj = rb_ca_store_all(dest, rval);
     break;
   case CA_REG_BLOCK: {
     volatile VALUE block;
-    block = rb_ca_ref_block(self, &info);
+    block = rb_ca_ref_block(dest, &info);
     obj   = rb_ca_store_all(block, rval); 
     break;
   }
   case CA_REG_SELECT: {
-    obj = rb_ca_select_new(self, argv[0]);
+    obj = rb_ca_select_new(dest, argv[0]);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
@@ -1529,27 +1740,30 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_REPEAT: {
-    obj = rb_ca_repeat(argc, argv, self);
+    obj = rb_ca_repeat(argc, argv, dest);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
   case CA_REG_MAPPING: {
-    obj = rb_ca_fancy_index_chain(self, argv[0]);
+    obj = rb_ca_fancy_index_chain(dest, argv[0]);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
   case CA_REG_GRID: {
-    obj = rb_ca_grid(argc, argv, self);
+    obj = rb_ca_grid(argc, argv, dest);
     obj = rb_ca_store_all(obj, rval);
     break;
   }
   case CA_REG_METHOD_CALL: {
-    volatile VALUE idx;
+    ca_store_method_call_ctx_t c;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-    ca_attach(ca);
-    idx = rb_funcall2(self, SYM2ID(info.symbol), (int)(argc-1), argv+1);
-    obj = rb_ca_store(self, idx, rval);
-    ca_detach(ca);
+    c.self = self;
+    c.dest = dest;
+    c.mid  = SYM2ID(info.symbol);
+    c.argc = (int)(argc-1);
+    c.argv = argv+1;
+    c.rval = rval;
+    obj = ca_attach_window(1, &ca, "r", ca_store_method_call_body, (VALUE) &c);
     break;
   }
   case CA_REG_MEMBER: {
@@ -1627,15 +1841,13 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   Check_Type(rdim, T_ARRAY);
   Check_Type(ridx, T_ARRAY);
 
-  elements = 1;
   ndim = (int) RARRAY_LEN(rdim);
+  CA_CHECK_RANK(ndim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
-    elements *= dim[i];
   }
-
-  CA_CHECK_RANK(ndim);
   CA_CHECK_DIM(ndim, dim);
+  elements = ca_shape_elements(ndim, dim, 1);
 
   info.range_check = 1;
   rb_ca_scan_index(ndim, dim, elements,
@@ -1699,7 +1911,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
                                  info.index[i].symbol.spec));
         break;
       default:
-        rb_raise(rb_eRuntimeError, "unknown index spec");
+        rb_raise(rb_eIndexError, "unknown index spec");
       }
     }
     break;
@@ -1767,7 +1979,7 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
         rb_ary_store(rindex, i, ID2SYM(info.index[i].symbol.id));
         break;
       default:
-        rb_raise(rb_eRuntimeError, "unknown index spec");
+        rb_raise(rb_eIndexError, "unknown index spec");
       }
     }
     return rindex;
@@ -1814,8 +2026,8 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
       rb_raise(rb_eArgError, "negative dim %" PRId64 " at axis %d",
                (ca_size_t) dim[i], i);
     }
-    elements *= dim[i];
   }
+  elements = ca_shape_elements(ndim, dim, 1);
   *out_ndim = ndim;
   *out_elements = elements;
 }
@@ -1829,12 +2041,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
   /* Scalar path (Integer input): returns Ruby Array of N Integers.
    * Preserves legacy shape for callers like `i, j = ca.addr2index(k)`. */
   if ( rb_obj_is_kind_of(raddr, rb_cInteger) ) {
-    ca_size_t addr = NUM2SIZE(raddr);
-    if ( addr < 0 || addr >= elements ) {
-      rb_raise(rb_eArgError,
-               "address %" PRId64 " is out of range (0..%" PRId64 ")",
-               (ca_size_t) addr, (ca_size_t) (elements - 1));
-    }
+    ca_size_t addr = ca_index_in_range(NUM2SIZE(raddr), elements, "address");
     out = rb_ary_new2(ndim);
     for (i = ndim - 1; i >= 0; i--) {
       rb_ary_store(out, i, SIZE2NUM(addr % dim[i]));
@@ -1852,8 +2059,9 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
     ca_size_t j, n;
     volatile VALUE objs[CA_RANK_MAX];
 
+    ca_check_index_array(raddr);
     cin = ca_wrap_readonly(raddr, CA_SIZE);
-    ca_attach(cin);
+    ca_attach(cin);   /* window: detached before its one raise */
 
     out = rb_ary_new2(ndim);
     for (i = 0; i < ndim; i++) {
@@ -1882,12 +2090,11 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
           continue;
         }
         addr = src[j];
-        if ( addr < 0 || addr >= elements ) {
+        if ( addr < -elements || addr >= elements ) {
           ca_detach(cin);
-          rb_raise(rb_eArgError,
-                   "address %" PRId64 " is out of range (0..%" PRId64 ")",
-                   (ca_size_t) addr, (ca_size_t) (elements - 1));
+          ca_index_out_of_range(addr, elements, "address");
         }
+        addr = ca_index_in_range(addr, elements, "address");
         for (k = ndim - 1; k >= 0; k--) {
           p_out[k][j] = addr % dim[k];
           addr /= dim[k];
@@ -1900,81 +2107,38 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
   }
 }
 
+/* The vector path of index2addr reads every index array inside one
+   window: an index out of range raises part way through. */
+
+typedef struct {
+  int        ndim;
+  ca_size_t *dim;
+  CArray   **cidx;
+  int        out_ndim;
+  ca_size_t *out_dim;
+  ca_size_t  out_elements;
+} ca_index2addr_ctx_t;
+
 static VALUE
-index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
+ca_index2addr_body (VALUE arg)
 {
+  ca_index2addr_ctx_t *c = (ca_index2addr_ctx_t *) arg;
+  int        ndim = c->ndim;
+  ca_size_t *dim  = c->dim;
+  CArray   **cidx = c->cidx;
+  ca_size_t  out_elements = c->out_elements;
   volatile VALUE obj;
-  CArray *co, *cidx[CA_RANK_MAX];
+  CArray *co;
   ca_size_t *q, *p[CA_RANK_MAX], s[CA_RANK_MAX];
   ca_size_t addr, k, n;
   boolean8_t *m;
-  int i, all_number = 1;
-  int out_ndim = 1;
-  ca_size_t out_dim[CA_RANK_MAX];
-  ca_size_t out_elements = 1;
-  int shape_from = -1;
-
-  if ( argc != ndim ) {
-    rb_raise(rb_eArgError,
-             "wrong number of indices (%d for %d)", argc, ndim);
-  }
+  int i;
 
   for (i = 0; i < ndim; i++) {
-    if ( ! rb_obj_is_kind_of(argv[i], rb_cInteger) ) {
-      all_number = 0;
-      break;
-    }
-  }
-
-  /* All-scalar path: returns single Integer (unchanged). */
-  if ( all_number ) {
-    addr = 0;
-    for (i = 0; i < ndim; i++) {
-      k = NUM2SIZE(argv[i]);
-      CA_CHECK_INDEX(k, dim[i]);
-      addr = dim[i] * addr + k;
-    }
-    return SIZE2NUM(addr);
-  }
-
-  /* Vector path: wrap each arg as CA_SIZE view.  Output shape follows
-   * the first non-scalar CArray input; other non-scalar inputs must
-   * match that shape. */
-  for (i = 0; i < ndim; i++) {
-    cidx[i] = ca_wrap_readonly(argv[i], CA_SIZE);
-    if ( ! ca_is_scalar(cidx[i]) ) {
-      if ( shape_from < 0 ) {
-        shape_from = i;
-        out_ndim = cidx[i]->ndim;
-        memcpy(out_dim, cidx[i]->dim, sizeof(ca_size_t) * out_ndim);
-        out_elements = cidx[i]->elements;
-      }
-      else {
-        int j;
-        if ( cidx[i]->ndim != out_ndim
-             || cidx[i]->elements != out_elements ) {
-          rb_raise(rb_eArgError,
-                   "shape mismatch: axis %d has shape ndim=%d elements=%"
-                   PRId64 ", expected ndim=%d elements=%" PRId64,
-                   i, cidx[i]->ndim, (ca_size_t) cidx[i]->elements,
-                   out_ndim, (ca_size_t) out_elements);
-        }
-        for (j = 0; j < out_ndim; j++) {
-          if ( cidx[i]->dim[j] != out_dim[j] ) {
-            rb_raise(rb_eArgError,
-                     "shape mismatch at axis %d dim %d", i, j);
-          }
-        }
-      }
-    }
-  }
-
-  for (i = 0; i < ndim; i++) {
-    ca_attach(cidx[i]);
     ca_set_iterator(1, cidx[i], &p[i], &s[i]);
   }
 
-  obj = rb_carray_new(CA_SIZE, out_ndim, out_dim, 0, NULL);
+  obj = rb_carray_new(CA_SIZE, c->out_ndim, c->out_dim, 0, NULL);
   TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
   q = (ca_size_t *) co->ptr;
@@ -2016,9 +2180,89 @@ index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
     }
   }
 
-  for (i = 0; i < ndim; i++) { ca_detach(cidx[i]); }
-
   return obj;
+}
+
+static VALUE
+index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
+{
+  CArray *cidx[CA_RANK_MAX];
+  ca_size_t addr, k;
+  int i, all_number = 1;
+  int out_ndim = 1;
+  ca_size_t out_dim[CA_RANK_MAX];
+  ca_size_t out_elements = 1;
+  int shape_from = -1;
+
+  if ( argc != ndim ) {
+    rb_raise(rb_eArgError,
+             "wrong number of indices (%d for %d)", argc, ndim);
+  }
+
+  for (i = 0; i < ndim; i++) {
+    if ( ! rb_obj_is_kind_of(argv[i], rb_cInteger) ) {
+      all_number = 0;
+      break;
+    }
+  }
+
+  /* All-scalar path: returns single Integer (unchanged). */
+  if ( all_number ) {
+    addr = 0;
+    for (i = 0; i < ndim; i++) {
+      k = NUM2SIZE(argv[i]);
+      CA_CHECK_INDEX(k, dim[i]);
+      addr = dim[i] * addr + k;
+    }
+    return SIZE2NUM(addr);
+  }
+
+  /* Vector path: wrap each arg as CA_SIZE view.  Output shape follows
+   * the first non-scalar CArray input; other non-scalar inputs must
+   * match that shape. */
+  for (i = 0; i < ndim; i++) {
+    ca_check_index_array(argv[i]);
+    cidx[i] = ca_wrap_readonly(argv[i], CA_SIZE);
+    if ( ! ca_is_scalar(cidx[i]) ) {
+      if ( shape_from < 0 ) {
+        shape_from = i;
+        out_ndim = cidx[i]->ndim;
+        memcpy(out_dim, cidx[i]->dim, sizeof(ca_size_t) * out_ndim);
+        out_elements = cidx[i]->elements;
+      }
+      else {
+        int j;
+        if ( cidx[i]->ndim != out_ndim
+             || cidx[i]->elements != out_elements ) {
+          rb_raise(rb_eArgError,
+                   "shape mismatch: axis %d has shape ndim=%d elements=%"
+                   PRId64 ", expected ndim=%d elements=%" PRId64,
+                   i, cidx[i]->ndim, (ca_size_t) cidx[i]->elements,
+                   out_ndim, (ca_size_t) out_elements);
+        }
+        for (j = 0; j < out_ndim; j++) {
+          if ( cidx[i]->dim[j] != out_dim[j] ) {
+            rb_raise(rb_eArgError,
+                     "shape mismatch at axis %d dim %d", i, j);
+          }
+        }
+      }
+    }
+  }
+
+  {
+    ca_index2addr_ctx_t c;
+    char modes[CA_RANK_MAX + 1];
+    memset(modes, 'r', (size_t) ndim);
+    modes[ndim] = '\0';
+    c.ndim         = ndim;
+    c.dim          = dim;
+    c.cidx         = cidx;
+    c.out_ndim     = out_ndim;
+    c.out_dim      = out_dim;
+    c.out_elements = out_elements;
+    return ca_attach_window(ndim, cidx, modes, ca_index2addr_body, (VALUE) &c);
+  }
 }
 
 VALUE

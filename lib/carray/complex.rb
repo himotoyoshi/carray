@@ -52,6 +52,14 @@ class CArray
   # framework's read-only chain does not replace the CAField mutable view).
   # ---------------------------------------------------------------------------
 
+  # Whether a view kept by {#real} / {#imag} was made for this array.
+  # `dup` and `clone` copy instance variables, so a copy arrives holding the
+  # original's view, whose parent is the original; the copy makes its own.
+  def part_of_self? (view)
+    view && view.parent.equal?(self)
+  end
+  private :part_of_self?
+
   # @overload real
   #   Returns the real part of `self` as a zero-copy view. For a
   #   complex array the view is a mutable {CAField} into the
@@ -59,19 +67,16 @@ class CArray
   #   over `self`. Writing to the view updates `self` in place.
   #   @return [CArray]
   def real
-    if not @__real__
-      if complex?
-        @__real__ = case data_type
-                    when CA_CMPLX64
-                      field(0, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(0, CA_FLOAT64)
-                    end
-      else
-        @__real__ = self[]
-      end
-    end
-    @__real__
+    return @__real__ if part_of_self?(@__real__)
+    view = if complex?
+             case data_type
+             when CA_CMPLX64  then field(0, CA_FLOAT32)
+             when CA_CMPLX128 then field(0, CA_FLOAT64)
+             end
+           else
+             self[]
+           end
+    frozen? ? view : (@__real__ = view)
   end
 
   # @overload real=(val)
@@ -85,35 +90,37 @@ class CArray
   # @overload imag
   #   Returns the imaginary part of `self`. For a complex array the
   #   result is a mutable {CAField} view of the imaginary slot;
-  #   writing to it updates `self` in place. For a real array the
-  #   result is a fresh independent CArray filled with 0.
+  #   writing to it updates `self` in place. For an object array each
+  #   cell's `imaginary`; for a real array a fresh independent CArray
+  #   filled with 0. Masked cells stay masked.
   #   @return [CArray]
   def imag
-    if not @__imag__
-      if complex?
-        @__imag__ = case data_type
-                    when CA_CMPLX64
-                      field(4, CA_FLOAT32)
-                    when CA_CMPLX128
-                      field(8, CA_FLOAT64)
-                    end
-      else
-        @__imag__ = self.template { 0 }
-      end
+    if object?
+      return imag_i
     end
-    return @__imag__
+    if not complex?
+      zero = template { 0 }
+      zero[is_masked] = UNDEF if has_mask?
+      return zero
+    end
+    return @__imag__ if part_of_self?(@__imag__)
+    view = case data_type
+           when CA_CMPLX64  then field(4, CA_FLOAT32)
+           when CA_CMPLX128 then field(8, CA_FLOAT64)
+           end
+    frozen? ? view : (@__imag__ = view)
   end
 
   # @overload imag=(val)
   #   Sets the imaginary-part slot to `val` (complex arrays only).
   #   @param val [CArray, Numeric] value to broadcast.
   #   @return [Object] `val`.
-  #   @raise [RuntimeError] when `self` is not a complex array.
+  #   @raise [CArray::DataTypeError] when `self` is not a complex array.
   def imag= (val)
     if complex?
       imag[] = val
     else
-      raise "not a complex array"
+      raise CArray::DataTypeError, "not a complex array"
     end
   end
 

@@ -83,7 +83,10 @@ class TestSortCopyParity < Test::Unit::TestCase
       end
     end
     assert_not_nil got[0]
-    assert_equal got[0], got[1]
+    # each names the method that was called, and says the rest alike
+    assert_match(/\Asort: /, got[0])
+    assert_match(/\Asort_copy: /, got[1])
+    assert_equal got[0].sub(/\A\w+: /, ""), got[1].sub(/\A\w+: /, "")
   end
 
   def test_kind_is_still_checked

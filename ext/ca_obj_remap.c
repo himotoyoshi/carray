@@ -7,9 +7,9 @@
   Constraints:
   - ref.dim == idx.dim (same shape, same ndim, per-axis dim match)
   - idx.data_type == CA_SIZE (caller responsible)
-  - No public constructor — there is no `CArray#remap(idx)` or
-    `CARemap.new` surface; the class is only reachable via internal
-    helpers and the `ca[idx]` same-shape indexer fast path.
+  - No public constructor — there is no `CArray#remap(idx)` surface; a
+    view is built by internal helpers and the `ca[idx]` same-shape
+    indexer fast path.  `dup` / `clone` copy an existing one.
   - The CARemap Ruby class IS rb_define_class'd: visibility lets users
     see "this view came from a same-shape gather" when they inspect
     `.class`.  CA_OBJ_REMAP integer remains unexported as a Ruby
@@ -18,6 +18,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 
 typedef struct {
   int16_t   obj_type;
@@ -216,9 +217,7 @@ ca_remap_func_allocate (void *ap)
 static void
 ca_remap_func_attach (void *ap)
 {
-  CARemap *ca = (CARemap *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
-  ca_remap_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  ca_axis_view_attach_owned(ap);
 }
 
 static void
@@ -265,10 +264,7 @@ static void
 ca_remap_func_create_mask (void *ap)
 {
   CARemap *ca = (CARemap *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   /* Mask is a CARemap over (parent->mask, idx) — same shape, boolean. */
   ca->mask = (CArray *) ca_remap_new(ca->parent->mask, ca->idx);
 }
@@ -282,7 +278,7 @@ ca_remap_func_create_mask (void *ap)
      2. ca_xfer_addrs(ca->idx, n, addrs, paddrs, GET)  — one batched
         read of the parent flat addresses through ca->idx's own
         xfer_addrs dispatcher (entity, view, view chain — all
-        transparent).
+        transparent), each address then checked against the parent.
      3. ca_xfer_addrs(ca->parent, n, paddrs, data, dir) — one batched
         gather/scatter of the user payload against parent.
 
@@ -295,13 +291,20 @@ ca_remap_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   CARemap   *ca = (CARemap *) ap;
   ca_size_t *paddrs;
+  ca_size_t  i;
   volatile VALUE holder;
 
   if ( n == 0 ) return;
 
   paddrs = ALLOCV_N(ca_size_t, holder, n);
-  ca_xfer_addrs(ca->idx,    n, addrs,  paddrs, CA_XFER_GET);
-  ca_xfer_addrs(ca->parent, n, paddrs, data,   dir);
+  ca_xfer_addrs(ca->idx, n, addrs, paddrs, CA_XFER_GET);
+  /* idx is read live, so its values are checked here, not at
+     construction: negative counts from the end, out of range raises
+     before the parent is touched. */
+  for ( i = 0; i < n; i++ ) {
+    CA_CHECK_INDEX(paddrs[i], ca->parent->elements);
+  }
+  ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
   ALLOCV_END(holder);
 }
 
@@ -329,6 +332,7 @@ static void
 ca_remap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CARemap   *ca = (CARemap *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];
@@ -443,18 +447,54 @@ rb_ca_remap_mapper (VALUE self)
 }
 
 
+/* `dup` / `clone`.  CARemap has no allocator (Ruby cannot build one), so
+   Object#dup cannot copy it; these build the copy the way the indexer
+   does: a new view over the same parent and the same index array. */
+static VALUE
+rb_ca_remap_dup (VALUE self)
+{
+  return rb_ca_remap_new(rb_ca_parent(self),
+                         rb_ivar_get(self, rb_intern("remap_idx")));
+}
+
+static VALUE
+rb_ca_remap_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE opts = Qnil, vfreeze = Qnil;
+  volatile VALUE obj;
+  rb_scan_args(argc, argv, "0:", &opts);
+  if ( ! NIL_P(opts) ) {
+    /* rb_get_kwargs refuses any key but freeze:, as Kernel#clone does. */
+    ID kw[1];
+    VALUE val[1];
+    kw[0] = rb_intern("freeze");
+    rb_get_kwargs(opts, kw, 0, 1, val);
+    if ( val[0] != Qundef ) {
+      vfreeze = val[0];
+    }
+  }
+  obj = rb_ca_remap_dup(self);
+  if ( RTEST(vfreeze) || ( NIL_P(vfreeze) && OBJ_FROZEN(self) ) ) {
+    rb_obj_freeze(obj);
+  }
+  return obj;
+}
+
 void
 Init_ca_obj_remap (void)
 {
   /* CARemap is a proper Ruby class so users can see "this view is a
-     per-element gather" on .class.  No allocator, no initialize, no
-     `new` reachable from Ruby — construction is C-internal only.
-     CA_OBJ_REMAP integer remains unexported (it's an internal type
-     tag, not user-meaningful). */
+     per-element gather" on .class.  A view is built from C only (the
+     indexer and sort / partition): there is no allocator, and `dup` /
+     `clone` are defined here instead of going through one.  CA_OBJ_REMAP
+     integer remains unexported (it's an internal type tag, not
+     user-meaningful). */
   rb_cCARemap     = rb_define_class("CARemap",     rb_cCAView);
   rb_cCARemapMask = rb_define_class("CARemapMask", rb_cCARemap);
   rb_undef_alloc_func(rb_cCARemap);
   rb_undef_alloc_func(rb_cCARemapMask);
+  rb_define_method(rb_cCARemap, "dup",   rb_ca_remap_dup,    0);
+  rb_define_method(rb_cCARemap, "clone", rb_ca_remap_clone, -1);
 
   ca_remap_func.struct_size = sizeof(CARemap);
   ca_remap_func.pool_bytes  = ca_remap_pool_bytes;

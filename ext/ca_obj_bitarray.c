@@ -96,6 +96,21 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
     rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
   }
 
+  /* The bits of one byte would share that byte's one mask cell, so a bit
+     view takes no masked array and holds no mask of its own. */
+  if ( ca_has_mask(parent) ) {
+    rb_raise(rb_eArgError,
+             "bitarray: the array has a mask, which a bit view can not "
+             "carry (its bits would share one mask per byte); "
+             "use .value.bitarray to read the bits without it");
+  }
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ndim     = parent->ndim + 1;
   bitlen   = 8 * parent->bytes;
   elements = bitlen * parent->elements;
@@ -122,17 +137,15 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   memcpy(ca->dim, parent->dim, (ndim-1) * sizeof(ca_size_t));
   ca->dim[ndim-1] = bitlen;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
-
   return 0;
 }
 
 CABitarray *
 ca_bitarray_new (CArray *parent)
 {
-  CABitarray *ca = (CABitarray *) ca_array_alloc(CA_OBJ_BITARRAY, parent->ndim + 1);
+  CABitarray *ca;
+  ca_bitarray_setup(NULL, parent);
+  ca = (CABitarray *) ca_array_alloc(CA_OBJ_BITARRAY, parent->ndim + 1);
   ca_bitarray_setup(ca, parent);
   return ca;
 }
@@ -178,7 +191,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_size_t bytes  = ca->parent->bytes;
   ca_size_t offset = idx[ca->ndim-1];
   ca_size_t major, minor;
-  uint8_t sbuf[32];
+  volatile VALUE holder;
   uint8_t *v;
 
   if ( ca_endian == CA_BIG_ENDIAN &&
@@ -191,7 +204,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   }
   minor = offset % 8;
 
-  v = (ca->parent->bytes <= 32) ? sbuf : xmalloc(ca->parent->bytes);
+  v = ALLOCV_N(uint8_t, holder, ca->parent->bytes);
 
   if ( dir == CA_XFER_GET ) {
     ca_fetch_index(ca->parent, idx, v);
@@ -209,7 +222,7 @@ ca_bitarray_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_store_index(ca->parent, idx, v);
   }
 
-  if ( v != sbuf ) xfree(v);
+  ALLOCV_END(holder);
 }
 
 /* Batched gather / scatter.
@@ -315,6 +328,7 @@ static void
 ca_bitarray_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                               ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CABitarray *ca = (CABitarray *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];
@@ -478,29 +492,27 @@ ca_bitarray_func_fill_data (void *ap, void *ptr)
   CABitarray *ca = (CABitarray *) ap;
   ca_attach(ca->parent);
   ca_bitarray_fill(ca, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
+
+/* Reached when a mask is about to be put on the view (mask=, storing UNDEF
+   or a masked array), or when the array it views has gained a mask since
+   the view was made. */
+NORETURN(static void ca_bitarray_func_create_mask (void *ap));
 
 static void
 ca_bitarray_func_create_mask (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
-  ca_size_t count[CA_RANK_MAX];
-  int8_t i;
-
-  for (i=0; i<ca->ndim-1; i++) {
-    count[i] = 0;
+  if ( ca_has_mask(ca->parent) ) {
+    rb_raise(rb_eArgError,
+             "bitarray: the array this view reads has gained a mask, which "
+             "a bit view can not carry (its bits would share one mask per "
+             "byte); use .value.bitarray to read the bits without it");
   }
-  count[ca->ndim-1] = ca->bitlen;
-
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_repeat_new(ca->parent->mask, ca->ndim, count);
-
-  ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
+  rb_raise(rb_eArgError,
+           "a bitarray view can not hold a mask "
+           "(its bits would share one mask per byte)");
 }
 
 ca_operation_function_t ca_bitarray_func = {
@@ -703,6 +715,7 @@ rb_ca_bitarray_initialize_copy (VALUE self, VALUE other)
   CABitarray *ca, *cs;
 
   TypedData_Get_Struct(self,  CABitarray, &cabitarray_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABitarray, &cabitarray_data_type, cs);
 
   if ( ca_func[CA_OBJ_BITARRAY].pool_init ) {

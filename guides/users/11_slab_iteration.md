@@ -126,7 +126,7 @@ m.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 
 ## Higher-dimensional arrays
 
-Everything above extends to any number of dimensions. The slab is always 1-D; all the other axes index *which* slab.
+Everything above extends to any number of dimensions. A slab along one axis is 1-D; all the other axes index *which* slab.
 
 ```ruby
 c = CArray.int32(2, 2, 2).seq
@@ -144,7 +144,7 @@ c.reduce_slab(axis: 0) { |fiber| fiber.max }
 #       [ 6, 7 ] ]
 ```
 
-The slab iterator is single-axis only — `axis:` takes one integer, not an array of integers. If you need a multi-axis reduction expressible with the built-ins (`sum`, `prod`, `min`, `max`, `mean`, `variance`, `stddev`, `accumulate`, `count`), those accept `axis: [k1, k2, …]`; see [Reduction and statistics](04_reduction_and_statistics.md).
+`axis:` also takes an array of axes, and the block then receives a slab spanning all of them: `c.reduce_slab(axis: [0, 2]) { |s| s.max }` gives `[ 5, 7 ]`. For reductions the built-ins already cover (`sum`, `prod`, `min`, `max`, `mean`, `variance`, `stddev`, `accumulate`, `count`), pass the same `axis: [k1, k2, …]` to them directly; see [Reduction and statistics](04_reduction_and_statistics.md).
 
 ## Relation to the built-in reductions
 
@@ -163,16 +163,16 @@ m.each_slab(axis: 1) { |row| refs << row }       # all entries alias each other
 
 # RIGHT — take a snapshot in the block
 rows = []
-m.each_slab(axis: 1) { |row| rows << row.dup }
+m.each_slab(axis: 1) { |row| rows << row.copy }
 ```
 
-Use `row.dup`, `row.copy`, or `row.to_a` when you need to remember a slab. This is the same rule as views in general — see [Views](06_views.md) — and the slab is in fact presented as a small view onto the source.
+Use `row.copy` or `row.to_a` when you need to remember a slab. `row.dup` is not a snapshot: like any view's `dup` it shares the data — here the slab's buffer — so after the walk it shows the last slab as well. This is the same rule as views in general — see [Views](06_views.md).
 
 Derived values made inside the block (`row.sum`, `row - 1`, `row[1..-1]`, `row.median`) read the current iteration's data correctly. The trap is only about keeping the slab object itself across iterations.
 
 ## Masks
 
-A masked source array is passed straight through: the slab the block receives carries the mask, so masked cells show up as `UNDEF`. Any mask-aware method you call on the slab (`sum`, `mean`, `count_not_masked`, …) skips them just as it would on a whole array (see [Masks and missing values](05_masks.md)). If you would rather work on the raw stored values, strip the mask first with `.value`:
+A masked source array is passed straight through: the slab the block receives carries the mask, so masked cells show up as `UNDEF`. Any mask-aware method you call on the slab (`sum`, `mean`, `count_not_masked`, …) skips them just as it would on a whole array (see [Masks and missing values](05_masks.md)). A masked cell of the array the `map_slab` block returns is masked in the result. If you would rather work on the raw stored values, strip the mask first with `.value`:
 
 ```ruby
 masked.value.map_slab(axis: 1) { |row| row.normalize }
@@ -209,5 +209,5 @@ m.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 
 ```ruby
 rows = []
-m.each_slab(axis: 1) { |row| rows << row.dup }
+m.each_slab(axis: 1) { |row| rows << row.copy }
 ```

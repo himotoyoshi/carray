@@ -17,7 +17,11 @@ class CArray
   #   materialise.  The marker is transient — a Ruby reference can
   #   re-consume it (`m = a.lazy; m.sqrt + m.sin`) without side
   #   effects on `self`.
-  #   @return [CALazyMarker]
+  #
+  #   A Face (`CATime`, `CACategorical`, a string array, ...) returns
+  #   `self`: a lazy tree computes on storage and would drop what the
+  #   Face means, so operations on a Face stay eager.
+  #   @return [CALazyMarker, CArray] the marker, or `self` for a Face
   def lazy; end
   # @!endgroup
 end

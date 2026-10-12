@@ -22,7 +22,7 @@ class CArray
   #   reinterpret the storage on purpose. A Numeric Face, whose surface *is*
   #   its storage, is unaffected.
   #   @param data_type [Symbol, Integer, Class, String]
-  #   @param bytes [Integer] element byte size for `:fixlen`.
+  #   @param bytes [Integer] element byte size for `:fixlen` (1 or more).
   #   @return [CAFake]
   #   @raise [TypeError] when `self` is a Face and the request would read its
   #     storage under another type.

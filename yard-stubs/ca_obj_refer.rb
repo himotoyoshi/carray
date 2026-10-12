@@ -32,10 +32,10 @@ class CArray
   #     defaults to `self.bytes`.
   #   @param offset [Integer] offset in parent elements.
   #   @return [CARefer, CARecord]
-  #   @raise [RuntimeError] when the byte widths do not divide
+  #   @raise [ArgumentError] when the byte widths do not divide
   #     evenly, when `offset` is negative, or when the requested
   #     view extends past the parent's data.
-  #   @raise [RuntimeError] when reinterpreting a CA_OBJECT parent
+  #   @raise [CArray::DataTypeError] when reinterpreting a CA_OBJECT parent
   #     with a non-object `data_type`.
   def refer(*argv); end
 
@@ -54,7 +54,7 @@ class CArray
   #   @return [CArray] the reshape view.
   #   @raise [ArgumentError] when the number of dims exceeds
   #     `CA_RANK_MAX`.
-  #   @raise [RuntimeError] when the product does not equal
+  #   @raise [ArgumentError] when the product does not equal
   #     `self.elements` (with no placeholder), when the placeholder
   #     cannot be inferred, when more than one placeholder is
   #     given, or when a `nil` has no matching source axis.

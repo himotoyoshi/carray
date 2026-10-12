@@ -21,8 +21,10 @@ def carray_version
 
   ca_version2 = format("%i.%i.%i", 
                        ca_version_major, ca_version_minor, ca_version_teeny)
-  ca_version_code2 = 
-            100 * ca_version_major + 10*ca_version_minor + ca_version_teeny
+  # Two decimal digits for each of minor and teeny, so 3.0.10 (30010)
+  # comes after 3.0.9 (30009) and before 3.1.0 (30100).
+  ca_version_code2 =
+            10000 * ca_version_major + 100 * ca_version_minor + ca_version_teeny
 
   # Allow pre-release suffix like "3.0.0.dev" / "3.0.0.alpha1" while still
   # validating the numeric MAJOR.MINOR.TEENY prefix.

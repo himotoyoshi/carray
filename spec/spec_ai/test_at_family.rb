@@ -432,4 +432,99 @@ class TestAtFamily < Test::Unit::TestCase
     assert_equal([10, 20, 30], a.to_a)
   end
 
+
+  # ---- complex: add / sub / mul / replace work, min / max refuse ----
+  #
+  # A complex receiver passed the numeric check and then fell through the
+  # per-type dispatch into rb_bug, taking the process down.
+
+  def test_scatter_add_complex
+    [CA_CMPLX64, CA_CMPLX128].each do |dt|
+      a = CArray.new(dt, [3]).fill(0)
+      a.scatter_add!(CA_SIZE([0, 0, 2]), CA_CMPLX128([1+2i, 3, 1i]).to_type(dt))
+      assert_equal([4+2i, 0, 1i], a.to_a, "data type #{dt}")
+    end
+  end
+
+  def test_scatter_complex_scalar_broadcasts
+    a = CArray.cmplx128(3).fill(0)
+    a.scatter_add!(CA_SIZE([1, 1]), Complex(1, -1))
+    a.scatter_add!(CA_SIZE([2]), 5)
+    assert_equal([0, 2-2i, 5], a.to_a)
+  end
+
+  def test_scatter_sub_mul_complex
+    a = CArray.cmplx128(2).fill(1)
+    a.scatter_sub!(CA_SIZE([0]), 1i)
+    a.scatter_mul!(CA_SIZE([1, 1]), 1i)
+    assert_equal([1-1i, -1], a.to_a)
+  end
+
+  def test_scatter_replace_complex
+    a = CArray.cmplx64(3).fill(0)
+    a.scatter_replace!(CA_SIZE([0, 2]), Complex(4, 4))
+    assert_equal([4+4i, 0, 4+4i], a.to_a)
+  end
+
+  def test_scatter_add_complex_skips_masked_vals
+    vals = CA_CMPLX128([1, 2, 3])
+    vals[1] = UNDEF
+    a = CArray.cmplx128(1).fill(0)
+    a.scatter_add!(CA_SIZE([0, 0, 0]), vals)
+    assert_equal([4], a.to_a)
+  end
+
+  def test_scatter_min_max_complex_raise
+    %i[scatter_min! scatter_max!].each do |op|
+      a = CArray.cmplx128(2).fill(0)
+      assert_raise(CArray::DataTypeError, op.to_s) { a.send(op, CA_SIZE([0]), 1) }
+    end
+  end
+
+  # ---- a self that does not lend its memory ----
+
+  OPS = %i[scatter_add! scatter_sub! scatter_mul!
+           scatter_min! scatter_max! scatter_replace!]
+
+  # Only the cells the addresses name are written back.  The other cells
+  # of a converting view do not round-trip through the conversion.
+  def test_scatter_through_a_converting_view_leaves_other_cells
+    OPS.each do |op|
+      a = CA_INT32([16777217, 16777219, 5])
+      a.fake(CA_FLOAT32).send(op, CA_SIZE([2]), 1.0)
+      assert_equal [16777217, 16777219], a[0..1].to_a, op.to_s
+    end
+  end
+
+  # A selection answers as the entity it selects, duplicates, masks and
+  # negative addresses included.
+  def test_scatter_through_a_selection_matches_the_entity
+    srand(7)
+    OPS.each do |op|
+      50.times do
+        base = CArray.float64(10) { |i| rand(10).to_f }
+        base[rand(10)] = UNDEF
+        addrs = CA_SIZE(Array.new(6) { rand(-10...10) })
+        addrs[rand(6)] = UNDEF
+        vals = CArray.float64(6) { |i| rand(5).to_f }
+        vals[rand(6)] = UNDEF
+        entity = base.copy
+        entity.send(op, addrs, vals)
+        parent = base.copy
+        parent[CArray.boolean(10).fill(true)].send(op, addrs, vals)
+        assert_equal entity.to_a, parent.to_a, op.to_s
+        assert_equal entity.is_masked.to_a, parent.is_masked.to_a, op.to_s
+      end
+    end
+  end
+
+  def test_integer_scalar_is_exact_above_2_53
+    big = 2**53
+    x = CA_INT64([0])
+    x.scatter_add!(CA_INT64([0]), big + 1)
+    assert_equal big + 1, x[0]
+    y = CA_INT64([0])
+    y.scatter_replace!(CA_INT64([0]), big + 1)
+    assert_equal big + 1, y[0]
+  end
 end

@@ -69,7 +69,7 @@ class TestProjectFace < Test::Unit::TestCase
 
   def test_datetime_fill_converts_via_write_hook
     # Fill args arrive as surface scalars; rb_ca_obj2ptr now fires the
-    # scalar_to_storage write hook for a Face self, so out-of-range lval /
+    # element_to_storage write hook for a Face self, so out-of-range lval /
     # uval are converted to storage (self's unit) instead of being rejected.
     dt = CArray.time_series("2024-06-15", count: 4, unit: :h)  # 477336..339
     oob = CA_INT32([-1, 1, 5])                                  # lower / valid / upper
@@ -80,7 +80,7 @@ class TestProjectFace < Test::Unit::TestCase
   end
 
   def test_categorical_fill_raises_no_write_hook
-    # CACategorical is read-only and has no scalar_to_storage write hook
+    # CACategorical is read-only and has no element_to_storage write hook
     # (label -> code encoding is a separate design, out of scope), so a fill
     # label has no storage conversion and raises loudly rather than
     # mis-storing.  The default UNDEF-at-miss path stays available.

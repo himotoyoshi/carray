@@ -99,22 +99,21 @@ class TestTakeAlongAxis < Test::Unit::TestCase
 
   def test_axis_out_of_range_raises
     a = CA_FLOAT64([1,2,3])
-    # axis2addr (= C side) raises IndexError, same convention as
-    # min_addr / min_index / sort_addr (= per-axis kernel family).
-    assert_raise(IndexError) { a.take_along_axis(CA_INT([0]), axis: 5) }
-    assert_raise(IndexError) { a.take_along_axis(CA_INT([0]), axis: -5) }
+    # An out-of-range axis is an ArgumentError, as for every axis: method.
+    assert_raise(ArgumentError) { a.take_along_axis(CA_INT([0]), axis: 5) }
+    assert_raise(ArgumentError) { a.take_along_axis(CA_INT([0]), axis: -5) }
   end
 
   # ---- OOB (Q2 raise) ----------------------------------------------------
 
   def test_oob_positive_raises
     a = CA_FLOAT64([10,20,30])
-    assert_raise(RangeError) { a.take_along_axis(CA_INT([5])) }
+    assert_raise(IndexError) { a.take_along_axis(CA_INT([5])) }
   end
 
   def test_oob_negative_after_normalize_raises
     a = CA_FLOAT64([10,20,30])
-    assert_raise(RangeError) { a.take_along_axis(CA_INT([-10])) }
+    assert_raise(IndexError) { a.take_along_axis(CA_INT([-10])) }
   end
 
   # ---- negative indices (Q3 accept) --------------------------------------
@@ -206,4 +205,13 @@ class TestTakeAlongAxis < Test::Unit::TestCase
     assert_equal 30.0, a[0]
   end
 
+  def test_a_masked_index_reads_undef_and_writes_nothing
+    m = CA_FLOAT64([[1, 2, 3], [4, 5, 6]])
+    k = CA_INT64([[2, 99, 1], [0, 1, 2]]); k[0, 1] = UNDEF
+    assert_equal [[3.0, UNDEF, 2.0], [4.0, 5.0, 6.0]], m.take_along_axis(k, axis: 1).to_a
+    assert_equal [[2, UNDEF, 1], [3, 4, 5]], m.axis2addr(k, axis: 1).to_a
+    y = CA_FLOAT64([[0, 0, 0], [0, 0, 0]])
+    y.put_along_axis(k, CA_FLOAT64([[7, 8, 9], [1, 2, 3]]), axis: 1)
+    assert_equal [[0.0, 9.0, 7.0], [1.0, 2.0, 3.0]], y.to_a
+  end
 end

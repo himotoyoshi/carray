@@ -58,36 +58,6 @@ mv.format                  #  => "d"
 mv[1, 2]                   #  => 5.0
 ```
 
-## Kernel-style iteration
-
-When a reduction you want is not among the built-ins, you can write it as a Ruby block and have CArray run it over each sub-array along the axes you choose. The block sees an ordinary CArray, so everything CArray offers is available inside it.
-
-```ruby
-a = CArray.float64(2, 4).seq!
-
-a.map_slab(axis: -1) { |row| row - row.mean }    #  same shape back
-#  => [ [ -1.5, -0.5, 0.5, 1.5 ],
-#       [ -1.5, -0.5, 0.5, 1.5 ] ]
-
-a.reduce_slab(axis: -1) { |row| row.median }     #  the axis collapses
-#  => [ 1.5, 5.5 ]
-```
-
-`each_slab` is the third of the set, for when you only want the side effect. Beside them are four more iterators built on the same surface — over rolling windows, over non-overlapping tiles, over categories, and over grid groups.
-
-## Faces — domain meaning over unchanged storage
-
-A Face is a view that changes what the elements *mean* without touching how they are stored. `CATime` is the worked example: the storage stays integer ticks on a grid you name, while the array reads and writes instants, and subtracting two of them answers a duration rather than a number.
-
-```ruby
-t = CArray.time(["2026-01-01", "2026-01-08", "2026-01-15"], unit: :D)
-t[0]                       #  => #<CATime::Element 2026-01-01 (20454D)>
-t[2] - t[0]                #  => #<CATimedelta::Element 14D>
-t.ticks                    #  => [ 20454, 20461, 20468 ]   the storage, untouched
-```
-
-Because the meaning rides on a view, it survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a quantity carrying units — are written the same way.
-
 ## Array classes written in Ruby
 
 Subclass `CAObject`, say what shape and data type you present, and answer elements when asked. What you get back is a full array: reductions, views, masks and arithmetic all work on it, and it can be built on by other views.
@@ -111,20 +81,35 @@ c[1..3]                    #  => [ 99, 98, 97 ]
 
 Values can come from anywhere — a computation, a file, a remote store — and only the elements actually asked for are produced.
 
-## Record elements
+## Kernel-style iteration
 
-An element can hold several named values packed into one fixed-width record. The array stays a single block of memory; a field is reached as a view onto the bytes, so it can be computed on like any other array.
+When a reduction you want is not among the built-ins, you can write it as a Ruby block and have CArray run it over each sub-array along the axes you choose. The block sees an ordinary CArray, so everything CArray offers is available inside it.
 
 ```ruby
-GeoCoord = CArray.struct { float64 :lat; float64 :lng }
+a = CArray.float64(2, 4).seq!
 
-g = CARecord.new(GeoCoord, 3)
-g["lat"][] = [35.7, 34.7, 43.1]
-g["lng"][] = [139.7, 135.5, 141.3]
+a.map_slab(axis: -1) { |row| row - row.mean }    #  same shape back
+#  => [ [ -1.5, -0.5, 0.5, 1.5 ],
+#       [ -1.5, -0.5, 0.5, 1.5 ] ]
 
-g[0]                       #  => #<GeoCoord "lat" => 35.7, "lng" => 139.7>
-g["lat"].mean              #  => 37.833333333333336
+a.reduce_slab(axis: -1) { |row| row.median }     #  the axis collapses
+#  => [ 1.5, 5.5 ]
 ```
+
+`each_slab` is the third of the set, for when you only want the side effect. Beside them are four more iterators built on the same surface — over rolling windows, over non-overlapping tiles, over categories, and over grid groups.
+
+## Faces — new types that are still CArrays
+
+A Face gives an array an element type of its own, with behavior to match, while everything a CArray does still works on it. `CATime` is the worked example: the array reads and writes instants, and subtracting two of them answers a duration rather than a number. Underneath, it is integer ticks on a grid you name.
+
+```ruby
+t = CArray.time(["2026-01-01", "2026-01-08", "2026-01-15"], unit: :D)
+t[0]                       #  => #<CATime::Element 2026-01-01 (20454D)>
+t[2] - t[0]                #  => #<CATimedelta::Element 14D>
+t.ticks                    #  => [ 20454, 20461, 20468 ]   the storage, untouched
+```
+
+Because a Face is a view, its type survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a price stored as integer cents — are written the same way.
 
 ## A DataFrame whose columns are arrays
 

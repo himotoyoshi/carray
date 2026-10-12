@@ -20,7 +20,8 @@ class CArray
 
   # Returns a {CAStride} view of `self` with the given byte strides and
   # starting byte offset, inheriting the receiver's data type and element
-  # size.  Memory is shared with the receiver.
+  # size.  Memory is shared with the receiver, and a Face receiver stays the
+  # Face.
   #
   # This is a low-level escape hatch: the strides and offset are **not**
   # bounds-checked against the receiver's memory, so a combination that
@@ -46,7 +47,8 @@ class CArray
   #
   # Truncate mode: a trailing partial window is dropped rather than padded.
   # Memory is shared with the parent, and because windows overlap, one parent
-  # cell is visible from several positions of the view.
+  # cell is visible from several positions of the view.  A Face parent stays
+  # the Face.
   #
   # Reduce over the trailing `ndim` axes for a rolling statistic.
   #
@@ -70,7 +72,7 @@ class CArray
   # The window axes are inserted before the trailing axes, so the result rank
   # is `ndim + S`.  With `S == ndim` there are no trailing axes and the
   # result is identical to {#sliding_windows}.  Truncate mode; memory is
-  # shared with the parent.
+  # shared with the parent, and a Face parent stays the Face.
   #
   # @overload unfold(window, step: nil)
   # @overload unfold(w0, w1, ..., step: nil)
@@ -93,13 +95,14 @@ class CArray
   # tile size: nothing is truncated and no cell is aliased twice.  Reduce over
   # the trailing `ndim` axes (e.g. `v.mean(-1, -2)` for a 2-D parent) for
   # per-tile statistics such as pooling or block-wise aggregation.  Memory is
-  # shared with the parent.
+  # shared with the parent, and a Face parent stays the Face.
   #
   # @overload block_view(block)
   # @overload block_view(b0, b1, ...)
   #   @param block [Array<Integer>, Integer] tile length per axis, one per
   #     dimension, as an Array or as variadic arguments.
-  #   @return [CAStride] of rank `2 * ndim`.
+  #   @return [CAStride] of rank `2 * ndim` (the parent's Face class when
+  #     the parent is a Face).
   #   @raise [ArgumentError] when the tile count does not equal `ndim`, when
   #     a tile length is not positive, when an axis is not divisible by its
   #     tile length, or when `2 * ndim` exceeds `CA_RANK_MAX`.
@@ -148,8 +151,8 @@ class CArray
   # @overload flip(axis)
   # @overload flip(a0, a1, ...)
   # @overload flip([a0, a1, ...])
-  #   @param axis [Array<Integer>, Integer] axes to reverse; negative indices
-  #     count from the last axis.
+  #   @param axis [Array<Integer>, Integer, nil] axes to reverse; negative
+  #     indices count from the last axis. `flip(nil)` is the same as `flip`.
   #   @return [CAStride]
   #   @raise [ArgumentError] when an axis is out of range or repeated.
   def flip(*axis); end

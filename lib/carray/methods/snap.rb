@@ -66,8 +66,11 @@ class CArray
   #   the sample, `:ceil` at or above), and delegates to
   #   `locate_nearest_addr(direction:)`.
   #
-  #   `list` must be a 1-D ascending numeric CArray (or convertible via
-  #   `CArray.wrap_readonly`). Out-of-range and NaN handling follows the
+  #   `list` must be a 1-D ascending numeric CArray, or a Ruby Array /
+  #   Range.  An Array grid takes `self`'s data_type, except that a Float
+  #   in it makes an integer array's grid float64 (so `0.5` is not
+  #   truncated); an Integer that does not fit `self`'s type raises
+  #   `RangeError`.  Out-of-range and NaN handling follows the
   #   same pattern as `bin_to`, but with an additional `:clamp`
   #   sentinel that snaps out-of-range cells to the nearest list end.
   #
@@ -95,19 +98,21 @@ class CArray
   #     shape as `self`.
   #   @raise [ArgumentError] when `list` is not 1-D or is empty, or
   #     `direction` is not one of the accepted symbols.
+  #   @raise [RangeError] when an Integer in an Array `list` does not
+  #     fit `self`'s data_type.
   #   @example
   #     temp.snap_to([270.0, 280.0, 290.0, 300.0])                   # clamp OOB
   #     temp.snap_to(grid, lfill: nil, ufill: nil)                   # mask OOB
   #     rain.snap_to([0.0, 1.0, 5.0, 20.0], direction: :floor)       # list value at or below
   def snap_to(list, lfill: :clamp, ufill: :clamp, direction: :round)
-    ref = list.is_a?(CArray) ? list : CArray.wrap_readonly(list, self.data_type)
+    ref = list.is_a?(CArray) ? list : snap_list(list)
     raise ArgumentError, "snap_to: list must be 1-D" unless ref.ndim == 1
     n = ref.elements
     raise ArgumentError, "snap_to: list must have at least one value" if n < 1
 
     if n == 1
       # Degenerate: every finite cell snaps to the only value.
-      out = CArray.new(ref.data_type, shape).fill(ref[0])
+      out = CArray.new(ref.data_type, shape, bytes: ref.bytes).fill(ref[0])
       out.mask = self.mask.to_ca if self.has_mask?
       if self.float?
         inv = self.is_invalid
@@ -118,17 +123,16 @@ class CArray
       return out
     end
 
-    # `locate_nearest_addr` (via `linear_section`) accepts a 1-D `val` only;
-    # flatten multi-D input and reshape the result back to preserve the
-    # element-wise semantic on any shape.
+    # Multi-D input is snapped as its flattened cells and given its shape
+    # back.
     if ndim > 1
       return reshape(-1).snap_to(ref, lfill: lfill, ufill: ufill,
                                  direction: direction).reshape(*shape)
     end
 
-    # locate_nearest_addr returns int64 indices; OOB (below / above / NaN)
-    # cells come back masked. We split OOB into below / above with
-    # explicit comparisons so the two sides can be filled independently.
+    # locate_nearest_addr returns int64 indices; whether a cell outside the
+    # list gets one depends on the direction, so the two sides are split with
+    # explicit comparisons and filled here independently of it.
     idx = self.locate_nearest_addr(ref, direction: direction)
     out = ref.project(idx)
 
@@ -137,13 +141,13 @@ class CArray
 
     case lfill
     when :clamp then out[below] = ref[0]
-    when nil    then # leave masked (locate_nearest_addr already masked OOB)
+    when nil    then out[below] = UNDEF
     else             out[below] = lfill
     end
 
     case ufill
     when :clamp then out[above] = ref[-1]
-    when nil    then # leave masked
+    when nil    then out[above] = UNDEF
     else             out[above] = ufill
     end
 
@@ -156,6 +160,24 @@ class CArray
     end
 
     out
+  end
+
+  private
+
+  # A Ruby Array grid in the type a search query would get: a Float in it
+  # makes an integer array's grid float64 (so 0.5 is not truncated to 0),
+  # otherwise the grid takes self's type, and an Integer that does not fit
+  # it is refused rather than wrapped.
+  def snap_list(list)
+    vals = list.to_a
+    type = data_type
+    type = CA_FLOAT64 if (integer? || data_type == CA_BOOLEAN) && vals.any? { |v| v.is_a?(Float) }
+    ref = CArray.wrap_readonly(vals, type)
+    if ref.integer?
+      bad = vals.zip(ref.to_a).find { |v, w| v != w }
+      raise RangeError, "snap_to: #{bad[0].inspect} is out of range for #{ref.data_type_name}" if bad
+    end
+    ref
   end
 
 end

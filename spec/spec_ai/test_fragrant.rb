@@ -145,8 +145,8 @@ class TestCyclicReference < Test::Unit::TestCase
   def test_self_reference_fetch_raises
     a = CArray.object(2)
     a[0] = a
-    # fetch 時に再入を検出して RuntimeError を raise する
-    assert_raises(RuntimeError) { a[0] }
+    # fetch 時に再入を検出して ArgumentError を raise する
+    assert_raises(ArgumentError) { a[0] }
   end
 
   # [修正済み] 循環参照エラー後に cyclic_check flag が残留して配列が永久使用不能になる
@@ -156,8 +156,8 @@ class TestCyclicReference < Test::Unit::TestCase
     a[0] = a  # 自己参照 (この時点では flag 未セット → 成功)
 
     begin
-      a[0]  # cyclic reference 検出 → RuntimeError, flag 残留
-    rescue RuntimeError
+      a[0]  # cyclic reference 検出 → ArgumentError, flag 残留
+    rescue ArgumentError
     end
 
     assert_nothing_raised do

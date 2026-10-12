@@ -30,6 +30,7 @@
 #include "carray.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE, used by rb_ca_window */
+#include "carray_internal.h"   /* ca_axis_view_attach_owned */
 
 /* should not be static variable as used by CAIteratorWindow */
 
@@ -82,11 +83,23 @@ ca_window_pool_init (void *ap, int8_t ndim)
   ca->dim                 = ca->count;   /* alias; ca_window_setup re-sets */
 }
 
+/* A window over an object array keeps its fill value, a VALUE, in a
+   buffer of its own, so it marks it; ca_mark covers only ca->ptr. */
+void
+ca_window_mark (void *ap)
+{
+  CAWindow *ca = (CAWindow *) ap;
+  ca_mark(ca);
+  if ( ca->fill != NULL && ca_is_object_type(ca) ) {
+    rb_gc_mark(*(VALUE *) ca->fill);
+  }
+}
+
 const rb_data_type_t cawindow_data_type = {
     .parent = &caview_data_type,
     .wrap_struct_name = "CAWindow",
     .function = {
-        .dmark = ca_mark,
+        .dmark = ca_window_mark,
         .dfree = ca_free,
         .dsize = ca_window_dsize,
         .dcompact = NULL
@@ -314,6 +327,7 @@ static void
 ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAWindow *w = (CAWindow *) ap;
   CArray   *parent = w->parent;
   int8_t    ndim = w->ndim;
@@ -667,11 +681,17 @@ ca_window_setup (CAWindow *ca, CArray *parent,
 
   elements = 1;
   for (i=0; i<ndim; i++) {
-    if ( count[i] <= 0 ) {
+    if ( count[i] < 0 ) {            /* zero is an empty window */
       rb_raise(rb_eIndexError,
-               "invalid size for %i-th dimension (negative or zero)", i);
+               "invalid size for %i-th dimension (negative)", i);
     }
-    elements *= count[i];
+  }
+  elements = ca_shape_elements(ndim, count, bytes);
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
 
   ca->obj_type  = CA_OBJ_WINDOW;
@@ -746,7 +766,9 @@ CAWindow *
 ca_window_new (CArray *parent,
                ca_size_t *start, ca_size_t *count, uint8_t *bounds, char *fill)
 {
-  CAWindow *ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
+  CAWindow *ca;
+  ca_window_setup(NULL, parent, start, count, bounds, fill);
+  ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
   ca_window_setup(ca, parent, start, count, bounds, fill);
   return ca;
 }
@@ -952,13 +974,52 @@ ca_window_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ALLOCV_END(h1);
 }
 
+/* Whether this window over a parent with no memory to lend owns its buffer
+   rather than attaching the parent.  Only FILL / MASK bounds qualify: their
+   xfer_stride hands the parent one region per row, where the other bounds
+   go cell by cell -- for a Ruby-backed parent, a call per cell, which costs
+   more than producing the parent once.  Both inputs are fixed for the
+   life of the view, so attach, sync and detach take the same branch. */
+static int
+ca_window_owns_buffer (CAWindow *ca)
+{
+  int8_t k;
+  for ( k = 0; k < ca->ndim; k++ ) {
+    if ( ca->bounds[k] != CA_BOUNDS_FILL && ca->bounds[k] != CA_BOUNDS_MASK ) {
+      return 0;
+    }
+  }
+  return ca_parent_lends_no_memory(ca->parent);
+}
+
+/* The parent's storage the alias path points into: inner axes full and
+   interior, so the window is one contiguous run of the attached parent. */
+static char *
+ca_window_alias_ptr (CAWindow *ca)
+{
+  ca_size_t parent_row_stride = ca->bytes;
+  int8_t k;
+  for (k = ca->ndim - 1; k >= 1; k--) parent_row_stride *= ca->parent->dim[k];
+  return ca->parent->ptr + ca->start[0] * parent_row_stride;
+}
+
+/* Agrees with attach on the alias path: sync has nothing to write back
+   and detach frees nothing there, so a buffer of our own would take the
+   writes and be dropped. */
 static void
 ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    ca->ptr = xmalloc(ca_length(ca));
+    return;
+  }
   ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->ptr = xmalloc(ca_length(ca));  
+  if ( ca->embed_alias_eligible ) {
+    ca->ptr = ca_window_alias_ptr(ca);
+    return;
+  }
+  ca->ptr = xmalloc(ca_length(ca));
 }
 
 /* The engine paths below emit a per-axis descriptor (ca_window_describe_axes)
@@ -973,6 +1034,10 @@ static void
 ca_window_func_attach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
   ca_attach(ca->parent);
   if ( ca->embed_alias_eligible ) {
     /* Alias path: inner axes full + interior, so the embedded region is a
@@ -981,10 +1046,7 @@ ca_window_func_attach (void *ap)
        CAREFUL: sync and detach must agree with this — sync has nothing to
        scatter back (the writes already landed in the parent) and detach must
        not xfree a pointer it does not own. */
-    ca_size_t parent_row_stride = ca->bytes;
-    int8_t k;
-    for (k = ca->ndim - 1; k >= 1; k--) parent_row_stride *= ca->parent->dim[k];
-    ca->ptr = ca->parent->ptr + ca->start[0] * parent_row_stride;
+    ca->ptr = ca_window_alias_ptr(ca);
   } else if ( ca->embed_eligible ) {
     /* Embed path: allocate, then 1 fill + 1 strided memcpy. */
     ca_size_t out_len = ca->elements * ca->bytes;
@@ -1005,6 +1067,10 @@ static void
 ca_window_func_sync (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
   if ( ca->embed_alias_eligible ) {
     /* Alias path: ca->ptr aliases the parent, so the writes already landed
        in parent storage.  Nothing to scatter back. */
@@ -1025,6 +1091,11 @@ static void
 ca_window_func_detach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( ca_window_owns_buffer(ca) ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+    return;
+  }
   /* Alias path: ca->ptr aliases parent storage; it is not ours to xfree. */
   if ( ! ca->embed_alias_eligible ) {
     xfree(ca->ptr);
@@ -1117,9 +1188,25 @@ ca_window_func_xfer_all (void *ap, void *data, int dir)
     }
   }
 
-  /* Cold parent with nothing to lend: materialise it into a scratch buffer
-     via ca_xfer_all, then run the normal fast path with the scratch standing
-     in for parent->ptr. */
+  /* A parent with no memory to lend is asked for the cells of the window
+     only, through xfer_stride over the whole view, when the bounds let that
+     go row by row (see ca_window_owns_buffer). */
+  if ( ca_window_owns_buffer(ca) ) {
+    ca_size_t starts[CA_RANK_MAX], strides[CA_RANK_MAX], s;
+    int8_t    k;
+    s = ca->bytes;
+    for ( k = ca->ndim - 1; k >= 0; k-- ) {
+      starts[k]  = 0;
+      strides[k] = s;
+      s *= ca->dim[k];
+    }
+    ca_window_func_xfer_stride(ca, starts, ca->dim, strides, data, dir);
+    return;
+  }
+
+  /* Any other cold parent: materialise it into a scratch buffer via
+     ca_xfer_all, then run the normal fast path with the scratch standing in
+     for parent->ptr. */
   {
     volatile VALUE holder;
     CArray   *parent = ca->parent;
@@ -1137,12 +1224,14 @@ ca_window_func_xfer_all (void *ap, void *data, int dir)
 
     ca_window_func_run_fast_path(ca, (char *) data, dir);
 
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this
+       frame is. */
+    parent->ptr = parent_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       /* Push back scratch (modified by scatter) to parent. */
       ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
     }
-
-    parent->ptr = parent_ptr_saved;
     ALLOCV_END(holder);
   }
 }
@@ -1238,8 +1327,7 @@ ca_window_func_fill_data (void *ap, void *ptr)
   ca_attach(ca->parent);
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -1251,10 +1339,7 @@ ca_window_func_create_mask (void *ap)
   int8_t i;
   int any_mask;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   /* Any MASK axis of the view becomes FILL in the mask sub-view, with the
      mask cell forced to 1 (= "masked").  Other axes keep their policy.  When
@@ -1270,8 +1355,15 @@ ca_window_func_create_mask (void *ap)
   }
   fill = any_mask ? 1 : 0;
 
-  ca->mask = (CArray *) ca_window_new(ca->parent->mask,
-                                    ca->start, ca->count, mbounds, (char*)&fill);
+  /* The mask has the view's own type, so CAShift (which shares this table)
+     gets a CAShiftMask. */
+  {
+    CAWindow *m = (CAWindow *) ca_array_alloc(ca->obj_type, ca->ndim);
+    ca_window_setup(m, ca->parent->mask,
+                    ca->start, ca->count, mbounds, (char*)&fill);
+    m->obj_type = ca->obj_type;
+    ca->mask = (CArray *) m;
+  }
 }
 
 ca_operation_function_t ca_window_func = {
@@ -1427,7 +1519,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
       cbounds = StringValuePtr(rbounds);
       if ( rfval == CA_UNDEF && strncmp(cbounds, "fill", 4) 
                              && strncmp(cbounds, "mask", 4) ) {
-        rb_raise(rb_eRuntimeError, "conflicted bounds and fill_value");
+        rb_raise(rb_eArgError, "conflicted bounds and fill_value");
       }
       if ( ! strncmp(cbounds, "ruby", 4) ) {
         bounds = CA_BOUNDS_RUBY;
@@ -1458,7 +1550,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
         bounds = CA_BOUNDS_FILL;
       }
       else {
-        rb_raise(rb_eRuntimeError, 
+        rb_raise(rb_eArgError, 
                  "unknown option value '%s' for :bounds", cbounds);        
       }
       break;
@@ -1466,7 +1558,7 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
       bounds = NUM2INT(rbounds);
       break;
     default:
-      rb_raise(rb_eRuntimeError, "invalid option value for :bounds");
+      rb_raise(rb_eArgError, "invalid option value for :bounds");
     }
   }
 
@@ -1491,6 +1583,7 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
   CAWindow *ca, *cs;
 
   TypedData_Get_Struct(self,  CAWindow, &cawindow_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAWindow, &cawindow_data_type, cs);
 
   /* `self` came from rb_ca_window_s_allocate (TypedData_Make_Struct,
@@ -1586,6 +1679,34 @@ rb_ca_window_get_bounds (VALUE self)
   CAWindow *cw;
   TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
   return SIZE2NUM(cw->bounds[0]);
+}
+
+/* The boundary rule on each axis, one Symbol per axis.  `bounds` answers
+   for axis 0 only, which is all CArray#window sets; a shift with `roll:`
+   on some axes sets them one by one. */
+static VALUE
+rb_ca_window_axis_bounds (VALUE self)
+{
+  volatile VALUE ary;
+  CAWindow *cw;
+  const char *name;
+  int8_t i;
+  TypedData_Get_Struct(self, CAWindow, &cawindow_data_type, cw);
+  ary = rb_ary_new2(cw->ndim);
+  for (i=0; i<cw->ndim; i++) {
+    switch ( cw->bounds[i] ) {
+    case CA_BOUNDS_RUBY:     name = "ruby";     break;
+    case CA_BOUNDS_STRICT:   name = "strict";   break;
+    case CA_BOUNDS_NEAREST:  name = "nearest";  break;
+    case CA_BOUNDS_PERIODIC: name = "periodic"; break;
+    case CA_BOUNDS_REFLECT:  name = "reflect";  break;
+    case CA_BOUNDS_FILL:     name = "fill";     break;
+    case CA_BOUNDS_MASK:     name = "mask";     break;
+    default:                 name = "unknown";  break;
+    }
+    rb_ary_store(ary, i, ID2SYM(rb_intern(name)));
+  }
+  return ary;
 }
 
 #define rb_cw_get_attr_ary(name)    \
@@ -1688,6 +1809,7 @@ Init_ca_obj_window (void)
   /* No `count` accessor: the per-axis window widths are what `shape`
      already answers, and the name belongs to CArray#count. */
   rb_define_method(rb_cCAWindow, "start",  rb_cw_start, 0);
+  rb_define_method(rb_cCAWindow, "__axis_bounds__", rb_ca_window_axis_bounds, 0);
   rb_define_method(rb_cCAWindow, "size0",  rb_cw_size0, 0);
 
 #ifdef CARRAY_DEV_BUILD

@@ -1,5 +1,6 @@
 require "test/unit"
 require "carray"
+require "stringio"
 
 # CAFrame group_by / join (MEMO_DATAFRAME_ON_CARRAY.md §5, §11.6, §11.7, §13.3).
 #
@@ -36,7 +37,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
       "temp_mean" => ["temp", :mean],
       "temp_max"  => ["temp", :max],
     )
-    assert_equal ["temp_mean", "temp_max"], stat.variable_names
+    assert_equal ["temp_mean", "temp_max"], stat.column_names
     assert_equal [20.55, 27.65, 15.0], stat["temp_mean"].to_a
     assert_equal [22.1, 30.0, 15.0], stat["temp_max"].to_a
   end
@@ -86,11 +87,37 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     end
   end
 
-  def test_mean_shortcut_over_numeric_scalar_columns
+  def test_mean_shortcut_over_numeric_columns
     m = @df.group_by("station").mean
-    # the key "station" is the index; N-D "wind" has no reduction; only "temp".
-    assert_equal ["temp"], m.variable_names
+    # the key "station" is the index; an N-D column is reduced along the rows,
+    # so "wind" keeps its two components per group
+    assert_equal ["temp", "wind"], m.column_names
     assert_equal [20.55, 27.65, 15.0], m["temp"].to_a
+    assert_equal [[3.0, 4.0], [5.0, 6.0], [9.0, 10.0]], m["wind"].to_a
+  end
+
+  # An N-D column of any type: its per-group answer has the trailing shape,
+  # in the type the core gives (a time column's mean is a time).
+  def test_group_reductions_of_n_d_columns
+    df = CAFrame.new("k" => CA_INT32([1, 2, 1, 2]),
+                     "p" => CA_FLOAT64([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]),
+                     "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04
+                                           2024-01-05 2024-01-06 2024-01-07 2024-01-08]).reshape(4, 2),
+                     "b" => CA_BOOLEAN([[1, 0], [1, 1], [0, 0], [1, 0]]),
+                     "s" => CArray.const_string(%w[a b c d e f g h]).reshape(4, 2))
+    df["p"][1, 1] = UNDEF
+    g = df.group_by("k")
+    assert_equal [[4.0, 5.0, 6.0], [7.0, 11.0, 9.0]], g.mean["p"].to_a
+    assert_equal [[8.0, 10.0, 12.0], [14.0, UNDEF, 18.0]], g.sum(min_count: 2)["p"].to_a
+    assert_kind_of CATime, g.mean["t"]
+    assert_equal CArray.time(%w[2024-01-03 2024-01-04 2024-01-05 2024-01-06]).reshape(2, 2).to_a,
+                 g.mean["t"].to_a
+    assert_equal %w[p b], g.sum.column_names                    # a time has no sum, a string no sum
+    assert_equal [[0.5, 0.0], [1.0, 0.5]], g.mean["b"].to_a
+    assert_equal [%w[a b], %w[c d]], g.min["s"].to_a
+    a = g.aggregate("pmax" => ["p", :max, { min_count: 2 }], "pv" => ["p", :variance])
+    assert_equal [[7.0, 8.0, 9.0], [10.0, UNDEF, 12.0]], a["pmax"].to_a
+    assert_equal [2, 3], a["pv"].shape
   end
 
   # The key column is the result's index, so it must not also come back as a
@@ -101,7 +128,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     df = CAFrame.new("id" => CA_INT32([7, 7, 9]),
                      "v"  => CA_FLOAT64([1, 2, 3]))
     m = df.group_by("id").mean
-    assert_equal ["v"], m.variable_names
+    assert_equal ["v"], m.column_names
     assert_equal "id", m.axis_name
     assert_equal [7, 9], m.index.to_a
     assert_equal [1.5, 3.0], m["v"].to_a
@@ -114,7 +141,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
                      "b" => CA_INT32([5, 5, 6]),
                      "v" => CA_FLOAT64([1, 2, 3]))
     m = df.group_by("a", "b").mean
-    assert_equal ["v"], m.variable_names
+    assert_equal ["v"], m.column_names
     assert_equal "group", m.axis_name
     assert_equal [1.5, 3.0], m["v"].to_a
   end
@@ -125,7 +152,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
                      "v"  => CA_FLOAT64([1, 2, 3]))
     grp = df.group_by("id")
     [:mean, :sum, :min, :max].each do |op|
-      assert_equal ["v"], grp.public_send(op).variable_names, "#{op} kept the key column"
+      assert_equal ["v"], grp.public_send(op).column_names, "#{op} kept the key column"
     end
   end
 
@@ -177,8 +204,88 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [1.0, 3.0], grp.aggregate("s" => ["v", :sum])["s"].to_a
   end
 
+  # The grouping and its index are taken when group_by is called; the values
+  # are read when a reduction is.  A later change to the key does not rename
+  # the groups.
+  def test_index_is_taken_with_the_grouping
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2, 2, 3]), "v" => CA_FLOAT64([10, 20, 30, 40, 50]))
+    g = df.group_by("k")
+    df["k"][2] = 1
+    df["k"][0] = UNDEF
+    r = g.mean
+    assert_equal [1, 2, 3], r.index.to_a
+    assert_equal [15.0, 35.0, 50.0], r["v"].to_a
+  end
+
+  def test_index_of_an_external_key_is_taken_with_the_grouping
+    key = CA_INT32([1, 1, 2])
+    df = CAFrame.new("v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by(key)
+    key[0] = 7
+    assert_equal [1, 2], g.sum.index.to_a
+  end
+
+  def test_index_after_a_splice_names_the_rows_grouped
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    df[0..1] = CAFrame.new("k" => CA_INT32([2, 2]), "v" => CA_FLOAT64([7, 8]))
+    assert_equal [1, 2], g.mean.index.to_a
+  end
+
+  def test_values_are_read_when_reduced
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    df["v"][2] = 90
+    assert_equal [15.0, 90.0], g.mean["v"].to_a
+  end
+
+  def test_results_do_not_share_an_index
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([10, 20, 30]))
+    g = df.group_by("k")
+    a = g.mean
+    a.index[0] = 9
+    assert_equal [1, 2], g.sum.index.to_a
+    t = CArray.time(["2024-01-01 00:10", "2024-01-01 01:10"], unit: :m)
+    g = CAFrame.new("t" => t, "v" => CA_FLOAT64([1, 2])).resample("t", "1 hour")
+    refute g.mean.index.equal?(g.sum.index)
+  end
+
   def test_empty_group_by_raises
     assert_raise(ArgumentError) { @df.group_by }
+  end
+
+  # A column is in a convenience reduction when its type defines it, whatever
+  # its storage data type: a time column has a mean but no sum, a string
+  # column a minimum but no mean.
+  def test_convenience_reductions_take_every_column_whose_type_answers
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]),
+                     "t" => CArray.time(["2024-01-01", "2024-01-03", "2024-01-05"]),
+                     "v" => CA_FLOAT64([1, 2, 3]),
+                     "s" => CArray.const_string(%w[a b c]),
+                     "b" => CA_BOOLEAN([1, 0, 1]),
+                     "o" => CA_OBJECT([1, 2, 3]),
+                     "z" => CA_CMPLX128([1, 2, 3]))
+    g = df.group_by("k")
+    assert_equal %w[v b o z],         g.sum.column_names
+    assert_equal %w[t v b o z],       g.mean.column_names
+    assert_equal %w[t v s b o],       g.min.column_names
+    assert_equal %w[t v s b o],       g.max.column_names
+    mean = g.mean["t"]
+    assert_kind_of CATime, mean
+    assert_equal CArray.time(["2024-01-02", "2024-01-05"]).to_a, mean.to_a
+    assert_equal ["a", "c"], g.min["s"].to_a
+    # an empty frame keeps the same columns
+    e = df[CA_BOOLEAN([0, 0, 0])].group_by("k")
+    assert_equal %w[t v s b o], e.min.column_names
+    assert_equal %w[t v b o z], e.mean.column_names
+  end
+
+  def test_minimum_of_a_raw_fixlen_column_per_group
+    fx = CArray.fixlen(3, bytes: 2)
+    fx[0] = "cd"; fx[1] = "ab"; fx[2] = "ef"
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "f" => fx)
+    assert_equal ["ab", "ef"], df.group_by("k").min["f"].to_a
+    assert_equal ["ab", "ef"], fx.group_by_category(CA_INT32([1, 1, 2]).categorize).min.to_a
   end
 end
 
@@ -198,7 +305,7 @@ class TestCAFrameJoin < Test::Unit::TestCase
   def test_left_join_is_row_preserving
     j = @df.join(@meta, on: "station")
     assert_equal 3, j.nrow
-    assert_equal ["station", "temp", "lat", "wvec"], j.variable_names
+    assert_equal ["station", "temp", "lat", "wvec"], j.column_names
     assert_equal [22.1, 25.3, 19.0], j["temp"].to_a
     assert_equal [35.7, 34.7, 35.7], j["lat"].to_a
   end
@@ -221,16 +328,15 @@ class TestCAFrameJoin < Test::Unit::TestCase
 
   def test_inner_join
     j = @df.join(@meta, on: "station", how: :inner)
-    assert_equal ["tokyo", "osaka"], j["station"].to_a
-    assert_equal [35.7, 34.7], j["lat"].to_a
+    assert_equal ["tokyo", "osaka", "tokyo"], j["station"].to_a
+    assert_equal [35.7, 34.7, 35.7], j["lat"].to_a
   end
 
   def test_outer_join
     j = @df.join(@meta, on: "station", how: :outer)
-    assert_equal ["tokyo", "osaka", "kyoto"], j["station"].to_a
-    assert_equal 22.1, j["temp"][0]
-    assert_equal UNDEF, j["temp"][2] # kyoto has no left row
-    assert_equal 35.0, j["lat"][2]
+    assert_equal ["tokyo", "osaka", "tokyo", "kyoto"], j["station"].to_a
+    assert_equal [22.1, 25.3, 19.0, UNDEF], j["temp"].to_a  # kyoto has no left row
+    assert_equal 35.0, j["lat"][3]
   end
 
   def test_left_join_keeps_index
@@ -244,9 +350,9 @@ class TestCAFrameJoin < Test::Unit::TestCase
     assert_equal [100, 200, 300], j.index.to_a
   end
 
-  def test_align_join_carries_left_index_by_a_idx
-    # Index rides a_idx just like the left columns: rows with no left match
-    # (outer/right) become UNDEF, staying consistent with the left join.
+  def test_outer_join_carries_left_index
+    # The index rides the left rows just like the left columns: rows with no
+    # left match (outer/right) become UNDEF.
     d = CAFrame.new(
       "id" => CA_INT32([100, 200, 300]),
       "station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
@@ -254,10 +360,8 @@ class TestCAFrameJoin < Test::Unit::TestCase
     ).set_index("id")
     j = d.join(@meta, on: "station", how: :outer)
     assert_equal "id", j.axis_name
-    # aligned key order: tokyo, osaka, kyoto -> left ids 100, 200, (miss)
-    assert_equal 100, j.index[0]
-    assert_equal 200, j.index[1]
-    assert_equal UNDEF, j.index[2]
+    # every left row, then kyoto, which has no left row
+    assert_equal [100, 200, 300, UNDEF], j.index.to_a
   end
 
   def test_inner_join_carries_left_index
@@ -267,8 +371,8 @@ class TestCAFrameJoin < Test::Unit::TestCase
       "temp" => CA_FLOAT64([1, 2, 3]),
     ).set_index("id")
     j = d.join(@meta, on: "station", how: :inner)
-    # common = tokyo, osaka; a_idx picks left rows 0 and 1 -> ids 100, 200
-    assert_equal [100, 200], j.index.to_a
+    # every left row has a match, so every left id stays
+    assert_equal [100, 200, 300], j.index.to_a
   end
 
   def test_collision_auto_suffixes_both_sides
@@ -276,7 +380,7 @@ class TestCAFrameJoin < Test::Unit::TestCase
                         "temp" => CA_FLOAT64([9, 8]), "lat" => CA_FLOAT64([35.7, 34.7]))
     j = @df.join(other, on: "station")
     # key stays single; colliding "temp" suffixed both sides; "lat" untouched
-    assert_equal ["station", "temp_left", "temp_right", "lat"], j.variable_names
+    assert_equal ["station", "temp_left", "temp_right", "lat"], j.column_names
     assert_equal [22.1, 25.3, 19.0], j["temp_left"].to_a
     assert_equal [9.0, 8.0, 9.0], j["temp_right"].to_a
   end
@@ -284,7 +388,7 @@ class TestCAFrameJoin < Test::Unit::TestCase
   def test_custom_suffixes
     other = CAFrame.new("station" => CA_OBJECT(["tokyo"]), "temp" => CA_FLOAT64([9]))
     j = @df.join(other, on: "station", suffixes: ["_obs", "_fcst"])
-    assert_equal ["station", "temp_obs", "temp_fcst"], j.variable_names
+    assert_equal ["station", "temp_obs", "temp_fcst"], j.column_names
   end
 
   def test_suffixes_false_raises_on_collision
@@ -294,14 +398,14 @@ class TestCAFrameJoin < Test::Unit::TestCase
 
   def test_no_collision_no_suffix
     j = @df.join(@meta, on: "station")
-    assert_equal ["station", "temp", "lat", "wvec"], j.variable_names
+    assert_equal ["station", "temp", "lat", "wvec"], j.column_names
   end
 
   def test_inner_join_suffixes_collision
     other = CAFrame.new("station" => CA_OBJECT(["tokyo", "osaka"]), "temp" => CA_FLOAT64([9, 8]))
     j = @df.join(other, on: "station", how: :inner)
-    assert_includes j.variable_names, "temp_left"
-    assert_includes j.variable_names, "temp_right"
+    assert_includes j.column_names, "temp_left"
+    assert_includes j.column_names, "temp_right"
   end
 
   def test_bad_suffixes_raise
@@ -387,7 +491,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     a = CAFrame.new("s" => CA_OBJECT(%w[x y]), "temp" => CA_FLOAT64([1, 2]))
     b = CAFrame.new("rh" => CA_FLOAT64([40, 60]), "wind" => CA_FLOAT64([[1, 2], [3, 4]]))
     r = a.paste(b)
-    assert_equal %w[s temp rh wind], r.variable_names
+    assert_equal %w[s temp rh wind], r.column_names
     assert_equal 2, r.nrow
     assert_equal [[1.0, 2.0], [3.0, 4.0]], r["wind"].to_a
   end
@@ -396,7 +500,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     a = CAFrame.new("s" => CA_OBJECT(%w[x y]), "temp" => CA_FLOAT64([1, 2]))
     c = CAFrame.new("temp" => CA_FLOAT64([9, 8]), "p" => CA_FLOAT64([1, 2]))
     r = a.paste(c)
-    assert_equal %w[s temp_left temp_right p], r.variable_names
+    assert_equal %w[s temp_left temp_right p], r.column_names
     assert_equal [1.0, 2.0], r["temp_left"].to_a
     assert_equal [9.0, 8.0], r["temp_right"].to_a
   end
@@ -404,7 +508,7 @@ class TestCAFramePaste < Test::Unit::TestCase
   def test_custom_suffixes_and_false
     a = CAFrame.new("temp" => CA_FLOAT64([1]))
     c = CAFrame.new("temp" => CA_FLOAT64([9]))
-    assert_equal %w[temp_a temp_c], a.paste(c, suffixes: ["_a", "_c"]).variable_names
+    assert_equal %w[temp_a temp_c], a.paste(c, suffixes: ["_a", "_c"]).column_names
     assert_raise(ArgumentError) { a.paste(c, suffixes: false) }
   end
 
@@ -419,7 +523,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     ri = ai.paste(bi)
     assert_equal "t", ri.axis_name
     assert_equal [10, 20], ri.index.to_a
-    assert_equal %w[v w], ri.variable_names
+    assert_equal %w[v w], ri.column_names
   end
 
   def test_non_frame_raises
@@ -433,7 +537,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     b = CAFrame.new("t" => CA_FLOAT64([1, 2]))
     c = CAFrame.new("u" => CA_INT32([10, 20]))
     r = CAFrame.paste(a, b, c)
-    assert_equal %w[s t u], r.variable_names
+    assert_equal %w[s t u], r.column_names
     assert_equal 2, r.nrow
   end
 
@@ -441,7 +545,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     a = CAFrame.new("s" => CA_OBJECT(%w[x y]))
     b = CAFrame.new("t" => CA_FLOAT64([1, 2]))
     r = CAFrame.paste([a, b])
-    assert_equal %w[s t], r.variable_names
+    assert_equal %w[s t], r.column_names
   end
 
   def test_class_method_three_frame_collision_needs_k_suffixes
@@ -451,7 +555,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     # Without a 3-element suffix list, DEFAULT (2-element) raises.
     assert_raise(ArgumentError) { CAFrame.paste(a, b, c) }
     r = CAFrame.paste(a, b, c, suffixes: ["_a", "_b", "_c"])
-    assert_equal %w[temp_a temp_b temp_c], r.variable_names
+    assert_equal %w[temp_a temp_b temp_c], r.column_names
   end
 
   def test_class_method_collision_free_no_suffixes_needed
@@ -460,7 +564,7 @@ class TestCAFramePaste < Test::Unit::TestCase
     c = CAFrame.new("u" => CA_INT32([10, 20]))
     # Even without suffixes:, collision-free paste of 3 works with default.
     r = CAFrame.paste(a, b, c)
-    assert_equal %w[s t u], r.variable_names
+    assert_equal %w[s t u], r.column_names
   end
 
   def test_class_method_nrow_mismatch_raises
@@ -511,7 +615,7 @@ class TestCAFrameMeld < Test::Unit::TestCase
     b = CAFrame.new("t" => CA_FLOAT64([4, 5]), "s" => CA_OBJECT(%w[p q])) # order differs
     r = CAFrame.meld(a, b)
     assert_equal 4, r.nrow
-    assert_equal %w[s t], r.variable_names
+    assert_equal %w[s t], r.column_names
     assert_equal %w[x y p q], r["s"].to_a
     assert_equal [1.0, 2.0, 4.0, 5.0], r["t"].to_a
   end
@@ -587,7 +691,7 @@ class TestCAFrameConcatenate < Test::Unit::TestCase
     b = CAFrame.new("t" => CA_INT32([4, 5]), "s" => CA_OBJECT(%w[p q]))   # int32 mix
     r = CAFrame.concatenate(a, b)
     assert_equal 4, r.nrow
-    assert_equal %w[s t], r.variable_names
+    assert_equal %w[s t], r.column_names
     assert_equal %w[x y p q], r["s"].to_a
     # per-column auto-cast: int32 + float64 → float64
     assert_equal [1.0, 2.0, 4.0, 5.0], r["t"].to_a
@@ -640,6 +744,54 @@ class TestCAFrameConcatenate < Test::Unit::TestCase
   def test_empty_and_non_frame_raise
     assert_raise(ArgumentError) { CAFrame.concatenate }
     assert_raise(ArgumentError) { CAFrame.concatenate(CAFrame.new("t" => CA_INT32([1])), "nope") }
+  end
+end
+
+# A frame with no rows adds no values, so its data types take no part: a
+# header-only CSV reads as object columns, which used to make meld refuse and
+# concatenate demote every column to object.
+class TestCAFrameJoinEmptyFrame < Test::Unit::TestCase
+  def setup
+    @full  = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_FLOAT64([1.5, 2.5]))
+    @empty = CAFrame.from_csv(StringIO.new("a,b\n"))
+  end
+
+  def test_an_empty_frame_of_other_types_joins_in_either_place
+    [[@full, @empty], [@empty, @full], [@empty, @full, @empty]].each do |frames|
+      [:meld, :concatenate].each do |verb|
+        r = CAFrame.public_send(verb, *frames)
+        assert_equal [:int32, :float64], r.columns.map(&:data_type), verb.inspect
+        assert_equal [[1, 2], [1.5, 2.5]], r.columns.map(&:to_a), verb.inspect
+      end
+    end
+  end
+
+  def test_all_empty_frames_keep_the_first_ones_types
+    e = @full[CA_BOOLEAN([0, 0])]
+    [:meld, :concatenate].each do |verb|
+      r = CAFrame.public_send(verb, e, @empty)
+      assert_equal 0, r.nrow
+      assert_equal [:int32, :float64], r.columns.map(&:data_type)
+    end
+  end
+
+  def test_an_empty_frame_still_has_to_agree_on_columns_and_index
+    [:meld, :concatenate].each do |verb|
+      assert_raise(ArgumentError) { CAFrame.public_send(verb, @full, CAFrame.new("a" => CA_INT32([]))) }
+      indexed = CAFrame.new({ "a" => CA_INT32([]), "b" => CA_FLOAT64([]) }, index: CA_INT32([]), axis_name: "i")
+      assert_raise(ArgumentError) { CAFrame.public_send(verb, @full, indexed) }
+    end
+  end
+
+  def test_meld_still_writes_through_to_the_frames_with_rows
+    r = CAFrame.meld(@empty, @full)
+    r["a"][1] = 9
+    assert_equal [1, 9], @full["a"].to_a
+  end
+
+  def test_meld_names_the_data_types_it_refuses
+    err = assert_raise(ArgumentError) { CArray.meld([CA_INT32([1]), CA_OBJECT([2])]) }
+    assert_match(/array 0 is int32, array 1 is object/, err.message)
   end
 end
 
@@ -787,5 +939,98 @@ class TestCAFrameSort < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df.sort_by { |f| 42 } }            # non-CArray
     assert_raise(ArgumentError) { @df.sort_by { |f| CA_INT32([1,2]) } } # wrong length
     assert_raise(ArgumentError) { @df.sort_by { |f| [] } }            # empty
+  end
+end
+
+# A join key gives each row one value: an N-D key column is refused by every
+# key-matching verb rather than matched cell by cell.
+class TestCAFrameJoinNDKey < Test::Unit::TestCase
+  def setup
+    @left  = CAFrame.new("wind" => CA_FLOAT64([[1.2, -0.3], [2.1, 0.5], [0.0, 0.0]]),
+                         "t"    => CA_FLOAT64([1, 2, 3]))
+    @right = CAFrame.new("wind" => CA_FLOAT64([[1.2, -0.3], [9, 9]]),
+                         "z"    => CA_INT64([1, 2]))
+  end
+
+  def test_join_refuses_nd_key
+    [:left, :inner, :outer, :right].each do |how|
+      e = assert_raise(ArgumentError) { @left.join(@right, on: "wind", how: how) }
+      assert_match(/join: the key "wind" has shape \[3, 2\], not one value per row/, e.message)
+    end
+  end
+
+  def test_join_refuses_nd_key_on_the_right_only
+    l = CAFrame.new("wind" => CA_FLOAT64([1, 2, 3]))
+    e = assert_raise(ArgumentError) { l.join(@right, on: "wind") }
+    assert_match(/has shape \[2, 2\]/, e.message)
+  end
+
+  def test_join_asof_refuses_nd_key
+    e = assert_raise(ArgumentError) { @left.join_asof(@right, on: "wind") }
+    assert_match(/join_asof: the key "wind" has shape \[3, 2\]/, e.message)
+  end
+
+  def test_align_refuses_nd_key_and_nd_reference
+    e = assert_raise(ArgumentError) { @left.align("wind", CA_FLOAT64([1.2])) }
+    assert_match(/align: the key "wind" has shape \[3, 2\]/, e.message)
+    e = assert_raise(ArgumentError) { @left.align("t", CA_FLOAT64([[1, 2]])) }
+    assert_match(/align: the reference has shape \[1, 2\]/, e.message)
+  end
+
+  def test_nd_payload_still_gathers
+    l = CAFrame.new("k" => CA_INT64([1, 2, 5]))
+    r = CAFrame.new("k" => CA_INT64([1, 2]), "v" => CA_FLOAT64([[1, 2], [3, 4]]))
+    assert_equal [[1.0, 2.0], [3.0, 4.0], [UNDEF, UNDEF]], l.join(r, on: "k")["v"].to_a
+  end
+end
+
+# join_asof's tolerance: is a duration for a time key.
+class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
+  def setup
+    t = ->(a, unit = :s) { CArray.time(a, unit: unit) }
+    @obs   = CAFrame.new("time" => t.(["2024-01-01 00:10", "2024-01-01 00:30", "2024-01-01 00:05"]),
+                         "x" => CA_INT64([1, 2, 3]))
+    @radar = CAFrame.new("time" => t.(["2024-01-01 00:20", "2024-01-01 00:00", "2024-01-01 00:09"]),
+                         "y" => CA_INT64([10, 20, 30]))
+  end
+
+  def test_string_duration
+    assert_equal [30, 10, 20], @obs.join_asof(@radar, on: "time", tolerance: "10 minutes")["y"].to_a
+    assert_equal [30, UNDEF, 20], @obs.join_asof(@radar, on: "time", tolerance: "5 minutes")["y"].to_a
+    assert_equal [30, UNDEF, UNDEF], @obs.join_asof(@radar, on: "time", tolerance: "1 minute")["y"].to_a
+  end
+
+  def test_timedelta_value_matches_the_string
+    td = CATimedelta::Element.new(300, :s)
+    assert_equal @obs.join_asof(@radar, on: "time", tolerance: "5 minutes")["y"].to_a,
+                 @obs.join_asof(@radar, on: "time", tolerance: td)["y"].to_a
+  end
+
+  def test_duration_does_not_depend_on_the_key_unit
+    coarse = CAFrame.new("time" => CArray.time(["2024-01-01 00:10", "2024-01-01 00:30"], unit: :m),
+                         "x" => CA_INT64([1, 2]))
+    assert_equal [30, 10], coarse.join_asof(@radar, on: "time", tolerance: "10 minutes")["y"].to_a
+    assert_equal [30, UNDEF], coarse.join_asof(@radar, on: "time", tolerance: "1 minute")["y"].to_a
+  end
+
+  def test_bare_number_refused_for_a_time_key
+    e = assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", tolerance: 600) }
+    assert_match(/time key needs a duration such as "10 minutes"/, e.message)
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", tolerance: "soon") }
+  end
+
+  def test_numeric_key_takes_a_number_and_refuses_a_duration
+    l = CAFrame.new("k" => CA_FLOAT64([5, 1.2]))
+    r = CAFrame.new("k" => CA_FLOAT64([4, 0, 1]), "y" => CA_INT64([1, 2, 3]))
+    assert_equal [UNDEF, 3], l.join_asof(r, on: "k", tolerance: 0.5)["y"].to_a
+    e = assert_raise(ArgumentError) { l.join_asof(r, on: "k", tolerance: "10 minutes") }
+    assert_match(/is a duration, but the key is float64; give a number/, e.message)
+  end
+
+  def test_locate_nearest_addr_takes_the_duration_too
+    a = CArray.time(["2024-01-01 00:10"], unit: :s)
+    ref = CArray.time(["2024-01-01 00:00", "2024-01-01 00:20"], unit: :s)
+    assert_equal [UNDEF], a.locate_nearest_addr(ref, tolerance: "5 minutes").to_a
+    assert_equal [0], a.locate_nearest_addr(ref, direction: :floor, tolerance: "10 minutes").to_a
   end
 end

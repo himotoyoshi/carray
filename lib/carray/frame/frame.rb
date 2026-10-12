@@ -11,6 +11,29 @@
 # storage, and +copy+ is the way to an independent frame.
 
 class CAFrame
+  # Raised when the contents of a column cannot be read as asked: a cell
+  # that does not read as the type a +cast+ (or +from_csv+'s +types:+) asks
+  # for under on_error: :raise, a cell +parse_to_time+ cannot read, a column
+  # whose time format +infer_time_format+ / parse_to_time(name, :infer)
+  # cannot find, or a float column +to_time+ cannot read as whole counts.
+  # The message names the column and the cell. The arguments were fine; the
+  # column's contents are what did not read.
+  class UnreadableColumn < StandardError; end
+
+  # Raised when +infer_time_format+ / parse_to_time(name, :infer) finds more
+  # than one format every cell fits ("01/02/2024" and "03/04/2024" are both
+  # day-first and month-first). The text reads in each of them, so it is
+  # not an UnreadableColumn; +formats+ gives the candidates, to choose one and
+  # pass it as the format.
+  class AmbiguousTimeFormat < StandardError
+    attr_reader :formats
+
+    def initialize(message = nil, formats: [])
+      @formats = formats
+      super(message)
+    end
+  end
+
   # Integer data_types that select rows positionally when used as a df[] key.
   INTEGER_TYPES = [:int8, :int16, :int32, :int64,
                    :uint8, :uint16, :uint32, :uint64].freeze
@@ -112,7 +135,7 @@ class CAFrame
     if keys.size > 1
       unless keys.all? { |k| k.is_a?(String) }
         raise ArgumentError,
-              "multi-key df[...] escapes columns; every key must be a String " \
+              "df[...] with several keys returns columns; every key must be a String " \
               "(use df.select(...) for a subset frame)"
       end
       return keys.map { |k| @columns.fetch(k) { raise KeyError, "no column #{k.inspect}" } }
@@ -142,7 +165,7 @@ class CAFrame
               "CArray df[] key must be boolean or integer (got #{key.data_type})"
       end
     when Symbol
-      raise NotImplementedError, "df[symbol] is reserved for predicate keys"
+      raise ArgumentError, "df[symbol] is reserved for predicate keys"
     else
       raise ArgumentError, "unsupported df[] key: #{key.class}"
     end
@@ -197,6 +220,7 @@ class CAFrame
   # write path always propagates to derived views (unchanged from
   # previous behaviour).
   def []=(*keys, value)
+    refuse_if_frozen
     if keys.size != 1
       raise ArgumentError,
             "df[...] = takes one key (a column name or a row selector); " \
@@ -222,6 +246,52 @@ class CAFrame
     value
   end
 
+  # Freezing a frame fixes its columns, rows and index; the columns' cells are
+  # their own arrays' to guard, as an Array's elements are.  The check comes
+  # first so a refused edit leaves the frame as it was: the edits change the
+  # column table before any instance variable.
+  private def refuse_if_frozen
+    raise FrozenError.new("can't modify frozen CAFrame: #{inspect}", receiver: self) if frozen?
+  end
+
+  # Make this frame read-only and return it.  It is +freeze+ extended to the
+  # cells: the column set, the rows and the index are fixed as by +freeze+,
+  # and the cells and masks of every column and of the index refuse writes
+  # made through this frame.
+  #
+  # Each column (and the index) is replaced by a read-only view of itself, so
+  # the arrays the frame was built from are left as they were: whoever holds
+  # them can still write, and the writes show through this frame.  Frames
+  # derived from a protected frame by views (+select+, +filter+, a row slice)
+  # read through those views and refuse cell writes too, but are not frozen.
+  # +copy+ gives a frame that can be written again.
+  #
+  # Calling it on a protected frame returns the frame unchanged.  A frame
+  # frozen with +freeze+ cannot be protected afterwards, because its columns
+  # can no longer be replaced: raises +FrozenError+.
+  def protect
+    return self if protected?
+    refuse_if_frozen
+    @columns = @columns.transform_values { |col| read_only_view(col) }
+    @index   = read_only_view(@index) if @index
+    @protected = true
+    freeze
+  end
+
+  # True if this frame was made read-only by +protect+.  A +dup+ is not frozen
+  # and so not protected, though its columns stay the read-only views it
+  # shares; a +clone+ keeps both.
+  def protected?
+    frozen? && @protected == true
+  end
+
+  private def read_only_view(col)
+    return col if col.read_only?
+    view = col.refer
+    view.set_read_only_flag
+    view
+  end
+
   # df["name"] = ... : the column forms of []=.  Unlike the verbs, +[]=+ can
   # only ever mutate the receiver -- Ruby hands the right-hand side back as
   # the value of an assignment, so there is no way to return a new frame.
@@ -238,7 +308,7 @@ class CAFrame
       mask_column(key)
     elsif value.is_a?(CAFrame)
       raise ArgumentError,
-            "df[name] = takes a column, not a CAFrame; escape one with " \
+            "df[name] = takes a column, not a CAFrame; take one with " \
             "other[\"name\"], or splice rows with df[rows] = other"
     else
       rebind_column(key, value)
@@ -331,9 +401,9 @@ class CAFrame
       raise ArgumentError,
             "filter block must return a boolean CArray (got #{mask.class})"
     end
-    unless mask.shape[0] == @nrow
+    unless mask.shape == [@nrow]
       raise ArgumentError,
-            "filter mask has axis-0 length #{mask.shape[0]}, expected nrow #{@nrow}"
+            "filter mask has shape #{mask.shape.inspect}, expected [#{@nrow}] (one value per row)"
     end
     select_rows(mask, keep_masked: keep_masked)
   end
@@ -342,6 +412,7 @@ class CAFrame
   # An index-role change: the data is unchanged, so this mutates self and
   # returns it (memo §3.8). Any existing index is replaced.
   def set_index(name)
+    refuse_if_frozen
     key = name.to_s
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     idx = @columns[key]
@@ -370,6 +441,7 @@ class CAFrame
   # Also an index-role change, so it mutates self (memo §3.8). The former
   # index becomes the first column, named after the row axis.
   def reset_index
+    refuse_if_frozen
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)
     @index     = nil
@@ -394,7 +466,11 @@ class CAFrame
 
   # The single row whose index label equals +label+, as a Ruby Hash (memo
   # §13.2b). +label+ is matched exactly against the index (+index.eq+), so any
-  # orderable / object / datetime / categorical index works. The return type is
+  # orderable / object / datetime / categorical index works, and +label+ is
+  # whatever +index.eq+ takes -- for a time index, a Time, Date or a String
+  # such as "2024-01-02".  A NaN label finds the NaN label, as join and
+  # group_by match NaN keys.  A numeric index takes a number; a String or
+  # true / false raises. The return type is
   # a row Hash and stays that way: zero matches raise KeyError, and duplicate
   # labels raise (go through +filter { |f| f.index.eq(label) }+ for the
   # multi-row, frame-returning path). Positional access is +df[i]+.
@@ -411,16 +487,29 @@ class CAFrame
             "at(UNDEF): an undefined label identifies no row; " \
             "use filter { |f| f.index.is_masked } for the rows with no label"
     end
-    pos = @index.eq(label).where
+    # A NaN label is the NaN value, as join and group_by take it: eq answers
+    # false for NaN against anything, itself included.
+    # A numeric index is looked up with a number: a String or true/false would
+    # be read differently by each numeric type, or not at all.
+    if !@index.face? && (@index.integer? || @index.float? || @index.complex?) &&
+       !label.is_a?(Numeric)
+      raise ArgumentError,
+            "at: the index is #{@index.data_type}, so the label must be a number " \
+            "(got #{label.inspect}); convert it first, e.g. at(Float(s)) or at(Integer(s))"
+    end
+    nan = label.is_a?(Float) && label.nan?
+    hit = nan ? @index.is_in([label]) : @index.eq(label)
+    pos = hit.where
     case pos.elements
     when 0
       raise KeyError, "no row with index label #{label.inspect}"
     when 1
       row(pos[0])
     else
+      test = nan ? "f.index.is_nan" : "f.index.eq(label)"
       raise ArgumentError,
             "index label #{label.inspect} matches #{pos.elements} rows; " \
-            "use filter { |f| f.index.eq(label) } for duplicate labels"
+            "use filter { |f| #{test} } for duplicate labels"
     end
   end
 
@@ -444,20 +533,20 @@ class CAFrame
   # --- metadata readers (memo §13.2) ------------------------------------
   # Each returns a fresh object; the live columns Hash is never exposed.
 
-  # Variable (column) names in column order.  Returns +Array<String>+.
-  def variable_names
+  # Column names in column order.  Returns +Array<String>+.
+  def column_names
     @columns.keys
   end
 
-  # Variables (raw column CArrays) in column order.  Returns
-  # +Array<CArray>+.  Equivalent to +df[*variable_names]+ but built
-  # directly from the columns Hash.
-  def variables
+  # The columns (raw CArrays) in column order.  Returns +Array<CArray>+.
+  # Equivalent to +df[*column_names]+ but built directly from the columns
+  # Hash.
+  def columns
     @columns.values
   end
 
-  # Number of variables (columns).
-  def nvar
+  # Number of columns.
+  def ncol
     @columns.size
   end
 
@@ -485,7 +574,7 @@ class CAFrame
     if col.is_a?(CAFrame)
       raise ArgumentError,
             "a CAFrame cannot be a column (it answers to_ca as a 2-D matrix); " \
-            "escape a column with df[\"name\"] or df.to_ca first"
+            "take a column with df[\"name\"] or df.to_ca first"
     end
     unless col.respond_to?(:to_ca)
       raise ArgumentError, "column must be a CArray or Array (got #{col.class})"
@@ -498,10 +587,11 @@ class CAFrame
   end
 
   private def row(i)
-    i += @nrow if i < 0
-    unless i >= 0 && i < @nrow
+    pos = i < 0 ? i + @nrow : i
+    unless pos >= 0 && pos < @nrow
       raise IndexError, "row index #{i} out of range (nrow=#{@nrow})"
     end
+    i = pos
     h = {}
     h[@axis_name] = elem_at(@index, i) if @index
     @columns.each { |name, col| h[name] = elem_at(col, i) }
@@ -562,10 +652,10 @@ class CAFrame
   # promote and the row count shifts by other.nrow - span.
   private def splice_rows(selector, other)
     lo, hi = contiguous_span(selector)
-    unless other.variable_names.sort == variable_names.sort
+    unless other.column_names.sort == column_names.sort
       raise ArgumentError,
-            "splice frame has columns #{other.variable_names.inspect}, " \
-            "expected the same set as #{variable_names.inspect}"
+            "splice frame has columns #{other.column_names.inspect}, " \
+            "expected the same set as #{column_names.inspect}"
     end
     new_cols = {}
     @columns.each do |name, col|
@@ -691,11 +781,20 @@ class CAFrame
     keep       = selector.strip_mask(1)   # true where selected OR undetermined
     undet_kept = selector.is_masked[keep] # among kept rows, which were undetermined
     cols = {}
+    any_undet = undet_kept.any
     @columns.each do |name, col|
       tail = [nil] * (col.ndim - 1)
-      g = col[keep, *tail].copy
-      g[undet_kept, *tail] = UNDEF
-      cols[name] = g
+      g = col[keep, *tail]
+      if any_undet
+        # mask_where copies and masks in one step, so a read-only Face
+        # (categorical, CAConstString) takes the mask as any column does.
+        cells = CArray.boolean(*g.shape)
+        cells[] = false
+        cells[undet_kept, *tail] = true
+        cols[name] = g.mask_where(cells)
+      else
+        cols[name] = g.copy
+      end
     end
     # The index is copied along with the columns. Its values are carried over
     # unmasked (an undetermined row keeps its label, as mask_rows leaves the

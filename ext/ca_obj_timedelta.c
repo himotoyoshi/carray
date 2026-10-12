@@ -14,6 +14,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"
 
 /* The unit enum is shared with CATime (= same unit system).
@@ -26,7 +27,7 @@ extern void   ca_time_extract_unit (VALUE unit, int8_t *base, int64_t *count);
 typedef struct {
   /* === CAView prefix === */
   int16_t    obj_type;
-  int8_t     data_type;        /* fixed to CA_INT64 */
+  int8_t     data_type;        /* surface: CA_FIXLEN (storage is the int64 parent) */
   int8_t     ndim;
   int32_t    flags;            /* CA_FLAG_IS_FACE set */
   ca_size_t  bytes;            /* fixed to sizeof(int64_t) */
@@ -161,6 +162,12 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
              "CATimedelta requires int64 storage (parent.data_type != CA_INT64)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_TIMEDELTA;
   /* NonNumeric surface (the FIXLEN gate), like CATime: the storage is a
      count of `count x unit` ticks, and letting the numeric kernels read it
@@ -208,7 +215,9 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
 CATimedelta *
 ca_timedelta_new (CArray *parent, int8_t unit, int64_t count)
 {
-  CATimedelta *ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
+  CATimedelta *ca;
+  ca_timedelta_setup(NULL, parent, unit, count);
+  ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
   ca_timedelta_setup(ca, parent, unit, count);
   return ca;
 }
@@ -246,18 +255,6 @@ ca_timedelta_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_timedelta_func_create_mask (void *ap)
-{
-  CATimedelta *ca = (CATimedelta *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_timedelta_func = {
   -1, /* CA_OBJ_TIMEDELTA — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -268,7 +265,7 @@ ca_operation_function_t ca_timedelta_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_timedelta_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride */
@@ -330,6 +327,7 @@ rb_ca_timedelta_initialize_copy (VALUE self, VALUE other)
 {
   CATimedelta *ca, *cs;
   TypedData_Get_Struct(self,  CATimedelta, &catimedelta_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATimedelta, &catimedelta_data_type, cs);
   if ( ca_func[CA_OBJ_TIMEDELTA].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TIMEDELTA, cs->parent->ndim);
@@ -338,12 +336,12 @@ rb_ca_timedelta_initialize_copy (VALUE self, VALUE other)
   return self;
 }
 
-/* storage_to_scalar implemented in C to avoid per-cell Ruby method dispatch
+/* storage_to_element implemented in C to avoid per-cell Ruby method dispatch
    on the fetch hot path.  Accepts either an Integer (INT64 surface fetch)
    or an 8-byte String (FIXLEN surface fetch); decodes the parent int64
    and constructs CATimedelta::Element(value, unit). */
 static VALUE
-rb_ca_timedelta_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_timedelta_storage_to_element (VALUE self, VALUE raw)
 {
   CATimedelta *ca;
   CATimedeltaElement *s;
@@ -355,7 +353,7 @@ rb_ca_timedelta_storage_to_scalar (VALUE self, VALUE raw)
   if ( TYPE(raw) == T_STRING ) {
     if ( RSTRING_LEN(raw) != (long) sizeof(int64_t) ) {
       rb_raise(rb_eArgError,
-               "CATimedelta#storage_to_scalar: expected %lu bytes, got %ld",
+               "CATimedelta#storage_to_element: expected %lu bytes, got %ld",
                (unsigned long) sizeof(int64_t), RSTRING_LEN(raw));
     }
     memcpy(&value, RSTRING_PTR(raw), sizeof(int64_t));
@@ -408,17 +406,17 @@ Init_ca_obj_timedelta (void)
   rb_define_singleton_method(rb_cCATimedelta, "__wrap__",
                                     rb_ca_timedelta_wrap_method, 2);
   rb_define_method(rb_cCATimedelta, "unit", rb_ca_timedelta_unit, 0);
-  rb_define_method(rb_cCATimedelta, "storage_to_scalar",
-                                    rb_ca_timedelta_storage_to_scalar, 1);
-  /* Registers the state-compatibility predicate so CA_FACE_STORAGE_TO_SCALAR_IF_FACE
+  rb_define_method(rb_cCATimedelta, "storage_to_element",
+                                    rb_ca_timedelta_storage_to_element, 1);
+  /* Registers the state-compatibility predicate so CA_FACE_STORAGE_TO_ELEMENT_IF_FACE
      can skip rb_funcall on the hot path. */
   ca_face_register_state_compatible(CA_OBJ_TIMEDELTA,
                                     ca_timedelta_state_compatible);
   /* unit is pure metadata, no per-parent buffer; multi-parent Face lift
      is safe (portable = 1). */
   ca_face_register_state_portable(CA_OBJ_TIMEDELTA, 1);
-  ca_face_register_storage_to_scalar(CA_OBJ_TIMEDELTA,
-                                     rb_ca_timedelta_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_TIMEDELTA,
+                                     rb_ca_timedelta_storage_to_element);
 
   /* CATimedelta::Element as a C-backed TypedData class.  The Ruby-side
      definition in lib/carray/time.rb keeps Comparable + to_seconds /

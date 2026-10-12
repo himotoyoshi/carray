@@ -9,9 +9,11 @@ class CArray
   #   Returns the median of `self` along `axis` (or over all elements
   #   when `axis` is `nil`).
   #
-  #   Numeric arrays return a `Float`; `CA_OBJECT` arrays return the
-  #   result of Ruby `+` / `/` on the stored objects. Fixlen arrays
-  #   raise, since no numeric midpoint is defined.
+  #   Numeric arrays return a `Float`. A `CA_OBJECT` array answers in
+  #   its elements' own terms: the middle element itself, or the
+  #   average of two as `(lo + hi) * (1/2)`, so an Integer, Rational or
+  #   BigDecimal median is exact (`CA_OBJECT([1, 2]).median` is `3/2`).
+  #   Fixlen arrays raise, since no numeric midpoint is defined.
   #
   #   An even number of elements has no middle one, only the average of
   #   two -- so an object array whose elements cannot be averaged (a
@@ -64,9 +66,11 @@ class CArray
   #   so only when the requested `p` actually falls between two
   #   elements (`percentile(50)` of five Strings still answers).
   #
-  #   Numeric arrays produce `Float` results; `CA_OBJECT` arrays
-  #   apply Ruby `+` / `/` / `*` on the stored objects. Fixlen
-  #   arrays raise.
+  #   Numeric arrays produce `Float` results. A `CA_OBJECT` array
+  #   answers in its elements' own terms: a pick (`:lower`, `:higher`,
+  #   `:nearest`) is the element itself, and `:linear` / `:midpoint`
+  #   use the elements' arithmetic with an exact Rational weight, so an
+  #   exact element gives an exact answer. Fixlen arrays raise.
   #
   #   Masking, `min_count`, `fill_value`, and `keep_axis` follow the
   #   same rules as {#median}.

@@ -10,6 +10,8 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
+#include "ca_obj_face.h"        /* ca_face_equal */
 
 static ID id_equal;
 static ID id_eql;
@@ -26,13 +28,34 @@ ca_check_type (void *ap, int8_t data_type)
   }
 }
 
+/* For `initialize` and `initialize_copy`: raises unless the struct is as
+   the allocator left it.  Setting up a struct that is already set up
+   would overwrite what it owns (its buffer, its shape arrays, its parent
+   list) without freeing it.
+
+   What is tested is dim: NULL means the struct owns nothing yet.  That
+   holds on three conditions, which a new array class has to keep:
+     - its allocator zero-fills the struct (TypedData_Make_Struct does);
+     - its setup gives the struct a dim (there is no array without one);
+     - its `initialize` runs the argument checks before it takes the pool
+       or anything else (ca_array_pool_alloc sets dim), so that a rejected
+       argument leaves dim NULL and the object can be initialized again. */
+void
+ca_check_uninitialized (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  if ( ca->dim != NULL ) {
+    rb_raise(rb_eTypeError, "already initialized array");
+  }
+}
+
 void
 ca_check_ndim (void *ap, int ndim)
 {
   CArray *ca = (CArray *) ap;
   if ( ! ca_is_scalar(ca) ) {
     if ( ca->ndim != ndim ) {
-      rb_raise(rb_eRuntimeError, "ndim mismatch");
+      rb_raise(rb_eArgError, "ndim mismatch");
     }
   }
 }
@@ -44,11 +67,11 @@ ca_check_shape (void *ap, int ndim, ca_size_t *dim)
   int i;
   if ( ! ca_is_scalar(ca) ) {
     if ( ca->ndim != ndim ) {
-      rb_raise(rb_eRuntimeError, "shape mismatch");
+      rb_raise(rb_eArgError, "shape mismatch");
     }
     for (i=0; i<ndim; i++) {
       if ( ca->dim[i] != dim[i] ) {
-        rb_raise(rb_eRuntimeError, "shape mismatch");
+        rb_raise(rb_eArgError, "shape mismatch");
       }
     }
   }
@@ -70,7 +93,7 @@ ca_check_same_ndim (void *ap1, void *ap2)
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
   if ( ca1->ndim != ca2->ndim ) {
-    rb_raise(rb_eRuntimeError, "ndim mismatch");
+    rb_raise(rb_eArgError, "ndim mismatch");
   }
 }
 
@@ -80,7 +103,7 @@ ca_check_same_elements (void *ap1, void *ap2)
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
   if ( ca1->elements != ca2->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch");
+    rb_raise(rb_eArgError, "elements mismatch");
   }
 }
 
@@ -92,11 +115,11 @@ ca_check_same_shape (void *ap1, void *ap2)
   int i;
   if ( ( ! ca_is_scalar(ca1) ) && ( ! ca_is_scalar(ca2) ) ) {
     if ( ca1->ndim != ca2->ndim ) {
-      rb_raise(rb_eRuntimeError, "shape mismatch");
+      rb_raise(rb_eArgError, "shape mismatch");
     }
     for (i=0; i<ca1->ndim; i++) {
       if ( ca1->dim[i] != ca2->dim[i] ) {
-        rb_raise(rb_eRuntimeError, "shape mismatch");
+        rb_raise(rb_eArgError, "shape mismatch");
       }
     }
   }
@@ -109,7 +132,7 @@ ca_check_index (void *ap, ca_size_t *idx)
   int i;
   for (i=0; i<ca->ndim; i++) {
     if ( idx[i] < 0 || idx[i] >= ca->dim[i] ) {
-      rb_raise(rb_eRuntimeError, "invalid index");
+      rb_raise(rb_eIndexError, "invalid index");
     }
   }
 }
@@ -118,7 +141,7 @@ void
 rb_check_carray_object (VALUE arg)
 {
   if ( ! rb_obj_is_carray(arg) ) {
-    rb_raise(rb_eRuntimeError, "CArray required");
+    rb_raise(rb_eTypeError, "CArray required");
   }
 }
 
@@ -166,7 +189,7 @@ rb_ca_is_type (VALUE arg, int type)
 {
   CArray *ca;
   if ( ! rb_obj_is_carray(arg) ) {
-    rb_raise(rb_eRuntimeError, "CArray required");
+    rb_raise(rb_eTypeError, "CArray required");
   }
   TypedData_Get_Struct(arg, CArray, &carray_data_type, ca);
   return ca->data_type == type;
@@ -296,25 +319,20 @@ ca_eql[CA_NTYPE] = {
   eql_VALUE,
 };
 
-/* ca_compare_common(a, b, strict) — shared body of ca_equal (==) and
- * ca_eql_strict (eql?).  Returns 1 if arrays match under the selected
- * semantics, else 0.
- *
- * Common structure: metadata pre-check (scalar / data_type / bytes /
- * ndim / elements / dim), mask attach via ca_attach_n (recurses into
- * mask), unified loop over the four masked/unmasked combinations.
- *
- * The only difference is the per-element comparator:
- *   == : ca_eql[data_type] (type-specific, so float NaN != NaN)
- *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
- *
- * The unmasked-unmasked branch takes a bulk memcmp or per-cell
- * shortcut to amortise per-element function pointer dispatch. */
-static int
-ca_compare_common (void *ap, void *bp, int strict)
+typedef struct {
+  CArray *ca;
+  CArray *cb;
+  int     strict;
+  int     flag;
+} ca_compare_ctx_t;
+
+static VALUE
+ca_compare_body (VALUE arg)
 {
-  CArray *ca = (CArray *) ap;
-  CArray *cb = (CArray *) bp;
+  ca_compare_ctx_t *c = (ca_compare_ctx_t *) arg;
+  CArray *ca = c->ca;
+  CArray *cb = c->cb;
+  int strict = c->strict;
   int flag = 1;
   int masked_a, masked_b;
   boolean8_t *ma, *mb;
@@ -325,28 +343,6 @@ ca_compare_common (void *ap, void *bp, int strict)
   ca_eql_func eql = NULL;        /* used only when !strict */
   int is_object;
 
-  if ( ca_is_scalar(ca) ^ ca_is_scalar(cb) ) {
-    return 0;
-  }
-  if ( ca->data_type != cb->data_type ) {
-    return 0;
-  }
-  if ( ca->bytes != cb->bytes ) {
-    return 0;
-  }
-  if ( ca->ndim != cb->ndim ) {
-    return 0;
-  }
-  if ( ca->elements != cb->elements ) {
-    return 0;
-  }
-  for (i=0; i<ca->ndim; i++) {
-    if ( ca->dim[i] != cb->dim[i] ) {
-      return 0;
-    }
-  }
-
-  ca_attach_n(2, ca, cb);              /* recurses into ca->mask / cb->mask */
 
   masked_a = ca_is_any_masked(ca);
   masked_b = ca_is_any_masked(cb);
@@ -441,9 +437,66 @@ ca_compare_common (void *ap, void *bp, int strict)
     }
   }
 
-  ca_detach_n(2, ca, cb);
+  c->flag = flag;
+  return Qnil;
+}
 
-  return flag;
+/* ca_compare_common(a, b, strict) — shared body of ca_equal (==) and
+ * ca_eql_strict (eql?).  Returns 1 if arrays match under the selected
+ * semantics, else 0.
+ *
+ * Common structure: metadata pre-check (scalar / data_type / bytes /
+ * ndim / elements / dim), then ca_compare_body in a window over both
+ * arrays (attaching an array attaches its mask), a unified loop over the
+ * four masked/unmasked combinations.
+ *
+ * The only difference is the per-element comparator:
+ *   == : ca_eql[data_type] (type-specific, so float NaN != NaN)
+ *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
+ *
+ * The unmasked-unmasked branch takes a bulk memcmp or per-cell
+ * shortcut to amortise per-element function pointer dispatch. */
+static int
+ca_compare_common (void *ap, void *bp, int strict)
+{
+  CArray *ca = (CArray *) ap;
+  CArray *cb = (CArray *) bp;
+  int8_t i;
+
+  if ( ca_is_scalar(ca) ^ ca_is_scalar(cb) ) {
+    return 0;
+  }
+  if ( ca->data_type != cb->data_type ) {
+    return 0;
+  }
+  if ( ca->bytes != cb->bytes ) {
+    return 0;
+  }
+  if ( ca->ndim != cb->ndim ) {
+    return 0;
+  }
+  if ( ca->elements != cb->elements ) {
+    return 0;
+  }
+  for (i=0; i<ca->ndim; i++) {
+    if ( ca->dim[i] != cb->dim[i] ) {
+      return 0;
+    }
+  }
+
+  {
+    ca_compare_ctx_t c;
+    CArray *list[2];
+    c.ca     = ca;
+    c.cb     = cb;
+    c.strict = strict;
+    c.flag   = 1;
+    list[0]  = ca;
+    list[1]  = cb;
+    /* The object lane calls #== / #eql? with both arrays attached. */
+    ca_attach_window(2, list, "rr", ca_compare_body, (VALUE) &c);
+    return c.flag;
+  }
 }
 
 int
@@ -452,8 +505,8 @@ ca_equal (void *ap, void *bp)
   return ca_compare_common(ap, bp, 0);
 }
 
-static int
-ca_eql_strict (void *ap, void *bp)
+int
+ca_eql_storage (void *ap, void *bp)
 {
   return ca_compare_common(ap, bp, 1);
 }
@@ -487,6 +540,10 @@ rb_ca_equal (VALUE self, VALUE other)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
 
+  if ( ! rb_ca_has_data_class(self) && ( ca_is_face(ca) || ca_is_face(cb) ) ) {
+    return ca_face_equal(self, other, 0) ? Qtrue : Qfalse;
+  }
+
   return ( ca_equal(ca, cb) ) ? Qtrue : Qfalse;
 }
 
@@ -519,13 +576,20 @@ rb_ca_eql (VALUE self, VALUE other)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
 
-  return ( ca_eql_strict(ca, cb) ) ? Qtrue : Qfalse;
+  if ( ! rb_ca_has_data_class(self) && ( ca_is_face(ca) || ca_is_face(cb) ) ) {
+    return ca_face_equal(self, other, 1) ? Qtrue : Qfalse;
+  }
+
+  return ( ca_eql_storage(ca, cb) ) ? Qtrue : Qfalse;
 }
 
 /* ca_hash(ca) — cheap Hash key for CArray.  Mixes metadata (data_type,
  * ndim, bytes, elements, scalar-ness, shape, mask presence) and, for
- * unmasked arrays only, samples the leading CA_HASH_SAMPLE_BYTES of
- * data.  Masked arrays skip the data sample entirely — otherwise
+ * unmasked arrays only, samples the leading cells (CA_HASH_SAMPLE_BYTES
+ * of data, at least one cell), read by address so a view is not
+ * materialised for them.  An object array samples the #hash of those
+ * cells, matching eql?, which compares them with #eql?.  Masked arrays
+ * skip the data sample entirely — otherwise
  * masked positions would have to be zeroed in the sample to preserve
  * the eql?→hash invariant, and masked CArrays are rare as Hash keys.
  * The collision rate cost buys no ca->mask->ptr access and no
@@ -557,9 +621,36 @@ ca_hash (CArray *ca)
   h ^= rb_memhash(&masked_flag, sizeof(masked_flag));
 
   if ( ! masked_flag && sample > 0 ) {
-    ca_attach(ca);
-    h ^= rb_memhash(ca->ptr, sample);
-    ca_detach(ca);
+    ca_size_t addrs[CA_HASH_SAMPLE_BYTES];
+    ca_size_t ncell = sample / ca->bytes;
+    ca_size_t i;
+    if ( ncell < 1 ) {
+      ncell = 1;
+    }
+    if ( ncell > ca->elements ) {
+      ncell = ca->elements;
+    }
+    for (i = 0; i < ncell; i++) {
+      addrs[i] = i;
+    }
+    if ( ca_is_object_type(ca) ) {
+      /* eql? compares object cells with #eql?, so the sample is their
+         #hash, not the VALUE bits.  The cells sit on the stack, where the
+         GC sees them while #hash runs. */
+      VALUE cells[CA_HASH_SAMPLE_BYTES / sizeof(VALUE)];
+      ca_xfer_addrs(ca, ncell, addrs, cells, CA_XFER_GET);
+      for (i = 0; i < ncell; i++) {
+        h = rb_hash_uint(h, (st_index_t) NUM2LONG(rb_hash(cells[i])));
+      }
+      RB_GC_GUARD(cells[0]);
+    }
+    else {
+      volatile VALUE holder;
+      char *buf = ALLOCV_N(char, holder, ncell * ca->bytes);
+      ca_xfer_addrs(ca, ncell, addrs, buf, CA_XFER_GET);
+      h ^= rb_memhash(buf, ncell * ca->bytes);
+      ALLOCV_END(holder);
+    }
   }
 
   return h;
@@ -642,6 +733,9 @@ without_read_only_ensure (VALUE arg)
   struct without_read_only_state *s = (struct without_read_only_state *) arg;
   if (s->was_readonly) {
     ca_set_flag(s->ca, CA_FLAG_READ_ONLY);
+    if (s->ca->mask) {                 /* the block may have replaced it */
+      ca_set_flag(s->ca->mask, CA_FLAG_READ_ONLY);
+    }
   }
   return Qnil;
 }
@@ -679,10 +773,16 @@ without_read_only_ensure (VALUE arg)
  * immutable (producer's contract) but the mask slot is CArray-side metadata
  * the bridge owns.
  *
- * Mechanics: clears CA_FLAG_READ_ONLY on self for the duration of the block;
- * rb_ensure restores the flag on normal return AND on raise.  Frozen objects
- * still raise FrozenError.  Self only: does not walk parent chains, does not
- * touch ca->mask's flag.
+ * Mechanics: clears CA_FLAG_READ_ONLY on self and on its mask for the
+ * duration of the block; rb_ensure restores both on normal return AND on
+ * raise, setting the flag on whatever mask self has by then.  (A read-only
+ * array's mask carries the flag once CArray#mask has handed it out.)  Frozen
+ * objects still raise FrozenError.  Does not walk parent chains.
+ *
+ * The lift covers every write, not only the mask: a value write inside the
+ * block reaches the producer's buffer, which case (a) declares immutable (a
+ * frozen CArray wrapped through MemoryView changes).  Keeping the block to
+ * the mask is the caller's part, like the choice among (a) / (b) / (c).
  *
  * Caller discipline (not enforced by the primitive): confine usage to
  * entities (CArray / CScalar / CAWrap).  On a view of a read-only parent,
@@ -701,6 +801,9 @@ rb_ca_without_read_only_flag (VALUE self)
   s.was_readonly = ca_test_flag(ca, CA_FLAG_READ_ONLY);
   if (s.was_readonly) {
     ca_unset_flag(ca, CA_FLAG_READ_ONLY);
+    if (ca->mask) {
+      ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
+    }
   }
   return rb_ensure(without_read_only_body, Qnil,
                    without_read_only_ensure, (VALUE) &s);

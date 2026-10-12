@@ -94,6 +94,75 @@ class TestFusionPlan < Test::Unit::TestCase
     end
   end
 
+  def test_every_comparison_can_be_planned
+    x = CArray.float64(8) { |i| i - 3.0 }
+    y = CArray.float64(8) { |i| (i % 3) - 1.0 }
+    missing = []
+    CArray::LAZY_MONCMP_OP_IDS.each_key do |m|
+      missing << m unless CArray::Fusion.plan(CArray.fuse { x.send(m) })
+    end
+    CArray::LAZY_BINCMP_OP_IDS.each_key do |m|
+      next if m == :feq     # its body is written against its type and an epsilon
+      missing << m unless CArray::Fusion.plan(CArray.fuse { x.send(m, y) })
+    end
+    assert_equal [], missing
+  end
+
+  def test_a_comparison_carries_the_body_for_what_it_compares
+    ints = CArray.int32(8) { |i| i }
+    op = plan_for(CArray.fuse { ints.lt(3) }).nodes.last
+    assert_equal [:bincmp, :lt, :boolean], [op.kind, op.name, op.data_type]
+    assert_equal CArray.__kernel_body__(:bincmp, :lt, :int32), op.body
+    op = plan_for(CArray.fuse { @a.is_nan }).nodes.last
+    assert_equal CArray.__kernel_body__(:moncmp, :is_nan, :float64), op.body
+  end
+
+  def test_a_comparison_is_an_operation_not_a_leaf
+    plan = plan_for(CArray.fuse { (@a + @b).gt(3.0) & @a.lt(5.0) })
+    assert_equal [@a, @b], plan.leaves
+  end
+
+  # -- shifted reads ----------------------------------------------------
+
+  def test_a_shift_is_its_array_read_elsewhere
+    g = CArray.float64(4, 5) { |i, j| i * 10 + j }
+    plan = plan_for(CArray.fuse { g.shift(1, -2, fill_value: 7.0) + g })
+    assert_equal [g], plan.leaves, "the shift and the array are one leaf"
+    shifted = plan.nodes.grep(CArray::Fusion::Shifted).first
+    assert_equal 0, shifted.index
+    assert_equal [-1, 2], shifted.offset, "cell (i, j) reads (i - 1, j + 2)"
+    assert_equal [:fill, :fill], shifted.bounds
+    assert_equal 7.0, shifted.fill
+    assert_false plan.masked
+  end
+
+  # The fill as the array would hold it.
+  def test_a_fill_is_a_cell_of_the_array
+    g = CArray.boolean(4, 5)
+    plan = plan_for(CArray.fuse { g.shift(1, 0, fill_value: 0) & g })
+    assert_equal false, plan.nodes.grep(CArray::Fusion::Shifted).first.fill
+  end
+
+  def test_a_fill_of_undef_masks
+    g = CArray.float64(4, 5)
+    plan = plan_for(CArray.fuse { g.shift(1, 0, fill_value: UNDEF) + g })
+    assert_equal [:mask, :mask], plan.nodes.grep(CArray::Fusion::Shifted).first.bounds
+    assert_true plan.masked
+  end
+
+  def test_a_shift_of_an_expression_is_taken_whole
+    plan = plan_for(CArray.fuse { @a + (@a + @b).shift(1, fill_value: 0) })
+    assert_empty plan.nodes.grep(CArray::Fusion::Shifted)
+    assert_kind_of CAShift, plan.leaves.last
+  end
+
+  def test_how_far_it_shifts_is_part_of_the_signature
+    g = CArray.float64(4, 5)
+    one = plan_for(CArray.fuse { g.shift(1, 0) + g })
+    two = plan_for(CArray.fuse { g.shift(0, 1) + g })
+    assert_not_equal one.signature, two.signature
+  end
+
   # -- masks ------------------------------------------------------------
 
   def test_a_view_over_one_array_is_masked_where_that_array_is
@@ -152,6 +221,14 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_not_equal one.signature, two.signature
   end
 
+  # Which node an operation reads, and which leaf a read is, is part of
+  # the shape: these two differ only there.
+  def test_the_wiring_is_part_of_it
+    one = plan_for(CArray.fuse { (@a - @b) - @a })
+    two = plan_for(CArray.fuse { (@a - @b) - @b })
+    assert_not_equal one.signature, two.signature
+  end
+
   def test_a_mask_or_a_data_type_changes_it
     masked = @a.copy
     masked[1] = UNDEF
@@ -176,9 +253,83 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_nil CArray::Fusion.plan(nil)
   end
 
+  def test_a_masked_scalar_has_no_plan
+    s = CScalar.float64
+    s[0] = UNDEF
+    assert_nil CArray::Fusion.plan(@a.lazy + s)
+  end
+
   def test_an_object_array_has_no_plan
     # Its kernels call back into the interpreter, so there is no body.
     objs = CArray.object(4) { |i| i }
     assert_nil CArray::Fusion.plan(CArray.fuse { objs + 1 })
   end
+
+  # -- which operations skip masked cells -------------------------------
+
+  # A plan carries the rule each lazy view's own kernel follows, read from
+  # the view rather than written down a second time.
+  def test_an_operation_that_can_raise_on_a_cell_is_marked_trapping
+    i = CArray.int32(4) { |k| k + 1 }
+    f = CArray.float64(4) { |k| k + 1.0 }
+    ops = ->(view) {
+      plan_for(view).nodes.select { |n| n.is_a?(CArray::Fusion::Op) }
+                    .map { |n| [n.name, n.trapping] }
+    }
+    assert_equal [[:div, true]],   ops.(i.lazy / i.lazy)
+    assert_equal [[:power, true]], ops.(i.lazy ** i.lazy)
+    assert_equal [[:rcp, true]],   ops.(i.lazy.rcp)
+    assert_equal [[:div, false]],  ops.(f.lazy / f.lazy)
+    assert_equal [[:add, false]],  ops.(i.lazy + i.lazy)
+  end
+
+  # A Float array to an Integer power is its own node (ipow); its body calls
+  # op_powi_<type>, which CArray hands over as the helpers text.
+  def test_an_integer_power_is_planned
+    x = CArray.float64(3).seq!
+    plan = CArray::Fusion.plan(x.lazy ** 2)
+    op = plan.nodes.last
+    assert_equal :ipow, op.name
+    assert_equal "(#3) = op_powi_<type>((#1), (#2));", op.body
+    assert_equal :int64, plan.nodes[1].data_type
+    assert_not_nil CArray::Fusion.plan(x.to_type(:float32).lazy ** -3)
+  end
+
+  def test_the_helpers_are_ca_op_powi_as_it_stands
+    header = File.read(File.expand_path("../../ext/ca_op_powi.h", __dir__))
+    region = header[%r{/\* BEGIN kernel helpers \*/\n(.*)/\* END kernel helpers \*/}m, 1]
+    assert_equal region, CArray.__kernel_helpers__
+    assert_match(/^op_powi_fc\(float64_t\)$/, CArray.__kernel_helpers__)
+  end
+
+
+  # A mixed-type expression converts one operand first.  The conversion is
+  # an operation named by the type it converts to, with the C cast the walk
+  # applies, keyed by the type it converts from.
+  def test_a_conversion_is_planned
+    a = CArray.float32(3).seq!
+    b = CArray.float64(3).seq!
+    i = CArray.int32(3).seq!
+    plan = CArray::Fusion.plan(a.lazy + b.lazy)
+    cast = plan.nodes[1]
+    assert_equal [:monop, :cast_float64, :float64, [0]],
+                 [cast.kind, cast.name, cast.data_type, cast.args]
+    assert_equal "(#2) = (double)(#1);", cast.body
+    assert_equal :pass, cast.mask
+    assert_not_nil CArray::Fusion.plan(i.lazy.sin)
+    assert_not_nil CArray::Fusion.plan(CArray.boolean(3).lazy + CArray.boolean(3).lazy)
+  end
+
+  # A float or complex value converted to an integer has no defined C
+  # result out of range, so no body is offered for it.
+  def test_no_conversion_body_from_a_float_to_an_integer
+    assert_nil CArray.__kernel_body__(:monop, :cast_int32, :float64)
+    assert_nil CArray.__kernel_body__(:monop, :cast_int64, :cmplx128)
+    assert_nil CArray.__kernel_body__(:monop, :cast_boolean, :int32)
+    assert_equal "(#2) = (int64_t)(#1);",
+                 CArray.__kernel_body__(:monop, :cast_int64, :boolean)
+    assert_equal "(#2) = (float)(#1);",
+                 CArray.__kernel_body__(:monop, :cast_float32, :float64)
+  end
+
 end

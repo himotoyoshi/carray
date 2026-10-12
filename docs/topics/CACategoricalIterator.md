@@ -179,15 +179,32 @@ Because the empty slot in `mean` / `variance` / … is a genuine masked cell (no
 magic number like `NaN`), a downstream calculation on `grp.mean` propagates the
 missing-ness through the mask.
 
+### Too few values: `min_count:` and `fill_value:`
+
+The value reductions (`sum`, `accumulate`, `min`, `max`, `minmax`, `mean`,
+`median`, `percentile`, `variance`, `stddev`, `variancep`, `stddevp`, `prod`,
+`wsum`, `wmean`) take `min_count:` and `fill_value:` as the core reduction of
+the same name does. A category with fewer than `min_count` present cells is
+masked, and `fill_value` then fills the masked cells, those `min_count` made
+and those an empty category gives. For `wsum` and `wmean` a cell is present
+when its value and its weight both are:
+
+```ruby
+grp.mean(min_count: 2)                     #  => [ 20.0, _, _ ]
+grp.sum(min_count: 2, fill_value: -1.0)    #  => [ 40.0, -1.0, -1.0 ]
+```
+
 ### A single-value category
 
-Sample variance of one value is `0.0` — the same as `CArray#variance` on a
-one-element array. A single-value category is therefore `0.0`, not masked:
+The sample variance divides by n − 1, so it has no value for a single value:
+a single-value category is masked, the same as `CArray#variance` on a
+one-element array. The population variance of one value is `0.0`:
 
 ```ruby
 cat = CA_OBJECT(%w[a b b]).categorize
 grp = CA_DOUBLE([5, 10, 20]).group_by_category(cat)
-grp.variance   #  => [ 0.0, 50.0 ]     'a' has one value -> 0.0
+grp.variance    #  => [ UNDEF, 50.0 ]   'a' has one value
+grp.variancep   #  => [ 0.0, 25.0 ]
 ```
 
 ## Iterating the categories
@@ -220,6 +237,31 @@ is untouched; use `value[] = grp.map { ... }` for in-place); cells in no categor
 are `UNDEF` in the result. The iterator does **not** mix in `Enumerable`, so only
 the methods documented here are defined — a name that is not defined is a plain
 `NoMethodError`, not a wrong answer.
+
+The result of `map` has the value's data type, or `data_type:` when you give
+one. A [Face](CAFace.md) value gives a result in the same Face (a `CATime`
+column maps to a `CATime`); a read-only Face — a categorical, a const string —
+cannot be written cell by cell, so its result is an object array of the surface
+values.
+
+### Running values within a category
+
+`cumsum`, `cumprod`, `cummax`, `cummin` and `cumcount` are the running
+counterparts of the reductions: the result is shaped like the source, and each
+cell holds its category's running value up to and including it, in source
+order. A cell in no category is `UNDEF`; a masked cell inside a category holds
+the running value, as `CArray#cumsum` does.
+
+```ruby
+grp.cumsum     #  => [10.0, 30.0, 30.0, 70.0]
+grp.cumcount   #  => [1, 2, 1, 2]
+```
+
+Each answers as the core scan of the same name does over the category's
+members: the data type is the core's (`cumsum` of a boolean is uint64), a Face
+keeps its Face (`cummin` of a `CATime` column is a `CATime`), and a scan the
+core refuses (`cumsum` of a `CATime` column) is refused here, in the core's
+words.
 
 ## N-dimensional value and categorical
 
@@ -298,12 +340,31 @@ with all three named.
 ### Which reductions take it
 
 `sum`, `mean`, `min`, `max`, `minmax`, `prod`, `accumulate`, `count`,
-`count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, and
-`wsum(w)` / `wmean(w)`.
+`count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, `median`,
+`percentile(p)`, and `wsum(w)` / `wmean(w)`.
 
-The order statistics — `median`, `percentile`, `quantile` — do not: each group of
-each fiber would need its own sort. They are available without `axis:`. So are
-`count(v)`, `count_masked`, `elements`, and the index and address members.
+`median` and `percentile` with `axis:` take each group's cells and ask the core
+for its order statistic along the axis, one call per group, so the answer is
+the core's — an empty group is `UNDEF`, as for `mean`. With many groups this is
+slower than the other reductions, which run once over the whole value.
+
+`quantile` does not take `axis:`; use `percentile` for each fraction. Neither
+do `count(v)`, `count_masked`, `elements`, and the index and address members.
+
+The running values (`cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`) and
+`map` take `axis:` too, when the categorical classifies the positions along the
+axis (its shape is `[value.shape[axis]]`). They keep the source shape: each cell
+holds its category's running value along the axis, per fiber, and `map` hands
+the block each category's positions along the axis with every other axis kept.
+
+```ruby
+temp.group_by_category(day).cummax(axis: 0)   # running maximum per station,
+                                              # within weekdays and within weekends
+temp.group_by_category(day).map(axis: 0) { |g| g - g.mean }
+```
+
+A categorical shaped otherwise is refused, since a running value follows the
+positions along the axis.
 
 `wsum` / `wmean` want a weight array of the value's shape exactly; broadcast it
 yourself before passing it.
@@ -334,10 +395,21 @@ Both group a categorical, but they answer different needs:
   cheaply. Reach for it for a flat categorical, for order statistics, or when you
   want many statistics per group.
 
+## Relationship to `segments`
+
+`group_by_category` is a sort followed by a segment reduction. The sort gathers
+the value so that each category is one contiguous run of a copy; every reduction
+without `axis:` is then the [`CASegmentIterator`](CASegmentIterator.md) reduction
+over that copy, and `CACategoricalIterator` descends from `CASegmentIterator`.
+When the pieces are already contiguous in the value — rows of a sparse matrix,
+records of a ragged array — `value.segments(offsets: o)` gives the same
+reductions without the sort.
+
 ## See also
 
 - [`CACategorical`](../objects/CACategorical.md) — the classifier this consumes.
 - [`AxisGroup`](AxisGroup.md) — grid group-by along axes (the scatter path).
+- [`CASegmentIterator`](CASegmentIterator.md) — the same reductions over runs already contiguous in the value.
 - [Masks and missing values](../../guides/users/05_masks.md) — the mask contract the
   reductions follow.
 - [Reduction and statistics](../../guides/users/04_reduction_and_statistics.md) — the

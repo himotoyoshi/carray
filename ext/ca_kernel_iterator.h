@@ -15,7 +15,8 @@
         CA_SLAB_REDUCE_* / _MAP_* / _SCAN_* suites, CA_L2_FOR_EACH,
         CA_*_UNMASKED helpers)
       - the raw-API entry points the macros expand to: ca_iter_state_
-        init_l2 / next_slab_axes / sync_slab / finish
+        init_l2 / init_l2_paired / next_slab_axes / sync_slab / finish /
+        close, ca_iter_check_init, ca_iter_check_same_shape
       - the enum/status tokens authors write literally: CA_SLAB_AXES,
         CA_KERNEL_WRITE, CA_KERNEL_NO_MASK, CA_ITER_OK, CA_ITER_ERR_*
       - the slab-delivery representation = the ca_iter_state fields a
@@ -41,21 +42,6 @@
   devel/MEMO_KERNEL_ITERATOR_OOP_PATH.vev4.md for the planned engine
   overhaul this contract insulates against.)
 
-  Step 1 scope (this commit):
-    - struct definition (subset used by step 1; chunk_pos / scratch /
-      descs / outer_idx fields are present but unused, reserved for
-      later steps per proposal §3.1)
-    - CA_SLAB_WHOLE policy only (single slab = whole array)
-    - alias path only: ca_attach_is_alias(src) must hold, else init
-      returns CA_ITER_ERR_NOT_CHEAP (renamed from ca_attach_is_cheap
-      in T1 step 9.4a)
-    - READ-only, no mask handling, no WRITE sync
-
-  Later steps will fill in scratch materialize (step 2), L2 strided
-  (step 3), WRITE + sync_slab (step 4), descriptor 6-view connection
-  via P3 ca_axis_dispatch_for_each_slab (step 5), mask + macros
-  (step 6), NO_MASK enforcement (step 7).
-
   --------------------------------------------------------------------------- */
 
 #ifndef CA_KERNEL_ITERATOR_H
@@ -66,9 +52,10 @@
 
 /* ---- slab policy (proposal §2.2) ------------------------------------- */
 typedef enum {
-  CA_SLAB_FREE  = 0,    /* engine-chosen chunk (S1 max merge). step 2+. */
-  CA_SLAB_AXES  = 1,    /* user-pinned axes inside the slab. step 5+.  */
-  CA_SLAB_WHOLE = 2     /* whole array in one slab. step 1 default.    */
+  CA_SLAB_FREE  = 0,    /* engine-chosen chunk.  Not implemented:
+                           init returns CA_ITER_ERR_POLICY.          */
+  CA_SLAB_AXES  = 1,    /* user-pinned axes inside the slab (init_l2) */
+  CA_SLAB_WHOLE = 2     /* whole array in one slab                    */
 } ca_slab_policy_t;
 
 /* ---- kernel flags (proposal §2.2) ------------------------------------ */
@@ -93,9 +80,11 @@ typedef enum {
 #define CA_ITER_ALIAS_NONE     0     /* scratch materialize. step 2+.   */
 #define CA_ITER_ALIAS_CONTIG   1     /* parent.ptr+offset direct slab.   */
 #define CA_ITER_ALIAS_STRIDED  2     /* L2 stride-aware. step 3+.        */
-#define CA_ITER_ALIAS_ATTACH   3     /* SRC_ATTACH path: view's own
-                                        ca_attach materialised src->ptr,
-                                        sync via ca_sync(src). step 9+.  */
+#define CA_ITER_ALIAS_ATTACH   3     /* Not set by the engine.  A
+                                        SRC_ATTACH walk runs with
+                                        CA_ITER_ALIAS_NONE over an
+                                        iterator-owned scratch filled and
+                                        written back with ca_xfer_all.  */
 #define CA_ITER_ALIAS_PER_SLAB 4     /* Phase C T3 fallback: per-slab
                                         materialise via ca_axis_dispatch_gather
                                         with subset descriptor (= caller-built
@@ -120,34 +109,28 @@ typedef enum {
                                           mask in fiber_mask_scratch
                                           (= rev2 §3.3, (data,mask)
                                           pair). */
-#define CA_ITER_ALIAS_STACK_OUTER_K 8 /* PROPOSAL_CASTACK_XFER_OPT_LAYERING
-                                        P.2 Case A (2026-06-18): CAStack
-                                        source + CA_SLAB_AXES with axis 0
-                                        NOT in slab (= K-axis in outer
-                                        iter, e.g. view.mean(axis: 1) /
-                                        view.mean(axis: 2)).  Each slab
-                                        corresponds to a region inside
-                                        ONE parent selected by
-                                        outer_idx[K_outer_pos].  init_l2
-                                        attaches K parents (+ K parent
-                                        masks if present) and caches
-                                        their ptrs + uniform parent
-                                        native byte strides; next_slab_
-                                        axes aliases parents[k]->ptr +
-                                        parent_off directly (= zero
-                                        copy, zero scratch).  parent
-                                        entity case = eager-equivalent
-                                        memory bandwidth.  Mask aliases
-                                        parent->mask similarly.  Scoped
-                                        to slab_axes that exclude axis 0
-                                        (= axis 0 must be an outer iter
-                                        axis). */
+#define CA_ITER_ALIAS_STACK_OUTER_K 8 /* CAStack source + CA_SLAB_AXES
+                                        whose slab leaves out the stack
+                                        axis (k_axis), which is then an
+                                        outer axis.  Each slab lies inside
+                                        ONE parent, selected by
+                                        outer_idx[stack_k_outer_pos].
+                                        init_l2 attaches the K parents and
+                                        caches their ptrs and parent byte
+                                        strides; next_slab_axes reads
+                                        parents[k]->ptr + parent_off
+                                        directly.  The parents' masks are
+                                        copied at init and the cursor
+                                        points into the copy.  A fiber
+                                        that is not contiguous in its
+                                        parent is gathered (FIBER_CONTIG).
+                                        READ only. */
 #define CA_ITER_ALIAS_STACK    7     /* PROPOSAL_CASTACK_LOOP_INTERCHANGE
                                         Vector A rev2 (direct per-parent
                                         ptr access): CAStack source +
                                         CA_SLAB_AXES with slab_axes ==
-                                        [0] (= K-axis-only slab, e.g.
-                                        view.mean(axis: 0) / sum(axis: 0)).
+                                        [k_axis] (= the stack axis alone,
+                                        e.g. view.mean(axis: k_axis)).
                                         init_l2 attaches K parents up
                                         front (= O(1) per entity parent),
                                         caches parent->ptr aliases +
@@ -192,19 +175,30 @@ typedef enum {
 
 /* ---- error codes ----------------------------------------------------- */
 #define CA_ITER_OK              0
-#define CA_ITER_ERR_NOT_CHEAP   1    /* src needs materialize, step 2+   */
+#define CA_ITER_ERR_NOT_CHEAP   1    /* the classifier does not recognise
+                                        the source (a view with no attach
+                                        slot; any other external obj_type
+                                        is delivered by attaching it)    */
 #define CA_ITER_ERR_POLICY      2    /* policy not implemented yet       */
-#define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported     */
+#define CA_ITER_ERR_FLAGS       3    /* flag combination unsupported;
+                                        also returned for a NULL state
+                                        or source                       */
 #define CA_ITER_ERR_READONLY    4    /* WRITE on readonly view (CARepeat etc.) */
-#define CA_ITER_ERR_MASK        5    /* masked source — step 4-5 only, lifted in step 6 */
-#define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source (step 7) */
+#define CA_ITER_ERR_MASK        5    /* reserved: no entry point returns
+                                        it (masked sources are accepted) */
+#define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source */
 /* ---- source kind (step 5+, internal routing) ------------------------- */
 #define CA_ITER_SRC_NONE       0
 #define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
-#define CA_ITER_SRC_DESCRIPTOR 2     /* CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift (step 5+) */
-#define CA_ITER_SRC_ATTACH     3     /* CAFake / CAByteSwap / CABitfield /
-                                        CABitarray / CAReduce — view's own
-                                        ca_attach materialises (step 9+).  */
+#define CA_ITER_SRC_DESCRIPTOR 2     /* CASelectAxis / CAGrid / CASelect /
+                                        CAWindow / CAShift: per-axis
+                                        descriptors (describe_axes)      */
+#define CA_ITER_SRC_ATTACH     3     /* every other view the classifier
+                                        knows (conversion views, CATile,
+                                        CARoll, CAStack, CAMeld, CARemap,
+                                        CAObject, the lazy views) and any
+                                        registered external obj_type: the
+                                        view's own transfer gathers it */
 #define CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE 4
                                      /* F-2 (PROPOSAL_F2_KERNEL_ITERATOR_ALIAS
                                         rev6): descriptor view whose innermost
@@ -220,13 +214,13 @@ typedef enum {
    The classifier recognises the core's own view classes by comparing
    their operation table against a list compiled into the engine.  A view
    class installed by a companion gem through ca_install_obj_type matches
-   nothing on that list, so without this hook it classifies as
-   CA_ITER_SRC_NONE and every kernel that goes through the iterator
-   refuses the array with CA_ITER_ERR_NOT_CHEAP.  An external author
-   declares the routing here instead, once, in the class's Init:
+   nothing on that list; it is delivered as CA_ITER_SRC_ATTACH (the view's
+   own attach gathers it), and so is one that registers here, once, in the
+   class's Init:
 
      ca_iter_register_source_kind(CA_OBJ_MY_VIEW, CA_ITER_SRC_ATTACH);
 
+   Registering states the routing rather than changing it.
    CA_ITER_SRC_ATTACH is the only kind that may be registered.  It is the
    one whose contract an external class can meet on its own: func_attach
    materialises (or aliases) src->ptr and func_sync scatters back — the
@@ -257,7 +251,10 @@ typedef struct {
   ca_slab_policy_t  policy;
   int8_t            ndim;
   int8_t            naxes;             /* [step 5+] AXES policy axis count */
-  int8_t           *axes;              /* [step 5+] [naxes]                */
+  void             *pair;              /* the other state of a two-state
+                                          walk (ca_iter_state_init_l2_paired),
+                                          else NULL; finished with this one
+                                          when the walk raises */
   uint32_t          flags;
   ca_size_t         bytes;             /* element size                     */
 
@@ -273,9 +270,9 @@ typedef struct {
   ca_size_t         composed_strides[CA_RANK_MAX]; /* byte units           */
   ca_size_t         composed_base;     /* byte offset from root->ptr       */
 
-  /* --- descriptor framework cache (step 5+, descriptor sources) ---
-     For CSA / CAGrid / CASelect / CAMapping / CAWindow / CAShift,
-     init_l1_descriptor runs the view's *_describe_axes once then
+  /* --- descriptor framework cache (descriptor sources) ---
+     For CASelectAxis / CAGrid / CASelect / CAWindow / CAShift, init runs
+     the view's *_describe_axes once then
      reuses the P3 substrate (ca_axis_dispatch_prepare / _layout /
      _classify_prefix) to derive the slab layout.  Cached inline so
      next_slab walks the prefix axes without re-doing the analysis. */
@@ -315,8 +312,8 @@ typedef struct {
   uint8_t           write_dirty;
 
   /* --- CA_SLAB_AXES policy fields (Phase A capstone, T1) ---
-     Populated when init_l2 is called with policy = CA_SLAB_AXES against
-     a SRC_CASTRIDE source.  The kernel reads slab metadata directly
+     Populated when init_l2 is called with policy = CA_SLAB_AXES, for
+     every kind of source.  The kernel reads slab metadata directly
      from these fields (= per-walk metadata, unchanged across slabs).
      outer_axes / outer_dims / outer_strides drive the prefix walk;
      slab_axes_buf / slab_dims / slab_strides describe the K-D slab
@@ -355,14 +352,14 @@ typedef struct {
      gather and gathers each fiber here before yielding.  Reused across
      fibers; size grows to max slab_dims[0] * bytes.
 
-     last_data_off is captured by next_slab_axes(k) BEFORE the outer_idx
-     advance, then consumed by sync_slab(k) to compute the dst base for
-     WRITE scatter (= rebuilding from outer_idx in sync would duplicate
-     next_slab_axes logic; see PROPOSAL §4.3.2 hazard comment).
+     last_data_off is the byte offset of the current slab from alias_ptr,
+     set by next_slab_axes on its default path BEFORE the outer_idx
+     advance.  sync_slab reads it for the fiber it scatters back and for
+     the cells of a whole-view scratch it compares; the slab iterator's
+     map_slab reads it to mark the output's mask.
 
-     Phase C T3 paths (CA_ITER_ALIAS_PER_SLAB / _HOIST) yield from
-     scratch_ptr (= already contig per-slab materialise) and do NOT
-     touch these fields. */
+     The per-slab paths (CA_ITER_ALIAS_PER_SLAB / _HOIST) and the stack
+     paths do not set it. */
   char             *fiber_data_scratch;
   ca_size_t         fiber_data_scratch_cap;
   ca_size_t         last_data_off;
@@ -410,12 +407,10 @@ typedef struct {
      here lets next_slab_axes compute mask_off without downcasting to
      CAStack (= AC3 layering goal). */
   ca_size_t         stack_parent_mask_strides[CA_RANK_MAX];
-  /* --- PROPOSAL_CASTACK_XFER_OPT_LAYERING P.2 Case A (2026-06-18) --- */
   /* When alias_mode == CA_ITER_ALIAS_STACK_OUTER_K and the CAStack
-     source carries a mask, init_l2 attaches K parent masks and caches
-     their ptrs here for parent->mask alias delivery alongside
-     parents[k]->ptr.  NULL when source has no mask.  Owned by iter
-     (xfree in finish). */
+     source carries a mask, init_l2 copies the K parent masks here, read
+     alongside parents[k]->ptr.  NULL when the source has no mask.  Owned
+     by the iterator (xfree in finish). */
   boolean8_t      **stack_parent_mask_ptrs;        /* [n_parents] or NULL */
   /* K axis position within the outer iter axis list.  Set by init_l2
      when alias_mode == CA_ITER_ALIAS_STACK_OUTER_K; next_slab_axes uses
@@ -461,10 +456,12 @@ typedef struct {
        Not implemented in Phase 1 — falls back to L1 semantics so the predicate
        stays well-defined for callers that probe ahead.
 
-   Descriptor framework views (CAGrid / CASelect / CAMapping / CAWindow /
-   CAShift / CSA) and overlay views (CAFake / CAByteSwap / CABitfield /
-   CABitarray) return 0 at every level; their alias story lands in
-   step 5 (descriptor connection via ca_axis_dispatch_for_each_slab).
+   Descriptor views (CASelectAxis / CAGrid / CASelect / CAWindow /
+   CAShift) and conversion views (CAFake / CAByteSwap / CABitfield /
+   CABitarray) return 0 at every level.  init_l2 still reads a
+   descriptor view in place when its innermost axis is a stride
+   (CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE); this predicate does not
+   report that case.
 
    ca_attach_is_alias is retained as the level=1 oracle for the Tier A
    (PROPOSAL_DELEGATE_COPY_DATA) defer site; callers that already use
@@ -481,19 +478,21 @@ int  ca_iter_can_alias (void *ap, int level);
        src->ptr, stride implicit = bytes)
      - CAStride family non-contig: scratch path (ca_copy_data
        compose-fold gather into a malloc'd buffer)
-     - other sources: CA_ITER_ERR_NOT_CHEAP
+     - descriptor views (CAGrid / CASelect / CAMapping / CAWindow /
+       CAShift / CASelectAxis): gathered into a scratch buffer
+     - SRC_ATTACH views (overlays, lazy views, CAObject, CAStack, ...):
+       iterator-owned scratch filled through ca_xfer_all
+     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
 
-   policy: only CA_SLAB_WHOLE accepted in step 1-3.
-   flags:  must be 0 (READ) until step 4 / 7.
+   policy: CA_SLAB_WHOLE only (CA_SLAB_AXES and CA_SLAB_FREE return
+           CA_ITER_ERR_POLICY).
+   flags:  any of CA_KERNEL_WRITE / CA_KERNEL_NO_MASK /
+           CA_KERNEL_FIBER_CONTIG; other bits return CA_ITER_ERR_FLAGS.
 
    On success returns CA_ITER_OK; on error returns CA_ITER_ERR_*
    without claiming resources (finish need not be called).
 
-   Pair with ca_iter_state_next_slab.  Step 3 split init into
-   level-specific entry points so each setup path stays focused
-   (proposal §3.2 rev: original single-init was relaxed when L2 setup
-   diverged enough to warrant its own state initialiser; see
-   ROADMAP/CHANGELOG rev). */
+   Pair with ca_iter_state_next_slab. */
 int  ca_iter_state_init_l1 (ca_iter_state    *st,
                             struct _CArray   *src,
                             ca_slab_policy_t  policy,
@@ -509,9 +508,23 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
      - CAStride non-contig: alias_mode = STRIDED, multi-slab walk over
        prefix axes, each yield carries native inner stride_bytes. No
        scratch.
-     - other sources: CA_ITER_ERR_NOT_CHEAP
+     - descriptor views: aliased when the innermost axis is a STRIDE
+       axis, otherwise gathered into scratch (per slab under
+       CA_SLAB_AXES when a slab axis is an INDEX or SHIFT axis)
+     - SRC_ATTACH views: iterator-owned scratch filled through
+       ca_xfer_all and written back the same way
+     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
 
-   Other args match init_l1.  Pair with ca_iter_state_next_slab_strided. */
+   policy: CA_SLAB_WHOLE or CA_SLAB_AXES (CA_SLAB_FREE returns
+           CA_ITER_ERR_POLICY, as do out-of-range or duplicate axes, and
+           CA_SLAB_AXES over a descriptor view whose descriptor rank
+           differs from the view's rank).
+   flags:  as init_l1.  CA_KERNEL_WRITE is refused with
+           CA_ITER_ERR_FLAGS when a CA_SLAB_AXES slab axis is an INDEX
+           or SHIFT axis of a descriptor view.
+
+   Pair with ca_iter_state_next_slab_strided (CA_SLAB_WHOLE) or
+   ca_iter_state_next_slab_axes (CA_SLAB_AXES). */
 int  ca_iter_state_init_l2 (ca_iter_state    *st,
                             struct _CArray   *src,
                             ca_slab_policy_t  policy,
@@ -555,12 +568,9 @@ int  ca_iter_state_next_slab (ca_iter_state *st,
    *out_mask / *out_n / *out_stride_bytes when a slab is yielded;
    returns 0 when the walk is complete.  The kernel walks `*out_n`
    elements by stepping `*out_stride_bytes` between consecutive
-   elements starting at `*out_ptr`; the mask uses the **same stride
-   semantics** when non-NULL (= each mask byte at offset i * stride is
-   conceptually paired with the value at ptr + i * stride_bytes, but
-   since mask is boolean8_t == 1 byte, mask stride is 1 byte when the
-   value stride is bytes, and proportional otherwise).  Only valid
-   when init_l2 was used. */
+   elements starting at `*out_ptr`.  The mask, when non-NULL, is
+   contiguous whatever the value stride: mask[i] pairs with the value
+   at ptr + i * stride_bytes.  Only valid when init_l2 was used. */
 int  ca_iter_state_next_slab_strided (ca_iter_state *st,
                                       char         **out_ptr,
                                       boolean8_t   **out_mask,
@@ -606,19 +616,51 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
    next_slab_strided + kernel invocation; the alias_mode branch lives
    inside the state machine so the caller never has to inspect it.
 
-   Behaviour (proposal PROPOSAL_T1_WRITE_SEMANTICS.md §(b)):
+   Behaviour:
      - !(flags & CA_KERNEL_WRITE): no-op (READ walk)
+     - per-fiber gather (CA_KERNEL_FIBER_CONTIG on a strided fiber):
+       the fiber is scattered back from its scratch first
      - alias path (scratch_ptr == NULL): no-op — kernel wrote to
-       parent directly through alias_ptr (case A semantics)
-     - scratch path (L1 only by step-4 invariant): scatter back via
-       ca_sync_data(src, scratch). L2 scratch is structurally
-       unreachable in step 4 (CAStride only) and is guarded by an
-       assert; step 5 re-evaluation noted in the proposal. */
+       parent directly through alias_ptr
+     - scratch path, at L1 or L2: written back through the source —
+       ca_xfer_all for SRC_ATTACH, ca_sync_data for CAStride, the
+       descriptor scatter for descriptor views */
 void ca_iter_state_sync_slab (ca_iter_state *st);
 
-/* Release any resources held by `st` and detach parent.  Safe to call
-   exactly once after a successful init (either level). */
+/* Release any resources held by `st` and detach parent.  Idempotent:
+   a second call is a no-op.  Also safe after a failed init, which holds
+   nothing to release (the call is then not required). */
 void ca_iter_state_finish (ca_iter_state *st);
+
+/* Open `st` as the second state of a walk whose first state is already
+   open -- an input and an output walked together.  Takes what
+   ca_iter_state_init_l2 takes, plus `first`.
+
+   The two are then finished together when either walk raises (a gather
+   or a write-back through a source's slots): each is open in the
+   caller's frame, and the raise would jump over the other's finish.  If
+   opening `st` raises, or is declined (the code is returned), `first` is
+   finished here, so the caller has nothing left to close.
+
+   When `st` writes (CA_KERNEL_WRITE), `first` reads, both walk by
+   CA_SLAB_AXES, and their arrays live in the same root, `first` is
+   reopened on a copy of its array taken before anything is written, so
+   the kernel reads the values the input held when the walk began.  Two
+   walks opened separately with ca_iter_state_init_l2 know nothing of
+   each other: a read walk over memory a write walk writes into must be
+   given a copy by the caller. */
+int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
+                                   ca_iter_state    *first,
+                                   struct _CArray   *src,
+                                   ca_slab_policy_t  policy,
+                                   int8_t           *axes,
+                                   int8_t            naxes,
+                                   uint32_t          flags);
+
+/* Finish a walk as the block macros leave it: when the body left a write
+   walk with `break`, the slab it was in is written back before the walk is
+   finished.  ca_iter_state_finish itself abandons such a slab. */
+void ca_iter_state_close (ca_iter_state *st);
 
 /* Raise unless rc is CA_ITER_OK.  The block macros call this on the value
    ca_iter_state_init_l1 / _l2 returned, so an author who never looks at a
@@ -626,6 +668,32 @@ void ca_iter_state_finish (ca_iter_state *st);
    Returns rc when there is nothing to report, so it composes inside the
    macros' comma expressions. */
 int ca_iter_check_init (int rc);
+
+/* Raise ArgumentError unless the two arrays have the same shape.  The
+   INOUT and PAIR fiber macros call this before opening either walk. */
+int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
+
+/* Run body(arg) so that the walks in states[0..n) are finished however the
+   body leaves: by returning, by `break`, or by raising.
+
+   A walk releases what it holds in ca_iter_state_finish, and a body that
+   raises jumps over the finish -- the block macros put it in the `for`
+   increment, and a hand-written walk has it after the loop.  A body that
+   calls back into Ruby (an object-lane kernel) can raise at any cell, so
+   it runs through this function.
+
+   The states belong to the caller's frame, not to the body's: after a
+   raise, the body's frame is gone, and the cleanup runs where it was.
+   Pass them to the body inside `arg` and open each one there, with
+   ca_iter_state_init_* or a block macro (`CA_FOR_EACH_SLAB(c->st, ...)`).
+   A state declared inside the body is not covered.
+
+   The states are marked unopened before the body runs, so one the body
+   never opens costs nothing, and the body may finish a walk itself:
+   finishing is idempotent.  Returns what the body returns; a raise propagates
+   after the walks are finished. */
+VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
+                      VALUE (*body)(VALUE), VALUE arg);
 
 /* ---- Phase C C.3: kernel author block macros ------------------------
    (PROPOSAL_CAPSTONE_PHASE_C.md D3.1 (A) do/while/for + D3.2 (C) 2 kinds)
@@ -652,13 +720,16 @@ int ca_iter_check_init (int rc);
      should drop down to the raw API and read the code themselves.
    - `break;` from inside the body exits the loop AND triggers finish
      correctly (= outer for's "increment" clause runs once on natural
-     exit; `break` from the inner while breaks both).  `return` inside
+     exit; `break` from the inner while breaks both).  In a write walk
+     finish writes back the slab the body was in.  `return` inside
      the body LEAKS resources (scratch_ptr, parent attach) — drop to
      raw API if early return is needed.  A body that raises leaks the
      same way: the engine releases what it holds when the walk itself
      raises (a gather or a write-back through the source's slots), but
      the body runs in the caller's frame, where it has no hold on it.
-     An object-lane body calling back into Ruby is the case to watch.
+     A body that can raise -- one that calls back into Ruby, as an
+     object-lane kernel does -- runs through ca_iter_ensure, with the
+     state in the caller's frame.
    - Macros are not statement-equivalent (= they expand to nested for
      constructs).  Don't follow them with `else` etc. */
 
@@ -796,7 +867,7 @@ int ca_iter_check_init (int rc);
                                                   (axes), (naxes), (flags))), \
                           1);                                                 \
         __caf_init;                                                           \
-        __caf_init = 0, ca_iter_state_finish(&(st)) )                         \
+        __caf_init = 0, ca_iter_state_close(&(st)) )                          \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), &(m));                  \
             ca_iter_state_sync_slab(&(st)) )
 
@@ -819,13 +890,14 @@ int ca_iter_check_init (int rc);
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (axes), (naxes), 0)),                     \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (axes), (naxes), CA_KERNEL_WRITE)),       \
             1);                                                               \
         __cafi_init;                                                          \
         __cafi_init = 0,                                                      \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
     for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m_in)) &&     \
             ca_iter_state_next_slab_axes(&(st_out), &(p_out), &(m_out));      \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -843,21 +915,25 @@ int ca_iter_check_init (int rc);
    The CA_KERNEL_FIBER_CONTIG flag is auto-set; engine gathers strided
    fibers into per-state scratch when slab_strides[0] != bytes (= F.1a/b).
 
-   `axis` is evaluated ONCE into a stack-local int8 buffer of static
-   storage scope; `ca`/`ca_in`/`ca_out` are evaluated ONCE in init.
-   `n` is set to the fiber length (= slab_dims[0], constant per walk).
+   `axis`, `ca`, `ca_in` and `ca_out` may be evaluated more than once:
+   pass variables, not expressions with side effects.  `n` is set to the
+   fiber length (= slab_dims[0], constant per walk).
+
+   The forms without MASKED in the name hand out no mask cursor: a masked
+   source is walked with its masked cells read as values.  Pass
+   CA_KERNEL_NO_MASK to have a masked source refused, or use a MASKED
+   form to see the mask.
 
    Same constraints as CA_FOR_EACH_SLAB family:
-     - `break;` from body exits cleanly (finish runs).
+     - `break;` from body exits cleanly (finish runs, and a write walk
+       writes back the fiber it was in).
      - `return;` from body LEAKS scratch / parent attach -- use raw API.
      - Macros are NOT statement-equivalent (nested for); no trailing else.
 
-   INOUT forms (form 2 / 4) require STRICT FULL SHAPE EQUALITY of
-   `ca_in` and `ca_out` (= ndim + every dim[k] match).  Mismatch is a
-   silent-corruption seam (= short-circuit fiber-count drop, k-th
-   pairing corruption); init_l2 does not validate it itself, so the
-   macros runtime-assert shape equality and skip body on mismatch.
-   Authors that need broadcasting must drop to raw API. */
+   INOUT forms (form 2 / 4) require `ca_in` and `ca_out` to have the same
+   shape (ndim and every dim[k]), and raise ArgumentError before opening
+   either walk when they do not.  Authors that need broadcasting must
+   drop to raw API. */
 
 #define CA_FOR_EACH_FIBER(st, ca, axis, flags, p, n)                          \
   for ( int __cff_init = (                                                    \
@@ -868,7 +944,7 @@ int ca_iter_check_init (int rc);
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cff_init;                                                           \
-        __cff_init = 0, ca_iter_state_finish(&(st)) )                         \
+        __cff_init = 0, ca_iter_state_close(&(st)) )                          \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), NULL);                  \
             ca_iter_state_sync_slab(&(st)) )
 
@@ -881,31 +957,23 @@ int ca_iter_check_init (int rc);
             (n) = (st).slab_dims[0],                                          \
             1);                                                               \
         __cffm_init;                                                          \
-        __cffm_init = 0, ca_iter_state_finish(&(st)) )                        \
+        __cffm_init = 0, ca_iter_state_close(&(st)) )                         \
     for ( ; ca_iter_state_next_slab_axes(&(st), &(p), &(m));                  \
             ca_iter_state_sync_slab(&(st)) )
 
-/* INOUT form 2 (NO_MASK).  Output gets CA_KERNEL_WRITE auto-set.
-
-   STRICT FULL SHAPE EQUALITY (rev4 §2.3): the inner for-condition
-   re-evaluates ca_in->ndim == ca_out->ndim and dim[axis] equality (=
-   minimal seam coverage given the macro can't loop over k).  Full
-   per-axis equality lives one level up in the init-time short-circuit
-   below: we compare elements + ndim + axis dim, which catches the
-   common silent-corruption seam (= e.g. (3,5) vs (4,5) axis=1 with
-   matching fiber length but different fiber count).  Comprehensive
-   per-dim check is the caller's responsibility for now (= simpler than
-   building a per-dim k loop into a macro; ext authors can drop to raw
-   API for arbitrary broadcasting designs). */
+/* INOUT form 2.  Output gets CA_KERNEL_WRITE auto-set.  The shapes are
+   checked first (ca_iter_check_same_shape). */
 #define CA_FOR_EACH_FIBER_INOUT(st_in, st_out, ca_in, ca_out, axis,           \
                                 flags, p_in, p_out, n)                        \
   for ( int __cffi_init = (                                                   \
+            ca_iter_check_same_shape((ca_in), (ca_out)),                      \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     ((flags) | CA_KERNEL_FIBER_CONTIG         \
                                              | CA_KERNEL_WRITE))),            \
@@ -913,12 +981,9 @@ int ca_iter_check_init (int rc);
             1);                                                               \
         __cffi_init;                                                          \
         __cffi_init = 0,                                                      \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
-    for ( ; (st_in).src->ndim == (st_out).src->ndim                           \
-         && (st_in).src->elements == (st_out).src->elements                   \
-         && (st_in).slab_dims[0] == (st_out).slab_dims[0]                     \
-         && ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  NULL)           \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
+    for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  NULL)           \
          && ca_iter_state_next_slab_axes(&(st_out), &(p_out), NULL);          \
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -926,12 +991,14 @@ int ca_iter_check_init (int rc);
 #define CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca_in, ca_out, axis,    \
                                        flags, p_in, p_out, n, m)              \
   for ( int __cffim_init = (                                                  \
+            ca_iter_check_same_shape((ca_in), (ca_out)),                      \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_out), (ca_out), CA_SLAB_AXES,        \
+              ca_iter_state_init_l2_paired(&(st_out), &(st_in), (ca_out), \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     ((flags) | CA_KERNEL_FIBER_CONTIG         \
                                              | CA_KERNEL_WRITE))),            \
@@ -939,12 +1006,9 @@ int ca_iter_check_init (int rc);
             1);                                                               \
         __cffim_init;                                                         \
         __cffim_init = 0,                                                     \
-          ca_iter_state_finish(&(st_in)),                                     \
-          ca_iter_state_finish(&(st_out)) )                                   \
-    for ( ; (st_in).src->ndim == (st_out).src->ndim                           \
-         && (st_in).src->elements == (st_out).src->elements                   \
-         && (st_in).slab_dims[0] == (st_out).slab_dims[0]                     \
-         && ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m))           \
+          ca_iter_state_close(&(st_in)),                                      \
+          ca_iter_state_close(&(st_out)) )                                    \
+    for ( ; ca_iter_state_next_slab_axes(&(st_in),  &(p_in),  &(m))           \
          && ca_iter_state_next_slab_axes(&(st_out), &(p_out), NULL);          \
             ca_iter_state_sync_slab(&(st_in)),                                \
             ca_iter_state_sync_slab(&(st_out)) )
@@ -962,31 +1026,32 @@ int ca_iter_check_init (int rc);
    cursors: which cells a pair of fibers may be used at is a question about
    both of them, and the INOUT forms answer only about the input.
 
-   Shape agreement is guarded the way the INOUT forms guard it (ndim,
-   elements, fiber length), and the body is skipped on mismatch.  The two
-   sources may be the same array. */
+   The two sources must have the same shape, as for the INOUT forms:
+   ca_iter_check_same_shape raises ArgumentError before either walk is
+   opened.  The two sources may be the same array.  The second state is
+   opened paired with the first, so a refusal or a raise on either side
+   closes both. */
 
 #define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
                                flags, p_a, p_b, n)                            \
   for ( int __cffp_init = (                                                   \
+            ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+              ca_iter_state_init_l2_paired(&(st_b), &(st_a), (ca_b),          \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st_a).slab_dims[0],                                        \
             1);                                                               \
         __cffp_init;                                                          \
         __cffp_init = 0,                                                      \
-          ca_iter_state_finish(&(st_a)),                                      \
-          ca_iter_state_finish(&(st_b)) )                                     \
-    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
-         && (st_a).src->elements == (st_b).src->elements                      \
-         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
-         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
+          ca_iter_state_close(&(st_a)),                                       \
+          ca_iter_state_close(&(st_b)) )                                      \
+    for ( ; ca_iter_state_next_slab_axes(&(st_a), &(p_a), NULL)               \
          && ca_iter_state_next_slab_axes(&(st_b), &(p_b), NULL);              \
             ca_iter_state_sync_slab(&(st_a)),                                 \
             ca_iter_state_sync_slab(&(st_b)) )
@@ -994,24 +1059,23 @@ int ca_iter_check_init (int rc);
 #define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
                                       flags, p_a, p_b, n, m_a, m_b)           \
   for ( int __cffpm_init = (                                                  \
+            ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             ca_iter_check_init(                                               \
-              ca_iter_state_init_l2(&(st_b), (ca_b), CA_SLAB_AXES,            \
+              ca_iter_state_init_l2_paired(&(st_b), &(st_a), (ca_b),          \
+                                    CA_SLAB_AXES,                             \
                                     (int8_t[]){(int8_t)(axis)}, 1,            \
                                     (flags) | CA_KERNEL_FIBER_CONTIG)),       \
             (n) = (st_a).slab_dims[0],                                        \
             1);                                                               \
         __cffpm_init;                                                         \
         __cffpm_init = 0,                                                     \
-          ca_iter_state_finish(&(st_a)),                                      \
-          ca_iter_state_finish(&(st_b)) )                                     \
-    for ( ; (st_a).src->ndim     == (st_b).src->ndim                          \
-         && (st_a).src->elements == (st_b).src->elements                      \
-         && (st_a).slab_dims[0]  == (st_b).slab_dims[0]                       \
-         && ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
+          ca_iter_state_close(&(st_a)),                                       \
+          ca_iter_state_close(&(st_b)) )                                      \
+    for ( ; ca_iter_state_next_slab_axes(&(st_a), &(p_a), &(m_a))             \
          && ca_iter_state_next_slab_axes(&(st_b), &(p_b), &(m_b));            \
             ca_iter_state_sync_slab(&(st_a)),                                 \
             ca_iter_state_sync_slab(&(st_b)) )
@@ -2351,7 +2415,7 @@ int ca_iter_check_init (int rc);
    Both states must share slab geometry (= same slab_ndim and slab_dims),
    typically by initialising both with the same policy + axes on
    shape-equal CArrays.  Mask handling is **not** done by this macro —
-   if your input is masked, see §6.2 mask propagation discussion in
+   if your input is masked, see §8 Mask handling in
    docs/authoring/HOW_TO_WRITE_KERNEL.md.  Caller is responsible for invoking
    ca_iter_state_sync_slab on the output state after each slab.
 

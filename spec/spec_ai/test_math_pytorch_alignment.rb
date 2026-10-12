@@ -167,6 +167,21 @@ class TestMathPyTorchAlignment < Test::Unit::TestCase
     assert_equal x.log1p.to_a,    CAMath.log1p(x).to_a
   end
 
+  # CAMath.expm1 / log1p answer in the CArray's own data_type, as the
+  # methods do; a plain Numeric is taken as float64.
+  def test_m3_camath_expm1_log1p_keep_data_type
+    [:expm1, :log1p].each do |op|
+      f32 = CA_FLOAT32([0.5, 1.5])
+      assert_equal CA_FLOAT32, CAMath.send(op, f32).data_type
+      assert_equal f32.send(op).to_a, CAMath.send(op, f32).to_a
+      assert_equal CA_FLOAT64, CAMath.send(op, CA_INT32([1, 2])).data_type
+      assert_equal CA_OBJECT,
+                   CAMath.send(op, CA_OBJECT([Rational(1, 2)])).data_type
+      assert_in_delta Math.exp(0.5) - 1, CAMath.expm1(0.5)[0], 1e-15 if op == :expm1
+      assert_in_delta Math.log(1.5),     CAMath.log1p(0.5)[0], 1e-15 if op == :log1p
+    end
+  end
+
   def test_m3_camath_scalar_first_arg_auto_wrap
     y = CArray.float64(3).seq + 1
     out = CAMath.atan2(1.0, y)   # 1.0 wraps to CScalar
@@ -262,4 +277,14 @@ class TestMathPyTorchAlignment < Test::Unit::TestCase
     assert CArray::LAZY_MONCMP_OP_IDS.key?(:signbit)
   end
 
+  def test_camath_binop_keeps_a_float_or_integer_carray_type
+    big = 2**53
+    r = CAMath.fmod(CA_INT64([big + 1]), CA_INT64([2]))
+    assert_equal CA_INT64, r.data_type
+    assert_equal [1], r.to_a
+    assert_equal CA_FLOAT32, CAMath.atan2(CA_FLOAT32([1]), CA_FLOAT32([1])).data_type
+    assert_equal CA_FLOAT32, CAMath.hypot(CA_FLOAT32([3]), CA_FLOAT32([4])).data_type
+    assert_equal CA_FLOAT64, CAMath.atan2(CA_INT32([1]), CA_INT32([1])).data_type
+    assert_equal [5.0], CAMath.hypot(3, CA_FLOAT64([4])).to_a
+  end
 end

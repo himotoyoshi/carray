@@ -41,6 +41,8 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_integer_arg, ca_calling_method_name */
+#include "ca_obj_face.h"       /* ca_face_refuse_numeric */
 #include <math.h>
 
 /* Externals (link-time; kept out of carray.h to keep the header lean). */
@@ -50,6 +52,7 @@ extern VALUE rb_ca_insert_axis        (int argc, VALUE *argv, VALUE self);  /* c
 static ID id_axis, id_sort_copy, id_is_not_masked;
 /* object lane (arbitrary Ruby objects -> arithmetic is irreducibly funcall) */
 static ID id_plus, id_div, id_mul, id_min, id_max, id_sort, id_copy;
+static ID id_rationalize;
 static ID id_aref, id_aset;
 static VALUE sym_linear, sym_lower, sym_higher, sym_nearest, sym_midpoint;
 
@@ -71,13 +74,14 @@ mp_is_numeric (int8_t dt)
   _(CA_INT64,  int64_t)  _(CA_UINT64, uint64_t)                          \
   _(CA_FLOAT32, float32_t) _(CA_FLOAT64, double)
 
-/* [numeric] min over the upper region [k+1, n-1] of a partitioned fiber,
-   skipping NaN (= matches production .min(axis:): NaN sorts to the tail
-   and is ignored).  stride = element stride along the reduce axis.
-   fmin ignores NaN (fmin(x,NaN)==x), so a +INFINITY seed naturally skips
-   NaN and stays branch-free -> the compiler vectorises this loop, matching
-   the production SIMD min(axis:).  An all-NaN (or empty) upper region
-   leaves hi == +INFINITY; fall back to the kth value (degenerate). */
+/* [numeric] sorted[k+1] of a fiber partitioned at k = the min over the
+   upper region [k+1, n-1].  NaN sorts after every number, so it is the
+   upper element only when the region holds nothing else.  stride = element
+   stride along the reduce axis.  fmin ignores NaN (fmin(x,NaN)==x), so a
+   +INFINITY seed skips NaN and the loop stays branch-free and vectorised.
+   A result of +INFINITY is either a +INFINITY in the region or a region of
+   NaN only; the rescan that tells them apart runs only in that case.  An
+   empty region (k == n-1) answers the kth value. */
 #define MP_GEN_MINUP(CT, T)                                              \
   static double                                                          \
   mp_minup_##T (const T *b, ca_size_t f0, long k, long n, long stride) { \
@@ -86,8 +90,11 @@ mp_is_numeric (int8_t dt)
       double v = (double) b[f0 + (ca_size_t)(ai * stride)];             \
       hi = fmin(hi, v);                                                  \
     }                                                                    \
-    return ( hi == (double) INFINITY )                                   \
-             ? (double) b[f0 + (ca_size_t)(k * stride)] : hi;            \
+    if ( hi != (double) INFINITY ) return hi;                           \
+    if ( k + 1 >= n ) return (double) b[f0 + (ca_size_t)(k * stride)];  \
+    for ( long ai = k + 1; ai < n; ai++ )                               \
+      if ( (double) b[f0 + (ca_size_t)(ai * stride)] == hi ) return hi;  \
+    return (double) NAN;                                                 \
   }
 MP_TYPES(MP_GEN_MINUP)
 
@@ -137,7 +144,12 @@ static VALUE
 mp_axis_all_masked (VALUE self, long axis, int keep_axis)
 {
   int8_t ax = (int8_t) axis;
-  VALUE out = rb_ca_new_reduced(self, &ax, 1, CA_FLOAT64, keep_axis);
+  CArray *ca;
+  GetCArray(self, ca);
+  VALUE out = rb_ca_new_reduced(self, &ax, 1,
+                                (ca->data_type == CA_OBJECT) ? CA_OBJECT
+                                                             : CA_FLOAT64,
+                                keep_axis);
   CArray *co;
   GetCArray(out, co);
   ca_create_mask(co);
@@ -240,7 +252,7 @@ median_fill (double *op, int8_t dt, const char *base,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "median: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -298,13 +310,13 @@ median_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
 
   if ( filled ) {
@@ -348,13 +360,58 @@ mp_object_interpolates (VALUE v)
   }
   if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
     CArray *ca;
+    ca_size_t i;
     GetCArray(v, ca);
-    if ( ca->elements == 0 ) {
-      return 1;
+    for ( i = 0; i < ca->elements; i++ ) {
+      VALUE e = rb_ca_fetch_addr(v, i);
+      if ( e != CA_UNDEF && ! rb_obj_is_kind_of(e, rb_cNumeric) ) {
+        return 0;
+      }
     }
-    return rb_obj_is_kind_of(rb_ca_fetch_addr(v, 0), rb_cNumeric) ? 1 : 0;
+    return 1;
   }
   return 0;
+}
+
+/* [object] The element an interpolation refusal names: lo itself, or the
+   first element of a CArray of them that has no arithmetic. */
+static VALUE
+mp_first_non_numeric (VALUE v)
+{
+  if ( rb_obj_is_kind_of(v, rb_cCArray) ) {
+    CArray *ca;
+    ca_size_t i;
+    GetCArray(v, ca);
+    for ( i = 0; i < ca->elements; i++ ) {
+      VALUE e = rb_ca_fetch_addr(v, i);
+      if ( e != CA_UNDEF && ! rb_obj_is_kind_of(e, rb_cNumeric) ) {
+        return e;
+      }
+    }
+  }
+  return v;
+}
+
+/* [object] An order statistic answers in the elements' own terms: a pick
+   is the element itself, and an average or an interpolation is done with
+   the elements' own arithmetic and an exact weight, so a Rational or a
+   BigDecimal stays exact and a Float stays a Float. */
+
+/* The interpolation weight r (0 <= r < 1) as a Rational. */
+static VALUE
+obj_weight (double r)
+{
+  return rb_funcall(DBL2NUM(r), id_rationalize, 0);
+}
+
+/* The midpoint of lo and hi, (lo + hi) * (1/2): exact for an Integer or a
+   Rational, and the same for a cell (the flat path) and for a CArray of
+   them (the per-axis path). */
+static VALUE
+obj_midpoint (VALUE lo, VALUE hi)
+{
+  return rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_mul, 1,
+                    rb_rational_new(INT2FIX(1), INT2FIX(2)));
 }
 
 /* [object] Refuse to interpolate between two elements that have no
@@ -370,12 +427,10 @@ mp_require_interpolable (const char *who, VALUE method, VALUE lo)
     return;
   }
   rb_raise(rb_eCADataTypeError,
-           "%s: method: :%s interpolates between two elements, which %s "
-           "does not support; use method: :lower, :higher or :nearest to "
-           "pick an element instead",
-           who, rb_id2name(SYM2ID(method)),
-           rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
-                            ? rb_ca_fetch_addr(lo, 0) : lo));
+           "%s: method: :%"PRIsVALUE" interpolates between two elements, "
+           "which %"PRIsVALUE" does not support; use method: :lower, :higher "
+           "or :nearest to pick an element instead",
+           who, rb_sym2str(method), rb_obj_class(mp_first_non_numeric(lo)));
 }
 
 /* [object] recv.mid(axis: raxis) -- e.g. min/max/sort along an axis. */
@@ -467,15 +522,14 @@ median_object_axis (VALUE self, long axis, long n, int keep_axis)
     if ( ! mp_object_interpolates(lo) ) {
       rb_raise(rb_eCADataTypeError,
                "median: an even number of elements has no middle one, and "
-               "%s cannot be averaged; use percentile(50, method: :lower) "
-               "(or :higher / :nearest) to pick an element instead",
-               rb_obj_classname(rb_obj_is_kind_of(lo, rb_cCArray)
-                                ? rb_ca_fetch_addr(lo, 0) : lo));
+               "%"PRIsVALUE" cannot be averaged; use percentile(50, method: "
+               ":lower) (or :higher / :nearest) to pick an element instead",
+               rb_obj_class(mp_first_non_numeric(lo)));
     }
-    result = rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
+    result = obj_midpoint(lo, hi);
   } else {
     VALUE kv = obj_kth_one(self, axis, (n - 1) / 2);
-    result = rb_funcall(kv, id_mul, 1, DBL2NUM(1.0));   /* force float promote */
+    result = kv;
   }
   if ( keep_axis ) {
     VALUE ia[1] = { LONG2NUM(axis) };
@@ -493,13 +547,13 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
   if ( filled ) {
     result = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -517,31 +571,28 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
    pre-fetched).  Reached ONLY by CA_OBJECT percentile/quantile -- never
    by numeric (that path uses pct_compute) and never by median.
    The :linear / :midpoint interpolation funcalls are irreducible for
-   arbitrary objects; the *1.0 in the pick methods is float-promotion to
-   match the numeric "always Float" output contract. */
+   arbitrary objects; the pick methods return the element itself. */
 static VALUE
 pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
 {
-  if ( method == sym_lower )  return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
-  if ( method == sym_higher ) {
-    VALUE v = (r == 0.0) ? lo : hi;
-    return rb_funcall(v, id_mul, 1, DBL2NUM(1.0));
-  }
+  if ( method == sym_lower )  return lo;
+  if ( method == sym_higher ) return (r == 0.0) ? lo : hi;
   if ( method == sym_nearest ) {
     int use_k = (r < 0.5) || (r == 0.5 && (k % 2 == 0));
-    return rb_funcall(use_k ? lo : hi, id_mul, 1, DBL2NUM(1.0));
+    return use_k ? lo : hi;
   }
   if ( method == sym_linear ) {
-    if ( r == 0.0 || k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    if ( r == 0.0 || k + 1 >= n ) return lo;
     mp_require_interpolable("percentile", method, lo);
-    VALUE a = rb_funcall(lo, id_mul, 1, DBL2NUM(1.0 - r));
-    VALUE b = rb_funcall(hi, id_mul, 1, DBL2NUM(r));
+    VALUE w = obj_weight(r);
+    VALUE a = rb_funcall(lo, id_mul, 1, rb_funcall(INT2FIX(1), rb_intern("-"), 1, w));
+    VALUE b = rb_funcall(hi, id_mul, 1, w);
     return rb_funcall(a, id_plus, 1, b);
   }
   if ( method == sym_midpoint ) {
-    if ( k + 1 >= n ) return rb_funcall(lo, id_mul, 1, DBL2NUM(1.0));
+    if ( k + 1 >= n ) return lo;
     mp_require_interpolable("percentile", method, lo);
-    return rb_funcall(rb_funcall(lo, id_plus, 1, hi), id_div, 1, DBL2NUM(2.0));
+    return obj_midpoint(lo, hi);
   }
   rb_raise(rb_eArgError, "percentile: invalid method (BUG)");
 }
@@ -550,11 +601,8 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
 static VALUE
 pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
 {
-  if ( p == 100.0 )
-    return rb_funcall(obj_call_axis(self, id_max, LONG2NUM(axis)),
-                      id_mul, 1, DBL2NUM(1.0));
   if ( n == 1 )
-    return rb_funcall(obj_slice(self, axis, 0), id_mul, 1, DBL2NUM(1.0));
+    return obj_slice(self, axis, 0);
   double f = (n - 1) * p / 100.0;
   long k = (long) floor(f);
   double r = f - k;
@@ -570,9 +618,9 @@ static VALUE
 pct_object_one_sorted (VALUE sorted, long axis, long n, double p, VALUE method)
 {
   if ( p == 100.0 )
-    return rb_funcall(obj_slice(sorted, axis, n - 1), id_mul, 1, DBL2NUM(1.0));
+    return obj_slice(sorted, axis, n - 1);
   if ( n == 1 )
-    return rb_funcall(obj_slice(sorted, axis, 0), id_mul, 1, DBL2NUM(1.0));
+    return obj_slice(sorted, axis, 0);
   double f = (n - 1) * p / 100.0;
   long k = (long) floor(f);
   double r = f - k;
@@ -652,7 +700,7 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
         for ( long j = 0; j < M; j++ )
           if ( !sm[f0 + (ca_size_t)(j * INNER)] ) np++;
       }
-      if ( np == 0 || np < min_count ) {
+      if ( ca_too_few_present(np, min_count, 1) ) {
         if ( is_undef ) {
           if ( !co->mask ) ca_create_mask(co);
           ((boolean8_t *) co->mask->ptr)[oc] = 1;
@@ -738,13 +786,13 @@ percentile_object_flat (VALUE self, VALUE pers, long min_count, VALUE fill_value
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
   if ( filled ) {
     VALUE fill = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -765,7 +813,7 @@ static VALUE median_axis_masked (VALUE self, long axis, long min_count,
 /* [entry] median(axis:, min_count:, fill_value:, keep_axis:).  Dispatches
    fixlen -> reject, object -> object lane, numeric -> numeric lane. */
 static VALUE
-rb_ca_median_m (int argc, VALUE *argv, VALUE self)
+rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
 {
   VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE raxis = Qnil, rmin_count = INT2FIX(0), fill_value = Qnil, rkeep = Qfalse;
@@ -776,6 +824,15 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
 
   CArray *ca;
   GetCArray(self, ca);
+  /* A lazy expression is computed whole here, so a registered evaluator
+     may compute it instead. */
+  {
+    volatile VALUE evaluated = ca_lazy_evaluated(self);
+    if ( ! NIL_P(evaluated) ) {
+      self = evaluated;
+      GetCArray(self, ca);
+    }
+  }
   /* Boolean rides the f64 lane: 0/1 -> 0.0/1.0, so median interpolates and
      returns a float (a 2-element median averages to 0.5), matching how the
      numeric lane treats integer input. */
@@ -784,17 +841,25 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
     GetCArray(self, ca);
   }
   int8_t dt = ca->data_type;
-  if ( ca_is_fixlen_type(ca) )
+  if ( ca_is_fixlen_type(ca) ) {
+    ca_face_refuse_numeric(self, "median", rb_eCADataTypeError);
     rb_raise(rb_eCADataTypeError,
              "median: not defined for fixlen (no numeric midpoint); "
              "use a numeric or object array");
+  }
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
-    rb_raise(rb_eCADataTypeError, "median: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
 
-  long min_count = NUM2LONG(rmin_count);
-  if ( min_count < 0 )
-    rb_raise(rb_eArgError, "min_count must be non-negative; got %ld", min_count);
+  long min_count = ca_min_count_arg(rmin_count, NULL);
+  /* fill_value: UNDEF leaves the result undefined; any other fill is what
+     a store into the float64 result would make of it. */
+  if ( fill_value == CA_UNDEF ) {
+    fill_value = Qnil;
+  }
+  else if ( ! NIL_P(fill_value) && ! is_obj ) {
+    fill_value = ca_fill_as(fill_value, CA_FLOAT64);
+  }
   int keep_axis = RTEST(rkeep);
 
   if ( !NIL_P(raxis) ) {
@@ -858,7 +923,7 @@ pct_fill (double *op, int8_t dt, const char *base, int from_sorted,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -886,7 +951,7 @@ pct_fill (double *op, int8_t dt, const char *base, int from_sorted,
           for ( long j = 0; j < M; j++ )                                    \
             if ( !sm[f0 + (ca_size_t)(j * INNER)] ) np++;                   \
         }                                                                    \
-        if ( np == 0 || np < min_count ) {                                  \
+        if ( ca_too_few_present(np, min_count, 1) ) {                                  \
           if ( is_undef ) {                                                 \
             if ( !co->mask ) ca_create_mask(co);                           \
             ((boolean8_t *) co->mask->ptr)[oc] = 1;                        \
@@ -927,7 +992,7 @@ pct_fill_masked (CArray *co, int8_t dt, const char *base, const boolean8_t *sm,
   MP_TYPES(MP_CASE)
 #undef MP_CASE
   default:
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
   }
 }
 
@@ -1116,7 +1181,7 @@ pct_flat (VALUE self, VALUE pers_ary, long min_count, VALUE fill_value,
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) {
+    if ( ca_too_few_present(cnt, min_count, 1) ) {
       masked_out = 1; is_undef = NIL_P(fill_value);
       if ( !is_undef ) fillv = NUM2DBL(fill_value);
     } else {
@@ -1126,7 +1191,7 @@ pct_flat (VALUE self, VALUE pers_ary, long min_count, VALUE fill_value,
   if ( !masked_out ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 ) {
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) {
       masked_out = 1; is_undef = NIL_P(fill_value);
       if ( !is_undef ) fillv = NUM2DBL(fill_value);
     }
@@ -1174,7 +1239,10 @@ pct_flatten_validate_pers (VALUE pers)
     rb_raise(rb_eArgError, "percentile: at least one p value required");
   for ( long i = 0; i < len; i++ ) {
     VALUE p = rb_ary_entry(pers, i);
-    if ( !rb_obj_is_kind_of(p, rb_cNumeric) || NUM2DBL(p) < 0.0 || NUM2DBL(p) > 100.0 )
+    /* Written as "inside", so that NaN -- which fails every comparison --
+       is refused rather than let through. */
+    if ( !rb_obj_is_kind_of(p, rb_cNumeric) ||
+         !(NUM2DBL(p) >= 0.0 && NUM2DBL(p) <= 100.0) )
       rb_raise(rb_eArgError,
                "percentile: p must be Numeric in [0,100] (got %"PRIsVALUE")",
                rb_inspect(p));
@@ -1186,9 +1254,8 @@ pct_flatten_validate_pers (VALUE pers)
    keep_axis:).  Dispatches fixlen -> reject, object -> object lane,
    numeric -> numeric lane. */
 static VALUE
-rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
+rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
-  VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE raxis = Qnil, rmin_count = INT2FIX(0), fill_value = Qnil,
         method = sym_linear, rkeep = Qfalse;
   rb_scan_options(ropt, "axis,min_count,fill_value,method,keep_axis",
@@ -1196,6 +1263,15 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
 
   CArray *ca;
   GetCArray(self, ca);
+  /* A lazy expression is computed whole here, so a registered evaluator
+     may compute it instead. */
+  {
+    volatile VALUE evaluated = ca_lazy_evaluated(self);
+    if ( ! NIL_P(evaluated) ) {
+      self = evaluated;
+      GetCArray(self, ca);
+    }
+  }
   /* Boolean rides the f64 lane (0/1 -> 0.0/1.0), so percentile / quantile
      interpolate and return a float, matching the integer lane. */
   if ( ca->data_type == CA_BOOLEAN ) {
@@ -1203,16 +1279,24 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
     GetCArray(self, ca);
   }
   int8_t dt = ca->data_type;
-  if ( ca_is_fixlen_type(ca) )
+  if ( ca_is_fixlen_type(ca) ) {
+    ca_face_refuse_numeric(self, "percentile", rb_eCADataTypeError);
     rb_raise(rb_eCADataTypeError,
              "percentile: not defined for fixlen; use a numeric or object array");
+  }
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
-    rb_raise(rb_eCADataTypeError, "percentile: unsupported data_type %d", dt);
+    rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
 
-  long min_count = NUM2LONG(rmin_count);
-  if ( min_count < 0 )
-    rb_raise(rb_eArgError, "min_count must be non-negative; got %ld", min_count);
+  long min_count = ca_min_count_arg(rmin_count, NULL);
+  /* fill_value: UNDEF leaves the result undefined; any other fill is what
+     a store into the float64 result would make of it. */
+  if ( fill_value == CA_UNDEF ) {
+    fill_value = Qnil;
+  }
+  else if ( ! NIL_P(fill_value) && ! is_obj ) {
+    fill_value = ca_fill_as(fill_value, CA_FLOAT64);
+  }
 
   VALUE pers = pct_flatten_validate_pers(rb_ary_new_from_values(argc, argv));
   pct_validate_method(method);
@@ -1230,7 +1314,7 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
      flattened first and follows the same rule (length 1 unwraps). */
   VALUE result;
   if ( !NIL_P(raxis) ) {
-    long axis = rb_ca_normalize_axis_value(self, raxis, "percentile");
+    long axis = rb_ca_normalize_axis_value(self, raxis, NULL);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition/sort path assumes a
        uniform n.  These paths bake keep_axis into the reduced output. */
@@ -1271,11 +1355,18 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
   return result;
 }
 
+static VALUE
+rb_ca_percentile_m_body (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_percentile_kw(argc, argv, ropt, self);
+}
+
 /* [entry] quantile(axis:, keep_axis:) = percentile(0, 25, 50, 75, 100, ...).
    Return shape: Array<Float> len 5 (flat) or Array<CArray> len 5 (per-axis),
    matching percentile's multi-p wrapping since we pass 5 fixed p values. */
 static VALUE
-rb_ca_quantile_m (int argc, VALUE *argv, VALUE self)
+rb_ca_quantile_m_body (int argc, VALUE *argv, VALUE self)
 {
   VALUE ropt = rb_pop_options(&argc, &argv);
   if ( argc != 0 )
@@ -1285,9 +1376,62 @@ rb_ca_quantile_m (int argc, VALUE *argv, VALUE self)
   VALUE opts = rb_hash_new();
   if ( !NIL_P(raxis) ) rb_hash_aset(opts, ID2SYM(rb_intern("axis")), raxis);
   rb_hash_aset(opts, ID2SYM(rb_intern("keep_axis")), rkeep);
-  VALUE pa[6] = { INT2FIX(0), INT2FIX(25), INT2FIX(50), INT2FIX(75), INT2FIX(100),
-                  opts };
-  return rb_ca_percentile_m(6, pa, self);
+  VALUE pa[5] = { INT2FIX(0), INT2FIX(25), INT2FIX(50), INT2FIX(75), INT2FIX(100) };
+  return rb_ca_percentile_kw(5, pa, opts, self);
+}
+
+
+typedef struct { int argc; VALUE *argv; VALUE self; } mp_median_call_t;
+
+static VALUE
+mp_median_answer_body (VALUE p)
+{
+  mp_median_call_t *c = (mp_median_call_t *) p;
+  return rb_ca_median_m_body(c->argc, c->argv, c->self);
+}
+
+/* An error raised by the methods this one calls names this one. */
+static VALUE
+rb_ca_median_m (int argc, VALUE *argv, VALUE self)
+{
+  mp_median_call_t c = { argc, argv, self };
+  return ca_answer_as_caller(mp_median_answer_body, (VALUE) &c);
+}
+
+
+typedef struct { int argc; VALUE *argv; VALUE self; } mp_percentile_call_t;
+
+static VALUE
+mp_percentile_answer_body (VALUE p)
+{
+  mp_percentile_call_t *c = (mp_percentile_call_t *) p;
+  return rb_ca_percentile_m_body(c->argc, c->argv, c->self);
+}
+
+/* An error raised by the methods this one calls names this one. */
+static VALUE
+rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
+{
+  mp_percentile_call_t c = { argc, argv, self };
+  return ca_answer_as_caller(mp_percentile_answer_body, (VALUE) &c);
+}
+
+
+typedef struct { int argc; VALUE *argv; VALUE self; } mp_quantile_call_t;
+
+static VALUE
+mp_quantile_answer_body (VALUE p)
+{
+  mp_quantile_call_t *c = (mp_quantile_call_t *) p;
+  return rb_ca_quantile_m_body(c->argc, c->argv, c->self);
+}
+
+/* An error raised by the methods this one calls names this one. */
+static VALUE
+rb_ca_quantile_m (int argc, VALUE *argv, VALUE self)
+{
+  mp_quantile_call_t c = { argc, argv, self };
+  return ca_answer_as_caller(mp_quantile_answer_body, (VALUE) &c);
 }
 
 void
@@ -1297,6 +1441,7 @@ Init_carray_median_percentile (void)
   id_sort_copy     = rb_intern("sort_copy");
   id_is_not_masked = rb_intern("is_not_masked");
   id_plus = rb_intern("+");  id_div = rb_intern("/");  id_mul = rb_intern("*");
+  id_rationalize = rb_intern("rationalize");
   id_min  = rb_intern("min"); id_max = rb_intern("max");
   id_sort = rb_intern("sort"); id_copy = rb_intern("copy");
   id_aref = rb_intern("[]"); id_aset = rb_intern("[]=");

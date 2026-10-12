@@ -425,7 +425,6 @@ ca_attach_is_alias (void *ap)
   CArray *ca = (CArray *) ap;
   extern ca_operation_function_t ca_stride_func;
   extern ca_operation_function_t ca_lazy_marker_func;
-  extern int ca_stride_is_contiguous (CAStride *ca);
   extern int ca_stride_attach_aliases_root (CAStride *ca);
 
   if ( ca == NULL ) return 0;
@@ -440,21 +439,13 @@ ca_attach_is_alias (void *ap)
     return ca_attach_is_alias(((CAView *) ca)->parent);
   }
 
-  /* CAStride family share ca_stride_func.attach (= ca_stride_func_attach).
-     The alias-attach fast path is taken iff composed strides are
-     row-major contiguous.  ca_stride_is_contiguous checks the leaf
-     view's own strides, which is what we want — the compose-fold to
-     root happens during attach itself; if leaf is contig and parent
-     chain is too (transitively, since each CAStride's strides are
-     composed against parent's), the alias path fires.
-
-     ...and iff there is parent memory to alias at the end of that fold.
-     A non-entity root has none to lend, so attach builds its own buffer
-     and writes through ca->ptr reach the root only via ca_sync.  Saying
-     "alias" there would let a caller write and skip the sync. */
+  /* CAStride family share ca_stride_func.attach, which aliases the root's
+     memory iff the strides composed to the root are row-major contiguous
+     and the root has memory to lend.  Otherwise attach builds its own
+     buffer and writes through ca->ptr reach the root only via ca_sync, so
+     saying "alias" would let a caller write and skip the sync. */
   if ( ca_func[ca->obj_type].attach == ca_stride_func.attach ) {
-    return ca_stride_is_contiguous((CAStride *) ca)
-           && ca_stride_attach_aliases_root((CAStride *) ca);
+    return ca_stride_attach_aliases_root((CAStride *) ca);
   }
   return 0;
 }
@@ -598,8 +589,8 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
    to NUM2SIZE) of length `count`, normalises + range-checks + duplicate-
    checks, fills out_axes[] in input order.  Shared between the legacy
    variadic entry (rb_ca_parse_reduce_axes) and the kwarg entry
-   (rb_ca_parse_reduce_axes_kw).  ctx is a short label embedded in error
-   messages so callers can disambiguate which entry raised. */
+   (rb_ca_parse_reduce_axes_kw).  ctx names the method in error messages;
+   the two public entries pass the method the user called. */
 static int8_t
 parse_axes_items (const VALUE *items, int count, CArray *ca,
                   int8_t *out_axes, const char *ctx)
@@ -623,12 +614,12 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
   for ( i = 0; i < count; i++ ) {
-    ca_size_t a = NUM2SIZE(items[i]);
-    if ( a < 0 ) a += ca->ndim;
+    ca_size_t raw = ca_axis_integer(items[i], NULL);
+    ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
     if ( a < 0 || a >= ca->ndim ) {
-      rb_raise(rb_eIndexError,
-               "%s: axis %ld out of range [0, %d)",
-               ctx, (long) a, (int) ca->ndim);
+      rb_raise(rb_eArgError,
+               "%s: axis %ld out of range for ndim %d",
+               ctx, (long) raw, (int) ca->ndim);
     }
     if ( seen[a] ) {
       rb_raise(rb_eArgError,
@@ -666,7 +657,7 @@ rb_ca_parse_reduce_axes (int argc, VALUE *argv, CArray *ca, int8_t *out_axes)
   }
 
   return parse_axes_items(items, count, ca, out_axes,
-                          "rb_ca_parse_reduce_axes");
+                          ca_calling_method_name());
 }
 
 /* Kwarg form of rb_ca_parse_reduce_axes — accepts the `axis:` value as
@@ -705,8 +696,8 @@ rb_ca_parse_reduce_axes_kw_ctx (VALUE axis_val, CArray *ca, int8_t *out_axes,
   }
 
   rb_raise(rb_eTypeError,
-           "%s: axis: must be nil, Integer, or "
-           "Array of Integer (got %"PRIsVALUE")",
+           "%s: axis must be nil, an Integer or an Array of Integer "
+           "(got %"PRIsVALUE")",
            ctx, rb_obj_class(axis_val));
 }
 
@@ -714,7 +705,7 @@ int8_t
 rb_ca_parse_reduce_axes_kw (VALUE axis_val, CArray *ca, int8_t *out_axes)
 {
   return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes,
-                                        "rb_ca_parse_reduce_axes_kw");
+                                        ca_calling_method_name());
 }
 
 /* ------------------------------------------------------------------- */
@@ -832,7 +823,7 @@ ca_set_cyclic_check(void *ap)
   /* ca.data_type == CA_OBJECT */
   if ( ca_is_object_type(ca) ) {
     if ( ca->flags & CA_FLAG_CYCLE_CHECK ) {
-      rb_raise(rb_eRuntimeError, "cyclic reference is not allowed in CArray");
+      rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
     }
     ca_set_flag(ca, CA_FLAG_CYCLE_CHECK);
   }
@@ -860,9 +851,33 @@ ca_test_cyclic_check(void *ap, void *ptr)
       CArray *cv;
       TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
       if ( ca_test_flag(cv, CA_FLAG_CYCLE_CHECK) ) {
-        rb_raise(rb_eRuntimeError, "cyclic reference is not allowed in CArray");
+        rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
       }
     }
+  }
+}
+
+/* Runs body(arg) -- one transfer of an object cell or cells -- with ca's
+   cycle check set, and clears the check however body leaves.  Either
+   direction can call into Ruby: a GET through a CAObject slot or the
+   check of what it delivered, a PUT that converts the caller's value.  A
+   raise that skipped the clear would leave every later access to ca
+   reporting a cyclic reference.  A PUT into an entity only copies VALUEs
+   and cannot raise, so it runs unprotected. */
+static void
+ca_with_cyclic_check (CArray *ca, int dir, VALUE (*body)(VALUE), VALUE arg)
+{
+  int state = 0;
+  ca_set_cyclic_check(ca);
+  if ( dir == CA_XFER_PUT && ca_is_entity(ca) ) {
+    body(arg);
+  }
+  else {
+    rb_protect(body, arg, &state);
+  }
+  ca_clear_cyclic_check(ca);
+  if ( state ) {
+    rb_jump_tag(state);
   }
 }
 
@@ -911,14 +926,17 @@ struct ca_xfer_index_args {
   CArray    *ca;
   ca_size_t *idx;
   char      *ptr;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_index_get_body (VALUE arg)
+ca_xfer_index_body (VALUE arg)
 {
   struct ca_xfer_index_args *d = (struct ca_xfer_index_args *) arg;
-  ca_xfer_index_dispatch(d->ca, d->idx, d->ptr, CA_XFER_GET);
-  ca_test_cyclic_check(d->ca, d->ptr);
+  ca_xfer_index_dispatch(d->ca, d->idx, d->ptr, d->dir);
+  if ( d->dir == CA_XFER_GET ) {
+    ca_test_cyclic_check(d->ca, d->ptr);
+  }
   return Qnil;
 }
 
@@ -937,24 +955,14 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     return;
   }
 
-  /* CA_OBJECT slow path: cyclic check (+ rb_protect on GET). */
-  if ( dir == CA_XFER_GET ) {
+  /* CA_OBJECT slow path: cyclic check. */
+  {
     struct ca_xfer_index_args args;
-    int state = 0;
     args.ca  = ca;
     args.idx = idx;
     args.ptr = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_index_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) {
-      rb_jump_tag(state);
-    }
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_index_dispatch(ca, idx, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.dir = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_index_body, (VALUE) &args);
   }
 }
 
@@ -1043,16 +1051,19 @@ struct ca_xfer_addrs_args {
   ca_size_t  n;
   ca_size_t *addrs;
   char      *data;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_addrs_get_body (VALUE arg)
+ca_xfer_addrs_body (VALUE arg)
 {
   struct ca_xfer_addrs_args *d = (struct ca_xfer_addrs_args *) arg;
   ca_size_t i;
-  ca_xfer_addrs_dispatch(d->ca, d->n, d->addrs, d->data, CA_XFER_GET);
-  for ( i = 0; i < d->n; i++ ) {
-    ca_test_cyclic_check(d->ca, d->data + i * d->ca->bytes);
+  ca_xfer_addrs_dispatch(d->ca, d->n, d->addrs, d->data, d->dir);
+  if ( d->dir == CA_XFER_GET ) {
+    for ( i = 0; i < d->n; i++ ) {
+      ca_test_cyclic_check(d->ca, d->data + i * d->ca->bytes);
+    }
   }
   return Qnil;
 }
@@ -1072,25 +1083,15 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
     return;
   }
 
-  /* CA_OBJECT slow path: cyclic check (+ rb_protect on GET). */
-  if ( dir == CA_XFER_GET ) {
+  /* CA_OBJECT slow path: cyclic check. */
+  {
     struct ca_xfer_addrs_args args;
-    int state = 0;
     args.ca    = ca;
     args.n     = n;
     args.addrs = addrs;
     args.data  = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_addrs_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) {
-      rb_jump_tag(state);
-    }
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_addrs_dispatch(ca, n, addrs, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.dir   = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_addrs_body, (VALUE) &args);
   }
 }
 
@@ -1335,6 +1336,8 @@ ca_xfer_strided_walk (char            *src_base,
   ca_size_t doff = 0;
   int8_t    k;
 
+  if ( ca_region_is_empty(ndim, counts) ) return;
+
   /* slab merge -- scan innermost contig run (src_strides[k] equals the
      accumulated slab byte size).  This collapses per-cell memcpy(_,_,
      bytes) loops into per-slab memcpy when the source region is row-major
@@ -1481,16 +1484,20 @@ struct ca_xfer_stride_args {
   ca_size_t *counts;
   ca_size_t *strides;
   char      *data;
+  int        dir;
 };
 
 static VALUE
-ca_xfer_stride_get_body (VALUE arg)
+ca_xfer_stride_body (VALUE arg)
 {
   struct ca_xfer_stride_args *a = (struct ca_xfer_stride_args *) arg;
   ca_size_t n = 1, i;
   int8_t k;
   ca_xfer_stride_dispatch(a->ca, a->starts, a->counts, a->strides, a->data,
-                          CA_XFER_GET);
+                          a->dir);
+  if ( a->dir != CA_XFER_GET ) {
+    return Qnil;
+  }
   /* cyclic check over the delivered cells (CA_OBJECT only).  dst is contiguous
      row-major over counts (semantics b), so cell i is at data + i*bytes. */
   for ( k = 0; k < a->ca->ndim; k++ ) n *= a->counts[k];
@@ -1510,25 +1517,18 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     rb_raise(rb_eRuntimeError, "can not store data to read-only array");
   }
 
+  if ( ca_region_is_empty(ca->ndim, counts) ) return;
+
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_stride_dispatch(ca, starts, counts, strides, data, dir);
     return;
   }
 
-  if ( dir == CA_XFER_GET ) {
+  {
     struct ca_xfer_stride_args args;
-    int state = 0;
     args.ca = ca; args.starts = starts; args.counts = counts;
-    args.strides = strides; args.data = (char *) data;
-    ca_set_cyclic_check(ca);
-    rb_protect(ca_xfer_stride_get_body, (VALUE) &args, &state);
-    ca_clear_cyclic_check(ca);
-    if ( state ) rb_jump_tag(state);
-  }
-  else {
-    ca_set_cyclic_check(ca);
-    ca_xfer_stride_dispatch(ca, starts, counts, strides, data, CA_XFER_PUT);
-    ca_clear_cyclic_check(ca);
+    args.strides = strides; args.data = (char *) data; args.dir = dir;
+    ca_with_cyclic_check(ca, dir, ca_xfer_stride_body, (VALUE) &args);
   }
 }
 
@@ -1580,6 +1580,10 @@ ca_xfer_all (void *ap, void *data, int dir)
              "[BUG] xfer_all not defined for object type <%i>",
              ca->obj_type);
   }
+  /* An empty view moves nothing; see ca_xfer_stride. */
+  if ( ca->elements == 0 ) {
+    return;
+  }
   /* Universal arena lifetime hook.  ca_xfer_all is the single universal
      entry for materialise (to_ca -> ca_copy -> ca_copy_data ->
      ca_xfer_all), so wrapping here covers every outermost view type,
@@ -1615,7 +1619,73 @@ ca_xfer_all (void *ap, void *data, int dir)
 
 /* ------------------------------------------------------------------- */
 
+/* What follows the slot in ca_allocate: the object cells cleared, then the
+   mask.  Clearing the mask can create it, which for a CAObject calls Ruby.
+   mask0 is the mask the array had before; see ca_attach_view_first. */
+static void
+ca_allocate_rest (CArray *ca, CArray *mask0)
+{
+  if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
+    volatile VALUE rzero = INT2NUM(0);
+    VALUE *p = (VALUE*)ca->ptr;
+    ca_size_t i;
+    for (i=0; i<ca->elements; i++) {
+      *p++ = rzero;
+    }
+  }
+
+  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
+  if ( ca->mask == mask0 ) {
+    ca_allocate(ca->mask);
+  }
+}
+
+/* The view half of ca_allocate, after the attach level is taken.  Run
+   under rb_protect by ca_allocate. */
+static VALUE
+ca_allocate_view (VALUE arg)
+{
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
+  if ( ! ca->ptr ) {
+    ca_func[ca->obj_type].allocate(ca);
+  }
+  ca_allocate_rest(ca, mask0);
+  return Qnil;
+}
+
 /* make ca->ptr to point the allocated memory block */
+
+/* Steps a view's attach level by d.  A development build also counts the
+   views whose level is above zero, and the spec compares that count
+   before and after every test: a window left open shows as a view that
+   stays counted. */
+#ifdef CARRAY_DEV_BUILD
+static long ca_attached_views = 0;
+
+#define CA_VIEW_ATTACH_STEP(ca, d) do {                                       \
+    uint32_t attach_before_ = CAVIEW(ca)->attach;                             \
+    CAVIEW(ca)->attach += (d);                                                \
+    ca_attached_views += ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ); \
+  } while (0)
+
+static VALUE
+rb_ca_s_attached_views (VALUE klass)
+{
+  return LONG2NUM(ca_attached_views);
+}
+
+/* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
+int ca_fast_paths_on = 1;
+
+static VALUE
+rb_ca_s_fast_paths_enabled (VALUE klass)
+{
+  return ca_fast_paths_on ? Qtrue : Qfalse;
+}
+#else
+#define CA_VIEW_ATTACH_STEP(ca, d) ( CAVIEW(ca)->attach += (d) )
+#endif
 
 void
 ca_allocate (void *ap)
@@ -1628,31 +1698,36 @@ ca_allocate (void *ap)
 
   if ( ca_is_view(ca) ) {  /* view array */
 
-    CAVIEW(ca)->attach += 1; /* increments attach level */
-    if ( CAVIEW(ca)->attach > CA_ATTACH_MAX ) {
+    if ( CAVIEW(ca)->attach >= CA_ATTACH_MAX ) {
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
+    CA_VIEW_ATTACH_STEP(ca, 1); /* increments attach level */
 
-    if ( ! ca->ptr ) {
-      ca_func[ca->obj_type].allocate(ap);
+    /* Undo the level if the slot or the mask raises, as ca_attach does.
+       Left in place, the level is invisible while ptr is NULL, and the
+       next attach / detach pair then leaves the view attached for good.
+       A slot that got as far as publishing ca->ptr has taken what its
+       detach slot releases; one that raised earlier has published
+       nothing. */
+    {
+      char *ptr0 = ca->ptr;
+      int   tag  = 0;
+      rb_protect(ca_allocate_view, (VALUE) ca, &tag);
+      if ( tag ) {
+        if ( ! ptr0 && ca->ptr ) {
+          ca_func[ca->obj_type].detach(ca);
+          ca->ptr = NULL;
+        }
+        CA_VIEW_ATTACH_STEP(ca, -1);
+        rb_jump_tag(tag);
+      }
     }
   }
   else {                      /* entity array */
     ca_func[ca->obj_type].allocate(ap);
+    ca_allocate_rest(ca, ca->mask);  /* an entity's new mask is not yet allocated */
   }
-
-  if ( ca->data_type == CA_OBJECT ) { /* protection against GC */
-    volatile VALUE rzero = INT2NUM(0);
-    VALUE *p = (VALUE*)ca->ptr;
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = rzero;
-    }
-  }
-
-  ca_clear_mask(ca); /* ca_update_mask called in ca_clear_mask */
-  ca_allocate(ca->mask);
 }
 
 /* The first attach of a view: materialise through the type's slot, then
@@ -1660,10 +1735,21 @@ ca_allocate (void *ap)
 static VALUE
 ca_attach_view_first (VALUE arg)
 {
-  CArray *ca = (CArray *) arg;
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
+  /* The mask moves in step with its view: attach, allocate and detach
+     each take it one level with the view.  A mask created here -- by the
+     slot (a CAObject makes its mask while it attaches) or by
+     ca_update_mask -- is already at the view's level, since
+     ca_create_mask attaches a new mask to match an attached view.  So
+     only a mask that was there before the slot takes the step; stepping a
+     new one too leaves it a level above the view, still attached after
+     the view's last detach. */
   ca_func[ca->obj_type].attach(ca);
   ca_update_mask(ca);
-  ca_attach(ca->mask);
+  if ( ca->mask == mask0 ) {
+    ca_attach(ca->mask);
+  }
   return Qnil;
 }
 
@@ -1684,7 +1770,7 @@ ca_attach (void *ap)
       rb_raise(rb_eRuntimeError,
                "too large attach count of view array");
     }
-    CAVIEW(ca)->attach += 1; /* increments attach level */
+    CA_VIEW_ATTACH_STEP(ca, 1); /* increments attach level */
 
     if ( ! ca->ptr ) {
       /* A slot can raise part way (a conversion meeting a value it cannot
@@ -1700,7 +1786,7 @@ ca_attach (void *ap)
           ca_func[ca->obj_type].detach(ca);
           ca->ptr = NULL;
         }
-        CAVIEW(ca)->attach -= 1;
+        CA_VIEW_ATTACH_STEP(ca, -1);
         rb_jump_tag(tag);
       }
       return;
@@ -1710,8 +1796,13 @@ ca_attach (void *ap)
     ca_func[ca->obj_type].attach(ap);
   }
 
-  ca_update_mask(ca);
-  ca_attach(ca->mask);
+  {
+    CArray *mask0 = ca->mask;
+    ca_update_mask(ca);
+    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+      ca_attach(ca->mask);
+    }
+  }
 }
 
 /* Attach every array in list[0..n-1], or, if one of those attaches
@@ -1749,6 +1840,168 @@ ca_attach_all (CArray **list, int32_t n)
     }
     rb_jump_tag(tag);
   }
+}
+
+static VALUE
+ca_sync_all_step (VALUE arg)
+{
+  ca_sync((void *) arg);
+  return Qnil;
+}
+
+/* Syncs every one of list[0..n-1] in turn, carrying on past one that
+   raises so that the others still receive what was written, then raises
+   the first exception.  A throw or break cannot wait, and goes at once. */
+void
+ca_sync_all (CArray **list, int32_t n)
+{
+  volatile VALUE error = Qnil;
+  int32_t k;
+  for ( k = 0; k < n; k++ ) {
+    int tag = 0;
+    rb_protect(ca_sync_all_step, (VALUE) list[k], &tag);
+    if ( tag ) {
+      VALUE err = rb_errinfo();
+      if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
+        rb_jump_tag(tag);
+      }
+      if ( NIL_P(error) ) {
+        error = err;
+      }
+      rb_set_errinfo(Qnil);
+    }
+  }
+  if ( ! NIL_P(error) ) {
+    rb_exc_raise(error);
+  }
+}
+
+/* An attach window over list[0..n-1] that closes however body leaves.
+
+   modes holds one letter per array:
+     'r'  attach; detach on close
+     'w'  attach; sync, then detach on close
+     'a'  allocate (write only); sync, then detach on close
+
+   Opening takes all of the arrays or none.  Closing syncs the 'w' arrays
+   even when body raised or broke out -- the cells body wrote reach the
+   parent, as they would for an entity, which has no separate buffer.  An
+   'a' array is not synced after a raise: allocate did not gather, so its
+   cells body never wrote hold nothing faithful to push back.
+
+   Every array is detached, in reverse order, whatever happens.  body's
+   own exception wins over one raised by a sync; when body returned and a
+   sync raised, that exception propagates once everything is detached. */
+
+typedef struct {
+  int32_t      n;
+  CArray     **list;
+  const char  *modes;
+  int32_t      opened;
+  int          body_done;       /* body returned without raising */
+  int          sync_tag;
+  volatile VALUE sync_err;
+  VALUE      (*body)(VALUE);
+  VALUE        arg;
+} ca_window_ctx_t;
+
+static VALUE
+ca_attach_window_open (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  for ( ; w->opened < w->n; w->opened++ ) {
+    if ( w->modes[w->opened] == 'a' ) {
+      ca_allocate(w->list[w->opened]);
+    }
+    else {
+      ca_attach(w->list[w->opened]);
+    }
+  }
+  return Qnil;
+}
+
+static VALUE
+ca_attach_window_body (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  VALUE result = w->body(w->arg);
+  w->body_done = 1;
+  return result;
+}
+
+static VALUE
+ca_attach_window_sync (VALUE varg)
+{
+  ca_sync((void *) varg);
+  return Qnil;
+}
+
+/* The ensure half.  rb_ensure keeps the exception body raised (or the
+   break it took) across this call, so a sync raising in here is caught
+   and set aside rather than let replace it. */
+static VALUE
+ca_attach_window_close (VALUE varg)
+{
+  ca_window_ctx_t *w = (ca_window_ctx_t *) varg;
+  int32_t k;
+  for ( k = w->opened - 1; k >= 0; k-- ) {
+    CArray *ca   = w->list[k];
+    char    mode = w->modes[k];
+    if ( ! ca ) {
+      continue;
+    }
+    if ( ca->ptr && ( mode == 'w' || ( mode == 'a' && w->body_done ) ) ) {
+      int tag = 0;
+      rb_protect(ca_attach_window_sync, (VALUE) ca, &tag);
+      if ( tag && ! w->sync_tag ) {
+        w->sync_tag = tag;
+        w->sync_err = rb_errinfo();
+      }
+      rb_set_errinfo(Qnil);
+    }
+    if ( ca->ptr ) {
+      ca_detach(ca);
+    }
+  }
+  return Qnil;
+}
+
+VALUE
+ca_attach_window (int32_t n, CArray **list, const char *modes,
+                  VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_window_ctx_t w;
+  VALUE result;
+  int   tag = 0;
+
+  w.n         = n;
+  w.list      = list;
+  w.modes     = modes;
+  w.opened    = 0;
+  w.body_done = 0;
+  w.sync_tag  = 0;
+  w.sync_err  = Qnil;
+  w.body      = body;
+  w.arg       = arg;
+
+  rb_protect(ca_attach_window_open, (VALUE) &w, &tag);
+  if ( tag ) {
+    while ( w.opened > 0 ) {
+      w.opened--;
+      if ( w.list[w.opened] ) {
+        ca_detach(w.list[w.opened]);
+      }
+    }
+    rb_jump_tag(tag);
+  }
+
+  result = rb_ensure(ca_attach_window_body,  (VALUE) &w,
+                     ca_attach_window_close, (VALUE) &w);
+  if ( w.sync_tag && RB_TYPE_P(w.sync_err, T_OBJECT) &&
+       RTEST(rb_obj_is_kind_of(w.sync_err, rb_eException)) ) {
+    rb_exc_raise(w.sync_err);
+  }
+  return result;
 }
 
 /* attach parent's data to ca->ptr */
@@ -1799,8 +2052,13 @@ ca_sync (void *ap)
              "can not modify read-only array");
   }
 
-  ca_update_mask(ca);
-  ca_sync(ca->mask);
+  /* Only a mask that exists can hold writes: one made inside the window
+     is attached with the view (ca_create_mask).  Making one here would
+     read the parent's mask while the window closes, and a parent that
+     cannot answer would leave the window open. */
+  if ( ca->mask ) {
+    ca_sync(ca->mask);
+  }
 
   if ( ca_is_view(ca) ) {  /* view array */
     if ( ! CAVIEW(ca)->nosync ) { /* FIXME : */
@@ -1811,6 +2069,42 @@ ca_sync (void *ap)
     ca_func[ca->obj_type].sync(ap);
   }
 
+}
+
+/* Sync ap and detach it -- the close of a window a frame opened with
+   ca_attach or ca_allocate.  The detach happens even when the sync raises
+   (a read-only array, a backing whose write fails); the sync's exception
+   then propagates.  Written as two calls, a raising sync skips the detach
+   and the window stays open.
+
+   Not a replacement for every ca_sync: a view's sync slot syncs its parent
+   without detaching it, because that attach belongs to the view and its
+   detach slot releases it. */
+
+static VALUE
+ca_sync_body (VALUE arg)
+{
+  ca_sync((void *) arg);
+  return Qnil;
+}
+
+void
+ca_sync_detach (void *ap)
+{
+  CArray *ca = (CArray *) ap;
+  int tag = 0;
+
+  if ( ! ca ) {
+    return;
+  }
+
+  rb_protect(ca_sync_body, (VALUE) ca, &tag);
+  if ( ca->ptr ) {
+    ca_detach(ca);
+  }
+  if ( tag ) {
+    rb_jump_tag(tag);
+  }
 }
 
 /* make ca->ptr to be detached */
@@ -1833,38 +2127,86 @@ ca_detach (void *ap)
     if ( CAVIEW(ca)->attach == 1 ) {
       ca_func[ca->obj_type].detach(ap);
     }
-    CAVIEW(ca)->attach -= 1;
+    CA_VIEW_ATTACH_STEP(ca, -1);
   }
   else {                      /* entity array */
     ca_func[ca->obj_type].detach(ap);
   }
 
-  ca_update_mask(ca);
-  ca_detach(ca->mask);
+  /* The mask, if there is one, is at the view's level (see
+     ca_attach_view_first).  A mask that does not exist yet is not made
+     here: it would be made unattached, and making it reads the parent's
+     mask, which may raise with the view half detached. */
+  if ( ca->mask ) {
+    ca_detach(ca->mask);
+  }
 }
 
 /* multiple versions of ca_allocate, ca_attach, ca_sync, ca_detach */
 
+/* ca_allocate_n and ca_attach_n take all of their arrays or none: when
+   one raises, the ones already taken are detached before the raise
+   propagates. */
+
+typedef struct {
+  CArray **list;
+  int32_t  n;
+  int32_t  done;
+} ca_allocate_all_ctx_t;
+
+static VALUE
+ca_allocate_all_body (VALUE arg)
+{
+  ca_allocate_all_ctx_t *c = (ca_allocate_all_ctx_t *) arg;
+  for ( ; c->done < c->n; c->done++ ) {
+    ca_allocate(c->list[c->done]);
+  }
+  return Qnil;
+}
+
+static void
+ca_allocate_all (CArray **list, int32_t n)
+{
+  ca_allocate_all_ctx_t c;
+  int tag = 0;
+  c.list = list;
+  c.n    = n;
+  c.done = 0;
+  rb_protect(ca_allocate_all_body, (VALUE) &c, &tag);
+  if ( tag ) {
+    while ( c.done > 0 ) {
+      ca_detach(list[--c.done]);
+    }
+    rb_jump_tag(tag);
+  }
+}
+
 void
 ca_allocate_n (int n, ...)
 {
+  CArray **list = ALLOCA_N(CArray *, n > 0 ? n : 1);
   va_list args;
+  int i;
   va_start(args, n);
-  while ( n-- ) {
-    ca_allocate(va_arg(args, CArray *));
+  for ( i = 0; i < n; i++ ) {
+    list[i] = va_arg(args, CArray *);
   }
   va_end(args);
+  ca_allocate_all(list, n);
 }
 
 void
 ca_attach_n (int n, ...)
 {
+  CArray **list = ALLOCA_N(CArray *, n > 0 ? n : 1);
   va_list args;
+  int i;
   va_start(args, n);
-  while ( n-- ) {
-    ca_attach(va_arg(args, CArray *));
+  for ( i = 0; i < n; i++ ) {
+    list[i] = va_arg(args, CArray *);
   }
   va_end(args);
+  ca_attach_all(list, n);
 }
 
 void
@@ -1989,15 +2331,12 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                 ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
   CArray *ca = (CArray *) ap;
-  int8_t  k;
 
   if ( ca_is_readonly(ca) ) {
     rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
   }
 
-  for ( k = 0; k < ndim; k++ ) {
-    if ( counts[k] <= 0 ) return;
-  }
+  if ( ca_region_is_empty(ndim, counts) ) return;
 
   if ( ca_func[ca->obj_type].fill_stride ) {
     ca_func[ca->obj_type].fill_stride(ap, base, ndim, counts, steps, ptr);
@@ -2144,7 +2483,7 @@ ca_fill (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can't fill read-only carray");
+    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
   }
 
   ca_fill_data(ap, ptr);
@@ -2425,7 +2764,7 @@ rb_ca_members (VALUE self)
 {
   volatile VALUE data_class = rb_ca_data_class(self);
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   else {
     return rb_obj_clone(rb_const_get(data_class, rb_intern("MEMBERS")));
@@ -2438,8 +2777,8 @@ rb_ca_members (VALUE self)
    (= Face strip): the @member cache lives on self (the Face) while the
    actual field view is the CAField on the parent.  A plain FIXLEN entity
    keeps self == receiver. */
-VALUE
-rb_ca_face_field (VALUE self, VALUE sym)
+static VALUE
+ca_face_field_lookup (VALUE self, VALUE sym)
 {
   volatile VALUE data_class = rb_ca_data_class(self);
   volatile VALUE member;
@@ -2448,7 +2787,7 @@ rb_ca_face_field (VALUE self, VALUE sym)
   CArray *ca;
 
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -2464,7 +2803,9 @@ rb_ca_face_field (VALUE self, VALUE sym)
        is local to the derived view; field views are still on its parent
        (which itself is on the entity). */
     member = rb_hash_new();
-    rb_ivar_set(self, rb_intern("member"), member);
+    if ( ! OBJ_FROZEN(self) ) {
+      rb_ivar_set(self, rb_intern("member"), member);
+    }
   }
 
   if ( rb_obj_is_kind_of(sym, rb_cInteger) ) {
@@ -2490,7 +2831,7 @@ rb_ca_face_field (VALUE self, VALUE sym)
       if ( TYPE(sym) != T_STRING ) {
         sym = rb_funcall(sym, rb_intern("to_s"), 0);
       }
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "can't find data_member named <%s>", StringValuePtr(sym));
     }
     Check_Type(info, T_ARRAY);
@@ -2532,10 +2873,51 @@ rb_ca_face_field (VALUE self, VALUE sym)
         return obj;
       }
     }
+    /* `endian:` is not an option of #field; the member's byte order is a
+       view over the field, as CAStruct#[] reads it. */
+    {
+      volatile VALUE opts = rb_ary_entry(info, 2);
+      volatile VALUE endian = Qnil;
+      if ( RB_TYPE_P(opts, T_HASH) ) {
+        endian = rb_hash_aref(opts, ID2SYM(rb_intern("endian")));
+      }
+      if ( ! NIL_P(endian) ) {
+        volatile VALUE field_opts = rb_hash_dup(opts);
+        rb_hash_delete(field_opts, ID2SYM(rb_intern("endian")));
+        if ( RHASH_SIZE(field_opts) > 0 ) {
+          obj = rb_funcall(receiver, rb_intern("field"), 3,
+                           rb_ary_entry(info, 0), rb_ary_entry(info, 1),
+                           field_opts);
+        }
+        else {
+          obj = rb_funcall(receiver, rb_intern("field"), 2,
+                           rb_ary_entry(info, 0), rb_ary_entry(info, 1));
+        }
+        obj = rb_funcall(obj, rb_intern("endian"), 1, endian);
+        rb_hash_aset(member, sym, obj);
+        return obj;
+      }
+    }
     obj = rb_apply(receiver, rb_intern("field"), info);
     rb_hash_aset(member, sym, obj);
     return obj;
   }
+}
+
+/* A field is a view on the record array's storage, below the Face, so the
+   read-only state of the record array (frozen, or a read-only view) is not
+   on its parent chain; the field carries it itself. */
+VALUE
+rb_ca_face_field (VALUE self, VALUE sym)
+{
+  volatile VALUE obj = ca_face_field_lookup(self, sym);
+  CArray *ca, *co;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_readonly(ca) && rb_obj_is_carray(obj) ) {
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
+    ca_set_flag(co, CA_FLAG_READ_ONLY);
+  }
+  return obj;
 }
 
 /* @overload fields
@@ -2550,7 +2932,7 @@ rb_ca_fields (VALUE self)
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   member_names = rb_const_get(data_class, rb_intern("MEMBERS"));
   list = rb_ary_new2(RARRAY_LEN(member_names));
@@ -2573,7 +2955,7 @@ rb_ca_fields_at (int argc, VALUE *argv, VALUE self)
   volatile VALUE member_names, list;
   int i;
   if ( NIL_P(data_class) ) {
-    rb_raise(rb_eRuntimeError, "carray doesn't have data class");
+    rb_raise(rb_eTypeError, "carray doesn't have data class");
   }
   member_names = rb_ary_new4(argc, argv);
   list = rb_ary_new2(RARRAY_LEN(member_names));
@@ -2603,6 +2985,16 @@ Init_carray_core (void)
   rb_define_method(rb_cCArray, "__attach__", rb_ca__attach__, 0);
   rb_define_method(rb_cCArray, "__sync__", rb_ca__sync__, 0);
   rb_define_method(rb_cCArray, "__detach__", rb_ca__detach__, 0);
+
+  rb_define_singleton_method(rb_cCArray, "__attached_views__",
+                             rb_ca_s_attached_views, 0);
+
+  {
+    const char *general = getenv("CARRAY_GENERAL_PATH");
+    ca_fast_paths_on = !( general && general[0] && strcmp(general, "0") );
+  }
+  rb_define_singleton_method(rb_cCArray, "__fast_paths_enabled__",
+                             rb_ca_s_fast_paths_enabled, 0);
 #endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);

@@ -107,6 +107,17 @@ if enable_config("dev-build", false)
   $stderr.puts "carray: CARRAY_DEV_BUILD enabled (smoke surface available)"
 end
 
+# --- signed overflow wraps (`-fwrapv`)
+#
+# An integer kernel that overflows answers modulo 2^N.  C leaves signed
+# overflow undefined, and a compiler that sees several operations at once
+# rewrites them as if it could not happen -- `(x + 1) > x` becomes true --
+# which carray-jit's fused expressions, built with these flags, would show.
+if try_compile("int main(void) { return 0; }", "-fwrapv")
+  $CFLAGS += " -fwrapv"
+  $carray_build_flags << "-fwrapv"
+end
+
 # --- probe for `-fopenmp-simd` (SL.1.0, PROPOSAL_REDUCTION_SIMD_LICENSE)
 #
 # `-fopenmp-simd` enables `#pragma omp simd` (and its `reduction(+:acc)`
@@ -257,6 +268,8 @@ $INSTALLFILES << ['carray_config.h', '$(archdir)']
 # (b) Not in the closure, but written for ext authors to include
 #     explicitly.  ca_obj_face.h is the Face authoring surface: an
 #     external gem defines its own Face by including it directly.
+#     ca_for_buffer.h is whole-buffer delivery to an external library;
+#     it pulls ca_sweep_engine.h.
 #
 # A header that is neither is internal, however useful it looks in-tree.
 # ca_op_powi.h (op_powi_<type> helpers for the generated kernels) and
@@ -272,11 +285,14 @@ $INSTALLFILES << ['carray_config.h', '$(archdir)']
   ca_axis_descriptor.h
   ca_monop_dispatch.h
   ca_binop_dispatch.h
+  ca_triop_dispatch.h
   ca_bincmp_dispatch.h
   ca_moncmp_dispatch.h
   ca_kernel_iterator.h
   ca_iter_substrate.h
   ca_obj_face.h
+  ca_for_buffer.h
+  ca_sweep_engine.h
 ].each do |h|
   $INSTALLFILES << [h, '$(archdir)']
 end
@@ -324,11 +340,14 @@ end
 # compiling static sources, which is one pass with no race.
 #
 # carray_kernels.stamp is the mtime witness:
-#   - here: regenerate and touch it when mkkernel.rb is newer
+#   - here: regenerate and touch it when mkkernel.rb or ca_op_powi.h (whose
+#     helper text the generator copies) is newer
 #   - in the Rakefile (rake build_ext): the same stamp triggers need_extconf
 CARRAY_KERNELS_STAMP = "carray_kernels.stamp"
 if ( not File.exist?(CARRAY_KERNELS_STAMP) ) or
-    File.stat("mkkernel.rb").mtime > File.stat(CARRAY_KERNELS_STAMP).mtime
+    %w[mkkernel.rb ca_op_powi.h].any? { |f|
+      File.stat(f).mtime > File.stat(CARRAY_KERNELS_STAMP).mtime
+    }
   # passing "." makes the generator write the split files into ext/
   unless system("ruby mkkernel.rb .")
     raise "mkkernel.rb failed to generate split kernel files"
@@ -344,6 +363,12 @@ end
 # Fail here rather than at link time if the generator produced nothing.
 if Dir.glob("carray_kernels_*.c").empty?
   raise "no carray_kernels_*.c files found after mkkernel.rb; check the generator"
+end
+
+# The 5^q table the decimal-to-double reader (carray_cast.c) multiplies by.
+if ( not File.exist?("ca_pow5_table.h") ) or
+    File.stat("mk_pow5_table.rb").mtime > File.stat("ca_pow5_table.h").mtime
+  system("ruby mk_pow5_table.rb")
 end
 
 if ( not File.exist?("carray_call_cfunc.c") ) or

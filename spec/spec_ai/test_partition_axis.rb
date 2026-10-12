@@ -28,10 +28,12 @@ class TestPartitionAxis < Test::Unit::TestCase
     assert_equal(a.sort_index_ki(1).to_a, a.sort_index(axis: 1).to_a)
   end
 
-  def test_sort_index_default_axis_is_0
-    a = CArray.int32(3, 4).seq
-    # axis: defaults to 0
-    assert_equal(a.sort_index_ki(0).to_a, a.sort_index.to_a)
+  # No axis means the whole array, as for sort.
+  def test_sort_index_default_is_the_whole_array
+    a = CArray.int32(3, 4) { |i, j| (j * 3 + i) % 7 }
+    assert_equal(a.flatten.sort_index_ki(0).to_a, a.sort_index.to_a)
+    assert_equal(a.sort_index.to_a, a.sort_index(axis: nil).to_a)
+    assert_equal(a.sort.to_a, a.flatten[a.sort_index].to_a)
   end
 
   def test_sort_index_negative_axis

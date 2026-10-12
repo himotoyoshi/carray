@@ -80,31 +80,31 @@ class CArray
         Array.new(flat.length, repeat)
       end
 
-  # Validate each value.  A positive Integer only; nil is not a valid
-  # per-axis repeat.
-  reps.each do |r|
-    unless r.is_a?(Integer)
-      raise ArgumentError,
-        "insert_axis: repeat must be a positive Integer, got #{r.inspect}"
+    # Validate each value.  A positive Integer only; nil is not a valid
+    # per-axis repeat.
+    reps.each do |r|
+      unless r.is_a?(Integer)
+        raise ArgumentError,
+          "insert_axis: repeat must be a positive Integer, got #{r.inspect}"
+      end
+      raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
     end
-    raise ArgumentError, "insert_axis: repeat count must be >= 1" if r < 1
+
+    # Final output layout: stable order by (gap, argument index) keeps
+    # same-gap axes in argument order; the k-th inserted axis lands at output
+    # position gap + k.  This output position only drives broadcast_to; the
+    # insertion itself always goes through the source-frame primitive.
+    order = (0...flat.length).sort_by { |i| [gaps[i], i] }
+    final = {}
+    order.each_with_index { |i, k| final[i] = gaps[i] + k }
+
+    inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
+    return inter unless order.any? { |i| reps[i] > 1 }
+
+    shp = inter.shape
+    order.each { |i| shp[final[i]] = reps[i] if reps[i] > 1 }
+    inter.broadcast_to(*shp)
   end
-
-  # Final output layout: stable order by (gap, argument index) keeps
-  # same-gap axes in argument order; the k-th inserted axis lands at output
-  # position gap + k.  This output position only drives broadcast_to; the
-  # insertion itself always goes through the source-frame primitive.
-  order = (0...flat.length).sort_by { |i| [gaps[i], i] }
-  final = {}
-  order.each_with_index { |i, k| final[i] = gaps[i] + k }
-
-  inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
-  return inter unless order.any? { |i| reps[i] > 1 }
-
-  shp = inter.shape
-  order.each { |i| shp[final[i]] = reps[i] if reps[i] > 1 }
-  inter.broadcast_to(*shp)
-end
 
   # @overload drop_axis
   #   Returns a view of `self` with every size-1 axis dropped.
@@ -140,6 +140,28 @@ end
   #   @return [CArray]
   def true ()
     return template(:boolean) { 1 }
+  end
+
+  # A Face is clipped in its own terms: its comparisons decide which cells are
+  # out of range (a time array reads its bounds as times, a record array
+  # orders by its declared members, a Face that cannot be ordered refuses),
+  # and its store writes the bound or the fill value into them.
+  private def __face_clip__ (min, max, fill_value, lfill, ufill)
+    lfill = fill_value if lfill.nil?
+    ufill = fill_value if ufill.nil?
+    out = copy
+    out[self < min] = lfill.nil? ? min : lfill unless min.nil?
+    out[self > max] = ufill.nil? ? max : ufill unless max.nil?
+    out
+  end
+
+  # An array of +shape+ of the same kind as self: its data type and cell
+  # width, or its Face over a zero storage.  Nothing is written into it, so
+  # it can be built for a read-only Face too.
+  private def __blank_like__ (shape)
+    storage = __face_storage__
+    out = CArray.new(storage.data_type, shape, bytes: storage.bytes)
+    face? ? out.face_lift(self) : out
   end
 
   # Sub-region copy (paste / crop), the old C `ca_paste` / `ca_clip` pair.
@@ -250,6 +272,31 @@ end
 
   # @!endgroup
 
+  # An Integer shift count on an integer array means what it means to
+  # Integer#<< and #>>: negative shifts the other way, and a count past the
+  # width shifts every bit out.  The kernels do that for a count of the
+  # array's own type; this brings a count the type cannot hold -- -1 for a
+  # uint8 array, 300 for an int8 one -- to one it can.
+  module IntegerShiftCount
+    UNSIGNED = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].freeze
+
+    def << (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return self >> -other if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
+
+    def >> (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return self << -other if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
+  end
+  # Prepended by carray/lazy, after it has wrapped << and >>: prepended
+  # here, the method lazy aliases as the eager form would be this one.
+
   # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
   #   Returns `self` with every element clamped to `[min, max]`.
   #
@@ -258,7 +305,12 @@ end
   #   `fill_value` (or `lfill` / `ufill`) is given, out-of-range
   #   cells are replaced by the fill instead of clamped -- pass
   #   `UNDEF` to mask that end. `fill_value` is sugar for symmetric
-  #   dual-fill; `lfill` / `ufill` override per side.
+  #   dual-fill; `lfill` / `ufill` override per side, and a side
+  #   given no fill is still clamped.
+  #
+  #   `min` may not exceed `max` (in any cell, when a bound is an
+  #   array); equal bounds give every unmasked cell that value.
+  #   A NaN bound bounds nothing.
   #
   #   Boundary is strict `[min, max]`: values equal to a bound
   #   remain unchanged in both the clamped and filled variants.
@@ -272,7 +324,8 @@ end
   #   @param lfill [Object, nil] override below-range fill.
   #   @param ufill [Object, nil] override above-range fill.
   #   @return [CArray] new CArray with clamped or filled values.
-  #   @raise [ArgumentError] when both `min` and `max` are `nil`.
+  #   @raise [ArgumentError] when both `min` and `max` are `nil`,
+  #     or when `min` exceeds `max`.
   #   @example
   #     a.clip(0, 10)                          # strict clamp
   #     a.clip(0, 10, -1)                      # both ends -> -1
@@ -280,6 +333,16 @@ end
   def clip(min, max=nil, fill_value=nil, lfill: nil, ufill: nil)
     if min.nil? && max.nil?
       raise ArgumentError, "clip: at least one of (min, max) must be given"
+    end
+    return __face_clip__(min, max, fill_value, lfill, ufill) if face?
+    if !min.nil? && !max.nil?
+      reversed = if min.is_a?(CArray) then min.gt(max).any
+                 elsif max.is_a?(CArray) then max.lt(min).any
+                 else min > max
+                 end
+      if reversed
+        raise ArgumentError, "clip: min must be less than or equal to max"
+      end
     end
 
     # `fill_value` as a single argument is sugar applied to both ends; kwargs override.
@@ -292,9 +355,12 @@ end
       return pmin(max)
     end
 
+    # A side without a fill still clamps.
     out = self.copy
-    out[:lt, min] = lfill unless min.nil? || lfill.nil?
-    out[:gt, max] = ufill unless max.nil? || ufill.nil?
+    out = out.pmax(min) if !min.nil? && lfill.nil?
+    out = out.pmin(max) if !max.nil? && ufill.nil?
+    out[self.lt(min)] = lfill unless min.nil? || lfill.nil?
+    out[self.gt(max)] = ufill unless max.nil? || ufill.nil?
     out
   end
 

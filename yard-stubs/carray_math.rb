@@ -25,12 +25,15 @@ class CArray
   #   division is true division, as Ruby's `Float#/` is, so that
   #   identity is an integer one. Boolean arrays participate as their
   #   0/1 storage. Masked elements stay masked, and a masked cell is
-  #   never divided.
+  #   never divided. The signed minimum divided by `-1` does not fit and
+  #   is answered as the wrapped negation: `MIN / -1` is `MIN`.
   #   @param other [CArray, Numeric] divisor, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands.
   #   @raise [ZeroDivisionError] when an integer divisor is `0`. Float
   #     division returns `Infinity` or `NaN` instead.
+  #   @raise [RangeError] when an Integer `other` does not fit the
+  #     integer `data_type` of `self`.
   #   @example
   #     CA_INT32([-7, -1, 7]) / 3      # => [ -3, -1, 2 ]
   #     CA_DOUBLE([-7.0]) / 3.0        # => [ -2.3333333333333335 ]
@@ -215,7 +218,7 @@ class CArray
   # @overload rcp_mul(other)
   #   Returns `other` divided element-wise by `self` -- the reciprocal
   #   of {#/} in operand order, so that scaling a constant by an array
-  #   needs no temporary.
+  #   needs no temporary. Integer division floors, as {#/} does.
   #   @param other [CArray, Numeric] dividend, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands.
@@ -241,12 +244,12 @@ class CArray
   #
   #   A numeric array keeps its `data_type`; a complex array returns the
   #   real magnitude at that complex type's own width, so a `:cmplx64`
-  #   yields `:float32` just as {#real} and {#imag} do. For the form
-  #   that keeps a complex array complex (magnitude with a zero
-  #   imaginary part) use {#abs_i}, which also accepts `:object`.
-  #   @return [CArray] `self`'s `data_type` for numeric input; the real
-  #     component type for complex input.
-  #   @raise [CArray::DataTypeError] for a boolean or `:object` array.
+  #   yields `:float32` just as {#real} and {#imag} do. An `:object`
+  #   array calls each cell's `abs`. For the form that keeps a complex
+  #   array complex (magnitude with a zero imaginary part) use {#abs_i}.
+  #   @return [CArray] `self`'s `data_type` for numeric and `:object`
+  #     input; the real component type for complex input.
+  #   @raise [CArray::DataTypeError] for a boolean array.
   #   @example
   #     CA_CMPLX64([Complex(3, 4)]).abs      # => [ 5.0 ]  (:float32)
   def abs; end
@@ -738,7 +741,8 @@ class CArray
   #   comparison) and `:object` (Ruby `==`) `data_type`. A masked
   #   element yields a masked result rather than `false`. Floating
   #   point equality is exact here; for a tolerant comparison see
-  #   {#is_close} (absolute) or {#is_equiv} (relative).
+  #   {#is_close} (absolute) or {#is_equiv} (relative). Integers compare
+  #   by value, as for {#<}.
   #   @param other [CArray, Numeric, Object] comparand, broadcast to
   #     `self.shape`.
   #   @return [CArray] `:boolean`, same shape as `self`.
@@ -760,6 +764,11 @@ class CArray
   #   Accepts numeric, boolean, `:fixlen` (byte order, shorter first on
   #   a common prefix) and `:object` (Ruby `<`) `data_type`s. Complex
   #   arrays have no ordering and raise.
+  #
+  #   Integers compare by value: an unsigned array against a signed one
+  #   answers as the Integers would (`CA_UINT64([7]) < CA_INT64([-7])`
+  #   is false), and so does an Integer the array's type cannot hold
+  #   (`CA_UINT8([0]) > -1` is true).
   #   @param other [CArray, Numeric, Object] comparand, broadcast to
   #     `self.shape`.
   #   @return [CArray] `:boolean`, same shape as `self`.
@@ -861,8 +870,11 @@ class CArray
   #   Returns a boolean array that is true where an element is `NaN`.
   #   @return [CArray] `:boolean`, same shape as `self`.
   #   @raise [CArray::DataTypeError] for a boolean array.
-  #   @raise [NoMethodError] for an `:object` array whose elements do
-  #     not respond to `#nan?`.
+  #   On an `:object` array an Integer or a Rational element is never
+  #   `NaN`; other elements answer through `#nan?`.
+  #   @raise [NoMethodError] for an `:object` array with an element that
+  #     is not an Integer, a Rational or a Float and does not respond to
+  #     `#nan?`.
   def is_nan; end
 
   # @overload is_inf
@@ -1043,7 +1055,7 @@ class CArray
   #   Applies {#abs} to `self` in place, keeping `self`'s
   #   `data_type`.
   #   @return [self]
-  #   @raise [RuntimeError] for a boolean array.
+  #   @raise [CArray::DataTypeError] for a boolean array.
   def abs!; end
 
   # @overload abs_i!
@@ -1093,7 +1105,7 @@ class CArray
   #   Applies {#arg} to `self` in place, keeping `self`'s
   #   `data_type`.
   #   @return [self]
-  #   @raise [RuntimeError] for an integer or boolean array, whose
+  #   @raise [CArray::DataTypeError] for an integer or boolean array, whose
   #     `data_type` cannot hold the widened result -- {#arg} promotes it
   #     instead of raising.
   def arg!; end

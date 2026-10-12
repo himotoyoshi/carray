@@ -109,6 +109,23 @@ class TestMaskGapFillHold < Test::Unit::TestCase
                  m.strip_mask(method: :forward, axis: -1).to_a)
   end
 
+  # A negative axis past -ndim is out of range, as everywhere else; it
+  # used to be wrapped twice and land on a real axis.
+  def test_negative_axis_out_of_range_raises
+    m = CA_INT32([[1, 0, 3], [0, 5, 0]]); m[1, 2] = UNDEF
+    [:forward, :backward].each do |meth|
+      [-3, -4, 2].each do |ax|
+        assert_raise(ArgumentError, "#{meth} axis #{ax}") {
+          m.strip_mask(method: meth, axis: ax)
+        }
+        assert_raise(ArgumentError, "#{meth} axis #{ax} in place") {
+          m.unmask(method: meth, axis: ax)
+        }
+      end
+    end
+    assert(m.is_masked[1, 2])
+  end
+
   # ---- dtype coverage -----------------------------------------------------
 
   def test_float_hold
@@ -360,5 +377,20 @@ class TestMaskGapFillHold < Test::Unit::TestCase
     a = CA_INT32([1, 0, 3]); a[1] = UNDEF
     a.unmask
     refute(a.any_masked?)
+  end
+
+  def test_linear_keeps_present_cells_exact_and_unmasked_nan_alone
+    big = 2**53
+    a = CA_INT64([big + 1, 0, big + 3]); a[1] = UNDEF
+    assert_equal [big + 1, big + 2, big + 3], a.strip_mask(method: :linear).to_a
+    m = CA_INT64([[big + 1, 0, big + 3], [1, 2, 3]]); m[0, 1] = UNDEF
+    assert_equal [big + 1, big + 2, big + 3], m.strip_mask(method: :linear, axis: 1)[0, nil].to_a
+    nan = Float::NAN
+    c = CA_FLOAT64([1, nan, 3, 4]).strip_mask(method: :linear)
+    refute c.has_mask?
+    assert c[1].nan?
+    inf = Float::INFINITY
+    q = CA_FLOAT64([1, inf, 3, 4]); q[2] = UNDEF
+    assert_equal [1.0, inf, inf, 4.0], q.strip_mask(method: :linear).to_a
   end
 end

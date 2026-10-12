@@ -1,5 +1,6 @@
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_integer_arg */
 #include "ca_kernel_iterator.h"
 #include "ca_obj_face.h"
 #include <math.h>
@@ -120,7 +121,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
   CArray *co;
 
-  ca_attach_n(2, ca, ci); /* ATTACH */
+  ca_attach_n(2, ca, ci); /* window: nothing raises inside */
 
   co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
@@ -129,6 +130,96 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 
   return co;
 }
+
+/* rk.__count_below__(q, inclusive) -- for each cell of q, how many values
+ * of the sorted array rk are below it (at or below it when inclusive).
+ * rk is 1-D, ascending, with no masked or NaN value; q has rk's data type
+ * (any shape, read in address order).  The count is the insertion position
+ * of the cell among rk's values, found by binary search; a masked or NaN
+ * cell gets an arbitrary count, for the caller to mask.  Returns an int64
+ * array of q's shape.  Numeric and boolean types only. */
+
+/* The search keeps a base and a length and moves the base by a comparison
+   rather than branching on it, which keeps the loop free of mispredicted
+   branches; the last comparison adds the cell at the base. */
+#define CA_COUNT_BELOW_LOOP(T, CMP)                                   \
+  {                                                                   \
+    const T *r = (const T *) cr->ptr;                                 \
+    const T *x = (const T *) cq->ptr;                                 \
+    for ( i = 0; i < m; i++ ) {                                       \
+      T v = x[i];                                                     \
+      const T *base = r;                                              \
+      ca_size_t len = n;                                              \
+      if ( len == 0 ) { out[i] = 0; continue; }                       \
+      while ( len > 1 ) {                                             \
+        ca_size_t half = len / 2;                                     \
+        base = (base[half] CMP v) ? base + half : base;               \
+        len -= half;                                                  \
+      }                                                               \
+      out[i] = (int64_t) (base - r) + ((*base CMP v) ? 1 : 0);        \
+    }                                                                 \
+  }
+
+#define CA_COUNT_BELOW(T)                                             \
+  if ( inclusive ) CA_COUNT_BELOW_LOOP(T, <=)                         \
+  else             CA_COUNT_BELOW_LOOP(T, <)
+
+static VALUE
+rb_ca_count_below (VALUE self, VALUE vq, VALUE vinclusive)
+{
+  volatile VALUE vout;
+  CArray *cr, *cq, *co;
+  ca_size_t n, m, i;
+  int64_t *out;
+  int inclusive = RTEST(vinclusive);
+
+  GetCArray(self, cr);
+  rb_check_carray_object(vq);
+  GetCArray(vq, cq);
+  if ( cr->ndim != 1 ) {
+    rb_raise(rb_eArgError, "__count_below__: the reference must be 1-D");
+  }
+  if ( cr->data_type != cq->data_type ) {
+    rb_raise(rb_eCADataTypeError,
+             "__count_below__: the reference and the query must have one data type");
+  }
+  switch ( cr->data_type ) {
+  case CA_BOOLEAN: case CA_INT8: case CA_UINT8: case CA_INT16: case CA_UINT16:
+  case CA_INT32: case CA_UINT32: case CA_INT64: case CA_UINT64:
+  case CA_FLOAT32: case CA_FLOAT64:
+    break;
+  default:
+    rb_raise(rb_eCADataTypeError, "__count_below__: no order for %s",
+             ca_type_name[cr->data_type]);
+  }
+
+  n = cr->elements;
+  m = cq->elements;
+  vout = rb_carray_new(CA_INT64, cq->ndim, cq->dim, 0, NULL);
+  GetCArray(vout, co);
+  out = (int64_t *) co->ptr;
+
+  ca_attach_n(2, cr, cq); /* window: nothing raises inside */
+  switch ( cr->data_type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_COUNT_BELOW(uint8_t);  break;
+  case CA_INT8:    CA_COUNT_BELOW(int8_t);   break;
+  case CA_INT16:   CA_COUNT_BELOW(int16_t);  break;
+  case CA_UINT16:  CA_COUNT_BELOW(uint16_t); break;
+  case CA_INT32:   CA_COUNT_BELOW(int32_t);  break;
+  case CA_UINT32:  CA_COUNT_BELOW(uint32_t); break;
+  case CA_INT64:   CA_COUNT_BELOW(int64_t);  break;
+  case CA_UINT64:  CA_COUNT_BELOW(uint64_t); break;
+  case CA_FLOAT32: CA_COUNT_BELOW(float);    break;
+  case CA_FLOAT64: CA_COUNT_BELOW(double);   break;
+  }
+  ca_detach_n(2, cr, cq);
+
+  return vout;
+}
+
+#undef CA_COUNT_BELOW
+#undef CA_COUNT_BELOW_LOOP
 
 /* project(idx, lval=nil, uval=nil) — gather: for each element of `idx`,
  * pick `self[idx[i]]`.  Returns an entity CArray shaped like `idx`.
@@ -142,6 +233,7 @@ VALUE
 rb_ca_project (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, ridx, vlfval, vufval, vstorage;
+  volatile VALUE hlfval = 0, hufval = 0;
   CArray *ca, *ci, *co;
   char *lfval, *ufval;
   int self_is_face;
@@ -152,14 +244,15 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   self_is_face = ca_is_face(ca);
 
   rb_check_carray_object(ridx);
+  ca_check_index_array(ridx);
   ci = ca_wrap_readonly(ridx, CA_SIZE);
 
   /* The fill args arrive as surface values.  rb_ca_obj2ptr owns the
-     surface->storage conversion: for a Face self it fires the scalar_to_storage
+     surface->storage conversion: for a Face self it fires the element_to_storage
      write hook (a datetime scalar / Time is reconciled to the Face's unit),
      for a plain array it writes the storage bytes directly. */
-  lfval = xmalloc(ca->bytes);
-  ufval = xmalloc(ca->bytes);
+  lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */
+  ufval = ALLOCV_N(char, hufval, ca->bytes);   /* can raise; the unwind frees */
 
   if ( ! NIL_P(vlfval) ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
@@ -185,8 +278,8 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
                  ( ! NIL_P(vlfval) ) ? lfval : NULL,
                  ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
 
-  xfree(lfval);
-  xfree(ufval);
+  ALLOCV_END(hlfval);
+  ALLOCV_END(hufval);
 
   obj = ca_wrap_struct(co);
 
@@ -255,7 +348,7 @@ extern VALUE rb_ca_reshape                   (int argc, VALUE *argv, VALUE self)
  * through rb_funcall + kwarg hash construction. */
 extern VALUE rb_ca_sort_index_ki_quick       (VALUE self, VALUE vaxis);
 extern VALUE rb_ca_partition_index_ki        (VALUE self, VALUE vaxis, VALUE vkth);
-extern VALUE rb_ca_rank_index_ki_quick_dense (VALUE self, VALUE vaxis, int dense);
+extern VALUE rb_ca_rank_index_ki_kind_dense (VALUE self, VALUE vaxis, int stable, int dense);
 
 /* ---- no-axis (flat) search helper -----------------------------------
  *
@@ -473,7 +566,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
   else {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
-    addrs = rb_ca_argmax_addr_ki(1, &kw, rkey);
+    addrs = rb_funcallv_kw(rkey, rb_intern("max_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
   return rb_ca_fetch(self, addrs);
 }
@@ -498,7 +591,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
   else {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
-    addrs = rb_ca_argmin_addr_ki(1, &kw, rkey);
+    addrs = rb_funcallv_kw(rkey, rb_intern("min_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
   return rb_ca_fetch(self, addrs);
 }
@@ -515,6 +608,11 @@ rb_ca_take_along_axis_c (VALUE self, VALUE indices, VALUE raxis)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, indices, raxis);
+  /* A masked index reads as UNDEF: project carries the mask of its
+     addresses into the result. */
+  if ( RTEST(rb_ca_has_mask(addrs)) ) {
+    return rb_funcall(self, rb_intern("project"), 1, addrs);
+  }
   return rb_ca_fetch(self, addrs);
 }
 
@@ -539,6 +637,12 @@ rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
+  /* A masked index writes nothing: scatter_replace! skips a masked
+     address (and writes the rest last-write-wins, as the store does). */
+  if ( RTEST(rb_ca_has_mask(addrs)) ) {
+    rb_funcall(self, rb_intern("scatter_replace!"), 2, addrs, argv[1]);
+    return self;
+  }
   rb_ca_store(self, addrs, argv[1]);
   return self;
 }
@@ -611,12 +715,14 @@ rb_ca_topk_index (VALUE self, VALUE rn, VALUE raxis, int desc, const char *name)
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   long a = rb_ca_normalize_axis_value(self, raxis, name);
-  long n_val = NUM2LONG(rn);
+  long n_val = ca_integer_arg(rn, "n", name);
   long dim_a = (long) ca->dim[a];
-  long cap = (n_val < dim_a) ? n_val : dim_a;
-  if ( cap < 0 ) {
-    cap = 0;
+  /* As Array#max(n): a negative count is an error, one past the length
+     gives the whole fiber. */
+  if ( n_val < 0 ) {
+    rb_raise(rb_eArgError, "%s: n must be non-negative (got %ld)", name, n_val);
   }
+  long cap = (n_val < dim_a) ? n_val : dim_a;
   if ( cap == 0 ) {
     /* Return zero-along-axis int64 array via the C carray constructor. */
     ca_size_t out_dim[CA_RANK_MAX];
@@ -711,29 +817,20 @@ static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
 {
   VALUE ropt = rb_pop_options(&argc, &argv);
-  VALUE raxis = Qnil, rdesc = Qfalse, rmethod = Qnil;
-  rb_scan_options(ropt, "axis,descending,method", &raxis, &rdesc, &rmethod);
+  VALUE raxis = Qnil, rdesc = Qfalse, rmethod = Qnil, rkind = Qnil;
+  rb_scan_options(ropt, "axis,descending,method,kind", &raxis, &rdesc, &rmethod, &rkind);
   rb_check_arity(argc, 0, 0);
 
-  int dense = 0;   /* default method: :ordinal */
-  if ( ! NIL_P(rmethod) ) {
-    static ID sym_ordinal = 0, sym_dense = 0;
-    if ( ! sym_ordinal ) sym_ordinal = rb_intern("ordinal");
-    if ( ! sym_dense )   sym_dense   = rb_intern("dense");
-    ID method_id = SYM2ID(rmethod);
-    if      ( method_id == sym_ordinal ) dense = 0;
-    else if ( method_id == sym_dense )   dense = 1;
-    else {
-      rb_raise(rb_eArgError, "order: unknown method %s (expected :ordinal or :dense)",
-               rb_id2name(method_id));
-    }
-  }
+  int dense = NIL_P(rmethod) ? 0
+    : ca_symbol_choice(rmethod, "method", "ordinal", "dense", NULL);
+  int do_stable = NIL_P(rkind) ? 0
+  : ca_symbol_choice(rkind, "kind", "quick", "stable", NULL);
 
   VALUE asc, n;
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
     /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
-    VALUE ranked = rb_ca_rank_index_ki_quick_dense(flat, INT2FIX(0), dense);
+    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, dense);
     /* reshape(*shape) */
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -748,7 +845,7 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
   } else {
     long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
     VALUE raxis_norm = LONG2NUM(axis_norm);
-    asc = rb_ca_rank_index_ki_quick_dense(self, raxis_norm, dense);
+    asc = rb_ca_rank_index_ki_kind_dense(self, raxis_norm, do_stable, dense);
     if ( RTEST(rb_ca_has_mask(self)) ) {
       n = rb_ca_count_not_masked_c(self, raxis_norm);
     } else {
@@ -800,10 +897,7 @@ ca_linear_prep (VALUE self, VALUE raxis, const char *name, long *axis_out)
      float-numeric flag is needed. */
   if ( ca_is_face(ca) ) {
     if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      rb_raise(rb_eArgError,
-               "%s: Face-typed input (%s) is not orderable by storage; "
-               "use ca.parent to descend to storage",
-               name, rb_obj_classname(self));
+      ca_face_refuse_order(name, self, "order");
     }
     self = rb_ca_strip_face_value(self);
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -831,44 +925,13 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
   rb_check_arity(argc, 1, 1);
   VALUE val = argv[0];
 
-  /* Query gate (generic, mirror search + reference flip
-     PROPOSAL_TO_COMPARABLE_RECEIVER_FLIP): the reference axis Face reconciles
-     the query into its own space.  A COMPARABLE axis is directly comparable
-     -> strip a Face query, take a plain query as-is.  A non-COMPARABLE Face
-     axis calls its own to_comparable(query) for ANY query type (Face CArray,
-     our Scalar, a Ruby Time / DateTime, ...), then strips; it raises if it
-     cannot reconcile the query.  `self` is still the pre-strip axis Face
-     here, so it carries the unit for to_comparable and its COMPARABLE flag. */
-  {
-    int val_is_face = 0, self_is_face = 0, self_comparable = 0;
+  /* Query gate: the reference axis, still a Face here, reconciles the query
+     into its own space (ca_face_reconcile_operand). */
+  if ( rb_obj_is_carray(self) ) {
     CArray *sca;
-    if ( rb_obj_is_kind_of(val, rb_cCArray) ) {
-      CArray *vca;
-      TypedData_Get_Struct(val, CArray, &carray_data_type, vca);
-      val_is_face = ca_is_face(vca);
-    }
     TypedData_Get_Struct(self, CArray, &carray_data_type, sca);
     if ( ca_is_face(sca) ) {
-      self_is_face = 1;
-      self_comparable = ca_test_flag(sca, CA_FLAG_FACE_COMPARABLE_STORAGE);
-    }
-    if ( self_comparable ) {
-      if ( val_is_face ) {
-        val = ca_face_operand_descend(val, "linear_section");
-      }
-    }
-    else if ( self_is_face ) {
-      if ( rb_respond_to(self, rb_intern("to_comparable")) ) {
-        val = rb_funcall(self, rb_intern("to_comparable"), 1, val);
-        val = rb_ca_strip_face_value(val);
-      }
-      else {
-        rb_raise(rb_eArgError,
-                 "linear_section: non-comparable Face axis (%s) has no "
-                 "to_comparable to reconcile the query; use ca.parent to "
-                 "search the hidden storage explicitly",
-                 rb_obj_classname(self));
-      }
+      val = ca_face_reconcile_operand(self, val, "linear_section");
     }
   }
 
@@ -925,6 +988,7 @@ Init_carray_order (void)
   id_sym_linear   = rb_intern("linear");
 
   rb_define_method(rb_cCArray,  "project", rb_ca_project, -1);
+  rb_define_private_method(rb_cCArray, "__count_below__", rb_ca_count_below, 2);
 
   /* Search family (dual API: index / addr) -- see the trampoline
      comment block above for the axis: kwarg dispatch contract. */

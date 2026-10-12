@@ -215,8 +215,7 @@ class TestMemoryViewBorrower < Test::Unit::TestCase
     # Earlier the producer used to fall back to ATTACH (materialise a
     # snapshot) when a SIMPLE-only consumer asked for a strided view.
     # That had wrong MV semantics (deferred sync on release).  Now we
-    # reject; consumers that need a contig snapshot use
-    # CArray.from_memory_view(arr) or arr.to_ca.
+    # reject; consumers that need a contig snapshot export arr.copy.
     ca = CArray.int32(10).seq
     bl = ca[[0, 5, 2]]   # strided
     assert_nil(MVBorrower.inspect_view(bl, MVBorrower::SIMPLE))
@@ -259,7 +258,7 @@ class TestMemoryViewBorrower < Test::Unit::TestCase
   # Previously these went through the ATTACH (materialise) path.  The
   # snapshot semantics were wrong for MV wrap (deferred sync; stale
   # reads; no explicit sync API).  Reject now; consumers wanting a
-  # copy should use arr.to_ca.
+  # copy export arr.copy.
 
   def test_select_rejected
     ca = CArray.int32(10).seq
@@ -341,7 +340,7 @@ class TestMemoryViewBorrower < Test::Unit::TestCase
   # CATranspose non-identity, CARepeat).  That deferred sync to the
   # consumer's release and clobbered concurrent writes on snapshot
   # scatter-back.  Now we reject with a helpful TypeError; consumers
-  # wanting a contig copy should use CArray.from_memory_view(arr).
+  # wanting a contig copy export arr.copy.
 
   SIMPLE = MVBorrower::SIMPLE
 

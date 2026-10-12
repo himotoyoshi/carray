@@ -19,7 +19,7 @@ describe "TestCArrayCARefer " do
     # N) is removed; a non-preserving shape now raises.  Migration: take
     # an explicit prefix first, e.g. a.flatten[0..3].reshape(2, 2).
     a = CArray.int(3,2).seq!
-    expect { a.reshape(2,2) }.to raise_error(RuntimeError)
+    expect { a.reshape(2,2) }.to raise_error(ArgumentError)
     r = a.flatten[0..3].reshape(2, 2)
     is_asserted_by { CA_INT([[0,1],
                          [2,3]]) == r }
@@ -51,8 +51,8 @@ describe "TestCArrayCARefer " do
   example "invalid_args" do
     # ---
     a = CArray.int8(3,3).seq!
-    expect { a.reshape(10) }.to raise_error(RuntimeError) ### too large data num
-    expect { a.refer(CA_INT,[9]) }.to raise_error(RuntimeError)
+    expect { a.reshape(10) }.to raise_error(ArgumentError) ### too large data num
+    expect { a.refer(CA_INT,[9]) }.to raise_error(ArgumentError)
                                                    ### larger data type bytes
 
   end

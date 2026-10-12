@@ -9,9 +9,7 @@ require "carray"
 # The class marks the provenance of the entry object only.  A view
 # derived from it is a CABlock or a CAStride like any other, and that
 # is deliberate -- a slice of a borrowed image is no longer the image.
-# `dup` is left unpinned here: it returns an owning entity while
-# keeping the class, which is a defect predating this surface, and
-# pinning it would fix the defect in place.
+# So is a `dup` or `clone`: it owns its memory, so it is a plain CArray.
 #
 # CArray itself is used as the producer, so these run without a
 # third-party MemoryView gem.
@@ -83,6 +81,20 @@ class TestMemoryViewWrapClass < Test::Unit::TestCase
   end
 
   # ---------------- refusals ----------------
+
+  def test_dup_and_clone_own_their_memory_and_drop_the_class
+    w = MVWrapClassSubclass.wrap_memory_view(@src)
+    [w.dup, w.clone].each do |d|
+      assert_instance_of CArray, d
+      assert_equal CA_OBJ_ARRAY, d.obj_type
+      assert_equal @src.to_a, d.to_a
+      d[0, 0] = -1
+      assert_equal 0.0, @src[0, 0]
+    end
+    w.freeze
+    assert_predicate w.clone, :frozen?
+    assert_not_predicate w.clone(freeze: false), :frozen?
+  end
 
   def test_receiver_outside_the_cawrap_line_is_refused
     # CScalar and the Face classes inherit the singleton method from

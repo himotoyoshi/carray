@@ -234,8 +234,17 @@ class CAStruct::Builder  # :nodoc:
   end
 
   # @!visibility private
+  # A nested member reads as an element of the nested struct over the
+  # parent's own bytes (a field view), so writing to it writes to the
+  # parent, as writing to an array member does.  A frozen parent gives a
+  # frozen nested element.
   def self.build_nested_struct_dispatcher (offset, nested_class)
-    reader = ->(data) { nested_class.decode(data.field(offset, nested_class)) }
+    reader = ->(data) {
+      element = nested_class.allocate
+      element.instance_variable_set(:@data, data.field(offset, nested_class).parent)
+      element.freeze if data.frozen?
+      element
+    }
     writer = ->(data, val) { data.field(offset, nested_class)[0] = val }
     [reader, writer].freeze
   end
@@ -296,7 +305,22 @@ class CAStruct::Builder  # :nodoc:
     CA_CMPLX128 => CA_ALIGN_FLOAT64,
   }
 
+  # Raises ArgumentError when `opt` names a key outside `allowed`.  The
+  # options are read one key at a time, so a misspelt key would otherwise
+  # be ignored and the layout would change without a word.
+  def self.check_keys! (opt, allowed, where)
+    unknown = opt.keys - allowed
+    return if unknown.empty?
+    raise ArgumentError, "#{where}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+                         unknown.map(&:inspect).join(", ")
+  end
+
+  BUILDER_KEYS = [:pack, :size, :order_by].freeze
+  MEMBER_KEYS  = [:offset, :bytes, :endian].freeze
+  NESTED_KEYS  = (BUILDER_KEYS + [:type, :offset]).freeze
+
   def initialize (type, opt = {})
+    CAStruct::Builder.check_keys!(opt, BUILDER_KEYS, type.to_s)
     if not opt[:pack].nil? and not opt[:pack].is_a?(Integer)
       raise CAStruct::DefinitionError,
             "invalid :pack value #{opt[:pack].inspect} (expected nil or Integer)"
@@ -305,10 +329,42 @@ class CAStruct::Builder  # :nodoc:
     @align      = opt[:pack] ### nil for alignment, int for pack(n)
     @members    = []         ### array of CArray::Struct::Builder::Member
     @offset     = 0          ### offset of each member and size of struct
+    @extent     = 0          ### furthest byte any member reaches
     @align_max  = 1          ### maximum of alignment among members
     @size       = opt[:size] ### user defined struct size
     @bit_offset = 0          ### 0..7, sub-byte position for bitfield accumulator
+    @order_by   = opt[:order_by] ### member names the records are ordered by
   end
+
+  # The `order_by:` members, as member names.  Each has to be a member of
+  # this struct that holds one ordered value: not a nested record, an array
+  # member or a complex number.
+  def order_keys (table)
+    keys = Array(@order_by).map(&:to_s)
+    if keys.empty?
+      raise CAStruct::DefinitionError, "order_by: names no member"
+    end
+    keys.each do |key|
+      unless table.key?(key)
+        raise CAStruct::DefinitionError, "order_by: #{key.inspect} is not a member"
+      end
+      type = table[key][1]
+      if type.is_a?(Class) && type <= CAStruct
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is a nested record; order by its members instead"
+      end
+      if type.is_a?(CArray)
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is an array member, which has no order"
+      end
+      if [:cmplx64, :cmplx128].include?(type)
+        raise CAStruct::DefinitionError,
+              "order_by: #{key.inspect} is complex, which has no order"
+      end
+    end
+    keys.freeze
+  end
+  private :order_keys
 
   # Round up the byte cursor if the bitfield accumulator is mid-byte.
   # Called before placing a non-bit member so the byte member starts
@@ -364,6 +420,9 @@ class CAStruct::Builder  # :nodoc:
       klass = Class.new(CAUnion)
     end
     # ---
+    # A member placed by an explicit offset can end before an earlier one
+    # does, so the body runs to the furthest member, not the last one.
+    @offset = @extent if @extent > @offset
     if @align.nil?
       @offset = alignment(@offset, :align_max)
     end
@@ -406,6 +465,7 @@ class CAStruct::Builder  # :nodoc:
     names.freeze
     klass.const_set(:MEMBER_TABLE, table)   ### required element as data class
     klass.const_set(:MEMBERS, names)
+    klass.const_set(:ORDER_BY, order_keys(table)) if @order_by
     # ---
     # Step 3 dispatch table: precompute a per-member [reader, writer]
     # Proc pair so `record[name]` is one Hash lookup + one Proc call,
@@ -424,14 +484,23 @@ class CAStruct::Builder  # :nodoc:
     klass.const_set(:FAST_PRIMITIVES,
                     self.class.build_fast_primitives(table, @offset).freeze)
     # ---
+    # An accessor for each member, unless the name is already a method of
+    # the element (hash, size, class, initialize, ...): the accessor would
+    # replace it.  Such a member is read as s["name"] only, as a record
+    # array's members always are.
     klass.module_eval {
+      taken = ->(m) { method_defined?(m) || private_method_defined?(m) }
       names.each do |name|
-        define_method(name) {
-          return self[name]
-        }
-        define_method("#{name}=") { |val|
-          return self[name] = val
-        }
+        unless taken.(name)
+          define_method(name) {
+            return self[name]
+          }
+        end
+        unless taken.("#{name}=")
+          define_method("#{name}=") { |val|
+            return self[name] = val
+          }
+        end
       end
     }
     # ---
@@ -471,6 +540,9 @@ class CAStruct::Builder  # :nodoc:
   end
 
   def pack (addr, align, opt={})
+    if addr < 0
+      raise CAStruct::DefinitionError, format("negative member offset: %d", addr)
+    end
     if ( addr % align ) != 0
       raise CAStruct::DefinitionError,
             format("invalid offset for packing: %d not aligned to %d", addr, align)
@@ -491,6 +563,7 @@ class CAStruct::Builder  # :nodoc:
   #   @param opt [Hash] member options (`:offset`, `:bytes`, `:endian`, ...).
   #   @return [Member]
   def member (data_type, id = nil, opt = {})
+    CAStruct::Builder.check_keys!(opt, MEMBER_KEYS, "member")
     opt = opt.clone
     # If a bit member sequence was in flight, round up to a clean byte
     # boundary before placing this byte-typed member.
@@ -504,6 +577,10 @@ class CAStruct::Builder  # :nodoc:
     when :struct                           ### struct
       case @align
       when nil                             ### -- aligned
+        if opt[:offset]
+          raise CAStruct::DefinitionError,
+                "offset: places a member only in a packed struct (pass pack:)"
+        end
         @offset = alignment(@offset, data_type, opt)
         opt[:offset] = @offset
       else                                 ### -- packed
@@ -516,7 +593,12 @@ class CAStruct::Builder  # :nodoc:
       mem = Member.new(id, data_type, opt)
       @members.push(mem)
       @offset += mem.byte_length
+      @extent = @offset if @offset > @extent
     when :union                            ### union
+      if opt[:offset] && opt[:offset] != 0
+        raise CAStruct::DefinitionError,
+              "a union member is always at offset 0 (got offset: #{opt[:offset]})"
+      end
       alignment(0, data_type, opt)
       opt[:offset] = 0
       mem = Member.new(id, data_type, opt)
@@ -537,17 +619,19 @@ class CAStruct::Builder  # :nodoc:
   #     `type:` is provided.
   def struct (*args, &block)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, NESTED_KEYS, "struct")
     if block
-      opt = {:pack => @align}.update(opt)
-      st = self.class.new(:struct, opt).define(&block)
+      inner = {:pack => @align}.update(opt.slice(*BUILDER_KEYS))
+      st = self.class.new(:struct, inner).define(&block)
     elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
       raise CAStruct::DefinitionError,
             "no type given for nested struct member (pass a block or :type)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(st, arg)
+      member(st, arg, place)
     end
     return st
   end
@@ -562,17 +646,19 @@ class CAStruct::Builder  # :nodoc:
   #     `type:` is provided.
   def union (*args, &block)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, NESTED_KEYS, "union")
     if block
-      opt = {:pack => @align}.update(opt)
-      st = self.class.new(:union, opt).define(&block)
+      inner = {:pack => @align}.update(opt.slice(*BUILDER_KEYS))
+      st = self.class.new(:union, inner).define(&block)
     elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
       raise CAStruct::DefinitionError,
             "no type given for nested union member (pass a block or :type)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(st, arg)
+      member(st, arg, place)
     end
     return st
   end
@@ -585,12 +671,14 @@ class CAStruct::Builder  # :nodoc:
   #     CArray template.
   def array (*args)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, [:type, :offset], "array")
     if not opt[:type] or not opt[:type].kind_of?(CArray)
       raise CAStruct::DefinitionError,
             "no :type given for array member (expected a CArray template)"
     end
+    place = opt.key?(:offset) ? {:offset => opt[:offset]} : {}
     args.each do |arg|
-      member(opt[:type], arg)
+      member(opt[:type], arg, place)
     end
   end
 
@@ -618,6 +706,13 @@ class CAStruct::Builder  # :nodoc:
             "bit member requires bits: as an Integer in 1..64 (got #{bits.inspect})"
     end
     total_bit_offset = @offset * 8 + @bit_offset
+    # A bit member is read from one word of up to 8 bytes starting at the
+    # byte it begins in, so it may not reach past the 64th bit of that word.
+    if (total_bit_offset % 8) + bits > 64
+      raise CAStruct::DefinitionError,
+            "bit member #{name.to_s.inspect} (bits: #{bits}) starts at bit " \
+            "#{total_bit_offset % 8} of a byte and would span more than 8 bytes"
+    end
     mem = Member.new(name.to_s, :bitfield,
                      {:bits       => bits,
                       :bit_offset => total_bit_offset,
@@ -676,6 +771,7 @@ class CAStruct::Builder  # :nodoc:
                 "#{typename} requires at least one member name " \
                 "(use nil for anonymous padding)"
         end
+        CAStruct::Builder.check_keys!(opt, MEMBER_KEYS, "#{typename}")
         CAStruct::Builder.validate_endian!(opt, "#{typename}", #{allow_endian})
         args.each do |arg|
           member(:#{typename}, arg, opt)

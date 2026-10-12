@@ -38,7 +38,7 @@ class CArray
 
     if elements.zero?
       if weights
-        out = CArray.new(weights.data_type, [length])
+        out = CArray.new(weights.data_type, [length], bytes: weights.bytes)
       else
         out_type = (length > 0xFFFFFFFF) ? CA_UINT64 : CA_UINT32
         out = CArray.new(out_type, [length])
@@ -54,7 +54,7 @@ class CArray
       # Every cell is masked: no labels to count, same result as an empty
       # input (all-zero output of the requested minimum length).
       if weights
-        out = CArray.new(weights.data_type, [length])
+        out = CArray.new(weights.data_type, [length], bytes: weights.bytes)
       else
         out_type = (length > 0xFFFFFFFF) ? CA_UINT64 : CA_UINT32
         out = CArray.new(out_type, [length])

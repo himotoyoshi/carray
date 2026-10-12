@@ -30,7 +30,7 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
   def test_missing_key_is_union_and_nil
     recs = [{ "a" => 1, "b" => 2 }, { "a" => 3 }]
     df = CAFrame.from_records(recs)
-    assert_equal ["a", "b"], df.variable_names            # union, first-appearance order
+    assert_equal ["a", "b"], df.column_names            # union, first-appearance order
     assert_equal 2, df["b"][0]
     assert_equal UNDEF, df["b"][1]                   # missing -> UNDEF
   end
@@ -88,14 +88,14 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
   def test_symbol_keys_stringified
     recs = [{ temp: 1.0 }, { temp: 2.0 }]
     df = CAFrame.from_records(recs)
-    assert_equal ["temp"], df.variable_names
+    assert_equal ["temp"], df.column_names
     assert_equal :float64, df["temp"].data_type
   end
 
   def test_empty_records
     df = CAFrame.from_records([])
     assert_equal 0, df.nrow
-    assert_equal [], df.variable_names
+    assert_equal [], df.column_names
   end
 
   def test_non_array_raises
@@ -168,5 +168,23 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
     df = CAFrame.from_records([{ "a" => 1, "b" => nil }])
     json = JSON.generate(df.to_records)
     assert_equal [{ "a" => 1, "b" => nil }], JSON.parse(json)
+  end
+
+  # A Complex column used to become float64, and every value in it UNDEF.
+  def test_complex_values_build_a_complex_column
+    df = CAFrame.from_records([{ "c" => Complex(1, 2) }, { "c" => 3 }, { "c" => nil }])
+    assert_equal CA_CMPLX128, df["c"].data_type
+    assert_equal [Complex(1.0, 2.0), Complex(3.0, 0.0), UNDEF], df["c"].to_a
+    z = CAFrame.new("z" => CA_CMPLX128([1 + 2i, 3]))
+    assert_equal z["z"].to_a, CAFrame.from_records(z.to_records)["z"].to_a
+  end
+
+  # A float column would round them, so Rational and BigDecimal stay exact.
+  def test_rational_and_bigdecimal_values_stay_object
+    require "bigdecimal"
+    df = CAFrame.from_records([{ "r" => Rational(1, 3), "b" => BigDecimal("0.1") }])
+    assert_equal [:object, :object], [df["r"].data_type, df["b"].data_type]
+    assert_equal [Rational(1, 3)], df["r"].to_a
+    assert_equal [BigDecimal("0.1")], df["b"].to_a
   end
 end

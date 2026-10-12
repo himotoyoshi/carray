@@ -14,6 +14,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_axis_integer */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_partition_quick_* / ca_partition_nan_* */
@@ -23,7 +24,6 @@
 /* External entries reached at link time (extern declarations rather than
    carray.h additions to keep the public header lean): */
 extern VALUE rb_ca_remap_new         (VALUE cary, VALUE rmapper);           /* ca_obj_remap.c */
-extern VALUE rb_ca_partition_addr_ki (VALUE self, VALUE vaxis, VALUE vkth); /* carray_kernels.c (generated, bind_ruby: false) */
 /* _mp ("masked position") twin: explicit masked_last, used by `partition`
    / `partition_copy` to pass masked_position: through (see MASKED_POSITION
    rev1 in mkkernel.rb's MkKernel.sort doc). */
@@ -111,7 +111,21 @@ ca_quickselect_bytes (char *buf, ca_size_t lo, ca_size_t hi,
 #undef QSCMP
 }
 
-/* partition_copy(kth, axis: 0) — eager counterpart to `partition(kth,
+/* The kth of a partition along a fiber of length n: an Integer in
+   -n <= kth < n, negative counting from the end. */
+static ca_size_t
+partition_kth (ca_size_t n, VALUE vkth)
+{
+  ca_size_t raw = (ca_size_t) ca_integer_arg(vkth, "kth", NULL);
+  ca_size_t kth = ( raw < 0 ) ? raw + n : raw;
+  if ( kth < 0 || kth >= n ) {
+    rb_raise(rb_eArgError, "%s: kth %lld out of range for length %lld",
+             ca_calling_method_name(), (long long) raw, (long long) n);
+  }
+  return kth;
+}
+
+/* partition_copy(kth, axis:) — eager counterpart to `partition(kth,
  * axis:)`.  Returns a fresh entity CArray with the kth fiber-local
  * position holding the kth-smallest value.  Average O(n) per fiber via
  * quickselect.  Mask handling, axis kwarg, kth validation: identical to
@@ -141,22 +155,10 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   }
 
   /* Normalize axis. */
-  int axis = NUM2INT(vaxis);
-  if ( axis < 0 ) axis += cat->ndim;
-  if ( axis < 0 || axis >= cat->ndim ) {
-    rb_raise(rb_eArgError, "partition_copy: axis %d out of range for ndim %d",
-             NUM2INT(vaxis), cat->ndim);
-  }
+  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL), cat->ndim, NULL);
 
-  /* Normalize kth (-dim[axis] <= kth < dim[axis], negative counts from end). */
   ca_size_t fiber_n = cat->dim[axis];
-  ca_size_t kth = (ca_size_t) NUM2SSIZET(vkth);
-  if ( kth < 0 ) kth += fiber_n;
-  if ( kth < 0 || kth >= fiber_n ) {
-    rb_raise(rb_eArgError,
-             "partition_copy: kth %ld out of range for axis %d (dim=%ld)",
-             (long) NUM2SSIZET(vkth), axis, (long) fiber_n);
-  }
+  ca_size_t kth = partition_kth(fiber_n, vkth);
 
   /* CA_OBJECT branch: partition_index_ki carries the rb_funcall(<=>)
    * comparator.  Build the entity via partition_index_ki ->
@@ -193,8 +195,10 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
                                                    INT2NUM((int) fbytes));
     CArray *cao;
     TypedData_Get_Struct(vout, CArray, &carray_data_type, cao);
-    char *swap_tmp = ALLOCA_N(char, fbytes);
-    char *pivot    = ALLOCA_N(char, fbytes);
+    /* Two cells of scratch.  ALLOCV, not the stack: a cell can be wide. */
+    volatile VALUE scratch_holder = 0;
+    char *swap_tmp = ALLOCV_N(char, scratch_holder, 2 * (size_t) fbytes);
+    char *pivot    = swap_tmp + fbytes;
     ca_iter_state st_in, st_out;
     char       *pi, *po;
     ca_size_t   n;
@@ -205,15 +209,16 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
         ca_quickselect_bytes(po, 0, n - 1, kth, fbytes, NULL, swap_tmp, pivot);
       }
     }
+    ALLOCV_END(scratch_holder);
     return vout;
   }
 
   if ( cat->data_type != CA_BOOLEAN &&
        (cat->data_type < CA_INT8 || cat->data_type > CA_FLOAT64) ) {
     rb_raise(rb_eCADataTypeError,
-             "partition_copy: data_type %d not supported "
-             "(expected one of: bool, i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, object)",
-             cat->data_type);
+             "partition_copy: source data_type :%s not supported "
+             "(expected boolean, an integer or float type, or object)",
+             ca_type_name[cat->data_type]);
   }
 
   volatile VALUE vout = rb_ca_template_with_type(target,
@@ -289,6 +294,13 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   if ( ! ca_has_mask(ca) ) {
     return rb_ca_partition_copy_c(self, vkth, vaxis);
   }
+  /* Check axis and kth here, so a bad one is reported as partition_copy's
+     rather than as the partition this delegates to. */
+  {
+    int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL),
+                                             ca->ndim, NULL);
+    partition_kth(ca->dim[axis], vkth);
+  }
   /* rb_ca_partitioned_view's rb_scan_args "1:" pattern needs call-frame
      keyword-splat state, only set by full Ruby method dispatch -- a raw
      C call segfaults/misparses (same constraint documented on
@@ -307,34 +319,56 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   return obj;
 }
 
-/* Ruby entry: partition_copy(kth, axis: 0, masked_position: :last) */
+/* Ruby entry: partition_copy(kth, axis: nil, masked_position: :last).
+   No axis means the whole array, as for sort_copy: flatten first. */
 static VALUE
-rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
+rb_ca_partition_copy_body (int argc, VALUE *argv, VALUE self)
 {
   VALUE vkth, rkw = Qnil;
-  VALUE vaxis = INT2NUM(0);
+  VALUE vaxis = Qnil;
   VALUE vmasked_position = Qnil;
   rb_scan_args(argc, argv, "1:", &vkth, &rkw);
   rb_scan_options(rkw, "axis,masked_position", &vaxis, &vmasked_position);
+  if ( NIL_P(vaxis) ) {
+    self  = rb_ca_flatten(self);
+    vaxis = INT2NUM(0);
+  }
 
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "partition_copy: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
+
+  /* Face gate, the same policy as the sort family's: a fixlen storage
+     partitions by memcmp, a numeric storage only when ORDERABLE (its order
+     is the surface order).  The selection runs on the storage and the Face
+     is put back on the result.  Without this the surface fixlen bytes were
+     selected by memcmp, which is not the order of a little-endian integer
+     (CATime) and not the label order of a code (CACategorical). */
+  volatile VALUE face = Qnil;
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_face(ca) ) {
+      VALUE st = rb_ca_strip_face_value(self);
+      CArray *sc;
+      TypedData_Get_Struct(st, CArray, &carray_data_type, sc);
+      if ( sc->data_type != CA_FIXLEN
+           && ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+        ca_face_refuse_order("partition_copy", self, "order");
+      }
+      face = self;
+      self = st;
     }
   }
-  return rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
+
+  VALUE out = rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
+
+  if ( face != Qnil ) {
+    out = ca_face_relift_entity(face, out);
+  }
+  return out;
 }
 
-/* partition(kth, axis: 0, masked_position: :last)
+/* partition(kth, axis: nil, masked_position: :last)
  *
  * Returns a CARemap view of +self+ partitioned along +axis+ such that
  * the cell at the kth fiber-local position contains the kth-smallest
@@ -344,7 +378,7 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
  * :partition).
  *
  * Signature mirrors rb_ca_sorted_view: positional kth + optional axis: /
- * masked_position: kwargs (default 0 / :last).  Mask handling mirrors
+ * masked_position: kwargs (default nil = whole array / :last).  Mask handling mirrors
  * {sort}: masked cells are an incomparable sentinel clustered at
  * masked_position:, excluded from the kth-selection; a kth landing in
  * the masked cluster needs no selection (unspecified order, same
@@ -356,33 +390,27 @@ static VALUE
 rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
 {
   VALUE vkth, rkw = Qnil;
-  VALUE vaxis = INT2NUM(0);
+  VALUE vaxis = Qnil;
   VALUE vmasked_position = Qnil;
 
   rb_scan_args(argc, argv, "1:", &vkth, &rkw);
   rb_scan_options(rkw, "axis,masked_position", &vaxis, &vmasked_position);
 
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "partition: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   /* CA_FIXLEN flows through the same partition_addr_ki fixlen dialect
-     as numeric; masked_position: applies uniformly across data types. */
-  VALUE target = self;
+     as numeric; masked_position: applies uniformly across data types.
+     No axis means the whole array, as for sort: partition the flattened
+     view. */
+  volatile VALUE target = self;
+  if ( NIL_P(vaxis) ) {
+    target = rb_ca_flatten(self);
+    vaxis  = INT2NUM(0);
+  }
 
   /* partition_addr_ki_mp validates axis + kth, splits masked cells to
      masked_position:, and quickselects per fiber over the unmasked
@@ -399,6 +427,24 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
 }
 
 /* ----------------------------------------------------------------------- */
+
+
+typedef struct { int argc; VALUE *argv; VALUE self; } pc_call_t;
+
+static VALUE
+pc_answer_body (VALUE p)
+{
+  pc_call_t *c = (pc_call_t *) p;
+  return rb_ca_partition_copy_body(c->argc, c->argv, c->self);
+}
+
+/* An error raised by the methods this one calls names this one. */
+static VALUE
+rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
+{
+  pc_call_t c = { argc, argv, self };
+  return ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+}
 
 void
 Init_carray_partition (void)

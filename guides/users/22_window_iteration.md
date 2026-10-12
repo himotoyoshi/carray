@@ -195,10 +195,7 @@ For a zero-padded filter — the usual image-filter boundary — construct the i
 
 ## Order statistics
 
-`median`, `percentile`, and `quantile` need every value of a window held together. The core order statistics they call have two constraints that shape the surface here:
-
-* they take a **single** axis, so for an N-D window CArray materialises the windows and flattens the window axes into one before the core call; and
-* they **do not accept a masked input**, so the default `:skip` (a masked margin) is **rejected** — you must supply an unmasked margin.
+`median`, `percentile`, and `quantile` need every value of a window held together. The core order statistics they call take a **single** axis, so for an N-D window CArray materialises the windows and flattens the window axes into one before the core call. Masked cells, and the UNDEF margin of the default `:skip`, are left out of each window, so an edge window takes the order statistic of the cells it has.
 
 ```ruby
 sig = CArray.float64(8).seq(1)
@@ -210,13 +207,11 @@ sig.windows(-2..2, bounds: :truncate).median     # interior only, output shrinks
 #  => [ 3.0, 4.0, 5.0, 6.0 ]
 ```
 
-Calling an order statistic under the default `:skip` raises with a pointer to the fix:
+Under the default `:skip` an edge window has fewer cells:
 
 ```ruby
-sig.windows(-2..2).median
-#  ArgumentError: windowed order statistics need an unmasked margin;
-#  use bounds: :nearest (edge-extend) or bounds: :truncate (valid).
-#  For an UNDEF-margin median use reduce { |w| w.median } (slower).
+sig.windows(-2..2).median                        # edge windows shrink
+#  => [ 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 6.5, 7.0 ]
 ```
 
 `percentile` follows the usual `CArray#percentile` rules — one argument returns one array, several return an array of arrays — and `quantile` returns the five-number summary `[min, Q1, median, Q3, max]`.

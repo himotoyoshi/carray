@@ -93,21 +93,24 @@ ca_select_snapshot_masked (VALUE arg)
 {
   CArray **pair = (CArray **) arg;
   CArray *select = pair[0], *snap = pair[1];
-  boolean8_t *p, *q, *m;
+  boolean8_t *q, *m;
   ca_size_t i;
-  ca_attach(select);
+  volatile VALUE holder = 0;
+  ca_copy_data(select, snap->ptr);
+  ca_update_mask(select);
+  m = ALLOCV_N(boolean8_t, holder, select->elements);
+  ca_copy_data(select->mask, (char *) m);
   q = (boolean8_t *) snap->ptr;
-  p = (boolean8_t *) select->ptr;
-  m = (boolean8_t *) select->mask->ptr;
   for (i = 0; i < select->elements; i++) {
-    *q = ( *m ) ? 0 : *p;
-    q++; p++; m++;
+    if ( m[i] ) {
+      q[i] = 0;
+    }
   }
-  ca_detach(select);
+  ALLOCV_END(holder);
   return Qnil;
 }
 
-static CArray *
+CArray *
 ca_select_snapshot (CArray *select)
 {
   if ( ! ca_is_boolean_type(select) ) {
@@ -352,6 +355,7 @@ static void
 ca_select_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CASelect  *ca = (CASelect *) ap;
   CArray    *parent = ca->parent;
   ca_size_t  n = counts[0];
@@ -414,17 +418,21 @@ ca_select_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 }
 
+/* A parent with no memory to lend (ca_parent_lends_no_memory) is never
+   attached: the view owns its buffer, filled and drained through xfer_all,
+   which asks the parent for the selected cells only.  The predicate asks
+   what the parent is, not whether it is attached now, so attach, sync and
+   detach all take the same branch. */
+
 static void
 ca_select_func_allocate (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  ca_attach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_attach(ca->parent);
+  }
   ca->ptr = xmalloc(ca_length(ca));
 }
-
-/* Every attach / sync / xfer_all / xfer_stride / fill_data path
-   dispatches through the descriptor engine with the same shape
-   CASelectAxis uses: one axis over a flattened parent. */
 
 static void
 ca_select_func_attach (void *ap)
@@ -432,6 +440,12 @@ ca_select_func_attach (void *ap)
   CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
+
   ca_attach(ca->parent);
   ca_select_describe_axes(ca, desc, pdims);
   ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
@@ -444,6 +458,12 @@ ca_select_func_sync (void *ap)
   CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
+
   ca_select_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, ca->ptr);
@@ -454,16 +474,20 @@ static void
 ca_select_func_detach (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  xfree(ca->ptr);
-  ca->ptr = NULL;
-  ca_detach(ca->parent);
+  if ( ca->ptr ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+  }
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_detach(ca->parent);
+  }
 }
 
-/* Fast-path core used by xfer_all's attached-parent branch and the
-   cold-parent 2-pass scratch branch below. */
+/* The transfer against parent->ptr, for ca_axis_view_xfer_all. */
 static void
-ca_select_func_run_fast_path (CASelect *ca, char *data, int dir)
+ca_select_func_run_fast_path (void *ap, char *data, int dir)
 {
+  CASelect *ca = (CASelect *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
   ca_select_describe_axes(ca, desc, pdims);
@@ -476,33 +500,10 @@ ca_select_func_run_fast_path (CASelect *ca, char *data, int dir)
   }
 }
 
-/* Cold parent is served by a 2-pass scratch (gather parent into a
-   local buffer, dispatch through the fast path against the buffer,
-   scatter back on PUT).  Deliberately avoids ca_attach(parent) so
-   that a silent transitive attach cannot re-enter through here. */
 static void
 ca_select_func_xfer_all (void *ap, void *data, int dir)
 {
-  CASelect *ca = (CASelect *) ap;
-  if ( ca->parent->ptr ) {
-    ca_select_func_run_fast_path(ca, (char *) data, dir);
-    return;
-  }
-  {
-    volatile VALUE holder;
-    CArray   *parent = ca->parent;
-    ca_size_t plen   = parent->elements * parent->bytes;
-    char     *parent_scratch = ALLOCV_N(char, holder, plen);
-    char     *parent_ptr_saved = parent->ptr;
-    ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
-    parent->ptr = parent_scratch;
-    ca_select_func_run_fast_path(ca, (char *) data, dir);
-    if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
-    }
-    parent->ptr = parent_ptr_saved;
-    ALLOCV_END(holder);
-  }
+  ca_axis_view_xfer_all(ap, ca_select_func_run_fast_path, 1, data, dir);
 }
 
 static void
@@ -531,18 +532,14 @@ ca_select_func_fill_data (void *ap, void *ptr)
   ca_select_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
 ca_select_func_create_mask (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_select_new_share(ca->parent->mask, ca->select);
 }
 
@@ -624,6 +621,7 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
   CASelect *ca, *cs;
 
   TypedData_Get_Struct(self,  CASelect, &caselect_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CASelect, &caselect_data_type, cs);
 
   /* Re-snapshot from the source's selector copy so the two views

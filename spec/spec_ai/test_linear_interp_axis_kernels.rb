@@ -40,7 +40,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
   def test_binary_mask_self_raises
     y = CArray.float64(10) { |i| i.to_f }
     y[3] = UNDEF
-    assert_raise(RuntimeError) { y.linear_section_binary_ki(2.5, 0) }
+    assert_raise(ArgumentError) { y.linear_section_binary_ki(2.5, 0) }
   end
 
   # ---- linear_section_linear (= legacy `section_linear` semantic) ------

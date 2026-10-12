@@ -81,7 +81,7 @@ class TestSearchNoaxisUnified < Test::Unit::TestCase
   def test_bsearch_masked_self_raises
     a = CA_INT([10, 20, 30, 40, 50])
     a.mask = [0, 0, 1, 0, 0]
-    assert_raise(RuntimeError) { a.bsearch(30) }
+    assert_raise(ArgumentError) { a.bsearch(30) }
   end
 
   # ---- search: scalar (parity) + array/fixlen (S3 additive) ----------

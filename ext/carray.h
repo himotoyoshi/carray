@@ -716,6 +716,12 @@ typedef struct {
                               0 = outer-axis stack (legacy default).
                               parent_ndim = K innermost (= old merge at=-1).
                               Set by ca_stack_setup_with_axis / preserved on clone. */
+  CArray  **mask_standins; /* NULL, or ALLOC_N(CArray*, n_parents) once the mask is
+                              built: the all-false masks standing in for parents that
+                              have none (owned, freed with the view) */
+  CArray   *mask_owner;    /* on the mask of a CAStack: that CAStack, whose stand-ins
+                              this mask reads until they give way to the parents'
+                              own masks (ca_multi_parent_mask_refresh); else NULL */
 } CAStack;
 
 /* CAMeld (ragged concatenate view along an existing axis).  Unlike CAStack
@@ -749,6 +755,8 @@ typedef struct {
   ca_size_t *seg_offset;   /* ALLOC_N(ca_size_t, K+1); prefix sum along meld_axis.
                               seg_offset[0]=0, seg_offset[k+1]=seg_offset[k]+parents[k]->dim[meld_axis],
                               seg_offset[K]=dim[meld_axis]. */
+  CArray  **mask_standins; /* as CAStack's: stand-in masks this view owns, or NULL */
+  CArray   *mask_owner;    /* as CAStack's */
 } CAMeld;
 
 /* Multi-parent view layout convention (CA_FLAG_MULTI_PARENTS).  A view that
@@ -786,9 +794,14 @@ typedef struct {
   VALUE     self;
 } CAObject;                /* 48 + 4*(ndim) (bytes) */
 
-/* 
-  CAObjectMask is an internal class 
-  used only as mask array of CAObject.
+/*
+  CAObjectMask is an internal class used only as the mask array of a
+  CAObject.  Its bits live in the CAObject's mask hooks (mask_copy_data,
+  mask_fetch_addr, ...) when it has them, and in `cache` -- the mask
+  buffer of the CAObject's internal data array -- always.  Like the mask
+  of any view it is cold at rest: ptr is NULL, and every read and write
+  goes through its slots to the hooks.  An attach publishes the cache in
+  ptr, and `holds` counts the attaches not yet detached.
 */
 
 typedef struct {
@@ -807,6 +820,8 @@ typedef struct {
                               ext/ca_array_pool.c. */
   /* -------------*/
   VALUE     array;
+  char     *cache;
+  long      holds;
 } CAObjectMask;
 
 /* CARepeat (Phase R migration): structurally identical to CAStride.
@@ -862,7 +877,7 @@ int8_t ca_promote_type (int8_t a, int8_t b);
 /* Infer a data_type code from a Ruby *value* (literal Numeric, true/false,
    Complex, etc.) — distinct from rb_ca_guess_type which interprets the
    object as a data_type *representation* (e.g. T_FIXNUM as a data_type code).
-   Used by then_else and by ca_lazy_wrap_scalar's bool-self corner case.
+   Used by rb_ca_cast_self_or_other.
    CArray is not accepted (callers should use ca->data_type directly). */
 int8_t ca_value_to_data_type (VALUE obj);
 
@@ -985,21 +1000,21 @@ extern VALUE rb_cCArrayObject;
 #define CA_CHECK_DATA_TYPE(data_type) \
   do { \
     if ( data_type <= CA_NONE || data_type >= CA_NTYPE ) { \
-      rb_raise(rb_eRuntimeError, "invalid data_type id %i", data_type);     \
+      rb_raise(rb_eArgError, "invalid data_type id %i", data_type);     \
     } \
     if ( ! ca_valid[data_type] ) { \
-      rb_raise(rb_eRuntimeError, "data_type %s is disabled", ca_type_name[data_type]);    \
+      rb_raise(rb_eCADataTypeError, "data_type %s is disabled", ca_type_name[data_type]);    \
     } \
   } while (0)
 
 #define CA_CHECK_DATA_TYPE_NUMERIC(data_type) \
   if ( data_type <= CA_NONE || data_type >= CA_NTYPE || !ca_valid[data_type] || data_type == CA_FIXLEN || data_type == CA_OBJECT ) { \
-    rb_raise(rb_eRuntimeError, "invalid numeric data type"); \
+    rb_raise(rb_eCADataTypeError, "invalid numeric data type"); \
   }
 
 #define CA_CHECK_RANK(ndim) \
   if ( ndim <= 0 || ndim > CA_RANK_MAX ) { \
-    rb_raise(rb_eRuntimeError, "invalid ndim"); \
+    rb_raise(rb_eArgError, "invalid ndim"); \
   }
 
 #define CA_CHECK_DIM(ndim, dim)     \
@@ -1007,43 +1022,45 @@ extern VALUE rb_cCArrayObject;
     int8_t i_; \
     for (i_=0; i_<ndim; i_++) { \
       if ( dim[i_] < 0 ) { \
-        rb_raise(rb_eRuntimeError, "negative size dimension at %i-dim", i_);  \
+        rb_raise(rb_eArgError, "negative size dimension at %i-dim", i_);  \
       } \
     } \
   }
 
+/* A fixlen cell is at least one byte wide.  A zero-width cell has one
+   possible value, and a strided view of it cannot say which cell is which:
+   its byte strides are all zero. */
 #define CA_CHECK_BYTES(data_type, bytes) \
   if ( data_type == CA_FIXLEN ) { \
-    if ( bytes < 0 ) {                             \
-      rb_raise(rb_eRuntimeError, "invalid bytes"); \
+    if ( bytes <= 0 ) {                            \
+      rb_raise(rb_eArgError,                   \
+               "invalid bytes (a fixlen needs bytes: of 1 or more)"); \
     } \
   } \
   else { \
     bytes = ca_sizeof[data_type]; \
     if ( bytes <= 0 ) {           \
-      rb_raise(rb_eRuntimeError, "invalid bytes"); \
+      rb_raise(rb_eArgError, "invalid bytes"); \
     } \
   }
 
+/* An index into `n` places, counted from the end when negative, outside of
+   which IndexError is raised naming the method the user called, `what` the
+   index is ("index", "address") and the value given. */
+NORETURN(void ca_index_out_of_range (ca_size_t idx, ca_size_t n, const char *what));
+
+/* Normalise `index` in place against `dim` (a negative one counts from the
+   end) and raise through ca_index_out_of_range when it falls outside. */
 #define CA_CHECK_INDEX(index, dim) \
   do { \
-    if ( index < 0 ) {       \
-      index += (dim);     \
+    ca_size_t ca_check_index_given_ = (index); \
+    if ( (index) < 0 ) {       \
+      (index) += (dim);     \
     } \
-    if ( index < 0 || index >= (dim) ) { \
-      rb_raise(rb_eIndexError, "index out of range ( %" PRId64 " <=> 0..%" PRId64 " )", (int64_t) index, (int64_t) dim-1); \
+    if ( (index) < 0 || (index) >= (dim) ) { \
+      ca_index_out_of_range(ca_check_index_given_, (dim), "index"); \
     } \
   } while (0)
-
-#define CA_CHECK_BOUND(ca, idx) \
-  { \
-    int8_t i; \
-    for (i=0; i<ca->ndim; i++) { \
-      if ( idx[i] < 0 || idx[i] >= ca->dim[i] )  { \
-        rb_raise(rb_eRuntimeError, "index out of range at %i-dim ( %i <=> 0..%i )", i, idx[i], ca->dim[i]-1); \
-      } \
-    } \
-  }
 
 /* -------------------------------------------------------------------- */
 
@@ -1070,6 +1087,10 @@ extern VALUE rb_cCArrayObject;
 #  endif
 #endif
 
+/* A string as a complex cell: a real number read as Float() reads it
+   (nan / inf included), else as Complex() does; anything else raises. */
+double complex ca_str_to_cmplx (VALUE str);
+
 static inline double complex
 rb_carray_num2cmplx (VALUE num)
 {
@@ -1078,6 +1099,12 @@ rb_carray_num2cmplx (VALUE num)
   }
   if ( RB_FLOAT_TYPE_P(num) || RB_INTEGER_TYPE_P(num) ) {
     return (double complex) NUM2DBL(num);
+  }
+  if ( RB_TYPE_P(num, T_STRING) ) {
+    return ca_str_to_cmplx(num);
+  }
+  if ( NIL_P(num) ) {
+    rb_raise(rb_eTypeError, "can't convert nil into Complex");
   }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);
@@ -1125,6 +1152,7 @@ double    OBJ2DBL (VALUE v);
    object->int/float cast loop so an unparseable cell becomes UNDEF instead
    of a silent 0.0 (float) or a raise (int).  See ext/carray_cast.c. */
 int   ca_obj2dbl_ok   (VALUE v, double *out);
+int   ca_obj2cmplx_ok (VALUE v, double complex *out);
 int   rb_obj2long_ok  (VALUE v, long *out);
 int   rb_obj2ulong_ok (VALUE v, unsigned long *out);
 int   rb_obj2ll_ok    (VALUE v, long long *out);
@@ -1293,6 +1321,10 @@ VALUE    rb_ca_farray (VALUE self);
 
 /* --- ca_obj_stride.c --- */
 
+/* ca_stride_setup with ca == NULL runs its checks and returns 0 without
+   writing.  ca_stride_new calls it that way before it allocates, so a
+   rejected argument leaves no struct behind; a subclass constructor can
+   do the same through its own setup function. */
 int       ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
                            int8_t data_type, ca_size_t bytes,
                            int8_t ndim, ca_size_t *dim,
@@ -1459,6 +1491,7 @@ int     ca_is_object_type (void *ap);
 
 void    ca_check_type (void *ap, int8_t data_type);
 #define ca_check_data_type(ap, data_type) ca_check_type(ap, data_type)
+void    ca_check_uninitialized (void *ap);  /* initialize / initialize_copy entry */
 void    ca_check_ndim (void *ap, int ndim);
 void    ca_check_shape (void *ap, int ndim, ca_size_t *dim);
 void    ca_check_same_data_type (void *ap1, void *ap2);
@@ -1474,7 +1507,7 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
 
 /* API : allocate, attach, update, sync, detach */
 
-/* Attach lifecycle contract (R1-R5).  Ownership-based, and NOT transitive.
+/* Attach lifecycle contract (R1-R6).  Ownership-based, and NOT transitive.
    This block is the canonical statement of the contract; the other documents
    copy it.  guides/devel/04_attach_lifecycle.md discusses it at length.
 
@@ -1493,6 +1526,14 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
      R5 (traffic)    Attach hands you a buffer, not a live array.  Use x->ptr;
                      a view derived from x composes past the buffer to the
                      root.
+     R6 (raising)    ca_allocate and ca_attach that raise have taken
+                     nothing; ca_allocate_n and ca_attach_n take all of
+                     their arrays or none.  Close a window with
+                     ca_sync_detach, which detaches even when the sync
+                     raises -- ca_sync then ca_detach leaves the window open
+                     on a raise.  Anything between that can raise (Ruby
+                     called from inside the window) needs an ensure of its
+                     own.
 */
 
 void    ca_allocate (void *ap);
@@ -1500,6 +1541,7 @@ void    ca_attach (void *ca);
 void    ca_update (void *ca);
 void    ca_sync (void *ca);
 void    ca_detach (void *ca);
+void    ca_sync_detach (void *ca);
 
 void    ca_allocate_n (int n, ...);
 void    ca_attach_n (int n, ...);
@@ -1672,6 +1714,7 @@ void    ca_parse_range_without_check (VALUE arg, ca_size_t size,
                         ca_size_t *offset, ca_size_t *count, ca_size_t *step);
 
 int     ca_equal (void *ap, void *bp);
+int     ca_eql_storage (void *ap, void *bp);
 void    ca_zerodiv(void)  __attribute__((noreturn));
 /* ca_rand removed in 3.0; use rb_random_real/rb_random_ulong_limited instead */
 ca_size_t ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k);

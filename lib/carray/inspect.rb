@@ -17,13 +17,12 @@ class CArray::Inspector  # :nodoc:
       raise "can't inspect CArray of ndim == 0"
     end
     formatter  = get_formatter()
-    class_name = get_class_name()
-    type_name  = get_type_name()
+    label      = get_label()
     shape      = get_shape()
     data_spec  = get_data_spec(0, Array.new(@carray.ndim){0}, formatter, abbrev)
     info_list  = get_info_list()
     output = ["<",
-              format("%s.%s(%s)", class_name, type_name, shape.join(",")),
+              format("%s(%s)", label, shape.join(",")),
               ": ",
               info_list.join(" "),
               "\n",
@@ -34,6 +33,16 @@ class CArray::Inspector  # :nodoc:
   end
   
   private
+
+  # The name before the shape: the class and the storage type, or what a
+  # Face says instead through a private inspect_label (CATime gives its
+  # tick, which the storage type does not tell).
+  def get_label
+    if @carray.respond_to?(:inspect_label, true)
+      return @carray.send(:inspect_label)
+    end
+    return format("%s.%s", get_class_name, get_type_name)
+  end
 
   def get_class_name
     return @carray.class.to_s
@@ -110,15 +119,27 @@ class CArray::Inspector  # :nodoc:
   end
 
   def get_formatter
-    # A Face that defines storage_to_scalar decodes each cell into a surface
+    # A Face can write its cells itself through a private
+    # inspect_cell_formatter, a lambda taking the decoded cell.
+    if @carray.respond_to?(:inspect_cell_formatter, true)
+      return @carray.send(:inspect_cell_formatter)
+    end
+    # A Face that defines storage_to_element decodes each cell into a surface
     # value (CATime::Element, a String, a category label, ...) that has nothing
     # to do with the storage data_type, so the formatter must follow the decoded
     # value, not the storage.  Faces without the hook (CAString) hand back the
     # stored value itself and fall through to the storage formatters below.
-    if @carray.face? and @carray.respond_to?(:storage_to_scalar)
+    if @carray.face? and @carray.respond_to?(:storage_to_element)
       return lambda { |x| x.inspect }
     end
-    case @carray.data_type
+    data_type = @carray.data_type
+    # The same Faces behind a gated (fixlen) surface hand back the value of
+    # their storage, so they take the storage's formatter.
+    if @carray.face? and data_type == CA_FIXLEN and not @carray.data_class
+      storage = @carray.parent.data_type
+      data_type = storage unless storage == CA_FIXLEN
+    end
+    case data_type
     when CA_BOOLEAN
       # Boolean cells fetch as true/false; show compact 1/0 (masked = _).
       # The type name in the inspect header distinguishes this from an int array.
@@ -134,11 +155,8 @@ class CArray::Inspector  # :nodoc:
                         x.real.inspect, (x.imag >= 0) ? "+" : "-", x.imag.abs.inspect) }
     when CA_FIXLEN
       if @carray.data_class
-        if @carray.bytes <= 6
-          lambda{|x| "%s" % x.encode.dump }
-        else
-          lambda{|x| "%s" % (x.encode.chomp[0, 5]+"...").dump }
-        end
+        # A record shows its members, as the element's own inspect does.
+        lambda{|x| x.inspect }
       else
         if @carray.bytes <= 6
           lambda{|x| "%s" % x.dump }

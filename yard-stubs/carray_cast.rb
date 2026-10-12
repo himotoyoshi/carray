@@ -8,57 +8,75 @@
 # is a top-level function that coerces `obj` (a CArray, Array,
 # Numeric, or anything castable) into a CArray of the named element
 # type, equivalent to `obj.to_ca.as_type(:<type>)`.
+#
+# These are casts, not shape spellings: `CA_INT32(3, 3)` is not the
+# `(3, 3)` array that `CArray.int32(3, 3)` builds, and is refused.
+# A `Range` accepts one more argument, the step, and that is the only
+# two-argument form:
+#
+#     CA_INT32(0..6)        # => [ 0, 1, 2, 3, 4, 5, 6 ]
+#     CA_INT32(0..6, 2)     # => [ 0, 2, 4, 6 ]
+#     CA_INT32(0, 2)        # ArgumentError
+#
+# A step of `0` raises `RuntimeError`.  A step given for anything but a
+# `Range`, or a third argument, raises `ArgumentError`.  An
+# `Enumerator::ArithmeticSequence` already carries its own step, so
+# `CA_INT32((0..6).step(2))` needs no second argument.
+#
+# `CA_FIXLEN` takes `bytes:` instead of a step; see {#CA_FIXLEN}.
 module Kernel
   # @!group CArray cast shorthands
 
   # Coerces `obj` into a `:boolean` CArray. @return [CArray]
-  def CA_BOOLEAN(obj); end
+  def CA_BOOLEAN(obj = nil, step = nil); end
   # Coerces `obj` into an `:int8` CArray. @return [CArray]
-  def CA_INT8(obj); end
+  def CA_INT8(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint8` CArray. @return [CArray]
-  def CA_UINT8(obj); end
+  def CA_UINT8(obj = nil, step = nil); end
   # Coerces `obj` into an `:int16` CArray. @return [CArray]
-  def CA_INT16(obj); end
+  def CA_INT16(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint16` CArray. @return [CArray]
-  def CA_UINT16(obj); end
+  def CA_UINT16(obj = nil, step = nil); end
   # Coerces `obj` into an `:int32` CArray. @return [CArray]
-  def CA_INT32(obj); end
+  def CA_INT32(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint32` CArray. @return [CArray]
-  def CA_UINT32(obj); end
+  def CA_UINT32(obj = nil, step = nil); end
   # Coerces `obj` into an `:int64` CArray. @return [CArray]
-  def CA_INT64(obj); end
+  def CA_INT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:uint64` CArray. @return [CArray]
-  def CA_UINT64(obj); end
+  def CA_UINT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:float32` CArray. @return [CArray]
-  def CA_FLOAT32(obj); end
+  def CA_FLOAT32(obj = nil, step = nil); end
   # Coerces `obj` into a `:float64` CArray. @return [CArray]
-  def CA_FLOAT64(obj); end
+  def CA_FLOAT64(obj = nil, step = nil); end
   # Coerces `obj` into a `:cmplx64` CArray. @return [CArray]
-  def CA_CMPLX64(obj); end
+  def CA_CMPLX64(obj = nil, step = nil); end
   # Coerces `obj` into a `:cmplx128` CArray. @return [CArray]
-  def CA_CMPLX128(obj); end
+  def CA_CMPLX128(obj = nil, step = nil); end
   # Coerces `obj` into an `:object` CArray. @return [CArray]
-  def CA_OBJECT(obj); end
+  def CA_OBJECT(obj = nil, step = nil); end
   # Coerces `obj` into a `CA_SIZE` (platform native size) CArray.
   # @return [CArray]
-  def CA_SIZE(obj); end
-  # Coerces `obj` into a `:fixlen` CArray. @return [CArray]
-  def CA_FIXLEN(obj); end
+  def CA_SIZE(obj = nil, step = nil); end
+  # Coerces `obj` into a `:fixlen` CArray.  `bytes` defaults to the
+  # longest top-level element of an `Array`, or `0` for `nil`.
+  # @return [CArray]
+  def CA_FIXLEN(obj, bytes: nil); end
 
   # Alias of {#CA_UINT8}. @return [CArray]
-  def CA_BYTE(obj); end
+  def CA_BYTE(obj = nil, step = nil); end
   # Alias of {#CA_INT16}. @return [CArray]
-  def CA_SHORT(obj); end
+  def CA_SHORT(obj = nil, step = nil); end
   # Alias of {#CA_INT32}. @return [CArray]
-  def CA_INT(obj); end
+  def CA_INT(obj = nil, step = nil); end
   # Alias of {#CA_FLOAT32}. @return [CArray]
-  def CA_FLOAT(obj); end
+  def CA_FLOAT(obj = nil, step = nil); end
   # Alias of {#CA_FLOAT64}. @return [CArray]
-  def CA_DOUBLE(obj); end
+  def CA_DOUBLE(obj = nil, step = nil); end
   # Alias of {#CA_CMPLX64}. @return [CArray]
-  def CA_COMPLEX(obj); end
+  def CA_COMPLEX(obj = nil, step = nil); end
   # Alias of {#CA_CMPLX128}. @return [CArray]
-  def CA_DCOMPLEX(obj); end
+  def CA_DCOMPLEX(obj = nil, step = nil); end
 
   # @!endgroup
 end
@@ -71,17 +89,21 @@ class CArray
   # @overload to_type(data_type, bytes: nil)
   #   Returns a new entity holding the elements of `self` converted to
   #   `data_type` (an eager copy that owns its storage). Masked cells are
-  #   carried across. When `data_type` is a data_class (a CAStruct
-  #   subclass) the result is wrapped in CARecord.
+  #   carried across, and so are the attributes `self` shows (`attrs`).
+  #   When `data_type` is a data_class (a CAStruct subclass) the result
+  #   is wrapped in CARecord.
   #
   #   When `self` is an `:object` array and `data_type` is an integer or
-  #   float type, each cell is parsed with Ruby `Integer()` / `Float()`
-  #   rules and a cell that cannot be parsed becomes UNDEF (masked) rather
-  #   than a silent `0.0` or a raise. This is symmetric for float and int:
-  #   `nil`, `""`, `"xx"`, and (for int targets) a non-integer string such
-  #   as `"1.5"` all map to UNDEF. Explicit `nan` / `inf` / `infinity`
-  #   literals (optional sign, case-insensitive, matched as a whole token)
-  #   are kept as NaN / ±Infinity.
+  #   float type, a String cell is read as a decimal number, not as a Ruby
+  #   literal: `"010"` is 10, and `"0x10"` / `"1_000"` / `"0b11"` are not
+  #   numbers. An integer type takes a number whose value is exactly an
+  #   integer (`"1.0"`, `"1e3"`) but not `"1.5"`. A cell that cannot be
+  #   read becomes UNDEF (masked) rather than a silent `0.0` or a raise:
+  #   `nil`, `""`, `"xx"`, and a String integer the type cannot hold
+  #   (`"300"` into `:int8`) all map to UNDEF. Explicit `nan` / `inf` /
+  #   `infinity` (optional sign, any case) are kept as NaN / ±Infinity for
+  #   float types. A cell that is not a String goes through `Integer()` /
+  #   `Float()` as before.
   #   @param data_type [Symbol, Integer, Class, String] target element type.
   #   @param bytes [Integer, nil] element width in bytes, required for
   #     `:fixlen`.
@@ -337,7 +359,7 @@ class CArray
   #   primitive the binary operators use.
   #   @param other [CArray, Object] the second operand.
   #   @return [Array(CArray, CArray)]
-  #   @raise [RuntimeError] when the two data_types have no common type.
+  #   @raise [CArray::DataTypeError] when the two data_types have no common type.
   def cast_with(other); end
 
   # `coerce` is documented with its definition in ext/carray_operator.c;
@@ -376,10 +398,9 @@ class CArray
   #     `nil` keeps the source type (or `:object` when `other` is `nil`).
   #   @return [CArray]
   #   @raise [RuntimeError] when `other` is read-only, its MemoryView is
-  #     read-only, its `to_ca` refuses `writable: true`, or it cannot be
-  #     wrapped as a CArray.
-  #   @raise [TypeError] when `other#to_ca` returns something that is not a
-  #     CArray.
+  #     read-only, or its `to_ca` refuses `writable: true`.
+  #   @raise [TypeError] when `other` cannot be wrapped as a CArray, or
+  #     `other#to_ca` returns something that is not a CArray.
   #   @raise [ArgumentError] when `other#to_ca` does not accept `writable:`.
   #   @raise [TypeError] when `other` is a Face and `data_type` differs from
   #     its surface type.
@@ -445,20 +466,30 @@ class CArray
   #     data_type inferred (3 -> `:int64`, 3.14 -> `:float64`,
   #     1+2i -> `:cmplx128`, ...)
   #
-  #   Values and data_type representations promote uniformly. Integer args
-  #   are interpreted as *values*, not as data_type codes:
+  #   The arrays and data_type representations promote together. A
+  #   scalar (a value, or a CScalar) then joins their type the way it
+  #   does beside an operator: one of the same kind takes that type
+  #   (`result_type(float32_array, 0.1)` is `:float32`, as
+  #   `float32_array + 0.1` is), one of another kind promotes
+  #   (`result_type(int32_array, 1.5)` is `:float64`), and an Integer
+  #   that does not fit an integer type takes `:int64`. With no array or
+  #   data_type representation, every argument promotes by its own type.
+  #
+  #   Integer args are interpreted as *values*, not as data_type codes:
   #   `result_type(8)` returns `:int64` because the value 8 is an Integer,
   #   not because a data_type code equals 8. Use `result_type(:int64)` or
   #   `result_type(CA_INT64)` to be explicit about data_type intent.
   #   @param args [Array<CArray, Symbol, String, Class, Object>] operands.
   #   @return [Symbol]
   #   @raise [ArgumentError] when called with no arguments.
-  #   @raise [RuntimeError] when two inputs are mutually incompatible
+  #   @raise [CArray::DataTypeError] when two inputs are mutually incompatible
   #     (e.g. `:object` with `:fixlen`).
   #   @example
   #     CArray.result_type(:int32, :float32)  #=> :float32
   #     CArray.result_type(3, 3.14)           #=> :float64
   #     CArray.result_type(true, 3)           #=> :int64
+  #     CArray.result_type(CA_INT8([1]), 1)   #=> :int8
+  #     CArray.result_type(CA_INT8([1]), 300) #=> :int64
   def self.result_type(*args); end
 
   # @overload promote_list(list, data_type: nil)
@@ -471,8 +502,12 @@ class CArray
   #   elements passes through (CAStack lifts it), unless the class is not
   #   portable (CAConstString) or the elements disagree on state
   #   (CATime with different units); a list of primitives is
-  #   promoted via {.result_type} + {.wrap_readonly}; a mix of Face and
-  #   non-Face, or heterogeneous Face classes, is rejected.
+  #   promoted via {.result_type} + {.wrap_readonly}, except that a list
+  #   mixing signed and unsigned integers takes a type that holds both
+  #   (`uint8` with `int8` is `int16`, 64-bit pairs are `:object`), and an
+  #   integer of 32 bits or more beside `float32` takes `float64`, since
+  #   the arrays are joined value for value; a mix of Face and non-Face,
+  #   or heterogeneous Face classes, is rejected.
   #
   #   With an explicit primitive `data_type`: all-primitive elements are
   #   wrapped read-only to the requested type; any Face element is

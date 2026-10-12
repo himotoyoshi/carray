@@ -498,13 +498,13 @@ class TestCAStrideFrozen < Test::Unit::TestCase
   def test_write_through_frozen_parent_aliased
     src = CArray.float64(5).seq.freeze
     re = src.refer                       # contig => aliases
-    assert_raise(FrozenError) { re[0] = -1.0 }
+    assert_raise(RuntimeError) { re[0] = -1.0 }
   end
 
   def test_write_through_frozen_parent_strided
     src = CArray.float64(3, 4).seq.freeze
     col = src[nil, 1]                    # non-contig column slice
-    assert_raise(FrozenError) { col[0] = -1.0 }
+    assert_raise(RuntimeError) { col[0] = -1.0 }
   end
 end
 

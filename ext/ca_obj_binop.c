@@ -34,6 +34,7 @@
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_binop_dispatch.h"
 #include "ca_monop_dispatch.h"  /* CA_MONOP_CAST_BASE */
+#include "carray_math_kernel.h" /* ca_binop_not_implement */
 
 /* carray_broadcast.c */
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
@@ -48,7 +49,6 @@ extern int8_t CA_OBJ_LAZY_MARKER;
 
 /* Defined in carray_lazy.c: wrap a non-CArray Ruby value as a
    CScalar carrying the other operand's natural data_type. */
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 
 /* ------------------------------------------------------------------- */
 /* CABinOp struct                                                       */
@@ -239,58 +239,30 @@ ca_binop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_binop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CABinOp *ca = (CABinOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
-  }
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_binop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
-}
-
-/* Test / observability counters bumped from the xfer_stride hot
-   path so specs can assert scratch acquisition (one per node,
-   independent of left-chain depth) and materialise vs
-   non-materialise behaviour without attaching the view. */
+/* Test / observability counters bumped from the evaluation hot path
+   so specs can assert scratch acquisition (one per node, independent
+   of left-chain depth) and materialise vs non-materialise behaviour
+   without attaching the view. */
 ca_size_t ca_binop_scratch_acquire_count = 0;
 ca_size_t ca_binop_materialise_call_count = 0;
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                            ca_size_t *strides, void *data, int dir)
+ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
 {
-  CABinOp *bo = (CABinOp *) ap;
-  ca_size_t slab_n;
+  ca_size_t slab_n = req->n;
   int8_t    k;
   void     *scratch;
   volatile VALUE holder;
   ca_size_t right_bytes;
   ca_size_t right_step;            /* element-stride for the kernel walk */
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
-  }
   ca_binop_materialise_call_count++;
 
-  slab_n = 1;
-  for ( k = 0; k < bo->ndim; k++ ) slab_n *= counts[k];
-
   /* === 1. Pull left into the output buffer ===
-     CAREFUL: left.data_type == output.data_type by the cast-before
-     invariant, so the caller's `strides` (output byte layout) is
-     also valid for left.  A mismatch would silently write past the
-     output row. */
-  ca_xfer_stride(bo->parent, starts, counts, strides, data, CA_XFER_GET);
+     left.data_type == output.data_type by the cast-before invariant,
+     so the output buffer holds left's cells as they are. */
+  ca_lazy_req_pull(bo->parent, req, data, CA_XFER_GET);
 
   /* === 2. Pull right into an arena scratch === */
   right_bytes = bo->right->bytes;
@@ -315,17 +287,12 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     right_step = 0;
   }
   else {
-    /* Same-shape right.  `strides` is the step through the operand, the
-       same one the left was pulled with -- recomputing a packed one here
-       reads the right operand's cells 0, 1, 2 against the left's 0, 2, 4.
-       right.bytes matches output.bytes because right.data_type ==
-       out.data_type by cast-before, so the same steps serve both. */
+    /* Same-shape right, pulled over the same cells as the left. */
     scratch = ( bo->data_type == CA_OBJECT )
                 ? ca_lazy_arena_acquire_object(slab_n)
                 : ca_lazy_arena_acquire(slab_n * right_bytes);
     ca_binop_scratch_acquire_count++;
-    ca_xfer_stride(bo->right, starts, counts, strides, scratch,
-                   CA_XFER_GET);
+    ca_lazy_req_pull(bo->right, req, scratch, CA_XFER_GET);
     right_step = 1;
   }
 
@@ -337,8 +304,9 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    * Mask handling:
    *   - non-trapping op → m = NULL (SIMD fast path; garbage compute
    *     on masked cells is allowed).
-   *   - trapping op with any operand mask → build a per-slab OR
-   *     mask from the operand-side masks.
+   *   - trapping op (one that can raise on a cell, or an object cell)
+   *     with any operand mask → the cells either operand masks
+   *     (ca_lazy_req_mask), which the kernel skips.
    *
    * CAREFUL: the trapping-op mask is built from left.mask and
    * right.mask directly, NOT from out->mask.  The output's mask
@@ -353,67 +321,13 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   {
     boolean8_t *slab_mask = NULL;
     void *mscratch = NULL;
-    volatile VALUE mholder = Qnil;
-    int is_trapping = ca_binop_is_trapping(bo->op_id, bo->data_type);
 
-    if ( is_trapping && ( ca_has_mask(bo->parent) ||
-                          ca_has_mask(bo->right) ) ) {
-      /* Build a slab-shaped mask = left.slab_mask | right.slab_mask.
-         Pull each operand's mask (or fill with 0 if absent) into the
-         output-shaped layout, then OR them in place.                */
-      ca_size_t k_;
-      ca_size_t right_mask_strides[CA_RANK_MAX];
-      (void) mholder;  /* Kept for stack-shape compatibility; arena
-                          replaces the ALLOCV path here. */
-
-      mscratch = ca_lazy_arena_acquire(slab_n);
-      slab_mask = (boolean8_t *) mscratch;
-
-      if ( ca_has_mask(bo->parent) ) {
-        ca_size_t mstrides[CA_RANK_MAX];
-        ca_size_t s = 1;
-        for ( k_ = bo->ndim - 1; k_ >= 0; k_-- ) {
-          mstrides[k_] = s; s *= counts[k_];
-        }
-        ca_xfer_stride(bo->parent->mask, starts, counts, mstrides,
-                       slab_mask, CA_XFER_GET);
-      }
-      else {
-        memset(slab_mask, 0, slab_n);
-      }
-
-      if ( ca_has_mask(bo->right) ) {
-        boolean8_t *rm = NULL;
-        ca_size_t i_;
-        if ( bo->right_is_scalar ) {
-          /* CScalar right: pull the single mask bit and broadcast OR. */
-          ca_size_t one_starts[CA_RANK_MAX] = {0};
-          ca_size_t one_counts[CA_RANK_MAX];
-          ca_size_t one_strides[CA_RANK_MAX];
-          boolean8_t one_bit = 0;
-          for ( k_ = 0; k_ < bo->right->ndim; k_++ ) {
-            one_counts[k_]  = 1;
-            one_strides[k_] = 1;
-          }
-          ca_xfer_stride(bo->right->mask, one_starts, one_counts,
-                         one_strides, &one_bit, CA_XFER_GET);
-          if ( one_bit ) {
-            for ( i_ = 0; i_ < slab_n; i_++ ) slab_mask[i_] = 1;
-          }
-        }
-        else {
-          ca_size_t s = 1;
-          for ( k_ = bo->ndim - 1; k_ >= 0; k_-- ) {
-            right_mask_strides[k_] = s; s *= counts[k_];
-          }
-          /* Small mask-scratch for right; OR into slab_mask in
-             place to avoid a persistent second buffer. */
-          rm = (boolean8_t *) ALLOCA_N(boolean8_t, slab_n);
-          ca_xfer_stride(bo->right->mask, starts, counts,
-                         right_mask_strides, rm, CA_XFER_GET);
-          for ( i_ = 0; i_ < slab_n; i_++ ) slab_mask[i_] |= rm[i_];
-        }
-      }
+    if ( ca_binop_is_trapping(bo->op_id, bo->data_type) ) {
+      CArray *ops[2];
+      ops[0] = bo->parent;
+      ops[1] = bo->right;
+      slab_mask = ca_lazy_req_mask(req, 2, ops);
+      mscratch  = slab_mask;
     }
 
     ca_binop_func_t fn = ca_binop_kernel_lookup_vv(bo->op_id, bo->data_type);
@@ -433,6 +347,33 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_binop_eval((CABinOp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass: each operand is gathered at
+   the same addresses and the kernel runs once over all of them. */
+static void
+ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_binop_eval((CABinOp *) ap, &req, data);
 }
 
 static void
@@ -514,104 +455,25 @@ ca_binop_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CABinOp is read-only (fill_data)");
 }
 
-/* Build out.mask.  When either parent has a mask, materialise a
-   freshly-allocated boolean8_t buffer.  For most ops this is the blind
-   OR `left.mask | right.mask`.
+/* Build out.mask: the operands' masks ORed on each read (CAMaskOfOperands), so
+   that it follows them as the values do.
 
    Boolean AND / OR are three-valued (Kleene): a masked cell is resolved by
    the *known* side (`unknown | true = true`, `unknown & false = false`), so
-   it is NOT masked in the result.  This needs operand VALUES, not just
-   masks, so both operands are attached; the blind value the value kernel
-   later writes is already correct on a resolved cell because the absorbing
-   element (true for OR, false for AND) dominates whatever garbage sits on
-   the masked side.  Nested trees compose: an inner boolean `&`/`|` node's
-   mask is already Kleene-resolved by the time an outer node reads it.
-
-   Not memory-optimal (a CARepeat-like view would share pages), but correct
-   and decoupled from xfer_stride ordering. */
+   it is NOT masked in the result.  The blind value the value kernel writes
+   is already correct on a resolved cell because the absorbing element (true
+   for OR, false for AND) dominates whatever sits on the masked side. */
 static void
 ca_binop_func_create_mask (void *ap)
 {
   CABinOp *bo = (CABinOp *) ap;
-  CArray *l = bo->parent;
-  CArray *r = bo->right;
-  boolean8_t *dst;
-  ca_size_t i, n;
-  int has_l, has_r, kleene, need_l, need_r, is_or;
-  boolean8_t *lm, *rm, *lv, *rv;
+  int mode = CA_LAZY_MASK_OR;
 
-  has_l = ca_has_mask(l);
-  has_r = ca_has_mask(r);
-  if ( ! has_l && ! has_r ) return;
-
-  kleene = ( bo->data_type == CA_BOOLEAN &&
-             ( bo->op_id == CA_BINOP_BIT_AND || bo->op_id == CA_BINOP_BIT_OR ) );
-  is_or  = ( bo->op_id == CA_BINOP_BIT_OR );
-
-  /* One masked operand and no Kleene resolution: the answer is that
-     operand's mask, cell for cell.  Share it the way CAMonOp shares its
-     parent's, rather than allocating a copy per node -- a chain of k
-     binops over one masked array then holds one boolean array, not k. */
-  if ( ! kleene && ( has_l != has_r ) ) {
-    CArray *src = has_l ? l : r;
-    if ( src->elements == bo->elements ) {
-      bo->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
-                                         bo->ndim, bo->dim, 0, 0);
-      return;
-    }
+  if ( bo->data_type == CA_BOOLEAN ) {
+    if ( bo->op_id == CA_BINOP_BIT_OR )  mode = CA_LAZY_MASK_KLEENE_OR;
+    if ( bo->op_id == CA_BINOP_BIT_AND ) mode = CA_LAZY_MASK_KLEENE_AND;
   }
-
-  bo->mask = (CArray *) carray_new(CA_BOOLEAN, bo->ndim, bo->dim, 0, NULL);
-  dst = (boolean8_t *) bo->mask->ptr;
-  n = bo->elements;
-
-  /* Kleene needs operand values even where an operand is unmasked. */
-  need_l = has_l || kleene;
-  need_r = has_r || kleene;
-  /* Only Kleene reads operand values.  Every other op reads the operand
-     masks alone, and attaching the operand to reach its mask materialises
-     the whole subexpression under it -- so a chain of k masked binops
-     evaluates its own subtree k times over.  Attach what is read. */
-  if ( kleene ) {
-    if ( need_l ) ca_attach(l);
-    if ( need_r ) ca_attach(r);
-  }
-  else {
-    if ( has_l ) ca_attach(l->mask);
-    if ( has_r ) ca_attach(r->mask);
-  }
-
-  lm = has_l ? (boolean8_t *) l->mask->ptr : NULL;
-  rm = has_r ? (boolean8_t *) r->mask->ptr : NULL;
-  lv = kleene ? (boolean8_t *) l->ptr : NULL;
-  rv = kleene ? (boolean8_t *) r->ptr : NULL;
-
-  for ( i = 0; i < n; i++ ) {
-    /* right broadcast: repeat element 0 when right was a scalar. */
-    ca_size_t ri = bo->right_is_scalar ? 0 : i;
-    boolean8_t am = lm ? lm[i]  : 0;
-    boolean8_t bm = rm ? rm[ri] : 0;
-    boolean8_t m  = (boolean8_t)( am | bm );
-    if ( kleene && m ) {
-      boolean8_t av = lv[i], bv = rv[ri];
-      if ( is_or ) {
-        if ( ( ! am && av ) || ( ! bm && bv ) ) m = 0;      /* known TRUE */
-      }
-      else {
-        if ( ( ! am && ! av ) || ( ! bm && ! bv ) ) m = 0;  /* known FALSE */
-      }
-    }
-    dst[i] = m;
-  }
-
-  if ( kleene ) {
-    if ( need_r ) ca_detach(r);
-    if ( need_l ) ca_detach(l);
-  }
-  else {
-    if ( has_r ) ca_detach(r->mask);
-    if ( has_l ) ca_detach(l->mask);
-  }
+  bo->mask = ca_lazy_operation_mask((CArray *) bo, mode);
 }
 
 ca_operation_function_t ca_binop_func = {
@@ -704,17 +566,22 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
-  /* Promote a non-CArray Ruby value to a CScalar carrying the
-     other side's natural data_type. */
-  if ( ! rb_obj_is_carray(l_resolved) ) {
-    rb_check_carray_object(r_resolved);
-    TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
-    l_resolved = ca_lazy_wrap_scalar(l_resolved, r);
-  }
-  if ( ! rb_obj_is_carray(r_resolved) ) {
-    rb_check_carray_object(l_resolved);
-    TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
-    r_resolved = ca_lazy_wrap_scalar(r_resolved, l);
+  ca_binop_read_boolean_as_truth(
+      ca_binop_kernel_lookup_vv(op_id, CA_BOOLEAN) != ca_binop_not_implement,
+      &l_resolved, &r_resolved);
+
+  /* A scalar beside the array (a Ruby value or a CScalar) takes the
+     data_type the eager binop gives it, and the pair is promoted as the
+     eager binop promotes it.  An integer power keeps its int64 exponent
+     (ca_binop_kernel_input_data_types). */
+  if ( op_id != CA_BINOP_IPOWER &&
+       ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ||
+         rb_obj_is_cscalar(l_resolved) || rb_obj_is_cscalar(r_resolved) ) ) {
+    int l_scalar = ! rb_obj_is_carray(l_resolved) || rb_obj_is_cscalar(l_resolved);
+    int r_scalar = ! rb_obj_is_carray(r_resolved) || rb_obj_is_cscalar(r_resolved);
+    rb_ca_cast_self_or_other(&l_resolved, &r_resolved);
+    l_resolved = ca_lazy_settle_scalar(l_resolved, l_scalar);
+    r_resolved = ca_lazy_settle_scalar(r_resolved, r_scalar);
   }
 
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
@@ -724,6 +591,23 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
      broadcast so the cast acts on the smallest element count. */
   ca_binop_kernel_input_data_types(op_id, l->data_type, r->data_type,
                                 &l_in_dt, &r_in_dt);
+
+  /* A boolean operand of an op with no boolean kernel (arithmetic) is
+     read as its 0/1 storage in int64, as rb_ca_call_binop does. */
+  if ( l_in_dt == CA_BOOLEAN &&
+       ca_binop_kernel_lookup_vv(op_id, CA_BOOLEAN) == ca_binop_not_implement ) {
+    l_in_dt = CA_INT64;
+    if ( r_in_dt == CA_BOOLEAN ) {
+      r_in_dt = CA_INT64;
+    }
+  }
+
+  /* No kernel for that data_type (fixlen arithmetic, ...): raise as the
+     eager binop does, before a view is built over it. */
+  if ( ca_binop_kernel_lookup_vv(op_id, l_in_dt) == ca_binop_not_implement ) {
+    rb_raise(rb_eCADataTypeError,
+             "invalid data_type for binop (not implemented)");
+  }
 
   if ( l_in_dt != l->data_type ) {
     VALUE cast_op = INT2NUM(CA_MONOP_CAST_BASE + l_in_dt);
@@ -757,11 +641,11 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
            shape so the kernel sees matched shapes; cost is N
            reads of the scalar cell with stride 0. */
   if ( l->elements != r->elements ) {
-    if ( r->elements == 1 && l->elements > 1 ) {
+    if ( r->elements == 1 ) {
       /* CScalar-vs-array, right.  xfer_stride handles this with
          right_step = 0. */
     }
-    else if ( l->elements == 1 && r->elements > 1 ) {
+    else if ( l->elements == 1 ) {
       int commutes = ( op_id == CA_BINOP_ADD     ||
                        op_id == CA_BINOP_MUL     ||
                        op_id == CA_BINOP_BIT_AND ||
@@ -816,6 +700,17 @@ rb_ca_binop_s_build (VALUE klass, VALUE l_cary, VALUE r_cary, VALUE op_id_val)
 }
 
 /* op_id accessor for inspect / dump_tree consumers in Ruby. */
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_binop_trapping (VALUE self)
+{
+  CABinOp *bo;
+  TypedData_Get_Struct(self, CABinOp, &cabinop_data_type, bo);
+  return ca_binop_is_trapping(bo->op_id, bo->data_type) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_binop_op_id (VALUE self)
 {
@@ -872,6 +767,7 @@ rb_ca_binop_initialize_copy (VALUE self, VALUE other)
 {
   CABinOp *ca, *cs;
   TypedData_Get_Struct(self,  CABinOp, &cabinop_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CABinOp, &cabinop_data_type, cs);
   if ( ca_func[CA_OBJ_BINOP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_BINOP, cs->parent->ndim);
@@ -933,6 +829,7 @@ Init_ca_obj_binop (void)
 
   rb_define_method(rb_cCABinOp, "__op_id__",
                                 rb_ca_binop_op_id, 0);
+  rb_define_method(rb_cCABinOp, "__trapping__", rb_ca_binop_trapping, 0);
   rb_define_method(rb_cCABinOp, "__binop_right__",
                                 rb_ca_binop_right, 0);
 

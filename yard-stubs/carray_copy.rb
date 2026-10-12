@@ -8,10 +8,15 @@ class CArray
   # @overload copy
   #   Returns a fresh entity CArray with the same shape, `data_type`,
   #   element values, and mask state as `self`. Always allocates and
-  #   copies, even when `self` is already an entity.
+  #   copies, even when `self` is already an entity. The copy gets the
+  #   attributes `self` shows (`attrs`) as its own.
   #
   #   Use `copy` when you need an array you own and can mutate
-  #   without affecting any source.
+  #   without affecting any source. It is the only way to copy a
+  #   CArray: `to_ca` returns `self`, and `dup` / `clone` on a view
+  #   return another view onto the same storage, so writing to any of
+  #   them writes to the source. Don't use `dup`, `clone` or `to_ca`
+  #   to copy.
   #   @return [CArray] independent entity.
   #   @example A view's copy is independent of its source
   #     a = CArray.float64(4).seq
@@ -59,7 +64,7 @@ class CArray
   #   @param data_type [Symbol] target element type
   #     (e.g. `:int32`, `:float64`, `:fixlen`).
   #   @param bytes [Integer] element byte size; required for
-  #     `:fixlen`, ignored for numeric types.
+  #     `:fixlen` (1 or more), ignored for numeric types.
   #   @return [CArray]
   # @overload template { value }
   #   With a 0-arity block, fills every element of the result with

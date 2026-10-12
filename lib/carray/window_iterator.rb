@@ -104,6 +104,7 @@ class CAWindowIterator < CAIterator
             "windows: expected #{@source.ndim} ranges (one per axis), " \
             "got #{@ranges.size}"
     end
+    @ranges = @ranges.each_with_index.map { |r, k| window_offsets(r, k) }
 
     @sndim  = @source.ndim
     @widths = @ranges.map { |r| r.end - r.begin + 1 }
@@ -158,10 +159,37 @@ class CAWindowIterator < CAIterator
   #   the padded entity.
   #   @return [CArray]
   def sliding_view
-    @sliding_view ||= anchored_buffer.sliding_windows(*@widths)
+    @sliding_view ||= @shape.include?(0) ? no_windows : anchored_buffer.sliding_windows(*@widths)
   end
 
   private
+
+  # An axis's offsets as an inclusive Integer range, as Ruby reads the range
+  # given (`-1...1` is the offsets -1 and 0).
+  def window_offsets (r, k)
+    unless r.is_a?(Range) && r.begin.is_a?(Integer) && r.end.is_a?(Integer)
+      raise TypeError,
+            "windows: axis #{k} takes a Range of Integer offsets, got #{r.inspect}"
+    end
+    last = r.exclude_end? ? r.end - 1 : r.end
+    if last < r.begin
+      raise ArgumentError, "windows: axis #{k} offsets #{r.inspect} are empty"
+    end
+    r.begin..last
+  end
+
+  # With no anchors (an empty source, or a :truncate window wider than the
+  # source) there is nothing to slide over, and sliding_windows refuses a
+  # window wider than its buffer.  The view is then an empty one of the same
+  # shape: the source's unit tiles cut to the output and stretched along the
+  # window axes, so every reduction answers with an empty array of its type.
+  def no_windows
+    unit = @source.block_view(*[1] * @sndim)
+    cut  = @shape.each_with_index.map { |n, k| n == unit.shape[k] ? nil : 0...n }
+    unit = unit[*cut, *[nil] * @sndim] unless cut.all?(&:nil?)
+    view = unit.broadcast_to(*(@shape + @widths))
+    @source.face? ? view.face_lift(@source) : view
+  end
 
   # The stretch of the padded buffer the windows are taken from: it begins at
   # the first window and holds one window per anchor.  For a window that covers
@@ -210,10 +238,11 @@ class CAWindowIterator < CAIterator
   # One allocation, the source copied into the interior region, then the
   # margins filled per mode.
   def pad_source (src, lefts, rights, mode, value)
+    return pad_face(src, lefts, rights, mode, value) if src.face?
     nd    = src.ndim
     shape = src.shape
     pshape = nd.times.map { |i| shape[i] + lefts[i] + rights[i] }
-    pad    = CArray.new(src.data_type, pshape)
+    pad    = CArray.new(src.data_type, pshape, bytes: src.bytes)
 
     # Fill the whole buffer first, then overwrite the interior with the source.
     case mode
@@ -222,8 +251,8 @@ class CAWindowIterator < CAIterator
     when :masked
       pad[] = UNDEF
     when :edge
-      # Provisional fill; the edge margins are written below from the source.
-      pad[] = 0
+      # Nothing to fill: every margin cell is written from the source below
+      # (a provisional 0 cannot be stored in a fixlen buffer).
     end
 
     interior = nd.times.map { |i| lefts[i]...(lefts[i] + shape[i]) }
@@ -232,6 +261,23 @@ class CAWindowIterator < CAIterator
     replicate_edges(pad, lefts, rights, shape) if mode == :edge
 
     pad
+  end
+
+  # A Face is padded on its storage and put back on at the end, so the margins
+  # hold storage -- UNDEF, a copy of an edge cell, or a `:constant` value the
+  # Face has turned into storage -- and the reductions over the windows are
+  # the Face's own.  A buffer of the Face's surface type could not take the
+  # margin values at all.
+  def pad_face (src, lefts, rights, mode, value)
+    storage = src.__send__(:__face_storage__)
+    if mode == :constant && !value.nil?
+      cell = src.__send__(:__blank_like__, [1])
+      cell[0] = value
+      padded = pad_source(storage, lefts, rights, :constant, cell.parent[0])
+    else
+      padded = pad_source(storage, lefts, rights, mode, value)
+    end
+    padded.face_lift(src)
   end
 
   # Edge-replicate the margins of a padded buffer whose interior already holds
@@ -356,19 +402,13 @@ class CAWindowIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # @!method all(min_count: nil, fill_value: nil)
+  # @!method all
   #   Whether every cell of each rolling is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `all` does not.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  # @!method any(min_count: nil, fill_value: nil)
+  # @!method any
   #   Whether any cell of each rolling is true.
-  #   @param min_count [Integer, nil] fewest cells that must be present
-  #     for a result; a piece with fewer comes back masked.
-  #   @param fill_value [Object, nil] value to put in place of a masked
-  #     result instead of leaving it masked.
+  #   Takes no `min_count:` or `fill_value:`, as the core `any` does not.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
   # @!method variancep(min_count: nil, fill_value: nil)
   #   Rolling population variance (divisor `n`).
@@ -405,16 +445,29 @@ class CAWindowIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev, :all, :any,
+  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp, :minmax, :min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
       def #{op} (min_count: nil, fill_value: nil)
-        folded = fold_by_offset(:#{op}, min_count, fill_value)
+        folded = @shape.include?(0) ? nil : fold_by_offset(:#{op}, min_count, fill_value)
         return folded unless folded.nil?
         kw = {}
         kw[:min_count]  = min_count  unless min_count.nil?
         kw[:fill_value] = fill_value unless fill_value.nil?
         sliding_view.#{op}(axis: @window_axes, **kw)
+      end
+    RUBY
+  end
+
+  # all / any take no min_count: or fill_value:, as the core ones do not.
+  [:all, :any].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        if kw.empty?
+          folded = @shape.include?(0) ? nil : fold_by_offset(:#{op}, nil)
+          return folded unless folded.nil?
+        end
+        sliding_view.#{op}(axis: @window_axes, **CAIterator.reduce_keywords(:#{op}, kw))
       end
     RUBY
   end
@@ -428,12 +481,12 @@ class CAWindowIterator < CAIterator
   #   source cell it replicates, and with `bounds: :constant` (or `fill_value:`)
   #   a winning margin cell has no source address and is a masked result.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  def min_addr; window_winner_addr(:min_index); end
+  def min_addr (**kw); window_winner_addr(:min_index, kw); end
 
   # @overload max_addr
   #   Rolling flat source address of the window maximum. See {#min_addr}.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  def max_addr; window_winner_addr(:max_index); end
+  def max_addr (**kw); window_winner_addr(:max_index, kw); end
 
   private
 
@@ -470,16 +523,22 @@ class CAWindowIterator < CAIterator
   # Runs the fold by offset, or returns nil when this window is not one it can
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
+    return nil unless CArray.__fast_paths_enabled__
+    need = CArray.__min_count_need__(op, min_count, 0)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
+    # The elementwise kernels act on a Face's storage; its reductions are its own.
+    return nil if @source.face?
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
     return nil if neutral_value(op).nil?
+    # pmin / pmax let NaN lose, so a window holding only NaN would fold to the
+    # neutral value; the core answers NaN there.
+    return nil if (op == :min || op == :max) && source_has_nan?
 
     folded = op == :mean ? fold_mean : accumulate_offsets(op)
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
-    folded = apply_min_count(folded, min_count)
+    folded = apply_min_count(folded, need)
     # A `fill_value:` on the call replaces a result that came out undefined.
-    folded = folded.strip_mask(fill_value) if !fill_value.nil? && folded.has_mask?
-    folded
+    CArray.__reduce_fill__(folded, fill_value)
   end
 
   # The mean is the sum over the same offsets, divided by the number of cells
@@ -540,14 +599,19 @@ class CAWindowIterator < CAIterator
     end
   end
 
-  # `min_count` asks for a result only where the window held that many cells.
-  def apply_min_count (folded, min_count)
-    return folded if min_count.nil?
+  def source_has_nan?
+    return false unless @source.float? || @source.data_type == CA_OBJECT
+    @source.is_nan.any
+  end
+
+  # A result only where the window held `need` cells (CArray.__min_count_need__).
+  def apply_min_count (folded, need)
+    return folded if need == 0
     counts = window_cell_counts
     if counts.is_a?(Integer)
-      folded[] = UNDEF if counts < min_count
+      folded[] = UNDEF if counts < need
     else
-      folded[counts.lt(min_count)] = UNDEF
+      folded[counts.lt(need)] = UNDEF
     end
     folded
   end
@@ -644,7 +708,7 @@ class CAWindowIterator < CAIterator
   def offset_fold_data_type (op)
     @offset_fold_data_type ||= {}
     @offset_fold_data_type[op] ||=
-      CArray.new(@source.data_type, [1, 1]).send(op, axis: [1]).data_type
+      CArray.new(@source.data_type, [1, 1], bytes: @source.bytes).send(op, axis: [1]).data_type
   end
 
   # Every offset within the window, as a list of per-axis positions into the
@@ -662,8 +726,9 @@ class CAWindowIterator < CAIterator
   # offset is the range's begin for a padded margin, 0 for :truncate). A margin
   # winner (coordinate out of bounds) resolves per the boundary policy:
   # :nearest clamps to the edge source cell, :constant / :skip mask the result.
-  def window_winner_addr (idx_op)
-    mi = send(idx_op)                                    # window-local flat index
+  def window_winner_addr (idx_op, kw = {})
+    kw = CAIterator.reduce_keywords(idx_op, kw)
+    mi = send(idx_op, **kw.slice(:min_count))           # window-local flat index
     n  = @source.shape
     wstride = Array.new(@sndim); acc = 1
     (@sndim - 1).downto(0) { |i| wstride[i] = acc; acc *= @widths[i] }
@@ -687,7 +752,7 @@ class CAWindowIterator < CAIterator
     end
     addr[oob] = UNDEF unless @bounds == :nearest
     addr[mi.is_masked.eq(1)] = UNDEF if mi.has_mask?
-    addr
+    CArray.__reduce_fill__(addr, kw[:fill_value])
   end
 
   public
@@ -697,26 +762,29 @@ class CAWindowIterator < CAIterator
   #   cells (the effective tap count, which drops near a :skip edge);
   #   `count(UNDEF)` counts masked cells; `count(v)` counts cells equal to `v`.
   #   @return [CArray]
-  def count (*args)
-    return count_not_masked if args.empty?
+  def count (*args, **kw)
+    return count_not_masked(**kw) if args.empty?
     # The sliding_windows view is a CAStride, so its #count is not shadowed;
     # dispatch CArray#count explicitly anyway, matching the family regularity.
-    CArray.instance_method(:count).bind_call(sliding_view, *args, axis: @window_axes)
+    CArray.instance_method(:count).bind_call(sliding_view, *args, axis: @window_axes,
+                                             **CAIterator.reduce_keywords(:count, kw))
   end
 
   # @overload count_not_masked
   #   Rolling count of present (non-masked) cells -- the denominator of a
   #   renormalizing convolution.
   #   @return [CArray]
-  def count_not_masked
-    sliding_view.count_not_masked(axis: @window_axes)
+  def count_not_masked (**kw)
+    sliding_view.count_not_masked(axis: @window_axes,
+                                  **CAIterator.reduce_keywords(:count_not_masked, kw))
   end
 
   # @overload count_masked
   #   Rolling count of masked cells.
   #   @return [CArray]
-  def count_masked
-    sliding_view.count_masked(axis: @window_axes)
+  def count_masked (**kw)
+    sliding_view.count_masked(axis: @window_axes,
+                              **CAIterator.reduce_keywords(:count_masked, kw))
   end
 
   # @overload elements
@@ -788,40 +856,31 @@ class CAWindowIterator < CAIterator
 
   # ---- order statistics (median / percentile / quantile) ----------------
   #
-  # Core per-axis order statistics take a single axis and do not accept a
-  # masked input, so the window mode is dispatched:
-  #
-  #   single window axis + unmasked margin -> `sliding_view.op(axis: window_axis)`
-  #   multi window axes + unmasked margin  -> materialize the windows, flatten
-  #                                           the window axes into one, single-
-  #                                           axis core order-stat
-  #   :skip (UNDEF margin)                 -> raise (core has no masked per-axis
-  #                                           order-stat); guide to :nearest /
-  #                                           :truncate
-  #
-  # When core gains masked per-axis order statistics (a tracked refactor), the
-  # :skip guard can be dropped and :skip served directly.
+  # Core per-axis order statistics take a single axis, so a single window
+  # axis goes straight to `sliding_view.op(axis: window_axis)`, and several
+  # are materialized with the window axes flattened into one.  The UNDEF
+  # margin of :skip is left out of each window as any masked cell is.
 
-  # @overload median
-  #   Rolling median.  Requires an unmasked margin (`bounds: :nearest` or
-  #   `:truncate`); with the default `:skip` it raises.
+  # @overload median(min_count: nil, fill_value: nil)
+  #   Rolling median.
   #   @return [CArray]
-  def median
-    order_stat { |view, axis| view.median(axis: axis) }
+  def median (**kw)
+    kw = CAIterator.reduce_keywords(:median, kw)
+    order_stat { |view, axis| view.median(axis: axis, **kw) }
   end
 
-  # @overload percentile(*pers)
+  # @overload percentile(*pers, min_count: nil, fill_value: nil)
   #   Rolling percentile(s).  One argument returns one CArray, several return
-  #   an array of CArrays (as `CArray#percentile`).  Requires an unmasked
-  #   margin.
+  #   an array of CArrays (as `CArray#percentile`).
   #   @return [CArray, Array<CArray>]
-  def percentile (*pers)
-    order_stat { |view, axis| view.percentile(*pers, axis: axis) }
+  def percentile (*pers, **kw)
+    kw = CAIterator.reduce_keywords(:percentile, kw)
+    order_stat { |view, axis| view.percentile(*pers, axis: axis, **kw) }
   end
 
   # @overload quantile
   #   Rolling five-number summary `[min, Q1, median, Q3, max]` (five CArrays),
-  #   as `CArray#quantile`.  Requires an unmasked margin.
+  #   as `CArray#quantile`.
   #   @return [Array<CArray>]
   def quantile
     order_stat { |view, axis| view.quantile(axis: axis) }
@@ -830,14 +889,8 @@ class CAWindowIterator < CAIterator
   private
 
   # Drive an order statistic (yielded as `block.call(view, axis)`) through the
-  # single-axis / multi-axis / :skip-reject dispatch above.
+  # single-axis / multi-axis dispatch above.
   def order_stat
-    if @bounds == :skip
-      raise ArgumentError,
-            "windowed order statistics need an unmasked margin; " \
-            "use bounds: :nearest (edge-extend) or bounds: :truncate (valid). " \
-            "For an UNDEF-margin median use reduce { |w| w.median } (slower)."
-    end
     sv = sliding_view
     if @window_axes.size == 1
       yield sv, @window_axes[0]
@@ -858,15 +911,17 @@ class CAWindowIterator < CAIterator
   # @overload wsum(weights)
   #   Rolling weighted sum, `weights` shaped like a single window.
   #   @return [CArray]
-  def wsum (weights)
-    weighted(weights) { |sv, w, axis| sv.wsum(w, axis: axis) }
+  def wsum (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wsum, kw)
+    weighted(weights) { |sv, w, axis| sv.wsum(w, axis: axis, **kw) }
   end
 
   # @overload wmean(weights)
   #   Rolling weighted mean, `weights` shaped like a single window.
   #   @return [CArray]
-  def wmean (weights)
-    weighted(weights) { |sv, w, axis| sv.wmean(w, axis: axis) }
+  def wmean (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wmean, kw)
+    weighted(weights) { |sv, w, axis| sv.wmean(w, axis: axis, **kw) }
   end
 
   private

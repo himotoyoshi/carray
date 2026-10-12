@@ -45,6 +45,19 @@ class TestCARecord < Test::Unit::TestCase
     assert_equal 24, a.elements
   end
 
+  # A new record holds zeros, as CArray.new does, not the bytes the
+  # allocator last handed out (rake spec_ai turns off macOS's zero-on-free,
+  # which would otherwise hide the difference).
+  def test_ac1_new_records_are_zero_filled
+    junk = Array.new(50) { CArray.float64(3000) { |i| i * 1.7 } }
+    junk = nil
+    GC.start
+    20.times do
+      bytes = CARecord.new(GeoCoord, 50).parent.to_a.join.bytes
+      assert bytes.all?(&:zero?)
+    end
+  end
+
   def test_ac1_parent_is_fixlen_entity
     a = CARecord.new(GeoCoord, 5)
     p = a.parent
@@ -191,7 +204,7 @@ class TestCARecord < Test::Unit::TestCase
     klass = Class.new(CARecord) do
       data_class GeoCoord
     end
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       klass.instance_eval { data_class Pixel }
     end
   end
@@ -370,6 +383,249 @@ class TestCARecord < Test::Unit::TestCase
     w = CARecord.wrap(ent, GeoCoord)
     assert_equal a["lat"].to_a, w["lat"].to_a
     assert_equal a["lng"].to_a, w["lng"].to_a
+  end
+
+  # Marshal loads a record array into an empty instance through
+  # initialize_copy; the loaded array must hold on to its storage.
+  def test_marshal_round_trip_keeps_the_storage
+    a = CARecord.new(GeoCoord, 2, 3)
+    a["lat"][] = CArray.float64(2, 3).seq
+    a["lng"][] = CArray.float64(2, 3).seq * 10
+    b = Marshal.load(Marshal.dump(a))
+    assert_kind_of CArray, b.parent
+    GC.start
+    Array.new(20000) { CArray.int8(48).seq! }
+    assert_equal a["lat"].to_a, b["lat"].to_a
+    assert_equal a["lng"].to_a, b["lng"].to_a
+    assert_equal GeoCoord, b.data_class
+  end
+
+  # A view of a record array has the Face on top and the storage under it,
+  # with no Face in between (CAFace.md §8.3).
+  def faces_in_chain (a)
+    n = 0
+    while a.kind_of?(CArray)
+      n += 1 if a.face?
+      a = a.parent
+    end
+    n
+  end
+
+  def test_value_of_a_subclass_keeps_its_class
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    a["lat"][] = [1.0, 2.0, 3.0]
+    a[1] = UNDEF
+    v = a.value
+    assert_kind_of klass, v
+    assert_equal 1, faces_in_chain(v)
+    assert_equal false, v.has_mask?
+    assert_equal [1.0, 2.0, 3.0], v["lat"].to_a
+  end
+
+  def test_value_and_grid_have_one_face
+    a = CARecord.new(GeoCoord, 2, 3)
+    assert_equal 1, faces_in_chain(a.value)
+    assert_equal 1, faces_in_chain(a[CA_INT([1, 4])])
+  end
+
+  def test_refer_as_its_own_data_class_keeps_the_subclass
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    r = a.refer(GeoCoord, [3])
+    assert_kind_of klass, r
+    assert_equal 1, faces_in_chain(r)
+  end
+
+  # Records are read at their data_class's offsets, so a store takes records
+  # of the same data_class whatever the record array's class, and refuses
+  # any other data_class.
+  Swapped = CArray.struct { float64 :lng; float64 :lat } unless defined?(Swapped)
+  Narrow  = CArray.struct { int32 :z } unless defined?(Narrow)
+
+  def test_store_refuses_records_of_another_data_class
+    a = CARecord.new(GeoCoord, 3)
+    q = CARecord.new(Swapped, 3)
+    n = CARecord.new(Narrow, 3)
+    assert_raise(TypeError) { a[] = q }
+    assert_raise(TypeError) { a[0..1] = q[0..1] }
+    assert_raise(TypeError) { a[] = n }
+    assert_raise(TypeError) { CA_BOOLEAN([1, 0, 1]).then_else(a, q) }
+  end
+
+  def test_store_takes_records_of_the_same_data_class_across_classes
+    klass = Class.new(CARecord) { data_class GeoCoord }
+    a = klass.new(3)
+    b = CARecord.new(GeoCoord, 3)
+    b["lat"][] = [1.0, 2.0, 3.0]
+    a[] = b
+    assert_equal [1.0, 2.0, 3.0], a["lat"].to_a
+    b[1..2] = a[0..1]
+    assert_equal [1.0, 1.0, 2.0], b["lat"].to_a
+    r = CA_BOOLEAN([1, 0, 1]).then_else(a, b)
+    assert_equal [1.0, 1.0, 3.0], r["lat"].to_a
+  end
+
+  def test_eq_compares_records_of_the_same_data_class_only
+    a = CARecord.new(GeoCoord, 2)
+    b = CARecord.new(GeoCoord, 2)
+    b["lat"][1] = 1.0
+    assert_equal [true, false], a.eq(b).to_a
+    assert_equal [false, true], a.ne(b).to_a
+    q = CARecord.new(Swapped, 2)
+    assert_raise(TypeError) { a.eq(q) }
+    assert_raise(TypeError) { a.ne(q) }
+    assert_equal [true, true], a.eq(a.parent).to_a   # bytes, as a store takes
+  end
+
+  # A struct element is taken wherever a record array takes a value.
+  def test_struct_elements_are_stored_through_every_path
+    g = ->(lat) { GeoCoord.new(lat, 0.0) }
+    a = CARecord.new(GeoCoord, 4)
+    a[1..2] = g.(1.0)
+    assert_equal [0.0, 1.0, 1.0, 0.0], a["lat"].to_a
+    a[CA_INT([0, 3])] = g.(2.0)
+    assert_equal [2.0, 1.0, 1.0, 2.0], a["lat"].to_a
+    a[] = [g.(1.0), g.(2.0), g.(3.0), g.(4.0)]
+    assert_equal [1.0, 2.0, 3.0, 4.0], a["lat"].to_a
+    a[] = a.to_a.reverse
+    assert_equal [4.0, 3.0, 2.0, 1.0], a["lat"].to_a
+    a[] = a.to_type(CA_OBJECT).flip(0)
+    assert_equal [1.0, 2.0, 3.0, 4.0], a["lat"].to_a
+    b = CARecord.new(GeoCoord, 2, 2)
+    b[1, nil] = g.(5.0)
+    assert_equal [[0.0, 0.0], [5.0, 5.0]], b["lat"].to_a
+  end
+
+  def test_struct_element_fills_masked_records
+    g = GeoCoord.new(9.0, 0.0)
+    a = CARecord.new(GeoCoord, 3)
+    a[1] = UNDEF
+    assert_equal [0.0, 9.0, 0.0], a.strip_mask(g)["lat"].to_a
+    a.unmask(g)
+    assert_equal [0.0, 9.0, 0.0], a["lat"].to_a
+    assert_equal [9.0, 0.0, 9.0],
+                 a.shift(1, fill_value: g)["lat"].to_a
+  end
+
+  def test_struct_element_of_another_class_is_refused
+    a = CARecord.new(GeoCoord, 3)
+    e = assert_raise(TypeError) { a[0] = Swapped.new(1.0, 2.0) }
+    assert_match(/Swapped/, e.message)
+    assert_raise(TypeError) { a[0..1] = Swapped.new(1.0, 2.0) }
+  end
+
+  # A field of a frozen or read-only record array refuses writes, and a
+  # frozen view still projects its fields.
+  def test_fields_of_a_frozen_record_array_are_read_only
+    a = CARecord.new(GeoCoord, 3)
+    a["lat"]                       # cached before the freeze
+    a.freeze
+    assert_raise(RuntimeError) { a["lat"][] = 5.0 }
+    assert_raise(RuntimeError) { a["lng"][0] = 5.0 }
+    assert_raise(RuntimeError) { a.flip(0)["lat"][0] = 5.0 }
+    assert_raise(RuntimeError) { a.fields[0][1] = 5.0 }
+    assert_equal [0.0, 0.0, 0.0], a["lat"].to_a
+    v = CARecord.new(GeoCoord, 3)[1..2]
+    v.freeze
+    assert_equal [0.0, 0.0], v["lat"].to_a
+    assert_raise(RuntimeError) { v["lat"][0] = 5.0 }
+  end
+
+  # The discovery family answers for records by their bytes, as nunique and
+  # mask_duplicates already did; anything that sorts needs order_by:.
+  def discovery_fixture
+    a = CARecord.new(GeoCoord, 4)
+    a["lat"][] = [2.0, 1.0, 2.0, 3.0]
+    a["lng"][] = [1.0, 0.0, 1.0, 5.0]
+    a
+  end
+
+  def lats (r)
+    r["lat"].to_a
+  end
+
+  def test_discovery_family_takes_records_by_bytes
+    a = discovery_fixture
+    one = CARecord.new(GeoCoord, 1); one["lat"][0] = 1.0
+    assert_equal [2.0, 1.0, 3.0], lats(a.unique)
+    assert_kind_of CARecord, a.unique
+    values, counts = a.value_counts
+    assert_equal [2.0, 1.0, 3.0], lats(values)
+    assert_equal [2, 1, 1], counts.to_a
+    assert_equal 3, a.nunique
+    assert_equal [2.0], lats(a.mode)
+    assert_equal [false, true, false, false], a.is_in(one).to_a
+    assert_equal [false, true, false, false], a.is_in(one.parent).to_a
+    assert_equal [1.0], lats(a.intersection(one))
+    assert_equal [2.0, 3.0], lats(a.difference(one))
+    assert_equal 2, a.count(GeoCoord.new(2.0, 1.0))
+    assert_equal [true, false, true, false], a.categorize.codes.eq(0).to_a
+  end
+
+  def test_discovery_family_refuses_records_of_another_data_class
+    a = discovery_fixture
+    q = CARecord.new(Swapped, 1)
+    assert_raise(TypeError) { a.is_in(q) }
+    assert_raise(TypeError) { a.intersection(q) }
+    assert_raise(TypeError) { a.count(q) }
+    assert_raise(TypeError) { a.count(Swapped.new(1.0, 0.0)) }
+  end
+
+  def test_sorted_discovery_needs_order_by
+    a = discovery_fixture
+    assert_raise(ArgumentError) { a.unique(sort: true) }
+    ordered = CArray.struct(order_by: [:lat]) { float64 :lat; float64 :lng }
+    b = CARecord.new(ordered, 4)
+    b["lat"][] = [2.0, 1.0, 2.0, 3.0]
+    assert_equal [1.0, 2.0, 3.0], lats(b.unique(sort: true))
+  end
+
+  # Marshal carries a record array of a named struct whatever its members
+  # are, mask and subclass included.
+  Inner = CArray.struct { int16 :p; int16 :q } unless defined?(Inner)
+  Mixed = CArray.struct {
+    fixlen :s, bytes: 3
+    bit :f, bits: 1
+    bit :g, bits: 5
+    struct :in, type: Inner
+    array :v, type: CArray.int32(2)
+  } unless defined?(Mixed)
+
+  def test_marshal_round_trip_of_every_member_kind
+    a = CARecord.new(Mixed, 3)
+    a["s"][] = %w[abc def ghi]
+    a["g"][] = [1, 2, 3]
+    a[1] = UNDEF
+    b = Marshal.load(Marshal.dump(a))
+    assert_equal Mixed, b.data_class
+    assert_equal ["abc", UNDEF, "ghi"], b["s"].to_a
+    assert_equal [1, UNDEF, 3], b["g"].to_a
+    klass = Class.new(CARecord) { data_class Mixed }
+    TestCARecord.const_set(:MixedRecords, klass) unless defined?(MixedRecords)
+    c = Marshal.load(Marshal.dump(MixedRecords.new(2)))
+    assert_kind_of MixedRecords, c
+  end
+
+  # Shown and written as members, never as raw bytes or an object address.
+  def test_records_are_shown_by_their_members
+    a = CARecord.new(GeoCoord, 2)
+    a["lat"][] = [1.0, 2.0]
+    assert_match(/lat.*1\.0/, a.inspect)
+    refute_match(/\\x/, a.inspect)
+    assert_equal a[0].inspect, a[0].to_s
+    df = CAFrame.new("r" => a)
+    refute_match(/#<.*0x/, df.inspect)
+    e = assert_raise(ArgumentError) { df.to_csv }
+    assert_match(/record column "r"/, e.message)
+  end
+
+  def test_dup_shares_the_storage
+    a = CARecord.new(GeoCoord, 3)
+    b = a.dup
+    assert_same a.parent, b.parent
+    b["lat"][1] = 5.0
+    assert_equal 5.0, a["lat"][1]
   end
 
   # =========================================================================

@@ -16,21 +16,25 @@ class CAFrame
   # column name => value; a scalar cell is a Ruby value, an N-D cell is a Ruby
   # Array, and a masked cell (UNDEF) is +nil+. Normalizing UNDEF -> nil and
   # CArray -> Array (unlike +each_row+, which yields the raw view with UNDEF /
-  # CArray slices) is what makes it round-trip: +from_records(df.to_records)+
-  # rebuilds the same typing, and the result is JSON-serializable.
+  # CArray slices) makes the result JSON-serializable and lets
+  # +from_records(df.to_records)+ give back the column names, the values and
+  # the mask. The rest is not in a record: +from_records+ rebuilds each type
+  # from the values (an int32 comes back int64, a time column as an object
+  # column of its elements), the index comes back as an ordinary first
+  # column, and a frame with no rows gives +[]+, which has no column names.
   def to_records
     each_row.map { |row| row.transform_values { |v| record_value(v) } }
   end
 
   # Hand the frame over as a CArray with the minimum work (memo §11.9): a
-  # 2-D **view** of shape (nrow, nvar), one column per variable in column
+  # 2-D **view** of shape (nrow, ncol), one per column in column
   # order (§12-C). Nothing is materialised — the result is a +CAStack+ over
   # the stored columns, so reads gather from them and writes flow back
   # (§3.6). Call +copy+ on it for an independent, owned matrix; +CArray.tabulate+
   # is the eager sibling that builds one directly.
   #
   # Only same-shape scalar (1-D) columns qualify. An N-D column has no single
-  # matrix form and raises — escape it per column with +df["name"]+. A mixed
+  # matrix form and raises — take it per column with +df["name"]+. A mixed
   # data type set is promoted to a common type (+result_type+, §12-F) through
   # lazy cast lanes, so the promotion costs no buffer either.
   #
@@ -48,12 +52,12 @@ class CAFrame
     if nd
       raise ArgumentError,
             "to_ca needs all-scalar (1-D) columns; #{nd.first.inspect} is " \
-            "#{nd.last.ndim}-D — escape per column with df[name]"
+            "#{nd.last.ndim}-D — take it per column with df[name]"
     end
     refuse_unshared_columns(cols) if writable
     begin
       CArray.stack(cols, axis: 1)
-    rescue ArgumentError, RuntimeError => e
+    rescue ArgumentError, TypeError, CArray::DataTypeError => e
       # The columns have no common type (a text or Face column beside a
       # numeric one). Point at the frame-level verb that gives them one.
       raise e.class,
@@ -87,7 +91,9 @@ class CAFrame
     if UNDEF.equal?(v)
       nil
     elsif v.is_a?(CArray)
-      v.to_a.map { |e| UNDEF.equal?(e) ? nil : e }
+      record_value(v.to_a)
+    elsif v.is_a?(Array)
+      v.map { |e| record_value(e) }
     else
       v
     end

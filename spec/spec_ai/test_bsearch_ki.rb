@@ -149,7 +149,7 @@ class TestBsearchKi < Test::Unit::TestCase
   def test_mask_global_raise
     a = CArray.float64(5).seq!(0, 1)
     a.mask = [0, 0, 1, 0, 0]
-    assert_raise(RuntimeError) do
+    assert_raise(ArgumentError) do
       a.bsearch_ki(2.0, 0)
     end
   end

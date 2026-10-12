@@ -75,7 +75,8 @@ class CArray
   #   Use `CArray.meld` for the uniform-shape view-default counterpart.
   #
   #   @param list [Array<CArray>] pieces to concatenate.
-  #   @param axis [Integer] axis to concatenate along.
+  #   @param axis [Integer, nil] axis to concatenate along; `nil` is the
+  #     same as `0`.
   #   @param data_type [Symbol, Integer, nil] result `data_type`;
   #     inferred via `result_type` when `nil`.
   #   @return [CArray] fresh CArray with per-piece `axis` sizes summed.
@@ -83,7 +84,8 @@ class CArray
   #     inconsistent.
   def self.concatenate (list, axis: 0, data_type: nil)
     raise ArgumentError, "concatenate: list must not be empty" if list.empty?
-    __ragged_paste(list, [list.size], axis, data_type)
+    axis = 0 if axis.nil?
+    __ragged_paste(list, [list.size], axis, data_type, "concatenate")
   end
 
   # @overload concatenate(*others, axis: 0, data_type: nil)
@@ -128,7 +130,7 @@ class CArray
       raise ArgumentError,
             "mosaic: tdim product (#{expected}) must equal list size (#{list.size})"
     end
-    __ragged_paste(list, tdim, axis, data_type)
+    __ragged_paste(list, tdim, axis, data_type, "mosaic")
   end
 
   # Shared eager paste-loop helper (= ex-`combine` paste implementation,
@@ -136,7 +138,7 @@ class CArray
   # shape obtained by tiling `list` over `tdim` starting at `axis`, with
   # per-piece dim sizes summed along each tile axis (= block-matrix
   # consistency required across rows / columns).
-  def self.__ragged_paste (list, tdim, axis, data_type)
+  def self.__ragged_paste (list, tdim, axis, data_type, name)
     list = CArray.promote_list(list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and
     # for Face elements: same Face class + portable + state-compatible).  So,
@@ -144,12 +146,16 @@ class CArray
     # result with face_lift, rather than special-casing data_class / DATA_SIZE
     # here (= which only ever handled CARecord and silently corrupted plain
     # fixlen / numeric Faces by leaving bytes nil).
-    face_parent = list[0].face? ? list[0] : nil
+    # The Face is re-wrapped from the widest piece: a fixlen Face carries
+    # its cell width, and the result is as wide as its widest piece.
+    face_parent = list[0].face? ? list.max_by(&:bytes) : nil
     if face_parent
-      list = list.map { |x| s = x; s = s.parent while s.face?; s }
+      list = list.map { |x| x.__send__(:__face_storage__) }
     end
     data_type = list[0].data_type
-    bytes     = (data_type == :fixlen) ? list[0].bytes : nil
+    # Fixlen pieces of different widths join at the widest, so no cell is
+    # cut; each narrower piece is padded with NUL as it is pasted.
+    bytes     = (data_type == :fixlen) ? list.map(&:bytes).max : nil
     # promote_list guarantees a non-empty list of CArrays, so the reference
     # shape is simply the first element (a CScalar carries shape [1], so a
     # leading scalar is fine; the scalar-expansion pass below broadcasts it).
@@ -157,7 +163,7 @@ class CArray
     dim   = ref.shape
     ndim  = ref.ndim
     tndim = tdim.size
-    axis = CArray.normalize_axis(axis, ndim - tndim + 1, "concatenate/mosaic")
+    axis = CArray.normalize_axis(axis, ndim - tndim + 1, name)
 
     list = list.map do |x|
       if x.scalar?
@@ -190,7 +196,7 @@ class CArray
     block.each_with_index do |item, *tidx|
       unless item.ndim == ndim
         raise ArgumentError,
-              "concatenate/mosaic: piece at tile #{tidx.inspect} has ndim " \
+              "#{name}: piece at tile #{tidx.inspect} has ndim " \
               "#{item.ndim} (expected #{ndim})"
       end
       ndim.times do |d|
@@ -199,7 +205,7 @@ class CArray
         expected = on_tile ? tile_sizes[i][tidx[i]] : dim[d]
         unless item.shape[d] == expected
           raise ArgumentError,
-                "concatenate/mosaic: piece at tile #{tidx.inspect} has " \
+                "#{name}: piece at tile #{tidx.inspect} has " \
                 "#{on_tile ? 'tile' : 'non-tile'} axis #{d} size " \
                 "#{item.shape[d]} (expected #{expected}); pieces must agree " \
                 "on non-tile axes and be block-matrix consistent along tile axes"

@@ -824,8 +824,8 @@ Ruby callback, an allocation, `rb_funcall`), wrap the section in
 
 ### 4.6 Read-only views and `nosync`
 
-Some views can't be written through (reduction results, frozen
-arrays, `value_array` variants). In C the predicate is
+Some views can't be written through (reduction results, repeated
+cells, lazy expressions, views of a frozen or read-only array). In C the predicate is
 `ca_is_readonly(ca)`. Calling `ca_sync` on a read-only array raises;
 `ca_attach` on it is fine (you can still read).
 
@@ -2373,6 +2373,11 @@ The same discipline applies to any `xmalloc`ed scratch you hold across a
 possibly-raising call, and to output arrays you have attached — release
 them in the ensure handler too.
 
+A kernel-iterator walk is the same case: the walk holds its source until
+`ca_iter_state_finish`, and a body that raises jumps over it. Run such a
+body through `ca_iter_ensure`, which finishes the walks you hand it
+however the body leaves; the kernel-iterator chapter shows the shape.
+
 ### 17.3 Argument validation idioms
 
 Validate at the top of the method, before allocating or attaching, so a
@@ -2488,7 +2493,7 @@ preprocessor macro. CArray exposes:
 
 ```ruby
 CArray::VERSION        # => "3.0.0"      (string)
-CArray::VERSION_CODE   # => 300          (integer, major*100 + minor*10 + teeny)
+CArray::VERSION_CODE   # => 30000        (integer, major*10000 + minor*100 + teeny)
 CArray::VERSION_MAJOR  # => 3
 CArray::VERSION_MINOR  # => 0
 CArray::VERSION_TEENY  # => 0
@@ -2499,7 +2504,7 @@ Gate the build on a minimum version in `extconf.rb`:
 ```ruby
 require 'carray/mkmf'
 
-if CArray::VERSION_CODE < 300
+if CArray::VERSION_CODE < 30000
   abort "my_ext requires CArray 3.0 or later (found #{CArray::VERSION})"
 end
 
@@ -2508,8 +2513,12 @@ if have_carray()
 end
 ```
 
-`VERSION_CODE` is the integer form to compare against (`300` for 3.0.0);
-it is monotonic across releases, so `>=` comparisons are safe.
+`VERSION_CODE` is the integer form to compare against (`30000` for 3.0.0,
+`30010` for 3.0.10, `30100` for 3.1.0); it grows with every release, so
+`>=` comparisons are safe.  Before 3.0.3 it was `major*100 + minor*10 +
+teeny` (`302` for 3.0.2); every value in that form is smaller than any in
+the current one, so a check written against the old form, such as
+`< 303`, still turns away 3.0.2 and earlier.
 
 For finer-grained *feature* detection — "does this CArray build have
 function `foo`?" — use mkmf's `have_func`:
@@ -2534,10 +2543,21 @@ CArray 3.0 is an intentionally breaking major release; its C API is not
 promised to be identical to 2.x, and future majors may again break
 source or ABI. A few practical rules for a companion gem:
 
-- **Pin a minimum CArray version** in both your gemspec (as a runtime
-  dependency) and `extconf.rb` (as a build-time `VERSION_CODE` check),
-  so an incompatible CArray fails early with a clear message rather
-  than as a confusing compile error.
+- **Give a lower bound, and no upper bound.** In the gemspec, require
+  the CArray release that added the newest part of CArray your gem uses
+  (`'carray', '>= 3.0.2'`), found by building and testing against it,
+  not the release you happened to develop on. Leave the upper end open:
+  a bound such as `< 3.1` makes every release of your gem refuse the
+  next CArray until you publish again, while a CArray that has changed
+  something you use fails loudly anyway, at build or load time. The one
+  exception is a gem that depends on CArray's own build rather than on
+  its API — carray-jit compiles CArray's kernel bodies and must match
+  the release it reads them from, so it states an upper bound.
+- **An `extconf.rb` check is optional.** It repeats the gemspec's lower
+  bound for a build that does not go through `gem install` (a source
+  tree, `rake compile`). Write it in the current `VERSION_CODE` form;
+  a lower bound below 3.0.3 cannot be written in that form, so leave
+  the check out and rely on the gemspec.
 - **Recompile against the CArray you run on.** Because symbols resolve
   from the loaded `carray` extension at load time, an extension built
   against one CArray and run against a materially different one can
@@ -2560,7 +2580,5 @@ source or ABI. A few practical rules for a companion gem:
   break. Stay on the public surface and version compatibility stays
   manageable.
 
-When in doubt, match your gem's supported CArray range to what you
-actually test against, state it in the gemspec dependency, and let the
-`extconf.rb` version gate turn an unsupported combination into a
-readable abort rather than a mysterious failure.
+When in doubt, find the oldest CArray your gem builds and passes its
+tests on, and state that as the lower bound in the gemspec.

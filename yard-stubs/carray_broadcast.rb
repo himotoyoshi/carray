@@ -23,7 +23,7 @@ class CArray
   #   @param shape [Array<Integer>] target shape, with
   #     `length >= self.ndim`.
   #   @return [CArray]
-  #   @raise [RuntimeError] if a source axis cannot be paired with a
+  #   @raise [ArgumentError] if a source axis cannot be paired with a
   #     target axis (cross-ndim expansion is intentionally strict —
   #     see {CArray.broadcast} for the explicit-`:_` axis
   #     declaration form).

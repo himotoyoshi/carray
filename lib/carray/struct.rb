@@ -217,6 +217,14 @@ class CAStruct
       return self::MEMBERS
     end
 
+    # @overload order_by
+    #   Returns the members the records are ordered by (`order_by:` of
+    #   {CArray.struct}), or nil when the struct declares no order.
+    #   @return [Array<String>, nil]
+    def order_by
+      const_defined?(:ORDER_BY) ? self::ORDER_BY : nil
+    end
+
     # @overload fields
     #   Returns the struct's members as {CAStruct::Field} objects
     #   in declaration order. Cached on the class.
@@ -318,6 +326,20 @@ class CAStruct
     end
   end
 
+  # A copy owns its bytes (dup and clone of the struct object would
+  # otherwise share the one-record array behind it).
+  def initialize_copy (other)
+    super
+    @data = @data.copy
+  end
+
+  # Freezing an element also stops writes to its bytes.
+  # @return [self]
+  def freeze
+    @data.freeze
+    super
+  end
+
   protected
 
   def __data__
@@ -326,56 +348,69 @@ class CAStruct
 
   public
 
-  # Member access (`record[:name]` / `record["name"]` / `record[i]`).
-  # Step 3 (3.0): the per-type `case` was replaced by a class-level
-  # DISPATCH_TABLE built once at struct-definition time.  Each known
-  # member has a frozen `[reader_proc, writer_proc]` pair that closes
-  # over its offset / type / opts, so the per-call work is one Hash
-  # lookup + one Proc#call.  Unknown names fall back to `send(name)`
-  # so subclasses can define computed members via plain Ruby methods.
+  # Member access.  A member is named by a String (`s["lat"]`) or its
+  # Integer position (`s[0]`); its accessor (`s.lat`) reads it too.  A
+  # Symbol is not a member name here, and a name that is not a member
+  # raises.  These Ruby bodies state the rule; the methods that run are
+  # the C ones installed at the bottom of this file.
   # @overload [](name)
-  #   Returns the value of member `name` (Integer indexes the
-  #   member list). Unknown names fall through to `send(name)`.
-  #   @param name [Symbol, String, Integer]
+  #   Returns the value of member `name`.
+  #   @param name [String, Integer]
   #   @return [Object]
+  #   @raise [TypeError] for a Symbol or another type of name.
+  #   @raise [ArgumentError] when `name` is not a member.
   def [] (name)
-    if name.kind_of?(Integer)
-      name = members[name]
-    end
-    pair = self.class::DISPATCH_TABLE[name.to_s]
-    if pair
-      pair[0].call(@data)
-    else
-      send(name)
-    end
+    pair = self.class::DISPATCH_TABLE[member_name(name)]
+    pair[0].call(@data)
   end
 
   # @overload []=(name, val)
-  #   Sets member `name` to `val`. Unknown names fall through to
-  #   `send("#{name}=", val)`.
-  #   @param name [Symbol, String, Integer]
+  #   Sets member `name` to `val`.
+  #   @param name [String, Integer]
   #   @param val [Object]
   #   @return [Object] `val`.
+  #   @raise [TypeError] for a Symbol or another type of name.
+  #   @raise [ArgumentError] when `name` is not a member.
   def []= (name, val)
-    if name.kind_of?(Integer)
-      name = members[name]
-    end
-    pair = self.class::DISPATCH_TABLE[name.to_s]
-    if pair
-      pair[1].call(@data, val)
+    pair = self.class::DISPATCH_TABLE[member_name(name)]
+    pair[1].call(@data, val)
+  end
+
+  private def member_name (name)
+    case name
+    when Symbol
+      if self.class::MEMBER_TABLE.key?(name.to_s)
+        raise TypeError, "a struct member is named by a String (s[\"#{name}\"]) " \
+                         "or read by its accessor (s.#{name}), not by a Symbol"
+      end
+      raise TypeError, "a struct member is named by a String, not by a Symbol " \
+                       "(#{self.class.inspect} has no member #{name.to_s.inspect} either)"
+    when Integer
+      key = members[name]
+    when String
+      key = name
     else
-      send(name.to_s + "=", val)
+      raise TypeError, "a struct member is named by a String or an Integer " \
+                       "position (got #{name.class})"
     end
+    unless key && self.class::MEMBER_TABLE.key?(key)
+      raise ArgumentError, "#{self.class.inspect} has no member #{name.inspect} " \
+                           "(members: #{members.inspect})"
+    end
+    key
   end
 
   # @overload each { |value| ... }
-  #   Yields each member value in declaration order.
+  #   Yields each member value in declaration order (an Enumerator
+  #   without a block).
   #   @yieldparam value [Object]
   #   @return [self]
   def each
+    return to_enum(:each) { length } unless block_given?
     members.each do |name|
       yield(self[name])
     end
+    self
   end
 
   # @overload each_pair { |name, value| ... }
@@ -385,9 +420,19 @@ class CAStruct
   #   @yieldparam value [Object]
   #   @return [self]
   def each_pair
+    return to_enum(:each_pair) { length } unless block_given?
     members.each do |name|
       yield(name.intern, self[name])
     end
+    self
+  end
+
+  # @overload to_h
+  #   Returns the members as a Hash of member name (Symbol) to value, in
+  #   declaration order.
+  #   @return [Hash{Symbol => Object}]
+  def to_h
+    each_pair.to_h
   end
 
   # @overload length
@@ -432,16 +477,58 @@ class CAStruct
     return ["<", self.class.inspect, " ", table.inspect[1..-2], ">"].join
   end
 
-  # Value comparison against another record of the same class.  Unlike
-  # `eql?`, which compares the raw bytes, this compares the decoded members.
+  alias to_s inspect
+
+  # Equality with another record of the same class, by the record's bytes
+  # (the same as {#eql?}): a struct is its bytes, so a NaN member equals
+  # itself, 0.0 and -0.0 differ, and so do records whose padding bytes
+  # differ.  A record array's `eq` compares records the same way.
   # @return [Boolean]
   def == (other)
-    case other
-    when self.class
-      return @data == other.__data__
-    else
-      return false
+    other.is_a?(self.class) && encode == other.encode
+  end
+
+  # Order against a record of the same class, by the members the struct
+  # was declared with in `order_by:`, compared in that order.  NaN sorts
+  # after every number.  nil when the other is not a record of this class,
+  # or when the struct declares no order.
+  # @return [Integer, nil]
+  def <=> (other)
+    keys = self.class.order_by
+    return nil unless keys && other.class.equal?(self.class)
+    keys.each do |key|
+      c = CAStruct.compare_key(self[key], other[key])
+      return c unless c == 0
     end
+    0
+  end
+
+  # @!method <(other)
+  #   @raise [ArgumentError] when the struct declares no `order_by:`, or
+  #     `other` is not a record of the same class.
+  # @!method <=(other)
+  # @!method >(other)
+  # @!method >=(other)
+  { :< => ->(c) { c < 0 }, :<= => ->(c) { c <= 0 },
+    :> => ->(c) { c > 0 }, :>= => ->(c) { c >= 0 } }.each do |op, test|
+    define_method(op) do |other|
+      c = (self <=> other)
+      if c.nil?
+        raise ArgumentError,
+              "comparison of #{self.class.inspect} with #{other.class.inspect} failed" +
+              (self.class.order_by ? "" : " (the struct declares no order_by:)")
+      end
+      test.call(c)
+    end
+  end
+
+  # One member of {#<=>}: NaN after every number, as a numeric array sorts.
+  def self.compare_key (a, b)
+    a_nan = a.is_a?(Float) && a.nan?
+    b_nan = b.is_a?(Float) && b.nan?
+    return (a_nan ? 0 : -1) if b_nan
+    return 1 if a_nan
+    a <=> b
   end
 
   # Byte-level identity.  Two CAStruct instances are eql? iff they are
@@ -465,6 +552,7 @@ class CAStruct
   #   @return [self]
   #   @raise [CAStruct::DecodeError] on an unsupported input.
   def decode (data)
+    raise FrozenError.new("can't modify frozen #{self.class}", receiver: self) if frozen?
     case data
     when String
       @data.load_binary(data)
@@ -486,25 +574,18 @@ class CAStruct
   end
 
   # @overload swap_bytes!
-  #   Byte-swaps `self` in place (endian flip).
+  #   Byte-swaps each member of `self` in place (endian flip).
   #   @return [self]
   def swap_bytes!
-    @data[] = @data.swap_bytes
-    return self
+    decode(swap_bytes.encode)
   end
 
   # @overload swap_bytes
-  #   Returns a fresh byte-swapped copy of `self`.
+  #   Returns a fresh copy of `self` with each member byte-swapped, as
+  #   a record array's swap_bytes swaps its records.
   #   @return [CAStruct]
   def swap_bytes
-    return self.class.decode(@data.swap_bytes.dump_binary)
-  end
-
-  # @overload to_ptr
-  #   Returns a `Fiddle::Pointer` to the backing storage.
-  #   @return [Fiddle::Pointer]
-  def to_ptr
-    return @data.to_ptr
+    return CARecord.wrap(@data, self.class).swap_bytes[0]
   end
 
 end
@@ -527,9 +608,19 @@ class CArray
   #   Returns a new {CAStruct} subclass defined by the block via
   #   {CAStruct::Builder}. Options control alignment, packing, and
   #   endianness.
-  #   @param opt [Hash]
+  #
+  #   `order_by:` names the members records are ordered by, compared in
+  #   that order (`order_by: [:lat, :id]` sorts by `lat`, then `id` among
+  #   equal `lat`).  It gives the records `<=>` and the comparison
+  #   operators, and gives a {CARecord} of them `sort`, `min`, `max`,
+  #   `partition_copy` and their index forms.  A struct without it has no
+  #   order, and those raise.  NaN sorts after every number, as in a
+  #   numeric array.
+  #   @param opt [Hash] `pack:`, `size:`, `order_by:`.
   #   @yield DSL calls in {CAStruct::Builder}.
   #   @return [Class] anonymous {CAStruct} subclass.
+  #   @raise [CAStruct::DefinitionError] when `order_by:` names something
+  #     that is not a member, or a nested record.
   def self.struct (opt={}, &block)
     return CAStruct::Builder.new(:struct, opt).define(&block)
   end
@@ -641,4 +732,4 @@ if CArray.respond_to?(:__install_castruct_methods__)
   CArray.__install_castruct_methods__(CAStruct)
 end
 
-
+require 'carray/record_order'

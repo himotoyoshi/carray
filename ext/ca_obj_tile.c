@@ -16,6 +16,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE */
 
@@ -75,17 +76,24 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
   ndim      = parent->ndim;
   bytes     = parent->bytes;
 
-  elements = 1;
-  for (i = 0; i < ndim; i++) {
-    if ( reps[i] <= 0 ) {
-      rb_raise(rb_eIndexError,
-               "invalid reps for %d-th dimension (must be positive)", i);
+  {
+    ca_size_t tiled[CA_RANK_MAX];
+    for (i = 0; i < ndim; i++) {
+      if ( reps[i] <= 0 ) {
+        rb_raise(rb_eIndexError,
+                 "invalid reps for %d-th dimension (must be positive)", i);
+      }
+      if ( __builtin_mul_overflow(parent->dim[i], reps[i], &tiled[i]) ) {
+        rb_raise(rb_eArgError, "too large byte length");
+      }
     }
-    if ( parent->dim[i] <= 0 ) {
-      rb_raise(rb_eIndexError,
-               "invalid parent dim for %d-th dimension", i);
-    }
-    elements *= parent->dim[i] * reps[i];
+    elements = ca_shape_elements(ndim, tiled, bytes);
+  }
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
 
   ca->obj_type  = CA_OBJ_TILE;
@@ -118,7 +126,9 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
 CATile *
 ca_tile_new (CArray *parent, ca_size_t *reps)
 {
-  CATile *ca = ALLOC(CATile);
+  CATile *ca;
+  ca_tile_setup(NULL, parent, reps);
+  ca = ALLOC(CATile);
   ca_tile_setup(ca, parent, reps);
   return ca;
 }
@@ -196,6 +206,7 @@ static void
 ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CATile   *ca = (CATile *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;
@@ -445,10 +456,13 @@ ca_tile_func_xfer_all (void *ap, void *data, int dir)
     parent->ptr = parent_scratch;
     if ( dir == CA_XFER_GET ) ca_tile_attach_into(ca, (char *) data);
     else                       ca_tile_sync_from(ca, (char *) data);
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this
+       frame is. */
+    parent->ptr = parent_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
     }
-    parent->ptr = parent_ptr_saved;
     ALLOCV_END(holder);
   }
 }
@@ -466,10 +480,7 @@ static void
 ca_tile_func_create_mask (void *ap)
 {
   CATile *ca = (CATile *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_tile_new(ca->parent->mask, ca->reps);
 }
 
@@ -571,11 +582,13 @@ rb_ca_tile_initialize_copy (VALUE self, VALUE other)
 {
   CATile *ca, *cs;
   TypedData_Get_Struct(self,  CATile, &catile_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATile, &catile_data_type, cs);
   ca_tile_setup(ca, cs->parent, cs->reps);
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only accessor returning the tile descriptor as a Hash.
    Naming: leading underscore signals internal use. */
 static VALUE
@@ -597,6 +610,7 @@ rb_ca_tile_descriptor (VALUE self)
   rb_hash_aset(hash, ID2SYM(rb_intern("ndim")), INT2NUM(ca->ndim));
   return hash;
 }
+#endif
 
 void
 Init_ca_obj_tile (void)
@@ -616,7 +630,9 @@ Init_ca_obj_tile (void)
   rb_define_method(rb_cCATile, "initialize_copy",
                                       rb_ca_tile_initialize_copy, 1);
 
+#ifdef CARRAY_DEV_BUILD
   /* Debug-only descriptor accessor. */
   rb_define_method(rb_cCATile, "_tile_descriptor",
                                       rb_ca_tile_descriptor, 0);
+#endif
 }

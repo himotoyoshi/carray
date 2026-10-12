@@ -241,6 +241,6 @@ a no-op — already single-Face.
 ## See also
 
 - [`CAFace.md`](../topics/CAFace.md) — the Face substrate (model, C-level and CAObject
-  paths, `storage_to_scalar` / `scalar_to_storage`, invariants).
+  paths, `storage_to_element` / `element_to_storage`, invariants).
 - [`FaceOrderingSearch.md`](../authoring/FaceOrderingSearch.md) — how a Face joins the
   ordering / search kernels (which strip-then-lift).

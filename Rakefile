@@ -55,6 +55,26 @@ task :kernel_surface_check do
   ruby "utils/check_kernel_surface_freeze.rb" or exit($?.exitstatus)
 end
 
+desc "Check that the Face rules are called through the parts in ext/ca_obj_face.c"
+task :face_parts_check do
+  ruby "utils/check_face_parts.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no file gains a hand-written IndexError"
+task :index_error_check do
+  ruby "utils/check_index_errors.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no file gains a RuntimeError a caller could cause"
+task :runtime_error_check do
+  ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
+end
+
+desc "Check that every attach window opened by hand says why it is safe"
+task :attach_window_check do
+  ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
+end
+
 task :install do
   spec = eval File.read(GEMSPEC)
   version_h = `ruby ext/version.rb`.chomp
@@ -92,10 +112,13 @@ task :build_ext do
   # fires and mkkernel runs, so regeneration is transparent.  A bare
   # `cd ext && make` is the caller's responsibility -- run extconf explicitly
   # after touching mkkernel.rb.
+  # ca_op_powi.h is an input too: the generator copies part of it into the
+  # build (CArray.__kernel_helpers__).
   kernels_stamp = "ext/carray_kernels.stamp"
+  kernels_inputs = %w[ext/mkkernel.rb ext/ca_op_powi.h]
   kernels_stale = File.exist?("ext/mkkernel.rb") && (
     !File.exist?(kernels_stamp) ||
-    File.stat("ext/mkkernel.rb").mtime > File.stat(kernels_stamp).mtime
+    kernels_inputs.any? { |f| File.stat(f).mtime > File.stat(kernels_stamp).mtime }
   )
   need_extconf = !File.exist?("ext/Makefile") || prev != curr || kernels_stale
   Dir.chdir("ext") do
@@ -209,12 +232,11 @@ def build_spec_ai_smoke (dirname, basename)
   end
 end
 
-desc "Build spec_ai author-surface smoke fixtures (cfunc_r / per_element / with_buffer / source / iter_source_kind)"
+desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind)"
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
   build_spec_ai_smoke("ext_sweep_raw",         "sweep_raw")
-  build_spec_ai_smoke("ext_per_element_smoke", "per_element")
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
@@ -243,9 +265,6 @@ task(:build_cfunc_r_example)       { build_c_extension_example("cfunc_r",     "c
 desc "Build examples/c-extensions/cslab/cslab (rebuild if source/header newer than bundle)"
 task(:build_cslab_example)         { build_c_extension_example("cslab",       "cslab") }
 
-desc "Build examples/c-extensions/per_element/per_element (rebuild if source newer than bundle)"
-task(:build_per_element_example)   { build_c_extension_example("per_element", "per_element") }
-
 desc "Build examples/c-extensions/with_buffer/with_buffer (rebuild if source newer than bundle)"
 task(:build_with_buffer_example)     { build_c_extension_example("with_buffer",   "with_buffer") }
 
@@ -253,12 +272,12 @@ desc "Build all examples/c-extensions/ examples"
 task :build_c_extension_examples => [
   :build_cfunc_r_example,
   :build_cslab_example,
-  :build_per_element_example,
   :build_with_buffer_example,
 ]
 
 desc "Run spec_ai tests (ruby -I ext -I lib)"
-task :spec_ai => [:kernel_surface_check,
+task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
+                  :runtime_error_check, :index_error_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any
@@ -273,7 +292,18 @@ task :spec_ai => [:kernel_surface_check,
   # during the test run, and a Makefile / mkmf.log left at the repo root.
   # Their helper (ext_xfer_smoke/load.rb) is pulled in by the tests that need
   # it, so it does not want collecting either.
-  sh "ruby -I ext -I lib -r test/unit -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
+  # attach_balance.rb checks around every test that no view was left
+  # attached (development builds only).
+  sh "ruby -I ext -I lib -r test/unit -r ./spec/spec_ai/attach_balance.rb -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
+end
+
+desc "Run spec_ai with every fast path switched off (development builds only)"
+task :spec_ai_general do
+  # A fast path answers by a different algorithm what a general path also
+  # answers.  CARRAY_GENERAL_PATH=1 makes a development build take the
+  # general path everywhere, so this run and spec_ai compare the two.
+  ENV["CARRAY_GENERAL_PATH"] = "1"
+  Rake::Task[:spec_ai].invoke
 end
 
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"

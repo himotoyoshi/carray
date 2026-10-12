@@ -26,11 +26,12 @@
   bytes once in logical order, without offset-sharing dedup.
 
   Sibling of ca_obj_record.c (Face + VALUE tail + custom dmark) and
-  ca_obj_time.c (int64 Face + storage_to_scalar fast path).
+  ca_obj_time.c (int64 Face + storage_to_element fast path).
 
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"
 #include <ruby/encoding.h>
 
@@ -200,18 +201,6 @@ ca_const_string_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_const_string_func_create_mask (void *ap)
-{
-  CAConstString *ca = (CAConstString *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                     CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_const_string_func = {
   -1, /* CA_OBJ_CONST_STRING — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -222,7 +211,7 @@ ca_operation_function_t ca_const_string_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_const_string_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
@@ -255,12 +244,12 @@ ca_const_string_decode (CAConstString *ca, int64_t start, int64_t end)
   return rb_str_freeze(s);
 }
 
-/* storage_to_scalar in C (= skip rb_funcall on the per-cell fetch hot
+/* storage_to_element in C (= skip rb_funcall on the per-cell fetch hot
    path).  Since the Face surface is CA_FIXLEN (16 bytes), fetch delivers a
    16-byte raw String = the (start,end) int64 pair.  Decode the buffer slice
    → frozen Ruby String (plain frozen String, no Scalar wrapper). */
 static VALUE
-rb_ca_const_string_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_const_string_storage_to_element (VALUE self, VALUE raw)
 {
   CAConstString *ca;
   int64_t pair[2];
@@ -269,7 +258,7 @@ rb_ca_const_string_storage_to_scalar (VALUE self, VALUE raw)
 
   if ( TYPE(raw) != T_STRING || RSTRING_LEN(raw) != (long) sizeof(pair) ) {
     rb_raise(rb_eArgError,
-             "CAConstString#storage_to_scalar: expected a %lu-byte (start,end) cell",
+             "CAConstString#storage_to_element: expected a %lu-byte (start,end) cell",
              (unsigned long) sizeof(pair));
   }
   memcpy(pair, RSTRING_PTR(raw), sizeof(pair));
@@ -316,8 +305,8 @@ rb_ca_const_string_wrap (VALUE parent_val, VALUE buffer, int encoding_id)
     int64_t *pair;
     boolean8_t *m;
 
-    ca_attach(parent);
     ca_update_mask(parent);
+    ca_attach(parent);   /* window: detached before its one raise */
     n    = parent->elements;
     pair = (int64_t *) parent->ptr;
     m    = parent->mask ? (boolean8_t *) parent->mask->ptr : NULL;
@@ -462,6 +451,54 @@ rb_ca_const_string_buffer (VALUE self)
 
 /* ------------------------------------------------------------------- */
 
+/* to_string: the cells as a CAString over an object array of Strings, in
+   one pass over the buffer (shape and mask carried). */
+static VALUE
+rb_ca_const_string_to_string (VALUE self)
+{
+  CAConstString *ca;
+  volatile VALUE vpairs, out;
+  CArray *pe, *co;
+  rb_encoding *enc;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m;
+  VALUE *cells;
+  ca_size_t i;
+
+  TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
+  vpairs = rb_ca_parent(self);
+  TypedData_Get_Struct(vpairs, CArray, &carray_data_type, pe);
+  if ( ! ca_is_entity(pe) ) {
+    vpairs = rb_ca_copy(vpairs);
+    TypedData_Get_Struct(vpairs, CArray, &carray_data_type, pe);
+  }
+  enc = rb_enc_from_index(ca->encoding_id);
+  out = rb_carray_new(CA_OBJECT, pe->ndim, pe->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  m = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+  if ( m ) {
+    ca_create_mask(co);
+    memcpy(co->mask->ptr, m, pe->elements);
+  }
+  buf   = RSTRING_PTR(ca->buffer);
+  pair  = (const int64_t *) pe->ptr;
+  cells = (VALUE *) co->ptr;
+  for (i = 0; i < pe->elements; i++) {
+    if ( m && m[i] ) {
+      continue;
+    }
+    /* out is reachable and marks its cells, so each String is held as it
+       is stored */
+    cells[i] = rb_enc_str_new(buf + pair[2 * i],
+                              (long) ( pair[2 * i + 1] - pair[2 * i] ), enc);
+  }
+  RB_GC_GUARD(vpairs);
+  RB_GC_GUARD(self);
+  return rb_funcall(rb_const_get(rb_cObject, rb_intern("CAString")),
+                    rb_intern("wrap"), 1, out);
+}
+
 /* copy = compacting deep copy — the only chain-descent point in
    CAConstString.  Produces a standalone CAConstString:
      - a fresh contiguous fixlen-16 (start,end) pair entity
@@ -486,8 +523,8 @@ rb_ca_const_string_copy (VALUE self)
   TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
 
   /* materialize logical-order (start,end) pairs + mask */
-  ca_attach((CArray *) ca);
   ca_update_mask((CArray *) ca);
+  ca_attach((CArray *) ca);   /* window: detached before its one raise */
 
   n          = ca->elements;
   src_pair   = (int64_t *) ca->ptr;
@@ -567,12 +604,14 @@ typedef struct {
   ca_size_t   n;
 } ca_const_string_scan_t;
 
+/* Opens the scan's window; ca_const_string_scan_end closes it.  What runs
+   between them in this file reads bytes and raises only after closing. */
 static void
 ca_const_string_scan_begin (VALUE self, ca_const_string_scan_t *s)
 {
   TypedData_Get_Struct(self, CAConstString, &catext_data_type, s->ca);
-  ca_attach((CArray *) s->ca);
   ca_update_mask((CArray *) s->ca);
+  ca_attach((CArray *) s->ca);   /* window: closed by ca_const_string_scan_end */
   s->off    = (int64_t *) s->ca->ptr;
   s->m      = s->ca->mask ? (boolean8_t *) s->ca->mask->ptr : NULL;
   s->buf    = RSTRING_PTR(s->ca->buffer);
@@ -584,6 +623,37 @@ static void
 ca_const_string_scan_end (ca_const_string_scan_t *s)
 {
   ca_detach((CArray *) s->ca);
+}
+
+typedef struct {
+  VALUE                   self;
+  ca_const_string_scan_t *s;
+} ca_const_string_scan_arg_t;
+
+static VALUE
+ca_const_string_scan_begin_body (VALUE arg)
+{
+  ca_const_string_scan_arg_t *x = (ca_const_string_scan_arg_t *) arg;
+  ca_const_string_scan_begin(x->self, x->s);
+  return Qnil;
+}
+
+/* Begins the scans of two arrays, both or neither: when the second one's
+   attach raises, the first is closed before the raise goes on. */
+static void
+ca_const_string_scan_begin_pair (VALUE va, ca_const_string_scan_t *a,
+                                 VALUE vb, ca_const_string_scan_t *b)
+{
+  ca_const_string_scan_arg_t x;
+  int tag = 0;
+  ca_const_string_scan_begin(va, a);
+  x.self = vb;
+  x.s    = b;
+  rb_protect(ca_const_string_scan_begin_body, (VALUE) &x, &tag);
+  if ( tag ) {
+    ca_const_string_scan_end(a);
+    rb_jump_tag(tag);
+  }
 }
 
 /* Resolve element i to its record bytes; returns 0 if masked.
@@ -740,8 +810,7 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
     int64_t la = 0, lb = 0;
     ca_size_t i;
 
-    ca_const_string_scan_begin(self, &a);
-    ca_const_string_scan_begin(other, &b);
+    ca_const_string_scan_begin_pair(self, &a, other, &b);
     if ( a.n != b.n ) {
       ca_const_string_scan_end(&a);
       ca_const_string_scan_end(&b);
@@ -950,6 +1019,7 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
 {
   CAConstString *ca, *cs;
   TypedData_Get_Struct(self,  CAConstString, &catext_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAConstString, &catext_data_type, cs);
   /* Shallow re-setup: shares the buffer and the offset source, which is the
      documented `dup` semantics for a view.  `copy` is the compacting deep
@@ -985,11 +1055,12 @@ Init_ca_obj_const_string (void)
   rb_define_singleton_method(rb_cCAConstString, "__build__", rb_ca_const_string_build, 2);
   rb_define_method(rb_cCAConstString, "encoding", rb_ca_const_string_encoding, 0);
   rb_define_method(rb_cCAConstString, "buffer",   rb_ca_const_string_buffer, 0);
-  rb_define_method(rb_cCAConstString, "storage_to_scalar",
-                               rb_ca_const_string_storage_to_scalar, 1);
+  rb_define_method(rb_cCAConstString, "storage_to_element",
+                               rb_ca_const_string_storage_to_element, 1);
 
   /* copy = compacting deep copy; to_ca is the same descent point. */
   rb_define_method(rb_cCAConstString, "copy",  rb_ca_const_string_copy, 0);
+  rb_define_method(rb_cCAConstString, "to_string", rb_ca_const_string_to_string, 0);
   rb_define_method(rb_cCAConstString, "to_ca", rb_ca_const_string_to_ca, -1);
 
   /* native byte ops (§3.7) */
@@ -1015,7 +1086,7 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
-  ca_face_register_storage_to_scalar(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_scalar);
+  ca_face_register_storage_to_element(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_element);
 
   /* F.S1: CAConstString's `buffer` field is per-parent (= each CAConstString holds its
      own frozen byte String; cell offsets index into THIS instance's

@@ -53,5 +53,11 @@ module AutoloadMethodExtension
       send(name, *args, **kwargs, &block)
     end
     stub = target.instance_method(name)
+    # The library replaces the stub with a plain `def`, which `ruby -w`
+    # reports as a redefinition.  Replacing is what the stub is for, so mark
+    # it as aliased: Ruby does not warn when the old definition has an alias.
+    tmp = :"__autoload_stub_#{name}__"
+    target.send(:alias_method, tmp, name)
+    target.send(:remove_method, tmp)
   end
 end

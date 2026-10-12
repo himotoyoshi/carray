@@ -92,6 +92,7 @@ rb_ca_farray_initialize_copy (VALUE self, VALUE other)
 {
   CAStride *ca, *cs;
   TypedData_Get_Struct(self,  CAStride, &castride_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAStride, &castride_data_type, cs);
   if ( ca_func[CA_OBJ_FARRAY].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_FARRAY, cs->ndim);

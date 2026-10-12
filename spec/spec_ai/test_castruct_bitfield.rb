@@ -82,8 +82,8 @@ class TestCAStructBitfield < Test::Unit::TestCase
               flag_a: 1, flag_b: 0, version: 42,
               payload: 0xDEADBEEF)
     assert_equal(0x1234,     r.header)
-    assert_equal(1,          r.flag_a)
-    assert_equal(0,          r.flag_b)
+    assert_equal(true,       r.flag_a)
+    assert_equal(false,      r.flag_b)
     assert_equal(42,         r.version)
     assert_equal(0xDEADBEEF, r.payload)
   end
@@ -101,8 +101,8 @@ class TestCAStructBitfield < Test::Unit::TestCase
               payload: 0xDEADBEEF)
     r.version = 17
     assert_equal(0xCAFE,     r.header)
-    assert_equal(0,          r.flag_a)
-    assert_equal(0,          r.flag_b)
+    assert_equal(false,      r.flag_a)
+    assert_equal(false,      r.flag_b)
     assert_equal(17,         r.version)
     assert_equal(0xDEADBEEF, r.payload)
   end
@@ -115,9 +115,9 @@ class TestCAStructBitfield < Test::Unit::TestCase
     }
     r = s.new
     r.a = 1; r.c = 1
-    assert_equal(1, r.a)
-    assert_equal(0, r.b)
-    assert_equal(1, r.c)
+    assert_equal(true,  r.a)
+    assert_equal(false, r.b)
+    assert_equal(true,  r.c)
   end
 
   def test_round_trip_8bit_field
@@ -170,7 +170,7 @@ class TestCAStructBitfield < Test::Unit::TestCase
     r = s.new(tag: 7, flag: 1)
     pairs = []
     r.each_pair { |k, v| pairs << [k, v] }
-    assert_equal([[:tag, 7], [:flag, 1]], pairs)
+    assert_equal([[:tag, 7], [:flag, true]], pairs)
   end
 
   def test_bit_member_eql_round_trip
@@ -184,6 +184,25 @@ class TestCAStructBitfield < Test::Unit::TestCase
     assert(a.eql?(b))
     refute(a.eql?(c))
     assert_equal(a.hash, b.hash)
+  end
+
+  # A bit member is read from one word of at most 8 bytes, so one that
+  # would span 9 bytes is refused at definition; 64 bits from bit 0 fit.
+  def test_bit_member_spanning_nine_bytes_rejected
+    assert_raise(CAStruct::DefinitionError) {
+      CArray.struct(pack: 1, size: 16) { bit :p, bits: 4; bit :w, bits: 62 }
+    }
+    assert_raise(CAStruct::DefinitionError) {
+      CArray.struct(pack: 1, size: 16) { bit :p, bits: 7; bit :w, bits: 58 }
+    }
+    s = CArray.struct(pack: 1, size: 16) { bit :p, bits: 4; bit :w, bits: 60 }
+    o = s.new
+    o["w"] = 2**60 - 1
+    assert_equal 2**60 - 1, o["w"]
+    t = CArray.struct(pack: 1) { bit :w, bits: 64 }
+    o = t.new
+    o["w"] = 2**64 - 1
+    assert_equal 2**64 - 1, o["w"]
   end
 
 end

@@ -22,6 +22,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"
 
 typedef struct {
   /* === CAView prefix === */
@@ -89,6 +90,12 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
              "CAFixlenString requires fixlen storage (parent.data_type != CA_FIXLEN)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_FIXLEN_STRING;
   ca->data_type = CA_FIXLEN;
   /* ORDERABLE + COMPARABLE.  The descent is NOT the identity map -- the
@@ -148,8 +155,9 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
 CAFixlenString *
 ca_fixlen_string_new (CArray *parent)
 {
-  CAFixlenString *ca =
-      (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
+  CAFixlenString *ca;
+  ca_fixlen_string_setup(NULL, parent);
+  ca = (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
   ca_fixlen_string_setup(ca, parent);
   return ca;
 }
@@ -188,18 +196,6 @@ ca_fixlen_string_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_fixlen_string_func_create_mask (void *ap)
-{
-  CAFixlenString *ca = (CAFixlenString *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_fixlen_string_func = {
   -1, /* CA_OBJ_FIXLEN_STRING — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -210,7 +206,7 @@ ca_operation_function_t ca_fixlen_string_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_fixlen_string_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
@@ -253,7 +249,7 @@ rb_ca_fixlen_string_wrap_method (VALUE klass, VALUE raw)
    search / MemoryView still see the raw padded bytes.  Genuine trailing NULs
    cannot survive here; use a raw CA_FIXLEN array for binary blobs. */
 static VALUE
-rb_ca_fixlen_string_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_fixlen_string_storage_to_element (VALUE self, VALUE raw)
 {
   (void) self;
   if ( TYPE(raw) == T_STRING ) {
@@ -280,6 +276,7 @@ rb_ca_fixlen_string_initialize_copy (VALUE self, VALUE other)
 {
   CAFixlenString *ca, *cs;
   TypedData_Get_Struct(self,  CAFixlenString, &cafixlen_string_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAFixlenString, &cafixlen_string_data_type, cs);
   if ( ca_func[CA_OBJ_FIXLEN_STRING].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_FIXLEN_STRING, cs->parent->ndim);
@@ -309,13 +306,16 @@ Init_ca_obj_fixlen_string (void)
                                        rb_ca_fixlen_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAFixlenString, "wrap",
                                        rb_ca_fixlen_string_wrap_method, 1);
-  rb_define_method(rb_cCAFixlenString, "storage_to_scalar",
-                                       rb_ca_fixlen_string_storage_to_scalar, 1);
-  ca_face_register_storage_to_scalar(CA_OBJ_FIXLEN_STRING,
-                                     rb_ca_fixlen_string_storage_to_scalar);
+  rb_define_method(rb_cCAFixlenString, "storage_to_element",
+                                       rb_ca_fixlen_string_storage_to_element, 1);
+  ca_face_register_storage_to_element(CA_OBJ_FIXLEN_STRING,
+                                     rb_ca_fixlen_string_storage_to_element);
 
   /* CA_FIXLEN is portable storage (fixed-width bytes, no per-process VALUE
      or per-parent buffer), so the Face can be carried across multi-parent
-     constructions like CAStack / Marshal / MemoryView. */
+     constructions like CAStack. */
   ca_face_register_state_portable(CA_OBJ_FIXLEN_STRING, 1);
+
+  /* The bytes are the strings: a MemoryView consumer reads them as "Ns". */
+  ca_face_register_memory_view(CA_OBJ_FIXLEN_STRING, 1);
 }

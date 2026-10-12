@@ -56,10 +56,10 @@ class TestRubberSigilReshape < Test::Unit::TestCase
     assert_equal [4, 3, 2], @a.reshape(:~, 3, 2).dim
   end
 
-  # AC6: two infer placeholders -> RuntimeError (same as two -1)
+  # AC6: two infer placeholders -> ArgumentError (same as two -1)
   def test_two_placeholders_raise
-    assert_raise(RuntimeError) { @a.reshape(:~, :~) }
-    assert_raise(RuntimeError) { @a.reshape(:~, -1) }   # mixed also one-too-many
+    assert_raise(ArgumentError) { @a.reshape(:~, :~) }
+    assert_raise(ArgumentError) { @a.reshape(:~, -1) }   # mixed also one-too-many
   end
 
   # AC7: :~ / nil mix == -1 / nil mix, always element-preserving
@@ -72,7 +72,7 @@ class TestRubberSigilReshape < Test::Unit::TestCase
 
   # infer must divide evenly
   def test_infer_non_divisible_raises
-    assert_raise(RuntimeError) { @a.reshape(:~, 5) }   # 24 % 5 != 0
+    assert_raise(ArgumentError) { @a.reshape(:~, 5) }   # 24 % 5 != 0
   end
 end
 

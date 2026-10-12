@@ -9,7 +9,7 @@
 # int64 storage by little-endian byte order — wrong for values >= 256 or
 # negative.  The gate descends an ORDERABLE Face to its numeric storage
 # (fixing the memcmp mis-order) and, for value-returning min / max, re-lifts
-# the result back into the Face (scalar via storage_to_scalar, per-axis via
+# the result back into the Face (scalar via storage_to_element, per-axis via
 # rb_ca_face_template) — so no per-Face lib override is needed.
 #
 # See devel/PROPOSAL_FACE_ORDERING_GATE.md (reduce-family extension).

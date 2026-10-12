@@ -117,8 +117,8 @@ A Face declares one of two surface choices at setup time:
 
 | | surface `data_type` | mkkernel numeric dispatch | example |
 |---|---|---|---|
-| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | an angle in radians (`examples/face/ca_circular.rb`): the surface value *is* the stored number |
-| **NonNumeric Face** | `CA_FIXLEN` | hits `ca_*_not_implement` stub → `rb_eCADataTypeError` | `CATime`, `CATimedelta` (`dt + dt`, `sqrt(dur)` are nonsense) |
+| **Numeric Face** | `parent->data_type` (e.g. float64) | passes through to numeric kernels | a latitude column: `lat + 0.5` and `lat.mean` are right on the stored numbers |
+| **NonNumeric Face** | `CA_FIXLEN` | hits `ca_*_not_implement` stub → `rb_eCADataTypeError` | `CATime`, `CATimedelta` (`dt + dt`, `sqrt(dur)` are nonsense); an angle in radians (`examples/face/ca_circular.rb`: the arithmetic mean of angles is not their mean) |
 
 The NonNumeric variant leverages the fact that mkkernel emits
 `ca_*_not_implement` raise stubs for `CA_FIXLEN` slots — by declaring
@@ -133,6 +133,12 @@ Choosing between the two:
   (`+` `-` `*` `sum` etc. preserve domain semantics), choose Numeric.
 - If they do not (time + time, sqrt(epoch), bitwise(offset),
   …), choose NonNumeric — silent nonsense becomes a loud TypeError.
+
+A Numeric Face adds little beyond its name and its own methods: views
+carry it, but the result of any operation is a plain array. A Face whose
+stored numbers are not its values is wrong under Numeric without a
+warning, so NonNumeric is the default a CAObject Face gets (§5.4), and
+Numeric is chosen with `numeric: true`.
 
 Note that "some of them make sense" is not Numeric: the dispatch is
 all-or-nothing, so a Face whose `+` is meaningful but whose `sqrt` is not
@@ -213,7 +219,7 @@ both are transparently consumed by every view-creating method, by
 | Path | Class hierarchy | Storage type | Hot path | Effort |
 |---|---|---|---|---|
 | **C-level Face** | `MyFace < CAFace < CAView` | Any (int64, float64, FIXLEN, …) | C struct + op table; per-cell access is dispatcher-direct | ~250 lines C |
-| **CAObject Face** | `MyFace < CAObject` (flag set via `face: true`) | Any | Ruby-level method definitions; per-cell access still C-fast (Face mode bypasses CAObject's per-cell Ruby callback) | ~30 lines Ruby |
+| **CAObject Face** | `MyFace < CAObject` (flag set via `face: true`) | Any | Ruby-level method definitions; per-cell access still C-fast (Face mode bypasses CAObject's per-cell Ruby callback) | 6 lines Ruby at minimum, plus the domain methods |
 
 ### A complete Face is six lines of Ruby
 
@@ -230,8 +236,7 @@ every storage op directly to it.
 class MyPrice < CAObject
   def initialize(parent, currency: :usd)
     @currency = currency
-    super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64,
-          parent: parent, face: true)
+    super(CA_INT64, parent.dim, parent: parent, face: true)
   end
 end
 ```
@@ -243,7 +248,7 @@ the ~100× overhead of a Ruby-callback per cell.  From this point
 on, the author only writes what is *new* about their type: domain
 methods (`#convert_to`, `#total`, …), operator overrides where the
 semantics differ from raw storage arithmetic, and optional
-`copy_state` / `storage_to_scalar` hooks.
+`copy_state` / `storage_to_element` hooks.
 
 This is what makes external-gem Faces (`carray-text`,
 `carray-categorical`, `carray-money`, `carray-sparse`, …) tractable
@@ -278,7 +283,7 @@ new C-level Face.
 typedef struct {
   /* === CAView prefix (must match field-for-field) === */
   int16_t    obj_type;
-  int8_t     data_type;      /* the storage data_type, e.g. CA_INT64 */
+  int8_t     data_type;      /* the surface data_type: CA_FIXLEN (§2.5) */
   int8_t     ndim;
   int32_t    flags;          /* CA_FLAG_IS_FACE is set in setup */
   ca_size_t  bytes;
@@ -286,6 +291,7 @@ typedef struct {
   ca_size_t *dim;
   char      *ptr;
   CArray    *mask;
+  char      *_pool;          /* pool-framework buffer; NULL = legacy path */
   CArray    *parent;
   uint32_t   attach;
   uint8_t    nosync;
@@ -345,40 +351,42 @@ inheritance. The chain is purely a type-tag-relationship marker.
 ```c
 ca_operation_function_t ca_time_func = {
   -1,                              /* obj_type, filled by ca_install_obj_type */
-  CA_VIRTUAL_ARRAY,
-  free_ca_time,                  /* subclass-specific (frees tail) */
-  ca_time_func_clone,        /* subclass-specific (knows tail size) */
-  ca_time_func_allocate,     /* subclass-specific (alias parent->ptr) */
+  CA_VIEW_ARRAY,
+  free_ca_time,                    /* subclass-specific (frees tail) */
+  ca_time_func_clone,              /* subclass-specific (knows tail size) */
+  ca_time_func_allocate,           /* subclass-specific (alias parent->ptr) */
   ca_face_attach,                  /* shared helper */
   ca_face_sync,                    /* shared helper */
   ca_face_detach,                  /* shared helper */
   ca_face_fill_data,               /* shared helper */
-  ca_time_func_create_mask,  /* subclass-specific (refer to parent mask) */
+  ca_view_func_create_mask,        /* generic view mask (over the parent's) */
   ca_face_xfer_index,              /* shared helper */
   ca_face_xfer_addrs,              /* shared helper */
   NULL,                            /* fold_stride: identity Face is not foldable */
   ca_face_xfer_stride,             /* shared helper */
   ca_face_xfer_all,                /* shared helper */
+  .fill_addrs  = ca_face_fill_addrs,   /* shared helper */
+  .fill_stride = ca_face_fill_stride,  /* shared helper */
 };
 ```
 
-Eight of the fourteen slots are shared `ca_face_*` helpers declared
+Ten of the fifteen slots are shared `ca_face_*` helpers declared
 in `ext/ca_obj_face.h`. They implement the storage-transparent
 default: attach forwards to the parent and aliases `parent->ptr`,
 sync forwards, detach releases the alias and detaches the parent,
-xfer slots delegate to the parent's xfer routines, fill_data
-delegates to `ca_fill`.
+xfer slots delegate to the parent's xfer routines, and the three fill
+slots delegate to the parent's fill. `create_mask` is the generic view
+slot `ca_view_func_create_mask`, which builds the Face's mask over the
+parent's, and `fold_stride` is `NULL`.
 
-The six subclass-specific slots cover the things that must know about
-the tail or the data_type:
+The three subclass-specific slots cover the things that must know about
+the tail:
 
 - `free_object` — frees the tail.
 - `clone` — duplicates with the correct tail size.
 - `allocate` — establishes the alias to `parent->ptr`. The alias is
   the entire reason Face is "free": no buffer is malloced, no bytes
   are copied; the Face just sees the parent's buffer as its own.
-- `create_mask` — usually a `CARefer` over the parent's mask, so the
-  Face inherits the parent's mask without copying.
 
 ### 4.4 The setup function
 
@@ -388,27 +396,30 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 {
   if ( parent->data_type != CA_INT64 ) {
     rb_raise(rb_eTypeError,
-             "CATime requires int64 storage");
+             "CATime requires int64 storage (parent.data_type != CA_INT64)");
+  }
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
   ca->obj_type  = CA_OBJ_TIME;
-  /* NonNumericFace: surface = CA_FIXLEN gates mkkernel numeric ops
-     (= dispatch hits ca_*_not_implement stub → TypeError).  Storage
-     remains parent->data_type (= CA_INT64); bytes = 8 must be set
-     explicitly for FIXLEN.  See §2.5 for the surface vs storage
-     choice. */
-  ca->data_type = CA_FIXLEN;
-  ca->flags     = CA_FLAG_IS_FACE;     /* <-- the gate */
+  ca->data_type = CA_FIXLEN;           /* NonNumeric surface (§2.5) */
+  ca->flags     = CA_FLAG_IS_FACE | CA_FLAG_FACE_ORDERABLE_STORAGE;
   ca->ndim      = parent->ndim;
-  ca->bytes     = sizeof(int64_t);
+  ca->bytes     = sizeof(int64_t);     /* FIXLEN needs bytes set explicitly */
   ca->elements  = parent->elements;
   ca->ptr       = NULL;                /* alias is set in allocate */
   ca->mask      = NULL;
-  ca->dim       = ALLOC_N(ca_size_t, parent->ndim);
+  if ( ! ca->_pool ) {
+    ca->dim     = ALLOC_N(ca_size_t, parent->ndim);
+  }
   memcpy(ca->dim, parent->dim, sizeof(ca_size_t) * parent->ndim);
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->unit      = unit;
+  ca->count     = count;
   if ( ca_has_mask(parent) ) ca_create_mask((CArray *) ca);
   if ( ca_is_scalar(parent) ) ca_set_flag(ca, CA_FLAG_SCALAR);
   if ( ca_test_flag(parent, CA_FLAG_READ_ONLY) )
@@ -417,12 +428,31 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
 }
 ```
 
-The critical line is `ca->flags = CA_FLAG_IS_FACE`. Every Face
+The critical bit is `CA_FLAG_IS_FACE` in `ca->flags`. Every Face
 subclass sets this flag in setup; downstream Face-aware machinery
-detects Face-ness from the flag alone. A Numeric Face writes
+detects Face-ness from the flag alone. The other flags on the same line
+open operation families (§6.3): CATime adds
+`CA_FLAG_FACE_ORDERABLE_STORAGE` because its int64 storage sorts in the
+same order as the instants it encodes. A Numeric Face writes
 `ca->data_type = parent->data_type` (= the storage type); a NonNumeric
 Face — `CATime` and `CATimedelta` both — writes
 `ca->data_type = CA_FIXLEN` to opt into the mkkernel gate.
+
+The constructor calls setup twice: first with `ca == NULL`, which runs
+the checks before anything is allocated, then on the struct returned by
+`ca_array_alloc`:
+
+```c
+CATime *
+ca_time_new (CArray *parent, int8_t unit, int64_t count)
+{
+  CATime *ca;
+  ca_time_setup(NULL, parent, unit, count);
+  ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
+  ca_time_setup(ca, parent, unit, count);
+  return ca;
+}
+```
 
 ### 4.5 The `Init_` function
 
@@ -452,7 +482,7 @@ correctly.
 ### 4.6 Ruby surface
 
 The class itself is now defined. Ruby-side method additions (`unit`,
-operator overrides, `storage_to_scalar` for scalar fetch, helpers like
+operator overrides, `storage_to_element` for scalar fetch, helpers like
 `CArray.time_series`) live in `lib/carray/time.rb`. They are
 ordinary Ruby methods on the registered class; nothing about the
 Ruby surface is special-cased for Face.
@@ -476,7 +506,7 @@ class MyFace < CAObject
   def initialize(parent, *args, **opts)
     @semantic_state = ...                    # whatever state the Face needs
 
-    super(STORAGE_DTYPE,                     # e.g. CA_INT64, CA_FLOAT64
+    super(STORAGE_DTYPE,                     # parent.data_type: CA_INT64, CA_FLOAT64, ...
           parent.dim,
           parent: parent,
           face: true)                        # <-- sets CA_FLAG_IS_FACE
@@ -494,6 +524,15 @@ end
 
 The `face: true` option is what installs the flag. `CAObject`'s
 constructor honours it; nothing else in user code has to change.
+
+The flags that open the ordering families (§6.3) are keyword options
+next to it: `orderable_storage: true` sets
+`CA_FLAG_FACE_ORDERABLE_STORAGE` and `comparable_storage: true` sets
+`CA_FLAG_FACE_COMPARABLE_STORAGE`. Both require `face: true`. Without
+them, `sort`, `min`, `max`, search and the value-hash family raise on
+the Face — including on a Numeric Face — unless the Face declares that
+storage order is its order. `CACircular` below does not: an angle near
+2π is next to one near 0.
 
 ### 5.2 Worked example — `CACircular`
 
@@ -526,6 +565,7 @@ end
 
 raw = CArray.float64(5) { |i| i * Math::PI / 4 }
 cc  = CACircular.new(raw, range: :rad)
+cc.mean                      # => raises (NonNumeric, the default)
 cc.circular_mean             # => π/2
 cc[1..3].circular_mean       # view chain preserves the Face
 cc.flip.range                # => :rad (ivar carried via copy_state)
@@ -544,48 +584,53 @@ cc.flip.range                # => :rad (ivar carried via copy_state)
   carried via the optional `copy_state` callback. Without it, a
   sliced view's ivars are nil.
 
-### 5.4 NonNumeric Face from CAObject — the `:storage` opt-in
+### 5.4 NonNumeric by default — `numeric: true` and `:storage`
 
-To declare a CAObject-based Face as NonNumeric (= make `face_arr + x`
-etc. raise upfront instead of dispatching per-cell through Ruby `:+`),
-pass surface = `CA_FIXLEN` as the data_type argument and the actual
-storage type via the `:storage` option:
+A CAObject Face over a numeric storage is NonNumeric unless it says
+otherwise. Passing the parent's `data_type` gives it the `CA_FIXLEN`
+surface, so `face_arr + x` and the reductions raise upfront instead of
+computing on the stored numbers:
 
 ```ruby
 class MyTagArray < CAObject
   def initialize(parent_int64)
-    super(CA_FIXLEN, parent_int64.dim,
-          bytes:   8,
-          storage: CA_INT64,         # explicit: parent is int64
-          parent:  parent_int64,
-          face:    true)
+    super(CA_INT64, parent_int64.dim, parent: parent_int64, face: true)
   end
 end
 
 raw = CArray.int64(5) { |i| i }
 arr = MyTagArray.new(raw)
+arr.data_type    # => :fixlen
 arr * 2          # => raises (mkkernel CA_FIXLEN slot is not_implement)
 arr.sum          # => raises
+arr[1]           # => 1  (an element is the stored value)
 arr[0..2].parent.data_type   # => :int64  (storage invariant maintained)
 ```
 
-The mechanism is the same surface-vs-storage split that
-`CATime` uses internally — only that the C-level Face puts
-both values in its struct, while the CAObject path puts surface in
-the `data_type` argument and storage in `:storage`. See `§2.5
-Numeric vs NonNumeric surface — the FIXLEN gate` for the rationale.
+`numeric: true` opts into the Numeric surface instead (surface ==
+storage, §2.5). A surface of another kind is passed as `data_type`
+with the storage named by `:storage`; the default above is the same
+as `super(CA_FIXLEN, dim, bytes: 8, storage: CA_INT64, parent:,
+face: true)`. The mechanism is the same surface-vs-storage split that
+`CATime` uses internally — only that the C-level Face puts both values
+in its struct. See §2.5 for the rationale.
 
 #### Contract
 
-| `:storage` | declared `data_type` | parent.data_type | Result |
-|---|---|---|---|
-| omitted | must equal | parent.data_type | Numeric Face (= legacy, surface == storage) |
-| explicit | free (CA_FIXLEN or other) | must equal `:storage` | NonNumeric or numeric, surface != storage allowed |
-| explicit but `face: true` omitted | — | — | `ArgumentError` (`:storage` only meaningful in Face mode) |
-| explicit but mismatch with parent | — | — | `TypeError` |
+| call | surface | numeric ops |
+|---|---|---|
+| `super(parent.data_type, …, face: true)`, numeric storage | `CA_FIXLEN` | raise |
+| the same with `numeric: true` | the storage | compute |
+| `super(parent.data_type, …, face: true)`, object or fixlen storage | the storage | as the storage does |
+| `super(surface, …, storage: parent.data_type, face: true)` | `surface` | as `surface` does |
 
-`bytes` (or `:bytes`) must always match `parent.bytes`; this is the
-memory-layout invariant the lift mechanism depends on.
+A storage that is not `parent.data_type` raises `TypeError`, as does a
+surface other than `CA_OBJECT` over an object storage (an object cell
+is a VALUE, not bytes to hand out). `:numeric` over an object or fixlen
+storage, `:numeric` together with `:storage`, and either of them
+without `face: true` raise `ArgumentError`. `bytes` (or `:bytes`) must
+always match `parent.bytes`; this is the memory-layout invariant the
+lift mechanism depends on.
 
 #### Recovering permitted operations
 
@@ -688,25 +733,25 @@ only three things subclass authors need to be aware of:
 - New view-creating methods need one line of `CA_FACE_LIFT_IF_FACE`
   at the return path.
 
-### 6.1 Scalar return — `storage_to_scalar`
+### 6.1 Element return — `storage_to_element`
 
 Per-cell access (`ca[i]`, `ca.fetch_index(...)`, `ca.to_a[k]`, …)
 returns a Ruby scalar, not a CArray. The lift mechanism cannot apply
 here; instead a parallel hook reads the Face's storage value and
 hands it to a wrapper. The hook prefers a C function pointer
-registered via `ca_face_register_storage_to_scalar` and falls back to a
-Ruby method named `storage_to_scalar` if none is registered:
+registered via `ca_face_register_storage_to_element` and falls back to a
+Ruby method named `storage_to_element` if none is registered:
 
 ```c
-#define CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca) do {                       \
+#define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                       \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                   \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                          \
-    ca_face_storage_to_scalar_fn _fn = ca_face_storage_to_scalar_table[(ca)->obj_type]; \
+    ca_face_storage_to_element_fn _fn = ca_face_storage_to_element_table[(ca)->obj_type]; \
     if ( _fn != NULL ) {                                                      \
       (obj) = _fn((self), (obj));                /* C fast path */             \
     } else {                                                                  \
       static ID id_w = 0;                                                     \
-      if ( id_w == 0 ) id_w = rb_intern("storage_to_scalar");                    \
+      if ( id_w == 0 ) id_w = rb_intern("storage_to_element");                    \
       if ( rb_respond_to((self), id_w) )                                      \
         (obj) = rb_funcall((self), id_w, 1, (obj));                           \
     }                                                                         \
@@ -717,25 +762,32 @@ Ruby method named `storage_to_scalar` if none is registered:
 In-core Faces register a C function at `Init_` time:
 
 ```c
-ca_face_register_storage_to_scalar(CA_OBJ_TIME,
-                                rb_ca_time_storage_to_scalar);
+ca_face_register_storage_to_element(CA_OBJ_TIME,
+                                rb_ca_time_storage_to_element);
 ```
 
-The Ruby class still defines `storage_to_scalar` (via `rb_define_method`
+The Ruby class still defines `storage_to_element` (via `rb_define_method`
 on the C function), so Ruby callers can use
-`dt.storage_to_scalar(raw)` directly — the Ruby method is a thin
+`dt.storage_to_element(raw)` directly — the Ruby method is a thin
 ergonomic wrapper around the same C function. The "C-as-core,
 Ruby-as-thin-surface" direction is intentional: external-gem Faces
-that omit `ca_face_register_storage_to_scalar` still work via the
-`rb_funcall` fallback by defining `def storage_to_scalar` in Ruby.
+that omit `ca_face_register_storage_to_element` still work via the
+`rb_funcall` fallback by defining `def storage_to_element` in Ruby.
 
-For NonNumericFace (FIXLEN surface), the per-cell fetch delivers an
-8-byte raw `String` to the wrapper; the wrapper decodes it as the
-parent storage type:
+A Ruby `storage_to_element` receives the cell's **storage value**: an
+Integer for an int64 storage, a Float for float64, `true` / `false` for
+boolean — whether the surface is the storage or the `CA_FIXLEN` gate.
+Only a fixlen storage arrives as a `String` of its bytes. A Face that
+defines no hook returns that storage value as its element.
+
+A C function registered with `ca_face_register_storage_to_element`
+receives the cell as it was read: under the `CA_FIXLEN` gate, a
+`String` of the storage's bytes, which it decodes itself without a
+Ruby value in between:
 
 ```c
 static VALUE
-rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
+rb_ca_time_storage_to_element (VALUE self, VALUE raw)
 {
   CATime *ca; CATimeElement *s;
   int64_t epoch;
@@ -743,7 +795,7 @@ rb_ca_time_storage_to_scalar (VALUE self, VALUE raw)
   if (TYPE(raw) == T_STRING) {
     memcpy(&epoch, RSTRING_PTR(raw), sizeof(int64_t));
   } else {
-    epoch = NUM2LL(raw);   /* Numeric Face surface delivers Integer */
+    epoch = NUM2LL(raw);   /* an Integer passed by a Ruby caller */
   }
   VALUE obj = TypedData_Make_Struct(rb_cCATimeElement,
                                     CATimeElement,
@@ -765,9 +817,9 @@ The macro is a no-op for non-Face arrays, for `UNDEF` (masked
 elements), and for sub-array fetches (those go through the lift
 macro).
 
-Naming: `storage_to_scalar` is a decode — it copies the storage value
+Naming: `storage_to_element` is a decode — it copies the storage value
 out and constructs a fresh surface value object (not a zero-copy wrap of
-the parent bytes). Its write counterpart is `scalar_to_storage`
+the parent bytes). Its write counterpart is `element_to_storage`
 (§6.2); the two form a matched directional pair.
 
 **Bulk paths take the same route.** Anything that hands a Face's cells
@@ -796,37 +848,52 @@ The storage stays reachable, deliberately and explicitly, through
 `.parent` — `td.parent.to_a` gives the serials, and it keeps the fast
 path. Reaching the storage should be something the caller wrote down.
 
-### 6.2 Scalar store — `scalar_to_storage`
+### 6.2 Element store — `element_to_storage`
 
 The read hook has a write counterpart: storing a surface value object
 into a Face cell (`dt[i] = other_instant`) must convert *back* to the
 Face's storage domain, or the raw store would ignore the unit. The
-hook is the mirror of `storage_to_scalar`: it prefers a C function
-registered via `ca_face_register_scalar_to_storage` and falls back to
-a Ruby method `scalar_to_storage(surface)`.
+hook is the mirror of `storage_to_element`: it prefers a C function
+registered via `ca_face_register_element_to_storage` and falls back to
+a Ruby method `element_to_storage(surface)`.
 
 Unlike the read hook, the write hook is not placed at each return
-site. It fires in one place, `rb_ca_obj2ptr` — the single funnel every
-surface-value store passes through — just before the storage cast:
+site. It runs **once for each stored value**, in one of two places.
+`[]=` converts the value as it enters, while the destination is still the
+Face, and stores the result into the storage; every other store (`fill`,
+`elem_store`, a fill value) converts in `rb_ca_obj2ptr`, just before the
+storage cast:
 
 ```c
 if ( ca_face_safe_check(ca) ) {
-  obj = ca_face_scalar_to_storage(self, ca, obj);   /* surface -> storage-domain */
+  obj = ca_face_element_to_storage(self, ca, obj);   /* surface -> storage-domain */
   convert_type = ca_storage_type_of(ca);
 }
 ```
 
-`ca_face_scalar_to_storage` returns `obj` unchanged for a non-Face `ca`
+`ca_face_element_to_storage` returns `obj` unchanged for a non-Face `ca`
 (so the non-Face store path is untouched), consults the C table first,
 then the Ruby fallback. The contract of the hook:
 
 - a recognized surface value object (for time/timedelta: `Element`,
   `Time`, `DateTime`) → a storage-domain value in the Face's unit;
-- a bare `Integer` / `String` it does not recognize → returned
-  unchanged, so the existing storage cast (and the `.parent` raw-store
-  escape) is preserved;
+- a value it does not recognize → either returned unchanged, so the
+  storage cast takes it (time/timedelta keep this for a bare `Integer`, a
+  raw count of ticks), or refused with a raise — a Face for which a bare
+  number has no meaning (a unit-bearing quantity) may refuse it, since the
+  hook never sees its own output a second time;
 - an unconvertible value (e.g. a cross-unit-group instant) → raise,
   never a silent mis-store.
+
+A Face **array** stored into an array that is not the same Face goes the
+other way: its cells are surface values, and its storage means nothing to
+the destination. An object destination receives the values, as
+`to_type(:object)` gives them (`obj[] = times` holds `CATime::Element`s, not
+ticks); so does a Face destination that does not reconcile a Face source
+itself (a fixlen string taking a const string). Any other plain destination
+refuses, rather than receive storage bytes. A fixlen string or a record,
+whose storage is its surface, still goes into a plain fixlen array of its
+width as its bytes.
 
 time/timedelta implement the hook by delegating to the same
 `to_comparable` unit algebra the reference side uses, so read and write
@@ -883,8 +950,8 @@ Every gap found so far is one of these. The middle one is the dangerous one.
 | family | covered by the flags? | your part |
 |---|---|---|
 | view-creating (`[]`, `reshape`, `sort`, `flip`, …) | yes (lift macro, §6) | nothing |
-| scalar read / store | — | `storage_to_scalar` / `scalar_to_storage` (6.1 / 6.2) |
-| `min` / `max` / sort / partition / rank | ORDERABLE | nothing (`minmax` has no core gate: re-lift the pair in Ruby) |
+| scalar read / store | — | `storage_to_element` / `element_to_storage` (6.1 / 6.2) |
+| `min` / `max` / `minmax` / `clip` / sort / partition / rank | ORDERABLE | nothing |
 | search / `linear_section` / `count(v)` | ORDERABLE + (COMPARABLE or `to_comparable`) | the one `to_comparable` |
 | value-hash discovery (`unique`, `value_counts`, `mode`, `is_in`, set operations, `locate_addr`, `categorize`) | ORDERABLE + same | nothing |
 | gap-fill (`unmask` / `strip_mask` with `method:`) | hold is byte-generic (any Face); `:linear` defers to your `linear_fetch` | nothing, once `linear_fetch` is decided |
@@ -948,6 +1015,9 @@ void ca_face_attach     (void *ap);
 void ca_face_sync       (void *ap);
 void ca_face_detach     (void *ap);
 void ca_face_fill_data  (void *ap, void *ptr);
+void ca_face_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr);
+void ca_face_fill_stride(void *ap, ca_size_t base, int8_t ndim,
+                         ca_size_t *counts, ca_size_t *steps, void *ptr);
 
 void ca_face_xfer_index (void *ap, ca_size_t *idx,
                          void *data, int dir);
@@ -987,35 +1057,35 @@ CArray *ca_strip_face       (CArray *src);
 
 ```c
 CA_FACE_LIFT_IF_FACE(obj, self, ca)
-CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca)
+CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca)
 ```
 
 The convention is: place the macro just before the `return` of a
-view-creating method (LIFT) or a scalar-fetch method (STORAGE_TO_SCALAR).
+view-creating method (LIFT) or a scalar-fetch method (STORAGE_TO_ELEMENT).
 `obj` is the result being returned; the macro mutates it in place if
 the receiver is a Face.
 
-The write counterpart, `scalar_to_storage` (§6.2), is *not* a
+The write counterpart, `element_to_storage` (§6.2), is *not* a
 return-path macro. It fires inside `rb_ca_obj2ptr` (the single
 surface-value store funnel), so a Face's store conversion applies to
 every store path without the author placing a macro at each call site.
 
-### 7.3a Face-local dispatch tables for `storage_to_scalar` / `scalar_to_storage`
+### 7.3a Face-local dispatch tables for `storage_to_element` / `element_to_storage`
 
 ```c
 /* read: storage -> surface scalar */
-typedef VALUE (*ca_face_storage_to_scalar_fn)(VALUE self, VALUE raw);
-extern ca_face_storage_to_scalar_fn ca_face_storage_to_scalar_table[CA_OBJ_TYPE_MAX];
+typedef VALUE (*ca_face_storage_to_element_fn)(VALUE self, VALUE raw);
+extern ca_face_storage_to_element_fn ca_face_storage_to_element_table[CA_OBJ_TYPE_MAX];
 
-void ca_face_register_storage_to_scalar (int obj_type,
-                                      ca_face_storage_to_scalar_fn fn);
+void ca_face_register_storage_to_element (int obj_type,
+                                      ca_face_storage_to_element_fn fn);
 
 /* write: surface scalar -> storage */
-typedef VALUE (*ca_face_scalar_to_storage_fn)(VALUE self, VALUE surface);
-extern ca_face_scalar_to_storage_fn ca_face_scalar_to_storage_table[CA_OBJ_TYPE_MAX];
+typedef VALUE (*ca_face_element_to_storage_fn)(VALUE self, VALUE surface);
+extern ca_face_element_to_storage_fn ca_face_element_to_storage_table[CA_OBJ_TYPE_MAX];
 
-void ca_face_register_scalar_to_storage (int obj_type,
-                                      ca_face_scalar_to_storage_fn fn);
+void ca_face_register_element_to_storage (int obj_type,
+                                      ca_face_element_to_storage_fn fn);
 ```
 
 A Face subclass that wants the per-cell scalar fetch/store hot path to
@@ -1024,7 +1094,7 @@ skip `rb_funcall` registers its C function in the matching table at
 *not* the same as `ca_operation_function_t`, so extending them does not
 require modifying the global op table or any other subsystem.
 Unregistered obj_types fall through to `rb_funcall` of the Ruby
-`storage_to_scalar` / `scalar_to_storage` method (= the
+`storage_to_element` / `element_to_storage` method (= the
 external-gem-friendly fallback). Registering neither is valid too: a
 Face whose surface value already equals its storage value (no unit or
 encoding to apply) leaves both tables NULL and stores/reads raw.
@@ -1069,10 +1139,10 @@ allowed to assume them.
    search kernels run on storage; the Face-or-not decision is the
    caller's (does the result get re-lifted?), not the kernel's.
 6. **Both legs.** Face is a two-leg mask: reads return the parent's
-   value (optionally re-wrapped by `storage_to_scalar` for scalars and
+   value (optionally re-wrapped by `storage_to_element` for scalars and
    by `ca_face_lift` for view-returning paths); writes accept Ruby
-   values (optionally translated by an explicit setter the subclass
-   defines) and store them through to the parent. Read-only Face is
+   values (optionally translated by `element_to_storage`, §6.2) and
+   store them through to the parent. Read-only Face is
    a degenerate case, not the structural rule.
 7. **`Face.parent.data_type == storage` across the chain.** For a
    NonNumericFace (surface = `CA_FIXLEN`), the lift hook rewrites
@@ -1089,6 +1159,22 @@ allowed to assume them.
    the Face's `ptr`) and passes that to the primitive; the primitive
    never sees the Face. See `rb_ca_store_all`'s Array-RHS branch for
    the canonical example.
+
+---
+
+## 8.5 Saving a Face
+
+`Marshal.dump` and `CArray.save` refuse a Face with a `TypeError`: both
+formats record what an array is, and they have no place yet for a
+Face's state. The message points at `.parent` to save the storage.
+
+`dump_binary` writes element bytes with no header, so it records no
+state for any array, and on a Face it writes the storage. The state is
+not written: the unit of a `CATime`, the labels of a `CACategorical`.
+`load_binary` reads the bytes back into the receiver's storage, so load
+into a Face set up with the same state. A `CAConstString` cell is a
+`(start, end)` pair into its own byte pool, so `dump_binary` writes no
+text at all; call `to_fixlen_string` first.
 
 ---
 
@@ -1114,7 +1200,7 @@ precedent:
 | `CAConstString` | **no** — storage is a byte range, not the bytes | — | — | own overrides via `#to_string` (§6.3) |
 | `CACategorical` | **no** — code order is the vocabulary's | — | — | own overrides in label space (§6.3) |
 | `CAFixlenString` | yes | yes | no (one space) | ride the gate. Both flags hold, but *not* because the descent is the identity map — it strips trailing NUL. See the note below |
-| `CARecord` | no | — | — | not wired; `memcmp` is the sort default and field-order ordering is still future work |
+| `CARecord` | no | — | — | own ordering members, ranked by the struct's `order_by:` members (none declared → raise); equality and the discovery family (`unique`, `is_in`, `count(v)`, ...) by the record's bytes, against records of the same `data_class` only |
 
 `CAFixlenString` is the case worth knowing about, because the flags are right
 and the tempting reason for them is wrong. Its surface is *not* its storage
@@ -1147,7 +1233,7 @@ dispatch table's existing `ca_*_not_implement` stubs do the gating.
 and letting it through also lets through `sqrt` of a duration and a
 variance in squared ticks. So it gates the surface too and defines the
 handful of meaningful operations (`+ - * /`, `abs`, unary `-`, `sum`,
-`mean`, `median`, `stddev`, `minmax`) itself. Turning one into a plain
+`mean`, `median`, `stddev`) itself; `min` / `max` / `minmax` come from the core order gate. Turning one into a plain
 number is `#ticks`, which says which unit it is counting.
 
 `docs/CATime.md` is the user-facing reference for these two

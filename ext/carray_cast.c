@@ -34,11 +34,573 @@
 #include "ruby/memory_view.h"
 #include "ca_monop_dispatch.h"   /* CA_MONOP_CAST_BASE for as_type routing */
 #include "ca_obj_face.h"         /* ca_strip_face for write path lift */
+#include "carray_internal.h"      /* rb_ca_inherit_attr */
+#include "ruby/util.h"            /* ruby_strtod */
+#include <math.h>
+
+/* ------------------------------------------------------------------------
+   Reading numbers from strings
+
+   A String stored into, or converted to, an integer or float array is data,
+   not a Ruby literal, so it is read as a decimal number rather than through
+   Integer() / Float():
+
+     number    [+-]? ( digit+ ( '.' digit* )? | '.' digit+ )
+                     ( [eE] [+-]? digit+ )?
+     float     number | nan | inf | infinity     (any case, optional sign)
+
+   Surrounding ASCII whitespace is ignored.  "010" is ten, never octal, and
+   "0x1F" / "1_000" / "0b11" are not numbers.  An integer target takes a
+   number whose value is exactly an integer ("1.0", "1e3", "2.50e1"), decided
+   from the digits rather than through a double, so a long integer is not
+   rounded; "1.5" is not an integer.
+
+   to_type makes a string that does not read, or an integer the target type
+   cannot hold, UNDEF; a store raises (ArgumentError / RangeError).
+   ------------------------------------------------------------------------ */
+
+static int ca_str_nonfinite (const char *str, double *out);
+
+#include "ca_pow5_table.h"
+
+/* Decimal to binary64, correctly rounded, without the C library.
+
+   A validated token is read as w * 10^q with w the first 19 significant
+   digits.  Clinger's fast path answers when w and 10^q are both exact
+   doubles (one rounding).  Otherwise the Eisel-Lemire method multiplies w
+   by a 128-bit approximation of 5^q (ca_pow5_table.h) and reads the
+   significand from the top of the product, declining in the rare cases
+   where the product cannot settle the rounding.  A declined token, and one
+   with more than 19 significant digits, goes to ruby_strtod. */
+
+static const double ca_exact_pow10[23] = {
+  1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11,
+  1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22
+};
+
+#if defined(__SIZEOF_INT128__)
+static int
+ca_decimal_to_double_eisel_lemire (int64_t q, uint64_t w, uint64_t *bits)
+{
+  const uint64_t *t;
+  unsigned __int128 p;
+  uint64_t hi, lo, m;
+  int lz, upper;
+  int64_t e2;
+
+  if ( q < CA_POW5_Q_MIN ) {
+    *bits = 0;
+    return 1;
+  }
+  if ( q > CA_POW5_Q_MAX ) {
+    *bits = 0x7FFULL << 52;
+    return 1;
+  }
+  lz = __builtin_clzll(w);
+  w <<= lz;
+  t = ca_pow5_table + 2 * ( q - CA_POW5_Q_MIN );
+  p = (unsigned __int128) w * t[0];
+  hi = (uint64_t) ( p >> 64 );
+  lo = (uint64_t) p;
+  if ( ( hi & 0x1FF ) == 0x1FF ) {
+    /* The bits below the significand are all ones: the low half of the
+       table entry can carry into them. */
+    uint64_t hi2 = (uint64_t) ( ( (unsigned __int128) w * t[1] ) >> 64 );
+    lo += hi2;
+    if ( lo < hi2 ) {
+      hi++;
+    }
+    if ( ( hi & 0x1FF ) == 0x1FF && lo == UINT64_MAX && ( q < -27 || q > 55 ) ) {
+      return 0;
+    }
+  }
+  upper = (int) ( hi >> 63 );
+  m = hi >> ( upper + 9 );
+  /* floor(q * log2(10)) + 63, then the bias.  217706 / 2^16 is log2(10)
+     closely enough for every q in the table; the floor is taken by hand,
+     since >> on a negative number is the compiler's choice. */
+  {
+    int64_t t = 217706 * q;
+    int64_t log2_10_q = ( t >= 0 ) ? t / 65536 : - ( ( - t + 65535 ) / 65536 );
+    e2 = log2_10_q + 63 + upper - lz + 1023;
+  }
+  if ( e2 <= 0 ) {                                   /* subnormal */
+    if ( -e2 + 1 >= 64 ) {
+      *bits = 0;
+      return 1;
+    }
+    m >>= -e2 + 1;
+    m += m & 1;
+    m >>= 1;
+    e2 = ( m < ( 1ULL << 52 ) ) ? 0 : 1;
+    *bits = ( (uint64_t) e2 << 52 ) | ( m & ( ( 1ULL << 52 ) - 1 ) );
+    return 1;
+  }
+  if ( lo <= 1 && q >= -4 && q <= 23 && ( m & 3 ) == 1
+       && ( m << ( upper + 9 ) ) == hi ) {
+    m &= ~1ULL;                                      /* exactly halfway: to even */
+  }
+  m += m & 1;
+  m >>= 1;
+  if ( m >= ( 2ULL << 52 ) ) {
+    m = 1ULL << 52;
+    e2++;
+  }
+  m &= ~( 1ULL << 52 );
+  if ( e2 >= 0x7FF ) {
+    *bits = 0x7FFULL << 52;
+    return 1;
+  }
+  *bits = ( (uint64_t) e2 << 52 ) | m;
+  return 1;
+}
+#endif
+
+/* 1 with the value at out, 0 to hand the token to ruby_strtod. */
+static int
+ca_decimal_token_to_double_without_strtod (const char *s, long n, double *out)
+{
+  long i = 0;
+  int negative = 0, nd = 0, truncated = 0;
+  uint64_t w = 0;
+  int64_t q = 0, e = 0;
+
+  if ( s[i] == '+' || s[i] == '-' ) {
+    negative = ( s[i] == '-' );
+    i++;
+  }
+  for (; i < n && s[i] >= '0' && s[i] <= '9'; i++) {
+    unsigned d = (unsigned) ( s[i] - '0' );
+    if ( w == 0 && d == 0 ) continue;
+    if ( nd < 19 ) { w = w * 10 + d; nd++; }
+    else { q++; truncated |= ( d != 0 ); }
+  }
+  if ( i < n && s[i] == '.' ) {
+    for (i++; i < n && s[i] >= '0' && s[i] <= '9'; i++) {
+      unsigned d = (unsigned) ( s[i] - '0' );
+      if ( w == 0 && d == 0 ) { q--; continue; }
+      if ( nd < 19 ) { w = w * 10 + d; nd++; q--; }
+      else { truncated |= ( d != 0 ); }
+    }
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    int eneg = 0;
+    i++;
+    if ( s[i] == '+' || s[i] == '-' ) {
+      eneg = ( s[i] == '-' );
+      i++;
+    }
+    for (; i < n; i++) {
+      if ( e < 100000 ) {
+        e = e * 10 + ( s[i] - '0' );
+      }
+    }
+    q += eneg ? -e : e;
+  }
+  if ( truncated ) {
+    return 0;
+  }
+  if ( w == 0 ) {
+    *out = negative ? -0.0 : 0.0;
+    return 1;
+  }
+  if ( w <= ( 1ULL << 53 ) && q >= -22 && q <= 22 ) {
+    double d = (double) w;
+    d = ( q >= 0 ) ? d * ca_exact_pow10[q] : d / ca_exact_pow10[-q];
+    *out = negative ? -d : d;
+    return 1;
+  }
+#if defined(__SIZEOF_INT128__)
+  {
+    uint64_t bits;
+    double d;
+    if ( ! ca_decimal_to_double_eisel_lemire(q, w, &bits) ) {
+      return 0;
+    }
+    memcpy(&d, &bits, sizeof(d));
+    *out = negative ? -d : d;
+    return 1;
+  }
+#else
+  return 0;
+#endif
+}
+
+static double
+ca_decimal_token_to_double (const char *s, long n, const char *buf)
+{
+  double d;
+  if ( ca_decimal_token_to_double_without_strtod(s, n, &d) ) {
+    return d;
+  }
+  return ruby_strtod(buf, NULL);
+}
+
+enum {
+  CA_DECIMAL_OK = 0,
+  CA_DECIMAL_BLANK,
+  CA_DECIMAL_UNREADABLE,
+  CA_DECIMAL_OUT_OF_RANGE
+};
+
+static int
+ca_decimal_is_space (char c)
+{
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+         || c == '\v' || c == '\f';
+}
+
+static void
+ca_decimal_trim (const char **str, long *len)
+{
+  const char *s = *str;
+  long n = *len;
+  while ( n > 0 && ca_decimal_is_space(s[0]) ) {
+    s++;
+    n--;
+  }
+  while ( n > 0 && ca_decimal_is_space(s[n-1]) ) {
+    n--;
+  }
+  *str = s;
+  *len = n;
+}
+
+/* A decimal number whose value is exactly an integer, into a sign and a
+   magnitude.  The digits are read with the decimal point moved by the
+   exponent: those left of it form the magnitude, those right of it must all
+   be zero.  Returns CA_DECIMAL_OK, CA_DECIMAL_UNREADABLE, or
+   CA_DECIMAL_OUT_OF_RANGE for a magnitude beyond uint64. */
+static int
+ca_decimal_integer (const char *s, long n, int *negative, uint64_t *magnitude)
+{
+  long i = 0, int_start, int_end, frac_start, frac_end;
+  long nint, total, point, exponent = 0, k;
+  int exponent_negative = 0;
+  uint64_t v = 0;
+  *negative = 0;
+  if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+    *negative = ( s[i] == '-' );
+    i++;
+  }
+  int_start = i;
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+  }
+  int_end = frac_start = frac_end = i;
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    frac_start = i;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+    }
+    frac_end = i;
+  }
+  nint  = int_end - int_start;
+  total = nint + ( frac_end - frac_start );
+  if ( total == 0 ) {
+    return CA_DECIMAL_UNREADABLE;
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      exponent_negative = ( s[i] == '-' );
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      if ( exponent < 1000000 ) {            /* saturate; far past any fit */
+        exponent = exponent * 10 + ( s[i] - '0' );
+      }
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
+      return CA_DECIMAL_UNREADABLE;
+    }
+    if ( exponent_negative ) {
+      exponent = - exponent;
+    }
+  }
+  if ( i != n ) {
+    return CA_DECIMAL_UNREADABLE;
+  }
+  point = nint + exponent;
+  for (k = 0; k < total; k++) {
+    char c = ( k < nint ) ? s[int_start + k] : s[frac_start + k - nint];
+    unsigned d = (unsigned) ( c - '0' );
+    if ( k >= point ) {
+      if ( d != 0 ) {
+        return CA_DECIMAL_UNREADABLE;       /* a fractional part */
+      }
+      continue;
+    }
+    if ( v > ( UINT64_MAX - d ) / 10 ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    v = v * 10 + d;
+  }
+  for (k = total; k < point && v != 0; k++) {
+    if ( v > UINT64_MAX / 10 ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    v *= 10;
+  }
+  *magnitude = v;
+  return CA_DECIMAL_OK;
+}
+
+/* Whether s could be nan / inf / infinity: a letter after an optional sign. */
+static int
+ca_decimal_may_be_word (const char *s, long n)
+{
+  long i = ( s[0] == '+' || s[0] == '-' ) ? 1 : 0;
+  return i < n && ( ( s[i] | 0x20 ) == 'n' || ( s[i] | 0x20 ) == 'i' );
+}
+
+/* A decimal float, written to out.  With out NULL, only whether s is one. */
+static int
+ca_decimal_float (const char *s, long n, double *out)
+{
+  char buf[64];
+  long i = 0, digits = 0;
+  double nonfinite;
+  if ( n == 0 ) {
+    return 0;
+  }
+  if ( n <= 9 && ca_decimal_may_be_word(s, n) ) {   /* longest: "+infinity" */
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    if ( ca_str_nonfinite(buf, &nonfinite) ) {
+      if ( out ) {
+        *out = nonfinite;
+      }
+      return 1;
+    }
+  }
+  if ( s[i] == '+' || s[i] == '-' ) {
+    i++;
+  }
+  while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+    i++;
+    digits++;
+  }
+  if ( i < n && s[i] == '.' ) {
+    i++;
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      digits++;
+    }
+  }
+  if ( digits == 0 ) {
+    return 0;
+  }
+  if ( i < n && ( s[i] == 'e' || s[i] == 'E' ) ) {
+    long exponent_digits = 0;
+    i++;
+    if ( i < n && ( s[i] == '+' || s[i] == '-' ) ) {
+      i++;
+    }
+    while ( i < n && s[i] >= '0' && s[i] <= '9' ) {
+      i++;
+      exponent_digits++;
+    }
+    if ( exponent_digits == 0 ) {
+      return 0;
+    }
+  }
+  if ( i != n ) {
+    return 0;
+  }
+  if ( out == NULL ) {
+    return 1;
+  }
+  /* The token is validated, so the reader sees nothing but a decimal
+     number. */
+  if ( n < (long) sizeof(buf) ) {
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    *out = ca_decimal_token_to_double(s, n, buf);
+  }
+  else {
+    volatile VALUE token = rb_str_new(s, n);
+    *out = ruby_strtod(RSTRING_PTR(token), NULL);
+  }
+  return 1;
+}
+
+static int
+ca_decimal_fits (int8_t data_type, int negative, uint64_t magnitude)
+{
+  uint64_t positive_max, negative_max;
+  switch ( data_type ) {
+  case CA_INT8:   positive_max = INT8_MAX;   negative_max = (uint64_t) INT8_MAX + 1;  break;
+  case CA_INT16:  positive_max = INT16_MAX;  negative_max = (uint64_t) INT16_MAX + 1; break;
+  case CA_INT32:  positive_max = INT32_MAX;  negative_max = (uint64_t) INT32_MAX + 1; break;
+  case CA_INT64:  positive_max = INT64_MAX;  negative_max = (uint64_t) INT64_MAX + 1; break;
+  case CA_UINT8:  positive_max = UINT8_MAX;  negative_max = 0; break;
+  case CA_UINT16: positive_max = UINT16_MAX; negative_max = 0; break;
+  case CA_UINT32: positive_max = UINT32_MAX; negative_max = 0; break;
+  case CA_UINT64: positive_max = UINT64_MAX; negative_max = 0; break;
+  default:
+    return 0;
+  }
+  return negative ? ( magnitude <= negative_max ) : ( magnitude <= positive_max );
+}
+
+/* Store a value that ca_decimal_fits accepted. */
+static void
+ca_decimal_store_integer (int8_t data_type, char *ptr, ca_size_t i,
+                          int negative, uint64_t magnitude)
+{
+  int64_t v;
+  if ( negative && magnitude > 0 ) {
+    v = - (int64_t) ( magnitude - 1 ) - 1;
+  }
+  else {
+    v = (int64_t) magnitude;
+  }
+  switch ( data_type ) {
+  case CA_INT8:   ((int8_t *)   ptr)[i] = (int8_t) v;   break;
+  case CA_INT16:  ((int16_t *)  ptr)[i] = (int16_t) v;  break;
+  case CA_INT32:  ((int32_t *)  ptr)[i] = (int32_t) v;  break;
+  case CA_INT64:  ((int64_t *)  ptr)[i] = v;            break;
+  case CA_UINT8:  ((uint8_t *)  ptr)[i] = (uint8_t) magnitude;  break;
+  case CA_UINT16: ((uint16_t *) ptr)[i] = (uint16_t) magnitude; break;
+  case CA_UINT32: ((uint32_t *) ptr)[i] = (uint32_t) magnitude; break;
+  case CA_UINT64: ((uint64_t *) ptr)[i] = magnitude;            break;
+  }
+}
+
+/* Whether v is a real number other than an Integer or a Float -- a Rational,
+   a BigDecimal -- which reads as the value it stands for. */
+static int
+ca_decimal_other_real (VALUE v)
+{
+  return RTEST(rb_obj_is_kind_of(v, rb_cNumeric))
+      && RTEST(rb_funcall(v, rb_intern("real?"), 0));
+}
+
+static VALUE
+ca_decimal_truncate (VALUE v)
+{
+  return rb_funcall(v, rb_intern("truncate"), 0);
+}
+
+/* A non-String cell as an integer: an Integer, or a Float or another real
+   number with no fractional part, that the target can hold. */
+static int
+ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
+{
+  if ( ! RB_INTEGER_TYPE_P(v) && ! RB_FLOAT_TYPE_P(v) && ca_decimal_other_real(v) ) {
+    /* truncate raises for a NaN or infinite BigDecimal, which reads as
+       nothing an integer can hold. */
+    int state = 0;
+    VALUE whole = rb_protect(ca_decimal_truncate, v, &state);
+    if ( state ) {
+      rb_set_errinfo(Qnil);
+      return 0;
+    }
+    if ( ! RB_INTEGER_TYPE_P(whole) || ! RTEST(rb_equal(whole, v)) ) {
+      return 0;
+    }
+    v = whole;
+  }
+  if ( RB_INTEGER_TYPE_P(v) ) {
+    VALUE zero = INT2FIX(0);
+    *negative = RTEST(rb_funcall(v, '<', 1, zero));
+    if ( *negative ) {
+      v = rb_funcall(v, rb_intern("-@"), 0);
+    }
+    if ( RTEST(rb_funcall(v, '>', 1, ULL2NUM(UINT64_MAX))) ) {
+      return 0;
+    }
+    *magnitude = NUM2ULL(v);
+    return 1;
+  }
+  if ( RB_FLOAT_TYPE_P(v) ) {
+    double d = RFLOAT_VALUE(v);
+    if ( d != d || d != floor(d) || fabs(d) >= 18446744073709551616.0 ) {
+      return 0;
+    }
+    *negative = ( d < 0 );
+    *magnitude = (uint64_t) fabs(d);
+    return 1;
+  }
+  return 0;
+}
+
+/* A String as one value of data_type (an integer or float type), written
+   to out. */
+static int
+ca_decimal_read_bytes_as (const char *s, long n, int8_t data_type, void *out)
+{
+  ca_decimal_trim(&s, &n);
+  if ( n == 0 ) {
+    return CA_DECIMAL_BLANK;
+  }
+  if ( data_type == CA_FLOAT32 || data_type == CA_FLOAT64 ) {
+    double d;
+    if ( ! ca_decimal_float(s, n, &d) ) {
+      return CA_DECIMAL_UNREADABLE;
+    }
+    if ( data_type == CA_FLOAT32 ) {
+      *(float32_t *) out = (float32_t) d;
+    }
+    else {
+      *(float64_t *) out = d;
+    }
+    return CA_DECIMAL_OK;
+  }
+  else {
+    int negative = 0;
+    uint64_t magnitude = 0;
+    int rc = ca_decimal_integer(s, n, &negative, &magnitude);
+    if ( rc != CA_DECIMAL_OK ) {
+      return rc;
+    }
+    if ( ! ca_decimal_fits(data_type, negative, magnitude) ) {
+      return CA_DECIMAL_OUT_OF_RANGE;
+    }
+    ca_decimal_store_integer(data_type, (char *) out, 0, negative, magnitude);
+    return CA_DECIMAL_OK;
+  }
+}
+
+static int
+ca_decimal_string_read (VALUE str, int8_t data_type, void *out)
+{
+  return ca_decimal_read_bytes_as(RSTRING_PTR(str), RSTRING_LEN(str), data_type, out);
+}
+
+/* The to_type reader: 1 with the value at out, or 0 for a cell that
+   becomes UNDEF. */
+int
+ca_decimal_string_to (VALUE str, int8_t data_type, void *out)
+{
+  return ca_decimal_string_read(str, data_type, out) == CA_DECIMAL_OK;
+}
+
+/* The store reader: the value at out, or a raise. */
+void
+ca_decimal_string_store (VALUE str, int8_t data_type, void *out)
+{
+  switch ( ca_decimal_string_read(str, data_type, out) ) {
+  case CA_DECIMAL_OK:
+    return;
+  case CA_DECIMAL_OUT_OF_RANGE:
+    rb_raise(rb_eRangeError, "%+"PRIsVALUE" is out of range for %s",
+             str, ca_type_name[data_type]);
+  default:
+    rb_raise(rb_eArgError, "%+"PRIsVALUE" cannot be read as %s",
+             str, ca_type_name[data_type]);
+  }
+}
 
 boolean8_t
 OBJ2BOOL (VALUE v)
 {
-  if ( v == Qfalse || v == Qnil ) {
+  if ( v == Qfalse ) {
     return 0;
   }
   else if ( v == Qtrue ) {
@@ -99,25 +661,20 @@ OBJ2DBL (VALUE val)
   switch ( TYPE(val) ) {
   case T_FLOAT:
     return NUM2DBL(val);
-  case T_NIL:
-    return 0.0/0.0;
   case T_STRING: {
     double d;
-    volatile VALUE rstr = rb_funcall(val, rb_intern("strip"), 0);
-    char *str = StringValuePtr(rstr);
-    if ( ca_str_nonfinite(str, &d) ) {
-      return d;
-    }
-    return rb_cstr_to_dbl(str, 0);
+    ca_decimal_string_store(val, CA_FLOAT64, &d);
+    return d;
   }
   default:
     return NUM2DBL(rb_Float(val));
   }
 }
 
-/* rb_protect bodies: Kernel#Float / Kernel#Integer applied to one value.
-   Used by the mask-aware object->numeric parsers below so a conversion
-   error is caught (and turned into a masked cell) rather than raised. */
+/* rb_protect bodies: Kernel#Float / Kernel#Integer applied to one value
+   that is not a String.  Used by the mask-aware object->numeric parsers
+   below so a conversion error is caught (and turned into a masked cell)
+   rather than raised. */
 static VALUE
 ca_kernel_float (VALUE v)
 {
@@ -130,12 +687,71 @@ ca_kernel_integer (VALUE v)
   return rb_Integer(v);
 }
 
+/* Complex#to_s writes a part that is not finite as "NaN" or "Infinity" and
+   then marks the imaginary part with "*i" ("1.0+Infinity*i", "NaN+0i"),
+   which Complex() does not read back.  Read that form as two decimal
+   numbers: the imaginary part starts at the last sign that is not the
+   first character and not an exponent's.  Returns 0 when the text is not
+   of that form. */
+static int
+ca_str_to_cmplx_nonfinite (VALUE str, double complex *out)
+{
+  const char *s = RSTRING_PTR(str);
+  long n = RSTRING_LEN(str), k;
+  double re, im;
+  volatile VALUE vre, vim;
+  while ( n > 0 && ( s[0] == ' ' || s[0] == '\t' ) ) { s++; n--; }
+  while ( n > 0 && ( s[n-1] == ' ' || s[n-1] == '\t' ) ) { n--; }
+  if ( n < 2 || s[n-1] != 'i' ) {
+    return 0;
+  }
+  n -= ( n >= 2 && s[n-2] == '*' ) ? 2 : 1;
+  for ( k = n - 1; k > 0; k-- ) {
+    if ( ( s[k] == '+' || s[k] == '-' ) && s[k-1] != 'e' && s[k-1] != 'E' ) {
+      break;
+    }
+  }
+  if ( k <= 0 ) {
+    return 0;
+  }
+  vre = rb_str_new(s, k);
+  vim = rb_str_new(s + k, n - k);
+  if ( ! ca_decimal_string_to(vre, CA_FLOAT64, &re)
+       || ! ca_decimal_string_to(vim, CA_FLOAT64, &im) ) {
+    return 0;
+  }
+  *out = CMPLX(re, im);
+  return 1;
+}
+
+/* A real is read as a decimal number; anything else goes to Complex(). */
+double complex
+ca_str_to_cmplx (VALUE str)
+{
+  volatile VALUE rstr;
+  volatile VALUE c;
+  double d;
+  double complex z;
+  if ( ca_decimal_string_to(str, CA_FLOAT64, &d) ) {
+    return (double complex) d;
+  }
+  if ( ( memchr(RSTRING_PTR(str), 'N', RSTRING_LEN(str))
+         || memchr(RSTRING_PTR(str), 'I', RSTRING_LEN(str)) )
+       && ca_str_to_cmplx_nonfinite(str, &z) ) {
+    return z;
+  }
+  rstr = rb_funcall(str, rb_intern("strip"), 0);
+  c = rb_funcall(rb_mKernel, rb_intern("Complex"), 1, rstr);
+  return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
+}
+
 /* Object -> double with parse-failure signalling.  Returns 1 and sets *out
    on success; returns 0 when the cell cannot be parsed, in which case the
-   caller writes UNDEF (mask) for that cell.  nil and unparseable
-   strings/objects fail; already-numeric values and explicit nan/inf
-   literals succeed.  Strictness mirrors Ruby Float() (whitespace strip,
-   "1e3" ok, ...) but a bad token masks instead of raising. */
+   caller writes UNDEF (mask) for that cell.  nil and unreadable
+   strings/objects fail; already-numeric values succeed, and a String is
+   read as a decimal number.  This is the reading path of to_type from an
+   object array, where a cell with no number in it is a missing value; a
+   store (OBJ2DBL) raises instead. */
 int
 ca_obj2dbl_ok (VALUE val, double *out)
 {
@@ -147,10 +763,7 @@ ca_obj2dbl_ok (VALUE val, double *out)
     return 1;
   }
   if ( RB_TYPE_P(val, T_STRING) ) {
-    volatile VALUE rstr = rb_funcall(val, rb_intern("strip"), 0);
-    if ( ca_str_nonfinite(StringValuePtr(rstr), out) ) {
-      return 1;
-    }
+    return ca_decimal_string_to(val, CA_FLOAT64, out);
   }
   {
     int state = 0;
@@ -164,98 +777,118 @@ ca_obj2dbl_ok (VALUE val, double *out)
   }
 }
 
-/* Object -> integer with parse-failure signalling (int/long lane).  Same
-   contract as ca_obj2dbl_ok: 1 + *out on success, 0 (mask) on failure.
-   Strictness mirrors Ruby Integer() -- a non-integer string ("1.5") fails
-   (no truncation), nil fails, "0xff"/"1_000" parse.  A valid Integer that
-   overflows the widest C integer still raises (a domain error, not a parse
-   failure). */
-int
-rb_obj2long_ok (VALUE val, long *out)
+/* Object -> complex with parse-failure signalling: the complex sibling of
+   ca_obj2dbl_ok.  A cell is read as a store reads it (a real as a decimal
+   number, the rest as Complex()); nil and a cell that does not read fail. */
+static VALUE
+ca_cmplx_cell_body (VALUE v)
 {
+  double complex z = rb_carray_num2cmplx(v);
+  return rb_dbl_complex_new(creal(z), cimag(z));
+}
+
+int
+ca_obj2cmplx_ok (VALUE val, double complex *out)
+{
+  int state = 0;
+  volatile VALUE r;
   if ( NIL_P(val) ) {
     return 0;
   }
+  r = rb_protect(ca_cmplx_cell_body, val, &state);
+  if ( state ) {
+    rb_set_errinfo(Qnil);
+    return 0;
+  }
+  *out = CMPLX(NUM2DBL(rb_complex_real(r)), NUM2DBL(rb_complex_imag(r)));
+  return 1;
+}
+
+/* Object -> integer with parse-failure signalling.  Same contract as
+   ca_obj2dbl_ok: 1 + *out on success, 0 (mask) on failure.  A String is
+   read as a decimal number ("1.5" fails, no truncation); any other object
+   goes through Integer().  nil fails.  A valid Integer that overflows the
+   widest C integer still raises (a domain error, not a parse failure). */
+static int
+ca_obj2integer_ok (VALUE val, int8_t wide_type, void *wide, VALUE *integer)
+{
+  int state = 0;
+  if ( NIL_P(val) ) {
+    return 0;
+  }
+  if ( RB_TYPE_P(val, T_STRING) ) {
+    return ca_decimal_string_to(val, wide_type, wide);
+  }
+  *integer = rb_protect(ca_kernel_integer, val, &state);
+  if ( state ) {
+    rb_set_errinfo(Qnil);
+    return 0;
+  }
+  return 1;
+}
+
+int
+rb_obj2long_ok (VALUE val, long *out)
+{
+  int64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2LONG(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2LONG(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (long) wide : NUM2LONG(integer);
+  return 1;
 }
 
 int
 rb_obj2ulong_ok (VALUE val, unsigned long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  uint64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2ULONG(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2ULONG(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (unsigned long) wide : NUM2ULONG(integer);
+  return 1;
 }
 
 int
 rb_obj2ll_ok (VALUE val, long long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  int64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2LL(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = NUM2LL(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (long long) wide : NUM2LL(integer);
+  return 1;
 }
 
 int
 rb_obj2ull_ok (VALUE val, unsigned long long *out)
 {
-  if ( NIL_P(val) ) {
-    return 0;
-  }
+  uint64_t wide;
+  VALUE integer = Qnil;
   if ( RB_TYPE_P(val, T_FIXNUM) ) {
     *out = NUM2ULL(val);
     return 1;
   }
-  {
-    int state = 0;
-    volatile VALUE r = rb_protect(ca_kernel_integer, val, &state);
-    if ( state ) {
-      rb_set_errinfo(Qnil);
-      return 0;
-    }
-    *out = rb_num2ull(r);
-    return 1;
+  if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
+    return 0;
   }
+  *out = NIL_P(integer) ? (unsigned long long) wide : rb_num2ull(integer);
+  return 1;
 }
 
 long
@@ -267,8 +900,13 @@ rb_obj2long (VALUE val)
   case T_BIGNUM:
     return (long) NUM2LL(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    int64_t v;
+    ca_decimal_string_store(val, CA_INT64, &v);
+    return (long) v;
+  }
   default:
     return NUM2LONG(rb_Integer(val));
   }
@@ -283,8 +921,13 @@ rb_obj2ulong (VALUE val)
   case T_BIGNUM:
     return (unsigned long) rb_num2ull(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    uint64_t v;
+    ca_decimal_string_store(val, CA_UINT64, &v);
+    return (unsigned long) v;
+  }
   default:
     return NUM2ULONG(rb_Integer(val));
   }
@@ -297,8 +940,13 @@ rb_obj2ll (VALUE val)
   case T_FIXNUM:
     return NUM2LONG(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    int64_t v;
+    ca_decimal_string_store(val, CA_INT64, &v);
+    return (long long) v;
+  }
   default:
     return NUM2LL(rb_Integer(val));
   }
@@ -311,8 +959,13 @@ rb_obj2ull (VALUE val)
   case T_FIXNUM:
     return NUM2ULONG(val);
   case T_NIL:
-    rb_raise(rb_eTypeError, "no implicit conversion from nil to integer");
+    rb_raise(rb_eTypeError, "can't convert nil into Integer");
     break;
+  case T_STRING: {
+    uint64_t v;
+    ca_decimal_string_store(val, CA_UINT64, &v);
+    return (unsigned long long) v;
+  }
   default:
     return rb_num2ull(rb_Integer(val));
   }
@@ -334,7 +987,7 @@ ca_face_safe_check (CArray *ca)
 static inline int8_t
 ca_storage_type_of (CArray *ca)
 {
-  while (ca_face_safe_check(ca)) ca = ((CAView *) ca)->parent;
+  if ( ca_face_safe_check(ca) ) ca = ca_strip_face(ca);
   return ca ? ca->data_type : CA_FIXLEN;
 }
 
@@ -433,7 +1086,7 @@ ca_val2val (int8_t data_type1, void *ptr1, int8_t data_type2, void *ptr2)
 /* Cast to CA_OBJECT for an array whose cells mean something other than their
    storage bytes: a data_class array (CARecord / CAStruct) or a Face (CATime,
    CAConstString, CACategorical, ...).  Both decode per cell -- rb_ca_fetch_addr
-   goes through the data_class decode and CA_FACE_STORAGE_TO_SCALAR_IF_FACE --
+   goes through the data_class decode and CA_FACE_STORAGE_TO_ELEMENT_IF_FACE --
    so the object array holds the *surface* values (labels, not codes;
    CATime::Element, not serials; the string, not the descriptor bytes).  Reading
    the storage instead is `.parent`, which stays available and explicit.  Mask
@@ -558,6 +1211,33 @@ typedef struct {
   boolean8_t *scratch;
 } ca_to_type_ctx_t;
 
+/* Marks in `m` the cells of a float or complex array that hold NaN (in
+   either part).  A NaN has no integer, and C leaves its conversion
+   undefined. */
+static void
+ca_mark_nan (CArray *ca, boolean8_t *m)
+{
+  ca_size_t i, n = ca->elements;
+  switch ( ca->data_type ) {
+  case CA_FLOAT32: { float32_t *p = (float32_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    break; }
+  case CA_FLOAT64: { float64_t *p = (float64_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    break; }
+#ifdef HAVE_COMPLEX_H
+  case CA_CMPLX64: { cmplx64_t *p = (cmplx64_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(crealf(p[i])) || isnan(cimagf(p[i])) ) m[i] = 1;
+    break; }
+  case CA_CMPLX128: { cmplx128_t *p = (cmplx128_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( isnan(creal(p[i])) || isnan(cimag(p[i])) ) m[i] = 1;
+    break; }
+#endif
+  default:
+    break;
+  }
+}
+
 /* The cast proper, with `ca` attached.  It can raise (a value the target
    type cannot hold), so it runs under rb_ensure. */
 static VALUE
@@ -565,11 +1245,16 @@ ca_to_type_cast (VALUE arg)
 {
   ca_to_type_ctx_t *c = (ca_to_type_ctx_t *) arg;
   CArray *ca = c->ca, *cb = c->cb;
+  int to_integer = ( cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64 );
+  int from_float = ( ca->data_type == CA_FLOAT32 || ca->data_type == CA_FLOAT64
+                     || ca->data_type == CA_CMPLX64 || ca->data_type == CA_CMPLX128 );
 
-  if ( ca->data_type == CA_OBJECT
-       && ( (cb->data_type >= CA_INT8 && cb->data_type <= CA_UINT64)
-            || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64 ) ) {
-    /* object -> int/float: give the cast a mask buffer so an unparseable
+  if ( ( ca->data_type == CA_OBJECT
+         && ( to_integer
+              || cb->data_type == CA_FLOAT32 || cb->data_type == CA_FLOAT64
+              || cb->data_type == CA_CMPLX64 || cb->data_type == CA_CMPLX128 ) )
+       || ( from_float && to_integer ) ) {
+    /* object -> int/float/complex: give the cast a mask buffer so an unparseable
        cell becomes UNDEF (see ext/carray_cast_func.rb).  Cast into a
        scratch mask seeded from the source mask, then attach it to the
        output only if some cell ended up masked -- an all-valid cast keeps
@@ -584,6 +1269,13 @@ ca_to_type_cast (VALUE arg)
     }
     else {
       memset(scratch, 0, ne);
+    }
+    /* float -> integer: a NaN cell becomes UNDEF, as an unparseable object
+       cell does.  A finite value outside the integer type is converted the
+       way the machine's C converts it, which differs between machines. */
+    if ( from_float ) {
+      ca_mark_nan(ca, scratch);
+      memset(cb->ptr, 0, ne * cb->bytes);
     }
     ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
     for (i=0; i<ne; i++) {
@@ -627,8 +1319,20 @@ ca_to_type_release (VALUE arg)
    data_type (a new entity owning its storage).  User doc lives in
    yard-stubs/carray_cast.rb. */
 
+static VALUE rb_ca_to_type_convert (int argc, VALUE *argv, VALUE self);
+
+/* The converted array keeps self's attributes: the values are the same
+   values in another representation. */
 static VALUE
 rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
+{
+  VALUE obj = rb_ca_to_type_convert(argc, argv, self);
+  rb_ca_inherit_attr(obj, self);
+  return obj;
+}
+
+static VALUE
+rb_ca_to_type_convert (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
   CArray *ca, *cb;
@@ -657,8 +1361,8 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
      Numeric Face is not routed here -- its surface *is* its storage, so the
      ordinary cast below is already right. */
   if ( ca_is_face(ca) && ca->data_type == CA_FIXLEN ) {
-    return rb_ca_to_type_internal(argc, argv,
-                                  rb_ca_face_numeric_projection(self, ca));
+    return rb_ca_to_type_convert(argc, argv,
+                                 rb_ca_face_numeric_projection(self, ca));
   }
 
   ca_update_mask(ca);
@@ -676,7 +1380,7 @@ rb_ca_to_type_internal (int argc, VALUE *argv, VALUE self)
   ctx.ca      = ca;
   ctx.cb      = cb;
   ctx.scratch = NULL;
-  ca_attach(ca);
+  ca_attach(ca);   /* window: released by ca_to_type_release under rb_ensure */
   rb_ensure(ca_to_type_cast, (VALUE) &ctx, ca_to_type_release, (VALUE) &ctx);
 
   /* When rtype is a data_class (e.g. CAStruct subclass), wrap the
@@ -1081,30 +1785,30 @@ rb_ca_ptr2obj (VALUE self, void *ptr)
 }
 
 /* Surface -> storage-domain conversion for a Face store (mirror of the
-   storage_to_scalar read hook).  Non-Face `ca` returns `obj` unchanged, so
+   storage_to_element read hook).  Non-Face `ca` returns `obj` unchanged, so
    the non-Face store path is untouched.  For a Face, the per-obj_type C
    table is consulted first (fast path); if none is registered, the Ruby
-   `scalar_to_storage` method is called when defined.  A Face that recognizes
+   `element_to_storage` method is called when defined.  A Face that recognizes
    `obj` returns a storage-domain value (e.g. an Integer in its unit); a bare
    Integer / String falls through unchanged to the storage cast. */
 VALUE
-ca_face_scalar_to_storage (VALUE self, CArray *ca, VALUE obj)
+ca_face_element_to_storage (VALUE self, CArray *ca, VALUE obj)
 {
-  ca_face_scalar_to_storage_fn fn;
+  ca_face_element_to_storage_fn fn;
   if ( ! ca_face_safe_check(ca) || obj == CA_UNDEF ) {
     return obj;
   }
-  fn = ca_face_scalar_to_storage_table[ca->obj_type];
+  fn = ca_face_element_to_storage_table[ca->obj_type];
   if ( fn != NULL ) {
     return fn(self, obj);
   }
   else {
-    static ID id_scalar_to_storage = 0;
-    if ( id_scalar_to_storage == 0 ) {
-      id_scalar_to_storage = rb_intern("scalar_to_storage");
+    static ID id_element_to_storage = 0;
+    if ( id_element_to_storage == 0 ) {
+      id_element_to_storage = rb_intern("element_to_storage");
     }
-    if ( rb_respond_to(self, id_scalar_to_storage) ) {
-      return rb_funcall(self, id_scalar_to_storage, 1, obj);
+    if ( rb_respond_to(self, id_element_to_storage) ) {
+      return rb_funcall(self, id_element_to_storage, 1, obj);
     }
   }
   return obj;
@@ -1127,7 +1831,7 @@ rb_ca_obj2ptr (VALUE self, VALUE obj, void *ptr)
     if ( ca_face_safe_check(ca) ) {
       /* Face write hook: turn a surface value object (Scalar / Time /
          DateTime) into a storage-domain value the cast below consumes. */
-      obj = ca_face_scalar_to_storage(self, ca, obj);
+      obj = ca_face_element_to_storage(self, ca, obj);
       convert_type = ca_storage_type_of(ca);
     }
     if ( convert_type == CA_FIXLEN ) {
@@ -1149,7 +1853,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   if ( rb_obj_is_carray(obj) ) {                    /* obj == carray */
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -1187,7 +1891,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
     }
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -1220,7 +1924,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   }
   else {
     volatile VALUE inspect = rb_inspect(CLASS_OF(obj));
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "given object '%s' can't be wrapped as carray",
              StringValuePtr(inspect));
   }
@@ -1431,6 +2135,62 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
   return 1;
 }
 
+/* Where a Ruby Integer falls against the range of integer data type `dt`:
+   -1 below it, 1 above it, 0 inside.  Anything but an Integer, and a
+   non-integer `dt`, answer 0. */
+int
+ca_integer_range_side (VALUE v, int8_t dt)
+{
+  VALUE lo, hi;
+  if ( ! RB_INTEGER_TYPE_P(v) ) return 0;
+  switch ( dt ) {
+  case CA_INT8:   lo = INT2FIX(INT8_MIN);   hi = INT2FIX(INT8_MAX);    break;
+  case CA_UINT8:  lo = INT2FIX(0);          hi = INT2FIX(UINT8_MAX);   break;
+  case CA_INT16:  lo = INT2FIX(INT16_MIN);  hi = INT2FIX(INT16_MAX);   break;
+  case CA_UINT16: lo = INT2FIX(0);          hi = INT2FIX(UINT16_MAX);  break;
+  case CA_INT32:  lo = LL2NUM(INT32_MIN);   hi = LL2NUM(INT32_MAX);    break;
+  case CA_UINT32: lo = INT2FIX(0);          hi = ULL2NUM(UINT32_MAX);  break;
+  case CA_INT64:  lo = LL2NUM(INT64_MIN);   hi = LL2NUM(INT64_MAX);    break;
+  case CA_UINT64: lo = INT2FIX(0);          hi = ULL2NUM(UINT64_MAX);  break;
+  default: return 0;
+  }
+  if ( RTEST(rb_funcall(v, rb_intern("<"), 1, lo)) ) return -1;
+  if ( RTEST(rb_funcall(v, rb_intern(">"), 1, hi)) ) return 1;
+  return 0;
+}
+
+/* Refuses a Ruby Integer that does not fit integer data type `dt`.  Taken
+   modulo the type, 256 against a uint8 array would be 0 and compare equal
+   to it. */
+void
+ca_check_integer_fits (VALUE v, int8_t dt)
+{
+  if ( ca_integer_range_side(v, dt) != 0 ) {
+    rb_raise(rb_eRangeError, "%"PRIsVALUE" is out of range for %s",
+             rb_inspect(v), ca_type_name[dt]);
+  }
+}
+
+/* A Ruby Integer operand against an integer array is taken in the array's
+   own data type, refused when it does not fit (ca_check_integer_fits).
+   Widening instead would make the result's type depend on a scalar's
+   value.  A Float, a Face and an object array keep the coercion below. */
+static int
+ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
+{
+  CArray *cr;
+  if ( ! RB_INTEGER_TYPE_P(*scalar) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( ! ca_is_integer_type(cr) || ca_is_face(cr) ) {
+    return 0;
+  }
+  ca_check_integer_fits(*scalar, cr->data_type);
+  *scalar = rb_cscalar_new_with_value(cr->data_type, 0, *scalar);
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -1439,6 +2199,41 @@ static VALUE
 rb_ca_s_cast (VALUE klass, VALUE val)
 {
   return rb_ca_cast(val);
+}
+
+/* An operator operand that exports MemoryView, as a CArray.  When the object
+   also defines to_ca, that is asked first, in the order wrap_readonly uses:
+   the MemoryView carries only the values buffer, while to_ca can hand over
+   what the object knows besides it (the nulls of an Arrow array as a mask,
+   a time type as a Face).  Only MemoryView producers come here, so an object
+   with to_ca alone (a Range) is still not an operand. */
+static VALUE
+ca_operand_from_memory_view (VALUE obj)
+{
+  volatile VALUE ca;
+  if ( rb_respond_to(obj, rb_intern("to_ca")) ) {
+    ca = rb_funcall(obj, rb_intern("to_ca"), 0);
+    if ( ! rb_obj_is_carray(ca) ) {
+      volatile VALUE inspect = rb_inspect(CLASS_OF(obj));
+      rb_raise(rb_eTypeError,
+               "%s#to_ca did not return a CArray", StringValuePtr(inspect));
+    }
+    return ca;
+  }
+  return rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+}
+
+/* The name a coercion error gives an operand: its data type, or for a Face
+   its class.  A Face reports the data type of its storage ("fixlen" for a
+   time, a categorical, a record or a string column), which says nothing
+   about what the operand is. */
+static const char *
+ca_coerce_operand_name (VALUE obj, CArray *ca)
+{
+  if ( ca_is_face(ca) ) {
+    return rb_obj_classname(obj);
+  }
+  return ca_type_name[ca->data_type];
 }
 
 void
@@ -1453,11 +2248,11 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
      Excludes T_STRING which has its own legacy interpretation. */
   if ( ! rb_obj_is_carray(*self) && TYPE(*self) != T_STRING &&
        rb_memory_view_available_p(*self) ) {
-    *self = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *self);
+    *self = ca_operand_from_memory_view(*self);
   }
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
-    *other = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *other);
+    *other = ca_operand_from_memory_view(*other);
   }
 
   if ( ! rb_obj_is_carray(*self) ) {
@@ -1476,6 +2271,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 #endif
     else if ( ca_fixlen_scalar_operand(self, *other) ) {
       /* width taken from the fixlen reference; see the helper above */
+    }
+    else if ( ca_integer_scalar_operand(self, *other) ) {
+      /* the array's own integer type; see the helper above */
     }
     else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
@@ -1507,6 +2305,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 #endif
     else if ( ca_fixlen_scalar_operand(other, *self) ) {
       /* width taken from the fixlen reference; see the helper above */
+    }
+    else if ( ca_integer_scalar_operand(other, *self) ) {
+      /* the array's own integer type; see the helper above */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
@@ -1577,10 +2378,10 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
-           ca_type_name[ca->data_type],
-           ca_type_name[cb->data_type]);
+           ca_coerce_operand_name(*self, ca),
+           ca_coerce_operand_name(*other, cb));
 }
 
 /* CArray.cast_self_or_other(self, other) — promote self and other
@@ -1681,33 +2482,129 @@ ca_promote_type (int8_t a, int8_t b)
     /* b should be cast to a */
     return a;
   }
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eCADataTypeError,
            "can't promote data_types '%s' and '%s' to a common type",
            ca_type_name[a], ca_type_name[b]);
 }
 
-/* CArray.result_type(*args) -- common data_type each operand promotes to
-   under ca_cast_table.  Each arg is classified by ca_arg_to_data_type: a
+/* The type in which values of types `a` and `b`, whose common type is `t`,
+   are matched for equality.  It is `t`, except where `t` cannot hold every
+   value of both: an integer pair of mixed sign whose common type is
+   unsigned (uint8 with int8 is uint8, where -1 would read as 255) moves to
+   a signed type that holds both, or, for 64 bits, where no numeric type
+   does, to object, whose Integers compare by value; and an integer of 32
+   bits or more beside a float32 (or cmplx64) moves to double precision.  `eq` answers the
+   mixed-sign pair by value. */
+int8_t
+ca_value_match_type (int8_t t, int8_t a, int8_t b)
+{
+  int signed_a = ( a == CA_INT8 || a == CA_INT16 || a == CA_INT32 || a == CA_INT64 );
+  int signed_b = ( b == CA_INT8 || b == CA_INT16 || b == CA_INT32 || b == CA_INT64 );
+  int wide_a = ( a == CA_INT32 || a == CA_UINT32 || a == CA_INT64 || a == CA_UINT64 );
+  int wide_b = ( b == CA_INT32 || b == CA_UINT32 || b == CA_INT64 || b == CA_UINT64 );
+  /* An integer of 32 bits or more beside a single-precision float: float32
+     holds integers only up to 2**24 (every value of a 16-bit integer, not of
+     a 32-bit one), so the match moves to double precision, which holds every
+     value of a 32-bit integer and of a float32 (a 64-bit integer only up to
+     2**53). */
+  if ( wide_a || wide_b ) {
+    if ( t == CA_FLOAT32 ) return CA_FLOAT64;
+    if ( t == CA_CMPLX64 ) return CA_CMPLX128;
+  }
+  if ( ! signed_a && ! signed_b ) return t;
+  switch ( t ) {
+  case CA_UINT8:  return CA_INT16;
+  case CA_UINT16: return CA_INT32;
+  case CA_UINT32: return CA_INT64;
+  case CA_UINT64: return CA_OBJECT;
+  default:        return t;
+  }
+}
+
+/* ca.value_match_type(t, other_type) -- ca_value_match_type with self's
+   data type as the first operand, for the set family and locate_addr. */
+static VALUE
+rb_ca_value_match_type (VALUE self, VALUE vt, VALUE vother)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  return rb_ca_data_type_to_sym(ca_value_match_type(rb_ca_guess_type(vt), ca->data_type,
+                                                    rb_ca_guess_type(vother)));
+}
+
+/* A result_type argument that is a scalar: a Ruby value (Integer, Float,
+   true, ...) or a CScalar.  The operators let a scalar take the type of the
+   array beside it, so result_type does too. */
+static int
+ca_arg_is_scalar (VALUE obj)
+{
+  if ( rb_obj_is_carray(obj) ) {
+    CArray *ca;
+    TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
+    return ca_is_scalar(ca);
+  }
+  if ( TYPE(obj) == T_SYMBOL || TYPE(obj) == T_STRING || TYPE(obj) == T_CLASS ) {
+    return 0;
+  }
+  return ca_mv_probe_data_type(obj) < 0;
+}
+
+/* The type a scalar `obj` (of type `st`) and an array of type `at` share,
+   by the rule the operators apply: a scalar of the same kind takes the
+   array's type (0.1 beside float32 is float32, 1 beside int8 is int8); one
+   of another kind promotes (1.5 beside int32 is float64).  An Integer that
+   does not fit the array's integer type takes the type of its value, where
+   an operator would raise RangeError. */
+int8_t
+ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st)
+{
+  if ( RB_INTEGER_TYPE_P(obj) && at >= CA_INT8 && at <= CA_UINT64 ) {
+    return ( ca_integer_range_side(obj, at) == 0 ) ? at : ca_promote_type(at, st);
+  }
+  if ( ca_cast_table2[st][at] >= 0 ) {
+    return at;
+  }
+  return ca_promote_type(at, st);
+}
+
+/* CArray.result_type(*args) -- common data_type of the operands, by the rule
+   the operators use.  Each arg is classified by ca_arg_to_data_type: a
    CArray / Symbol / String / Class gives a data_type representation, a
    Numeric / bool / nil / Object gives a value whose data_type is inferred.
-   Folds pairwise via ca_promote_type; returns a Symbol.  User doc (with
-   the value-vs-code distinction and examples) lives in
-   yard-stubs/carray_cast.rb. */
+   The non-scalar arguments fold pairwise via ca_promote_type; a scalar then
+   joins that type through ca_promote_scalar_type.  With no non-scalar
+   argument every argument folds by its own type.  Returns a Symbol.  User
+   doc lives in yard-stubs/carray_cast.rb. */
 
 static VALUE
 rb_ca_s_result_type (int argc, VALUE *argv, VALUE klass)
 {
-  int8_t cur;
+  int8_t cur = -1;
   int i;
+  VALUE rest, ropt;
+
+  /* Keywords are refused; without this a keyword Hash would be classified
+     as one more operand and the answer would turn into object. */
+  rb_scan_args(argc, argv, "*:", &rest, &ropt);
+  rb_reject_options(ropt);
+  argc = (int) RARRAY_LEN(rest);
+  argv = RARRAY_PTR(rest);
 
   if ( argc < 1 ) {
     rb_raise(rb_eArgError, "result_type requires at least one argument");
   }
 
-  cur = ca_arg_to_data_type(argv[0]);
-  for ( i = 1; i < argc; i++ ) {
-    int8_t next = ca_arg_to_data_type(argv[i]);
-    cur = ca_promote_type(cur, next);
+  for ( i = 0; i < argc; i++ ) {
+    if ( ! ca_arg_is_scalar(argv[i]) ) {
+      int8_t t = ca_arg_to_data_type(argv[i]);
+      cur = ( cur < 0 ) ? t : ca_promote_type(cur, t);
+    }
+  }
+  for ( i = 0; i < argc; i++ ) {
+    if ( ca_arg_is_scalar(argv[i]) ) {
+      int8_t t = ca_arg_to_data_type(argv[i]);
+      cur = ( cur < 0 ) ? t : ca_promote_scalar_type(cur, argv[i], t);
+    }
   }
   /* Return Symbol for family consistency with
      CArray.value_to_data_type and ca.data_type. */
@@ -1747,9 +2644,6 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
 {
   VALUE list, kwargs, data_type = Qnil;
   long n, i;
-  int  all_face = 1, any_face = 0, all_primitive = 1;
-  VALUE face_class = Qnil;
-  CArray *ref_face = NULL;
   int8_t common = -1;
 
   rb_scan_args(argc, argv, "1:", &list, &kwargs);
@@ -1768,49 +2662,26 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     if ( RB_TYPE_P(data_type, T_CLASS) || RB_TYPE_P(data_type, T_MODULE) ) {
       rb_raise(rb_eArgError,
                "promote_list: data_type must be a primitive Symbol "
-               "(Class targets are not supported; use auto-detect or "
-               "strip Face manually)");
-    }
-  }
-
-  /* Classify each element: Face / primitive CArray.  Detect Face-class
-     homogeneity as we go. */
-  for ( i = 0; i < n; i++ ) {
-    VALUE elem = rb_ary_entry(list, i);
-    CArray *ca;
-    rb_check_carray_object(elem);
-    TypedData_Get_Struct(elem, CArray, &carray_data_type, ca);
-    if ( ca_is_face(ca) ) {
-      any_face = 1;
-      all_primitive = 0;
-      if ( NIL_P(face_class) ) {
-        face_class = rb_obj_class(elem);
-        ref_face   = ca;
-      } else if ( rb_obj_class(elem) != face_class ) {
-        all_face = 0;   /* will be caught after the loop */
-      } else if ( all_face ) {
-        if ( ! ca_face_state_compatible(rb_ary_entry(list, 0), ref_face,
-                                        elem, ca) ) {
-          rb_raise(rb_eArgError,
-                   "promote_list: Face state mismatch across elements "
-                   "(= %s instance at index %ld differs from index 0)",
-                   rb_class2name(face_class), i);
-        }
-      }
-    } else {
-      all_face = 0;
+               "(Class targets are not supported; leave data_type out to "
+               "keep a Face)");
     }
   }
 
   /* Explicit data_type path: primitive Symbol, all elements must be
      primitive.  Reject if any Face in list. */
   if ( ! NIL_P(data_type) ) {
-    if ( any_face ) {
-      rb_raise(rb_eArgError,
-               "promote_list: data_type %s cannot be applied to a list "
-               "containing Face elements (= Face cannot be coerced to "
-               "a primitive without losing identity)",
-               RSTRING_PTR(rb_inspect(data_type)));
+    for ( i = 0; i < n; i++ ) {
+      VALUE elem = rb_ary_entry(list, i);
+      CArray *ca;
+      rb_check_carray_object(elem);
+      TypedData_Get_Struct(elem, CArray, &carray_data_type, ca);
+      if ( ca_is_face(ca) ) {
+        rb_raise(rb_eArgError,
+                 "promote_list: data_type %s cannot be applied to a list "
+                 "containing Face elements (= Face cannot be coerced to "
+                 "a primitive without losing identity)",
+                 RSTRING_PTR(rb_inspect(data_type)));
+      }
     }
     {
       VALUE out = rb_ary_new_capa(n);
@@ -1825,41 +2696,24 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     }
   }
 
-  /* Auto-detect path. */
-  if ( any_face && ! all_face ) {
-    if ( all_primitive == 0 && any_face ) {
-      /* Mixed: at least one Face and at least one non-Face,
-         OR mixed Face classes.  Both are rejected. */
-      rb_raise(rb_eArgError,
-               "promote_list: cannot mix Face and non-Face (or heterogeneous "
-               "Face classes); pass a homogeneous Face list, or strip Face "
-               "manually with .parent for the storage-level layout");
-    }
-  }
-
-  if ( all_face ) {
-    /* Homogeneous Face: validate portability, then pass through. */
-    if ( n > 1 && ! ca_face_state_portable(ref_face->obj_type, face_class) ) {
-      rb_raise(rb_eArgError,
-               "promote_list: %s state is not portable across multiple "
-               "elements (= per-parent storage like CAConstString's buffer); "
-               "strip Face manually with .parent for a storage-level list",
-               rb_class2name(face_class));
-    }
-    /* Return a fresh Array so callers can mutate without aliasing. */
-    {
-      VALUE out = rb_ary_new_capa(n);
-      for ( i = 0; i < n; i++ ) rb_ary_push(out, rb_ary_entry(list, i));
-      return out;
-    }
+  /* Auto-detect path.  A list of one Face class passes through (the
+     multi-parent constructor lifts it). */
+  if ( ! NIL_P(ca_face_list_class(list, "promote_list")) ) {
+    VALUE out = rb_ary_new_capa(n);
+    for ( i = 0; i < n; i++ ) rb_ary_push(out, rb_ary_entry(list, i));
+    return out;
   }
 
   /* All primitive: result_type to determine common data_type, then
      wrap_readonly each element. */
+  /* The arrays are joined value for value, so a list mixing signed and
+     unsigned integers takes a type that holds both (uint8 with int8 is
+     int16, not uint8, where -1 would read as 255): the rule equality
+     matches such a pair by. */
   common = ca_arg_to_data_type(rb_ary_entry(list, 0));
   for ( i = 1; i < n; i++ ) {
     int8_t next = ca_arg_to_data_type(rb_ary_entry(list, i));
-    common = ca_promote_type(common, next);
+    common = ca_value_match_type(ca_promote_type(common, next), common, next);
   }
   {
     VALUE common_sym = rb_ca_data_type_to_sym(common);
@@ -1888,7 +2742,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
      Excludes T_STRING which has its own legacy interpretation. */
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
-    *other = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, *other);
+    *other = ca_operand_from_memory_view(*other);
   }
 
   if ( ! rb_obj_is_carray(*other) ) {
@@ -1933,10 +2787,10 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
-           ca_type_name[ca->data_type],
-           ca_type_name[cb->data_type]);
+           ca_coerce_operand_name(*self, ca),
+           ca_coerce_operand_name(*other, cb));
 }
 
 /* CArray#cast_with(other) -- coerce self and other to a common
@@ -1951,7 +2805,7 @@ rb_ca_cast_with (VALUE self, VALUE other)
     rb_ca_cast_self_or_other(&self, &other);
   }
   else {
-    rb_raise(rb_eRuntimeError, "first argument should be a carray");
+    rb_raise(rb_eTypeError, "first argument should be a carray");
   }
   return rb_assoc_new(self, other);
 }
@@ -2000,7 +2854,7 @@ rb_ca_clip_uint64 (VALUE self)
     volatile VALUE vout = rb_carray_new(CA_UINT64, ca->ndim, ca->dim, 0, NULL);
     CArray *out;
     GetCArray(vout, out);
-    ca_attach(src);
+    ca_attach(src);   /* window: nothing raises inside */
     double  *sp = (double  *) src->ptr;
     uint64_t *op = (uint64_t *) out->ptr;
     ca_size_t n = ca->elements;
@@ -2028,16 +2882,19 @@ rb_ca_clip_uint64 (VALUE self)
    Polymorphic cast (NOT a fresh allocator): `data` is coerced into a CArray
    of the target data_type, dispatching on its Ruby class:
 
-     Array   -> shape-guessed CArray, element-wise store         (C fast path)
-     CArray  -> copy if same data_type, else #to_type            (C fast path)
-     nil     -> empty CArray                                     (C fast path)
-     Range / String / Numeric / #to_ca responder                (Ruby fallback)
+     Array    -> shape-guessed CArray, element-wise store
+     CArray   -> copy if same data_type, else #to_type
+     nil      -> empty CArray
+     Range    -> arange; a second argument, if given, is the step
+     Numeric  -> CScalar, or #to_ca when the object answers it
+     String   -> the whitespace / `,` / `;` / `_`->UNDEF parser, which reads
+                 far more naturally in Ruby and so is the one branch that
+                 calls back out to it (CArray.__cast_string__ in
+                 carray/basics.rb, eager-loaded).  It receives the data_type
+                 as a Symbol.
 
-   The cold / Ruby-natural branches (arange arithmetic, the whitespace/`,`/`;`
-   string parser, generic coercion) stay in Ruby as `CArray.__cast_rest__`
-   (carray/basics.rb, eager-loaded).  `type` is passed to the fallback as the
-   data_type Symbol so the Ruby side keeps its original `type == CA_OBJECT`
-   style comparisons.
+   A second argument is meaningful only for Range, and a third never is;
+   anything else is refused.
    ------------------------------------------------------------------------ */
 
 static ID id_new_cast = 0, id_guess_array_shape_cast = 0, id_cast_string = 0,
@@ -2063,6 +2920,21 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
   VALUE v = ( argc >= 1 ) ? argv[0] : Qnil;
   VALUE sym = ID2SYM(ca_data_type_sym[data_type]);
 
+  /* Only the Range branch below reads a second argument (the step), and
+     nothing reads a third.  The arity is -1 for the step's sake, so the count
+     is checked here; without it `CA_INT32(0, 2)`, which looks like the shape
+     spelling `CArray.int32(3, 3)`, casts the 0 and drops the 2. */
+  if ( argc > 2 ) {
+    rb_raise(rb_eArgError,
+             "wrong number of arguments (given %d, expected 0..2)", argc);
+  }
+  if ( argc == 2 && ! RTEST(rb_obj_is_kind_of(v, rb_cRange)) ) {
+    rb_raise(rb_eArgError,
+             "a step (the second argument) is only accepted "
+             "when the first argument is a Range (got %s)",
+             rb_obj_classname(v));
+  }
+
   if ( TYPE(v) == T_ARRAY ) {
     volatile VALUE shape, obj;
     shape = rb_funcall(rb_cCArray, id_guess_array_shape_cast, 1, v);
@@ -2083,8 +2955,9 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     return rb_carray_new(data_type, 1, &dim0, 0, NULL);
   }
   else if ( RTEST(rb_obj_is_kind_of(v, rb_cRange)) ) {
-    /* arange: n = ((end - begin).abs / step).floor (+1 unless exclude_end),
-       then seq(begin, sign * step.abs). */
+    /* arange: n = ((end - begin).abs / step).floor + 1, or for an excluded
+       end ((end - begin).abs.quo(step)).ceil -- the steps that start before
+       the end -- then seq(begin, sign * step.abs). */
     volatile VALUE vbeg, vend, step, n;
     int sign;
     ca_size_t dn;
@@ -2094,7 +2967,7 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     vend = rb_funcall(v, id_end_cast, 0);
     step = ( argc >= 2 ) ? argv[1] : Qnil;
     if ( RTEST(step) && RTEST(rb_funcall(step, id_op_eq, 1, INT2FIX(0))) ) {
-      rb_raise(rb_eRuntimeError, "step should not be 0");
+      rb_raise(rb_eArgError, "step should not be 0");
     }
     if ( data_type == CA_OBJECT && !RTEST(step) ) {
       VALUE va = rb_funcall(v, id_to_a_cast, 0);   /* CA_OBJECT(v.to_a) */
@@ -2103,9 +2976,13 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
     if ( !RTEST(step) ) step = INT2FIX(1);
     n = rb_funcall(vend, id_op_minus, 1, vbeg);
     n = rb_funcall(n, id_abs_cast, 0);
-    n = rb_funcall(n, id_op_div, 1, step);
-    n = rb_funcall(n, id_floor_cast, 0);
-    if ( !RTEST(rb_funcall(v, id_exclude_end_p_cast, 0)) ) {
+    if ( RTEST(rb_funcall(v, id_exclude_end_p_cast, 0)) ) {
+      n = rb_funcall(n, rb_intern("quo"), 1, rb_funcall(step, id_abs_cast, 0));
+      n = rb_funcall(n, rb_intern("ceil"), 0);
+    }
+    else {
+      n = rb_funcall(n, id_op_div, 1, step);
+      n = rb_funcall(n, id_floor_cast, 0);
       n = rb_funcall(n, id_op_plus, 1, INT2FIX(1));
     }
     sign = RTEST(rb_funcall(vbeg, id_op_le, 1, vend)) ? 1 : -1;
@@ -2206,7 +3083,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
         ca_size_t l = NUM2SIZE(rb_funcall(rb_ary_entry(v, i), id_length_cast, 0));
         if ( l > maxlen ) maxlen = l;
       }
-      bytes = maxlen;
+      bytes = ( maxlen > 0 ) ? maxlen : 1;   /* all empty: one NUL byte */
     } else {
       bytes = NUM2SIZE(bytes_v);
     }
@@ -2219,7 +3096,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
   }
   else if ( NIL_P(v) ) {
     ca_size_t dim0 = 0;
-    ca_size_t bytes = NIL_P(bytes_v) ? 0 : NUM2SIZE(bytes_v);
+    ca_size_t bytes = NIL_P(bytes_v) ? 1 : NUM2SIZE(bytes_v);
     return rb_carray_new(CA_FIXLEN, 1, &dim0, bytes, NULL);
   }
   else {
@@ -2231,16 +3108,372 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
                ? ca : ca_cast_to_fixlen(ca, fixlen_sym, bytes_v);
     }
     {
-      ca_size_t bytes = NIL_P(bytes_v) ? 0 : NUM2SIZE(bytes_v);
+      /* No bytes: given: a String is as wide as it is (one NUL byte when
+         empty).  Anything else has no width to infer, and the fixlen
+         check reports it. */
+      ca_size_t bytes = 0;
+      if ( ! NIL_P(bytes_v) ) {
+        bytes = NUM2SIZE(bytes_v);
+      }
+      else if ( RB_TYPE_P(v, T_STRING) ) {
+        bytes = ( RSTRING_LEN(v) > 0 ) ? RSTRING_LEN(v) : 1;
+      }
       return rb_cscalar_new_with_value(CA_FIXLEN, bytes, v);
     }
   }
+}
+
+static VALUE
+rb_ca_read_text_as_number (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE src = self, out, vmask;
+  VALUE rtype, report;
+  CArray *ca, *co, *cmask;
+  int8_t data_type;
+  int is_float;
+  VALUE *cells;
+  boolean8_t *m_in, *m_out;
+  ca_size_t i;
+
+  rb_scan_args(argc, argv, "11", &rtype, &report);
+  if ( ! NIL_P(report) ) {
+    Check_Type(report, T_ARRAY);
+  }
+
+  data_type = rb_ca_guess_type(rtype);
+  switch ( data_type ) {
+  case CA_INT8: case CA_INT16: case CA_INT32: case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+    is_float = 0;
+    break;
+  case CA_FLOAT32: case CA_FLOAT64:
+    is_float = 1;
+    break;
+  default:
+    return Qnil;               /* not a number type: the caller casts */
+  }
+
+  TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eArgError, "decimal reading needs an object array");
+  }
+  if ( ! ca_is_entity(ca) ) {
+    src = rb_ca_copy(src);
+    TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  }
+
+  out = rb_carray_new(data_type, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  vmask = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
+
+  cells = (VALUE *) ca->ptr;
+  m_in  = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
+  TypedData_Get_Struct(vmask, CArray, &carray_data_type, cmask);
+  m_out = (boolean8_t *) cmask->ptr;
+
+  for (i = 0; i < ca->elements; i++) {
+    VALUE v = cells[i];
+    char *cell = co->ptr + i * co->bytes;
+    int ok = 0;
+    int missing = ( m_in && m_in[i] ) || NIL_P(v);
+    if ( missing ) {
+      ok = 0;
+    }
+    else if ( RB_TYPE_P(v, T_STRING) ) {
+      int rc = ca_decimal_string_read(v, data_type, cell);
+      missing = ( rc == CA_DECIMAL_BLANK );
+      ok = ( rc == CA_DECIMAL_OK );
+    }
+    else if ( is_float ) {
+      if ( RB_FLOAT_TYPE_P(v) || RB_INTEGER_TYPE_P(v) || ca_decimal_other_real(v) ) {
+        double d = NUM2DBL(v);
+        if ( data_type == CA_FLOAT32 ) {
+          *(float32_t *) cell = (float32_t) d;
+        }
+        else {
+          *(float64_t *) cell = d;
+        }
+        ok = 1;
+      }
+    }
+    else {
+      int negative = 0;
+      uint64_t magnitude = 0;
+      ok = ca_decimal_object_integer(v, &negative, &magnitude)
+           && ca_decimal_fits(data_type, negative, magnitude);
+      if ( ok ) {
+        ca_decimal_store_integer(data_type, cell, 0, negative, magnitude);
+      }
+    }
+    m_out[i] = ok ? 0 : 1;
+    if ( ! ok ) {
+      memset(co->ptr + i * co->bytes, 0, co->bytes);
+      if ( ! missing && ! NIL_P(report) ) {
+        rb_ary_push(report, SIZET2NUM(i));
+      }
+    }
+  }
+
+  ca_mask_from_bytes(co, m_out);
+  rb_ca_inherit_attr(out, self);
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(vmask);
+  return out;
+}
+
+/* The number type a column of text reads as, for CAFrame#infer_types.
+
+   A cell is an integer when it is digits with an optional sign and fits
+   int64, and a float when it is any other decimal number (the grammar
+   above, nan / inf included).  A number with a leading zero ("007",
+   "007.5") is not a number here: it is a code, kept as text.  Neither is
+   an integer too long for int64 (an identifier), which a float would
+   round.  Blank, nil and masked cells are missing and say nothing.
+
+   Returns :int64 when every present cell is an integer, :float64 when
+   every present cell is a number and one is not an integer, and nil
+   otherwise -- including when no cell is present. */
+
+enum {
+  CA_INFER_MISSING,
+  CA_INFER_INTEGER,
+  CA_INFER_FLOAT,
+  CA_INFER_TEXT
+};
+
+static int
+ca_infer_decimal_kind_of_bytes (const char *s, long n)
+{
+  long i = 0, k;
+  int digits_only = 1;
+  ca_decimal_trim(&s, &n);
+  if ( n == 0 ) {
+    return CA_INFER_MISSING;
+  }
+  if ( ! ca_decimal_float(s, n, NULL) ) {
+    return CA_INFER_TEXT;
+  }
+  if ( s[i] == '+' || s[i] == '-' ) {
+    i++;
+  }
+  if ( i + 1 < n && s[i] == '0' && s[i+1] >= '0' && s[i+1] <= '9' ) {
+    return CA_INFER_TEXT;                    /* a leading zero */
+  }
+  if ( i == n ) {
+    return CA_INFER_TEXT;
+  }
+  for (k = i; k < n; k++) {
+    if ( s[k] < '0' || s[k] > '9' ) {
+      digits_only = 0;
+      break;
+    }
+  }
+  if ( digits_only ) {
+    int negative;
+    uint64_t magnitude;
+    if ( ca_decimal_integer(s, n, &negative, &magnitude) == CA_DECIMAL_OK
+         && ca_decimal_fits(CA_INT64, negative, magnitude) ) {
+      return CA_INFER_INTEGER;
+    }
+    return CA_INFER_TEXT;                    /* too long for int64 */
+  }
+  return CA_INFER_FLOAT;
+}
+
+static VALUE
+rb_ca_infer_number_type_of_text (VALUE self)
+{
+  volatile VALUE src = self;
+  CArray *ca;
+  VALUE *cells;
+  boolean8_t *m;
+  ca_size_t i;
+  int present = 0, any_float = 0;
+
+  TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eArgError, "type inference needs an object array");
+  }
+  if ( ! ca_is_entity(ca) ) {
+    src = rb_ca_copy(src);
+    TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
+  }
+  cells = (VALUE *) ca->ptr;
+  m = ca_has_mask(ca) ? (boolean8_t *) ca->mask->ptr : NULL;
+
+  for (i = 0; i < ca->elements; i++) {
+    VALUE v = cells[i];
+    int kind;
+    if ( ( m && m[i] ) || NIL_P(v) ) {
+      continue;
+    }
+    if ( RB_TYPE_P(v, T_STRING) ) {
+      kind = ca_infer_decimal_kind_of_bytes(RSTRING_PTR(v), RSTRING_LEN(v));
+    }
+    else if ( RB_FLOAT_TYPE_P(v) ) {
+      kind = CA_INFER_FLOAT;
+    }
+    else if ( RB_INTEGER_TYPE_P(v) ) {
+      int negative;
+      uint64_t magnitude;
+      kind = ( ca_decimal_object_integer(v, &negative, &magnitude)
+               && ca_decimal_fits(CA_INT64, negative, magnitude) )
+             ? CA_INFER_INTEGER : CA_INFER_TEXT;
+    }
+    else {
+      kind = CA_INFER_TEXT;
+    }
+    if ( kind == CA_INFER_TEXT ) {
+      RB_GC_GUARD(src);
+      return Qnil;
+    }
+    if ( kind != CA_INFER_MISSING ) {
+      present = 1;
+      any_float |= ( kind == CA_INFER_FLOAT );
+    }
+  }
+  RB_GC_GUARD(src);
+  if ( ! present ) {
+    return Qnil;
+  }
+  return ID2SYM(rb_intern(any_float ? "float64" : "int64"));
+}
+
+/* The same two readers over a CAConstString, from its buffer and its
+   (start, end) byte ranges, without a String per cell.  CAConstString's
+   __infer_number_type_of_text__ / __read_text_as_number__ call them, so
+   CAFrame#infer_types and #cast read a text column from a file this way. */
+
+/* The buffer of a CAConstString and an entity of its (start, end) byte
+   ranges, masked where a cell is missing. */
+static VALUE
+ca_const_string_buffer_and_ranges (VALUE cs, VALUE *buffer, CArray **ranges)
+{
+  volatile VALUE vranges;
+  VALUE klass = rb_const_get(rb_cObject, rb_intern("CAConstString"));
+  if ( ! RTEST(rb_obj_is_kind_of(cs, klass)) ) {
+    rb_raise(rb_eTypeError, "needs a CAConstString");
+  }
+  *buffer = rb_funcall(cs, rb_intern("buffer"), 0);
+  vranges = rb_ca_parent(cs);
+  TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
+  if ( ! ca_is_entity(*ranges) ) {
+    vranges = rb_ca_copy(vranges);
+    TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
+  }
+  return vranges;
+}
+
+static VALUE
+rb_ca_s_const_string_infer_number_type_of_text (VALUE klass, VALUE cs)
+{
+  volatile VALUE src;
+  VALUE buffer;
+  CArray *pe;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m;
+  ca_size_t i;
+  int present = 0, any_float = 0;
+
+  src = ca_const_string_buffer_and_ranges(cs, &buffer, &pe);
+  buf  = RSTRING_PTR(buffer);
+  pair = (const int64_t *) pe->ptr;
+  m = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+  for (i = 0; i < pe->elements; i++) {
+    int kind;
+    if ( m && m[i] ) {
+      continue;
+    }
+    kind = ca_infer_decimal_kind_of_bytes(buf + pair[2 * i], (long) ( pair[2 * i + 1] - pair[2 * i] ));
+    if ( kind == CA_INFER_TEXT ) {
+      RB_GC_GUARD(src);
+      return Qnil;
+    }
+    if ( kind != CA_INFER_MISSING ) {
+      present = 1;
+      any_float |= ( kind == CA_INFER_FLOAT );
+    }
+  }
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(buffer);
+  if ( ! present ) {
+    return Qnil;
+  }
+  return ID2SYM(rb_intern(any_float ? "float64" : "int64"));
+}
+
+static VALUE
+rb_ca_s_const_string_read_text_as_number (VALUE klass, VALUE cs, VALUE rtype, VALUE report)
+{
+  volatile VALUE src, out;
+  VALUE buffer;
+  CArray *pe, *co;
+  int8_t data_type;
+  const char *buf;
+  const int64_t *pair;
+  boolean8_t *m_in, *m_out = NULL;
+  ca_size_t i;
+
+  if ( ! NIL_P(report) ) {
+    Check_Type(report, T_ARRAY);
+  }
+  data_type = rb_ca_guess_type(rtype);
+  switch ( data_type ) {
+  case CA_INT8: case CA_INT16: case CA_INT32: case CA_INT64:
+  case CA_UINT8: case CA_UINT16: case CA_UINT32: case CA_UINT64:
+  case CA_FLOAT32: case CA_FLOAT64:
+    break;
+  default:
+    return Qnil;               /* not a number type: the caller casts */
+  }
+  src = ca_const_string_buffer_and_ranges(cs, &buffer, &pe);
+  out = rb_carray_new(data_type, pe->ndim, pe->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  buf  = RSTRING_PTR(buffer);
+  pair = (const int64_t *) pe->ptr;
+  m_in = ca_has_mask(pe) ? (boolean8_t *) pe->mask->ptr : NULL;
+
+  for (i = 0; i < pe->elements; i++) {
+    char *cell = co->ptr + i * co->bytes;
+    int rc = CA_DECIMAL_BLANK;
+    if ( ! ( m_in && m_in[i] ) ) {
+      rc = ca_decimal_read_bytes_as(buf + pair[2 * i],
+                                 (long) ( pair[2 * i + 1] - pair[2 * i] ),
+                                 data_type, cell);
+    }
+    if ( rc != CA_DECIMAL_OK ) {
+      if ( m_out == NULL ) {
+        ca_create_mask(co);
+        m_out = (boolean8_t *) co->mask->ptr;
+      }
+      m_out[i] = 1;
+      memset(cell, 0, co->bytes);
+      if ( rc != CA_DECIMAL_BLANK && ! NIL_P(report) ) {
+        rb_ary_push(report, SIZET2NUM(i));
+      }
+    }
+  }
+  RB_GC_GUARD(src);
+  RB_GC_GUARD(buffer);
+  return out;
 }
 
 void
 Init_carray_cast (void)
 {
   /* CArray data_type conversion */
+
+  /* Internal: CAFrame#infer_types asks the number type of a text column. */
+  rb_define_method(rb_cCArray, "__infer_number_type_of_text__", rb_ca_infer_number_type_of_text, 0);
+
+  /* Internal: CAFrame#cast reads text cells with this grammar.  With an
+     Array as the second argument, the addresses of cells that hold
+     something but do not read (blank, nil and masked cells are missing,
+     not unreadable) are pushed onto it. */
+  rb_define_method(rb_cCArray, "__read_text_as_number__", rb_ca_read_text_as_number, -1);
+  rb_define_singleton_method(rb_cCArray, "__const_string_infer_number_type_of_text__", rb_ca_s_const_string_infer_number_type_of_text, 1);
+  rb_define_singleton_method(rb_cCArray, "__const_string_read_text_as_number__", rb_ca_s_const_string_read_text_as_number, 3);
 
   rb_define_method(rb_cCArray, "to_type", rb_ca_to_type_internal, -1);
 
@@ -2306,6 +3539,8 @@ Init_carray_cast (void)
            "cast_self_or_other", rb_ca_s_cast_self_or_other, 2);
   rb_define_singleton_method(rb_cCArray,
            "result_type", rb_ca_s_result_type, -1);
+  rb_define_private_method(rb_cCArray,
+           "value_match_type", rb_ca_value_match_type, 2);
 
   rb_define_singleton_method(rb_cCArray,
            "promote_list", rb_ca_s_promote_list, -1);

@@ -6,6 +6,8 @@
 # +project+ (length-preserving, miss -> UNDEF, Face-lift, read-only safe).
 # The frame layer just distributes that address to every column.
 
+require "carray/methods/is_in"   # promote_value_set, for align's Array reference
+
 class CAFrame
   # Default disambiguation for non-key columns present on both sides (§12-C):
   # left gets "_left", right gets "_right". +_left+/+_right+ read clearer than
@@ -13,13 +15,21 @@ class CAFrame
   DEFAULT_JOIN_SUFFIXES = ["_left", "_right"].freeze
   private_constant :DEFAULT_JOIN_SUFFIXES
 
-  # Join +other+ on a shared key column.
+  # Join +other+ on a shared key column, as SQL joins: each pair of a left
+  # row and a right row with the same key gives one row, so a key on k left
+  # rows and m right rows gives k * m rows.  A masked key matches nothing.
   #
-  #   how: :left  (default) — keep all left rows; right columns gathered per
-  #                           left row (locate_addr), misses become UNDEF.
-  #   how: :inner/:outer/:right — set-align both key sets (align_addr) and
-  #                           gather both sides; the aligned key values form
-  #                           the +on+ column.
+  #   how: :left  (default) — every pair, and each left row with no match
+  #                           once, its right columns UNDEF.
+  #   how: :inner — every pair.
+  #   how: :right — every pair, and each right row with no match once.
+  #   how: :outer — every pair, each unmatched left row, then each unmatched
+  #                 right row.
+  #
+  # Rows come in left-row order (right-row order for :right), the pairs of
+  # one row in the other side's order.  The left columns are views of this
+  # frame's, picked by row, wherever every row comes from the left (:left,
+  # :inner); the right columns are gathered into new arrays.
   #
   # A non-key column present on both sides collides. The key column (+on+) is
   # kept once, never suffixed. By default the collision is resolved by suffixing
@@ -28,18 +38,14 @@ class CAFrame
   # raise instead. Rename afterward with +rename+ if needed (§12-C).
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = on.to_s
-    lkey = self[on]
-    rkey = other[on]
+    lkey = join_key(self[on], on, "join")
+    rkey = join_key(other[on], on, "join")
     plan = join_name_plan(other, on, suffixes)
 
-    case how
-    when :left
-      join_left(other, on, lkey, rkey, plan)
-    when :inner, :outer, :right
-      join_align(other, on, lkey, rkey, how, plan)
-    else
+    unless %i[left inner outer right].include?(how)
       raise ArgumentError, "unknown join mode #{how.inspect}"
     end
+    join_pairs(other, on, lkey, rkey, how, plan)
   end
 
   # As-of (nearest-key) left join for irregular series (memo §11.7). Each
@@ -47,16 +53,20 @@ class CAFrame
   # locate_nearest_addr (the per-row, row-preserving counterpart of
   # align_nearest_addr); +direction:+ follows CArray (:floor = most recent
   # at-or-before, :ceil = next, :round = nearest), and rows with no match
-  # in range or beyond +tolerance:+ come back UNDEF. Same wiring as the left
-  # join, only the address primitive differs.
+  # in that direction or beyond +tolerance:+ come back UNDEF. +tolerance:+
+  # is a number for a numeric key and a duration for a time key
+  # ("10 minutes", or a CATimedelta value). Same wiring as the left join,
+  # only the address primitive differs.
   def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = on.to_s
     plan = join_name_plan(other, on, suffixes)
-    addr = self[on].locate_nearest_addr(other[on], direction: direction, tolerance: tolerance)
+    lkey = join_key(self[on], on, "join_asof")
+    rkey = join_key(other[on], on, "join_asof")
+    addr = lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
     join_by_addr(other, on, addr, plan)
   end
 
-  # Conform every variable to an externally supplied reference key set (the
+  # Conform every column to an externally supplied reference key set (the
   # asymmetric sibling of +join+; pandas +reindex+). Given a +reference+ array
   # of key values, each column is gathered onto it by exact key match
   # (+locate_addr+): the aligned key column (or index) becomes the reference
@@ -71,16 +81,25 @@ class CAFrame
   #   df.align("time", reftime)   # reftime = a CArray of reference key values
   #
   # +key+ may be a column name or the index axis name. +reference+ is a CArray
-  # (or Array); its keys are matched against the source key by value, so their
-  # data types must be comparable (a DateTime object key matches by eql?/hash).
+  # or an Array; its keys are matched against the source key by value.  An
+  # Array is read as values of the key's kind, as +is_in+ reads one: numbers
+  # against a numeric key, Time / Date / String instants against a time key.
   def align(key, reference)
     key = key.to_s
-    ref = reference.is_a?(CArray) ? reference : reference.to_ca
     on_index = !@columns.key?(key) && @axis_name == key && @index
-    addr = ref.locate_addr(on_index ? @index : self[key])
+    keys = on_index ? @index : join_key(self[key], key, "align")
+    # An Array reference is read as values of the key's kind, as is_in reads
+    # one: 1 and 2.5 against a float key are numbers, and Time or String
+    # values against a time key are instants.
+    ref = reference.is_a?(CArray) ? reference : keys.send(:promote_value_set, reference)[1]
+    unless ref.ndim == 1
+      raise ArgumentError,
+            "align: the reference has shape #{ref.shape.inspect}; give one key value per row of the result"
+    end
+    addr = ref.locate_addr(keys)
 
     cols = {}
-    variable_names.each { |name| cols[name] = project_rows(self[name], addr) }
+    column_names.each { |name| cols[name] = project_rows(self[name], addr) }
     if on_index
       CAFrame.new(cols, axis_name: key, index: ref)
     else
@@ -90,7 +109,7 @@ class CAFrame
     end
   end
 
-  # Paste +other+'s variables beside this frame's, matched by **row position**
+  # Paste +other+'s columns beside this frame's, matched by **row position**
   # (memo §12-C) — a keyless column merge (the column-direction counterpart of
   # the row-stacking +concat+, and the positional counterpart of the key-aligned
   # +join+; named after the UNIX +paste+). Both frames must have the same
@@ -137,7 +156,7 @@ class CAFrame
 
     # Detect columns that appear in 2+ frames (collisions across the K inputs).
     name_count = Hash.new(0)
-    frames.each { |f| f.variable_names.each { |name| name_count[name] += 1 } }
+    frames.each { |f| f.column_names.each { |name| name_count[name] += 1 } }
     collisions = name_count.select { |_, n| n > 1 }.keys
 
     if collisions.any?
@@ -160,7 +179,7 @@ class CAFrame
 
     cols = {}
     frames.each_with_index do |f, i|
-      f.variable_names.each do |name|
+      f.column_names.each do |name|
         key = collisions.include?(name) ? "#{name}#{suffixes[i]}" : name
         if cols.key?(key)
           raise ArgumentError,
@@ -173,8 +192,17 @@ class CAFrame
     new(cols, axis_name: first.axis_name, index: first.index)
   end
 
+  # The key column of a join, checked to give each row one value. An N-D key
+  # would be matched cell by cell rather than row by row.
+  private def join_key(col, on, verb)
+    return col if col.ndim == 1
+    raise ArgumentError,
+          "#{verb}: the key #{on.inspect} has shape #{col.shape.inspect}, not one value per row; " \
+          "#{verb} on one of its components (e.g. df[name][nil, 0])"
+  end
+
   private def join_name_plan(other, on, suffixes)
-    collisions = (variable_names & other.variable_names) - [on]
+    collisions = (column_names & other.column_names) - [on]
     return { collisions: [], lsuf: nil, rsuf: nil } if collisions.empty?
 
     if suffixes == false
@@ -202,39 +230,99 @@ class CAFrame
     cols[name] = col
   end
 
-  private def join_left(other, on, lkey, rkey, plan)
-    join_by_addr(other, on, lkey.locate_addr(rkey), plan)
-  end
-
   private def join_by_addr(other, on, addr, plan)
     cols = {}
-    variable_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
-    other.variable_names.each do |name|
+    column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
+    other.column_names.each do |name|
       next if name == on
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))
     end
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end
 
-  private def join_align(other, on, lkey, rkey, how, plan)
-    common, a_idx, b_idx = CArray.align_addr(lkey, rkey, join: how)
-    cols = {}
-    variable_names.each do |name|
-      if name == on
-        put_join_column(cols, on, common)
-      else
-        put_join_column(cols, join_name(name, plan[:lsuf], plan), project_rows(self[name], a_idx))
+  # The rows of a key join: li / ri are the left / right row of each result
+  # row, UNDEF on the side a row has no match on.
+  private def join_pairs(other, on, lkey, rkey, how, plan)
+    # Both keys get a code in one set of distinct values, compared as the
+    # lookups compare them (type, unit and width reconciled); a masked key
+    # gets none and matches nothing.
+    common = CArray.align_addr(lkey, rkey, join: :outer)[0]
+    lcode  = lkey.locate_addr(common)
+    rcode  = rkey.locate_addr(common)
+    if how == :right
+      ri, li = join_expand(rcode, lcode, common.elements, true)
+    else
+      li, ri = join_expand(lcode, rcode, common.elements, how != :inner)
+      if how == :outer
+        lcount = lcode.bincount(length: common.elements)
+        alone  = rcode.is_masked | lcount.project(rcode).strip_mask(0).eq(0)
+        alone  = alone.strip_mask(true)
+        extra  = CArray.int64(rcode.elements).seq[alone]
+        if extra.elements > 0
+          undef_rows = CArray.int64(extra.elements).fill(UNDEF)
+          li = CArray.concatenate([li, undef_rows])
+          ri = CArray.concatenate([ri, extra])
+          code = CArray.concatenate([lcode.project(li[0...(li.elements - extra.elements)]),
+                                     rcode.project(extra)])
+        end
       end
     end
-    other.variable_names.each do |name|
-      next if name == on
-      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], b_idx))
+    every_left = how == :left || how == :inner
+    identity   = every_left && li.elements == nrow &&
+                 (nrow == 0 || li.eq(CArray.int64(nrow).seq).all)
+    cols = {}
+    column_names.each do |name|
+      col = if identity          then self[name]
+            elsif every_left     then self[name][li, *([nil] * (self[name].ndim - 1))]
+            elsif name == on     then nil
+            else                      project_rows(self[name], li)
+            end
+      if name == on && col.nil?
+        col = how == :right ? project_rows(rkey, ri) :
+                              common.project(code || lcode.project(li))
+      end
+      name = join_name(name, plan[:lsuf], plan) unless name == on
+      put_join_column(cols, name, col)
     end
-    # Carry the left index the same way its columns are gathered (by a_idx),
-    # so it stays consistent with the left join; rows with no left match
-    # (outer/right) become UNDEF.
-    new_index = @index && project_rows(@index, a_idx)
+    other.column_names.each do |name|
+      next if name == on
+      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
+    end
+    new_index = if @index.nil?  then nil
+                elsif identity  then @index
+                elsif every_left then @index[li]
+                else                  project_rows(@index, li)
+                end
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+  end
+
+  # Pairs a side's rows (codes +acode+) with the other side's (+bcode+), in
+  # a-row order and, for one a-row, in b-row order.  An a-row with no match
+  # comes once with no b-row when +keep_alone+.  Returns [ai, bi].
+  private def join_expand(acode, bcode, k, keep_alone)
+    na, nb = acode.elements, bcode.elements
+    # b's rows by code, each code's rows in b-row order.
+    border = CArray.sort_addr(bcode, CArray.int64(nb).seq)
+    bcount = bcode.bincount(length: k).int64
+    bstart = bcount.cumsum.int64 - bcount
+    matches = bcount.project(acode).strip_mask(0)
+    reps = keep_alone ? matches.pmax(1) : matches
+    total = reps.sum.to_i
+    return [CArray.int64(0), CArray.int64(0)] if total == 0
+    # Each a-row repeated reps times: mark where each run starts and count.
+    rows  = CArray.int64(na).seq[reps.gt(0)]
+    first = (reps.cumsum.int64 - reps)[reps.gt(0)]
+    mark  = CArray.int64(total).fill(0)
+    mark[first] = 1
+    run   = mark.cumsum.int64 - 1
+    ai    = rows[run]
+    j     = CArray.int64(total).seq - first[run]
+    bi    = CArray.int64(total).fill(UNDEF)
+    hit   = matches.project(ai).gt(0)
+    if hit.any
+      bi[hit] = border.project(bstart.project(acode.project(ai[hit])) + j[hit])
+    end
+    [ai, bi]
   end
 
   private def project_rows(col, addr)

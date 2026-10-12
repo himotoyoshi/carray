@@ -49,7 +49,8 @@ rb_ca_hold_forward (VALUE self, int axis)
   if ( rc != CA_ITER_OK ) {
     rb_raise(rb_eRuntimeError, "__hold__: input init failed rc=%d", rc);
   }
-  rc = ca_iter_state_init_l2(&st_out, co, CA_SLAB_AXES, slab_axes, 1,
+  rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
+                                    slab_axes, 1,
                              CA_KERNEL_WRITE);
   if ( rc != CA_ITER_OK ) {
     ca_iter_state_finish(&st_in);

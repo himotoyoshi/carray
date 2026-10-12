@@ -227,9 +227,9 @@ class TestTimeReductionGrid < Test::Unit::TestCase
 
   def test_sum_and_variance_still_refuse_for_catime
     t = days
-    assert_raise(TypeError) { t.sum }
-    assert_raise(TypeError) { t.variance }
-    assert_raise(TypeError) { t.variancep }        # was a raw kernel error
+    assert_raise(CArray::DataTypeError) { t.sum }
+    assert_raise(CArray::DataTypeError) { t.variance }
+    assert_raise(CArray::DataTypeError) { t.variancep }        # was a raw kernel error
   end
 
   def test_timedelta_variance_refuses_like_time_does
@@ -239,8 +239,8 @@ class TestTimeReductionGrid < Test::Unit::TestCase
     # back a bare number whose unit is squared and unrecorded.  The spread as
     # a duration is #stddev.
     td = durations
-    assert_raise(TypeError) { td.variance }
-    assert_raise(TypeError) { td.variancep }
+    assert_raise(CArray::DataTypeError) { td.variance }
+    assert_raise(CArray::DataTypeError) { td.variancep }
     assert_kind_of CATimedelta::Element, td.stddev
   end
 

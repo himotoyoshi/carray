@@ -72,9 +72,13 @@ FROZEN_MACROS = %w[
 # kernels that need explicit error handling — see doc §6.3).
 FROZEN_FUNCS = %w[
   ca_iter_state_init_l2
+  ca_iter_state_init_l2_paired
   ca_iter_state_next_slab_axes
   ca_iter_state_sync_slab
   ca_iter_state_finish
+  ca_iter_state_close
+  ca_iter_check_init
+  ca_iter_check_same_shape
 ]
 
 # Enum / status tokens authors write literally at a macro call site or in

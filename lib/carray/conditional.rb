@@ -6,7 +6,7 @@
 #  same "pick a value per cell based on a boolean condition" contract but
 #  differ in where the condition lives and how the branches are supplied:
 #
-#      cond.then_else(x, y)                  # boolean receiver, 2 values (eager)
+#      cond.then_else(x, y)                  # boolean receiver, 2 values (lazy if an operand is)
 #      self.replace_where(cond, b)           # value receiver, 1 replacement (eager)
 #      self.conditional(cond, f_then, f_else) # value receiver, 2 callables (per-region)
 #
@@ -25,10 +25,20 @@ class CArray
   #   reading as "if `self` then `x` else `y`". The boolean 2-way
   #   case of {#choose} that additionally propagates `self`'s mask
   #   (`UNDEF` in `self` produces `UNDEF` in the result).
+  #   The result's data type is the common type of the two branches; a
+  #   branch given as `UNDEF` masks its cells and leaves the type to the
+  #   other branch (`cond.then_else(a, UNDEF)` has `a`'s data type).
+  #   When `self` or a branch is a lazy view, the result is a lazy view
+  #   (read-only) that joins the expression around it; `copy` makes an
+  #   array of it.  An object result is always computed at once.
   #   @param x [CArray, Numeric, Object] true-branch value(s).
   #   @param y [CArray, Numeric, Object] false-branch value(s).
-  #   @return [CArray] new array with the same shape as `self`.
-  #   @raise [ArgumentError] when `self` is not a boolean CArray.
+  #   @return [CArray] new array with the same shape as `self`, or a
+  #     lazy view (CATriOp) when an operand is lazy.
+  #   @raise [ArgumentError] when `self` is not a boolean CArray, or when
+  #     an array branch's shape does not pair with `self`'s as an
+  #     operator's operands would (equal, or size-1 axes of the same ndim;
+  #     an object or fixlen result needs `self`'s shape exactly).
   def then_else (x, y)
     # Guard: self must be boolean.  Integer / float receiver would be
     # silently reinterpreted by the indexer setter (`result[self] = ...`)
@@ -38,10 +48,27 @@ class CArray
       raise ArgumentError,
             "then_else: receiver must be a boolean CArray (data_type == CA_BOOLEAN), got #{self.data_type}"
     end
-    # Promote data_type from both branches via CArray.result_type
-    # (a CScalar contributes its own data_type, so CA_INT32(0) keeps int32
-    # where a bare Ruby Integer would widen to int64).
-    dt = CArray.result_type(x, y)
+    reshaped = [x, y].any? { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
+    face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
+    if face
+      refuse_branch_shape(x, y) if reshaped
+      return face_then_else(x, y, face)
+    end
+    # Promote data_type from both branches via CArray.result_type, which
+    # lets a scalar branch take the type of an array branch as an operator
+    # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
+    # value, not a value of some type: a branch that is UNDEF leaves the
+    # type to the other.
+    typed = [x, y].reject { |v| v.equal?(UNDEF) }
+    dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
+    return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
+    # A branch shaped unlike the condition goes through the lazy select,
+    # which pairs the shapes by the operator rule (equal, or size-1 axes
+    # with the same ndim) and refuses the rest.
+    if reshaped
+      refuse_branch_shape(x, y) if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
+      return lazy_then_else(x, y, dt).copy
+    end
     # A CScalar (scalar? CArray) is treated as a scalar value, not as a
     # self-shaped operand: full CArray -> gather/copy, scalar -> broadcast.
     y_full = y.is_a?(CArray) && !y.scalar?
@@ -57,6 +84,66 @@ class CArray
     if self.has_mask?
       result[self.is_masked] = UNDEF
     end
+    result
+  end
+
+  # A lazy receiver or branch makes the selection a lazy node (CATriOp
+  # select), so it joins the expression around it rather than computing
+  # it here.  The branches carry the result type: a scalar branch becomes
+  # a CScalar of it, UNDEF a masked one.
+  private def lazy_then_else? (x, y, dt)
+    return false if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
+    [self, x, y].any? { |v| v.is_a?(CArray) && v.__lazy_view__? }
+  end
+
+  # The types the lazy select cannot carry keep the strict form: a full
+  # branch must have the condition's shape.
+  private def refuse_branch_shape (x, y)
+    bad = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
+    raise ArgumentError,
+          "then_else: branch shape #{bad.shape.inspect} does not match the condition's #{shape.inspect}"
+  end
+
+  private def lazy_then_else (x, y, dt)
+    branch = lambda do |v|
+      next v if v.is_a?(CArray) && !v.scalar?
+      cell = CScalar.new(dt)
+      cell[0] = v.is_a?(CArray) ? v[0] : v
+      cell
+    end
+    CATriOp.__build__(self, branch.(x), branch.(y), CATriOp::OP_SELECT)
+  end
+
+  private def face_then_else (x, y, face)
+    # A Face branch decides the result: the other branch is written into a
+    # copy of it through the Face's own store, so an instant stays an instant.
+    # Promoting the two branches to a common data type would compare a Face's
+    # surface type with its storage's.  A CAConstString cannot be written, so
+    # it selects among its strings and packs them again.
+    if face.is_a?(CAConstString)
+      sx = x.is_a?(CAConstString) ? x.to_string : x
+      sy = y.is_a?(CAConstString) ? y.to_string : y
+      return CArray.const_string(then_else(sx, sy), encoding: face.encoding)
+    end
+    x_full = x.is_a?(CArray) && !x.scalar?
+    y_full = y.is_a?(CArray) && !y.scalar?
+    base   = y_full ? y : x
+    if base.read_only?
+      # No store to write through (a CACategorical's codes): select among
+      # the values themselves.
+      result = CArray.object(*shape)
+      result[] = y_full ? y.to_type(CA_OBJECT) : y
+      result[self] = x_full ? x.to_type(CA_OBJECT)[self] : x
+      result[self.is_masked] = UNDEF if self.has_mask?
+      return result
+    end
+    result = base.copy
+    if y_full
+      result[self] = x_full ? x[self] : x
+    else
+      result[self.not] = y.is_a?(CArray) ? y[0] : y
+    end
+    result[self.is_masked] = UNDEF if self.has_mask?
     result
   end
 

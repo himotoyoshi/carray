@@ -226,7 +226,7 @@ fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
   cells are **skipped** (the callback is not invoked for them). You
   never touch mask pointers.
 - **Attach-safety** — input-only operands (`fsync == '0'`) are
-  **never** attached: the engine alias-checks via `ca_iter_can_alias`
+  **never** attached: the engine alias-checks via `ca_attach_is_alias`
   and, for non-alias views, uses `xmalloc` + `ca_xfer_all` to get a
   contiguous read buffer. Only output operands (`fsync == '1'`) use
   `ca_attach` + `ca_sync`. This honors the input-only-operand
@@ -335,7 +335,7 @@ function takes VALUEs.
 - **One scalar per call.** The bridge invokes the callback once per
   cell. For a kernel that needs the whole fiber at once (sort,
   search, FFT), use the kernel iterator's FIBER family or
-  `CA_WITH_BUFFER` ([ch. 13](13_sweep_author_surface.md)).
+  `rb_ca_call_with_buffer` ([ch. 13](13_sweep_author_surface.md)).
 
 ## See also
 

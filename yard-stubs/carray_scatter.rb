@@ -19,10 +19,13 @@ class CArray
   #   `CA_SIZE`) or a Ruby Array.
   # - `vals` is a CArray of length matching `addrs` (coerced to
   #   `self.data_type`), or a Numeric scalar broadcast to all
-  #   addresses.
+  #   addresses. A complex `self` also takes a Complex scalar.
   # - Out-of-range `addrs[i]` (`< 0` or `>= self.elements`) raises
-  #   `IndexError`.
-  # - `self.data_type` must be numeric.
+  #   `IndexError`.  The pairs before it stay applied, through a view
+  #   as well.
+  # - `self.data_type` must be numeric. Complex is accepted by
+  #   every variant except {#scatter_min!} and {#scatter_max!},
+  #   since complex values have no order.
   #
   # Mask policy differs between the accumulate family and
   # {#scatter_replace!}: the accumulate variants skip the pair when
@@ -73,6 +76,8 @@ class CArray
   #   @param addrs [CArray, Array<Integer>]
   #   @param vals [CArray, Numeric]
   #   @return [self]
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type`.
   def scatter_min!(addrs, vals); end
 
   # @overload scatter_max!(addrs, vals)
@@ -82,6 +87,8 @@ class CArray
   #   @param addrs [CArray, Array<Integer>]
   #   @param vals [CArray, Numeric]
   #   @return [self]
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type`.
   def scatter_max!(addrs, vals); end
 
   # @overload scatter_replace!(addrs, vals)

@@ -20,7 +20,7 @@ k").
 
 The block always receives a **1-D CArray** representing one fiber along
 `axis:`. Standard CArray operations (`sum`, `mean`, indexing, arithmetic,
-`.dup`, `.copy`) work directly on the slab.
+`.copy`) work directly on the slab.
 
 ## When to reach for the slab iterator
 
@@ -115,9 +115,8 @@ ca.map_slab(axis: 1)    { |row| ... }  # row spans axis 1
 ca.reduce_slab(axis: 1) { |row| ... }  # axis 1 collapsed in output
 ```
 
-Negative axes are supported (`axis: -1` is the innermost). The
-current surface is single-axis only; multi-axis slabs
-(`axis: [k1, k2]`) are not supported.
+Negative axes are supported (`axis: -1` is the innermost). An array of
+axes (`axis: [k1, k2]`) gives the block a slab spanning all of them.
 
 ## The slab is read-only
 
@@ -142,19 +141,22 @@ every entry referring to the same CArray, showing only the last iter's
 data. This is documented and **not runtime-checked** (= per-cell access
 hooks would defeat the cost model).
 
-Use `slab.copy` / `slab.dup` / `slab.to_a` inside the block to snapshot:
+Use `slab.copy` or `slab.to_a` inside the block to snapshot. `slab.dup`
+is a view sharing the slab's buffer, so after the walk it shows the
+last slab too (except where the slab happens to be a window onto the
+source):
 
 ```ruby
 # CORRECT — snapshots taken in the block
 rows = []
-ca.each_slab(axis: 1) { |row| rows << row.dup }
+ca.each_slab(axis: 1) { |row| rows << row.copy }
 
 # TRAP — every entry refers to the same persistence-trapped object
 refs = []
 ca.each_slab(axis: 1) { |row| refs << row }   # refs all point at iter N-1 data
 ```
 
-In-block derived views (`row.dup`, `row[range]`, `row + 1`,
+In-block derived views (`row[range]`, `row + 1`,
 `(row > 0).as_int32`, `row.median`) read the current iter's data
 correctly. The slab is presented as a `CAStride` whose
 `(parent, base_offset, strides)` triple is updated per iteration so
@@ -162,13 +164,10 @@ that derived views see the right window.
 
 ## Mask handling
 
-Masked source arrays currently raise `NotImplementedError`.
-Strip the mask explicitly via `ca.value` if you need to feed a
-masked source through:
-
-```ruby
-masked_ca.value.map_slab(axis: 1) { |row| row.normalize }
-```
+The slab carries the source's mask: a masked cell of the source is
+masked in the slab, so `slab.sum` or `slab.count_masked` in the block
+see it. A masked cell of the CArray the block returns from `map_slab`
+is masked in the output.
 
 ## Internal use — `CA_OBJECT` per-axis paths
 

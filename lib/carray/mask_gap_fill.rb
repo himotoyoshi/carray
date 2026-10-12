@@ -46,15 +46,10 @@ class CArray
         raise ArgumentError,
               "unmask: pass either a constant fill value or method:, not both"
       end
-      held = __gap_fill__(method, axis)
-      # Copy the filled values in place.  A Face writes through its storage: a
-      # bulk store into its surface would try to cast the storage values to the
-      # surface type (int64 ticks to fixlen, for a time array).
-      if face?
-        parent.value[] = held.parent.value
-      else
-        value[] = held.value
-      end
+      held = __gap_fill__(method, axis, "unmask")
+      # Copy the filled values in place (a Face takes a Face of its own kind
+      # as it is).
+      value[] = held.value
       if held.has_mask?
         self.mask = held.mask              # residual leading/trailing mask
       else
@@ -71,7 +66,7 @@ class CArray
         raise ArgumentError,
               "strip_mask: pass either a constant fill value or method:, not both"
       end
-      return __gap_fill__(method, axis)
+      return __gap_fill__(method, axis, "strip_mask")
     end
     if fill.equal?(MASK_FILL_UNSET)
       raise ArgumentError, "strip_mask: a fill value is required (or method:)"
@@ -85,7 +80,8 @@ class CArray
   # unfillable cells stay masked; a fully filled result carries no mask
   # (hold allocates the output mask only when a leading run goes UNDEF;
   # :linear masks only the exterior via mask_invalid).
-  def __gap_fill__ (method, axis)
+  def __gap_fill__ (method, axis, name)
+    axis = normalize_axis(axis, name) unless axis.nil?
     case method
     when :forward, :ffill
       __hold_axis__(axis, false)
@@ -100,8 +96,8 @@ class CArray
     end
   end
 
-  # Forward (backward = false) or backward (true) hold along `axis`
-  # (axis nil = flatten).  Backward reuses the forward primitive on the
+  # Forward (backward = false) or backward (true) hold along `axis`, already
+  # normalised by __gap_fill__ (axis nil = flatten).  Backward reuses the forward primitive on the
   # reversed view; flatten flattens, holds axis 0, reshapes back.
   def __hold_axis__ (axis, backward)
     if axis.nil?
@@ -111,11 +107,10 @@ class CArray
       held = held.reverse if backward
       held.reshape(*shape)
     else
-      ax = axis < 0 ? axis + ndim : axis
       if backward
-        flip(ax).send(:__hold__, ax).flip(ax)
+        flip(axis).send(:__hold__, axis).flip(axis)
       else
-        send(:__hold__, ax)
+        send(:__hold__, axis)
       end
     end
   end
@@ -123,11 +118,18 @@ class CArray
   # Linear-by-index gap fill: interpolate each masked cell from the two
   # bracketing valid cells, x = cell index along the axis.  Cells outside the
   # valid range (leading/trailing) stay masked.  A Face goes through its own
-  # linear_fetch, which keeps its unit and rounds to its grid; whether that
-  # means anything is the Face's call (an ORDERABLE numeric one answers, the
-  # rest raise from there), so this gate only asks that it be one.
+  # linear_fetch, which keeps its unit and rounds to its grid.  Defining one
+  # is how a Face says it interpolates: without it, the core linear_fetch
+  # reads the Face's storage and fails from inside.
   def __gap_fill_linear__ (axis)
-    unless numeric? || face?
+    if face?
+      unless __interpolable__
+        raise ArgumentError,
+              "unmask/strip_mask(method: :linear): #{self.class} does not " \
+              "interpolate (it defines no linear_fetch of its own); " \
+              "use method: :forward or :backward"
+      end
+    elsif ! numeric?
       raise ArgumentError,
             "unmask/strip_mask(method: :linear): numeric or time data_type " \
             "required (got #{data_type_name})"
@@ -135,46 +137,58 @@ class CArray
     if axis.nil?
       return __linear_fiber__(flatten).reshape(*shape)
     end
-    ax = axis < 0 ? axis + ndim : axis
-    if ax < 0 || ax >= ndim
-      raise ArgumentError, "axis #{axis} out of range for ndim #{ndim}"
-    end
-    # A Face assembles in storage space -- its linear_fetch has already rounded
-    # to the grid, so there is nothing left to hold in float64.  A numeric
-    # array assembles in float64 and casts back once at the end.
-    out  = face? ? template : float64.copy
-    sink = face? ? out.parent : out
+    ax = axis
+    # A fiber comes back in self's own type (a Face's linear_fetch has already
+    # rounded to its grid), so the result assembles in that type and the
+    # present cells are never carried through float64.
+    out = face? ? template : value.copy
     __each_fiber_key__(ax) do |key|
-      fiber = __linear_fiber__(self[*key])
-      sink[*key] = face? ? fiber.parent : fiber
+      out[*key] = __linear_fiber__(self[*key])
     end
-    face? ? out : out.to_type(data_type)
+    out
   end
 
-  # 1-D linear-by-index fill of a single (possibly masked) fiber.  Present
-  # cells reproduce exactly; interior masked cells interpolate; exterior
-  # masked cells become UNDEF (linear_section returns NaN out of range,
-  # mask_invalid marks it).  Returns the same kind as `vec`: a Face fiber
-  # comes back as that Face, on its own unit.
+  # Whether linear interpolation can fill this array: a numeric array, or a
+  # Face that defines a linear_fetch of its own -- which is how a Face says it
+  # interpolates (the core linear_fetch would read its storage).
+  private def __interpolable__
+    face? ? self.class.instance_method(:linear_fetch).owner != CArray : numeric?
+  end
+
+  # 1-D linear-by-index fill of a single (possibly masked) fiber.
   def __linear_fiber__ (vec)
-    n = vec.elements
-    present = vec.is_not_masked
+    vec.send(:__linear_fill_along__, CArray.float64(vec.elements) { |i| i.to_f })
+  end
+
+  # Fill the masked cells of this 1-D array by linear interpolation against
+  # the coordinate `x` (same length, ascending over the present cells).
+  # The one rule both the core (x = cell position) and CAFrame (x = index)
+  # use: present cells come back exactly as they are, in this array's own
+  # type; a masked cell inside the span of the present ones takes the
+  # interpolated value; one outside it stays masked.  Outside is where
+  # linear_section answers NaN -- a property of x, not of the values, so a
+  # NaN or Inf stored in a present cell is left alone.  A Face goes through
+  # its own linear_fetch, which keeps its unit and rounds to its grid.
+  def __linear_fill_along__ (x)
+    present = is_not_masked
     # Fewer than two valid points -> nothing to interpolate between; leave
-    # every masked cell masked (the copy carries vec's mask).
-    if present.count(true) < 2
-      return vec.face? ? vec.copy : vec.float64.copy
-    end
-    pos  = CArray.float64(n) { |i| i.to_f }
-    addr = pos[present].linear_section(pos)   # valid positions -> monotonic grid
-    if vec.face?
+    # every masked cell masked.
+    return copy if present.count(true) < 2
+    addr = x[present].linear_section(x)       # valid positions -> monotonic grid
+    if face?
       # The Face's linear_fetch already masks the exterior (out of range) and
-      # lands on its own grid, so it needs no cast and no mask_invalid.
-      return vec[present].linear_fetch(addr)
+      # lands on its own grid.
+      return self[present].linear_fetch(addr)
     end
-    vval = vec.value.float64[present]         # valid values
-    # Mark the out-of-range NaN before casting back: for an integer data_type
-    # the cast turns NaN into 0, and mask_invalid then has nothing left to find.
-    vval.linear_fetch(addr).mask_invalid.to_type(vec.data_type)
+    interp = value.float64[present].linear_fetch(addr)
+    # Built from the values alone, so a fully filled result carries no mask.
+    out      = value.copy
+    masked   = is_masked
+    fill     = masked & addr.is_finite
+    exterior = masked & fill.not
+    out[fill] = interp[fill] if fill.any
+    out[exterior] = UNDEF if exterior.any
+    out
   end
 
   # Yield an index key (Array with `nil` at `axis`, integers elsewhere)

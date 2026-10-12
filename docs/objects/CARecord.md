@@ -115,7 +115,14 @@ Indexing by **integer** decodes a single cell to a struct instance:
 v = a[0]
 v.class                     # => GeoCoord
 v["lat"]                    # => 1.0
+v.lat                       # => 1.0   (the member's accessor)
 ```
+
+A struct instance names a member by a String (`v["lat"]`) or its position
+(`v[0]`), and has an accessor for each member (`v.lat`).  A member whose
+name is already a method of the instance (`hash`, `size`, `class`, ...)
+gets no accessor, so the method keeps working; read that member as
+`v["size"]`.  A Symbol (`v[:lat]`) is not a member name.
 
 Field projection also works through derived views (a slice or transpose of a
 `CARecord` can still project its fields):
@@ -138,31 +145,58 @@ a.count_masked              # => 1
 a.mask.to_a                 # => [0, 0, 1, 0, 0]
 ```
 
-## Ordering — memcmp, not field-semantic
+## Ordering — by the members the struct declares
 
-`CARecord` sorts and searches by the **raw record bytes** (`memcmp`), not by any
-per-field comparison. For records this means the byte order of the whole
-fixed-width blob decides the sort:
+A record's bytes are no order of its values (a negative integer, a
+little-endian float), so a record array has an order only when its struct
+names one with `order_by:`.  The members are compared in the order given:
 
 ```ruby
-a = CARecord.new(GeoCoord, 3)
-a["lat"][] = [3.0, 1.0, 2.0]
-a["lng"][] = [0.0, 0.0, 0.0]
-a.sort_index.to_a           # => [2, 0, 1]   (byte order, NOT numeric lat order)
+Site = CArray.struct(order_by: [:lat, :lng]) { float64 :lat; float64 :lng }
+a = CARecord.new(Site, 3)
+a["lat"][] = [3.0, 1.0, 1.0]
+a["lng"][] = [0.0, 5.0, 2.0]
+a.sort_index.to_a           # => [2, 1, 0]   by lat, then lng
+a.min.values                # => [1.0, 2.0]
+a < a[0]                    # boolean, compared by the same order
+a[1] < a[0]                 # => true   (the records compare too)
 ```
 
-Because floating-point fields are not byte-order-comparable, memcmp ordering of
-a record generally does **not** match the numeric ordering of its fields. If you
-want to sort by a field's value, sort that field's projection instead:
+`sort`, `sort_copy`, `sort_addr`, `sort_index`, `rank_index`, `order`, `min`,
+`max`, `minmax`, `min_index`, `max_index`, `partition_copy`, `partition_index`
+and the comparison operators follow it.  NaN sorts after every number, and a
+masked record stays masked.  `order_by:` names members that hold one ordered
+value; a nested record (order by its members instead), an array member and a
+complex member are refused.
+
+A struct declared without `order_by:` has no order: those methods raise.  To
+sort by one field without declaring an order, sort that field's projection:
 
 ```ruby
 order = a["lat"].sort_index         # sort by lat numerically
 a[order]                            # records in lat order
 ```
 
-A future opt-out flag (`CA_FLAG_FACE_ORDER_AS_OBJECT`) to sort records through
-their struct `<=>` is designed but not yet implemented; see
-[FaceOrderingSearch](../authoring/FaceOrderingSearch.md).
+## Equality and discovery — by the bytes
+
+A record is its bytes, so two records are equal exactly when their bytes are:
+a NaN member equals itself, `0.0` and `-0.0` differ, and padding bytes count.
+`eq` / `ne`, the struct element's `==` and the discovery family (`unique`,
+`value_counts`, `nunique`, `mode`, `is_in`, `intersection` / `difference` /
+`union`, `mask_duplicates`, `categorize`, `count(v)`, `locate_addr`) all use
+this equality:
+
+```ruby
+a.unique                    # distinct records, first-appearance order
+a.count(Site.new(1.0, 5.0)) # records equal to this one
+a.is_in(b)                  # b: a record array of the same struct
+```
+
+They take records of the same `data_class` (whatever the record array's class)
+or a plain fixlen array of the same width, and refuse records of another
+struct.  A variant that sorts (`unique(sort: true)`, `value_counts(sort:
+:value)`) needs `order_by:`; `mode` without one returns the modal records in
+first-appearance order.
 
 ## Serialization
 

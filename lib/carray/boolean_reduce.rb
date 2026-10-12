@@ -69,41 +69,33 @@ class CArray
   # @return [Boolean, CArray] a scalar, or an array when an axis is given.
   def none (skip_masked: true, **opts)
     return __none_skipna__(**opts) if skip_masked
-    # none = not any (Kleene): not(true)=false, not(false)=true, not(UNDEF)=UNDEF
-    r = __kleene_fold(:any, opts)
-    r.is_a?(CArray) ? r.not : (r.equal?(UNDEF) ? UNDEF : !r)
+    __kleene_fold(:none, opts)
   end
 
   private
 
-  # Three-valued fold via counts.  `kind` is :any (OR) or :all (AND).
-  # `opts` carries axis: / keep_axis: (same surface as the skipna reduction).
+  # Three-valued fold.  `kind` is :any, :all or :none.  The available-case
+  # reduction answers wherever an unmasked cell settles the fold (a true for
+  # any, a false for all, a true for none); elsewhere a masked cell leaves the
+  # answer undetermined.  Going through that reduction checks the data type,
+  # the axes and the keywords exactly as `skip_masked: true` does.
   def __kleene_fold (kind, opts)
-    axis = opts[:axis]
-    if axis.nil?
-      if kind == :any
-        return true  if count(true)  > 0     # a known TRUE settles OR
-      else
-        return false if count(false) > 0     # a known FALSE settles AND
-      end
-      return UNDEF if count_masked > 0        # undetermined
-      return( kind == :any ? false : true )
+    r = case kind
+        when :any then __any_skipna__(**opts)
+        when :all then __all_skipna__(**opts)
+        else           __none_skipna__(**opts)
+        end
+    cm = count_masked(**opts)
+    if r.is_a?(CArray)
+      settled = ( kind == :any ) ? r : r.not
+      out = r.copy
+      out[settled.not & (cm > 0)] = UNDEF
+      out
+    else
+      settled = ( kind == :any ) ? r : !r
+      return r if settled
+      ( cm > 0 ) ? UNDEF : r
     end
-
-    keep = opts[:keep_axis]
-    cnt_kw = keep ? { axis: axis, keep_axis: keep } : { axis: axis }
-    ck = ( kind == :any ) ? count(true, **cnt_kw) : count(false, **cnt_kw)
-    cm = count_masked(axis: axis)               # count_masked has no keep_axis
-    cm = cm.reshape(*ck.shape) unless cm.shape == ck.shape
-
-    # A cell is undetermined only where it is masked AND the known side does
-    # not settle it (ck counts the settling value: true for OR, false for AND).
-    # Masking only those cells avoids leaving an all-zero mask behind.
-    out = CArray.boolean(*ck.shape)
-    out[] = ( kind == :any ) ? 0 : 1            # OR default false / AND default true
-    out[ck.eq(0) & (cm > 0)] = UNDEF             # genuinely undetermined
-    out[ck > 0] = ( kind == :any ) ? 1 : 0       # known side dominates
-    out
   end
 
 end

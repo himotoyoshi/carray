@@ -132,7 +132,14 @@ b = (ref.data_type  == t) ? ref  : ref.to_type(t)
 
 `result_type` accepts any mix of CArrays, dtype names (Symbol / String /
 Class), Numeric literals, and MV producers, classifies each via
-`ca_arg_to_data_type`, and folds pairwise through `ca_promote_type`.
+`ca_arg_to_data_type`, and folds the non-scalar ones pairwise through
+`ca_promote_type`. A scalar (a Ruby value or a CScalar) then joins that
+type by the rule the operators use: one of the same kind takes the
+array's type (`0.1` beside float32 is float32, `1` beside int8 is int8),
+one of another kind promotes (`1.5` beside int32 is float64), and an
+Integer that does not fit the array's integer type takes the type of
+its value (int64). So `result_type(a, s)` is the type `a + s` has. With
+no non-scalar argument every argument folds by its own type.
 Returned as a Symbol; caller compares to each operand's `data_type` and
 calls `to_type` only where a change is needed (the guard avoids
 allocating a copy for the arm already at the common type).
@@ -194,7 +201,7 @@ intake points, and the dtype derivation is single-sourced:
 
 | Entry point | How the MV is handled |
 |---|---|
-| `a * mv` (binop coerce) | `rb_ca_cast_self_or_other` runs `wrap_memory_view` before classifying, so the MV becomes a CAWrap and the normal cast_table logic takes over. |
+| `a * mv` (binop coerce) | `rb_ca_cast_self_or_other` turns the MV producer into a CArray before classifying, then the normal cast_table logic takes over. A producer that defines `to_ca` goes through it, as in `wrap_readonly`, so what the MV cannot carry (an Arrow array's nulls) survives; otherwise `wrap_memory_view` makes a CAWrap. Only MV producers are asked, so an object with `to_ca` alone (a Range) is still not an operand. |
 | `wrap_readonly(mv, dt)` | detects the MV producer, imports it, adapts to `dt` (import strategy — copy vs zero-copy — is inside `wrap_memory_view` / `from_memory_view`). |
 | `result_type(a, mv)` / `promote_list(list_with_mv)` | `ca_arg_to_data_type` calls `ca_mv_probe_data_type`, which **fetches the MV, parses `view.format`, releases the MV without importing**. Dtype known; no data moved. |
 

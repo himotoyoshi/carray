@@ -18,6 +18,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"   /* ca_obj_extremum_replaces */
 
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.
    Direct VALUE * access + FIXNUM_P fast path eliminates rb_ary_entry
@@ -85,8 +86,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
   ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
   ca_size_t addr1 = 0, addr2 = 0;
   int     has_mask, has_index1, has_index2;
-  char   _val1[64], _val2[64];
-  char   *val1 = _val1, *val2 = _val2;
+  volatile VALUE holder1, holder2;
+  char   *val1, *val2;
   boolean8_t m1 = 0, m2 = 0;
 
   rb_ca_modify(self);
@@ -95,10 +96,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
 
   has_mask = elem_probe_mask(ca);
 
-  if ( ca->bytes > 64 ) {
-    val1 = xmalloc(ca->bytes);
-    val2 = xmalloc(ca->bytes);
-  }
+  val1 = ALLOCV_N(char, holder1, ca->bytes);
+  val2 = ALLOCV_N(char, holder2, ca->bytes);
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     elem_parse_idx_array(ca, ridx1, idx1);
@@ -160,10 +159,8 @@ rb_ca_elem_swap (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
 
-  if ( ca->bytes > 64 ) {
-    xfree(val1);
-    xfree(val2);
-  }
+  ALLOCV_END(holder2);
+  ALLOCV_END(holder1);
 
   return self;
 }
@@ -178,8 +175,8 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
   ca_size_t idx1[CA_RANK_MAX], idx2[CA_RANK_MAX];
   ca_size_t addr1 = 0, addr2 = 0;
   int     has_mask;
-  char   _val[64];
-  char   *val = _val;
+  volatile VALUE holder;
+  char   *val;
   boolean8_t m = 0;
 
   rb_ca_modify(self);
@@ -188,9 +185,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
 
   has_mask = elem_probe_mask(ca);
 
-  if ( ca->bytes > 64 ) {
-    val = xmalloc(ca->bytes);
-  }
+  val = ALLOCV_N(char, holder, ca->bytes);
 
   if ( TYPE(ridx1) == T_ARRAY ) {
     elem_parse_idx_array(ca, ridx1, idx1);
@@ -222,9 +217,7 @@ rb_ca_elem_copy (VALUE self, VALUE ridx1, VALUE ridx2)
     }
   }
 
-  if ( ca->bytes > 64 ) {
-    xfree(val);
-  }
+  ALLOCV_END(holder);
 
   return self;
 }
@@ -380,10 +373,11 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       out = rb_ca_ptr2obj(self, v);
     }
     else {
-      char *v = xmalloc(ca->bytes);
+      volatile VALUE holder;
+      char *v = ALLOCV_N(char, holder, ca->bytes);
       ca_fetch_index(ca, idx, v);
       out = rb_ca_ptr2obj(self, v);
-      xfree(v);
+      ALLOCV_END(holder);
     }
 
     /* Mask check with inline skip for the entity+no-mask common case. */
@@ -401,7 +395,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       }
     }
 
-    CA_FACE_STORAGE_TO_SCALAR_IF_FACE(out, self, ca);
+    CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
     return out;
   }
   else {
@@ -690,10 +684,7 @@ rb_ca_elem_mask (VALUE self, VALUE ridx)
   /* General path: view array.  Walk parent chain + dispatch. */
   {
     boolean8_t one = 1;
-    ca_update_mask(ca);
-    if ( ! ca->mask ) {
-      ca_create_mask(ca);
-    }
+    ca_create_mask(ca);
     if ( TYPE(ridx) == T_ARRAY ) {
       elem_parse_idx_array(ca, ridx, idx);
       ca_store_index(ca->mask, idx, &one);
@@ -846,7 +837,7 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
 
     cur = from_array ? rb_ca_fetch_index(self, idx) : rb_ca_fetch_addr(self, addr);
     if ( cur == CA_UNDEF ) return self;
-    if ( RTEST(rb_funcall(rval, rb_intern("<"), 1, cur)) ) {
+    if ( ca_obj_extremum_replaces(rval, cur, rb_intern("<")) ) {
       if ( from_array ) rb_ca_store_index(self, idx, rval);
       else              rb_ca_store_addr(self, addr, rval);
     }
@@ -899,7 +890,7 @@ rb_ca_elem_max (VALUE self, VALUE ridx, VALUE rval)
 
     cur = from_array ? rb_ca_fetch_index(self, idx) : rb_ca_fetch_addr(self, addr);
     if ( cur == CA_UNDEF ) return self;
-    if ( RTEST(rb_funcall(rval, rb_intern(">"), 1, cur)) ) {
+    if ( ca_obj_extremum_replaces(rval, cur, rb_intern(">")) ) {
       if ( from_array ) rb_ca_store_index(self, idx, rval);
       else              rb_ca_store_addr(self, addr, rval);
     }

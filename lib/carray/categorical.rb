@@ -297,7 +297,7 @@ class CACategorical < CAObject
 
   # Face hook: decode a per-cell code into its category label, through the one
   # decode every code-to-label path shares (see #label_at).
-  def storage_to_scalar(raw)
+  def storage_to_element(raw)
     code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(parent.data_type)) : raw
     label_at(code)
   end
@@ -317,6 +317,27 @@ class CACategorical < CAObject
   #   an all-false result.
   #   @param label [Object] category to match.
   #   @return [CArray]
+  # @overload resize(*newdim, fill_value: UNDEF)
+  #   Returns a categorical resized to `newdim` (see {CArray#resize}).
+  #   The new cells are excluded (UNDEF) unless `fill_value` names one of
+  #   the labels, since a zero code would read as the first label.
+  #   @raise [ArgumentError] when `fill_value` is not a label.
+  def resize (*newdim, fill_value: UNDEF)
+    CACategorical.from_codes(codes.resize(*newdim, fill_value: code_for_fill(fill_value)),
+                             labels)
+  end
+
+  # @overload insert_block(offset, bsize, &block)
+  #   Returns a categorical with a block inserted (see
+  #   {CArray#insert_block}). The inserted cells are excluded (UNDEF)
+  #   unless the block returns one of the labels.
+  #   @raise [ArgumentError] when the block returns something that is not
+  #     a label.
+  def insert_block (offset, bsize, &block)
+    fill = block ? code_for_fill(block.call) : UNDEF
+    CACategorical.from_codes(codes.insert_block(offset, bsize) { fill }, labels)
+  end
+
   def eq(label)
     codes.eq(@labels.index(label) || @labels.size)
   end
@@ -356,11 +377,11 @@ class CACategorical < CAObject
   #   so `labels.zip(category_sizes.to_a)` always pairs up.
   #   @return [CArray]
   def category_sizes
-    return @_category_sizes if @_category_sizes
+    return @category_sizes if @category_sizes
     bc  = codes.bincount
-    out = CArray.new(bc.data_type, [@labels.size])   # new zero-fills
+    out = CArray.new(bc.data_type, [@labels.size], bytes: bc.bytes)   # new zero-fills
     out[0...bc.elements] = bc if bc.elements > 0
-    @_category_sizes = out
+    @category_sizes = out
     out
   end
 
@@ -463,6 +484,14 @@ class CACategorical < CAObject
   # that has none. Every code-to-label path goes through here rather than
   # indexing @labels itself, because two decodes are two chances to disagree,
   # and disagreeing is how #unique came to contradict #to_a on the same cell.
+  # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
+  def code_for_fill (value)
+    return UNDEF if UNDEF.equal?(value)
+    code = labels.index(value)
+    raise ArgumentError, "#{value.inspect} is not one of the labels #{labels.inspect}" unless code
+    code
+  end
+
   def label_at (code)
     (code < 0 || code >= @labels.size) ? nil : @labels[code]
   end
@@ -541,13 +570,11 @@ class CACategorical < CAObject
   #   addresses that order the cells by category (excluded cells last).
   #   @return [CArray]
   def sort_addr
-    return @_sort_addr if @_sort_addr
+    return @sort_addr if @sort_addr
     n      = elements
     k      = @labels.size
-    cs     = category_sizes                       # per-category counts
-    nvalid = cs.sum
-    cur    = CArray.int64(k > 0 ? k : 0)          # segment starts, consumed as cursor
-    cur[1..-1] = cs.cumsum.int64[0..-2] if k > 1
+    nvalid = category_sizes.sum
+    cur    = reduceat_index.copy                  # segment starts, consumed as cursor
     flat   = codes.reshape(n)
     seq    = CArray.int64(n).seq!                 # source indices, scattered as payload
     out    = CArray.int64(n)
@@ -566,7 +593,7 @@ class CACategorical < CAObject
       excluded = excluded.or(flat.is_masked) if flat.has_mask?
       out[nvalid..-1] = seq[excluded]             # excluded cells, source order
     end
-    @_sort_addr = out
+    @sort_addr = out
     out
   end
 
@@ -581,17 +608,26 @@ class CACategorical < CAObject
   #   offsets aligned to {#labels}. Pair with {#category_sizes} for lengths.
   #   @return [CArray]
   def reduceat_index
-    return @_reduceat_index if @_reduceat_index
-    k = @labels.size
-    out = CArray.int64(k > 0 ? k : 0)
-    if k > 1
-      out[0] = 0
-      out[1..-1] = category_sizes.cumsum.int64[0..-2]
-    elsif k == 1
-      out[0] = 0
+    return @reduceat_index if @reduceat_index
+    # Every boundary but the last; the copy makes it an entity the
+    # reduceat kernels can read directly.
+    @reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
+  end
+
+  # @overload categorize(labels: nil, sort_labels: false)
+  #   Returns a {CACategorical} keyed on the labels, as categorizing any
+  #   key array does: the labels that occur, in first-appearance order (or
+  #   sorted with `sort_labels:`), or the fixed `labels:` vocabulary.  A
+  #   category of `self` with no cells does not carry over; a masked cell
+  #   is excluded.
+  #   @return [CACategorical]
+  def categorize (labels: nil, sort_labels: false)
+    if labels || sort_labels
+      return label_values.categorize(labels: labels, sort_labels: sort_labels)
     end
-    @_reduceat_index = out
-    out
+    # Distinctness rides the codes; only the k labels cross the surface.
+    recoded = codes.categorize
+    CACategorical.from_codes(recoded.codes, recoded.labels.map { |c| label_at(c) })
   end
 
   # @overload inspect
@@ -629,6 +665,24 @@ class CArray
   #   @return [CACategorical]
   #   @raise [ArgumentError] when explicit `labels` contain
   #     duplicates.
+  #   @raise [CArray::DataTypeError] when `sort_labels: true` discovers
+  #     the labels of a complex array, which have no order.
+  # The order sort_labels: puts two labels in: as sort orders the cells of an
+  # array, a Float NaN after every other value; two labels <=> cannot order
+  # are refused, by name.
+  private def label_order(a, b)
+    na = a.is_a?(Float) && a.nan?
+    nb = b.is_a?(Float) && b.nan?
+    return (na ? 1 : 0) - (nb ? 1 : 0) if na || nb
+    c = a <=> b
+    if c.nil?
+      raise ArgumentError,
+            "categorize(sort_labels: true): cannot order the labels " \
+            "#{a.inspect} and #{b.inspect}"
+    end
+    c
+  end
+
   def categorize(labels: nil, sort_labels: false)
     # Automatic appearance-order vocabulary: one linear pass (C
     # __factorize_appearance__) returns both codes and levels directly, over the
@@ -636,12 +690,26 @@ class CArray
     # lane). Distinctness is the hash-key judgement shared with the discovery
     # family: Float NaN collapses to one category and -0.0 == +0.0, while mixed
     # Integer / Float keys stay distinct (eql?, so 1 and 1.0 are separate
-    # categories). The discovery path below is reserved for sort_labels (which
-    # reorders the vocabulary, desyncing the appearance-order codes), an explicit
-    # labels list, and the data types the factorize kernel does not take (complex).
-    if labels.nil? && !sort_labels && (integer? || float? || object? || fixlen? || boolean?)
+    # categories). Complex values are distinct by value with the same NaN and
+    # -0.0 rules, and have no order, so sort_labels refuses them. The discovery
+    # path below is reserved for an explicit labels list.
+    if labels.nil? && sort_labels && complex?
+      raise CArray::DataTypeError,
+            "categorize(sort_labels: true): a #{data_type_name} value has no " \
+            "order (complex numbers are not ordered); without sort_labels: the " \
+            "labels are in first-appearance order"
+    end
+    if labels.nil? && (integer? || float? || complex? || object? || fixlen? || boolean?)
       codes, levels = __factorize_appearance__
-      return CACategorical.from_codes(codes, levels.to_a)
+      levels = levels.to_a
+      return CACategorical.from_codes(codes, levels) unless sort_labels
+      # Sort the k levels as Ruby sorts them, then renumber every code through
+      # the rank in one gather. The sentinel of an excluded cell is out of the
+      # rank's range, so project makes it UNDEF and from_codes writes it back.
+      order = (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
+      rank = CArray.new(codes.data_type, [levels.size])
+      order.each_with_index { |old, new_code| rank[old] = new_code }
+      return CACategorical.from_codes(rank.project(codes), order.map { |i| levels[i] })
     end
 
     if labels.nil?
@@ -650,7 +718,7 @@ class CArray
       # masked keys stay excluded), so the non-masked cells are the levels.
       # Only the final list is Ruby, since labels are Ruby objects.
       labels_arr = mask_duplicates[:is_not_masked].to_a
-      labels_arr.sort! if sort_labels
+      labels_arr.sort! { |a, b| label_order(a, b) } if sort_labels
     else
       labels_arr = labels.respond_to?(:to_a) ? labels.to_a : Array(labels)
       if labels_arr.uniq.size != labels_arr.size

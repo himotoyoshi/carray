@@ -133,6 +133,10 @@ class CArray
   __abs_eager_um__ = instance_method(:__abs_eager__)
   define_method(:abs) do
     if __lazy_view__?
+      # A boolean has no absolute value to change type for, as eager says.
+      raise CArray::DataTypeError,
+            "data_type-changing monop not implemented for input data_type " \
+            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
       abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
       if complex?
         # float_dt is a Symbol; convert via data_type_code so the cast
@@ -206,7 +210,11 @@ class CArray
   define_method(:imag) do
     if __lazy_view__?
       imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
-      if complex?
+      if boolean?
+        # imag_i reads a boolean as int64; the eager imag stays boolean.
+        CAMonOp.__build__(imag_i_node,
+                          CAMonOp::CAST_BASE + CArray.data_type_code(CA_BOOLEAN))
+      elsif complex?
         float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
         # float_dt is a Symbol; convert via data_type_code for kernel
         # op_id arithmetic.
@@ -235,8 +243,7 @@ class CArray
   #
   # Both paths keep the operand's float / complex width (f32 → f32,
   # cmplx64 → f32), and both send integers to f64 since pi does not fit
-  # an integer slot.  That agrees with the general lazy-substrate rule
-  # "scalar keeps operand's precision" (see ca_lazy_wrap_scalar header).
+  # an integer slot.
   # ---------------------------------------------------------------------------
 
   # @private
@@ -244,8 +251,11 @@ class CArray
   __arg_eager_um__ = instance_method(:__arg_eager__)
   define_method(:arg) do
     if __lazy_view__?
+      raise CArray::DataTypeError,
+            "data_type-changing monop not implemented for input data_type " \
+            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
       parent = self
-      if integer? || boolean?
+      if integer?
         parent = CAMonOp.__build__(parent,
                                    CAMonOp::CAST_BASE +
                                    CArray.data_type_code(CA_FLOAT64))
@@ -325,6 +335,10 @@ class CArray
       end
     end
   end
+
+  # The shift count of an Integer is brought into the array's type before
+  # either form sees it (see CArray::IntegerShiftCount).
+  prepend IntegerShiftCount
 
   # Binop word aliases (`add` -> `+`, `mul` -> `*`, `bit_and` -> `&`, …) were
   # installed by rb_define_alias at Init time (see MkKernel.alias_binop in
@@ -529,23 +543,48 @@ class CArray
     end
   end
 
+  # A lazy receiver takes the scalar the eager coerce makes, and stays
+  # lazy itself: the builder promotes the pair as the eager operator does.
   # @!visibility private
   alias_method :__coerce_eager__, :coerce
   coerce_um = instance_method(:__coerce_eager__)
   define_method(:coerce) do |other|
-    if __lazy_view__?
-      dt_name = data_type_name
-      if CScalar.respond_to?(dt_name)
-        s = CScalar.public_send(dt_name)
-        s[0] = other
-        [s, self]
-      else
-        coerce_um.bind_call(self, other)
-      end
-    else
-      coerce_um.bind_call(self, other)
+    begin
+      scalar, receiver = coerce_um.bind_call(self, other)
+    rescue RangeError => e
+      raise unless other.is_a?(Integer)
+      return [OutOfRangeInteger.new(other, self, e), self]
+    end
+    __lazy_view__? ? [scalar, self] : [scalar, receiver]
+  end
+
+  # An Integer the array's type cannot hold, on the left of an operator.
+  # A comparison is answered from the array's side, where it compares by
+  # value; any other operator refuses the Integer as the array would.
+  class OutOfRangeInteger
+    def initialize (value, array, error)
+      @value, @array, @error = value, array, error
+    end
+
+    def <  (other) = flip(other, :>)
+    def <= (other) = flip(other, :>=)
+    def >  (other) = flip(other, :<)
+    def >= (other) = flip(other, :<=)
+
+    def method_missing (*)
+      raise @error
+    end
+
+    def respond_to_missing? (*) = false
+
+    private
+
+    def flip (other, op)
+      raise @error unless other.equal?(@array)
+      @array.send(op, @value)
     end
   end
+  private_constant :OutOfRangeInteger
 end
 
 # ---------------------------------------------------------------------------
@@ -616,14 +655,6 @@ class CAMonOp
   #   @return [Array]
   def to_a
     to_ca.to_a
-  end
-
-  # @overload sort(*args, **kwargs)
-  #   Materialises `self` into a copy and returns
-  #   `entity.sort(*args, **kwargs)`.
-  #   @return [CArray]
-  def sort(*args, **kwargs)
-    copy.sort(*args, **kwargs)
   end
 
   # --- MemoryView export → TypeError + .copy recommendation -----------
@@ -712,13 +743,6 @@ class CABinOp
   #   @return [Array]
   def to_a
     to_ca.to_a
-  end
-
-  # @overload sort(*args, **kwargs)
-  #   Materialises `self` and sorts the resulting entity.
-  #   @return [CArray]
-  def sort(*args, **kwargs)
-    to_ca.sort(*args, **kwargs)
   end
 
   # @overload to_memory_view

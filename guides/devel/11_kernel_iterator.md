@@ -75,7 +75,7 @@ output operand:
 
 | Form | What it delivers |
 |------|------------------|
-| `CA_FOR_EACH_FIBER` | contig data (`p[i]`); NO_MASK only |
+| `CA_FOR_EACH_FIBER` | contig data (`p[i]`); no mask cursor (masked cells read as values; add `CA_KERNEL_NO_MASK` to refuse a masked source) |
 | `CA_FOR_EACH_FIBER_INOUT` | + a parallel contig output (`p_out[i]`) |
 | `CA_FOR_EACH_FIBER_MASKED` | + contig mask (`m[i]`) |
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | + both |
@@ -128,11 +128,9 @@ a question about both fibers.
 
 Each fiber macro auto-sets `CA_KERNEL_FIBER_CONTIG`; the engine guarantees
 contig data delivery (gathers strided fibers into per-state scratch when
-needed). The INOUT macros runtime-assert strict full-shape equality and
-silently skip the body on mismatch (= same `ndim` and same `dim[axis]`). This
-is deliberately *unlike* the sweep INOUT family
-([ch. 13](13_sweep_author_surface.md)), which **raises** on a shape mismatch
-(`ca_sweep_check_same_shape`) — the two engines differ here by design.
+needed). The INOUT and PAIR macros require their two arrays to have the
+same shape (`ndim` and every `dim[k]`) and raise `ArgumentError` before
+opening either walk when they do not.
 
 L2 inner-loop helpers — fast-path contig within a strided callback:
 
@@ -247,8 +245,9 @@ int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */
   yielded by `ca_iter_state_next_slab` with stride implicit at `bytes`.
   Source routing: entity / CAStride-contig → alias; CAStride non-contig →
   scratch path (`ca_copy_data` compose-fold gathers into a malloc'd
-  buffer); other sources → `CA_ITER_ERR_NOT_CHEAP` in step 1, extended in
-  later phases.
+  buffer); descriptor views and `CA_ITER_SRC_ATTACH` views → scratch;
+  a source the classifier does not recognise → `CA_ITER_ERR_NOT_CHEAP`.
+  `init_l1` takes `CA_SLAB_WHOLE` only.
 - **`init_l2`** prepares an **L2 strided** walk. The kernel sees per-slab
   pointers with an explicit byte stride argument. Source routing covers
   entity / CAStride contig (alias, stride = `bytes`), CAStride non-contig
@@ -293,6 +292,29 @@ descriptor-framework cache. Calling `finish` after a successful init is
 mandatory; calling it after a failed init (`init_l2` returned an
 `ERR_*`) is **not** required — the engine releases resources on the
 error path.
+
+### Two states walked together
+
+A kernel that reads one array and writes another holds two states in the
+same frame. Open the second one with `ca_iter_state_init_l2_paired`:
+
+```c
+int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
+                                   ca_iter_state    *first,
+                                   struct _CArray   *src,
+                                   ca_slab_policy_t  policy,
+                                   int8_t           *axes,
+                                   int8_t            naxes,
+                                   uint32_t          flags);
+```
+
+It takes what `init_l2` takes, plus the state already open. When either
+walk later raises (a gather or a write-back through a source's slots),
+the engine finishes both; with plain `init_l2` it would finish only the
+one that raised and jump over the other. If opening the second state
+raises or is declined, the first is finished before the function
+returns, so there is nothing left to close. The `_INOUT` macros open
+their states this way.
 
 ## The slab-delivery contract (frozen kernel-readable state)
 
@@ -349,7 +371,7 @@ the same walk in three lines.
 
 ```c
 typedef enum {
-  CA_SLAB_FREE  = 0,    /* engine-chosen chunk; reserved, step 2+ */
+  CA_SLAB_FREE  = 0,    /* engine-chosen chunk; reserved */
   CA_SLAB_AXES  = 1,    /* user-pinned slab axes (the default) */
   CA_SLAB_WHOLE = 2     /* whole array in one slab */
 } ca_slab_policy_t;
@@ -358,7 +380,7 @@ typedef enum {
 `CA_SLAB_AXES` is the workhorse — it is what gives reductions / scans /
 maps their per-axis semantics. `CA_SLAB_WHOLE` is the L1 entry point for
 "give me everything as one contig run". `CA_SLAB_FREE` is reserved for
-the future T2 chunk-hinted walk.
+a chunk-hinted walk; init returns `CA_ITER_ERR_POLICY` for it.
 
 ## Kernel flags
 
@@ -383,8 +405,9 @@ Choose them based on what the kernel needs:
   rejected with `CA_ITER_ERR_READONLY`.
 - A kernel that genuinely cannot accept a masked source declares
   `CA_KERNEL_NO_MASK`; the engine then rejects a masked source rather
-  than silently dropping the mask. The `_FIBER` (non-masked) forms are
-  NO_MASK by construction.
+  than silently dropping the mask. The `_FIBER` forms without MASKED in
+  the name hand out no mask cursor; without `CA_KERNEL_NO_MASK` a masked
+  source is walked with its masked cells read as values.
 - `CA_KERNEL_FIBER_CONTIG` is set internally by the FIBER macros — direct
   callers leave it clear to get the legacy L2-strided semantic.
 
@@ -396,16 +419,17 @@ Choose them based on what the kernel needs:
 #define CA_ITER_OK                     0
 #define CA_ITER_ERR_NOT_CHEAP          1   /* src needs materialize */
 #define CA_ITER_ERR_POLICY             2   /* policy not implemented */
-#define CA_ITER_ERR_FLAGS              3   /* flag combination invalid */
+#define CA_ITER_ERR_FLAGS              3   /* flag combination invalid; also NULL st / src */
 #define CA_ITER_ERR_READONLY           4   /* WRITE on read-only view */
-#define CA_ITER_ERR_MASK               5   /* masked src on path that lacks it */
+#define CA_ITER_ERR_MASK               5   /* reserved: never returned */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED   6   /* NO_MASK + masked src */
 ```
 
 On error the engine releases anything it claimed; `finish` is not
-required. Production kernels typically raise on any non-OK code; the
-block-form macros silently skip the body and run `finish` (= no exception
-path is needed for the common case).
+required. The block-form macros raise `RuntimeError` naming the code
+(`kernel iterator: ... (rc=N)`), and neither the body nor `finish` runs.
+A kernel that wants to handle a refusal itself reads the code from the
+raw API.
 
 ## The body-macro suite
 
@@ -563,13 +587,16 @@ level.
 
 ## Masks: propagated by default
 
-A kernel receives mask-aware iteration *by default* — masked input cells
-produce masked output, automatically ([ch. 5](05_mask_and_undef.md)). The
-`m` pointer in the body is the per-slab mask base (or `NULL` when the
-source has no mask). To opt out — for a kernel that genuinely cannot
-accept a masked source — declare `CA_KERNEL_NO_MASK`; the engine then
-rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The `_FIBER`
-(non-masked) forms are NO_MASK by construction.
+A kernel receives the source's mask *by default*: the `m` pointer in the
+body is the per-slab mask base (or `NULL` when the source has no mask).
+What a masked cell means for the output is the kernel's to decide — the
+engine does not mask the output for it; a kernel that should mask its
+output where its input is masked writes that mask itself
+([ch. 5](05_mask_and_undef.md)). To opt out — for a kernel that genuinely
+cannot accept a masked source — declare `CA_KERNEL_NO_MASK`; the engine
+then rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The
+`_FIBER` forms without MASKED in the name hand out no mask cursor, so
+without `CA_KERNEL_NO_MASK` they read masked cells as values.
 
 ### Mask helper macros
 
@@ -613,15 +640,16 @@ cumsum is semantically ambiguous — the user chains
 goal of opening per-axis capability to every stat method, while keeping
 the flatten (no-arg) form.
 
-## The one place `ca_attach` is right
+## CAObject and Faces need no special path
 
-The deliver principle says `ca_attach` is the last resort — but there is
-one legitimate routine use: a **`CA_OBJECT` per-cell Ruby callback**
-(CAObject). The iterator cannot transparently deliver a per-cell
-`rb_funcall`, so CAObject kernels take the dedicated attach path.
-Everything else goes through the iterator. Likewise, Faces are stripped on
-entry (`ca_strip_face`) and re-lifted on the result, so a kernel never
-sees a Face ([ch. 9](09_faces.md)).
+The deliver principle says `ca_attach` is the last resort, and a kernel
+does not need it for a CAObject (a view whose cells come from a Ruby
+callback) either: the classifier sends it through `CA_ITER_SRC_ATTACH`
+like the other views that compute their cells, and the iterator gathers
+the slab through the view's own transfer slots; a write walk is written
+back through the same slots, and one over a read-only CAObject is refused
+with `CA_ITER_ERR_READONLY`. Faces are stripped on entry and re-lifted on the
+result, so a kernel never sees a Face ([ch. 9](09_faces.md)).
 
 ## Internal routing (free-to-refactor)
 
@@ -631,28 +659,29 @@ INTERNAL routing keys you might see in the engine and in `ca_iter_state`:
 `src_kind`:
 
 ```c
-CA_ITER_SRC_CASTRIDE             /* entity, CAStride family, CAUbrep */
+CA_ITER_SRC_CASTRIDE             /* entity, CAStride family */
 CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA */
 CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE
-CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce */
+CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce /
+                                    CAObject / CATile / CARoll / CAStack / CAMeld / CARemap /
+                                    lazy views */
 ```
 
 The classifier reads these off the source's op table, which only works for the
 view classes compiled into the engine. A class installed from outside declares
-its kind instead, with `ca_iter_register_source_kind(obj_type,
-CA_ITER_SRC_ATTACH)` in its `Init_`; without it the source classifies as
-`CA_ITER_SRC_NONE` and every kernel refuses it with `CA_ITER_ERR_NOT_CHEAP`. The
-declaration is the one part of this routing an external author touches, so it is
-additive rather than free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a
+its kind with `ca_iter_register_source_kind(obj_type, CA_ITER_SRC_ATTACH)` in its
+`Init_`; without it the source is delivered the same way, by attaching it, so the
+declaration states the routing rather than changing it. It is the one part of
+this routing an external author touches, so it is additive rather than
+free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a
 standalone view", step 6.
 
 `alias_mode`:
 
 ```c
-CA_ITER_ALIAS_NONE              /* scratch materialise */
+CA_ITER_ALIAS_NONE              /* scratch materialise (SRC_ATTACH walks use this) */
 CA_ITER_ALIAS_CONTIG            /* parent.ptr+offset, stride implicit */
 CA_ITER_ALIAS_STRIDED           /* L2 stride-aware */
-CA_ITER_ALIAS_ATTACH            /* view's own ca_attach materialised */
 CA_ITER_ALIAS_PER_SLAB          /* T3 fallback via axis-dispatch gather */
 CA_ITER_ALIAS_PER_SLAB_HOIST    /* T3 STRIDE-innermost specialisation */
 CA_ITER_ALIAS_STACK             /* CAStack K-axis slab direct ptr access */
@@ -679,19 +708,68 @@ Constraints (the same across the family):
   does not allow two different-typed declarations in a `for` init clause,
   so they live in the surrounding scope.
 - `break;` from the body exits cleanly (= the outer for's teardown clause
-  runs `finish`).
+  runs `finish`). In a write walk `finish` writes back the slab the body
+  was in.
 - `return;` from the body LEAKS resources (scratch, parent attach). If
   you need early return, drop to the raw API.
 - A body that **raises** leaks the same way. The walk releases what it
   holds when the raise is its own (a gather, or a write-back through the
   source's transfer slots), but the body runs in the caller's frame,
-  where the engine has no hold on it — watch for an object-lane body
-  calling back into Ruby.
+  where the engine has no hold on it. A body that can raise — an
+  object-lane body calling back into Ruby — runs through `ca_iter_ensure`
+  (below).
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
-- INOUT macros runtime-assert strict full-shape equality (= same `ndim`
-  and same `dim[axis]`); a mismatch silently skips the body. Authors that
-  want broadcasting must drop to the raw API.
+- INOUT macros require the same shape for input and output (`ndim` and
+  every `dim[k]`) and raise `ArgumentError` before opening either walk
+  when they differ. Authors that want broadcasting must drop to the raw
+  API.
+
+### A body that can raise: `ca_iter_ensure`
+
+`ca_iter_ensure(n, states, body, arg)` runs `body(arg)` and finishes the
+walks in `states[0..n)` however the body leaves — by returning, by
+`break`, or by raising. The states belong to the caller's frame, not the
+body's: once the body raises, its frame is gone, and the cleanup runs
+where it was. So the body gets them through `arg` and opens them there,
+with the raw API or a block macro, which take the state as an lvalue:
+
+```c
+typedef struct {
+  ca_iter_state st;          /* in the caller's frame, not the body's */
+  CArray       *ca;
+  int8_t        axis;
+  VALUE        *op;
+} sum_ctx;
+
+static VALUE
+sum_body (VALUE arg)
+{
+  sum_ctx    *c = (sum_ctx *) arg;
+  char       *p;
+  boolean8_t *m;
+  ca_size_t   n, out_i = 0;
+  CA_FOR_EACH_FIBER_MASKED(c->st, c->ca, c->axis, CA_KERNEL_READ, p, n, m) {
+    VALUE acc = INT2FIX(0);
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      if ( m && m[i] ) continue;
+      acc = rb_funcall(acc, rb_intern("+"), 1, ((VALUE *) p)[i]);  /* may raise */
+    }
+    c->op[out_i++] = acc;
+  }
+  return Qnil;
+}
+
+/* ... */
+sum_ctx c = { .ca = ca, .axis = axis, .op = (VALUE *) co->ptr };
+ca_iter_ensure(1, &c.st, sum_body, (VALUE) &c);
+```
+
+The states are marked unopened before the body runs, so a state the body
+never opens costs nothing, and the body may finish a walk itself (finishing is
+idempotent). A state declared inside the body is not covered. Scratch the
+body allocates across a Ruby call belongs in `ALLOCV_N`, which the unwind
+collects.
 
 ## Where to go next
 

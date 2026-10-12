@@ -37,6 +37,9 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     [m, CArray::DataTypeError]
   }.to_h
 
+  # A record of one two-byte string member, ordered by it.
+  MatrixRecord = CArray.struct(order_by: [:s]) { fixlen :s, bytes: 2 }
+
   # Every Face is built over the same logical values: ab, cd, ab (or their time
   # equivalent), so one set of expectations covers the whole matrix.
   FACES = [
@@ -52,7 +55,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       # a spread of instants is a duration, not an instant
       spread:       CATimedelta::Element,
       # squared time has no type at all
-      raises:       { "variance" => TypeError } },
+      raises:       { "variance" => CArray::DataTypeError } },
 
     { name:         "CATimedelta",
       build:        -> { CArray.int64(3) { |i| [1, 2, 1][i] }.timedelta(unit: :D) },
@@ -64,7 +67,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       integer_storage: true,
       spread:       CATimedelta::Element,
       # squared time has no type, so this refuses exactly as CATime does
-      raises:       { "variance" => TypeError } },
+      raises:       { "variance" => CArray::DataTypeError } },
 
     { name:         "CAString",
       build:        -> { CArray.const_string(%w[ab cd ab]).to_string },
@@ -123,13 +126,27 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       unique:       -> { %w[ab cd] },
       cross:        nil,
       integer_storage: false,
-      # code order is the vocabulary's, not the labels', so it is not ORDERABLE;
-      # and its codes are read-only, which the self-shaped members cannot take
+      # code order is the vocabulary's, not the labels', so it is not ORDERABLE
       raises:       { "sort"            => ArgumentError,
                       "min"             => ArgumentError,
-                      "mask_duplicates" => RuntimeError,
+                      "clip"            => ArgumentError,
                       "linear_fetch"    => ArgumentError }.merge(
                       TestFaceFamilyMatrix::NO_REDUCTIONS) },
+
+    { name:         "CARecord",
+      build:        -> {
+        r = CARecord.new(TestFaceFamilyMatrix::MatrixRecord, 3)
+        r["s"][] = %w[ab cd ab]
+        r
+      },
+      value_class:  CARecord,
+      element:      TestFaceFamilyMatrix::MatrixRecord,
+      space:        ->(a) { a.data_class },
+      unique:       -> { %w[ab cd].map { |x| TestFaceFamilyMatrix::MatrixRecord.new(x) } },
+      cross:        nil,
+      integer_storage: false,
+      # a record has no numeric lane; its members do (r["s"])
+      raises:       TestFaceFamilyMatrix::NO_REDUCTIONS },
   ]
 
   # Members whose result carries VALUES: the class, the space and the decoded
@@ -142,6 +159,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     "difference"      => ->(a) { a.difference(a[1..1]) },
     "union"           => ->(a) { a.union(a[0..0]) },
     "sort"            => ->(a) { a.sort },
+    "clip"            => ->(a) { a.clip(a.min, a.max) },
     "mask_duplicates" => ->(a) { a.mask_duplicates },
     "strip_mask"      => ->(a) { a.strip_mask(method: :forward) },
   }
@@ -220,6 +238,18 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     each_face do |face, a|
       next if raises_for(face, "unique")
       assert_equal face[:unique].call, a.unique.to_a, "#{face[:name]}#unique"
+    end
+  end
+
+  # ---- 1c. equality compares values, and only within the Face's class ------
+
+  def test_equality_is_by_value_within_the_class
+    each_face do |face, a|
+      assert a == a.copy, "#{face[:name]}: == its own copy"
+      assert a.eql?(a.copy), "#{face[:name]}: eql? its own copy"
+      storage = a.__send__(:__face_storage__)
+      assert !(a == storage), "#{face[:name]}: == its storage"
+      assert !(a == a.to_type(:object)), "#{face[:name]}: == its values as objects"
     end
   end
 
@@ -459,9 +489,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
 
   # Faces in tree that the matrix does not exercise, with the reason.  Naming
   # one here is a claim that has to be paid off, not a way to stay quiet.
-  DOCUMENTED_OMISSIONS = {
-    "CARecord" => "ordering / discovery wiring is still future work",
-  }
+  DOCUMENTED_OMISSIONS = {}
 
   # CAObject subclasses that are not Faces (they never opt in).
   NON_FACE_CAOBJECT_SUBCLASSES = [].freeze

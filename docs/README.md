@@ -55,7 +55,8 @@ CArray can present.
 | [CAFarray](objects/CAFarray.md) | Guide | Column-major (Fortran-order) view |
 | [CAStack](objects/CAStack.md) | Guide | Outer-axis stack view of K uniform parents (`stack` / `meld` / `montage`) |
 | [Lazy](topics/Lazy.md) | Guide | Lazy element-wise views — `.lazy` / `CArray.lazy` / `CArray.fuse` |
-| [CAFrame](topics/CAFrame.md) | Guide (provisional) | A lightweight DataFrame over named CArray columns |
+| [CAFrame](topics/CAFrame.md) | Guide | A lightweight DataFrame over named CArray columns |
+| [CAFrameCSV](topics/CAFrameCSV.md) | Guide | Reading and writing CSV with a CAFrame (`from_csv` / `to_csv`) |
 
 ## Iterators and reductions
 
@@ -64,12 +65,13 @@ engines that differ in what a *piece* is.
 
 | Doc | Tag | What it is |
 |---|---|---|
-| [IteratorFamily](topics/IteratorFamily.md) | Overview | The whole family: one surface, five engines |
+| [IteratorFamily](topics/IteratorFamily.md) | Overview | The whole family: one surface, six engines |
 | [SlabIterator](topics/SlabIterator.md) | Guide | Per-axis Ruby block surface (`each_slab` / `map_slab` / `reduce_slab`) |
 | [CAWindowIterator](topics/CAWindowIterator.md) | Guide | Rolling reductions and bounded convolution (`windows`) |
 | [CABlockIterator](topics/CABlockIterator.md) | Guide | Non-overlapping tile reductions and pooling (`blocks`) |
 | [CACategoricalIterator](topics/CACategoricalIterator.md) | Guide | Per-category reduction (`group_by_category`) |
 | [CAGroupIterator](topics/CAGroupIterator.md) | Guide | Group a grid by its axis coordinates |
+| [CASegmentIterator](topics/CASegmentIterator.md) | Guide | Reductions over consecutive segments (`segments`) |
 | [AxisGroup](topics/AxisGroup.md) | Overview + Guide | Axis-group reduction: grouping a grid by its coordinates |
 
 ## Features

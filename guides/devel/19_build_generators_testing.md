@@ -123,6 +123,50 @@ There are three, in two frameworks, and `rake test` runs all of them.
 - **`spec/UnitTest/`** — one `test/unit` file, also from 2.x, applying the same
   mixin to nine view classes. `rake spec_unit`.
 
+`rake spec_ai` does two more checks, both about attach windows (the
+stretch between `ca_attach` and `ca_detach`; [ch. 4](04_attach_lifecycle.md)).
+A raise inside a window skips the detach, and the test that caused it
+still passes, so nothing else would report it:
+
+- **`attach_window_check`** runs first. It finds every `ca_attach`,
+  `ca_allocate`, `ca_attach_n` and `ca_allocate_n` in `ext/*.c` and in the templates of
+  `ext/mkkernel.rb`, and wants each one to say why it cannot be left open,
+  in a comment of the form `/* window: nothing raises inside */` on the
+  same line or the line above. A window inside which Ruby can run does
+  not get a note; it goes through `ca_attach_window` or `ca_iter_ensure`,
+  which close it however it is left. The attach machinery itself
+  (`carray_core.c`, the kernel-iterator and sweep engines, the views'
+  operation-table slots) is exempt. `rake attach_window_check` runs it
+  alone. Given paths, it checks those instead, so a C extension built on
+  carray can run it over its own sources from a carray checkout:
+  `ruby path/to/carray/utils/check_attach_windows.rb ext/`.
+- **`spec/spec_ai/attach_balance.rb`** is loaded ahead of the tests. In a
+  development build, CArray counts the views that are attached, and this
+  checks that the count is the same after each test as before it. To get
+  the check on a single file run by hand, load it with
+  `-r ./spec/spec_ai/attach_balance.rb`.
+
+### Fast paths and `rake spec_ai_general`
+
+A fast path answers what a general path also answers, by a different
+algorithm: the CAStack tile cache, the loop-interchange reduction, the
+streaming reduction of a lazy expression, the per-parent decomposition of a
+meld's reductions. Each one tests `ca_fast_paths_enabled()` (declared in
+`ext/carray_internal.h`) alongside its own condition; a Ruby one tests
+`CArray.__fast_paths_enabled__`. In a development build both are false when
+the process starts with `CARRAY_GENERAL_PATH=1`, so the general paths run
+everywhere. In a release build the C test is the constant 1.
+
+`rake spec_ai_general` runs spec_ai that way. The two runs together compare
+every fast path with its general path on the whole suite. A test that fails
+in only one of them points at a fault in one of the two paths.
+
+When you write a fast path, add the test to its condition. Leave it off a
+branch that only lends a pointer or drops to `memcpy` (the same code runs
+either way), and off a branch that is the only way to keep a promise, such
+as reading only the cells a view selects from a root that cannot lend its
+memory.
+
 When you delete or change behaviour, run `rake test` rather than one suite — a
 unit pass alone has missed library-load failures and old-contract regressions
 before (memory: run-tests-after-deletion).

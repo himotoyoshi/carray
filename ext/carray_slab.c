@@ -28,6 +28,7 @@
   --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name, ca_axis_integer */
 #include "carray_slab.h"
 
 /* Forward declarations: per-form loop bodies are defined later in this
@@ -67,22 +68,23 @@ ca_slab_parse_axes (ca_slab_iter_state_t *st, VALUE axis_arg, int8_t src_ndim)
   n = (int) RARRAY_LEN(arr);
   if ( n < 1 || n > CA_RANK_MAX ) {
     rb_raise(rb_eArgError,
-             "CArray::SlabIterator: axis count %d out of range [1..%d]",
-             n, CA_RANK_MAX);
+             "%s: axis count %d out of range [1..%d]",
+             ca_calling_method_name(), n, CA_RANK_MAX);
   }
 
   for ( i = 0; i < n; i++ ) {
-    int k = NUM2INT(rb_ary_entry(arr, i));
+    int k = (int) ca_axis_integer(rb_ary_entry(arr, i), NULL);
     if ( k < 0 ) k += src_ndim;
     if ( k < 0 || k >= src_ndim ) {
       rb_raise(rb_eArgError,
-               "CArray::SlabIterator: axis %d out of range for ndim %d",
-               NUM2INT(rb_ary_entry(arr, i)), src_ndim);
+               "%s: axis %d out of range for ndim %d",
+               ca_calling_method_name(), NUM2INT(rb_ary_entry(arr, i)),
+               src_ndim);
     }
     for ( j = 0; j < i; j++ ) {
       if ( st->slab_axes[j] == (int8_t) k ) {
         rb_raise(rb_eArgError,
-                 "CArray::SlabIterator: duplicate axis %d", k);
+                 "%s: duplicate axis %d", ca_calling_method_name(), k);
       }
     }
     st->slab_axes[i] = (int8_t) k;
@@ -368,23 +370,16 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
            p_in via slab_strides into the scratch, present slab_view as
            a CAStride over the carrier with contig strides.
 
-       Both paths require ALIAS T1 mode (= p_in is in src memory).
-       Non-ALIAS multi-axis T1 modes (= PER_SLAB scratch where T1 picks
-       its own gather for descriptor-framework sources) remain
-       NotImpError until a follow-on substrate phase.                   */
-    uint8_t am = st->t1->alias_mode;
-    int contig;
-    if ( am != CA_ITER_ALIAS_CONTIG &&
-         am != CA_ITER_ALIAS_STRIDED &&
-         am != CA_ITER_ALIAS_ATTACH ) {
-      rb_raise(rb_eNotImpError,
-               "multi-axis slab with non-ALIAS T1 mode not implemented yet "
-               "(alias_mode = %d)", (int) am);
-    }
-    contig = ca_slab_strides_are_row_major_contig(slab_ndim,
-                                                  st->t1->slab_dims,
-                                                  st->t1->slab_strides,
-                                                  src->bytes);
+       Path (a) needs p_in to lie in src's own buffer, which holds only
+       when src is an entity.  Any other source -- a view, whose cells the
+       iterator hands out from the root, a parent or its own scratch --
+       takes path (b): the iterator describes every slab by p_in and
+       slab_strides, whatever its mode.                                  */
+    int contig = ca_is_entity(src)
+                 && ca_slab_strides_are_row_major_contig(slab_ndim,
+                                                         st->t1->slab_dims,
+                                                         st->t1->slab_strides,
+                                                         src->bytes);
     if ( contig ) {
       /* (a) contig multi-axis ALIAS: parent=src, K-D strides match src.  */
       st->slab_view = ca_slab_build_slab_view(st->self, src->data_type,
@@ -440,7 +435,10 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
     ca_size_t strides[1];
     dim[0]     = fiber_len;
     strides[0] = src->bytes;
-    in_alias   = (in_stride == src->bytes);
+    /* A window onto src only when the fiber lies in src's own buffer:
+       an entity whose fiber is contiguous.  A view's fiber comes from
+       the root or the iterator's scratch, so it goes through a carrier. */
+    in_alias   = ca_is_entity(src) && (in_stride == src->bytes);
 
     if ( in_alias ) {
       /* ALIAS: parent = src.  ca_stride_setup auto-creates slab_view->mask
@@ -525,6 +523,44 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
   }
 }
 
+/* map_slab: mark in the output the cells the block's result has masked.
+   The output is an entity walked in place, so the slab starts at
+   last_data_off in its buffer and steps by slab_strides; the output gets
+   a mask only when some result has a masked cell. */
+static void
+ca_map_slab_carry_mask (ca_slab_iter_state_t *st, CArray *out, CArray *res,
+                        ca_size_t slab_elements)
+{
+  ca_iter_state *t = st->t1_out;
+  volatile VALUE h = 0;
+  boolean8_t *m;
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t i;
+  int8_t k;
+
+  if ( ! ca_has_mask(res) ) return;
+  ca_update_mask(res);
+  m = (boolean8_t *) ALLOCV(h, slab_elements);
+  ca_xfer_all(res->mask, m, CA_XFER_GET);
+  for ( i = 0; i < slab_elements && ! m[i]; i++ ) ;
+  if ( i < slab_elements ) {
+    ca_create_mask(out);
+    for ( k = 0; k < t->slab_ndim; k++ ) idx[k] = 0;
+    for ( i = 0; i < slab_elements; i++ ) {
+      if ( m[i] ) {
+        ca_size_t off = t->last_data_off;
+        for ( k = 0; k < t->slab_ndim; k++ ) off += idx[k] * t->slab_strides[k];
+        ((boolean8_t *) out->mask->ptr)[off / out->bytes] = 1;
+      }
+      for ( k = t->slab_ndim - 1; k >= 0; k-- ) {
+        if ( ++idx[k] < t->slab_dims[k] ) break;
+        idx[k] = 0;
+      }
+    }
+  }
+  ALLOCV_END(h);
+}
+
 /* Convert a Ruby Numeric scalar into bytes of slab_view's data_type and
    fill the entire slab buffer at out_ptr.  Used when the user block
    returns a scalar instead of a CArray (= broadcast over the slab).
@@ -533,9 +569,6 @@ static void
 ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
                      int8_t out_data_type, ca_size_t out_bytes, VALUE val)
 {
-  char buf[64];
-  char *scratch = (out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                        : xmalloc(out_bytes);
   ca_size_t i;
   /* Use source's data_type-aware conversion (rb_ca_obj2ptr looks at the
      receiver's data_type).  Build a stand-in scalar buffer via the
@@ -546,18 +579,51 @@ ca_slab_fill_scalar (VALUE source, char *out_ptr, ca_size_t slab_elements,
      conversion through the actual output entity (= we already have
      `source`-keyed obj2ptr in carray_cast.c).  Here we construct an
      ephemeral CScalar of the output data_type to anchor the cast.        */
-  VALUE cs_anchor =
+  volatile VALUE cs_anchor =
     rb_cscalar_new_with_value((int) out_data_type, (int) out_bytes, val);
   CScalar *anchor_ca;
   (void) source;
   TypedData_Get_Struct(cs_anchor, CScalar, &cscalar_data_type, anchor_ca);
-  ca_attach(anchor_ca);
-  memcpy(scratch, anchor_ca->ptr, out_bytes);
-  ca_detach(anchor_ca);
   for ( i = 0; i < slab_elements; i++ ) {
-    memcpy(out_ptr + i * out_bytes, scratch, out_bytes);
+    memcpy(out_ptr + i * out_bytes, anchor_ca->ptr, out_bytes);
   }
-  if ( scratch != buf ) xfree(scratch);
+  RB_GC_GUARD(cs_anchor);
+}
+
+/* map_slab's cast-on-scatter: each cell of the block's result converted
+   into the output data type, with the result attached for the fetches. */
+
+typedef struct {
+  VALUE      result;
+  CArray    *res;
+  VALUE      output_view;
+  char      *write_target;
+  ca_size_t  out_bytes;
+  ca_size_t  slab_elements;
+} ca_map_slab_cast_ctx_t;
+
+static VALUE
+ca_map_slab_cast_body (VALUE arg)
+{
+  ca_map_slab_cast_ctx_t *c = (ca_map_slab_cast_ctx_t *) arg;
+  volatile VALUE holder;
+  char *scratch = ALLOCV_N(char, holder, c->out_bytes);
+  ca_size_t i;
+  for ( i = 0; i < c->slab_elements; i++ ) {
+    VALUE elem;
+    ca_size_t idx[CA_RANK_MAX] = { 0 };
+    ca_size_t flat = i;
+    int8_t k;
+    for ( k = c->res->ndim - 1; k >= 0; k-- ) {
+      idx[k] = flat % c->res->dim[k];
+      flat /= c->res->dim[k];
+    }
+    elem = rb_ca_fetch_index(c->result, idx);
+    rb_ca_obj2ptr(c->output_view, elem, scratch);
+    memcpy(c->write_target + i * c->out_bytes, scratch, c->out_bytes);
+  }
+  ALLOCV_END(holder);
+  return Qnil;
 }
 
 static VALUE
@@ -573,16 +639,13 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
 
   TypedData_Get_Struct(st->self, CArray, &carray_data_type, src);
 
-  /* Mask transparent carry: input mask is exposed via slab_view
-     (= user's block can see slab.mask / slab.has_mask?).  Output mask
-     is intentionally NOT scattered — block return CArray mask info is
-     dropped (= simplest contract).                                     */
+  /* The input slab carries the source's mask; a CArray the block
+     returns carries its mask into the output (ca_map_slab_carry_mask). */
 
   /* Step 1: allocate output entity (same shape as src, data_type from opts). */
   st->output = rb_carray_new(st->out_data_type, src->ndim, src->dim,
                              st->out_bytes, NULL);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
-  ca_allocate(out);   /* entity ptr usable as both read + write target */
 
   /* Step 2: T1 init on both sides.  FIBER_CONTIG is naxes==1 only;
      multi-axis omits it.  Output side gets CA_KERNEL_WRITE.            */
@@ -698,34 +761,22 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
                      (long long) slab_elements, (int) slab_cs->ndim);
           }
           if ( res->data_type == st->out_data_type && res->bytes == st->out_bytes ) {
-            ca_attach(res);
             ca_xfer_all(res, write_target, CA_XFER_GET);
-            ca_detach(res);
           }
           else {
             /* Cast-on-scatter via per-cell obj2ptr.  Writes to write_target
-               (= either p_out direct or own_out_scratch).               */
-            char buf[64];
-            char *scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
-                            ? buf : xmalloc(st->out_bytes);
-            ca_size_t i;
-            ca_attach(res);
-            for ( i = 0; i < slab_elements; i++ ) {
-              VALUE elem;
-              ca_size_t idx[CA_RANK_MAX] = { 0 };
-              ca_size_t flat = i;
-              int8_t k;
-              for ( k = res->ndim - 1; k >= 0; k-- ) {
-                idx[k] = flat % res->dim[k];
-                flat /= res->dim[k];
-              }
-              elem = rb_ca_fetch_index(result, idx);
-              rb_ca_obj2ptr(st->output_slab_view, elem, scratch);
-              memcpy(write_target + i * st->out_bytes, scratch, st->out_bytes);
-            }
-            ca_detach(res);
-            if ( scratch != buf ) xfree(scratch);
+               (= either p_out direct or own_out_scratch).  The conversion
+               can raise, so the result is read in a window. */
+            ca_map_slab_cast_ctx_t c;
+            c.result        = result;
+            c.res           = res;
+            c.output_view   = st->output_slab_view;
+            c.write_target  = write_target;
+            c.out_bytes     = st->out_bytes;
+            c.slab_elements = slab_elements;
+            ca_attach_window(1, &res, "r", ca_map_slab_cast_body, (VALUE) &c);
           }
+          ca_map_slab_carry_mask(st, out, res, slab_elements);
         }
         else if ( rb_obj_is_kind_of(result, rb_cNumeric) ||
                   result == Qtrue || result == Qfalse ||
@@ -820,7 +871,6 @@ ca_slab_reduce_setup (ca_slab_iter_state_t *st, CArray **out_src,
   st->output = rb_carray_new(st->out_data_type, out_ndim, out_dim,
                              st->out_bytes, NULL);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
-  ca_allocate(out);
 
   /* FIBER_CONTIG is naxes==1 only (T1 substrate contract).  Multi-axis
      omits the flag and uses bare CA_SLAB_AXES; T1 picks an in-src
@@ -862,6 +912,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
+  volatile VALUE scratch_holder = 0;  /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
@@ -871,8 +922,10 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->carrier, CAWrap, &cawrap_data_type, carrier_cw);
   }
 
-  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                      : xmalloc(st->out_bytes);
+  /* The block and the conversion of its value can raise, so a scratch
+     too wide for buf is Ruby's temporary. */
+  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
+              ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE result;
@@ -891,7 +944,6 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     if ( rb_obj_is_kind_of(result, rb_cCArray) ) {
       CArray *res;
       TypedData_Get_Struct(result, CArray, &carray_data_type, res);
-      if ( scratch != buf ) xfree(scratch);
       rb_raise(rb_eArgError,
                "CArray#reduce_slab: per-slab block must return a scalar "
                "(got CArray with %lld element%s; use `slab[0]` or "
@@ -905,7 +957,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
     out_idx++;
   }
 
-  if ( scratch != buf ) xfree(scratch);
+  ALLOCV_END(scratch_holder);
   return st->output;
 }
 
@@ -926,6 +978,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
   ca_size_t out_idx = 0;
   char buf[64];
   char *scratch;
+  volatile VALUE scratch_holder = 0;  /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
 
   ca_slab_reduce_setup(st, &src, &fiber_len);
   TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
@@ -935,8 +988,10 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->carrier, CAWrap, &cawrap_data_type, carrier_cw);
   }
 
-  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf)) ? buf
-                                                      : xmalloc(st->out_bytes);
+  /* The block and the conversion of its value can raise, so a scratch
+     too wide for buf is Ruby's temporary. */
+  scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
+              ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE acc;
@@ -971,7 +1026,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
     out_idx++;
   }
 
-  if ( scratch != buf ) xfree(scratch);
+  ALLOCV_END(scratch_holder);
   return st->output;
 }
 
@@ -1055,10 +1110,55 @@ slab_state_run_body (VALUE arg)
   return Qnil;
 }
 
+/* The slab views outlive the walk: the block may keep the slab or a view
+   of it (`row.dup`), and the GC marks an object array's cells for as long
+   as it has a ptr.  Before the scratch they point into is freed, the
+   input slab and its carrier are moved onto a copy of the last slab,
+   held by the carrier, and the internal output view lets go of its
+   buffer.  A slab that is a window onto the source itself points into
+   the source and needs nothing. */
+static void
+slab_state_release_views (ca_slab_iter_state_t *st)
+{
+  if ( st->output_slab_view != Qnil ) {
+    CArray *ov;
+    TypedData_Get_Struct(st->output_slab_view, CArray, &carray_data_type, ov);
+    ov->ptr = NULL;
+  }
+  if ( st->carrier != Qnil && st->slab_view != Qnil ) {
+    CArray *cw, *cs, *backing;
+    volatile VALUE bv;
+    TypedData_Get_Struct(st->carrier,   CArray, &carray_data_type, cw);
+    TypedData_Get_Struct(st->slab_view, CArray, &carray_data_type, cs);
+    if ( cw->ptr == NULL ) {
+      return;
+    }
+    backing = ca_copy(cw);
+    bv = ca_wrap_struct(backing);
+    if ( cw->mask && ! backing->mask ) {
+      ca_create_mask(backing);
+    }
+    rb_ivar_set(st->carrier, rb_intern("__slab_backing__"), bv);
+    if ( cs->ptr ) {
+      cs->ptr = backing->ptr;
+    }
+    if ( cs->mask && cs->mask->ptr ) {
+      cs->mask->ptr = backing->mask->ptr;
+    }
+    cw->ptr = backing->ptr;
+    if ( cw->mask ) {
+      cw->mask->ptr = backing->mask->ptr;
+    }
+    RB_GC_GUARD(bv);
+  }
+}
+
 static VALUE
 slab_state_finish (VALUE arg)
 {
   ca_slab_iter_state_t *st = (ca_slab_iter_state_t *)(uintptr_t) arg;
+
+  slab_state_release_views(st);
 
   /* T1 substrate teardown.
      CAREFUL: ca_detach(slab_view) is NEVER called — T1 owns the buffer;
@@ -1124,7 +1224,7 @@ static VALUE
 slab_extract_kwargs (int argc, VALUE *argv, const char *method_name)
 {
   VALUE kw = Qnil;
-  if ( argc == 1 && RB_TYPE_P(argv[0], T_HASH) ) {
+  if ( argc == 1 && rb_keyword_given_p() && RB_TYPE_P(argv[0], T_HASH) ) {
     kw = argv[0];
   }
   else if ( argc != 0 ) {

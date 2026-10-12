@@ -38,7 +38,6 @@ class CArray
   #     shorter than `ndim` (missing axes default to `0`).
   #   @return [CARoll]
   #   @raise [ArgumentError] when more than `ndim` shifts are given.
-  #   @raise [IndexError] when any parent dimension is non-positive.
   def roll(*shifts); end
 
   # @!endgroup

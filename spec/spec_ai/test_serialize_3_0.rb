@@ -185,8 +185,8 @@ class TestSerialize30 < Test::Unit::TestCase
     rc[1] = Rec.new(:lat => 3.5, :lng => 4.5, :id => 8)
     rc2 = CArray.load(CArray.dump(rc))
     assert_equal Rec, rc2.data_class
-    assert_equal 1.5, rc2[0][:lat]
-    assert_equal 8, rc2[1][:id]
+    assert_equal 1.5, rc2[0]["lat"]
+    assert_equal 8, rc2[1]["id"]
     assert_equal rc, rc2
   end
 
@@ -219,9 +219,43 @@ class TestSerialize30 < Test::Unit::TestCase
     self.class.send(:remove_const, :TmpRec)
     rc2 = CArray.load(s)
     assert_operator rc2.data_class, :<, CAStruct
-    assert_equal 5, rc2[0][:a]
-    assert_in_delta 1.5, rc2[0][:b], 1e-6
+    assert_equal 5, rc2[0]["a"]
+    assert_in_delta 1.5, rc2[0]["b"], 1e-6
     assert_equal 6, rc2.data_class::DATA_SIZE
+  end
+
+  # A member declared with endian: keeps its byte order through the schema,
+  # in a file of either byte order.
+  def test_anonymous_data_class_keeps_member_endian
+    tmp = CArray.struct { int32 :v, endian: :big; int32 :w }
+    rc = CARecord.new(tmp, 2)
+    rc["v"][] = [1, 2]
+    rc["w"][] = [3, 4]
+    [CA_LITTLE_ENDIAN, CA_BIG_ENDIAN].each do |e|
+      rc2 = CArray.load(CArray.dump(rc, :endian => e))
+      assert_equal :big, rc2.data_class.field_info("v").endian
+      assert_equal [1, 2], rc2["v"].to_a
+      assert_equal [3, 4], rc2["w"].to_a
+    end
+  end
+
+  # A file in the other byte order swaps the members in machine order only:
+  # a declared member's bytes are the same in either file, so a machine of
+  # the file's byte order reads it without swapping.
+  def test_declared_members_keep_their_bytes_in_either_file
+    tmp = CArray.struct { int32 :v, endian: :big; int32 :w; int16 :u, endian: :little }
+    rc = CARecord.new(tmp, 1)
+    rc["v"][0] = 1; rc["w"][0] = 2; rc["u"][0] = 5
+    data = [CA_LITTLE_ENDIAN, CA_BIG_ENDIAN].map { |e|
+      CArray.dump(rc, :endian => e).byteslice(HDR, 10).bytes
+    }
+    little, big = data
+    assert_equal [0, 0, 0, 1], big[0, 4]           # v: big in both
+    assert_equal little[0, 4], big[0, 4]
+    assert_equal [5, 0], big[8, 2]                 # u: little in both
+    assert_equal little[8, 2], big[8, 2]
+    assert_equal [0, 0, 0, 2], big[4, 4]           # w: the file's order
+    assert_equal [2, 0, 0, 0], little[4, 4]
   end
 
   # ---- endian override ----
@@ -264,11 +298,11 @@ class TestSerialize30 < Test::Unit::TestCase
 
   def test_bad_magic_raises
     io = StringIO.new(("garbage" + "\x00" * HDR).b)
-    assert_raises(RuntimeError) { CArray.load(io) }
+    assert_raises(ArgumentError) { CArray.load(io) }
   end
 
   def test_truncated_header_raises
     io = StringIO.new("_CARRAY3\x00\x00".b)
-    assert_raises(RuntimeError) { CArray.load(io) }
+    assert_raises(ArgumentError) { CArray.load(io) }
   end
 end

@@ -85,6 +85,26 @@ ca_sweep_pair_operands (ca_sweep_state_t *st)
   return donor;
 }
 
+/* Non-zero when INPUT k_op lives in the same root as an OUTPUT other
+ * than itself.  Read in place, or chunk by chunk after earlier chunks
+ * were written, it would show the kernel cells already written; such an
+ * input is read whole before the walk.  An input that is the output
+ * itself is read in place: each cell is read before it is written. */
+static int
+ca_sweep_input_overlaps_output (ca_sweep_state_t *st, int k_op)
+{
+  int j;
+  CArray *ca = st->cx[k_op];
+  if (st->fsync[k_op] != '0' || ca_is_scalar(ca)) return 0;
+  for (j = 0; j < st->n_ops; j++) {
+    if (st->fsync[j] == '1' && st->cx[j] != ca &&
+        ca_shares_root(ca, st->cx[j])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 /* Non-zero when any INPUT operand carries a mask.  Asks, allocates
  * nothing. */
 static int
@@ -95,18 +115,6 @@ ca_sweep_any_input_mask (ca_sweep_state_t *st)
     if (st->fsync[k_op] == '0' && ca_has_mask(st->cx[k_op])) return 1;
   }
   return 0;
-}
-
-NORETURN(static void ca_sweep_refuse_masked_input (ca_sweep_state_t *st,
-                                                  const char *fallback));
-
-static void
-ca_sweep_refuse_masked_input (ca_sweep_state_t *st, const char *fallback)
-{
-  rb_raise(rb_eRuntimeError,
-           "%s: masked INPUT not allowed in NO_MASK form "
-           "(use the *_MASKED form to handle masked cells explicitly)",
-           st->src_label ? st->src_label : fallback);
 }
 
 /* Give back everything acquire has taken so far, without syncing: detach
@@ -158,12 +166,14 @@ ca_sweep_acquire_body (VALUE arg)
   /* Per-operand acquire:
    *   OUTPUT (fsync == '1')       -> ca_attach + base = ca->ptr
    *   INPUT alias                 -> ca_attach + base = ca->ptr
-   *   INPUT non-alias non-scalar  -> xmalloc scratch + ca_xfer_all
+   *   INPUT non-alias non-scalar,
+   *   or sharing an OUTPUT's root -> xmalloc scratch + ca_xfer_all
    * INPUT non-alias never attaches the operand itself; the scratch
    * copy carries the values into the kernel. */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
-    if (st->fsync[k_op] == '1' || ca_attach_is_alias(ca)) {
+    if (st->fsync[k_op] == '1' ||
+        (ca_attach_is_alias(ca) && ! ca_sweep_input_overlaps_output(st, k_op))) {
       ca_attach(ca);
       st->attached[k_op] = 1;
       st->base[k_op]     = (char *) ca->ptr;
@@ -204,8 +214,7 @@ ca_sweep_acquire_body (VALUE arg)
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
       if (st->fsync[k_op] != '1') continue;
-      ca_update_mask(ca);
-      if (!ca->mask) ca_create_mask(ca);
+      ca_create_mask(ca);
       memcpy(ca->mask->ptr, st->m0, st->n_kernel);
     }
   }
@@ -232,17 +241,12 @@ ca_sweep_acquire (ca_sweep_state_t *st)
     st->attached[k_op]  = 0;
   }
   st->m0       = NULL;
-  /* CAREFUL: do not reset st->no_mask here — caller sets it before
-   * acquire and the NO_MASK guard below consumes it. */
 
   /* Refusals come first, while nothing is held. */
   ca_sweep_pair_operands(st);
   ctx.st             = st;
   ctx.ms             = NULL;
   ctx.any_input_mask = ca_sweep_any_input_mask(st);
-  if (ctx.any_input_mask && st->no_mask) {
-    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire");
-  }
 
   rb_protect(ca_sweep_acquire_body, (VALUE) &ctx, &tag);
   if (ctx.ms) xfree(ctx.ms);
@@ -280,14 +284,60 @@ ca_sweep_run_chunked (ca_sweep_state_t *st, VALUE (*walk)(VALUE), VALUE arg)
   ca_sweep_release_chunked(st);
 }
 
+static VALUE
+ca_sweep_sync_one (VALUE arg)
+{
+  ca_sync((CArray *) arg);
+  return Qnil;
+}
+
+/* Sync the OUTPUTs (reverse order).  Writing back through a view's slots
+ * can raise (a CAObject's store hook); the raise is held so that release
+ * still detaches and frees everything, and ca_sweep_reraise propagates
+ * it afterwards.  An entity's sync does nothing that can raise, so it is
+ * called directly: the outputs this library allocates itself pay nothing. */
+static int
+ca_sweep_sync_outputs (ca_sweep_state_t *st, volatile VALUE *error)
+{
+  int k_op, first = 0;
+  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
+    CArray *ca = st->cx[k_op];
+    if (st->fsync[k_op] != '1') {
+      continue;
+    }
+    if (ca_is_entity(ca)) {
+      ca_sync(ca);
+    }
+    else {
+      int tag = 0;
+      rb_protect(ca_sweep_sync_one, (VALUE) ca, &tag);
+      if (tag) {
+        if (! first) {
+          first  = tag;
+          *error = rb_errinfo();
+        }
+        rb_set_errinfo(Qnil);
+      }
+    }
+  }
+  return first;
+}
+
+static void
+ca_sweep_reraise (int tag, VALUE error)
+{
+  if (tag) {
+    rb_set_errinfo(error);
+    rb_jump_tag(tag);
+  }
+}
+
 void
 ca_sweep_release (ca_sweep_state_t *st)
 {
   int k_op;
-  /* sync OUTPUTs (reverse order) */
-  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
-    if (st->fsync[k_op] == '1') ca_sync(st->cx[k_op]);
-  }
+  volatile VALUE error = Qnil;
+  int tag = ca_sweep_sync_outputs(st, &error);
   /* detach attached / xfree owned buffers (reverse order) */
   for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
     if (st->attached[k_op]) {
@@ -301,6 +351,7 @@ ca_sweep_release (ca_sweep_state_t *st)
     xfree(st->m0);
     st->m0 = NULL;
   }
+  ca_sweep_reraise(tag, error);
 }
 
 /* ===== Chunked path implementation ===== */
@@ -315,13 +366,14 @@ ca_sweep_acquire_chunked_body (VALUE arg)
   /* per-operand acquire:
    *   OUTPUT (fsync == '1') : ca_attach + base_orig = ca->ptr (legitimate)
    *   INPUT  alias          : ca_attach + base_orig = ca->ptr (zero-copy)
-   *   INPUT  non-alias non-scalar : arena chunk scratch of chunk_n_max bytes
+   *   INPUT  non-alias non-scalar,
+   *   or sharing an OUTPUT's root : arena chunk scratch of chunk_n_max bytes
    *   INPUT  scalar         : ca_attach + base_orig = ca->ptr (1 cell)
    */
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     CArray *ca = st->cx[k_op];
     if (st->fsync[k_op] == '1' || ca_is_scalar(ca) ||
-        ca_attach_is_alias(ca)) {
+        (ca_attach_is_alias(ca) && ! ca_sweep_input_overlaps_output(st, k_op))) {
       ca_attach(ca);
       st->attached[k_op]  = 1;
       st->base_orig[k_op] = (char *) ca->ptr;
@@ -352,8 +404,7 @@ ca_sweep_acquire_chunked_body (VALUE arg)
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
       if (st->fsync[k_op] != '1') continue;
-      ca_update_mask(ca);
-      if (!ca->mask) ca_create_mask(ca);
+      ca_create_mask(ca);
     }
   }
 
@@ -410,13 +461,20 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
     st->chunk_n_max = 1;
   }
 
+  /* An INPUT sharing an OUTPUT's root is read whole before anything is
+     written: the walk becomes a single chunk, so its data and its mask
+     are gathered before the first flush. */
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    if (ca_sweep_input_overlaps_output(st, k_op) && st->n_kernel > 0) {
+      st->chunk_n_max = st->n_kernel;
+      break;
+    }
+  }
+
   /* Refusals come first, while nothing is held. */
   ctx.st             = st;
   ctx.ms             = NULL;
   ctx.any_input_mask = ca_sweep_any_input_mask(st);
-  if (ctx.any_input_mask && st->no_mask) {
-    ca_sweep_refuse_masked_input(st, "ca_sweep_acquire_chunked");
-  }
 
   rb_protect(ca_sweep_acquire_chunked_body, (VALUE) &ctx, &tag);
   if (tag) {
@@ -454,9 +512,7 @@ ca_sweep_gather_chunk_mask (ca_sweep_state_t *st, ca_size_t off, ca_size_t n)
   }
 }
 
-/* Copy the chunk just finished out to every OUTPUT operand's mask.  Runs
- * after the author's loop over that chunk, so m_out writes into m0 are
- * carried through. */
+/* Copy the chunk just finished out to every OUTPUT operand's mask. */
 static void
 ca_sweep_flush_chunk_mask (ca_sweep_state_t *st)
 {
@@ -510,7 +566,6 @@ ca_sweep_next_chunk (ca_sweep_state_t *st)
     st->chunk_off     = 0;
     st->chunked_state = 1;
   } else {
-    /* the chunk that just finished is the author's last word on its mask */
     ca_sweep_flush_chunk_mask(st);
     /* advance */
     st->chunk_off += st->chunk_n;
@@ -543,16 +598,15 @@ void
 ca_sweep_release_chunked (ca_sweep_state_t *st)
 {
   int k_op;
+  volatile VALUE error = Qnil;
+  int tag;
   /* a walk that raised has already given everything back */
   if (st->chunked_state == 3) return;
   /* The final chunk has no next_chunk call to flush it, so it is flushed
-   * here.  For INOUT_MASKED forms this is what captures the author's
-   * per-cell m_out writes over that last chunk. */
+   * here. */
   ca_sweep_flush_chunk_mask(st);
-  /* sync OUTPUTs (reverse order, regardless of whether chunk loop ran) */
-  for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
-    if (st->fsync[k_op] == '1') ca_sync(st->cx[k_op]);
-  }
+  /* sync OUTPUTs (regardless of whether chunk loop ran) */
+  tag = ca_sweep_sync_outputs(st, &error);
   /* detach attached / release arena scratch buffers (reverse order) */
   for (k_op = st->n_ops - 1; k_op >= 0; k_op--) {
     if (st->attached[k_op]) {
@@ -570,13 +624,16 @@ ca_sweep_release_chunked (ca_sweep_state_t *st)
     ca_lazy_arena_release(st->mask_scratch);
     st->mask_scratch = NULL;
   }
+  if (tag) {
+    st->chunked_state = 3;            /* everything has been given back */
+  }
+  ca_sweep_reraise(tag, error);
 }
 
 /* ===== WHOLE_BUFFER function form (rb_ensure-protected) ===== */
 
 typedef struct {
   CArray              *ca;
-  int                  writable;
   ca_with_buffer_body_fn body_fn;
   void                *user_data;
 } ca_with_buffer_ctx_t;
@@ -589,49 +646,15 @@ ca_with_buffer_body_trampoline (VALUE ctx_val)
   return Qnil;
 }
 
-static VALUE
-ca_with_buffer_ensure_trampoline (VALUE ctx_val)
-{
-  ca_with_buffer_ctx_t *ctx = (ca_with_buffer_ctx_t *) ctx_val;
-  if (ctx->writable) ca_sync(ctx->ca);
-  ca_detach(ctx->ca);
-  return Qnil;
-}
-
 void
 rb_ca_call_with_buffer (VALUE r_ca, int writable,
                    ca_with_buffer_body_fn body, void *user_data)
 {
   ca_with_buffer_ctx_t ctx;
   TypedData_Get_Struct(r_ca, CArray, &carray_data_type, ctx.ca);
-  /* CAREFUL: attach outside rb_ensure.  If attach raises, we are not
-   * yet inside the ensure scope, so the ensure trampoline will not
-   * fire on a not-attached ca (which would try to detach and crash). */
-  ca_attach(ctx.ca);
-  ctx.writable  = writable;
   ctx.body_fn   = body;
   ctx.user_data = user_data;
-  rb_ensure(ca_with_buffer_body_trampoline,    (VALUE) &ctx,
-            ca_with_buffer_ensure_trampoline,  (VALUE) &ctx);
+  ca_attach_window(1, &ctx.ca, writable ? "w" : "r",
+                   ca_with_buffer_body_trampoline, (VALUE) &ctx);
 }
 
-void
-ca_sweep_check_same_shape (CArray *ca_in, CArray *ca_out, const char *src_label)
-{
-  int k;
-  const char *lbl = src_label ? src_label : "ca_sweep_check_same_shape";
-  if (ca_in->ndim != ca_out->ndim) {
-    rb_raise(rb_eRuntimeError,
-             "%s: shape mismatch (ndim %d vs %d)",
-             lbl, ca_in->ndim, ca_out->ndim);
-  }
-  for (k = 0; k < ca_in->ndim; k++) {
-    if (ca_in->dim[k] != ca_out->dim[k]) {
-      rb_raise(rb_eRuntimeError,
-               "%s: shape mismatch at dim[%d] (%lld vs %lld)",
-               lbl, k,
-               (long long) ca_in->dim[k],
-               (long long) ca_out->dim[k]);
-    }
-  }
-}

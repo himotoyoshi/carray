@@ -150,7 +150,7 @@ new shape must equal the source element count — a mismatch raises rather
 than silently truncating:
 
 ```ruby
-m.reshape(5)                 # RuntimeError: cannot reshape 12 elements into 5
+m.reshape(5)                 # ArgumentError: cannot reshape 12 elements into 5
 ```
 
 At most one `-1` / `:~` placeholder is allowed.
@@ -242,13 +242,13 @@ be trusted if any byte of it came from a masked source element.
 
 | condition | result |
 |---|---|
-| view width does not divide parent width (or vice versa) | `RuntimeError` |
-| `offset` negative | `RuntimeError` |
-| view byte extent exceeds the parent | `RuntimeError` |
-| `CA_OBJECT` parent reinterpreted as a non-object type | `RuntimeError` |
-| `reshape` product ≠ element count (no placeholder) | `RuntimeError` |
-| more than one `-1` / `:~` placeholder | `RuntimeError` |
-| `reshape` with a different byte width but no `dim` | `RuntimeError` |
+| view width does not divide parent width (or vice versa) | `ArgumentError` |
+| `offset` negative | `ArgumentError` |
+| view byte extent exceeds the parent | `ArgumentError` |
+| `CA_OBJECT` parent reinterpreted as a non-object type | `CArray::DataTypeError` |
+| `reshape` product ≠ element count (no placeholder) | `ArgumentError` |
+| more than one `-1` / `:~` placeholder | `ArgumentError` |
+| `reshape` with a different byte width but no `dim` | `ArgumentError` |
 
 `CA_OBJECT` cannot be reinterpreted as a numeric type — its elements are
 Ruby object references, not fixed-width bytes.

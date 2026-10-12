@@ -1,8 +1,9 @@
 # 21 The address basis (`CArray::AddressBasis`)
 
 Every surface in Part III hands a kernel its *cells*: the kernel iterator
-delivers a slab or a fiber at a time, the sweep ELEMENT family delivers one
-element at a time, `call_cfunc` delivers the arguments of a scalar call.
+delivers a slab or a fiber at a time, `call_cfunc` delivers the arguments of
+a scalar call or a flat chunk, `rb_ca_call_with_buffer` delivers the whole
+array as one contiguous buffer.
 
 Some code does not want cells. A kernel generated from an expression writes
 its own loop — it reads `a[i-1]` and writes `a[i]`, or it reaches across two
@@ -33,8 +34,8 @@ own terms.
 | Surface | Why it does not fit |
 |---|---|
 | kernel iterator (ch. 11) | Delivers per cell or per slab, and has no N-ary form. A generated kernel with five operands and a stencil reach cannot be expressed as "here is the next slab". |
-| sweep ELEMENT family (ch. 13) | Flattens the array. A stencil needs the axis structure the flattening throws away. |
-| `CA_WITH_BUFFER` (ch. 13) | The closest relative — it also lends a buffer for the length of a block — but it materialises the whole view, one array at a time, and gives back a contiguous buffer rather than the view's own strides. |
+| call_cfunc (ch. 14) | Flattens the array. A stencil needs the axis structure the flattening throws away. |
+| `rb_ca_call_with_buffer` (ch. 13) | The closest relative — it also lends a buffer for the length of a block — but it materialises the whole view, one array at a time, and gives back a contiguous buffer rather than the view's own strides. |
 
 The shape of the surface follows from that: **N arrays at once**, **strides
 rather than contiguity**, and **only the region the caller says it will
@@ -55,12 +56,14 @@ CArray::AddressBasis.classify(array)   #=> Hash
 form. `classify` reports how an array *would* be opened without opening it,
 which is what a caller uses to decide whether a fast path applies.
 
-Both refuse the same two things up front:
+`classify` refuses nothing. `open` refuses, before it opens any array:
 
 - an array whose `data_type` is `CA_OBJECT`, because its cells are `VALUE`s
   and a generated kernel computes on numbers (`ArgumentError`);
 - an array that is read-only, when the matching `writable` flag is true
-  (`RuntimeError`).
+  (`RuntimeError`);
+- a masked view that reinterprets the element size (see *Masks* below,
+  `ArgumentError`).
 
 ## The three tiers
 
@@ -123,7 +126,8 @@ Two things about how the region lands:
 The region is only *used* by tier 3 — tiers 1 and 2 address the whole array,
 which already covers any box inside it. It is **checked** for every array all
 the same, before any of them is opened: one start and one count per axis, both
-numbers, and the box inside the array. A region that is wrong is refused the
+Integers (a Float is a `TypeError`, not truncated), and the box inside the
+array. A region that is wrong is refused the
 same way whatever the arrays turn out to be, rather than being noticed only
 once the same call is handed a gather view.
 
@@ -138,7 +142,12 @@ One refusal is specific to masks. A view that reinterprets the element size
 shape, but one cell of that mask covers a fraction of a parent cell, so
 writing cell *i*'s mask also marks its neighbour. A per-cell kernel writes
 cells independently and cannot express that, so opening such a view with a
-mask raises `ArgumentError` rather than marking a neighbour quietly.
+mask raises `ArgumentError` rather than marking a neighbour quietly. This
+holds in every tier: a view that lands in tier 3 moves the same mask, and the
+neighbour would be marked on the way back.
+
+A mask added to a parent after a view of it was made is not on the view
+until the view is asked for it. `open` asks, so such a mask is opened.
 
 Note that a mask slot carries no region of its own: when the data is boxed,
 the mask is still transferred whole. That is consistent rather than wrong —
@@ -232,10 +241,17 @@ void kernel (char **pointers, int64_t *strides, int64_t *bounds,
 
 - A **tier-1 or tier-2** basis addresses the root's own memory, so a write is
   already where it belongs. Closing detaches the root, and nothing else.
-- A **tier-3** region is a buffer of its own. Closing sends it back with
-  `ca_xfer_stride` — if the array was opened writable — and frees it.
+- A **tier-3** region is a buffer of its own. If the array was opened
+  writable, closing sends back **the cells whose bytes the kernel changed**,
+  a run along the last axis at a time, and frees the buffer. Sending the
+  whole box would also send the cells the kernel left alone, and those do
+  not come back unchanged through a view that converts: a `float64` read
+  through an `int32` view as 1 would be written back as 1.0. It would also
+  overwrite a write the kernel made to the same cells through another
+  basis that addresses them in place. A kernel that writes the very value
+  it read leaves the cell as it was.
 
-Two consequences worth stating, because a consumer will meet both.
+Three consequences worth stating, because a consumer will meet all of them.
 
 **A raise does not roll anything back.** The block leaving by an exception
 still runs the close, which still sends a writable region back. Whatever the
@@ -243,10 +259,17 @@ kernel managed to write before it gave up is in the array. That is the same
 promise `attach!` makes (ch. 4): the close is guaranteed, the *contents* are
 the caller's business.
 
-**A refusal part way through still closes what was already open.** Arrays are
-opened one at a time, and a later one can be refused — the reinterpret-plus-
-mask case above, for instance. The arrays already open at that point are
-closed on the way out.
+**A failure part way through still closes what was already open.** Arrays
+are opened one at a time, and opening a later one can raise — a tier-3 read
+whose own transfer fails, for instance. The arrays already open at that
+point are closed on the way out.
+
+**One region failing to go back does not stop the others.** A write-back can
+raise — the array's own transfer failing, as a lazily backed source's does
+when its I/O fails. The close sets that exception aside, sends the remaining
+regions back, frees every buffer and detaches every root, and raises it
+afterwards — unless the block raised, in which case the block's exception is
+the one that propagates.
 
 ## What is pinned, and where
 
@@ -258,7 +281,7 @@ macOS only, omitted elsewhere).
 
 ## Related chapters
 
-- [ch. 04](04_attach_lifecycle.md) — `ca_attach` / `ca_detach` and the R1–R5
+- [ch. 04](04_attach_lifecycle.md) — `ca_attach` / `ca_detach` and the R1–R6
   contract this sits on.
 - [ch. 06](06_view_algebra_and_castride.md) — `ca_stride_compose_to_root`,
   which is the whole of tier 2.

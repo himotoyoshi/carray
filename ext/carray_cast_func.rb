@@ -107,8 +107,8 @@ FLOAT = [
   CA_FLOAT64  ,
 ]
 
-# object -> int/float cast: a parse failure masks the output cell (UNDEF)
-# instead of a silent 0.0 (float) or a raise (int).  These parsers report
+# object -> int/float/complex cast: a parse failure masks the output cell
+# (UNDEF) instead of raising.  These parsers report
 # failure through an out-param whose C type is `oktype`.
 obj2cval_ok = {
   CA_INT8     => "rb_obj2long_ok",
@@ -121,6 +121,8 @@ obj2cval_ok = {
   CA_UINT64   => "rb_obj2ull_ok",
   CA_FLOAT32  => "ca_obj2dbl_ok",
   CA_FLOAT64  => "ca_obj2dbl_ok",
+  CA_CMPLX64  => "ca_obj2cmplx_ok",
+  CA_CMPLX128 => "ca_obj2cmplx_ok",
 }
 
 oktype = {
@@ -134,6 +136,8 @@ oktype = {
   CA_UINT64   => "unsigned long long",
   CA_FLOAT32  => "double",
   CA_FLOAT64  => "double",
+  CA_CMPLX64  => "double complex",
+  CA_CMPLX128 => "double complex",
 }
 
 BOOLEAN = [
@@ -172,6 +176,7 @@ puts %{
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_decimal_string_to / _store */
 
 static void __attribute__((noreturn))
 ca_cast_not_implemented(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
@@ -295,7 +300,7 @@ puts
                  *p2 = q;
                }
                else {
-                 rb_raise(rb_eRuntimeError, "out of range to cast to boolean (0 or 1)");
+                 rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
                }
              }
              p1++; p2++; m++;
@@ -308,7 +313,7 @@ puts
                *p2 = q;
              }
              else {
-               rb_raise(rb_eRuntimeError, "out of range to cast to boolean (0 or 1)");
+               rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
              }
              p1++; p2++; 
            }
@@ -456,17 +461,30 @@ OBJECT.each do |type1|
     ctype1 = ctype[type1]
     ctype2 = ctype[type2]
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
-    if (INTEGER+FLOAT).include?(type2)
-      # object -> int/float: parse failure -> masked (UNDEF) output cell.
-      # The mask-aware loop runs only when a mask buffer is supplied (m);
-      # #to_type always supplies one for these targets so the whole
-      # user-facing object->numeric surface gets the masking semantics.
-      # With no mask buffer (internal single-cell / view paths) the legacy
-      # value parser keeps its old behaviour (lenient 0.0 float / raising
-      # int), leaving those paths byte-identical.
+    if (INTEGER+FLOAT+[CA_CMPLX64, CA_CMPLX128]).include?(type2)
+      # object -> int/float/complex: parse failure -> masked (UNDEF) output
+      # cell.  The mask-aware loop runs only when a mask buffer is supplied
+      # (m); #to_type always supplies one for these targets.  With no mask
+      # buffer (a store, single-cell and view paths) the value parser
+      # raises for a cell it cannot read.
       conv_ok = obj2cval_ok[type2]
       conv    = obj2cval[type2]
       oktype2 = oktype[type2]
+      # A String cell of an integer or float target is read as a decimal
+      # number (ca_decimal_string_to / _store in carray_cast.c), not as a
+      # Ruby literal. Complex keeps its own reader.
+      if (INTEGER+FLOAT).include?(type2)
+        type_name = "CA_" + ctype2.sub(/_t\z/, "").upcase
+        read_ok   = "( RB_TYPE_P(*p1, T_STRING) ? " \
+                    "ca_decimal_string_to(*p1, #{type_name}, p2) : " \
+                    "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
+        read      = "if ( RB_TYPE_P(*p1, T_STRING) ) { " \
+                    "ca_decimal_string_store(*p1, #{type_name}, p2); } " \
+                    "else { *p2 = (#{ctype2}) #{conv}(*p1); }"
+      else
+        read_ok   = "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 )"
+        read      = "*p2 = (#{ctype2}) #{conv}(*p1);"
+      end
       puts <<-END_DEF  .gsub(/^ {6}/, '')
         static void
         ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
@@ -476,20 +494,15 @@ OBJECT.each do |type1|
            #{oktype2} tmp;
            if ( m ) {
              while ( n-- ) {
-               if ( !*m ) {
-                 if ( #{conv_ok}(*p1, &tmp) ) {
-                   *p2 = (#{ctype2}) tmp;
-                 }
-                 else {
-                   *m = 1;
-                   *p2 = 0;
-                 }
+               if ( !*m && ! #{read_ok} ) {
+                 *m = 1;
+                 *p2 = 0;
                }
                p1++; p2++; m++;
              }
            }
            else {
-             while ( n-- ) { *p2 = (#{ctype2}) #{conv}(*p1); p1++; p2++; }
+             while ( n-- ) { #{read} p1++; p2++; }
            }
            return;
         }

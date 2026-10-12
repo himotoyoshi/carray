@@ -112,21 +112,31 @@ class CArray::Serializer   # :nodoc:
   #   The data region is raw contiguous bytes; attribute Hash and
   #   data_class schema (if any) ride in a YAML trailer at the tail.
   #   @param ca [CArray] array to write.
-  #   @param opt [Hash] `:endian` forces the output byte order
+  #   @param endian [Symbol, Integer, nil] forces the output byte order
   #     (defaults to the host's; a differing value swaps data + header).
   #   @return [CArray] `ca`.
   #   @raise [ArgumentError] when `ca` is a CA_OBJECT array (use
   #     `Marshal.dump(ca)` instead), or carries a data_class the
   #     v1.0 flat-primitive schema cannot express.
-  def save (ca, **opt)
+  #   @raise [TypeError] when `ca` is a Face other than a record (save
+  #     its storage with `.parent`).
+  def save (ca, endian: nil)
     if ca.data_type == :object
       raise ArgumentError,
             "CArray.save cannot serialise a CA_OBJECT array " \
             "(arbitrary Ruby objects have no portable representation); " \
             "use Marshal.dump(ca) for a Ruby-only round-trip"
     end
+    # A Face other than a record is refused, as Marshal refuses it: the file
+    # would carry its storage without what makes it the Face (a unit, the
+    # string buffer, the labels), and load could not put that back.
+    if ca.face? && !ca.is_a?(CARecord)
+      raise TypeError,
+            "CArray.save cannot carry a #{ca.class} yet (its Face would be " \
+            "lost); save its storage with .parent"
+    end
 
-    file_endian = opt[:endian] || CArray.endian
+    file_endian = endian || CArray.endian
     swap        = (file_endian != CArray.endian)
 
     elements     = ca.elements
@@ -170,7 +180,7 @@ class CArray::Serializer   # :nodoc:
 
     @io.write(self.class.pack_header(header, file_endian))
 
-    data_ca = swap ? ca.swap_bytes : ca
+    data_ca = swap ? to_other_byte_order(ca) : ca
     data_ca.dump_binary(@io)
 
     if has_mask
@@ -186,18 +196,19 @@ class CArray::Serializer   # :nodoc:
   #   Reads a _CARRAY3 payload from the wrapped IO and returns the
   #   reconstructed array, re-wrapping it through its recorded
   #   data_class when the trailer carries one.
-  #   @param opt [Hash] `:data_type` overrides the element type for a
+  #   @param data_type [Symbol, Integer, nil] overrides the element type for a
   #     bare `CA_FIXLEN` payload.
   #   @return [CArray]
-  #   @raise [RuntimeError] on a bad magic string, corrupt header, or
+  #   @raise [ArgumentError] on a bad magic string, corrupt header, or
   #     unsupported version.
-  def load (**opt)
+  def load (data_type: nil)
+    fixlen_type = data_type
     buf = @io.read(HEADER_BYTES)
     unless buf && buf.bytesize == HEADER_BYTES
-      raise "not a CArray binary data (truncated header)"
+      raise ArgumentError, "not a CArray binary data (truncated header)"
     end
     if buf[0, 8] != MAGIC
-      raise "not a CArray binary data (bad magic)"
+      raise ArgumentError, "not a CArray binary data (bad magic)"
     end
 
     # The byte order is self-describing via endian_marker at offset 8:
@@ -208,22 +219,23 @@ class CArray::Serializer   # :nodoc:
     when 0x01 then file_endian = CA_BIG_ENDIAN
     when 0x04 then file_endian = CA_LITTLE_ENDIAN
     else
-      raise "corrupt CArray binary data (endian marker mismatch)"
+      raise ArgumentError, "corrupt CArray binary data (endian marker mismatch)"
     end
     h = self.class.unpack_header(buf, file_endian)
 
     if h[:endian_marker] != ENDIAN_MARKER
-      raise "corrupt CArray binary data (endian marker mismatch)"
+      raise ArgumentError, "corrupt CArray binary data (endian marker mismatch)"
     end
     if h[:version_major] != VERSION_MAJOR
-      raise "unsupported CArray binary version #{h[:version_major]}.#{h[:version_minor]}"
+      raise ArgumentError, "unsupported CArray binary version #{h[:version_major]}.#{h[:version_minor]}"
     end
     if h[:header_bytes] != HEADER_BYTES
-      raise "unsupported CArray binary header size #{h[:header_bytes]}"
+      raise ArgumentError, "unsupported CArray binary header size #{h[:header_bytes]}"
     end
     if h[:data_bytes] != h[:elements] * h[:element_bytes]
-      raise "corrupt CArray binary data (data_bytes cross-check failed)"
+      raise ArgumentError, "corrupt CArray binary data (data_bytes cross-check failed)"
     end
+    check_header(h)
 
     swap      = (file_endian != CArray.endian)
     data_type = h[:data_type_code]
@@ -231,29 +243,93 @@ class CArray::Serializer   # :nodoc:
     dim       = h[:shape][0, ndim]
     bytes     = h[:element_bytes]
 
-    if opt[:data_type] and data_type == CArray.data_type_code(CA_FIXLEN)
-      data_type = opt[:data_type]
+    if fixlen_type and data_type == CArray.data_type_code(CA_FIXLEN)
+      data_type = fixlen_type
     end
 
     ca = CArray.new(data_type, dim, :bytes => bytes)
     ca.load_binary(@io)
-    ca[] = ca.swap_bytes if swap
 
+    mask = nil
     if h[:has_mask] != 0
-      ca.mask = 0
-      ca.mask.load_binary(@io)
+      mask = CArray.boolean(*dim)
+      mask.load_binary(@io)
     end
 
     if h[:trailer_bytes] > 0
       trailer_raw = @io.read(h[:trailer_bytes])
+      unless trailer_raw && trailer_raw.bytesize == h[:trailer_bytes]
+        raise ArgumentError, "corrupt CArray binary data (truncated trailer)"
+      end
       trailer = decode_trailer(trailer_raw)
+      unless trailer.is_a?(Hash)
+        raise ArgumentError, "corrupt CArray binary data (trailer is not a mapping)"
+      end
       ca = apply_trailer(ca, trailer)
+    end
+
+    # Swap once the trailer is applied and before the mask is: a record is
+    # swapped member by member, as the writer swapped it, and only its
+    # data_class says where the members are.  Swapping the bare fixlen
+    # first reversed the whole record.
+    ca[] = to_other_byte_order(ca) if swap
+
+    if mask
+      ca.mask = 0
+      ca.mask[] = mask
     end
 
     return ca
   end
 
   private
+
+  # `ca` in the other byte order.  A member declared with `endian:` holds its
+  # bytes in that order on every machine and in every file, so it is left as
+  # it is; only the members in machine order are swapped.
+  def to_other_byte_order (ca)
+    swapped = ca.swap_bytes
+    declared = ca.respond_to?(:data_class) && ca.data_class &&
+               ca.data_class.fields.select(&:endian)
+    return swapped if !declared || declared.empty?
+    swapped = swapped.copy
+    declared.each { |f| swapped[f.name][] = ca[f.name].value }
+    swapped
+  end
+
+  # The header fields that describe the same array have to agree, and a
+  # source whose size is known has to hold what the header declares --
+  # checked before the array is allocated, so a short file cannot make
+  # the reader allocate what it declares.
+  def check_header (h)
+    ndim = h[:ndim]
+    unless ndim >= 1 && ndim <= CA_RANK_MAX
+      raise ArgumentError, "corrupt CArray binary data (ndim #{ndim} out of 1..#{CA_RANK_MAX})"
+    end
+    dim = h[:shape][0, ndim]
+    if dim.any?(&:negative?) || dim.inject(:*) != h[:elements]
+      raise ArgumentError, "corrupt CArray binary data (shape #{dim.inspect} does not " \
+            "hold #{h[:elements]} elements)"
+    end
+    fixlen = CArray.data_type_code(CA_FIXLEN)
+    if h[:data_type_code] != fixlen &&
+       h[:data_type_code] <= CArray.data_type_code(CA_OBJECT) &&
+       h[:element_bytes] != CArray.sizeof(h[:data_type_code])
+      raise ArgumentError, "corrupt CArray binary data (element_bytes #{h[:element_bytes]} " \
+            "for data type #{CArray.data_type_name(h[:data_type_code]) rescue h[:data_type_code]})"
+    end
+    mask_bytes = (h[:has_mask] != 0) ? h[:elements] : 0
+    if h[:mask_bytes] != mask_bytes
+      raise ArgumentError, "corrupt CArray binary data (mask_bytes cross-check failed)"
+    end
+    if @io.respond_to?(:size) && @io.respond_to?(:pos)
+      declared = h[:data_bytes] + mask_bytes + h[:trailer_bytes]
+      if @io.size - @io.pos < declared
+        raise ArgumentError, "corrupt CArray binary data (declares #{declared} bytes after " \
+              "the header, the source holds #{@io.size - @io.pos})"
+      end
+    end
+  end
 
   # Build the trailer mapping (String-keyed) from the array's
   # attributes and data_class.  Returns {} when there is nothing to
@@ -279,7 +355,8 @@ class CArray::Serializer   # :nodoc:
         raise ArgumentError,
               "CArray.save cannot serialise data_class #{klass.inspect}: " \
               "member #{f.name.inspect} is a bitfield (the v1.0 Layer 1 " \
-              "schema is flat-primitive only); use Marshal.dump(ca)"
+              "schema is flat-primitive only); Marshal.dump(ca) carries it " \
+              "when the struct is named (assigned to a constant)"
       end
       pep = SYMBOL_TO_PEP[f.type]
       unless pep
@@ -287,9 +364,12 @@ class CArray::Serializer   # :nodoc:
               "CArray.save cannot serialise data_class #{klass.inspect}: " \
               "member #{f.name.inspect} has non-primitive type #{f.type.inspect} " \
               "(nested struct / template / fixlen are not expressible in the " \
-              "v1.0 Layer 1 schema); use Marshal.dump(ca)"
+              "v1.0 Layer 1 schema); Marshal.dump(ca) carries it " \
+              "when the struct is named (assigned to a constant)"
       end
-      { "name" => f.name, "type" => pep, "offset" => f.offset, "bytes" => f.bytes }
+      m = { "name" => f.name, "type" => pep, "offset" => f.offset, "bytes" => f.bytes }
+      m["endian"] = f.endian.to_s if f.endian
+      m
     end
 
     schema = {
@@ -320,6 +400,12 @@ class CArray::Serializer   # :nodoc:
   # synthesise an anonymous struct from the Layer 1 members[], else
   # leave the raw CA_FIXLEN array untouched.
   def wrap_data_class (ca, schema)
+    members = schema.is_a?(Hash) ? schema["members"] : nil
+    unless schema.is_a?(Hash) &&
+           (members.nil? || members.is_a?(Array) && members.all?(Hash))
+      raise ArgumentError, "corrupt CArray binary data (data_class schema is not a " \
+            "mapping with a list of member mappings)"
+    end
     name = schema["name"]
     if name
       begin
@@ -352,9 +438,17 @@ class CArray::Serializer   # :nodoc:
       members.each do |m|
         sym = PEP_TO_SYMBOL[m["type"]]
         unless sym
-          raise "unknown data_class member type #{m["type"].inspect} in CArray binary data"
+          raise ArgumentError, "unknown data_class member type #{m["type"].inspect} in CArray binary data"
         end
-        member sym, m["name"], :offset => m["offset"]
+        opt = { :offset => m["offset"] }
+        if m.key?("endian")
+          endian = %w[big little native preserve].find { |e| e == m["endian"] }
+          unless endian
+            raise ArgumentError, "unknown data_class member endian #{m["endian"].inspect} in CArray binary data"
+          end
+          opt[:endian] = endian.to_sym
+        end
+        member sym, m["name"], opt
       end
     end
   end
@@ -533,6 +627,11 @@ class CArray
   #   @param data [Array] Marshal payload.
   #   @return [void]
   def marshal_load (data)
+    initialize_copy(CArray.send(:array_from_marshal_payload, data))
+  end
+
+  # The array a {#marshal_dump} payload describes.
+  def self.array_from_marshal_payload (data)
     tag, *rest = data
     case tag
     when "object"
@@ -543,13 +642,84 @@ class CArray
         ca.mask = 0
         ca.mask[] = mask
       end
-      initialize_copy(ca)
+      ca
     when "portable"
-      ca = CArray.load(StringIO.new(rest[0]))
-      initialize_copy(ca)
+      CArray.load(StringIO.new(rest[0]))
+    when "record"
+      data_class, storage = rest
+      CARecord.wrap(array_from_marshal_payload(storage), data_class)
     else
       raise TypeError, "unrecognised CArray Marshal payload"
     end
+  end
+  private_class_method :array_from_marshal_payload
+
+end
+
+# Marshal of a view and a scalar: the {CArray#marshal_dump} payload, loaded
+# back by the class method rather than into an empty instance.  A view comes
+# back as a plain array (a copy owns its memory, as #copy gives); a scalar
+# comes back a scalar.  A wrap is refused below.
+[CAView, CAWrap, CScalar].each do |klass|
+  klass.class_eval do
+    # A Face other than a record is refused: the payload would carry its
+    # storage without what makes it the Face (a unit, labels), and load
+    # could not put that back.
+    # @return [String]
+    def _dump (_level)
+      if face?
+        raise TypeError,
+              "Marshal cannot carry a #{self.class} yet (its Face would be lost); " \
+              "dump its storage with .parent"
+      end
+      Marshal.dump(CArray.instance_method(:marshal_dump).bind_call(self))
+    end
+  end
+end
+
+class CAView
+  # @return [CArray] the plain array a {#_dump} string describes.
+  def self._load (str)
+    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  end
+end
+
+class CAWrap
+  # A wrap borrows memory, which Marshal cannot carry to another process;
+  # Ruby would also try to write the objects that keep the borrowed memory
+  # alive.  Its copy owns its memory and marshals.
+  def _dump (_level)
+    raise TypeError,
+          "Marshal cannot carry a #{self.class}: it borrows its memory; " \
+          "dump .copy instead"
+  end
+
+  def self._load (str)
+    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  end
+end
+
+class CScalar
+  # @return [CScalar] the scalar a {#_dump} string describes.
+  def self._load (str)
+    a = CArray.send(:array_from_marshal_payload, Marshal.load(str))
+    s = CScalar.new(a.data_type, bytes: a.bytes)
+    s[0] = a[0]
+    s
+  end
+end
+
+class CARecord
+
+  # A record array keeps marshal_dump: it round-trips with its class.  A
+  # named struct is written by name with the record bytes, so every kind of
+  # member (nested, fixlen, bit, array) travels.  An anonymous struct has no
+  # name to write: it goes through the binary format, whose schema
+  # describes flat numeric members only.
+  def marshal_dump
+    return CArray.instance_method(:marshal_dump).bind_call(self) unless data_class.name
+    ["record", data_class,
+     CArray.instance_method(:marshal_dump).bind_call(copy.parent)]
   end
 
 end

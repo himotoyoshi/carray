@@ -162,13 +162,33 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     r = cond.then_else(CA_INT32(0), i32)
     assert_equal :int32, r.data_type
     assert_equal [1, 2, 0, 0], r.to_a
-    assert_equal :int64, cond.then_else(0, i32).data_type
+    # A bare Integer takes the array's type, as it does beside an operator.
+    assert_equal :int32, cond.then_else(0, i32).data_type
   end
 
   def test_then_else_rejects_non_boolean_receiver
     int_self = CArray.int32(5) {|i| i }
     assert_raise(ArgumentError) do
       int_self.then_else(1, 0)
+    end
+  end
+
+  def test_then_else_branch_shape_follows_the_operator_rule
+    a = CArray.int32(3, 2).seq
+    cond = a.gt(1)
+    # The same element count in another shape is refused, as by the lazy form.
+    [CArray.int32(2, 3), CArray.int32(6), CArray.int32(5)].each do |b|
+      assert_raise(ArgumentError) { cond.then_else(a, b) }
+      assert_raise(ArgumentError) { cond.then_else(b, a) }
+      assert_raise(ArgumentError) { cond.lazy.then_else(a, b) }
+    end
+    # A size-1 axis with the same ndim broadcasts.
+    r = cond.then_else(a, CArray.int32(1, 2) { 9 })
+    assert_equal [[9, 9], [2, 3], [4, 5]], r.to_a
+    assert_equal r.to_a, cond.lazy.then_else(a, CArray.int32(1, 2) { 9 }).copy.to_a
+    # Types the lazy select cannot carry need the condition's shape.
+    assert_raise(ArgumentError) do
+      cond.then_else(CArray.object(3, 2) { 1 }, CArray.object(2, 3) { 2 })
     end
   end
 

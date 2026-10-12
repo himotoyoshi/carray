@@ -11,7 +11,7 @@
 
   Surface data_type is CA_OBJECT (== storage): unlike the NonNumeric Faces
   (CATime etc.) there is no CA_FIXLEN gate.  Per-cell fetch returns
-  the stored String VALUE directly (no storage_to_scalar decode).  Numeric
+  the stored String VALUE directly (no storage_to_element decode).  Numeric
   dispatch lands on the :object kernels, so String-meaningful ops (+, sort
   via <=>) work and nonsensical ones raise at the Ruby method call.
 
@@ -20,6 +20,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_obj_face.h"
 
 typedef struct {
@@ -88,6 +89,12 @@ ca_string_setup (CAString *ca, CArray *parent)
              "CAString requires object storage (parent.data_type != CA_OBJECT)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_STRING;
   ca->data_type = CA_OBJECT;
   /* ORDERABLE + COMPARABLE, and both hold by construction: a storage cell
@@ -130,7 +137,9 @@ ca_string_setup (CAString *ca, CArray *parent)
 CAString *
 ca_string_new (CArray *parent)
 {
-  CAString *ca = (CAString *) ca_array_alloc(CA_OBJ_STRING, parent->ndim);
+  CAString *ca;
+  ca_string_setup(NULL, parent);
+  ca = (CAString *) ca_array_alloc(CA_OBJ_STRING, parent->ndim);
   ca_string_setup(ca, parent);
   return ca;
 }
@@ -169,18 +178,6 @@ ca_string_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_string_func_create_mask (void *ap)
-{
-  CAString *ca = (CAString *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_string_func = {
   -1, /* CA_OBJ_STRING — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -191,7 +188,7 @@ ca_operation_function_t ca_string_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_string_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
@@ -239,6 +236,7 @@ rb_ca_string_initialize_copy (VALUE self, VALUE other)
 {
   CAString *ca, *cs;
   TypedData_Get_Struct(self,  CAString, &castring_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAString, &castring_data_type, cs);
   if ( ca_func[CA_OBJ_STRING].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_STRING, cs->parent->ndim);
@@ -268,7 +266,8 @@ Init_ca_obj_string (void)
                                  rb_ca_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAString, "wrap", rb_ca_string_wrap_method, 1);
 
-  /* VALUE storage is per-process, so the Face cannot be carried across
-     multi-parent constructions (CAStack / Marshal / MemoryView). */
-  ca_face_register_state_portable(CA_OBJ_STRING, 0);
+  /* A cell is the String itself, so the Face is the same over any parent:
+     CAStack / CAMeld / concatenate can carry it (unlike CAConstString, whose
+     cells point into one parent's buffer). */
+  ca_face_register_state_portable(CA_OBJ_STRING, 1);
 }

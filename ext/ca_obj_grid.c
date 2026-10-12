@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_attach_window */
 
 /* Per-axis tagged kind.  Each axis is either STRIDE (start/step/count,
    no allocation) or INDEX (an owned ca_size_t index snapshot).  A Range
@@ -122,53 +123,81 @@ static VALUE rb_cCAGridMask;
 
 static int8_t CA_OBJ_GRID;
 
-/* Setup: caller passes ndim + per-axis protos (cag_axis_t).  Copies the
-   fields and, for INDEX axes, snapshots the indices into an owned buffer.
-   The share path (share=1, from initialize_copy and create_mask) aliases
-   the caller's protos buffer instead, tying its lifetime to the source
-   CAGrid (free_ca_grid skips the xfree under CA_FLAG_SHARE_INDEX). */
-int
-ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
-               cag_axis_t *protos, int share)
+/* Raises when protos cannot describe a view of parent: an ndim that is
+   not parent's, a negative count, a byte length over the limit, or a
+   parent index out of range.  Nothing is allocated here, so the caller
+   runs it before taking memory. */
+static void
+ca_grid_check_protos (CArray *parent, int8_t ndim, const cag_axis_t *protos)
 {
   int8_t k;
-  int8_t data_type;
-  ca_size_t elements, bytes;
-  double  length;
-  ca_size_t *dim0;
+  ca_size_t j;
+  double length;
 
-  CA_ASSUME(ndim >= 0 && ndim <= CA_RANK_MAX);   /* bound loops/allocs over [CA_RANK_MAX] arrays */
-  data_type = parent->data_type;
-  bytes     = parent->bytes;
-  dim0      = parent->dim;
-
-  /* parent->ndim should equal ndim (= number of axes provided).
-     rb_ca_grid pads with nil when fewer args are given, so by the
-     time we get here ndim == parent->ndim. */
+  /* rb_ca_grid pads with nil when fewer args are given, so ndim ==
+     parent->ndim for every in-tree caller. */
   if ( ndim != parent->ndim ) {
     rb_raise(rb_eArgError,
              "CAGrid: ndim mismatch (%d args vs parent->ndim %d)",
              (int) ndim, (int) parent->ndim);
   }
 
-  elements = 1;
-  length = bytes;
+  length = parent->bytes;
   for (k = 0; k < ndim; k++) {
     if (protos[k].count < 0) {
-      rb_raise(rb_eRuntimeError, "negative size for %d-th dimension", k);
+      rb_raise(rb_eArgError, "negative size for %d-th dimension", k);
     }
-    elements *= protos[k].count;
     length *= protos[k].count;
   }
   if (length > CA_LENGTH_MAX) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
+    rb_raise(rb_eArgError, "too large byte length");
+  }
+
+  for (k = 0; k < ndim; k++) {
+    if ( protos[k].count <= 0 ) {
+      continue;
+    }
+    if (protos[k].kind == CAG_AXIS_STRIDE) {
+      ca_size_t first = protos[k].start;
+      ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
+      CA_CHECK_INDEX(first, parent->dim[k]);
+      if (protos[k].count > 1) CA_CHECK_INDEX(last, parent->dim[k]);
+    }
+    else {
+      for (j = 0; j < protos[k].count; j++) {
+        ca_size_t v = protos[k].indices[j];
+        CA_CHECK_INDEX(v, parent->dim[k]);
+      }
+    }
+  }
+}
+
+/* Setup: caller passes ndim + per-axis protos (cag_axis_t) that
+   ca_grid_check_protos has accepted.  Copies the fields and, for INDEX
+   axes, snapshots the indices into an owned buffer.  The share path
+   (share=1, used only by create_mask) aliases the caller's protos buffer
+   instead: the mask grid is owned and freed by the grid whose axes it
+   aliases (free_ca_grid skips the xfree under CA_FLAG_SHARE_INDEX). */
+static int
+ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
+               cag_axis_t *protos, int share)
+{
+  int8_t k;
+  ca_size_t elements;
+
+  CA_ASSUME(ndim >= 0 && ndim <= CA_RANK_MAX);   /* bound loops/allocs over [CA_RANK_MAX] arrays */
+
+  {
+    ca_size_t counts[CA_RANK_MAX];
+    for (k = 0; k < ndim; k++) counts[k] = protos[k].count;
+    elements = ca_shape_elements(ndim, counts, parent->bytes);
   }
 
   ca->obj_type  = CA_OBJ_GRID;
-  ca->data_type = data_type;
+  ca->data_type = parent->data_type;
   ca->flags     = 0;
   ca->ndim      = ndim;
-  ca->bytes     = bytes;
+  ca->bytes     = parent->bytes;
   ca->elements  = elements;
   ca->ptr       = NULL;
   ca->mask      = NULL;
@@ -196,13 +225,6 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
         ca->axes[k].start   = protos[k].start;
         ca->axes[k].step    = protos[k].step;
         ca->axes[k].indices = NULL;
-        /* Bounds check: first and last parent index must be in range. */
-        if (protos[k].count > 0) {
-          ca_size_t first = protos[k].start;
-          ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
-          CA_CHECK_INDEX(first, dim0[k]);
-          if (protos[k].count > 1) CA_CHECK_INDEX(last, dim0[k]);
-        }
       } else {
         ca->axes[k].start   = 0;
         ca->axes[k].step    = 0;
@@ -211,8 +233,7 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
         ca_size_t j;
         for (j = 0; j < protos[k].count; j++) {
           ca_size_t v = protos[k].indices[j];
-          CA_CHECK_INDEX(v, dim0[k]);
-          ca->axes[k].indices[j] = v;
+          ca->axes[k].indices[j] = ( v < 0 ) ? v + parent->dim[k] : v;
         }
       }
     }
@@ -228,7 +249,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
 CAGrid *
 ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
-  CAGrid *ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
+  CAGrid *ca;
+  ca_grid_check_protos(parent, ndim, protos);
+  ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 0);
   return ca;
 }
@@ -278,7 +301,7 @@ static void *
 ca_grid_func_clone (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  return ca_grid_new_share(ca->parent, ca->ndim, ca->axes);
+  return ca_grid_new(ca->parent, ca->ndim, ca->axes);
 }
 
 /* Per-axis parent-index lookup.  STRIDE = one multiply, INDEX = one
@@ -451,6 +474,7 @@ static void
 ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAGrid   *g = (CAGrid *) ap;
   CArray   *parent = g->parent;
   int8_t    ndim = g->ndim;
@@ -624,17 +648,26 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 }
 
+/* attach / sync / copy_data / sync_data / fill_data all go through the
+   descriptor engine (ca_axis_dispatch.c).  This file supplies only
+   describe_axes; the engine does the rest.
+
+   A parent with no memory to lend (ca_parent_lends_no_memory) is never
+   attached: attaching it would produce all of its cells to serve the few
+   this grid selects.  The grid then owns its buffer, filled and drained
+   through xfer_all, which asks the parent for the selected cells only.
+   The predicate asks what the parent is, not whether it is attached now,
+   so attach, sync and detach all take the same branch. */
+
 static void
 ca_grid_func_allocate (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  ca_attach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_attach(ca->parent);
+  }
   ca->ptr = xmalloc(ca_length(ca));
 }
-
-/* attach / sync / copy_data / sync_data / fill_data all go through the
-   descriptor engine (ca_axis_dispatch.c).  This file supplies only
-   describe_axes; the engine does the rest. */
 
 static void
 ca_grid_func_attach (void *ap)
@@ -642,6 +675,12 @@ ca_grid_func_attach (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_attach_owned(ca);
+    return;
+  }
+
   ca_attach(ca->parent);
   ca_grid_describe_axes(ca, desc, pdims);
   ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
@@ -654,6 +693,12 @@ ca_grid_func_sync (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( ca_parent_lends_no_memory(ca->parent) ) {
+    ca_axis_view_sync_owned(ca);
+    return;
+  }
+
   ca_grid_describe_axes(ca, desc, pdims);
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, ca->ptr);
@@ -666,16 +711,16 @@ ca_grid_func_detach (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   xfree(ca->ptr);
   ca->ptr = NULL;
-  ca_detach(ca->parent);
+  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+    ca_detach(ca->parent);
+  }
 }
 
-/* xfer_all: fast path on parent->ptr, with no silent transitive attach
-   of the parent.  A cold parent uses a proper 2-pass -- materialise the
-   parent into scratch via ca_xfer_all, temporarily expose it as
-   parent->ptr, run the fast path, then (for PUT) write scratch back. */
+/* The transfer against parent->ptr, for ca_axis_view_xfer_all. */
 static void
-ca_grid_func_run_fast_path (CAGrid *ca, char *data, int dir)
+ca_grid_func_run_fast_path (void *ap, char *data, int dir)
 {
+  CAGrid *ca = (CAGrid *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
   ca_grid_describe_axes(ca, desc, pdims);
@@ -691,27 +736,7 @@ ca_grid_func_run_fast_path (CAGrid *ca, char *data, int dir)
 static void
 ca_grid_func_xfer_all (void *ap, void *data, int dir)
 {
-  CAGrid *ca = (CAGrid *) ap;
-  if ( ca->parent->ptr ) {
-    ca_grid_func_run_fast_path(ca, (char *) data, dir);
-    return;
-  }
-  /* Proper 2-pass cold fallback. */
-  {
-    volatile VALUE holder;
-    CArray   *parent = ca->parent;
-    ca_size_t plen   = parent->elements * parent->bytes;
-    char     *parent_scratch = ALLOCV_N(char, holder, plen);
-    char     *parent_ptr_saved = parent->ptr;
-    ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
-    parent->ptr = parent_scratch;
-    ca_grid_func_run_fast_path(ca, (char *) data, dir);
-    if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
-    }
-    parent->ptr = parent_ptr_saved;
-    ALLOCV_END(holder);
-  }
+  ca_axis_view_xfer_all(ap, ca_grid_func_run_fast_path, 1, data, dir);
 }
 
 static void
@@ -734,11 +759,10 @@ ca_grid_func_fill_data (void *ap, void *ptr)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, ptr);
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -746,10 +770,7 @@ ca_grid_func_create_mask (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   ca->mask = (CArray *) ca_grid_new_share(ca->parent->mask,
                                           ca->ndim, ca->axes);
@@ -822,6 +843,63 @@ cag_range_to_stride (VALUE range, ca_size_t dim_size,
   *out_start = first;
   *out_count = count;
   return 1;
+}
+
+/* The INDEX axes of rb_ca_grid, read with their index arrays attached,
+   and the view built from them. */
+
+typedef struct {
+  VALUE        self;
+  CArray      *ca;
+  CArray     **ci;
+  cag_axis_t  *protos;
+} ca_grid_build_ctx_t;
+
+static VALUE
+ca_grid_build_body (VALUE arg)
+{
+  ca_grid_build_ctx_t *c = (ca_grid_build_ctx_t *) arg;
+  volatile VALUE holders[CA_RANK_MAX];
+  volatile VALUE obj;
+  int8_t i;
+
+  for (i = 0; i < c->ca->ndim; i++) {
+    CArray *ci = c->ci[i];
+    holders[i] = Qfalse;
+    if ( ! ci ) {
+      continue;
+    }
+    c->protos[i].kind = CAG_AXIS_INDEX;
+    if ( ca_is_any_masked(ci) ) {
+      /* mask-filtered snapshot: skip masked cells.  setup copies the
+         indices into its own buffer, so the snapshot only has to live
+         until ca_grid_new returns. */
+      ca_size_t gsize = ci->elements - ca_count_masked(ci);
+      ca_size_t *src  = (ca_size_t *) ci->ptr;
+      boolean8_t *m   = (boolean8_t *) ci->mask->ptr;
+      ca_size_t *tmp  = ALLOCV_N(ca_size_t, holders[i], gsize > 0 ? gsize : 1);
+      ca_size_t j, n = 0;
+      for (j = 0; j < ci->elements; j++) {
+        if ( ! m[j] ) tmp[n++] = src[j];
+      }
+      c->protos[i].count   = gsize;
+      c->protos[i].indices = tmp;
+    } else {
+      c->protos[i].count   = ci->elements;
+      c->protos[i].indices = (ca_size_t *) ci->ptr;
+    }
+    c->protos[i].start = 0;
+    c->protos[i].step  = 0;
+  }
+
+  obj = rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
+
+  for (i = 0; i < c->ca->ndim; i++) {
+    if ( c->ci[i] && holders[i] != Qfalse ) {
+      ALLOCV_END(holders[i]);
+    }
+  }
+  return obj;
 }
 
 VALUE
@@ -916,49 +994,30 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
       }
     }
     else if ( TYPE(rval) == T_ARRAY ) {
-      rb_raise(rb_eRuntimeError, "not implemented for this index");
+      rb_raise(rb_eTypeError, "grid: an axis is an Integer, a Range, nil or a CArray of indices (got Array)");
     }
 
-    /* INDEX axis */
+    /* INDEX axis: converted here, read once the window below opens */
+    ca_check_index_array(rval);
     ci[i] = ca_wrap_readonly(rval, CA_SIZE);
     rb_ary_push(list, rval);
-    ca_attach(ci[i]);
-
-    protos[i].kind = CAG_AXIS_INDEX;
-    if ( ca_is_any_masked(ci[i]) ) {
-      /* mask-filtered snapshot: skip masked cells.  We point protos[i]
-         .indices at a temp buffer alloc'd here and freed after setup
-         copies it (setup snapshots into its own ALLOC).  Caller-side
-         lifetime: the temp lives until ca_grid_new returns. */
-      ca_size_t gsize = ci[i]->elements - ca_count_masked(ci[i]);
-      ca_size_t *src  = (ca_size_t *) ci[i]->ptr;
-      boolean8_t *m   = (boolean8_t *) ci[i]->mask->ptr;
-      ca_size_t *tmp  = ALLOC_N(ca_size_t, gsize > 0 ? gsize : 1);
-      ca_size_t j, n = 0;
-      for (j = 0; j < ci[i]->elements; j++) {
-        if ( ! m[j] ) tmp[n++] = src[j];
-      }
-      protos[i].count   = gsize;
-      protos[i].indices = tmp;
-    } else {
-      protos[i].count   = ci[i]->elements;
-      protos[i].indices = (ca_size_t *) ci[i]->ptr;
-    }
-    protos[i].start = 0;
-    protos[i].step  = 0;
   }
 
-  obj = rb_ca_grid_new(self, ca->ndim, protos);
-
-  /* Cleanup: detach CAWraps + free temp masked-snapshot buffers (setup
-     has already copied indices into its own ALLOC). */
-  for (i = 0; i < ca->ndim; i++) {
-    if ( ci[i] ) {
-      if ( ca_is_any_masked(ci[i]) ) {
-        xfree(protos[i].indices);
-      }
-      ca_detach(ci[i]);
-    }
+  /* The index arrays are read with all of them attached, and building
+     the view checks every index against the parent -- an index out of
+     range raises there.  So the reads and the build are a window body,
+     which detaches the caller's index arrays however it ends. */
+  {
+    ca_grid_build_ctx_t c;
+    char modes[CA_RANK_MAX + 1];
+    memset(modes, 'r', (size_t) ca->ndim);
+    modes[ca->ndim] = '\0';
+    c.self   = self;
+    c.ca     = ca;
+    c.ci     = ci;
+    c.protos = protos;
+    obj = ca_attach_window(ca->ndim, ci, modes, ca_grid_build_body,
+                           (VALUE) &c);
   }
 
   return obj;
@@ -977,14 +1036,14 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   CAGrid *ca, *cs;
 
   TypedData_Get_Struct(self,  CAGrid, &cagrid_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAGrid, &cagrid_data_type, cs);
 
   if ( ca_func[CA_OBJ_GRID].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_GRID, cs->ndim);
   }
-  /* Share the source's axes buffer (CA_FLAG_SHARE_INDEX semantics:
-     source CAGrid owns the lifetime; clone aliases it). */
-  ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 1);
+  /* Copy the axes: the source may be collected before the copy. */
+  ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 0);
 
   return self;
 }
@@ -1087,7 +1146,7 @@ rb_ca_grid_dispatch_attach_debug (VALUE self)
   TypedData_Get_Struct(self, CAGrid, &cagrid_data_type, ca);
   ca_grid_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   buf = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                                 ca->elements, NULL);
   ca_detach(ca->parent);
@@ -1118,11 +1177,10 @@ rb_ca_grid_dispatch_scatter_debug (VALUE self, VALUE in_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_grid_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_scatter(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                            ca->elements, RSTRING_PTR(in_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 
@@ -1145,11 +1203,10 @@ rb_ca_grid_dispatch_fill_value_debug (VALUE self, VALUE val_str)
   ca_size_t pdims[CA_RANK_MAX];
   ca_grid_describe_axes(ca, desc, pdims);
 
-  ca_attach(ca->parent);
+  ca_attach(ca->parent);   /* window: nothing raises inside */
   ca_axis_dispatch_fill_value(ca->parent, pdims, desc, ca->ndim, ca->bytes,
                               ca->elements, RSTRING_PTR(val_str));
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
   return Qnil;
 }
 #endif /* CARRAY_DEV_BUILD */

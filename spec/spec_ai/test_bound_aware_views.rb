@@ -59,7 +59,7 @@ class TestBoundAwareViews < Test::Unit::TestCase
 
   def test_window_strict_raises_on_oob
     a = CArray.int(5).seq
-    assert_raise(RuntimeError) { a.window(-1..3, bounds: "strict").to_a }
+    assert_raise(IndexError) { a.window(-1..3, bounds: "strict").to_a }
   end
 
   # ------------------------------------------------------------------

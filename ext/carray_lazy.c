@@ -19,6 +19,8 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_*, ca_is_lazy_view */
+#include "ca_kernel_iterator.h" /* ca_iter_register_source_kind */
+#include <ruby/ractor.h>
 
 int8_t CA_OBJ_LAZY_MARKER;
 VALUE rb_cCALazyMarker;
@@ -153,6 +155,7 @@ static void
 ca_lazy_marker_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                                  ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CALazyMarker *ca = (CALazyMarker *) ap;
   ca_xfer_stride(ca->parent, starts, counts, strides, data, dir);
 }
@@ -206,12 +209,8 @@ static void
 ca_lazy_marker_func_create_mask (void *ap)
 {
   CALazyMarker *ca = (CALazyMarker *) ap;
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
+  ca_view_func_create_mask(ca);
+  ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
 }
 
 ca_operation_function_t ca_lazy_marker_func = {
@@ -250,10 +249,19 @@ rb_ca_lazy_marker_new (VALUE cary)
 
 /* CArray#lazy — return a zero-cost CALazyMarker wrapping self.  Subsequent
  * element-wise ops (.sqrt / .sin / .+ / ...) build a lazy CAMonOp / CABinOp
- * tree instead of evaluating eagerly; `.to_ca` materialises. */
+ * tree instead of evaluating eagerly; `.to_ca` materialises.
+ *
+ * A Face returns itself: a lazy tree computes on storage and would lose
+ * the Face's meaning (units, labels, string surface), so its operations
+ * stay eager. */
 VALUE
 rb_ca_lazy (VALUE self)
 {
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_face(ca) ) {
+    return self;
+  }
   return rb_ca_lazy_marker_new(self);
 }
 
@@ -292,8 +300,65 @@ typedef struct ca_gc_hold {
   ca_size_t elements;
 } ca_gc_hold_t;
 
-static ca_gc_hold_t ca_gc_holds[CA_GC_HOLD_MAX];
-static int          ca_gc_hold_depth = 0;
+/* Each Ractor keeps its own holds: walks in different Ractors push and
+   release at the same time.  The GC marks every Ractor's set through
+   the storage type's mark function. */
+typedef struct ca_gc_local {
+  ca_gc_hold_t  holds[CA_GC_HOLD_MAX];
+  int           hold_depth;
+  ca_gc_hold_t *buffers;      /* held until released, in any order */
+  int           buffer_n;
+  int           buffer_cap;
+} ca_gc_local_t;
+
+static rb_ractor_local_key_t ca_gc_local_key;
+
+static void
+ca_gc_local_mark (void *ptr)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) ptr;
+  int i;
+  if ( g == NULL ) return;
+  for ( i = 0; i < g->hold_depth; i++ ) {
+    VALUE    *p = g->holds[i].ptr;
+    ca_size_t n = g->holds[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+  for ( i = 0; i < g->buffer_n; i++ ) {
+    VALUE    *p = g->buffers[i].ptr;
+    ca_size_t n = g->buffers[i].elements;
+    while ( n-- ) rb_gc_mark(*p++);
+  }
+}
+
+static void
+ca_gc_local_free (void *ptr)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) ptr;
+  if ( g == NULL ) return;
+  free(g->buffers);
+  free(g);
+}
+
+static const struct rb_ractor_local_storage_type ca_gc_local_type = {
+  ca_gc_local_mark, ca_gc_local_free
+};
+
+/* The state is allocated with the C allocator, like the table it grows:
+   a collection must not run while either is half set up. */
+static ca_gc_local_t *
+ca_gc_local (void)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) rb_ractor_local_storage_ptr(ca_gc_local_key);
+  if ( g == NULL ) {
+    g = (ca_gc_local_t *) calloc(1, sizeof(ca_gc_local_t));
+    if ( g == NULL ) {
+      rb_memerror();
+    }
+    rb_ractor_local_storage_ptr_set(ca_gc_local_key, g);
+  }
+  return g;
+}
 
 static void ca_lazy_arena_mark_object_slots (void);
 
@@ -306,22 +371,69 @@ static void ca_lazy_arena_mark_object_slots (void);
 int
 ca_gc_hold_push (void *ptr, ca_size_t n_elements)
 {
-  int depth = ca_gc_hold_depth;
+  ca_gc_local_t *g;
+  int depth;
 
-  if ( depth >= CA_GC_HOLD_MAX || n_elements <= 0 || ptr == NULL ) {
+  if ( n_elements <= 0 || ptr == NULL ) {
     return -1;
   }
-  ca_gc_holds[depth].ptr      = (VALUE *) ptr;
-  ca_gc_holds[depth].elements = n_elements;
-  ca_gc_hold_depth = depth + 1;
+  g = ca_gc_local();
+  depth = g->hold_depth;
+  if ( depth >= CA_GC_HOLD_MAX ) {
+    return -1;
+  }
+  g->holds[depth].ptr      = (VALUE *) ptr;
+  g->holds[depth].elements = n_elements;
+  g->hold_depth = depth + 1;
   return depth;
 }
 
 void
 ca_gc_hold_pop_to (int depth)
 {
-  if ( depth >= 0 && depth < ca_gc_hold_depth ) {
-    ca_gc_hold_depth = depth;
+  ca_gc_local_t *g;
+  if ( depth < 0 ) return;
+  g = ca_gc_local();
+  if ( depth < g->hold_depth ) {
+    g->hold_depth = depth;
+  }
+}
+
+void
+ca_gc_hold_buffer (void *ptr, ca_size_t n_elements)
+{
+  ca_gc_local_t *g;
+  if ( ptr == NULL || n_elements <= 0 ) {
+    return;
+  }
+  g = ca_gc_local();
+  if ( g->buffer_n == g->buffer_cap ) {
+    int cap = g->buffer_cap ? g->buffer_cap * 2 : 16;
+    ca_gc_hold_t *grown = (ca_gc_hold_t *) realloc(g->buffers,
+                                                   cap * sizeof(ca_gc_hold_t));
+    if ( grown == NULL ) {
+      rb_memerror();
+    }
+    g->buffers    = grown;
+    g->buffer_cap = cap;
+  }
+  g->buffers[g->buffer_n].ptr      = (VALUE *) ptr;
+  g->buffers[g->buffer_n].elements = n_elements;
+  g->buffer_n++;
+}
+
+void
+ca_gc_release_buffer (void *ptr)
+{
+  ca_gc_local_t *g = (ca_gc_local_t *) rb_ractor_local_storage_ptr(ca_gc_local_key);
+  int i;
+  if ( g == NULL ) return;
+  for ( i = g->buffer_n - 1; i >= 0; i-- ) {
+    if ( g->buffers[i].ptr == (VALUE *) ptr ) {
+      g->buffers[i] = g->buffers[g->buffer_n - 1];
+      g->buffer_n--;
+      return;
+    }
   }
 }
 
@@ -331,16 +443,11 @@ static VALUE ca_gc_guard = Qnil;
    function of a TypedData whose data pointer is NULL. */
 static int ca_gc_guard_body = 0;
 
+/* The arena's object slots.  The holds are marked per Ractor above. */
 static void
 ca_gc_guard_mark (void *ptr)
 {
-  int i;
   (void) ptr;
-  for ( i = 0; i < ca_gc_hold_depth; i++ ) {
-    VALUE    *p = ca_gc_holds[i].ptr;
-    ca_size_t n = ca_gc_holds[i].elements;
-    while ( n-- ) rb_gc_mark(*p++);
-  }
   ca_lazy_arena_mark_object_slots();
 }
 
@@ -374,11 +481,12 @@ static const rb_data_type_t ca_gc_guard_data_type = {
      best-fit allocation keeps small requests (mask scratch) out of
                          large data slots
 
-   Footprint: 32 slots × max observed size (up to 32 × max_slab_bytes;
-   e.g. N=1M f64, depth-8 chain = 8 × 8MB = 64MB kept resident).  When
-   the slot pool is exhausted the acquire raises: this signals a
-   programming error or a pathological chain rather than a graceful
-   fallback.
+   Footprint: one slot per scratch held at the same time, each as large
+   as the largest request it has served (e.g. N=1M f64, depth-8 chain =
+   8 × 8MB = 64MB kept resident).  A request no free slot can hold grows
+   a free slot; a new slot opens only while every warm one is in use.
+   When all 32 are in use the acquire raises: this signals a programming
+   error or a pathological chain rather than a graceful fallback.
 
    CAREFUL: single-thread only -- thread-safety across concurrent access
    is not a goal (see guides/devel/04_attach_lifecycle.md).  The arena is
@@ -437,6 +545,57 @@ ca_lazy_arena_exit (void)
      from being collected in the first place. */
 }
 
+/* Runs body(arg) inside an enter / exit bracket that closes however body
+   leaves.  cleanup(arg), when given, runs first -- the place to release
+   the scratches and detach the arrays body acquired -- and the exit runs
+   after it.
+
+   A raise that skipped the exit would leave the depth above 0 for the
+   rest of the process: the depth-0 reset that recovers abandoned slots
+   would never fire again, and once 32 slots were abandoned every lazy
+   expression would fail. */
+
+typedef struct {
+  VALUE (*cleanup)(VALUE);
+  VALUE   arg;
+} ca_lazy_arena_ensure_t;
+
+static VALUE
+ca_lazy_arena_ensure (VALUE varg)
+{
+  ca_lazy_arena_ensure_t *e = (ca_lazy_arena_ensure_t *) varg;
+  if ( e->cleanup ) {
+    e->cleanup(e->arg);
+  }
+  ca_lazy_arena_exit();
+  return Qnil;
+}
+
+VALUE
+ca_lazy_arena_protect (VALUE (*body)(VALUE), VALUE (*cleanup)(VALUE),
+                       VALUE arg)
+{
+  ca_lazy_arena_ensure_t e;
+  e.cleanup = cleanup;
+  e.arg     = arg;
+  ca_lazy_arena_enter();
+  return rb_ensure(body, arg, ca_lazy_arena_ensure, (VALUE) &e);
+}
+
+/* A cleanup for ca_lazy_arena_protect when body holds one scratch: arg
+   points at a struct whose first member is that scratch (NULL until it
+   is acquired). */
+VALUE
+ca_lazy_arena_release_held (VALUE arg)
+{
+  void **held = (void **) arg;
+  if ( *held ) {
+    ca_lazy_arena_release(*held);
+    *held = NULL;
+  }
+  return Qnil;
+}
+
 void *
 ca_lazy_arena_acquire (ca_size_t bytes)
 {
@@ -471,7 +630,40 @@ ca_lazy_arena_acquire (ca_size_t bytes)
   }
 
 
-  /* Pass 2: empty slot — xmalloc a fresh buffer.  */
+  /* Pass 2: every free warm slot is too small.  Grow the largest of
+     them rather than open another slot: a slot that is free now was not
+     needed at the same time as this request, so the arena holds one
+     buffer per simultaneous acquire rather than one per size ever asked
+     for.  Taking the largest leaves the small slots to the small
+     requests (mask scratch next to data scratch).
+
+     The slot is emptied before the xmalloc so that a NoMemoryError
+     leaves it unallocated instead of pointing at freed memory. */
+  best = -1;
+  best_bytes = -1;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    if ( s->in_use || s->ptr == NULL ) continue;
+    if ( s->bytes > best_bytes ) {
+      best = i;
+      best_bytes = s->bytes;
+    }
+  }
+  if ( best >= 0 ) {
+    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[best];
+    void *old = s->ptr;
+    s->ptr   = NULL;
+    s->bytes = 0;
+    xfree(old);
+    s->ptr    = xmalloc(bytes);
+    s->bytes  = bytes;
+    s->in_use = 1;
+    s->object_elements = 0;
+    ca_lazy_arena.debug_xmalloc_count++;
+    return s->ptr;
+  }
+
+  /* Pass 3: every warm slot is in use.  Open an empty one. */
   empty = -1;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
     if ( ca_lazy_arena.slots[i].ptr == NULL ) {
@@ -488,26 +680,11 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     return ca_lazy_arena.slots[empty].ptr;
   }
 
-  /* Pass 3: all slots have ptrs.  Find a non-in-use slot and grow it
-     (= xfree + xmalloc).  This pays a mmap roundtrip but only on
-     slot pool exhaustion (= unusual size request).  */
-  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ! ca_lazy_arena.slots[i].in_use ) {
-      xfree(ca_lazy_arena.slots[i].ptr);
-      ca_lazy_arena.slots[i].ptr    = xmalloc(bytes);
-      ca_lazy_arena.slots[i].bytes  = bytes;
-      ca_lazy_arena.slots[i].in_use = 1;
-      ca_lazy_arena.slots[i].object_elements = 0;
-      ca_lazy_arena.debug_xmalloc_count++;
-      return ca_lazy_arena.slots[i].ptr;
-    }
-  }
-
   /* Pass 4: all CA_LAZY_ARENA_SLOTS in use simultaneously.  This is
      a programming error or a pathological chain.  Raise.            */
-  rb_raise(rb_eRuntimeError,
-           "ca_lazy_arena_acquire: all %d slots in use simultaneously "
-           "(chain depth exceeds arena capacity)",
+  rb_raise(rb_eArgError,
+           "lazy expression too deep: it needs more than %d intermediate "
+           "arrays at once",
            CA_LAZY_ARENA_SLOTS);
   return NULL;  /* unreachable */
 }
@@ -642,38 +819,6 @@ rb_ca_lazy_arena_s_slot_capacities (VALUE klass)
 
 /* ------------------------------------------------------------------- */
 
-/* ca_lazy_wrap_scalar(other, self_ca) — wrap a non-CArray Ruby value
- * as a 1-element CScalar whose data_type follows the array's family,
- * mirroring the array+scalar branch of rb_ca_cast_self_or_other.  The
- * scalar takes on self's data_type so binops preserve self's
- * precision (`f32_array + 2.5` stays f32).
- *
- * CA_OBJECT self    -> CA_OBJECT
- * CA_BOOLEAN self   -> derive from other's Ruby type via
- *                       ca_value_to_data_type (bool arithmetic is a
- *                       corner case; eager widens the array, so we
- *                       just let the scalar choose)
- * numeric self      -> self_ca->data_type
- *
- * Callers broadcast against the array via stride 0 in xfer_stride. */
-VALUE
-ca_lazy_wrap_scalar (VALUE other, CArray *self_ca)
-{
-  int8_t dt;
-
-  if ( ca_is_object_type(self_ca) ) {
-    dt = CA_OBJECT;
-  }
-  else if ( self_ca->data_type == CA_BOOLEAN ) {
-    dt = ca_value_to_data_type(other);
-  }
-  else {
-    dt = self_ca->data_type;
-  }
-
-  return rb_cscalar_new_with_value(dt, 0, other);
-}
-
 static VALUE
 rb_ca_lazy_marker_s_allocate (VALUE klass)
 {
@@ -687,10 +832,13 @@ rb_ca_lazy_marker_initialize_copy (VALUE self, VALUE other)
 {
   CALazyMarker *ca, *cs;
   TypedData_Get_Struct(self,  CALazyMarker, &calazy_marker_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CALazyMarker, &calazy_marker_data_type, cs);
   ca_lazy_marker_setup(ca, cs->parent);
   return self;
 }
+
+static void Init_ca_mask_of_operands (void);
 
 void
 Init_carray_lazy (void)
@@ -707,8 +855,10 @@ Init_carray_lazy (void)
 
   rb_define_method(rb_cCArray, "lazy", rb_ca_lazy, 0);
 
+  ca_gc_local_key = rb_ractor_local_storage_ptr_newkey(&ca_gc_local_type);
+
   /* Hidden, never collected: its mark function is what keeps the
-     in-flight CA_OBJECT buffers reachable. */
+     arena's CA_OBJECT slots reachable. */
   ca_gc_guard = TypedData_Wrap_Struct(rb_cObject, &ca_gc_guard_data_type,
                                       &ca_gc_guard_body);
   rb_gc_register_mark_object(ca_gc_guard);
@@ -734,4 +884,609 @@ Init_carray_lazy (void)
                              rb_ca_lazy_arena_s_slot_in_use_count, 0);
   rb_define_singleton_method(rb_cCArray, "__lazy_arena_slot_capacities__",
                              rb_ca_lazy_arena_s_slot_capacities, 0);
+
+  Init_ca_mask_of_operands();
+}
+
+/* ---------------------------------------------------------------------------
+   Requests to the element-wise lazy views (ca_lazy_req_t, carray_internal.h).
+
+   An operand is pulled over the cells the request names.  In the region
+   form the strides address the view's cells, so they are restated at the
+   operand's cell width: strides[k] / bytes is the index step the two share.
+   (A packed stride over counts is not a substitute -- it walks cells 0, 1,
+   2 where the request asked for 0, 2, 4.)
+   --------------------------------------------------------------------------- */
+
+void
+ca_lazy_req_region (ca_lazy_req_t *req, void *view, ca_size_t *starts,
+                    ca_size_t *counts, ca_size_t *strides)
+{
+  CArray *ca = (CArray *) view;
+  int8_t  k;
+  req->n = 1;
+  for ( k = 0; k < ca->ndim; k++ ) {
+    req->n *= counts[k];
+  }
+  req->addrs   = NULL;
+  req->starts  = starts;
+  req->counts  = counts;
+  req->strides = strides;
+  req->bytes   = ca->bytes;
+  req->ndim    = ca->ndim;
+}
+
+void
+ca_lazy_req_addrs (ca_lazy_req_t *req, ca_size_t n, ca_size_t *addrs)
+{
+  req->n       = n;
+  req->addrs   = addrs;
+  req->starts  = NULL;
+  req->counts  = NULL;
+  req->strides = NULL;
+  req->bytes   = 0;
+  req->ndim    = 0;
+}
+
+/* Whether the request names one contiguous run of the view's cells, in
+   the view's own row-major order -- the case in which an operand's buffer
+   already holds the cells in the order the kernel reads them.  The strides
+   must be the native row-major ones, and the box must be whole on every
+   axis inside the outermost one it does not span with a count of 1. */
+int
+ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view)
+{
+  CArray   *ca = (CArray *) view;
+  ca_size_t native = ca->bytes;
+  int       partial = 0;
+  int8_t    k;
+  if ( req->addrs ) {
+    return 0;
+  }
+  for ( k = ca->ndim - 1; k >= 0; k-- ) {
+    if ( req->strides[k] != native ) {
+      return 0;
+    }
+    if ( partial && req->counts[k] != 1 ) {
+      return 0;
+    }
+    if ( req->counts[k] != ca->dim[k] ) {
+      partial = 1;
+    }
+    native *= ca->dim[k];
+  }
+  return 1;
+}
+
+/* The cells of a request that any of `ops` masks, as a packed boolean
+   slab in arena scratch, or NULL when none of them is masked.  An operand
+   of one cell masks every cell or none.  Kernels that can raise on a cell,
+   or that call Ruby for it, take this to skip the masked cells, as the
+   eager operators do.  Release with ca_lazy_arena_release. */
+boolean8_t *
+ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops)
+{
+  boolean8_t *m = NULL;
+  ca_size_t   j;
+  int         i;
+  int8_t      k;
+
+  for ( i = 0; i < n; i++ ) {
+    CArray *op = ops[i];
+    if ( ! op || ! ca_has_mask(op) ) {
+      continue;
+    }
+    if ( ! m ) {
+      m = (boolean8_t *) ca_lazy_arena_acquire(req->n);
+      memset(m, 0, req->n);
+    }
+    if ( op->elements == 1 ) {
+      ca_size_t  starts[CA_RANK_MAX], counts[CA_RANK_MAX];
+      ca_size_t  strides[CA_RANK_MAX];
+      boolean8_t bit = 0;
+      for ( k = 0; k < op->ndim; k++ ) {
+        starts[k] = 0; counts[k] = 1; strides[k] = 1;
+      }
+      ca_xfer_stride(op->mask, starts, counts, strides, &bit, CA_XFER_GET);
+      if ( bit ) {
+        memset(m, 1, req->n);
+      }
+    }
+    else {
+      volatile VALUE holder;
+      boolean8_t *om = ALLOCV_N(boolean8_t, holder, req->n);
+      ca_lazy_req_pull(op->mask, req, om, CA_XFER_GET);
+      for ( j = 0; j < req->n; j++ ) {
+        m[j] |= om[j];
+      }
+      ALLOCV_END(holder);
+    }
+  }
+  return m;
+}
+
+/* A scalar operand (a Ruby value or a CScalar) that the eager promotion
+   has cast to the array's data_type comes back as a cast view over a
+   CScalar.  Fix it as the CScalar the cast gives, so the expression holds
+   a plain value leaf. */
+VALUE
+ca_lazy_settle_scalar (VALUE operand, int was_scalar)
+{
+  CArray *ca;
+  if ( ! was_scalar ) {
+    return operand;
+  }
+  /* rb_obj_is_cscalar is true for any view carrying the scalar flag, the
+     cast view included; the obj_type says whether it is a CScalar. */
+  TypedData_Get_Struct(operand, CArray, &carray_data_type, ca);
+  if ( ca->obj_type != CA_OBJ_SCALAR ) {
+    return rb_ca_copy(operand);
+  }
+  return operand;
+}
+
+void
+ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
+{
+  CArray   *op = (CArray *) operand;
+  ca_size_t strides[CA_RANK_MAX];
+  int8_t    k;
+
+  if ( req->addrs ) {
+    ca_xfer_addrs(op, req->n, req->addrs, buf, dir);
+    return;
+  }
+  for ( k = 0; k < req->ndim; k++ ) {
+    strides[k] = req->strides[k] / req->bytes * op->bytes;
+  }
+  ca_xfer_stride(op, req->starts, req->counts, strides, buf, dir);
+}
+
+/* An expression the caller is about to compute whole -- a reduction along
+   an axis, a sort, a median -- computed by the registered expression
+   evaluator instead, when there is one and it takes the expression.
+   Returns the array it made, or Qnil where nothing is registered, self is
+   not a lazy expression, or the evaluator declined (CArray::Fusion.evaluate
+   decides, and asks only above its size threshold).  The caller goes on
+   with that array in place of self, or with self as before.
+
+   Only where the expression would be made whole anyway: a reduction that
+   streams the expression in chunks keeps doing so, since asking here would
+   make it whole and take that much more memory. */
+VALUE
+ca_lazy_evaluated (VALUE self)
+{
+  static ID id_evaluator = 0, id_fusion, id_evaluate;
+  CArray *ca;
+  if ( ! id_evaluator ) {
+    id_evaluator = rb_intern("@expression_evaluator");
+    id_fusion    = rb_intern("Fusion");
+    id_evaluate  = rb_intern("evaluate");
+  }
+  GetCArray(self, ca);
+  if ( ! ca_is_lazy_view(ca) ) {
+    return Qnil;
+  }
+  if ( ! RTEST(rb_attr_get(rb_cCArray, id_evaluator)) ) {
+    return Qnil;
+  }
+  return rb_funcall(rb_const_get(rb_cCArray, id_fusion), id_evaluate, 1, self);
+}
+
+/* ---------------------------------------------------------------------------
+   CAMaskOfOperands: the mask of an element-wise lazy operation over several
+   operands (CABinOp, CABinCmp, CATriOp).
+
+   The operation computes its values each time it is read, so its mask is
+   computed the same way: a request pulls each operand's mask over the cells
+   it names and ORs them.  An operand with no mask reads as all false, so an
+   operand that is given a mask after the expression was first read is seen
+   on the next read -- and reading the mask never gives an operand one.
+
+   For the boolean `|` and `&` (three-valued) a masked cell is not masked in
+   the result when an unmasked operand already decides it: true for `|`,
+   false for `&`.  The operands' values are pulled for that.
+
+   The view is read-only and has no mask of its own (CA_FLAG_VALUE_ARRAY),
+   so nothing above it asks for one.  Its parent is the operation, which
+   owns it as its mask; the operands are read through the operation's
+   parents[].
+   --------------------------------------------------------------------------- */
+
+int8_t CA_OBJ_MASK_OF_OPERANDS;
+VALUE rb_cCAMaskOfOperands;
+
+typedef struct CAMaskOfOperands {
+  int16_t   obj_type;
+  int8_t    data_type;
+  int8_t    ndim;
+  int32_t   flags;
+  ca_size_t bytes;
+  ca_size_t elements;
+  ca_size_t *dim;
+  char     *ptr;
+  CArray   *mask;
+  char     *_pool;
+  CArray   *parent;
+  uint32_t  attach;
+  uint8_t   nosync;
+  int8_t    mode;          /* CA_LAZY_MASK_OR / _KLEENE_OR / _KLEENE_AND / _SELECT */
+} CAMaskOfOperands;
+
+static size_t
+ca_mask_of_operands_dsize (const void *ap)
+{
+  const CAMaskOfOperands *ca = (const CAMaskOfOperands *) ap;
+  return sizeof(CAMaskOfOperands) + ca->ndim * sizeof(ca_size_t);
+}
+
+const rb_data_type_t camask_of_operands_data_type = {
+    .parent = &caview_data_type,
+    .wrap_struct_name = "CAMaskOfOperands",
+    .function = {
+        .dmark = ca_mark,
+        .dfree = ca_free,
+        .dsize = ca_mask_of_operands_dsize,
+        .dcompact = NULL
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+CArray *
+ca_mask_of_operands_new (CArray *operation, int mode)
+{
+  CAMaskOfOperands *ca = ALLOC(CAMaskOfOperands);
+  ca->_pool     = NULL;
+  ca->obj_type  = CA_OBJ_MASK_OF_OPERANDS;
+  ca->data_type = CA_BOOLEAN;
+  ca->flags     = CA_FLAG_READ_ONLY | CA_FLAG_VALUE_ARRAY;
+  ca->ndim      = operation->ndim;
+  ca->bytes     = 1;
+  ca->elements  = operation->elements;
+  ca->dim       = ALLOC_N(ca_size_t, operation->ndim);
+  ca->ptr       = NULL;
+  ca->mask      = NULL;
+  ca->parent    = operation;
+  ca->attach    = 0;
+  ca->nosync    = 0;
+  ca->mode      = (int8_t) mode;
+  memcpy(ca->dim, operation->dim, operation->ndim * sizeof(ca_size_t));
+  if ( ca_is_scalar(operation) ) {
+    ca_set_flag(ca, CA_FLAG_SCALAR);
+  }
+  return (CArray *) ca;
+}
+
+static void
+free_ca_mask_of_operands (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  if ( ca != NULL ) {
+    xfree(ca->ptr);
+    xfree(ca->dim);
+    xfree(ca);
+  }
+}
+
+static void *
+ca_mask_of_operands_func_clone (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  return ca_mask_of_operands_new(ca->parent, ca->mode);
+}
+
+/* An operand of one cell beside a larger operation is broadcast: its one
+   cell stands for every cell of the request. */
+static int
+ca_mask_of_operands_operand_is_scalar (CAMaskOfOperands *lm, CArray *op)
+{
+  return ( op->elements == 1 && lm->elements > 1 );
+}
+
+static void
+ca_mask_of_operands_pull (CAMaskOfOperands *lm, CArray *src, const ca_lazy_req_t *req,
+                   boolean8_t *buf)
+{
+  if ( ca_mask_of_operands_operand_is_scalar(lm, src) ) {
+    boolean8_t one;
+    ca_xfer_all(src, &one, CA_XFER_GET);
+    memset(buf, one ? 1 : 0, req->n);
+  }
+  else {
+    ca_lazy_req_pull(src, req, buf, CA_XFER_GET);
+  }
+}
+
+/* select: masked where the condition is, else where the branch it
+   chooses is.  The condition arrives converted to the branches' type
+   from boolean, so a cell is true exactly when one of its bytes is not
+   zero. */
+static void
+ca_mask_of_operands_eval_select (CAMaskOfOperands *lm, const ca_lazy_req_t *req,
+                                 boolean8_t *dst)
+{
+  CAMultiParent *mp = (CAMultiParent *) lm->parent;
+  CArray *cond = mp->parents[0];
+  ca_size_t bytes = cond->bytes;
+  ca_size_t n = req->n, i, b;
+  volatile VALUE h_value, h_m1, h_m2;
+  boolean8_t *m1, *m2;
+  char *v;
+  int32_t k;
+
+  memset(dst, 0, n);
+  if ( ca_has_mask(cond) ) {
+    ca_mask_of_operands_pull(lm, cond->mask, req, dst);
+  }
+  m1 = ALLOCV_N(boolean8_t, h_m1, n);
+  m2 = ALLOCV_N(boolean8_t, h_m2, n);
+  for ( k = 1; k <= 2; k++ ) {
+    CArray *op = mp->parents[k];
+    boolean8_t *m = ( k == 1 ) ? m1 : m2;
+    if ( ca_has_mask(op) ) {
+      ca_mask_of_operands_pull(lm, op->mask, req, m);
+    }
+    else {
+      memset(m, 0, n);
+    }
+  }
+  if ( ca_mask_of_operands_operand_is_scalar(lm, cond) ) {
+    v = ALLOCV_N(char, h_value, bytes);
+    ca_xfer_all(cond, v, CA_XFER_GET);
+    for ( b = 0; b < bytes && ! v[b]; b++ ) ;
+    for ( i = 0; i < n; i++ ) dst[i] |= ( b < bytes ) ? m1[i] : m2[i];
+  }
+  else {
+    v = ALLOCV_N(char, h_value, n * bytes);
+    ca_lazy_req_pull(cond, req, v, CA_XFER_GET);
+    for ( i = 0; i < n; i++ ) {
+      const char *c = v + i * bytes;
+      for ( b = 0; b < bytes && ! c[b]; b++ ) ;
+      dst[i] |= ( b < bytes ) ? m1[i] : m2[i];
+    }
+  }
+  ALLOCV_END(h_value);
+  ALLOCV_END(h_m2);
+  ALLOCV_END(h_m1);
+}
+
+static void
+ca_mask_of_operands_eval (CAMaskOfOperands *lm, const ca_lazy_req_t *req, boolean8_t *dst)
+{
+  CAMultiParent *mp = (CAMultiParent *) lm->parent;
+  int kleene = ( lm->mode == CA_LAZY_MASK_KLEENE_OR ||
+                 lm->mode == CA_LAZY_MASK_KLEENE_AND );
+  boolean8_t absorbing = ( lm->mode == CA_LAZY_MASK_KLEENE_OR ) ? 1 : 0;
+  volatile VALUE h_mask, h_value, h_known;
+  boolean8_t *m, *v = NULL, *known = NULL;
+  ca_size_t n = req->n, i;
+  int32_t k;
+
+  if ( lm->mode == CA_LAZY_MASK_SELECT ) {
+    ca_mask_of_operands_eval_select(lm, req, dst);
+    return;
+  }
+
+  memset(dst, 0, n);
+  m = ALLOCV_N(boolean8_t, h_mask, n);
+  if ( kleene ) {
+    v     = ALLOCV_N(boolean8_t, h_value, n);
+    known = ALLOCV_N(boolean8_t, h_known, n);
+    memset(known, 0, n);
+  }
+
+  for ( k = 0; k < mp->n_parents; k++ ) {
+    CArray *op = mp->parents[k];
+    if ( ca_has_mask(op) ) {
+      ca_mask_of_operands_pull(lm, op->mask, req, m);
+      for ( i = 0; i < n; i++ ) dst[i] |= m[i];
+    }
+    else {
+      memset(m, 0, n);
+    }
+    if ( kleene ) {
+      ca_mask_of_operands_pull(lm, op, req, v);
+      for ( i = 0; i < n; i++ ) {
+        if ( ! m[i] && ( v[i] ? 1 : 0 ) == absorbing ) known[i] = 1;
+      }
+    }
+  }
+
+  if ( kleene ) {
+    for ( i = 0; i < n; i++ ) {
+      if ( known[i] ) dst[i] = 0;
+    }
+    ALLOCV_END(h_known);
+    ALLOCV_END(h_value);
+  }
+  ALLOCV_END(h_mask);
+}
+
+NORETURN(static void ca_mask_of_operands_read_only (void));
+static void
+ca_mask_of_operands_read_only (void)
+{
+  rb_raise(rb_eRuntimeError, "the mask of a lazy operation is read-only");
+}
+
+static void
+ca_mask_of_operands_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                               ca_size_t *strides, void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_mask_of_operands_eval((CAMaskOfOperands *) ap, &req, (boolean8_t *) data);
+}
+
+static void
+ca_mask_of_operands_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                              void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_mask_of_operands_eval((CAMaskOfOperands *) ap, &req, (boolean8_t *) data);
+}
+
+static void
+ca_mask_of_operands_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t addr = 0;
+  int8_t    k;
+  if ( dir != CA_XFER_GET ) ca_mask_of_operands_read_only();
+  for ( k = 0; k < ca->ndim; k++ ) {
+    addr = addr * ca->dim[k] + idx[k];
+  }
+  ca_mask_of_operands_func_xfer_addrs(ap, 1, &addr, data, dir);
+}
+
+static void
+ca_mask_of_operands_func_xfer_all (void *ap, void *data, int dir)
+{
+  CArray   *ca = (CArray *) ap;
+  ca_size_t starts[CA_RANK_MAX];
+  ca_size_t native[CA_RANK_MAX];
+  ca_size_t s = 1;
+  int8_t    k;
+  for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
+  for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
+  ca_mask_of_operands_func_xfer_stride(ap, starts, ca->dim, native, data, dir);
+}
+
+static VALUE
+ca_mask_of_operands_fill_buffer (VALUE arg)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) arg;
+  ca_mask_of_operands_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  return Qnil;
+}
+
+/* The buffer is published only once it is filled: a read that raises
+   frees it and leaves the view unattached. */
+static void
+ca_mask_of_operands_func_attach (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  int tag = 0;
+  ca->ptr = xmalloc(ca->elements);
+  rb_protect(ca_mask_of_operands_fill_buffer, (VALUE) ca, &tag);
+  if ( tag ) {
+    xfree(ca->ptr);
+    ca->ptr = NULL;
+    rb_jump_tag(tag);
+  }
+}
+
+static void
+ca_mask_of_operands_func_allocate (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  ca->ptr = xmalloc(ca->elements);
+  memset(ca->ptr, 0, ca->elements);
+}
+
+static void
+ca_mask_of_operands_func_sync (void *ap)
+{
+  /* read-only */
+}
+
+static void
+ca_mask_of_operands_func_detach (void *ap)
+{
+  CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
+  xfree(ca->ptr);
+  ca->ptr = NULL;
+}
+
+NORETURN(static void ca_mask_of_operands_func_fill_data (void *ap, void *ptr));
+static void
+ca_mask_of_operands_func_fill_data (void *ap, void *ptr)
+{
+  ca_mask_of_operands_read_only();
+}
+
+NORETURN(static void ca_mask_of_operands_func_create_mask (void *ap));
+static void
+ca_mask_of_operands_func_create_mask (void *ap)
+{
+  rb_raise(rb_eTypeError, "can not create mask array for the mask array");
+}
+
+ca_operation_function_t ca_mask_of_operands_func = {
+  -1, /* CA_OBJ_MASK_OF_OPERANDS, set at install time */
+  CA_VIEW_ARRAY,
+  free_ca_mask_of_operands,
+  ca_mask_of_operands_func_clone,
+  ca_mask_of_operands_func_allocate,
+  ca_mask_of_operands_func_attach,
+  ca_mask_of_operands_func_sync,
+  ca_mask_of_operands_func_detach,
+  ca_mask_of_operands_func_fill_data,
+  ca_mask_of_operands_func_create_mask,
+  ca_mask_of_operands_func_xfer_index,
+  ca_mask_of_operands_func_xfer_addrs,
+  NULL,                       /* fold_stride: computed, never folds */
+  ca_mask_of_operands_func_xfer_stride,
+  ca_mask_of_operands_func_xfer_all,
+};
+
+static void
+Init_ca_mask_of_operands (void)
+{
+  rb_cCAMaskOfOperands = rb_define_class("CAMaskOfOperands", rb_cCAView);
+  CA_OBJ_MASK_OF_OPERANDS = ca_install_obj_type(rb_cCAMaskOfOperands,
+                                         &camask_of_operands_data_type,
+                                         rb_cCArrayMask,
+                                         &carray_mask_data_type,
+                                         &ca_mask_of_operands_func,
+                                         sizeof(ca_mask_of_operands_func));
+  rb_undef_alloc_func(rb_cCAMaskOfOperands);
+  ca_iter_register_source_kind(CA_OBJ_MASK_OF_OPERANDS, CA_ITER_SRC_ATTACH);
+}
+
+/* The mask of a lazy operation over several operands: shared with the one
+   masked operand when no other operand can ever be given a mask, computed
+   from all of them on each read otherwise (CAMaskOfOperands above).
+
+   An operand can be given a mask later unless it is broadcast from one
+   cell (a scalar the expression made from a literal), a value array, or a
+   read-only entity.  The shared mask is read-only, as the operation is. */
+CArray *
+ca_lazy_operation_mask (CArray *operation, int mode)
+{
+  CAMultiParent *mp = (CAMultiParent *) operation;
+  CArray *masked = NULL;
+  int32_t k, n_masked = 0, n_open = 0;
+
+  for ( k = 0; k < mp->n_parents; k++ ) {
+    CArray *op = mp->parents[k];
+    if ( ca_has_mask(op) ) {
+      masked = op;
+      n_masked++;
+    }
+    else if ( ! ( op->elements == 1 && operation->elements > 1 )
+              && ! ca_is_value_array(op)
+              && ! ( ca_is_entity(op) && ca_is_readonly(op) ) ) {
+      n_open++;
+    }
+  }
+
+  if ( n_masked == 0 ) {
+    return NULL;
+  }
+
+  if ( mode == CA_LAZY_MASK_OR && n_masked == 1 && n_open == 0
+       && masked->elements == operation->elements ) {
+    CArray *shared = (CArray *) ca_refer_new(masked->mask, CA_BOOLEAN,
+                                             operation->ndim, operation->dim,
+                                             0, 0);
+    ca_set_flag(shared, CA_FLAG_READ_ONLY);
+    return shared;
+  }
+
+  return ca_mask_of_operands_new(operation, mode);
 }

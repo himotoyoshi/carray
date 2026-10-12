@@ -8,11 +8,12 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "ca_for_buffer.h"        /* CA_WITH_BUFFER (scoped attach/detach) */
+#include "ca_for_buffer.h"        /* rb_ca_call_with_buffer */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT (sort_copy) */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_sort_quick_* / ca_sort_merge_* / ca_partition_nan_* */
 #include "ca_compare.h"           /* ca_elem_cmp[] -- shared element comparators */
+#include "carray_internal.h"      /* ca_attach_window */
 #include <math.h>
 #include <float.h>
 
@@ -93,6 +94,40 @@ sort_addr_cmp (struct sort_addr_key *a, struct sort_addr_key *b)
   return ( ia > ib ) ? 1 : -1; /* for stable sort */
 }
 
+/* An object key compares through <=>, which can raise, and a raise must
+   not unwind through libc's mergesort / qsort.  Those keys sort with this
+   mergesort instead, whose frames hold nothing; the numeric ones keep
+   libc's, which their comparisons cannot leave. */
+static void
+sort_addr_merge (struct sort_addr_key *a, struct sort_addr_key *aux,
+                 ca_size_t n, int (*cmp)(const void *, const void *))
+CA_SORT_MERGE_BY_CMP(struct sort_addr_key)
+
+typedef struct {
+  struct sort_addr_key *data;
+  struct sort_addr_key *aux;     /* NULL: no object key, libc sorts */
+  ca_size_t             elements;
+} sort_addr_run_t;
+
+static VALUE
+sort_addr_run (VALUE arg)
+{
+  sort_addr_run_t *r = (sort_addr_run_t *) arg;
+  if ( r->aux ) {
+    sort_addr_merge(r->data, r->aux, r->elements,
+                    (int (*)(const void*,const void*)) sort_addr_cmp);
+    return Qnil;
+  }
+#ifdef HAVE_MERGESORT
+  mergesort(r->data, r->elements, sizeof(struct sort_addr_key),
+            (int (*)(const void*,const void*)) sort_addr_cmp);
+#else
+  qsort(r->data, r->elements, sizeof(struct sort_addr_key),
+            (int (*)(const void*,const void*)) sort_addr_cmp);
+#endif
+  return Qnil;
+}
+
 /* CArray.sort_addr(*args, masked_position: :last) — multi-key lex
  * sort.  Returns a 1-D CA_SIZE array of indices that sorts the
  * arguments in priority order (a > b > c):
@@ -104,34 +139,25 @@ sort_addr_cmp (struct sort_addr_key *a, struct sort_addr_key *b)
  * an incomparable sentinel clustered at masked_position: (:last
  * default, or :first); ties are broken by original index (stable). */
 static VALUE
-rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
+rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
   volatile VALUE out;
   CArray *co;
-  struct cmp_base *base;
+  struct cmp_base base_s, *base = &base_s;
   struct sort_addr_key *data;
+  volatile VALUE hlist = 0, hdata = 0, haux = 0, hmodes = 0;
+  sort_addr_run_t run;
+  char *modes;
+  int has_object = 0;
   ca_size_t elements;
   ca_size_t *q;
   int j;
   ca_size_t i;
 
-  VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE vmasked_position = Qnil;
   rb_scan_options(ropt, "masked_position", &vmasked_position);
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   if ( argc <= 0 ) {
     rb_raise(rb_eArgError, "no arg given");
@@ -146,53 +172,68 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
     if ( elements != NUM2SIZE(rb_ca_elements(argv[j])) ) {
       rb_raise(rb_eArgError, "elements mismatch");
     }
-    /* Face gate: descend a Face to its storage and build attach / comparator
-       / template output on that plain storage (this also removes the SEGV
-       from a face-lifted NULL-ptr index output).  A fixlen storage sorts by
-       memcmp (the default order for fixlen, as for a plain fixlen array); a
-       numeric storage requires ORDERABLE so the numeric order equals the
-       surface order, else it raises. */
+    /* Face gate: an ORDERABLE Face sorts by its storage, so it descends to
+       it (attach / comparator / template output then run on plain storage,
+       which also avoids a face-lifted NULL-ptr index output).  A fixlen
+       storage that is not ORDERABLE (CAConstString's offsets, a record's
+       bytes) has no order in its bytes; the Face's own order stands in for
+       it, as a dense rank, so ties stay ties for the next key.  A Face that
+       has no order (CARecord without order_by:) raises there.  Any other
+       storage raises here. */
     TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca_j);
     if ( ca_is_face(ca_j) ) {
       int orderable = ca_test_flag(ca_j, CA_FLAG_FACE_ORDERABLE_STORAGE);
       VALUE stripped = rb_ca_strip_face_value(argv[j]);
       CArray *sc;
       TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
-      if ( sc->data_type != CA_FIXLEN && ! orderable ) {
-        rb_raise(rb_eArgError,
-                 "sort_addr: Face-typed input (%s) is not orderable by "
-                 "storage; use ca.parent to descend to storage",
-                 rb_obj_classname(argv[j]));
+      if ( sc->data_type == CA_FIXLEN && ! orderable ) {
+        VALUE opts = rb_hash_new();
+        rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+        argv[j] = rb_funcallv_kw(argv[j], rb_intern("order"), 1, &opts,
+                                 RB_PASS_KEYWORDS);
+        continue;
+      }
+      if ( ! orderable ) {
+        ca_face_refuse_order("sort_addr", argv[j], "order");
       }
       argv[j] = stripped;
     }
+    {
+      CArray *k;
+      TypedData_Get_Struct(argv[j], CArray, &carray_data_type, k);
+      if ( ca_is_complex_type(k) ) {
+        rb_raise(rb_eCADataTypeError,
+                 "sort_addr: a %s key has no order (complex numbers are not "
+                 "ordered); sort by its real part, imaginary part or abs",
+                 ca_type_name[k->data_type]);
+      }
+    }
   }
 
-  base = xmalloc(sizeof(struct cmp_base));
+  /* Scratch the unwind collects: the keys are read inside an attach
+     window, and a comparison of object keys can raise. */
   base->n = argc;
   base->masked_last = masked_last;
-  base->ca = xmalloc(sizeof(CArray *)*base->n);
+  base->ca = ALLOCV_N(CArray *, hlist, base->n);
+  modes = ALLOCV_N(char, hmodes, argc + 1);
 
   for (j=0; j<argc; j++) {
-    CArray *ca;
-    TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca);
-    base->ca[j] = ca;
-    ca_attach(ca);
+    TypedData_Get_Struct(argv[j], CArray, &carray_data_type, base->ca[j]);
+    has_object |= ( base->ca[j]->data_type == CA_OBJECT );
+    modes[j] = 'r';
   }
+  modes[argc] = '\0';
 
-  data = xmalloc(sizeof(struct sort_addr_key)*elements);
+  data = ALLOCV_N(struct sort_addr_key, hdata, elements);
   for (i=0; i<elements; i++) {
     data[i].i = i;
     data[i].base = base;
   }
 
-#ifdef HAVE_MERGESORT
-  mergesort(data, elements, sizeof(struct sort_addr_key),
-            (int (*)(const void*,const void*)) sort_addr_cmp);
-#else
-  qsort(data, elements, sizeof(struct sort_addr_key),
-            (int (*)(const void*,const void*)) sort_addr_cmp);
-#endif
+  run.data     = data;
+  run.aux      = has_object ? ALLOCV_N(struct sort_addr_key, haux, elements) : NULL;
+  run.elements = elements;
+  ca_attach_window(argc, base->ca, modes, sort_addr_run, (VALUE) &run);
 
   out = rb_ca_template_with_type(argv[0], INT2NUM(CA_SIZE), INT2NUM(0));
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
@@ -203,27 +244,26 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
     q++;
   }
 
-  for (j=0; j<argc; j++) {
-    ca_detach(base->ca[j]);
-  }
-
-  xfree(data);
-  xfree(base->ca);  
-  xfree(base);        
+  ALLOCV_END(haux);
+  ALLOCV_END(hdata);
+  ALLOCV_END(hmodes);
+  ALLOCV_END(hlist);
 
   return out;
 }
 
-/* Internal sort_addr_ki kernel entries (C-level only, no Ruby binding;
- * declared in the generated carray_kernels.c).  The _quick and _stable
- * variants implement the kind: dispatch; _ki itself is a 2-arg alias of
- * _quick retained for older callers.  The _mp ("masked position") twins
- * take an explicit masked_last so `sort` / `sort_copy` can pass the
- * masked_position: kwarg through (see MASKED_POSITION rev1 in
- * mkkernel.rb's MkKernel.sort doc). */
-extern VALUE rb_ca_sort_addr_ki        (VALUE self, VALUE vaxis);
-extern VALUE rb_ca_sort_addr_ki_quick  (VALUE self, VALUE vaxis);
-extern VALUE rb_ca_sort_addr_ki_stable (VALUE self, VALUE vaxis);
+static VALUE
+rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_s_sort_addr_kw(argc, argv, ropt, self);
+}
+
+/* Internal sort_addr kernel entries (C-level only, no Ruby binding;
+ * defined in the generated carray_kernels_sort.c).  The _quick and
+ * _stable variants implement the kind: dispatch; both take an explicit
+ * masked_last so `sort` / `sort_copy` can pass the masked_position:
+ * kwarg through (see MkKernel.sort in mkkernel.rb). */
 extern VALUE rb_ca_sort_addr_ki_quick_mp  (VALUE self, VALUE vaxis, int masked_last);
 extern VALUE rb_ca_sort_addr_ki_stable_mp (VALUE self, VALUE vaxis, int masked_last);
 extern VALUE rb_ca_remap_new           (VALUE cary, VALUE rmapper); /* ca_obj_remap.c (sort view) */
@@ -274,16 +314,12 @@ rb_ca_sort_addr_c (VALUE self, VALUE axis, int stable, int masked_last)
   if ( NIL_P(axis) ) {
     /* Legacy flat: equivalent to CArray.sort_addr(self, masked_position:).
        kind: ignored for now (the flat path uses qsort/mergesort
-       internally).  rb_ca_s_sort_addr's rb_pop_options handles a trailing
-       Hash the same way regardless of call-frame keyword-splat state (it
-       type-checks the last positional arg, not rb_keyword_given_p), so
-       this raw C call is safe unlike the rb_scan_args "1:" pattern used
-       elsewhere in this file. */
-    VALUE kw = rb_hash_new();
+       internally). */
+    volatile VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(rb_intern("masked_position")),
                  masked_last ? ID2SYM(rb_intern("last")) : ID2SYM(rb_intern("first")));
-    VALUE flat_argv[2] = { self, kw };
-    return rb_ca_s_sort_addr(2, flat_argv, rb_cCArray);
+    VALUE flat_argv[1] = { self };
+    return rb_ca_s_sort_addr_kw(1, flat_argv, kw, rb_cCArray);
   }
   return stable ? rb_ca_sort_addr_ki_stable_mp(self, axis, masked_last)
                 : rb_ca_sort_addr_ki_quick_mp (self, axis, masked_last);
@@ -302,35 +338,11 @@ rb_ca_sort_addr (int argc, VALUE *argv, VALUE self)
   rb_scan_args(argc, argv, "0:", &opts);
   rb_scan_options(opts, "axis,kind,masked_position", &axis, &kind, &vmasked_position);
 
-  int do_stable = 0;
-  if ( ! NIL_P(kind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( ! sym_quick )  sym_quick  = rb_intern("quick");
-    if ( ! sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(kind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
-  }
+  int do_stable = NIL_P(kind) ? 0
+    : ca_symbol_choice(kind, "kind", "quick", "stable", NULL);
 
-  int masked_last = 1;
-  if ( ! NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_addr: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   return rb_ca_sort_addr_c(self, axis, do_stable, masked_last);
 }
@@ -362,11 +374,57 @@ rb_ca_sort_addr (int argc, VALUE *argv, VALUE self)
  *
  * indices data_type: any integer kind (zero-copy if already CA_SIZE).
  * Negative indices: Python-style (-1 = last), normalized internally.
- * OOB indices: raises RangeError.  Default axis: 0; negative axis
+ * OOB indices: raises IndexError.  Default axis: 0; negative axis
  * Python-style.
  *
  * Returns: CArray of CA_SIZE, same shape as indices.
  */
+
+typedef struct {
+  CArray    *idx_ca;
+  ca_size_t *out_ptr;
+  ca_size_t *strides;
+  int        axis;
+  ca_size_t  axis_size;
+  boolean8_t *mask;      /* the indices' mask, or NULL */
+} axis2addr_ctx_t;
+
+/* Body of rb_ca_axis2addr_c: one flat address per index cell. */
+static void
+axis2addr_body (void *user_data, void *ptr, ca_size_t n)
+{
+  axis2addr_ctx_t *c       = (axis2addr_ctx_t *) user_data;
+  ca_size_t       *idx_ptr = (ca_size_t *) ptr;
+  int              ndim    = c->idx_ca->ndim;
+  ca_size_t        coord[CA_RANK_MAX];
+
+  for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
+  for ( ca_size_t k = 0; k < n; k++ ) {
+    /* A masked index has no address: the cell keeps the mask (copied from
+       the indices) and is skipped here, its stored value unread. */
+    if ( c->mask && c->mask[k] ) {
+      c->out_ptr[k] = 0;
+      goto advance;
+    }
+    ca_size_t norm = ca_index_in_range(idx_ptr[k], c->axis_size, "index");
+    /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
+    ca_size_t addr = 0;
+    for ( int8_t j = 0; j < ndim; j++ ) {
+      if ( j == c->axis ) {
+        addr += norm * c->strides[j];
+      } else {
+        addr += coord[j] * c->strides[j];
+      }
+    }
+    c->out_ptr[k] = addr;
+  advance:
+    /* Advance coord row-major (last axis ticks fastest). */
+    for ( int8_t j = (int8_t)(ndim - 1); j >= 0; j-- ) {
+      if ( ++coord[j] < c->idx_ca->dim[j] ) break;
+      coord[j] = 0;
+    }
+  }
+}
 
 /* C-callable entry: skip rb_scan_args (call-frame state dependency).
  * vaxis = Qnil treated as axis 0; Integer is taken as-is (negative
@@ -385,27 +443,27 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   TypedData_Get_Struct(vindices, CArray, &carray_data_type, idx_ca);
 
   /* axis normalization + range check. */
-  int axis_raw = NIL_P(vaxis) ? 0 : NUM2INT(vaxis);
+  int axis_raw = NIL_P(vaxis) ? 0 : (int) ca_axis_integer(vaxis, NULL);
   int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
   if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eIndexError,
-             "axis2addr: axis %d out of range for ndim %d",
-             axis_raw, (int) ca->ndim);
+    rb_raise(rb_eArgError,
+             "%s: axis %d out of range for ndim %d",
+             ca_calling_method_name(), axis_raw, (int) ca->ndim);
   }
 
   /* Shape rule: indices.ndim == self.ndim, dims match except at axis. */
   if ( idx_ca->ndim != ca->ndim ) {
     rb_raise(rb_eArgError,
-             "axis2addr: indices.ndim (%d) must equal self.ndim (%d)",
-             (int) idx_ca->ndim, (int) ca->ndim);
+             "%s: indices.ndim (%d) must equal self.ndim (%d)",
+             ca_calling_method_name(), (int) idx_ca->ndim, (int) ca->ndim);
   }
   for ( int8_t j = 0; j < ca->ndim; j++ ) {
     if ( j == axis ) continue;
     if ( idx_ca->dim[j] != ca->dim[j] ) {
       rb_raise(rb_eArgError,
-               "axis2addr: indices.dim[%d] (%lld) must equal "
+               "%s: indices.dim[%d] (%lld) must equal "
                "self.dim[%d] (%lld)",
-               (int) j, (long long) idx_ca->dim[j],
+               ca_calling_method_name(), (int) j, (long long) idx_ca->dim[j],
                (int) j, (long long) ca->dim[j]);
     }
   }
@@ -414,8 +472,8 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
      (zero-copy when already CA_SIZE via to_type identity). */
   if ( ! ca_is_integer_type(idx_ca) ) {
     rb_raise(rb_eArgError,
-             "axis2addr: indices data_type must be integer kind (got %d)",
-             (int) idx_ca->data_type);
+             "%s: indices data_type must be integer kind (got %d)",
+             ca_calling_method_name(), (int) idx_ca->data_type);
   }
   volatile VALUE vidx_cast = vindices;
   CArray         *idx_cast = idx_ca;
@@ -439,59 +497,26 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
     rb_ca_template_with_type(vidx_cast, INT2NUM(CA_SIZE), INT2NUM(0));
   TypedData_Get_Struct(vout, CArray, &carray_data_type, out_ca);
 
-  /* out_ca is a freshly allocated entity (ptr already valid), so it needs
-     no attach/sync/detach.  idx_cast may still be a view (CA_SIZE identity
-     branch above), so its contig buffer is delivered via CA_WITH_BUFFER,
-     which aliases when contig / materialises a view into scratch and scopes
-     the attach/detach to the block. */
-  ca_size_t *out_ptr = (ca_size_t *) out_ca->ptr;
+  /* out_ca is a freshly allocated entity of the indices' shape and cell
+     width, so the indices are copied into it (a view is gathered without
+     being attached) and turned into addresses in place: cell k is read
+     before it is written. */
+  axis2addr_ctx_t ctx;
+  ctx.idx_ca    = idx_cast;
+  ctx.out_ptr   = (ca_size_t *) out_ca->ptr;
+  ctx.strides   = strides;
+  ctx.axis      = axis;
+  ctx.axis_size = axis_size;
+  ctx.mask      = NULL;
 
-  ca_size_t coord[CA_RANK_MAX];
-  int       ndim = idx_cast->ndim;
-
-  /* OOB is reported after the block: rb_raise from inside CA_WITH_BUFFER
-     would longjmp past the scoped ca_detach and leak the attach (= doc
-     constraint "restructure to break").  Record the offender, break, raise
-     once the buffer lifecycle has closed. */
-  ca_size_t  bad_k   = -1;
-  ca_size_t  bad_raw = 0;
-
-  ca_size_t       *idx_ptr;
-  ca_size_t        n;
-  CA_WITH_BUFFER(idx_cast, ca_size_t, idx_ptr, n) {
-    for ( int8_t j = 0; j < ndim; j++ ) coord[j] = 0;
-    for ( ca_size_t k = 0; k < n; k++ ) {
-      /* Negative normalize + OOB check (raises on out-of-bounds). */
-      ca_size_t raw = idx_ptr[k];
-      ca_size_t norm = (raw < 0) ? (raw + axis_size) : raw;
-      if ( norm < 0 || norm >= axis_size ) {
-        bad_k = k; bad_raw = raw;
-        break;
-      }
-      /* Compute flat addr: sum c_j * stride_j (with c_axis = norm). */
-      ca_size_t addr = 0;
-      for ( int8_t j = 0; j < ndim; j++ ) {
-        if ( j == axis ) {
-          addr += norm * strides[j];
-        } else {
-          addr += coord[j] * strides[j];
-        }
-      }
-      out_ptr[k] = addr;
-      /* Advance coord row-major (last axis ticks fastest). */
-      for ( int8_t j = (int8_t)(ndim - 1); j >= 0; j-- ) {
-        if ( ++coord[j] < idx_cast->dim[j] ) break;
-        coord[j] = 0;
-      }
-    }
+  ca_copy_data(idx_cast, out_ca->ptr);
+  /* A masked index gives a masked address: readers propagate it (UNDEF in
+     that cell), writers skip it. */
+  if ( ca_has_mask(idx_cast) ) {
+    ca_copy_mask_overlay(out_ca, out_ca->elements, 1, idx_cast);
+    ctx.mask = (boolean8_t *) out_ca->mask->ptr;
   }
-
-  if ( bad_k >= 0 ) {
-    rb_raise(rb_eRangeError,
-             "axis2addr: indices[%lld] = %lld out of range [0, %lld) "
-             "(after negative normalize)",
-             (long long) bad_k, (long long) bad_raw, (long long) axis_size);
-  }
+  axis2addr_body(&ctx, out_ca->ptr, out_ca->elements);
 
   return vout;
 }
@@ -548,50 +573,24 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
  *               numeric, both no-axis and axis: forms.
  */
 static VALUE
-rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
+rb_ca_sorted_view_kw (VALUE rkw, VALUE self)
 {
-  VALUE rkw = Qnil;
   VALUE vaxis = Qnil;
   VALUE vkind = Qnil;
   VALUE vmasked_position = Qnil;
 
-  /* Parse kwargs: `sort` accepts `axis:`, `kind:`, `masked_position:`. */
-  rb_scan_args(argc, argv, "0:", &rkw);
+  /* `sort` accepts `axis:`, `kind:`, `masked_position:`. */
   rb_scan_options(rkw, "axis,kind,masked_position", &vaxis, &vkind, &vmasked_position);
 
   /* Resolve kind: -> do_stable.  :quick (default) = introsort; :stable
      = bottom-up mergesort.  Both share the same pair layout and produce
      identical orderings; only the algorithm differs. */
-  int do_stable = 0;
-  if ( !NIL_P(vkind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( !sym_quick )  sym_quick  = rb_intern("quick");
-    if ( !sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(vkind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
-  }
+  int do_stable = NIL_P(vkind) ? 0
+    : ca_symbol_choice(vkind, "kind", "quick", "stable", NULL);
 
   /* Resolve masked_position: -> masked_last.  :last (default) or :first. */
-  int masked_last = 1;
-  if ( !NIL_P(vmasked_position) ) {
-    static ID sym_first = 0, sym_last = 0;
-    if ( !sym_first ) sym_first = rb_intern("first");
-    if ( !sym_last )  sym_last  = rb_intern("last");
-    ID mp_id = SYM2ID(vmasked_position);
-    if      ( mp_id == sym_last )  masked_last = 1;
-    else if ( mp_id == sym_first ) masked_last = 0;
-    else {
-      rb_raise(rb_eArgError,
-               "sort: unknown masked_position %s (expected :first or :last)",
-               rb_id2name(mp_id));
-    }
-  }
+  int masked_last = NIL_P(vmasked_position) ? 1
+    : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -600,7 +599,7 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
      before mask handling: rb_ca_flatten re-propagates the mask field
      from the parent, so any mask stripping must happen on the post-
      flatten target. */
-  VALUE target;
+  volatile VALUE target;   /* cat points into it; the walk can run a GC */
   VALUE vaxis_use;
   if ( NIL_P(vaxis) ) {
     target    = rb_ca_flatten(self);
@@ -626,6 +625,14 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
     CA_FACE_LIFT_IF_FACE(obj, self, ca);
     return obj;
   }
+}
+
+static VALUE
+rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
+{
+  VALUE rkw = Qnil;
+  rb_scan_args(argc, argv, "0:", &rkw);
+  return rb_ca_sorted_view_kw(rkw, self);
 }
 
 /* sort_copy(axis: nil, kind: :quick, masked_position: :last) — eager
@@ -667,19 +674,12 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
 
   /* Resolve kind:: :quick (default) = portable textbook quicksort,
      :stable = portable textbook bottom-up mergesort. */
-  int do_stable = 0;
-  if ( !NIL_P(vkind) ) {
-    static ID sym_quick = 0, sym_stable = 0;
-    if ( !sym_quick )  sym_quick  = rb_intern("quick");
-    if ( !sym_stable ) sym_stable = rb_intern("stable");
-    ID kind_id = SYM2ID(vkind);
-    if      ( kind_id == sym_quick )  do_stable = 0;
-    else if ( kind_id == sym_stable ) do_stable = 1;
-    else {
-      rb_raise(rb_eArgError,
-               "sort_copy: unknown kind %s (expected :quick or :stable)",
-               rb_id2name(kind_id));
-    }
+  int do_stable = NIL_P(vkind) ? 0
+    : ca_symbol_choice(vkind, "kind", "quick", "stable", NULL);
+  /* The unmasked path below has no use for masked_position:, but a value
+     sort would refuse is refused here too. */
+  if ( ! NIL_P(vmasked_position) ) {
+    ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
   }
 
   CArray *ca;
@@ -691,13 +691,11 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
      same shape/class contract as the fast path. */
   if ( ca->data_type < CA_INT8 || ca->data_type > CA_FLOAT64
        || ca_has_mask(ca) ) {
-    VALUE sv_kw = rb_hash_new();
+    volatile VALUE sv_kw = rb_hash_new();
     if ( !NIL_P(vaxis) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("axis")), vaxis);
     if ( !NIL_P(vkind) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("kind")), vkind);
     if ( !NIL_P(vmasked_position) ) rb_hash_aset(sv_kw, ID2SYM(rb_intern("masked_position")), vmasked_position);
-    VALUE sv_argv[1] = { sv_kw };
-    int   sv_argc = ( NIL_P(vaxis) && NIL_P(vkind) && NIL_P(vmasked_position) ) ? 0 : 1;
-    VALUE obj = rb_ca_copy(rb_ca_sorted_view(sv_argc, sv_argv, self));
+    VALUE obj = rb_ca_copy(rb_ca_sorted_view_kw(sv_kw, self));
     CA_FACE_LIFT_IF_FACE(obj, self, ca);
     return obj;
   }
@@ -705,7 +703,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   /* Build target view (flatten for no-arg, identity for axis: kwarg).
      Unmasked past this point (guarded above), so no mask handling is
      needed here -- see the analogous block in rb_ca_sorted_view. */
-  VALUE target;
+  volatile VALUE target;   /* cat points into it; the walk can run a GC */
   VALUE vaxis_use;
   if ( NIL_P(vaxis) ) {
     target    = rb_ca_flatten(self);
@@ -719,12 +717,8 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(target, CArray, &carray_data_type, cat);
 
   /* Normalize axis (negative -> +ndim, range check). */
-  int axis = NUM2INT(vaxis_use);
-  if ( axis < 0 ) axis += cat->ndim;
-  if ( axis < 0 || axis >= cat->ndim ) {
-    rb_raise(rb_eArgError, "sort_copy: axis %d out of range for ndim %d",
-             NUM2INT(vaxis_use), cat->ndim);
-  }
+  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis_use, NULL),
+                                           cat->ndim, NULL);
 
   /* Allocate output: same shape and data_type as target
      (bytes=0 = preserve native bytes). */
@@ -749,8 +743,10 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
      the fiber loop and reused across fibers (all fibers share the
      same axis length and data_type). */
   void *aux = NULL;
+  volatile VALUE aux_holder = 0;      /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
   if ( do_stable ) {
-    aux = xmalloc((size_t) cat->dim[axis] * (size_t) bytes);
+    aux = ALLOCV_N(char, aux_holder,
+                   (size_t) cat->dim[axis] * (size_t) bytes);
   }
   CA_FOR_EACH_FIBER_INOUT(st_in, st_out, cat, cao, (int8_t) axis,
                           CA_KERNEL_NO_MASK, pi, po, n) {
@@ -806,8 +802,9 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
       }
     }
   }
-  if ( aux ) xfree(aux);
+  ALLOCV_END(aux_holder);
 
+  RB_GC_GUARD(target);
   return vout;
 }
 

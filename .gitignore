@@ -59,11 +59,6 @@ spec/spec_ai/ext_sweep_raw/*.bundle
 spec/spec_ai/ext_sweep_raw/*.bundle.dSYM/
 spec/spec_ai/ext_sweep_raw/*.o
 spec/spec_ai/ext_sweep_raw/mkmf.log
-spec/spec_ai/ext_per_element_smoke/Makefile
-spec/spec_ai/ext_per_element_smoke/*.bundle
-spec/spec_ai/ext_per_element_smoke/*.bundle.dSYM/
-spec/spec_ai/ext_per_element_smoke/*.o
-spec/spec_ai/ext_per_element_smoke/mkmf.log
 spec/spec_ai/ext_with_buffer_smoke/Makefile
 spec/spec_ai/ext_with_buffer_smoke/*.bundle
 spec/spec_ai/ext_with_buffer_smoke/*.bundle.dSYM/

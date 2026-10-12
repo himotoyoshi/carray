@@ -24,7 +24,7 @@ require_relative "../../lib/carray"
 class TestAxisDispatchMerge < Test::Unit::TestCase
 
   def teardown
-    CArray._csa_bypass = false
+    CArray._csa_bypass = false if CArray.respond_to?(:_csa_bypass=)
   end
 
   # ----------------------------------------------------------------

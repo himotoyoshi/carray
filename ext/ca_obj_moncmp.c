@@ -189,24 +189,6 @@ ca_moncmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_moncmp_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_moncmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                            void *data, int dir)
-{
-  CAMonCmp *ca = (CAMonCmp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_addrs PUT)");
-  }
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_moncmp_func_xfer_index(ca, idx, out + i, CA_XFER_GET);
-  }
-}
-
 ca_size_t ca_moncmp_scratch_acquire_count = 0;
 ca_size_t ca_moncmp_materialise_call_count = 0;
 ca_size_t ca_moncmp_leaf_inplace_count     = 0;
@@ -242,55 +224,30 @@ ca_moncmp_try_leaf_inplace (CArray *p,
   return 1;
 }
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                             ca_size_t *strides, void *data, int dir)
+ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
 {
-  CAMonCmp *mc = (CAMonCmp *) ap;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   void     *scratch;
   ca_size_t operand_bytes;
-  ca_size_t operand_strides[CA_RANK_MAX];
   int       is_contig;
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
-  }
   ca_moncmp_materialise_call_count++;
-
-  slab_n = 1;
-  for ( k = 0; k < mc->ndim; k++ ) slab_n *= counts[k];
 
   operand_bytes = mc->parent->bytes;
 
-  /* The operand's cell is operand_bytes wide where this view's is one byte
-     (CA_BOOLEAN), so the caller's strides have to be restated at the
-     operand's cell size before the pull; strides[k] / bytes is the index
-     step, which is what the two spaces share.
-
-     is_contig says the caller asked for the row-major slab that xfer_all
-     and attach send.  Only then does the parent's own buffer hold the
-     wanted cells in the packed order the kernel reads them in, so it is
-     also the only case the leaf in-place path is good for. */
-  {
-    ca_size_t native = mc->bytes;
-    is_contig = 1;
-    for ( k = mc->ndim - 1; k >= 0; k-- ) {
-      operand_strides[k] = strides[k] / mc->bytes * operand_bytes;
-      if ( strides[k] != native ) {
-        is_contig = 0;
-      }
-      native *= mc->dim[k];
-    }
-  }
+  /* The leaf in-place path reads the parent's own buffer, which holds the
+     wanted cells in the order the kernel reads them only for the row-major
+     slab that xfer_all and attach send. */
+  is_contig = ca_lazy_req_is_packed(req, mc);
 
   /* === 1. pull parent (leaf-opt or scratch) === */
   int scratch_is_inplace = 0;
   {
     char *inplace = NULL;
     if ( is_contig &&
-         ca_moncmp_try_leaf_inplace(mc->parent, starts, counts,
+         ca_moncmp_try_leaf_inplace(mc->parent, req->starts, req->counts,
                                      operand_bytes, &inplace) ) {
       scratch = inplace;
       scratch_is_inplace = 1;
@@ -301,8 +258,7 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                   ? ca_lazy_arena_acquire_object(slab_n)
                   : ca_lazy_arena_acquire(slab_n * operand_bytes);
       ca_moncmp_scratch_acquire_count++;
-      ca_xfer_stride(mc->parent, starts, counts, operand_strides, scratch,
-                     CA_XFER_GET);
+      ca_lazy_req_pull(mc->parent, req, scratch, CA_XFER_GET);
     }
   }
 
@@ -312,10 +268,12 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    *   fn(n, m, ptr1, i1, ptr2, i2)
    *   where ptr2 is boolean8_t*
    *
-   * Non-trapping: m=NULL (= SIMD fast path).  Per-data_type kernel handles
-   * integer is_nan etc. internally.
+   * m=NULL (= SIMD fast path) except for an object parent, whose cells
+   * call Ruby: those skip the masked cells, as the eager method does.
+   * Per-data_type kernel handles integer is_nan etc. internally.
    */
   {
+    boolean8_t *slab_mask = NULL;
     ca_moncmp_func_t fn = ca_moncmp_kernel_lookup(mc->op_id,
                                                    mc->parent->data_type);
     if ( fn == NULL ) {
@@ -324,12 +282,42 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                "CAMonCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) mc->op_id, (int) mc->parent->data_type);
     }
-    fn(slab_n, NULL,
+    if ( mc->parent->data_type == CA_OBJECT ) {
+      slab_mask = ca_lazy_req_mask(req, 1, &mc->parent);
+    }
+    fn(slab_n, slab_mask,
        (char *) scratch,    1,
        (boolean8_t *) data, 1);
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
   if ( ! scratch_is_inplace ) ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                            ca_size_t *strides, void *data, int dir)
+{
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_moncmp_eval((CAMonCmp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_moncmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                           void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_moncmp_eval((CAMonCmp *) ap, &req, data);
 }
 
 static void
@@ -394,17 +382,16 @@ ca_moncmp_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (fill_data)");
 }
 
+/* The parent's mask cell for cell, read-only as the comparison is. */
 static void
 ca_moncmp_func_create_mask (void *ap)
 {
   CAMonCmp *mc = (CAMonCmp *) ap;
   CArray *p = mc->parent;
   if ( ! ca_has_mask(p) ) return;
-
-  mc->mask = (CArray *) carray_new(CA_BOOLEAN, mc->ndim, mc->dim, 0, NULL);
-  ca_attach(p->mask);
-  memcpy(mc->mask->ptr, p->mask->ptr, mc->elements);
-  ca_detach(p->mask);
+  mc->mask = (CArray *) ca_refer_new(p->mask, CA_BOOLEAN,
+                                     mc->ndim, mc->dim, 0, 0);
+  ca_set_flag(mc->mask, CA_FLAG_READ_ONLY);
 }
 
 ca_operation_function_t ca_moncmp_func = {
@@ -468,6 +455,17 @@ rb_ca_moncmp_s_build (VALUE klass, VALUE p_cary, VALUE op_id_val)
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_moncmp_build(p_cary, op_id);
+}
+
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: object cells, which call Ruby.  CArray::Fusion
+   reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_moncmp_trapping (VALUE self)
+{
+  CAMonCmp *mc;
+  TypedData_Get_Struct(self, CAMonCmp, &camoncmp_data_type, mc);
+  return ( mc->parent->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -535,6 +533,7 @@ rb_ca_moncmp_initialize_copy (VALUE self, VALUE other)
 {
   CAMonCmp *ca, *cs;
   TypedData_Get_Struct(self,  CAMonCmp, &camoncmp_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMonCmp, &camoncmp_data_type, cs);
   if ( ca_func[CA_OBJ_MONCMP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_MONCMP, cs->parent->ndim);
@@ -572,6 +571,7 @@ Init_ca_obj_moncmp (void)
                              rb_ca_moncmp_s_build, 2);
 
   rb_define_method(rb_cCAMonCmp, "__op_id__", rb_ca_moncmp_op_id, 0);
+  rb_define_method(rb_cCAMonCmp, "__trapping__", rb_ca_moncmp_trapping, 0);
 
   rb_define_singleton_method(rb_cCAMonCmp, "__reset_scratch_counter__",
                              rb_ca_moncmp_s_reset_scratch_counter, 0);

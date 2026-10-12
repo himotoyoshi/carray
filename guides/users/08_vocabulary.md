@@ -150,7 +150,7 @@ a[0, 0]         #  => 999    and so was a, the underlying entity
 
 For arrays from other libraries that speak the MemoryView protocol (for example Apache Arrow), use `CArray.from_memory_view(obj)` (copy) or `CArray.wrap_memory_view(obj)` (zero-copy, yielding a `CAWrap`). See MemoryView.
 
-Rule of thumb: **`to_ca`** to get a CArray out of whatever you are holding (cheap); **`copy`** when you need an independent, owned array. Avoid `dup` / `clone` for making independent copies.
+Rule of thumb: **`to_ca`** to get a CArray out of whatever you are holding (cheap); **`copy`** when you need an independent, owned array. `copy` is the only way to copy a CArray: don't use `dup`, `clone` or `to_ca` for it.
 
 ## Broadcasting
 
@@ -162,7 +162,7 @@ A 1-D array does not silently combine with a 2-D one — you have to say whether
 a = CArray.int32(2, 3).seq
 v = CA_INT([100, 200, 300])    #  shape [3] — one axis
 
-a + v             #  => RuntimeError: elements mismatch (6 <-> 3)
+a + v             #  => ArgumentError: shape mismatch between operands ([2, 3] and [3])
 
 a + v[:_, nil]    #  treat v as a row (shape [1, 3]) and broadcast it
 #  => [ [ 100, 201, 302 ],

@@ -26,19 +26,31 @@ class TestFaceOperandGate < Test::Unit::TestCase
 
   # ---- the operand side ------------------------------------------------
 
+  # Every verb that takes an operand reads a const string by its strings, as
+  # converting it would: the answer (or the refusal) is the one to_string
+  # gives, never one taken from the encoding.
+  def outcome (op, a, b)
+    op.call(a, b).to_a
+  rescue => e
+    [e.class, e.message]
+  end
+
   { :is_in        => ->(a, b) { a.is_in(b) },
-    :count        => ->(a, b) { a.count(b) },
     :intersection => ->(a, b) { a.intersection(b) },
     :union        => ->(a, b) { a.union(b) },
     :difference   => ->(a, b) { a.difference(b) },
+    :locate_addr  => ->(a, b) { a.locate_addr(b) },
+    :count        => ->(a, b) { a.count(b) },
     :search       => ->(a, b) { a.search(b) },
     :bsearch      => ->(a, b) { a.bsearch(b) },
-    :locate_addr  => ->(a, b) { a.locate_addr(b) },
   }.each do |name, op|
-    define_method("test_#{name}_refuses_a_const_string_operand") do
-      err = assert_raise(ArgumentError) { op.call(codes, allow) }
-      assert_match(/CAConstString/, err.message)
+    define_method("test_#{name}_reads_a_const_string_operand_by_its_strings") do
+      assert_equal outcome(op, codes, allow.to_string), outcome(op, codes, allow)
     end
+  end
+
+  def test_count_answers_by_the_strings
+    assert_equal [1, 0], codes.count(allow).to_a
   end
 
   # ---- and the same question, asked so it can be answered --------------

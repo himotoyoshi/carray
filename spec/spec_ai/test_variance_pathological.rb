@@ -144,4 +144,17 @@ class TestVariancePathological < Test::Unit::TestCase
     assert_in_delta(0.0, s, 1e-10)
     assert_in_delta(0.0, a.variancep, 1e-20)
   end
+  # The square root keeps a NaN variance NaN; only an ε-negative from
+  # rounding is taken to 0.
+  def test_stddev_of_a_nan_variance_is_nan
+    nan = Float::NAN
+    [CA_FLOAT64([1.0, nan, 2.0]), CA_FLOAT32([1.0, nan, 2.0]),
+     CA_OBJECT([1.0, nan, 2.0]), CA_FLOAT64([1.0, Float::INFINITY])].each do |a|
+      [:stddev, :stddevp].each do |op|
+        assert a.send(op).nan?, "#{a.data_type_name} #{op}"
+        assert a.lazy.send(op).nan?, "lazy #{a.data_type_name} #{op}" unless a.object?
+      end
+    end
+    assert CA_FLOAT64([[1.0, nan], [1.0, 2.0]]).stddev(axis: 1)[0].nan?
+  end
 end

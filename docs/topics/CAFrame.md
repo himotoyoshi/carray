@@ -1,29 +1,13 @@
 # A DataFrame built on CArray columns (`CAFrame`)
 
-> **Status: provisional.** CAFrame is being grown inside CArray, and that is
-> where it is expected to stay. Splitting it into a gem of its own remains an
-> option if it ever outgrows the fit — that would change the `require` and make
-> it a separate dependency — but it is not the current direction.
->
-> The surface described here is implemented and tested unless a section is
-> marked **TBD**, which flags a planned feature that is not yet built. Names
-> and details of TBD items may change.
+`CAFrame` is a lightweight DataFrame: a set of **named columns**, each a [`CArray`](../WhatIsCArray.md). The frame adds names on top of the columns and hands the columns back whenever you ask for them, so everything CArray offers (masks, [views](Composition.md), [Face](CAFace.md) types, [MemoryView](../interop/MemoryView.md) interop) applies to them directly.
 
-`CAFrame` is a lightweight DataFrame: a set of **named columns**, each a real
-[`CArray`](../WhatIsCArray.md). The frame adds only one thing on top of the
-columns — **names** — and hands the columns back raw whenever you ask for
-them, so you *escape* to a plain `CArray` and get the entire CArray universe
-(masks, [views](Composition.md), [Face](CAFace.md) types,
-[MemoryView](../interop/MemoryView.md) interop) for free.
+Four things to know before you start:
 
-That escape-first stance is the whole idea:
-
-- a **column is a first-class `CArray`** (`df["temp"]` is the stored array
-  itself, not a wrapper);
-- the frame layer is a thin Ruby shell over columns; anything the frame does
-  not offer, you do on the escaped column with ordinary CArray operations;
-- there is **no type-inference engine, no opaque Series wrapper, no hidden
-  index alignment** — the frame keeps names, you keep control.
+- **A column is a `CArray`.** `df["temp"]` is the stored array itself, not a wrapper.
+- **Missing values are masked cells.** A column carries its mask as any CArray does, and the frame's verbs follow it. A masked cell reads as `UNDEF`, and assigning `UNDEF` masks a cell. So an integer column with a missing value **stays an integer column**; it is not turned into floats to hold a NaN.
+- **Sub-frames are views, not copies.** `select`, `filter`, `head` and row slices write through to the original frame. `df.copy` makes an independent frame (see [Sub-frames share data](#sub-frames-share-data-with-the-original-frame)).
+- **A column can be N-D.** A vector or a profile per row is one column. This is covered in its own chapter, [N-D columns](#n-d-columns); everything before it can be read with ordinary 1-D columns in mind.
 
 ```ruby
 require "carray"
@@ -31,114 +15,118 @@ require "carray"
 df = CAFrame.new(
   "station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
   "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]),
-  "wind"    => CA_FLOAT64([[1.2, -0.3], [2.1, 0.5], [0.0, 0.0]]),
 )
 
 df["temp"]                       # => CArray [22.1, 25.3, 19.0]  (the column itself)
-df.select("station", "temp")     # => a view-frame with two columns
-df.filter { |f| f["temp"] > 20 } # => a view-frame of the matching rows
-df.group_by("station").mean      # => per-station means as a new frame
+df.select("station", "temp")     # => a sub-frame with two columns
+df.filter { |f| f["temp"] > 20 } # => a sub-frame of the matching rows
+p df.group_by("station").mean    # per-station means as a new frame
 ```
+
+```
+#<CAFrame nrow=2 columns=[temp:float64] index="station">
+station   temp
+-------  -----
+tokyo    20.55
+osaka     25.3
+```
+
+### A typical session
+
+The chapters follow the order in which a frame is usually used: read it, look at it, pick rows and columns, fix the columns, aggregate, combine, write it out.
+
+```ruby
+df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })  # Building a frame
+puts df.describe.to_table                                        # Looking at a frame
+df.parse_to_time("time").set_index("time")                       # Editing columns, The index
+warm  = df.filter { |f| f["temp"] > 20 }                         # Selecting rows
+daily = df.resample("time", "1 day").mean                        # Grouping rows
+means = df.group_by("station").mean.reset_index
+means.join(meta, on: "station").to_csv("summary.csv")            # Combining, Exporting
+```
+
+### Contents
+
+1. [The model](#the-model)
+2. [Building a frame](#building-a-frame)
+3. [Looking at a frame](#looking-at-a-frame)
+4. [Getting columns and rows](#getting-columns-and-rows)
+5. [Selecting and sorting rows](#selecting-and-sorting-rows)
+6. [Editing columns](#editing-columns)
+7. [The index](#the-index)
+8. [Grouping rows](#grouping-rows)
+9. [Combining frames](#combining-frames)
+10. [Reshaping](#reshaping)
+11. [Exporting](#exporting)
+12. [View, copy and sharing](#view-copy-and-sharing)
+13. [Read-only frames](#read-only-frames)
+14. [N-D columns](#n-d-columns)
+
+[Appendix: finding the verb for a task](#appendix-finding-the-verb-for-a-task)
 
 ---
 
-## 1. The model
+## The model
 
-A frame holds:
+A frame holds its data as an ordered Hash of columns, keyed by column name (`name => CArray`).
 
-- an ordered **Hash of columns** (`name => CArray`). Column order is the Hash
-  insertion order.
-- a **row axis name** (default `"row"`).
-- an optional **index column** (a 1-D `CArray` aligned to the rows).
-
-The one structural invariant is the **axis-0 length**: every column must agree
-on its first-dimension length `N` (the row count). Beyond axis 0, each column's
-**trailing shape is free** — a frame can mix a scalar column `(N,)`, a vector
-column `(N, 2)`, and a tensor column `(N, 3, 3)`. This is how CAFrame carries
-record/tensor columns that a 2-D grid DataFrame cannot (see
-[N-D columns](#4-n-d-columns)).
+The one rule is that **every column has the same length `N`**, the number of rows.
 
 ```ruby
 df = CAFrame.new(
-  "temp" => CA_FLOAT64([1.0, 2.0, 3.0]),          # (3,)   scalar column
-  "wind" => CA_FLOAT64([[1, 2], [3, 4], [5, 6]]), # (3, 2) vector column
+  "temp" => CA_FLOAT64([1.0, 2.0, 3.0]),
+  "rh"   => CA_FLOAT64([60.0, 55.0, 70.0]),
 )
 df.nrow   # => 3
-df.nvar   # => 2
-df["wind"].shape  # => [3, 2]
+df.ncol   # => 2
 ```
 
-### What holds the row count
+A column may also have more axes than one; then axis 0 is the row axis and has length `N`, and the axes after it are free. See [N-D columns](#n-d-columns).
 
-`nrow` is not a number the frame remembers on its own — it is read off
-something the frame holds. A column holds it; so does the **index**, which is
-why a frame may have an index and **no columns at all** and still be a frame of
-`N` rows:
+A frame holds its columns as CArrays. `df["temp"]` returns the CArray the frame holds for that column, not a copy. Writing to that CArray therefore changes the data of the frame itself. When you build a frame from your own arrays, `CAFrame.new("temp" => t)` stores `t` itself, so writing to `t` also changes the frame.
+
+A frame may also have an **index**: a row-aligned array of labels (times, station names) that is kept beside the columns rather than among them. See [The index](#the-index).
+
+### Sub-frames share data with the original frame
+
+A sub-frame is a frame made from part of another frame. It shares data with the frame it came from in one of two ways:
+
+- `select` picks columns. The sub-frame holds the same column CArrays as the original frame.
+- `filter`, `head`, `tail` and a row slice pick rows. Each column of the sub-frame is a CArray view of the original column.
+
+Either way, writing a cell through the sub-frame changes the original frame, and the other way around. Nothing is copied unless you ask: `df.copy` makes a frame whose columns and index are copies.
 
 ```ruby
-CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t").nrow   # => 3
+df   = CAFrame.new("station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
+                   "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]))
+warm = df.filter { |f| f["temp"] > 20 }
+warm["temp"][0] = 0.0
+df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- the edit reached df
+
+snap = df.copy
+snap["temp"][1] = 99.0
+df["temp"].to_a            # => [0.0, 25.3, 19.0]  -- a copy does not
 ```
 
-Such a frame is an ordinary one. `at`, `filter`, `head`, `sort_by_key`, `align`,
-`copy`, `to_csv` and `to_records` all work on it, reading and carrying the index
-the same way they carry a column (§12). What does not work is asking for the
-index as a column — `df["t"]` raises `KeyError`, because the index is not one
-(§3) — and `to_ca`, which has no column to stack.
+**Note.** Most DataFrame libraries take the opposite direction: a selection or a filter behaves as an independent copy, and writing to it never reaches the frame it came from — recent pandas does this with Copy-on-Write, R copies a data frame when it is modified, and Polars operations return new frames. CAFrame keeps CArray's model instead: a sub-frame is a view, and `copy` is where you cut the link. Code carried over from those libraries that writes to a filtered frame will change the original here.
 
-You reach one by dropping every column of an indexed frame. **`drop` cannot
-remove the index**: the index is not a column, so `drop(axis_name)` raises
-`KeyError` like any other absent name. `reset_index` is the way, and it does not
-delete the index either — it *demotes* it to an ordinary column at the front:
-
-```ruby
-df = CAFrame.new({ "a" => CA_INT32([1, 2, 3]) },
-                 index: CA_INT32([10, 20, 30]), axis_name: "t")
-df.drop("a").nrow           # => 3   -- the index still holds the row count
-df.drop("a").nvar           # => 0
-df.reset_index.variables    # => ["t", "a"]   -- the index became a column
-```
-
-When the last witness goes — no columns **and** no index — there is no row count
-to keep, and the frame reports `nrow` 0. The next column assigned then fixes `N`
-again, exactly as it does for a frame that was built empty:
-
-```ruby
-df = CAFrame.new("a" => CA_INT32([1, 2, 3]))   # no index
-df.nrow                                        # => 3
-e = df.drop("a")
-e.nrow                                         # => 0   -- nothing holds 3 any more
-e.append("b", CArray.int32(99).seq!).nrow      # => 99  -- the new column fixes N
-```
-
-That is a real change of row count, so it is worth being deliberate about:
-a frame that still has an index refuses a differently-sized column
-(`column "b" has axis-0 length 99, expected 3`), while one with no witness left
-accepts it. Keep an index, or rebuild with `CAFrame.new`, when you want the
-old length enforced.
-
-### Ownership — columns are shared views, `copy` is the only cut
-
-A frame is a **thin envelope over living columns**. Sub-frames (from `select`,
-`filter`, a row slice) and escaped columns (`df["temp"]`) share those columns
-**by reference**, exactly like any CArray view, so a frame is cheap to build and
-to pass around. The flip side: there is **no copy-on-write and no
-`SettingWithCopy` warning**. An edit reaches every frame that shares the column —
-whether you go through a verb or through the escaped column
-(`df["temp"][i] = v`). When you want an independent table, say so: `df.copy`
-materializes every column and the index. To own a single column, rebind a fresh
-copy — `df = df.append("temp", df["temp"].copy)`. **This is CArray's
-view-everywhere model lifted to a table, not a general DataFrame** — how you
-place `copy` is the dividing line.
+Which operations share and which copy is listed operation by operation in [View, copy and sharing](#view-copy-and-sharing). To make a frame refuse writes altogether, see [Read-only frames](#read-only-frames).
 
 ---
 
-## 2. Construction
+## Building a frame
+
+There are three constructors, one per shape the data arrives in:
+
+| the data is… | constructor |
+|---|---|
+| arrays you already have, one per column | `CAFrame.new` |
+| an Array of row Hashes (parsed JSON) | `CAFrame.from_records` |
+| a CSV file or IO | `CAFrame.from_csv` |
 
 ### `CAFrame.new`
 
-Pass a Hash of `name => column`. Columns may be `CArray`s or anything that
-answers `to_ca` (a Ruby `Array`, a lazy view). Column names are **Strings** —
-a Symbol key in a column hash is stringified. Pairs may be given inline:
+Pass a Hash of `name => column`. Columns may be `CArray`s or anything that answers `to_ca` (a Ruby `Array`, a lazy view). Column names are **Strings** — a Symbol key in a column hash is stringified. Pairs may be given inline:
 
 ```ruby
 CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
@@ -149,18 +137,6 @@ CAFrame.new({ "v" => CA_FLOAT64([1, 2, 3]) },
             index: CArray.int64([100, 200, 300]))
 ```
 
-The keyword slot doubles as the `axis_name:` / `index:` control channel. Only
-those two Symbols are recognized there; any other Symbol keyword is rejected
-rather than taken as a column, so a mistyped control option cannot silently turn
-into one. String-keyed pairs always route to columns (a String can't be a
-keyword), so a column named `"index"` or `"axis_name"` is written the ordinary
-way:
-
-```ruby
-CAFrame.new(temp: CA_INT32([1, 2, 3]))          # ArgumentError (stray Symbol keyword)
-CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
-```
-
 A length disagreement raises immediately:
 
 ```ruby
@@ -168,172 +144,194 @@ CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([1, 2, 3]))
 # => ArgumentError: column "b" has axis-0 length 3, expected 2
 ```
 
-### `CAFrame.from_csv`
-
-Read a CSV from a path, or from an open IO — anything answering `gets`, which
-a `StringIO` is. So CSV already in memory does not have to go to a temporary
-file first:
+**Note.** The keyword slot doubles as the `axis_name:` / `index:` control channel. Only those two Symbols are recognized there; any other Symbol keyword is rejected rather than taken as a column, so a mistyped control option cannot silently turn into one. String-keyed pairs always go to columns (a String can't be a keyword), so a column named `"index"` or `"axis_name"` is written the ordinary way:
 
 ```ruby
-CAFrame.from_csv("obs.csv")                      # a path
-CAFrame.from_csv(StringIO.new(body))             # text already in hand
-File.open("obs.csv") { |io| CAFrame.from_csv(io) }
-```
-
-A String is always read as a **path**, never as CSV text. Guessing between the
-two by looking for a newline is the kind of guess that is right until it is
-not, and `StringIO` says which one you meant. An IO is read from wherever it
-is and left open — the caller opened it, so the caller closes it. One reader
-drives both forms, so a path and the same bytes in memory cannot come to be
-read differently; `encoding:` is the exception, since it is an open mode and an
-IO is already open (there the IO's own encoding governs, and a BOM is the
-caller's).
-
-The header row supplies column names (Strings). Every column is
-read **raw as an object column of the cell strings** — CAFrame does not guess
-types. Casting is a separate, explicit step: pass `types:` to cast named
-columns on the way in, or call [`cast`](#8-column-verbs) later. Cells that fail
-to parse become `UNDEF` automatically (**parse-mask**):
-
-```ruby
-df = CAFrame.from_csv("obs.csv")
-df["temp"].data_type      # => :object   (raw strings)
-
-df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64, "rh" => :int32 })
-df["temp"].data_type      # => :float64
-# an empty cell or "xx" in the temp column fails to_type -> UNDEF
-```
-
-Parsing uses a **built-in fast tokenizer** (no external dependency): quote-free
-records are split directly, and only quote-bearing records go through the field
-scanner (embedded separators / newlines / `""` escapes). Columns are handed to
-the frame as views over one backing object array, so the build is cheap.
-Options: `sep:` (default `","`), `quote:` (`'"'`), `strip:` (trim spaces from
-unquoted fields, default `false` = RFC 4180 spacing), `encoding:`
-(default `"bom|utf-8"`, strips a BOM).
-
-For files with a preamble, a units row, or no header, pass a **reading-control
-block** — `skip(n)` / `header` / `header(name)` / `column_names(...)` / `body`:
-
-```ruby
-CAFrame.from_csv("obs.csv") do
-  skip 2          # drop 2 preamble lines
-  header          # next line is the header
-  skip 1          # drop a units row
-  body            # the rest are data rows
-end
-```
-
-Without a block the default is `header` then `body`. A headerless file gets
-positional names `c0`, `c1`, … unless you supply `column_names`.
-
-To swap in a different parser (the stdlib `csv`, or a typed-table source), pass
-`parser:` — a callable `source -> [headers, rows]`, handed whatever you passed
-as the source. When given, it owns parsing,
-so `sep:` / `quote:` / `strip:` / `encoding:` and any block are its concern:
-
-```ruby
-require "csv"
-CAFrame.from_csv("obs.csv",
-                 parser: ->(p) { t = CSV.read(p); [t.shift, t] })   # first row = header
+CAFrame.new(temp: CA_INT32([1, 2, 3]))          # ArgumentError (stray Symbol keyword)
+CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
 ```
 
 ### `CAFrame.from_records`
 
-Build a frame from an **Array of row Hashes** — the shape `JSON.parse` yields
-for a JSON array of objects:
+Build a frame from an **Array of row Hashes** — the shape `JSON.parse` yields for a JSON array of objects:
 
 ```ruby
 records = JSON.parse(File.read("obs.json"))   # => [ {...}, {...}, ... ]
 df = CAFrame.from_records(records)
 ```
 
-Unlike a CSV cell (always a string), a record value is **already a typed Ruby
-object** (`Float`, `Integer`, `DateTime`, `String`). So `from_records` builds
-each homogeneous column at its **native leaf type** — this is *arranging by the
-value's own type*, not string inference, so §4.2's rule holds: **no date-like
-string is parsed**, and anything mixed stays object.
+A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`, `DateTime`, `String`), so `from_records` builds each column from the types of its values. Strings are not parsed: a date written as a string stays a string, and a column of mixed values stays `:object`.
 
 | the column's non-nil values are… | column built as |
 |---|---|
 | all `Integer` | `:int64` |
-| all `Numeric` (int/float mix) | `:float64` |
-| strings / `DateTime` / booleans / mixed | `:object` (left as is) |
-| equal-length numeric **arrays** | an **N-D** `(N, L)` column (see §4) |
+| `Integer` and `Float` | `:float64` |
+| `Integer`, `Float` and `Complex` | `:cmplx128` |
+| strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed | `:object` (left as is) |
+| numeric **arrays** of one shape | an N-D column (see [Making N-D columns](#making-n-d-columns-from-records)) |
 
-- The column set is the **union of keys** in first-appearance order; keys are
-  stringified (String- or Symbol-keyed records both work).
-- A **missing key or `nil`** becomes `UNDEF`. An integer column with a hole
-  stays `:int64` with an `UNDEF` cell — **no promotion to float** (the mask
-  carries the missingness, unlike a NaN-forced float column).
-- `types:` casts named columns afterward (same map / array-key forms as
-  [`cast`](#8-column-verbs)), overriding the detected type:
+- The column set is the **union of keys** in first-appearance order; keys are stringified (String- or Symbol-keyed records both work).
+- A **missing key or `nil`** becomes `UNDEF`. An integer column with a hole stays `:int64` with an `UNDEF` cell — **no promotion to float**: the mask carries the missingness, so there is no need to force the column to float to hold a NaN.
+- `types:` casts named columns afterward (the same map / array-key forms as [`cast`](#changing-a-columns-type)), overriding the detected type:
 
 ```ruby
 df = CAFrame.from_records(records,
                           types: { %w[prefNumber humidity] => :int32 })
 ```
 
-An equal-length **array cell** across every record becomes one N-D column —
-`{ "temp" => [min, mean, max] }` over `N` records is a single `(N, 3)` column
-(see [N-D columns](#4-n-d-columns)). Ragged lengths or non-numeric leaves fall
-back to an object column.
+### `CAFrame.from_csv`
+
+Read a CSV from a path or from an open IO. The header row gives the column names, and every column is read as text (a `CAString`) unless you ask for types:
+
+```ruby
+df = CAFrame.from_csv("obs.csv")                                    # every column as text
+df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64
+df = CAFrame.from_csv("obs.csv", types: :infer)                     # each column's type inferred
+```
+
+With `types: :infer`, each text column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text otherwise (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
+
+An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF` — in an integer column too, which stays integer. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframefrom_csv).
+
+### Other formats
+
+Reading other formats — Excel, Parquet, Arrow, SQLite, DuckDB and others — is planned as separate gems that build a frame with these constructors. They will be released one at a time; none is available yet.
 
 ---
 
-## 3. Column and row access — `df[...]`
+## Looking at a frame
 
-`df[...]` is a **total function of the key type** (no sniffing of contents).
-String keys *escape* to raw columns; row-selector keys stay in frame-land:
+Right after reading a frame, look at what you got: `p` for a glance, `describe` for a check of every column, and the readers at the end of this chapter for its size, names and types.
+
+### Printing — `p`, `puts`, `to_table`
+
+```ruby
+p df                       # summary line + first 8 / last 2 rows
+puts df                    # the whole frame
+puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
+```
+
+```
+#<CAFrame nrow=1286 columns=[name:object, lat:float64, temp:int32] index="id">
+  id  name               lat  temp
+----  -----------  ---------  ----
+   0  station0          45.0     0
+   1  station1     44.999667     1
+   2  station2     44.999333     2
+   3  station3        44.999     3
+   4  station4     44.998667     4
+   5  station5     44.998333     5
+   6  station6        44.998     6
+   7  station7     44.997667     7
+   :  :                    :     :
+1284  station1284     44.572    10
+1285  station1285  44.571667    11
+```
+
+**`p df` stays a screenful** (the summary line, then the first 8 and last 2 rows) while **`puts df` prints the whole frame**. Both are built on `to_table`, which takes options:
+
+- `rows:` caps the printed rows (default 20); the elided middle becomes a `:` row, and a footer states the full size. `rows: nil` prints every row.
+- `precision:` rounds float cells to that many decimal places **for display only** (default 6), so that one value like `141.67833333333334` does not set the width of the whole column. `precision: nil` prints them as Ruby renders them.
+- `index: false` drops the index column.
+
+In the table, numeric columns are right-aligned and everything else left-aligned, and **a masked cell shows as `_`** (the marker CArray's own inspect uses). `to_table` is text to be looked at, not read back — for a file, use [`to_csv`](#csv--to_csv).
+
+### Checking a frame just read — `describe`
+
+`describe` summarizes the columns, **one row per column**, as a new frame indexed by column name — so a wide table stays readable, and the result is an ordinary frame to filter or print:
+
+```ruby
+puts df.describe.to_table
+```
+
+```
+column   type     count  masked  unique  min         max         mean        stddev
+-------  -------  -----  ------  ------  ----------  ----------  ----------  --------
+station  object       3       0       2  _           _           _           _
+temp     float64      2       1       2  19.0        22.1        20.55       2.192031
+time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
+```
+
+- `type` is the data type, or the Face's class for a Face column. A text column read by `from_csv` shows as `CAString` here, though `data_types` lists it as `:object` (a `CAString` is a Face over object storage).
+- `count` and `masked` count cells; `unique` is the number of distinct present values. A `masked` count you did not expect is the usual sign that a column was read with the wrong type.
+- `min` / `max` / `mean` / `stddev` apply where the column's kind gives them a meaning and are `UNDEF` elsewhere:
+  - real numbers and booleans get all four (a boolean's mean is the share of trues);
+  - complex numbers get `mean` and `stddev` (they have no order);
+  - `CATime` and `CATimedelta` get all four, as times and durations;
+  - text, categorical and record columns get the counts only.
+- A column with no present cell has `UNDEF` statistics. The index is not a column and is not summarized.
+
+`describe("temp", "rh")` summarizes only the named columns.
+
+### Size, names and types
+
+| reader | returns |
+|---|---|
+| `nrow` | number of rows `N` (normally the length of the columns; see [A frame with only an index](#a-frame-with-only-an-index) for the exception) |
+| `ncol` | number of columns |
+| `column_names` | `Array<String>` of column names, in column order |
+| `data_types` | `Hash<String, Symbol>` of `name => data_type` |
+| `columns` | `Array<CArray>` of the stored columns themselves, in column order |
+| `axis_name` | the row-axis name (String); see [The index](#the-index) |
+| `index` | the index `CArray`, or `nil` |
+
+```ruby
+df.column_names     # => ["station", "temp"]
+df.data_types       # => { "station" => :object, "temp" => :float64 }
+```
+
+The Arrays and Hashes these readers return are made for each call, so changing one does not change the frame. The CArrays inside them are not copies: `columns` holds the stored columns themselves, and `index` is the stored index.
+
+Positional or pattern selection of columns is done on `column_names` rather than with an API of its own — e.g. `df.select(*df.column_names[1..])` or `df.select(*df.column_names.grep(/temp/))`.
+
+---
+
+## Getting columns and rows
+
+`df[...]` takes a key. A String key returns a column; the other keys select rows:
 
 | key | result |
 |---|---|
-| `String` ×1 | the column — a raw `CArray` (the escape unit) |
-| `String` ×2+ | `Array<CArray>` — the escaped columns, in order |
+| `String` ×1 | the column — the `CArray` the frame holds |
+| `String` ×2+ | `Array<CArray>` — those columns, in order |
 | `Integer` | one row, as a Ruby `Hash` |
-| `Range` (integer endpoints) | positional row slice → **view-frame** |
-| boolean `CArray` | row filter → **view-frame** |
-| integer `CArray` | row gather → **view-frame** |
+| `Range` (integer endpoints) | positional row slice → **sub-frame** |
+| boolean `CArray` | row filter → **sub-frame** |
+| integer `CArray` | row gather → **sub-frame** |
 
-### String keys escape
+Besides `df[...]`, this chapter covers `head` / `tail`, `at` (a row by its label), `select` (a frame of some columns) and `each_row`. Writing with `df[...] =` is in [Editing columns](#adding-removing-and-renaming-columns) and [Masking, deleting and splicing rows](#masking-deleting-and-splicing-rows).
 
-One name collapses to a bare `CArray`; several give an `Array` of them — the
-same "single collapses, plural is an array" rule as `ca[i]` vs `ca[i..j]`. This
-makes destructuring natural:
+### Columns by name
+
+One name gives a bare `CArray`; several give an `Array` of them — the same "one gives an element, several give an array" rule as `ca[i]` and `ca[i..j]`. This makes destructuring natural:
 
 ```ruby
 df["temp"]                 # => CArray            (one column)
-df["temp", "wind"]         # => [CArray, CArray]  (several columns)
+df["temp", "rh"]           # => [CArray, CArray]  (several columns)
 
-t, wind = df["temp", "wind"]   # parallel assignment
+t, rh = df["temp", "rh"]   # parallel assignment
 ```
 
-The escaped columns are the **stored arrays** (aliases), so writing through one
-mutates the frame — the same write-through contract as any CArray view:
+The returned columns are the **stored arrays**, so writing through one changes the frame — the same write-through rule as any CArray view:
 
 ```ruby
-t, = df["temp", "wind"]
+t, = df["temp", "rh"]
 t[1] = -7.0
 df["temp"][1]              # => -7.0
 ```
 
-`df[...]` never returns a *frame* for String keys — for a column-subset frame,
-use [`select`](#5-select). A missing name raises `KeyError`; a mixed-type
-multi-key list raises `ArgumentError`.
+`df[...]` never returns a *frame* for String keys — for a frame of some columns, use [`select`](#a-frame-of-some-columns--select). A missing name raises `KeyError`; a key list mixing Strings and other types raises `ArgumentError`.
 
-### Integer → one row (Hash)
+### One row as a Hash
 
-A single integer returns the row as a Ruby `Hash` (`name => value`), with the
-index field included when the frame has one. Scalar columns give a scalar; N-D
-columns give the trailing-shape slice:
+A single integer returns the row as a Ruby `Hash` (`name => value`), with the index included under the row-axis name when the frame has one. As with `Array#[]`, a negative position counts from the end: `df[-1]` is the last row. A position out of range raises `IndexError`.
 
 ```ruby
 df[0]
-# => { "station" => "tokyo", "temp" => 22.1, "wind" => <CArray [1.2, -0.3]> }
+# => { "station" => "tokyo", "temp" => 22.1 }
 ```
 
-A masked cell surfaces as `UNDEF`, **not** `nil`. Test for it with `== UNDEF` —
-`UNDEF.nil?` is `false`, so `.nil?` misses it:
+A masked cell comes back as `UNDEF`, **not** `nil`. Test for it with `== UNDEF` — `UNDEF.nil?` is `false`, so `.nil?` misses it:
 
 ```ruby
 m = CAFrame.new("temp" => CA_FLOAT64([22.1, UNDEF, 19.0]))
@@ -342,10 +340,9 @@ m[1]["temp"] == UNDEF       # => true
 m[1]["temp"].nil?           # => false  (do not use this to detect missing)
 ```
 
-### Range / boolean / integer CArray → view-frame
+### Rows as a sub-frame
 
-These select **rows** and return a **view-frame** (each column a view sharing
-storage with the parent):
+A Range, a boolean `CArray` or an integer `CArray` selects **rows** and returns a **sub-frame**; each column is a view sharing storage with the frame it came from:
 
 ```ruby
 df[0..1]                   # rows 0..1 (positional)
@@ -353,133 +350,398 @@ df[df["temp"] > 20]        # boolean row filter
 df[CA_INT64([2, 0, 1])]    # integer row gather (reorder / repeat)
 ```
 
-Ranges are **positional only** — endpoints must be integers. Label ranges go
-through [`filter`](#6-filter) with `f.index` (see below). A non-integer range
-raises.
+Ranges are **positional only** — endpoints must be integers, and a non-integer Range raises. To select a range of labels, use [`filter`](#filter--rows-matching-a-condition) with `f.index`.
 
-### `head` / `tail` → first / last rows (view-frame)
+### First and last rows — `head`, `tail`
 
-`head(n)` and `tail(n)` return the first / last `n` rows as a positional
-view-frame (`n` defaults to 5). `n` larger than `nrow` yields the whole frame;
-`n` of 0 yields an empty frame; a negative `n` raises.
+`head(n)` and `tail(n)` return the first / last `n` rows as a sub-frame (`n` defaults to 5). `n` larger than `nrow` yields the whole frame; `n` of 0 yields an empty frame; a negative `n` raises.
 
 ```ruby
-df.head        # first 5 rows (view-frame)
+df.head        # first 5 rows
 df.tail(3)     # last 3 rows
 ```
 
-### `at` → one row by index label (Hash)
+### One row by its label — `at`
 
-`at(label)` returns the single row whose index label equals `label`, as a Ruby
-`Hash` — the label-keyed counterpart to `df[i]`. The label is matched exactly
-against the index, so any orderable / object / time / categorical index
-works. The frame must have an index (`set_index`).
+`at(label)` returns the single row whose index label equals `label`, as a Ruby `Hash` — the counterpart of `df[i]` that looks the row up by label instead of position. The frame must have an index (see [The index](#the-index)). The label is matched exactly, so any index type works: numbers, strings and other objects, times, categoricals. A time index also takes the label as a `Time`, a `Date` or a String such as `"2024-01-02"`, and `at(Float::NAN)` finds a NaN label — such as the one `group_by` gives rows whose key is NaN.
+
+A **numeric** index is looked up with a number: `at(2.5)`, `at(2)`. A String or `true` / `false` raises, so a label read from text is converted first — `at(Float(s))`.
+
+In an **object** index, `at` compares labels with Ruby's `==`, so `at(1.0)` finds a label `1`. `join`, `align` and `group_by` compare object keys with `eql?`, as a Ruby `Hash` does, so there `1` and `1.0` are different keys. When numbers are kept in an object column, cast it to a numeric type (`df.cast("k", :float64)`) and both agree.
 
 ```ruby
 byname = df.set_index("station")
-byname.at("osaka")             # => { "station" => "osaka", "temp" => 25.3, ... }
+byname.at("osaka")             # => { "station" => "osaka", "temp" => 25.3 }
 ```
 
-The return type is always a row Hash. A missing label raises `KeyError`, and a
-**duplicate** label raises `ArgumentError` (the index is not required to be
-unique) — reach for the multi-row, frame-returning path instead:
+`at` always returns one row Hash, so it raises when there is not exactly one row to return:
+
+- a frame with no index raises `ArgumentError`;
+- a label that is not in the index raises `KeyError`;
+- a label that appears **more than once** raises `ArgumentError` (an index is not required to be unique). Use `filter` to get every row with that label, as a frame:
 
 ```ruby
 df.filter { |f| f.index.eq(label) }   # every row whose label matches
+df.filter { |f| f.index.is_nan }      # every row whose label is NaN (eq is false for NaN)
 ```
 
-An index may carry a **masked cell** — an `:outer` / `:right` join and `align`
-both produce one for a row that matched nothing. Such a row has no label, so
-`at` cannot reach it: `at(UNDEF)` raises `ArgumentError`, and asking for a real
-label whose cell is masked raises `KeyError` like any other absent label. Two
-undefined labels are not the same label, so there is nothing for `at` to return
-one row for — which is the answer the key-matching primitives behind `join` and
-`align` already give. Reach for those rows with mask vocabulary instead:
+**Rows with no label.** An `:outer` / `:right` [`join`](#join--match-rows-by-key) and [`align`](#align--conform-to-a-reference-key-set) can leave a row whose index cell is masked. Such a row has no label, so `at` cannot reach it: `at(UNDEF)` raises `ArgumentError`. (Two undefined labels are not the same label, so there would be no single row to return; `join` and `align` match keys the same way.) Reach those rows by their mask instead:
 
 ```ruby
 df.filter { |f| f.index.is_masked }   # every row with no label
 ```
 
-### `sort_by_key` → reorder rows by key columns (view-frame)
+### A frame of some columns — `select`
 
-`sort_by_key(*keys, order:, masked_position:)` sorts rows **lexicographic** by
-one or more key columns (the first key is primary). It delegates to the
-multi-key `CArray.sort_addr` for the row permutation and gathers every column
-and the index by it, returning a view-frame.
+`select` picks columns and returns a **sub-frame** holding them — the same CArrays the original frame holds. Where `df["a", "b"]` returns the columns as CArrays, `df.select("a", "b")` keeps a frame:
+
+```ruby
+sub = df.select("station", "temp")   # => CAFrame with two columns
+sub.column_names                     # => ["station", "temp"]
+```
+
+`select` **always returns a frame**, even for one name (unlike `df["a"]`):
+
+```ruby
+df.select("temp").column_names       # => ["temp"]   (a frame, not a CArray)
+```
+
+The requested order becomes the new frame's column order, so `select` also **reorders columns**:
+
+```ruby
+df.select("temp", "station").column_names
+# => ["temp", "station"]
+```
+
+Being a sub-frame, it holds the original's columns — writing through it changes the original. `select` takes no block; to choose rows too, chain `filter`:
+
+```ruby
+df.select("station", "temp").filter { |f| f["temp"] > 20 }
+```
+
+### One row at a time — `each_row`
+
+```ruby
+df.each_row { |r| ... }    # yield each row as a Ruby Hash
+df.each_row                # without a block -> Enumerator
+```
+
+`each_row` is for the occasional look at single rows. Most work on a frame is done on whole columns, not in per-row loops. Each row is yielded as `df[i]` would return it (a masked cell is `UNDEF`); for rows as plain Ruby values ready to serialize, use [`to_records`](#ruby-records--to_records).
+
+---
+
+## Selecting and sorting rows
+
+### `filter` — rows matching a condition
+
+`filter` selects **rows** with a block that receives the frame and returns a boolean column. The block builds the condition from `f["col"]` (and `f.index`):
+
+```ruby
+df.filter { |f| f["temp"] > 24 }
+df.filter { |f| (f["temp"] > 24) & (f["rh"] < 50) }   # & / | combine conditions
+```
+
+The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest.
+
+Column names are written as `f["..."]` strings, **not** bare identifiers: a frame allows any column name (`"temp.max"`, names with spaces, names that collide with method names), which a `method_missing` DSL cannot support.
+
+The **index** is a row-aligned array like a column, reachable as `f.index`, so **conditions on labels are ordinary column conditions**:
+
+```ruby
+df.filter { |f| f.index >= "2024-06-15 01:00" }
+df.filter { |f| (f.index >= lo) & (f.index <= hi) }   # a range of labels
+```
+
+A comparison between two frames does not fit a block that receives one frame — take the columns out as local variables instead (they are CArrays, so you can name them):
+
+```ruby
+diff = df_aws["temp"] - df_gpv["temp"]
+```
+
+### Rows whose condition is undetermined — `keep_masked:`
+
+A row is **undetermined** when the value its condition reads is masked, so the condition is neither true nor false for it. By default such a row is **dropped**, exactly as a false row would be. Pass `keep_masked: true` to keep it, masked:
+
+```ruby
+df.filter { |f| f["temp"] > 24 }                     # undetermined rows dropped
+df.filter(keep_masked: true) { |f| f["temp"] > 24 }  # they survive, masked
+```
+
+The surviving undetermined rows arrive with their **data cells masked** and their **index value present**, so the row stays identifiable and a later, better-informed pass can judge it again. Rows whose condition is true carry their values through unchanged either way.
+
+**`keep_masked: true` returns a new frame, not a sub-frame**: a view could not show those rows masked without masking them in the original frame too. It is a new frame even when no cell of the condition is masked.
+
+### `sort_by_key` — reorder rows by key columns
+
+`sort_by_key(*keys, order:, masked_position:)` sorts rows by one or more key columns, the first key deciding first and the next breaking its ties. It returns a sub-frame.
 
 ```ruby
 df.sort_by_key("temp")                             # one column, ascending
-df.sort_by_key("station", "temp")                  # lexicographic: station, then temp
+df.sort_by_key("station", "temp")                  # by station, then temp
 df.sort_by_key("temp", order: :desc)               # all keys descending
-df.sort_by_key(["station", :asc], ["temp", :desc]) # per-key direction
+df.sort_by_key(["station", :asc], ["temp", :desc]) # a direction per key
 df.sort_by_key("temp", masked_position: :first)    # masked rows first
-df.sort_by_key("time")                             # by the index (axis name)
+df.sort_by_key("time")                             # by the index (its axis name)
 ```
 
-- Each key is a **column name** (or the index axis name), or a
-  **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys
-  (default `:asc`). A key must be a scalar (1-D) column (an N-D key raises).
-- **`masked_position:`** sends masked key rows to the `:last` (default) or
-  `:first` end.
-- Descending works for **every data type** (a descending key is internally its dense
-  descending rank via `CArray#order` — reliable where negating a value is not,
-  and tie-safe in a multi-key sort).
+- Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys (default `:asc`).
+- **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end, whichever the direction.
+- **NaN** counts as larger than every number: it comes last in ascending order and first in descending order. To keep it at the end either way, mask it first (`df["temp"][:is_nan] = UNDEF`) and let `masked_position:` place it.
+- A key can be any column whose values have an order — numbers, text, times — in either direction. Two kinds of column cannot be keys:
+  - a **categorical** column, whose codes are not in the order of its labels. Sort by its labels with `df.sort_by { |f| f["k"].to_type(:object) }`;
+  - a **complex** column, since complex numbers have no order. Sort by a part of it, e.g. `df.sort_by { |f| f["z"].abs }`.
 
-The block form `sort_by { |f| ... }` is the **escape** (the sort sibling of
-`filter`): the block receives the frame and returns a key `CArray` — or an
-`Array` of them — sorted ascending. Use it for **derived or composite** keys
-that are not a plain column:
+### `sort_by` — sort by a computed key
+
+The block form `sort_by { |f| ... }` is the sorting sibling of `filter`: the block receives the frame and returns a key `CArray` — or an `Array` of them — sorted ascending. Use it for keys that are **computed** rather than a plain column:
 
 ```ruby
-df.sort_by { |f| (f["temp"] - target).abs }                          # nearest-to-target
+df.sort_by { |f| (f["temp"] - target).abs }                          # nearest to target first
 df.sort_by { |f| f["temp"].order(descending: true, method: :dense) } # a descending key
 ```
 
-`sort_by` also takes `masked_position:`. Build a descending key the same way
-`sort_by_key` does internally — with `col.order(descending: true, method: :dense)`.
+`sort_by` also takes `masked_position:`. For a descending key, use `col.order(descending: true, method: :dense)` as above; it works for any type, where negating a value does not, and it keeps ties as ties when several keys are combined. (`sort_by_key` builds its descending keys the same way.)
 
-### `df[...] =` → the key picks the axis, as it does when reading
+---
 
-The write side of `df[...]` classifies the **key** the same way the read side
-does: a **String names a column**, anything else selects **rows**.
+## Editing columns
+
+### New frame or `self`?
+
+The column verbs split by **what they change**, and that alone decides whether a call returns a new frame or changes `self`:
+
+- Verbs that make the table a **different table** — a different set of columns (`append`, `drop`), different names (`rename`) — return a **new frame** that shares the columns. Chain or reassign: `df = df.append(...).drop(...)`.
+- Verbs that **edit a column of the same table** — its mask (`mask_eq`, `fill`), its type (`cast`, `promote`, `parse_to_time`, `to_time`) — and the verbs that choose which column is the index (`set_index` / `reset_index`) return **`self`**.
+
+Whether an edit reaches other frames that share the column depends on the verb:
+
+| verb | returns | reaches frames sharing the column |
+|---|---|---|
+| `append` / `drop` / `rename` | a new frame | — (this frame is unchanged) |
+| `mask_eq` / `fill` | `self` | yes — the stored column is edited |
+| `cast` / `promote` / `parse_to_time` / `to_time` | `self` | no — a new column is bound in its place |
+| `set_index` / `reset_index` | `self` | — (no cell changes) |
+
+`copy` first when an edit must not reach other frames.
+
+```ruby
+# the set of columns or their names change -> new frame (keep the result):
+df = df.append("tempF", df["temp"] * 9 / 5.0 + 32) # add a derived column at the end
+df = df.drop("raw", "scratch")                      # remove columns (data untouched)
+df = df.rename("temp" => "temperature")             # rename, keeping the order
+
+# edit a column of the same table -> self (changes df in place):
+df.cast("temp", :float64)                           # change a column's type
+df.mask_eq("flag", -999)                            # mask cells equal to a sentinel
+df.fill("temp", :linear)                            # fill masked cells
+```
+
+### Adding, removing and renaming columns
+
+- **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
+- **`drop(*names)`** returns a new frame without those columns. The data is not touched.
+- **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order.
+
+The same changes can be made to the frame itself with `df["name"] =`:
 
 ```ruby
 df["temp"] = col      # bind the name to that column (a new name is added)
 df["temp"] = nil      # remove the column
 df["temp"] = UNDEF    # mask every cell of the column, in place
-df[2..3]   = nil      # remove those rows (below)
 ```
 
-An assignment can only ever mutate the receiver — Ruby hands the right-hand
-side back as the value of the expression, so there is no way for `[]=` to
-return a new frame the way `append` / `drop` do. All the forms below act on
-**this** frame; a parent frame's column set is untouched (membership is
-per-frame).
+These act on **this** frame only. (Ruby returns the right-hand side as the value of an assignment, so `[]=` has no way to return a new frame the way `append` / `drop` do.) A frame this one was derived from keeps its own columns — each frame has its own set of names.
 
-Two of the column forms are worth stating plainly:
+- **Rebinding is a replacement, not an edit.** `df["a"] = other_col` binds the name to a different column and leaves the old one alone, so frames that hold the old column do not see the change — like `cast` and `promote`, and unlike `fill` or `mask_eq`, which edit the shared column. Rebinding is also where a column enters an existing frame, so this is where its length must equal `nrow` (a frame with no columns and no index takes its `nrow` from the first column assigned).
+- **`df["c"] = UNDEF` does reach other frames**, because it masks the stored column in place rather than replacing it.
+- A scalar right-hand side is refused (there is no implicit broadcast — write `CArray.float64(df.nrow) { 3 }`), and so is a `CAFrame` (take a column from it, or splice rows with [`df[rows] = other`](#masking-deleting-and-splicing-rows)).
+- When the frame has an index, its axis name is not a column name: assigning to it raises and points at `set_index` / `reset_index`.
 
-- **Rebinding is a replacement, not an edit.** Every other edit reaches the
-  shared column and so is visible everywhere it is held — `fill`, `mask_eq`,
-  `df[rows] = UNDEF`. `df["a"] = other_col` is the exception, together with
-  `cast`: it binds the name to a different column and leaves the old one
-  alone, so nothing that holds the old column sees the change. Rebinding is
-  also the one place a column enters an existing frame, so it is where the
-  **axis-0 length** must match `nrow` (an empty frame takes its `nrow` from
-  the first column assigned).
-- **`= UNDEF` does write through**, because it masks the stored column in
-  place rather than replacing it — the column counterpart of
-  `df[rows] = UNDEF`.
+### Changing a column's type
 
-A scalar right-hand side is refused (no implicit broadcast — write
-`CArray.float64(df.nrow) { 3 }`), as is a `CAFrame` (escape a column from it,
-or splice rows with `df[rows] = other`). When the frame has an index, its
-`axis_name` is not a column name: assigning to it raises and points at
-`set_index` / `reset_index`.
+```ruby
+df.cast("temp", :float64)                           # one column
+df.cast("temp" => :float64, "rh" => :int32)         # map form: several columns
+df.cast(["u", "v"] => :float64)                     # one type shared by several
+df.cast(:infer)                                     # the types infer_types finds
+df.cast(default: :float64, "station" => nil)        # the rest float64, station as is
+df.promote                                          # every column to one common type
+df.promote(:object)                                 # ...to the widest type of all
+```
 
-#### Row forms — mask / delete / splice
+**`cast`** binds a new column of the target type in place of the old one, so the change does not reach frames sharing the old column. What it does depends on the column and the target:
 
-With a non-String key the **right-hand value** picks the operation and the key
-selects the rows:
+- **Text to a number.** A text (object) column, or a string column (`CArray.string`, `CArray.const_string`), is read as decimal numbers: digits with an optional sign, decimal point and exponent (and `nan` / `inf` for floats), surrounding spaces ignored.
+  - A cell is data, not a Ruby literal: `"010"` is ten, and `"0x1F"` / `"1_000"` are not numbers.
+  - An integer type takes any number whose value is exactly an integer (`"1.0"`, `"1e3"`), decided from the digits so that a long integer is not rounded; `"1.5"` is not an integer.
+  - A cell that does not read, or a value the type cannot hold (`"300"` into `:int8`), becomes `UNDEF`.
+  - A Ruby number in an object column follows the same rule: an Integer that fits, or a Float, Rational or BigDecimal with no fractional part, is kept, and `2.5` becomes `UNDEF` rather than being truncated — so `"2.5"` and `2.5` in one column agree.
+- **Text to `:time`.** `cast(name => :time)` parses a text column into a `CATime` column, as [`parse_to_time`](#time-columns) without a format does.
+- **A number to a number**, and other targets, go through `to_type`, an ordinary conversion.
+
+**`on_error:`** decides what an unreadable cell does, for `cast`, `parse_to_time` and `from_csv` alike:
+
+- `:mask` (the default) makes it `UNDEF`;
+- `:warn` does the same and warns once per column, with the count and the first few cells;
+- `:raise` raises `CAFrame::UnreadableColumn` naming the column, the row and the cell, and rebinds no column.
+
+Blank, `nil` and masked cells are missing values, not errors, under every policy.
+
+```ruby
+df.cast("rh" => :int32, on_error: :raise)
+# CAFrame::UnreadableColumn: column "rh", row 41 "1.5" cannot be read as int32
+```
+
+**`promote`** brings the **whole frame** to one data type, where `cast` forces only the columns you name.
+
+- Without an argument the type is the one `CArray.result_type` picks — the same choice [`to_ca`](#a-matrix--to_ca) makes — so `df.promote` means "make this frame stackable into one matrix". A frame that is already of one type is left alone.
+- With an argument, the type must be a **widening** for every column. A narrowing target raises and points at `cast`, the verb for a lossy change. `:object` is the widest type and always accepted, which is how a frame mixing text, Face and numeric columns becomes one type.
+- Like `cast`, it binds new columns, so the change does not reach frames sharing the old ones.
+
+**Face columns.** A Face column ([`CATime`](CATime.md), [`CACategorical`](../objects/CACategorical.md), [`CAConstString`](../objects/CAConstString.md)) decides its own conversions, and `cast` / `promote` leave the decision to it: `:object` gives its **surface** values (labels, not codes; `CATime::Element`, not serials), and a numeric target gives whatever the Face declares in `#to_numeric` — a fixed-point column becomes its scaled values, while a Face that declares nothing raises and says so (a time is not a number). The storage underneath is always reachable through `df["name"].parent`. Because the Face decides, the widening rule above applies to plain columns only.
+
+### Finding the types — `infer_types`
+
+`infer_types` returns, for each text column, the type all its present cells can be read as, as a Hash that `cast` takes directly. `cast(:infer)` is `cast(infer_types)`, and `from_csv(types: :infer)` applies it while reading.
+
+```ruby
+df.infer_types   # => { "time" => :time, "temp" => :float64, "n" => :int64, "flag" => :boolean }
+df.cast(df.infer_types)                           # the same as cast(:infer)
+df.cast(df.infer_types.merge("code" => :int32))   # with one type of your own
+```
+
+- Only text columns are looked at (object columns, `CAString`, `CAConstString`); a column that already has a type is not listed.
+- A column is listed only when **every present cell reads as one type**, tried in this order:
+  1. a number: `:int64` when every value is an integer that fits in int64, `:float64` when every value is a number;
+  2. `:boolean` when every value is `true` or `false` (in any case);
+  3. `:time` when every value is a date or time written year first (`"2024-01-01"`, `"2024-01-01 12:00:00"`, `"2024-01-01T12:00:00.5Z"`), in the finest unit the text shows.
+- A column of only `0` and `1` is `:int64`; `cast("name" => :boolean)` makes it boolean.
+- Numbers with a leading zero (`"007"`) and integers too long for int64 stay text, since they are usually codes or identifiers.
+- Dates written day-first or month-first (`"01/02/2024"`) are not taken as times, since the order cannot be told from the text; use [`parse_to_time`](#text--parse_to_time) with a format or `:infer`.
+- Blank, `nil` and masked cells take no part. A column with no present cell is not listed.
+
+### Splitting a text column — `split_column`
+
+`split_column(name, sep, into:)` splits each cell of a text column into several columns:
+
+```ruby
+df = df.split_column("code", "-", into: ["kind", "num"])   # "A-12" -> "A", "12"
+df.cast("num" => :int32)                                  # the pieces are text
+```
+
+- It returns a new frame. The new columns take the place of the old one, which leaves the frame.
+- Each cell is split into at most `into.size` pieces. A cell with more separators puts the rest in the last column; a cell with fewer leaves the remaining columns `UNDEF`. A masked cell is `UNDEF` in every new column.
+- `sep` is a String or a Regexp, as in `String#split`. A Regexp with a capturing group adds the captured pieces, so write groups as `(?:...)`.
+- The new columns are `CAString`; follow with `cast` for numbers.
+- Only a 1-D text column can be split. `into:` takes two or more distinct names, none of them an existing column.
+
+### Time columns
+
+Two verbs turn a column into a [time](CATime.md) column, one per kind of input. Each rebinds the column and returns `self`; make it the index with `set_index` afterward.
+
+| the column holds… | verb |
+|---|---|
+| dates written as text | `parse_to_time` |
+| numbers counted from an epoch (netCDF, Excel) | `to_time` |
+
+```ruby
+# text -> time
+df.parse_to_time("time").set_index("time")      # written year first
+df.parse_to_time("time", "%d/%m/%Y")            # an explicit strptime format
+df.parse_to_time("time", :infer)                # find the one format it is in
+df.parse_to_time("time", :mixed)                # guess at each cell (slow)
+
+# counts since an epoch -> time
+df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
+df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
+
+# the same pair as one value -- a netCDF units attribute goes straight in
+df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
+```
+
+#### Text — `parse_to_time`
+
+`parse_to_time(name, format = nil, unit: nil, on_error: :mask)` parses a column of text: an object `CArray` of Strings, or a `CAString` / `CAConstString` / `CAFixlenString`. A non-text column raises. Choose the second argument by what you know about the text:
+
+- **you know the format** → pass it as a strptime format (`"%d/%m/%Y"`);
+- **it is written year first** → pass nothing;
+- **it is written in one format, but you do not know which** → `:infer`;
+- **each cell is written its own way** → `:mixed`, which guesses per cell and can misread without saying so.
+
+**Without a format**, only text written **year first** is read:
+
+- the date as `YYYY-M-D` or `YYYY/M/D` (month and day with or without a leading zero);
+- optionally a time of day after `T` or a space: `h:mm`, `:ss`, a fraction of up to nine digits, or after `T` the hour alone as `hh`;
+- optionally a zone: `Z`, `+09:00`, `+0900`, `+09`. A time without a zone is UTC.
+
+A date in another order is not read, because whether `"01/02/2024"` is January or February cannot be told from the text; pass a format, `:infer` or `:mixed` for it.
+
+**`:infer`** finds the one format the column is written in. The first present cell gives the candidate formats (listed in [Formats `:infer` recognizes](#formats-infer-recognizes)), and each later cell drops the candidates it does not fit until one is left — so a later `13/02/2024` settles whether `01/02/2024` is day-first. It raises:
+
+- `CAFrame::UnreadableColumn` when no candidate fits the first cell, when none is left, or when a cell does not fit the chosen format — whatever `on_error` says;
+- `CAFrame::AmbiguousTimeFormat` when more than one candidate is left at the end. Its `formats` lists them; pick one and pass it.
+
+`infer_time_format(name)` returns the format `:infer` would choose, so you can write it into your code:
+
+```ruby
+df.infer_time_format("date")   # => "%d/%m/%Y"
+
+begin
+  df.parse_to_time("date", :infer)
+rescue CAFrame::AmbiguousTimeFormat => e
+  e.formats                    # => ["%d/%m/%Y", "%m/%d/%Y"]
+  df.parse_to_time("date", "%d/%m/%Y")
+end
+```
+
+**`:mixed`** is for text that is not written in one format, which is broken as data for a machine to read. It guesses at each cell on its own, as `Time.parse` does, so it can read a cell wrongly without saying so: `"01/02/24"` is read as 24 February 2001. It is also much slower.
+
+**The unit.** Without a format, or with `:infer`, the unit is the finest the text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` / `:ns` for fractions of a second. With a format it is `:s`. `unit:` sets it explicitly, in the spellings `CArray.time` takes (`:s`, `"10 minutes"`, a `CATime::Resolution`).
+
+The inferred unit is the finest **any** cell shows, so one cell with nanoseconds puts the whole column in `:ns`, which spans only the years 1677 to 2262. A date outside that span raises `RangeError` naming the column and the cell, under every `on_error:`, rather than becoming `UNDEF`. Pass a coarser `unit:` (`unit: :us`) to avoid it.
+
+**Other details.** Hour 24 is read only as `24:00:00`, the end of the day (the next midnight); `24:30` does not parse. Missing and unparseable cells become `UNDEF`; `on_error: :warn` / `:raise` report the unparseable ones as [`cast`](#changing-a-columns-type) does.
+
+#### Formats `:infer` recognizes
+
+- Dates day-first or month-first, separated by `/`, `-` or `.`, with four- or two-digit years.
+- Month names, as in `Jan 2, 2024` or `2 Jan 2024`.
+- `YYYYMMDD`.
+- Each with an optional time: `h:mm`, `h:mm:ss`, a fraction of a second, or `AM` / `PM`; and an optional zone: `+0900`, `+09:00`, `+09`, `Z`, `UTC` or `GMT`.
+- Japanese dates `2024年1月2日`, with an optional `3時4分`, `3時4分5秒` or `3:04` time.
+
+A zone named after a place (`JST`, `CST`) is not a candidate, since some of those names mean different offsets in different places.
+
+#### Counts since an epoch — `to_time`
+
+`to_time(name, grid = nil, unit:, epoch: nil)` reads an integer column as counts of `unit` since `epoch` (default the Unix epoch).
+
+- `epoch` takes any time literal (String / `Time` / Integer), so columns measured from another origin convert directly.
+- A float column is accepted only when every value is whole; a fractional value raises `CAFrame::UnreadableColumn` (use a finer `unit`). A non-numeric column raises.
+- A [`CATime::Grid`](CATime.md) carries the (unit, epoch) pair as one value, passed positionally or as `unit:`, so a netCDF `units` attribute needs no taking apart. It also keeps a time of day in the epoch that the keyword form loses: the keyword `epoch` is read on the `unit` grid, so `unit: :D, epoch: "1980-01-01 12:00"` drops the 12:00, while `CATime::Grid.parse("days since 1980-01-01 12:00")` keeps it.
+
+### Masking and filling cells
+
+**`mask_eq(name, value)`** masks the cells of a column equal to `value` — a sentinel such as `-999` that a file uses for "missing". It edits the stored column in place, so the change reaches every frame sharing it.
+
+**`fill(name, method)`** fills the masked cells of a column **in place**, returning `self`:
+
+```ruby
+df.fill("temp", :ffill)     # forward-fill: carry the last present value
+df.fill("temp", :bfill)     # back-fill: carry the next present value
+df.fill("temp", :linear)    # linear interpolation between present values
+df.fill("temp", 0.0)        # a constant
+```
+
+- **`:ffill` / `:bfill`** carry the nearest present value; leading cells (for `:ffill`) or trailing cells (for `:bfill`) with nothing to carry stay masked. Works for any column type.
+- **`:linear`** interpolates a numeric column **against the frame's index** when one is set (a time index gives interpolation in time), and against the row position when there is no index. With an index that is neither numeric nor a time (station names, say), it raises rather than falling back to the row position; to interpolate by position there, use `df["temp"].unmask(method: :linear)` on the column directly. Cells outside the range of present values stay masked; a column with fewer than two present cells is left unchanged.
+- **A value** fills every masked cell with that constant.
+
+A [categorical](../objects/CACategorical.md) column's codes are read-only, so `mask_eq` and `fill` raise on one. Bind a new column instead: `df = df.append("s", df["s"].strip_mask(method: :forward))`.
+
+### Masking, deleting and splicing rows
+
+`df[sel] =` with a row selector acts on rows. The **right-hand value** chooses the operation:
 
 | `df[sel] = ` | operation |
 |---|---|
@@ -490,327 +752,56 @@ selects the rows:
 ```ruby
 df[2..3]            = UNDEF   # mask rows 2 and 3 (every column)
 df[df["temp"] < 0]  = UNDEF   # mask by condition
-df[2..3]            = nil     # drop rows 2 and 3
-df[df["temp"] < 0]  = nil     # drop by condition
-df[2..3]            = other   # replace rows 2..3 with other's rows (any count)
-df[6...6]           = other   # empty span at the end -> append other's rows
+df[2..3]            = nil     # delete rows 2 and 3
+df[df["temp"] < 0]  = nil     # delete by condition
+df[2..3]            = other   # replace rows 2..3 with other's rows (any number)
+df[6...6]           = other   # an empty span at the end -> append other's rows
 ```
 
-`sel` is a **row-axis indexer key, classified exactly as a 1-D column key**
-([Indexer decision tree](Indexer_decision_tree.md)): a slice (`Range` /
-`ArithmeticSequence` / `[start, count, step]`), a boolean `CArray`, an integer
-`CArray`, or an `Integer`. **Mask and delete** accept any of them (they are
-forwarded to the column indexer, so their errors are CArray's). **Splice** needs
-a contiguous span, so it takes an `Integer` or a step-1 slice; a strided or
-scattered selector raises.
+`sel` is classified exactly as a key for a 1-D column is ([Indexer decision tree](Indexer_decision_tree.md)): a slice (`Range` / `ArithmeticSequence` / `[start, count, step]`), a boolean `CArray`, an integer `CArray`, or an `Integer`.
 
-- **`= UNDEF`** writes through to the column storage, so the shape is unchanged
-  and the index is kept — the masked rows stay identifiable, and every view
-  derived from the frame still tracks the change.
-- **`= nil`** keeps the surviving rows in order and shrinks the index with them.
-- **`= other`** follows **Ruby `Array#[]=` splice semantics**: `other` may carry
-  **any number of rows**, so the row count changes; its **column set must match
-  exactly**. When the frame has an index, `other` must have one too (its rows
-  need labels), and the indexes are woven together.
+- **Mask and delete** accept any of them (they are passed on to the column's indexer, so their errors are CArray's).
+- **Splice** needs a contiguous span, so it takes an `Integer` or a slice with step 1; a strided or scattered selector raises.
 
-> **What happens to shared storage** — the three forms differ, and all stay
-> within CArray's view model:
+What each form does:
+
+- **`= UNDEF`** masks the stored cells, so the shape is unchanged and the index is kept — the masked rows stay identifiable, and every view derived from the frame sees the change.
+- **`= nil`** keeps the remaining rows in order and shrinks the index with them.
+- **`= other`** works like Ruby's `Array#[]=` splice: `other` may have **any number of rows**, so the number of rows changes. Its **set of columns must match exactly**. When the frame has an index, `other` must have one too (its rows need labels), and the indexes are woven together.
+
+To drop rows **without** changing the frame in place, take a filtered sub-frame instead — `df[mask]` or `filter` return a new frame and leave this one as it is.
+
+> **What happens to shared storage.** In short: after a delete or a splice, the rows that remain still share storage with the original columns; `copy` gives an independent frame. In detail:
 >
-> - `= UNDEF` masks **in place** (write-through), so every alias and derived view
->   sees the change; the shape is unchanged.
-> - `= nil` rebinds each column to a **row-gather view of its former self**
->   (`col[keep]`), so the surviving rows **still share storage with the original
->   columns** — writing through the frame after a delete reaches a column escaped
->   before it, and vice versa. Nothing is copied; the original full-length
->   buffers stay alive behind the views, so `copy` if you want to reclaim them.
-> - `= other` rebuilds each column with `CArray.meld` of three pieces: a view of
->   the rows before the span, a **snapshot** of `other`'s column, and a view of
->   the rows after it. The result is a `CAMeld` view, so the two halves behave
->   differently:
->   - The **spliced span is independent of `other`**: writing the frame's new
->     rows never reaches `other`, and `other`'s later writes never reach the
->     frame. This holds **even when `other` has the same row count as the
->     span** — `= other` is splice (structural), not an element-write, so it
->     does not write through to `other` the way CArray's `ca[sel] = other`
->     does. (Making it write-through when the counts happen to match would make
->     the same expression copy or mutate depending on lengths — the row count
->     deciding the behavior — so it always snapshots.)
->   - The **rows outside the span still share storage with the original
->     columns**, just as in the `= nil` form. A column escaped before the splice
->     keeps its own length and its own values in the replaced span, but writes to
->     the rows on either side of that span propagate both ways. `copy` the result
->     if you want a frame detached from the originals.
->
-> To drop rows **without** mutating the frame in place, take a filtered view
-> instead — `df[mask]` / `filter` return a new frame and leave this one bound to
-> its current columns.
+> - `= UNDEF` masks **in place**, so every alias and derived view sees the change.
+> - `= nil` rebinds each column to a **row-gather view of its former self** (`col[keep]`), so the remaining rows **still share storage with the original columns**: writing through the frame after a delete reaches a column taken out before it, and the other way around. Nothing is copied; the original full-length buffers stay alive behind the views, so `copy` if you want to free them.
+> - `= other` rebuilds each column with `CArray.meld` of three pieces: a view of the rows before the span, a **snapshot** of `other`'s column, and a view of the rows after it.
+>   - The **spliced rows are independent of `other`**: writing them never reaches `other`, and `other`'s later writes never reach the frame. This holds **even when `other` has as many rows as the span** — splicing changes the frame's structure and always takes a snapshot, unlike CArray's element write `ca[sel] = other`.
+>   - The **rows outside the span still share storage with the original columns**, as with `= nil`. A column taken out before the splice keeps its own length and its own values in the replaced span, but writes to the rows on either side of the span go both ways. `copy` the result to detach it.
 
 ---
 
-## 4. N-D columns
+## The index
 
-A column may carry trailing dimensions (a wind vector `(N, 2)`, a vertical
-profile `(N, 20)`, a covariance `(N, 3, 3)`). Such a column comes either from
-constructing it directly (`CAFrame.new("wind" => CA_FLOAT64([[…], …]))`) or from
-[`from_records`](#2-construction), where an equal-length array cell
-(`{ "temp" => [min, mean, max] }`) across the records stacks into one `(N, L)`
-column. Row-selecting operations carry the trailing shape along automatically.
-To work on a component, **escape and index the column** — the frame's row
-filters are 1-D, so drop an N-D column to a scalar component first:
+The index is an array of **row labels** — times, station names, ids — kept beside the columns. You need one for:
 
-```ruby
-df["wind"][nil, 0]                 # first component of every row -> (N,) column
-df["wind"][nil, 0] > 4             # a boolean row mask built from a component
-df = df.append("speed",
-               (df["wind"][nil, 0] ** 2 + df["wind"][nil, 1] ** 2).sqrt)
-```
+- looking up a row by label with [`at`](#one-row-by-its-label--at);
+- conditions on labels in [`filter`](#filter--rows-matching-a-condition) (`f.index`);
+- interpolating in time with [`fill(name, :linear)`](#masking-and-filling-cells);
+- labelling the rows of a grouped result — [`group_by`](#grouping-rows) and [`resample`](#time-bins--resample) make the group key the index.
 
-> There is no `df["wind", 0]` component sugar — the leading `nil` in
-> `df["wind"][nil, 0]` is explicit on purpose, keeping `df[...]` a clean
-> column/row selector.
+The index is not a column: `df["time"]` does not reach it (it raises `KeyError`), and `drop` does not remove it. Its name is the frame's **`axis_name`**, the name of the row axis (`"row"` by default); it is the key the index appears under in a row `Hash`, and the first column `to_csv` writes. Because of that, while the frame has an index, its axis name cannot also be a column name: building such a frame, or `append` of a column with that name, raises `ArgumentError`.
 
----
-
-## 5. `select`
-
-`select` is **column projection**: a **view-frame** holding the named columns
-as aliases (zero-copy, sharing storage with the parent). It is the frame-valued
-counterpart to `df[...]`'s escape — where `df["a", "b"]` hands back raw
-CArrays, `df.select("a", "b")` keeps a frame:
+### `set_index` / `reset_index`
 
 ```ruby
-sub = df.select("station", "temp")   # => CAFrame with two columns
-sub.variable_names                        # => ["station", "temp"]
-```
-
-`select` **never collapses** — one name is still a frame (unlike `df["a"]`):
-
-```ruby
-df.select("temp").variable_names          # => ["temp"]   (a frame, not a CArray)
-```
-
-Because the requested order becomes the new frame's column order, `select`
-doubles as a **column reorder**:
-
-```ruby
-df.select("wind", "temp", "station").variable_names
-# => ["wind", "temp", "station"]
-```
-
-Being a view-frame, its columns are aliases — writing through mutates the
-parent. It chains with `filter` and everything else:
-
-```ruby
-df.select("station", "temp").filter { |f| f["temp"] > 20 }
-```
-
-`select` takes **no block** — a row condition goes through `filter`. The two
-are orthogonal and compose by chaining (`df.select(…).filter { … }`); they are
-deliberately *not* fused into one `select(cols) { cond }` call.
-
----
-
-## 6. `filter`
-
-`filter` selects **rows** with a block that receives the frame and returns a
-boolean column. The block builds the mask from `f["col"]` (and `f.index`):
-
-```ruby
-df.filter { |f| f["temp"] > 24 }
-df.filter { |f| (f["temp"] > 24) & (f["rh"] < 50) }   # & / | combine masks
-```
-
-The block form lets you reference columns without binding a variable, and the
-result is a view-frame, so filters chain into group-by, join, etc.
-
-Column names are written as `f["..."]` strings, **not** bare identifiers — a
-frame allows arbitrary column names (`"temp.max"`, names with spaces, names
-that collide with method names), which a `method_missing` DSL cannot support.
-
-The **index** is just a row-aligned column, reachable as `f.index`, so **label
-conditions are ordinary column conditions** — no separate `.loc` entry point:
-
-```ruby
-df.filter { |f| f.index >= "2024-06-15 01:00" }
-df.filter { |f| (f.index >= lo) & (f.index <= hi) }   # a label range
-```
-
-### Rows whose membership is undetermined — `keep_masked:`
-
-A **masked (UNDEF) selector cell** means the row's membership is genuinely
-undetermined: the predicate read a masked input, so the answer is neither true
-nor false. By default such a row is **dropped**, exactly as a false cell would
-be. Pass `keep_masked: true` to carry the UNDEF forward instead:
-
-```ruby
-df.filter { |f| f["temp"] > 24 }                     # undetermined rows dropped
-df.filter(keep_masked: true) { |f| f["temp"] > 24 }  # they survive, masked
-```
-
-The surviving undetermined rows arrive with their **data cells masked** and
-their **index value present**, so the row stays identifiable and a later,
-better-informed pass can re-judge it. Definitely-true rows carry their values
-through unchanged either way.
-
-> `keep_masked: true` returns a **materialized** frame, not a view-frame —
-> writing the carried-forward UNDEF into the result is something a view cannot
-> do without masking the parent's rows. This holds whether or not the selector
-> actually carries a masked cell, so the same call site does not switch between
-> sharing and copying depending on the data.
-
-Two-frame comparisons don't fit a single-frame block — pull the columns out as
-local variables instead (they're raw CArrays, so you can name them):
-
-```ruby
-diff = df_aws["temp"] - df_gpv["temp"]
-```
-
----
-
-## 7. Rows and conversion
-
-```ruby
-df.each_row { |r| ... }    # yield each row as a Ruby Hash (escape path)
-df.each_row                # without a block -> Enumerator
-```
-
-`each_row` is an escape hatch for touching heterogeneous / Face-carrying rows
-occasionally — the primary idiom is column-vectorized work, not per-row loops.
-
-```ruby
-df.to_records              # rows as an Array of plain Ruby Hashes
-```
-
-`to_records` is the **inverse of `from_records`** and the shape
-`JSON.generate` wants. It exports rows as an `Array` of Hashes and **normalizes
-for export**: a masked cell (`UNDEF`) becomes `nil`, an N-D column cell becomes
-a Ruby `Array`, and a scalar stays a Ruby value. That normalization (which
-`each_row` does *not* do — it yields the raw view with `UNDEF` and `CArray`
-slices) is what lets it round-trip and serialize:
-
-```ruby
-CAFrame.from_records(df.to_records)   # rebuilds the same columns
-JSON.generate(df.to_records)          # -> a JSON array of objects
-```
-
-The **mask survives**: `nil` on the way back in is the only spelling a missing
-cell has, so it becomes `UNDEF` again in every column. The **data type is
-rebuilt from the values**, which is not always the one you started with — a
-Ruby `Integer` carries no width, so any integer column comes back `int64`, and
-a boolean column comes back as an object column of `true` / `false`. When the
-exact types matter, `to_csv` with `types:` on the way back, or `cast`
-afterwards, is the way to pin them.
-
-> **`nil` and `UNDEF` are the same thing on the way out.** In memory they are
-> distinct — a masked cell is `UNDEF`, and an object column can hold a genuine
-> Ruby `nil` as a value (§3). Neither `to_records` nor `to_csv` keeps that apart:
-> both write either one as missing, and both read missing back as `UNDEF`. So a
-> `nil` held as a value in an object column comes back masked. Serialization has
-> one way to say "nothing here", and this is it; if the distinction matters,
-> keep it in a value the format can carry (an empty string, a sentinel) rather
-> than in `nil`.
-
-If a 2-D CArray of shape `(nrow, nvar)` is what you want, `to_ca` hands
-one over — a **view**, one column per variable in column order:
-
-```ruby
-m = df.to_ca                # CAStack view (nrow, nvar), no data copied
-m[0, 1] = 99.0              # writes flow back into the column
-owned = df.to_ca.copy       # independent, owned matrix
-```
-
-Only all-scalar (**1-D**) columns qualify; an N-D column has no single
-matrix form and raises — escape it per column with `df["name"]`. A mixed
-data type set is promoted to a common type (`result_type`) through lazy cast
-lanes, so the promotion costs no buffer either.
-
-`to_ca(writable: true)` — the 3.0 "give me something my writes reach"
-demand — is honoured only when every column enters the stack unchanged.
-A read-only column, or one the common type promotes (it is stacked
-through a cast lane, so a write there is no longer the value handed
-over), is refused rather than silently answered.
-
-Columns with no common type as stored — text (`fixlen`) or `Face`-typed
-columns beside numeric ones — raise. `promote` is the frame-level answer:
-
-```ruby
-df.promote(:object).to_ca   # every column at its surface values -> object matrix
-df.promote.to_ca            # already-common type; also makes writable: true pass
-```
-
-`CArray.tabulate(df.variables)` is the eager sibling: it builds an owned
-table directly and also accepts 2-D column blocks.
-
-```ruby
-df.to_csv("out.csv")       # write a CSV file, returns self
-csv = df.to_csv            # no path -> return the CSV String
-df.to_csv(sep: ";", header: false, index: false)
-```
-
-`to_csv` is the text form of the same flat table `to_ca` needs: every column
-must be **1-D** (an N-D column has no flat CSV cell and raises — export it per
-column, or use `to_records` + JSON for the structured shape). Unlike `to_ca` it
-does **not** promote to a common data type — each column is formatted to text on its
-own, so numbers, strings, and time / categorical columns sit side by side.
-
-The index (if any) is written as the first column under `axis_name` unless
-`index: false`. A **masked cell (UNDEF) becomes an empty field**, which
-`from_csv` reads back as UNDEF (parse-mask) — so mask round-trips. A genuine
-empty string is written quoted (`""`) to stay distinct from missing. Fields
-containing the separator, a quote, or a newline are quoted with internal quotes
-doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` /
-`index` default to true.
-
-### Looking at a frame — `to_table`, `p`, `puts`
-
-```ruby
-p df                       # summary line + first 8 / last 2 rows
-puts df                    # the whole frame (to_s)
-puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
-```
-
-```
-#<CAFrame nrow=1286 vars=[name:object, lat:float64, temp:int32] index="id">
-  id  name              lat  temp
-----  ----------  ---------  ----
-   0  観測点0          45.0     0
-   1  観測点1     44.999667     1
-   :  :                   :     :
-1285  観測点1285  44.571667    25
-```
-
-`to_table` is the display counterpart of `to_csv` and shares none of its
-constraints — it is text to be looked at, not read back. Numeric columns are
-right-aligned and everything else left-aligned, a **masked cell shows as `_`**
-(the marker CArray's own inspect uses), and an **N-D column** — which `to_csv`
-rejects, having no flat cell — shows each row's slice as an Array literal.
-Column widths are counted in terminal cells, so a CJK name occupies two per
-character and the columns stay square.
-
-Float cells are rounded to `precision` decimal places **for display only**
-(default 6): full precision lets one value like `141.67833333333334` set the
-width of the whole column. `precision: nil` prints them as Ruby renders them.
-
-`rows` caps the printed rows (default 20) and the elided middle becomes a `:`
-row; `rows: nil` prints every row. When rows are elided, a footer states the
-full size. `index: false` drops the index column.
-
-`inspect` and `to_s` sit on the same renderer: **`p df` stays a screenful**
-(the summary line, then the first 8 and last 2 rows) while **`puts df` is the
-whole frame**.
-
-### Index
-
-```ruby
-df.set_index("time")       # move "time" to the index (mutates self; §8 role change)
-df.reset_index             # move the index back into a column (mutates self)
+df.set_index("time")       # move the column "time" to the index (changes df)
+df.reset_index             # move the index back to a column at the front (changes df)
 df.index                   # the index CArray (or nil)
 df.axis_name               # the row-axis name
 ```
 
-`set_index` renames the row axis after the column it promotes, because that is
-the name the index then appears under — as the first CSV column, and as its key
-in a row `Hash`. `reset_index` is its inverse, and puts the earlier name back:
+`set_index` renames the row axis after the column it moves, since that is the name the index then appears under. `reset_index` is its inverse, and puts the earlier name back:
 
 ```ruby
 df = CAFrame.new({ "t" => …, "v" => … }, axis_name: "obs")
@@ -818,169 +809,61 @@ df.set_index("t").axis_name    # => "t"
 df.reset_index.axis_name       # => "obs"
 ```
 
-A frame **built** with an index never had a row axis name before it, so there is
-nothing to put back and `reset_index` leaves the default `"row"`. A frame
-derived from an indexed one — a row slice, `filter`, `copy` — is born indexed in
-the same way, so it behaves the same.
+A frame **built** with an index (`CAFrame.new(..., index:)`) had no axis name before it, so there is nothing to put back and `reset_index` leaves the default `"row"`. A frame derived from an indexed one — a row slice, `filter`, `copy` — behaves the same way.
 
-`set_index` on a frame that **already has an index** replaces it, and the index
-being replaced goes back to being a column — the same demotion `reset_index`
-performs, in the same position. So re-indexing keeps every column, and
-`set_index("b")` on a frame indexed by `"a"` is the same as `reset_index`
-followed by `set_index("b")`:
+**Re-indexing.** `set_index` on a frame that **already has an index** replaces it, and the old index goes back to being a column at the front, just as `reset_index` would put it. So re-indexing loses no column: `set_index("b")` on a frame indexed by `"a"` is the same as `reset_index` followed by `set_index("b")`:
 
 ```ruby
 df.set_index("a")
 df.set_index("b")
-df.variables        # => ["a", "v"]   -- "a" is a column again, not lost
-df.reset_index      # => axis_name "obs" again, variables ["b", "a", "v"]
+df.column_names     # => ["a", "v"]   -- "a" is a column again, not lost
+df.reset_index      # => axis_name "obs" again, column_names ["b", "a", "v"]
 ```
+
+### A frame with only an index
+
+`nrow` is read off something the frame holds: a column, or the index. So a frame may have an index and **no columns** and still have `N` rows:
+
+```ruby
+CAFrame.new({}, index: CA_INT32([10, 20, 30]), axis_name: "t").nrow   # => 3
+```
+
+You usually reach one by dropping every column of an indexed frame. Such a frame works as any other — `at`, `filter`, `head`, `sort_by_key`, `align`, `copy`, `to_csv` and `to_records` carry the index as they would carry a column. Only `to_ca` fails, having no column to stack.
+
+When a frame has **neither columns nor an index**, nothing holds the row count any more, and `nrow` is 0. The next column assigned then sets `N` afresh — which may be a different number from before:
+
+```ruby
+df = CAFrame.new("a" => CA_INT32([1, 2, 3]))   # no index
+e  = df.drop("a")
+e.nrow                                         # => 0   -- nothing holds 3 any more
+e.append("b", CArray.int32(99).seq!).nrow      # => 99  -- the new column sets N
+```
+
+A frame that still has its index refuses that column (`column "b" has axis-0 length 99, expected 3`). Keep an index, or rebuild with `CAFrame.new`, when the old length should be enforced.
 
 ---
 
-## 8. Column verbs
+## Grouping rows
 
-The verbs split by **what they change** — the single rule that decides whether a
-call returns a new frame or mutates `self`:
-
-- Verbs that make the table a **different table** — a different column set
-  (`append`, `drop`), different names (`rename`) — return a **new frame**.
-  Columns are shared, so the new frame is a cheap envelope; chain or reassign:
-  `df = df.append(...).drop(...)`.
-- Verbs that **edit a column of the same table** — its mask (`mask_eq`, `fill`),
-  its type (`cast`, `promote`), or which column is the index (`set_index` /
-  `reset_index`) — return **`self`**. The edit is written through to the shared column, so it
-  reaches any frame sharing that column; `copy` first to isolate. The one
-  exception is `cast`, which must allocate a new column (the byte layout
-  changes) and so does not reach other frames.
+`group_by` groups **rows** by one or more keys and returns a `GroupedFrame`; a reduction on it gives one row per group:
 
 ```ruby
-# column set / names change -> new frame (thread the result):
-df = df.append("tempF", df["temp"] * 9 / 5.0 + 32) # add a derived column at the tail
-df = df.drop("raw", "scratch")                      # remove columns (data untouched)
-df = df.rename("temp" => "temperature")             # rename, preserving order
-
-# edit a column of the same table -> self (mutates in place):
-df.cast("temp", :float64)                           # cast a column
-df.cast("temp" => :float64, "rh" => :int32)         # map form: several columns
-df.cast(["u", "v"] => :float64)                     # one type shared by several
-df.promote                                          # every column to one common type
-df.promote(:object)                                 # ...to the widest type of all
-df.mask_eq("flag", -999)                            # mask cells equal to a sentinel
+p df.group_by("station").mean
 ```
 
-Notes:
-
-- **`append`** returns a new frame with the column added at the tail (or
-  replacing an existing name in place). The length must match `N`; appending to
-  an empty frame (`nrow` `0`, a defined value) yields a frame whose `N` is that
-  column's length.
-- **`cast`** uses `to_type`, so parse failures on string columns become
-  `UNDEF` (parse-mask). Casting a numeric column is an ordinary conversion. It
-  rebinds a fresh column — the one edit that does **not** write through to
-  frames sharing the old column.
-- **`promote`** brings the **whole frame** to one data type, where `cast`
-  forces the columns you name. Without an argument the type is the one
-  `CArray.result_type` picks — the same decision `to_ca` makes internally, so
-  `df.promote` is exactly "make this frame stackable", and a frame that is
-  already uniform is left alone. With an argument the type must be a
-  **widening** for every column; a narrowing target raises and points at
-  `cast`, the verb that forces a lossy change. `:object` is the widest type
-  and always accepted, which is how a frame mixing text, `Face`-typed and
-  numeric columns becomes single-typed (and so how `to_ca` can hand back a
-  matrix for it).
-- **A `Face` column** ([`CATime`](CATime.md),
-  [`CACategorical`](../objects/CACategorical.md),
-  [`CAConstString`](../objects/CAConstString.md)) answers the conversion
-  itself, and `cast` / `promote` hand it over rather than second-guessing:
-  `:object` gives its **surface** values (labels, not codes;
-  `CATime::Element`, not serials), and a numeric target gives whatever the
-  Face declares in `#to_numeric` — a fixed-point column becomes its scaled
-  values, while a Face that declares nothing raises and says so (a time is
-  not a number). The storage is always reachable, deliberately, through
-  `df["name"].parent`. Because the Face decides, the widening rule above
-  applies to plain columns only.
-- **`mask_eq`** masks in place through the escaped column (write-through). A
-  [categorical](../objects/CACategorical.md) column's codes are read-only, so `mask_eq`
-  on one raises — recode by rebinding a new column instead.
-
-### Datetime columns
-
-Two verbs turn a column into a [time](CATime.md) column, one per
-input shape. Each rebinds the column and returns `self`; make it the index with
-`set_index` afterward.
-
-```ruby
-# text -> time: parse date strings
-df.parse_to_time("time").set_index("time")
-df.parse_to_time("time", "%d/%m/%Y")            # explicit strptime format
-
-# serial -> time: reinterpret integer counts since an epoch
-df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
-df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
-
-# the same pair as one value — a units attribute goes straight in
-df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
+```
+#<CAFrame nrow=2 columns=[temp:float64] index="station">
+station   temp
+-------  -----
+tokyo    20.55
+osaka     25.3
 ```
 
-- **`parse_to_time(name, format = nil, unit: :s)`** parses a
-  string-bearing column (an object `CArray` of Strings, or a `CAString` /
-  `CAConstString` / `CAFixlenString`). Missing and unparseable cells become
-  `UNDEF` (parse-mask). A non-string column raises.
-- **`to_time(name, grid = nil, unit:, epoch: nil)`** reads an integer column
-  as counts of `unit` resolution since `epoch` (default the Unix epoch).
-  `epoch` takes any time literal (String / `Time` / Integer), so columns
-  measured from another origin convert directly. A float column is accepted
-  only when every value is whole; a fractional serial raises (use a finer
-  `unit`). A non-numeric column raises.
+`resample` does the same with time bins as the groups (see [Time bins](#time-bins--resample)).
 
-  A [`CATime::Grid`](CATime.md) carries that (unit, epoch)
-  pair as one value — passed positionally or as `unit:` — so a netCDF `units`
-  attribute needs no taking apart. It also carries a phase the keyword form
-  cannot: the keyword `epoch` is read on the `unit` grid, so
-  `unit: :D, epoch: "1980-01-01 12:00"` loses the time of day, while
-  `CATime::Grid.parse("days since 1980-01-01 12:00")` resolves the finer
-  storage that holds it.
+### Keys and groups
 
-There is no bundled "convert and index" verb — compose the conversion with
-`set_index`, keeping each step explicit.
-
-### Filling masked cells — `fill`
-
-`fill(name, method)` fills the masked cells of a column **in place**
-(write-through, returning `self`):
-
-```ruby
-df.fill("temp", :ffill)     # forward-fill: carry the last present value
-df.fill("temp", :bfill)     # back-fill: carry the next present value
-df.fill("temp", :linear)    # linear interpolation between present values
-df.fill("temp", 0.0)        # constant fill
-```
-
-- **`:ffill` / `:bfill`** carry the nearest present value; leading (for `:ffill`)
-  or trailing (for `:bfill`) cells with nothing to carry stay masked. Works for
-  any column type.
-- **`:linear`** interpolates a numeric column against the frame's **index**
-  coordinate when one is set (else the cell position) — this is where the index
-  earns its keep. Cells outside the present range stay masked; a column with
-  fewer than two present cells is left unchanged.
-- a bare value fills every masked cell with that constant.
-
-Because `fill` writes through, a [categorical](../objects/CACategorical.md) column raises
-(its codes are read-only) — rebind a filled copy instead:
-`df = df.append("s", df["s"].strip_mask(method: :forward))`.
-
-> **TBD — `strict` cast.** A `strict:` option on `cast` (parse failure raises
-> instead of masking) is not yet built.
-
----
-
-## 9. `group_by` and `GroupedFrame`
-
-`group_by` groups **rows** by one or more keys — a column name, several names
-(composite key), or an external length-`N` `CArray`. Everything routes through
-`categorize` → [`group_by_category`](../objects/CACategorical.md), so the frame layer only
-builds the key and hands back a `GroupedFrame`:
+The key is a column name, several names (a composite key), or a `CArray` of one value per row.
 
 ```ruby
 grp = df.group_by("station")
@@ -988,48 +871,56 @@ grp.ngroup                 # => number of groups
 grp.labels                 # => group key values, in code order
 ```
 
-A row whose key is **masked** belongs to **no group**: which group it falls in
-is undetermined, and grouping takes the same default `filter` does and leaves it
-out rather than inventing a group for it. With a composite key one undetermined
-component is enough to make the whole tuple undetermined. So the group sizes
-need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) if
-you need to account for the difference, or fill them first
-(`df.fill("k", value)`) to group them together.
+- **The result's index** is the group's key value. With a single key it keeps the key's data type and Face — an integer key gives an integer index, a `CATime` key a `CATime` index — so the result can be joined or aligned on it. A composite key gives an object index of the key tuples.
+- **Groups appear in the order their keys first appear.**
+- **Keys are compared as values**: all NaN keys are one group, `-0.0` and `0.0` one group, and a composite key compares each of its columns the same way.
+- **A row whose key is masked belongs to no group**, as `filter` drops a row whose condition is undetermined. With a composite key, one masked component is enough. So the group sizes need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) to account for the difference, or fill them first (`df.fill("k", value)`) to group them together.
+- **When things are read.** The grouping and its labels are fixed when `group_by` is called: changing a key afterwards does not move rows between groups. The **values** are read when a reduction is called, so a reduction after `df["v"][i] = x` sees the new value, in the group the row had when `group_by` was called. Group again after changing a key.
 
-A `GroupedFrame` has three surfaces:
+### Choosing a reduction
 
-### (a) Convenience reductions
+A `GroupedFrame` offers four ways to reduce. Choose by what you need:
 
-`sum` / `mean` / `min` / `max` reduce **every numeric scalar column** into a
-new frame indexed by the group labels. The **key columns are skipped** — they
-are the index of the result, whatever their data type — and so are non-numeric
-and N-D columns, which a reduction has nothing to say about:
+| you need… | use |
+|---|---|
+| the same reduction for every column | [`sum` / `mean` / `min` / `max`](#the-same-reduction-for-every-column) |
+| a reduction, or an output name, of your own for each column | [`aggregate`](#a-reduction-per-column--aggregate) |
+| a computation that combines several columns | [`table`](#computing-across-columns--table) |
+| one column, with any reduction the categorical iterator offers | [`grp["col"]`](#one-column--the-group-iterator) |
+
+### The same reduction for every column
+
+`sum` / `mean` / `min` / `max` reduce **every column whose type has that reduction** into a new frame indexed by the group labels. A time column has a mean, a minimum and a maximum but no sum; a string column a minimum and a maximum only; a boolean column all four. A column whose type lacks the reduction is left out. The **key columns are skipped** — they are the result's index.
 
 ```ruby
 df.group_by("station").mean       # => frame of per-station means
 ```
 
-### (b) `aggregate` — declarative per-column reductions
+Each takes `min_count:` and `fill_value:`, as a CArray reduction does: a group with fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the `UNDEF` cells:
 
-Map each output name to `[input_column, reduction]`. The reduction is a
-**Symbol** (a vectorized reduction applied through the group iterator) or a
-**Proc** (per-group custom, called with the group's column slice — this is how
-N-D columns reduce):
+```ruby
+df.group_by("station").mean(min_count: 20)                  # too few readings -> UNDEF
+df.group_by("station").sum(min_count: 1, fill_value: 0.0)
+```
+
+### A reduction per column — `aggregate`
+
+Map each output name to `[input_column, reduction]`. The reduction is a **Symbol** (a vectorized reduction) or a **Proc** (called with each group's slice of the column, for any computation):
 
 ```ruby
 df.group_by("station").aggregate(
   "temp_mean" => ["temp", :mean],
   "temp_max"  => ["temp", :max],
-  "wind_mean" => ["wind", ->(c) { c.mean(axis: 0) }],   # N-D column, per group
+  "temp_rng"  => ["temp", ->(c) { c.max - c.min }],
 )
-# => frame with columns temp_mean / temp_max / wind_mean, index = station labels
+# => columns temp_mean / temp_max / temp_rng, index = station labels
 ```
 
-### (c) `table` — cross-column Ruby escape
+A Symbol reduction takes its arguments after it, as in a call, with keywords last: `"temp_p90" => ["temp", :percentile, 90.0]`, `"temp_mean" => ["temp", :mean, min_count: 20]`.
 
-When aggregation isn't enough, `table` yields **each group as a view-frame**
-and collects a Hash of outputs column-wise into a new frame. The full frame API
-works on `g`:
+### Computing across columns — `table`
+
+When a reduction of one column at a time is not enough, `table` yields **each group as a sub-frame** and collects the Hash the block returns, column by column, into a new frame. The full frame API works on `g`:
 
 ```ruby
 df.group_by("station").table do |g|
@@ -1037,104 +928,170 @@ df.group_by("station").table do |g|
 end
 ```
 
-### (d) Raw group iterator
+### One column — the group iterator
 
-`grp["col"]` exposes the underlying
-[`CACategoricalIterator`](CACategoricalIterator.md) for one column, so any
-per-group reduction the iterator offers is reachable:
+`grp["col"]` gives the [`CACategoricalIterator`](CACategoricalIterator.md) for one column, so every per-group reduction the iterator offers is available. The result is a `CArray`, not a frame:
 
 ```ruby
 df.group_by("station")["temp"].mean    # => per-group means as a CArray
 ```
 
+### Time bins — `resample`
+
+`resample(name, unit)` groups the rows into **time bins** of length `unit` along a time column (or the time index). It returns a `GroupedFrame`, so every reduction above applies:
+
+```ruby
+df.resample("time", "1 hour").mean
+df.resample("time", "1 day").aggregate("rain" => ["rain", :sum], "tmax" => ["temp", :max])
+df.resample("time", "1 month").table { |g| { "n" => g.nrow } }
+```
+
+The result's index is the bin labels as a `CATime`, **in time order**, and its row axis is named after the time column. The time column itself becomes the index, not a reduced column.
+
+**Which end names the bin.** With `label: :left` (the default) a bin starts at its label and holds the times at or after it: `[00:00, 01:00)` is labelled `00:00`. With `label: :right` a bin ends at its label and holds the times up to and including it: `(00:00, 01:00]` is labelled `01:00` — the usual convention for a value that describes the hour before it, such as hourly precipitation:
+
+```ruby
+df.resample("time", "1 hour", label: :right).sum   # 01:00 = what fell in the hour up to 01:00
+```
+
+With readings every 30 minutes, the two labellings put the rows in different bins:
+
+```
+time   rain     label: :left (sum)              label: :right (sum)
+00:00   1.0     00:00   3.0  (00:00, 00:30)     00:00   1.0  (00:00)
+00:30   2.0     01:00   7.0  (01:00, 01:30)     01:00   5.0  (00:30, 01:00)
+01:00   3.0     02:00   5.0  (02:00)            02:00   9.0  (01:30, 02:00)
+01:30   4.0
+02:00   5.0
+```
+
+**Shifting the bins.** `origin:` shifts them as `CATime#floor` does: `"1 hour"` with `origin: "2024-01-01 00:30"` gives bins at `00:30`, `01:30`, …. Month and year bins start on the calendar boundary.
+
+**Empty bins.** By default a bin with no rows does not appear. `fill: true` makes every bin from the first to the last a row; an empty one reduces as an empty reduction does — `UNDEF` for `mean`, `0` for `count` and `sum` — so "no data in this hour" stays distinguishable from a mean:
+
+```ruby
+df.resample("time", "1 hour", fill: true).mean     # every hour, UNDEF where none
+```
+
+**Short bins.** A bin with only some of its readings still reduces. `min_count:` makes it `UNDEF` below a number of present values — for an hourly mean of 10-minute data that wants all six:
+
+```ruby
+df.resample("time", "1 hour", label: :right).mean(min_count: 6)
+```
+
+A row whose time is masked belongs to no bin. `resample` builds the bins and nothing more: it does not interpolate. To bring a series onto a grid of instants, build the grid with `CArray.time_range` and [`align`](#align--conform-to-a-reference-key-set) onto it, then `fill(name, :linear)` if values should be interpolated.
+
 ---
 
-## 10. Combining frames — `join`, `align`, `meld`, `paste`
+## Combining frames
 
-Join delegates to CArray addressing primitives: the key yields an address
-array, and each column is gathered by `project` (length-preserving,
-miss → `UNDEF`, [Face](CAFace.md)-preserving).
+How the rows of the frames are put together decides the verb:
+
+| rows are put together | verb |
+|---|---|
+| matched by a key in both frames | `join` (`join_asof` for the nearest key) |
+| matched by a key against a reference you supply | `align` |
+| one frame's rows after another's | `CAFrame.meld` / `CAFrame.concatenate` |
+| the same rows, with columns side by side | `paste` |
+| the same rows, as layers | `CAFrame.stack` — see [Layers](#layers--caframestack--unstack) |
+
+### `join` — match rows by key
 
 ```ruby
 obs.join(meta, on: "station")                    # left join (default)
-obs.join(meta, on: "station", how: :inner)       # inner / :outer / :right
+obs.join(meta, on: "station", how: :inner)       # :inner / :outer / :right
 ```
 
-- **`:left`** (default) keeps every left row; right columns are gathered per
-  left row, misses become `UNDEF`.
-- **`:inner` / `:outer` / `:right`** set-align both key sets; the aligned key
-  values form the `on` column.
+Rows are matched as SQL joins match them: each pair of a left row and a right row with the same key gives one result row. A key held by 2 left rows and 3 right rows gives 6 rows. A masked key matches nothing, like a NULL key in SQL.
 
-N-D columns are gathered correctly (the row address is expanded across the
-trailing shape; a missed row comes back fully masked).
+Choose `how:` by which rows you want to keep:
 
-**Column-name collisions.** A non-key column present on both sides collides
-(the key `on` is kept once, never suffixed). By default both sides are
-disambiguated with suffixes — `temp` → `temp_left` / `temp_right`:
+- **`:left`** (default) — add the other frame's columns, e.g. station metadata added to observations. Every left row appears: once per matching right row, or once with `UNDEF` in the new columns when nothing matches.
+- **`:inner`** — only the matching pairs.
+- **`:outer`** — the matching pairs, every left row with no match, then every right row with no match, e.g. to see which keys each side is missing.
+- **`:right`** — every right row, as `:left` keeps every left row.
+
+The key stays a column, and the result keeps the left frame's index:
+
+| `how:` | rows | order | a row only on the right |
+|---|---|---|---|
+| `:left` (default) | the pairs, and each unmatched left row | left rows, each one's matches in right order | — |
+| `:inner` | the pairs | left rows, each one's matches in right order | — |
+| `:outer` | the pairs, each unmatched left row, each unmatched right row | as `:left`, then the unmatched right rows | its index is masked |
+| `:right` | the pairs, and each unmatched right row | right rows, each one's matches in left order | its index is masked |
+
+When the other frame's key is unique, `:left` gives one row per left row, in order: the left columns and index are this frame's own. When a left row matches several right rows, it repeats, and the left columns are views of this frame's picked by row, so a write still reaches this frame.
+
+**How keys are compared.** The two key columns need not have the same type; values are matched as values:
+
+- numbers of different types: an `int64` key `2` matches a `float64` key `2.0`, and a negative signed value never matches a large unsigned one;
+- time keys in different units: a day key matches an hour key at midnight of that day, from either side. The result's key column is the left key for `:left` and `:inner`, the right key for `:right`, and in the finer of the two units for `:outer`, which holds the keys of both;
+- a time key and a column of `Time`, `Date` or date-string values (an object or string column, as from a CSV not yet parsed): the values are read as instants;
+- text held in different ways: fixed-width strings of different widths (`CArray.fixlen_string`), a `CAConstString` or a categorical column against a plain text column — each is read by its strings;
+- NaN matches NaN; a masked key matches nothing.
+
+Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
+
+The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first).
+
+**Column-name collisions.** A non-key column present on both sides collides (the key `on` is kept once, never suffixed). By default both sides get a suffix — `temp` → `temp_left` / `temp_right`:
 
 ```ruby
-obs.join(fcst, on: "time")                          # temp_left, temp_right
+obs.join(fcst, on: "time")                               # temp_left, temp_right
 obs.join(fcst, on: "time", suffixes: ["_obs", "_fcst"])  # name them up front
-obs.join(fcst, on: "time", suffixes: false)         # raise on collision instead
+obs.join(fcst, on: "time", suffixes: false)              # raise on collision instead
 ```
 
-Pick meaningful `suffixes:` at join time to avoid renaming afterward; or fix
-names later with `rename`. `_left`/`_right` read clearer than pandas' `_x`/`_y`.
-The same policy governs `paste`.
+Choosing meaningful `suffixes:` at join time saves a `rename` afterward. `paste` follows the same rule.
 
-### As-of join
+### `join_asof` — the nearest key
 
-`join_asof` matches each left row to the **nearest** `other` row by the key —
-for irregular time series. `direction:` follows CArray (`:floor` = most recent
-at-or-before, `:ceil` = next, `:round` = nearest); rows out of range or beyond
-`tolerance:` come back `UNDEF`:
+`join_asof` matches each left row to the **nearest** row of the other frame by the key — for time series observed at different times. `direction:` says which row:
+
+- `:floor` — the latest at or before;
+- `:ceil` — the first at or after;
+- `:round` — the nearest.
+
+A row with no such row (before the first key under `:floor`, after the last under `:ceil`) gets `UNDEF`, and so does a row whose match is farther than `tolerance:` — use it to refuse a stale match past the end of the other frame:
 
 ```ruby
-obs.join_asof(radar, on: "time", direction: :floor, tolerance: 600)
+obs.join_asof(radar, on: "time", direction: :floor, tolerance: "10 minutes")
 ```
+
+- **`tolerance:` is the same kind of quantity as the key.** For a numeric key it is a number (`tolerance: 0.5`). For a time key it is a duration: a String in the spellings `CArray.time(unit:)` takes (`"10 minutes"`), or a `CATimedelta` value (`CATimedelta::Element.new(600, :s)`). A bare number is refused for a time key, since its length would depend on the unit the column is stored in; a duration means the same length whatever that unit is.
+- Neither frame needs to be sorted by the key; the result keeps the left frame's row order.
+- Each left row gets **one** row of the other frame. When several rows there share a key, `:floor` takes the **last** of them (the latest entry for that time) and `:ceil` the **first**; `:round` takes the first on an exact match, and otherwise does what `:floor` or `:ceil` does on its nearer side. Remove the duplicates first when the choice matters.
+- A masked or NaN key in either frame matches nothing. Keys of different types or units are compared as `join` compares them.
+- `on:` must name a column in both frames; the index cannot be the key (unlike `align`). `reset_index` first if the key is the index.
+- Like a `:left` `join`, the result shares this frame's columns and index; the other frame's columns are gathered into new arrays.
 
 ### `align` — conform to a reference key set
 
-`align(key, reference)` is the **asymmetric sibling of `join`** (pandas
-`reindex`): it conforms every variable to a **caller-supplied reference** array
-of key values. Each column is gathered onto the reference by exact key match;
-the aligned key column (or index) *becomes* the reference, and a reference key
-absent from the source comes back `UNDEF` in every other column.
+`align(key, reference)` conforms every column to a **reference array of key values that you supply** — the one-sided sibling of `join` (pandas `reindex`). Each column is gathered onto the reference by exact key match; the key column (or the index) **becomes** the reference, and a reference key absent from the frame comes back as a row that has only its key, `UNDEF` everywhere else.
 
-CAFrame **measures no interval and generates nothing** — you own the reference
-axis. This is the primitive for reindexing to an axis you built (a complete
-time grid, a canonical station list, a master key set): supply it as
-`reference` and the gaps become `UNDEF` rows carrying only the key.
+`align` measures no interval and generates nothing — you build the reference axis: a complete time grid, a canonical station list, a master key set. That is how gaps in a series become visible as rows:
 
 ```ruby
 # a 10-minute series with a 40-minute gap (11:40 -> 12:20); reftime is the
-# complete 10-minute axis the caller built (e.g. via DateTime arithmetic).
+# complete 10-minute axis, built with CArray.time_range.
 gapped.align("time", reftime)
 # => a frame on reftime; the three missing rows carry their time and UNDEF
 #    everywhere else. An int column's gaps stay int + UNDEF (no float promotion).
 ```
 
-`key` may be a column name or the index axis name. `reference` is a `CArray`
-(or `Array`); its values are matched against the source key **by value**, so
-the types must be comparable — a `DateTime` object key matches by `eql?`/`hash`,
-a time / integer key matches natively (and faster).
+- `key` may be a column name or the index's axis name.
+- When a key value appears more than once in the frame, the **first** row with it is taken.
+- `reference` is a `CArray` or a Ruby `Array`. Its values are matched against the key **by value**, as `join` compares keys. An `Array` is read as values of the key's kind: `[1, 2.5]` against a float key gives float keys, and `[Time.utc(2024, 1, 2), "2024-01-03"]` against a time key gives times, so the key column keeps its type.
+- `align` only gathers; it does not interpolate or resample. Fill the gaps afterward with [`fill`](#masking-and-filling-cells) or your own column arithmetic.
 
-Because the reference is external, `align` stays a pure gather with no
-interpolation or resampling — fill the `UNDEF` gaps afterward with an explicit
-step (`fill`, §8, or your own column math on the escaped columns).
+### `CAFrame.meld` / `CAFrame.concatenate` — rows after rows
 
-### `CAFrame.meld` / `CAFrame.concatenate` — stack rows
-
-Both stack frames along the **row axis** (vertical): same columns, more rows.
-They are the **symmetric sibling of `join`** — no frame is privileged — so they
-are class methods (mirroring `CArray.meld` / `CArray.concatenate`), not `df.join`.
-
-The pair mirrors the CArray-level taxonomy, and the choice is view vs. eager:
+Both put frames one after another along the **row axis**: the same columns, more rows. No frame is privileged, so they are class methods, like `CArray.meld` / `CArray.concatenate`. Choose by whether the result should stay connected to its inputs:
 
 | | result | data types | when to use |
 |---|---|---|---|
-| `CAFrame.meld` | **view frame** — each column is a `CAMeld` over the inputs, sharing their storage | **must match** per column; a mismatch raises, because a view constructor cannot auto-cast without hiding schema drift | you want the stacked frame to stay connected to its inputs, or you want to avoid the copy |
-| `CAFrame.concatenate` | **eager frame** — each column is a materialized entity, independent of the inputs | **promote** to a common type per column | you want a detached result, or the inputs' types differ |
+| `CAFrame.meld` | **sub-frame** — each column is a view over the inputs, sharing their storage | **must match** column by column; a mismatch raises (a view cannot convert types without hiding a change of schema) | to stay connected to the inputs, or to avoid the copy |
+| `CAFrame.concatenate` | **new frame** — independent of the inputs | **promoted** to a common type per column | for a detached result, or when the inputs' types differ |
 
 ```ruby
 CAFrame.meld(jan, feb, mar)          # a view over three months
@@ -1142,146 +1099,600 @@ CAFrame.concatenate(jan, feb, mar)   # an independent frame
 CAFrame.meld([jan, feb, mar])        # an Array is accepted too
 ```
 
-Everything else is shared between the two:
+Both follow the same rules:
 
-- Columns are **matched by name** (output order follows the first frame); every
-  frame must carry the same column-name set, or it raises.
-- **Masks are preserved**, and an **N-D column** carries its trailing dimensions
-  (which must agree across frames).
-- The **index** is stacked the same way as the columns when every frame has one
-  (their `axis_name` must agree) — a `CAMeld` view for `meld`, a materialized
-  column for `concatenate`. If none of the frames has an index, the result has
-  none; a mix raises.
-- A single-frame call is not special-cased: `CAFrame.meld(df)` returns a view
-  sharing `df`'s columns, `CAFrame.concatenate(df)` returns an independent copy.
+- Columns are **matched by name**, in the first frame's order; every frame must have the same set of column names, or it raises. (A mode that fills missing columns with `UNDEF` may be added as an option later.)
+- **Masks are kept.**
+- The **index** is joined the same way as the columns when every frame has one (their axis names must agree). If none has one, the result has none; a mix raises.
+- One frame is not a special case: `CAFrame.meld(df)` returns a view sharing `df`'s columns, `CAFrame.concatenate(df)` an independent copy.
+- A frame with **no rows** adds no values, so its data types take no part: a header-only CSV reads as object columns, and joined to a typed frame it neither makes `meld` refuse nor turns `concatenate`'s columns into object. It still needs the same columns, and an index exactly when the others have one.
 
-Because `meld` shares storage, writes flow **both ways**: writing a row of the
-result reaches whichever input frame owns that row, and writing an input reaches
-the result. `copy` the result if you want it detached.
+Because `meld` shares storage, writes go **both ways**: writing a row of the result reaches the input frame that owns the row, and writing an input reaches the result. `copy` the result to detach it.
 
-Both are deliberately strict (same columns only) — a union-with-`UNDEF` mode is a
-possible future opt-in, kept out to stay explicit.
+### `paste` — columns side by side
 
-### `paste` — merge columns by position
-
-`paste(other)` puts `other`'s variables **beside** this frame's, matched by
-**row position** — a keyless column merge (the column-direction counterpart of
-the row-stacking `meld` / `concatenate`, named after the UNIX `paste`; the positional
-counterpart of the key-aligned `join`). Both frames must have the same `nrow`;
-rows are assumed to already correspond (no key alignment — consistent with the
-no-implicit-align stance).
+`paste(other)` puts `other`'s columns **beside** this frame's, matched by **row position** — the positional counterpart of `join`, named after the UNIX `paste`. Both frames must have the same `nrow`, and their rows are taken to correspond already; nothing is aligned.
 
 ```ruby
 obs.paste(fcst)                             # side by side, same rows
 obs.paste(fcst, suffixes: ["_obs", "_fcst"])
 ```
 
-- Colliding column names use the **same suffix policy as `join`** (default
-  `_left`/`_right`, `suffixes:` to override, `suffixes: false` to raise).
-- This frame's index is kept; `other`'s index (if any) is not carried — only its
-  columns are pasted.
-- Returns a new frame. Paste three or more by chaining
-  (`a.paste(b).paste(c)`).
+- Colliding names follow the **same suffix rule as `join`**.
+- This frame's index is kept; `other`'s index, if any, is not carried.
+- Returns a new frame. Paste three or more by chaining: `a.paste(b).paste(c)`.
 
-Use `join` instead when the rows must be **aligned by a key** rather than by
-position.
+Use `join` instead when the rows must be **matched by a key**.
 
 ---
 
-## 11. Metadata readers
+## Reshaping
 
-Each reader returns a **fresh** object — the live columns Hash is never
-exposed.
-
-| reader | returns |
-|---|---|
-| `variable_names` | `Array<String>` of column names, in column order |
-| `variables` | `Array<CArray>` of the stored columns themselves, in column order |
-| `nvar` | number of columns |
-| `nrow` | number of rows (axis-0 length `N`) — backed by a column, or by the index when the frame has no columns |
-| `data_types` | `Hash<String, Symbol>` of `name => data_type` |
-| `axis_name` | row-axis name (String) |
-| `index` | the index `CArray`, or `nil` |
+Observations often arrive **long**: one row per (time, station) pair. To put the stations side by side, spread the long frame into a **wide** one with `pivot`; `melt` goes the other way.
 
 ```ruby
-df.variable_names        # => ["station", "temp", "wind"]
-df.data_types       # => { "station" => :object, "temp" => :float64, "wind" => :float64 }
+long = CAFrame.new(
+  "time"    => CA_INT32([2, 1, 1, 2, 3]),
+  "station" => CA_OBJECT(["tokyo", "tokyo", "osaka", "osaka", "tokyo"]),
+  "temp"    => CA_FLOAT64([20.0, 10.0, 11.0, 21.0, 30.0]),
+)
+
+wide = long.pivot(index: "time", columns: "station", values: "temp")
+wide.column_names     # => ["osaka", "tokyo"]
+wide.index.to_a       # => [1, 2, 3]
+wide["osaka"].to_a    # => [11.0, 21.0, UNDEF]
+wide["tokyo"].to_a    # => [10.0, 20.0, 30.0]
 ```
 
-Positional / pattern column selection composes on `variables` rather than
-having its own API — e.g. `df.select(*df.variable_names[1..])` or
-`df.select(*df.variable_names.grep(/temp/))`.
+### `pivot` — long to wide
+
+`pivot(index:, columns:, values:)` makes each distinct value of the `index` key a row and each distinct value of the `columns` key a column; the cell where they cross holds the `values` cell of the row that has that pair.
+
+- `index:` may name the frame's index as well as a column.
+- Both keys are **sorted ascending**, NaN last. The `index` key becomes the result's index and names its row axis; the `columns` key values become column names through `to_s`. A key whose values cannot be put in order — `nil` beside numbers, numbers beside strings — raises; fill or cast it first.
+- A pair **no row has is `UNDEF`** (osaka at time 3 above), and so is a pair whose value is masked. A row whose `index` or `columns` key is masked belongs to no cell.
+- A Face column (a time column, say) stays that Face, and so does a Face index.
+- It is a **new frame**; it shares no storage with the long one.
+
+`values:` may be an **Array** of column names. Each is spread over the same rows and columns, and the output columns are named `"<value>_<label>"`, all of the first value's columns before the next's:
+
+```ruby
+long.pivot(index: "time", columns: "station", values: ["temp", "rh"])
+# columns: temp_osaka, temp_tokyo, rh_osaka, rh_tokyo
+```
+
+Two output columns that would share a name raise.
+
+#### Repeated pairs — `aggregate:`
+
+`pivot` places values; it does not combine them, so two rows with the same pair raise. Pass `aggregate:` with a reduction name (`:mean`, `:sum`, `:max`, `:count`, …) and each cell holds that reduction over the rows that have its pair:
+
+```ruby
+hourly.pivot(index: "day", columns: "station", values: "temp", aggregate: :mean)
+```
+
+Masked values are left out of the reduction, as in any reduction, so a pair whose values are all masked is `UNDEF`. A pair **no row has stays `UNDEF` whatever the reduction, `:count` included** — "counted none" and "no such pair" stay distinguishable.
+
+### `pivot_grid` — the same cells as one CArray
+
+When the next step is array arithmetic rather than named columns, `pivot_grid` returns the cells as a single CArray, with the two key arrays that label its axes:
+
+```ruby
+temp, times, stations = long.pivot_grid(index: "time", columns: "station",
+                                        values: "temp")
+temp.shape            # => [3, 2]
+stations.to_a         # => ["osaka", "tokyo"]
+temp.mean(axis: 0)    # => mean per station: [16.0, 20.0]
+```
+
+Axis 0 follows the `index` key and axis 1 the `columns` key. Missing pairs, masked keys, repeats and `aggregate:` behave as in `pivot`, and the grid keeps the value column's data type, Face included. It takes one value column; call it once per column for several.
+
+### `melt` — wide to long
+
+`melt` stacks value columns one after another into a single column, with a column naming where each row came from and the id columns repeated alongside:
+
+```ruby
+wide = CAFrame.new("time"  => CA_INT32([1, 2, 3]),
+                   "tokyo" => CA_FLOAT64([10, 20, 30]),
+                   "osaka" => CA_FLOAT64([11, 21, 31]))
+
+long = wide.melt(id: "time")
+long.column_names       # => ["time", "variable", "value"]
+long["variable"].to_a   # => ["tokyo", "tokyo", "tokyo", "osaka", "osaka", "osaka"]
+long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
+```
+
+- With no `value_columns:`, every column that is not an id is melted. `var_name:` and `value_name:` rename the two new columns.
+- When the frame has an index, it is carried as an id column named after the row axis.
+- Masked cells stay masked.
+- **The result is a sub-frame**: its value column is a view of the melted columns, so writing the result reaches the wide frame. `copy` it to detach it.
+- Because it is a view, the value columns must share **one data type**. Mixed types raise rather than being promoted silently; `cast` them first.
+
+`melt` followed by `pivot` on the same keys gives back the wide frame's values and column names. The id column comes back as the index, and the value columns in ascending order of their names.
 
 ---
 
-## 12. View, copy, and aliasing
+## Exporting
 
-Frame view/copy semantics follow CArray exactly:
-
-| operation | result |
+| you want… | use |
 |---|---|
-| `df["col"]` | the **stored column** (alias) — writing mutates the frame |
-| `df.select(...)` | **view-frame**, columns aliased (zero-copy) |
-| `df[0..1]` / `df[bool]` / `df.filter { }` | **view-frame**, columns are row views sharing storage |
-| `df.head(n)` / `df.tail(n)` | **view-frame**, as a row slice |
-| `df.sort_by_key(...)` / `df.sort_by { }` | **view-frame**, columns are row-gather views in the sorted order |
-| `df.filter(keep_masked: true) { }` | a **materialized** frame — columns and index both independent; the carried-forward UNDEF has to be written into the result, which a view cannot do (§6) |
-| `df.copy` | an **independent** frame — every column materialized |
-| `df.append` / `drop` / `rename` | a **new frame** (column set / names change) — columns shared, cheap; the original is untouched (§8) |
-| `df.paste(other)` | a **new frame** — the columns of both frames shared, nothing copied (§10) |
-| `df.dup` / `clone` | a **new frame sharing every column and the index** (the CArray `dup` contract: shallow). Adding or dropping a name affects only the copy, but writing a column writes through. For an independent frame use `copy`, not `dup` |
-| `df.cast(...)` | **self** — rebinds a fresh column of the new type; does not write through to frames sharing the old column |
-| `df.promote(...)` | **self** — same as `cast`, applied to every column (fresh columns, common type) |
-| `df.parse_to_time(...)` / `df.to_time(...)` | **self** — as `cast`: rebinds that column to a fresh time column |
-| `df.set_index` / `reset_index` | **self** — an index-role change, data unchanged |
-| `df.drop` of every column | **a new frame with no columns** — it keeps the index, and with it the row count; `drop` cannot remove the index (§1) |
-| `df.mask_eq(...)` / `df.fill(...)` | **write-through self** — mutates the shared column in place, visible through every alias / parent |
-| `df["c"] = col` | **self** — binds the name to a different column; a replacement, not an edit, so it does not reach holders of the old one (as `cast`) |
-| `df["c"] = nil` | **self** — removes the column from this frame's set |
-| `df["c"] = UNDEF` | **write-through self** — masks the stored column in place, visible through every alias |
-| `df[sel] = UNDEF` | **write-through self** — masks the selected rows in place; shape unchanged, visible through every derived view |
-| `df[sel] = nil` | **self** — rebinds each column to a row-gather view of itself; surviving rows still share storage with the originals (§3) |
-| `df[sel] = frame` | **self** — rebuilds each column as a `CAMeld` of [rows before the span, a snapshot of `other`'s column, rows after it]. The spliced span is independent of `other`; the rows on either side still share storage with the original columns (§3) |
-| `CAFrame.meld(...)` | a **view-frame** — each column a `CAMeld` over the inputs; writes flow both ways (§10) |
-| `CAFrame.concatenate(...)` | an **independent** frame — each column materialized (§10) |
-| `df.join(..., how: :left)` / `df.join_asof(...)` | a **new frame, shared on one side only**: this frame's columns and index go in as they are (writing them reaches this frame), while the other frame's columns are gathered copies — a miss has to become UNDEF, which a view cannot express (§10) |
-| `df.join(..., how: :inner/:outer/:right)` / `df.align(...)` | a **new frame sharing nothing** — both sides are gathered onto the aligned key, so every column is a copy (§10) |
-| `grouped.table { \|sub\| }` | each `sub` is a **view-frame** of that group's rows — writing it reaches the grouped frame (§9) |
-| `df.each_row` | a Hash of **raw cells** per row: a scalar cell is a Ruby value, an N-D cell is a **live view** of that row's slice (§7) |
-| `df.to_records` | plain Ruby Hashes — values normalized (`CArray` -> `Array`, UNDEF -> `nil`), so independent of the frame (§7) |
-| `df.to_ca` | a **view** — a `CAStack` of shape `(nrow, nvar)` over the stored columns; writes flow back, `copy` for an owned matrix |
+| Ruby values, e.g. for JSON | `to_records` |
+| a CSV file or String | `to_csv` |
+| one numeric matrix for array work | `to_ca` |
 
-Because view-frames share storage, mutating a view writes through to the
-parent — the same aliasing rule as CArray views. When you need an independent
-frame, use `copy`:
+### Ruby records — `to_records`
+
+```ruby
+df.to_records              # rows as an Array of plain Ruby Hashes
+JSON.generate(df.to_records)          # -> a JSON array of objects
+CAFrame.from_records(df.to_records)   # the same names, values and mask
+```
+
+`to_records` gives the rows as an `Array` of Hashes, **normalized for export**: a masked cell (`UNDEF`) becomes `nil`, and every value is a plain Ruby value. That normalization — which `each_row` does *not* do — is what lets `JSON.generate` serialize it and `from_records` read it back.
+
+A record carries only Ruby values, so this is what a round trip keeps:
+
+| | after `from_records(df.to_records)` |
+|---|---|
+| column names and their order | kept |
+| every cell's value | kept |
+| the mask | kept — `nil` is read back as `UNDEF` |
+| the data type | rebuilt from the values: any integer column comes back `int64`, a `float32` column `float64`, a boolean column an object column of `true` / `false`, a time or string column an object column of its elements |
+| the index | not kept — it comes back as an ordinary first column (call `set_index` again) |
+| the columns of a frame with no rows | not kept — `to_records` gives `[]`, which has no names in it |
+
+When the types matter, read back with `types:` or `cast` afterwards; to keep the types and the index together, use `to_csv` / `from_csv` with `types:`.
+
+**`nil` and `UNDEF` become the same thing on the way out.** In memory they are distinct — a masked cell is `UNDEF`, and an object column can hold a genuine Ruby `nil` as a value. Neither `to_records` nor `to_csv` keeps them apart: both write either one as missing, and both read missing back as `UNDEF`. So a `nil` held as a value in an object column comes back masked.
+
+### CSV — `to_csv`
+
+`to_csv` writes the frame as CSV, to a file or as a String:
+
+```ruby
+df.to_csv("out.csv")       # write a CSV file, returns self
+csv = df.to_csv            # no path -> return the CSV String
+```
+
+The index, when there is one, is written as the first column. A masked cell is written as an empty field, which `from_csv` reads back as masked. Every column must be 1-D. The options — separators, encodings, missing-value tokens — are described in [Reading and writing CSV](CAFrameCSV.md#writing-csv-to_csv).
+
+### A matrix — `to_ca`
+
+`df.to_ca` gives the `(nrow, ncol)` matrix, one matrix column per frame column, in column order. It is a view: no data is copied, and writes reach the columns.
+
+```ruby
+m = df.to_ca                # (nrow, ncol) view, no data copied
+m[0, 1] = 99.0              # writes go back into the column
+owned = df.to_ca.copy       # an independent matrix
+```
+
+- Columns of different numeric types are read at a common type.
+- Columns with no common type — text or Face columns beside numeric ones — raise. `df.promote(:object).to_ca` gives an object matrix of their values.
+- `to_ca(writable: true)` asks for a matrix whose writes are sure to reach the columns. It raises when a column is read-only or is read at a promoted type, since a write there would not reach the stored value. `df.promote.to_ca(writable: true)` converts the columns first, so it passes.
+
+`CArray.tabulate(df.columns)` builds an independent matrix directly.
+
+---
+
+## View, copy and sharing
+
+This chapter lists, for each operation, what it returns and whether that shares data with the frame it came from. `copy` gives a frame that shares nothing with the original:
 
 ```ruby
 snapshot = df.copy         # independent; later edits to df don't touch it
 ```
 
+**Sub-frames** — share the data; writing one reaches the frame it came from, and the other way around:
+
+| operation | see |
+|---|---|
+| `df.select(...)` — the same column CArrays | [select](#a-frame-of-some-columns--select) |
+| `df[0..1]` / `df[bool]` / `df[ints]` / `df.filter { }` — views of the selected rows | [Rows as a sub-frame](#rows-as-a-sub-frame), [filter](#filter--rows-matching-a-condition) |
+| `df.head(n)` / `df.tail(n)` | [head, tail](#first-and-last-rows--head-tail) |
+| `df.sort_by_key(...)` / `df.sort_by { }` — views in the sorted order | [sort_by_key](#sort_by_key--reorder-rows-by-key-columns) |
+| `CAFrame.meld(...)` — writes reach the input frames | [meld](#caframemeld--caframeconcatenate--rows-after-rows) |
+| `df.melt(...)` — except the new column naming each row's source | [melt](#melt--wide-to-long) |
+| each group in `grouped.table { \|sub\| }` | [table](#computing-across-columns--table) |
+| `df.stack_rows(by:)` / `df.unstack_rows` | [From rows of a group](#from-rows-of-a-group--stack_rows--unstack_rows) |
+| `CAFrame.stack(...)` / `df.unstack(axis:)` | [Layers](#layers--caframestack--unstack) |
+| `df.to_ca` — a matrix view over the columns | [to_ca](#a-matrix--to_ca) |
+
+**New frames that share some columns** — the frame you called it on is unchanged:
+
+| operation | shared | new | see |
+|---|---|---|---|
+| `df.append` / `drop` / `rename` | every column | — | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
+| `df.paste(other)` | the columns of both frames | — | [paste](#paste--columns-side-by-side) |
+| `df.dup` / `clone` | every column and the index | — (adding or dropping a name affects only the new frame) | — |
+| `df.join(..., how: :left / :inner)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
+| `df.split_column(...)` | the other columns | text columns built from the split one | [split_column](#splitting-a-text-column--split_column) |
+| `df.stack_columns(...)` / `unstack_column(...)` | the other columns | a view of the stacked or split columns | [From columns side by side](#from-columns-side-by-side--stack_columns--unstack_column) |
+
+**Results that share nothing:**
+
+| operation | see |
+|---|---|
+| `df.copy` | — |
+| `df.filter(keep_masked: true) { }` | [keep_masked](#rows-whose-condition-is-undetermined--keep_masked) |
+| `CAFrame.concatenate(...)` | [concatenate](#caframemeld--caframeconcatenate--rows-after-rows) |
+| `df.join(..., how: :outer / :right)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
+| `df.pivot(...)` / `df.pivot_grid(...)` | [pivot](#pivot--long-to-wide) |
+| `df.to_records` | [to_records](#ruby-records--to_records) |
+| `df.stack_rows(by:, on:)` | [From rows of a group](#from-rows-of-a-group--stack_rows--unstack_rows) |
+
+**Operations that change `self`** — and whether the change reaches other frames sharing the column:
+
+| operation | reaches frames sharing the column | see |
+|---|---|---|
+| `df.mask_eq(...)` / `df.fill(...)` | yes — the stored column is edited | [Masking and filling](#masking-and-filling-cells) |
+| `df["c"] = UNDEF` / `df[sel] = UNDEF` | yes — masks the stored cells | [Adding, removing and renaming](#adding-removing-and-renaming-columns), [rows](#masking-deleting-and-splicing-rows) |
+| `df.cast(...)` / `promote` / `parse_to_time` / `to_time` | no — a new column is bound | [Changing a column's type](#changing-a-columns-type) |
+| `df["c"] = col` | no — the name is bound to a different column | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
+| `df["c"] = nil` | — (removes the column from this frame only) | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
+| `df[sel] = nil` | the remaining rows still share storage with the original columns | [rows](#masking-deleting-and-splicing-rows) |
+| `df[sel] = frame` | the rows outside the span still share storage; the spliced rows share nothing | [rows](#masking-deleting-and-splicing-rows) |
+| `df.set_index` / `reset_index` | — (no cell changes) | [The index](#the-index) |
+| `df.protect` | — (makes the frame read-only; the arrays it was built from stay writable) | [Read-only frames](#read-only-frames) |
+
+`df["col"]` returns the stored column itself ([The model](#the-model)).
+
 ---
 
-## 13. Planned features (TBD)
+## Read-only frames
 
-This appears in the design and is intended, but is **not implemented yet**:
+Because sub-frames and columns write through, a frame handed to other code can be changed by it, or a write meant for one view can land in the frame it came from. Make a frame read-only when it should not change: a reference table that several sub-frames are taken from, or a frame passed to code that should only read it.
 
-- **`cast(name, type, strict: true)`** — parse failure raises instead of
-  masking.
-  > **Naming caveat (settle before building).** "strict" is overloaded across
-  > the notes: an earlier "strict-parse" idea meant *mask* the failures, while
-  > this `strict:` means *raise* on them — opposite senses. There are really
-  > three parse behaviors — lenient (`"xx" → 0.0`), mask (`"xx" → UNDEF`, now
-  > the `to_type` default), and raise — and they deserve three distinct words.
-  > Pick the vocabulary before this option lands, while it is still free to move.
+There are two levels. `freeze` fixes the frame's structure — its columns, rows and index. `protect` does that and also makes the cells of its columns refuse writes:
+
+| | `freeze` | `protect` |
+|---|---|---|
+| add, remove or rebind a column (`df["c"] = ...`) | raises `FrozenError` | raises `FrozenError` |
+| assign to rows (`df[sel] = ...`) | raises `FrozenError` | raises `FrozenError` |
+| in-place verbs (`fill`, `mask_eq`, `cast`, `set_index`, ...) | raises `FrozenError` | raises `FrozenError` |
+| write a cell or a mask through a column (`df["temp"][0] = v`) | writes | raises |
+
+`freeze` leaves the cells to the columns, as `Array#freeze` leaves an Array's elements alone. Both change the frame and return it.
+
+```ruby
+temp = CA_FLOAT64([22.1, 25.3, 19.0])
+df   = CAFrame.new("temp" => temp).protect
+df.protected?              # => true
+df["temp"][0] = 0.0        # raises: can not modify read-only array
+df["temp"][0] = UNDEF      # raises as well -- masks are cells too
+
+temp[0] = 0.0              # the array it was built from is still writable
+df["temp"][0]              # => 0.0  -- and the write shows through
+```
+
+`protect` replaces each column, and the index, with a read-only view of itself; the arrays the frame was built from do not change, and whoever holds them can still write. `df["temp"]` returns the read-only view, not `temp` itself. A column that is already read-only (a categorical, a `CAConstString`) is kept as it is.
+
+- Frames derived from a protected frame by views (`select`, `filter`, a row slice) read through the read-only views and refuse cell writes too; they are not frozen.
+- `copy` gives a frame that can be written again.
+- `dup` is not frozen, so it is not protected, though its columns are the same read-only views; `clone` keeps both.
+- A frame already frozen with `freeze` cannot be protected afterwards, since its columns can no longer be replaced: `protect` raises `FrozenError`. Call `protect` instead of `freeze` when you want both.
+
+---
+
+## N-D columns
+
+A column may carry axes after the row axis: a wind vector `(N, 2)`, a vertical profile `(N, 20)`, a covariance matrix `(N, 3, 3)`. Columns share only the number of rows on axis 0; the axes after it are free, so all three can sit in one frame beside scalar columns `(N,)`:
+
+```ruby
+df = CAFrame.new(
+  "station" => CA_OBJECT(["tokyo", "osaka", "tokyo"]),
+  "temp"    => CA_FLOAT64([22.1, 25.3, 19.0]),                      # (3,)
+  "wind"    => CA_FLOAT64([[1.2, -0.3], [2.1, 0.5], [0.0, 0.0]]),   # (3, 2)
+)
+df["wind"].shape                 # => [3, 2]
+p df.group_by("station").mean
+```
+
+```
+#<CAFrame nrow=2 columns=[temp:float64, wind:float64[2]] index="station">
+station   temp  wind
+-------  -----  ------------
+tokyo    20.55  [0.6, -0.15]
+osaka     25.3  [2.1, 0.5]
+```
+
+Row operations carry the axes after the row axis along, so most of this document applies to N-D columns unchanged; the [table at the end of this chapter](#how-each-operation-treats-n-d-columns) lists the places where they behave differently.
+
+The axes after the row axis carry **no labels**. Keep what each position means alongside, as an array of your own (`months = [1, 2, 3, 12]` for a column that has only those months, `days = CArray.time([...])` for layers).
+
+### Working with a component
+
+The frame's row conditions are 1-D, so to filter or sort on an N-D column, take a scalar component of it first — index the column as a CArray:
+
+```ruby
+df["wind"][nil, 0]                 # component 0 of every row (nil = all rows) -> (N,)
+df.filter { |f| f["wind"][nil, 0] > 4 }               # a condition on a component
+df = df.append("speed",                               # wind speed from the components
+               (df["wind"][nil, 0] ** 2 + df["wind"][nil, 1] ** 2).sqrt)
+```
+
+### Making N-D columns
+
+An N-D column comes from one of four places:
+
+| the data is… | made by |
+|---|---|
+| an N-D array you already have | `CAFrame.new("wind" => …)` |
+| JSON records with an array per cell | [`from_records`](#making-n-d-columns-from-records) |
+| columns laid side by side (one per month, say) | [`stack_columns`](#from-columns-side-by-side--stack_columns--unstack_column) |
+| several rows per group (a sounding's levels) | [`stack_rows`](#from-rows-of-a-group--stack_rows--unstack_rows) |
+
+A fifth verb, [`CAFrame.stack`](#layers--caframestack--unstack), adds an axis to every column at once by laying several frames on top of each other.
+
+#### Making N-D columns from records
+
+In [`from_records`](#caframefrom_records), an **array cell** of one shape across every record becomes one N-D column: `{ "temp" => [min, mean, max] }` over `N` records is a single `(N, 3)` column, and a nested cell `[[1, 2], [3, 4]]` gives an `(N, 2, 2)` one.
+
+Cells of different shapes, nesting that is not rectangular, or non-numeric elements fall back to an object column; so do cells with no value at all (every element `nil`, or empty arrays), as a scalar column of `nil` does.
+
+### From columns side by side — `stack_columns` / `unstack_column`
+
+A file often lays a series out as columns side by side: a value per month, one per hour, or for each month three values (maximum, minimum, mean). `stack_columns` makes them one N-D column, and `unstack_column` splits it back:
+
+```ruby
+df                                     # three columns side by side
+# station  t_max  t_min  t_mean
+# tokyo     25.1   18.2    21.0
+# osaka     27.3   20.4    23.5
+
+w = df.stack_columns("t_max".."t_mean", into: "temp")
+# station  temp
+# tokyo    [25.1, 18.2, 21.0]
+# osaka    [27.3, 20.4, 23.5]
+
+w.unstack_column("temp", into: %w[t_max t_min t_mean])   # the three columns again
+```
+
+With many columns, a Range of names and `shape:` arrange them into more than one axis:
+
+```ruby
+df = df.stack_columns("G02_002".."G02_013", into: "precip")            # int32[12]
+df = df.stack_columns("G02_015".."G02_050", into: "temp", shape: [12, 3])
+df["temp"][nil, 6, 0]                  # July's maximum, every row
+df["precip"].sum(axis: 1)              # the year's total, every row
+df = df.unstack_column("temp", into: names)   # the 36 columns again
+```
+
+**Choosing the columns.** They are a **Range of names**, an **Array** or a **Regexp**:
+
+- A Range means this frame's columns from the first name to the last, **in the frame's order** (not the names Ruby would count between the two); `...` leaves the last one out.
+- An Array is taken in its own order.
+- A Regexp matches in the frame's order.
+
+A name that is not a column, a Range that runs backwards, or a column named twice raises.
+
+**`stack_columns`:**
+
+- `into:` is the new column's name, a String. The new column takes the place of the first of the stacked columns; the others leave the returned frame.
+- `shape:` arranges the columns in row-major order — the last axis runs fastest — and must hold exactly as many: 36 columns of maximum, minimum, mean for each month are `shape: [12, 3]`. Without it the columns make one axis.
+- The new column is a **view** of the old ones: writing to it — masking a missing-value code with `df["temp"][:eq, 999999] = UNDEF`, say — writes the columns it was made from.
+- Columns of different data types are read at a common type. Stacked columns that are themselves N-D keep their axes after the new ones.
+
+**`unstack_column`:**
+
+- It puts one column per position in the N-D column's place, in row-major order, as views.
+- `into:` names them; without it they are named `"temp_0"`, or `"temp_6_2"` with two axes. The frame does not remember the names the columns had, so pass them as `into:` to get them back.
+- When `into:` names as many columns as the **first** axis after the row axis is long, the column is split along that axis only, and each new column keeps the axes after it: a `(n, 2, 3)` column with two names gives two `(n, 3)` columns. This undoes `stack_columns` of columns that were themselves N-D.
+- A column whose axes hold no position (an `(n, 0)` column) has nothing to split into and raises.
+
+### From rows of a group — `stack_rows` / `unstack_rows`
+
+A long table often lays a series out as rows: one observation per row, several rows per station (a sounding's levels, a day's hours). `stack_rows` makes each group's rows one row, every other column becoming an N-D column over them; `unstack_rows` spreads them back:
+
+```ruby
+long                                   # station, level, temp: 6 rows
+# station  level   temp
+# tokyo     1000   15.0
+# tokyo      850    5.0
+# tokyo      500  -20.0
+# osaka     1000   17.0
+# osaka      850    7.0
+# osaka      500  -18.0
+
+n = long.stack_rows(by: "station")
+# station  level             temp
+# tokyo    [1000, 850, 500]  [15.0, 5.0, -20.0]
+# osaka    [1000, 850, 500]  [17.0, 7.0, -18.0]
+
+n["temp"].min(axis: 1)                 # each station's lowest temperature
+n.unstack_rows                         # the 6 rows again, station as the index
+```
+
+**The key.** `by:` takes keys as `group_by` does — column names, or a CArray of one value per row — and the key becomes the **index**. A computed key folds consecutive rows: `h.stack_rows(by: h["time"].floor(unit: :D))` makes an hourly series one row per day, each column `[24]`. Every row needs a key.
+
+**The other columns.** A group's rows are stacked **in the order they are in the frame**; `sort_by` first for another order. A column that tells the rows apart (`level` here) is stacked like any other, so what position k means stays in the frame as a column. The frame's own index, if it has one, is stacked as a column named after the row axis. A frame with no column besides the key, and no index, has nothing to stack and raises.
+
+**Lining up the rows — `on:`.** How the rows of the groups line up depends on `on:`:
+
+| | rows are matched | a group with a missing row | result |
+|---|---|---|---|
+| without `on:` | by position | raises | a view: writes reach the long frame |
+| `on: "level"` | by the value of `level` | `UNDEF` at that position | a new frame |
+
+Without `on:`, every group must have the **same number of rows**: filling a short group with `UNDEF` at its end would put its values at the wrong positions — a station missing the 850 hPa row would have its 500 hPa value where 850 belongs. With `on:`, position k is the k-th value of that column **in the order it first appears** in the frame (`sort_by` first for another order); a group with two rows for one value raises, and the `on:` column is stacked too, with the same values in every row:
+
+```ruby
+long.stack_rows(by: "station", on: "level")   # osaka has no 850 hPa row
+# station  level             temp
+# tokyo    [1000, 850, 500]  [15.0, 5.0, -20.0]
+# osaka    [1000, 850, 500]  [17.0, _, -18.0]
+```
+
+**`unstack_rows`** spreads **every** N-D column along its first axis after the row axis, repeating the other columns and the index once per position; the N-D columns must agree on that length. The index stays the index (`reset_index` turns it back into a column).
+
+An N-D column the frame had before `stack_rows` — a wind vector `(N, 2)` — is `(groups, rows, 2)` after it and spreads back to `(N, 2)`. But on a frame that was never stacked, `unstack_rows` spreads such a column's components into rows, so set it aside first.
+
+### Layers — `CAFrame.stack` / `unstack`
+
+`CAFrame.stack` puts several frames of the **same shape** on top of each other as layers: the rows stay as they are, and each column gains an axis that runs over the frames. Several files of the same table — one per day, say — become one frame whose columns hold every day:
+
+```ruby
+s = CAFrame.stack(day1, day2, day3)   # temp:float64 -> temp:float64[3]
+s["temp"]                             # (nrow, 3): row by day
+s["temp"][nil, 1]                     # day2's column
+s["temp"][0..9, nil]                  # a block of rows over every day
+s["temp"].mean(axis: 1)               # each row's mean over the days
+```
+
+Row verbs (`filter`, `sort_by`, `meld`, `head`) work on the stack unchanged, and work across the layers is a column reduction along the layer axis. `group_by` takes one value per row, so group by a component — `s.group_by(s["station"][nil, 0])` — rather than by a stacked column, which it refuses.
+
+- `axis:` counts a column's own axes, 0 being the row axis, so it starts at 1 and defaults to 1: the layer axis comes right after the rows in **every** column (`v:float64[2]` becomes `float64[3, 2]`). Axis 0 is refused — rows are joined by `meld` / `concatenate` — and so is a negative axis, which would name a different axis in columns with different numbers of axes.
+- Every frame must have the same columns, the same number of rows, and the same index **by value** under the same axis name (or none). Stacked rows have to be the same rows; frames whose rows differ are refused rather than put together row by row. The result takes the first frame's index.
+- The result is a **view**: each column is a `CAStack` over the frames' columns, and writes reach them. `copy` it for an independent frame. A column whose data type differs between the frames is read at a common type.
+
+`unstack(axis:)` is the inverse: one frame per position on that axis, each with this frame's index and views of its columns. `CAFrame.stack(*s.unstack(axis: 1))` gives the same frame back. Every column must have the axis with the same length; a column without it has no layer to give each frame, so it raises rather than repeating the column in every frame.
+
+```ruby
+s.unstack(axis: 1)  # => [day1's frame, day2's frame, day3's frame]
+```
+
+### How each operation treats N-D columns
+
+| operation | with an N-D column |
+|---|---|
+| row selection (`df[...]`, `filter`, `head`, `sort_by_key`, …) | the axes after the row axis are carried along |
+| `df[i]` / `each_row` | the cell is a view of that row's slice; writing it reaches the frame |
+| `filter` | the condition must be one value per row; an N-D condition raises — take a component |
+| `sort_by_key` / `sort_by` | a key must be one value per row; an N-D key raises |
+| keys of `group_by`, `join`, `join_asof`, `align` | must be one value per row; an N-D column is refused — take a component |
+| `group_by` / `resample` reductions, `aggregate` with a Symbol | reduced along the rows, so each group keeps the shape: a `(N, 20)` profile gives `(groups, 20)`, each station's mean profile |
+| `aggregate` with a Proc | the Proc receives each group's slice, shaped `(rows in the group, ...)` |
+| `fill` | filled down the rows: each position is a series of its own, filled only from the rows above and below it, never from a neighbouring component |
+| `join` / `join_asof` / `align` (columns brought in) | gathered correctly; a row with no match comes back fully masked |
+| `paste` | no restriction |
+| `meld` / `concatenate` | the axes after the row axis must agree across frames (also for a frame with no rows) |
+| `pivot` / `pivot_grid` | kept in every output column; in `pivot_grid` they come after the two key axes. `aggregate:` needs 1-D value columns |
+| `melt` | the value columns must share one shape after the row axis |
+| `describe` | `type` shows the shape (`float64[2]`); `count` and `masked` count elements, not rows — a `(3, 2)` column has `count` 6 — and `unique` and the statistics are taken over all elements together |
+| `to_table` / `p` | each row's slice as a bracketed list, each element shown as a scalar cell of its kind would be (rounded, `_` when masked, a time as its date, a string quoted) |
+| `to_records` | the cell becomes a Ruby `Array`, which `from_records` reads back as the same N-D column |
+| `to_csv` | raises — a CSV cell is flat; `unstack_column` first |
+| `to_ca` | raises when any column is N-D, even if every column has the same shape; take the column with `df["name"]` |
+
+---
+
+## Appendix: finding the verb for a task
+
+The chapters are ordered by how a frame is used. This appendix is ordered by what you want to do; each entry links to the section that explains it.
+
+### Reading and looking
+
+| I want to… | use |
+|---|---|
+| make a frame from arrays I already have | [`CAFrame.new`](#caframenew) |
+| read parsed JSON (an Array of objects) | [`CAFrame.from_records`](#caframefrom_records) |
+| read a CSV, with types guessed from the text | [`CAFrame.from_csv(types: :infer)`](#caframefrom_csv) |
+| see what types the text columns could be, before converting | [`infer_types`](#finding-the-types--infer_types) |
+| glance at a frame | [`p df`](#printing--p-puts-to_table) |
+| check every column just read: types, counts, masked cells, ranges | [`describe`](#checking-a-frame-just-read--describe) |
+| know the number of rows, the column names, the types | [`nrow` / `column_names` / `data_types`](#size-names-and-types) |
+
+### Picking rows and columns
+
+| I want to… | use |
+|---|---|
+| take a column as an array | [`df["temp"]`](#columns-by-name) |
+| take several columns as local variables | [`t, rh = df["temp", "rh"]`](#columns-by-name) |
+| keep a frame of some columns, or reorder them | [`select`](#a-frame-of-some-columns--select) |
+| look at one row | [`df[i]`](#one-row-as-a-hash) |
+| look up the row of a station or a time | [`at`](#one-row-by-its-label--at) |
+| see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
+| keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
+| keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
+| keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |
+| sort by one or more columns | [`sort_by_key`](#sort_by_key--reorder-rows-by-key-columns) |
+| sort by a computed value, e.g. nearest to a target | [`sort_by`](#sort_by--sort-by-a-computed-key) |
+
+### Fixing columns
+
+| I want to… | use |
+|---|---|
+| add a derived column | [`append`](#adding-removing-and-renaming-columns) |
+| remove or rename columns | [`drop` / `rename`](#adding-removing-and-renaming-columns) |
+| turn text into numbers | [`cast`](#changing-a-columns-type) |
+| be told when a cell does not read as a number, instead of getting `UNDEF` | [`cast(..., on_error: :raise)`](#changing-a-columns-type) |
+| bring every column to one type, e.g. to make a matrix | [`promote`](#changing-a-columns-type) |
+| split a code like `"A-12"` into two columns | [`split_column`](#splitting-a-text-column--split_column) |
+| turn date strings into times | [`parse_to_time`](#text--parse_to_time) |
+| find which format a column of dates is written in | [`infer_time_format`](#text--parse_to_time) |
+| turn "hours since 1990-01-01" into times | [`to_time`](#counts-since-an-epoch--to_time) |
+| make a `-999` sentinel a missing value | [`mask_eq`](#masking-and-filling-cells) |
+| fill gaps by carrying the last value, or by interpolating in time | [`fill`](#masking-and-filling-cells) |
+| mask whole rows, e.g. a period when a sensor was faulty | [`df[sel] = UNDEF`](#masking-deleting-and-splicing-rows) |
+| delete rows from the frame itself | [`df[sel] = nil`](#masking-deleting-and-splicing-rows) |
+| replace a span of rows with corrected ones | [`df[span] = other`](#masking-deleting-and-splicing-rows) |
+| make times or stations the row labels | [`set_index`](#set_index--reset_index) |
+
+### Aggregating
+
+| I want to… | use |
+|---|---|
+| a mean of every column per station | [`group_by(...).mean`](#the-same-reduction-for-every-column) |
+| named results with a reduction of my own per column | [`aggregate`](#a-reduction-per-column--aggregate) |
+| a result per group that combines several columns | [`table`](#computing-across-columns--table) |
+| hourly totals from 10-minute data | [`resample`](#time-bins--resample) |
+| hourly values labelled by the end of the hour, as for precipitation | [`resample(..., label: :right)`](#time-bins--resample) |
+| a row for every hour, `UNDEF` where there was no data | [`resample(..., fill: true)`](#time-bins--resample) |
+| refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
+
+### Combining
+
+| I want to… | use |
+|---|---|
+| add station metadata to observations by a key | [`join`](#join--match-rows-by-key) |
+| keep only the rows found in both frames | [`join(how: :inner)`](#join--match-rows-by-key) |
+| match each observation to the latest radar time before it | [`join_asof`](#join_asof--the-nearest-key) |
+| put a series onto a complete time grid, gaps becoming rows | [`align`](#align--conform-to-a-reference-key-set) |
+| put one month's frame after another, as a view | [`CAFrame.meld`](#caframemeld--caframeconcatenate--rows-after-rows) |
+| the same, as an independent frame, or with differing types | [`CAFrame.concatenate`](#caframemeld--caframeconcatenate--rows-after-rows) |
+| put columns of frames with the same rows side by side | [`paste`](#paste--columns-side-by-side) |
+
+### Reshaping
+
+| I want to… | use |
+|---|---|
+| spread stations into columns | [`pivot`](#pivot--long-to-wide) |
+| the same, combining repeated readings | [`pivot(aggregate:)`](#repeated-pairs--aggregate) |
+| the same cells as one array, for array arithmetic | [`pivot_grid`](#pivot_grid--the-same-cells-as-one-carray) |
+| turn columns per station back into rows | [`melt`](#melt--wide-to-long) |
+
+### N-D columns
+
+| I want to… | use |
+|---|---|
+| keep a vector or a profile per row | [N-D columns](#n-d-columns) |
+| filter or sort on one component of a vector | [`df["wind"][nil, 0]`](#working-with-a-component) |
+| make twelve monthly columns one column | [`stack_columns`](#from-columns-side-by-side--stack_columns--unstack_column) |
+| make a sounding's levels one row per station | [`stack_rows`](#from-rows-of-a-group--stack_rows--unstack_rows) |
+| hold several days' frames of the same table as layers | [`CAFrame.stack`](#layers--caframestack--unstack) |
+
+### Writing out
+
+| I want to… | use |
+|---|---|
+| JSON | [`to_records`](#ruby-records--to_records) |
+| a CSV file | [`to_csv`](#csv--to_csv) |
+| one numeric matrix | [`to_ca`](#a-matrix--to_ca) |
+
+### Sharing and safety
+
+| I want to… | use |
+|---|---|
+| work on part of a frame without touching the original | [`copy`](#view-copy-and-sharing) |
+| know whether a result shares data with its source | [View, copy and sharing](#view-copy-and-sharing) |
+| hand a frame to code that should only read it | [`protect`](#read-only-frames) |
 
 ---
 
 ## See also
 
 - [What is CArray](../WhatIsCArray.md) — the array type columns are made of.
-- [CACategorical](../objects/CACategorical.md) — categorical columns and the group-by
-  substrate.
+- [Reading and writing CSV](CAFrameCSV.md) — every option of `from_csv` / `to_csv`.
+- [CACategorical](../objects/CACategorical.md) — categorical columns and the group-by substrate.
 - [CATime](CATime.md) — time columns and time indices.
-- [CAFace](CAFace.md) — semantic column types (time / categorical) carried
-  through joins and gathers.
-- [MemoryView](../interop/MemoryView.md) — zero-copy interchange from an escaped column.
+- [CAFace](CAFace.md) — semantic column types (time / categorical) carried through joins and gathers.
+- [MemoryView](../interop/MemoryView.md) — zero-copy interchange from a column.

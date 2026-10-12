@@ -51,7 +51,6 @@
 #include <string.h>
 #include <math.h>
 
-#define CA_SORT_INSERTION_THRESHOLD 16
 
 /* ---------------------------------------------------------------------------
    DEFINE_SORT_MERGE(TYPE, SUFFIX)
@@ -615,6 +614,14 @@ DEFINE_PARTITION_QUICK(int64_t,   i64);
 DEFINE_PARTITION_QUICK(uint64_t,  u64);
 DEFINE_PARTITION_QUICK(float32_t, f32);
 DEFINE_PARTITION_QUICK(double,    f64);
+
+/* The pair mergesort above for object pairs, which have no `<`: every
+   comparison goes through cmp (see CA_SORT_MERGE_BY_CMP). */
+void
+ca_sort_merge_pair_object (ca_pair_object *a, ca_pair_object *aux,
+                           ca_size_t n,
+                           int (*cmp)(const void *, const void *))
+CA_SORT_MERGE_BY_CMP(ca_pair_object)
 
 /* No Init function: this file exposes only C kernels (via ca_sort_kernels.h);
    it registers no Ruby methods. */

@@ -102,15 +102,113 @@
    discovery surface rather than this gate (see
    devel/PROPOSAL_DISCOVERY_FAMILY_FACE_GATE.md §4). */
 
+/* The value-hash family decides whether two cells hold the same value: every
+   NaN is one value, and -0.0 is the same value as +0.0.  A float cell's key
+   is the bytes of its canonical form (one NaN, +0.0 for a zero), so equal
+   values have equal keys; fz_canonical_* writes that form back as a value. */
+#define FZ_NAN_KEY_DOUBLE 0x7ff8000000000000ULL
+#define FZ_NAN_KEY_FLOAT  0x7fc00000UL
+
+static inline uint64_t
+fz_key_double (double v)
+{
+  uint64_t b;
+  if ( v != v ) return FZ_NAN_KEY_DOUBLE;
+  if ( v == 0.0 ) v = 0.0;
+  memcpy(&b, &v, sizeof(b));
+  return b;
+}
+
+static inline uint64_t
+fz_key_float (float v)
+{
+  uint32_t b;
+  if ( v != v ) return FZ_NAN_KEY_FLOAT;
+  if ( v == 0.0f ) v = 0.0f;
+  memcpy(&b, &v, sizeof(b));
+  return (uint64_t) b;
+}
+
+static inline double
+fz_canonical_double (double v)
+{
+  uint64_t b = fz_key_double(v);
+  memcpy(&v, &b, sizeof(v));
+  return v;
+}
+
+static inline float
+fz_canonical_float (float v)
+{
+  uint32_t b = (uint32_t) fz_key_float(v);
+  memcpy(&v, &b, sizeof(v));
+  return v;
+}
+
+/* For the kernel macros, which take the cell type T. */
+#define FZ_FLOAT_KEY(T, v) \
+  _Generic((T) 0, float: fz_key_float, double: fz_key_double)(v)
+
+/* A complex array as hash keys: its cells as fixlen blobs of the same
+   width, each component written so that equal values have equal bytes
+   (-0.0 as 0.0, every NaN as one NaN), with the mask kept.  The fixlen lane
+   then answers equality for complex values. */
+static VALUE
+fz_complex_key (VALUE self)
+{
+  volatile VALUE out;
+  CArray *ca, *co;
+  ca_size_t i, n;
+  GetCArray(self, ca);
+  out = rb_carray_new(CA_FIXLEN, ca->ndim, ca->dim, ca->bytes, NULL);
+  GetCArray(out, co);
+  ca_copy_data(ca, co->ptr);
+  n = 2 * ca->elements;
+  if ( ca->data_type == CA_CMPLX128 ) {
+    double *p = (double *) co->ptr;
+    for ( i = 0; i < n; i++ ) p[i] = fz_canonical_double(p[i]);
+  }
+  else {
+    float *p = (float *) co->ptr;
+    for ( i = 0; i < n; i++ ) p[i] = fz_canonical_float(p[i]);
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask(co, ca);
+  }
+  return out;
+}
+
+/* The members whose output carries no values (a mask, a count) read a
+   complex array through its keys and need nothing back. */
+static VALUE
+fz_complex_as_key (VALUE self)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  if ( ! ca_is_face(ca) && ca_is_complex_type(ca) ) {
+    return fz_complex_key(self);
+  }
+  return self;
+}
+
 /* Descend `self` when it is an ORDERABLE Face; *pface keeps the pre-strip Face
-   for the re-lift (Qnil when there is nothing to put back). */
+   for the re-lift (Qnil when there is nothing to put back).  A complex array
+   is turned into hash keys (fz_complex_key) and *pface keeps it, so the
+   re-lift reads the values back as complex. */
 static VALUE
 fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
+  if ( ! ca_is_face(ca) && ca_is_complex_type(ca) ) {
+    *pface = self;
+    return fz_complex_key(self);
+  }
   if ( ca_is_face(ca) ) {
-    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    /* A record is its bytes: two records are the same value exactly when
+       their bytes are, so the fixlen lane answers for it. */
+    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
+         || ca->obj_type == CA_OBJ_RECORD ) {
       *pface = self;
       return rb_ca_strip_face_value(self);
     }
@@ -123,23 +221,18 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
        argument. */
     rb_raise(rb_eArgError,
              "%s: %s is not orderable by storage (a cell encodes the value "
-             "rather than being it); convert it first -- #to_string for a "
-             "string Face -- or pass .parent to work in storage space",
-             name, rb_obj_classname(self));
+             "rather than being it); convert it first -- %s -- or pass "
+             ".parent to work in storage space",
+             name, rb_obj_classname(self), ca_face_conversion_hint(self));
   }
   *pface = Qnil;
   return self;
 }
 
 /* Bring `operand` into the space of `reference` (the *pre-strip* Face) and
-   descend it, so both sides hash in one storage space.
-
-   `to_comparable` exists because a Face can carry a *unit* -- an alternative
-   space for the same value -- so a reference that defines it reconciles any
-   operand type through it (and refuses what it cannot convert, which is how a
-   bare storage number stays out).  A reference with one space only (COMPARABLE,
-   or a Face with no unit algebra at all, e.g. CAString) has nothing to
-   reconcile between: descending both sides is the whole job. */
+   descend it, so both sides hash in one storage space
+   (ca_face_reconcile_operand).  A complex reference instead turns the
+   operand into keys of its own complex type. */
 static VALUE
 fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
 {
@@ -148,21 +241,36 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     return operand;
   }
   GetCArray(reference, ca);
-  if ( ! ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE)
-       && rb_respond_to(reference, rb_intern("to_comparable")) ) {
-    return rb_ca_strip_face_value(rb_funcall(reference,
-                                             rb_intern("to_comparable"),
-                                             1, operand));
+  if ( ! ca_is_face(ca) ) {
+    /* A complex reference: the operand becomes keys of the same kind, in the
+       reference's complex type. */
+    CArray *op;
+    if ( ! rb_obj_is_carray(operand) ) {
+      return operand;
+    }
+    GetCArray(operand, op);
+    if ( op->data_type != ca->data_type ) {
+      operand = rb_ca_to_type(operand, INT2NUM(ca->data_type), Qnil);
+    }
+    return fz_complex_key(operand);
   }
-  return ca_face_operand_descend(operand, name);
+  return ca_face_reconcile_operand(reference, operand, name);
 }
 
-/* Put the Face back on a value-carrying output. */
+/* Put the Face back on a value-carrying output, or read complex keys back
+   as complex values. */
 static VALUE
 fz_face_relift (VALUE out, VALUE face)
 {
+  CArray *cf, *co;
   if ( NIL_P(face) ) {
     return out;
+  }
+  GetCArray(face, cf);
+  if ( ! ca_is_face(cf) ) {
+    GetCArray(out, co);
+    return rb_ca_copy(rb_ca_refer_new(out, cf->data_type, co->ndim, co->dim,
+                                      cf->bytes, 0));
   }
   return ca_face_lift(out, face);
 }
@@ -176,15 +284,94 @@ typedef struct {
   VALUE    *val;    /* object lane only: the interned VALUE, kept for an eql? re-check
                        on a hash collision (NULL in the numeric lane, where the widened
                        key is lossless so a key match already proves value equality).
-                       Its VALUEs are always elements of the live receiver, so the GC
-                       reaches them through `self`; this array is not separately marked. */
+                       A receiver that computes its cells (a CAObject, a lazy
+                       expression) hands each fiber over in a scratch that is refilled,
+                       so the owner marks this array (fz_tmp_values). */
   char     *raw;    /* fixlen lane only: cap*esz bytes, the interned element bytes kept
                        for a memcmp re-check on a hash collision (NULL otherwise). */
   int       esz;    /* fixlen lane: element width in bytes (0 otherwise) */
+  int       has_val; /* object lane: val is kept (0 otherwise) */
   ca_size_t cap;    /* power of two */
   ca_size_t n;      /* distinct keys interned so far */
   int       shift;  /* 64 - log2(cap); the home slot is the top log2(cap) bits */
+  VALUE     hbuf;   /* owner of the tables, one block (fz_tmp_alloc) */
 } fz_hash;
+
+/* The tables live in buffers owned by hidden Ruby objects rather than bare
+   xmalloc.  The object lane calls #hash and #eql? for every cell, and a raise
+   there leaves the tables with nothing to free them; the owner is reclaimed
+   by the GC once the frame holding it is gone, and frees its buffer then.
+   An owner whose buffer keeps VALUEs (fz_tmp_values) marks them: the object
+   lane's cells come from a scratch the walk refills, not only from the
+   receiver, so nothing else holds the ones already interned. */
+typedef struct {
+  char      *buf;
+  ca_size_t  voff;    /* byte offset of the VALUE run in buf */
+  ca_size_t  nvals;   /* VALUEs in the run (0: nothing to mark) */
+} fz_buffer;
+
+static void
+fz_buffer_mark (void *ptr)
+{
+  fz_buffer *b = (fz_buffer *) ptr;
+  if ( b->buf && b->nvals > 0 ) {
+    VALUE    *v = (VALUE *) (b->buf + b->voff);
+    ca_size_t i;
+    for ( i = 0; i < b->nvals; i++ ) rb_gc_mark(v[i]);
+  }
+}
+
+static void
+fz_buffer_free (void *ptr)
+{
+  fz_buffer *b = (fz_buffer *) ptr;
+  xfree(b->buf);
+  xfree(b);
+}
+
+static const rb_data_type_t fz_buffer_type = {
+  "carray_factorize_buffer",
+  { fz_buffer_mark, fz_buffer_free, NULL, },
+  NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static void *
+fz_tmp_alloc (VALUE *store, size_t bytes)
+{
+  fz_buffer *b;
+  *store = TypedData_Make_Struct(0, fz_buffer, &fz_buffer_type, b);
+  b->buf = (char *) xmalloc(bytes);
+  return b->buf;
+}
+
+static void *
+fz_tmp_realloc (VALUE store, size_t bytes)
+{
+  fz_buffer *b = (fz_buffer *) DATA_PTR(store);
+  b->buf = (char *) xrealloc(b->buf, bytes);
+  return b->buf;
+}
+
+/* Mark the n VALUEs at vals (inside store's buffer); they must be valid. */
+static void
+fz_tmp_values (VALUE store, void *vals, ca_size_t n)
+{
+  fz_buffer *b = (fz_buffer *) DATA_PTR(store);
+  b->voff  = (ca_size_t) ((char *) vals - b->buf);
+  b->nvals = n;
+}
+
+static void
+fz_tmp_free (VALUE *store)
+{
+  if ( *store ) {
+    fz_buffer *b = (fz_buffer *) DATA_PTR(*store);
+    b->nvals = 0;
+    xfree(b->buf);
+    b->buf = NULL;
+    *store = 0;
+  }
+}
 
 /* Multiplicative hashing (Knuth, TAOCP vol. 3 sec. 6.4): multiply by
    2^64 / golden-ratio and take the TOP log2(cap) bits of the product -- the
@@ -195,19 +382,49 @@ typedef struct {
 #define FZ_GOLDEN 0x9E3779B97F4A7C15ULL
 #define FZ_HOME(h, key) ((ca_size_t) (((uint64_t)(key) * FZ_GOLDEN) >> (h)->shift))
 
+/* Points the tables of h at one new block for cap slots: key, then the
+   object lane's val, code, used, and the fixlen lane's raw bytes. */
+static void
+fz_hash_alloc (fz_hash *h, ca_size_t cap)
+{
+  int    has_val = h->has_val;
+  size_t nkey    = sizeof(uint64_t) * (size_t) cap;
+  size_t nval    = has_val ? sizeof(VALUE) * (size_t) cap : 0;
+  size_t ncode   = sizeof(int32_t) * (size_t) cap;
+  size_t nused   = sizeof(uint8_t) * (size_t) cap;
+  size_t nraw    = (size_t) cap * (size_t) h->esz;
+  char  *b = fz_tmp_alloc(&h->hbuf, nkey + nval + ncode + nused + nraw);
+  h->key  = (uint64_t *) b;                 b += nkey;
+  h->val  = has_val ? (VALUE *) b : NULL;   b += nval;
+  h->code = (int32_t *) b;                  b += ncode;
+  h->used = (uint8_t *) b;                  b += nused;
+  h->raw  = h->esz ? b : NULL;
+  h->cap  = cap;
+  MEMZERO(h->used, uint8_t, cap);
+  if ( has_val ) {
+    ca_size_t i;
+    for ( i = 0; i < cap; i++ ) h->val[i] = Qnil;
+    fz_tmp_values(h->hbuf, h->val, cap);
+  }
+}
+
+/* has_val: the object lane (a slot keeps its VALUE); esz > 0: the fixlen
+   lane (a slot keeps esz bytes). */
+static void
+fz_hash_setup (fz_hash *h, int has_val, int esz)
+{
+  h->shift = 64 - 10;   /* log2(1024) = 10 */
+  h->n     = 0;
+  h->hbuf  = 0;
+  h->has_val = has_val;
+  h->esz   = esz;
+  fz_hash_alloc(h, 1024);
+}
+
 static void
 fz_hash_init (fz_hash *h)
 {
-  h->cap   = 1024;
-  h->shift = 64 - 10;   /* log2(1024) = 10 */
-  h->n     = 0;
-  h->key   = ALLOC_N(uint64_t, h->cap);
-  h->code  = ALLOC_N(int32_t,  h->cap);
-  h->used  = ALLOC_N(uint8_t,  h->cap);
-  h->val   = NULL;      /* numeric lane: no VALUE re-check needed */
-  h->raw   = NULL;
-  h->esz   = 0;
-  MEMZERO(h->used, uint8_t, h->cap);
+  fz_hash_setup(h, 0, 0);   /* numeric lane: no re-check needed */
 }
 
 /* Object lane: the widened key is `rb_hash` (lossy), so a slot also stores the
@@ -216,8 +433,7 @@ fz_hash_init (fz_hash *h)
 static void
 fz_hash_init_obj (fz_hash *h)
 {
-  fz_hash_init(h);
-  h->val = ALLOC_N(VALUE, h->cap);
+  fz_hash_setup(h, 1, 0);
 }
 
 /* Fixlen lane: the key is a byte-hash of the esz-wide element (lossy), so a slot
@@ -227,19 +443,18 @@ fz_hash_init_obj (fz_hash *h)
 static void
 fz_hash_init_mem (fz_hash *h, int esz)
 {
-  fz_hash_init(h);
-  h->esz = esz;
-  h->raw = ALLOC_N(char, h->cap * esz);
+  fz_hash_setup(h, 0, esz);
 }
 
 static void
 fz_hash_free (fz_hash *h)
 {
-  if ( h->key )  { xfree(h->key);  h->key  = NULL; }
-  if ( h->code ) { xfree(h->code); h->code = NULL; }
-  if ( h->used ) { xfree(h->used); h->used = NULL; }
-  if ( h->val )  { xfree(h->val);  h->val  = NULL; }
-  if ( h->raw )  { xfree(h->raw);  h->raw  = NULL; }
+  fz_tmp_free(&h->hbuf);
+  h->key  = NULL;
+  h->code = NULL;
+  h->used = NULL;
+  h->val  = NULL;
+  h->raw  = NULL;
 }
 
 /* FNV-1a over esz bytes: a lossy 64-bit key for the fixlen lane. */
@@ -272,14 +487,10 @@ fz_hash_grow (fz_hash *h)
   VALUE    *ov = h->val;
   char     *orw = h->raw;
   int       esz = h->esz;
-  h->cap    = newcap;
-  h->shift -= 1;                 /* log2(cap) grew by one */
-  h->key    = ALLOC_N(uint64_t, newcap);
-  h->code   = ALLOC_N(int32_t,  newcap);
-  h->used   = ALLOC_N(uint8_t,  newcap);
-  if ( ov )  { h->val = ALLOC_N(VALUE, newcap); }
-  if ( orw ) { h->raw = ALLOC_N(char, newcap * esz); }
-  MEMZERO(h->used, uint8_t, newcap);
+  VALUE     hold = h->hbuf;   /* keeps the old block until it is freed below */
+  h->hbuf   = 0;
+  h->shift -= 1;              /* log2(cap) grew by one */
+  fz_hash_alloc(h, newcap);
   ca_size_t mask = newcap - 1;
   for ( ca_size_t s = 0; s < oldcap; s++ ) {
     if ( ! ou[s] ) { continue; }
@@ -291,9 +502,7 @@ fz_hash_grow (fz_hash *h)
     if ( ov )  { h->val[slot] = ov[s]; }
     if ( orw ) { memcpy(h->raw + slot * esz, orw + s * esz, esz); }
   }
-  xfree(ok); xfree(oc); xfree(ou);
-  if ( ov )  { xfree(ov); }
-  if ( orw ) { xfree(orw); }
+  fz_tmp_free(&hold);
 }
 
 /* True when v is a Float holding NaN (any bit pattern). */
@@ -315,7 +524,7 @@ fz_hash_intern_obj (fz_hash *h, VALUE v, int *is_new)
 {
   if ( (h->n + 1) * 10 >= h->cap * 7 ) { fz_hash_grow(h); }   /* load factor 0.7 */
   int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? 0x7ff8000000000000ULL
+  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
                        : (uint64_t) NUM2LL(rb_hash(v));
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
@@ -413,7 +622,7 @@ static int
 fz_hash_lookup_obj (fz_hash *h, VALUE v, int32_t *code_out)
 {
   int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? 0x7ff8000000000000ULL
+  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
                        : (uint64_t) NUM2LL(rb_hash(v));
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
@@ -452,23 +661,44 @@ typedef struct {
   ca_size_t cap;    /* capacity in elements */
   ca_size_t n;      /* elements stored */
   int       esz;    /* element bytes */
+  VALUE     hp;     /* owner of p (see fz_tmp_alloc) */
+  int       obj;    /* p holds VALUEs, marked by hp */
 } fz_levels;
 
+/* Fill the VALUE slots from..cap with Qnil and mark all cap of them. */
 static void
-fz_levels_init (fz_levels *l, int esz)
+fz_levels_values (fz_levels *l, ca_size_t from)
+{
+  VALUE    *v = (VALUE *) l->p;
+  ca_size_t i;
+  for ( i = from; i < l->cap; i++ ) v[i] = Qnil;
+  fz_tmp_values(l->hp, l->p, l->cap);
+}
+
+static void
+fz_levels_init (fz_levels *l, int esz, int obj)
 {
   l->esz = esz;
   l->cap = 16;
   l->n   = 0;
-  l->p   = ALLOC_N(char, l->cap * esz);
+  l->hp  = 0;
+  l->obj = obj;
+  l->p   = fz_tmp_alloc(&l->hp, (size_t) l->cap * esz);
+  if ( obj ) {
+    fz_levels_values(l, 0);
+  }
 }
 
 static void
 fz_levels_push (fz_levels *l, const void *e)
 {
   if ( l->n == l->cap ) {
+    ca_size_t old = l->cap;
     l->cap <<= 1;
-    REALLOC_N(l->p, char, l->cap * l->esz);
+    l->p = fz_tmp_realloc(l->hp, (size_t) l->cap * l->esz);
+    if ( l->obj ) {
+      fz_levels_values(l, old);
+    }
   }
   memcpy(l->p + l->n * l->esz, e, l->esz);
   l->n++;
@@ -477,7 +707,35 @@ fz_levels_push (fz_levels *l, const void *e)
 static void
 fz_levels_free (fz_levels *l)
 {
-  if ( l->p ) { xfree(l->p); l->p = NULL; }
+  fz_tmp_free(&l->hp);
+  l->p = NULL;
+}
+
+/* ---- the frame a discovery method runs in ---------------------------------
+
+   The object lane calls #hash and #eql? for every cell, and either can raise
+   in the middle of a walk.  The walks' states live in this frame, outside the
+   method's body, and ca_iter_ensure finishes them however the body leaves;
+   the tables have owners the unwind collects (fz_tmp_alloc).  Slots 0
+   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all. */
+
+typedef struct {
+  ca_iter_state st[3];
+  VALUE         self;
+  VALUE         a;
+  VALUE         b;
+  int           i;
+} fz_frame;
+
+static VALUE
+fz_run (VALUE (*body)(VALUE), VALUE self, VALUE a, VALUE b, int i)
+{
+  fz_frame fr;
+  fr.self = self;
+  fr.a    = a;
+  fr.b    = b;
+  fr.i    = i;
+  return ca_iter_ensure(3, fr.st, body, (VALUE) &fr);
 }
 
 /* @overload __factorize_appearance__
@@ -497,8 +755,10 @@ fz_levels_free (fz_levels *l)
               (row-major flatten) order.
 */
 static VALUE
-rb_ca_factorize_appearance (VALUE self)
+fz_factorize_appearance_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "categorize");
@@ -532,11 +792,11 @@ rb_ca_factorize_appearance (VALUE self)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber = row-major flatten */
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -558,25 +818,18 @@ rb_ca_factorize_appearance (VALUE self)
     } while (0)
 
   /* Float lane: reproduce `==` with two value-based exceptions matching the
-     discovery family -- all NaN collapse to one canonical key (v != v -> NANKEY),
+     discovery family -- all NaN collapse to one canonical key (FZ_FLOAT_KEY),
      and -0.0 == +0.0 (a zero normalizes to +0.0 before the bitwise key).  The
      level pushed is the raw first-seen element (an appearance-first NaN / -0.0 is
      kept as-is), so masked source cells store the sentinel. */
-  #define FZ_LOOP_FLOAT(T, UINT, NANKEY)                                     \
+  #define FZ_LOOP_FLOAT(T)                                     \
     do {                                                                     \
       const T  *ip = (const T *) p_in;                                       \
       uint32_t *op = (uint32_t *) p_out;                                     \
       for ( ca_size_t i = 0; i < n; i++ ) {                                  \
         if ( m && m[i] ) { op[i] = 0xFFFFFFFFu; continue; }                  \
         T v = ip[i];                                                         \
-        uint64_t key;                                                        \
-        if ( v != v ) { key = (NANKEY); }                                    \
-        else {                                                               \
-          if ( v == (T) 0 ) { v = (T) 0; }                                   \
-          UINT bits;                                                         \
-          memcpy(&bits, &v, sizeof(bits));                                   \
-          key = (uint64_t) bits;                                             \
-        }                                                                    \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                          \
         int32_t code = fz_hash_intern(&h, key, &is_new);                     \
         if ( is_new ) { fz_levels_push(&lv, &ip[i]); }                       \
@@ -615,7 +868,7 @@ rb_ca_factorize_appearance (VALUE self)
       }                                                                      \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cu32, axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cu32, axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     switch ( dt ) {
     case CA_INT8:   FZ_LOOP(int8_t,   (int64_t));  break;
@@ -626,8 +879,8 @@ rb_ca_factorize_appearance (VALUE self)
     case CA_UINT16: FZ_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: FZ_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: FZ_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: FZ_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: FZ_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: FZ_LOOP_FLOAT(float);         break;
+    case CA_FLOAT64: FZ_LOOP_FLOAT(double); break;
     case CA_OBJECT: FZ_LOOP_OBJ;                   break;
     case CA_FIXLEN: FZ_LOOP_MEM;                   break;
     }
@@ -686,6 +939,12 @@ rb_ca_factorize_appearance (VALUE self)
   return rb_ary_new3(2, vcodes, fz_face_relift(vlev, face));
 }
 
+static VALUE
+rb_ca_factorize_appearance (VALUE self)
+{
+  return fz_run(fz_factorize_appearance_body, self, Qnil, Qnil, 0);
+}
+
 /* @overload __mask_duplicates__(axis)
 
    INTERNAL (mask_duplicates). Mark each cell whose value duplicates an
@@ -706,8 +965,11 @@ rb_ca_factorize_appearance (VALUE self)
    value (so the second and later NaN are duplicates, as in the numeric lane).
 */
 static VALUE
-rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
+fz_mask_duplicates_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -741,7 +1003,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -764,24 +1026,17 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
 
   /* Float variant: reproduce `==` with two value-based exceptions so the
      distinct-value judgement matches uniq / the discovery family. All NaN
-     collapse to one canonical key (v != v -> NANKEY), so the second and later
+     collapse to one canonical key (FZ_FLOAT_KEY), so the second and later
      NaN in a fiber are duplicates; -0.0 == +0.0, so a zero normalizes to +0.0
      before the bitwise key. */
-  #define MD_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define MD_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T    *ip = (const T *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { op[i] = 0; continue; }                            \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                   \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         fz_hash_intern(&h, key, &is_new);                                     \
         op[i] = is_new ? 0 : 1;                                               \
@@ -814,7 +1069,7 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, (int8_t) axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, (int8_t) axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     fz_hash_reset(&h);   /* independent seen-set per fiber */
     switch ( dt ) {
@@ -826,8 +1081,8 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
     case CA_UINT16: MD_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: MD_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: MD_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: MD_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: MD_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: MD_LOOP_FLOAT(float);         break;
+    case CA_FLOAT64: MD_LOOP_FLOAT(double); break;
     case CA_OBJECT:  MD_LOOP_OBJ;                                            break;
     case CA_FIXLEN:  MD_LOOP_MEM;                                            break;
     }
@@ -839,6 +1094,12 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
 
   fz_hash_free(&h);
   return vout;
+}
+
+static VALUE
+rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_mask_duplicates_body, fz_complex_as_key(self), vaxis, Qnil, 0);
 }
 
 /* @overload __unique_flat__
@@ -865,8 +1126,10 @@ rb_ca_mask_duplicates (VALUE self, VALUE vaxis)
    uniform-width binary cells the fixlen seen-set used.
 */
 static VALUE
-rb_ca_unique_flat (VALUE self)
+fz_unique_flat_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "unique");
@@ -893,11 +1156,11 @@ rb_ca_unique_flat (VALUE self)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber; hash not reset =
                                               one seen-set over the whole array */
-  ca_iter_state st_in;
+  ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
   ca_size_t   n;
@@ -916,20 +1179,13 @@ rb_ca_unique_flat (VALUE self)
 
   /* Float: NaN collapses to one canonical key; -0.0 / +0.0 share a key. The
      pushed level is the raw first-seen element. */
-  #define UQ_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define UQ_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T *ip = (const T *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         fz_hash_intern(&h, key, &is_new);                                     \
         if ( is_new ) { fz_levels_push(&lv, &ip[i]); }                        \
@@ -964,7 +1220,7 @@ rb_ca_unique_flat (VALUE self)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   UQ_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  UQ_LOOP(int16_t,  (int64_t));  break;
@@ -974,8 +1230,8 @@ rb_ca_unique_flat (VALUE self)
     case CA_UINT16: UQ_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: UQ_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: UQ_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: UQ_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: UQ_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: UQ_LOOP_FLOAT(float);          break;
+    case CA_FLOAT64: UQ_LOOP_FLOAT(double);  break;
     case CA_OBJECT:  UQ_LOOP_OBJ;                                             break;
     case CA_FIXLEN:  UQ_LOOP_MEM;                                             break;
     }
@@ -1002,6 +1258,12 @@ rb_ca_unique_flat (VALUE self)
   return fz_face_relift(vlev, face);   /* distinct *values*: give the Face back */
 }
 
+static VALUE
+rb_ca_unique_flat (VALUE self)
+{
+  return fz_run(fz_unique_flat_body, self, Qnil, Qnil, 0);
+}
+
 /* Intern every non-masked cell of cv into h, one seen-set over the whole array
    (the hash is not reset between fibers).  When lv is non-NULL, the first-seen
    raw element of each distinct value is pushed to it (appearance order), so the
@@ -1011,11 +1273,10 @@ rb_ca_unique_flat (VALUE self)
    fixlen byte-hash + memcmp.  Used to build the probe set (is_in, set relations)
    and to accumulate distinct values (union). */
 static void
-fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
+fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 {
   int8_t dt = cv->data_type;
   int8_t vaxis = (int8_t) (cv->ndim - 1);
-  ca_iter_state st_v;
   char       *p_v;
   boolean8_t *mv;
   ca_size_t   nv;
@@ -1032,20 +1293,13 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  #define FZ_IA_FLOAT(T, UINT, NANKEY)                                         \
+  #define FZ_IA_FLOAT(T)                                         \
     do {                                                                       \
       const T *ip = (const T *) p_v;                                           \
       for ( ca_size_t i = 0; i < nv; i++ ) {                                   \
         if ( mv && mv[i] ) { continue; }                                       \
         T v = ip[i];                                                           \
-        uint64_t key;                                                          \
-        if ( v != v ) { key = (NANKEY); }                                      \
-        else {                                                                 \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                           \
-          memcpy(&bits, &v, sizeof(bits));                                     \
-          key = (uint64_t) bits;                                               \
-        }                                                                      \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                            \
         fz_hash_intern(h, key, &is_new);                                       \
         if ( is_new && lv ) { fz_levels_push(lv, &ip[i]); }                    \
@@ -1075,7 +1329,7 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
+  CA_FOR_EACH_FIBER_MASKED(*st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
     switch ( dt ) {
     case CA_INT8:   FZ_IA(int8_t,   (int64_t));  break;
     case CA_INT16:  FZ_IA(int16_t,  (int64_t));  break;
@@ -1085,8 +1339,8 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
     case CA_UINT16: FZ_IA(uint16_t, (uint64_t)); break;
     case CA_UINT32: FZ_IA(uint32_t, (uint64_t)); break;
     case CA_UINT64: FZ_IA(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: FZ_IA_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: FZ_IA_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: FZ_IA_FLOAT(float);         break;
+    case CA_FLOAT64: FZ_IA_FLOAT(double); break;
     case CA_OBJECT:  FZ_IA_OBJ;                                            break;
     case CA_FIXLEN:  FZ_IA_MEM;                                            break;
     }
@@ -1115,8 +1369,11 @@ fz_intern_all (fz_hash *h, CArray *cv, fz_levels *lv)
    fixlen byte equality (byte-hash + memcmp).
 */
 static VALUE
-rb_ca_is_in (VALUE self, VALUE rvalues)
+fz_is_in_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rvalues = fr->a;
   CArray *ca, *cv;
   volatile VALUE face;
   self     = fz_face_descend(self, &face, "is_in");
@@ -1145,12 +1402,12 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   GetCArray(rvalues, cv);
   if ( cv->data_type != dt ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: values data type (%s) must match self (%s)",
+             "is_in: values data type (%s) must match self (%s)",
              ca_type_name[cv->data_type], ca_type_name[dt]);
   }
   if ( dt == CA_FIXLEN && cv->bytes != ca->bytes ) {
     rb_raise(rb_eCADataTypeError,
-             "__is_in__: a fixlen value is a cell-width blob, so the values "
+             "is_in: a fixlen value is a cell-width blob, so the values "
              "must be %ld bytes wide like self, not %ld",
              (long) ca->bytes, (long) cv->bytes);
   }
@@ -1164,14 +1421,14 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   else                        { fz_hash_init(&h); }
 
   /* ---- Phase 1: build the seen-set from every non-masked cell of `values`. */
-  fz_intern_all(&h, cv, NULL);
+  fz_intern_all(&fr->st[2], &h, cv, NULL);
 
   /* ---- Phase 2: probe every cell of self, writing the boolean membership. */
   VALUE vout = rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
   CArray *cout;
   GetCArray(vout, cout);
   {
-    ca_iter_state st_in, st_out;
+    ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
     char       *p_in, *p_out;
     boolean8_t *m;
     ca_size_t   n;
@@ -1188,21 +1445,14 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
         }                                                                       \
       } while (0)
 
-    #define IN_PROBE_FLOAT(T, UINT, NANKEY)                                     \
+    #define IN_PROBE_FLOAT(T)                                     \
       do {                                                                      \
         const T    *ip = (const T *) p_in;                                      \
         boolean8_t *op = (boolean8_t *) p_out;                                  \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           if ( m && m[i] ) { op[i] = 0; continue; }                            \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           op[i] = (boolean8_t) fz_hash_lookup(&h, key, NULL);                        \
         }                                                                       \
       } while (0)
@@ -1227,7 +1477,7 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, axis,
+    CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, axis,
                                    CA_KERNEL_READ, p_in, p_out, n, m) {
       switch ( dt ) {
       case CA_INT8:   IN_PROBE(int8_t,   (int64_t));  break;
@@ -1238,8 +1488,8 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
       case CA_UINT16: IN_PROBE(uint16_t, (uint64_t)); break;
       case CA_UINT32: IN_PROBE(uint32_t, (uint64_t)); break;
       case CA_UINT64: IN_PROBE(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: IN_PROBE_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: IN_PROBE_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: IN_PROBE_FLOAT(float);         break;
+      case CA_FLOAT64: IN_PROBE_FLOAT(double); break;
       case CA_OBJECT:  IN_PROBE_OBJ;                                            break;
       case CA_FIXLEN:  IN_PROBE_MEM;                                            break;
       }
@@ -1259,6 +1509,12 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
   return vout;
 }
 
+static VALUE
+rb_ca_is_in (VALUE self, VALUE rvalues)
+{
+  return fz_run(fz_is_in_body, self, rvalues, Qnil, 0);
+}
+
 /* @overload __locate_addr__(ref)
 
    INTERNAL (CArray#locate_addr, exact hash lane). For each cell of self, the
@@ -1276,8 +1532,11 @@ rb_ca_is_in (VALUE self, VALUE rvalues)
    appearance order (matching the discovery family); on a `ref` with duplicate
    values this is the earliest address, which can differ from the bsearch lane. */
 static VALUE
-rb_ca_locate_addr (VALUE self, VALUE rref)
+fz_locate_addr_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rref = fr->a;
   CArray *ca, *cr;
   /* Here the *reference* is the argument (self is the query being placed on
      rref), so the gate runs the other way round: rref reconciles self.  The
@@ -1308,9 +1567,16 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
     rb_raise(rb_eArgError, "__locate_addr__: ref must be a CArray");
   }
   GetCArray(rref, cr);
-  if ( cr->data_type != dt || (dt == CA_FIXLEN && cr->bytes != ca->bytes) ) {
+  if ( cr->data_type != dt ) {
     rb_raise(rb_eCADataTypeError,
-             "__locate_addr__: ref data type must match self (%d)", dt);
+             "locate_addr: ref data type (%s) must match self (%s)",
+             ca_type_name[cr->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && cr->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "locate_addr: a fixlen value is a cell-width blob, so ref "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) cr->bytes);
   }
   if ( cr->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__locate_addr__: ref need ndim >= 1");
@@ -1325,11 +1591,11 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
      the ref value carrying dense code `code`.  Codes are assigned 0,1,2,... in
      insertion order, so pushing on is_new fills addr.p in code order. */
   fz_levels addr;
-  fz_levels_init(&addr, (int) sizeof(int64_t));
+  fz_levels_init(&addr, (int) sizeof(int64_t), 0);
 
   /* ---- Phase 1: build value -> first-address map from ref (row-major). ----- */
   {
-    ca_iter_state st_r;
+    ca_iter_state *st_r = &fr->st[0];
     char       *p_r;
     boolean8_t *mr;
     ca_size_t   nr;
@@ -1349,20 +1615,13 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    #define LOC_BUILD_FLOAT(T, UINT, NANKEY)                                    \
+    #define LOC_BUILD_FLOAT(T)                                    \
       do {                                                                      \
         const T *ip = (const T *) p_r;                                          \
         for ( ca_size_t i = 0; i < nr; i++ ) {                                  \
           if ( mr && mr[i] ) { continue; }                                     \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int is_new;                                                           \
           fz_hash_intern(&h, key, &is_new);                                     \
           if ( is_new ) { int64_t a = (int64_t) (base + i);                     \
@@ -1394,7 +1653,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_MASKED(st_r, cr, raxis, CA_KERNEL_READ, p_r, nr, mr) {
+    CA_FOR_EACH_FIBER_MASKED(*st_r, cr, raxis, CA_KERNEL_READ, p_r, nr, mr) {
       switch ( dt ) {
       case CA_INT8:   LOC_BUILD(int8_t,   (int64_t));  break;
       case CA_INT16:  LOC_BUILD(int16_t,  (int64_t));  break;
@@ -1404,8 +1663,8 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
       case CA_UINT16: LOC_BUILD(uint16_t, (uint64_t)); break;
       case CA_UINT32: LOC_BUILD(uint32_t, (uint64_t)); break;
       case CA_UINT64: LOC_BUILD(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: LOC_BUILD_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: LOC_BUILD_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: LOC_BUILD_FLOAT(float);         break;
+      case CA_FLOAT64: LOC_BUILD_FLOAT(double); break;
       case CA_OBJECT:  LOC_BUILD_OBJ;                                            break;
       case CA_FIXLEN:  LOC_BUILD_MEM;                                            break;
       }
@@ -1422,10 +1681,11 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
   CArray *cout;
   GetCArray(vout, cout);
   int64_t    *out = (int64_t *) cout->ptr;
-  boolean8_t *um  = ALLOC_N(boolean8_t, ca->elements);   /* undef flags scratch */
+  volatile VALUE hum = 0;
+  boolean8_t *um  = ALLOCV_N(boolean8_t, hum, ca->elements);   /* undef flags scratch */
   ca_size_t   n_undef = 0;
   {
-    ca_iter_state st_in;
+    ca_iter_state *st_in = &fr->st[1];
     char       *p_in;
     boolean8_t *m;
     ca_size_t   n;
@@ -1446,7 +1706,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    #define LOC_PROBE_FLOAT(T, UINT, NANKEY)                                    \
+    #define LOC_PROBE_FLOAT(T)                                    \
       do {                                                                      \
         const T *ip = (const T *) p_in;                                         \
         const int64_t *ab = (const int64_t *) addr.p;                           \
@@ -1454,14 +1714,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
           ca_size_t o = base + i;                                               \
           if ( m && m[i] ) { out[o] = 0; um[o] = 1; n_undef++; continue; }     \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int32_t code;                                                         \
           if ( fz_hash_lookup(&h, key, &code) ) { out[o] = ab[code]; um[o] = 0; } \
           else { out[o] = 0; um[o] = 1; n_undef++; }                            \
@@ -1494,7 +1747,7 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
         }                                                                       \
       } while (0)
 
-    CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+    CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
       switch ( dt ) {
       case CA_INT8:   LOC_PROBE(int8_t,   (int64_t));  break;
       case CA_INT16:  LOC_PROBE(int16_t,  (int64_t));  break;
@@ -1504,8 +1757,8 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
       case CA_UINT16: LOC_PROBE(uint16_t, (uint64_t)); break;
       case CA_UINT32: LOC_PROBE(uint32_t, (uint64_t)); break;
       case CA_UINT64: LOC_PROBE(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: LOC_PROBE_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: LOC_PROBE_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: LOC_PROBE_FLOAT(float);         break;
+      case CA_FLOAT64: LOC_PROBE_FLOAT(double); break;
       case CA_OBJECT:  LOC_PROBE_OBJ;                                            break;
       case CA_FIXLEN:  LOC_PROBE_MEM;                                            break;
       }
@@ -1526,9 +1779,15 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
     ca_create_mask(cout);
     memcpy(cout->mask->ptr, um, (size_t) ca->elements);
   }
-  xfree(um);
+  ALLOCV_END(hum);
 
   return vout;
+}
+
+static VALUE
+rb_ca_locate_addr (VALUE self, VALUE rref)
+{
+  return fz_run(fz_locate_addr_body, self, rref, Qnil, 0);
 }
 
 /* Shared body of __intersection__ (keep_when_hit = 1) and __difference__
@@ -1540,8 +1799,12 @@ rb_ca_locate_addr (VALUE self, VALUE rref)
    lane (numeric `==` + NaN collapse + -0.0 == +0.0, object hash/eql? + NaN
    collapse, fixlen byte equality). */
 static VALUE
-fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
+fz_set_relation_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rother = fr->a;
+  int keep_when_hit = fr->i;
   CArray *ca, *co;
   volatile VALUE face;
   self   = fz_face_descend(self, &face, "set relation");
@@ -1594,15 +1857,15 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
   }
 
   fz_levels lv;
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
   /* Build the probe set from every non-masked cell of other. */
-  fz_intern_all(&hoth, co, NULL);
+  fz_intern_all(&fr->st[2], &hoth, co, NULL);
 
   /* Walk self: hself dedups, so each distinct self value is decided once; keep
      it when its membership in other equals keep_when_hit. */
   int8_t axis = (int8_t) (ca->ndim - 1);
-  ca_iter_state st;
+  ca_iter_state *st = &fr->st[0];
   char       *p;
   boolean8_t *m;
   ca_size_t   n;
@@ -1621,20 +1884,13 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
       }                                                                        \
     } while (0)
 
-  #define SR_FLOAT(T, UINT, NANKEY)                                            \
+  #define SR_FLOAT(T)                                            \
     do {                                                                       \
       const T *ip = (const T *) p;                                             \
       for ( ca_size_t i = 0; i < n; i++ ) {                                    \
         if ( m && m[i] ) { continue; }                                         \
         T v = ip[i];                                                           \
-        uint64_t key;                                                          \
-        if ( v != v ) { key = (NANKEY); }                                      \
-        else {                                                                 \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                           \
-          memcpy(&bits, &v, sizeof(bits));                                     \
-          key = (uint64_t) bits;                                               \
-        }                                                                      \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                            \
         fz_hash_intern(&hself, key, &is_new);                                  \
         if ( is_new && fz_hash_lookup(&hoth, key, NULL) == keep_when_hit ) {   \
@@ -1670,7 +1926,7 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st, ca, axis, CA_KERNEL_READ, p, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st, ca, axis, CA_KERNEL_READ, p, n, m) {
     switch ( dt ) {
     case CA_INT8:   SR(int8_t,   (int64_t));  break;
     case CA_INT16:  SR(int16_t,  (int64_t));  break;
@@ -1680,8 +1936,8 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
     case CA_UINT16: SR(uint16_t, (uint64_t)); break;
     case CA_UINT32: SR(uint32_t, (uint64_t)); break;
     case CA_UINT64: SR(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: SR_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: SR_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: SR_FLOAT(float);         break;
+    case CA_FLOAT64: SR_FLOAT(double); break;
     case CA_OBJECT:  SR_OBJ;                                            break;
     case CA_FIXLEN:  SR_MEM;                                            break;
     }
@@ -1706,6 +1962,12 @@ fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
   fz_levels_free(&lv);
 
   return fz_face_relift(vlev, face);   /* set *values*: give the Face back */
+}
+
+static VALUE
+fz_set_relation (VALUE self, VALUE rother, int keep_when_hit)
+{
+  return fz_run(fz_set_relation_body, self, rother, Qnil, keep_when_hit);
 }
 
 /* @overload __intersection__(other)
@@ -1733,8 +1995,11 @@ rb_ca_difference (VALUE self, VALUE rother)
    distinct values first, then other's not-yet-seen ones).  Masked cells of
    either array do not participate. */
 static VALUE
-rb_ca_set_union (VALUE self, VALUE rother)
+fz_set_union_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE rother = fr->a;
   CArray *ca, *co;
   volatile VALUE face;
   self   = fz_face_descend(self, &face, "union");
@@ -1760,8 +2025,16 @@ rb_ca_set_union (VALUE self, VALUE rother)
     rb_raise(rb_eArgError, "__union__: other must be a CArray");
   }
   GetCArray(rother, co);
-  if ( co->data_type != dt || (dt == CA_FIXLEN && co->bytes != ca->bytes) ) {
-    rb_raise(rb_eCADataTypeError, "__union__: other data type must match self (%d)", dt);
+  if ( co->data_type != dt ) {
+    rb_raise(rb_eCADataTypeError,
+             "union: other data type (%s) must match self (%s)",
+             ca_type_name[co->data_type], ca_type_name[dt]);
+  }
+  if ( dt == CA_FIXLEN && co->bytes != ca->bytes ) {
+    rb_raise(rb_eCADataTypeError,
+             "union: a fixlen value is a cell-width blob, so other "
+             "must be %ld bytes wide like self, not %ld",
+             (long) ca->bytes, (long) co->bytes);
   }
   if ( co->ndim < 1 ) {
     rb_raise(rb_eRuntimeError, "__union__: other need ndim >= 1");
@@ -1773,10 +2046,10 @@ rb_ca_set_union (VALUE self, VALUE rother)
   else                        { fz_hash_init(&h); }
 
   fz_levels lv;
-  fz_levels_init(&lv, (int) ca->bytes);
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
-  fz_intern_all(&h, ca, &lv);   /* self's distinct values, appearance order */
-  fz_intern_all(&h, co, &lv);   /* + other's not-yet-seen distinct values   */
+  fz_intern_all(&fr->st[2], &h, ca, &lv);   /* self's distinct values, appearance order */
+  fz_intern_all(&fr->st[2], &h, co, &lv);   /* + other's not-yet-seen distinct values   */
 
   ca_size_t k = lv.n;
   fz_hash_free(&h);
@@ -1792,6 +2065,12 @@ rb_ca_set_union (VALUE self, VALUE rother)
   fz_levels_free(&lv);
 
   return fz_face_relift(vlev, face);   /* set *values*: give the Face back */
+}
+
+static VALUE
+rb_ca_set_union (VALUE self, VALUE rother)
+{
+  return fz_run(fz_set_union_body, self, rother, Qnil, 0);
 }
 
 /* @overload __value_counts_flat__
@@ -1810,8 +2089,10 @@ rb_ca_set_union (VALUE self, VALUE rother)
    collapses every Float NaN to one value (their counts add up, as numeric does).
 */
 static VALUE
-rb_ca_value_counts_flat (VALUE self)
+fz_value_counts_flat_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "value_counts");
@@ -1839,11 +2120,11 @@ rb_ca_value_counts_flat (VALUE self)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&lv, (int) ca->bytes);
-  fz_levels_init(&ct, (int) sizeof(int64_t));
+  fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
+  fz_levels_init(&ct, (int) sizeof(int64_t), 0);
 
   int8_t axis = (int8_t) (ca->ndim - 1);   /* one seen-set over the whole array */
-  ca_iter_state st_in;
+  ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
   ca_size_t   n;
@@ -1866,20 +2147,13 @@ rb_ca_value_counts_flat (VALUE self)
       }                                                                       \
     } while (0)
 
-  #define VC_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define VC_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T *ip = (const T *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         int32_t code = fz_hash_intern(&h, key, &is_new);                      \
         if ( is_new ) {                                                       \
@@ -1929,7 +2203,7 @@ rb_ca_value_counts_flat (VALUE self)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   VC_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  VC_LOOP(int16_t,  (int64_t));  break;
@@ -1939,8 +2213,8 @@ rb_ca_value_counts_flat (VALUE self)
     case CA_UINT16: VC_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: VC_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: VC_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: VC_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: VC_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: VC_LOOP_FLOAT(float);          break;
+    case CA_FLOAT64: VC_LOOP_FLOAT(double);  break;
     case CA_OBJECT:  VC_LOOP_OBJ;                                             break;
     case CA_FIXLEN:  VC_LOOP_MEM;                                             break;
     }
@@ -1973,6 +2247,12 @@ rb_ca_value_counts_flat (VALUE self)
   return rb_ary_new3(2, fz_face_relift(vlev, face), vcnt);
 }
 
+static VALUE
+rb_ca_value_counts_flat (VALUE self)
+{
+  return fz_run(fz_value_counts_flat_body, self, Qnil, Qnil, 0);
+}
+
 /* @overload __nunique__(axis, keep_axis)
 
    INTERNAL (CArray#nunique). Count the distinct values along axis, one linear
@@ -1985,8 +2265,12 @@ rb_ca_value_counts_flat (VALUE self)
    Ruby Hash distinctness; the object lane also collapses every Float NaN to one.
 */
 static VALUE
-rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
+fz_nunique_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
+  VALUE vkeep = fr->b;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -2023,8 +2307,8 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
 
-  ca_iter_state st;
-  int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  ca_iter_state *st = &fr->st[0];
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h);
     rb_raise(rb_eRuntimeError, "__nunique__: kernel_iterator init failed rc=%d", rc);
@@ -2040,17 +2324,10 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
      -0.0 before the bitwise key. */
   #define NU_INT(WIDEN)                                                       \
     do { int _n; fz_hash_intern(&h, (uint64_t) ((WIDEN) v), &_n); } while (0)
-  #define NU_FLOAT(T, UINT, NANKEY)                                           \
+  #define NU_FLOAT(T)                                           \
     do {                                                                      \
       T _v = v;                                                               \
-      uint64_t _key;                                                          \
-      if ( _v != _v ) { _key = (NANKEY); }                                    \
-      else {                                                                  \
-        if ( _v == (T) 0 ) { _v = (T) 0; }                                    \
-        UINT _b;                                                              \
-        memcpy(&_b, &_v, sizeof(_b));                                         \
-        _key = (uint64_t) _b;                                                 \
-      }                                                                       \
+      uint64_t _key = FZ_FLOAT_KEY(T, _v);           \
       int _n; fz_hash_intern(&h, _key, &_n);                                  \
     } while (0)
   /* Object: intern the VALUE via the object lane (v is bound by the macro). */
@@ -2062,43 +2339,43 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
      each esz-wide element via the fixlen lane. */
   #define NU_MEM_WALK                                                         \
     do {                                                                      \
-      int8_t K = st.slab_ndim;                                               \
+      int8_t K = st->slab_ndim;                                              \
       ca_size_t idx[CA_RANK_MAX] = { 0 };                                    \
-      ca_size_t total = st.slab_elements;                                    \
+      ca_size_t total = st->slab_elements;                                   \
       for ( ca_size_t e = 0; e < total; e++ ) {                             \
         ca_size_t doff = 0, moff = 0;                                        \
         for ( int8_t kk = 0; kk < K; kk++ ) {                               \
-          doff += idx[kk] * st.slab_strides[kk];                            \
-          moff += idx[kk] * st.slab_mask_strides[kk];                       \
+          doff += idx[kk] * st->slab_strides[kk];                           \
+          moff += idx[kk] * st->slab_mask_strides[kk];                      \
         }                                                                    \
         if ( ! (m && m[moff]) ) {                                           \
           int _n; fz_hash_intern_mem(&h, p + doff, &_n);                    \
         }                                                                    \
         for ( int8_t kk = (int8_t)(K - 1); kk >= 0; kk-- ) {               \
-          if ( ++idx[kk] < st.slab_dims[kk] ) break;                        \
+          if ( ++idx[kk] < st->slab_dims[kk] ) break;                       \
           idx[kk] = 0;                                                      \
         }                                                                    \
       }                                                                      \
     } while (0)
 
-  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+  while ( ca_iter_state_next_slab_axes(st, &p, &m) ) {
     fz_hash_reset(&h);   /* independent seen-set per fiber */
     switch ( dt ) {
-    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  st, p, m, dummy, 0, NU_INT(int64_t));  break;
-    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
-    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  *st, p, m, dummy, 0, NU_INT(int64_t));  break;
+    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
+    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  st, p, m, dummy, 0, NU_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, NU_FLOAT(float));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, st, p, m, dummy, 0, NU_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, NU_FLOAT(double));
       break;
-    case CA_OBJECT: CA_SLAB_REDUCE_T(VALUE, st, p, m, dummy, 0, NU_OBJ); break;
+    case CA_OBJECT: CA_SLAB_REDUCE_T(VALUE, *st, p, m, dummy, 0, NU_OBJ); break;
     case CA_FIXLEN: NU_MEM_WALK;                                          break;
     }
     op[out_i++] = (int64_t) h.n;
@@ -2109,9 +2386,15 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
   #undef NU_MEM_WALK
   (void) dummy;
 
-  ca_iter_state_finish(&st);
+  ca_iter_state_finish(st);
   fz_hash_free(&h);
   return vout;
+}
+
+static VALUE
+rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
+{
+  return fz_run(fz_nunique_body, fz_complex_as_key(self), vaxis, vkeep, 0);
 }
 
 /* @overload __is_mode__(axis)
@@ -2132,8 +2415,11 @@ rb_ca_nunique (VALUE self, VALUE vaxis, VALUE vkeep)
    Callers pass flat input by flattening first (a single fiber over axis 0).
 */
 static VALUE
-rb_ca_is_mode (VALUE self, VALUE vaxis)
+fz_is_mode_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -2166,9 +2452,9 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
   if      ( dt == CA_OBJECT ) { fz_hash_init_obj(&h); }
   else if ( dt == CA_FIXLEN ) { fz_hash_init_mem(&h, (int) ca->bytes); }
   else                        { fz_hash_init(&h); }
-  fz_levels_init(&ct, (int) sizeof(int64_t));
+  fz_levels_init(&ct, (int) sizeof(int64_t), 0);
 
-  ca_iter_state st_in, st_out;
+  ca_iter_state *st_in = &fr->st[0], *st_out = &fr->st[1];
   char       *p_in, *p_out;
   boolean8_t *m;
   ca_size_t   n;
@@ -2201,7 +2487,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
     } while (0)
 
   /* Float: NaN collapses to one canonical key; -0.0 / +0.0 share a key. */
-  #define IM_BODY_FLOAT(T, UINT, NANKEY)                                      \
+  #define IM_BODY_FLOAT(T)                                      \
     do {                                                                      \
       const T    *ip = (const T *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
@@ -2216,14 +2502,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
         for ( ca_size_t i = 0; i < n; i++ ) {                                 \
           if ( m && m[i] ) { if ( pass == 1 ) { op[i] = 0; } continue; }      \
           T v = ip[i];                                                        \
-          uint64_t key;                                                       \
-          if ( v != v ) { key = (NANKEY); }                                   \
-          else {                                                              \
-            if ( v == (T) 0 ) { v = (T) 0; }                                  \
-            UINT bits;                                                        \
-            memcpy(&bits, &v, sizeof(bits));                                  \
-            key = (uint64_t) bits;                                            \
-          }                                                                   \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int is_new;                                                         \
           int32_t code = fz_hash_intern(&h, key, &is_new);                    \
           if ( pass == 0 ) {                                                  \
@@ -2287,7 +2566,7 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
       }                                                                       \
     } while (0)
 
-  CA_FOR_EACH_FIBER_INOUT_MASKED(st_in, st_out, ca, cout, (int8_t) axis,
+  CA_FOR_EACH_FIBER_INOUT_MASKED(*st_in, *st_out, ca, cout, (int8_t) axis,
                                  CA_KERNEL_READ, p_in, p_out, n, m) {
     fz_hash_reset(&h);   /* independent frequency table per fiber */
     ct.n = 0;
@@ -2300,8 +2579,8 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
     case CA_UINT16: IM_BODY(uint16_t, (uint64_t)); break;
     case CA_UINT32: IM_BODY(uint32_t, (uint64_t)); break;
     case CA_UINT64: IM_BODY(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: IM_BODY_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: IM_BODY_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: IM_BODY_FLOAT(float);          break;
+    case CA_FLOAT64: IM_BODY_FLOAT(double);  break;
     case CA_OBJECT:  IM_BODY_OBJ;                                            break;
     case CA_FIXLEN:  IM_BODY_MEM;                                            break;
     }
@@ -2314,6 +2593,12 @@ rb_ca_is_mode (VALUE self, VALUE vaxis)
   fz_hash_free(&h);
   fz_levels_free(&ct);
   return vout;
+}
+
+static VALUE
+rb_ca_is_mode (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_is_mode_body, fz_complex_as_key(self), vaxis, Qnil, 0);
 }
 
 /* Ascending comparison for the modal-value sort, NaN ordered last so a
@@ -2349,8 +2634,11 @@ static int mode_gt_f64 (double a, double b) { if ( a != a ) return b == b; if ( 
    its sign), matching the discovery family.
 */
 static VALUE
-rb_ca_mode_axis (VALUE self, VALUE vaxis)
+fz_mode_axis_body (VALUE arg)
 {
+  fz_frame *fr = (fz_frame *) arg;
+  VALUE self = fr->self;
+  VALUE vaxis = fr->a;
   CArray *ca;
   volatile VALUE face;
   self = fz_face_descend(self, &face, "mode");
@@ -2387,20 +2675,21 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   fz_levels mod;    /* per-fiber modal values, collected then sorted (reset) */
   fz_levels flat;   /* all fibers' modal values concatenated, fiber order */
   fz_hash_init(&h);
-  fz_levels_init(&lv,   esz);
-  fz_levels_init(&ct,   (int) sizeof(int64_t));
-  fz_levels_init(&mod,  esz);
-  fz_levels_init(&flat, esz);
+  fz_levels_init(&lv,   esz, 0);
+  fz_levels_init(&ct,   (int) sizeof(int64_t), 0);
+  fz_levels_init(&mod,  esz, 0);
+  fz_levels_init(&flat, esz, 0);
 
-  ca_size_t *foff = ALLOC_N(ca_size_t, M + 1);   /* prefix offsets into flat */
+  volatile VALUE hfoff = 0;
+  ca_size_t *foff = ALLOCV_N(ca_size_t, hfoff, M + 1);   /* prefix offsets into flat */
   foff[0] = 0;
 
   int8_t ax = (int8_t) axis;
-  ca_iter_state st;
-  int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  ca_iter_state *st = &fr->st[0];
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h); fz_levels_free(&lv); fz_levels_free(&ct);
-    fz_levels_free(&mod); fz_levels_free(&flat); xfree(foff);
+    fz_levels_free(&mod); fz_levels_free(&flat); ALLOCV_END(hfoff);
     rb_raise(rb_eRuntimeError, "__mode_axis__: kernel_iterator init failed rc=%d", rc);
   }
 
@@ -2421,12 +2710,9 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
                       fz_levels_push(&ct, &one); }                           \
       else { ((int64_t *) ct.p)[code]++; }                                    \
     } while (0)
-  #define MB_FLOAT(T, UINT, NANKEY)                                           \
+  #define MB_FLOAT(T)                                           \
     do {                                                                      \
-      T vn = v; uint64_t key;                                                 \
-      if ( vn != vn ) { key = (NANKEY); }                                     \
-      else { if ( vn == (T) 0 ) { vn = (T) 0; }                              \
-             UINT bits; memcpy(&bits, &vn, sizeof(bits)); key = (uint64_t) bits; } \
+      uint64_t key = FZ_FLOAT_KEY(T, v);                                      \
       int is_new; int32_t code = fz_hash_intern(&h, key, &is_new);            \
       if ( is_new ) { int64_t one = 1; fz_levels_push(&lv, &v);              \
                       fz_levels_push(&ct, &one); }                           \
@@ -2450,24 +2736,24 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
       for ( ca_size_t x = 0; x < cm; x++ ) { fz_levels_push(&flat, &dp[x]); } \
     } while (0)
 
-  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+  while ( ca_iter_state_next_slab_axes(st, &p, &m) ) {
     fz_hash_reset(&h);
     lv.n = 0; ct.n = 0; mod.n = 0;
 
     switch ( dt ) {
-    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  st, p, m, dummy, 0, MB_INT(int64_t));  break;
-    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
-    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_INT8:   CA_SLAB_REDUCE_T(int8_t,   *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT16:  CA_SLAB_REDUCE_T(int16_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT32:  CA_SLAB_REDUCE_T(int32_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_INT64:  CA_SLAB_REDUCE_T(int64_t,  *st, p, m, dummy, 0, MB_INT(int64_t));  break;
+    case CA_BOOLEAN: case CA_UINT8:  CA_SLAB_REDUCE_T(uint8_t,  *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT16: CA_SLAB_REDUCE_T(uint16_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
+    case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  st, p, m, dummy, 0, MB_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, MB_FLOAT(float));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, st, p, m, dummy, 0, MB_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, MB_FLOAT(double));
       break;
     }
 
@@ -2499,7 +2785,7 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   #undef MODE_EMIT
   (void) dummy;
 
-  ca_iter_state_finish(&st);
+  ca_iter_state_finish(st);
   fz_hash_free(&h);
   fz_levels_free(&lv);
   fz_levels_free(&ct);
@@ -2529,8 +2815,14 @@ rb_ca_mode_axis (VALUE self, VALUE vaxis)
   }
 
   fz_levels_free(&flat);
-  xfree(foff);
+  ALLOCV_END(hfoff);
   return result;
+}
+
+static VALUE
+rb_ca_mode_axis (VALUE self, VALUE vaxis)
+{
+  return fz_run(fz_mode_axis_body, self, vaxis, Qnil, 0);
 }
 
 void

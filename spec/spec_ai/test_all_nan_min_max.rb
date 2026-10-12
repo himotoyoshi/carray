@@ -126,7 +126,7 @@ class TestAllNaNMinMax < Test::Unit::TestCase
     assert_equal UNDEF, CArray.float64(0).max
     assert_equal UNDEF, all_masked.min
     assert_equal UNDEF, all_masked.max
-    assert_equal UNDEF, all_masked.minmax
+    assert_equal [UNDEF, UNDEF], all_masked.minmax
     assert_equal [UNDEF, UNDEF, UNDEF], all_masked.cummin.to_a
   end
 

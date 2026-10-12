@@ -17,6 +17,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"
 
@@ -90,10 +91,13 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
 
   elements = 1;
   for (i = 0; i < ndim; i++) {
-    if ( parent->dim[i] <= 0 ) {
-      rb_raise(rb_eIndexError, "invalid parent dim for %d-th dimension", i);
-    }
     elements *= parent->dim[i];
+  }
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
 
   ca->obj_type  = CA_OBJ_ROLL;
@@ -114,8 +118,11 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
   for (i = 0; i < ndim; i++) {
     ca->dim[i] = parent->dim[i];
     /* Normalise: ((shift[i] % dim[i]) + dim[i]) % dim[i] ∈ [0, dim[i]). */
-    ca_size_t s = shift[i] % parent->dim[i];
-    if ( s < 0 ) s += parent->dim[i];
+    ca_size_t s = 0;                 /* an empty axis has nothing to roll */
+    if ( parent->dim[i] > 0 ) {
+      s = shift[i] % parent->dim[i];
+      if ( s < 0 ) s += parent->dim[i];
+    }
     ca->reps[i] = s;
   }
 
@@ -129,7 +136,9 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
 CARoll *
 ca_roll_new (CArray *parent, ca_size_t *shift)
 {
-  CARoll *ca = ALLOC(CARoll);
+  CARoll *ca;
+  ca_roll_setup(NULL, parent, shift);
+  ca = ALLOC(CARoll);
   ca_roll_setup(ca, parent, shift);
   return ca;
 }
@@ -214,6 +223,7 @@ static void
 ca_roll_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CARoll   *ca = (CARoll *) ap;
   CArray   *parent = ca->parent;
   int8_t    ndim = ca->ndim;
@@ -262,6 +272,95 @@ ca_roll_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       if (k < 0) break;
     }
     return;
+  }
+
+  /* The inner range is one run of a parent row, or two when it wraps, and
+     the rows along the next axis out are consecutive parent rows except
+     across that axis's wrap.  So each pass over the axes further out moves
+     at most two strided boxes per inner run, instead of one transfer per
+     row.  A box over an unwrapped inner range is already the request's own
+     layout; a box over one of two inner runs goes through a scratch whose
+     rows are spliced into the request's.  Object cells keep the per-row
+     path: a scratch would hold the VALUEs a parent produces where the GC
+     cannot see them. */
+  if ( inner >= 1 ) {
+    int8_t    m  = inner - 1;
+    ca_size_t dim_in = parent->dim[inner];
+    ca_size_t p0 = starts[inner] - ca->reps[inner];
+    ca_size_t seg_p[2], seg_n[2], seg_i[2];
+    int       nseg, sg;
+    if (p0 < 0) p0 += dim_in;
+    if ( p0 + counts[inner] <= dim_in ) {
+      nseg = 1;
+      seg_p[0] = p0; seg_n[0] = counts[inner]; seg_i[0] = 0;
+    }
+    else {
+      nseg = 2;
+      seg_p[0] = p0; seg_n[0] = dim_in - p0;            seg_i[0] = 0;
+      seg_p[1] = 0;  seg_n[1] = counts[inner] - seg_n[0]; seg_i[1] = seg_n[0];
+    }
+    if ( nseg == 1 || ca->data_type != CA_OBJECT ) {
+      volatile VALUE holder = 0;
+      char *tmp = NULL;
+      if ( nseg == 2 ) {
+        ca_size_t wide = seg_n[0] > seg_n[1] ? seg_n[0] : seg_n[1];
+        tmp = (char *) ALLOCV(holder, counts[m] * wide * ca->bytes);
+      }
+      for (k = 0; k < m; k++) o[k] = 0;
+      while (1) {
+        ca_size_t pbase = 0, doff = 0;
+        for (k = 0; k < m; k++) {
+          ca_size_t j = (starts[k] + o[k]) - ca->reps[k];
+          if (j < 0) j += parent->dim[k];
+          pbase += j * pnative[k];
+          doff  += o[k] * dstride[k];
+        }
+        for (sg = 0; sg < nseg; sg++) {
+          ca_size_t r = 0;
+          while (r < counts[m]) {
+            ca_size_t pm = (starts[m] + r) - ca->reps[m];
+            ca_size_t run, q;
+            ca_size_t pstarts[CA_RANK_MAX], pcounts[CA_RANK_MAX], pstrides[CA_RANK_MAX];
+            char     *rows = d + doff + r * dstride[m] + seg_i[sg] * ca->bytes;
+            ca_size_t rowb = seg_n[sg] * ca->bytes;
+            if (pm < 0) pm += parent->dim[m];
+            run = parent->dim[m] - pm;
+            if (run > counts[m] - r) run = counts[m] - r;
+            ca_addr2index((CArray *) parent,
+                          (pbase + pm * pnative[m] + seg_p[sg] * pnative[inner])
+                          / parent->bytes, pstarts);
+            for (k = 0; k < ndim; k++) { pcounts[k] = 1; pstrides[k] = 0; }
+            pcounts[m]      = run;
+            pstrides[m]     = pnative[m];
+            pcounts[inner]  = seg_n[sg];
+            pstrides[inner] = pnative[inner];
+            if ( nseg == 1 ) {
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, rows, dir);
+            }
+            else if ( dir == CA_XFER_GET ) {
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, tmp, dir);
+              for (q = 0; q < run; q++) {
+                memcpy(rows + q * dstride[m], tmp + q * rowb, rowb);
+              }
+            }
+            else {
+              for (q = 0; q < run; q++) {
+                memcpy(tmp + q * rowb, rows + q * dstride[m], rowb);
+              }
+              ca_xfer_stride(parent, pstarts, pcounts, pstrides, tmp, dir);
+            }
+            r += run;
+          }
+        }
+        k = m - 1;
+        while (k >= 0) { if (++o[k] < counts[k]) break; o[k] = 0; k--; }
+        if (k < 0) break;
+      }
+      if ( tmp ) {
+        ALLOCV_END(holder);
+      }
+      return;
+    }
   }
 
   for (k = 0; k < ndim; k++) o[k] = 0;
@@ -459,10 +558,13 @@ ca_roll_func_xfer_all (void *ap, void *data, int dir)
     ca_xfer_all(parent, parent_scratch, CA_XFER_GET);
     parent->ptr = parent_scratch;
     ca_roll_iterate_regions(ca, (char *) data, dir == CA_XFER_PUT);
+    /* Put parent->ptr back before the PUT: the PUT can raise (a lazy
+       backing's sync failing), and the scratch is gone once this
+       frame is. */
+    parent->ptr = parent_ptr_saved;
     if ( dir == CA_XFER_PUT ) {
       ca_xfer_all(parent, parent_scratch, CA_XFER_PUT);
     }
-    parent->ptr = parent_ptr_saved;
     ALLOCV_END(holder);
   }
 }
@@ -480,10 +582,7 @@ static void
 ca_roll_func_create_mask (void *ap)
 {
   CARoll *ca = (CARoll *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
   ca->mask = (CArray *) ca_roll_new(ca->parent->mask, ca->reps);
 }
 
@@ -557,11 +656,13 @@ rb_ca_roll_initialize_copy (VALUE self, VALUE other)
 {
   CARoll *ca, *cs;
   TypedData_Get_Struct(self,  CARoll, &caroll_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CARoll, &caroll_data_type, cs);
   ca_roll_setup(ca, cs->parent, cs->reps);
   return self;
 }
 
+#ifdef CARRAY_DEV_BUILD
 /* Debug-only accessor returning the roll descriptor as a Hash
    (`shifts`, `n_regions`, `ndim`).  Not part of the public surface. */
 static VALUE
@@ -583,6 +684,7 @@ rb_ca_roll_descriptor (VALUE self)
   rb_hash_aset(hash, ID2SYM(rb_intern("ndim")), INT2NUM(ca->ndim));
   return hash;
 }
+#endif
 
 void
 Init_ca_obj_roll (void)
@@ -618,7 +720,9 @@ Init_ca_obj_roll (void)
   rb_define_method(rb_cCARoll, "initialize_copy",
                                       rb_ca_roll_initialize_copy, 1);
 
+#ifdef CARRAY_DEV_BUILD
   /* Debug accessor, not part of the public surface. */
   rb_define_method(rb_cCARoll, "_roll_descriptor",
                                       rb_ca_roll_descriptor, 0);
+#endif
 }

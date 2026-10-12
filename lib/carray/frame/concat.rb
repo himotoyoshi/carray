@@ -9,6 +9,9 @@
 #
 # Both are class methods (symmetric N-ary; no frame is privileged), like
 # +CArray.meld+ / +CArray.concatenate+, not instance verbs.
+#
+# +CAFrame.stack+ and +CAFrame#unstack+ add and take away a layer axis
+# instead of rows.
 
 class CAFrame
   # Weld frames along the row axis, view-style.  Each output column is
@@ -28,6 +31,13 @@ class CAFrame
   #
   # The index is welded too when every frame has one (their +axis_name+
   # must agree); if none do, the result has no index; a mix raises.
+  #
+  # A frame with no rows adds no values, so it takes no part in the result
+  # past these checks: its column set, its N-D columns' trailing dimensions
+  # and its index still have to agree, but the
+  # data types are the other frames' (a header-only CSV reads as object
+  # columns, which would otherwise refuse or demote the rest).  When every
+  # frame is empty, the first one stands for them.
   # Column-set mismatch raises — a union-with-UNDEF mode is a possible
   # future opt-in, kept out here to stay explicit (memo §4.2).
   #
@@ -37,8 +47,11 @@ class CAFrame
     frames = frames.flatten
     check_concat_inputs(frames, verb: "meld")
     first = frames.first
-    names = first.variable_names
+    names = first.column_names
     check_column_sets(frames, names, verb: "meld")
+    index_pieces(frames, verb: "meld")
+    check_trailing_shapes(frames, names, verb: "meld")
+    frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
       cols[name] = CArray.meld(frames.map { |f| f[name] }, axis: 0)
@@ -54,8 +67,9 @@ class CAFrame
   # For a view frame that shares storage with the inputs (strict same data type
   # per column, chain composability preserved) use {CAFrame.meld}.
   #
-  # Column matching, index handling, and column-set / index-mix rules
-  # match {CAFrame.meld}.
+  # Column matching, index handling, column-set / index-mix rules and the
+  # treatment of a frame with no rows match {CAFrame.meld}: an empty frame's
+  # data types take no part in the common type.
   #
   #   CAFrame.concatenate(jan, feb, mar)     # eager, independent result
   #   CAFrame.concatenate([jan, feb, mar])   # an Array is accepted too
@@ -63,14 +77,119 @@ class CAFrame
     frames = frames.flatten
     check_concat_inputs(frames, verb: "concatenate")
     first = frames.first
-    names = first.variable_names
+    names = first.column_names
     check_column_sets(frames, names, verb: "concatenate")
+    index_pieces(frames, verb: "concatenate")
+    check_trailing_shapes(frames, names, verb: "concatenate")
+    frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
       cols[name] = CArray.concatenate(frames.map { |f| f[name] })
     end
     new(cols, axis_name: first.axis_name, index: concatenate_index(frames))
   end
+
+  # Stack frames of the same shape as layers.  Each output column is
+  # +CArray.stack+ of that column across the frames along +axis+, counted in
+  # the column's own axes (0 is the row axis, so +axis+ starts at 1): a
+  # scalar column of K frames becomes a column of shape (nrow, K).  The rows
+  # stay as they are, so row verbs work on the stack unchanged and a layer is
+  # a column axis -- +s["temp"][nil, k]+ is frame k's column, and
+  # +s["temp"].mean(axis: 1)+ reduces across the layers.
+  #
+  # The result is a view frame: its columns are CAStack views over the
+  # frames' columns, and writes reach them.  Call +copy+ for an independent
+  # frame.  The layers carry no labels; keep them alongside (the dates of the
+  # files, say) as an array of your own.
+  #
+  # Every frame must have the same columns, the same number of rows and the
+  # same index (by value) under the same axis name, or none; the result
+  # takes the first frame's.  +unstack+ is the inverse:
+  #
+  #   s = CAFrame.stack(jan1, jan2, jan3)    # temp:float64 -> temp:float64[3]
+  #   CAFrame.stack(*s.unstack(axis: 1))       # the same frame again
+  def self.stack(*frames, axis: 1)
+    frames = frames.flatten
+    check_concat_inputs(frames, verb: "stack")
+    check_layer_axis(axis, "stack")
+    first = frames.first
+    names = first.column_names
+    check_column_sets(frames, names, verb: "stack")
+    frames.each_with_index do |f, i|
+      next if i.zero?
+      unless f.nrow == first.nrow
+        raise ArgumentError,
+              "stack: frame #{i} has #{f.nrow} rows, frame 0 has #{first.nrow}"
+      end
+    end
+    indexes, = index_pieces(frames, verb: "stack")
+    if indexes && ! indexes.all? { |x| same_index_values?(x, indexes.first) }
+      raise ArgumentError, "stack: the frames' indexes differ; stacked rows have to be the same rows"
+    end
+    cols = {}
+    names.each do |name|
+      parts = frames.map { |f| f[name] }
+      if axis > parts.first.ndim
+        raise ArgumentError,
+              "stack: axis #{axis} out of range for column #{name.inspect} " \
+              "(a #{parts.first.ndim}-D column takes 1 to #{parts.first.ndim})"
+      end
+      cols[name] = CArray.stack(parts, axis: axis)
+    end
+    new(cols, axis_name: first.axis_name, index: first.index)
+  end
+
+  # Split the frame along a column axis into an Array of frames, one per
+  # position on that axis -- the inverse of {CAFrame.stack}.  +axis+ counts
+  # the columns' own axes (0 is the row axis, so it starts at 1).  Every
+  # column must have that axis, and the same length along it: a column
+  # without it has no layer to give each frame.  Each frame's columns are
+  # views of this frame's, and each has this frame's index.
+  #
+  #   s.unstack(axis: 1)    # => [frame of layer 0, frame of layer 1, ...]
+  def unstack(axis:)
+    self.class.send(:check_layer_axis, axis, "unstack")
+    if @columns.empty?
+      raise ArgumentError, "unstack: the frame has no columns to unstack"
+    end
+    length = nil
+    @columns.each do |name, col|
+      unless axis < col.ndim
+        raise ArgumentError,
+              "unstack: column #{name.inspect} is #{col.ndim}-D and has no axis #{axis}"
+      end
+      length ||= col.shape[axis]
+      unless col.shape[axis] == length
+        raise ArgumentError,
+              "unstack: column #{name.inspect} has #{col.shape[axis]} along axis #{axis}, " \
+              "the others #{length}"
+      end
+    end
+    (0...length).map do |k|
+      cols = @columns.to_h do |name, col|
+        idx = [nil] * col.ndim
+        idx[axis] = k
+        [name, col[*idx]]
+      end
+      CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    end
+  end
+
+  def self.check_layer_axis(axis, verb)
+    unless axis.is_a?(Integer)
+      raise TypeError, "#{verb}: axis must be an Integer (got #{axis.inspect})"
+    end
+    if axis == 0
+      raise ArgumentError,
+            "#{verb}: axis 0 is the row axis; rows are joined by meld or concatenate"
+    end
+    if axis < 0
+      raise ArgumentError,
+            "#{verb}: axis counts a column's axes from 1 (got #{axis}); " \
+            "a negative axis would mean a different axis in columns of different ndim"
+    end
+  end
+  private_class_method :check_layer_axis
 
   # ---- shared validators -------------------------------------------------
 
@@ -86,14 +205,46 @@ class CAFrame
     expected = names.sort
     frames.each_with_index do |f, i|
       next if i.zero?
-      if f.variable_names.sort != expected
+      if f.column_names.sort != expected
         raise ArgumentError,
-              "#{verb}: frame #{i} has columns #{f.variable_names.inspect}, " \
+              "#{verb}: frame #{i} has columns #{f.column_names.inspect}, " \
               "expected the same set as #{names.inspect}"
       end
     end
   end
   private_class_method :check_column_sets
+
+  # A column's trailing dimensions are its shape, not a type the other
+  # frames can settle, so a frame with no rows has to agree on them too.
+  def self.check_trailing_shapes(frames, names, verb:)
+    names.each do |name|
+      trailing = frames.first[name].shape[1..]
+      frames.each_with_index do |f, i|
+        next if i.zero? || f[name].shape[1..] == trailing
+        raise ArgumentError,
+              "#{verb}: column #{name.inspect} has trailing dimensions " \
+              "#{f[name].shape[1..].inspect} in frame #{i}, #{trailing.inspect} in frame 0"
+      end
+    end
+  end
+  private_class_method :check_trailing_shapes
+
+  # Two indexes hold the same rows when their values agree cell by cell; a
+  # NaN label matches a NaN label, and a masked cell a masked cell.
+  def self.same_index_values?(a, b)
+    return false unless a.shape == b.shape
+    a.to_a.zip(b.to_a).all? do |x, y|
+      x.equal?(y) || x == y || (x.is_a?(Float) && y.is_a?(Float) && x.nan? && y.nan?)
+    end
+  end
+  private_class_method :same_index_values?
+
+  # The frames that add rows, or the first frame when none does.
+  def self.frames_with_rows(frames)
+    with_rows = frames.reject { |f| f.nrow.zero? }
+    with_rows.empty? ? [frames.first] : with_rows
+  end
+  private_class_method :frames_with_rows
 
   # ---- index helpers -----------------------------------------------------
 

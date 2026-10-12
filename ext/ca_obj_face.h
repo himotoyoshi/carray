@@ -4,16 +4,12 @@
 
   Face mechanism — shared op helper signatures + lift/strip entry points.
 
-  Phase 1 (= PROPOSAL_CAFACE_PHASE_1.md): skeleton.
-  Phase 2 (= PROPOSAL_CAFACE_PHASE_2.md F.2.1): replace shared op helpers
-  with thin-forward to parent.
-
   This header provides signatures for (1) shared op helpers (= thin-forward
   for storage ops, alias-based since Face is data-layout identical to
   parent), (2) `rb_ca_face_template` (struct duplicate + parent swap),
   (3) `ca_face_lift` (= wrap hook at the tail of user-facing access
-  methods), (4) `ca_strip_face` (= Face-stripping helper at kernel_iterator
-  entry).
+  methods), (4) `ca_strip_face` (= Face-stripping helper for code that
+  must see the storage).
 
   A Face is a "mask of a semantic type" (= identity layered on a storage
   type such as int64, with no value conversion), sibling to CAFake which
@@ -57,20 +53,27 @@ void ca_face_xfer_all   (void *ap, void *data, int dir);
 
 /* -- lift / strip helpers -- */
 
-/* Struct duplicate + parent + shape swap (= MEMO §4.3; consumed by Face
-   subclass lift / clone / dup machinery in Phase 2). */
+/* Struct duplicate + parent + shape swap.  The primitive under
+   ca_face_lift; also called directly where a result is re-wrapped under
+   a Face without going through a view (partition, generated reduce). */
 VALUE   rb_ca_face_template (VALUE original_face, CArray *new_parent,
                               ca_size_t *new_dim);
 
-/* At the tail of user-facing access methods, `if parent is a Face, wrap
-   the result as a Face`. Deployed in Phase 1 for `ca[...]`
-   (= rb_ca_aref / rb_ca_store); planned for block / refer / reshape /
-   transpose / sort etc. in Phase 2. */
+/* At the tail of view-creating methods, `if the receiver is a Face, wrap
+   the result as a Face`.  Reached through CA_FACE_LIFT_IF_FACE, which
+   each view-creating method deploys at its return path. */
 VALUE   ca_face_lift (VALUE view, VALUE face_parent);
 
-/* Follow the Face flag down to parent, e.g. at kernel_iterator entry.
-   No call sites in Phase 1; wired into SRC_* path init_l2 in Phase 2
-   (F.2.6). */
+/* Lift a fresh array `result` (one a reduction, a scan or a partition built
+   from the Face's storage) into the Face `face`: the same Face class over
+   `result`, carrying the subclass tail, `result`'s mask and the state
+   copy_state carries.  `result` stays reachable through the new Face. */
+VALUE   ca_face_relift_entity (VALUE face, VALUE result);
+
+/* Follow the Face flag down to the first non-Face parent, for code that
+   must talk to the storage (store, mask, MemoryView export).  The kernel
+   iterator strips Faces at entry with its own loop, which also strips
+   lazy markers. */
 CArray *ca_strip_face (CArray *src);
 
 /* VALUE-level counterpart: walks the Face parent ivar chain to the root
@@ -101,15 +104,11 @@ void Init_ca_face (void);
 extern int8_t CA_OBJ_RECORD;
 VALUE   rb_ca_record_get_data_class (CArray *ca);
 
-/* -- Convenience macro for view-creating method deployment (F.2.13) --
+/* -- Convenience macro for view-creating method deployment --
    Insert at the tail of each view-creating Ruby method (= rb_ca_transpose
    / rb_ca_reshape / etc.) just before return. `ca` is self's CArray *,
    `obj` is the view result, `self` is the calling VALUE. Achieves Face
-   transparency in a single C-level line, subclass-agnostic.
-
-   Macroises the pattern hand-written at the tail of `rb_ca_fetch_method`
-   in Phase 1; applied uniformly to view-creating methods from Phase 2
-   F.2.13 onward. */
+   transparency in a single C-level line, subclass-agnostic. */
 #define CA_FACE_LIFT_IF_FACE(obj, self, ca) do {                  \
   if ( ca_is_face(ca) && rb_obj_is_kind_of((obj), rb_cCArray) ) { \
     (obj) = ca_face_lift((obj), (self));                          \
@@ -127,14 +126,13 @@ VALUE   rb_ca_record_get_data_class (CArray *ca);
 
    The flag test comes first and covers both bits in one mask, so an
    ordinary array leaves through a single AND.  That matters: `[]` is the
-   hottest method this is deployed on (see devel/bench_index_percall.rb).
+   hottest method this is deployed on.
 
    NOT interchangeable with CA_FACE_LIFT_IF_FACE.  Face is lifted at ~24
    sites, including ones a marker must not follow it through -- `copy` owns
    its data, `sort` reorders values, `value` and `strip_mask` change what
    the mask means.  Deploy this only where the result is a view whose shape
-   was fixed at construction and which only moves positions
-   (PROPOSAL_LAZY_MARKER_LIFT section 4). */
+   was fixed at construction and which only moves positions. */
 #define CA_WRAPPER_LIFT(obj, self, ca) do {                          \
   if ( ca_test_flag((ca), CA_FLAG_IS_FACE | CA_FLAG_IS_LAZY_MARKER)  \
        && rb_obj_is_kind_of((obj), rb_cCArray) ) {                   \
@@ -147,10 +145,10 @@ VALUE ca_wrapper_lift (VALUE view, VALUE wrapper, void *wrapper_ca);
 /* -- Scalar fetch decode hook (storage -> surface) --
    On the scalar-return path (= tail of rb_ca_fetch_index /
    rb_ca_fetch_addr), if a Face-derived subclass defines a
-   `storage_to_scalar(raw_value)` Ruby callback, invoke it.  This is a
+   `storage_to_element(raw_value)` Ruby callback, invoke it.  This is a
    decode (copy the storage value out and construct a new value object),
    not a wrap (a zero-copy lens over live memory).  Its write-direction
-   counterpart is `scalar_to_storage` (below).
+   counterpart is `element_to_storage` (below).
 
    Use cases:
      - `dt[i]` for CATime / CATimedelta → Scalar decode
@@ -163,39 +161,39 @@ VALUE ca_wrapper_lift (VALUE view, VALUE wrapper, void *wrapper_ca);
      - !is_a?(CArray): CArray results go through the lift path
        (= CA_FACE_LIFT_IF_FACE)
      - !UNDEF: don't decode the masked-element sentinel
-     - respond_to?(:storage_to_scalar): activates once the subclass adopts
+     - respond_to?(:storage_to_element): activates once the subclass adopts
        the convention */
-/* Face-local C-level dispatch table for storage_to_scalar, separate
+/* Face-local C-level dispatch table for storage_to_element, separate
    from the global ca_operation_function_t (no API change to existing
    subsystems). A Face subclass that wants the per-cell scalar fetch hot
    path to skip rb_funcall registers its C function via
-   ca_face_register_storage_to_scalar(obj_type, fn) at Init time.
+   ca_face_register_storage_to_element(obj_type, fn) at Init time.
    Unregistered obj_types (= external gem Faces that only define the Ruby
    method) fall through to the rb_funcall branch.  The Ruby
-   `storage_to_scalar` method is still defined as a regular method so
+   `storage_to_element` method is still defined as a regular method so
    user-facing Ruby code may call it directly. */
-typedef VALUE (*ca_face_storage_to_scalar_fn)(VALUE self, VALUE raw);
+typedef VALUE (*ca_face_storage_to_element_fn)(VALUE self, VALUE raw);
 
-extern ca_face_storage_to_scalar_fn ca_face_storage_to_scalar_table[];
+extern ca_face_storage_to_element_fn ca_face_storage_to_element_table[];
 
-void ca_face_register_storage_to_scalar (int obj_type,
-                                         ca_face_storage_to_scalar_fn fn);
+void ca_face_register_storage_to_element (int obj_type,
+                                         ca_face_storage_to_element_fn fn);
 
 /* -- Scalar store encode hook (surface -> storage), mirror of the decode --
-   The write-direction counterpart of storage_to_scalar.  Given a surface
+   The write-direction counterpart of storage_to_element.  Given a surface
    value object (a Scalar / Time / DateTime), a Face-owned function returns
    a storage-domain value (for datetime/timedelta: an Integer in self's
    unit) that the storage cast in rb_ca_obj2ptr can consume directly.  A
    Face that needs no conversion (surface == storage) simply does not
    register.  Faces may either register a C fast-path function here or
-   define the Ruby method `scalar_to_storage`; the C table is consulted
+   define the Ruby method `element_to_storage`; the C table is consulted
    first, then the Ruby fallback. */
-typedef VALUE (*ca_face_scalar_to_storage_fn)(VALUE self, VALUE surface);
+typedef VALUE (*ca_face_element_to_storage_fn)(VALUE self, VALUE surface);
 
-extern ca_face_scalar_to_storage_fn ca_face_scalar_to_storage_table[];
+extern ca_face_element_to_storage_fn ca_face_element_to_storage_table[];
 
-void ca_face_register_scalar_to_storage (int obj_type,
-                                         ca_face_scalar_to_storage_fn fn);
+void ca_face_register_element_to_storage (int obj_type,
+                                         ca_face_element_to_storage_fn fn);
 
 /* Single source of truth for the surface -> storage-domain conversion.
    Returns `obj` unchanged when `ca` is not a Face or when no hook is
@@ -203,7 +201,7 @@ void ca_face_register_scalar_to_storage (int obj_type,
    existing storage cast).  Otherwise returns the storage-domain value the
    Face produced.  Called from rb_ca_obj2ptr (single-cell / fill / masked /
    range stores) and from the Array-of-scalars bulk store branch. */
-VALUE ca_face_scalar_to_storage (VALUE self, CArray *ca, VALUE obj);
+VALUE ca_face_element_to_storage (VALUE self, CArray *ca, VALUE obj);
 
 /* -- F.S0: Face state homogeneity check (= prerequisite for multi-Face APIs
    such as CAStack lift) --
@@ -259,6 +257,19 @@ void ca_face_register_state_portable (int obj_type, int portable);
    (= falls through to default). */
 int ca_face_state_portable (int obj_type, VALUE klass);
 
+/* Check a list of arrays about to be combined into one (CAStack, CAMeld,
+   promote_list).  Returns the Face class every element shares, or Qnil
+   when none of them is a Face; the combined array is then lifted into
+   that class.  Raises ArgumentError for a mix of Face and non-Face arrays
+   or of two Face classes, for two or more of a Face whose state is not
+   portable, and for elements whose state differs from the first one's.
+   `who` names the caller at the head of the message. */
+VALUE ca_face_list_class (VALUE list, const char *who);
+
+/* A Face array's storage-side parent, one level down; any other array
+   as it is. */
+VALUE ca_face_strip_one (VALUE v);
+
 /* Bring a Face *operand* into the reference's storage space, or refuse.
 
    The gate asks `fz_face_descend`'s question -- "is your storage your
@@ -272,20 +283,54 @@ int ca_face_state_portable (int obj_type, VALUE klass);
    cells *are* the values it shows.  Anything else -- a byte range, a code, a
    tick -- is refused rather than compared as bytes.  Non-Face operands are
    returned untouched.  `name` opens the message. */
+/* Refuse to order (verb "order") or count by value (verb "count") a Face
+   whose storage does not hold its values in order, naming the conversion. */
+NORETURN(void ca_face_refuse_order (const char *name, VALUE face,
+                                    const char *verb));
+
+/* The conversion a refusal of a Face whose cells encode its values points
+   at (#to_string for a string Face, to_type(:object) for any other). */
+const char *ca_face_conversion_hint (VALUE face);
+
+/* Raise eclass naming a Face that does not define the numeric operation
+   `name`; returns when self is not a Face.  See ca_obj_face.c. */
+void ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass);
+
 VALUE ca_face_operand_descend (VALUE operand, const char *name);
 
-#define CA_FACE_STORAGE_TO_SCALAR_IF_FACE(obj, self, ca) do {                \
+/* Bring an operand into the storage space of a Face reference (a record's
+   own data_class, a COMPARABLE Face's plain values, or the reference's
+   to_comparable), refusing what the reference cannot read.  See
+   ca_obj_face.c. */
+VALUE ca_face_reconcile_operand (VALUE reference, VALUE operand,
+                                 const char *name);
+
+/* `==` (strict = 0) / `eql?` (strict = 1) when an operand is a Face other
+   than a record array.  See ca_obj_face.c. */
+int ca_face_equal (VALUE va, VALUE vb, int strict);
+
+/* The storage value of a cell read through a Face.  A gated (CA_FIXLEN)
+   surface over a numeric storage delivers the cell as its bytes; they are
+   read back as the storage data_type (a boolean as true / false).  A
+   fixlen or object storage, and anything not a String, comes back as it
+   came.  This is what a Ruby storage_to_element receives, and the element
+   of a Face that defines none.  A C function registered for the obj_type
+   receives the cell as it was read, the bytes under a gated surface. */
+VALUE ca_face_storage_value (CArray *ca, VALUE raw);
+
+#define CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca) do {                \
   if ( ca_is_face(ca) && (obj) != CA_UNDEF && (obj) != Qnil                  \
        && ! rb_obj_is_kind_of((obj), rb_cCArray) ) {                         \
-    ca_face_storage_to_scalar_fn _decode_fn = ca_face_storage_to_scalar_table[(ca)->obj_type]; \
+    ca_face_storage_to_element_fn _decode_fn = ca_face_storage_to_element_table[(ca)->obj_type]; \
     if ( _decode_fn != NULL ) {                                              \
       (obj) = _decode_fn((self), (obj));                                     \
     }                                                                        \
     else {                                                                   \
-      static ID _id_storage_to_scalar = 0;                                   \
-      if ( _id_storage_to_scalar == 0 ) _id_storage_to_scalar = rb_intern("storage_to_scalar"); \
-      if ( rb_respond_to((self), _id_storage_to_scalar) ) {                  \
-        (obj) = rb_funcall((self), _id_storage_to_scalar, 1, (obj));         \
+      static ID _id_storage_to_element = 0;                                   \
+      (obj) = ca_face_storage_value((ca), (obj));                            \
+      if ( _id_storage_to_element == 0 ) _id_storage_to_element = rb_intern("storage_to_element"); \
+      if ( rb_respond_to((self), _id_storage_to_element) ) {                  \
+        (obj) = rb_funcall((self), _id_storage_to_element, 1, (obj));         \
       }                                                                      \
     }                                                                        \
   }                                                                          \

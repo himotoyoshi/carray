@@ -30,6 +30,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "ca_obj_face.h"  /* CA_WRAPPER_LIFT */
 
 NORETURN(static void ca_broadcast_refuse_write (VALUE dst, VALUE src));
 
@@ -39,7 +40,7 @@ ca_broadcast_refuse_write (VALUE dst, VALUE src)
 {
   volatile VALUE dst_s = rb_inspect(rb_funcall(dst, rb_intern("shape"), 0));
   volatile VALUE src_s = rb_inspect(rb_funcall(src, rb_intern("shape"), 0));
-  rb_raise(rb_eRuntimeError,
+  rb_raise(rb_eArgError,
            "shape mismatch writing to carray (%s <- %s); shapes must agree "
            "once size-1 axes are dropped, or one side must be 1-D, or the "
            "source must be smaller and broadcastable -- use .flatten to "
@@ -119,7 +120,7 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
   TypedData_Get_Struct(src, CArray, &carray_data_type, cs);
 
   if (cs->ndim != ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast: ndim mismatch (%d vs %d)",
              (int) cs->ndim, (int) ndim);
   }
@@ -143,7 +144,7 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
       needs_broadcast = 1;
     }
     else {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "broadcast: cannot broadcast axis %d (%lld vs %lld)",
                i, (long long) cs->dim[i], (long long) target_dim[i]);
     }
@@ -172,20 +173,48 @@ ca_broadcast_view (VALUE src, int8_t ndim, ca_size_t *target_dim)
    raises). */
 NORETURN(static void ca_broadcast_refuse (VALUE self, VALUE other));
 
-/* Report a pair that cannot be brought to a common shape.  Naming both
-   shapes is the point of the message: the caller wrote two arrays that
-   cannot be combined, and the only remedy is to say which two. */
+/* Report a pair that cannot be brought to a common shape.  The message
+   names both shapes and points to the remedy that fits the pair: when
+   the ndim differs, the missing axes are added with :_; when the
+   element counts are equal, .flatten pairs the values in the order
+   they lie. */
 static void
 ca_broadcast_refuse (VALUE self, VALUE other)
 {
+  CArray *ca, *cb;
   volatile VALUE self_s  = rb_inspect(rb_funcall(self,  rb_intern("shape"), 0));
   volatile VALUE other_s = rb_inspect(rb_funcall(other, rb_intern("shape"), 0));
+  const char *flatten_hint;
+  int i;
+
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+
+  flatten_hint = (ca->elements == cb->elements)
+    ? "; to pair the values in the order they lie, use .flatten on both sides"
+    : "";
+
+  if (ca->ndim != cb->ndim) {
+    rb_raise(rb_eArgError,
+             "shape mismatch between operands (%s and %s): the operands "
+             "have different numbers of axes, and axes are not added "
+             "implicitly -- add size-1 axes with :_ so both have the same "
+             "number (x[:_, nil] makes a 1-D x a row, x[nil, :_] a column)%s",
+             StringValueCStr(self_s), StringValueCStr(other_s),
+             flatten_hint);
+  }
+
+  for (i = 0; i < ca->ndim; i++) {
+    if (ca->dim[i] != cb->dim[i] && ca->dim[i] != 1 && cb->dim[i] != 1) {
+      break;
+    }
+  }
   rb_raise(rb_eArgError,
-           "shape mismatch between operands (%s and %s); shapes must "
-           "agree, or differ only in size-1 axes with equal ndim -- use "
-           ".flatten on both sides to operate on the values in the order "
-           "they lie",
-           StringValueCStr(self_s), StringValueCStr(other_s));
+           "shape mismatch between operands (%s and %s): axis %d has "
+           "sizes %lld and %lld; each axis must have the same size, or "
+           "size 1 on one side%s",
+           StringValueCStr(self_s), StringValueCStr(other_s), i,
+           (long long) ca->dim[i], (long long) cb->dim[i], flatten_hint);
 }
 
 void
@@ -272,7 +301,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   target_ndim = (int8_t) argc;
 
   if (target_ndim < cs->ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast_to: target ndim %d smaller than source ndim %d",
              (int) target_ndim, (int) cs->ndim);
   }
@@ -303,6 +332,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
     }
     obj = ca_wrap_struct(view);
     rb_ca_set_parent(obj, self);
+    CA_WRAPPER_LIFT(obj, self, cs);
     return obj;
   }
 
@@ -340,7 +370,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
     else {
       /* sd == -1 (source exhausted) with dd > 1, or sd > 1 with
          dd > 1 and not equal: cannot broadcast. */
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "broadcast_to: cannot broadcast axis %d "
                "(source %s, target %lld)",
                t_idx,
@@ -351,7 +381,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
 
   if (s_idx >= 0) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "broadcast_to: %d source axes left unmatched", s_idx + 1);
   }
 
@@ -366,6 +396,8 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
   obj = ca_wrap_struct(view);
   rb_ca_set_parent(obj, self);
+  /* The Face stays on top, as for every view. */
+  CA_WRAPPER_LIFT(obj, self, cs);
   return obj;
 }
 

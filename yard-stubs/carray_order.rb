@@ -30,12 +30,15 @@ class CArray
   # sort / sort_copy stubs live in yard-stubs/carray_sort.rb (same
   # file split as ext/carray_sort.c <-> ext/carray_order.c).
 
-  # @overload partition(kth, axis: 0, masked_position: :last)
+  # @overload partition(kth, axis: nil, masked_position: :last)
   #   Returns a `CARemap` view of `self` permuted along `axis` so that
   #   the element at fiber-local position `kth` is in its final sorted
   #   place, every element before it is `<=` it, and every element
   #   after it is `>=` it. Order within the two regions is unspecified.
   #   Average `O(n)` per fiber via quickselect.
+  #
+  #   Without `axis:` (or with `axis: nil`) `self` is flattened and
+  #   treated as one fiber, as {#sort} does; the result is 1-D.
   #
   #   Negative `kth` counts from the end of the fiber
   #   (`-self.shape[axis] <= kth < self.shape[axis]`).
@@ -52,32 +55,39 @@ class CArray
   #   among unmasked values.
   #
   #   @param kth [Integer] target fiber-local position along `axis`.
-  #   @param axis [Integer]
+  #   @param axis [Integer, nil] `nil` partitions the whole array.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] `CARemap` view of `self`.
   #   @raise [ArgumentError] when `kth` is out of range.
-  def partition(kth, axis: 0, masked_position: :last); end
+  def partition(kth, axis: nil, masked_position: :last); end
 
-  # @overload partition_copy(kth, axis: 0, masked_position: :last)
-  #   Returns a fresh entity `CArray` with the same shape as `self`,
-  #   partitioned along `axis` by the same rule as {#partition}.
+  # @overload partition_copy(kth, axis: nil, masked_position: :last)
+  #   Returns a fresh entity `CArray` partitioned along `axis` by the
+  #   same rule as {#partition}: the shape of `self`, or 1-D when `axis`
+  #   is omitted.
   #   Bypasses the `CARemap` scatter layer for cases where an entity
   #   is wanted directly. Same dispatch (numeric / boolean / `CA_FIXLEN` /
   #   `CA_OBJECT`), same `kth` and `masked_position:` semantics.
   #   Masked input delegates to {#partition} + copy.
+  #
+  #   A Face partitions in its surface order and comes back as the same
+  #   Face: one whose storage order is its surface order is selected on its
+  #   storage, a fixlen storage by byte order. A Face whose storage order is
+  #   not its surface order (e.g. {CACategorical}) raises.
   #
   #   Float NaN policy: NaN cells are pre-partitioned to the tail. If
   #   `kth` falls within the finite slice, quickselect runs over the
   #   finite cells; otherwise the kth cell is already NaN.
   #
   #   @param kth [Integer]
-  #   @param axis [Integer]
+  #   @param axis [Integer, nil] `nil` partitions the whole array.
   #   @param masked_position [Symbol] `:last` (default) or `:first`.
   #   @return [CArray] fresh entity.
-  #   @raise [ArgumentError] same conditions as {#partition}.
-  def partition_copy(kth, axis: 0, masked_position: :last); end
+  #   @raise [ArgumentError] same conditions as {#partition}, or a Face that
+  #     is not orderable by its storage.
+  def partition_copy(kth, axis: nil, masked_position: :last); end
 
-  # @overload order(axis: nil, descending: false, method: :ordinal)
+  # @overload order(axis: nil, descending: false, method: :ordinal, kind: :quick)
   #   Returns each cell's rank among the other cells along `axis`
   #   (`0` = smallest). When `axis` is omitted, `self` is flattened
   #   first (global rank). Sugar over `rank_index` (built on the
@@ -105,9 +115,11 @@ class CArray
   #   @param axis [Integer, nil]
   #   @param descending [Boolean]
   #   @param method [Symbol] `:ordinal` (default) or `:dense`.
+  #   @param kind [Symbol] `:quick` (default) or `:stable`, as for
+  #     {#sort_index}; a performance choice only.
   #   @return [CArray] `:int64` ranks, shape == `self.shape`.
   #   @raise [ArgumentError] when `method:` is neither `:ordinal` nor `:dense`.
-  def order(axis: nil, descending: false, method: :ordinal); end
+  def order(axis: nil, descending: false, method: :ordinal, kind: :quick); end
 
   # @!endgroup
 
@@ -121,7 +133,7 @@ class CArray
   #   with `UNDEF` at positions where the value is not present.
   #   @param val [Numeric, CArray]
   #   @return [Integer, CArray, nil]
-  #   @raise [RuntimeError] if `self` has any masked element.
+  #   @raise [ArgumentError] if `self` has any masked element.
   # @overload bsearch(val, axis:)
   #   Per-fiber binary search along `axis`. Returns a CArray of
   #   axis-local positions, one per fiber.
@@ -147,6 +159,14 @@ class CArray
   #   Returns the flat address of the first element of `self` equal
   #   to `val`. For float types, `eps` (default machine epsilon)
   #   sets the tolerance. Returns `nil` if no match.
+  #
+  #   `val` is compared in the type both share, as `self.eq(val)`
+  #   compares: an integer array searched with a Float is compared in
+  #   float64 (so `3.9` does not match `3`, and `eps` applies), and an
+  #   Integer that does not fit an integer array raises `RangeError`.
+  #   The same holds for {#bsearch} and {#search_nearest}. On an
+  #   `:object` array a cell matches when it is `==` to `val`, as {#eq}
+  #   compares (so `1` matches `1.0`, which {#is_in} does not).
   #
   #   `self` need not be sorted; this is a linear scan. For sorted
   #   data prefer {#bsearch}.
@@ -206,7 +226,8 @@ class CArray
   #   bracketing samples. The integer part of the returned address is
   #   the index of the lower bracket, the fractional part is the
   #   interpolation weight toward the next sample. Out-of-range `val`
-  #   returns NaN.
+  #   returns NaN. A one-point axis has no segment: `val` equal to the
+  #   point is at 0, any other value is out of range.
   #
   #   `self` is coerced to `:float64` if it is not already. When
   #   `axis: nil`, `self` is flattened to 1-D first.

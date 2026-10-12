@@ -93,6 +93,19 @@ module CATimeUnitAlgebra
 
   module_function
 
+  # An operand of a time or duration operator, taken through its to_ca when
+  # it exports MemoryView and defines one (an Apache Arrow duration array, given
+  # a bridge that adds to_ca), as the core binary operators take it; other
+  # objects are returned as they are, for the operator to accept or refuse.
+  def operand(other)
+    if !other.is_a?(CArray) && other.respond_to?(:to_ca) &&
+       CArray.memory_view_available?(other)
+      other.to_ca
+    else
+      other
+    end
+  end
+
   # seconds- (fixed) or months- (calendar) per base tick.
   def base_ratio(base)
     FIXED[base] || CALENDAR[base]
@@ -208,7 +221,7 @@ module CATimeUnitAlgebra
   # fine->coarse divides only when every value is exact; cross-group ALWAYS
   # raises -- a :M / :Y duration has no fixed ratio to days (a month is
   # calendar-variable), so it genuinely cannot scale to seconds.
-  def convert_scale!(storage, from, to)
+  def convert_scale!(storage, from, to, instant: false)
     a = res(from); b = res(to)
     return storage if a == b
     r = ratio(a, b)
@@ -221,6 +234,11 @@ module CATimeUnitAlgebra
     scaled = widen(storage, r.numerator)    # coarse -> fine: lossless multiply
     return scaled if r.denominator == 1
     unless (scaled % r.denominator).eq(0).all
+      if instant
+        raise ArgumentError,
+              "cannot convert times in #{a} to #{b} without loss: " \
+              "some are not on the #{b} grid (they would be moved to it)"
+      end
       raise ArgumentError,
             "cannot scale duration #{a} to #{b} without loss: " \
             "some values are not a whole multiple of #{b} " \
@@ -271,7 +289,7 @@ module CATimeUnitAlgebra
   def convert_instant!(storage, from, to)
     a = res(from); b = res(to)
     return storage if a == b
-    return convert_scale!(storage, a, b) if ratio(a, b)   # same group
+    return convert_scale!(storage, a, b, instant: true) if ratio(a, b)   # same group
     if CALENDAR.key?(a.base)
       convert_instant_calendar_to_fixed(storage, a, b)   # widen
     else
@@ -385,7 +403,48 @@ module CATimeUnitAlgebra
   end
 end
 
+# A reduction of a time Face takes `fill_value:` as a value of the Face (an
+# Element, or what an assignment to the Face accepts), the same as
+# `strip_mask` and `[]=` read it.  The reduction runs on the storage, so the
+# fill goes in after the result is a Face again: a whole reduction keeps its
+# axes for that, so the fill lands in a typed cell, and is then taken out.
+module CATimeSurfaceFill
+
+  private
+
+  def with_surface_fill (opts)
+    fill = opts[:fill_value]
+    return yield(opts) if fill.nil? || fill.equal?(UNDEF)
+    o = opts.reject { |k, _| k == :fill_value }
+    o[:keep_axis] = true
+    r = yield(o)
+    kept = nil
+    unless opts[:keep_axis]
+      axes = opts[:axis].nil? ? (0...ndim).to_a :
+               Array(opts[:axis]).map { |a| a < 0 ? a + ndim : a }
+      kept = shape.each_with_index.reject { |_, i| axes.include?(i) }.map(&:first)
+    end
+    surface_fill(r, fill, kept)
+  end
+
+  # `kept` is the shape to return to, or nil to keep the reduced axes.
+  def surface_fill (r, fill, kept)
+    case r
+    when Array then r.map { |x| surface_fill(x, fill, kept) }
+    when CArray
+      r = r.strip_mask(fill) if r.has_mask?
+      if kept.nil?      then r
+      elsif kept.empty? then r[*Array.new(r.ndim, 0)]
+      else                   r.reshape(*kept)
+      end
+    else r
+    end
+  end
+
+end
+
 class CATime
+  include CATimeSurfaceFill
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATime Face with the given `unit`. The
@@ -472,7 +531,7 @@ class CATime
     # @return [String]
     def to_s
       case unit.base
-      when :Y      then format("%04d", to_date.year)
+      when :Y      then to_date.strftime("%Y")
       when :M      then to_date.strftime("%Y-%m")
       when :W, :D  then to_date.strftime("%Y-%m-%d")
       else              to_time.iso8601(fractional_second_digits)  # :h .. :as (time shown)
@@ -602,6 +661,7 @@ class CATime
 end
 
 class CATimedelta
+  include CATimeSurfaceFill
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATimedelta Face with the given `unit`.
@@ -816,16 +876,19 @@ class CATime
   #   cross-group calendar duration raises).  Adding two datetimes is
   #   ill-defined.
   #   @param other [CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATime]
   #   @raise [TypeError] on a non-timedelta operand.
   def +(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       (parent + CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
-      raise TypeError, "CATime + #{other.class} is not allowed (use CATimedelta)"
+      raise TypeError, "CATime + #{given.class} is not allowed (use CATimedelta)"
     end
   end
 
@@ -835,9 +898,12 @@ class CATime
   #   another {CATime} yields a {CATimedelta} at the finer of the two
   #   units (cross-group falls to the fixed unit).
   #   @param other [CATimedelta, CATime]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration or timestamp array)
   #   @return [CATime, CATimedelta]
   #   @raise [TypeError] on an unsupported operand.
   def -(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       (parent - CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
@@ -847,7 +913,7 @@ class CATime
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
       (a - b).timedelta(unit: u)
     else
-      raise TypeError, "CATime - #{other.class} is not allowed"
+      raise TypeError, "CATime - #{given.class} is not allowed"
     end
   end
 
@@ -858,38 +924,19 @@ class CATime
   # base CArray#<=> composed from the (gated) > and <.
 
   # Element decode convention via the C-layer macro
-  # `CA_FACE_STORAGE_TO_SCALAR_IF_FACE`: no Ruby `[]` override is needed, a
+  # `CA_FACE_STORAGE_TO_ELEMENT_IF_FACE`: no Ruby `[]` override is needed, a
   # scalar auto-decodes on all scalar-return paths such as `ca[i,j,k]` /
-  # `ca[k]`.  storage_to_scalar itself lives in C (ext/ca_obj_datetime.c)
+  # `ca[k]`.  storage_to_element itself lives in C (ext/ca_obj_datetime.c)
   # so the hot path stays off Ruby method dispatch.  Its write counterpart
-  # is scalar_to_storage (below, surface -> storage on store).
+  # is element_to_storage (below, surface -> storage on store).
 
   # @!group Reductions
 
-  # min / max are order-structure reductions: they ride the core reduce
-  # Face gate (ORDERABLE storage descent + output re-lift, see
-  # ext/mkkernel.rb face_gate: :relift), so no Ruby override is needed --
-  # the inherited CArray#min / #max handle the Element / CATime return
-  # shapes directly.  minmax is the paired form; it has no core gate, so
-  # re-lift both extremes here.  They are actual elements, so they keep the
-  # storage unit (no rounding, unlike mean).
-
-  # @overload minmax(*axes, **opts)
-  #   Returns the earliest and latest time as a `[min, max]` pair (§8).
-  #   @return [Array(Element, Element), Array(CATime, CATime)]
-  def minmax(*args, **opts)
-    lo, hi = parent.minmax(*args, **opts)
-    [relift_extremum(lo), relift_extremum(hi)]
-  end
-
-  def relift_extremum(r)
-    case r
-    when Integer then Element.new(r, unit)
-    when CArray  then r.time(unit: unit)
-    else r
-    end
-  end
-  private :relift_extremum
+  # min / max / minmax are order-structure reductions: they ride the core
+  # reduce Face gate (ORDERABLE storage descent + output re-lift, see
+  # ext/mkkernel.rb face_gate: :relift), so the inherited methods return the
+  # Element / CATime shapes directly.  The extremes are actual elements, so
+  # they keep the storage unit (no rounding, unlike mean).
 
   # The centroid / spread / order reductions report on the array's own grid:
   # they run on the storage ticks and round the result back to the nearest
@@ -953,22 +1000,43 @@ class CATime
 
   # @overload sum(*)
   #   Not supported; use {#mean} for a centroid.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def sum(*)
-    raise TypeError, "CATime#sum is ill-defined; use mean for centroid"
+    raise CArray::DataTypeError, "CATime#sum is ill-defined; use mean for centroid"
   end
+
+  # @overload accumulate(*)
+  #   Not supported, for the same reason as {#sum}.
+  #   @raise [CArray::DataTypeError] always.
+  def accumulate(*); raise CArray::DataTypeError, "CATime#accumulate is ill-defined (a sum of instants)"; end
+
+  # @overload cumsum(*)
+  #   Not supported, for the same reason as {#sum}.  The running position
+  #   relative to the first instant is `(t - t[0])` cumulated as durations.
+  #   @raise [CArray::DataTypeError] always.
+  def cumsum(*); raise CArray::DataTypeError, "CATime#cumsum is ill-defined (a sum of instants)"; end
+
+  # @overload prod(*)
+  #   Not supported: a product of instants has no meaning.
+  #   @raise [CArray::DataTypeError] always.
+  def prod(*); raise CArray::DataTypeError, "CATime#prod is ill-defined (a product of instants)"; end
+
+  # @overload cumprod(*)
+  #   Not supported, for the same reason as {#prod}.
+  #   @raise [CArray::DataTypeError] always.
+  def cumprod(*); raise CArray::DataTypeError, "CATime#cumprod is ill-defined (a product of instants)"; end
 
   # @overload variance(*)
   #   Not supported: the variance of instants has squared-time units, which
   #   no type represents (ill-defined, like {#sum}).  Use {#stddev} for the
   #   spread as a duration.
-  #   @raise [TypeError] always.
-  def variance(*); raise TypeError, "CATime#variance is ill-defined (squared-time units); use stddev"; end
+  #   @raise [CArray::DataTypeError] always.
+  def variance(*); raise CArray::DataTypeError, "CATime#variance is ill-defined (squared-time units); use stddev"; end
 
   # @overload variancep(*)
   #   Not supported, for the same reason as {#variance}.  Use {#stddevp}.
-  #   @raise [TypeError] always.
-  def variancep(*); raise TypeError, "CATime#variancep is ill-defined (squared-time units); use stddevp"; end
+  #   @raise [CArray::DataTypeError] always.
+  def variancep(*); raise CArray::DataTypeError, "CATime#variancep is ill-defined (squared-time units); use stddevp"; end
   # @!endgroup
 
   # sort / partition ride the core sort Face gate (ORDERABLE storage
@@ -986,11 +1054,15 @@ class CATime
   #   different unit or shape), so the gate routes the operand through here.
   #
   #   Accepted operands: another {CATime} (unit-rescaled to self),
-  #   a {Element} (lifted to a length-1 CATime), a Ruby `Time`, and a
-  #   Ruby `DateTime` (both absolute instants converted to self's unit,
-  #   Unix epoch, UTC).  A `String` is out of scope (parsing is a separate,
-  #   opposite-direction mechanism).  A bare Integer / other type raises;
-  #   descend to `ca.parent` to compare the hidden storage directly.
+  #   a {Element} (lifted to a length-1 CATime), and an instant written
+  #   outside CArray -- a Ruby `Time`, `Date`, `DateTime`, or a `String` in
+  #   the grammar {CArray.time} reads (UTC unless it carries an offset).
+  #   Those are read at the precision they carry, not at self's unit, and
+  #   then go through the same conversion as a CATime: "2024-01-02 09:00"
+  #   against a day-unit array raises rather than matching 2024-01-02.  A
+  #   bare Integer / other type raises; descend to `ca.parent` to compare
+  #   the hidden storage directly.  An Array of any of these is a 1-D set
+  #   of instants (the value set of {#is_in}).
   #
   #   The rescale is an INSTANT conversion (convert_instant!), lossless: a
   #   coarser->finer unit always converts; a finer->coarser unit converts only
@@ -1000,10 +1072,24 @@ class CATime
   #   :D and finer, and a fixed operand coarsens to :M/:Y only when it sits on
   #   the calendar boundary (:W is the one exception -- month/year starts are
   #   not week-aligned, so :Y/:M <-> :W raises).
-  #   @param operand [CATime, CATime::Element, Time, DateTime]
+  #   @param operand [CATime, CATime::Element, Time, Date, DateTime, String, Array]
   #   @return [CATime] in self's unit.
   #   @raise [TypeError, ArgumentError] on an unreconcilable operand / unit.
+  # Returns `[self, other]` in one unit that holds every value of both
+  # exactly: the finer grid of two same-group units, or the fixed-length one
+  # of a calendar / fixed pair (a month begins on a day).  A lookup between
+  # two arrays of different units (is_in, the set operations, locate_addr and
+  # the joins on them) meets there, so it does not depend on which array is
+  # the receiver.
+  # @api private
+  def in_common_unit_with (other)
+    return [self, other] if other.unit == unit
+    u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
+    [to_unit(u), other.to_unit(u)]
+  end
+
   def to_comparable (operand)
+    require 'date'   # Date is one of the operand kinds below
     case operand
     when CATime
       return operand if operand.unit == unit
@@ -1012,12 +1098,19 @@ class CATime
     when CATime::Element
       lifted = CATime.wrap(CA_INT64([operand.value]), unit: operand.unit)
       to_comparable(lifted)
-    when Time
-      # Reuse the single-literal builder; it yields a length-1 CATime
-      # in the requested (= self's) resolution.
-      CArray.time(operand, unit: unit)
-    when defined?(DateTime) && DateTime
-      to_comparable(operand.to_time.utc)
+    when Time, String, Date
+      to_comparable(CATimeLiteral.exact_instant(operand))
+    when Array
+      # A set of instants written one by one (is_in(["2024-01-02", ...])).
+      CATime.wrap(CA_INT64(operand.map { |v| to_comparable(v).parent[0] }),
+                  unit: unit)
+    when CArray
+      # An array that is not a time array: each value read as an instant (an
+      # object column of Time values, a string column), a masked cell kept
+      # masked.
+      require "carray/methods/is_in"
+      send(:values_in_face, self, operand) ||
+        CArray.int64(*operand.shape).fill(UNDEF).time(unit: unit)
     else
       raise TypeError,
             "CATime cannot reconcile #{operand.class} " \
@@ -1025,23 +1118,22 @@ class CATime
     end
   end
 
-  # @overload scalar_to_storage(surface)
-  #   Write-direction counterpart of storage_to_scalar (the store hook fired
+  # @overload element_to_storage(surface)
+  #   Write-direction counterpart of storage_to_element (the store hook fired
   #   from rb_ca_obj2ptr): brings a surface value object into this Face's
   #   int64 storage (count in self's unit since the Unix epoch) so a scalar
-  #   store round-trips with a fetch.  A {Element} / `Time` / `DateTime` is
-  #   reconciled to self's unit via {#to_comparable} (same lossless
-  #   discipline: a cross-group unit or a non-exact finer->coarser cast
-  #   raises).  A bare Integer (the documented `.parent` raw-storage escape)
-  #   and a String (parsing is a separate, opposite-direction mechanism)
-  #   pass through unchanged to the storage cast.
-  #   @param surface [Element, Time, DateTime, Integer, String]
+  #   store round-trips with a fetch.  A {Element} / `Time` / `Date` /
+  #   `DateTime` / `String` is reconciled to self's unit via {#to_comparable}
+  #   (same lossless discipline: a cross-group unit or a non-exact
+  #   finer->coarser cast raises).  A bare Integer (the documented `.parent`
+  #   raw-storage escape) passes through unchanged to the storage cast.
+  #   @param surface [Element, Time, Date, DateTime, Integer, String]
   #   @return [Integer, Object] the storage-domain value, or `surface`
   #     unchanged for a pass-through type.
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
-  def scalar_to_storage (surface)
+  def element_to_storage (surface)
     case surface
-    when Integer, String
+    when Integer
       surface
     else
       to_comparable(surface).parent[0]
@@ -1248,7 +1340,9 @@ class CATime
   # the centroid of month numbers (a caller wanting the day-space answer
   # writes to_unit(:D) first) -- and the result is rounded back to a tick.
   def reduce_on_own_grid(op, kind, args, opts)
-    round_and_relift(parent.public_send(op, *args, **opts), kind)
+    with_surface_fill(opts) do |o|
+      round_and_relift(parent.public_send(op, *args, **o), kind)
+    end
   end
 
   # Round-to-nearest onto the storage grid, then wear the Face again.  An
@@ -1271,6 +1365,41 @@ class CATime
     else
       r    # UNDEF / nil passthrough (empty or all-masked reduction)
     end
+  end
+
+  # inspect's name for the array: the class and the tick, which the storage
+  # type name (fixlen[8]) does not tell.
+  private def inspect_label
+    "#{self.class}[#{unit}]"
+  end
+
+  # inspect's cell: the instant as Element#to_s writes it, but with the
+  # digits of a second that some cell of the array needs, the same in every
+  # cell so that the cells line up; the unit is in the label.
+  private def inspect_cell_formatter
+    digits = inspect_second_digits
+    lambda do |e|
+      case e.unit.base
+      when :Y, :M, :W, :D then e.to_s
+      else                     e.to_time.iso8601(digits)
+      end
+    end
+  end
+
+  # The digits of a second inspect writes: 0, 3, 6 or 9, the fewest that
+  # show every present cell exactly (9 at most, as Time holds).
+  private def inspect_second_digits
+    base_digits = { ms: 3, us: 6, ns: 9, ps: 12, fs: 15, as: 18 }[unit.base]
+    return 0 unless base_digits
+    count = unit.count
+    [0, 3, 6, 9].each do |d|
+      break if d >= base_digits
+      m = 10**(base_digits - d)
+      # ticks * count is a multiple of m when ticks is one of m / gcd(m, count),
+      # which does not multiply out of int64.
+      return d if (ticks % (m / m.gcd(count))).eq(0).all
+    end
+    [base_digits, 9].min
   end
 
 end
@@ -1319,9 +1448,12 @@ class CATimedelta
   #   {CATimedelta}; a {CATime} operand delegates to
   #   {CATime#+} (commutative).
   #   @param other [CATimedelta, CATime]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration or timestamp array)
   #   @return [CATimedelta, CATime]
   #   @raise [TypeError] on incompatible operands.
   def +(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
@@ -1331,7 +1463,7 @@ class CATimedelta
     when CATime
       other + self  # commutative -> time's unit
     else
-      raise TypeError, "CATimedelta + #{other.class} is not allowed"
+      raise TypeError, "CATimedelta + #{given.class} is not allowed"
     end
   end
 
@@ -1339,9 +1471,12 @@ class CATimedelta
   #   Returns the difference of two {CATimedelta} at the finer of the two
   #   units (a cross-group pair raises).
   #   @param other [CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATimedelta]
   #   @raise [TypeError] on a non-timedelta operand.
   def -(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
@@ -1349,7 +1484,7 @@ class CATimedelta
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       (a - b).timedelta(unit: u)
     else
-      raise TypeError, "CATimedelta - #{other.class} is not allowed"
+      raise TypeError, "CATimedelta - #{given.class} is not allowed"
     end
   end
 
@@ -1385,9 +1520,12 @@ class CATimedelta
   #   {CATimedelta}, by another {CATimedelta} with matching `unit`
   #   yields a dimensionless CArray.
   #   @param other [Integer, CATimedelta]
+  #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
+  #     duration array)
   #   @return [CATimedelta, CArray]
   #   @raise [TypeError] on incompatible operands.
   def /(other)
+    given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when Integer
       CATimeUnitAlgebra.trunc_divide(parent, other).timedelta(unit: unit)
@@ -1396,7 +1534,7 @@ class CATimedelta
       CATimeUnitAlgebra.trunc_divide(
         CATimeUnitAlgebra.convert_scale!(parent, unit, u),
         CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u))
-    else raise TypeError, "CATimedelta / #{other.class} is not allowed"
+    else raise TypeError, "CATimedelta / #{given.class} is not allowed"
     end
   end
 
@@ -1412,14 +1550,41 @@ class CATimedelta
   #   or as a {CATimedelta} view for per-axis reduction.
   #   @return [Element, CATimedelta]
   def sum(*args, **opts)
-    round_and_relift(parent.sum(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.sum(*args, **o)) }
   end
+
+  # @overload accumulate(*args, **opts)
+  #   Returns the sum of durations in the storage's own integer type, as
+  #   {#sum} does in float64.
+  #   @return [Element, CATimedelta]
+  def accumulate(*args, **opts)
+    with_surface_fill(opts) { |o| round_and_relift(parent.accumulate(*args, **o)) }
+  end
+
+  # @overload cumsum(axis: nil)
+  #   Returns the running sum of durations as a {CATimedelta} on `self`'s
+  #   unit.  A masked cell holds the running sum, as {CArray#cumsum} does.
+  #   @return [CATimedelta]
+  def cumsum(*args, **opts)
+    round_and_relift(parent.cumsum(*args, **opts))
+  end
+
+  # @overload prod(*)
+  #   Not supported: a product of durations has the units of a power of
+  #   time, which no type represents.
+  #   @raise [CArray::DataTypeError] always.
+  def prod(*); raise CArray::DataTypeError, "CATimedelta#prod is ill-defined (powers of time units)"; end
+
+  # @overload cumprod(*)
+  #   Not supported, for the same reason as {#prod}.
+  #   @raise [CArray::DataTypeError] always.
+  def cumprod(*); raise CArray::DataTypeError, "CATimedelta#cumprod is ill-defined (powers of time units)"; end
 
   # @overload mean(axis: nil, **opts)
   #   Returns the mean duration rounded to the nearest unit count.
   #   @return [Element, CATimedelta]
   def mean(*args, **opts)
-    round_and_relift(parent.mean(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.mean(*args, **o)) }
   end
 
   # median / percentile / quantile / stddev / stddevp report on this array's
@@ -1431,7 +1596,7 @@ class CATimedelta
   #   Returns the median duration on `self`'s unit.
   #   @return [Element, CATimedelta]
   def median(*args, **opts)
-    round_and_relift(parent.median(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.median(*args, **o)) }
   end
 
   # @overload percentile(*p, axis: nil, **opts)
@@ -1440,7 +1605,7 @@ class CATimedelta
   #   two or more give an Array).
   #   @return [Element, CATimedelta, Array<Element>, Array<CATimedelta>]
   def percentile(*args, **opts)
-    round_and_relift(parent.percentile(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.percentile(*args, **o)) }
   end
 
   # @overload quantile(axis: nil, **opts)
@@ -1448,7 +1613,7 @@ class CATimedelta
   #   `self`'s unit.
   #   @return [Array<Element>, Array<CATimedelta>]
   def quantile(*args, **opts)
-    round_and_relift(parent.quantile(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.quantile(*args, **o)) }
   end
 
   # @overload stddev(axis: nil, **opts)
@@ -1457,7 +1622,7 @@ class CATimedelta
   #   the precision matters.
   #   @return [Element, CATimedelta]
   def stddev(*args, **opts)
-    round_and_relift(parent.stddev(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.stddev(*args, **o)) }
   end
 
   # @overload stddevp(axis: nil, **opts)
@@ -1465,7 +1630,7 @@ class CATimedelta
   #   {#stddev}.
   #   @return [Element, CATimedelta]
   def stddevp(*args, **opts)
-    round_and_relift(parent.stddevp(*args, **opts))
+    with_surface_fill(opts) { |o| round_and_relift(parent.stddevp(*args, **o)) }
   end
 
   def round_and_relift(r)
@@ -1482,39 +1647,21 @@ class CATimedelta
   #   Not supported: the variance of durations has squared-time units, which
   #   no type represents -- the same reason {CATime#variance} refuses.  Use
   #   {#stddev} for the spread as a duration.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def variance(*)
-    raise TypeError, "CATimedelta#variance is ill-defined (squared-time units); use stddev"
+    raise CArray::DataTypeError, "CATimedelta#variance is ill-defined (squared-time units); use stddev"
   end
 
   # @overload variancep(*)
   #   Not supported, for the same reason as {#variance}.  Use {#stddevp}.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def variancep(*)
-    raise TypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
+    raise CArray::DataTypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
   end
 
-  # min / max ride the core reduce Face gate (ORDERABLE storage descent +
-  # output re-lift, see ext/mkkernel.rb face_gate: :relift); the inherited
-  # CArray#min / #max return the Element / CATimedelta shapes directly.
-  # minmax has no core gate, so re-lift both extremes here.
-
-  # @overload minmax(*axes, **opts)
-  #   Returns the shortest and longest duration as a `[min, max]` pair.
-  #   @return [Array(Element, Element), Array(CATimedelta, CATimedelta)]
-  def minmax(*args, **opts)
-    lo, hi = parent.minmax(*args, **opts)
-    [relift_extremum(lo), relift_extremum(hi)]
-  end
-
-  def relift_extremum(r)
-    case r
-    when Integer then Element.new(r, unit)
-    when CArray  then r.timedelta(unit: unit)
-    else r
-    end
-  end
-  private :relift_extremum
+  # min / max / minmax ride the core reduce Face gate (ORDERABLE storage
+  # descent + output re-lift); the inherited methods return the Element /
+  # CATimedelta shapes directly.
   # @!endgroup
 
   # sort / partition ride the core sort Face gate (ORDERABLE storage
@@ -1535,6 +1682,23 @@ class CATimedelta
   #   @param operand [CATimedelta, CATimedelta::Element]
   #   @return [CATimedelta] in self's unit.
   #   @raise [TypeError, ArgumentError] on an unreconcilable operand / unit.
+  # Returns `[self, other]` in one unit, the finer grid of the two, which
+  # holds every value of both exactly.  A lookup between two duration
+  # arrays of different units meets there, so it does not depend on which
+  # array is the receiver.  A calendar and a fixed-length duration have no
+  # common unit and raise.
+  # @api private
+  def in_common_unit_with (other)
+    return [self, other] if other.unit == unit
+    unless CATimeUnitAlgebra.same_group?(unit, other.unit)
+      raise ArgumentError,
+            "cannot compare a #{unit} duration with a #{other.unit} duration: " \
+            "a calendar length (months, years) has no fixed length in days"
+    end
+    u = CATimeUnitAlgebra.finer(unit, other.unit)
+    [to_unit(u), other.to_unit(u)]
+  end
+
   def to_comparable (operand)
     case operand
     when CATimedelta
@@ -1551,8 +1715,8 @@ class CATimedelta
     end
   end
 
-  # @overload scalar_to_storage(surface)
-  #   Write-direction counterpart of storage_to_scalar: brings a surface
+  # @overload element_to_storage(surface)
+  #   Write-direction counterpart of storage_to_element: brings a surface
   #   value object into this Face's int64 storage (count in self's unit) so a
   #   scalar store round-trips with a fetch.  A {Element} is reconciled to
   #   self's unit via {#to_comparable} (lossless discipline; a `Time` /
@@ -1563,7 +1727,7 @@ class CATimedelta
   #   @return [Integer, Object] the storage-domain value, or `surface`
   #     unchanged for a pass-through type.
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
-  def scalar_to_storage (surface)
+  def element_to_storage (surface)
     case surface
     when Integer, String
       surface
@@ -1609,6 +1773,17 @@ class CATimedelta
     end
     CATimeUnitAlgebra.finer(unit, ou)
   end
+
+  # inspect's name for the array: the class and the tick, which the storage
+  # type name (fixlen[8]) does not tell.
+  private def inspect_label
+    "#{self.class}[#{unit}]"
+  end
+
+  # inspect's cell: the duration in the base unit of the tick.
+  private def inspect_cell_formatter
+    lambda { |e| "#{e.value * e.unit.count}#{e.unit.base}" }
+  end
 end
 
 # Reads a time literal (Time / DateTime / Integer unix-seconds / String) into
@@ -1621,8 +1796,12 @@ module CATimeLiteral
 
   # Date fields of a String literal, UTC.  Ruby's Date._parse does not read
   # the calendar-grid forms CATime#to_s prints -- "2019-09" comes back as a
-  # month of 20 with a zone, and a bare "2019" as a month and a day -- so
-  # those two are read here and everything else is left to Date._parse.
+  # month of 20 with a zone, and a bare "2019" as a month and a day -- nor an
+  # hour alone after the date ("2024-01-01T05", ISO 8601 reduced to the
+  # hour), so those are read here and everything else is left to Date._parse.
+  # Date._parse passes over what it cannot read, so text with a time after
+  # the date that comes back without an hour is refused rather than read as
+  # midnight.
   #
   # What Date._parse returns is then checked, because an out-of-range field
   # used to flow into the civil kernel and normalise into a different date:
@@ -1634,10 +1813,21 @@ module CATimeLiteral
       if format                             then Date._strptime(spec, format)
       elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
       elsif spec =~ /\A(\d{4})\z/           then { year: $1.to_i }
+      elsif (hour = hour_only_fields(spec)) then hour
       else                                       Date._parse(spec)
       end
     unless h && h[:year]
       raise ArgumentError, "cannot parse time #{spec.inspect}"
+    end
+    if !format && !h[:hour] &&
+       (spec =~ /\d\s*T\s*\d/ || spec =~ /\A\s*[+-]?\d{4,}[-\/]\d{1,2}[-\/]\d{1,2}\s+\d/)
+      raise ArgumentError, "cannot parse time #{spec.inspect}: the time after the date is not read"
+    end
+    # Text left over after the format is not part of a time in that format.
+    if h[:leftover] && !h[:leftover].strip.empty?
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: #{h[:leftover].inspect} is " \
+            "left over after #{format.inspect}"
     end
     y, m, d = h[:year], h[:mon] || 1, h[:mday] || 1
     unless (1..12).cover?(m) && Date.valid_date?(y, m, d, Date::GREGORIAN)
@@ -1645,12 +1835,49 @@ module CATimeLiteral
             "cannot parse time #{spec.inspect}: it reads as year #{y}, " \
             "month #{m}, day #{d}, which is not a date"
     end
+    # Hour 24 is the end of the day, 24:00:00, and nothing past it.
+    if h[:hour] == 24 && [h[:min], h[:sec], h[:sec_fraction]].any? { |v| v && v != 0 }
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: hour 24 is only 24:00:00"
+    end
     h
   end
   private_class_method :parse_date_fields
 
+  # "YYYY-MM-DDThh" with an optional zone ("Z", "+hh", "+hhmm", "+hh:mm").
+  def hour_only_fields(spec)
+    m = /\A(\d{4})-(\d{2})-(\d{2})T(\d{2})(?:(Z)|([+-])(\d{2})(?::?(\d{2}))?)?\z/.match(spec)
+    return nil unless m
+    h = { year: m[1].to_i, mon: m[2].to_i, mday: m[3].to_i, hour: m[4].to_i }
+    raise ArgumentError, "cannot parse time #{spec.inspect}: hour #{h[:hour]}" if h[:hour] > 23
+    if m[6]
+      oh, om = m[7].to_i, m[8].to_i
+      raise ArgumentError, "cannot parse time #{spec.inspect}: offset" if oh > 23 || om > 59
+      h[:offset] = (oh * 3600 + om * 60) * (m[6] == "-" ? -1 : 1)
+    elsif m[5]
+      h[:offset] = 0
+    end
+    h
+  end
+  private_class_method :hour_only_fields
+
+  # An instant written outside CArray (Time / Date / DateTime / String) as a
+  # length-1 CATime in the coarsest of :s / :ms / :us / :ns that holds it
+  # exactly, so a comparison sees the instant it names and not that instant
+  # floored onto some other grid.  Finer than a nanosecond raises.
+  def exact_instant(spec)
+    sec = epoch_seconds(spec)
+    [:s, :ms, :us, :ns].each_with_index do |u, k|
+      ticks = sec * (10 ** (3 * k))
+      if ticks.denominator == 1
+        return CATime.wrap(CA_INT64([ticks.to_i]), unit: u)
+      end
+    end
+    raise ArgumentError, "#{spec.inspect} is finer than a nanosecond"
+  end
+
   # Exact Rational seconds since the Unix epoch for a start literal (Time /
-  # DateTime / Integer unix-seconds / String).  UTC default.
+  # Date / DateTime / Integer unix-seconds / String).  UTC default.
   def epoch_seconds(spec, format = nil)
     require 'date'
     require 'time'
@@ -1680,6 +1907,8 @@ module CATimeLiteral
     else
       if defined?(DateTime) && spec.is_a?(DateTime)
         spec.to_time.to_r
+      elsif defined?(Date) && spec.is_a?(Date)
+        Rational(CATimeCivil.days_from_civil_1(spec.year, spec.month, spec.day) * 86400)
       else
         raise ArgumentError, "cannot parse time #{spec.class}"
       end
@@ -1725,6 +1954,189 @@ module CATimeLiteral
       months  = (y - 1970) * 12 + (m - 1)
       (Rational(months) / res.tick_ratio).floor
     end
+  end
+
+  # A format :infer can choose: a strptime format, read strictly (see
+  # __strptime_fields__), and what the text carries (:date, :clock, or
+  # :fraction of a second).
+  TimeFormat = Struct.new(:format, :kind)
+
+  INFER_DATES = %w[%d/%m/%Y %m/%d/%Y %d-%m-%Y %m-%d-%Y %d.%m.%Y %d/%m/%y %m/%d/%y] +
+                ["%d %b %Y", "%d-%b-%Y", "%d-%b-%y", "%b %d, %Y", "%b %d %Y", "%Y%m%d"]
+
+  # A space in a format matches any run of spaces, none included.
+  INFER_CLOCKS = [
+    ["%H:%M", :clock], ["%H:%M:%S", :clock], ["%H:%M:%S.%N", :fraction],
+    ["%I:%M %p", :clock], ["%I:%M:%S %p", :clock],
+  ].freeze
+
+  # A time after a date: none, or a clock with or without a zone. %z takes
+  # an offset, Z, UTC or GMT, not a zone named for a place (some of those
+  # names mean different offsets in different places).
+  INFER_TIMES = ([["", :date]] +
+    INFER_CLOCKS.flat_map { |clock, kind| [[" #{clock}", kind], [" #{clock} %z", kind]] }
+  ).freeze
+
+  # A date written in Japanese, year first ("2024<year>1<month>2<day>"),
+  # takes a time in the same markers ("3<hour>4<minute>", "...5<second>")
+  # or with colons.
+  JA_YEAR, JA_MONTH, JA_DAY = "年", "月", "日"
+  JA_HOUR, JA_MINUTE, JA_SECOND = "時", "分", "秒"
+  INFER_JA_TIMES = ([["", :date]] +
+    ([["%H#{JA_HOUR}%M#{JA_MINUTE}", :clock],
+      ["%H#{JA_HOUR}%M#{JA_MINUTE}%S#{JA_SECOND}", :clock]] + INFER_CLOCKS)
+      .map { |clock, kind| [" #{clock}", kind] }).freeze
+
+  INFER_FORMATS = (
+    INFER_DATES.product(INFER_TIMES).map { |date, (time, kind)|
+      TimeFormat.new(date + time, kind)
+    } +
+    INFER_JA_TIMES.map { |time, kind|
+      TimeFormat.new("%Y#{JA_YEAR}%m#{JA_MONTH}%d#{JA_DAY}#{time}", kind)
+    }
+  ).freeze
+  INFER_FORMAT_STRINGS = INFER_FORMATS.map(&:format).freeze
+
+  # The one format of INFER_FORMATS that the text of object array `x` is
+  # written in, `first` being its first present cell, as
+  # [format, fields, address]: the fields __strptime_fields__ read in it,
+  # and the address of the first cell not in it, or nil.
+  #
+  # The first cell gives the candidates and each later cell drops those it
+  # does not fit, until one is left. Each candidate is read over the whole
+  # array once, and the candidate a later cell leaves last is the one left:
+  # no candidate for the first cell or none left (the last ones dropped by
+  # one cell) raises CAFrame::UnreadableColumn, and more than one left at the
+  # end raises CAFrame::AmbiguousTimeFormat (CAFrame is its only caller). A cell
+  # after the choice that is not in the format is returned for the caller
+  # to report.
+  def infer_time_format(x, first)
+    candidates = CArray.__strptime_fits__(first, INFER_FORMAT_STRINGS)
+    if candidates.empty?
+      raise CAFrame::UnreadableColumn,
+            "cannot infer a time format from #{first.inspect}; " \
+            "pass a strptime format, or :mixed to guess at each cell"
+    end
+    runs = candidates.map do |i|
+      fields = x.__strptime_fields__(INFER_FORMATS[i].format, true)
+      [INFER_FORMATS[i], fields, fields[7].first || Float::INFINITY]
+    end
+    last = runs.map(&:last).max
+    left = runs.select { |run| run[2] == last }
+    if left.size > 1
+      if last == Float::INFINITY
+        formats = left.map { |run| run[0].format }
+        raise CAFrame::AmbiguousTimeFormat.new(
+                "#{first.inspect} could be read as " \
+                "#{formats.map(&:inspect).join(' or ')}, " \
+                "and no cell tells which; pass the format",
+                formats: formats)
+      end
+      raise CAFrame::UnreadableColumn,
+            "#{x.flatten[last].inspect} is not in the format of #{first.inspect}; " \
+            "pass a strptime format, or :mixed to guess at each cell"
+    end
+    f, fields, bad = left.first
+    [f, fields, bad == Float::INFINITY ? nil : bad]
+  end
+
+  # [kind, per] for __time_ticks_from_fields__: ticks of `per` nanoseconds
+  # (:fixed) or months (:calendar), or nil when `res` is finer than a
+  # nanosecond.
+  def tick_kind(res)
+    if CATimeUnitAlgebra::FIXED.key?(res.base)
+      per = res.tick_ratio * 1_000_000_000
+      kind = :fixed
+    else
+      per = res.tick_ratio
+      kind = :calendar
+    end
+    (per.denominator == 1 && per >= 1) ? [kind, per.to_i] : nil
+  end
+
+  # The ticks of every cell of `x` on the `res` grid, as an int64 array of
+  # x's shape (missing and, under on_error: :mask, unparseable cells
+  # masked), or nil when `res` is finer than a nanosecond. A strptime
+  # format that __strptime_fields__ reads is read for the whole array in C;
+  # otherwise each String is parsed into fields here. Either way the fields
+  # become ticks for the whole array at once, and a cell that is not a
+  # String goes through tick_index.
+  def ticks_from_cells(x, res, format, on_error)
+    require 'date'
+    kind, per = tick_kind(res)
+    return nil unless kind
+    if format.is_a?(String)
+      text = (x.data_type == CA_OBJECT && !x.face?) ? x : x.to_type(:object)
+      fields = text.__strptime_fields__(format, false)
+      return ticks_from_fields(fields, x, res, format, on_error) if fields
+    end
+    cells = x.flatten.to_a
+    n = cells.size
+    year = Array.new(n, 1970)
+    mon = Array.new(n, 1)
+    day = Array.new(n, 1)
+    sod = Array.new(n, 0)
+    frac = Array.new(n, 0)
+    off = Array.new(n, 0)
+    present = Array.new(n, 0)
+    direct = {}
+    cells.each_with_index do |s, i|
+      next if s.nil? || UNDEF.equal?(s)
+      begin
+        if s.is_a?(String)
+          h = parse_date_fields(s, format)
+          year[i] = h[:year]
+          mon[i] = h[:mon] || 1
+          day[i] = h[:mday] || 1
+          sod[i] = (h[:hour] || 0) * 3600 + (h[:min] || 0) * 60 + (h[:sec] || 0)
+          frac[i] = (h[:sec_fraction] * 1_000_000_000).floor if h[:sec_fraction]
+          off[i] = h[:offset] if h[:offset]
+          present[i] = 1
+        else
+          direct[i] = tick_index(s, res, format)
+        end
+      rescue ArgumentError, TypeError
+        raise if on_error == :raise
+      end
+    end
+    raw = CArray.__time_ticks_from_fields__(
+      CA_INT64(year), CA_INT64(mon), CA_INT64(day), CA_INT64(sod),
+      CA_INT64(frac), CA_INT64(off), CA_UINT8(present), kind, per)
+    check_ticks_fit(raw, present, present.count(1), res) { cells }
+    direct.each { |i, t| raw[i] = t }
+    raw.reshape(*x.shape)
+  end
+
+  # Ticks from what __strptime_fields__ read; the cells it deferred are
+  # read one by one through tick_index.
+  def ticks_from_fields(fields, x, res, format, on_error)
+    kind, per = tick_kind(res)
+    year, mon, day, sod, frac, off, present, unreadable, deferred, = fields
+    cells = nil
+    if on_error == :raise && !unreadable.empty?
+      cells = x.flatten.to_a
+      raise ArgumentError, "cannot parse time #{cells[unreadable.first].inspect}"
+    end
+    raw = CArray.__time_ticks_from_fields__(year, mon, day, sod, frac, off,
+                                            present, kind, per)
+    check_ticks_fit(raw, present, present.sum, res) { cells ||= x.flatten.to_a }
+    unless deferred.empty?
+      cells ||= x.flatten.to_a
+      deferred.each do |i|
+        raw[i] = tick_index(cells[i], res, format)
+      rescue ArgumentError, TypeError
+        raise if on_error == :raise
+      end
+    end
+    raw.reshape(*x.shape)
+  end
+
+  # A tick that does not fit int64 is out of range, not unparseable.
+  def check_ticks_fit(raw, present, present_count, res)
+    return if raw.count_not_masked >= present_count
+    cells = yield
+    i = (0...raw.elements).find { |k| present[k] == 1 && UNDEF.equal?(raw[k]) }
+    raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
   end
 
   # Single-literal build for {.time}: a 1-element CATime, honouring
@@ -1836,6 +2248,8 @@ class CArray
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
+    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error)
+    return raw.time(unit: res) if raw
     raw = CArray.int64(*x.shape)
     x.each_index do |*idx|
       s = x[*idx]

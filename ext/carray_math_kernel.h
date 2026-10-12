@@ -114,6 +114,7 @@ VALUE ca_math_call (VALUE mod, VALUE arg, ID id);
 
 #include "ca_monop_dispatch.h"
 #include "ca_binop_dispatch.h"
+#include "ca_triop_dispatch.h"
 #include "ca_bincmp_dispatch.h"
 #include "ca_moncmp_dispatch.h"
 

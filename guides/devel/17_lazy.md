@@ -73,6 +73,10 @@ across `to_ca` calls:
   slots;
 - best-fit allocation keeps a small request (a mask scratch) from occupying a big
   slot;
+- a request larger than every free slot **grows the largest free slot**; a new
+  slot opens only while every warm one is in use, so the pool holds one buffer
+  per scratch held at the same time, each as large as the largest request it has
+  served;
 - release happens in LIFO order in practice (acquire data, recurse into the right
   operand, unwind), which maximises reuse, though the pool does not require LIFO
   semantically.
@@ -80,19 +84,18 @@ across `to_ca` calls:
 Thread-safety is a non-goal here: the arena is global static state, consistent with
 the project stance ([ch. 4](04_attach_lifecycle.md)).
 
-## The three surfaces
+## The two surfaces
 
-`ext/carray_lazy.c` and `lib/carray/lazy.rb` expose three entry points that differ
-in *when* materialisation happens, not in the tree they build:
+`ext/carray_lazy.c` and `lib/carray/lazy.rb` expose two ways to build the same
+tree:
 
 - **`.lazy`** — a persistent lazy view; operations on it stay lazy until forced.
-- **`CArray.fuse`** — a transient fusion scope that materialises at block exit
-  (with shadow read-only semantics on the operands inside).
-- **`CArray.lazy`** — a transient lazy scope with no auto-materialise.
+- **`CArray.fuse { ... }`** — reads the block's source, gives `.lazy` to every
+  name in it that holds a CArray, and returns the expression as a lazy view.
+  It is computed where it is used: stored, reduced, or forced with `to_ca`.
 
-The three surfaces and their block/shadow semantics, along with the measured
-fuse-vs-eager break-even and the "small N, deep chain" cliff, are covered in
-the user's guide.
+Neither materialises by itself. The measured fuse-vs-eager break-even and the
+"small N, deep chain" cliff are covered in the user's guide.
 
 ## Cross-ndim is rejected in the lazy substrate too
 
@@ -178,6 +181,48 @@ Two extra pitfalls to watch when adding a Ruby-facing op:
   chain quietly materialises and runs eager. Ordinary users cannot tell, so
   the discipline is proactive: after adding any op or view class, sweep the
   coverage against the `LAZY_*_OP_IDS` tables.
+
+## Handing an expression to another evaluator
+
+CArray can always force a tree by walking it. A second evaluator — carray-jit
+compiles the whole tree into one loop — is registered with
+`CArray.expression_evaluator = obj` and asked first when an expression of at
+least `CArray::Fusion::THRESHOLD` cells is forced. What it is given is a
+**plan**: `CArray::Fusion.plan(view)` reads the tree into plain data
+(`lib/carray/fusion.rb`). Its answer must be the one the walk would give.
+
+A plan holds its nodes in evaluation order, the last being the result:
+
+| node | meaning |
+|---|---|
+| `Op` | an operation reading the nodes in `args` |
+| `Leaf` | the `index`-th array of `plan.leaves`, read at the cell being computed |
+| `Shifted` | the same, read `offset` cells away (what `CArray#shift` makes); outside the array it is `fill` or masked, per `bounds` |
+| `Const` | a scalar written into the expression |
+
+An `Op` carries `kind` (`:monop`, `:binop`, `:triop`, `:moncmp`, `:bincmp`),
+`name` (the operation as the kernels name it), `body` (its C from
+`CArray.__kernel_body__`, with `#1`, `#2`, ... for the operands and the next
+number for the result), `mask` (`:pass`, `:union`, `:kleene_or`,
+`:kleene_and`, `:select`) and `trapping` (a masked cell must not be computed).
+A conversion between data types is a `:monop` named `cast_<type>` for the
+type it converts to, its body keyed by the type it converts from. A lazy
+`then_else` is the `:triop` `select`, masked where its condition is or where
+the branch the condition chooses is (`:select`).
+
+**The contract.** The node classes, kinds, names, mask rules and fields keep
+the meaning they have. New ones are added; none is renamed or changes meaning.
+An evaluator that meets something it does not know **declines** — its `call`
+returns false and the walk computes the answer. It must not raise: an
+evaluator that raises is unregistered for the rest of the process. Declining
+is what lets CArray add to the plan without a new evaluator being released at
+the same time — when the integer power became the node `ipow`, an older
+carray-jit declined it and the walk answered.
+
+Adding a lazy op therefore has one more step on this side: give it a spelling
+the plan reads (the `*_BY_ID` tables in `fusion.rb`) and a body in
+`__kernel_body__`. An op the plan cannot read is refused, and the expression is
+walked — correct, but the evaluator never sees it.
 
 ## Where to go next
 

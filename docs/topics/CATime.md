@@ -49,7 +49,7 @@ dt - dt       # => CATimedelta (all zero)
 dt.min        # => CATime::Element 2024-06-15
 dt.max        # => CATime::Element 2024-06-21
 dt.mean       # => CATime::Element 2024-06-18T00:00:00.000000000Z  (midpoint)
-dt.sum        # => raises TypeError (sum of datetimes is undefined)
+dt.sum        # => raises CArray::DataTypeError (sum of datetimes is undefined)
 
 dt.flip       # => CATime (reversed)
 dt[2..5]      # => CATime
@@ -152,6 +152,13 @@ rolling over into another date: `"2019-02-31"` is refused instead of
 becoming 2019-03-03. Note that `"201909"` is a valid **YYMMDD** to Ruby
 (2020-19-09), so it is refused too — name the layout with
 `format: "%Y%m"` for a compact year-month.
+
+An **hour alone after the date** (`"2024-01-01T05"`, with or without a zone —
+ISO 8601 reduced to the hour) is read too, which `Date._parse` passes over.
+And text with a time after the date that does not come back as a time of day
+is **refused** rather than read as midnight: `"2024-01-01T0130"` (a compact
+time after a dashed date) and `"2024-01-01T25"` raise, as any unreadable cell
+does unless `on_error: :mask` is given.
 
 ### 2.3 Rebasing relative indices (`origin:`)
 
@@ -573,8 +580,8 @@ order-statistic** ones can land between ticks and round.
 | `t.percentile(*p)`       | `Element`, or an `Array`      | order statistics, on `t`'s unit                       |
 | `t.quantile`             | `Array` of 5 `Element`        | `percentile(0, 25, 50, 75, 100)`                      |
 | `t.stddev` / `t.stddevp` | `CATimedelta::Element`        | spread of the instants, as a duration                 |
-| `t.sum`                  | raises `TypeError`            | a sum of instants is undefined (use `mean`)           |
-| `t.variance` / `variancep` | raises `TypeError`          | squared-time units, which no type represents          |
+| `t.sum`                  | raises `CArray::DataTypeError` | a sum of instants is undefined (use `mean`)          |
+| `t.variance` / `variancep` | raises `CArray::DataTypeError` | squared-time units, which no type represents       |
 
 With `axis:` the same members return a `CATime` (or `CATimedelta` for a
 spread) instead of an `Element`, and the multi-`p` forms return an `Array`
@@ -719,14 +726,23 @@ axis.search(q)    # => [2, 3]
 
 The query may be another time array **or a single instant the axis knows
 how to convert** — a `CATime::Element` (e.g. `axis[i]`), a Ruby `Time`,
-or a Ruby `DateTime` (both absolute, UTC, Unix epoch). It may **not** be a bare
-number, which would touch the hidden storage — see §16.2.
+`Date` or `DateTime`, or a `String` in the text grammar `CArray.time` reads
+(UTC unless the text carries an offset). An Array of these is a set of
+instants (the value set of `is_in`). It may **not** be a bare number, which
+would touch the hidden storage — see §16.2.
 
 ```ruby
 require "time"
 axis.bsearch(Time.utc(2024, 6, 17))   # => 2     (Time lifted into the axis unit)
+axis.bsearch("2024-06-17")            # => 2     (text read as an instant)
 axis.bsearch(axis[3])                 # => 3     (a Element operand)
 ```
+
+A `Time` / `Date` / `String` is read at the precision it carries, not at the
+axis's unit, and then reconciled like any other operand (§10.3): against a
+daily axis, `"2024-06-17 09:00"` raises rather than matching 2024-06-17. The
+same goes for a store: `t[0] = "2024-06-17"` reads the text, and a value off
+the array's grid raises.
 
 (A timedelta axis is narrower: it accepts a timedelta array or
 `CATimedelta::Element`, but **not** `Time` / `DateTime` — those are absolute
@@ -813,7 +829,7 @@ t.linear_fetch(CA_FLOAT64([0.0, 2.5]))
 ```
 
 The query side needs nothing special: `linear_section` accepts a `CATime`, an
-`Element`, a Ruby `Time` or `DateTime` and reconciles the unit through
+`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and reconciles the unit through
 `to_comparable` (§10.3), exactly as search does. Reconciliation is lossless,
 though, so a query at a *finer* resolution than the axis has to land on the
 axis's grid — `05:00` against a `2 h` axis raises rather than sit between two
@@ -1331,7 +1347,7 @@ UNDEF.
 These are the mechanisms behind the scalar surface and the raw storage —
 most code never needs them.
 
-### 16.1 The `storage_to_scalar` / `scalar_to_storage` convention
+### 16.1 The `storage_to_element` / `element_to_storage` convention
 
 Reading a cell decodes the storage integer into a `Element`; storing a
 cell encodes a surface instant back into the storage unit. Both happen
@@ -1340,20 +1356,20 @@ through a matched pair of methods on the Face class (see
 
 ```ruby
 class CATime
-  def storage_to_scalar(raw)      # read:  storage int -> Element
+  def storage_to_element(raw)      # read:  storage int -> Element
     Element.new(raw, unit)
   end
-  def scalar_to_storage(surface)  # write: instant -> storage int (this unit)
+  def element_to_storage(surface)  # write: instant -> storage int (this unit)
     to_comparable(surface).parent[0]
   end
 end
 ```
 
-`storage_to_scalar` covers every scalar-returning path — `dt[i, j, k]`,
+`storage_to_element` covers every scalar-returning path — `dt[i, j, k]`,
 `dt.fetch_index`, `dt.fetch_addr`, `dt.to_a`, and so on — without
 overriding `[]` in Ruby.
 
-`scalar_to_storage` covers the store paths — `dt[i] = instant`,
+`element_to_storage` covers the store paths — `dt[i] = instant`,
 `dt[mask] = instant`, `dt[i..j] = instant`, `dt.fill(instant)` — so a
 `Element` / `Time` / `DateTime` is converted into this Face's unit
 before it lands in storage (a `Time` at 02:00 stored into a `:h` axis

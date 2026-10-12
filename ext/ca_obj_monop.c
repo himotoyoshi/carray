@@ -33,6 +33,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_*, ca_is_lazy_view */
 #include "ca_monop_dispatch.h"
+#include "carray_math_kernel.h" /* ca_monop_not_implement */
 
 /* ca_cast_block (carray_cast.c) */
 extern void ca_cast_block (ca_size_t n, void *ap1, void *ptr1,
@@ -284,11 +285,10 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_index PUT)");
     }
     {
-      char scratch[32];   /* max sizeof for any built-in numeric data_type */
+      volatile VALUE holder;
       ca_size_t bytes_per_cell = (ca_monop_is_cast(ca->op_id))
                                   ? ca->parent->bytes : ca->bytes;
-      char *p = (bytes_per_cell <= 32) ? scratch
-                                       : (char *) ALLOC_N(char, bytes_per_cell);
+      char *p = ALLOCV_N(char, holder, bytes_per_cell);
       if ( ca_monop_is_cast(ca->op_id) ) {
         /* Reverse-cast view-data_type `data` to parent data_type scratch, then
            store into parent at idx[].  */
@@ -301,7 +301,7 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
         ca_byte_swap_buffer(ca->data_type, ca->bytes, 1, p);
       }
       ca_store_index(ca->parent, idx, p);
-      if ( p != scratch ) xfree(p);
+      ALLOCV_END(holder);
     }
     return;
   }
@@ -314,38 +314,6 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     strides[k] = s;
   }
   ca_monop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
-}
-
-static void
-ca_monop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CAMonOp *ca = (CAMonOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    /* PUT: only writable-view op_ids accept writes.  */
-    if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-      rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_addrs PUT)");
-    }
-    /* Per-cell loop: forward to xfer_index PUT (handles cast/byte_swap
-       branch internally).  */
-    for ( i = 0; i < n; i++ ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *)ca, addrs[i], idx);
-      ca_monop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_PUT);
-    }
-    return;
-  }
-
-  /* Naive per-addr loop: convert addr → idx, then xfer_index.  This path
-     is not optimised. */
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_monop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
 }
 
 /* ------------------------------------------------------------------- */
@@ -369,27 +337,30 @@ ca_size_t ca_monop_materialise_call_count = 0;
 #define CA_MAX_LAZY_DEPTH 256
 #endif
 
+/* Whether an op can raise on a cell, so that a masked cell must be
+   skipped rather than computed: any op on an object cell (it calls Ruby),
+   and an integer reciprocal (zero raises). */
+static int
+ca_monop_is_trapping (uint16_t op_id, int8_t dt)
+{
+  if ( dt == CA_OBJECT ) {
+    return 1;
+  }
+  return ( op_id == CA_MONOP_RCP && dt >= CA_INT8 && dt <= CA_UINT64 );
+}
+
 /* Apply a single op in-place on `data` (src == dst, unit element stride).
    Raises if the kernel is not implemented for the given input data_type.
 
-   Unmask fast path:
-   We always pass `mask == NULL` to the kernel, which selects the SIMD-
-   friendly "no mask" branch in the existing eager kernels (see e.g.
-   ca_monop_sqrt_float64_t in carray_math.c — `if (m) { ... } else
-   { ...SIMD loop... }`).  Mask cells contain garbage after evaluation,
-   but they are unobservable: the output mask is built separately via
-   the attach lifecycle (ca_monop_func_create_mask + parent.mask
-   CARefer), so reads of masked cells return UNDEF regardless of byte
-   contents.  The mask marks cells as undefined; it does not guard their
-   bytes, so writing garbage into a masked cell is licensed.
-
-   A "partial mask slow path" (= a cell-wise branch to skip masked-cell
-   compute) is a possible future micro-optimisation; it is not done
-   because masked-cell compute does not affect correctness and the SIMD
-   path is faster overall for typical mask densities.  */
+   `mask` is NULL except for an op that can raise on a cell: the kernel
+   then takes the SIMD-friendly "no mask" branch and computes the masked
+   cells too.  Their bytes are unobservable -- the output mask is the
+   parent's (ca_monop_func_create_mask) -- and the mask marks cells as
+   undefined rather than guarding their bytes, so writing anything into a
+   masked cell is licensed.  */
 static void
 apply_monop_in_place (uint16_t op_id, int8_t cur_dt,
-                      ca_size_t slab_n, void *data)
+                      ca_size_t slab_n, void *data, boolean8_t *mask)
 {
   ca_monop_func_t fn = ca_monop_kernel_lookup(op_id, cur_dt);
   if ( fn == NULL ) {
@@ -397,7 +368,7 @@ apply_monop_in_place (uint16_t op_id, int8_t cur_dt,
              "CAMonOp: kernel not implemented (op_id=%u data_type=%d)",
              (unsigned) op_id, (int) cur_dt);
   }
-  fn(slab_n, NULL, (char *) data, 1, (char *) data, 1);
+  fn(slab_n, mask, (char *) data, 1, (char *) data, 1);
 }
 
 /* Minimal CArray-shaped stub used as ca_cast_block's data_type-only carrier.
@@ -434,38 +405,25 @@ typedef struct {
 static int8_t
 pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
                               int has_cast_at_leaf, int8_t out_bytes,
-                              ca_size_t slab_n,
-                              ca_size_t *starts, ca_size_t *counts,
-                              ca_size_t *strides, void *data)
+                              const ca_lazy_req_t *req, void *data)
 {
   ca_size_t leaf_bytes = leaf->bytes;
+  ca_size_t slab_n = req->n;
 
   /* Path 1: no size mismatch, no cast — direct pull.  */
   if ( leaf_bytes == out_bytes && ! has_cast_at_leaf ) {
-    ca_xfer_stride(leaf, starts, counts, strides, data, CA_XFER_GET);
+    ca_lazy_req_pull(leaf, req, data, CA_XFER_GET);
     return leaf->data_type;
   }
 
-  /* Paths 2 & 3 both need a leaf-sized scratch + leaf-byte strides
-     for the leaf pull.  */
-  ca_size_t parent_strides[CA_RANK_MAX];
+  /* Paths 2 & 3 both pull the leaf into a leaf-sized scratch.  */
   ca_size_t total_bytes = slab_n * leaf_bytes;
   void *scratch;
-  volatile VALUE holder;
-  int8_t k;
-  {
-    ca_size_t s = leaf_bytes;
-    for ( k = leaf->ndim - 1; k >= 0; k-- ) {
-      parent_strides[k] = s;
-      s *= counts[k];
-    }
-  }
-  (void) holder;
   scratch = ( leaf->data_type == CA_OBJECT )
               ? ca_lazy_arena_acquire_object(slab_n)
               : ca_lazy_arena_acquire(total_bytes);
   ca_monop_scratch_acquire_count++;
-  ca_xfer_stride(leaf, starts, counts, parent_strides, scratch, CA_XFER_GET);
+  ca_lazy_req_pull(leaf, req, scratch, CA_XFER_GET);
 
   int8_t result_dt;
   if ( has_cast_at_leaf ) {
@@ -486,20 +444,21 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
   return result_dt;
 }
 
+/* Evaluate (GET) or write (PUT, writable views only) the cells a request
+   names; `data` holds them packed. */
 static void
-ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                           ca_size_t *strides, void *data, int dir)
+ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
 {
-  CAMonOp *mo = (CAMonOp *) ap;
   uint16_t op_chain[CA_MAX_LAZY_DEPTH];
   int chain_len = 0;
   CArray  *leaf;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   int8_t    cur_dt;
   int       i;
   int       has_cast_at_leaf = 0;
   int       chain_apply_count;
+  boolean8_t *slab_mask = NULL;
+  int       mask_taken = 0;
 
   /* Writable-view op_ids (cast / byte_swap) use CAFake-style xfer_stride
      for both GET and PUT.  This avoids the chain-materialise inline path
@@ -510,21 +469,13 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      - byte_swap: same data_type → pstrides = strides; involution apply.  */
   if ( ca_monop_is_writable_view(mo->op_id) ) {
     int is_cast = ca_monop_is_cast(mo->op_id);
-    ca_size_t pstrides[CA_RANK_MAX];
-    ca_size_t n = 1;
+    ca_size_t n = slab_n;
     ca_size_t parent_bytes = is_cast ? mo->parent->bytes : mo->bytes;
-    int8_t    kk;
     char     *v;
     volatile VALUE holder;
-    for ( kk = 0; kk < mo->ndim; kk++ ) {
-      n *= counts[kk];
-      pstrides[kk] = is_cast
-                       ? (strides[kk] / mo->bytes * mo->parent->bytes)
-                       : strides[kk];
-    }
     v = ALLOCV_N(char, holder, n * parent_bytes);
     if ( dir == CA_XFER_GET ) {
-      ca_xfer_stride(mo->parent, starts, counts, pstrides, v, CA_XFER_GET);
+      ca_lazy_req_pull(mo->parent, req, v, CA_XFER_GET);
       if ( is_cast ) {
         ca_cast_block(n, mo->parent, v, (CArray *) mo, data);
       }
@@ -543,7 +494,7 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
         memcpy(v, data, n * mo->bytes);
         ca_byte_swap_buffer(mo->data_type, mo->bytes, n, v);
       }
-      ca_xfer_stride(mo->parent, starts, counts, pstrides, v, CA_XFER_PUT);
+      ca_lazy_req_pull(mo->parent, req, v, CA_XFER_PUT);
     }
     ALLOCV_END(holder);
     return;
@@ -564,8 +515,8 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   while ( leaf->obj_type == CA_OBJ_MONOP ) {
     CAMonOp *node = (CAMonOp *) leaf;
     if ( chain_len >= CA_MAX_LAZY_DEPTH ) {
-      rb_raise(rb_eRuntimeError,
-               "CAMonOp chain depth exceeds CA_MAX_LAZY_DEPTH (%d)",
+      rb_raise(rb_eArgError,
+               "lazy expression too deep: more than %d operations in a chain",
                CA_MAX_LAZY_DEPTH);
     }
     op_chain[chain_len++] = node->op_id;
@@ -586,16 +537,12 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   /* === 2. pull leaf into output buffer (with optional cast) === */
-  slab_n = 1;
-  for ( k = 0; k < mo->ndim; k++ ) {
-    slab_n *= counts[k];
-  }
   cur_dt = pull_leaf_with_optional_cast(
     leaf,
     has_cast_at_leaf ? op_chain[chain_len - 1] : 0,
     has_cast_at_leaf,
     (int8_t) mo->bytes,
-    slab_n, starts, counts, strides, data
+    req, data
   );
 
   /* === 3. apply remaining chain in reverse (leaf side → outermost) ===
@@ -626,10 +573,38 @@ ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       ca_lazy_arena_release(scratch);
       cur_dt = target_dt;
     } else {
-      apply_monop_in_place(op_id, cur_dt, slab_n, data);
+      if ( ! mask_taken && ca_monop_is_trapping(op_id, cur_dt) ) {
+        slab_mask  = ca_lazy_req_mask(req, 1, &leaf);
+        mask_taken = 1;
+      }
+      apply_monop_in_place(op_id, cur_dt, slab_n, data,
+                           ca_monop_is_trapping(op_id, cur_dt) ? slab_mask : NULL);
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
     }
   }
+  if ( slab_mask ) {
+    ca_lazy_arena_release(slab_mask);
+  }
+}
+
+static void
+ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  ca_lazy_req_t req;
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_monop_eval((CAMonOp *) ap, &req, data, dir);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_monop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_monop_eval((CAMonOp *) ap, &req, data, dir);
 }
 
 static void
@@ -774,10 +749,12 @@ ca_monop_func_sync (void *ap)
     }
   }
   else {
-    /* byte_swap (involution): apply on ca.ptr in place (re-swap), then
-       memcpy ca.ptr → parent.ptr.  Mirrors CAByteSwap sync.  */
-    ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements, ca->ptr);
+    /* byte_swap (involution): swap a copy back to the parent's byte order.
+       Not ca.ptr in place -- the window stays open after a sync, and a
+       second sync (a stack holding this view twice) would swap it again. */
     memcpy(ca->parent->ptr, ca->ptr, ca_length(ca));
+    ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements,
+                        ca->parent->ptr);
   }
   ca_sync(ca->parent);
 }
@@ -810,9 +787,8 @@ ca_monop_func_fill_data (void *ap, void *ptr)
   {
     int is_cast = ca_monop_is_cast(ca->op_id);
     ca_size_t parent_bytes = is_cast ? ca->parent->bytes : ca->bytes;
-    char stack_v[32];
-    char *v = (parent_bytes <= 32) ? stack_v
-                                   : (char *) xmalloc(parent_bytes);
+    volatile VALUE holder;
+    char *v = ALLOCV_N(char, holder, parent_bytes);
     if ( is_cast ) {
       ca_ptr2ptr((CArray *) ca, ptr, ca->parent, v);
     }
@@ -821,7 +797,7 @@ ca_monop_func_fill_data (void *ap, void *ptr)
       ca_byte_swap_buffer(ca->data_type, ca->bytes, 1, v);
     }
     ca_fill(ca->parent, v);
-    if ( v != stack_v ) xfree(v);
+    ALLOCV_END(holder);
   }
 }
 
@@ -829,12 +805,12 @@ static void
 ca_monop_func_create_mask (void *ap)
 {
   CAMonOp *ca = (CAMonOp *) ap;
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
+  ca_view_func_create_mask(ca);
+  /* A cast view writes through to its parent, mask included; any other
+     operation is read-only and so is its mask. */
+  if ( ca_test_flag(ca, CA_FLAG_READ_ONLY) ) {
+    ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
   }
-  ca->mask =
-    (CArray *) ca_refer_new(ca->parent->mask,
-                            CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
 ca_operation_function_t ca_monop_func = {
@@ -933,7 +909,34 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
   }
 
   parent_dt    = parent->data_type;
+
+  /* A boolean parent, as rb_ca_call_monop and the data_type-changing
+     monops treat it: a math function wants an explicit cast, and an op
+     with no boolean kernel reads the 0/1 storage in int64. */
+  if ( parent_dt == CA_BOOLEAN && ! ca_monop_is_writable_view(op_id) ) {
+    if ( ca_monop_is_widening(op_id) ) {
+      rb_raise(rb_eCADataTypeError,
+               "invalid data type for monop (not implemented)");
+    }
+    if ( ca_monop_kernel_lookup(op_id, CA_BOOLEAN) == ca_monop_not_implement ) {
+      target = rb_ca_monop_new(target, CA_MONOP_CAST_BASE + CA_INT64);
+      TypedData_Get_Struct(target, CArray, &carray_data_type, parent);
+      parent_dt = CA_INT64;
+    }
+  }
+
   kernel_in_dt = ca_monop_kernel_input_data_type(op_id, parent_dt);
+
+  /* No kernel for the parent, nor one a cast could reach (a fixlen cell
+     converts to nothing numeric): raise as the eager monop does, before
+     a view is built over it. */
+  if ( ! ca_monop_is_writable_view(op_id) &&
+       ( ca_monop_kernel_lookup(op_id, kernel_in_dt) == ca_monop_not_implement ||
+         ( parent_dt == CA_FIXLEN &&
+           ca_monop_kernel_lookup(op_id, CA_FIXLEN) == ca_monop_not_implement ) ) ) {
+    rb_raise(rb_eCADataTypeError,
+             "invalid data type for monop (not implemented)");
+  }
 
   /* Insert cast node if the kernel wants a different input data_type.  */
   if ( kernel_in_dt != parent_dt ) {
@@ -964,6 +967,19 @@ rb_ca_is_lazy_view_p (VALUE self)
 }
 
 /* Read CAMonOp's op_id for inspect/dump_tree consumers in Ruby.  */
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_monop_trapping (VALUE self)
+{
+  CAMonOp *mo;
+  TypedData_Get_Struct(self, CAMonOp, &camonop_data_type, mo);
+  return ( ! ca_monop_is_cast(mo->op_id)
+           && ca_monop_is_trapping(mo->op_id, mo->parent->data_type) )
+         ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_monop_op_id (VALUE self)
 {
@@ -1018,6 +1034,7 @@ rb_ca_monop_initialize_copy (VALUE self, VALUE other)
 {
   CAMonOp *ca, *cs;
   TypedData_Get_Struct(self,  CAMonOp, &camonop_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMonOp, &camonop_data_type, cs);
   if ( ca_func[CA_OBJ_MONOP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_MONOP, cs->parent->ndim);
@@ -1110,6 +1127,7 @@ Init_ca_obj_monop (void)
   /* op_id accessor for inspect / dump_tree consumers in Ruby.  */
   rb_define_method(rb_cCAMonOp, "__op_id__",
                    rb_ca_monop_op_id, 0);
+  rb_define_method(rb_cCAMonOp, "__trapping__", rb_ca_monop_trapping, 0);
 
   /* Test instrumentation (not user-facing API).  */
   rb_define_singleton_method(rb_cCAMonOp, "__reset_scratch_counter__",

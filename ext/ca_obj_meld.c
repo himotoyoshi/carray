@@ -25,7 +25,7 @@
                            (sortedness-aware O(n+K) merge is a future
                            optimisation, memo §7.3)
     fill_data:             K-fold ca_fill
-    create_mask:           horizontal propagation (mirrors CAStack)
+    create_mask:           mask CAMeld over the parents' masks (mirrors CAStack)
     fold_stride:           decline (return 0)
 
   Design ref: devel/MEMO_CAMELD_SEGMENT_MAJOR_ENGINE.md.  Meld-axis reduce
@@ -39,7 +39,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_all */
+#include "carray_internal.h"   /* ca_attach_all / ca_sync_all */
 #include "ca_obj_face.h"       /* ca_face_state_portable */
 
 /* ------------------------------------------------------------------- */
@@ -112,9 +112,9 @@ ca_meld_check_uniform (int32_t n_parents, CArray **parents, int8_t meld_axis)
     CArray *p = parents[i];
     if ( p->data_type != ref->data_type ) {
       rb_raise(rb_eArgError,
-               "CAMeld parents must have uniform data_type "
-               "(parent[0]=%d, parent[%d]=%d)",
-               ref->data_type, i, p->data_type);
+               "meld: the arrays must have the same data type "
+               "(array 0 is %s, array %d is %s)",
+               ca_type_name[ref->data_type], i, ca_type_name[p->data_type]);
     }
     if ( p->ndim != ref->ndim ) {
       rb_raise(rb_eArgError,
@@ -181,6 +181,8 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
   ca->attach    = 0;
   ca->nosync    = 0;
 
+  ca->mask_standins = NULL;
+  ca->mask_owner    = NULL;
   ca->n_parents = n_parents;
   ca->parents   = ALLOC_N(CArray *, n_parents);
   for ( i = 0; i < n_parents; i++ ) {
@@ -224,6 +226,13 @@ free_ca_meld (void *ap)
   CAMeld *ca = (CAMeld *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    if ( ca->mask_standins ) {
+      int32_t k;
+      for ( k = 0; k < ca->n_parents; k++ ) {
+        if ( ca->mask_standins[k] ) ca_free(ca->mask_standins[k]);
+      }
+      xfree(ca->mask_standins);
+    }
     xfree(ca->seg_offset);
     xfree(ca->parents);
     xfree(ca->dim);
@@ -273,10 +282,33 @@ ca_meld_tail_elements (const CAMeld *ca)
 
 /* view[..., v at meld_axis, ...] = parents[k][..., v - seg_offset[k], ...]
    where k = segment_of(v). */
+/* On the mask of a CAMeld: let its stand-ins give way to the parents' own
+   masks (see ca_multi_parent_mask_refresh). */
+static void
+ca_meld_mask_refresh (CAMeld *ca, int for_write)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_refresh((CArray *) ca, o->parents, o->mask_standins,
+                                 o->n_parents, for_write);
+  }
+}
+
+static void
+ca_meld_mask_settle (CAMeld *ca)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_settle((CArray *) ca, o->parents, o->mask_standins,
+                                o->n_parents);
+  }
+}
+
 static void
 ca_meld_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t v = idx[ma];
   int32_t   k;
@@ -311,6 +343,7 @@ ca_meld_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                          void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t bytes = ca->bytes;
   ca_size_t view_div[CA_RANK_MAX];   /* row-major divisor per view axis */
@@ -606,7 +639,9 @@ static void
 ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
   int8_t   ma = ca->meld_axis;
   ca_size_t native[CA_RANK_MAX];
   ca_size_t s;
@@ -616,29 +651,25 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   s = ca->bytes;
   for ( i = ca->ndim - 1; i >= 0; i-- ) { native[i] = s; s *= ca->dim[i]; }
 
+  /* Structural iff strides == native and the request is a box over the
+     view's own axes.  Equal strides alone are not enough: a size-1 axis
+     gives two axes the same native stride, and a flat window reshaped back
+     to ndim has native strides yet wraps across an axis.  The request is
+     over the view's addresses; see ca_xfer_stride_request_is_axis_box
+     (carray.h).  Inside the gate the step on every axis is 1 and the region
+     stays inside each axis, which ca_meld_xfer_stride_ma_internal (handed
+     no strides) depends on. */
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( strides[i] != native[i] ) { structural = 0; break; }
   }
-
-  if ( ! structural ) {
-    ca_meld_xfer_stride_per_cell(ca, starts, counts, strides, data, dir);
-    return;
+  if ( structural &&
+       ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
+    structural = 0;
   }
 
-  /* Bound check on meld_axis, after the gate and not before it.  Only once
-     strides == native is established does request axis ma mean view axis ma;
-     asked earlier, strides[ma] / native[ma] is not a step along the meld axis
-     and legal requests get rejected.  Inside the gate the step is 1, so the
-     region is starts[ma] .. starts[ma] + counts[ma].  ca_meld_xfer_stride_ma_
-     internal below is handed no strides at all and depends on both facts. */
-  {
-    ca_size_t req_lo = starts[ma];
-    ca_size_t req_hi = starts[ma] + counts[ma];
-    if ( counts[ma] > 0 && ( req_lo < 0 || req_hi > ca->dim[ma] ) ) {
-      rb_raise(rb_eIndexError,
-               "CAMeld xfer_stride meld_axis (axis %d) [%lld, %lld) out of range [0, %lld)",
-               (int) ma, (long long) req_lo, (long long) req_hi, (long long) ca->dim[ma]);
-    }
+  if ( ! structural || ! ca_fast_paths_enabled() ) {
+    ca_meld_xfer_stride_per_cell(ca, starts, counts, strides, data, dir);
+    return;
   }
 
   if ( ma == 0 ) {
@@ -652,15 +683,37 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 /* xfer_all                                                             */
 /* ------------------------------------------------------------------- */
 
+/* A parent's cells, delivered (PUT).  into_buffers writes them into the
+   buffer the parent's attach handed out, rather than through the parent to
+   what is behind it: the sync of an attached meld, which then syncs each
+   parent.  Writing past the buffer would leave it stale, and the parent's
+   own sync would push the stale buffer back over the cells just written. */
+static void
+ca_meld_put_parent (CArray *p, char *src, int into_buffers)
+{
+  if ( into_buffers ) {
+    memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
+  }
+  else {
+    ca_xfer_all(p, src, CA_XFER_PUT);
+  }
+}
+
 /* meld_axis == 0 best path: K contig xfer_all at prefix-sum offsets. */
 static void
-ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir)
+ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, int into_buffers)
 {
   ca_size_t tail_bytes = ca_meld_tail_elements(ca) * ca->bytes;
   char *d = (char *) data;
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_xfer_all(ca->parents[k], d + ca->seg_offset[k] * tail_bytes, dir);
+    char *seg = d + ca->seg_offset[k] * tail_bytes;
+    if ( dir == CA_XFER_PUT ) {
+      ca_meld_put_parent(ca->parents[k], seg, into_buffers);
+    }
+    else {
+      ca_xfer_all(ca->parents[k], seg, dir);
+    }
   }
 }
 
@@ -677,7 +730,8 @@ ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir)
    The naive per-cell odometer that this replaces cost ~2x eager on M2;
    chunked memcpy approaches memcpy bandwidth (eager parity target). */
 static void
-ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir)
+ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
+                              int into_buffers)
 {
   int8_t   ma = ca->meld_axis;
   int8_t   ndim = ca->ndim;
@@ -762,21 +816,27 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir)
     }
 
     if ( dir == CA_XFER_PUT ) {
-      ca_xfer_all(p, buf, CA_XFER_PUT);
+      ca_meld_put_parent(p, buf, into_buffers);
     }
     ALLOCV_END(holder);
   }
 }
 
 static void
+ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
+{
+  if ( ca->meld_axis == 0 && ca_fast_paths_enabled() ) {
+    ca_meld_xfer_all_ma0(ca, data, dir, into_buffers);
+  } else {
+    ca_meld_xfer_all_ma_internal(ca, data, dir, into_buffers);
+  }
+}
+
+static void
 ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
-  CAMeld *ca = (CAMeld *) ap;
-  if ( ca->meld_axis == 0 ) {
-    ca_meld_xfer_all_ma0(ca, data, dir);
-  } else {
-    ca_meld_xfer_all_ma_internal(ca, data, dir);
-  }
+  ca_meld_mask_refresh((CAMeld *) ap, dir == CA_XFER_PUT);
+  ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
 }
 
 /* ------------------------------------------------------------------- */
@@ -787,28 +847,42 @@ static void
 ca_meld_func_allocate (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 0);
   ca_attach_all(ca->parents, ca->n_parents);
   ca->ptr = xmalloc(ca_length(ca));
+}
+
+static VALUE
+ca_meld_attach_owned (VALUE arg)
+{
+  ca_axis_view_attach_owned((void *) arg);
+  return Qnil;
 }
 
 static void
 ca_meld_func_attach (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 0);
+  int32_t k;
+  int     tag = 0;
   ca_attach_all(ca->parents, ca->n_parents);
-  ca->ptr = xmalloc(ca_length(ca));
-  ca_meld_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  rb_protect(ca_meld_attach_owned, (VALUE) ca, &tag);
+  if ( tag ) {
+    for ( k = 0; k < ca->n_parents; k++ ) {
+      ca_detach(ca->parents[k]);
+    }
+    rb_jump_tag(tag);
+  }
 }
 
 static void
 ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  int32_t k;
-  ca_meld_func_xfer_all(ca, ca->ptr, CA_XFER_PUT);
-  for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_sync(ca->parents[k]);
-  }
+  ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
+  ca_sync_all(ca->parents, ca->n_parents);
+  ca_meld_mask_settle(ca);
 }
 
 static void
@@ -831,6 +905,7 @@ static void
 ca_meld_func_fill_data (void *ap, void *ptr)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refresh(ca, 1);
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
     ca_fill(ca->parents[k], ptr);
@@ -838,7 +913,7 @@ ca_meld_func_fill_data (void *ap, void *ptr)
 }
 
 /* ------------------------------------------------------------------- */
-/* create_mask (horizontal propagation, mirrors CAStack)                */
+/* create_mask (mirrors CAStack)                                        */
 /* ------------------------------------------------------------------- */
 
 static void
@@ -850,14 +925,16 @@ ca_meld_func_create_mask (void *ap)
   int32_t k;
 
   mask_parents = ALLOCV_N(CArray *, holder, ca->n_parents);
+  if ( ! ca->mask_standins ) {
+    ca->mask_standins = ALLOC_N(CArray *, ca->n_parents);
+    MEMZERO(ca->mask_standins, CArray *, ca->n_parents);
+  }
   for ( k = 0; k < ca->n_parents; k++ ) {
-    ca_update_mask(ca->parents[k]);
-    if ( ! ca->parents[k]->mask ) {
-      ca_create_mask(ca->parents[k]);
-    }
-    mask_parents[k] = ca->parents[k]->mask;
+    mask_parents[k] = ca_multi_parent_mask(ca->parents[k],
+                                           &ca->mask_standins[k]);
   }
   ca->mask = (CArray *) ca_meld_new(ca->n_parents, mask_parents, ca->meld_axis);
+  ((CAMeld *) ca->mask)->mask_owner = (CArray *) ca;
   ALLOCV_END(holder);
 }
 
@@ -876,6 +953,56 @@ ca_meld_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* operation table                                                      */
 /* ------------------------------------------------------------------- */
 
+/* The table's write slots: after a write, refuse a true that reached the
+   stand-in of a value array or a mask array (ca_multi_parent_mask_check).
+   Only the mask of a CAMeld has stand-ins to check. */
+static void
+ca_meld_mask_check (CAMeld *ca)
+{
+  CAMeld *o = (CAMeld *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca_multi_parent_mask_check((CArray *) ca, o->parents, o->mask_standins,
+                               o->n_parents);
+  }
+}
+
+static void
+ca_meld_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
+{
+  ca_meld_func_xfer_index(ap, idx, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
+                         int dir)
+{
+  ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                          ca_size_t *strides, void *data, int dir)
+{
+  ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_xfer_all (void *ap, void *data, int dir)
+{
+  ca_meld_func_xfer_all(ap, data, dir);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+}
+
+static void
+ca_meld_put_fill_data (void *ap, void *ptr)
+{
+  ca_meld_func_fill_data(ap, ptr);
+  ca_meld_mask_check((CAMeld *) ap);
+}
+
 ca_operation_function_t ca_meld_func = {
   -1, /* CA_OBJ_MELD */
   CA_VIEW_ARRAY,
@@ -885,29 +1012,18 @@ ca_operation_function_t ca_meld_func = {
   ca_meld_func_attach,
   ca_meld_func_sync,
   ca_meld_func_detach,
-  ca_meld_func_fill_data,
+  ca_meld_put_fill_data,
   ca_meld_func_create_mask,
-  ca_meld_func_xfer_index,
-  ca_meld_func_xfer_addrs,
+  ca_meld_put_xfer_index,
+  ca_meld_put_xfer_addrs,
   ca_meld_func_fold_stride,
-  ca_meld_func_xfer_stride,
-  ca_meld_func_xfer_all,
+  ca_meld_put_xfer_stride,
+  ca_meld_put_xfer_all,
 };
 
 /* ------------------------------------------------------------------- */
 /* Ruby surface                                                         */
 /* ------------------------------------------------------------------- */
-
-/* One-level strip of a Face VALUE to its storage-side parent (non-Face as-is).
-   Keeps the @parent ivar in step with the pre-stripped C parents, so the
-   Ruby-visible chain of a melded Face is single-Face too. */
-static VALUE
-ca_meld_face_parent1 (VALUE v)
-{
-  CArray *c;
-  TypedData_Get_Struct(v, CArray, &carray_data_type, c);
-  return ca_is_face(c) ? rb_ca_parent(v) : v;
-}
 
 VALUE
 rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
@@ -932,7 +1048,7 @@ rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
   ca  = ca_meld_new((int32_t) n, parents, meld_axis);
   obj = ca_wrap_struct(ca);
   rb_ivar_set(obj, id_parents, rb_ary_dup(parents_ary));
-  rb_ca_set_parent(obj, ca_meld_face_parent1(rb_ary_entry(parents_ary, 0)));
+  rb_ca_set_parent(obj, ca_face_strip_one(rb_ary_entry(parents_ary, 0)));
   ALLOCV_END(holder);
   return obj;
 }
@@ -949,8 +1065,14 @@ rb_ca_meld_initialize_copy (VALUE self, VALUE other)
 {
   CAMeld *ca, *cs;
   TypedData_Get_Struct(self,  CAMeld, &cameld_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAMeld, &cameld_data_type, cs);
   ca_meld_setup(ca, cs->n_parents, cs->parents, cs->meld_axis);
+  /* A copy of a meld's mask reads and writes the same stand-ins, so it
+     answers to the same owner: its writes reach the parents' masks.  The
+     copy holds the owner alive through the masked_array ivar that dup
+     carries over (see rb_ca_mask_array). */
+  ca->mask_owner = cs->mask_owner;
   return self;
 }
 
@@ -981,6 +1103,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
         NUM2LONG(axis_val), (int) ref->ndim, "CAMeld.new");
   }
   TypedData_Get_Struct(self, CAMeld, &cameld_data_type, ca);
+  ca_check_uninitialized(ca);
   parents = ALLOCV_N(CArray *, holder, n);
   for ( i = 0; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);
@@ -989,7 +1112,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
   }
   ca_meld_setup(ca, (int32_t) n, parents, meld_axis);
   rb_ivar_set(self, id_parents, rb_ary_dup(list));
-  rb_ca_set_parent(self, ca_meld_face_parent1(rb_ary_entry(list, 0)));
+  rb_ca_set_parent(self, ca_face_strip_one(rb_ary_entry(list, 0)));
   ALLOCV_END(holder);
   return self;
 }
@@ -1011,61 +1134,20 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
 {
-  VALUE list, kwargs;
-  long n, i;
-  int  all_face = 1;
-  VALUE face_class = Qnil;
-  CArray *ref_face = NULL;
+  VALUE list, kwargs, face_class;
   VALUE obj;
 
   rb_scan_args(argc, argv, "1:", &list, &kwargs);
   Check_Type(list, T_ARRAY);
-  n = RARRAY_LEN(list);
-  if ( n <= 0 ) {
+  if ( RARRAY_LEN(list) <= 0 ) {
     rb_raise(rb_eArgError, "CAMeld.new requires at least one parent");
   }
-
-  for ( i = 0; i < n; i++ ) {
-    VALUE p = rb_ary_entry(list, i);
-    CArray *ca;
-    rb_check_carray_object(p);
-    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( !ca_is_face(ca) ) { all_face = 0; break; }
-    if ( i == 0 ) {
-      face_class = rb_obj_class(p);
-      ref_face   = ca;
-    } else if ( rb_obj_class(p) != face_class ) {
-      all_face = 0; break;
-    }
-  }
-
-  /* A single parent has nothing to weld against, so its Face rides the
-     chain as it always did; refuse and lift only apply from two up. */
-  if ( all_face && n > 1
-       && !ca_face_state_portable(ref_face->obj_type, face_class) ) {
-    rb_raise(rb_eArgError,
-             "CAMeld.new: %s state is not portable across multiple "
-             "parents (= per-parent storage like CAConstString's buffer); "
-             "strip Face with .parent if a storage-level CAMeld is intended",
-             rb_class2name(face_class));
-  }
+  face_class = ca_face_list_class(list, "CAMeld.new");
 
   obj = rb_obj_alloc(klass);
   rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
 
-  if ( !all_face || n < 2 ) return obj;
-
-  for ( i = 1; i < n; i++ ) {
-    VALUE p = rb_ary_entry(list, i);
-    CArray *ca;
-    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( !ca_face_state_compatible(rb_ary_entry(list, 0), ref_face, p, ca) ) {
-      rb_raise(rb_eArgError,
-               "CAMeld.new: Face state mismatch across parents "
-               "(= %s instance at index %ld differs in state from index 0)",
-               rb_class2name(face_class), i);
-    }
-  }
+  if ( NIL_P(face_class) ) return obj;
   return ca_face_lift(obj, rb_ary_entry(list, 0));
 }
 

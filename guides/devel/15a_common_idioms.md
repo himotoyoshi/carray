@@ -231,7 +231,7 @@ ca_attach_n(2, ca, ci);
 ca_detach_n(2, ca, ci);
 ```
 
-The R1–R5 contract is in [ch. 4](04_attach_lifecycle.md); the short
+The R1–R6 contract is in [ch. 4](04_attach_lifecycle.md); the short
 version is: `_n` opens left-to-right and detaches right-to-left for you,
 so it is symmetric.
 
@@ -246,23 +246,22 @@ ca_detach_n(2, ca_in, ca_out);
 
 ### Block-scoped attach
 
-When the work is one self-contained chunk, prefer the block-form macro
-that handles attach / sync / detach automatically — it's the same
-discipline `attach!` enforces in Ruby, lifted to C:
+When the work is one self-contained chunk, prefer `rb_ca_call_with_buffer`,
+which handles attach / sync / detach for you — the same discipline
+`attach!` enforces in Ruby, lifted to C:
 
 ```c
-double   *p;
-ca_size_t n;
-CA_WITH_BUFFER_WRITABLE(ca, double, p, n) {
-  /* p, n are the contig buffer + element count;
-     ca_sync + ca_detach run on block exit */
-  fftw_execute_dft(plan, p, p);
+static void
+fft_body (void *user_data, void *ptr, ca_size_t n)
+{
+  fftw_execute_dft((fftw_plan) user_data, ptr, ptr);
 }
+
+rb_ca_call_with_buffer(r_ca, /*writable=*/1, fft_body, plan);
 ```
 
-If the body may raise a Ruby exception, use `rb_ca_call_with_buffer`
-(the `rb_ensure`-protected function form) instead —
-[ch. 13](13_sweep_author_surface.md).
+The array is synced and detached however the body is left, including when
+it raises ([ch. 13](13_sweep_author_surface.md)).
 
 **Never** call `ca_attach` at a kernel entry as a shortcut for "give me
 contig data". That is the materialise-everything anti-pattern the
@@ -420,9 +419,23 @@ rb_raise(rb_eRangeError,  "value out of range for %s", ca_type_name[data_type]);
 rb_raise(rb_eRuntimeError,"internal: unexpected obj_type %d", ca->obj_type);
 ```
 
+An index into `n` places goes through `ca_index_in_range(idx, n, "index")`
+(`carray_internal.h`): a negative index counts from the end, and one
+outside after that raises `IndexError` naming the method the user called.
+`spec/spec_ai/test_index_out_of_range.rb` lists the doors.
+
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
-matches Ruby convention; `RuntimeError` is for internal invariants the
-user should never hit (a bug, not a misuse).
+matches Ruby convention. A data_type an operation cannot take is
+`CArray::DataTypeError` (`rb_eCADataTypeError`), a subclass of
+`TypeError`, so `rescue TypeError` catches it too; the wrong kind of
+operand (`time + 1`) is a plain `TypeError`. `RuntimeError` is for
+internal invariants the user should never hit (a bug, not a misuse), with
+one deliberate exception: a write to a read-only array, and a `to_ca`
+that refuses `writable: true`, raise `RuntimeError`.
+
+`NotImplementedError` is a `ScriptError`, which a bare `rescue` does not
+catch. It is kept for an operation an iterator member does not provide;
+anything a caller can get wrong raises one of the classes above.
 
 ### Don't editorialise
 

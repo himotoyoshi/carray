@@ -39,20 +39,23 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
   int8_t data_ndim = 0;
   int8_t i, j;
 
+  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
+  }
   for (i = 0; i < ndim; i++) {
     if (count[i] < 0) {
-      rb_raise(rb_eRuntimeError,
+      rb_raise(rb_eArgError,
                "negative size for %i-th dimension specified", i);
     }
     if (count[i]) nrpt *= count[i];
     else          data_ndim += 1;
   }
   if (data_ndim != parent->ndim) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "mismatch in ndim between original array and determined by # of dummies");
   }
   if (((double) parent->elements) * nrpt > CA_LENGTH_MAX) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
+    rb_raise(rb_eArgError, "too large byte length");
   }
   (void) total_elements_d;
 
@@ -77,6 +80,12 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_REPEAT, parent,
                   parent->data_type, parent->bytes,
                   ndim, newdim, strides, 0);
@@ -91,7 +100,9 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
 CAStride *
 ca_repeat_new (CArray *parent, int8_t ndim, ca_size_t *count)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
+  CAStride *ca;
+  ca_repeat_setup(NULL, parent, ndim, count);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
   ca_repeat_setup(ca, parent, ndim, count);
   return ca;
 }
@@ -155,7 +166,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
       TypedData_Get_Struct(argv[0], CArray, &carray_data_type, ct);
     }
     if ( ct->ndim < ca->ndim ) {
-      rb_raise(rb_eRuntimeError, "invalid ndim to template");
+      rb_raise(rb_eArgError, "invalid ndim to template");
     }
     args = rb_ary_new();
     ndim = 0;
@@ -208,6 +219,10 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
     return rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
   }
 
+  if ( argc > CA_RANK_MAX ) {         /* count[] and dim[] hold CA_RANK_MAX */
+    rb_raise(rb_eArgError, "invalid ndim %d", argc);
+  }
+
   repeat = 1;
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_kind_of(argv[i], rb_cSymbol) ) {
@@ -255,6 +270,7 @@ rb_ca_repeat_initialize_copy (VALUE self, VALUE other)
 {
   CAStride *ca, *cs;
   TypedData_Get_Struct(self,  CAStride, &castride_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAStride, &castride_data_type, cs);
   if ( ca_func[CA_OBJ_REPEAT].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_REPEAT, cs->ndim);

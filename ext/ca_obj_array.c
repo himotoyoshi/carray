@@ -9,6 +9,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 
 /* -------------------------------------------------------------------- */
 
@@ -137,7 +138,6 @@ carray_setup_i (CArray *ca,
                 CArray *mask, int allocate, int use_calloc, char *adopt_ptr)
 {
   ca_size_t elements;
-  double  length;
   int8_t i;
   ca_size_t k;
 
@@ -147,21 +147,7 @@ carray_setup_i (CArray *ca,
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
-  /* calculate total byte length using double to detect overflow */
-  length = bytes;
-  for (i=0; i<ndim; i++) {
-    length *= dim[i];
-  }
-
-  if ( length > CA_LENGTH_MAX ) {
-    rb_raise(rb_eRuntimeError, "too large byte length");
-  }
-
-  /* calculate total number of elements (safe after length check above) */
-  elements = 1;
-  for (i=0; i<ndim; i++) {
-    elements *= dim[i];
-  }
+  elements = ca_shape_elements(ndim, dim, bytes);
 
   /* An adopted buffer produces an owning entity (CA_OBJ_ARRAY), not a
      wrap: free_carray xfree()s ca->ptr, so the caller's buffer must be
@@ -171,6 +157,12 @@ carray_setup_i (CArray *ca,
   if ( adopt_ptr && data_type == CA_OBJECT ) {
     rb_raise(rb_eRuntimeError,
              "cannot adopt a raw buffer as a CA_OBJECT array");
+  }
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
   }
 
   /* set values to the struct members */
@@ -274,7 +266,9 @@ CArray *
 carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca  = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
+  CArray *ca;
+  carray_setup(NULL, data_type, ndim, dim, bytes, mask);
+  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
@@ -283,7 +277,9 @@ CArray *
 carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca  = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
+  CArray *ca;
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, mask);
+  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_safe_setup(ca, data_type, ndim, dim, bytes, mask);
   return ca;
 }
@@ -583,6 +579,8 @@ ca_fill_stride_buffer (char *dst, ca_size_t bytes, ca_size_t base, int8_t ndim,
   ca_size_t inner_count, inner_step;
   int8_t    outer_ndim, k;
 
+  if ( ca_region_is_empty(ndim, counts) ) return;
+
   if ( ndim <= 0 ) {
     memcpy(dst + base * bytes, ptr, bytes);
     return;
@@ -857,6 +855,7 @@ ca_scan_construct_args (int argc, VALUE *argv, int8_t *data_type,
   rb_ca_guess_type_and_bytes(rtype, rbytes, data_type, bytes);
 
   Check_Type(rdim, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
   *ndim = RARRAY_LEN(rdim);
   for (i=0; i<*ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -886,6 +885,10 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
   ca_scan_construct_args(argc, argv, &data_type, &bytes, &ndim, dim);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  ca_check_uninitialized(ca);
+  /* Checks first: a rejected argument leaves the struct as allocated, so
+     it takes no pool and can be initialized again. */
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, NULL);
   if ( ca_func[CA_OBJ_ARRAY].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_ARRAY, ndim);
   }
@@ -912,10 +915,7 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
     else if ( ca->ndim > 0 ) {
       ca_size_t idx[CA_RANK_MAX];
       volatile VALUE ridx = rb_ary_new2(ca->ndim);
-      ca_attach(ca);
       rb_ca_index_walk(self, ca, 0, idx, ridx, CA_LOOP_STORE);
-      ca_sync(ca);
-      ca_detach(ca);
     }
     else {
       /* 0-D safety net (rare from CArray.new path): yield no args. */
@@ -1109,6 +1109,7 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   rb_call_super(1, &other);
 
   TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
 
   ca_update_mask(cs);
@@ -1117,9 +1118,110 @@ rb_ca_initialize_copy (VALUE self, VALUE other)
   }
   carray_setup(ca, cs->data_type, cs->ndim, cs->dim, cs->bytes, cs->mask);
 
-  memcpy(ca->ptr, cs->ptr, ca_length(cs));
+  if ( cs->ptr ) {
+    memcpy(ca->ptr, cs->ptr, ca_length(cs));
+  }
+  else {
+    /* An entity cold at rest (a CAObject's mask, a source) is read
+       through its slots. */
+    ca_copy_data(cs, ca->ptr);
+  }
 
   return self;
+}
+
+/* dup and clone go through here before each class's initialize_copy.  A
+   view's copy is another view onto the same parent (Ruby's shallow copy),
+   rebuilt by that class from the parent, so what the original was told
+   about itself -- that it is a value array, read-only, a mask -- has to be
+   carried across here, once for every class.  An entity's copy owns new
+   memory, so it is not a value array and its writability is its own, but
+   a copy of a mask is still a mask (its class, CArrayMask, says so) and
+   can no more hold a mask of its own than the original. */
+static void
+ca_dup_keep_state (VALUE self, VALUE other)
+{
+  CArray *ca, *cs;
+  if ( ! rb_obj_is_kind_of(other, rb_cCArray) ) {
+    return;
+  }
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
+  if ( ca_is_view(cs) ) {
+    ca_keep_chain_flags(ca, cs);
+  }
+  else if ( ca_is_mask_array(cs) ) {
+    ca_set_flag(ca, CA_FLAG_MASK_ARRAY);
+  }
+}
+
+static VALUE
+rb_ca_initialize_dup (VALUE self, VALUE other)
+{
+  rb_call_super(1, &other);
+  ca_dup_keep_state(self, other);
+  return self;
+}
+
+/* clone freezes its result without calling #freeze, so the read-only flag
+   that CArray#freeze sets would be missing: the copy refuses writes as
+   frozen but answers read_only? false.  Set it here when the result is
+   going to be frozen (freeze: true, or freeze: omitted and the original
+   frozen). */
+static VALUE
+rb_ca_initialize_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE orig, opts, vfreeze = Qnil;
+  int will_freeze;
+
+  rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
+  rb_scan_args(argc, argv, "1:", &orig, &opts);
+  ca_dup_keep_state(self, orig);
+
+  if ( ! NIL_P(opts) ) {
+    vfreeze = rb_hash_lookup2(opts, ID2SYM(rb_intern("freeze")), Qnil);
+  }
+  will_freeze = NIL_P(vfreeze) ? OBJ_FROZEN(orig) : RTEST(vfreeze);
+  if ( will_freeze ) {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    ca_set_flag(ca, CA_FLAG_READ_ONLY);
+  }
+  return self;
+}
+
+/* A wrap borrows memory it does not own.  Object#dup would give the copy
+   the wrap's class over memory the copy owns, so a subclass that names what
+   it borrows (a libvips image's pixels) would name an array that borrows
+   nothing.  The copy is a plain CArray, as #copy is: the name goes with
+   what is borrowed. */
+static VALUE
+rb_ca_wrap_dup (VALUE self)
+{
+  return rb_ca_copy(self);
+}
+
+static VALUE
+rb_ca_wrap_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE opt = Qnil, rfreeze = Qnil;
+  volatile VALUE obj;
+  rb_scan_args(argc, argv, "0:", &opt);
+  if ( ! NIL_P(opt) ) {
+    /* rb_get_kwargs refuses any key but freeze:, as Kernel#clone does. */
+    ID kw[1];
+    VALUE val[1];
+    kw[0] = rb_intern("freeze");
+    rb_get_kwargs(opt, kw, 0, 1, val);
+    if ( val[0] != Qundef ) {
+      rfreeze = val[0];
+    }
+  }
+  obj = rb_ca_copy(self);
+  if ( RTEST(rfreeze) || ( NIL_P(rfreeze) && OBJ_FROZEN(self) ) ) {
+    rb_obj_freeze(obj);
+  }
+  return obj;
 }
 
 /* @overload wrap (data_type, dim, bytes=0) { target }
@@ -1144,6 +1246,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1212,6 +1315,7 @@ rb_cs_initialize (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   TypedData_Get_Struct(self, CScalar, &cscalar_data_type, ca);
+  ca_check_uninitialized(ca);
   cscalar_setup(ca, data_type, bytes, NULL);
 
   if ( rb_block_given_p() ) {
@@ -1405,6 +1509,7 @@ rb_cs_initialize_copy (VALUE self, VALUE other)
   CScalar *ca, *cs;
 
   TypedData_Get_Struct(self,  CScalar, &cscalar_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CScalar, &cscalar_data_type, cs);
 
   cscalar_setup(ca, cs->data_type, cs->bytes, NULL);
@@ -1447,6 +1552,7 @@ rb_ca_s_alloc_uninit (VALUE klass, VALUE rtype, VALUE rshape)
   int8_t i;
   rb_ca_guess_type_and_bytes(rtype, Qnil, &data_type, &bytes);
   Check_Type(rshape, T_ARRAY);
+  CA_CHECK_RANK(RARRAY_LEN(rshape));   /* before dim[] is filled */
   ndim = (int8_t) RARRAY_LEN(rshape);
   for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
   return rb_carray_new(data_type, ndim, dim, bytes, NULL);
@@ -1521,6 +1627,10 @@ Init_ca_obj_array (void)
 #endif
 
   rb_define_method(rb_cCArray, "initialize_copy", rb_ca_initialize_copy, 1);
+  rb_define_method(rb_cCArray, "initialize_dup", rb_ca_initialize_dup, 1);
+  rb_define_method(rb_cCArray, "initialize_clone", rb_ca_initialize_clone, -1);
+  rb_define_method(rb_cCAWrap, "dup",   rb_ca_wrap_dup, 0);
+  rb_define_method(rb_cCAWrap, "clone", rb_ca_wrap_clone, -1);
   rb_define_singleton_method(rb_cCArray, "wrap", rb_ca_s_wrap, -1);
 
   /* ------------------------------------------------------------------- */

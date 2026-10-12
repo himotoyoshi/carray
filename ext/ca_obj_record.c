@@ -20,6 +20,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"
 
 typedef struct {
   /* === CAView prefix === */
@@ -175,18 +176,6 @@ ca_record_func_allocate (void *ap)
   ca->ptr = ca->parent->ptr;
 }
 
-static void
-ca_record_func_create_mask (void *ap)
-{
-  CARecord *ca = (CARecord *) ap;
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
-  ca->mask = (CArray *) ca_refer_new(ca->parent->mask,
-                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
-}
-
 ca_operation_function_t ca_record_func = {
   -1, /* CA_OBJ_RECORD — filled by ca_install_obj_type */
   CA_VIEW_ARRAY,
@@ -197,7 +186,7 @@ ca_operation_function_t ca_record_func = {
   ca_face_sync,
   ca_face_detach,
   ca_face_fill_data,
-  ca_record_func_create_mask,
+  ca_view_func_create_mask,
   ca_face_xfer_index,
   ca_face_xfer_addrs,
   NULL,                              /* fold_stride: identity Face is not foldable */
@@ -229,6 +218,19 @@ ca_record_build (VALUE klass, VALUE data_class, VALUE parent_val)
     rb_raise(rb_eTypeError,
              "CARecord requires a CA_FIXLEN parent (got data_type=%d)",
              parent_ca->data_type);
+  }
+  /* Each record is read and written at the data_class's member offsets,
+     so the parent's cells have to be exactly that size. */
+  {
+    ca_size_t record_bytes =
+      NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
+    if ( parent_ca->bytes != record_bytes ) {
+      rb_raise(rb_eArgError,
+               "CARecord: %"PRIsVALUE" records are %lld bytes, the array's "
+               "elements are %lld bytes",
+               data_class, (long long) record_bytes,
+               (long long) parent_ca->bytes);
+    }
   }
   ca  = ca_record_new(parent_ca, data_class);
   obj = TypedData_Wrap_Struct(klass, &carecord_data_type, ca);
@@ -280,7 +282,9 @@ rb_ca_record_s_new (int argc, VALUE *argv, VALUE klass)
   }
   bytes = NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
 
-  parent_val = rb_carray_new(CA_FIXLEN, ndim, dim, bytes, NULL);
+  /* Zero-filled, as CArray.new is: a new record holds zeros, not the bytes
+     the allocator last handed out. */
+  parent_val = rb_carray_new_safe(CA_FIXLEN, ndim, dim, bytes, NULL);
   return ca_record_build(klass, data_class, parent_val);
 }
 
@@ -328,7 +332,7 @@ rb_ca_record_s_data_class_dsl (int argc, VALUE *argv, VALUE klass)
   }
   rb_scan_args(argc, argv, "1", &given);
   if ( ! NIL_P(current) ) {
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eArgError,
              "data_class already fixed to %"PRIsVALUE
              "; CARecord subclass data_class is immutable once set",
              current);
@@ -352,11 +356,16 @@ rb_ca_record_initialize_copy (VALUE self, VALUE other)
 {
   CARecord *ca, *cs;
   TypedData_Get_Struct(self,  CARecord, &carecord_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CARecord, &carecord_data_type, cs);
   if ( ca_func[CA_OBJ_RECORD].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_RECORD, cs->parent->ndim);
   }
   ca_record_setup(ca, cs->parent, cs->data_class);
+  /* Marshal loads into an empty instance through here without copying
+     ivars, so the parent pin is set from `other`, not inherited. */
+  rb_ca_set_parent(self, rb_ca_parent(other));
+  rb_ivar_set(self, rb_intern("member"), rb_hash_new());
   return self;
 }
 
@@ -401,7 +410,7 @@ ca_check_data_class (VALUE rtype)
 {
   if ( ! rb_obj_is_data_class(rtype) ) {
     VALUE inspect = rb_inspect(rtype);
-    rb_raise(rb_eRuntimeError,
+    rb_raise(rb_eTypeError,
              "<%s> is not a data_class, which should has the features\n" \
              " * constant data_class::DATA_SIZE    -> integer\n" \
              " * constant data_class::MEMBERS      -> array of string\n" \
@@ -429,6 +438,26 @@ ca_record_state_compatible (CArray *a, CArray *b)
   return (ra->data_class == rb->data_class) ? 1 : 0;
 }
 
+/* Write hook: a struct element becomes its bytes, on every store path (a
+   block or index store writes to the storage, below the Face, where the
+   element itself could not be cast).  A struct of another data_class is
+   refused; anything else is left to the fixlen store (a String is bytes). */
+static VALUE
+ca_record_element_to_storage (VALUE self, VALUE obj)
+{
+  volatile VALUE data_class = rb_ca_data_class(self);
+  if ( rb_obj_is_kind_of(obj, data_class) ) {
+    return rb_funcall(obj, rb_intern("encode"), 0);
+  }
+  if ( RB_TYPE_P(obj, T_OBJECT) && ! RB_TYPE_P(obj, T_STRING)
+       && RTEST(rb_obj_is_data_class(rb_obj_class(obj))) ) {
+    rb_raise(rb_eTypeError,
+             "a %"PRIsVALUE" is not an element of a record array of %"PRIsVALUE,
+             rb_obj_class(obj), data_class);
+  }
+  return obj;
+}
+
 /* ------------------------------------------------------------------------- */
 
 void
@@ -453,6 +482,12 @@ Init_ca_obj_record (void)
      instance. */
   ca_face_register_state_compatible(CA_OBJ_RECORD,
                                     ca_record_state_compatible);
+
+  /* The record's bytes are its members: a MemoryView consumer reads them
+     through the T{...} struct format built from the data_class. */
+  ca_face_register_memory_view(CA_OBJ_RECORD, 1);
+  ca_face_register_element_to_storage(CA_OBJ_RECORD,
+                                      ca_record_element_to_storage);
 
   rb_define_alloc_func(rb_cCARecord, rb_ca_record_s_allocate);
   rb_define_method(rb_cCARecord, "initialize_copy",

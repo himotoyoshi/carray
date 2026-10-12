@@ -38,12 +38,36 @@ class CAFrame
   def sort_by_key(*specs, order: :asc, masked_position: :last)
     raise ArgumentError, "sort_by_key requires at least one key" if specs.empty?
     validate_sort_order(order)
-    keys = specs.map do |spec|
+    named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
-      col = sort_key_column(name)
+      [name.to_s, sort_key_column(name), dir]
+    end
+    keys = named.map do |name, col, dir|
       dir == :desc ? col.order(descending: true, method: :dense) : col
     end
     select_rows(CArray.sort_addr(*keys, masked_position: masked_position))
+  rescue ArgumentError, CArray::DataTypeError => e
+    raise unless named
+    name, col, = named.find { |_, c, _| !sortable_key?(c) }
+    raise unless name
+    reason = e.message.sub(/\A\w+: /, "")
+    if col.face?
+      # The core names the conversion as an array method; in a frame it is
+      # written with sort_by.
+      reason = "#{reason.split(";").first}; sort by its values with " \
+               "sort_by { |f| f[#{name.inspect}].to_type(:object) }, or by its " \
+               "storage with sort_by { |f| f[#{name.inspect}].parent }"
+    end
+    raise e.class, "sort_by_key: the column #{name.inspect} cannot be sorted: #{reason}"
+  end
+
+  # Whether +col+ can be a sort key, asked of an empty slice of it so that
+  # nothing is sorted: used only to name the column a refusal was about.
+  private def sortable_key?(col)
+    CArray.sort_addr(col[0...0])
+    true
+  rescue ArgumentError, CArray::DataTypeError
+    false
   end
 
   # Sort rows by key columns the block builds (memo §4.3 escape). The block

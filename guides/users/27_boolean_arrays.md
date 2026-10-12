@@ -59,7 +59,7 @@ Comparisons are the normal source of boolean arrays; you rarely build one by han
 ```ruby
 CA_INT([0, 1, 0]).to_type(CA_BOOLEAN)   #  => [0, 1, 0]   ✓
 CA_INT([0, 3, 0]).to_type(CA_BOOLEAN)
-#  RuntimeError: out of range to cast to boolean (0 or 1)
+#  RangeError: out of range to cast to boolean (0 or 1)
 CA_INT([2, 0]).boolean                  #  same error
 ```
 
@@ -324,7 +324,7 @@ Masks are stored as boolean arrays too (see [Masks and missing values](05_masks.
 ## Conversions
 
 ```ruby
-b.to_type(CA_INT32)   #  => int32 [ 1, 0, 1 ]     (widen to integer for numeric use)
+b.to_type(:int32)     #  => int32 [ 1, 0, 1 ]     (widen to integer for numeric use)
 b.int32               #  => same
 b.to_a                #  => [true, false, true]   (Ruby-land; see the two
                       #     representations above)

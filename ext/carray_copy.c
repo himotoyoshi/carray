@@ -72,14 +72,32 @@ ca_copy (void *ap)
 
   pair[0] = ca;
   pair[1] = co;
-  ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
+
+  /* Object cells read from a view that computes them exist only in
+     co->ptr, and copying the mask afterwards can build it -- a lazy
+     expression's mask is computed from its operands -- which allocates.
+     Hold them until the copy is complete.  carray_new has filled the
+     cells with valid VALUEs. */
+  if ( ca_is_object_type(co) ) {
+    int tag = 0;
+    int guard = ca_gc_hold_push(co->ptr, co->elements);
+    rb_protect(ca_copy_fill, (VALUE) pair, &tag);
+    ca_gc_hold_pop_to(guard);
+    if ( tag ) {
+      ca_free(co);
+      rb_jump_tag(tag);
+    }
+  }
+  else {
+    ca_fill_or_free(co, ca_copy_fill, (VALUE) pair);
+  }
 
   return co;
 }
 
 /* Ruby entry for `CArray#copy`.  Wraps `ca_copy` and, when `self` is a
  * Face (e.g. CARecord), lifts the wrapped result so the derived class
- * identity is preserved on the copy. */
+ * identity is preserved on the copy.  The copy keeps self's attributes. */
 VALUE
 rb_ca_copy (VALUE self)
 {
@@ -97,6 +115,7 @@ rb_ca_copy (VALUE self)
   obj = ca_wrap_struct(co);
   ca_gc_hold_pop_to(guard);
   CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  rb_ca_inherit_attr(obj, self);
   return obj;
 }
 
@@ -154,7 +173,7 @@ rb_ca_to_ca (int argc, VALUE *argv, VALUE self)
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can't modify read-only carray");
+      rb_raise(rb_eRuntimeError, "can not modify read-only array");
     }
   }
   return self;
@@ -220,9 +239,8 @@ ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
  * The arity dispatch matches `CArray.new` (ca_obj_array.c) so the two
  * factories behave the same for block-driven initialisation. */
 static VALUE
-rb_ca_template_method (int argc, VALUE *argv, VALUE self)
+rb_ca_template_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
-  volatile VALUE ropt = rb_pop_options(&argc, &argv);
   volatile VALUE obj, rtype, rbytes = Qnil;
   CArray *ca, *co;
   int8_t data_type;
@@ -256,10 +274,7 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
       if ( co->ndim > 0 ) {
         ca_size_t idx[CA_RANK_MAX];
         volatile VALUE ridx = rb_ary_new2(co->ndim);
-        ca_attach(co);
         rb_ca_index_walk(obj, co, 0, idx, ridx, CA_LOOP_STORE);
-        ca_sync(co);
-        ca_detach(co);
       }
       else {
         volatile VALUE rval = rb_yield_values2(0, NULL);
@@ -283,6 +298,13 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
+static VALUE
+rb_ca_template_method (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_template_kw(argc, argv, ropt, self);
+}
+
 VALUE
 rb_ca_template (VALUE self)
 {
@@ -292,10 +314,9 @@ rb_ca_template (VALUE self)
 VALUE
 rb_ca_template_with_type (VALUE self, VALUE rtype, VALUE rbytes)
 {
-  VALUE ropt = rb_hash_new();
-  VALUE args[2] = { rtype, ropt };
+  volatile VALUE ropt = rb_hash_new();
   rb_set_options(ropt, "bytes", rbytes);
-  return rb_ca_template_method(2, args, self);
+  return rb_ca_template_kw(1, &rtype, ropt, self);
 }
 
 /* Returns `template` of the first non-scalar among `n` variadic CArray

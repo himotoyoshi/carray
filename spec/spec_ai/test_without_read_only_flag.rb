@@ -8,7 +8,7 @@ require "carray"
 # Contract (see devel/PROPOSAL_WITHOUT_READ_ONLY_FLAG.md):
 #   - block-only, rb_ensure guarantees the flag is restored on both normal
 #     return and raise
-#   - self only (does not walk parent chains, does not touch ca->mask flags)
+#   - self and its mask (does not walk parent chains)
 #   - private visibility, invoked via send(:without_read_only_flag)
 #   - direct mask= remains readonly-strict; only the bridge escape passes
 
@@ -144,5 +144,30 @@ class TestWithoutReadOnlyFlag < Test::Unit::TestCase
     assert_equal([false, true, false, true, false], mm.mask.to_a)
     # 1 + 3 + 5 = 9; masked cells skipped
     assert_in_delta(9.0, mm.sum.to_f, 1e-12)
+  end
+
+  # (10) Once CArray#mask has handed out a read-only array's mask, the mask
+  #      carries the read-only flag too.  The escape lifts it with self's,
+  #      so the mask can still be replaced or edited inside the block.
+  def test_mask_replaced_after_it_was_handed_out
+    w = read_only_chunk([1, nil, 3])
+    assert_true(w.mask.read_only?)
+    w.send(:without_read_only_flag) { w.mask = CArray.boolean(3) { |i| i == 0 } }
+    assert_equal([true, false, false], w.mask.to_a)
+    w.send(:without_read_only_flag) { w.mask[2] = true }
+    assert_equal([true, false, true], w.mask.to_a)
+  end
+
+  # (11) Both flags are back on the way out, also on the mask the block
+  #      put in place, and also when the block raises.
+  def test_mask_flag_restored_on_exit
+    w = read_only_chunk([1, nil, 3])
+    w.send(:without_read_only_flag) { w.mask = CArray.boolean(3) { false } }
+    assert_raise(RuntimeError) { w.mask[0] = true }
+    assert_raise(ZeroDivisionError) do
+      w.send(:without_read_only_flag) { 1 / 0 }
+    end
+    assert_true(w.read_only?)
+    assert_raise(RuntimeError) { w.mask[0] = true }
   end
 end

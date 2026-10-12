@@ -138,4 +138,14 @@ class TestMinCountAxisReduction < Test::Unit::TestCase
     assert_equal UNDEF, row_means[1]
     refute_equal UNDEF, row_means[2]
   end
+
+  def test_flat_order_statistics_honour_min_count_without_a_mask
+    a = CA_FLOAT64([7, 8])
+    assert_equal UNDEF, a.median(min_count: 3)
+    assert_equal UNDEF, a.percentile(30, min_count: 3)
+    assert_equal 7.5,   a.median(min_count: 2)
+    o = CA_OBJECT([7, 8])
+    assert_equal UNDEF, o.median(min_count: 3)
+    assert_equal UNDEF, o.percentile(30, min_count: 3)
+  end
 end

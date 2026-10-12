@@ -20,9 +20,9 @@
        op1), src2 == scratch2, src3 == scratch3.
 
   Mask handling: none of the currently-defined triops (fma / fms /
-  clip) trap on integer zero divisor, so m=NULL always at the
-  kernel walk (SIMD fast path).  Output mask is a blind OR of
-  operand masks (create_mask time).
+  clip / select) trap on integer zero divisor, so m=NULL always at the
+  kernel walk (SIMD fast path).  Output mask is the OR of the operand
+  masks, except for select (create_mask time).
 
   Cross-ndim promotion: intentional design rejection, mirroring
   CABinOp.  Callers must reshape explicitly.
@@ -33,6 +33,7 @@
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_triop_dispatch.h"
 #include "ca_monop_dispatch.h"  /* CA_MONOP_CAST_BASE */
+#include "carray_math_kernel.h" /* ca_triop_not_implement */
 
 extern VALUE ca_broadcast_view (VALUE src, int8_t ndim,
                                 ca_size_t *target_dim);
@@ -41,7 +42,6 @@ int8_t CA_OBJ_TRIOP;
 VALUE rb_cCATriOp;
 
 extern int8_t CA_OBJ_LAZY_MARKER;
-extern VALUE ca_lazy_wrap_scalar (VALUE other, CArray *self_ca);
 
 /* ------------------------------------------------------------------- */
 /* CATriOp struct                                                       */
@@ -222,25 +222,6 @@ ca_triop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_triop_func_xfer_stride(ca, starts, counts, strides, data, CA_XFER_GET);
 }
 
-static void
-ca_triop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
-                          void *data, int dir)
-{
-  CATriOp *ca = (CATriOp *) ap;
-  ca_size_t i;
-  char *out = (char *) data;
-
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_addrs PUT)");
-  }
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_addr2index((CArray *)ca, addrs[i], idx);
-    ca_triop_func_xfer_index(ca, idx, out + i * ca->bytes, CA_XFER_GET);
-  }
-}
-
 /* Test / observability counters (mirror CABinOp's counters).           */
 ca_size_t ca_triop_scratch_acquire_count = 0;
 ca_size_t ca_triop_materialise_call_count = 0;
@@ -249,8 +230,7 @@ ca_size_t ca_triop_materialise_call_count = 0;
    be broadcast at step=0).  Returns the scratch pointer; updates
    *step_out to 0 (scalar) or 1 (same-shape).                          */
 static void *
-pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
-              ca_size_t *counts, ca_size_t slab_n, int8_t ndim,
+pull_operand (CArray *op, int is_scalar, const ca_lazy_req_t *req,
               ca_size_t *step_out)
 {
   void *scratch;
@@ -274,54 +254,40 @@ pull_operand (CArray *op, int is_scalar, ca_size_t *starts,
     *step_out = 0;
   }
   else {
-    ca_size_t op_strides[CA_RANK_MAX];
-    ca_size_t s = bytes;
-    for ( k = ndim - 1; k >= 0; k-- ) {
-      op_strides[k] = s;
-      s *= counts[k];
-    }
     scratch = ( op->data_type == CA_OBJECT )
-                ? ca_lazy_arena_acquire_object(slab_n)
-                : ca_lazy_arena_acquire(slab_n * bytes);
+                ? ca_lazy_arena_acquire_object(req->n)
+                : ca_lazy_arena_acquire(req->n * bytes);
     ca_triop_scratch_acquire_count++;
-    ca_xfer_stride(op, starts, counts, op_strides, scratch, CA_XFER_GET);
+    ca_lazy_req_pull(op, req, scratch, CA_XFER_GET);
     *step_out = 1;
   }
   return scratch;
 }
 
+/* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
-                           ca_size_t *strides, void *data, int dir)
+ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
 {
-  CATriOp *to = (CATriOp *) ap;
-  ca_size_t slab_n;
-  int8_t    k;
+  ca_size_t slab_n = req->n;
   void     *scratch2, *scratch3;
   ca_size_t op2_step, op3_step;
 
-  if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");
-  }
   ca_triop_materialise_call_count++;
 
-  slab_n = 1;
-  for ( k = 0; k < to->ndim; k++ ) slab_n *= counts[k];
-
   /* Step 1: pull op1 into the output buffer. */
-  ca_xfer_stride(to->parent, starts, counts, strides, data, CA_XFER_GET);
+  ca_lazy_req_pull(to->parent, req, data, CA_XFER_GET);
 
   /* Step 2: pull op2 into an arena scratch. */
-  scratch2 = pull_operand(to->op2, to->op2_is_scalar, starts, counts,
-                          slab_n, to->ndim, &op2_step);
+  scratch2 = pull_operand(to->op2, to->op2_is_scalar, req, &op2_step);
 
   /* Step 3: pull op3 into another arena scratch. */
-  scratch3 = pull_operand(to->op3, to->op3_is_scalar, starts, counts,
-                          slab_n, to->ndim, &op3_step);
+  scratch3 = pull_operand(to->op3, to->op3_is_scalar, req, &op3_step);
 
-  /* Step 4: apply the kernel.  ptr1 == ptr4 (in-place op1); no
-     currently-defined triop traps, so m=NULL. */
+  /* Step 4: apply the kernel.  ptr1 == ptr4 (in-place op1).  No numeric
+     triop traps, so m=NULL; object cells call Ruby, and skip the masked
+     cells as the eager triop does. */
   {
+    boolean8_t *slab_mask = NULL;
     ca_triop_func_t fn = ca_triop_kernel_lookup_vvv(to->op_id, to->data_type);
     if ( fn == NULL ) {
       ca_lazy_arena_release(scratch3);
@@ -330,15 +296,49 @@ ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                "CATriOp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) to->op_id, (int) to->data_type);
     }
-    fn(slab_n, NULL,
+    if ( to->data_type == CA_OBJECT ) {
+      CArray *ops[3];
+      ops[0] = to->parent;
+      ops[1] = to->op2;
+      ops[2] = to->op3;
+      slab_mask = ca_lazy_req_mask(req, 3, ops);
+    }
+    fn(slab_n, slab_mask,
        (char *)data,     1,              /* src1 == dst (op1, in-place) */
        (char *)scratch2, op2_step,       /* src2 (op2) */
        (char *)scratch3, op3_step,       /* src3 (op3) */
        (char *)data,     1);             /* dst */
+    if ( slab_mask ) ca_lazy_arena_release(slab_mask);
   }
 
   ca_lazy_arena_release(scratch3);
   ca_lazy_arena_release(scratch2);
+}
+
+static void
+ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");
+  }
+  ca_lazy_req_region(&req, ap, starts, counts, strides);
+  ca_triop_eval((CATriOp *) ap, &req, data);
+}
+
+/* An address list is evaluated in one pass, as a region is. */
+static void
+ca_triop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                          void *data, int dir)
+{
+  ca_lazy_req_t req;
+  if ( dir != CA_XFER_GET ) {
+    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_addrs PUT)");
+  }
+  ca_lazy_req_addrs(&req, n, addrs);
+  ca_triop_eval((CATriOp *) ap, &req, data);
 }
 
 static void
@@ -419,61 +419,16 @@ ca_triop_func_fill_data (void *ap, void *ptr)
   rb_raise(rb_eRuntimeError, "CATriOp is read-only (fill_data)");
 }
 
-/* Build out.mask.  Blind OR of the three operand masks — none of the
-   currently-defined triops carry a Kleene 3-valued fixup. */
+/* Build out.mask on each read (CAMaskOfOperands): the three operands'
+   masks ORed, except for select, which is masked where the condition is
+   or where the branch it chooses is. */
 static void
 ca_triop_func_create_mask (void *ap)
 {
   CATriOp *to = (CATriOp *) ap;
-  CArray *op1 = to->parent;
-  CArray *op2 = to->op2;
-  CArray *op3 = to->op3;
-  boolean8_t *dst, *m1, *m2, *m3;
-  ca_size_t i, n;
-  int has1, has2, has3;
-
-  has1 = ca_has_mask(op1);
-  has2 = ca_has_mask(op2);
-  has3 = ca_has_mask(op3);
-  if ( ! has1 && ! has2 && ! has3 ) return;
-
-  /* Exactly one masked operand: the answer is that operand's mask, cell
-     for cell.  Share it rather than allocating a copy per node. */
-  if ( has1 + has2 + has3 == 1 ) {
-    CArray *src = has1 ? op1 : ( has2 ? op2 : op3 );
-    if ( src->elements == to->elements ) {
-      to->mask = (CArray *) ca_refer_new(src->mask, CA_BOOLEAN,
-                                         to->ndim, to->dim, 0, 0);
-      return;
-    }
-  }
-
-  to->mask = (CArray *) carray_new(CA_BOOLEAN, to->ndim, to->dim, 0, NULL);
-  dst = (boolean8_t *) to->mask->ptr;
-  n = to->elements;
-
-  /* The masks are what is read here; attaching the operand instead
-     materialises the whole subexpression under it. */
-  if ( has1 ) ca_attach(op1->mask);
-  if ( has2 ) ca_attach(op2->mask);
-  if ( has3 ) ca_attach(op3->mask);
-
-  m1 = has1 ? (boolean8_t *) op1->mask->ptr : NULL;
-  m2 = has2 ? (boolean8_t *) op2->mask->ptr : NULL;
-  m3 = has3 ? (boolean8_t *) op3->mask->ptr : NULL;
-
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t i2 = to->op2_is_scalar ? 0 : i;
-    ca_size_t i3 = to->op3_is_scalar ? 0 : i;
-    boolean8_t a = m1 ? m1[i]  : 0;
-    boolean8_t b = m2 ? m2[i2] : 0;
-    boolean8_t c = m3 ? m3[i3] : 0;
-    dst[i] = (boolean8_t) ( a | b | c );
-  }
-
-  if ( has3 ) ca_detach(op3->mask);
-  if ( has2 ) ca_detach(op2->mask);
-  if ( has1 ) ca_detach(op1->mask);
+  int mode = ( to->op_id == CA_TRIOP_SELECT ) ? CA_LAZY_MASK_SELECT
+                                              : CA_LAZY_MASK_OR;
+  to->mask = ca_lazy_operation_mask((CArray *) to, mode);
 }
 
 ca_operation_function_t ca_triop_func = {
@@ -574,21 +529,32 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   r2 = collapse_marker(cary2);
   r3 = collapse_marker(cary3);
 
-  /* Promote non-CArray Ruby values (e.g. clip's Numeric bounds) to
-     CScalars carrying an existing operand's data_type. */
-  if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ) {
-    /* Find an anchor CArray for scalar promotion. */
-    CArray *anchor = NULL;
-    if ( rb_obj_is_carray(r1) ) TypedData_Get_Struct(r1, CArray, &carray_data_type, anchor);
-    else if ( rb_obj_is_carray(r2) ) TypedData_Get_Struct(r2, CArray, &carray_data_type, anchor);
-    else if ( rb_obj_is_carray(r3) ) TypedData_Get_Struct(r3, CArray, &carray_data_type, anchor);
-    if ( anchor == NULL ) {
-      rb_raise(rb_eArgError,
-               "CATriOp: at least one operand must be a CArray");
+  /* select takes its branches already typed (CArray#then_else makes a
+     scalar branch a CScalar of the result type); the condition is boolean
+     and takes no part in the promotion. */
+  if ( op_id == CA_TRIOP_SELECT ) {
+    if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ) {
+      rb_raise(rb_eArgError, "CATriOp: select takes three CArrays");
     }
-    if ( ! rb_obj_is_carray(r1) ) r1 = ca_lazy_wrap_scalar(r1, anchor);
-    if ( ! rb_obj_is_carray(r2) ) r2 = ca_lazy_wrap_scalar(r2, anchor);
-    if ( ! rb_obj_is_carray(r3) ) r3 = ca_lazy_wrap_scalar(r3, anchor);
+    r2 = ca_lazy_settle_scalar(r2, RTEST(rb_obj_is_cscalar(r2)));
+    r3 = ca_lazy_settle_scalar(r3, RTEST(rb_obj_is_cscalar(r3)));
+  }
+  /* Scalar operands (clip's Numeric bounds, a CScalar) are wrapped and
+     promoted pairwise in the order the eager triop uses. */
+  else if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
+       rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
+    if ( ! rb_obj_is_carray(r1) ) {
+      rb_raise(rb_eArgError,
+               "CATriOp: the first operand must be a CArray");
+    }
+    int r2_scalar = ! rb_obj_is_carray(r2) || rb_obj_is_cscalar(r2);
+    int r3_scalar = ! rb_obj_is_carray(r3) || rb_obj_is_cscalar(r3);
+    rb_ca_cast_self_or_other(&r1, &r2);
+    rb_ca_cast_self_or_other(&r1, &r3);
+    rb_ca_cast_self_or_other(&r2, &r3);
+    rb_ca_cast_self_or_other(&r1, &r2);
+    r2 = ca_lazy_settle_scalar(r2, r2_scalar);
+    r3 = ca_lazy_settle_scalar(r3, r3_scalar);
   }
 
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
@@ -599,6 +565,19 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   ca_triop_kernel_input_data_types(op_id,
                                    op1->data_type, op2->data_type, op3->data_type,
                                    &dt1, &dt2, &dt3);
+
+  /* All boolean, and no boolean kernel (fma / fms): read the operands as
+     their 0/1 storage in int64, as rb_ca_call_triop does. */
+  if ( dt1 == CA_BOOLEAN &&
+       ca_triop_kernel_lookup_vvv(op_id, CA_BOOLEAN) == ca_triop_not_implement ) {
+    dt1 = dt2 = dt3 = CA_INT64;
+  }
+
+  /* No kernel for that data_type: raise as the eager triop does. */
+  if ( ca_triop_kernel_lookup_vvv(op_id, dt1) == ca_triop_not_implement ) {
+    rb_raise(rb_eCADataTypeError,
+             "invalid data_type for triop (not implemented)");
+  }
   r1 = insert_cast(r1, dt1, &op1);
   r2 = insert_cast(r2, dt2, &op2);
   r3 = insert_cast(r3, dt3, &op3);
@@ -668,6 +647,17 @@ rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
   return rb_ca_triop_build(cary1, cary2, cary3, op_id);
 }
 
+/* Whether this node's kernel skips the cells its operands mask, rather
+   than computing them: a kernel that can raise on a cell or calls Ruby
+   for it.  CArray::Fusion reads it so a plan carries the same rule. */
+static VALUE
+rb_ca_triop_trapping (VALUE self)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  return ( ca->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+}
+
 static VALUE
 rb_ca_triop_op_id (VALUE self)
 {
@@ -731,6 +721,7 @@ rb_ca_triop_initialize_copy (VALUE self, VALUE other)
 {
   CATriOp *ca, *cs;
   TypedData_Get_Struct(self,  CATriOp, &catriop_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATriOp, &catriop_data_type, cs);
   if ( ca_func[CA_OBJ_TRIOP].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_TRIOP, cs->parent->ndim);
@@ -758,6 +749,7 @@ Init_ca_obj_triop (void)
   rb_define_const(rb_cCATriOp, "OP_FMA",  INT2NUM(CA_TRIOP_FMA));
   rb_define_const(rb_cCATriOp, "OP_FMS",  INT2NUM(CA_TRIOP_FMS));
   rb_define_const(rb_cCATriOp, "OP_CLIP", INT2NUM(CA_TRIOP_CLIP));
+  rb_define_const(rb_cCATriOp, "OP_SELECT", INT2NUM(CA_TRIOP_SELECT));
 
   rb_define_alloc_func(rb_cCATriOp, rb_ca_triop_s_allocate);
   rb_define_method(rb_cCATriOp, "initialize_copy",
@@ -768,6 +760,7 @@ Init_ca_obj_triop (void)
 
   rb_define_method(rb_cCATriOp, "__op_id__",
                                 rb_ca_triop_op_id, 0);
+  rb_define_method(rb_cCATriOp, "__trapping__", rb_ca_triop_trapping, 0);
   rb_define_method(rb_cCATriOp, "__triop_op2__",
                                 rb_ca_triop_op2, 0);
   rb_define_method(rb_cCATriOp, "__triop_op3__",

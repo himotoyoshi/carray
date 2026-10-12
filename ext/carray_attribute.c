@@ -13,6 +13,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"   /* CA_OBJ_RECORD + rb_ca_record_get_data_class */
+#include "carray_internal.h"   /* rb_ca_inherit_attr */
 
 /* ------------------------------------------------------------------- */
 
@@ -436,6 +437,8 @@ rb_ca_is_object_type (VALUE self)
 /* ------------------------------------------------------------------- */
 
 static ID id_parent;
+static ID id_attr;
+static ID id_attrs;
 
 VALUE
 rb_ca_parent (VALUE self)
@@ -443,13 +446,41 @@ rb_ca_parent (VALUE self)
   return rb_ivar_get(self, id_parent);
 }
 
+/* Give dst the attributes (lib/carray/attribute.rb) that src shows, as its
+   own Hash.  Used by the methods that produce a new entity holding the
+   same values -- copy, to_type.  The parent walk here only decides
+   whether any array on the chain has an @attr at all; which of them
+   src actually shows (a lazy op view stops the chain) is left to #attrs,
+   so the rule lives in one place. */
+void
+rb_ca_inherit_attr (VALUE dst, VALUE src)
+{
+  VALUE obj = src, attrs;
+  int depth;
+
+  for (depth = 0; depth < 64 && ! NIL_P(obj); depth++) {
+    if ( rb_ivar_defined(obj, id_attr) ) {
+      break;
+    }
+    obj = rb_ivar_get(obj, id_parent);
+  }
+  if ( depth == 64 || NIL_P(obj) ) {
+    return;
+  }
+  attrs = rb_funcall(src, id_attrs, 0);
+  if ( RHASH_SIZE(attrs) > 0 ) {
+    rb_ivar_set(dst, id_attr, rb_hash_dup(attrs));
+  }
+}
+
+/* A view of a frozen array is not frozen itself: building it may still set
+   it up after this (an ivar, a lift that moves it onto another parent), and
+   writes through it are refused by ca_is_readonly, which walks to the
+   frozen root and finds CA_FLAG_READ_ONLY there. */
 VALUE
 rb_ca_set_parent (VALUE self, VALUE obj)
 {
   rb_ivar_set(self, id_parent, obj);
-  if ( OBJ_FROZEN(obj) ) {
-    rb_ca_freeze(self);
-  }
   return obj;
 }
 
@@ -521,6 +552,15 @@ ca_root_array (void *ap)
   }
 }
 
+/* Whether two arrays may share memory: their cells live in the same
+   root.  An operation that writes one while reading the other must read
+   from a copy taken before it writes. */
+int
+ca_shares_root (void *ap, void *aq)
+{
+  return ca_root_array(ap) == ca_root_array(aq);
+}
+
 static VALUE
 rb_ca_root_array (VALUE self)
 {
@@ -584,6 +624,8 @@ void
 Init_carray_attribute (void)
 {
   id_parent     = rb_intern("parent");
+  id_attr       = rb_intern("@attr");
+  id_attrs      = rb_intern("attrs");
 
   rb_define_method(rb_cCArray, "obj_type", rb_ca_obj_type, 0);
   rb_define_method(rb_cCArray, "data_type", rb_ca_data_type, 0);

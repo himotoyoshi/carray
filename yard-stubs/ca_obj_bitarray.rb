@@ -11,6 +11,11 @@
 # On big-endian hosts the bit axis of a non-fixlen parent reflects
 # network byte order (parent bytes are walked in reverse within each
 # element); single-byte parents are linear on either endian.
+#
+# A bit view has no mask.  The bits of one byte would share that byte's
+# one mask cell, so the view refuses a masked parent and refuses to be
+# masked (`mask=`, storing `UNDEF`, storing a masked array).  Read the
+# bits of a masked array through `value.bitarray`.
 class CABitarray < CAView
 end
 
@@ -27,6 +32,8 @@ class CArray
   #   @return [CABitarray]
   #   @raise [CADataTypeError] when `self.data_type` is a complex or
   #     object type (bit-level access is not defined for those).
+  #   @raise [ArgumentError] when `self` has a mask; use
+  #     `value.bitarray` to read the bits without it.
   def bitarray; end
 
   # Alias for {#bitarray}.

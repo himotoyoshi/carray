@@ -162,6 +162,7 @@ static void
 ca_reduce_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                             ca_size_t *strides, void *data, int dir)
 {
+  if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAReduce  *ca = (CAReduce *) ap;
   int8_t     ndim = ca->ndim;
   ca_size_t  native[CA_RANK_MAX], idx[CA_RANK_MAX];
@@ -224,8 +225,7 @@ ca_reduce_func_sync (void *ap)
     ca_reduce_func_xfer_addrs(ca, 1, &i, p, CA_XFER_PUT);
     p++;
   }
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -264,8 +264,7 @@ ca_reduce_func_fill_data (void *ap, void *ptr)
   for (i=0; i<ca->elements; i++) {
     ca_reduce_func_xfer_addrs(ca, 1, &i, ptr, CA_XFER_PUT);
   }
-  ca_sync(ca->parent);
-  ca_detach(ca->parent);
+  ca_sync_detach(ca->parent);
 }
 
 static void
@@ -273,10 +272,7 @@ ca_reduce_func_create_mask (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
 
-  ca_update_mask(ca->parent);
-  if ( ! ca->parent->mask ) {
-    ca_create_mask(ca->parent);
-  }
+  ca_create_mask(ca->parent);
 
   ca->mask = (CArray *) ca_reduce_new(ca->parent->mask, ca->count, ca->offset);
 }
@@ -314,6 +310,7 @@ rb_ca_reduce_initialize_copy (VALUE self, VALUE other)
   CAReduce *ca, *cs;
 
   TypedData_Get_Struct(self,  CAReduce, &careduce_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAReduce, &careduce_data_type, cs);
 
   ca_reduce_setup(ca, cs->parent, cs->count, cs->offset);

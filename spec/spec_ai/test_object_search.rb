@@ -59,7 +59,7 @@ class TestObjectSearch < Test::Unit::TestCase
     # mask_self: :raise — bsearch assumes sorted invariant, mask breaks it.
     a = CA_OBJECT([1, 3, 5, 7])
     a[1] = UNDEF
-    assert_raise(RuntimeError) { a.bsearch(3, axis: 0) }
+    assert_raise(ArgumentError) { a.bsearch(3, axis: 0) }
   end
 
   # ---- search (linear, mask: skip, eps ignored for :object) ------------

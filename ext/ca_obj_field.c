@@ -36,14 +36,18 @@ ca_field_setup (CAStride *ca, CArray *parent,
   CA_CHECK_BYTES(data_type, bytes);
 
   if ( offset < 0 ) {
-    rb_raise(rb_eRuntimeError, "negative offset");
+    rb_raise(rb_eArgError, "negative offset");
   }
   if ( data_type == CA_OBJECT ) {
     rb_raise(rb_eCADataTypeError,
              "CA_OBJECT can not to be a data_type for CAField");
   }
+  if ( ca_is_object_type(parent) ) {
+    rb_raise(rb_eCADataTypeError,
+             "a field can not be taken from an object array");
+  }
   if ( parent->bytes < offset + bytes ) {
-    rb_raise(rb_eRuntimeError, "offset or bytes out of range");
+    rb_raise(rb_eArgError, "offset or bytes out of range");
   }
 
   /* strides[k] = parent->bytes × Π_{i>k} parent->dim[i].  Same shape
@@ -57,6 +61,12 @@ ca_field_setup (CAStride *ca, CArray *parent,
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca_stride_setup(ca, CA_OBJ_FIELD, parent,
                   data_type, bytes,
                   parent->ndim, parent->dim, strides, offset);
@@ -67,7 +77,9 @@ ca_field_setup (CAStride *ca, CArray *parent,
 CAStride *
 ca_field_new (CArray *parent, ca_size_t offset, int8_t data_type, ca_size_t bytes)
 {
-  CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_FIELD, parent->ndim);
+  CAStride *ca;
+  ca_field_setup(NULL, parent, offset, data_type, bytes);
+  ca = (CAStride *) ca_array_alloc(CA_OBJ_FIELD, parent->ndim);
   ca_field_setup(ca, parent, offset, data_type, bytes);
   return ca;
 }
@@ -160,6 +172,7 @@ rb_ca_field_initialize_copy (VALUE self, VALUE other)
   CAStride *ca, *cs;
 
   TypedData_Get_Struct(self,  CAStride, &castride_data_type, ca);
+  ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CAStride, &castride_data_type, cs);
 
   if ( ca_func[CA_OBJ_FIELD].pool_init ) {

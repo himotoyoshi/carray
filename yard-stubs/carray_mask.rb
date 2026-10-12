@@ -74,7 +74,8 @@ class CArray
   #   Clears the mask state and overwrites the data at previously
   #   masked positions with `fill_value`. Mutates `self`.
   #   @param fill_value [Object] value to store at each previously
-  #     masked position. Cast to `self.data_type`.
+  #     masked position, converted as a store into `self` converts it.
+  #     `UNDEF` leaves the masked cells masked.
   #   @return [self]
   # @overload unmask(method:, axis: nil)
   #   Fills masked cells in place from neighbouring valid cells along
@@ -106,7 +107,8 @@ class CArray
   #
   #   Replaces the removed `unmask_copy(fill)` from 2.x.
   #   @param fill_value [Object] value to substitute at masked
-  #     positions. Cast to `self.data_type`.
+  #     positions, converted as a store into `self` converts it.
+  #     `UNDEF` leaves them masked (the copy keeps the mask).
   #   @return [CArray]
   # @overload strip_mask(method:, axis: nil)
   #   Returns a new array with masked cells filled from neighbouring
@@ -151,6 +153,8 @@ class CArray
   #   Flips the mask state of every element of `self` in place
   #   (masked ↔ not masked). Mutates `self`.
   #   @return [self]
+  #   @raise [FrozenError] if `self` is frozen or a view of a frozen array.
+  #   @raise [RuntimeError] if `self` is read-only (a lazy expression, for one).
   def invert_mask; end
 
   # @overload inherit_mask(*others)
@@ -174,23 +178,43 @@ class CArray
   # @overload count_masked
   #   Returns the total number of masked elements in `self`.
   #   @return [Integer]
-  # @overload count_masked(axis:)
+  # @overload count_masked(axis:, keep_axis: false, min_count: nil, fill_value: nil)
   #   Returns the per-slice count of masked elements along the given
   #   axis or axes. The result is an int64 CArray with `axis` removed
-  #   from `shape`.
+  #   from `shape` (kept as length 1 with `keep_axis: true`). Naming
+  #   every axis without `keep_axis:` returns an Integer, as the form
+  #   without `axis:` does. The answer is the same whether or not
+  #   `self` has a mask.
   #   @param axis [Integer, Array<Integer>] axis or axes to reduce.
-  #   @return [CArray] int64 CArray.
+  #   @param keep_axis [Boolean] keep the reduced axes as length 1.
+  #   @param min_count [Integer, nil] cells with fewer than this many
+  #     elements are UNDEF.  A count of the mask reads every element,
+  #     masked or not, so this compares with the slice size.
+  #   @param fill_value [Object, nil] value written into UNDEF cells.
+  #   @return [CArray, Integer]
+  #   @raise [ArgumentError] if an axis is out of range, repeated, or
+  #     the axis list is empty.
   def count_masked(*, **); end
 
   # @overload count_not_masked
   #   Returns the total number of not-masked elements in `self`.
   #   @return [Integer]
-  # @overload count_not_masked(axis:)
-  #   Returns the per-slice count of not-masked elements along the
-  #   given axis or axes. The result is an int64 CArray with `axis`
-  #   removed from `shape`.
+  # @overload count_not_masked(axis:, keep_axis: false, min_count: nil, fill_value: nil)
+  #   Returns the per-slice count of not-masked elements along the given
+  #   axis or axes. The result is an int64 CArray with `axis` removed
+  #   from `shape` (kept as length 1 with `keep_axis: true`). Naming
+  #   every axis without `keep_axis:` returns an Integer, as the form
+  #   without `axis:` does. The answer is the same whether or not
+  #   `self` has a mask.
   #   @param axis [Integer, Array<Integer>] axis or axes to reduce.
-  #   @return [CArray] int64 CArray.
+  #   @param keep_axis [Boolean] keep the reduced axes as length 1.
+  #   @param min_count [Integer, nil] cells with fewer than this many
+  #     elements are UNDEF.  A count of the mask reads every element,
+  #     masked or not, so this compares with the slice size.
+  #   @param fill_value [Object, nil] value written into UNDEF cells.
+  #   @return [CArray, Integer]
+  #   @raise [ArgumentError] if an axis is out of range, repeated, or
+  #     the axis list is empty.
   def count_not_masked(*, **); end
 
   # @!endgroup
