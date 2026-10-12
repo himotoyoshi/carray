@@ -12,6 +12,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_* */
+#include "ca_binop_dispatch.h"  /* ca_binop_is_trapping */
 
 /* Operand scratch for a chunked / gathered kernel run.
 
@@ -285,14 +286,15 @@ ca_monop_may_raise (ca_monop_func_t func[], int8_t dt)
       || ( func == ca_monop_rcp && ca_op_is_integer(dt) );
 }
 
+/* Which ops raise on a cell is ca_binop_is_trapping's list, the one the
+   lazy views skip masked cells by. */
 static int
 ca_binop_may_raise (ca_binop_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT
-      || func[dt] == ca_binop_not_implement
-      || ( ca_op_is_integer(dt) &&
-           ( func == ca_binop_div || func == ca_binop_mod ||
-             func == ca_binop_fmod || func == ca_binop_rcp_mul ) );
+  int op_id;
+  if ( dt == CA_OBJECT || func[dt] == ca_binop_not_implement ) return 1;
+  op_id = ca_binop_op_id_of_table(func);
+  return op_id >= 0 && ca_binop_is_trapping((uint16_t) op_id, dt);
 }
 
 static int

@@ -27,39 +27,56 @@
 /* vv kernel lookup                                                     */
 /* ------------------------------------------------------------------- */
 
+/* The kernel table of each op id.  The eager operators hold the tables
+   themselves; ca_binop_op_id_of_table maps one back to its op id, so that
+   both ask ca_binop_is_trapping the same question. */
+static ca_binop_func_t * const ca_binop_tables[CA_BINOP_COUNT] = {
+  [CA_BINOP_ADD]       = ca_binop_add,
+  [CA_BINOP_SUB]       = ca_binop_sub,
+  [CA_BINOP_MUL]       = ca_binop_mul,
+  [CA_BINOP_DIV]       = ca_binop_div,
+  [CA_BINOP_POW]       = ca_binop_power,
+  [CA_BINOP_BIT_AND]   = ca_binop_bit_and_i,
+  [CA_BINOP_BIT_OR]    = ca_binop_bit_or_i,
+  [CA_BINOP_BIT_XOR]   = ca_binop_bit_xor_i,
+  [CA_BINOP_BIT_LSHIFT]= ca_binop_bit_lshift,
+  [CA_BINOP_BIT_RSHIFT]= ca_binop_bit_rshift,
+  [CA_BINOP_MOD]       = ca_binop_mod,
+  [CA_BINOP_QUO]       = ca_binop_quo_i,
+  [CA_BINOP_RCP_MUL]   = ca_binop_rcp_mul,
+  [CA_BINOP_IPOWER]    = ca_binop_ipower,
+  [CA_BINOP_COPYSIGN]  = ca_binop_copysign,
+  [CA_BINOP_LOGADDEXP] = ca_binop_logaddexp,
+  [CA_BINOP_NEXTAFTER] = ca_binop_nextafter,
+  [CA_BINOP_FMOD]      = ca_binop_fmod,
+  [CA_BINOP_ATAN2]     = ca_binop_atan2,
+  [CA_BINOP_HYPOT]     = ca_binop_hypot,
+  [CA_BINOP_PMAX]      = ca_binop_pmax,
+  [CA_BINOP_PMIN]      = ca_binop_pmin,
+  [CA_BINOP_MAXIMUM]   = ca_binop_maximum,
+  [CA_BINOP_MINIMUM]   = ca_binop_minimum,
+  [CA_BINOP_AND]       = ca_binop_and,
+  [CA_BINOP_OR]        = ca_binop_or,
+  [CA_BINOP_XOR]       = ca_binop_xor,
+};
+
 ca_binop_func_t
 ca_binop_kernel_lookup_vv (uint16_t op_id, int8_t common_dt)
 {
-  switch (op_id) {
-    case CA_BINOP_ADD:        return ca_binop_add        [common_dt];
-    case CA_BINOP_SUB:        return ca_binop_sub        [common_dt];
-    case CA_BINOP_MUL:        return ca_binop_mul        [common_dt];
-    case CA_BINOP_DIV:        return ca_binop_div        [common_dt];
-    case CA_BINOP_POW:        return ca_binop_power      [common_dt];
-    case CA_BINOP_BIT_AND:    return ca_binop_bit_and_i  [common_dt];
-    case CA_BINOP_BIT_OR:     return ca_binop_bit_or_i   [common_dt];
-    case CA_BINOP_BIT_XOR:    return ca_binop_bit_xor_i  [common_dt];
-    case CA_BINOP_BIT_LSHIFT: return ca_binop_bit_lshift [common_dt];
-    case CA_BINOP_BIT_RSHIFT: return ca_binop_bit_rshift [common_dt];
-    case CA_BINOP_MOD:        return ca_binop_mod        [common_dt];
-    case CA_BINOP_QUO:        return ca_binop_quo_i      [common_dt];
-    case CA_BINOP_RCP_MUL:    return ca_binop_rcp_mul    [common_dt];
-    case CA_BINOP_IPOWER:     return ca_binop_ipower     [common_dt];
-    case CA_BINOP_COPYSIGN:   return ca_binop_copysign   [common_dt];
-    case CA_BINOP_LOGADDEXP:  return ca_binop_logaddexp  [common_dt];
-    case CA_BINOP_NEXTAFTER:  return ca_binop_nextafter  [common_dt];
-    case CA_BINOP_FMOD:       return ca_binop_fmod       [common_dt];
-    case CA_BINOP_ATAN2:      return ca_binop_atan2      [common_dt];
-    case CA_BINOP_HYPOT:      return ca_binop_hypot      [common_dt];
-    case CA_BINOP_PMAX:       return ca_binop_pmax       [common_dt];
-    case CA_BINOP_PMIN:       return ca_binop_pmin       [common_dt];
-    case CA_BINOP_MAXIMUM:    return ca_binop_maximum    [common_dt];
-    case CA_BINOP_MINIMUM:    return ca_binop_minimum    [common_dt];
-    case CA_BINOP_AND:        return ca_binop_and        [common_dt];
-    case CA_BINOP_OR:         return ca_binop_or         [common_dt];
-    case CA_BINOP_XOR:        return ca_binop_xor        [common_dt];
-    default:                  return NULL;
+  if ( op_id >= CA_BINOP_COUNT || ! ca_binop_tables[op_id] ) return NULL;
+  return ca_binop_tables[op_id][common_dt];
+}
+
+/* The op id whose kernel table is `table`, or -1 for a table no op id
+   names. */
+int
+ca_binop_op_id_of_table (ca_binop_func_t table[])
+{
+  int op_id;
+  for ( op_id = 0; op_id < CA_BINOP_COUNT; op_id++ ) {
+    if ( ca_binop_tables[op_id] == table ) return op_id;
   }
+  return -1;
 }
 
 /* ------------------------------------------------------------------- */
