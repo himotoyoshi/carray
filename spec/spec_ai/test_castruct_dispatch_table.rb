@@ -54,8 +54,8 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
   def test_primitive_member_roundtrip
     r = S.new(header: 0x1234)
     assert_equal 0x1234, r.header
-    r[:header] = 0xABCD
-    assert_equal 0xABCD, r[:header]
+    r["header"] = 0xABCD
+    assert_equal 0xABCD, r["header"]
   end
 
   def test_primitive_with_endian_roundtrip
@@ -71,8 +71,8 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
     r = S.new(flag: 1, version: 42)
     assert_equal true, r.flag
     assert_equal 42, r.version
-    r[:flag] = 0
-    r[:version] = 7
+    r["flag"] = 0
+    r["version"] = 7
     assert_equal false, r.flag
     assert_equal 7, r.version
   end
@@ -82,7 +82,7 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
     assert_equal "abcd", r.tag
   end
 
-  # --- unknown-name fallback to `send(name)` ---------------------------
+  # --- [] names members only ------------------------------------------
 
   class WithComputedMember < CAStruct
     DATA_SIZE    = 4
@@ -94,18 +94,25 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
       CAStruct::Builder.build_dispatch_table(MEMBER_TABLE, DATA_SIZE).freeze
 
     def x_squared
-      self[:x] ** 2
+      self["x"] ** 2
     end
   end
 
-  def test_unknown_name_falls_back_to_send
-    # `x_squared` is not a struct member but is callable as a method.
-    # Step 3 must route `record[:x_squared]` through `send` for
-    # backwards compatibility with subclasses defining computed
-    # readers.
+  # A name that is not a member raises rather than calling a method of that
+  # name: s["initialize"] used to reset the element.  A computed reader is
+  # called as a method.
+  def test_a_name_that_is_not_a_member_raises
     r = WithComputedMember.new
-    r[:x] = 5
-    assert_equal 25, r[:x_squared]
+    r["x"] = 5
+    assert_equal 25, r.x_squared
+    assert_raise(ArgumentError) { r["x_squared"] }
+    assert_raise(ArgumentError) { r["initialize"] }
+    assert_raise(ArgumentError) { r["x_squared"] = 1 }
+    assert_raise(TypeError) { r[:x] }
+    assert_raise(TypeError) { r[:x] = 1 }
+    assert_raise(TypeError) { r[1.0] }
+    assert_equal 5, r["x"]
+    assert_equal 5, r[0]
   end
 
   # --- bit-field bounds check fires at definition time ----------------
@@ -137,11 +144,11 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
   def test_integer_index_routes_to_named_dispatcher
     r = S.new(header: 0x11, flag: 1, version: 33,
               payload: 0xDEADBEEF, tag: "abcd")
-    assert_equal r[:header],  r[0]
-    assert_equal r[:flag],    r[1]
-    assert_equal r[:version], r[2]
-    assert_equal r[:payload], r[3]
-    assert_equal r[:tag],     r[4]
+    assert_equal r["header"],  r[0]
+    assert_equal r["flag"],    r[1]
+    assert_equal r["version"], r[2]
+    assert_equal r["payload"], r[3]
+    assert_equal r["tag"],     r[4]
   end
 
   # --- Nested struct member dispatch ----------------------------------
@@ -155,11 +162,11 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
   def test_nested_struct_member_through_dispatch
     inner = Inner.new(a: 1, b: 2)
     o     = Outer.new(nest: inner, z: 9)
-    got   = o[:nest]
+    got   = o["nest"]
     assert_kind_of Inner, got
     assert_equal 1, got.a
     assert_equal 2, got.b
-    assert_equal 9, o[:z]
+    assert_equal 9, o["z"]
   end
 
   # --- CArray-template member dispatch --------------------------------
@@ -170,8 +177,8 @@ class TestCAStructDispatchTable < Test::Unit::TestCase
 
   def test_carray_template_member_through_dispatch
     r = WithArray.new
-    r[:coords] = [10, 20, 30]
-    assert_equal [10, 20, 30], r[:coords].to_a
+    r["coords"] = [10, 20, 30]
+    assert_equal [10, 20, 30], r["coords"].to_a
   end
 
 end

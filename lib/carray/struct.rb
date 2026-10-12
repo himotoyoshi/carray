@@ -348,46 +348,56 @@ class CAStruct
 
   public
 
-  # Member access (`record[:name]` / `record["name"]` / `record[i]`).
-  # Step 3 (3.0): the per-type `case` was replaced by a class-level
-  # DISPATCH_TABLE built once at struct-definition time.  Each known
-  # member has a frozen `[reader_proc, writer_proc]` pair that closes
-  # over its offset / type / opts, so the per-call work is one Hash
-  # lookup + one Proc#call.  Unknown names fall back to `send(name)`
-  # so subclasses can define computed members via plain Ruby methods.
+  # Member access.  A member is named by a String (`s["lat"]`) or its
+  # Integer position (`s[0]`); its accessor (`s.lat`) reads it too.  A
+  # Symbol is not a member name here, and a name that is not a member
+  # raises.  These Ruby bodies state the rule; the methods that run are
+  # the C ones installed at the bottom of this file.
   # @overload [](name)
-  #   Returns the value of member `name` (Integer indexes the
-  #   member list). Unknown names fall through to `send(name)`.
-  #   @param name [Symbol, String, Integer]
+  #   Returns the value of member `name`.
+  #   @param name [String, Integer]
   #   @return [Object]
+  #   @raise [TypeError] for a Symbol or another type of name.
+  #   @raise [ArgumentError] when `name` is not a member.
   def [] (name)
-    if name.kind_of?(Integer)
-      name = members[name]
-    end
-    pair = self.class::DISPATCH_TABLE[name.to_s]
-    if pair
-      pair[0].call(@data)
-    else
-      send(name)
-    end
+    pair = self.class::DISPATCH_TABLE[member_name(name)]
+    pair[0].call(@data)
   end
 
   # @overload []=(name, val)
-  #   Sets member `name` to `val`. Unknown names fall through to
-  #   `send("#{name}=", val)`.
-  #   @param name [Symbol, String, Integer]
+  #   Sets member `name` to `val`.
+  #   @param name [String, Integer]
   #   @param val [Object]
   #   @return [Object] `val`.
+  #   @raise [TypeError] for a Symbol or another type of name.
+  #   @raise [ArgumentError] when `name` is not a member.
   def []= (name, val)
-    if name.kind_of?(Integer)
-      name = members[name]
-    end
-    pair = self.class::DISPATCH_TABLE[name.to_s]
-    if pair
-      pair[1].call(@data, val)
+    pair = self.class::DISPATCH_TABLE[member_name(name)]
+    pair[1].call(@data, val)
+  end
+
+  private def member_name (name)
+    case name
+    when Symbol
+      if self.class::MEMBER_TABLE.key?(name.to_s)
+        raise TypeError, "a struct member is named by a String (s[\"#{name}\"]) " \
+                         "or read by its accessor (s.#{name}), not by a Symbol"
+      end
+      raise TypeError, "a struct member is named by a String, not by a Symbol " \
+                       "(#{self.class.inspect} has no member #{name.to_s.inspect} either)"
+    when Integer
+      key = members[name]
+    when String
+      key = name
     else
-      send(name.to_s + "=", val)
+      raise TypeError, "a struct member is named by a String or an Integer " \
+                       "position (got #{name.class})"
     end
+    unless key && self.class::MEMBER_TABLE.key?(key)
+      raise ArgumentError, "#{self.class.inspect} has no member #{name.inspect} " \
+                           "(members: #{members.inspect})"
+    end
+    key
   end
 
   # @overload each { |value| ... }

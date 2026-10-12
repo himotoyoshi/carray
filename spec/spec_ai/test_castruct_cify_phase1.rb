@@ -136,91 +136,91 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
   def test_int8_range
     r = S_ALL_PRIMS.new
     [-128, -1, 0, 1, 127].each do |v|
-      r[:i8] = v
-      assert_equal v, r[:i8], "int8 round-trip for #{v}"
+      r["i8"] = v
+      assert_equal v, r["i8"], "int8 round-trip for #{v}"
     end
   end
 
   def test_uint8_range
     r = S_ALL_PRIMS.new
     [0, 1, 127, 128, 255].each do |v|
-      r[:u8] = v
-      assert_equal v, r[:u8]
+      r["u8"] = v
+      assert_equal v, r["u8"]
     end
   end
 
   def test_int16_range
     r = S_ALL_PRIMS.new
     [-32768, -1, 0, 32767].each do |v|
-      r[:i16] = v
-      assert_equal v, r[:i16]
+      r["i16"] = v
+      assert_equal v, r["i16"]
     end
   end
 
   def test_uint16_range
     r = S_ALL_PRIMS.new
     [0, 65535].each do |v|
-      r[:u16] = v
-      assert_equal v, r[:u16]
+      r["u16"] = v
+      assert_equal v, r["u16"]
     end
   end
 
   def test_int32_range
     r = S_ALL_PRIMS.new
     [-(2**31), -1, 0, 2**31 - 1].each do |v|
-      r[:i32] = v
-      assert_equal v, r[:i32]
+      r["i32"] = v
+      assert_equal v, r["i32"]
     end
   end
 
   def test_uint32_range
     r = S_ALL_PRIMS.new
     [0, 2**32 - 1].each do |v|
-      r[:u32] = v
-      assert_equal v, r[:u32]
+      r["u32"] = v
+      assert_equal v, r["u32"]
     end
   end
 
   def test_int64_range
     r = S_ALL_PRIMS.new
     [-(2**63), -1, 0, 2**63 - 1].each do |v|
-      r[:i64] = v
-      assert_equal v, r[:i64]
+      r["i64"] = v
+      assert_equal v, r["i64"]
     end
   end
 
   def test_uint64_range
     r = S_ALL_PRIMS.new
     [0, 2**64 - 1].each do |v|
-      r[:u64] = v
-      assert_equal v, r[:u64]
+      r["u64"] = v
+      assert_equal v, r["u64"]
     end
   end
 
   def test_float32_values
     r = S_ALL_PRIMS.new
-    r[:f32] = 1.5
-    assert_in_delta 1.5, r[:f32], 1e-6
-    r[:f32] = -3.25
-    assert_in_delta(-3.25, r[:f32], 1e-6)
+    r["f32"] = 1.5
+    assert_in_delta 1.5, r["f32"], 1e-6
+    r["f32"] = -3.25
+    assert_in_delta(-3.25, r["f32"], 1e-6)
   end
 
   def test_float64_values
     r = S_ALL_PRIMS.new
-    r[:f64] = Math::PI
-    assert_in_delta Math::PI, r[:f64], 1e-15
+    r["f64"] = Math::PI
+    assert_in_delta Math::PI, r["f64"], 1e-15
   end
 
   def test_boolean_round_trip
     r = S_ALL_PRIMS.new
-    r[:bo] = 1
-    assert_equal true, r[:bo]
-    r[:bo] = 0
-    assert_equal false, r[:bo]
-    r[:bo] = true
-    assert_equal true, r[:bo]
-    assert_raise(CArray::DataTypeError) { r[:bo] = 2 }
-    assert_raise(CArray::DataTypeError) { r[:bo] = nil }
+    r["bo"] = 1
+    assert_equal true, r["bo"]
+    r["bo"] = 0
+    assert_equal false, r["bo"]
+    r["bo"] = true
+    assert_equal true, r["bo"]
+    assert_raise(CArray::DataTypeError) { r["bo"] = 2 }
+    assert_raise(CArray::DataTypeError) { r["bo"] = nil }
   end
 
   # --- Sibling fields stay isolated (no aliasing across offsets) ------
@@ -232,10 +232,10 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
       int32  :c
     }
     r = s.new(a: 0xAAAAAAA, b: 0xBBBBBBB, c: 0xCCCCCCC)
-    r[:b] = 0x1234
-    assert_equal 0xAAAAAAA, r[:a]
-    assert_equal 0x1234,    r[:b]
-    assert_equal 0xCCCCCCC, r[:c]
+    r["b"] = 0x1234
+    assert_equal 0xAAAAAAA, r["a"]
+    assert_equal 0x1234,    r["b"]
+    assert_equal 0xCCCCCCC, r["c"]
   end
 
   # --- Integer-index routing --------------------------------------
@@ -246,7 +246,7 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
     assert_equal 11, r[0]
     assert_equal 22, r[1]
     r[0] = 99
-    assert_equal 99, r[:x]
+    assert_equal 99, r["x"]
   end
 
   # --- Symbol vs String name parity ----------------------------------
@@ -254,12 +254,12 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
   def test_symbol_and_string_name_lookup_agree
     s = CArray.struct { int32 :v }
     r = s.new(v: 42)
-    assert_equal 42, r[:v]
     assert_equal 42, r["v"]
-    r[:v] = 7
+    assert_equal 42, r["v"]
+    r["v"] = 7
     assert_equal 7, r["v"]
     r["v"] = 99
-    assert_equal 99, r[:v]
+    assert_equal 99, r["v"]
   end
 
   # --- Fallback paths still work (bit / endian / fixlen) --------------
@@ -271,26 +271,26 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
       bit :version, bits: 7
     }
     r = s.new(head: 0x1234, flag: 1, version: 42)
-    assert_equal true, r[:flag]
-    assert_equal 42, r[:version]
-    r[:version] = 7
-    assert_equal 7, r[:version]
-    assert_equal true, r[:flag]    # neighbour unchanged
+    assert_equal true, r["flag"]
+    assert_equal 42, r["version"]
+    r["version"] = 7
+    assert_equal 7, r["version"]
+    assert_equal true, r["flag"]    # neighbour unchanged
   end
 
   def test_endian_member_still_works_via_dispatch_table
     s = CArray.struct(pack: 1) { int32 :payload, endian: :big }
     r = s.new(payload: 0x01020304)
     assert_equal "\x01\x02\x03\x04".b, r.encode
-    assert_equal 0x01020304, r[:payload]
+    assert_equal 0x01020304, r["payload"]
   end
 
   def test_fixlen_member_still_works_via_dispatch_table
     s = CArray.struct { fixlen :tag, bytes: 4 }
     r = s.new(tag: "abcd")
-    assert_equal "abcd", r[:tag]
-    r[:tag] = "wxyz"
-    assert_equal "wxyz", r[:tag]
+    assert_equal "abcd", r["tag"]
+    r["tag"] = "wxyz"
+    assert_equal "wxyz", r["tag"]
   end
 
   # --- Unknown-name fallback to send ----------------------------------
@@ -305,14 +305,17 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
       CAStruct::Builder.build_fast_primitives(MEMBER_TABLE).freeze
 
     def twice
-      self[:x] * 2
+      self["x"] * 2
     end
   end
 
-  def test_unknown_name_routes_to_send
+  # A computed reader is a method (r.twice); [] names members only.
+  def test_computed_reader_is_a_method_not_a_member
     r = WithComputed.new
-    r[:x] = 21
-    assert_equal 42, r[:twice]
+    r["x"] = 21
+    assert_equal 42, r.twice
+    assert_raise(ArgumentError) { r["twice"] }
+    assert_raise(TypeError) { r[:twice] }
   end
 
   def test_subclass_without_fast_primitives_still_works
@@ -330,8 +333,8 @@ class TestCAStructCIFYPhase1 < Test::Unit::TestCase
     end
     refute klass.const_defined?(:FAST_PRIMITIVES, false)
     r = klass.new
-    r[:v] = 7
-    assert_equal 7, r[:v]
+    r["v"] = 7
+    assert_equal 7, r["v"]
   end
 
 end

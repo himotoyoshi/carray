@@ -133,9 +133,9 @@ class TestCAStructHygiene < Test::Unit::TestCase
     st = CArray.struct { int32 :x; float64 :y }
     a = st.new(1, 2.0)
     [a.dup, a.clone].each do |b|
-      b[:x] = 99
-      assert_equal 1, a[:x]
-      assert_equal 99, b[:x]
+      b["x"] = 99
+      assert_equal 1, a["x"]
+      assert_equal 99, b["x"]
     end
   end
 
@@ -145,7 +145,7 @@ class TestCAStructHygiene < Test::Unit::TestCase
     st = CArray.struct { int32 :x; cmplx64 :z }
     s = st.new(1, Complex(1.0, 0.0))
     t = s.swap_bytes
-    assert_equal 16777216, t[:x]
+    assert_equal 16777216, t["x"]
     assert_equal s, t.swap_bytes
     r = CARecord.new(st, 1); r[0] = s
     assert_equal r.swap_bytes[0], t
@@ -157,16 +157,16 @@ class TestCAStructHygiene < Test::Unit::TestCase
   def test_frozen_element_refuses_writes
     st = CArray.struct { int32 :x; float64 :y; fixlen :s, bytes: 4 }
     f = st.new(1, 2.0, "abcd").freeze
-    assert_raise(FrozenError) { f[:x] = 5 }
-    assert_raise(FrozenError) { f[:y] = 5.0 }
-    assert_raise(FrozenError) { f[:s] = "wxyz" }
+    assert_raise(FrozenError) { f["x"] = 5 }
+    assert_raise(FrozenError) { f["y"] = 5.0 }
+    assert_raise(FrozenError) { f["s"] = "wxyz" }
     assert_raise(FrozenError) { f.decode(st.new(7).encode) }
     assert_raise(FrozenError) { f.swap_bytes! }
     assert_equal [1, 2.0, "abcd"], f.values
-    assert_equal 1, f.dup[:x]
+    assert_equal 1, f.dup["x"]
     g = f.dup
-    g[:x] = 3
-    assert_equal 3, g[:x]
+    g["x"] = 3
+    assert_equal 3, g["x"]
   end
 
   # == compares the record's bytes, as eql? and a record array's eq do.
@@ -208,7 +208,7 @@ class TestCAStructHygiene < Test::Unit::TestCase
     %i[k s v in].each do |m|
       assert_raise(TypeError, m.to_s) { s[m] = UNDEF }
     end
-    assert_equal "ab", s[:s]
+    assert_equal "ab", s["s"]
     assert_equal s, st.decode(s.encode)
   end
 
@@ -218,21 +218,21 @@ class TestCAStructHygiene < Test::Unit::TestCase
     inner = CArray.struct { int32 :a; int32 :b }
     outer = CArray.struct { int32 :k; struct :in, type: inner; array :v, type: CArray.int32(2) }
     s = outer.new(1, inner.new(2, 3))
-    s[:in][:a] = 5
-    assert_equal [5, 3], s[:in].values
-    x = s[:in]
-    x[:b] = 7
-    assert_equal [5, 7], s[:in].values
-    s[:v][1] = 9
-    assert_equal [0, 9], s[:v].to_a
+    s["in"]["a"] = 5
+    assert_equal [5, 3], s["in"].values
+    x = s["in"]
+    x["b"] = 7
+    assert_equal [5, 7], s["in"].values
+    s["v"][1] = 9
+    assert_equal [0, 9], s["v"].to_a
     deep = CArray.struct { struct :o, type: outer }.new
-    deep[:o][:in][:b] = 42
-    assert_equal 42, deep[:o][:in][:b]
-    c = s[:in].dup                  # a copy owns its bytes
-    c[:a] = 0
-    assert_equal 5, s[:in][:a]
+    deep["o"]["in"]["b"] = 42
+    assert_equal 42, deep["o"]["in"]["b"]
+    c = s["in"].dup                  # a copy owns its bytes
+    c["a"] = 0
+    assert_equal 5, s["in"]["a"]
     s.freeze
-    assert_raise(FrozenError) { s[:in][:a] = 1 }
+    assert_raise(FrozenError) { s["in"]["a"] = 1 }
   end
 
 end

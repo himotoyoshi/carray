@@ -197,12 +197,12 @@ class TestCAStructBitfield < Test::Unit::TestCase
     }
     s = CArray.struct(pack: 1, size: 16) { bit :p, bits: 4; bit :w, bits: 60 }
     o = s.new
-    o[:w] = 2**60 - 1
-    assert_equal 2**60 - 1, o[:w]
+    o["w"] = 2**60 - 1
+    assert_equal 2**60 - 1, o["w"]
     t = CArray.struct(pack: 1) { bit :w, bits: 64 }
     o = t.new
-    o[:w] = 2**64 - 1
-    assert_equal 2**64 - 1, o[:w]
+    o["w"] = 2**64 - 1
+    assert_equal 2**64 - 1, o["w"]
   end
 
 end

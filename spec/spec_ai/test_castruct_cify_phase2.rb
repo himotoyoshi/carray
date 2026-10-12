@@ -37,18 +37,18 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
       bit :c, bits: 6
     }
     r = s.new(head: 0xCAFE, a: 1, b: 0, c: 42)
-    assert_equal true,  r[:a]
-    assert_equal false, r[:b]
-    assert_equal 42,   r[:c]
-    assert_equal 0xCAFE, r[:head]   # neighbour primitive untouched
+    assert_equal true,  r["a"]
+    assert_equal false, r["b"]
+    assert_equal 42,   r["c"]
+    assert_equal 0xCAFE, r["head"]   # neighbour primitive untouched
 
-    r[:a] = 0
-    r[:b] = 1
-    r[:c] = 17
-    assert_equal false, r[:a]
-    assert_equal true,  r[:b]
-    assert_equal 17,   r[:c]
-    assert_equal 0xCAFE, r[:head]   # still untouched
+    r["a"] = 0
+    r["b"] = 1
+    r["c"] = 17
+    assert_equal false, r["a"]
+    assert_equal true,  r["b"]
+    assert_equal 17,   r["c"]
+    assert_equal 0xCAFE, r["head"]   # still untouched
   end
 
   def test_bitfield_crossing_byte_boundary_uint16_view
@@ -68,14 +68,14 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     assert_equal 2,    entry[2]   # view_bytes = uint16
     assert_equal 4,    entry[3]   # bit_in_word
     assert_equal 12,   entry[4]
-    assert_equal 0xF,   r[:pad]
-    assert_equal 0xABC, r[:val]
-    assert_equal 0x55,  r[:tail]
-    r[:val] = 0x123
-    assert_equal 0x123, r[:val]
+    assert_equal 0xF,   r["pad"]
+    assert_equal 0xABC, r["val"]
+    assert_equal 0x55,  r["tail"]
+    r["val"] = 0x123
+    assert_equal 0x123, r["val"]
     # Neighbouring bit fields untouched
-    assert_equal 0xF,  r[:pad]
-    assert_equal 0x55, r[:tail]
+    assert_equal 0xF,  r["pad"]
+    assert_equal 0x55, r["tail"]
   end
 
   def test_bitfield_8bit_at_aligned_offset_uses_byte_view
@@ -89,7 +89,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     assert_equal 1,    entry[2]   # view_bytes (1: byte view since aligned)
     assert_equal 0,    entry[3]   # bit_in_word
     assert_equal 8,    entry[4]   # bits
-    assert_equal 0xCD, r[:byte_field]
+    assert_equal 0xCD, r["byte_field"]
   end
 
   def test_bitfield_8bit_unaligned_uses_uint16_view
@@ -104,9 +104,9 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     assert_equal 2,    entry[2]   # view_bytes: uint16 (spans bytes 0+1)
     assert_equal 4,    entry[3]   # bit_in_word
     assert_equal 8,    entry[4]
-    assert_equal 0xCD, r[:value]
-    assert_equal 0xA,  r[:pad]
-    assert_equal 0x9,  r[:tail]
+    assert_equal 0xCD, r["value"]
+    assert_equal 0xA,  r["pad"]
+    assert_equal 0x9,  r["tail"]
   end
 
   def test_bitfield_write_does_not_disturb_neighbours
@@ -117,11 +117,11 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
       bit :d, bits: 4
     }
     r = s.new(a: 0xA, b: 0xB, c: 0xC, d: 0xD)
-    r[:b] = 0x5
-    assert_equal 0xA, r[:a]
-    assert_equal 0x5, r[:b]
-    assert_equal 0xC, r[:c]
-    assert_equal 0xD, r[:d]
+    r["b"] = 0x5
+    assert_equal 0xA, r["a"]
+    assert_equal 0x5, r["b"]
+    assert_equal 0xC, r["c"]
+    assert_equal 0xD, r["d"]
   end
 
   def test_bitfield_value_truncates_to_bits
@@ -129,10 +129,10 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     # bit width (matches CABitfield semantics).
     s = CArray.struct(pack: 1) { bit :f, bits: 2 }
     r = s.new
-    r[:f] = 99
-    assert_equal 3, r[:f]   # 99 & 0x3 == 3
-    r[:f] = 256
-    assert_equal 0, r[:f]   # 256 & 0x3 == 0
+    r["f"] = 99
+    assert_equal 3, r["f"]   # 99 & 0x3 == 3
+    r["f"] = 256
+    assert_equal 0, r["f"]   # 256 & 0x3 == 0
   end
 
   def test_one_bit_field_is_a_boolean
@@ -140,12 +140,12 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     # column of it does: true / false / 1 / 0 are taken, anything else is not.
     s = CArray.struct(pack: 1) { bit :flag, bits: 1 }
     r = s.new
-    r[:flag] = true
-    assert_equal true, r[:flag]
-    r[:flag] = 0
-    assert_equal false, r[:flag]
-    assert_raise(CArray::DataTypeError) { r[:flag] = 99 }
-    assert_raise(CArray::DataTypeError) { r[:flag] = nil }
+    r["flag"] = true
+    assert_equal true, r["flag"]
+    r["flag"] = 0
+    assert_equal false, r["flag"]
+    assert_raise(CArray::DataTypeError) { r["flag"] = 99 }
+    assert_raise(CArray::DataTypeError) { r["flag"] = nil }
   end
 
   # ===== Endian-swapped reads / writes ================================
@@ -173,7 +173,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     r = s.new(v: 0x01020304)
     assert_equal CAStruct::Builder::FAST_KIND_ENDIAN,
                  s::FAST_PRIMITIVES["v"][0]
-    assert_equal 0x01020304, r[:v]
+    assert_equal 0x01020304, r["v"]
     # And the encoded bytes are big-endian on a LE host (the swapped
     # storage order), proving the swap happened.
     expected_bytes = HOST_LE ? "\x01\x02\x03\x04".b : "\x04\x03\x02\x01".b
@@ -184,7 +184,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     other = HOST_LE ? :big : :little
     s = CArray.struct(pack: 1) { uint16 :port, endian: other }
     r = s.new(port: 0x1234)
-    assert_equal 0x1234, r[:port]
+    assert_equal 0x1234, r["port"]
     expected = HOST_LE ? "\x12\x34".b : "\x34\x12".b
     assert_equal expected, r.encode
   end
@@ -193,7 +193,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     other = HOST_LE ? :big : :little
     s = CArray.struct(pack: 1) { int64 :big_v, endian: other }
     r = s.new(big_v: 0x0102030405060708)
-    assert_equal 0x0102030405060708, r[:big_v]
+    assert_equal 0x0102030405060708, r["big_v"]
     expected = HOST_LE ? "\x01\x02\x03\x04\x05\x06\x07\x08".b
                        : "\x08\x07\x06\x05\x04\x03\x02\x01".b
     assert_equal expected, r.encode
@@ -203,7 +203,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     other = HOST_LE ? :big : :little
     s = CArray.struct(pack: 1) { float64 :x, endian: other }
     r = s.new(x: Math::PI)
-    assert_in_delta Math::PI, r[:x], 1e-15
+    assert_in_delta Math::PI, r["x"], 1e-15
     # Bit-for-bit check: native double bytes reversed.
     native_bytes = [Math::PI].pack("E")  # native LE on intel/arm
     if HOST_LE
@@ -217,7 +217,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     other = HOST_LE ? :big : :little
     s = CArray.struct(pack: 1) { float32 :x, endian: other }
     r = s.new(x: 1.5)
-    assert_in_delta 1.5, r[:x], 1e-6
+    assert_in_delta 1.5, r["x"], 1e-6
   end
 
   def test_endian_write_does_not_disturb_neighbours
@@ -228,14 +228,14 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
       uint32 :c, endian: other
     }
     r = s.new(a: 0x11111111, b: 0x22222222, c: 0x33333333)
-    r[:a] = 0xAAAAAAAA
-    assert_equal 0xAAAAAAAA, r[:a]
-    assert_equal 0x22222222, r[:b]
-    assert_equal 0x33333333, r[:c]
-    r[:c] = 0xCCCCCCCC
-    assert_equal 0xAAAAAAAA, r[:a]
-    assert_equal 0x22222222, r[:b]
-    assert_equal 0xCCCCCCCC, r[:c]
+    r["a"] = 0xAAAAAAAA
+    assert_equal 0xAAAAAAAA, r["a"]
+    assert_equal 0x22222222, r["b"]
+    assert_equal 0x33333333, r["c"]
+    r["c"] = 0xCCCCCCCC
+    assert_equal 0xAAAAAAAA, r["a"]
+    assert_equal 0x22222222, r["b"]
+    assert_equal 0xCCCCCCCC, r["c"]
   end
 
   # ===== 1-byte endian: must be primitive (no swap) ==================
@@ -249,7 +249,7 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
     entry = s::FAST_PRIMITIVES["v"]
     assert_equal CAStruct::Builder::FAST_KIND_PRIMITIVE, entry[0]
     r = s.new(v: -42)
-    assert_equal(-42, r[:v])
+    assert_equal(-42, r["v"])
   end
 
   # ===== Column-level bitfield (A.3+) still works ====================
@@ -273,18 +273,18 @@ class TestCAStructCIFYPhase2 < Test::Unit::TestCase
   def test_symbol_and_string_lookup_parity_for_bitfield
     s = CArray.struct(pack: 1) { bit :flag, bits: 1 }
     r = s.new(flag: 1)
-    assert_equal r[:flag], r["flag"]
+    assert_equal r["flag"], r["flag"]
     r["flag"] = 0
-    assert_equal false, r[:flag]
+    assert_equal false, r["flag"]
   end
 
   def test_symbol_and_string_lookup_parity_for_endian
     other = HOST_LE ? :big : :little
     s = CArray.struct(pack: 1) { uint32 :v, endian: other }
     r = s.new(v: 0x1234)
-    assert_equal r[:v], r["v"]
+    assert_equal r["v"], r["v"]
     r["v"] = 0xABCD
-    assert_equal 0xABCD, r[:v]
+    assert_equal 0xABCD, r["v"]
   end
 
 end

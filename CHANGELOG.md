@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CAStruct` element's `[]` and `[]=` take a member's name as a
+  String (`s["lat"]`) or its position (`s[0]`); a Symbol (`s[:lat]`) raises
+  `TypeError`, as it is a method call on a `CARecord` (`r[:is_not_masked]`).
+  Read a member as `s["lat"]` or `s.lat`. A name that is not a member raises
+  `ArgumentError`; before, `[]` called a method of that name (so
+  `s["initialize"]` reset the element). Call a computed reader as a method.
+
 - Fix: a complex array works with the methods that find values by
   equality — `unique`, `value_counts`, `nunique`, `mask_duplicates`,
   `is_mode`, `factorize`, `is_in`, `locate_addr`, the set operations,

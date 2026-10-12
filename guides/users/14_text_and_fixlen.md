@@ -297,7 +297,7 @@ Indexing by **integer** decodes a single cell to a struct instance:
 ```ruby
 v = a[0]
 v.class                      #  => GeoCoord
-v[:lat]                      #  => 1.0
+v["lat"]                     #  => 1.0
 ```
 
 Field projection composes with the ordinary view algebra — a slice or transpose of a `CARecord` can still project its fields:

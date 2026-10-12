@@ -185,8 +185,8 @@ class TestSerialize30 < Test::Unit::TestCase
     rc[1] = Rec.new(:lat => 3.5, :lng => 4.5, :id => 8)
     rc2 = CArray.load(CArray.dump(rc))
     assert_equal Rec, rc2.data_class
-    assert_equal 1.5, rc2[0][:lat]
-    assert_equal 8, rc2[1][:id]
+    assert_equal 1.5, rc2[0]["lat"]
+    assert_equal 8, rc2[1]["id"]
     assert_equal rc, rc2
   end
 
@@ -219,8 +219,8 @@ class TestSerialize30 < Test::Unit::TestCase
     self.class.send(:remove_const, :TmpRec)
     rc2 = CArray.load(s)
     assert_operator rc2.data_class, :<, CAStruct
-    assert_equal 5, rc2[0][:a]
-    assert_in_delta 1.5, rc2[0][:b], 1e-6
+    assert_equal 5, rc2[0]["a"]
+    assert_in_delta 1.5, rc2[0]["b"], 1e-6
     assert_equal 6, rc2.data_class::DATA_SIZE
   end
 

@@ -16,7 +16,8 @@
                             (primitive / bitfield / endian-swap)
     DISPATCH_TABLE hit   -> Proc invoked via rb_funcall("call")
                             (nested struct / CArray template / fixlen)
-    miss                 -> send(name) / send(name=)
+    a Symbol, or a name that is not a member, raises: a member is
+    s["name"] or s[position], and its accessor s.name
 
 ---------------------------------------------------------------------------- */
 
@@ -406,6 +407,45 @@ ca_struct_resolve_name (VALUE klass, VALUE name)
   return rb_funcall(name, rb_intern("to_s"), 0);
 }
 
+/* The member an element's `[]` / `[]=` names: a String naming a member,
+   or an Integer position.  A Symbol is not a member name here -- the
+   member is s["name"] or the accessor s.name -- and a name that is not a
+   member raises rather than calling a method of that name. */
+static VALUE
+ca_struct_member_name (VALUE klass, VALUE name)
+{
+  VALUE name_s;
+  if ( SYMBOL_P(name) ) {
+    VALUE str = rb_sym2str(name);
+    if ( ! NIL_P(rb_hash_aref(rb_const_get(klass, rb_intern("MEMBER_TABLE")),
+                              str)) ) {
+      rb_raise(rb_eTypeError,
+               "a struct member is named by a String (s[\"%"PRIsVALUE"\"]) or "
+               "read by its accessor (s.%"PRIsVALUE"), not by a Symbol",
+               str, str);
+    }
+    rb_raise(rb_eTypeError,
+             "a struct member is named by a String, not by a Symbol "
+             "(%"PRIsVALUE" has no member %"PRIsVALUE" either)",
+             klass, rb_inspect(str));
+  }
+  if ( ! RB_TYPE_P(name, T_STRING) && ! RB_TYPE_P(name, T_FIXNUM) ) {
+    rb_raise(rb_eTypeError,
+             "a struct member is named by a String or an Integer position "
+             "(got %s)", rb_obj_classname(name));
+  }
+  name_s = ca_struct_resolve_name(klass, name);
+  if ( NIL_P(name_s)
+       || NIL_P(rb_hash_aref(rb_const_get(klass, rb_intern("MEMBER_TABLE")),
+                             name_s)) ) {
+    rb_raise(rb_eArgError, "%"PRIsVALUE" has no member %"PRIsVALUE
+             " (members: %"PRIsVALUE")",
+             klass, rb_inspect(name),
+             rb_inspect(rb_const_get(klass, rb_intern("MEMBERS"))));
+  }
+  return name_s;
+}
+
 /* ---------------------------------------------------------------------
    Shared write-dispatch helper reused by `[]=` and `initialize`.
    Returns 1 if the member was written, 0 if neither table contained
@@ -468,7 +508,7 @@ static VALUE
 rb_ca_struct_aref (VALUE self, VALUE name)
 {
   VALUE klass = rb_obj_class(self);
-  VALUE name_s = ca_struct_resolve_name(klass, name);
+  VALUE name_s = ca_struct_member_name(klass, name);
 
   /* Fast path.  FAST_PRIMITIVES may be absent on subclasses built
      outside Builder — fall through to the dispatch table in that
@@ -526,8 +566,9 @@ rb_ca_struct_aref (VALUE self, VALUE name)
     return rb_funcall(reader, rb_intern("call"), 1, data_val);
   }
 
-  /* Unknown name: fall back to send(name) for computed members. */
-  return rb_funcall(self, rb_to_id(name), 0);
+  rb_raise(rb_eArgError, "%"PRIsVALUE" has no reader for member %"PRIsVALUE,
+           klass, name_s);
+  return Qnil;
 }
 
 /* ---------------------------------------------------------------------
@@ -542,7 +583,7 @@ rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
 
   /* The fast path writes into the record's bytes directly. */
   rb_check_frozen(self);
-  name_s = ca_struct_resolve_name(klass, name);
+  name_s = ca_struct_member_name(klass, name);
 
   /* An element is one record of values: it has no mask to hold UNDEF.  A
      record is masked in its record array (a[i] = UNDEF). */
@@ -602,9 +643,9 @@ rb_ca_struct_aset (VALUE self, VALUE name, VALUE val)
     return val;
   }
 
-  /* Unknown name: fall back to send("name=", val). */
-  VALUE setter_name = rb_str_plus(rb_obj_as_string(name), rb_str_new_cstr("="));
-  return rb_funcall(self, rb_intern_str(setter_name), 1, val);
+  rb_raise(rb_eArgError, "%"PRIsVALUE" has no writer for member %"PRIsVALUE,
+           klass, name_s);
+  return Qnil;
 }
 
 /* ---------------------------------------------------------------------

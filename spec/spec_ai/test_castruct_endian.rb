@@ -18,23 +18,23 @@ class TestCAStructEndian < Test::Unit::TestCase
   def test_int32_big_endian_on_wire_layout
     s = CArray.struct { int32 :v, endian: :big }
     o = s.new
-    o[:v] = 0x01020304
+    o["v"] = 0x01020304
     assert_equal "\x01\x02\x03\x04".b, o.encode
-    assert_equal 0x01020304, s.decode(o.encode)[:v]
+    assert_equal 0x01020304, s.decode(o.encode)["v"]
   end
 
   def test_int32_little_endian_on_wire_layout
     s = CArray.struct { int32 :v, endian: :little }
     o = s.new
-    o[:v] = 0x01020304
+    o["v"] = 0x01020304
     assert_equal "\x04\x03\x02\x01".b, o.encode
-    assert_equal 0x01020304, s.decode(o.encode)[:v]
+    assert_equal 0x01020304, s.decode(o.encode)["v"]
   end
 
   def test_uint16_endian
     s = CArray.struct { uint16 :port, endian: :big }
     o = s.new
-    o[:port] = 0x1234
+    o["port"] = 0x1234
     assert_equal "\x12\x34".b, o.encode
   end
 
@@ -44,11 +44,11 @@ class TestCAStructEndian < Test::Unit::TestCase
       int32 :b, endian: :preserve
     }
     o = s.new
-    o[:a] = 0x11223344
-    o[:b] = 0x55667788
+    o["a"] = 0x11223344
+    o["b"] = 0x55667788
     o2 = s.decode(o.encode)
-    assert_equal 0x11223344, o2[:a]
-    assert_equal 0x55667788, o2[:b]
+    assert_equal 0x11223344, o2["a"]
+    assert_equal 0x55667788, o2["b"]
   end
 
   def test_mixed_endian_struct_roundtrip
@@ -58,32 +58,32 @@ class TestCAStructEndian < Test::Unit::TestCase
       uint16 :host_field
     }
     o = s.new
-    o[:be_field]   = -1
-    o[:le_field]   = 0x7eadbeef
-    o[:host_field] = 0xABCD
+    o["be_field"]   = -1
+    o["le_field"]   = 0x7eadbeef
+    o["host_field"] = 0xABCD
     o2 = s.decode(o.encode)
-    assert_equal(-1,         o2[:be_field])
-    assert_equal 0x7eadbeef, o2[:le_field]
-    assert_equal 0xABCD,     o2[:host_field]
+    assert_equal(-1,         o2["be_field"])
+    assert_equal 0x7eadbeef, o2["le_field"]
+    assert_equal 0xABCD,     o2["host_field"]
   end
 
   def test_float64_big_endian_roundtrip
     s = CArray.struct { float64 :x, endian: :big }
     o = s.new
-    o[:x] = Math::PI
+    o["x"] = Math::PI
     bin = o.encode
     # On a LE host, BE-stored Math::PI is the byte-reverse of native PI.
     pi_native = [Math::PI].pack("E")     # native double = LE on intel/arm64
     assert_equal pi_native.bytes.reverse, bin.bytes if HOST_LE
-    assert_in_delta Math::PI, s.decode(bin)[:x], 1e-15
+    assert_in_delta Math::PI, s.decode(bin)["x"], 1e-15
   end
 
   def test_cmplx64_endian_swaps_each_half
     s = CArray.struct { cmplx64 :c, endian: :big }
     o = s.new
-    o[:c] = Complex(1.5, -2.25)
-    assert_in_delta 1.5,  s.decode(o.encode)[:c].real, 1e-6
-    assert_in_delta(-2.25, s.decode(o.encode)[:c].imag, 1e-6)
+    o["c"] = Complex(1.5, -2.25)
+    assert_in_delta 1.5,  s.decode(o.encode)["c"].real, 1e-6
+    assert_in_delta(-2.25, s.decode(o.encode)["c"].imag, 1e-6)
   end
 
   def test_endian_rejected_on_fixlen
@@ -121,8 +121,8 @@ class TestCAStructEndian < Test::Unit::TestCase
     # same bytes a host-native field followed by swap_bytes would.
     s_be   = CArray.struct { int32 :v, endian: :big }
     s_host = CArray.struct { int32 :v }
-    o_be   = s_be.new;   o_be[:v]   = 0x0A0B0C0D
-    o_host = s_host.new; o_host[:v] = 0x0A0B0C0D
+    o_be   = s_be.new;   o_be["v"]   = 0x0A0B0C0D
+    o_host = s_host.new; o_host["v"] = 0x0A0B0C0D
     if HOST_LE
       assert_equal o_host.encode.bytes.reverse, o_be.encode.bytes
     else
@@ -136,7 +136,7 @@ class TestCAStructEndian < Test::Unit::TestCase
     r = CARecord.new(s, 3)
     r["v"][] = [3, 1, 2]
     r["w"][] = [30, 10, 20]
-    assert_equal [3, 1, 2], r.to_a.map { |e| e[:v] }
+    assert_equal [3, 1, 2], r.to_a.map { |e| e["v"] }
     assert_equal [3, 1, 2], r["v"].to_a
     assert_equal [1, 2, 3], r.sort["v"].to_a
     assert_equal [10, 20, 30], r.sort["w"].to_a

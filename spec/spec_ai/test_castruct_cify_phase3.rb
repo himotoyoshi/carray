@@ -35,16 +35,16 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
 
   def test_no_args_initializes_zeros
     r = S.new
-    assert_equal 0, r[:head]
-    assert_equal false, r[:flag]
-    assert_equal 0, r[:ver]
-    assert_equal 0, r[:payload]
+    assert_equal 0, r["head"]
+    assert_equal false, r["flag"]
+    assert_equal 0, r["ver"]
+    assert_equal 0, r["payload"]
   end
 
   def test_empty_hash_initializes_zeros
     r = S.new({})
-    assert_equal 0, r[:head]
-    assert_equal false, r[:flag]
+    assert_equal 0, r["head"]
+    assert_equal false, r["flag"]
   end
 
   # --- Hash init -----------------------------------------------------
@@ -52,49 +52,49 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_hash_init_all_fields
     r = S.new(head: 0x1234, flag: 1, ver: 42,
               payload: 0xDEADBEEF, tag: "abcd")
-    assert_equal 0x1234,     r[:head]
-    assert_equal true,          r[:flag]
-    assert_equal 42,         r[:ver]
-    assert_equal 0xDEADBEEF, r[:payload]
-    assert_equal "abcd",     r[:tag]
+    assert_equal 0x1234,     r["head"]
+    assert_equal true,          r["flag"]
+    assert_equal 42,         r["ver"]
+    assert_equal 0xDEADBEEF, r["payload"]
+    assert_equal "abcd",     r["tag"]
   end
 
   def test_hash_init_partial_zeros_remaining
     r = S.new(head: 0xCAFE)
-    assert_equal 0xCAFE, r[:head]
-    assert_equal false,      r[:flag]
-    assert_equal 0,      r[:ver]
+    assert_equal 0xCAFE, r["head"]
+    assert_equal false,      r["flag"]
+    assert_equal 0,      r["ver"]
   end
 
   def test_hash_init_accepts_string_keys
     r = S.new("head" => 11, "ver" => 7)
-    assert_equal 11, r[:head]
-    assert_equal 7,  r[:ver]
+    assert_equal 11, r["head"]
+    assert_equal 7,  r["ver"]
   end
 
   def test_hash_init_accepts_mixed_string_and_symbol_keys
     r = S.new("head" => 1, ver: 2)
-    assert_equal 1, r[:head]
-    assert_equal 2, r[:ver]
+    assert_equal 1, r["head"]
+    assert_equal 2, r["ver"]
   end
 
   # --- Positional init ----------------------------------------------
 
   def test_positional_init_all_fields
     r = S.new(0xCAFE, 0, 7, 0xBABEFACE, "wxyz")
-    assert_equal 0xCAFE,     r[:head]
-    assert_equal false,          r[:flag]
-    assert_equal 7,          r[:ver]
-    assert_equal 0xBABEFACE, r[:payload]
-    assert_equal "wxyz",     r[:tag]
+    assert_equal 0xCAFE,     r["head"]
+    assert_equal false,          r["flag"]
+    assert_equal 7,          r["ver"]
+    assert_equal 0xBABEFACE, r["payload"]
+    assert_equal "wxyz",     r["tag"]
   end
 
   def test_positional_init_partial
     r = S.new(0xCAFE, 1)
-    assert_equal 0xCAFE, r[:head]
-    assert_equal true,      r[:flag]
-    assert_equal 0,      r[:ver]    # remaining zeros
-    assert_equal 0,      r[:payload]
+    assert_equal 0xCAFE, r["head"]
+    assert_equal true,      r["flag"]
+    assert_equal 0,      r["ver"]    # remaining zeros
+    assert_equal 0,      r["payload"]
   end
 
   # --- Error cases ---------------------------------------------------
@@ -154,7 +154,7 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
 
   def test_subclass_initialize_can_call_super_with_hash
     r = WrapMyStruct.new(7)
-    assert_equal 70, r[:x]
+    assert_equal 70, r["x"]
   end
 
   # --- @data instance variable is set ------------------------------
@@ -176,11 +176,11 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_two_instances_have_independent_data
     a = S.new(head: 1)
     b = S.new(head: 2)
-    assert_equal 1, a[:head]
-    assert_equal 2, b[:head]
-    a[:head] = 99
-    assert_equal 99, a[:head]
-    assert_equal 2,  b[:head]
+    assert_equal 1, a["head"]
+    assert_equal 2, b["head"]
+    a["head"] = 99
+    assert_equal 99, a["head"]
+    assert_equal 2,  b["head"]
   end
 
   # --- All fast-path kinds via positional and hash ------------------
@@ -188,11 +188,11 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
   def test_positional_round_trip_through_all_fast_kinds
     # primitive (uint16), bit (1+7), endian (uint32 BE), fixlen (4 bytes)
     r = S.new(0xABCD, 1, 33, 0x12345678, "abcd")
-    assert_equal 0xABCD,     r[:head]
-    assert_equal true,          r[:flag]
-    assert_equal 33,         r[:ver]
-    assert_equal 0x12345678, r[:payload]
-    assert_equal "abcd",     r[:tag]
+    assert_equal 0xABCD,     r["head"]
+    assert_equal true,          r["flag"]
+    assert_equal 33,         r["ver"]
+    assert_equal 0x12345678, r["payload"]
+    assert_equal "abcd",     r["tag"]
   end
 
   # --- Subclass without FAST_PRIMITIVES still constructs -----------
@@ -208,9 +208,9 @@ class TestCAStructCIFYPhase3 < Test::Unit::TestCase
       # No FAST_PRIMITIVES -- C path must fall through to DISPATCH_TABLE.
     end
     r = klass.new(v: 42)
-    assert_equal 42, r[:v]
+    assert_equal 42, r["v"]
     r2 = klass.new(99)
-    assert_equal 99, r2[:v]
+    assert_equal 99, r2["v"]
   end
 
 end

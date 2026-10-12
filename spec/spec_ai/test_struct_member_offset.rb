@@ -11,7 +11,7 @@ class TestStructMemberOffset < Test::Unit::TestCase
     o = CArray.struct(pack: 1, size: 4) { int8 :z; struct :n, type: Inner, offset: 2 }
     assert_equal [["z", 0], ["n", 2]], o.fields.map { |f| [f.name, f.offset] }
     v = o.new(z: 1, n: Inner.new(a: 300))
-    assert_equal [1, 300], [v[:z], v[:n][:a]]
+    assert_equal [1, 300], [v["z"], v["n"]["a"]]
   end
 
   def test_array_member_at_its_offset
