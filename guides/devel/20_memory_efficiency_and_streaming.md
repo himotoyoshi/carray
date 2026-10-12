@@ -197,9 +197,9 @@ code. This replaces the older sort-based approach (sort addresses + gathered cop
 + boolean scan), whose scratch buffers were O(n). Peak memory is O(distinct
 values) for the hash table plus the output code/level arrays — no sort buffer, no
 gathered copy. The file header (`ext/carray_factorize.c:3`) documents that both
-discovery problems share the one hash and the one pass. (The object/fixlen path
-still falls back to a Ruby `Hash` seen-set; extending `fz_hash` to object keys is
-a pinned future item.)
+discovery problems share the one hash and the one pass. Object and fixlen
+cells go through the same hash, in lanes of their own (`rb_hash` / `rb_eql` for
+an object cell, the bytes for a fixlen cell).
 
 ## 7. Streaming I/O — no whole-copy buffer
 

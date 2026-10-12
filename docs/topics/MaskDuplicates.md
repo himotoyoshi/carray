@@ -170,16 +170,18 @@ a.mask_duplicates[:is_not_masked].copy
 
 ## 4. Comparison semantics
 
-### Strict `==`; NaN is never equal to anything
+### Same value; every NaN is one value
 
-Duplicate judging uses strict `==`. Because `NaN != NaN`, **NaN cells are
-all kept** (none is a duplicate of another):
+Duplicate judging compares values, as the rest of the value-hash family
+(`unique`, `value_counts`, `nunique`, `is_in`, the set operations,
+`categorize`) does: every NaN is the same value, and `-0.0` is the same
+value as `0.0`. The second NaN is a duplicate of the first:
 
 ```ruby
 f = CA_DOUBLE([1.0, Float::NAN, 2.0, Float::NAN, 1.0])
 
 f.mask_duplicates
-# => [ 1.0, NaN, 2.0, NaN, _ ]   # both NaNs kept; only the 2nd 1.0 masked
+# => [ 1.0, NaN, 2.0, _, _ ]   # the 2nd NaN and the 2nd 1.0 masked
 ```
 
 To treat NaN as "invalid and excluded," mask it first — masked cells do
