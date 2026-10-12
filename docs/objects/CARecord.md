@@ -115,7 +115,14 @@ Indexing by **integer** decodes a single cell to a struct instance:
 v = a[0]
 v.class                     # => GeoCoord
 v["lat"]                    # => 1.0
+v.lat                       # => 1.0   (the member's accessor)
 ```
+
+A struct instance names a member by a String (`v["lat"]`) or its position
+(`v[0]`), and has an accessor for each member (`v.lat`).  A member whose
+name is already a method of the instance (`hash`, `size`, `class`, ...)
+gets no accessor, so the method keeps working; read that member as
+`v["size"]`.  A Symbol (`v[:lat]`) is not a member name.
 
 Field projection also works through derived views (a slice or transpose of a
 `CARecord` can still project its fields):

@@ -469,14 +469,23 @@ class CAStruct::Builder  # :nodoc:
     klass.const_set(:FAST_PRIMITIVES,
                     self.class.build_fast_primitives(table, @offset).freeze)
     # ---
+    # An accessor for each member, unless the name is already a method of
+    # the element (hash, size, class, initialize, ...): the accessor would
+    # replace it.  Such a member is read as s["name"] only, as a record
+    # array's members always are.
     klass.module_eval {
+      taken = ->(m) { method_defined?(m) || private_method_defined?(m) }
       names.each do |name|
-        define_method(name) {
-          return self[name]
-        }
-        define_method("#{name}=") { |val|
-          return self[name] = val
-        }
+        unless taken.(name)
+          define_method(name) {
+            return self[name]
+          }
+        end
+        unless taken.("#{name}=")
+          define_method("#{name}=") { |val|
+            return self[name] = val
+          }
+        end
       end
     }
     # ---

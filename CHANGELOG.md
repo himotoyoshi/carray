@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CAStruct` member whose name is already a method of the element
+  (`hash`, `size`, `class`, `count`, `min`, `initialize`, ...) no longer gets
+  an accessor that replaces the method; read it as `s["name"]`. Before, such
+  a member broke the method: a member named `hash` or `class` made `==` and
+  Hash keys fail, and one named `initialize` made the struct impossible to
+  construct.
+
 - Change: a `CAStruct` element's `[]` and `[]=` take a member's name as a
   String (`s["lat"]`) or its position (`s[0]`); a Symbol (`s[:lat]`) raises
   `TypeError`, as it is a method call on a `CARecord` (`r[:is_not_masked]`).

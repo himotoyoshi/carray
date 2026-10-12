@@ -235,4 +235,22 @@ class TestCAStructHygiene < Test::Unit::TestCase
     assert_raise(FrozenError) { s["in"]["a"] = 1 }
   end
 
+  # A member named like a method of the element gets no accessor, so the
+  # element keeps its method; the member is read as s["name"].
+  def test_member_named_like_a_method_keeps_the_method
+    st = CArray.struct { int32 :hash; int32 :size; int32 :class; int32 :lat }
+    s = st.new(1, 2, 3, 4)
+    assert_equal st, s.class
+    assert_equal 4, s.size                      # the member count
+    assert_equal 1, s["hash"]
+    assert_equal 3, s["class"]
+    assert_equal 4, s.lat
+    assert_equal :hit, { s => :hit }[st.new(1, 2, 3, 4)]
+    assert_equal s, st.new(1, 2, 3, 4)
+    s["hash"] = 9
+    assert_equal 9, s["hash"]
+    init = CArray.struct { int32 :initialize; int32 :b }
+    assert_equal 7, init.new(7, 8)["initialize"]
+  end
+
 end
