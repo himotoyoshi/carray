@@ -11,8 +11,9 @@ run on the numeric storage.
 The gate is a separate axis from the FIXLEN choice of `CAFace.md` §2.5: it keys
 on `CA_FLAG_IS_FACE` and never reads `data_type`, so a Numeric Face — one whose
 surface `data_type` *is* its numeric storage type — is refused at these kernels
-exactly like a FIXLEN one until it sets `ORDERABLE`. `CATimedelta` is the
-in-tree case: `int64` on both sides, and it still has to opt in (§2).
+exactly like a FIXLEN one until it sets `ORDERABLE`. A `CAObject` Face built
+with `numeric: true` over `int64` is such a Face: `sort` and `bsearch` still
+raise on it until it passes `orderable_storage: true` (§6.2).
 
 This document explains the opt-in mechanism that lets a Face participate in
 those kernels — two flags and one template method — and the C-level policy
