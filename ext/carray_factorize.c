@@ -102,6 +102,53 @@
    discovery surface rather than this gate (see
    devel/PROPOSAL_DISCOVERY_FAMILY_FACE_GATE.md §4). */
 
+/* The value-hash family decides whether two cells hold the same value: every
+   NaN is one value, and -0.0 is the same value as +0.0.  A float cell's key
+   is the bytes of its canonical form (one NaN, +0.0 for a zero), so equal
+   values have equal keys; fz_canonical_* writes that form back as a value. */
+#define FZ_NAN_KEY_DOUBLE 0x7ff8000000000000ULL
+#define FZ_NAN_KEY_FLOAT  0x7fc00000UL
+
+static inline uint64_t
+fz_key_double (double v)
+{
+  uint64_t b;
+  if ( v != v ) return FZ_NAN_KEY_DOUBLE;
+  if ( v == 0.0 ) v = 0.0;
+  memcpy(&b, &v, sizeof(b));
+  return b;
+}
+
+static inline uint64_t
+fz_key_float (float v)
+{
+  uint32_t b;
+  if ( v != v ) return FZ_NAN_KEY_FLOAT;
+  if ( v == 0.0f ) v = 0.0f;
+  memcpy(&b, &v, sizeof(b));
+  return (uint64_t) b;
+}
+
+static inline double
+fz_canonical_double (double v)
+{
+  uint64_t b = fz_key_double(v);
+  memcpy(&v, &b, sizeof(v));
+  return v;
+}
+
+static inline float
+fz_canonical_float (float v)
+{
+  uint32_t b = (uint32_t) fz_key_float(v);
+  memcpy(&v, &b, sizeof(v));
+  return v;
+}
+
+/* For the kernel macros, which take the cell type T. */
+#define FZ_FLOAT_KEY(T, v) \
+  _Generic((T) 0, float: fz_key_float, double: fz_key_double)(v)
+
 /* A complex array as hash keys: its cells as fixlen blobs of the same
    width, each component written so that equal values have equal bytes
    (-0.0 as 0.0, every NaN as one NaN), with the mask kept.  The fixlen lane
@@ -119,17 +166,11 @@ fz_complex_key (VALUE self)
   n = 2 * ca->elements;
   if ( ca->data_type == CA_CMPLX128 ) {
     double *p = (double *) co->ptr;
-    for ( i = 0; i < n; i++ ) {
-      if ( p[i] != p[i] ) p[i] = NAN;
-      else if ( p[i] == 0.0 ) p[i] = 0.0;
-    }
+    for ( i = 0; i < n; i++ ) p[i] = fz_canonical_double(p[i]);
   }
   else {
     float *p = (float *) co->ptr;
-    for ( i = 0; i < n; i++ ) {
-      if ( p[i] != p[i] ) p[i] = (float) NAN;
-      else if ( p[i] == 0.0f ) p[i] = 0.0f;
-    }
+    for ( i = 0; i < n; i++ ) p[i] = fz_canonical_float(p[i]);
   }
   if ( ca_has_mask(ca) ) {
     ca_copy_mask(co, ca);
@@ -512,7 +553,7 @@ fz_hash_intern_obj (fz_hash *h, VALUE v, int *is_new)
 {
   if ( (h->n + 1) * 10 >= h->cap * 7 ) { fz_hash_grow(h); }   /* load factor 0.7 */
   int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? 0x7ff8000000000000ULL
+  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
                        : (uint64_t) NUM2LL(rb_hash(v));
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
@@ -610,7 +651,7 @@ static int
 fz_hash_lookup_obj (fz_hash *h, VALUE v, int32_t *code_out)
 {
   int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? 0x7ff8000000000000ULL
+  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
                        : (uint64_t) NUM2LL(rb_hash(v));
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
@@ -806,25 +847,18 @@ fz_factorize_appearance_body (VALUE arg)
     } while (0)
 
   /* Float lane: reproduce `==` with two value-based exceptions matching the
-     discovery family -- all NaN collapse to one canonical key (v != v -> NANKEY),
+     discovery family -- all NaN collapse to one canonical key (FZ_FLOAT_KEY),
      and -0.0 == +0.0 (a zero normalizes to +0.0 before the bitwise key).  The
      level pushed is the raw first-seen element (an appearance-first NaN / -0.0 is
      kept as-is), so masked source cells store the sentinel. */
-  #define FZ_LOOP_FLOAT(T, UINT, NANKEY)                                     \
+  #define FZ_LOOP_FLOAT(T)                                     \
     do {                                                                     \
       const T  *ip = (const T *) p_in;                                       \
       uint32_t *op = (uint32_t *) p_out;                                     \
       for ( ca_size_t i = 0; i < n; i++ ) {                                  \
         if ( m && m[i] ) { op[i] = 0xFFFFFFFFu; continue; }                  \
         T v = ip[i];                                                         \
-        uint64_t key;                                                        \
-        if ( v != v ) { key = (NANKEY); }                                    \
-        else {                                                               \
-          if ( v == (T) 0 ) { v = (T) 0; }                                   \
-          UINT bits;                                                         \
-          memcpy(&bits, &v, sizeof(bits));                                   \
-          key = (uint64_t) bits;                                             \
-        }                                                                    \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                          \
         int32_t code = fz_hash_intern(&h, key, &is_new);                     \
         if ( is_new ) { fz_levels_push(&lv, &ip[i]); }                       \
@@ -874,8 +908,8 @@ fz_factorize_appearance_body (VALUE arg)
     case CA_UINT16: FZ_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: FZ_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: FZ_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: FZ_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: FZ_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: FZ_LOOP_FLOAT(float);         break;
+    case CA_FLOAT64: FZ_LOOP_FLOAT(double); break;
     case CA_OBJECT: FZ_LOOP_OBJ;                   break;
     case CA_FIXLEN: FZ_LOOP_MEM;                   break;
     }
@@ -1021,24 +1055,17 @@ fz_mask_duplicates_body (VALUE arg)
 
   /* Float variant: reproduce `==` with two value-based exceptions so the
      distinct-value judgement matches uniq / the discovery family. All NaN
-     collapse to one canonical key (v != v -> NANKEY), so the second and later
+     collapse to one canonical key (FZ_FLOAT_KEY), so the second and later
      NaN in a fiber are duplicates; -0.0 == +0.0, so a zero normalizes to +0.0
      before the bitwise key. */
-  #define MD_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define MD_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T    *ip = (const T *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { op[i] = 0; continue; }                            \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                   \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         fz_hash_intern(&h, key, &is_new);                                     \
         op[i] = is_new ? 0 : 1;                                               \
@@ -1083,8 +1110,8 @@ fz_mask_duplicates_body (VALUE arg)
     case CA_UINT16: MD_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: MD_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: MD_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: MD_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: MD_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: MD_LOOP_FLOAT(float);         break;
+    case CA_FLOAT64: MD_LOOP_FLOAT(double); break;
     case CA_OBJECT:  MD_LOOP_OBJ;                                            break;
     case CA_FIXLEN:  MD_LOOP_MEM;                                            break;
     }
@@ -1181,20 +1208,13 @@ fz_unique_flat_body (VALUE arg)
 
   /* Float: NaN collapses to one canonical key; -0.0 / +0.0 share a key. The
      pushed level is the raw first-seen element. */
-  #define UQ_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define UQ_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T *ip = (const T *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         fz_hash_intern(&h, key, &is_new);                                     \
         if ( is_new ) { fz_levels_push(&lv, &ip[i]); }                        \
@@ -1239,8 +1259,8 @@ fz_unique_flat_body (VALUE arg)
     case CA_UINT16: UQ_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: UQ_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: UQ_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: UQ_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: UQ_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: UQ_LOOP_FLOAT(float);          break;
+    case CA_FLOAT64: UQ_LOOP_FLOAT(double);  break;
     case CA_OBJECT:  UQ_LOOP_OBJ;                                             break;
     case CA_FIXLEN:  UQ_LOOP_MEM;                                             break;
     }
@@ -1302,20 +1322,13 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  #define FZ_IA_FLOAT(T, UINT, NANKEY)                                         \
+  #define FZ_IA_FLOAT(T)                                         \
     do {                                                                       \
       const T *ip = (const T *) p_v;                                           \
       for ( ca_size_t i = 0; i < nv; i++ ) {                                   \
         if ( mv && mv[i] ) { continue; }                                       \
         T v = ip[i];                                                           \
-        uint64_t key;                                                          \
-        if ( v != v ) { key = (NANKEY); }                                      \
-        else {                                                                 \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                           \
-          memcpy(&bits, &v, sizeof(bits));                                     \
-          key = (uint64_t) bits;                                               \
-        }                                                                      \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                            \
         fz_hash_intern(h, key, &is_new);                                       \
         if ( is_new && lv ) { fz_levels_push(lv, &ip[i]); }                    \
@@ -1355,8 +1368,8 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
     case CA_UINT16: FZ_IA(uint16_t, (uint64_t)); break;
     case CA_UINT32: FZ_IA(uint32_t, (uint64_t)); break;
     case CA_UINT64: FZ_IA(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: FZ_IA_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: FZ_IA_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: FZ_IA_FLOAT(float);         break;
+    case CA_FLOAT64: FZ_IA_FLOAT(double); break;
     case CA_OBJECT:  FZ_IA_OBJ;                                            break;
     case CA_FIXLEN:  FZ_IA_MEM;                                            break;
     }
@@ -1461,21 +1474,14 @@ fz_is_in_body (VALUE arg)
         }                                                                       \
       } while (0)
 
-    #define IN_PROBE_FLOAT(T, UINT, NANKEY)                                     \
+    #define IN_PROBE_FLOAT(T)                                     \
       do {                                                                      \
         const T    *ip = (const T *) p_in;                                      \
         boolean8_t *op = (boolean8_t *) p_out;                                  \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           if ( m && m[i] ) { op[i] = 0; continue; }                            \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           op[i] = (boolean8_t) fz_hash_lookup(&h, key, NULL);                        \
         }                                                                       \
       } while (0)
@@ -1511,8 +1517,8 @@ fz_is_in_body (VALUE arg)
       case CA_UINT16: IN_PROBE(uint16_t, (uint64_t)); break;
       case CA_UINT32: IN_PROBE(uint32_t, (uint64_t)); break;
       case CA_UINT64: IN_PROBE(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: IN_PROBE_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: IN_PROBE_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: IN_PROBE_FLOAT(float);         break;
+      case CA_FLOAT64: IN_PROBE_FLOAT(double); break;
       case CA_OBJECT:  IN_PROBE_OBJ;                                            break;
       case CA_FIXLEN:  IN_PROBE_MEM;                                            break;
       }
@@ -1638,20 +1644,13 @@ fz_locate_addr_body (VALUE arg)
         }                                                                       \
       } while (0)
 
-    #define LOC_BUILD_FLOAT(T, UINT, NANKEY)                                    \
+    #define LOC_BUILD_FLOAT(T)                                    \
       do {                                                                      \
         const T *ip = (const T *) p_r;                                          \
         for ( ca_size_t i = 0; i < nr; i++ ) {                                  \
           if ( mr && mr[i] ) { continue; }                                     \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int is_new;                                                           \
           fz_hash_intern(&h, key, &is_new);                                     \
           if ( is_new ) { int64_t a = (int64_t) (base + i);                     \
@@ -1693,8 +1692,8 @@ fz_locate_addr_body (VALUE arg)
       case CA_UINT16: LOC_BUILD(uint16_t, (uint64_t)); break;
       case CA_UINT32: LOC_BUILD(uint32_t, (uint64_t)); break;
       case CA_UINT64: LOC_BUILD(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: LOC_BUILD_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: LOC_BUILD_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: LOC_BUILD_FLOAT(float);         break;
+      case CA_FLOAT64: LOC_BUILD_FLOAT(double); break;
       case CA_OBJECT:  LOC_BUILD_OBJ;                                            break;
       case CA_FIXLEN:  LOC_BUILD_MEM;                                            break;
       }
@@ -1736,7 +1735,7 @@ fz_locate_addr_body (VALUE arg)
         }                                                                       \
       } while (0)
 
-    #define LOC_PROBE_FLOAT(T, UINT, NANKEY)                                    \
+    #define LOC_PROBE_FLOAT(T)                                    \
       do {                                                                      \
         const T *ip = (const T *) p_in;                                         \
         const int64_t *ab = (const int64_t *) addr.p;                           \
@@ -1744,14 +1743,7 @@ fz_locate_addr_body (VALUE arg)
           ca_size_t o = base + i;                                               \
           if ( m && m[i] ) { out[o] = 0; um[o] = 1; n_undef++; continue; }     \
           T v = ip[i];                                                          \
-          uint64_t key;                                                         \
-          if ( v != v ) { key = (NANKEY); }                                     \
-          else {                                                                \
-            if ( v == (T) 0 ) { v = (T) 0; }                                   \
-            UINT bits;                                                          \
-            memcpy(&bits, &v, sizeof(bits));                                    \
-            key = (uint64_t) bits;                                              \
-          }                                                                     \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int32_t code;                                                         \
           if ( fz_hash_lookup(&h, key, &code) ) { out[o] = ab[code]; um[o] = 0; } \
           else { out[o] = 0; um[o] = 1; n_undef++; }                            \
@@ -1794,8 +1786,8 @@ fz_locate_addr_body (VALUE arg)
       case CA_UINT16: LOC_PROBE(uint16_t, (uint64_t)); break;
       case CA_UINT32: LOC_PROBE(uint32_t, (uint64_t)); break;
       case CA_UINT64: LOC_PROBE(uint64_t, (uint64_t)); break;
-      case CA_FLOAT32: LOC_PROBE_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-      case CA_FLOAT64: LOC_PROBE_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+      case CA_FLOAT32: LOC_PROBE_FLOAT(float);         break;
+      case CA_FLOAT64: LOC_PROBE_FLOAT(double); break;
       case CA_OBJECT:  LOC_PROBE_OBJ;                                            break;
       case CA_FIXLEN:  LOC_PROBE_MEM;                                            break;
       }
@@ -1921,20 +1913,13 @@ fz_set_relation_body (VALUE arg)
       }                                                                        \
     } while (0)
 
-  #define SR_FLOAT(T, UINT, NANKEY)                                            \
+  #define SR_FLOAT(T)                                            \
     do {                                                                       \
       const T *ip = (const T *) p;                                             \
       for ( ca_size_t i = 0; i < n; i++ ) {                                    \
         if ( m && m[i] ) { continue; }                                         \
         T v = ip[i];                                                           \
-        uint64_t key;                                                          \
-        if ( v != v ) { key = (NANKEY); }                                      \
-        else {                                                                 \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                           \
-          memcpy(&bits, &v, sizeof(bits));                                     \
-          key = (uint64_t) bits;                                               \
-        }                                                                      \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                            \
         fz_hash_intern(&hself, key, &is_new);                                  \
         if ( is_new && fz_hash_lookup(&hoth, key, NULL) == keep_when_hit ) {   \
@@ -1980,8 +1965,8 @@ fz_set_relation_body (VALUE arg)
     case CA_UINT16: SR(uint16_t, (uint64_t)); break;
     case CA_UINT32: SR(uint32_t, (uint64_t)); break;
     case CA_UINT64: SR(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: SR_FLOAT(float,  uint32_t, 0x7fc00000ULL);         break;
-    case CA_FLOAT64: SR_FLOAT(double, uint64_t, 0x7ff8000000000000ULL); break;
+    case CA_FLOAT32: SR_FLOAT(float);         break;
+    case CA_FLOAT64: SR_FLOAT(double); break;
     case CA_OBJECT:  SR_OBJ;                                            break;
     case CA_FIXLEN:  SR_MEM;                                            break;
     }
@@ -2191,20 +2176,13 @@ fz_value_counts_flat_body (VALUE arg)
       }                                                                       \
     } while (0)
 
-  #define VC_LOOP_FLOAT(T, UINT, NANKEY)                                      \
+  #define VC_LOOP_FLOAT(T)                                      \
     do {                                                                      \
       const T *ip = (const T *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
-        uint64_t key;                                                         \
-        if ( v != v ) { key = (NANKEY); }                                     \
-        else {                                                                \
-          if ( v == (T) 0 ) { v = (T) 0; }                                    \
-          UINT bits;                                                          \
-          memcpy(&bits, &v, sizeof(bits));                                    \
-          key = (uint64_t) bits;                                              \
-        }                                                                     \
+        uint64_t key = FZ_FLOAT_KEY(T, v);             \
         int is_new;                                                           \
         int32_t code = fz_hash_intern(&h, key, &is_new);                      \
         if ( is_new ) {                                                       \
@@ -2264,8 +2242,8 @@ fz_value_counts_flat_body (VALUE arg)
     case CA_UINT16: VC_LOOP(uint16_t, (uint64_t)); break;
     case CA_UINT32: VC_LOOP(uint32_t, (uint64_t)); break;
     case CA_UINT64: VC_LOOP(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: VC_LOOP_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: VC_LOOP_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: VC_LOOP_FLOAT(float);          break;
+    case CA_FLOAT64: VC_LOOP_FLOAT(double);  break;
     case CA_OBJECT:  VC_LOOP_OBJ;                                             break;
     case CA_FIXLEN:  VC_LOOP_MEM;                                             break;
     }
@@ -2375,17 +2353,10 @@ fz_nunique_body (VALUE arg)
      -0.0 before the bitwise key. */
   #define NU_INT(WIDEN)                                                       \
     do { int _n; fz_hash_intern(&h, (uint64_t) ((WIDEN) v), &_n); } while (0)
-  #define NU_FLOAT(T, UINT, NANKEY)                                           \
+  #define NU_FLOAT(T)                                           \
     do {                                                                      \
       T _v = v;                                                               \
-      uint64_t _key;                                                          \
-      if ( _v != _v ) { _key = (NANKEY); }                                    \
-      else {                                                                  \
-        if ( _v == (T) 0 ) { _v = (T) 0; }                                    \
-        UINT _b;                                                              \
-        memcpy(&_b, &_v, sizeof(_b));                                         \
-        _key = (uint64_t) _b;                                                 \
-      }                                                                       \
+      uint64_t _key = FZ_FLOAT_KEY(T, _v);           \
       int _n; fz_hash_intern(&h, _key, &_n);                                  \
     } while (0)
   /* Object: intern the VALUE via the object lane (v is bound by the macro). */
@@ -2428,10 +2399,10 @@ fz_nunique_body (VALUE arg)
     case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
     case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, NU_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, NU_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, NU_FLOAT(float));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, NU_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, NU_FLOAT(double));
       break;
     case CA_OBJECT: CA_SLAB_REDUCE_T(VALUE, *st, p, m, dummy, 0, NU_OBJ); break;
     case CA_FIXLEN: NU_MEM_WALK;                                          break;
@@ -2545,7 +2516,7 @@ fz_is_mode_body (VALUE arg)
     } while (0)
 
   /* Float: NaN collapses to one canonical key; -0.0 / +0.0 share a key. */
-  #define IM_BODY_FLOAT(T, UINT, NANKEY)                                      \
+  #define IM_BODY_FLOAT(T)                                      \
     do {                                                                      \
       const T    *ip = (const T *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
@@ -2560,14 +2531,7 @@ fz_is_mode_body (VALUE arg)
         for ( ca_size_t i = 0; i < n; i++ ) {                                 \
           if ( m && m[i] ) { if ( pass == 1 ) { op[i] = 0; } continue; }      \
           T v = ip[i];                                                        \
-          uint64_t key;                                                       \
-          if ( v != v ) { key = (NANKEY); }                                   \
-          else {                                                              \
-            if ( v == (T) 0 ) { v = (T) 0; }                                  \
-            UINT bits;                                                        \
-            memcpy(&bits, &v, sizeof(bits));                                  \
-            key = (uint64_t) bits;                                            \
-          }                                                                   \
+          uint64_t key = FZ_FLOAT_KEY(T, v);           \
           int is_new;                                                         \
           int32_t code = fz_hash_intern(&h, key, &is_new);                    \
           if ( pass == 0 ) {                                                  \
@@ -2644,8 +2608,8 @@ fz_is_mode_body (VALUE arg)
     case CA_UINT16: IM_BODY(uint16_t, (uint64_t)); break;
     case CA_UINT32: IM_BODY(uint32_t, (uint64_t)); break;
     case CA_UINT64: IM_BODY(uint64_t, (uint64_t)); break;
-    case CA_FLOAT32: IM_BODY_FLOAT(float,  uint32_t, 0x7fc00000ULL);          break;
-    case CA_FLOAT64: IM_BODY_FLOAT(double, uint64_t, 0x7ff8000000000000ULL);  break;
+    case CA_FLOAT32: IM_BODY_FLOAT(float);          break;
+    case CA_FLOAT64: IM_BODY_FLOAT(double);  break;
     case CA_OBJECT:  IM_BODY_OBJ;                                            break;
     case CA_FIXLEN:  IM_BODY_MEM;                                            break;
     }
@@ -2775,12 +2739,9 @@ fz_mode_axis_body (VALUE arg)
                       fz_levels_push(&ct, &one); }                           \
       else { ((int64_t *) ct.p)[code]++; }                                    \
     } while (0)
-  #define MB_FLOAT(T, UINT, NANKEY)                                           \
+  #define MB_FLOAT(T)                                           \
     do {                                                                      \
-      T vn = v; uint64_t key;                                                 \
-      if ( vn != vn ) { key = (NANKEY); }                                     \
-      else { if ( vn == (T) 0 ) { vn = (T) 0; }                              \
-             UINT bits; memcpy(&bits, &vn, sizeof(bits)); key = (uint64_t) bits; } \
+      uint64_t key = FZ_FLOAT_KEY(T, v);                                      \
       int is_new; int32_t code = fz_hash_intern(&h, key, &is_new);            \
       if ( is_new ) { int64_t one = 1; fz_levels_push(&lv, &v);              \
                       fz_levels_push(&ct, &one); }                           \
@@ -2818,10 +2779,10 @@ fz_mode_axis_body (VALUE arg)
     case CA_UINT32: CA_SLAB_REDUCE_T(uint32_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
     case CA_UINT64: CA_SLAB_REDUCE_T(uint64_t, *st, p, m, dummy, 0, MB_INT(uint64_t)); break;
     case CA_FLOAT32:
-      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, MB_FLOAT(float,  uint32_t, 0x7fc00000ULL));
+      CA_SLAB_REDUCE_T(float,  *st, p, m, dummy, 0, MB_FLOAT(float));
       break;
     case CA_FLOAT64:
-      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, MB_FLOAT(double, uint64_t, 0x7ff8000000000000ULL));
+      CA_SLAB_REDUCE_T(double, *st, p, m, dummy, 0, MB_FLOAT(double));
       break;
     }
 
