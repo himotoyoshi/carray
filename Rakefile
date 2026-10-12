@@ -55,12 +55,12 @@ task :kernel_surface_check do
   ruby "utils/check_kernel_surface_freeze.rb" or exit($?.exitstatus)
 end
 
-desc "Check that every attach window opened by hand says why it is safe"
-desc "Check that a Face is put back on a result only through ext/ca_obj_face.c"
-task :face_template_check do
-  ruby "utils/check_face_template.rb" or exit($?.exitstatus)
+desc "Check that the Face rules are called through the parts in ext/ca_obj_face.c"
+task :face_parts_check do
+  ruby "utils/check_face_parts.rb" or exit($?.exitstatus)
 end
 
+desc "Check that every attach window opened by hand says why it is safe"
 task :attach_window_check do
   ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
 end
@@ -266,7 +266,7 @@ task :build_c_extension_examples => [
 ]
 
 desc "Run spec_ai tests (ruby -I ext -I lib)"
-task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_template_check,
+task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any
