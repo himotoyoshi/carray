@@ -250,7 +250,7 @@ An array is exported when it is
   `CARepeat`, `CAField`, `CAStride`) whose chain of parents composes into
   byte strides over an entity, or
 - a **Face** whose storage bytes carry its values on their own — a
-  `CARecord` (exported as a `T{...}` struct, §7.6) or a `CAFixlenString`
+  `CARecord` (exported member by member, §7.6) or a `CAFixlenString`
   (exported as `Ns` bytes) — over one of the above,
 
 and it has no mask and an exportable data type (§7). A strided view is
@@ -348,23 +348,23 @@ for boolean, `"ff"` / `"dd"` for complex, `i`/`i!`/`l!`/`s!` etc.)
 and disambiguates by `item_size`. See [`MemoryViewFormat.md`](MemoryViewFormat.md)
 for the full producer/consumer convention.
 
-### 7.6 PEP 3118 struct format for CAStruct (`T{...}`)
+### 7.6 Record format for CARecord
 
-A `CA_FIXLEN` CArray whose `data_class` is a `CAStruct` subclass
-exports a PEP 3118 nested struct format string:
+A `CARecord` exports its members' specifiers in a row, in Ruby's
+vocabulary, with `x<N>` for padding:
 
+```ruby
+r = CARecord.new(CArray.struct { uint8 :a; uint64 :b }, 2)
+CArray.memory_view_available?(r)   # => true
+# format "Cx7Q", item size 16
+r.memory_view_field_names          # => ["a", "b"]
 ```
-T{<member_fmt>:<name>:<member_fmt>:<name>:...:}
-```
 
-Each member's `<member_fmt>` follows PEP 3118 dialect (e.g.
-`b`/`B`/`h`/`H`/`i`/`I`) and padding is canonical *elided* (the
-omitted bytes are implicit from member offsets). Consumers that
-understand PEP 3118 struct format (NumPy, PyArrow, ...) can
-zero-copy receive CAStruct arrays.
-
-Importing `T{...}` on the consumer side is reserved for a future
-phase; today CArray emits but does not parse struct format.
+Ruby's format has no member names, so the record array gives them as
+`memory_view_field_names`, one per specifier.  A bridge to PEP 3118
+(pycall-memoryview, for numpy) uses them to write a named `T{...}`
+format.  A member declared with `endian:` is written with Ruby's byte
+order spelling.  CArray does not import a record format.
 
 See [`MemoryViewFormat.md`](MemoryViewFormat.md) for the normative spec.
 
@@ -607,14 +607,14 @@ in memory.
 ## 13. Limitations
 
 - `CA_OBJECT` is not exported or imported (VALUE column, not raw
-  memory). `CA_FIXLEN` is exported as `Ns` bytes, or as a `T{...}`
-  struct when it is a `CARecord` (§7.6); `T{...}` is not imported.
+  memory). `CA_FIXLEN` is exported as `Ns` bytes, or member by member
+  when it is a `CARecord` (§7.6); a record format is not imported.
   `CA_FLOAT128` / `CA_CMPLX256` are disabled in 3.0 and cannot
   appear on a live CArray.
-- Cross-endian byte-swap is out of scope for v1.2; producers
-  must emit data in host order and consumers reject views with
-  the opposite byte-order prefix. See
-  [`MemoryViewFormat.md`](MemoryViewFormat.md).
+- Data is exported in the machine's byte order, except a record member
+  declared with `endian:`, which carries Ruby's byte order spelling in
+  the record format. On input, views in the other byte order are
+  rejected. See [`MemoryViewFormat.md`](MemoryViewFormat.md).
 - Only arrays that alias an entity are exported (§6). Export a
   `copy` of anything else.
 

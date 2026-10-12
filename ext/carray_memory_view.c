@@ -16,8 +16,11 @@
   - CArray.wrap_memory_view (zero-copy; contiguous only)
 
   Format-string contract:
-  - Producer emits PEP 3118 strict; consumer is Postel-permissive
-    (accepts synonyms other producers emit).
+  - Producer emits Ruby's vocabulary (ruby/memory_view.h), records
+    included; only the types Ruby cannot spell ('?', 'Zf' / 'Zd', "Ns")
+    stay PEP 3118.  The consumer is Postel-permissive (accepts synonyms
+    other producers emit).  A record's member names, which Ruby's format
+    cannot carry, are CARecord#memory_view_field_names.
   - See docs/interop/MemoryViewFormat.md for the format-string contract.
   - See devel/DESIGN_MemoryView.md for the design rationale.
   - See docs/interop/MemoryView.md for the user-facing MV API.
@@ -141,69 +144,68 @@ ca_mv_format_for (int8_t data_type)
   }
 }
 
-/* PEP 3118 single-character specifier for a primitive data_type, for
-   use inside a `T{...}` struct format body.  This is the context the
-   distinct entry point was kept for: `T{...}` is a PEP 3118 construct
-   with no Ruby counterpart, so a record body stays in PEP's vocabulary
-   even though the top level now publishes Ruby's.  A consumer reading
-   the body reads it as PEP, and a bridge that forwards the record
-   whole -- as pycall-memoryview does -- keeps it intact.
-
-   Returns NULL for non-primitive (CA_FIXLEN / CA_OBJECT) or for the
-   retired float128 / cmplx256 enum slots. */
-static const char *
-ca_mv_pep3118_char (int8_t data_type)
-{
-  switch (data_type) {
-  case CA_INT8:   return "b";
-  case CA_UINT8:  return "B";
-  case CA_INT16:  return "h";
-  case CA_UINT16: return "H";
-  default:        return ca_mv_format_for(data_type);
-  }
-}
-
-/* Build (or fetch from cache) the PEP 3118 struct format string for
-   a data_class.  Walks MEMBER_TABLE in MEMBERS order and emits
-   "T{<fmt>:<name>:<fmt>:<name>:}".  Returns Qnil if the class
-   contains a member type the producer cannot express (nested
-   sub-struct class, CArray template, :fixlen, :object).
-
-   The result is frozen and cached on the data_class via
-   @__mv_struct_format__ so successive calls are O(1) and the
-   underlying RSTRING_PTR is stable (the cached String is rooted by
-   the class, which outlives any MV produced from it). */
-/* Helper: resolve a MEMBER_TABLE member-type slot to (fmt, bytes).
-   Returns 1 on success, 0 if the type is not expressible in PEP 3118
-   struct format (nested class, CArray template, :fixlen, :object,
-   :bitfield).  Does NOT raise — :bitfield in particular is checked
-   before rb_ca_guess_type so the struct-format walk can give up
-   gracefully on bit-bearing structs. */
+/* The Ruby MemoryView specifier for one record member, written into `out`
+   with its byte order as ruby/memory_view.h writes it: a suffix ('<' / '>')
+   on an integer, its own letter on a float ('e' / 'E' little, 'g' / 'G'
+   big).  A member without a declared byte order is in the machine's.
+   Returns 0 for a member the format has no item for: a nested struct, an
+   array member, :fixlen, :object, a bit member, or a complex member with a
+   declared byte order (Ruby has no complex specifier to suffix). */
 static int
-ca_mv_struct_member_resolve (VALUE info, const char **fmt_out, ca_size_t *bytes_out)
+ca_mv_record_member_spec (VALUE info, char *out, size_t outlen,
+                          ca_size_t *bytes_out)
 {
   VALUE type = rb_ary_entry(info, 1);
+  VALUE opts = rb_ary_entry(info, 2);
+  VALUE endian = Qnil;
+  const char *base;
+  int8_t dt;
   if (!SYMBOL_P(type)) return 0;
   ID type_id = SYM2ID(type);
-  /* Reject explicitly unsupported symbol types up front (so
-     rb_ca_guess_type never sees them and never raises). */
   if (type_id == rb_intern("bitfield") ||
       type_id == rb_intern("fixlen")   ||
       type_id == rb_intern("object")) {
     return 0;
   }
-  int8_t dt = rb_ca_guess_type(rb_sym2str(type));
-  const char *fmt = ca_mv_pep3118_char(dt);
-  if (!fmt) return 0;
-  *fmt_out   = fmt;
+  dt = rb_ca_guess_type(rb_sym2str(type));
+  base = ca_mv_format_for(dt);
+  if (!base) return 0;
+  if (RB_TYPE_P(opts, T_HASH)) {
+    endian = rb_hash_aref(opts, ID2SYM(rb_intern("endian")));
+  }
+  if ( SYMBOL_P(endian) && ( SYM2ID(endian) == rb_intern("big")
+                             || SYM2ID(endian) == rb_intern("little") ) ) {
+    int big = ( SYM2ID(endian) == rb_intern("big") );
+    switch (dt) {
+    case CA_FLOAT32: base = big ? "g" : "e"; break;
+    case CA_FLOAT64: base = big ? "G" : "E"; break;
+    case CA_CMPLX64: case CA_CMPLX128: return 0;
+    case CA_BOOLEAN: case CA_INT8: case CA_UINT8: break;   /* one byte */
+    default:
+      snprintf(out, outlen, "%s%s", base, big ? ">" : "<");
+      *bytes_out = (ca_size_t) ca_sizeof[dt];
+      return 1;
+    }
+  }
+  snprintf(out, outlen, "%s", base);
   *bytes_out = (ca_size_t) ca_sizeof[dt];
   return 1;
 }
 
+/* Build (or fetch from cache) the Ruby MemoryView format of a record: the
+   members' specifiers in their byte order in the record, with "x<N>" for
+   the padding between them and after the last.  Ruby's format has no
+   member names; the record array gives them as #memory_view_field_names,
+   one per specifier.  Returns Qnil for a record the format cannot describe:
+   a member it has no item for (see above), or members that overlap or come
+   out of offset order (a union).
+
+   The result is frozen and cached on the data_class, so the pointer
+   handed to a view stays valid while the class lives. */
 static VALUE
 ca_mv_struct_format_for_data_class (VALUE data_class)
 {
-  ID iv = rb_intern("@__mv_struct_format__");
+  ID iv = rb_intern("@__mv_record_format__");
   if (rb_ivar_defined(data_class, iv)) {
     VALUE cached = rb_ivar_get(data_class, iv);
     /* Qfalse is a sentinel meaning "tried, found unsupported". */
@@ -214,61 +216,36 @@ ca_mv_struct_format_for_data_class (VALUE data_class)
   VALUE table   = rb_const_get(data_class, rb_intern("MEMBER_TABLE"));
   long  n       = RARRAY_LEN(members);
   long  i;
-  VALUE buf     = rb_str_buf_new(2 + 6 * n);
+  VALUE buf     = rb_str_buf_new(4 * n + 8);
   ca_size_t cursor = 0;
   ca_size_t data_size = NUM2SIZE(rb_const_get(data_class, rb_intern("DATA_SIZE")));
-
-  rb_str_buf_cat_ascii(buf, "T{");
+  char spec[16], pad[32];
 
   for (i = 0; i < n; i++) {
-    VALUE name   = rb_ary_entry(members, i);
-    VALUE info   = rb_hash_aref(table, name);
+    VALUE info = rb_hash_aref(table, rb_ary_entry(members, i));
+    ca_size_t offset, mb;
     if (NIL_P(info)) goto unsupported;
-    ca_size_t offset = NUM2SIZE(rb_ary_entry(info, 0));
-
-    const char *fmt;
-    ca_size_t   mb;
-    if (!ca_mv_struct_member_resolve(info, &fmt, &mb)) goto unsupported;
-
-    /* If alignment or explicit padding has left a gap before this
-       member, emit "<N>x:" to account for it.  PEP 3118 uses 'x'
-       as the pad-byte specifier.  The canonical form elides the name
-       slot after the pad spec (padding is anonymous by definition);
-       consumers MUST accept both elided and named (legacy "<N>x:_:")
-       forms. */
+    offset = NUM2SIZE(rb_ary_entry(info, 0));
+    if (offset < cursor) goto unsupported;
+    if (!ca_mv_record_member_spec(info, spec, sizeof(spec), &mb)) goto unsupported;
     if (offset > cursor) {
-      char pad_decl[32];
-      snprintf(pad_decl, sizeof(pad_decl), "%lldx:",
-               (long long) (offset - cursor));
-      rb_str_buf_cat_ascii(buf, pad_decl);
-      cursor = offset;
+      snprintf(pad, sizeof(pad), "x%lld", (long long) (offset - cursor));
+      rb_str_buf_cat_ascii(buf, pad);
     }
-
-    rb_str_buf_cat_ascii(buf, fmt);
-    rb_str_buf_cat_ascii(buf, ":");
-    /* MEMBERS entries are strings; emit verbatim. */
-    rb_str_buf_append(buf, rb_String(name));
-    rb_str_buf_cat_ascii(buf, ":");
-    cursor += mb;
+    rb_str_buf_cat_ascii(buf, spec);
+    cursor = offset + mb;
   }
-
-  /* Trailing padding (DATA_SIZE > last member's end).  Elided form
-     (see the alignment-gap branch above for rationale). */
+  if (cursor > data_size) goto unsupported;
   if (cursor < data_size) {
-    char pad_decl[32];
-    snprintf(pad_decl, sizeof(pad_decl), "%lldx:",
-             (long long) (data_size - cursor));
-    rb_str_buf_cat_ascii(buf, pad_decl);
+    snprintf(pad, sizeof(pad), "x%lld", (long long) (data_size - cursor));
+    rb_str_buf_cat_ascii(buf, pad);
   }
 
-  rb_str_buf_cat_ascii(buf, "}");
   rb_obj_freeze(buf);
   rb_ivar_set(data_class, iv, buf);
   return buf;
 
 unsupported:
-  /* Cache Qfalse to remember "we tried and gave up" — avoids
-     re-walking MEMBER_TABLE on every wrap call. */
   rb_ivar_set(data_class, iv, Qfalse);
   return Qnil;
 }
@@ -280,7 +257,7 @@ ca_mv_data_type_exportable (int8_t data_type)
 }
 
 /* Same as ca_mv_data_type_exportable, but also accepts CA_FIXLEN:
-   - with a data_class -> emit PEP 3118 "T{...}" struct format
+   - with a data_class -> emit the record's Ruby format (members in order)
    - without a data_class -> emit PEP 3118 "Ns" fixed-bytes format */
 static int
 ca_mv_ca_exportable (CArray *ca, VALUE obj)
@@ -727,10 +704,9 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   }
 
   /* Format string, resolved before shape / strides are allocated since
-     building it can raise.  Primitive types use the top-level PEP 3118
-     table; CA_FIXLEN + data_class emits a PEP 3118 "T{...}" struct format
-     whose lifetime is bound to the class via @__mv_struct_format__, so
-     the pointer is stable until the class is GC'd. */
+     building it can raise.  Primitive types use the top-level table;
+     CA_FIXLEN + data_class emits the record's format, cached on the class,
+     so the pointer is stable until the class is GC'd. */
   if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
     VALUE klass = rb_ca_data_class(obj);
     VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
@@ -1587,8 +1563,8 @@ rb_ca_s_parse_memory_view_format (VALUE klass, VALUE fmt_v, VALUE item_size_v)
 
 /* Test hook: return the MV format string the producer would emit
    for `obj`, without actually building the rb_memory_view_t.  Used
-   by spec_ai to verify PEP 3118 struct format emission for CAStruct
-   arrays.  Returns nil if obj isn't exportable. */
+   by spec_ai to verify the record format emitted for CAStruct arrays.
+   Returns nil if obj isn't exportable. */
 static VALUE
 rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
 {
@@ -1605,6 +1581,22 @@ rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
   }
   const char *fmt = ca_mv_format_for(ca->data_type);
   return fmt ? rb_str_new_cstr(fmt) : Qnil;
+}
+
+/* CARecord#memory_view_field_names: the names of the record's members,
+   one per specifier of the record's MemoryView format, in that order.
+   Ruby's format has no place for them, so a bridge that writes a format
+   which does (PEP 3118 "T{...}") asks the exporting object for them under
+   this name.  nil when the record has no MemoryView format. */
+static VALUE
+rb_ca_record_memory_view_field_names (VALUE self)
+{
+  VALUE data_class = rb_ca_data_class(self);
+  if ( NIL_P(data_class)
+       || NIL_P(ca_mv_struct_format_for_data_class(data_class)) ) {
+    return Qnil;
+  }
+  return rb_ary_dup(rb_const_get(data_class, rb_intern("MEMBERS")));
 }
 
 /* ---------------- Init ---------------- */
@@ -1658,4 +1650,7 @@ Init_carray_memory_view (void)
                              rb_ca_s_parse_memory_view_format, 2);
   rb_define_singleton_method(rb_cCArray, "__memory_view_format__",
                              rb_ca_s_memory_view_format, 1);
+  rb_define_method(rb_const_get(rb_cObject, rb_intern("CARecord")),
+                   "memory_view_field_names",
+                   rb_ca_record_memory_view_field_names, 0);
 }

@@ -18,9 +18,10 @@ Three types have no Ruby spelling and keep their PEP 3118 form: `?`
 (bool) and `Zf`/`Zd` (complex).  Ruby's parser rejects those, so
 element access through a generic consumer fails on them; the
 alternatives (`C` for a bool, `dd` for a complex) would misdescribe
-the data rather than merely fail to describe it.  Two structural
-formats stay PEP 3118 as well: `T{...}` records and the `Ns`
-fixed-bytes form, neither of which Ruby's vocabulary has a notion of.
+the data rather than merely fail to describe it.  The `Ns`
+fixed-bytes form stays PEP 3118 as well, as Ruby's vocabulary has no
+notion of it.  A record is written in Ruby's vocabulary — see
+[Record format](#record-format).
 
 Consumers are Postel: PEP 3118 spellings (`b`/`B`/`h`/`H`), the
 remaining pack-template synonyms (`l`/`L`, `s!`/`i!`/`l!`/`q!`), and
@@ -59,9 +60,8 @@ Not emitted (no MV format):
 - `CA_OBJECT` — VALUE column, protocol-level limit
 - bitarray / bitfield — sub-byte, MV protocol does not represent
 
-For CAStruct-typed data CArray emits a PEP 3118 struct format
-`T{...}` — see [Struct format](#struct-format) below.  The body
-uses the same primitive spellings as the top-level table.
+For a record array (`CARecord`) CArray emits the members'
+specifiers in a row — see [Record format](#record-format) below.
 
 ---
 
@@ -110,10 +110,12 @@ carries the byte width.  Consumers MUST cross-check.  The same
 character with different `item_size` can resolve to different
 data types — `(l, 4)` is int32, `(l, 8)` is int64.
 
-### Host byte order only
+### Byte order
 
-CArray emits and accepts host-native byte order.  Cross-endian
-exchange via `<`/`>` prefixes is deferred.
+A plain array is in the machine's byte order.  A record member declared
+with `endian:` is written in Ruby's form for it (see
+[Record format](#record-format)).  On input, CArray accepts the
+machine's byte order only.
 
 ### No alignment padding at top level
 
@@ -127,53 +129,49 @@ synonyms remain accepted on input but are not emitted.
 
 ---
 
-## Struct format
+## Record format
 
-For CAStruct-typed data the producer emits
+For a record array (`CARecord`) the producer emits the members'
+specifiers in their order in the record, in Ruby's vocabulary — the
+top-level table above — with `x<N>` for padding between members and
+after the last:
 
+| record                                                  | format     |
+|---------------------------------------------------------|------------|
+| `struct(pack: 1) { int32 :a; float64 :b }`              | `id`       |
+| `struct { uint8 :a; uint64 :b }` (aligned)              | `Cx7Q`     |
+| `struct(pack: 1, size: 16) { uint32 :x }`               | `Ix12`     |
+
+Ruby's parser reads these, and its item size is the record size.
+
+A member declared with `endian:` is written as Ruby writes byte order:
+a suffix on an integer (`i>` big, `s<` little) and its own letter on a
+float (`g` / `e` for a big / little float32, `G` / `E` for float64).
+A one-byte member needs none.  A complex member with a declared byte
+order has no Ruby spelling, and its record is not exported.
+
+Ruby's format has no member names.  A record array gives them as
+`memory_view_field_names`, one per specifier in the same order:
+
+```ruby
+r = CARecord.new(CArray.struct { uint8 :a; uint64 :b }, 2)
+r.memory_view_field_names   # => ["a", "b"]
 ```
-T{<fmt1>:<name1>:<fmt2>:<name2>:...:}
-```
 
-`T{...}` is a PEP 3118 construct with no Ruby counterpart, so a record
-body stays in PEP 3118's vocabulary even though the top-level table
-does not.  A consumer reading the body reads it as PEP 3118, and a
-bridge that forwards the record whole keeps it intact:
+A bridge that writes a format with names (PEP 3118 `T{...}`, for
+numpy) asks the exporting object for them under this name.  Any
+exporter can answer it; it returns `nil` when the object has no record
+format.
 
-| field type | spec    |
-|------------|---------|
-| bool       | `?`     |
-| int8       | `b`     |
-| uint8      | `B`     |
-| int16      | `h`     |
-| uint16     | `H`     |
-| int32      | `i`     |
-| uint32     | `I`     |
-| int64      | `q`     |
-| uint64     | `Q`     |
-| float32    | `f`     |
-| float64    | `d`     |
-| complex64  | `Zf`    |
-| complex128 | `Zd`    |
-| padding    | `<N>x`  |
+A record is not exported when the format cannot describe it:
 
-Example: `T{B:a:7x:Q:b:}` — uint8 `a`, 7 pad bytes, uint64 `b`.
+- a nested struct, an array member, a `:fixlen` / `:object` member, a
+  bit member — no item for it
+- a union, or members that overlap or are out of offset order — the
+  format lays items out one after another
+- a complex member with a declared byte order (above)
 
-The body MUST end with a colon before the closing `}`.  Padding
-is canonically elided (no name slot after the `x`).
-
-Consumers that don't natively support struct types MAY treat
-`T{...}` as opaque (forward `view.format` unchanged, treat
-`item_size` as record byte width).  Consumers that DO parse it
-MUST verify the sum of field sizes (including padding) equals
-`item_size`.
-
-Producers do NOT emit `T{...}` for:
-
-- nested struct (`T{T{...}:nested:...}`) — not represented
-- bitfield members — no PEP 3118 grammar
-- `:fixlen` / `:object` members — out of scope for buffer protocol
-- sub-array members (`(N)<fmt>:name:`) — deferred
+CArray does not import a record format.
 
 ---
 

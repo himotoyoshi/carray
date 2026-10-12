@@ -104,7 +104,8 @@ class TestMemoryViewExportMatrix < Test::Unit::TestCase
     r = record
     assert_true(CArray.memory_view_available?(r))
     m = Fiddle::MemoryView.new(r)
-    assert_equal("T{i:a:d:b:}", m.format)
+    assert_equal("id", m.format)
+    assert_equal(%w[a b], r.memory_view_field_names)
     assert_equal([3], m.shape)
     assert_equal(r.parent.copy.dump_binary, m.to_s)
     m.release

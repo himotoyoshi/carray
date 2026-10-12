@@ -147,17 +147,15 @@ class TestMemoryViewFixlenBytes < Test::Unit::TestCase
   end
 
   # ============================================================
-  # data_class FIXLEN still takes the T{...} path (unchanged)
+  # data_class FIXLEN takes the record path, not "Ns"
   # ============================================================
 
-  def test_fixlen_with_data_class_still_emits_struct_format
-    # CARecord-backed FIXLEN must continue using the T{...} struct
-    # format, NOT the new "Ns" path.
+  def test_fixlen_with_data_class_emits_its_record_format
+    # A CARecord-backed FIXLEN is described member by member, not as the
+    # opaque "Ns" bytes of a plain fixlen array.
     s = CArray.struct(pack: 1) { int32 :id; float64 :v }
     a = CARecord.new(s, 3)
-    fmt = CArray.__send__(:__memory_view_format__, a)
-    assert_match(/\AT\{/, fmt,
-                 "data-classed FIXLEN must still emit a T{...} struct format")
+    assert_equal "id", CArray.__send__(:__memory_view_format__, a)
   end
 
 end

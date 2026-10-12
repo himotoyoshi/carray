@@ -162,7 +162,7 @@ The interesting direction in practice is also the easy one: **you pass a CArray 
 The strategy depends on the view class on CArray's side:
 
 * **Entities and strided views** (`CArray`, `CAWrap`, `CScalar`, `CABlock`, `CARefer`, `CAStride`, `CATranspose`, `CAFarray`, `CARepeat`, `CAField`) are exported with the appropriate byte strides — **zero-copy**.
-* **Faces whose bytes are their values** (`CARecord` as a `T{...}` struct, `CAFixlenString` as `Ns` bytes) are exported the same way.
+* **Faces whose bytes are their values** (`CARecord` member by member, with its member names as `memory_view_field_names`; `CAFixlenString` as `Ns` bytes) are exported the same way.
 * **Everything else is refused**: views whose cells cannot be addressed by strides over one buffer (`CASelect`, `CAGrid`, `CAShift`, `CARoll`, `CAWindow`, `CATile`, `CAStack`, `CAMeld`, ...), lazy expressions, sub-byte and Ruby-object arrays, and Faces whose storage means nothing without the Face (`CATime`, `CATimedelta`, `CACategorical`, `CAConstString`). Nothing is materialised behind your back: hand the consumer a `copy`, or for one of those Faces its storage (`.ticks`, `.codes`).
 
 For the full export matrix (which obj_type uses which strategy, and the exact PEP 3118 format strings emitted), see `MemoryView.md` §6 and §7.

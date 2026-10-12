@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: a `CARecord` exported through MemoryView describes its records in
+  Ruby's MemoryView vocabulary (`ruby/memory_view.h`) instead of PEP 3118
+  `T{...}`: the members' specifiers in a row with `x<N>` padding (`Cx7Q`),
+  which Ruby's own parser reads. The member names, which that format cannot
+  carry, are `CARecord#memory_view_field_names`. A member declared with
+  `endian:` is written in Ruby's byte-order spelling (`i>`, `g`); before, it
+  was described as native. A union is no longer exported.
+
 - Change: the method-call form of the indexer (`a[:eq, 0]`, `a[:is_not_masked]`)
   calls public methods only; a private one such as `a[:puts]` or
   `a[:initialize]` raises `NoMethodError` instead of running.
