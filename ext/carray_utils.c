@@ -612,6 +612,36 @@ ca_integer_arg (VALUE v, const char *arg, const char *name)
   return NUM2LONG(v);
 }
 
+/* The min_count: keyword of a reduction: nil (not given) is -1, any other
+   value an Integer of at least 0.  An error names `name`, or the method the
+   user called when NULL.  See ca_too_few_present. */
+long
+ca_min_count_arg (VALUE v, const char *name)
+{
+  long n;
+  if ( NIL_P(v) ) {
+    return -1;
+  }
+  n = ca_integer_arg(v, "min_count", name);
+  if ( n < 0 ) {
+    rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
+             name ? name : ca_calling_method_name(), n);
+  }
+  return n;
+}
+
+/* CArray.__min_count_need__(op, min_count, least): how many present cells a
+   result cell of `op` needs (ca_too_few_present), for a reduction written
+   in Ruby; it masks the cells whose count is below it. */
+static VALUE
+rb_ca_s_min_count_need (VALUE klass, VALUE vop, VALUE vmc, VALUE vleast)
+{
+  volatile VALUE name = rb_String(vop);
+  long need  = NUM2LONG(vleast);
+  long mc    = ca_min_count_arg(vmc, StringValueCStr(name));
+  return LONG2NUM(mc > need ? mc : need);
+}
+
 /* A keyword that names one of two Symbols (`masked_position: :first /
    :last`, `kind: :quick / :stable`, `method: :ordinal / :dense`):
    returns 0 for c0 and 1 for c1.  Anything but a Symbol is a TypeError,
@@ -1089,6 +1119,8 @@ Init_carray_utils (void)
   rb_define_method(rb_cCArray, "normalize_axes", rb_ca_normalize_axes, -1);
   rb_define_singleton_method(rb_cCArray, "normalize_axis",
                              rb_ca_s_normalize_axis, -1);
+  rb_define_singleton_method(rb_cCArray, "__min_count_need__",
+                             rb_ca_s_min_count_need, 3);
 
 }
 

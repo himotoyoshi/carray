@@ -308,13 +308,13 @@ median_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
 
   if ( filled ) {
@@ -549,13 +549,13 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
   if ( filled ) {
     result = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -705,7 +705,7 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
         for ( long j = 0; j < M; j++ )
           if ( !sm[f0 + (ca_size_t)(j * INNER)] ) np++;
       }
-      if ( np == 0 || np < min_count ) {
+      if ( ca_too_few_present(np, min_count, 1) ) {
         if ( is_undef ) {
           if ( !co->mask ) ca_create_mask(co);
           ((boolean8_t *) co->mask->ptr)[oc] = 1;
@@ -791,13 +791,13 @@ percentile_object_flat (VALUE self, VALUE pers, long min_count, VALUE fill_value
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) filled = 1;
+    if ( ca_too_few_present(cnt, min_count, 1) ) filled = 1;
     else                   src = rb_ca_fetch(self, ID2SYM(id_is_not_masked));
   }
   if ( !filled ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 || sc->elements < min_count ) filled = 1;
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) filled = 1;
   }
   if ( filled ) {
     VALUE fill = NIL_P(fill_value) ? CA_UNDEF : fill_value;
@@ -854,11 +854,7 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
 
-  long min_count = NIL_P(rmin_count) ? 0
-                  : ca_integer_arg(rmin_count, "min_count", NULL);
-  if ( min_count < 0 )
-    rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
-             ca_calling_method_name(), min_count);
+  long min_count = ca_min_count_arg(rmin_count, NULL);
   /* fill_value: UNDEF leaves the result undefined; any other fill is what
      a store into the float64 result would make of it. */
   if ( fill_value == CA_UNDEF ) {
@@ -958,7 +954,7 @@ pct_fill (double *op, int8_t dt, const char *base, int from_sorted,
           for ( long j = 0; j < M; j++ )                                    \
             if ( !sm[f0 + (ca_size_t)(j * INNER)] ) np++;                   \
         }                                                                    \
-        if ( np == 0 || np < min_count ) {                                  \
+        if ( ca_too_few_present(np, min_count, 1) ) {                                  \
           if ( is_undef ) {                                                 \
             if ( !co->mask ) ca_create_mask(co);                           \
             ((boolean8_t *) co->mask->ptr)[oc] = 1;                        \
@@ -1188,7 +1184,7 @@ pct_flat (VALUE self, VALUE pers_ary, long min_count, VALUE fill_value,
   if ( RTEST(rb_ca_has_mask(self)) ) {
     CArray *mc; GetCArray(self, mc);
     long cnt = (long) ca_count_not_masked(mc);   /* = elements - count_masked */
-    if ( cnt < min_count ) {
+    if ( ca_too_few_present(cnt, min_count, 1) ) {
       masked_out = 1; is_undef = NIL_P(fill_value);
       if ( !is_undef ) fillv = NUM2DBL(fill_value);
     } else {
@@ -1198,7 +1194,7 @@ pct_flat (VALUE self, VALUE pers_ary, long min_count, VALUE fill_value,
   if ( !masked_out ) {
     CArray *sc;
     GetCArray(src, sc);
-    if ( sc->elements == 0 || sc->elements < min_count ) {
+    if ( ca_too_few_present(sc->elements, min_count, 1) ) {
       masked_out = 1; is_undef = NIL_P(fill_value);
       if ( !is_undef ) fillv = NUM2DBL(fill_value);
     }
@@ -1294,11 +1290,7 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);
 
-  long min_count = NIL_P(rmin_count) ? 0
-                  : ca_integer_arg(rmin_count, "min_count", NULL);
-  if ( min_count < 0 )
-    rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %ld)",
-             ca_calling_method_name(), min_count);
+  long min_count = ca_min_count_arg(rmin_count, NULL);
   /* fill_value: UNDEF leaves the result undefined; any other fill is what
      a store into the float64 result would make of it. */
   if ( fill_value == CA_UNDEF ) {

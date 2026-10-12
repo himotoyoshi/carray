@@ -336,6 +336,22 @@ ca_region_is_empty (int8_t ndim, const ca_size_t *counts)
   return 0;
 }
 
+/* ---- How many cells a result cell needs ---------------------------------
+
+   A reduction's result cell is UNDEF when fewer cells contribute to it than
+   it needs.  It needs `least` cells -- 0 for an operation with an identity
+   (sum, prod, accumulate, count, wsum: an empty cell is the identity), 1 for
+   one without (mean, min, max, median, ...), 2 for a sample variance -- or
+   `min_count` cells when that is given and asks for more.  A min_count below
+   zero means it was not given.  Every reduction decides this here. */
+
+static inline int
+ca_too_few_present (ca_size_t present, ca_size_t min_count, ca_size_t least)
+{
+  return present < ( min_count > least ? min_count : least );
+}
+
+long        ca_min_count_arg (VALUE v, const char *name);
 VALUE       ca_reduce_fill (VALUE result, VALUE fill, int whole);
 int         ca_symbol_choice (VALUE v, const char *arg, const char *c0,
                               const char *c1, const char *name);

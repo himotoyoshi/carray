@@ -2026,7 +2026,7 @@ module MkKernel
       # answer only when the reduced axis holds at least min_count cells;
       # otherwise the general walk writes the UNDEF (or fill_value) cells.
       li_gate = k[:mask_policy] == :min_count
-      io.puts "  if ( naxes != 1 || min_count < 0 || ca->dim[slab_axes[0]] >= min_count ) {" if li_gate
+      io.puts "  if ( naxes != 1 || ! ca_too_few_present(ca->dim[slab_axes[0]], min_count, 0) ) {" if li_gate
       emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
                                    acc_var, acc_init, reduce_stmt, finish_expr)
       io.puts "  }" if li_gate
@@ -2154,24 +2154,12 @@ module MkKernel
       end
       trigger = case k[:mask_policy]
                 when :strict     then "masked_cnt > 0"
-                when :all_masked then "masked_cnt == st.slab_elements"
+                when :all_masked then "ca_too_few_present(st.slab_elements - masked_cnt, -1, 1)"
                 when :min_count
-                  # min_count < 0 (sentinel) => legacy default (all_masked).
-                  # min_count >= 0 => need at least min_count valid cells
-                  # (valid_cnt = slab_elements - masked_cnt).
-                  #
-                  # ERI.0: identity_on_empty kernels do NOT fire UNDEF for the
-                  # default (min_count < 0) zero-contribution case; the trigger
-                  # is false there, so the else branch writes finish (= acc =
-                  # identity) for empty / all-masked slabs.  The explicit
-                  # min_count >= 0 opt-in ("require K valid cells") is unchanged.
-                  if k[:identity_on_empty]
-                    "(min_count < 0 ? 0 " \
-                      ": st.slab_elements - masked_cnt < min_count)"
-                  else
-                    "(min_count < 0 ? masked_cnt == st.slab_elements " \
-                      ": st.slab_elements - masked_cnt < min_count)"
-                  end
+                  # An identity_on_empty kernel needs no cell (the else
+                  # branch writes finish = acc = identity for an empty slab).
+                  "ca_too_few_present(st.slab_elements - masked_cnt, min_count, " \
+                    "#{k[:identity_on_empty] ? 0 : 1})"
                 end
       trigger = "(#{trigger}) || #{all_nan_flag}" if all_nan_flag
       finish_emit = view_flat \
@@ -2327,16 +2315,9 @@ module MkKernel
     io.puts "        sidx[sk] = 0;"
     io.puts "      }"
     io.puts "    }"
-    # ERI.0: a count over nothing is 0, not UNDEF -- so the default
-    # (min_count < 0) never fires the mask for :count_equal.  An explicit
-    # min_count: still does.
-    if counting
-      io.puts "    if ( min_count < 0 ? 0"
-      io.puts "                       : st.slab_elements - masked_cnt < min_count ) {"
-    else
-      io.puts "    if ( min_count < 0 ? masked_cnt == st.slab_elements"
-      io.puts "                       : st.slab_elements - masked_cnt < min_count ) {"
-    end
+    # A count over nothing is 0, not UNDEF: it needs no cell.
+    io.puts "    if ( ca_too_few_present(st.slab_elements - masked_cnt, min_count, " \
+            "#{counting ? 0 : 1}) ) {"
     io.puts "      if ( ! op_mask ) {"
     io.puts "        ca_create_mask(co);"
     io.puts "        op_mask = (boolean8_t *) co->mask->ptr;"
@@ -2389,11 +2370,8 @@ module MkKernel
   # Layout per slab:
   #   Pass 1: sum = Σ x_i   via CA_SLAB_REDUCE_T_PLUS_EX (SIMD :plus)
   #           masked_cnt is populated as a side effect.
-  #   mask trigger:
-  #     min_count < 0  (default) -> UNDEF iff all-masked.
-  #     min_count >= 0           -> UNDEF iff n_valid < min_count.
-  #     either way               -> UNDEF iff n_valid < 2 for the
-  #                                 :n_minus_1 divisor.
+  #   mask trigger: ca_too_few_present(n_valid, min_count, 1 or 2), 2 for
+  #                 the :n_minus_1 divisor.
   #   Pass 2: M2 = Σ (x_i - mean)²  via the same macro with a centred
   #           REDUCE stmt.
   #   Finish: variance = M2 / DIVISOR (n or n-1); stddev variant applies
@@ -2530,11 +2508,9 @@ module MkKernel
     # min_count sentinel arg is always present (all four kernels use it).
     extra_args = ", ca_size_t min_count"
 
-    # The default (min_count < 0) trigger fires when all cells are
-    # masked.  Independently of min_count, fewer than required_min valid
-    # cells (2 for the n-1 divisor) leave the statistic undefined, so the
-    # cell is UNDEF: the sample variance of one value is 0/0.
-    default_trigger = "masked_cnt == st.slab_elements"
+    # Fewer than required_min valid cells (2 for the n-1 divisor) leave the
+    # statistic undefined, so the cell is UNDEF: the sample variance of one
+    # value is 0/0.
 
     # Reduce-call plumbing.  :object keeps the scalar rb_funcall loop
     # (CA_SLAB_REDUCE_T_EX).  Every other src uses the 8-way accumulator
@@ -2587,8 +2563,7 @@ module MkKernel
           ca_size_t masked_cnt = 0;
           #{p1_reduce_call}
           ca_size_t n_valid = st.slab_elements - masked_cnt;
-          int __trigger = (min_count < 0 ? #{default_trigger} : n_valid < min_count)
-                          || n_valid < #{required_min};
+          int __trigger = ca_too_few_present(n_valid, min_count, #{required_min});
           if ( __trigger ) {
             if ( ! op_mask ) {
               ca_create_mask(co);
@@ -3227,10 +3202,7 @@ module MkKernel
         emit_all_nan_fixup(io, k, src, si, limit_init_state_vars(k, si, oi, src),
                            "masked_cnt < st.slab_elements", indent: "      ")
       end
-      # Same trigger as single-output :min_count: legacy default (all_masked)
-      # when min_count < 0, otherwise need at least min_count valid cells.
-      trigger = "(min_count < 0 ? masked_cnt == st.slab_elements " \
-                ": st.slab_elements - masked_cnt < min_count)"
+      trigger = "ca_too_few_present(st.slab_elements - masked_cnt, min_count, 1)"
       io.puts "      if ( #{trigger} ) {"
       io.puts "        if ( ! op_mask_a ) {"
       io.puts "          ca_create_mask(co_a);"
@@ -3412,7 +3384,7 @@ module MkKernel
     fn = "#{k[:name]}_ki_stream_#{src}"
     io.puts "    if ( naxes == ca->ndim && ca->ndim >= 1 && !keep_axis &&"
     io.puts "         ca->elements > 0 &&"
-    io.puts "         ( min_count < 0 || ca->elements >= min_count ) &&" if k[:mask_policy] == :min_count
+    io.puts "         ! ca_too_few_present(ca->elements, min_count, 0) &&" if k[:mask_policy] == :min_count
     io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) &&"
     io.puts "         ca_fast_paths_enabled() ) {"
     io.puts "      #{fn}_t __ctx;"
@@ -3519,9 +3491,7 @@ module MkKernel
     if k[:object_escape]
       io.puts "  if ( src->data_type == CA_OBJECT ) {"
       if min_count
-        io.puts "    if ( ! NIL_P(rmin_count) && ca_integer_arg(rmin_count, \"min_count\", NULL) < 0 ) {"
-        io.puts %Q[      rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %lld)", ca_calling_method_name(), (long long) ca_integer_arg(rmin_count, "min_count", NULL));]
-        io.puts "    }"
+        io.puts "    ca_min_count_arg(rmin_count, NULL);"
       end
       io.puts "    return rb_funcallv(self, rb_intern(\"#{k[:object_escape]}\"), escape_argc, escape_argv);"
       io.puts "  }"
@@ -3669,17 +3639,8 @@ module MkKernel
 
     if min_count
       # rmin_count / rfval were scanned up front (PoC scan-merge); here we
-      # only interpret them.  Sentinel min_count = -1 means "no opt given"
-      # -> :all_masked semantics.
-      io.puts "  ca_size_t min_count = -1;"
-      io.puts "  if ( ! NIL_P(rmin_count) ) {"
-      io.puts "    ca_size_t mc_user = (ca_size_t) ca_integer_arg(rmin_count, \"min_count\", NULL);"
-      io.puts "    if ( mc_user < 0 ) {"
-      io.puts %Q[      rb_raise(rb_eArgError, "%s: min_count must be non-negative (got %lld)", ca_calling_method_name(), (long long) mc_user);]
-      io.puts "    }"
-      io.puts "    /* :min_count = 0 collapses to legacy default (any 1 valid). */"
-      io.puts "    if ( mc_user > 0 ) min_count = mc_user;"
-      io.puts "  }"
+      # only interpret them; min_count is -1 when not given.
+      io.puts "  ca_size_t min_count = ca_min_count_arg(rmin_count, NULL);"
       # fill_value: UNDEF leaves the result undefined, as no fill_value does.
       # A full reduction with a fill keeps its axes so the fill goes into a
       # typed cell, as it does per axis; ca_reduce_fill takes the cell out.
