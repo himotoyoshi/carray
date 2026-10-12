@@ -239,9 +239,8 @@ ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
  * The arity dispatch matches `CArray.new` (ca_obj_array.c) so the two
  * factories behave the same for block-driven initialisation. */
 static VALUE
-rb_ca_template_method (int argc, VALUE *argv, VALUE self)
+rb_ca_template_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
-  volatile VALUE ropt = rb_pop_options(&argc, &argv);
   volatile VALUE obj, rtype, rbytes = Qnil;
   CArray *ca, *co;
   int8_t data_type;
@@ -299,6 +298,13 @@ rb_ca_template_method (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
+static VALUE
+rb_ca_template_method (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_template_kw(argc, argv, ropt, self);
+}
+
 VALUE
 rb_ca_template (VALUE self)
 {
@@ -308,10 +314,9 @@ rb_ca_template (VALUE self)
 VALUE
 rb_ca_template_with_type (VALUE self, VALUE rtype, VALUE rbytes)
 {
-  VALUE ropt = rb_hash_new();
-  VALUE args[2] = { rtype, ropt };
+  volatile VALUE ropt = rb_hash_new();
   rb_set_options(ropt, "bytes", rbytes);
-  return rb_ca_template_method(2, args, self);
+  return rb_ca_template_kw(1, &rtype, ropt, self);
 }
 
 /* Returns `template` of the first non-scalar among `n` variadic CArray

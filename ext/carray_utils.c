@@ -1012,11 +1012,15 @@ rb_ca_s_guess_type_and_bytes (int argc, VALUE *argv, VALUE klass)
   return rb_assoc_new(INT2NUM(data_type), SIZE2NUM(bytes));
 }
 
+/* Takes the trailing keyword Hash off argv when the caller passed keywords.
+   A Hash passed as a positional argument (`f({axis: 0})`) stays an argument,
+   as in Ruby 3: it may be a value, such as a cell of an object array. */
 VALUE
 rb_pop_options (int *argc, VALUE **argv)
 {
   VALUE ropt;
-  if ( ( *argc > 0 ) && ( TYPE( (*argv)[*argc-1] ) == T_HASH ) ) {
+  if ( ( *argc > 0 ) && rb_keyword_given_p() &&
+       ( TYPE( (*argv)[*argc-1] ) == T_HASH ) ) {
     ropt = (*argv)[*argc-1];
     (*argc) -= 1;
   }

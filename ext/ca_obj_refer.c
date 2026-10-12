@@ -447,8 +447,11 @@ ca_reshape_try_strides (CArray *parent,
   return 1;
 }
 
+/* `refer` with its options given apart from argv, for callers in C that
+   build the options themselves (a Hash at the end of argv is read as
+   options only when the Ruby caller passed keywords). */
 static VALUE
-rb_ca_refer (int argc, VALUE *argv, VALUE self)
+rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
   volatile VALUE obj = Qnil;
   CArray *ca;
@@ -461,7 +464,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if (argc == 0) {
+  if (argc == 0 && NIL_P(ropt)) {
     data_type = ca->data_type;
     bytes     = ca->bytes;
     ndim      = ca->ndim;
@@ -471,8 +474,7 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
     rb_ca_set_parent(obj, self);
   }
   else {
-    volatile VALUE rtype, rdim, ropt, rbytes = Qnil, roffset = Qnil;
-    ropt = rb_pop_options(&argc, &argv);
+    volatile VALUE rtype, rdim, rbytes = Qnil, roffset = Qnil;
     rb_scan_args(argc, argv, "11", (VALUE *) &rtype, (VALUE *) &rdim);
     rb_scan_options(ropt, "bytes,offset", &rbytes, &roffset);
     if (NIL_P(rbytes)) rbytes = rb_ca_bytes(self);
@@ -516,6 +518,13 @@ rb_ca_refer (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
+static VALUE
+rb_ca_refer (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_refer_kw(argc, argv, ropt, self);
+}
+
 VALUE
 rb_ca_refer_new (VALUE self,
                  int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
@@ -541,7 +550,7 @@ rb_ca_refer_new (VALUE self,
   rb_ary_store(list, 2, ropt);
 
   {
-    volatile VALUE obj = rb_ca_refer(3, (VALUE *) RARRAY_CONST_PTR(list), self);
+    volatile VALUE obj = rb_ca_refer_kw(2, (VALUE *) RARRAY_CONST_PTR(list), ropt, self);
     CArray *co;
 
     /* CAREFUL: this is the internal builder -- some fifteen call sites want

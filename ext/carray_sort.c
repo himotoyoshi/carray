@@ -139,7 +139,7 @@ sort_addr_run (VALUE arg)
  * an incomparable sentinel clustered at masked_position: (:last
  * default, or :first); ties are broken by original index (stable). */
 static VALUE
-rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
+rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
   volatile VALUE out;
   CArray *co;
@@ -154,7 +154,6 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   int j;
   ca_size_t i;
 
-  VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE vmasked_position = Qnil;
   rb_scan_options(ropt, "masked_position", &vmasked_position);
   int masked_last = NIL_P(vmasked_position) ? 1
@@ -253,6 +252,13 @@ rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
   return out;
 }
 
+static VALUE
+rb_ca_s_sort_addr (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_s_sort_addr_kw(argc, argv, ropt, self);
+}
+
 /* Internal sort_addr kernel entries (C-level only, no Ruby binding;
  * defined in the generated carray_kernels_sort.c).  The _quick and
  * _stable variants implement the kind: dispatch; both take an explicit
@@ -308,16 +314,12 @@ rb_ca_sort_addr_c (VALUE self, VALUE axis, int stable, int masked_last)
   if ( NIL_P(axis) ) {
     /* Legacy flat: equivalent to CArray.sort_addr(self, masked_position:).
        kind: ignored for now (the flat path uses qsort/mergesort
-       internally).  rb_ca_s_sort_addr's rb_pop_options handles a trailing
-       Hash the same way regardless of call-frame keyword-splat state (it
-       type-checks the last positional arg, not rb_keyword_given_p), so
-       this raw C call is safe unlike the rb_scan_args "1:" pattern used
-       elsewhere in this file. */
-    VALUE kw = rb_hash_new();
+       internally). */
+    volatile VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(rb_intern("masked_position")),
                  masked_last ? ID2SYM(rb_intern("last")) : ID2SYM(rb_intern("first")));
-    VALUE flat_argv[2] = { self, kw };
-    return rb_ca_s_sort_addr(2, flat_argv, rb_cCArray);
+    VALUE flat_argv[1] = { self };
+    return rb_ca_s_sort_addr_kw(1, flat_argv, kw, rb_cCArray);
   }
   return stable ? rb_ca_sort_addr_ki_stable_mp(self, axis, masked_last)
                 : rb_ca_sort_addr_ki_quick_mp (self, axis, masked_last);
@@ -571,15 +573,13 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
  *               numeric, both no-axis and axis: forms.
  */
 static VALUE
-rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
+rb_ca_sorted_view_kw (VALUE rkw, VALUE self)
 {
-  VALUE rkw = Qnil;
   VALUE vaxis = Qnil;
   VALUE vkind = Qnil;
   VALUE vmasked_position = Qnil;
 
-  /* Parse kwargs: `sort` accepts `axis:`, `kind:`, `masked_position:`. */
-  rb_scan_args(argc, argv, "0:", &rkw);
+  /* `sort` accepts `axis:`, `kind:`, `masked_position:`. */
   rb_scan_options(rkw, "axis,kind,masked_position", &vaxis, &vkind, &vmasked_position);
 
   /* Resolve kind: -> do_stable.  :quick (default) = introsort; :stable
@@ -625,6 +625,14 @@ rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
     CA_FACE_LIFT_IF_FACE(obj, self, ca);
     return obj;
   }
+}
+
+static VALUE
+rb_ca_sorted_view (int argc, VALUE *argv, VALUE self)
+{
+  VALUE rkw = Qnil;
+  rb_scan_args(argc, argv, "0:", &rkw);
+  return rb_ca_sorted_view_kw(rkw, self);
 }
 
 /* sort_copy(axis: nil, kind: :quick, masked_position: :last) — eager
@@ -683,13 +691,11 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
      same shape/class contract as the fast path. */
   if ( ca->data_type < CA_INT8 || ca->data_type > CA_FLOAT64
        || ca_has_mask(ca) ) {
-    VALUE sv_kw = rb_hash_new();
+    volatile VALUE sv_kw = rb_hash_new();
     if ( !NIL_P(vaxis) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("axis")), vaxis);
     if ( !NIL_P(vkind) )            rb_hash_aset(sv_kw, ID2SYM(rb_intern("kind")), vkind);
     if ( !NIL_P(vmasked_position) ) rb_hash_aset(sv_kw, ID2SYM(rb_intern("masked_position")), vmasked_position);
-    VALUE sv_argv[1] = { sv_kw };
-    int   sv_argc = ( NIL_P(vaxis) && NIL_P(vkind) && NIL_P(vmasked_position) ) ? 0 : 1;
-    VALUE obj = rb_ca_copy(rb_ca_sorted_view(sv_argc, sv_argv, self));
+    VALUE obj = rb_ca_copy(rb_ca_sorted_view_kw(sv_kw, self));
     CA_FACE_LIFT_IF_FACE(obj, self, ca);
     return obj;
   }

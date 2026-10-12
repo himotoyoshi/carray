@@ -135,10 +135,11 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
      ladder.  kwargs reach a -1 C method as a trailing options hash, so a
      bare `count(axis: k)` arrives as argc==1 with argv[0] a Hash; discount
      that trailing hash (same convention as the CArray-broadcast branch
-     below) before deciding there is no positional value.  argv is forwarded
-     verbatim so the axis: kwarg passes through. */
+     below) before deciding there is no positional value.  A Hash passed
+     positionally is the value to count.  argv is forwarded verbatim so the
+     axis: kwarg passes through. */
   {
-    int has_opts = ( argc >= 1 &&
+    int has_opts = ( argc >= 1 && rb_keyword_given_p() &&
                      rb_obj_is_kind_of(argv[argc - 1], rb_cHash) );
     if ( argc - (has_opts ? 1 : 0) < 1 ) {
       return rb_ca_count_not_masked(argc, argv, self);
@@ -227,8 +228,8 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     int    inner_argc = argc - 1;
     VALUE *inner_axes = argv + 1;
     volatile VALUE opt_hash = Qnil;
-    if ( inner_argc > 0 && rb_obj_is_kind_of(inner_axes[inner_argc - 1],
-                                              rb_cHash) ) {
+    if ( inner_argc > 0 && rb_keyword_given_p() &&
+         rb_obj_is_kind_of(inner_axes[inner_argc - 1], rb_cHash) ) {
       opt_hash = inner_axes[inner_argc - 1];
       inner_argc--;
     }

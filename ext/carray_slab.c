@@ -1224,7 +1224,7 @@ static VALUE
 slab_extract_kwargs (int argc, VALUE *argv, const char *method_name)
 {
   VALUE kw = Qnil;
-  if ( argc == 1 && RB_TYPE_P(argv[0], T_HASH) ) {
+  if ( argc == 1 && rb_keyword_given_p() && RB_TYPE_P(argv[0], T_HASH) ) {
     kw = argv[0];
   }
   else if ( argc != 0 ) {

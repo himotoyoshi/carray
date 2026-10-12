@@ -273,6 +273,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   counts from the end everywhere. The indexer's method form (`a[:eq, 0]`)
   calls public methods only.
 
+- Change: a Hash passed as a positional argument is an argument, as in
+  Ruby 3, and is no longer read as keywords: `a.sum({axis: 0})` raises
+  (write `a.sum(axis: 0)` or `a.sum(**opts)`). An object array of Hashes can
+  now be searched and counted (`search({a: 1})`, `count({a: 1})`).
+
 - Change: values that cannot be held raise instead of being bent: storing
   `nil` into a numeric or boolean array, an Integer operand the array's type
   cannot hold (`RangeError`; the comparisons answer by value instead), and a

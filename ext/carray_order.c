@@ -566,7 +566,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
   else {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
-    addrs = rb_ca_argmax_addr_ki(1, &kw, rkey);
+    addrs = rb_funcallv_kw(rkey, rb_intern("max_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
   return rb_ca_fetch(self, addrs);
 }
@@ -591,7 +591,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
   else {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
-    addrs = rb_ca_argmin_addr_ki(1, &kw, rkey);
+    addrs = rb_funcallv_kw(rkey, rb_intern("min_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
   return rb_ca_fetch(self, addrs);
 }

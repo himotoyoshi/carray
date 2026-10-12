@@ -1254,9 +1254,8 @@ pct_flatten_validate_pers (VALUE pers)
    keep_axis:).  Dispatches fixlen -> reject, object -> object lane,
    numeric -> numeric lane. */
 static VALUE
-rb_ca_percentile_m_body (int argc, VALUE *argv, VALUE self)
+rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
 {
-  VALUE ropt = rb_pop_options(&argc, &argv);
   VALUE raxis = Qnil, rmin_count = INT2FIX(0), fill_value = Qnil,
         method = sym_linear, rkeep = Qfalse;
   rb_scan_options(ropt, "axis,min_count,fill_value,method,keep_axis",
@@ -1356,6 +1355,13 @@ rb_ca_percentile_m_body (int argc, VALUE *argv, VALUE self)
   return result;
 }
 
+static VALUE
+rb_ca_percentile_m_body (int argc, VALUE *argv, VALUE self)
+{
+  VALUE ropt = rb_pop_options(&argc, &argv);
+  return rb_ca_percentile_kw(argc, argv, ropt, self);
+}
+
 /* [entry] quantile(axis:, keep_axis:) = percentile(0, 25, 50, 75, 100, ...).
    Return shape: Array<Float> len 5 (flat) or Array<CArray> len 5 (per-axis),
    matching percentile's multi-p wrapping since we pass 5 fixed p values. */
@@ -1370,9 +1376,8 @@ rb_ca_quantile_m_body (int argc, VALUE *argv, VALUE self)
   VALUE opts = rb_hash_new();
   if ( !NIL_P(raxis) ) rb_hash_aset(opts, ID2SYM(rb_intern("axis")), raxis);
   rb_hash_aset(opts, ID2SYM(rb_intern("keep_axis")), rkeep);
-  VALUE pa[6] = { INT2FIX(0), INT2FIX(25), INT2FIX(50), INT2FIX(75), INT2FIX(100),
-                  opts };
-  return rb_ca_percentile_m_body(6, pa, self);
+  VALUE pa[5] = { INT2FIX(0), INT2FIX(25), INT2FIX(50), INT2FIX(75), INT2FIX(100) };
+  return rb_ca_percentile_kw(5, pa, opts, self);
 }
 
 
