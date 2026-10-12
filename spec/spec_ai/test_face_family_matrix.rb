@@ -241,6 +241,18 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     end
   end
 
+  # ---- 1c. equality compares values, and only within the Face's class ------
+
+  def test_equality_is_by_value_within_the_class
+    each_face do |face, a|
+      assert a == a.copy, "#{face[:name]}: == its own copy"
+      assert a.eql?(a.copy), "#{face[:name]}: eql? its own copy"
+      storage = a.__send__(:__face_storage__)
+      assert !(a == storage), "#{face[:name]}: == its storage"
+      assert !(a == a.to_type(:object)), "#{face[:name]}: == its values as objects"
+    end
+  end
+
   def test_scalar_read_decodes_to_an_element
     each_face do |face, a|
       assert_kind_of face[:element], a[0], "#{face[:name]}[0]"

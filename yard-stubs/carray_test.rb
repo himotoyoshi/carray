@@ -36,6 +36,13 @@ class CArray
   #   `data_class`, `data_type`, mask state, and elementwise values as
   #   `self`. NaN values compare unequal (IEEE semantics), so two
   #   arrays with NaN at the same position are not `==`.
+  #
+  #   A Face (a time, string or categorical array) equals only a Face of
+  #   its own class, and is compared by its values: two time arrays of
+  #   different units holding the same instants are `==`, as are two
+  #   categoricals with the same labels at each cell whatever the order
+  #   of their vocabularies. A Face is never `==` to an array that is not
+  #   one, even when the bytes match.
   #   @param other [Object]
   #   @return [Boolean]
   def ==(other); end
@@ -46,6 +53,9 @@ class CArray
   #   are compared bitwise (for numeric types) or via `Object#eql?`
   #   (for `:object` arrays). Unlike `==`, `NaN.eql?(NaN)` holds, so
   #   two mask-free arrays with NaN at the same positions are `eql?`.
+  #   Two Faces are `eql?` only when they are of the same class, share
+  #   their state (a time array's unit, a categorical's labels) and hold
+  #   the same storage.
   #
   #   Guarantees `a.eql?(b)` ⇒ `a.hash == b.hash`.
   #   @param other [Object]

@@ -718,6 +718,49 @@ ca_face_operand_descend (VALUE operand, const char *name)
   return Qnil;   /* not reached */
 }
 
+/* Whether two arrays, at least one a Face other than a record array, are
+   equal (`==`, strict = 0) or the same key (`eql?`, strict = 1).
+
+   A Face equals only a Face of its own class.  When the two share their
+   state (a time array's unit) and the storage holds the values in their
+   order, equal storage is equal values, so the storage is compared.
+   Otherwise `==` compares the values themselves (two time arrays of
+   different units, two const strings over different pools, two
+   categoricals with differently ordered labels), and `eql?`, which has to
+   agree with #hash, answers false. */
+int
+ca_face_equal (VALUE va, VALUE vb, int strict)
+{
+  CArray *a, *b;
+  int8_t i;
+  TypedData_Get_Struct(va, CArray, &carray_data_type, a);
+  TypedData_Get_Struct(vb, CArray, &carray_data_type, b);
+  if ( ! ca_is_face(a) || ! ca_is_face(b) ) {
+    return 0;
+  }
+  if ( rb_obj_class(va) != rb_obj_class(vb) ) {
+    return 0;
+  }
+  if ( a->ndim != b->ndim ) {
+    return 0;
+  }
+  for (i = 0; i < a->ndim; i++) {
+    if ( a->dim[i] != b->dim[i] ) {
+      return 0;
+    }
+  }
+  if ( ca_face_state_compatible(va, a, vb, b)
+       && ( strict || ca_test_flag(a, CA_FLAG_FACE_ORDERABLE_STORAGE) ) ) {
+    return strict ? ca_eql_storage(ca_strip_face(a), ca_strip_face(b))
+                  : ca_equal(ca_strip_face(a), ca_strip_face(b));
+  }
+  if ( strict ) {
+    return 0;
+  }
+  return RTEST(rb_equal(rb_funcall(va, rb_intern("to_a"), 0),
+                        rb_funcall(vb, rb_intern("to_a"), 0)));
+}
+
 /* An operand Face whose storage is not even in the order of its values
    (a CAConstString, a CACategorical) is read by its values: its strings
    (#to_string) or, for any other, its values (to_type(:object)).  Any

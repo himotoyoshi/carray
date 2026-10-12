@@ -11,6 +11,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_window */
+#include "ca_obj_face.h"        /* ca_face_equal */
 
 static ID id_equal;
 static ID id_eql;
@@ -504,8 +505,8 @@ ca_equal (void *ap, void *bp)
   return ca_compare_common(ap, bp, 0);
 }
 
-static int
-ca_eql_strict (void *ap, void *bp)
+int
+ca_eql_storage (void *ap, void *bp)
 {
   return ca_compare_common(ap, bp, 1);
 }
@@ -539,6 +540,10 @@ rb_ca_equal (VALUE self, VALUE other)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
 
+  if ( ! rb_ca_has_data_class(self) && ( ca_is_face(ca) || ca_is_face(cb) ) ) {
+    return ca_face_equal(self, other, 0) ? Qtrue : Qfalse;
+  }
+
   return ( ca_equal(ca, cb) ) ? Qtrue : Qfalse;
 }
 
@@ -571,7 +576,11 @@ rb_ca_eql (VALUE self, VALUE other)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
 
-  return ( ca_eql_strict(ca, cb) ) ? Qtrue : Qfalse;
+  if ( ! rb_ca_has_data_class(self) && ( ca_is_face(ca) || ca_is_face(cb) ) ) {
+    return ca_face_equal(self, other, 1) ? Qtrue : Qfalse;
+  }
+
+  return ( ca_eql_storage(ca, cb) ) ? Qtrue : Qfalse;
 }
 
 /* ca_hash(ca) — cheap Hash key for CArray.  Mixes metadata (data_type,

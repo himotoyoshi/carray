@@ -301,6 +301,10 @@ VALUE ca_face_operand_descend (VALUE operand, const char *name);
 VALUE ca_face_reconcile_operand (VALUE reference, VALUE operand,
                                  const char *name);
 
+/* `==` (strict = 0) / `eql?` (strict = 1) when an operand is a Face other
+   than a record array.  See ca_obj_face.c. */
+int ca_face_equal (VALUE va, VALUE vb, int strict);
+
 /* The storage value of a cell read through a Face.  A gated (CA_FIXLEN)
    surface over a numeric storage delivers the cell as its bytes; they are
    read back as the storage data_type (a boolean as true / false).  A

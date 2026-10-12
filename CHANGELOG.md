@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `==` on a Face (a time, string or categorical array) compares the
+  values it holds. Two time arrays of different units holding the same
+  instants, two const strings over different pools and two categoricals
+  with differently ordered labels are now `==`. A Face equals only a Face
+  of its own class: a time array is no longer `==` to a timedelta or a
+  byte array that happens to hold the same bytes, and a `CAString` is no
+  longer `==` to an object array of the same strings (compare
+  `to_type(:object)` for that). `eql?`, the Hash key relation, also asks
+  for the same class, the same state (unit, labels) and the same storage.
 - Fix: `clip` on a time array returned a plain object array mixing elements
   and `Time` values; it now returns a time array, and its bounds and fill
   values are read as times. A record array clips by the members it is

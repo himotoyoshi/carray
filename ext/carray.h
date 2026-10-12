@@ -1716,6 +1716,7 @@ void    ca_parse_range_without_check (VALUE arg, ca_size_t size,
                         ca_size_t *offset, ca_size_t *count, ca_size_t *step);
 
 int     ca_equal (void *ap, void *bp);
+int     ca_eql_storage (void *ap, void *bp);
 void    ca_zerodiv(void)  __attribute__((noreturn));
 /* ca_rand removed in 3.0; use rb_random_real/rb_random_ulong_limited instead */
 ca_size_t ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k);
