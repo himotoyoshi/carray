@@ -20,6 +20,12 @@ unless CArray.respond_to?(:_scan_index_v2)
 end
 
 class TestScanIndexV2Diff < Test::Unit::TestCase
+  # A message names the method that raised it, which differs between the
+  # two entry points; the rest of it is what is compared.
+  def unnamed (message)
+    message.sub(/\A[\w\[\]=]+: /, "")
+  end
+
   def cmp(dim, idx, label: nil)
     label ||= "dim=#{dim.inspect} idx=#{idx.inspect}"
 
@@ -30,7 +36,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
       info = CArray.scan_index(dim, idx)
       v1_result = [info.type, info.index]
     rescue => e
-      v1_err = [e.class, e.message]
+      v1_err = [e.class, unnamed(e.message)]
     end
 
     begin
@@ -38,7 +44,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     rescue NotImplementedError => e
       omit "v2 not yet implemented for #{label}: #{e.message}"
     rescue => e
-      v2_err = [e.class, e.message]
+      v2_err = [e.class, unnamed(e.message)]
     end
 
     if v1_err && v2_err
@@ -408,21 +414,21 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   # `( %lld <=> 0..%lld )` 等) の細部一致を保証。
 
   def test_error_msg_axis_out_of_range
-    # "index out of range at %i-dim ( %lld <=> 0..%lld )"
+    # "<method>: index %lld is out of range for length %lld on axis %d"
     e1 = (CArray.scan_index([3, 3], [5, 0]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [5, 0]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
-    assert_match(/index out of range at 0-dim \( 5 <=> 0\.\.2 \)/, e2.message)
+    assert_equal unnamed(e1.message), unnamed(e2.message)
+    assert_match(/index 5 is out of range for length 3 on axis 0/, e2.message)
   end
 
   def test_error_msg_last_out_of_range
-    # "index %lld is out of range (0..%lld) at %i-dim"
+    # "<method>: index %lld is out of range for length %lld on axis %d"
     e1 = (CArray.scan_index([3, 3], [0..5, nil]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [0..5, nil]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
-    assert_match(/index 5 is out of range \(0\.\.2\) at 0-dim/, e2.message)
+    assert_equal unnamed(e1.message), unnamed(e2.message)
+    assert_match(/index 5 is out of range for length 3 on axis 0/, e2.message)
   end
 
   def test_error_msg_step_zero
@@ -430,7 +436,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([5], [[0, 3, 0]]) rescue $!)
     e2 = (CArray._scan_index_v2([5], [[0, 3, 0]]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_equal ArgumentError, e2.class
   end
 
@@ -439,7 +445,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([5, 5], [[1, 2, 3, 4], nil]) rescue $!)
     e2 = (CArray._scan_index_v2([5, 5], [[1, 2, 3, 4], nil]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/invalid form of index range at 0-dim/, e2.message)
   end
 
@@ -448,7 +454,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3], [0, 0]) rescue $!)
     e2 = (CArray._scan_index_v2([3], [0, 0]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/2 indices given for a carray of ndim 1/, e2.message)
     e3 = (CArray.float64(4, 3, 2)[0, 0] rescue $!)
     assert_match(/2 indices given for a carray of ndim 3/, e3.message)
@@ -459,7 +465,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 3], [0, 0, 0, 0, false]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [0, 0, 0, 0, false]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/index specification exceeds the ndim of carray \(2\)/,
                  e2.message)
   end
@@ -470,7 +476,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 3], [0, :ij]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [0, :ij]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/symbol :ij is invalid.*use :> instead/, e2.message)
   end
 
@@ -481,7 +487,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 4], [mask]) rescue $!)   # 12 elements
     e2 = (CArray._scan_index_v2([3, 4], [mask]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_equal ArgumentError, e2.class
     assert_match(/mismatch of # of elements/, e2.message)
   end
@@ -492,7 +498,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 3], [f]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [f]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/data_type .* is invalid for reference by selection\/mapping/,
                  e2.message)
   end
@@ -503,7 +509,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 3], [f, nil]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [f, nil]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/data_type .* is invalid for reference by gridding at 0-dim/,
                  e2.message)
   end
@@ -562,7 +568,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
       e1 = (CArray.scan_index([3, 3], [0, sym]) rescue $!)
       e2 = (CArray._scan_index_v2([3, 3], [0, sym]) rescue $!)
       assert_equal e1.class, e2.class, "axis :#{sym}: classes"
-      assert_equal e1.message, e2.message, "axis :#{sym}: message"
+      assert_equal unnamed(e1.message), unnamed(e2.message), "axis :#{sym}: message"
       assert_equal IndexError, e2.class, "axis :#{sym}: should be IndexError"
     end
   end
@@ -628,7 +634,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     e1 = (CArray.scan_index([3, 3], [0, bad]) rescue $!)
     e2 = (CArray._scan_index_v2([3, 3], [0, bad]) rescue $!)
     assert_equal e1.class, e2.class
-    assert_equal e1.message, e2.message
+    assert_equal unnamed(e1.message), unnamed(e2.message)
     assert_match(/is invalid for the index for reference at 1-dim/, e2.message)
   end
 end

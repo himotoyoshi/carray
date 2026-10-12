@@ -154,8 +154,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       last += ( (last>=start) ? -1 : 1 );
     }
     if ( last < 0 || last >= size ) {
-      rb_raise(rb_eIndexError,
-               "invalid index range");
+      ca_index_out_of_range(last, size, "index");
     }
     *poffset = start;
     *pcount  = llabs(last - start) + 1;
@@ -180,7 +179,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       last += ( (last>=start) ? -1 : 1 );
     }
     if ( last < 0 || last >= size ) {
-      rb_raise(rb_eIndexError, "index out of range");
+      ca_index_out_of_range(last, size, "index");
     }
     CA_CHECK_INDEX(start, size);
     if ( (last - start) * step < 0 ) {
@@ -233,7 +232,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
           last += ( (last>=start) ? -1 : 1 );
         }
         if ( last < 0 || last >= size ) {
-          rb_raise(rb_eIndexError, "index out of range");
+          ca_index_out_of_range(last, size, "index");
         }
         CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
@@ -267,7 +266,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
           last += ( (last>=start) ? -1 : 1 );
         }
         if ( last < 0 || last >= size ) {
-          rb_raise(rb_eIndexError, "index out of range");
+          ca_index_out_of_range(last, size, "index");
         }
         CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
@@ -459,14 +458,12 @@ ca_bounds_normalize_index (int8_t bounds, ca_size_t size0, ca_size_t k)
       k += size0;
     }
     if ( k < 0 || k >= size0 ) {
-      rb_raise(rb_eIndexError,
-               "window index out of range");
+      ca_index_out_of_range(k, size0, "index");
     }
     return k;
   case CA_BOUNDS_STRICT:
     if ( k < 0 || k >= size0 ) {
-      rb_raise(rb_eIndexError,
-               "window index out of range");
+      ca_index_out_of_range(k, size0, "index");
     }
     return k;
   case CA_BOUNDS_NEAREST:
@@ -654,6 +651,14 @@ ca_integer_arg (VALUE v, const char *arg, const char *name)
              name ? name : ca_calling_method_name(), arg, rb_obj_class(v));
   }
   return NUM2LONG(v);
+}
+
+void
+ca_index_out_of_range_at (ca_size_t idx, ca_size_t n, int axis)
+{
+  rb_raise(rb_eIndexError,
+           "%s: index %lld is out of range for length %lld on axis %d",
+           ca_calling_method_name(), (long long) idx, (long long) n, axis);
 }
 
 void

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: an index out of range in `[]` and `[]=` reports the method, the
+  index given, the length and the axis
+  (`[]: index 5 is out of range for length 3 on axis 0`), in place of
+  `index out of range at 0-dim ( 5 <=> 0..2 )`.
+
 - Change: a pair of object cells that `<=>` cannot order raises
   "<method>: comparison of A with B failed" naming the method you called,
   from every method and iterator. `median`, `percentile`, `quantile`,

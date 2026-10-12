@@ -364,6 +364,19 @@ ca_index_in_range (ca_size_t idx, ca_size_t n, const char *what)
   return i;
 }
 
+/* The same for an index on axis `axis` of a multi-axis index. */
+NORETURN(void ca_index_out_of_range_at (ca_size_t idx, ca_size_t n, int axis));
+
+static inline ca_size_t
+ca_index_in_range_at (ca_size_t idx, ca_size_t n, int axis)
+{
+  ca_size_t i = ( idx < 0 ) ? idx + n : idx;
+  if ( i < 0 || i >= n ) {
+    ca_index_out_of_range_at(idx, n, axis);
+  }
+  return i;
+}
+
 /* ---- How many cells a result cell needs ---------------------------------
 
    A reduction's result cell is UNDEF when fewer cells contribute to it than

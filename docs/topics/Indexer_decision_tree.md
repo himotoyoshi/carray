@@ -273,8 +273,8 @@ hyperslab notation, for example, treats them differently.
 | `argc == 1` with CArray of an invalid data_type      | `IndexError`       | `data_type %s is invalid for reference by selection/mapping(should be boolean or integer)`     |
 | rubber dim overflow (`argc > ndim + 1`)              | `IndexError`       | `index specification exceeds the ndim of carray (%i)`                                          |
 | arity mismatch without rubber dim                    | `IndexError`       | `%i indices given for a carray of ndim %i`                                                     |
-| integer axis out of range                            | `IndexError`       | `index out of range at %i-dim ( %lld <=> 0..%lld )`                                            |
-| `Range` / `ArithmeticSequence` endpoint out of range | `IndexError`       | `index %lld is out of range (0..%lld) at %i-dim`                                                |
+| integer axis out of range                            | `IndexError`       | `[]: index %lld is out of range for length %lld on axis %d` (`[]=` for a store)                |
+| `Range` / `ArithmeticSequence` endpoint out of range | `IndexError`       | same as above                                                                                  |
 | `step == 0` (`ArithmeticSequence`)                   | `ArgumentError`     | `step in index equals to 0 in block reference`                                                 |
 | `step == 0` (`[nil, step]`)                          | `ArgumentError`     | same as above                                                                                  |
 | `step == 0` (`[Range, step]`)                        | `ArgumentError`     | same as above                                                                                  |

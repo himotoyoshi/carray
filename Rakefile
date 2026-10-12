@@ -60,6 +60,11 @@ task :face_parts_check do
   ruby "utils/check_face_parts.rb" or exit($?.exitstatus)
 end
 
+desc "Check that no file gains a hand-written IndexError"
+task :index_error_check do
+  ruby "utils/check_index_errors.rb" or exit($?.exitstatus)
+end
+
 desc "Check that no file gains a RuntimeError a caller could cause"
 task :runtime_error_check do
   ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
@@ -272,7 +277,7 @@ task :build_c_extension_examples => [
 
 desc "Run spec_ai tests (ruby -I ext -I lib)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check,
+                  :runtime_error_check, :index_error_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any

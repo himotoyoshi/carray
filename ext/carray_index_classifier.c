@@ -21,6 +21,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_index_in_range_at */
 #include "carray_index_classifier.h"
 
 /* Range accessor macros — carray_access.c keeps a private cache
@@ -90,9 +91,7 @@ ca_classifier_normalize_axis_index (ca_size_t k, ca_size_t dim, int axis, int ra
     k += dim;
   }
   if ( range_check && ( k < 0 || k >= dim ) ) {
-    rb_raise(rb_eIndexError,
-             "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-             axis, (ca_size_t) given, (ca_size_t) (dim - 1));
+    ca_index_out_of_range_at(given, dim, axis);
   }
   return k;
 }
@@ -214,14 +213,7 @@ ca_classifier_axis_from_range (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
   info->index_type[axis] = CA_IDX_BLOCK;
 
   if ( info->range_check ) {
-    /* Inlined CA_CHECK_INDEX_AT so the format string stays
-       byte-identical with the surrounding helpers. */
-    if ( start < 0 ) start += dim;
-    if ( start < 0 || start >= dim ) {
-      rb_raise(rb_eIndexError,
-               "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-               axis, (ca_size_t) start, (ca_size_t) (dim - 1));
-    }
+    start = ca_index_in_range_at(start, dim, axis);
   }
 
   if ( last < 0 ) {
@@ -238,9 +230,7 @@ ca_classifier_axis_from_range (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
   }
   if ( info->range_check ) {
     if ( last < 0 || last >= dim ) {
-      rb_raise(rb_eIndexError,
-               "index %" PRId64 " is out of range (0..%" PRId64 ") at %i-dim",
-               (ca_size_t) last, (ca_size_t) (dim - 1), axis);
+      ca_index_out_of_range_at(last, dim, axis);
     }
   }
   count = llabs(last - start) + 1;
@@ -283,12 +273,7 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
      ignoring info->range_check.  An ArithSeq with a negative or
      out-of-range start silently produces an empty region if this
      check is deferred, which upstream callers do not expect. */
-  if ( start < 0 ) start += dim;
-  if ( start < 0 || start >= dim ) {
-    rb_raise(rb_eIndexError,
-             "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-             axis, (ca_size_t) start, (ca_size_t) (dim - 1));
-  }
+  start = ca_index_in_range_at(start, dim, axis);
 
   if ( last < 0 ) {
     last += dim;
@@ -303,9 +288,7 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     last += ( last >= start ) ? -1 : 1;
   }
   if ( last < 0 || last >= dim ) {
-    rb_raise(rb_eIndexError,
-             "index %" PRId64 " is out of range (0..%" PRId64 ") at %i-dim",
-             (ca_size_t) last, (ca_size_t) (dim - 1), axis);
+    ca_index_out_of_range_at(last, dim, axis);
   }
   /* start and last are both inside the axis, so their distance fits; the
      step is taken by magnitude unsigned, since -step overflows at its
@@ -321,12 +304,7 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     count = (ca_size_t) (span / ustep) + 1;
   }
   bound = start + (count - 1) * step;
-  if ( bound < 0 ) bound += dim;  /* CA_CHECK_INDEX_AT signature */
-  if ( bound < 0 || bound >= dim ) {
-    rb_raise(rb_eIndexError,
-             "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-             axis, (ca_size_t) bound, (ca_size_t) (dim - 1));
-  }
+  bound = ca_index_in_range_at(bound, dim, axis);
   info->index[axis].block.start = start;
   info->index[axis].block.count = count;
   info->index[axis].block.step  = step;
@@ -359,12 +337,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     {
       ca_size_t given = NUM2SIZE(a0);
       ca_size_t start = given;
-      if ( start < 0 ) start += dim;
-      if ( start < 0 || start >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) given, (ca_size_t) (dim - 1));
-      }
+      start = ca_index_in_range_at(start, dim, axis);
       info->index[axis].block.start = start;
       info->index[axis].block.count = 1;
       info->index[axis].block.step  = 1;
@@ -386,12 +359,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       last = dim - 1;
       count = ( step < 0 ) ? 1 : (last / step + 1);
       bound = start + (count - 1) * step;
-      if ( bound < 0 ) bound += dim;
-      if ( bound < 0 || bound >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) bound, (ca_size_t) (dim - 1));
-      }
+      bound = ca_index_in_range_at(bound, dim, axis);
       info->index[axis].block.start = start;
       info->index[axis].block.count = count;
       info->index[axis].block.step  = step;
@@ -413,12 +381,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
         rb_raise(rb_eArgError,
                  "step in index equals to 0 in block reference");
       }
-      if ( start < 0 ) start += dim;
-      if ( start < 0 || start >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) start, (ca_size_t) (dim - 1));
-      }
+      start = ca_index_in_range_at(start, dim, axis);
       if ( last < 0 ) last += dim;
       if ( excl && start == last ) {
         info->index[axis].block.start = start;
@@ -430,9 +393,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
         last += ( last >= start ) ? -1 : 1;
       }
       if ( last < 0 || last >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index %" PRId64 " is out of range (0..%" PRId64 ") at %i-dim",
-                 (ca_size_t) last, (ca_size_t) (dim - 1), axis);
+        ca_index_out_of_range_at(last, dim, axis);
       }
       if ( (last > start && step < 0) || (last < start && step > 0) ) {
         count = 1;
@@ -445,12 +406,7 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
         count = (ca_size_t) (span / ustep) + 1;
       }
       bound = start + (count - 1) * step;
-      if ( bound < 0 ) bound += dim;
-      if ( bound < 0 || bound >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) bound, (ca_size_t) (dim - 1));
-      }
+      bound = ca_index_in_range_at(bound, dim, axis);
       info->index[axis].block.start = start;
       info->index[axis].block.count = count;
       info->index[axis].block.step  = step;
@@ -464,21 +420,13 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       count = NUM2SIZE(a1);
       if ( __builtin_add_overflow(start, count - 1, &bound) ) {
         rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( [%" PRId64 ", %" PRId64 "] <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) start, (ca_size_t) count, (ca_size_t) (dim - 1));
+                 "%s: index [%" PRId64 ", %" PRId64 "] is out of range for "
+                 "length %" PRId64 " on axis %i",
+                 ca_calling_method_name(), (ca_size_t) start, (ca_size_t) count,
+                 (ca_size_t) dim, axis);
       }
-      if ( start < 0 ) start += dim;
-      if ( start < 0 || start >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) start, (ca_size_t) (dim - 1));
-      }
-      if ( bound < 0 ) bound += dim;
-      if ( bound < 0 || bound >= dim ) {
-        rb_raise(rb_eIndexError,
-                 "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-                 axis, (ca_size_t) bound, (ca_size_t) (dim - 1));
-      }
+      start = ca_index_in_range_at(start, dim, axis);
+      bound = ca_index_in_range_at(bound, dim, axis);
       info->index[axis].block.start = start;
       info->index[axis].block.count = count;
       info->index[axis].block.step  = 1;
@@ -500,22 +448,13 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     if ( __builtin_mul_overflow(count - 1, step, &bound) ||
          __builtin_add_overflow(start, bound, &bound) ) {
       rb_raise(rb_eIndexError,
-               "index out of range at %i-dim ( [%" PRId64 ", %" PRId64 ", %" PRId64 "] <=> 0..%" PRId64 " )",
-               axis, (ca_size_t) start, (ca_size_t) count, (ca_size_t) step,
-               (ca_size_t) (dim - 1));
+               "%s: index [%" PRId64 ", %" PRId64 ", %" PRId64 "] is out of "
+               "range for length %" PRId64 " on axis %i",
+               ca_calling_method_name(), (ca_size_t) start, (ca_size_t) count,
+               (ca_size_t) step, (ca_size_t) dim, axis);
     }
-    if ( start < 0 ) start += dim;
-    if ( start < 0 || start >= dim ) {
-      rb_raise(rb_eIndexError,
-               "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-               axis, (ca_size_t) start, (ca_size_t) (dim - 1));
-    }
-    if ( bound < 0 ) bound += dim;
-    if ( bound < 0 || bound >= dim ) {
-      rb_raise(rb_eIndexError,
-               "index out of range at %i-dim ( %" PRId64 " <=> 0..%" PRId64 " )",
-               axis, (ca_size_t) bound, (ca_size_t) (dim - 1));
-    }
+    start = ca_index_in_range_at(start, dim, axis);
+    bound = ca_index_in_range_at(bound, dim, axis);
     info->index[axis].block.start = start;
     info->index[axis].block.count = count;
     info->index[axis].block.step  = step;

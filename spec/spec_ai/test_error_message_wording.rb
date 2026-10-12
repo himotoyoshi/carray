@@ -13,8 +13,8 @@ class TestErrorMessageWording < Test::Unit::TestCase
 
   def test_out_of_range_index_reports_the_index_given
     v = CArray.int32(10).seq
-    assert_match(/\( -20 <=> 0\.\.9 \)/, message_of { v[-20] })
-    assert_match(/\( -20 <=> 0\.\.9 \)/, message_of { v[[-20]] })
+    assert_match(/index -20 is out of range for length 10/, message_of { v[-20] })
+    assert_match(/index -20 is out of range for length 10/, message_of { v[[-20]] })
   end
 
   def test_positional_axis_hint_names_the_method_called
