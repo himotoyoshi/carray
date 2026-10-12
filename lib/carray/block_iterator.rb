@@ -366,7 +366,7 @@ class CABlockIterator < CAIterator
     out  = elements - count_not_masked
     # A count of the mask reads every cell of the tile.
     out[elements.lt(need)] = UNDEF if need > 0
-    kw[:fill_value].nil? || !out.has_mask? ? out : out.strip_mask(kw[:fill_value])
+    CArray.__reduce_fill__(out, kw[:fill_value])
   end
 
   # @overload elements
@@ -474,8 +474,7 @@ class CABlockIterator < CAIterator
       out ||= CArray.int64(*@shape)
       out[*out_ranges] = picked
     end
-    out ||= CArray.int64(*@shape)
-    kw[:fill_value].nil? || !out.has_mask? ? out : out.strip_mask(kw[:fill_value])
+    CArray.__reduce_fill__(out || CArray.int64(*@shape), kw[:fill_value])
   end
 
   public

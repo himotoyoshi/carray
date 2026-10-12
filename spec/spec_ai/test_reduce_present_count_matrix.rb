@@ -3,7 +3,8 @@ require "carray"
 
 # A reduction's result cell is UNDEF when fewer cells contribute than it
 # needs -- none for an operation with an identity, one for most, two for a
-# sample variance -- or than min_count: asks for.  Every iterator member
+# sample variance -- or than min_count: asks for; fill_value: then fills it
+# as a store of the value into that cell would.  Every iterator member
 # answers each piece as the core answers that piece alone.  The iterator
 # classes and the reductions are both collected, so a new member or a new
 # reduction is checked without an entry here, and a member without a builder
@@ -15,6 +16,10 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
   NP = [0, 1, 2, 3]          # present cells in each piece
   P  = NP.size
   MIN_COUNTS = [nil, 0, 1, 2, 3, 4]
+  # fill_value: fills a result cell as a store of it into that cell would.
+  FILLS = [7, 1.5, "2", UNDEF, nil]
+  KEYWORDS = MIN_COUNTS.map { |mc| mc.nil? ? {} : { min_count: mc } } +
+             FILLS.map { |fv| { min_count: 3, fill_value: fv } }
   ARGS = { percentile: [50], count: [21.0] }
 
   def self.iterator_classes
@@ -94,8 +99,7 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
       diffs = []
       builders.each do |klass, (build, weights, per_piece)|
         reductions.each do |op|
-          MIN_COUNTS.each do |mc|
-            kw = mc.nil? ? {} : { min_count: mc }
+          KEYWORDS.each do |kw|
             got = begin
                     per_piece.(rows(call(build.(d), op, weights.(d), kw)))
                   rescue NotImplementedError

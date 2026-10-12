@@ -261,14 +261,7 @@ class AxisGroup
         result = UNDEF
       end
     end
-    if kw.key?(:fill_value) && !kw[:fill_value].nil?
-      if result.is_a?(CArray)
-        result = result.strip_mask(kw[:fill_value]) if result.has_mask?
-      elsif result.equal?(UNDEF)
-        result = kw[:fill_value]
-      end
-    end
-    result
+    CArray.__reduce_fill__(result, kw[:fill_value])
   end
 
   # Parse an axis: spec into [has_group, fused_band_slot_positions].
@@ -506,15 +499,21 @@ class CAGroupIterator
   # (no present pair) is UNDEF (matching CArray#wmean); a present group whose
   # weights sum to zero yields NaN/Inf (core's 0/0).
   def wmean (weights, **kw)
+    has_group, = AxisGroup.parse_axis(kw[:axis])
+    return value.wmean(weights, **kw) unless has_group
+    AxisGroup.__check_reduce_keywords__(:wmean, kw)
+    plain = { axis: kw[:axis] }
     prod = value * weights
-    num  = self.class.__build__(prod, spec).sum(**kw)
-    den  = self.class.__build__(value * 0 + weights, spec).sum(**kw)
-    cnt  = self.class.__build__(prod, spec).count_not_masked(**kw)
+    num  = self.class.__build__(prod, spec).sum(**plain)
+    den  = self.class.__build__(value * 0 + weights, spec).sum(**plain)
+    cnt  = self.class.__build__(prod, spec).count_not_masked(**plain)
     # No present pair is UNDEF (an empty group), set on the denominator so
     # the division never meets an empty group's 0 / 0.
     den  = den.copy
     den[cnt.eq(0)] = UNDEF
-    num / den
+    # min_count: counts the present pairs, as the core wmean does.
+    pairs = self.class.__build__(prod, spec)
+    AxisGroup.__finish_reduction__(pairs, :wmean, kw, num / den)
   end
 
   # ---- segment scan: within-group running statistics ---------------------

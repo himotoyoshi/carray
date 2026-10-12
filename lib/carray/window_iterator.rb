@@ -535,10 +535,7 @@ class CAWindowIterator < CAIterator
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
     folded = apply_min_count(folded, need)
     # A `fill_value:` on the call replaces a result that came out undefined.
-    if !fill_value.nil? && !fill_value.equal?(UNDEF) && folded.has_mask?
-      folded = folded.strip_mask(fill_value)
-    end
-    folded
+    CArray.__reduce_fill__(folded, fill_value)
   end
 
   # The mean is the sum over the same offsets, divided by the number of cells
@@ -747,7 +744,7 @@ class CAWindowIterator < CAIterator
     end
     addr[oob] = UNDEF unless @bounds == :nearest
     addr[mi.is_masked.eq(1)] = UNDEF if mi.has_mask?
-    kw[:fill_value].nil? || !addr.has_mask? ? addr : addr.strip_mask(kw[:fill_value])
+    CArray.__reduce_fill__(addr, kw[:fill_value])
   end
 
   public

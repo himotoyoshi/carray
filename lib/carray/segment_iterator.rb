@@ -423,7 +423,7 @@ class CASegmentIterator < CAIterator
     return axis_wsum_wmean(weights, axis, :wsum)[0] if axis
     wg = scatter_weights(weights)
     return kernel_weighted(wg)[0] if MONOID_TYPES.include?(grouped.data_type)
-    fold_weighted(wg, 0.0) { |v, ws| v.wsum(ws) }
+    fold_weighted(:wsum, wg, 0.0) { |v, ws| v.wsum(ws) }
   end
 
   # @overload wmean(weights)
@@ -436,7 +436,7 @@ class CASegmentIterator < CAIterator
     return axis_wsum_wmean(weights, axis, :wmean)[1] if axis
     wg = scatter_weights(weights)
     return kernel_weighted(wg)[1] if MONOID_TYPES.include?(grouped.data_type)
-    fold_weighted(wg, UNDEF) { |v, ws| v.wmean(ws) }
+    fold_weighted(:wmean, wg, UNDEF) { |v, ws| v.wmean(ws) }
   end
 
   # @overload reduce { |members| ... }
@@ -715,10 +715,11 @@ class CASegmentIterator < CAIterator
     [ws, wm]
   end
 
-  # Per-segment weighted fallback for non-numeric value data types (complex): delegate
-  # each segment to CArray#wsum / #wmean. Empty segments take the given identity.
-  def fold_weighted (wg, empty)
-    out = CArray.float64(@k)
+  # Per-segment weighted fallback for the value data types the kernel does not
+  # read (object): delegate each segment to CArray#wsum / #wmean, answering in
+  # the data type the core answers in. Empty segments take the given identity.
+  def fold_weighted (op, wg, empty)
+    out = CArray.new(core_reduce_type(op, CA_FLOAT64([[1.0]])), [@k])
     @k.times do |c|
       lo, hi = @bounds[c], @bounds[c + 1]
       out[c] = hi > lo ? yield(grouped[lo...hi], wg[lo...hi]) : empty
@@ -943,11 +944,10 @@ class CASegmentIterator < CAIterator
                     end
           short = present.lt(need)
         end
-        finish = lambda do |r|
-          r[short] = UNDEF if short
-          fill_value.nil? || !r.has_mask? ? r : r.strip_mask(fill_value)
+        if short
+          (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
         end
-        result.is_a?(Array) ? result.map(&finish) : finish.(result)
+        CArray.__reduce_fill__(result, fill_value)
       end
     end
   end

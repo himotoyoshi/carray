@@ -708,6 +708,18 @@ ca_reduce_fill (VALUE result, VALUE fill, int whole)
   return ( result == CA_UNDEF ) ? fill : result;
 }
 
+/* CArray.__reduce_fill__(result, fill_value): ca_reduce_fill for a
+   reduction written in Ruby.  A fill_value of nil or UNDEF leaves the
+   undefined cells as they are. */
+static VALUE
+rb_ca_s_reduce_fill (VALUE klass, VALUE result, VALUE fill)
+{
+  if ( NIL_P(fill) || fill == CA_UNDEF ) {
+    return result;
+  }
+  return ca_reduce_fill(result, fill, 0);
+}
+
 /* ca_integer_arg for an `axis` argument. */
 long
 ca_axis_integer (VALUE raxis, const char *name)
@@ -1121,6 +1133,8 @@ Init_carray_utils (void)
                              rb_ca_s_normalize_axis, -1);
   rb_define_singleton_method(rb_cCArray, "__min_count_need__",
                              rb_ca_s_min_count_need, 3);
+  rb_define_singleton_method(rb_cCArray, "__reduce_fill__",
+                             rb_ca_s_reduce_fill, 2);
 
 }
 

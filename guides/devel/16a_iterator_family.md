@@ -357,3 +357,15 @@ A new member (or a companion gem adding one) must keep:
 6. **Cache only value-independent plans, and only on read-only carriers.**
    The categorical's grouping-plan cache is sound because the codes are
    read-only; a plan keyed on mutable payload would go silently stale.
+7. **Take `min_count:` and `fill_value:` wherever the core reduction does,
+   and decide them as the core does.** Pass them to the core when you
+   delegate (`CAIterator.reduce_keywords` refuses only `axis:`). A member
+   that reduces on its own asks `CArray.__min_count_need__(op, min_count,
+   least)` for the number of cells a piece needs and fills with
+   `CArray.__reduce_fill__(result, fill_value)`; both are the C parts every
+   core reduction uses (`ca_too_few_present`, `ca_min_count_arg`,
+   `ca_reduce_fill`), so a member does not write the rule a second time.
+   A count of the mask reads every cell of a piece, so its `min_count:`
+   compares with the piece size. `spec/spec_ai/test_reduce_present_count_matrix.rb`
+   checks every member against the core and fails for a member it cannot
+   build.

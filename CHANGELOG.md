@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a group's `wmean` (`a[cat].wmean(w, axis: :group)`) took
+  `fill_value:` as a weight and value both, so an empty group came back
+  UNDEF and a short one as 1.0; it now fills the result as every other
+  reduction does.
+- Fix: `segments(...).wsum` and `.wmean` of an object array answered in
+  float64, losing a Rational or a BigDecimal; they answer as `wsum` and
+  `wmean` on the array do.
+
 - Fix: an arithmetic, math, comparison-kernel or reduction call that a Face
   does not define (`f + g`, `f.sqrt`, `f.sum`, `f.median`, ...) is refused
   with the method and the Face's class, and points at `to_type(:object)` for

@@ -233,7 +233,7 @@ options:
 | `output:` | see [output resolution](#output-data-type-resolution). |
 | `ruby_scalar:` | VALUE wrapper for the full-reduction scalar. `:rb_float_new` / `:LL2NUM` / `:auto` (derive from output). |
 | `fallback:` | unsupported sources: `:raise` (default) or `:wrap_to_f64` (re-run the f64 helper via `rb_ca_wrap_readonly`). |
-| `mask_policy:` | `nil` / `:strict` / `:all_masked` / `:min_count`. Controls how the dispatcher folds masked-cell counts into the result (UNDEF when policy is violated). |
+| `mask_policy:` | `nil` / `:strict` / `:all_masked` / `:min_count`. Controls how the dispatcher folds masked-cell counts into the result (UNDEF when policy is violated). `:all_masked` and `:min_count` decide through `ca_too_few_present` (`carray_internal.h`), the one test every reduction uses; `fill_value:` goes through `ca_reduce_fill`. |
 | `reduction_kind:` | SIMD license, see [above](#the-simd-license-reduction_kind). |
 | `semantics:` | `:fiber_local` (default) or `:view_flat`. |
 | `replaces_legacy:` | rebind an existing public method (Symbol) or `true` (same name) to this kernel at Init time. |

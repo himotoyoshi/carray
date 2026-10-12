@@ -84,14 +84,7 @@ class CArray
       else
         num / den
       end
-    fill_value = opts[:fill_value]
-    return result if fill_value.nil?
-    if result.is_a?(CArray)
-      result[result.is_masked] = fill_value if result.has_mask?
-      result
-    else
-      result.equal?(UNDEF) ? fill_value : result
-    end
+    CArray.__reduce_fill__(result, opts[:fill_value])
   end
   private :__wmean_object__
 
