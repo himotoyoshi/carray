@@ -73,8 +73,8 @@ class TestCategoricalScanMapKinds < Test::Unit::TestCase
   end
 
   def test_time_running_sum_is_refused_as_the_core_refuses_it
-    core = assert_raise(TypeError) { times.cumsum }
-    err  = assert_raise(TypeError) { times.group_by_category(@cat).cumsum }
+    core = assert_raise(CArray::DataTypeError) { times.cumsum }
+    err  = assert_raise(CArray::DataTypeError) { times.group_by_category(@cat).cumsum }
     assert_equal core.message, err.message
   end
 

@@ -61,10 +61,10 @@ class TestAxisGroupPayloadKinds < Test::Unit::TestCase
 
   def test_time_refusals_are_the_cores
     g = times[@cat]
-    core = assert_raise(TypeError) { times.sum }
-    assert_equal core.message, assert_raise(TypeError) { g.sum(axis: :group) }.message
-    core = assert_raise(TypeError) { times.cumsum }
-    assert_equal core.message, assert_raise(TypeError) { g.cumsum(axis: :group) }.message
+    core = assert_raise(CArray::DataTypeError) { times.sum }
+    assert_equal core.message, assert_raise(CArray::DataTypeError) { g.sum(axis: :group) }.message
+    core = assert_raise(CArray::DataTypeError) { times.cumsum }
+    assert_equal core.message, assert_raise(CArray::DataTypeError) { g.cumsum(axis: :group) }.message
   end
 
   def test_timedelta

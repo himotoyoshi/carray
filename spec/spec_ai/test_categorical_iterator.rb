@@ -859,7 +859,7 @@ class TestCategoricalIterator < Test::Unit::TestCase
 
   def test_a_member_the_core_refuses_for_a_face_still_refuses_in_its_words
     _t, grp = time_group
-    e = assert_raise(TypeError) { grp.sum }
+    e = assert_raise(CArray::DataTypeError) { grp.sum }
     assert_match(/CATime/, e.message)          # the core's own refusal
     assert_not_match(/rb_ca_new_reduced/, e.message)
   end

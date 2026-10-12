@@ -49,7 +49,7 @@ dt - dt       # => CATimedelta (all zero)
 dt.min        # => CATime::Element 2024-06-15
 dt.max        # => CATime::Element 2024-06-21
 dt.mean       # => CATime::Element 2024-06-18T00:00:00.000000000Z  (midpoint)
-dt.sum        # => raises TypeError (sum of datetimes is undefined)
+dt.sum        # => raises CArray::DataTypeError (sum of datetimes is undefined)
 
 dt.flip       # => CATime (reversed)
 dt[2..5]      # => CATime
@@ -580,8 +580,8 @@ order-statistic** ones can land between ticks and round.
 | `t.percentile(*p)`       | `Element`, or an `Array`      | order statistics, on `t`'s unit                       |
 | `t.quantile`             | `Array` of 5 `Element`        | `percentile(0, 25, 50, 75, 100)`                      |
 | `t.stddev` / `t.stddevp` | `CATimedelta::Element`        | spread of the instants, as a duration                 |
-| `t.sum`                  | raises `TypeError`            | a sum of instants is undefined (use `mean`)           |
-| `t.variance` / `variancep` | raises `TypeError`          | squared-time units, which no type represents          |
+| `t.sum`                  | raises `CArray::DataTypeError` | a sum of instants is undefined (use `mean`)          |
+| `t.variance` / `variancep` | raises `CArray::DataTypeError` | squared-time units, which no type represents       |
 
 With `axis:` the same members return a `CATime` (or `CATimedelta` for a
 spread) instead of an `Element`, and the multi-`p` forms return an `Array`

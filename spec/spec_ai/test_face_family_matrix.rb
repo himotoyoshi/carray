@@ -55,7 +55,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       # a spread of instants is a duration, not an instant
       spread:       CATimedelta::Element,
       # squared time has no type at all
-      raises:       { "variance" => TypeError } },
+      raises:       { "variance" => CArray::DataTypeError } },
 
     { name:         "CATimedelta",
       build:        -> { CArray.int64(3) { |i| [1, 2, 1][i] }.timedelta(unit: :D) },
@@ -67,7 +67,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
       integer_storage: true,
       spread:       CATimedelta::Element,
       # squared time has no type, so this refuses exactly as CATime does
-      raises:       { "variance" => TypeError } },
+      raises:       { "variance" => CArray::DataTypeError } },
 
     { name:         "CAString",
       build:        -> { CArray.const_string(%w[ab cd ab]).to_string },

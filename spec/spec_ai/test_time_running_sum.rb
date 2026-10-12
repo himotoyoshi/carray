@@ -14,14 +14,14 @@ class TestTimeRunningSum < Test::Unit::TestCase
     assert_equal [1, 1, 4, 8, 13, 19], r.ticks.to_a
     assert_equal [[1, 0, 3], [5, 5, 9]], td.cumsum(axis: 0).ticks.to_a
     assert_equal 19, td.accumulate.to_seconds.to_i
-    assert_raise(TypeError) { td.prod }
-    assert_raise(TypeError) { td.cumprod }
+    assert_raise(CArray::DataTypeError) { td.prod }
+    assert_raise(CArray::DataTypeError) { td.cumprod }
   end
 
   def test_time_has_no_running_sum
     t = CArray.int64(3) { |i| i }.time(unit: :s)
     %i[cumsum accumulate prod cumprod].each do |op|
-      assert_raise(TypeError, op.to_s) { t.send(op) }
+      assert_raise(CArray::DataTypeError, op.to_s) { t.send(op) }
     end
   end
 end

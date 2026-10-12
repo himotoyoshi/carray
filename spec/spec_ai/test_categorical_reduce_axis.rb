@@ -917,7 +917,7 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_kind_of CATime, lo
     assert_equal t[0, nil].to_a, lo[0, nil].to_a
     assert_equal t[3, nil].to_a, hi[1, nil].to_a
-    assert_raise(TypeError) { t.group_by_category(cat).sum(axis: 0) }   # the core refuses
+    assert_raise(CArray::DataTypeError) { t.group_by_category(cat).sum(axis: 0) }   # the core refuses
     s = CArray.const_string(%w[a b c d e f g h]).reshape(4, 2)
     assert_equal [%w[a b], %w[c d]], s.group_by_category(cat).min(axis: 0).to_a
     # classified cell by cell (the same shape as the values)

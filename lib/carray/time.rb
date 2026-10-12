@@ -1000,43 +1000,43 @@ class CATime
 
   # @overload sum(*)
   #   Not supported; use {#mean} for a centroid.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def sum(*)
-    raise TypeError, "CATime#sum is ill-defined; use mean for centroid"
+    raise CArray::DataTypeError, "CATime#sum is ill-defined; use mean for centroid"
   end
 
   # @overload accumulate(*)
   #   Not supported, for the same reason as {#sum}.
-  #   @raise [TypeError] always.
-  def accumulate(*); raise TypeError, "CATime#accumulate is ill-defined (a sum of instants)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def accumulate(*); raise CArray::DataTypeError, "CATime#accumulate is ill-defined (a sum of instants)"; end
 
   # @overload cumsum(*)
   #   Not supported, for the same reason as {#sum}.  The running position
   #   relative to the first instant is `(t - t[0])` cumulated as durations.
-  #   @raise [TypeError] always.
-  def cumsum(*); raise TypeError, "CATime#cumsum is ill-defined (a sum of instants)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def cumsum(*); raise CArray::DataTypeError, "CATime#cumsum is ill-defined (a sum of instants)"; end
 
   # @overload prod(*)
   #   Not supported: a product of instants has no meaning.
-  #   @raise [TypeError] always.
-  def prod(*); raise TypeError, "CATime#prod is ill-defined (a product of instants)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def prod(*); raise CArray::DataTypeError, "CATime#prod is ill-defined (a product of instants)"; end
 
   # @overload cumprod(*)
   #   Not supported, for the same reason as {#prod}.
-  #   @raise [TypeError] always.
-  def cumprod(*); raise TypeError, "CATime#cumprod is ill-defined (a product of instants)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def cumprod(*); raise CArray::DataTypeError, "CATime#cumprod is ill-defined (a product of instants)"; end
 
   # @overload variance(*)
   #   Not supported: the variance of instants has squared-time units, which
   #   no type represents (ill-defined, like {#sum}).  Use {#stddev} for the
   #   spread as a duration.
-  #   @raise [TypeError] always.
-  def variance(*); raise TypeError, "CATime#variance is ill-defined (squared-time units); use stddev"; end
+  #   @raise [CArray::DataTypeError] always.
+  def variance(*); raise CArray::DataTypeError, "CATime#variance is ill-defined (squared-time units); use stddev"; end
 
   # @overload variancep(*)
   #   Not supported, for the same reason as {#variance}.  Use {#stddevp}.
-  #   @raise [TypeError] always.
-  def variancep(*); raise TypeError, "CATime#variancep is ill-defined (squared-time units); use stddevp"; end
+  #   @raise [CArray::DataTypeError] always.
+  def variancep(*); raise CArray::DataTypeError, "CATime#variancep is ill-defined (squared-time units); use stddevp"; end
   # @!endgroup
 
   # sort / partition ride the core sort Face gate (ORDERABLE storage
@@ -1572,13 +1572,13 @@ class CATimedelta
   # @overload prod(*)
   #   Not supported: a product of durations has the units of a power of
   #   time, which no type represents.
-  #   @raise [TypeError] always.
-  def prod(*); raise TypeError, "CATimedelta#prod is ill-defined (powers of time units)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def prod(*); raise CArray::DataTypeError, "CATimedelta#prod is ill-defined (powers of time units)"; end
 
   # @overload cumprod(*)
   #   Not supported, for the same reason as {#prod}.
-  #   @raise [TypeError] always.
-  def cumprod(*); raise TypeError, "CATimedelta#cumprod is ill-defined (powers of time units)"; end
+  #   @raise [CArray::DataTypeError] always.
+  def cumprod(*); raise CArray::DataTypeError, "CATimedelta#cumprod is ill-defined (powers of time units)"; end
 
   # @overload mean(axis: nil, **opts)
   #   Returns the mean duration rounded to the nearest unit count.
@@ -1647,16 +1647,16 @@ class CATimedelta
   #   Not supported: the variance of durations has squared-time units, which
   #   no type represents -- the same reason {CATime#variance} refuses.  Use
   #   {#stddev} for the spread as a duration.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def variance(*)
-    raise TypeError, "CATimedelta#variance is ill-defined (squared-time units); use stddev"
+    raise CArray::DataTypeError, "CATimedelta#variance is ill-defined (squared-time units); use stddev"
   end
 
   # @overload variancep(*)
   #   Not supported, for the same reason as {#variance}.  Use {#stddevp}.
-  #   @raise [TypeError] always.
+  #   @raise [CArray::DataTypeError] always.
   def variancep(*)
-    raise TypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
+    raise CArray::DataTypeError, "CATimedelta#variancep is ill-defined (squared-time units); use stddevp"
   end
 
   # min / max / minmax ride the core reduce Face gate (ORDERABLE storage

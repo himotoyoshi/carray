@@ -172,7 +172,7 @@ Init_carray_ext (void)
   /* -- Exception class -- */
 
   rb_eCADataTypeError =
-    rb_define_class_under(rb_cCArray, "DataTypeError", rb_eStandardError);
+    rb_define_class_under(rb_cCArray, "DataTypeError", rb_eTypeError);
 
   /* -- CA module -- namespace for misc utilities related to CArray */
 

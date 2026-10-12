@@ -273,12 +273,12 @@ class TestCAFacePhase2 < Test::Unit::TestCase
 
   def test_dt_sum_raises
     dt = CArray.int64(5) {|i| i*10}.time(unit: :s)
-    assert_raise(TypeError) { dt.sum }
+    assert_raise(CArray::DataTypeError) { dt.sum }
   end
 
   def test_dt_variance_raises_stddev_is_a_timedelta
     dt = CArray.int64(5) {|i| i*10}.time(unit: :s)
-    assert_raise(TypeError) { dt.variance }   # squared-time units, no type
+    assert_raise(CArray::DataTypeError) { dt.variance }   # squared-time units, no type
     # stddev is the spread as a duration -> CATimedelta
     assert_kind_of CATimedelta::Element, dt.stddev
   end
