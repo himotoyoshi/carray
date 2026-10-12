@@ -149,8 +149,10 @@ operand (query / rhs), driven by the reference:
                                        (stripped) or a plain operand;
                                        any other Face raises TypeError
     reference COMPARABLE            -> strip a COMPARABLE Face operand; take
-                                       a plain operand as-is; raise for a
-                                       Face whose storage encodes its values
+                                       a plain operand as-is; read a string
+                                       or categorical Face by its values;
+                                       raise for a Face whose storage
+                                       encodes its values in order (a time)
                                                                      (direct)
     reference a non-COMPARABLE Face -> reference.to_comparable(operand), strip
                                        (ANY operand type: Face CArray, Element,

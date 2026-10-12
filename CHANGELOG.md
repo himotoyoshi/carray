@@ -36,12 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
-- Fix: comparing, searching, counting or looking up a set against a Face
-  whose cells are its values (`CAString`, `CAFixlenString`) took an operand
-  whose cells only encode its values (a time, a categorical, a
-  `CAConstString`) and compared the encoding, giving wrong answers
-  silently. Such an operand is now refused, naming the conversion that gives
-  its values (`#to_string`, `to_type(:object)`). A Face that neither holds
+- Fix: comparing, searching or counting against a Face whose cells are its
+  values (`CAString`, `CAFixlenString`) took an operand whose cells only
+  encode its values (a time, a categorical, a `CAConstString`) and compared
+  the encoding, giving wrong answers silently. A string or categorical
+  operand is now read by its values, as `is_in` and the set operations
+  already read it, and a time operand is refused. A Face that neither holds
   its values in its cells nor defines `to_comparable` now refuses a plain
   operand in `is_in` and the set operations too, as comparison, search and
   `count(v)` already did. `CATime#is_in` and the set operations take a

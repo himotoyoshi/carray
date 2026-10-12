@@ -693,6 +693,28 @@ ca_face_operand_descend (VALUE operand, const char *name)
   return Qnil;   /* not reached */
 }
 
+/* An operand Face whose storage is not even in the order of its values
+   (a CAConstString, a CACategorical) is read by its values: its strings
+   (#to_string) or, for any other, its values (to_type(:object)).  Any
+   other operand is returned as it is. */
+static VALUE
+ca_face_operand_values (VALUE operand)
+{
+  CArray *op;
+  if ( ! RTEST(rb_obj_is_carray(operand)) ) {
+    return operand;
+  }
+  TypedData_Get_Struct(operand, CArray, &carray_data_type, op);
+  if ( ! ca_is_face(op) || op->obj_type == CA_OBJ_RECORD
+       || ca_test_flag(op, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    return operand;
+  }
+  if ( rb_respond_to(operand, rb_intern("to_string")) ) {
+    return rb_funcall(operand, rb_intern("to_string"), 0);
+  }
+  return rb_funcall(operand, rb_intern("to_type"), 1, INT2NUM(CA_OBJECT));
+}
+
 /* Bring `operand` into the storage space of `reference`, a Face, so the
    two can be compared, searched, counted or hashed cell by cell.  Every
    family that takes an operand against a Face goes through here; the
@@ -703,8 +725,12 @@ ca_face_operand_descend (VALUE operand, const char *name)
      their bytes) and plain operands as they are; any other Face operand is
      refused with TypeError.
    - A COMPARABLE reference stores its values as they are, so a plain
-     operand is taken as it is and a Face operand must be COMPARABLE too
+     operand is taken as it is, a Face whose cells are its values is
+     stripped, a string or categorical Face is read by its values, and a
+     Face whose cells encode its values in order (a time) is refused
      (ca_face_operand_descend).
+   - A reference whose storage is not in the order of its values refuses,
+     naming the conversion that gives its values.
    - A reference with to_comparable brings any operand into its own space
      (a unit, an instant), and refuses what it cannot convert.
    - Any other reference has no way to read the operand in its space, and
@@ -737,7 +763,10 @@ ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
     return operand;
   }
   if ( ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
-    return ca_face_operand_descend(operand, name);
+    return ca_face_operand_descend(ca_face_operand_values(operand), name);
+  }
+  if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    ca_face_refuse_order(name, reference, "compare");
   }
   if ( rb_respond_to(reference, rb_intern("to_comparable")) ) {
     return rb_ca_strip_face_value(rb_funcall(reference,

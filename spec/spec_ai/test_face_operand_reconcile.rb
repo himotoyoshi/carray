@@ -6,13 +6,14 @@ require "carray"
 # Face's storage space by one rule, so a pair of arrays is either taken by
 # all of them or refused by all of them:
 #
-#   - a COMPARABLE Face takes a plain operand or a COMPARABLE Face;
+#   - a COMPARABLE Face takes a plain operand or a COMPARABLE Face, reads a
+#     string or categorical operand by its values, and refuses a Face whose
+#     cells encode its values in order (a time);
 #   - a Face with to_comparable brings any operand into its own space;
 #   - any other Face refuses the operand.
 #
-# The value-hash family first reads a string or categorical operand by its
-# values, and promotes a plain operand in Ruby, so for those operands only
-# the families that take the operand as it is are checked here.
+# The value-hash family promotes a plain operand in Ruby first, so for plain
+# operands only the families that take the operand as it is are checked.
 
 class TestFaceOperandReconcile < Test::Unit::TestCase
 
@@ -66,14 +67,23 @@ class TestFaceOperandReconcile < Test::Unit::TestCase
     plain = PlainTicks.new(CA_INT64([3, 1]))
     refused(plain, time("2024-01-01", "2024-01-02"))
     refused(plain, OrderedTicks.new(CA_INT64([3, 1])))
-    refused(plain, CArray.const_string(["a", "b"]), TAKEN_AS_IT_IS)
-    refused(plain, CArray.string(["a", "b"]).categorize, TAKEN_AS_IT_IS)
   end
 
   def test_fixlen_string_refuses_a_face_whose_storage_encodes_its_values
     s = CArray.fixlen_string(["aa", "bb"], bytes: 8)
     refused(s, time("2024-01-01", "2024-01-02"))
-    refused(s, CArray.const_string(["aa", "bb"]), TAKEN_AS_IT_IS)
+  end
+
+  def test_string_faces_read_string_and_categorical_operands_by_value
+    [CArray.string(["a", "c"]), CArray.fixlen_string(["a", "c"], bytes: 4)].each do |s|
+      [CArray.const_string(["a", "b"]), CArray.string(["a", "b"]).categorize].each do |o|
+        label = "#{s.class} / #{o.class}"
+        assert_equal [true, false], s.eq(o).to_a, label
+        assert_equal [false, false], (s < o).to_a, label
+        assert_equal [1, 0], s.count(o).to_a, label
+        assert_equal [true, false], s.is_in(o).to_a, label
+      end
+    end
   end
 
   def test_face_without_a_way_to_read_the_operand_refuses_everything
