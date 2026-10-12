@@ -66,8 +66,8 @@ a piece *is*.
 | `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
 | `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
-1. Window order statistics need an unmasked margin (`bounds: :nearest` or
-   `:truncate`); the default `:skip` (UNDEF margin) raises with guidance.
+1. Window order statistics leave the UNDEF margin of the default `:skip` out
+   of each window, as they leave out any masked cell.
 2. A group preserves source order, so a *within-group* index is weak; the group
    offers the flat **source address** (`min_addr` / `max_addr`) instead — the
    `_addr` vs `_index` split (a group indexes back into the original array).

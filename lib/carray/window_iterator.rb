@@ -481,12 +481,12 @@ class CAWindowIterator < CAIterator
   #   source cell it replicates, and with `bounds: :constant` (or `fill_value:`)
   #   a winning margin cell has no source address and is a masked result.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  def min_addr; window_winner_addr(:min_index); end
+  def min_addr (**kw); window_winner_addr(:min_index, kw); end
 
   # @overload max_addr
   #   Rolling flat source address of the window maximum. See {#min_addr}.
   #   @return [CArray] reference-shaped (or shrunk, for :truncate)
-  def max_addr; window_winner_addr(:max_index); end
+  def max_addr (**kw); window_winner_addr(:max_index, kw); end
 
   private
 
@@ -524,18 +524,16 @@ class CAWindowIterator < CAIterator
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless CArray.__fast_paths_enabled__
+    need = CArray.__min_count_need__(op, min_count, 0)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.
     return nil if @source.face?
-    # Anything but a plain count goes to the core, which owns the rule for
-    # what min_count accepts; answering it here would be a second rule.
-    return nil unless min_count.nil? || (min_count.is_a?(Integer) && min_count >= 0)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
     return nil if neutral_value(op).nil?
 
     folded = op == :mean ? fold_mean : accumulate_offsets(op)
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
-    folded = apply_min_count(folded, min_count)
+    folded = apply_min_count(folded, need)
     # A `fill_value:` on the call replaces a result that came out undefined.
     if !fill_value.nil? && !fill_value.equal?(UNDEF) && folded.has_mask?
       folded = folded.strip_mask(fill_value)
@@ -601,14 +599,14 @@ class CAWindowIterator < CAIterator
     end
   end
 
-  # `min_count` asks for a result only where the window held that many cells.
-  def apply_min_count (folded, min_count)
-    return folded if min_count.nil?
+  # A result only where the window held `need` cells (CArray.__min_count_need__).
+  def apply_min_count (folded, need)
+    return folded if need == 0
     counts = window_cell_counts
     if counts.is_a?(Integer)
-      folded[] = UNDEF if counts < min_count
+      folded[] = UNDEF if counts < need
     else
-      folded[counts.lt(min_count)] = UNDEF
+      folded[counts.lt(need)] = UNDEF
     end
     folded
   end
@@ -723,8 +721,9 @@ class CAWindowIterator < CAIterator
   # offset is the range's begin for a padded margin, 0 for :truncate). A margin
   # winner (coordinate out of bounds) resolves per the boundary policy:
   # :nearest clamps to the edge source cell, :constant / :skip mask the result.
-  def window_winner_addr (idx_op)
-    mi = send(idx_op)                                    # window-local flat index
+  def window_winner_addr (idx_op, kw = {})
+    kw = CAIterator.reduce_keywords(idx_op, kw)
+    mi = send(idx_op, **kw.slice(:min_count))           # window-local flat index
     n  = @source.shape
     wstride = Array.new(@sndim); acc = 1
     (@sndim - 1).downto(0) { |i| wstride[i] = acc; acc *= @widths[i] }
@@ -748,7 +747,7 @@ class CAWindowIterator < CAIterator
     end
     addr[oob] = UNDEF unless @bounds == :nearest
     addr[mi.is_masked.eq(1)] = UNDEF if mi.has_mask?
-    addr
+    kw[:fill_value].nil? || !addr.has_mask? ? addr : addr.strip_mask(kw[:fill_value])
   end
 
   public
@@ -758,26 +757,29 @@ class CAWindowIterator < CAIterator
   #   cells (the effective tap count, which drops near a :skip edge);
   #   `count(UNDEF)` counts masked cells; `count(v)` counts cells equal to `v`.
   #   @return [CArray]
-  def count (*args)
-    return count_not_masked if args.empty?
+  def count (*args, **kw)
+    return count_not_masked(**kw) if args.empty?
     # The sliding_windows view is a CAStride, so its #count is not shadowed;
     # dispatch CArray#count explicitly anyway, matching the family regularity.
-    CArray.instance_method(:count).bind_call(sliding_view, *args, axis: @window_axes)
+    CArray.instance_method(:count).bind_call(sliding_view, *args, axis: @window_axes,
+                                             **CAIterator.reduce_keywords(:count, kw))
   end
 
   # @overload count_not_masked
   #   Rolling count of present (non-masked) cells -- the denominator of a
   #   renormalizing convolution.
   #   @return [CArray]
-  def count_not_masked
-    sliding_view.count_not_masked(axis: @window_axes)
+  def count_not_masked (**kw)
+    sliding_view.count_not_masked(axis: @window_axes,
+                                  **CAIterator.reduce_keywords(:count_not_masked, kw))
   end
 
   # @overload count_masked
   #   Rolling count of masked cells.
   #   @return [CArray]
-  def count_masked
-    sliding_view.count_masked(axis: @window_axes)
+  def count_masked (**kw)
+    sliding_view.count_masked(axis: @window_axes,
+                              **CAIterator.reduce_keywords(:count_masked, kw))
   end
 
   # @overload elements
@@ -849,40 +851,31 @@ class CAWindowIterator < CAIterator
 
   # ---- order statistics (median / percentile / quantile) ----------------
   #
-  # Core per-axis order statistics take a single axis and do not accept a
-  # masked input, so the window mode is dispatched:
-  #
-  #   single window axis + unmasked margin -> `sliding_view.op(axis: window_axis)`
-  #   multi window axes + unmasked margin  -> materialize the windows, flatten
-  #                                           the window axes into one, single-
-  #                                           axis core order-stat
-  #   :skip (UNDEF margin)                 -> raise (core has no masked per-axis
-  #                                           order-stat); guide to :nearest /
-  #                                           :truncate
-  #
-  # When core gains masked per-axis order statistics (a tracked refactor), the
-  # :skip guard can be dropped and :skip served directly.
+  # Core per-axis order statistics take a single axis, so a single window
+  # axis goes straight to `sliding_view.op(axis: window_axis)`, and several
+  # are materialized with the window axes flattened into one.  The UNDEF
+  # margin of :skip is left out of each window as any masked cell is.
 
-  # @overload median
-  #   Rolling median.  Requires an unmasked margin (`bounds: :nearest` or
-  #   `:truncate`); with the default `:skip` it raises.
+  # @overload median(min_count: nil, fill_value: nil)
+  #   Rolling median.
   #   @return [CArray]
-  def median
-    order_stat { |view, axis| view.median(axis: axis) }
+  def median (**kw)
+    kw = CAIterator.reduce_keywords(:median, kw)
+    order_stat { |view, axis| view.median(axis: axis, **kw) }
   end
 
-  # @overload percentile(*pers)
+  # @overload percentile(*pers, min_count: nil, fill_value: nil)
   #   Rolling percentile(s).  One argument returns one CArray, several return
-  #   an array of CArrays (as `CArray#percentile`).  Requires an unmasked
-  #   margin.
+  #   an array of CArrays (as `CArray#percentile`).
   #   @return [CArray, Array<CArray>]
-  def percentile (*pers)
-    order_stat { |view, axis| view.percentile(*pers, axis: axis) }
+  def percentile (*pers, **kw)
+    kw = CAIterator.reduce_keywords(:percentile, kw)
+    order_stat { |view, axis| view.percentile(*pers, axis: axis, **kw) }
   end
 
   # @overload quantile
   #   Rolling five-number summary `[min, Q1, median, Q3, max]` (five CArrays),
-  #   as `CArray#quantile`.  Requires an unmasked margin.
+  #   as `CArray#quantile`.
   #   @return [Array<CArray>]
   def quantile
     order_stat { |view, axis| view.quantile(axis: axis) }
@@ -891,14 +884,8 @@ class CAWindowIterator < CAIterator
   private
 
   # Drive an order statistic (yielded as `block.call(view, axis)`) through the
-  # single-axis / multi-axis / :skip-reject dispatch above.
+  # single-axis / multi-axis dispatch above.
   def order_stat
-    if @bounds == :skip
-      raise ArgumentError,
-            "windowed order statistics need an unmasked margin; " \
-            "use bounds: :nearest (edge-extend) or bounds: :truncate (valid). " \
-            "For an UNDEF-margin median use reduce { |w| w.median } (slower)."
-    end
     sv = sliding_view
     if @window_axes.size == 1
       yield sv, @window_axes[0]
@@ -919,15 +906,17 @@ class CAWindowIterator < CAIterator
   # @overload wsum(weights)
   #   Rolling weighted sum, `weights` shaped like a single window.
   #   @return [CArray]
-  def wsum (weights)
-    weighted(weights) { |sv, w, axis| sv.wsum(w, axis: axis) }
+  def wsum (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wsum, kw)
+    weighted(weights) { |sv, w, axis| sv.wsum(w, axis: axis, **kw) }
   end
 
   # @overload wmean(weights)
   #   Rolling weighted mean, `weights` shaped like a single window.
   #   @return [CArray]
-  def wmean (weights)
-    weighted(weights) { |sv, w, axis| sv.wmean(w, axis: axis) }
+  def wmean (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wmean, kw)
+    weighted(weights) { |sv, w, axis| sv.wmean(w, axis: axis, **kw) }
   end
 
   private

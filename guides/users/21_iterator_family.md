@@ -117,7 +117,7 @@ The differences matter as much as the shared surface, and they all follow from w
 | `map` (per-piece transform, scattered back) | ✓ | — ⁴ | ✓ | ✓ | ✓ |
 | `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | — ³ | ✓ | ✓ |
 
-1. Window order statistics need an unmasked margin (`bounds: :nearest` or `:truncate`); the default `:skip` margin raises with guidance. See [Window iteration](22_window_iteration.md).
+1. Window order statistics leave the UNDEF margin of the default `:skip` out of each window, as they leave out any masked cell. See [Window iteration](22_window_iteration.md).
 2. A group preserves source order, so a *within-group* index is weak; the group offers the flat source address instead (see below).
 3. Not provided in this first version.
 4. A window's pieces overlap and its margin cells are padding with no source address, so an element-wise scatter-back (`map`) and a per-cell source `sort_addr` are ill-defined and raise `NotImplementedError`.

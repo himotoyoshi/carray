@@ -36,6 +36,22 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- New: a window's `median`, `percentile` and `quantile` answer under the
+  default `bounds: :skip`, leaving the UNDEF margin out of each window as
+  the other reductions do. They raised before.
+- Fix: every iterator reduction takes `min_count:` and `fill_value:` where
+  the same reduction on an array does. Before this, `blocks` refused them on
+  `median`, `percentile`, `wsum`, `wmean`, the counts and the positions,
+  `windows` on `wsum`, `wmean` and the counts, and `segments` and
+  `group_by_category` on the counts and the positions. `blocks(n).percentile(p,
+  min_count: k)` read the keywords as a second percentile.
+- Fix: a group's counts (`a[cat].count_not_masked(axis: :group, min_count: k)`
+  and the like) now answer as an array's do: a count of the mask compares
+  `min_count:` with the cells of the group, and `count(v)` with its present
+  cells. They were the other way round.
+- Fix: the weighted mean of an empty group on an object array raised
+  ZeroDivisionError; it is UNDEF.
+
 - Fix: for authors of a Face. A value stored with `[]=` reached the Face's
   `element_to_storage` twice, the second time as the storage value the
   first call returned, so a hook that refused anything but its own

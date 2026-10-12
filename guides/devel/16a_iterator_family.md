@@ -148,8 +148,7 @@ is UNDEF, so the core's mask skipping makes an edge window fold only its
 in-bounds cells, and the core's `min_count:` / `fill_value:` kwargs — passed
 straight through — express the whole strictness spectrum ("fold whatever is
 present" up to "full windows only, edges filled") with no window-specific
-knob. Order statistics need an unmasked margin, so under `:skip` they raise
-with guidance to use `:nearest` or `:truncate`.
+knob. Order statistics leave the margin out the same way.
 
 `correlate(kernel)` / `convolve(kernel)` are member-specific: a bounded
 cross-correlation/convolution expressed as a multiply of the window view by
