@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a misspelt keyword raises `ArgumentError` instead of being ignored in
+  `CArray.dump` / `save` / `load`, `CArray.struct` / `union` and their member
+  declarations, `CArray.result_type` (which counted it as one more operand
+  and answered `:object`), `clone` of a sorted or memory-view array, and
+  `count(v)` with an empty `v`.
+
+- Change: `inherit_mask` and `inherit_mask_replace` take CArray arguments
+  only; any other argument raises `TypeError` instead of being skipped as an
+  array without a mask.
+
 - Change: a `CARecord` exported through MemoryView describes its records in
   Ruby's MemoryView vocabulary (`ruby/memory_view.h`) instead of PEP 3118
   `T{...}`: the members' specifiers in a row with `x<N>` padding (`Cx7Q`),

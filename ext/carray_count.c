@@ -307,6 +307,19 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cout;
     GetCArray(vout, cout);
 
+    /* The options are checked by the recursive count() below, which an
+       empty v never reaches: check them once with a stand-in query, so a
+       misspelt keyword raises whatever v holds. */
+    if ( cv->elements == 0 && ! NIL_P(opt_hash) &&
+         src->data_type != CA_FIXLEN ) {
+      VALUE probe_argv[CA_RANK_MAX + 2];
+      int   j;
+      probe_argv[0] = INT2FIX(0);
+      for (j = 0; j < inner_argc; j++) probe_argv[1 + j] = inner_axes[j];
+      probe_argv[1 + inner_argc] = opt_hash;
+      rb_ca_count(inner_argc + 2, probe_argv, self);
+    }
+
     /* Iterate v in flat order, call self.count(vk, *axes, **opts)
        recursively, place result at output[..., k].  v is held attached
        for the fetches while Ruby runs, so the loop is a window body. */

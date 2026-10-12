@@ -2103,6 +2103,43 @@ Init_carray_mask_fast_paths (void)
 }
 
 
+/* The Ruby forms of inherit_mask take CArray arguments only: refuse a
+   keyword and any argument that is not a CArray, which the C API would
+   pass over as maskless.  Returns the arguments without the keyword Hash. */
+static VALUE
+ca_inherit_mask_check_args (int argc, VALUE *argv, const char *name)
+{
+  VALUE rest, ropt;
+  long i;
+  rb_scan_args(argc, argv, "*:", &rest, &ropt);
+  rb_reject_options(ropt);
+  for (i=0; i<RARRAY_LEN(rest); i++) {
+    VALUE v = RARRAY_AREF(rest, i);
+    if ( ! rb_obj_is_carray(v) ) {
+      rb_raise(rb_eTypeError, "%s: argument %ld must be a CArray (got %s)",
+               name, i, rb_obj_classname(v));
+    }
+  }
+  return rest;
+}
+
+static VALUE
+rb_ca_inherit_mask_ruby (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE rest = ca_inherit_mask_check_args(argc, argv, "inherit_mask");
+  return rb_ca_inherit_mask_method((int) RARRAY_LEN(rest),
+                                   (VALUE *) RARRAY_CONST_PTR(rest), self);
+}
+
+static VALUE
+rb_ca_inherit_mask_replace_ruby (int argc, VALUE *argv, VALUE self)
+{
+  volatile VALUE rest = ca_inherit_mask_check_args(argc, argv,
+                                                   "inherit_mask_replace");
+  return rb_ca_inherit_mask_replace_method((int) RARRAY_LEN(rest),
+                                           (VALUE *) RARRAY_CONST_PTR(rest), self);
+}
+
 void
 Init_carray_mask (void)
 {
@@ -2139,9 +2176,9 @@ Init_carray_mask (void)
   rb_define_method(rb_cCArray, "mask_invalid", rb_ca_mask_invalid, 0);
   rb_define_method(rb_cCArray, "mask_where",   rb_ca_mask_where,  -1);
 
-  rb_define_method(rb_cCArray, "inherit_mask",  rb_ca_inherit_mask_method, -1);
+  rb_define_method(rb_cCArray, "inherit_mask",  rb_ca_inherit_mask_ruby, -1);
   rb_define_method(rb_cCArray, "inherit_mask_replace",
-                                       rb_ca_inherit_mask_replace_method, -1);
+                                       rb_ca_inherit_mask_replace_ruby, -1);
 
   rb_define_method(rb_cCArray, "count_masked",     rb_ca_count_masked, -1);
   rb_define_method(rb_cCArray, "count_not_masked", rb_ca_count_not_masked, -1);

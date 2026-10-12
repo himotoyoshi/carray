@@ -1208,7 +1208,14 @@ rb_ca_wrap_clone (int argc, VALUE *argv, VALUE self)
   volatile VALUE obj;
   rb_scan_args(argc, argv, "0:", &opt);
   if ( ! NIL_P(opt) ) {
-    rfreeze = rb_hash_lookup2(opt, ID2SYM(rb_intern("freeze")), Qnil);
+    /* rb_get_kwargs refuses any key but freeze:, as Kernel#clone does. */
+    ID kw[1];
+    VALUE val[1];
+    kw[0] = rb_intern("freeze");
+    rb_get_kwargs(opt, kw, 0, 1, val);
+    if ( val[0] != Qundef ) {
+      rfreeze = val[0];
+    }
   }
   obj = rb_ca_copy(self);
   if ( RTEST(rfreeze) || ( NIL_P(rfreeze) && OBJ_FROZEN(self) ) ) {

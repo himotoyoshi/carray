@@ -112,7 +112,7 @@ class CArray::Serializer   # :nodoc:
   #   The data region is raw contiguous bytes; attribute Hash and
   #   data_class schema (if any) ride in a YAML trailer at the tail.
   #   @param ca [CArray] array to write.
-  #   @param opt [Hash] `:endian` forces the output byte order
+  #   @param endian [Symbol, Integer, nil] forces the output byte order
   #     (defaults to the host's; a differing value swaps data + header).
   #   @return [CArray] `ca`.
   #   @raise [ArgumentError] when `ca` is a CA_OBJECT array (use
@@ -120,7 +120,7 @@ class CArray::Serializer   # :nodoc:
   #     v1.0 flat-primitive schema cannot express.
   #   @raise [TypeError] when `ca` is a Face other than a record (save
   #     its storage with `.parent`).
-  def save (ca, **opt)
+  def save (ca, endian: nil)
     if ca.data_type == :object
       raise ArgumentError,
             "CArray.save cannot serialise a CA_OBJECT array " \
@@ -136,7 +136,7 @@ class CArray::Serializer   # :nodoc:
             "lost); save its storage with .parent"
     end
 
-    file_endian = opt[:endian] || CArray.endian
+    file_endian = endian || CArray.endian
     swap        = (file_endian != CArray.endian)
 
     elements     = ca.elements
@@ -196,12 +196,13 @@ class CArray::Serializer   # :nodoc:
   #   Reads a _CARRAY3 payload from the wrapped IO and returns the
   #   reconstructed array, re-wrapping it through its recorded
   #   data_class when the trailer carries one.
-  #   @param opt [Hash] `:data_type` overrides the element type for a
+  #   @param data_type [Symbol, Integer, nil] overrides the element type for a
   #     bare `CA_FIXLEN` payload.
   #   @return [CArray]
   #   @raise [ArgumentError] on a bad magic string, corrupt header, or
   #     unsupported version.
-  def load (**opt)
+  def load (data_type: nil)
+    fixlen_type = data_type
     buf = @io.read(HEADER_BYTES)
     unless buf && buf.bytesize == HEADER_BYTES
       raise ArgumentError, "not a CArray binary data (truncated header)"
@@ -242,8 +243,8 @@ class CArray::Serializer   # :nodoc:
     dim       = h[:shape][0, ndim]
     bytes     = h[:element_bytes]
 
-    if opt[:data_type] and data_type == CArray.data_type_code(CA_FIXLEN)
-      data_type = opt[:data_type]
+    if fixlen_type and data_type == CArray.data_type_code(CA_FIXLEN)
+      data_type = fixlen_type
     end
 
     ca = CArray.new(data_type, dim, :bytes => bytes)

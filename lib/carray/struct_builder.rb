@@ -305,7 +305,22 @@ class CAStruct::Builder  # :nodoc:
     CA_CMPLX128 => CA_ALIGN_FLOAT64,
   }
 
+  # Raises ArgumentError when `opt` names a key outside `allowed`.  The
+  # options are read one key at a time, so a misspelt key would otherwise
+  # be ignored and the layout would change without a word.
+  def self.check_keys! (opt, allowed, where)
+    unknown = opt.keys - allowed
+    return if unknown.empty?
+    raise ArgumentError, "#{where}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+                         unknown.map(&:inspect).join(", ")
+  end
+
+  BUILDER_KEYS = [:pack, :size, :order_by].freeze
+  MEMBER_KEYS  = [:offset, :bytes, :endian].freeze
+  NESTED_KEYS  = (BUILDER_KEYS + [:type, :offset]).freeze
+
   def initialize (type, opt = {})
+    CAStruct::Builder.check_keys!(opt, BUILDER_KEYS, type.to_s)
     if not opt[:pack].nil? and not opt[:pack].is_a?(Integer)
       raise CAStruct::DefinitionError,
             "invalid :pack value #{opt[:pack].inspect} (expected nil or Integer)"
@@ -548,6 +563,7 @@ class CAStruct::Builder  # :nodoc:
   #   @param opt [Hash] member options (`:offset`, `:bytes`, `:endian`, ...).
   #   @return [Member]
   def member (data_type, id = nil, opt = {})
+    CAStruct::Builder.check_keys!(opt, MEMBER_KEYS, "member")
     opt = opt.clone
     # If a bit member sequence was in flight, round up to a clean byte
     # boundary before placing this byte-typed member.
@@ -603,9 +619,10 @@ class CAStruct::Builder  # :nodoc:
   #     `type:` is provided.
   def struct (*args, &block)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, NESTED_KEYS, "struct")
     if block
-      opt = {:pack => @align}.update(opt)
-      st = self.class.new(:struct, opt).define(&block)
+      inner = {:pack => @align}.update(opt.slice(*BUILDER_KEYS))
+      st = self.class.new(:struct, inner).define(&block)
     elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
@@ -629,9 +646,10 @@ class CAStruct::Builder  # :nodoc:
   #     `type:` is provided.
   def union (*args, &block)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, NESTED_KEYS, "union")
     if block
-      opt = {:pack => @align}.update(opt)
-      st = self.class.new(:union, opt).define(&block)
+      inner = {:pack => @align}.update(opt.slice(*BUILDER_KEYS))
+      st = self.class.new(:union, inner).define(&block)
     elsif opt[:type] and opt[:type] <= CAStruct
       st = opt[:type]
     else
@@ -653,6 +671,7 @@ class CAStruct::Builder  # :nodoc:
   #     CArray template.
   def array (*args)
     opt = args.last.is_a?(Hash) ? args.pop : {}
+    CAStruct::Builder.check_keys!(opt, [:type, :offset], "array")
     if not opt[:type] or not opt[:type].kind_of?(CArray)
       raise CAStruct::DefinitionError,
             "no :type given for array member (expected a CArray template)"
@@ -752,6 +771,7 @@ class CAStruct::Builder  # :nodoc:
                 "#{typename} requires at least one member name " \
                 "(use nil for anonymous padding)"
         end
+        CAStruct::Builder.check_keys!(opt, MEMBER_KEYS, "#{typename}")
         CAStruct::Builder.validate_endian!(opt, "#{typename}", #{allow_endian})
         args.each do |arg|
           member(:#{typename}, arg, opt)

@@ -2581,6 +2581,14 @@ rb_ca_s_result_type (int argc, VALUE *argv, VALUE klass)
 {
   int8_t cur = -1;
   int i;
+  VALUE rest, ropt;
+
+  /* Keywords are refused; without this a keyword Hash would be classified
+     as one more operand and the answer would turn into object. */
+  rb_scan_args(argc, argv, "*:", &rest, &ropt);
+  rb_reject_options(ropt);
+  argc = (int) RARRAY_LEN(rest);
+  argv = RARRAY_PTR(rest);
 
   if ( argc < 1 ) {
     rb_raise(rb_eArgError, "result_type requires at least one argument");
