@@ -2,8 +2,10 @@ require "test/unit"
 require "carray"
 
 # Order statistics on an object array: picking an element (an odd-length
-# median, method: :lower / :higher / :nearest) needs only an ordering, a
-# number is reported as a Float, interpolation is refused for any fiber
+# median, method: :lower / :higher / :nearest) needs only an ordering and
+# returns the element itself, an average or interpolation is done in the
+# elements' own arithmetic (exact for Integer, Rational and BigDecimal),
+# interpolation is refused for any fiber
 # that holds a non-number, and the result is an object array on every path.
 
 class TestObjectOrderStatPicks < Test::Unit::TestCase
@@ -18,9 +20,18 @@ class TestObjectOrderStatPicks < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { CA_OBJECT([:b, :a, :c, :d]).median }
   end
 
-  def test_numbers_are_reported_as_floats
-    assert_equal 2.0, CA_OBJECT([3, 1, 2]).median
-    assert_kind_of Float, CA_OBJECT([3, 1, 2]).percentile(50, method: :lower)
+  def test_numbers_are_answered_in_their_own_terms
+    assert_same 2, CA_OBJECT([3, 1, 2]).median
+    assert_same 2, CA_OBJECT([3, 1, 2]).percentile(50, method: :lower)
+    assert_equal Rational(3, 2), CA_OBJECT([1, 2]).median
+    assert_equal Rational(2, 3), CA_OBJECT([1r/3, 2r/3, 1r]).median
+    assert_kind_of Rational, CA_OBJECT([1r/3, 2r/3, 1r]).percentile(33)
+    assert_equal 1.75, CA_OBJECT([1, 2.5]).median
+    assert_kind_of Float, CA_OBJECT([1, 2.5]).median
+    m = CA_OBJECT([[1r/2, 1r/3, 3r/4, 1r], [1, 2, 3, 4]])
+    m[0, 3] = UNDEF
+    assert_equal [Rational(1, 2), Rational(5, 2)], m.median(axis: 1).to_a
+    assert_equal [Rational(5, 2)], CA_OBJECT([[1, 2, 3, 4]]).median(axis: 1).to_a
   end
 
   def test_interpolation_checks_every_fiber
