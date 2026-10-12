@@ -40,20 +40,16 @@ class CArray
       # offset == dim (append) leaves nothing on the upper side to shift.
       grids[i][offset[i]..-1].seq!(offset[i]+bsize[i]) if offset[i] < shape[i]
     end
-    # Build at the storage layout (preserving bytes for fixlen) and put the
-    # Face back before anything is written, so the block's value and the
-    # original cells both go in as values of the Face.
-    storage = __face_storage__
-    dt    = storage.data_type
-    bytes = (dt == :fixlen) ? storage.bytes : nil
-    out = CArray.new(dt, newdim, bytes: bytes)
-    out = out.face_lift(self) if face?
+    # The original cells are copied as storage, so a read-only Face inserts
+    # too; the block's value is written as a value of the array, which a
+    # read-only Face refuses.
+    out = __blank_like__(newdim)
     if block_given?
       sel = CArray.boolean(*newdim) { true }
       sel[*grids] = false
       out[sel] = block.call
     end
-    out[*grids] = self
+    out.__send__(:__face_storage__)[*grids] = __face_storage__
     return out
   end
 

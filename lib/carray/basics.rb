@@ -157,6 +157,15 @@ class CArray
   #   @param src [CArray] source array.
   #   @return [self]
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
+  # An array of +shape+ of the same kind as self: its data type and cell
+  # width, or its Face over a zero storage.  Nothing is written into it, so
+  # it can be built for a read-only Face too.
+  private def __blank_like__ (shape)
+    storage = __face_storage__
+    out = CArray.new(storage.data_type, shape, bytes: storage.bytes)
+    face? ? out.face_lift(self) : out
+  end
+
   def paste (offset, src)
     raise ArgumentError, "offset length must equal ndim" if offset.length != ndim
     # A zero-length source covers no cell, so there is nothing to write --

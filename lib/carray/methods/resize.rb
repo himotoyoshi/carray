@@ -39,21 +39,15 @@ class CArray
         raise ArgumentError, "invalid dimension size"
       end
     end
-    # Build at the storage layout (preserving bytes for fixlen) and put the
-    # Face back before anything is written, so the fill value and the
-    # original cells both go in as values of the Face.
-    storage = __face_storage__
-    dt    = storage.data_type
-    bytes = (dt == :fixlen) ? storage.bytes : nil
-    out = CArray.new(dt, newdim, bytes: bytes)
-    out = out.face_lift(self) if face?
-    # The new area starts as zero storage; a given fill_value is written as
-    # a value of the array (fixlen storage cannot hold the default 0).
-    unless fill_value.equal?(NO_FILL_VALUE)
-      out[] = fill_value
-    end
-    out.mask.paste(offset, self.false) if out.has_mask?
-    out.paste(offset, self)
+    # The original cells are copied as storage, so a read-only Face (a
+    # const string, a categorical) resizes too.  The new area starts as zero
+    # storage; a given fill_value is written as a value of the array, which a
+    # read-only Face refuses.
+    out = __blank_like__(newdim)
+    out_storage = out.__send__(:__face_storage__)
+    out[] = fill_value unless fill_value.equal?(NO_FILL_VALUE)
+    out_storage.mask.paste(offset, self.false) if out_storage.has_mask?
+    out_storage.paste(offset, __face_storage__)
     out
   end
 

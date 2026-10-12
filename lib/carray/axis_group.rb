@@ -824,13 +824,10 @@ class CAGroupIterator
   # Face -- with every cell UNDEF. A read-only Face cannot be written cell by
   # cell, so its values are held in an object array.
   def blank_of (model, shape)
-    out = if ! model.face?
-            CArray.new(model.data_type, shape, bytes: model.bytes)
-          elsif model.read_only?
+    out = if model.face? && model.read_only?
             CArray.new(CA_OBJECT, shape)
           else
-            CArray.new(model.parent.data_type, shape, bytes: model.parent.bytes)
-                  .face_lift(model)
+            model.__send__(:__blank_like__, shape)
           end
     out[] = UNDEF
     out

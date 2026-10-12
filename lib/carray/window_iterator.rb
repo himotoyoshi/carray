@@ -269,9 +269,9 @@ class CAWindowIterator < CAIterator
   # the Face's own.  A buffer of the Face's surface type could not take the
   # margin values at all.
   def pad_face (src, lefts, rights, mode, value)
-    storage = src.parent
+    storage = src.__send__(:__face_storage__)
     if mode == :constant && !value.nil?
-      cell = CArray.new(storage.data_type, [1], bytes: storage.bytes).face_lift(src)
+      cell = src.__send__(:__blank_like__, [1])
       cell[0] = value
       padded = pad_source(storage, lefts, rights, :constant, cell.parent[0])
     else

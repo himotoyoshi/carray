@@ -625,12 +625,10 @@ class CASegmentIterator < CAIterator
   # Face. A read-only Face cannot be written cell by cell, so its values are
   # held as the surface objects they are.
   def blank_like (model, shape)
-    if ! model.face?
-      CArray.new(model.data_type, shape, bytes: model.bytes)
-    elsif model.read_only?
+    if model.face? && model.read_only?
       CArray.new(CA_OBJECT, shape)
     else
-      CArray.new(model.parent.data_type, shape, bytes: model.parent.bytes).face_lift(model)
+      model.__send__(:__blank_like__, shape)
     end
   end
 
@@ -839,8 +837,7 @@ class CASegmentIterator < CAIterator
             # the core answered in the values' own Face, so the output is one
             # too: CATime#min hands back a CATime::Element, which only a
             # CATime has anywhere to put
-            CArray.new(@value.parent.data_type, [@k],
-                       bytes: @value.parent.bytes).face_lift(@value)
+            @value.__send__(:__blank_like__, [@k])
           else
             # a read-only Face cannot be filled, so its answers are collected
             # as the surface objects they already are
