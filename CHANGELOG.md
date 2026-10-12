@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: the method-call form of the indexer (`a[:eq, 0]`, `a[:is_not_masked]`)
+  calls public methods only; a private one such as `a[:puts]` or
+  `a[:initialize]` raises `NoMethodError` instead of running.
+
 - Change: a `CAStruct` member whose name is already a method of the element
   (`hash`, `size`, `class`, `count`, `min`, `initialize`, ...) no longer gets
   an accessor that replaces the method; read it as `s["name"]`. Before, such

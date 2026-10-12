@@ -491,7 +491,7 @@ static VALUE
 ca_store_method_call_body (VALUE arg)
 {
   ca_store_method_call_ctx_t *c = (ca_store_method_call_ctx_t *) arg;
-  volatile VALUE idx = rb_funcall2(c->self, c->mid, c->argc, c->argv);
+  volatile VALUE idx = rb_funcallv_public(c->self, c->mid, c->argc, c->argv);
   return rb_ca_store(c->self, idx, c->rval);
 }
 
@@ -1223,8 +1223,10 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     obj = rb_ca_grid(argc, argv, self);
     break;
   case CA_REG_METHOD_CALL: {
+    /* a[:eq, 0] is a[a.eq(0)]: a public method of the array, as a call
+       written out would reach (a[:puts] does not run Kernel#puts). */
     volatile VALUE idx;
-    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
     obj = rb_ca_fetch(self, idx);
     break;
   }
@@ -1528,7 +1530,7 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
     break;
   case CA_REG_METHOD_CALL: {
     volatile VALUE idx;
-    idx = rb_funcall2(self, SYM2ID(info.symbol), argc-1, argv+1);
+    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
     obj = rb_ca_fetch(self, idx);
     break;
   }

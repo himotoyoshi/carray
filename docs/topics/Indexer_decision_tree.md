@@ -69,8 +69,11 @@ Evaluated in order; the first match wins.
 
 `METHOD_CALL` is not a table of accepted keys: downstream it evaluates
 `a[:m, x]` as `a[a.m(x)]` — the symbol is sent to the receiver with the
-remaining arguments and the answer is re-entered as the index. The length
-test is the whole gate, so a single-character symbol never reaches it.
+remaining arguments and the answer is re-entered as the index. Only a
+public method is called, as `a.m(x)` written out would reach one, so
+`a[:puts]` raises `NoMethodError` rather than running `Kernel#puts`. The
+length test is the whole gate, so a single-character symbol never reaches
+it.
 
 ### 2.3 `argc == 1`, `ndim > 1`
 
