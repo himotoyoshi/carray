@@ -297,7 +297,7 @@ ary_flatten_upto_level (VALUE ary, int max_level, int level,
   }
 }
 
-static VALUE
+VALUE
 rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap)
 {
   CArray *ca = (CArray *) ap;

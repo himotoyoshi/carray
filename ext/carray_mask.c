@@ -1240,18 +1240,36 @@ rb_ca_set_mask (VALUE self, VALUE rval)
              "can not create mask for the mask array");
   }
 
-  ca_create_mask(ca);
+  if ( TYPE(rmask) == T_ARRAY ) {
+    /* Flattened as a store into a boolean array of this shape flattens
+       it, and then taken as a 1-D boolean array (UNDEF becomes a masked
+       cell, as in any boolean array made from it). */
+    CArray shape = *ca;
+    shape.data_type = CA_BOOLEAN;
+    shape.bytes     = ca_sizeof[CA_BOOLEAN];
+    rmask = rb_ary_flatten_for_elements(rmask, ca->elements, &shape);
+    if ( NIL_P(rmask) ) {
+      rb_raise(rb_eArgError, "failed to guess data size of given array");
+    }
+    rmask = rb_ca_wrap_readonly(rmask, INT2NUM(CA_BOOLEAN));
+  }
 
   if ( rb_obj_is_carray(rmask) ) {
+    /* The array owns the shape, as in a store: the new mask agrees with
+       it, is 1-D or squeezes to it, or broadcasts along size-1 axes.
+       Checked before the mask exists, so a refused one leaves none. */
+    ca_broadcast_to_destination(self, &rmask);
     TypedData_Get_Struct(rmask, CArray, &carray_data_type, cv);
     if ( ! ca_is_boolean_type(cv) ) {
-      cv = ca_wrap_readonly(rval, CA_BOOLEAN);
+      cv = ca_wrap_readonly(rmask, CA_BOOLEAN);
     }
+    ca_create_mask(ca);
     ca_setup_mask(ca, cv);
     ca_copy_mask_overlay(ca, ca->elements, 1, cv);
     return rval;
   }
   else {
+    ca_create_mask(ca);
     return rb_ca_store_all(rb_ca_mask_array(self), rmask);
   }
 }

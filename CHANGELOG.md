@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `a.mask = m` with a mask of another shape (a `(4)` or a `(2,3)` mask
+  on a `(3,2)` array) copied cells by count, or left part of the old mask
+  in place. It now takes the shapes a store `a[] = m` takes and refuses the
+  rest, before the array gains a mask.
+
 - Fix: a lazy `&`, `|`, `^`, `and` or `xor` between a boolean array and an
   object array read the boolean cells as 1 and 0, so `b.lazy | o` gave
   numbers where `b | o` gives true and false. The lazy form now reads them

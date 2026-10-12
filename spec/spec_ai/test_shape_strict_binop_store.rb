@@ -201,3 +201,33 @@ class TestShapeStrictInPlace < Test::Unit::TestCase
     assert_raise(ArgumentError) { a.fma!(CArray.float64(2, 3).seq, a.copy) }
   end
 end
+
+# Setting a mask is a store into the mask: the array owns the shape.
+
+class TestShapeStrictMask < Test::Unit::TestCase
+
+  SHAPES = [[6], [3, 2], [2, 3], [4], [3, 1], [1, 2], [1, 3, 2], [3, 2, 1], [1]]
+
+  def test_mask_takes_the_shapes_a_store_takes
+    SHAPES.each do |shape|
+      src = CArray.boolean(*shape) { |*i| i.sum.odd? }
+      stored = begin; t = CArray.boolean(3, 2); t[] = src; t.to_a; rescue ArgumentError; :refused; end
+      masked = begin; a = CArray.int32(3, 2); a.mask = src; a.is_masked.to_a; rescue ArgumentError; :refused; end
+      assert_equal stored, masked, shape.inspect
+    end
+  end
+
+  def test_mask_of_another_shape_is_refused
+    a = CArray.int32(3, 2)
+    assert_raise(ArgumentError) { a.mask = CArray.boolean(4) }
+    assert_raise(ArgumentError) { a.mask = CArray.boolean(2, 3) }
+    assert_raise(ArgumentError) { a.mask = [true, false] }
+    assert_equal false, a.has_mask?
+  end
+
+  def test_ruby_array_is_poured_in_by_count_and_undef_masks
+    a = CArray.int32(3, 2)
+    a.mask = [[true, false, true], [false, true, UNDEF]]
+    assert_equal [[true, false], [true, false], [true, true]], a.is_masked.to_a
+  end
+end

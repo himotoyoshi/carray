@@ -296,6 +296,7 @@ CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 
 /* carray_broadcast.c */
 void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
+VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
 
 /* carray_utils.c */
 const char *ca_calling_method_name (void);
