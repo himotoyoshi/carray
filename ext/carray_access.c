@@ -1599,6 +1599,12 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     if ( ca_is_face(cval) && rb_respond_to(self, rb_intern("to_comparable")) ) {
       return ca_face_reconcile_operand(self, val, "[]=");
     }
+    /* A Face of the same class and a compatible state holds values of the
+       same kind in the same encoding: it goes in as its storage. */
+    if ( ca_is_face(cval) && rb_obj_class(val) == rb_obj_class(self)
+         && ca_face_state_compatible(self, ca, val, cval) ) {
+      return rb_ca_strip_face_value(val);
+    }
     /* Bare storage escape, integer storage: integer cells only (see above). */
     {
       CArray *storage = ca_strip_face(ca);

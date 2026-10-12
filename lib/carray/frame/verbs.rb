@@ -597,10 +597,9 @@ class CAFrame
   end
 
   private def fill_linear_column(key, col)
-    # A time column interpolates through CATime#linear_fetch /
-    # CATimedelta#linear_fetch, which keep the Face and its unit.
-    time_face = col.is_a?(CATime) || col.is_a?(CATimedelta)
-    unless col.numeric? || time_face
+    # A Face column interpolates through its own linear_fetch (a time
+    # column's keeps the Face and its unit), as the core gap fill does.
+    unless col.__send__(:__interpolable__)
       raise ArgumentError,
             "fill(#{key.inspect}, :linear): numeric or time column required " \
             "(got #{col.data_type_name})"
@@ -626,15 +625,7 @@ class CAFrame
       return
     end
     # The same fill as the core, with the index as x.
-    filled = col.send(:__linear_fill_along__, @index)
-    if time_face
-      # Write through the storage: a bulk store into the Face itself would try
-      # to cast int64 ticks to its fixlen surface.  Both sides carry the same
-      # unit (selection preserves it), so the ticks land exactly, mask included.
-      col.parent[] = filled.parent
-    else
-      col[] = filled   # write-through
-    end
+    col[] = col.send(:__linear_fill_along__, @index)   # write-through
   end
 
   # Text cells are data, not Ruby literals: an object column cast to a

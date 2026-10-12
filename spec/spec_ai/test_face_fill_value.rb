@@ -75,3 +75,54 @@ class TestFaceFillValue < Test::Unit::TestCase
     assert_equal [1], h.locate_nearest_addr(time("2024-01-01", "2024-01-05")).to_a
   end
 end
+
+class TestFaceInterpolates < Test::Unit::TestCase
+
+  # A Face that says it interpolates by defining its own linear_fetch.
+  class Ticks < CAObject
+    def initialize (parent)
+      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+            face: true, orderable_storage: true, comparable_storage: true)
+    end
+    def storage_to_element (raw)
+      raw.is_a?(String) ? raw.unpack1("q") : raw
+    end
+    def linear_fetch (x)
+      Ticks.new(parent.linear_fetch(x).round.to_type(:int64))
+    end
+  end
+
+  def ticks
+    a = CA_INT64([10, 0, 30, 0])
+    a[1] = UNDEF
+    a[3] = UNDEF
+    Ticks.new(a)
+  end
+
+  def test_the_core_and_a_frame_agree_on_which_faces_interpolate
+    core = ticks.strip_mask(method: :linear)
+    assert_equal [10, 20, 30], core.parent.to_a[0, 3]
+    df = CAFrame.new({ "t" => ticks }, index: CA_FLOAT64([0, 1, 2, 3]))
+    df.fill("t", :linear)
+    assert_kind_of Ticks, df["t"]
+    assert_equal [10, 20, 30], df["t"].parent.to_a[0, 3]
+  end
+
+  def test_a_face_takes_a_face_of_its_own_class
+    a = Ticks.new(CA_INT64([1, 2, 3]))
+    b = Ticks.new(CA_INT64([0, 0, 0]))
+    b[] = a
+    assert_equal [1, 2, 3], b.parent.to_a
+    o = TestFaceFillValue::OrderedTicks.new(CA_INT64([0, 0]))
+    o[] = TestFaceFillValue::OrderedTicks.new(CA_INT64([4, 5]))
+    assert_equal [4, 5], o.parent.to_a
+  end
+
+  def test_neither_interpolates_a_face_without_linear_fetch
+    c = CArray.string(%w[a b])
+    c[1] = UNDEF
+    assert_raise(ArgumentError) { c.strip_mask(method: :linear) }
+    df = CAFrame.new({ "c" => c }, index: CA_FLOAT64([0, 1]))
+    assert_raise(ArgumentError) { df.fill("c", :linear) }
+  end
+end

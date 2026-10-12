@@ -47,14 +47,9 @@ class CArray
               "unmask: pass either a constant fill value or method:, not both"
       end
       held = __gap_fill__(method, axis, "unmask")
-      # Copy the filled values in place.  A Face writes through its storage: a
-      # bulk store into its surface would try to cast the storage values to the
-      # surface type (int64 ticks to fixlen, for a time array).
-      if face?
-        parent.value[] = held.parent.value
-      else
-        value[] = held.value
-      end
+      # Copy the filled values in place (a Face takes a Face of its own kind
+      # as it is).
+      value[] = held.value
       if held.has_mask?
         self.mask = held.mask              # residual leading/trailing mask
       else
@@ -128,7 +123,7 @@ class CArray
   # reads the Face's storage and fails from inside.
   def __gap_fill_linear__ (axis)
     if face?
-      unless self.class.instance_method(:linear_fetch).owner != CArray
+      unless __interpolable__
         raise ArgumentError,
               "unmask/strip_mask(method: :linear): #{self.class} does not " \
               "interpolate (it defines no linear_fetch of its own); " \
@@ -146,13 +141,18 @@ class CArray
     # A fiber comes back in self's own type (a Face's linear_fetch has already
     # rounded to its grid), so the result assembles in that type and the
     # present cells are never carried through float64.
-    out  = face? ? template : value.copy
-    sink = face? ? out.parent : out
+    out = face? ? template : value.copy
     __each_fiber_key__(ax) do |key|
-      fiber = __linear_fiber__(self[*key])
-      sink[*key] = face? ? fiber.parent : fiber
+      out[*key] = __linear_fiber__(self[*key])
     end
     out
+  end
+
+  # Whether linear interpolation can fill this array: a numeric array, or a
+  # Face that defines a linear_fetch of its own -- which is how a Face says it
+  # interpolates (the core linear_fetch would read its storage).
+  private def __interpolable__
+    face? ? self.class.instance_method(:linear_fetch).owner != CArray : numeric?
   end
 
   # 1-D linear-by-index fill of a single (possibly masked) fiber.
