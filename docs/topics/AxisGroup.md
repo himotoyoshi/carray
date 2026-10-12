@@ -256,8 +256,9 @@ s[nil, nil, season].mean(axis: :group).shape    # => [2, 3, 4]
 
 ### Empty groups
 
-A group with no members reduces to `UNDEF` (masked) — except `count`,
-which is a plain `0`:
+A group with no members reduces as an empty array does: to the identity
+for an operation that has one (`sum` and `accumulate` give `0`, `prod`
+`1`, `count` `0`) and to `UNDEF` (masked) otherwise:
 
 ```ruby
 keys = CArray.object(4) { |i| %w[a a c c][i] }
@@ -265,6 +266,7 @@ cat  = keys.categorize(labels: %w[a b c])       # category "b" is unused
 a    = CArray.float64(4) { |i| i + 1.0 }
 
 a[cat].mean(axis: :group).to_a     # => [1.5, UNDEF, 3.5]
+a[cat].sum(axis: :group).to_a      # => [3.0, 0.0, 7.0]
 a[cat].count(axis: :group).to_a    # => [2, 0, 2]
 ```
 
@@ -503,8 +505,8 @@ field[g].count(axis: :group).to_a   # => cells per region, per time step
 * **The iterator is not an array.** `value[g]` is a `CAGroupIterator`; you
   get a result by reducing it. It has no materialise path.
 * **Masks and exclusions compose.** Masked input cells and
-  out-of-vocabulary keys drop out of their group; empty groups reduce to
-  `UNDEF` (`count` gives `0`).
+  out-of-vocabulary keys drop out of their group; an empty group reduces
+  to the identity (`sum` `0`, `count` `0`) or to `UNDEF` (`mean`, `min`).
 * **Newer feature.** The class names are provisional; the surface (build
   a categorical, position it, reduce with `:group`, read labels) is what
   to rely on.

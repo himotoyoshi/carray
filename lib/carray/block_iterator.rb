@@ -333,14 +333,15 @@ class CABlockIterator < CAIterator
   #   partial edge tile); `count(UNDEF)` counts masked cells; `count(v)` counts
   #   cells equal to `v`.
   #   @return [CArray] tile-grid shaped
-  def count (*args)
-    return count_not_masked if args.empty?
+  def count (*args, **kw)
+    return count_not_masked(**kw) if args.empty?
+    kw = CAIterator.reduce_keywords(:count, kw)
     out = nil
     each_region do |strip_ranges, tiles, out_ranges|
       view = @source[*strip_ranges].block_view(*tiles)
       # block_view is a CAStride, so #count is not shadowed; dispatch
       # CArray#count explicitly anyway, matching the family regularity.
-      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes)
+      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes, **kw)
       out ||= CArray.new(red.data_type, @shape, bytes: red.bytes)
       out[*out_ranges] = red
     end
@@ -351,16 +352,21 @@ class CABlockIterator < CAIterator
   #   Per-tile count of present (non-masked) cells.  For a partial edge tile
   #   this is the real cell count (the OOB cells are not present).
   #   @return [CArray]
-  def count_not_masked
-    fold(:count_not_masked)
+  def count_not_masked (**kw)
+    fold(:count_not_masked, **CAIterator.reduce_keywords(:count_not_masked, kw))
   end
 
   # @overload count_masked
   #   Per-tile count of masked cells.  Equals `elements - count_not_masked`;
   #   the OOB cells of a partial edge tile count here.
   #   @return [CArray]
-  def count_masked
-    elements - count_not_masked
+  def count_masked (**kw)
+    kw   = CAIterator.reduce_keywords(:count_masked, kw)
+    need = CArray.__min_count_need__(:count_masked, kw[:min_count], 0)
+    out  = elements - count_not_masked
+    # A count of the mask reads every cell of the tile.
+    out[elements.lt(need)] = UNDEF if need > 0
+    kw[:fill_value].nil? || !out.has_mask? ? out : out.strip_mask(kw[:fill_value])
   end
 
   # @overload elements
@@ -401,8 +407,9 @@ class CABlockIterator < CAIterator
   #   @return [CArray]
   [:min_index, :max_index].each do |op|
     class_eval <<~RUBY, __FILE__, __LINE__ + 1
-      def #{op}
-        assemble { |view, _| view.#{op}(axis: @tile_axes) }
+      def #{op} (**kw)
+        kw = CAIterator.reduce_keywords(:#{op}, kw)
+        assemble { |view, _| view.#{op}(axis: @tile_axes, **kw) }
       end
     RUBY
   end
@@ -413,12 +420,12 @@ class CABlockIterator < CAIterator
   #   minima. Unlike `min_index` (the tile-local position) this indexes back
   #   into the original array. An all-masked tile is a masked cell.
   #   @return [CArray] tile-grid shaped int64
-  def min_addr; winner_addr(:min_index); end
+  def min_addr (**kw); winner_addr(:min_index, kw); end
 
   # @overload max_addr
   #   Per-tile flat source address of the maximum. See {#min_addr}.
   #   @return [CArray] tile-grid shaped int64
-  def max_addr; winner_addr(:max_index); end
+  def max_addr (**kw); winner_addr(:max_index, kw); end
 
   private
 
@@ -427,9 +434,8 @@ class CABlockIterator < CAIterator
   # and with `min_count` a tile with too few present cells, is a masked cell.
   def face_winner (idx_op, min_count, fill_value)
     addr = winner_addr(idx_op)
-    if min_count
-      addr[count_not_masked.lt(min_count)] = UNDEF
-    end
+    need = CArray.__min_count_need__(idx_op == :min_index ? :min : :max, min_count, 0)
+    addr[count_not_masked.lt(need)] = UNDEF if need > 0
     src   = @source.reshape(@source.elements)
     empty = addr.is_masked
     return src[addr].copy unless empty.any
@@ -449,13 +455,14 @@ class CABlockIterator < CAIterator
   # max_index) is looked up in a source-address companion tiled the same way, so
   # the tile geometry is reused rather than recomputed. An all-masked tile yields
   # a masked index; it is gathered at 0 and re-masked in the result.
-  def winner_addr (idx_op)
+  def winner_addr (idx_op, kw = {})
+    kw    = CAIterator.reduce_keywords(idx_op, kw)
     saddr = CArray.int64(*@source.shape).seq!
     out = nil
     each_region do |strip_ranges, tiles, out_ranges|
       vview = @source[*strip_ranges].block_view(*tiles)
       sview = saddr[*strip_ranges].block_view(*tiles)
-      mi    = vview.public_send(idx_op, axis: @tile_axes)  # tile-local flat index
+      mi    = vview.public_send(idx_op, axis: @tile_axes, **kw.slice(:min_count))  # tile-local flat index
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
       safe  = mi.copy
@@ -467,7 +474,8 @@ class CABlockIterator < CAIterator
       out ||= CArray.int64(*@shape)
       out[*out_ranges] = picked
     end
-    out || CArray.int64(*@shape)
+    out ||= CArray.int64(*@shape)
+    kw[:fill_value].nil? || !out.has_mask? ? out : out.strip_mask(kw[:fill_value])
   end
 
   public
@@ -501,15 +509,17 @@ class CABlockIterator < CAIterator
   #   Per-tile weighted sum; `weights` is shaped like one full tile (`Π b_i`).
   #   At a partial edge tile the weight kernel is sliced to the present cells.
   #   @return [CArray]
-  def wsum (weights)
-    weighted(weights) { |view, w| view.wsum(w, axis: @tile_axes) }
+  def wsum (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wsum, kw)
+    weighted(weights) { |view, w| view.wsum(w, axis: @tile_axes, **kw) }
   end
 
   # @overload wmean(weights)
   #   Per-tile weighted mean; `weights` shaped like one full tile.
   #   @return [CArray]
-  def wmean (weights)
-    weighted(weights) { |view, w| view.wmean(w, axis: @tile_axes) }
+  def wmean (weights, **kw)
+    kw = CAIterator.reduce_keywords(:wmean, kw)
+    weighted(weights) { |view, w| view.wmean(w, axis: @tile_axes, **kw) }
   end
 
   private
@@ -539,21 +549,22 @@ class CABlockIterator < CAIterator
   # Core per-axis order statistics take a single integer axis, so a 1-D tile
   # delegates straight to the C path; a multi-axis tile is materialized per
   # region and its tile axes flattened into one before the single-axis core
-  # order-stat.  A masked source raises (the known per-axis masked limitation);
-  # strip the mask with `ca.value` first if needed.
+  # order-stat.  Masked cells are left out, as in `CArray#median(axis:)`.
 
   # @overload median
   #   Per-tile median.  @return [CArray]
-  def median
-    order_stat { |v, axis| v.median(axis: axis) }
+  def median (**kw)
+    kw = CAIterator.reduce_keywords(:median, kw)
+    order_stat { |v, axis| v.median(axis: axis, **kw) }
   end
 
   # @overload percentile(*pers)
   #   Per-tile percentile(s).  One argument returns one CArray, several an array
   #   of CArrays (as `CArray#percentile`).
   #   @return [CArray, Array<CArray>]
-  def percentile (*pers)
-    order_stat { |v, axis| v.percentile(*pers, axis: axis) }
+  def percentile (*pers, **kw)
+    kw = CAIterator.reduce_keywords(:percentile, kw)
+    order_stat { |v, axis| v.percentile(*pers, axis: axis, **kw) }
   end
 
   # @overload quantile

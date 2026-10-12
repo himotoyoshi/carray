@@ -188,7 +188,8 @@ class CArray
   #   @param axis [Integer, Array<Integer>] axis or axes to reduce.
   #   @param keep_axis [Boolean] keep the reduced axes as length 1.
   #   @param min_count [Integer, nil] cells with fewer than this many
-  #     contributing elements are UNDEF.
+  #     elements are UNDEF.  A count of the mask reads every element,
+  #     masked or not, so this compares with the slice size.
   #   @param fill_value [Object, nil] value written into UNDEF cells.
   #   @return [CArray, Integer]
   #   @raise [ArgumentError] if an axis is out of range, repeated, or
@@ -208,7 +209,8 @@ class CArray
   #   @param axis [Integer, Array<Integer>] axis or axes to reduce.
   #   @param keep_axis [Boolean] keep the reduced axes as length 1.
   #   @param min_count [Integer, nil] cells with fewer than this many
-  #     contributing elements are UNDEF.
+  #     elements are UNDEF.  A count of the mask reads every element,
+  #     masked or not, so this compares with the slice size.
   #   @param fill_value [Object, nil] value written into UNDEF cells.
   #   @return [CArray, Integer]
   #   @raise [ArgumentError] if an axis is out of range, repeated, or

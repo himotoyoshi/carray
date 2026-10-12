@@ -228,11 +228,7 @@ class AxisGroup
             "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
             unknown.map(&:inspect).join(", ")
     end
-    mc = kw[:min_count]
-    unless mc.nil?
-      raise TypeError, "#{op}: min_count must be an Integer (got #{mc.class})" unless mc.is_a?(Integer)
-      raise ArgumentError, "#{op}: min_count must be non-negative (got #{mc})" if mc < 0
-    end
+    CArray.__min_count_need__(op, kw[:min_count], 0)
     nil
   end
 
@@ -245,16 +241,25 @@ class AxisGroup
     stand_in
   end
 
-  # min_count: masks a group with fewer present cells; fill_value: then
-  # fills the masked cells -- as a core reduction does with each.
+  # A count of the mask reads every cell of the group, as the core's does.
+  MASK_COUNTS = [:count, :count_not_masked, :count_masked].freeze
+
+  # min_count: masks a group with fewer contributing cells (present cells,
+  # or every cell for a count of the mask); fill_value: then fills the masked
+  # cells -- as a core reduction does with each.
   def self.__finish_reduction__ (iter, op, kw, result)
-    mc = kw[:min_count]
-    if mc && mc > 0 && result.is_a?(CArray)
-      counts = iter.count_not_masked(axis: kw[:axis])
-      result[counts.lt(mc)] = UNDEF
-    elsif mc && mc > 0
-      counts = iter.count_not_masked(axis: kw[:axis])
-      result = UNDEF if counts < mc
+    need = CArray.__min_count_need__(op, kw[:min_count], 0)
+    if need > 0
+      counts = if MASK_COUNTS.include?(op.to_sym)
+                 iter.elements(axis: kw[:axis])
+               else
+                 iter.count_not_masked(axis: kw[:axis])
+               end
+      if result.is_a?(CArray)
+        result[counts.lt(need)] = UNDEF
+      elsif counts < need
+        result = UNDEF
+      end
     end
     if kw.key?(:fill_value) && !kw[:fill_value].nil?
       if result.is_a?(CArray)
@@ -401,11 +406,9 @@ class CAGroupIterator
     end
     v = args.first
     return count_masked(**kw) if v.equal?(UNDEF)
-    # a masked cell equals nothing, and eq marks it UNDEF; drop that to false
-    # so it is simply not counted
-    hit = value.eq(v)
-    hit = hit.strip_mask(false) if hit.has_mask?
-    self.class.__build__(hit.int64, spec).sum(**kw).int64
+    # eq leaves a masked cell UNDEF, so the sum leaves it out and its
+    # min_count: counts the present cells, as the core count(v) does
+    self.class.__build__(value.eq(v).int64, spec).sum(**kw).int64
   end
 
   alias __all_folded__ all
@@ -436,7 +439,12 @@ class CAGroupIterator
 
   # Per-group count of value-masked cells = elements - count_not_masked.
   def count_masked (**kw)
-    elements(**kw) - count_not_masked(**kw)
+    has_group, = AxisGroup.parse_axis(kw[:axis])
+    return value.count_masked(**kw) unless has_group
+    AxisGroup.__check_reduce_keywords__(:count_masked, kw)
+    plain = { axis: kw[:axis] }
+    AxisGroup.__finish_reduction__(self, :count_masked, kw,
+                                   elements(**plain) - count_not_masked(**plain))
   end
 
   # The scatter kernel reads an integer or float payload, and answers there
@@ -502,9 +510,11 @@ class CAGroupIterator
     num  = self.class.__build__(prod, spec).sum(**kw)
     den  = self.class.__build__(value * 0 + weights, spec).sum(**kw)
     cnt  = self.class.__build__(prod, spec).count_not_masked(**kw)
-    out  = num / den
-    out[cnt.eq(0)] = UNDEF          # no present pair -> masked (empty group)
-    out
+    # No present pair is UNDEF (an empty group), set on the denominator so
+    # the division never meets an empty group's 0 / 0.
+    den  = den.copy
+    den[cnt.eq(0)] = UNDEF
+    num / den
   end
 
   # ---- segment scan: within-group running statistics ---------------------

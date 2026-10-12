@@ -154,7 +154,7 @@ class CAIterator
   #   @yieldparam piece [CArray] next piece.
   #   @yieldreturn [Object] updated accumulator.
   #   @return [Object] the final accumulator.
-  [
+  REQUIRED_SURFACE = [
     :sum, :accumulate, :prod, :mean, :min, :max,                      # tier 1
     :variance, :stddev, :all, :any,
     :variancep, :stddevp, :minmax,                                    # tier 2
@@ -163,7 +163,9 @@ class CAIterator
     :median, :percentile, :quantile,                                 # tier 3
     :count, :count_not_masked, :count_masked, :elements,             # count family
     :each, :reduce,                                                   # generic iterate
-  ].each do |name|
+  ].freeze
+
+  REQUIRED_SURFACE.each do |name|
     define_method(name) do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} must implement ##{name}"
     end

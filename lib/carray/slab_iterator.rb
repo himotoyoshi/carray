@@ -179,25 +179,28 @@ class CASlabIterator < CAIterator
   #   No argument counts present (non-masked) cells; `count(UNDEF)` counts
   #   masked cells; `count(v)` counts cells equal to `v`.
   #   @return [CArray] one count per slab
-  def count (*args)
-    return count_not_masked if args.empty?
+  def count (*args, **kw)
+    return count_not_masked(**kw) if args.empty?
     # CABlock / CAWindow shadow #count with a geometry accessor, and @reference
     # may be such a view, so dispatch CArray#count explicitly for count(v).
-    CArray.instance_method(:count).bind_call(@reference, *args, axis: @slab_axes)
+    CArray.instance_method(:count).bind_call(@reference, *args, axis: @slab_axes,
+                                             **CAIterator.reduce_keywords(:count, kw))
   end
 
   # @overload count_not_masked
   #   Per-slab count of present (non-masked) cells.
   #   @return [CArray]
-  def count_not_masked
-    @reference.count_not_masked(axis: @slab_axes)
+  def count_not_masked (**kw)
+    @reference.count_not_masked(axis: @slab_axes,
+                                **CAIterator.reduce_keywords(:count_not_masked, kw))
   end
 
   # @overload count_masked
   #   Per-slab count of masked cells.
   #   @return [CArray]
-  def count_masked
-    @reference.count_masked(axis: @slab_axes)
+  def count_masked (**kw)
+    @reference.count_masked(axis: @slab_axes,
+                            **CAIterator.reduce_keywords(:count_masked, kw))
   end
 
   # @overload elements
@@ -218,9 +221,8 @@ class CASlabIterator < CAIterator
   #
   # Core order statistics take a single integer axis, so a single slab axis is
   # delegated directly (fast C path) and a multi-axis slab is folded per slab
-  # with reduce_slab (each slab flattened). As with `CArray#median(axis:)`, a
-  # masked source raises (the known per-axis masked limitation); strip the mask
-  # with `ca.value` first if needed.
+  # with reduce_slab (each slab flattened). Masked cells are left out, as in
+  # `CArray#median(axis:)`.
 
   # @overload median(min_count: nil, fill_value: nil)
   #   Per-slab median.

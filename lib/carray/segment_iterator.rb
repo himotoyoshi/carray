@@ -912,27 +912,36 @@ class CASegmentIterator < CAIterator
   # present.
   module ReductionCountAndFill
     REDUCTIONS = %i[sum accumulate max min minmax mean median percentile
-                    variance stddev variancep stddevp prod wsum wmean].freeze
+                    variance stddev variancep stddevp prod wsum wmean
+                    min_index max_index min_addr max_addr
+                    count count_not_masked count_masked].freeze
+
+    # A count of the mask reads every cell of the segment, as the core's does.
+    def self.mask_count? (op, args)
+      op == :count_not_masked || op == :count_masked ||
+        (op == :count && (args.empty? || args[0].equal?(UNDEF)))
+    end
 
     REDUCTIONS.each do |op|
       define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
-        unless min_count.nil?
-          unless min_count.is_a?(Integer)
-            raise TypeError, "#{op}: min_count must be an Integer (got #{min_count.class})"
-          end
-          if min_count < 0
-            raise ArgumentError, "#{op}: min_count must be non-negative (got #{min_count})"
-          end
-        end
+        # The segment reduction already leaves an empty segment as the core
+        # does, so only a min_count asking for more is applied here.
+        need = CArray.__min_count_need__(op, min_count, 0)
         result = super(*args, **kw)
-        return result if (min_count.nil? || min_count == 0) && fill_value.nil?
-        if min_count && min_count > 0
+        return result if need == 0 && fill_value.nil?
+        if need > 0
           present = if op == :wsum || op == :wmean
                       present_pair_count(args[0], kw[:axis])
+                    elsif ReductionCountAndFill.mask_count?(op, args)
+                      if kw[:axis]
+                        raise NotImplementedError,
+                              "#{self.class}##{op}(axis:, min_count:) is not implemented"
+                      end
+                      elements
                     else
                       count_not_masked(**kw)
                     end
-          short = present.lt(min_count)
+          short = present.lt(need)
         end
         finish = lambda do |r|
           r[short] = UNDEF if short
