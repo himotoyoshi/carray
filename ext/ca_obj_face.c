@@ -688,6 +688,66 @@ ca_face_state_portable (int obj_type, VALUE klass)
   return 1;   /* default portable */
 }
 
+VALUE
+ca_face_list_class (VALUE list, const char *who)
+{
+  long n = RARRAY_LEN(list), i;
+  int any_face = 0, all_face = 1;
+  VALUE face_class = Qnil;
+  CArray *ref = NULL;
+
+  for ( i = 0; i < n; i++ ) {
+    VALUE p = rb_ary_entry(list, i);
+    CArray *ca;
+    rb_check_carray_object(p);
+    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
+    if ( ! ca_is_face(ca) ) { all_face = 0; continue; }
+    any_face = 1;
+    if ( NIL_P(face_class) ) {
+      face_class = rb_obj_class(p);
+      ref = ca;
+    }
+    else if ( rb_obj_class(p) != face_class ) {
+      all_face = 0;
+    }
+  }
+  if ( ! any_face ) return Qnil;
+  if ( ! all_face ) {
+    rb_raise(rb_eArgError,
+             "%s: cannot mix Face and non-Face arrays, or arrays of "
+             "different Face classes; convert them to one Face class, or "
+             "none, first, or take .parent of each to combine the storage",
+             who);
+  }
+  if ( n > 1 && ! ca_face_state_portable(ref->obj_type, face_class) ) {
+    rb_raise(rb_eArgError,
+             "%s: %s state is not portable across several arrays (each "
+             "keeps its values in storage of its own); convert them first "
+             "(a CAConstString with to_string), or take .parent of each to "
+             "combine the storage",
+             who, rb_class2name(face_class));
+  }
+  for ( i = 1; i < n; i++ ) {
+    VALUE p = rb_ary_entry(list, i);
+    CArray *ca;
+    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
+    if ( ! ca_face_state_compatible(rb_ary_entry(list, 0), ref, p, ca) ) {
+      rb_raise(rb_eArgError,
+               "%s: Face state mismatch (the %s at index %ld differs from "
+               "index 0)", who, rb_class2name(face_class), i);
+    }
+  }
+  return face_class;
+}
+
+VALUE
+ca_face_strip_one (VALUE v)
+{
+  CArray *c;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, c);
+  return ca_is_face(c) ? rb_ca_parent(v) : v;
+}
+
 /* CArray.face_state_portable? — class method on CArray.  Subclasses
    (Face classes) override by defining their own `def self.face_state_portable?`.
    This default returns true (= 1) for non-Face CArray classes; the actual

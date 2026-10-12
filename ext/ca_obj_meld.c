@@ -1025,17 +1025,6 @@ ca_operation_function_t ca_meld_func = {
 /* Ruby surface                                                         */
 /* ------------------------------------------------------------------- */
 
-/* One-level strip of a Face VALUE to its storage-side parent (non-Face as-is).
-   Keeps the @parent ivar in step with the pre-stripped C parents, so the
-   Ruby-visible chain of a melded Face is single-Face too. */
-static VALUE
-ca_meld_face_parent1 (VALUE v)
-{
-  CArray *c;
-  TypedData_Get_Struct(v, CArray, &carray_data_type, c);
-  return ca_is_face(c) ? rb_ca_parent(v) : v;
-}
-
 VALUE
 rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
 {
@@ -1059,7 +1048,7 @@ rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
   ca  = ca_meld_new((int32_t) n, parents, meld_axis);
   obj = ca_wrap_struct(ca);
   rb_ivar_set(obj, id_parents, rb_ary_dup(parents_ary));
-  rb_ca_set_parent(obj, ca_meld_face_parent1(rb_ary_entry(parents_ary, 0)));
+  rb_ca_set_parent(obj, ca_face_strip_one(rb_ary_entry(parents_ary, 0)));
   ALLOCV_END(holder);
   return obj;
 }
@@ -1123,7 +1112,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
   }
   ca_meld_setup(ca, (int32_t) n, parents, meld_axis);
   rb_ivar_set(self, id_parents, rb_ary_dup(list));
-  rb_ca_set_parent(self, ca_meld_face_parent1(rb_ary_entry(list, 0)));
+  rb_ca_set_parent(self, ca_face_strip_one(rb_ary_entry(list, 0)));
   ALLOCV_END(holder);
   return self;
 }
@@ -1145,73 +1134,20 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_meld_s_new (int argc, VALUE *argv, VALUE klass)
 {
-  VALUE list, kwargs;
-  long n, i;
-  int  all_face = 1, any_face = 0;
-  VALUE face_class = Qnil;
-  CArray *ref_face = NULL;
+  VALUE list, kwargs, face_class;
   VALUE obj;
 
   rb_scan_args(argc, argv, "1:", &list, &kwargs);
   Check_Type(list, T_ARRAY);
-  n = RARRAY_LEN(list);
-  if ( n <= 0 ) {
+  if ( RARRAY_LEN(list) <= 0 ) {
     rb_raise(rb_eArgError, "CAMeld.new requires at least one parent");
   }
-
-  for ( i = 0; i < n; i++ ) {
-    VALUE p = rb_ary_entry(list, i);
-    CArray *ca;
-    rb_check_carray_object(p);
-    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( ca_is_face(ca) ) any_face = 1;
-    if ( !ca_is_face(ca) ) { all_face = 0; continue; }
-    if ( face_class == Qnil ) {
-      face_class = rb_obj_class(p);
-      ref_face   = ca;
-    } else if ( rb_obj_class(p) != face_class ) {
-      all_face = 0;
-    }
-  }
-
-  /* The setup strips a Face parent to its storage, so a list that is not
-     one Face class throughout would come back as raw storage presented as
-     data (CATime ticks, CAConstString (start,end) pairs). */
-  if ( any_face && !all_face ) {
-    rb_raise(rb_eArgError,
-             "CAMeld.new: cannot mix Face and non-Face (or heterogeneous "
-             "Face classes); pass a homogeneous Face list, or strip Face "
-             "manually with .parent for the storage-level layout");
-  }
-
-  /* A single parent shares its state with nobody, so only two or more are
-     refused; the lift below applies to one parent as well, since the setup
-     strips a Face parent whatever their number. */
-  if ( all_face && n > 1
-       && !ca_face_state_portable(ref_face->obj_type, face_class) ) {
-    rb_raise(rb_eArgError,
-             "CAMeld.new: %s state is not portable across multiple "
-             "parents (= per-parent storage like CAConstString's buffer); "
-             "strip Face with .parent if a storage-level CAMeld is intended",
-             rb_class2name(face_class));
-  }
+  face_class = ca_face_list_class(list, "CAMeld.new");
 
   obj = rb_obj_alloc(klass);
   rb_obj_call_init_kw(obj, argc, argv, RB_PASS_CALLED_KEYWORDS);
 
-  if ( !any_face ) return obj;
-
-  for ( i = 1; i < n; i++ ) {
-    VALUE p = rb_ary_entry(list, i);
-    CArray *ca;
-    TypedData_Get_Struct(p, CArray, &carray_data_type, ca);
-    if ( !ca_face_state_compatible(rb_ary_entry(list, 0), ref_face, p, ca) ) {
-      rb_raise(rb_eArgError,
-               "CAMeld.new: Face state mismatch across parents "
-               "(= %s instance at index %ld differs in state from index 0)",
-               rb_class2name(face_class), i);
-    }
-  }
+  if ( NIL_P(face_class) ) return obj;
   return ca_face_lift(obj, rb_ary_entry(list, 0));
 }
 

@@ -251,6 +251,19 @@ void ca_face_register_state_portable (int obj_type, int portable);
    (= falls through to default). */
 int ca_face_state_portable (int obj_type, VALUE klass);
 
+/* Check a list of arrays about to be combined into one (CAStack, CAMeld,
+   promote_list).  Returns the Face class every element shares, or Qnil
+   when none of them is a Face; the combined array is then lifted into
+   that class.  Raises ArgumentError for a mix of Face and non-Face arrays
+   or of two Face classes, for two or more of a Face whose state is not
+   portable, and for elements whose state differs from the first one's.
+   `who` names the caller at the head of the message. */
+VALUE ca_face_list_class (VALUE list, const char *who);
+
+/* A Face array's storage-side parent, one level down; any other array
+   as it is. */
+VALUE ca_face_strip_one (VALUE v);
+
 /* Bring a Face *operand* into the reference's storage space, or refuse.
 
    The gate asks `fz_face_descend`'s question -- "is your storage your

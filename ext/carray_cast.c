@@ -2636,9 +2636,6 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
 {
   VALUE list, kwargs, data_type = Qnil;
   long n, i;
-  int  all_face = 1, any_face = 0, all_primitive = 1;
-  VALUE face_class = Qnil;
-  CArray *ref_face = NULL;
   int8_t common = -1;
 
   rb_scan_args(argc, argv, "1:", &list, &kwargs);
@@ -2662,44 +2659,21 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     }
   }
 
-  /* Classify each element: Face / primitive CArray.  Detect Face-class
-     homogeneity as we go. */
-  for ( i = 0; i < n; i++ ) {
-    VALUE elem = rb_ary_entry(list, i);
-    CArray *ca;
-    rb_check_carray_object(elem);
-    TypedData_Get_Struct(elem, CArray, &carray_data_type, ca);
-    if ( ca_is_face(ca) ) {
-      any_face = 1;
-      all_primitive = 0;
-      if ( NIL_P(face_class) ) {
-        face_class = rb_obj_class(elem);
-        ref_face   = ca;
-      } else if ( rb_obj_class(elem) != face_class ) {
-        all_face = 0;   /* will be caught after the loop */
-      } else if ( all_face ) {
-        if ( ! ca_face_state_compatible(rb_ary_entry(list, 0), ref_face,
-                                        elem, ca) ) {
-          rb_raise(rb_eArgError,
-                   "promote_list: Face state mismatch across elements "
-                   "(= %s instance at index %ld differs from index 0)",
-                   rb_class2name(face_class), i);
-        }
-      }
-    } else {
-      all_face = 0;
-    }
-  }
-
   /* Explicit data_type path: primitive Symbol, all elements must be
      primitive.  Reject if any Face in list. */
   if ( ! NIL_P(data_type) ) {
-    if ( any_face ) {
-      rb_raise(rb_eArgError,
-               "promote_list: data_type %s cannot be applied to a list "
-               "containing Face elements (= Face cannot be coerced to "
-               "a primitive without losing identity)",
-               RSTRING_PTR(rb_inspect(data_type)));
+    for ( i = 0; i < n; i++ ) {
+      VALUE elem = rb_ary_entry(list, i);
+      CArray *ca;
+      rb_check_carray_object(elem);
+      TypedData_Get_Struct(elem, CArray, &carray_data_type, ca);
+      if ( ca_is_face(ca) ) {
+        rb_raise(rb_eArgError,
+                 "promote_list: data_type %s cannot be applied to a list "
+                 "containing Face elements (= Face cannot be coerced to "
+                 "a primitive without losing identity)",
+                 RSTRING_PTR(rb_inspect(data_type)));
+      }
     }
     {
       VALUE out = rb_ary_new_capa(n);
@@ -2714,33 +2688,12 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
     }
   }
 
-  /* Auto-detect path. */
-  if ( any_face && ! all_face ) {
-    if ( all_primitive == 0 && any_face ) {
-      /* Mixed: at least one Face and at least one non-Face,
-         OR mixed Face classes.  Both are rejected. */
-      rb_raise(rb_eArgError,
-               "promote_list: cannot mix Face and non-Face arrays (or arrays "
-               "of different Face classes) in one list; convert them to one "
-               "Face class, or none, first");
-    }
-  }
-
-  if ( all_face ) {
-    /* Homogeneous Face: validate portability, then pass through. */
-    if ( n > 1 && ! ca_face_state_portable(ref_face->obj_type, face_class) ) {
-      rb_raise(rb_eArgError,
-               "promote_list: %s state is not portable across several "
-               "arrays (each keeps its values in storage of its own); "
-               "convert them first (a CAConstString with to_string)",
-               rb_class2name(face_class));
-    }
-    /* Return a fresh Array so callers can mutate without aliasing. */
-    {
-      VALUE out = rb_ary_new_capa(n);
-      for ( i = 0; i < n; i++ ) rb_ary_push(out, rb_ary_entry(list, i));
-      return out;
-    }
+  /* Auto-detect path.  A list of one Face class passes through (the
+     multi-parent constructor lifts it). */
+  if ( ! NIL_P(ca_face_list_class(list, "promote_list")) ) {
+    VALUE out = rb_ary_new_capa(n);
+    for ( i = 0; i < n; i++ ) rb_ary_push(out, rb_ary_entry(list, i));
+    return out;
   }
 
   /* All primitive: result_type to determine common data_type, then
