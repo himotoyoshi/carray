@@ -64,6 +64,12 @@ VALUE   rb_ca_face_template (VALUE original_face, CArray *new_parent,
    each view-creating method deploys at its return path. */
 VALUE   ca_face_lift (VALUE view, VALUE face_parent);
 
+/* Lift a fresh array `result` (one a reduction, a scan or a partition built
+   from the Face's storage) into the Face `face`: the same Face class over
+   `result`, carrying the subclass tail, `result`'s mask and the state
+   copy_state carries.  `result` stays reachable through the new Face. */
+VALUE   ca_face_relift_entity (VALUE face, VALUE result);
+
 /* Follow the Face flag down to the first non-Face parent, for code that
    must talk to the storage (store, mask, MemoryView export).  The kernel
    iterator strips Faces at entry with its own loop, which also strips

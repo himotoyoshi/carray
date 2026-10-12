@@ -407,7 +407,7 @@ module MkKernel
     # :relift -- value-returning kernels (min/max): descend, then re-lift the
     #            output back into the Face -- a full-reduction scalar via the
     #            registered storage_to_element hook, a per-axis CArray via
-    #            rb_ca_face_template (carries the subclass tail, e.g. unit).
+    #            ca_face_relift_entity (carries the subclass tail, e.g. unit).
     raise "reduce: unknown face_gate #{face_gate} (expected nil, :strip, or :relift)" \
       unless [nil, :strip, :relift].include?(face_gate)
     # object_escape: a Symbol naming a Ruby instance method that handles the
@@ -4654,25 +4654,13 @@ module MkKernel
 
   # Re-lift a value-returning reduction result back into the Face captured by
   # emit_reduce_face_gate.  Full-reduction scalar -> storage_to_element hook;
-  # per-axis CArray -> rb_ca_face_template (carries the subclass tail).
+  # per-axis CArray -> ca_face_relift_entity (tail, mask and copy_state).
   # All-masked full reductions leave CA_UNDEF untouched.
   def self.emit_reduce_face_relift(io)
     io.puts "  if ( _reduce_face != Qnil && result != CA_UNDEF && result != Qnil ) {"
     io.puts "    if ( rb_obj_is_kind_of(result, rb_cCArray) ) {"
-    io.puts "      /* per-axis: re-lift the storage result as a Face of the same"
-    io.puts "         subclass; the template memcpy carries the subclass tail. */"
-    io.puts "      CArray *_rca;"
-    io.puts "      GetCArray(result, _rca);"
-    io.puts "      VALUE _lifted = rb_ca_face_template(_reduce_face, _rca, _rca->dim);"
-    io.puts "      rb_ca_set_parent(_lifted, result);  /* pin storage result as GC root */"
-    io.puts "      if ( ca_has_mask(_rca) ) {"
-    io.puts "        /* rb_ca_face_template resets mask to NULL; carry the reduced"
-    io.puts "           mask bits (all-masked slabs) onto the lifted Face. */"
-    io.puts "        CArray *_lca;"
-    io.puts "        GetCArray(_lifted, _lca);"
-    io.puts "        ca_copy_mask(_lca, _rca);"
-    io.puts "      }"
-    io.puts "      result = _lifted;"
+    io.puts "      /* per-axis: re-lift the storage result as a Face of the same class. */"
+    io.puts "      result = ca_face_relift_entity(_reduce_face, result);"
     io.puts "    }"
     io.puts "    else {"
     io.puts "      /* full reduction: decode the scalar via the registered hook. */"
@@ -6934,7 +6922,7 @@ MkKernel.reduce :min,
   mask_policy:     :min_count,   # Phase E
   # An ORDERABLE Face descends to numeric storage, then the result is
   # re-lifted into the Face (scalar via storage_to_element, per-axis via
-  # rb_ca_face_template).  This replaces per-Face lib overrides.
+  # ca_face_relift_entity).  This replaces per-Face lib overrides.
   face_gate:       :relift,
   public_method: true          # Phase E: rebind "min" -> rb_ca_min_ki
 

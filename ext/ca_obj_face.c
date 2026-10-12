@@ -177,6 +177,27 @@ rb_ca_face_template (VALUE original_face, CArray *new_parent,
                                 dst);
 }
 
+VALUE
+ca_face_relift_entity (VALUE face, VALUE result)
+{
+  static ID id_copy_state = 0;
+  CArray *rc, *lc;
+  VALUE lifted;
+  if ( id_copy_state == 0 ) id_copy_state = rb_intern("copy_state");
+  TypedData_Get_Struct(result, CArray, &carray_data_type, rc);
+  lifted = rb_ca_face_template(face, rc, rc->dim);
+  rb_ca_set_parent(lifted, result);
+  if ( ca_has_mask(rc) ) {
+    /* The template starts without a mask. */
+    TypedData_Get_Struct(lifted, CArray, &carray_data_type, lc);
+    ca_copy_mask(lc, rc);
+  }
+  if ( rb_respond_to(face, id_copy_state) ) {
+    rb_funcall(lifted, id_copy_state, 1, face);
+  }
+  return lifted;
+}
+
 /* ca_face_lift(view, face_parent) — at the tail of user-facing entry
  * points (`ca[...]` etc.), when the operand was a Face, re-wrap the
  * resulting view as a Face of the same subclass.  Thin wrapper over

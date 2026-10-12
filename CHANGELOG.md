@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a Face that keeps state of its own (a Ruby Face carrying it with
+  `copy_state`) kept it in views, copies and `sort`, but lost it in the
+  arrays `min(axis:)`, `max(axis:)`, `cummax`, `cummin` and
+  `partition_copy` build. It is now carried there too.
+
 - New: `CAFrame.from_csv` reads messy tables: `types: :infer` (numbers,
   booleans, year-first dates and times), `types: { default: ... }`,
   `missing:` tokens, `on_error:` (`:mask`, `:warn`, `:raise`), `columns:` to

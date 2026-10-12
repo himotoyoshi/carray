@@ -363,17 +363,7 @@ rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
   VALUE out = rb_ca_partition_copy_c_mp(self, vkth, vaxis, masked_last);
 
   if ( face != Qnil ) {
-    CArray *oc, *lc;
-    VALUE lifted;
-    TypedData_Get_Struct(out, CArray, &carray_data_type, oc);
-    lifted = rb_ca_face_template(face, oc, oc->dim);
-    rb_ca_set_parent(lifted, out);   /* pin the storage result */
-    if ( ca_has_mask(oc) ) {
-      /* rb_ca_face_template resets the mask; carry the result's. */
-      TypedData_Get_Struct(lifted, CArray, &carray_data_type, lc);
-      ca_copy_mask(lc, oc);
-    }
-    out = lifted;
+    out = ca_face_relift_entity(face, out);
   }
   return out;
 }
