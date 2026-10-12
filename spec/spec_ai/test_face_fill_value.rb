@@ -1,0 +1,77 @@
+require "test/unit"
+require "carray"
+
+# A fill value is a value of the array it fills: a Time for a time array, a
+# struct for a record array.  Every verb that takes one writes it the way a
+# store writes it, so they all give the cell the same value.
+
+class TestFaceFillValue < Test::Unit::TestCase
+
+  # ORDERABLE, not COMPARABLE, no to_comparable.
+  class OrderedTicks < CAObject
+    def initialize (parent)
+      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+            face: true, orderable_storage: true)
+    end
+    def storage_to_element (raw)
+      raw.is_a?(String) ? raw.unpack1("q") : raw
+    end
+  end
+
+  def time (*s)
+    CArray.time(s, unit: :D)
+  end
+
+  def strings (a)
+    a.to_a.map(&:to_s)
+  end
+
+  def test_every_fill_verb_writes_the_value_a_store_writes
+    arrays = [CA_INT8([0, 0, 0]), CA_FLOAT32([0, 0, 0]), CA_OBJECT([0, 0, 0]),
+              time("2024-01-01", "2024-01-02", "2024-01-03"),
+              CArray.string(%w[a b c]), CArray.fixlen_string(%w[aa bb cc])]
+    values = [1, 300, 1.5, "2", Time.utc(2024, 1, 5), "2024-01-05", "zz"]
+    arrays.each do |a|
+      values.each do |v|
+        verbs = {
+          "store"      => -> { b = a.copy; b[0] = v; b[0] },
+          "shift"      => -> { a.shift(1, fill_value: v)[0] },
+          "project"    => -> { a.project(CA_INT64([-1, 0]), v)[0] },
+          "unmask"     => -> { b = a.copy; b[0] = UNDEF; b.unmask(v); b[0] },
+          "strip_mask" => -> { b = a.copy; b[0] = UNDEF; b.strip_mask(v)[0] },
+        }
+        answers = verbs.transform_values { |f| begin; f.call; rescue => e; e.class; end }
+        assert_equal 1, answers.values.uniq.size, "#{a.class} #{a.data_type} #{v.inspect}: #{answers}"
+      end
+    end
+  end
+
+  def test_resize_writes_its_fill_value_as_a_value_of_the_array
+    t = time("2024-01-01", "2024-01-02")
+    assert_equal %w[2024-01-01 2024-01-02 2024-01-09],
+                 strings(t.resize(3, fill_value: Time.utc(2024, 1, 9)))
+    assert_equal %w[2024-01-01 2024-01-02 1970-01-01], strings(t.resize(3))
+    assert_equal [true, false, false], t.resize(-3, fill_value: UNDEF).is_masked.to_a
+    assert_equal [1, 2, 7], CA_INT32([1, 2]).resize(3, fill_value: 7).to_a
+    assert_equal ["ab", "cd", ""], CArray.fixlen_string(%w[ab cd]).resize(3).to_a
+  end
+
+  def test_insert_block_writes_the_block_value_as_a_value_of_the_array
+    t = time("2024-01-01", "2024-01-02")
+    assert_equal %w[2024-01-09 2024-01-01 2024-01-02],
+                 strings(t.insert_block([0], [1]) { Time.utc(2024, 1, 9) })
+    assert_kind_of CATime, t.insert_block([1], [1])
+    assert_equal [1, 9, 9, 2], CA_INT32([1, 2]).insert_block([1], [2]) { 9 }.to_a
+  end
+
+  def test_locate_nearest_addr_takes_operands_by_the_shared_rule
+    ticks = OrderedTicks.new(CA_INT64([1, 5, 9]))
+    assert_raise(ArgumentError) { CA_INT64([4]).locate_nearest_addr(ticks) }
+    assert_raise(ArgumentError) { ticks.locate_nearest_addr(CA_INT64([4])) }
+    assert_raise(ArgumentError) {
+      CArray.string(%w[b]).locate_nearest_addr(CArray.const_string(%w[a b]))
+    }
+    h = CArray.time(["2024-01-04T20"], unit: :h)
+    assert_equal [1], h.locate_nearest_addr(time("2024-01-01", "2024-01-05")).to_a
+  end
+end

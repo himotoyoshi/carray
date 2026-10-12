@@ -11,8 +11,8 @@ class CArray
   #   appends at the end) and a negative value counts from the end;
   #   `bsize[i]` must be non-negative. Inserted cells are filled by
   #   the block's return value, or left at the type's default when
-  #   no block is given. Preserves fixlen bytes and Face identity
-  #   (built on the storage layout, re-wrapped via `face_lift`).
+  #   no block is given. Preserves fixlen bytes and Face identity; the
+  #   block returns a value of the array (a Time for a time array).
   #   The `offset` array is not mutated.
   #
   #   @param offset [Array<Integer>] insertion offset per axis.
@@ -40,21 +40,20 @@ class CArray
       # offset == dim (append) leaves nothing on the upper side to shift.
       grids[i][offset[i]..-1].seq!(offset[i]+bsize[i]) if offset[i] < shape[i]
     end
-    # Build at the storage layout (preserving bytes for fixlen / Face),
-    # then re-wrap as the same Face.
-    face_parent = self.face? ? self : nil
-    src = self
-    src = src.parent while src.face?
-    dt    = src.data_type
-    bytes = (dt == :fixlen) ? src.bytes : nil
+    # Build at the storage layout (preserving bytes for fixlen) and put the
+    # Face back before anything is written, so the block's value and the
+    # original cells both go in as values of the Face.
+    storage = __face_storage__
+    dt    = storage.data_type
+    bytes = (dt == :fixlen) ? storage.bytes : nil
     out = CArray.new(dt, newdim, bytes: bytes)
+    out = out.face_lift(self) if face?
     if block_given?
-      sel = out.true
-      sel[*grids] = 0
+      sel = CArray.boolean(*newdim) { true }
+      sel[*grids] = false
       out[sel] = block.call
     end
-    out[*grids] = src
-    out = out.face_lift(face_parent) if face_parent
+    out[*grids] = self
     return out
   end
 

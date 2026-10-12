@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: `resize(fill_value:)` and `insert_block { ... }` on a Face (a time
+  or record array) wrote the fill value into the storage as it was, so a
+  `Time` filled a time array with a date millions of years off. The value is
+  now written as a value of the array, as `shift(fill_value:)` and `unmask`
+  write it. `locate_nearest_addr` now takes and refuses operands as `search`
+  does: it used to compare the storage of a categorical or `CAConstString`
+  reference.
 - Change: for authors of a Face written in Ruby on `CAObject`. A Face
   over a numeric storage (`super(CA_FLOAT64, dim, parent:, face: true)`)
   now refuses arithmetic, math and reductions, as a `CA_FIXLEN` surface

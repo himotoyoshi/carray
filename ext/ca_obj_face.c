@@ -927,6 +927,22 @@ rb_ca_face_storage (VALUE self)
   return rb_ca_strip_face_value(self);
 }
 
+/* ca.__reconcile_operand__(operand, name) -- operand brought into ca's
+   storage space by the rule every operand family follows
+   (ca_face_reconcile_operand for a Face, ca_face_operand_descend for an
+   array that is not one).  For the families written in Ruby. */
+static VALUE
+rb_ca_reconcile_operand (VALUE self, VALUE operand, VALUE rname)
+{
+  CArray *ca;
+  const char *name = StringValueCStr(rname);
+  GetCArray(self, ca);
+  if ( ca_is_face(ca) ) {
+    return ca_face_reconcile_operand(self, operand, name);
+  }
+  return ca_face_operand_descend(operand, name);
+}
+
 /* CArray#face_lift(face_parent) — Ruby surface for ca_face_lift.
    Used by CArray.stack to re-wrap a raw CAStack with the homogeneous
    Face class carried by face_parent (typically list[0] after the
@@ -1031,4 +1047,6 @@ Init_ca_face (void)
                            rb_ca_comparable_storage_p, 0);
   rb_define_private_method(rb_cCArray, "__face_storage__",
                            rb_ca_face_storage, 0);
+  rb_define_private_method(rb_cCArray, "__reconcile_operand__",
+                           rb_ca_reconcile_operand, 2);
 }

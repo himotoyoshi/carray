@@ -185,11 +185,9 @@ class CArray
         u  = CATimeUnitAlgebra.finer(rs.unit, q.unit)
         rs = rs.to_unit(u)
         q  = q.to_unit(u)
-      elsif rs.respond_to?(:to_comparable)
-        q = rs.to_comparable(q)
       end
-      rs = rs.parent while rs.face?
-      q  = q.parent while q.face?
+      q  = rs.__send__(:__reconcile_operand__, q, "locate_nearest_addr")
+      rs = rs.__send__(:__face_storage__)
     end
     t = value_match_type(CArray.result_type(q, rs), rs.data_type)
     rk = (rs.data_type == t) ? rs : rs.to_type(t)
