@@ -1093,6 +1093,25 @@ ca_value_is_type (VALUE v, int8_t data_type)
   return ca->data_type == data_type;
 }
 
+/* A logical operator (`logical`: one with a boolean kernel) between a
+   boolean array and an object array reads the boolean cells as true /
+   false.  The eager binop and the lazy builder both call this before
+   anything else decides the operands' types, so both read them alike. */
+void
+ca_binop_read_boolean_as_truth (int logical, volatile VALUE *pa,
+                                volatile VALUE *pb)
+{
+  if ( ! logical ) {
+    return;
+  }
+  if ( ca_value_is_type(*pa, CA_BOOLEAN) && ca_value_is_type(*pb, CA_OBJECT) ) {
+    *pa = ca_boolean_as_truth_objects(*pa);
+  }
+  else if ( ca_value_is_type(*pb, CA_BOOLEAN) && ca_value_is_type(*pa, CA_OBJECT) ) {
+    *pb = ca_boolean_as_truth_objects(*pb);
+  }
+}
+
 VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])
@@ -1104,16 +1123,8 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   ca_size_t i1, i2, i3;
   int fast_path;
 
-  /* A logical operator (it has a boolean kernel) between a boolean array
-     and an object array reads the boolean cells as true / false. */
-  if ( func[CA_BOOLEAN] != ca_binop_not_implement ) {
-    if ( ca_value_is_type(self, CA_BOOLEAN) && ca_value_is_type(other, CA_OBJECT) ) {
-      self = ca_boolean_as_truth_objects(self);
-    }
-    else if ( ca_value_is_type(other, CA_BOOLEAN) && ca_value_is_type(self, CA_OBJECT) ) {
-      other = ca_boolean_as_truth_objects(other);
-    }
-  }
+  ca_binop_read_boolean_as_truth(func[CA_BOOLEAN] != ca_binop_not_implement,
+                                 &self, &other);
 
   /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);

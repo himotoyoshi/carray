@@ -460,4 +460,10 @@ extern int ca_fast_paths_on;
 #define ca_fast_paths_enabled() (1)
 #endif
 
+/* A logical operator between a boolean array and an object array reads the
+   boolean cells as true / false (carray_operator.c).  Shared by the eager
+   binop and the lazy builder. */
+void ca_binop_read_boolean_as_truth (int logical, volatile VALUE *pa,
+                                     volatile VALUE *pb);
+
 #endif /* CARRAY_INTERNAL_H */

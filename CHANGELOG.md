@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: a lazy `&`, `|`, `^`, `and` or `xor` between a boolean array and an
+  object array read the boolean cells as 1 and 0, so `b.lazy | o` gave
+  numbers where `b | o` gives true and false. The lazy form now reads them
+  as true and false, as the eager form does.
 - Change: `==` on a Face (a time, string or categorical array) compares the
   values it holds. Two time arrays of different units holding the same
   instants, two const strings over different pools and two categoricals

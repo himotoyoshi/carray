@@ -566,6 +566,10 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
   l_resolved = collapse_marker(l_cary);
   r_resolved = collapse_marker(r_cary);
 
+  ca_binop_read_boolean_as_truth(
+      ca_binop_kernel_lookup_vv(op_id, CA_BOOLEAN) != ca_binop_not_implement,
+      &l_resolved, &r_resolved);
+
   /* A scalar beside the array (a Ruby value or a CScalar) takes the
      data_type the eager binop gives it, and the pair is promoted as the
      eager binop promotes it.  An integer power keeps its int64 exponent
