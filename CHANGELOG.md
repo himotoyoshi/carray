@@ -36,6 +36,22 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Change: `CArray::DataTypeError` is a `TypeError`, so `rescue TypeError`
+  catches it. A time array's refusals of `sum`, `prod`, `variance` and the
+  other operations it does not define raise it, as every other array does
+  for an operation its type does not take (they raised `TypeError`). The
+  wrong kind of operand, as in `time + 1`, is still a plain `TypeError`.
+- Change: errors a caller can cause no longer raise `RuntimeError`. A
+  retired data type (`CArray.new(:float128, ...)`) raises
+  `CArray::DataTypeError`; a Ruby Array as a `grid` axis and a value
+  `CAMath` cannot handle raise `TypeError`; a lazy expression too deep to
+  evaluate, a short read in `load_binary` from an IO, and an array of
+  another size in a bang operation on a `CScalar` raise `ArgumentError`.
+- Fix: `sum`, `mean`, `variance`, `minmax`, `wsum` and `mode(axis:)` refused
+  a view class installed by another gem that had not registered with
+  `ca_iter_register_source_kind` (C extensions only); it is attached and
+  answered as `sort` and `cumsum` already did, so registering is optional.
+
 - Fix: an in-place operator (`add!`, `mul!`, `fma!` and the rest) whose
   argument shares memory with the receiver answers what the plain operator
   answers. `a[1..5].add!(a[0..4])` produced a running sum, reading cells it

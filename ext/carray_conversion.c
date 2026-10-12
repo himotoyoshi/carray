@@ -501,7 +501,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
           VALUE r = rb_funcall(io, id_read, 2, SIZE2NUM(want), scratch);
           if ( NIL_P(r) || RSTRING_LEN(r) != want ) {
             ca_detach(ca);
-            rb_raise(rb_eRuntimeError,
+            rb_raise(rb_eArgError,
                      "short read from IO at offset %" PRId64 " "
                      "(got %" PRId64 " bytes, expected %" PRId64 ")",
                      (ca_size_t) off,
@@ -518,7 +518,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
            and recurse via T_STRING. */
         volatile VALUE buf = rb_funcall(io, id_read, 1, SIZE2NUM(total));
         if ( NIL_P(buf) || RSTRING_LEN(buf) != total ) {
-          rb_raise(rb_eRuntimeError,
+          rb_raise(rb_eArgError,
                    "short read from IO (got %" PRId64 " bytes, expected %" PRId64 ")",
                    (ca_size_t) (NIL_P(buf) ? 0 : RSTRING_LEN(buf)),
                    (ca_size_t) total);

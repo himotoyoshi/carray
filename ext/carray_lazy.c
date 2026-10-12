@@ -682,9 +682,9 @@ ca_lazy_arena_acquire (ca_size_t bytes)
 
   /* Pass 4: all CA_LAZY_ARENA_SLOTS in use simultaneously.  This is
      a programming error or a pathological chain.  Raise.            */
-  rb_raise(rb_eRuntimeError,
-           "ca_lazy_arena_acquire: all %d slots in use simultaneously "
-           "(chain depth exceeds arena capacity)",
+  rb_raise(rb_eArgError,
+           "lazy expression too deep: it needs more than %d intermediate "
+           "arrays at once",
            CA_LAZY_ARENA_SLOTS);
   return NULL;  /* unreachable */
 }

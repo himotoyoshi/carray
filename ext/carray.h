@@ -1003,7 +1003,7 @@ extern VALUE rb_cCArrayObject;
       rb_raise(rb_eArgError, "invalid data_type id %i", data_type);     \
     } \
     if ( ! ca_valid[data_type] ) { \
-      rb_raise(rb_eRuntimeError, "data_type %s is disabled", ca_type_name[data_type]);    \
+      rb_raise(rb_eCADataTypeError, "data_type %s is disabled", ca_type_name[data_type]);    \
     } \
   } while (0)
 

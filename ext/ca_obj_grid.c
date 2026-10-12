@@ -994,7 +994,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
       }
     }
     else if ( TYPE(rval) == T_ARRAY ) {
-      rb_raise(rb_eRuntimeError, "not implemented for this index");
+      rb_raise(rb_eTypeError, "grid: an axis is an Integer, a Range, nil or a CArray of indices (got Array)");
     }
 
     /* INDEX axis: converted here, read once the window below opens */

@@ -426,7 +426,9 @@ outside after that raises `IndexError` naming the method the user called.
 
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
 matches Ruby convention. A data_type an operation cannot take is
-`CArray::DataTypeError` (`rb_eCADataTypeError`). `RuntimeError` is for
+`CArray::DataTypeError` (`rb_eCADataTypeError`), a subclass of
+`TypeError`, so `rescue TypeError` catches it too; the wrong kind of
+operand (`time + 1`) is a plain `TypeError`. `RuntimeError` is for
 internal invariants the user should never hit (a bug, not a misuse), with
 one deliberate exception: a write to a read-only array, and a `to_ca`
 that refuses `writable: true`, raise `RuntimeError`.

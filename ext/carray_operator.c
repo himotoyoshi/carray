@@ -1528,16 +1528,10 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   /* self is the write target, so its shape is the result's by definition
      and the destination rule applies (the same one assignment uses), not
      the symmetric one a binary operation is held to. */
-  if ( !self_is_scalar && !other_is_scalar ) {
+  if ( !other_is_scalar ) {
     ca_broadcast_to_destination(self, &other);
     TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
     other_is_scalar = RTEST(rb_obj_is_cscalar(other));
-  }
-  if ( self_is_scalar && !other_is_scalar &&
-       ca1->elements != ca2->elements ) {
-    rb_raise(rb_eRuntimeError, "elements mismatch (%" PRId64 " <-> %" PRId64 ")",
-                               (ca_size_t) ca1->elements,
-                               (ca_size_t) ca2->elements);
   }
 
   /* kernel strides: cscalar → 0 (broadcast).  ca1 is both src1 (input)
@@ -2510,7 +2504,7 @@ ca_math_call (VALUE mod, VALUE arg, ID id)
       return rb_funcall(rb_mMath, id, 1, arg);
     }
     else {
-      rb_raise(rb_eRuntimeError, "unknown method for Math");
+      rb_raise(rb_eTypeError, "unknown method for Math");
     }
   }
 #endif
@@ -2520,7 +2514,7 @@ ca_math_call (VALUE mod, VALUE arg, ID id)
       return rb_funcall(rb_mMath, id, 1, arg);
     }
     else {
-      rb_raise(rb_eRuntimeError, "unknown method for Math");
+      rb_raise(rb_eTypeError, "unknown method for Math");
     }
   }
 }

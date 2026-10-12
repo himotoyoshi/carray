@@ -515,8 +515,8 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   while ( leaf->obj_type == CA_OBJ_MONOP ) {
     CAMonOp *node = (CAMonOp *) leaf;
     if ( chain_len >= CA_MAX_LAZY_DEPTH ) {
-      rb_raise(rb_eRuntimeError,
-               "CAMonOp chain depth exceeds CA_MAX_LAZY_DEPTH (%d)",
+      rb_raise(rb_eArgError,
+               "lazy expression too deep: more than %d operations in a chain",
                CA_MAX_LAZY_DEPTH);
     }
     op_chain[chain_len++] = node->op_id;
