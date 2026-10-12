@@ -3674,6 +3674,7 @@ module MkKernel
         io.puts "  switch ( src->data_type ) {"
         io.puts "  " + k[:source].map { |s| "case #{DTYPES[s][:ca]}:" }.join(" ") + " break;"
         io.puts "  default:"
+        io.puts %Q[    ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
         io.puts %Q[    rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
         io.puts "  }"
       end
@@ -3726,6 +3727,7 @@ module MkKernel
       io.puts "      switch ( src->data_type ) {"
       io.puts "        case CA_BOOLEAN: break;   /* wrap: count-of-trues semantic */"
       io.puts "        default:"
+      io.puts %Q[          ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
       io.puts %Q[          rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])}, or boolean)", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "      }"
       io.puts "      VALUE   vsrc = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));"
@@ -3746,6 +3748,7 @@ module MkKernel
       io.puts "    }"
     when :raise
       io.puts "    default:"
+      io.puts %Q[      ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     end
     io.puts "  }"
@@ -3949,6 +3952,7 @@ module MkKernel
         io.puts "      }"
       when :raise
         io.puts "      default:"
+        io.puts %Q[        ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
         io.puts %Q[        rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[fsrc->data_type]);]
       when :mask_count
         io.puts "      default:"
@@ -3984,6 +3988,7 @@ module MkKernel
       io.puts "    }"
     when :raise
       io.puts "    default:"
+      io.puts %Q[      ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     when :mask_count
       io.puts "    default:"
@@ -4734,6 +4739,7 @@ module MkKernel
         io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, axis, do_stable#{native_extra}));"
       end
       io.puts "    default:"
+      io.puts %Q[      ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "  }"
       io.puts "  return Qnil;  /* unreachable */"
@@ -4849,6 +4855,7 @@ module MkKernel
         io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, axis, kth#{native_extra}));"
       end
       io.puts "    default:"
+      io.puts %Q[      ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
       io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
       io.puts "  }"
       io.puts "  return Qnil;  /* unreachable */"
@@ -5715,6 +5722,7 @@ module MkKernel
       io.puts "    case #{si[:ca]}: CA_RETURN_KEEPING(self, #{name}_ki_native_#{s}(self, src, rval, axis#{extra_arg}));"
     end
     io.puts "    default:"
+    io.puts %Q[      ca_face_refuse_numeric(self, ca_calling_method_name(), rb_eCADataTypeError);]
     io.puts %Q[      rb_raise(rb_eCADataTypeError, "%s: source data_type :%s not supported (expected one of: #{MkKernel.type_names(k[:source])})", ca_calling_method_name(), ca_type_name[src->data_type]);]
     io.puts "  }"
     io.puts "  return Qnil;  /* unreachable */"

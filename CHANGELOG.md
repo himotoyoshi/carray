@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.3 (unreleased)
 
+- Fix: an arithmetic, math, comparison-kernel or reduction call that a Face
+  does not define (`f + g`, `f.sqrt`, `f.sum`, `f.median`, ...) is refused
+  with the method and the Face's class, and points at `to_type(:object)` for
+  its values and `.parent` for its storage. It said "data_type :fixlen not
+  supported", or "invalid data type for monop" with no method named. A plain
+  array whose data type has no such kernel names the method and the type.
+  The exception classes are unchanged.
 - New: a window's `median`, `percentile` and `quantile` answer under the
   default `bounds: :skip`, leaving the UNDEF margin out of each window as
   the other reductions do. They raised before.

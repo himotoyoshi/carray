@@ -694,6 +694,27 @@ ca_face_refuse_order (const char *name, VALUE face, const char *verb)
            ca_face_conversion_hint(face), verb);
 }
 
+/* Refuse a numeric operation (arithmetic, math, a reduction) on a Face,
+   whose cells encode its values rather than being numbers, pointing at what
+   gives numbers.  Returns when `self` is not a Face. */
+void
+ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(self) ) {
+    return;
+  }
+  GetCArray(self, ca);
+  if ( ! ca_is_face(ca) ) {
+    return;
+  }
+  rb_raise(eclass,
+           "%s: %s does not define it (a cell encodes the value rather than "
+           "being a number); compute on its values instead -- %s -- or pass "
+           ".parent to compute on its storage",
+           name, rb_obj_classname(self), ca_face_conversion_hint(self));
+}
+
 VALUE
 ca_face_operand_descend (VALUE operand, const char *name)
 {

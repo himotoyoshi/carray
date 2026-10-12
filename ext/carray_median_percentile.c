@@ -42,6 +42,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "carray_internal.h"   /* ca_integer_arg, ca_calling_method_name */
+#include "ca_obj_face.h"       /* ca_face_refuse_numeric */
 #include <math.h>
 
 /* Externals (link-time; kept out of carray.h to keep the header lean). */
@@ -846,10 +847,12 @@ rb_ca_median_m (int argc, VALUE *argv, VALUE self)
     GetCArray(self, ca);
   }
   int8_t dt = ca->data_type;
-  if ( ca_is_fixlen_type(ca) )
+  if ( ca_is_fixlen_type(ca) ) {
+    ca_face_refuse_numeric(self, "median", rb_eCADataTypeError);
     rb_raise(rb_eCADataTypeError,
              "median: not defined for fixlen (no numeric midpoint); "
              "use a numeric or object array");
+  }
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "median: source data_type :%s not supported", ca_type_name[dt]);
@@ -1283,9 +1286,11 @@ rb_ca_percentile_m (int argc, VALUE *argv, VALUE self)
     GetCArray(self, ca);
   }
   int8_t dt = ca->data_type;
-  if ( ca_is_fixlen_type(ca) )
+  if ( ca_is_fixlen_type(ca) ) {
+    ca_face_refuse_numeric(self, "percentile", rb_eCADataTypeError);
     rb_raise(rb_eCADataTypeError,
              "percentile: not defined for fixlen; use a numeric or object array");
+  }
   int is_obj = (dt == CA_OBJECT);
   if ( !is_obj && !mp_is_numeric(dt) )
     rb_raise(rb_eCADataTypeError, "percentile: source data_type :%s not supported", ca_type_name[dt]);

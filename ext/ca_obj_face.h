@@ -292,6 +292,10 @@ NORETURN(void ca_face_refuse_order (const char *name, VALUE face,
    at (#to_string for a string Face, to_type(:object) for any other). */
 const char *ca_face_conversion_hint (VALUE face);
 
+/* Raise eclass naming a Face that does not define the numeric operation
+   `name`; returns when self is not a Face.  See ca_obj_face.c. */
+void ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass);
+
 VALUE ca_face_operand_descend (VALUE operand, const char *name);
 
 /* Bring an operand into the storage space of a Face reference (a record's
