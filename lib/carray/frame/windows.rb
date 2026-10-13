@@ -8,7 +8,8 @@ class CAFrame
   # both or neither, as CArray#is_between does.  +by:+ names columns that
   # must match exactly, so each window stays within one station; +interval:+
   # gives the key's grid step for WindowedFrame#is_complete.  The rows need
-  # not be sorted; the answers come in row order.
+  # not be sorted; the answers come in row order.  A row whose key is
+  # masked, NaN or infinite is in no window and has no window.
   #
   #   w = df.windows(on: "time", before: "1 hour", by: "station")
   #   w.mean("temp")     # => CArray, one value per row

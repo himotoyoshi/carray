@@ -21,7 +21,8 @@ require "carray/segment_iterator"
 # (whether the window holds exactly the keys of that grid).
 #
 # The keys need not be sorted.  A row whose key (or `by:` key) is masked, or
-# a NaN, is in no window and has no window: its answers are UNDEF.  A masked
+# a float key that is NaN or infinite, is in no window and has no window: its
+# answers are UNDEF (a distance to an infinite key has no value).  A masked
 # value is in the windows (it counts in {#elements}) but, as in any
 # reduction, takes no part in the reductions.
 #

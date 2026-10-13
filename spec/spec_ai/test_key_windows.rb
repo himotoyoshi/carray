@@ -154,6 +154,15 @@ class TestKeyWindows < Test::Unit::TestCase
     end
   end
 
+  # An infinite float key, as a NaN one, is in no window and has none.
+  def test_an_infinite_key_is_in_no_window
+    inf = Float::INFINITY
+    v = CA_FLOAT64([1, 10, 100, 1000])
+    w = v.windows(on: CA_FLOAT64([-inf, 0, 1, inf]), before: inf, exclude: nil)
+    assert_equal [UNDEF, 1, 2, UNDEF], w.elements.to_a
+    assert_equal [UNDEF, 10.0, 110.0, UNDEF], w.sum.to_a
+  end
+
   # A width the key's unit does not divide gives bounds on the finer unit,
   # the bounds the windows were cut at.
   def test_bounds_on_a_unit_finer_than_the_key

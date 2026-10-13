@@ -1090,7 +1090,7 @@ w.mean             # => frame of the windowed mean of every column that has one
 w.elements         # => how many rows each window held
 ```
 
-The window of a row whose key is t runs from `t - before` to `t + after`; `exclude:` leaves out the lower end (the default, so `before: "1 hour"` is the hour ending at t), the upper end, both or neither. `by:` keeps each window within the rows of the same station. The rows need not be sorted, and the answers come in row order.
+The window of a row whose key is t runs from `t - before` to `t + after`; `exclude:` leaves out the lower end (the default, so `before: "1 hour"` is the hour ending at t), the upper end, both or neither. `by:` keeps each window within the rows of the same station. The rows need not be sorted, and the answers come in row order. A row whose key is masked, NaN or infinite is in no window and has no window; its answers are `UNDEF`.
 
 To check that each window is what you meant, `first_key` / `last_key` give the keys it really started and ended at, and with `interval:` (the grid step of the key) `is_complete` says whether it holds every point of the grid:
 
