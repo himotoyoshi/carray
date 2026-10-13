@@ -942,7 +942,6 @@ extern const rb_data_type_t cawindow_data_type;
 extern const rb_data_type_t carray_mask_data_type;
 extern const rb_data_type_t cablock_mask_data_type;
 extern const rb_data_type_t cagrid_mask_data_type;
-extern const rb_data_type_t camapping_mask_data_type;
 extern const rb_data_type_t careduce_mask_data_type;
 extern const rb_data_type_t carefer_mask_data_type;
 extern const rb_data_type_t caselect_mask_data_type;
@@ -999,50 +998,59 @@ extern VALUE rb_cCArrayObject;
 
 #define CA_CHECK_DATA_TYPE(data_type) \
   do { \
-    if ( data_type <= CA_NONE || data_type >= CA_NTYPE ) { \
-      rb_raise(rb_eArgError, "invalid data_type id %i", data_type);     \
+    int ca_dt_ = (data_type); \
+    if ( ca_dt_ <= CA_NONE || ca_dt_ >= CA_NTYPE ) { \
+      rb_raise(rb_eArgError, "invalid data_type id %i", ca_dt_);     \
     } \
-    if ( ! ca_valid[data_type] ) { \
-      rb_raise(rb_eCADataTypeError, "data_type %s is disabled", ca_type_name[data_type]);    \
+    if ( ! ca_valid[ca_dt_] ) { \
+      rb_raise(rb_eCADataTypeError, "data_type %s is disabled", ca_type_name[ca_dt_]);    \
     } \
   } while (0)
 
 #define CA_CHECK_DATA_TYPE_NUMERIC(data_type) \
-  if ( data_type <= CA_NONE || data_type >= CA_NTYPE || !ca_valid[data_type] || data_type == CA_FIXLEN || data_type == CA_OBJECT ) { \
-    rb_raise(rb_eCADataTypeError, "invalid numeric data type"); \
-  }
+  do { \
+    int ca_dt_ = (data_type); \
+    if ( ca_dt_ <= CA_NONE || ca_dt_ >= CA_NTYPE || !ca_valid[ca_dt_] || \
+         ca_dt_ == CA_FIXLEN || ca_dt_ == CA_OBJECT ) { \
+      rb_raise(rb_eCADataTypeError, "invalid numeric data type"); \
+    } \
+  } while (0)
 
 #define CA_CHECK_RANK(ndim) \
-  if ( ndim <= 0 || ndim > CA_RANK_MAX ) { \
-    rb_raise(rb_eArgError, "invalid ndim"); \
-  }
+  do { \
+    if ( (ndim) <= 0 || (ndim) > CA_RANK_MAX ) { \
+      rb_raise(rb_eArgError, "invalid ndim"); \
+    } \
+  } while (0)
 
 #define CA_CHECK_DIM(ndim, dim)     \
-  { \
+  do { \
     int8_t i_; \
-    for (i_=0; i_<ndim; i_++) { \
-      if ( dim[i_] < 0 ) { \
+    for (i_=0; i_<(ndim); i_++) { \
+      if ( (dim)[i_] < 0 ) { \
         rb_raise(rb_eArgError, "negative size dimension at %i-dim", i_);  \
       } \
     } \
-  }
+  } while (0)
 
 /* A fixlen cell is at least one byte wide.  A zero-width cell has one
    possible value, and a strided view of it cannot say which cell is which:
    its byte strides are all zero. */
 #define CA_CHECK_BYTES(data_type, bytes) \
-  if ( data_type == CA_FIXLEN ) { \
-    if ( bytes <= 0 ) {                            \
-      rb_raise(rb_eArgError,                   \
-               "invalid bytes (a fixlen needs bytes: of 1 or more)"); \
+  do { \
+    if ( (data_type) == CA_FIXLEN ) { \
+      if ( (bytes) <= 0 ) {                            \
+        rb_raise(rb_eArgError,                   \
+                 "invalid bytes (a fixlen needs bytes: of 1 or more)"); \
+      } \
     } \
-  } \
-  else { \
-    bytes = ca_sizeof[data_type]; \
-    if ( bytes <= 0 ) {           \
-      rb_raise(rb_eArgError, "invalid bytes"); \
+    else { \
+      (bytes) = ca_sizeof[(data_type)]; \
+      if ( (bytes) <= 0 ) {           \
+        rb_raise(rb_eArgError, "invalid bytes"); \
+      } \
     } \
-  }
+  } while (0)
 
 /* An index into `n` places, counted from the end when negative, outside of
    which IndexError is raised naming the method the user called, `what` the
@@ -1476,9 +1484,12 @@ int     ca_attach_is_alias (void *ap);
 
 /* OR operand masks into
    ca_out->mask without ca_attach on operand masks (= gathers via
-   ca_xfer_all into arena scratch then byte OR-folds).  ca_out must be
-   a freshly templated entity.  For bang variant where ca_out IS one of
-   the operands, the existing mask is preserved as initial accumulator. */
+   ca_xfer_all into arena scratch then byte OR-folds).  ca_out's mask is
+   written through its ptr, so ca_out is an entity or an attached view.
+   Each operand other than a scalar has ca_out's number of elements
+   (ArgumentError otherwise); n is at most 8.  For bang variant where
+   ca_out IS one of the operands, the existing mask is preserved as
+   initial accumulator. */
 void    ca_mask_overlay_safe (CArray *ca_out, int n, ...);
 
 #define ca_is_caobject(ca) ( (ca)->obj_type == CA_OBJ_OBJECT )
@@ -1679,7 +1690,7 @@ void    ca_copy_mask_overwrite (void *ap, ca_size_t elements, int n, ...);
 ca_size_t ca_count_masked (void *ap);
 ca_size_t ca_count_not_masked (void *ap);
 void    ca_unmask (void *ap, char *fill_value);
-CArray *ca_unmasked_copy (void *ap, char *fill_value);
+CArray *ca_unmask_copy (void *ap, char *fill_value);
 
 /* API : cast, conversion */
 
