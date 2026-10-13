@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame.from_csv(path, header: false, columns: ["c1", "c2"])`
+  selects columns by the names a file without a header gets (`c0`, `c1`,
+  ...). Before, only indexes selected there.
+
 - New: `CAFrame#cast` takes `:categorical`, which makes the column a
   `CACategorical` of its values, so `from_csv(path, types: { "station" =>
   :categorical })` reads a column of repeated text as categories. A text

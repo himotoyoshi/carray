@@ -425,8 +425,12 @@ class CAFrame
       indexes = @selection.flat_map do |c|
         case c
         when String
-          j = names&.index(c)
-          raise KeyError, "from_csv: columns: names no column #{c.inspect}" if j.nil?
+          # Without a header the columns are named c0, c1, ... by position.
+          j = names ? names.index(c) : c[/\Ac(0|[1-9]\d*)\z/, 1]&.to_i
+          if j.nil?
+            raise KeyError, "from_csv: columns: names no column #{c.inspect}" +
+                            (names ? "" : " (with no header the columns are c0, c1, ...)")
+          end
           j
         when Integer then c
         else

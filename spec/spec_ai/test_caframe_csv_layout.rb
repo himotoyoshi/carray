@@ -132,6 +132,8 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
         assert_equal [%w[b c d], %w[2 6], %w[3 7], %w[4 8]], cells(read(wide, columns: 1..))
         assert_equal [%w[d a], %w[4 8], %w[1 5]], cells(read(wide, columns: [3, "a"]))
         assert_equal [%w[c1 c3], %w[2 6], %w[4 8]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: [1, 3]))
+        # Without a header the default names select too.
+        assert_equal [%w[c3 c0], %w[4 8], %w[1 5]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: %w[c3 c0]))
         assert_equal [%w[y], %w[2 6]], cells(read("1,2,3,4\n5,6,7,8\n", column_names: %w[w y x z], columns: %w[y]))
         df = read(wide) { |r| r.header; r.columns "d"; r.data }
         assert_equal [%w[d], %w[4 8]], cells(df)
@@ -149,6 +151,9 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     err = assert_raise(ArgumentError) { read(wide, columns: [0, 3]) }
     assert_equal "from_csv: columns: 3 is past the 3 columns of the file", err.message
     assert_raise(ArgumentError) { read(wide, columns: [0, "a"]) }
+    err = assert_raise(KeyError) { read("1,2\n", header: false, columns: %w[c01]) }
+    assert_equal 'from_csv: columns: names no column "c01" (with no header the columns are c0, c1, ...)', err.message
+    assert_raise(KeyError) { read(wide, columns: %w[c0]) }
     assert_raise(ArgumentError) { read(wide, columns: []) }
     assert_raise(ArgumentError) { read(wide, columns: [-1]) }
     assert_raise(KeyError) { read(wide, columns: %w[a], types: { "b" => :int32 }) }

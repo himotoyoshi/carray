@@ -56,7 +56,9 @@ class CAFrame
   #             header then defaults to none
   #   columns:  the columns to read, by name or by index from 0 (Integers
   #             and Ranges), in the order the frame has them; the others are
-  #             read past without a String made for their fields
+  #             read past without a String made for their fields. Without a
+  #             header the columns are named c0, c1, ..., and those names
+  #             select too
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
