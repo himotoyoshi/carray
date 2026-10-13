@@ -235,6 +235,7 @@ class CArray
   autoload_method "self.align_nearest_addr", "carray/methods/align_addr"
   autoload_method "value_counts",    "carray/methods/value_counts"
   autoload_method "nunique",         "carray/methods/nunique"
+  autoload_method "lag",             "carray/methods/lag"
   autoload_method "is_mode",         "carray/methods/mode"
   autoload_method "mode",            "carray/methods/mode"
   autoload_method "snap",           "carray/methods/snap"

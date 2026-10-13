@@ -712,20 +712,43 @@ class CABlockIterator < CAIterator
     define_method(op) { block_scan(op) }
   end
 
+  # @overload lag(n = 1)
+  #   Per-tile value `n` steps earlier, counting the tile's cells row-major;
+  #   UNDEF where the tile has none, so a lag never reaches into another
+  #   tile. A partial edge tile counts only the cells it has.
+  #   @return [CArray] source-shaped
+  def lag (n = 1)
+    unless n.is_a?(Integer)
+      raise TypeError, "lag: n must be an Integer (got #{n.class})"
+    end
+    out = nil
+    # Each region has whole tiles of one size, so the steps are counted over
+    # the cells a tile has rather than over the padding of a partial one.
+    each_region do |strip_ranges, tiles, _out_ranges|
+      view   = @source[*strip_ranges].block_view(*tiles)
+      grid   = view.shape[0, @sndim]
+      lagged = view.copy.reshape(*grid, tiles.inject(1, :*))
+                   .lag(n, axis: @sndim).reshape(*grid, *tiles)
+      out ||= lag_output(lagged)
+      out[*strip_ranges].block_view(*tiles)[] = lag_values(out, lagged)
+    end
+    out || @source.copy
+  end
+
   private
 
   # Drive a within-tile segment scan: scan each tile flattened row-major and
   # scatter back to a source-shaped result.  The output data type is taken from the
   # first tile's scan (all tiles share it); the padded margin is UNDEF and the
   # OOB cells of a partial edge tile are cropped from the result.
-  def block_scan (op)
+  def block_scan (op, *args)
     tgv  = tile_grid_view
     nils = Array.new(@sndim, nil)
     pout = nil
     pgv  = nil
     CArray.each_index(*@shape) do |*g|
       tile    = tgv[*g, *nils]
-      scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
+      scanned = tile.copy.reshape(tile.elements).public_send(op, *args).reshape(*@sizes)
       unless pout
         pout = CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
         pout[] = UNDEF
@@ -734,6 +757,23 @@ class CABlockIterator < CAIterator
       pgv[*g, *nils] = scanned
     end
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
+  end
+
+  # A source-shaped array that can hold what #lag gives: of its kind, or an
+  # object array for a read-only Face, which cannot be written cell by cell.
+  def lag_output (lagged)
+    if lagged.face? && lagged.read_only?
+      CArray.object(*@source.shape)
+    else
+      lagged.__send__(:__blank_like__, @source.shape)
+    end
+  end
+
+  # The lagged values as +out+ can hold them: a Face going into an object
+  # array goes as its surface values, not its storage.
+  def lag_values (out, lagged)
+    return lagged unless out.data_type == CA_OBJECT && lagged.face?
+    CArray.object(*lagged.shape) { lagged.to_a }
   end
 
   # A padded entity whose interior holds the source and whose partial-edge

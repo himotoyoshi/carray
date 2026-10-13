@@ -114,6 +114,8 @@ it.cumsum
 
 The scans are `cumsum` `cumprod` `cummax` `cummin` `cumcount`. As in
 `CArray#cumsum`, a masked cell inside a segment holds the running value.
+`lag(n)` gives each cell the value `n` steps earlier in its segment (`UNDEF`
+where the segment has none), so a lag never reaches into the segment before.
 
 `each` yields each segment as a CArray (an empty segment yields an empty
 array); `reduce { |s| ... }` folds each segment to one value and

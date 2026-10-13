@@ -265,6 +265,19 @@ keeps its Face (`cummin` of a `CATime` column is a `CATime`), and a scan the
 core refuses (`cumsum` of a `CATime` column) is refused here, in the core's
 words.
 
+`lag(n)` gives each cell the value `n` steps earlier among its category's
+members, in source order, as `CArray#lag` does along an axis: a cell with no
+such member is `UNDEF`, so a lag never reaches into another category. A
+negative `n` looks ahead. With `axis:` the categorical classifies the
+positions along that axis, as for the scans.
+
+```ruby
+v   = CA_FLOAT64([10, 20, 11, 21, 12])
+grp = v.group_by_category(CA_OBJECT(%w[a b a b a]).categorize)
+grp.lag        #  => [UNDEF, UNDEF, 10.0, 20.0, 11.0]
+v - grp.lag    #  => the change since the previous member of the same category
+```
+
 ## N-dimensional value and categorical
 
 `value` and `cat` may be N-dimensional; both are read flat, so the result is

@@ -1095,6 +1095,19 @@ class CAWindowIterator < CAIterator
     end
   end
 
+  # @!method lag(n = 1)
+  #   Not supported for a window iterator. A lag writes each cell the value
+  #   some steps earlier in its piece, which needs each cell to have one
+  #   position in one piece; overlapping windows put a cell in many windows.
+  #   Use `source.lag(n, axis:)` for the lag along an axis.
+  #   @raise [NotImplementedError]
+  def lag (*)
+    raise NotImplementedError,
+          "#{self.class} has no lag: a cell belongs to many overlapping windows, " \
+          "so it has no single position to step back from; use " \
+          "source.lag(n, axis:) for the lag along an axis."
+  end
+
   private
 
   # Yield every anchor index (the output iteration space) as an index Array of

@@ -573,6 +573,24 @@ class CAGroupIterator
     scan_op(:cumcount, kw)
   end
 
+  # @overload lag(n = 1, axis: :group)
+  #   Per-group value `n` steps earlier, counting a group's members in
+  #   row-major position order along the grouped axes (per band), as the
+  #   scans do; UNDEF where the group has none, so a lag never reaches
+  #   another group. Without :group it is the value's own `lag` along an
+  #   axis. A negative `n` looks ahead.
+  #   @return [CArray] source-shaped
+  def lag (n = 1, axis: nil)
+    has_group, fused = AxisGroup.parse_axis(axis)
+    return value.lag(n, axis: axis) unless has_group
+    unless fused.empty?
+      raise ArgumentError,
+            "axis_group lag: folding a band into a lag (axis: [:group, k]) " \
+            "is not supported; a lag preserves the source shape"
+    end
+    scan_by_core(:lag, n)
+  end
+
   # ---- materialize path: order statistics + generic iteration ------------
   #
   # These need every member of a group held together, so (unlike the scatter
@@ -837,12 +855,12 @@ class CAGroupIterator
 
   # A scan the kernel does not answer as the core does: each group block is
   # grouped through the composite categorical, whose scans are the core's.
-  def scan_by_core (op)
+  def scan_by_core (op, *args)
     ccat, _kd, gslots, bslots, gaxes = composite_layout
-    return value.group_by_category(ccat).public_send(op) if bslots.empty?
+    return value.group_by_category(ccat).public_send(op, *args) if bslots.empty?
     out = nil
     each_band_block(ccat, gslots, bslots, gaxes) do |val_idx, _oi, _co, gi|
-      result = gi.public_send(op)
+      result = gi.public_send(op, *args)
       out ||= blank_of(result, value.shape)
       out[*val_idx] = result
     end

@@ -531,6 +531,16 @@ class CACategoricalIterator < CASegmentIterator
     end
   end
 
+  # #lag along an axis (case A): each group's positions along the axis, every
+  # other axis kept, lagged along it, so a lag never reaches another group.
+  def axis_lag (n, axis)
+    axis = checked_axis(axis, :lag)
+    classified_along!(:lag, axis)
+    each_group_along(axis, ->(shape) { blank_like(@value, shape) }) do |g|
+      g.lag(n, axis: axis)
+    end
+  end
+
   # #map along an axis (case A): the block receives each group's positions
   # along the axis, every other axis kept, and its answer goes back to them.
   def axis_map (axis, data_type, &block)
@@ -566,7 +576,7 @@ class CACategoricalIterator < CASegmentIterator
           "positions along axis #{axis} (shape [#{n}]); got shape " \
           "#{@cat.codes.shape.inspect}"
   end
-  private :axis_scan, :axis_map, :each_group_along, :classified_along!
+  private :axis_scan, :axis_lag, :axis_map, :each_group_along, :classified_along!
 
   # Axis-aware wsum + wmean fused (single kernel call, both outputs).  Returns
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit

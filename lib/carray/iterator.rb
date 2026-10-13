@@ -189,7 +189,8 @@ class CAIterator
   # required: `map` is a per-piece element-wise transform scattered back to the
   # source, `sort_addr` is a per-piece sort returning source flat addresses, and
   # the segment scans (cumsum / cumprod / cummax / cummin / cumcount) write a
-  # per-cell running statistic of each piece.  A member implements each when it
+  # per-cell running statistic of each piece, and `lag` the value some steps
+  # earlier in the same piece.  A member implements each when it
   # is well-defined and overrides it to raise with a reason when it is not.  The
   # scans belong here for the same reason as map: a running per-cell value is
   # single-valued only when each cell belongs to exactly one piece, so the
@@ -234,8 +235,17 @@ class CAIterator
   #   masked within each piece.
   #   @return [CArray] shaped like the source.
   #   @raise [NotImplementedError] for a member whose pieces overlap.
+  # @!method lag(n = 1)
+  #   Returns a source-shaped array whose cell holds the value `n` steps
+  #   earlier within the same piece, as `CArray#lag` does along an axis; a
+  #   cell with no such value in its piece is UNDEF, so a lag never reaches
+  #   across into another piece.
+  #   @param n [Integer] steps back; a negative `n` looks ahead.
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap, where a
+  #     cell has no single position within a piece.
   [:map, :sort_addr,
-   :cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |name|
+   :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
     define_method(name) do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"
     end

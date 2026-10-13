@@ -129,6 +129,10 @@ category code out of vocabulary or masked), and a `cummax` / `cummin` cell whose
 group has **no member yet** (an empty extremum has no value — the same reason an
 empty-group `max` reduces to `UNDEF`).
 
+`lag(n, axis: :group)` follows the same order: each cell gets the value `n`
+steps earlier among its group's members (per band), `UNDEF` where there is none,
+so a lag never reaches another group.
+
 ```ruby
 # per-station running total through the year, kept in the [station, month] grid
 data[station, nil].cumsum(axis: :group)

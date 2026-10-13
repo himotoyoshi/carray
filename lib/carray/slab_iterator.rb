@@ -365,6 +365,16 @@ class CASlabIterator < CAIterator
     RUBY
   end
 
+  # @overload lag(n = 1)
+  #   Per-slab value `n` steps earlier along the slab axis (UNDEF where the
+  #   slab has none), as `reference.lag(n, axis: slab_axis)`: a view of the
+  #   reference. A multi-axis slab has no single direction to step in, so it
+  #   raises, as the scans do.
+  #   @return [CArray] reference-shaped
+  def lag (n = 1)
+    @reference.lag(n, axis: single_scan_axis(:lag))
+  end
+
   private
 
   # The single slab axis for the order surface (core sort takes one integer

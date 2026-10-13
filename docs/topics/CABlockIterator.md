@@ -152,6 +152,18 @@ a.blocks(2, 2).reduce { |tile| tile.max - tile.min }   # a tile-grid result
 is the element-wise fold. Each yielded tile is a uniform `b0×b1×…` CArray with
 out-of-bounds cells masked.
 
+### `lag`
+
+`lag(n)` gives each cell the value `n` steps earlier in its own tile, counting
+the tile's cells row-major; a cell with no such value in its tile is `UNDEF`,
+so a lag never reaches into another tile. A partial edge tile counts only the
+cells it has:
+
+```ruby
+a = CArray.int32(3, 5).seq
+a.blocks(2, 2).lag[nil, 4]   # => [UNDEF, 4, UNDEF]   (the edge tiles 2x1 and 1x1)
+```
+
 ## Winner address and sorting
 
 Because tiles do not overlap, every tile cell is a real source cell, so the

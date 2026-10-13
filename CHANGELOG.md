@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CArray#lag(n = 1, axis:)` is the value `n` steps earlier along one
+  axis, UNDEF where there is none, so `x - x.lag` is UNDEF at the start
+  instead of a difference against 0. An array of more than one dimension
+  must name the axis. It is `shift` with `UNDEF` as the fill value and
+  returns a view like it; `shift` itself still fills with 0. The
+  slab, block, segment, categorical and axis-group iterators have `lag(n)`
+  too, which never reaches into another piece: `it.lag` is the previous
+  value of the same station. The window iterator refuses it.
+
 - Change: the values a `CAFrame` group's `table` block or a Proc
   reduction of `aggregate` returns become typed columns, as `from_records`
   types a record's values: Integers int64, numbers float64, arrays of one

@@ -134,6 +134,14 @@ b.shift(1)           #  => [ 0, 1, 2, 3, 4 ]    shifted right, vacated slot fill
 b.roll(1)            #  => [ 5, 1, 2, 3, 4 ]    rotated right (the last element wraps around)
 ```
 
+`shift` fills the vacated slot with a value (0 unless you give `fill_value:`). When what you want is *the previous value* — for a difference along a time series, say — use `lag`, which leaves `UNDEF` where there is no earlier value, so the difference there is `UNDEF` rather than a difference against 0:
+
+```ruby
+b.lag                #  => [ UNDEF, 1, 2, 3, 4 ]
+b - b.lag            #  => [ UNDEF, 1, 1, 1, 1 ]
+b.lag(-1)            #  => [ 2, 3, 4, 5, UNDEF ]   the value one step later
+```
+
 For a 2-D array, `flip` and `sort` take the axis to act on:
 
 ```ruby

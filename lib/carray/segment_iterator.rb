@@ -572,6 +572,37 @@ class CASegmentIterator < CAIterator
     define_method(op) { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }
   end
 
+  # @overload lag(n = 1)
+  #   Returns the value `n` steps earlier within each segment, source-shaped,
+  #   as `CArray#lag` does along an axis. A cell whose segment has no value
+  #   `n` steps back is UNDEF, so a lag never reaches into the segment before;
+  #   a cell in no segment is UNDEF. A negative `n` looks ahead.
+  #   @param n [Integer]
+  #   @return [CArray]
+  def lag (n = 1, axis: nil)
+    unless n.is_a?(Integer)
+      raise TypeError, "lag: n must be an Integer (got #{n.class})"
+    end
+    return axis_lag(n, axis) if axis
+    out = blank_like(@value, @src_shape)
+    out[] = UNDEF
+    m = grouped.elements
+    return out if m.zero?
+    # The copy is in segment order, so one shift moves every segment; the
+    # cells it brought across a segment boundary are then cut.
+    lagged = grouped.lag(n)
+    lagged = out.data_type == CA_OBJECT && lagged.face? ?
+               CArray.object(m) { lagged.to_a } : lagged.copy
+    unless n.zero?
+      seg   = CArray.segment_index(offsets: @bounds)
+      start = @bounds[seg]
+      pos   = CArray.int64(m).seq! - start
+      lagged[n > 0 ? pos.lt(n) : pos.ge(@bounds[seg + 1] - start + n)] = UNDEF
+    end
+    out.reshape(@value.elements)[perm] = lagged
+    out
+  end
+
   private
 
   # The contiguous copy every reduction works from. On a CACategoricalIterator
@@ -956,6 +987,10 @@ class CASegmentIterator < CAIterator
   end
 
   def axis_scan (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_lag (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
