@@ -36,6 +36,28 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: an operator over an array with an axis of length 0 could crash or
+  write past its result when the other operand was a row broadcast to it
+  or a view that is not contiguous: `CArray.int64(0, 4096) +
+  CArray.int64(1, 4096)` crashed, and an integer division raised
+  ZeroDivisionError for cells that do not exist. It now returns the empty
+  result. The same holds for the unary operators and the comparisons.
+
+- Fix: `then_else` and the lazy `fma` / `fms` / `clip` refused an operand
+  with no cells beside a row to broadcast (`CArray.boolean(0, 5).then_else(
+  CArray.int64(1, 5), CArray.int64(0, 5))` raised). They now answer the
+  empty result, as the binary operators do.
+
+- Fix: an in-place operator (`add!`, ...) refused a source whose size-1
+  axis is repeated onto an axis of length 0, which assignment (`x[] = row`)
+  accepted. It now accepts it too.
+
+- Fix: `windows` called with ranges on a view made by `window` rolled over
+  the array the view was cut from, not over the view: `x.window(-1..2)
+  .windows(-1..1).sum` had the length of `x`. It now rolls over the view.
+  `CAWindowIterator.new(view)` with no ranges still reads its ranges from
+  the view.
+
 - New: a `CAFrame` group has `filter`, which keeps the rows of the groups
   its block chooses: the block gets the grouped frame and returns one
   boolean per group, as in
