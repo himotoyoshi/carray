@@ -111,6 +111,20 @@ r = (ref.data_type == t) ? ref  : ref.to_type(t)
 It is legitimate when the target is "a fixed type the kernel structurally
 requires" (write that with `wrap_readonly`).
 
+**Matching values.** A method that compares the values of two arrays
+(`is_in`, the set operations, `locate_addr`) cannot always meet at the
+`result_type`: a mixed-sign integer pair such as `int8` with `uint8` has the
+common type `uint8`, where `-1` reads as `255`.  These methods widen the common
+type with `value_match_type` (a signed type that holds both, `object` for 64
+bits, double precision for a wide integer beside `float32`), still from both
+sides.
+
+**Checked by a lint.** `rake one_sided_cast_check`
+(`utils/check_one_sided_cast.rb`, run before `rake spec_ai`) finds every cast
+whose target is some array's data type and asks for a note saying why that
+side is the authority — `# coerce: a store into the receiver` in Ruby,
+`/* coerce: ... */` in C.
+
 ## Decision flow
 
 1. Does the operand accept a non-CArray (Numeric/Array/String/MV)?

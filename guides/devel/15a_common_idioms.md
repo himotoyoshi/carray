@@ -132,6 +132,13 @@ Use `rb_ca_wrap_writable` (or `ca_wrap_writable`) when the wrapped view
 must accept writes. This is rare — most kernels write only to outputs
 they allocated themselves.
 
+When the target is not a fixed type but the type of another operand, do
+not cast one side to the other's type: settle a common type with
+`CArray.result_type` and bring both sides to it (or let a binary operator
+do it).  `rake one_sided_cast_check` asks for a `/* coerce: reason */` note
+on any cast whose target is an array's data type, for the cases where one
+side really is the authority (a store into the receiver).
+
 ### Validate shapes
 
 Raise on mismatch — these are the canonical checks
