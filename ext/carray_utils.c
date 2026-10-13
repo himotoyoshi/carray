@@ -158,7 +158,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
     }
     *poffset = start;
     *pcount  = llabs(last - start) + 1;
-    *pstep   = 1;
+    *pstep   = ( last >= start ) ? 1 : -1;
   }
 #ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
   else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
