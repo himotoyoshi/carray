@@ -424,6 +424,15 @@ An index into `n` places goes through `ca_index_in_range(idx, n, "index")`
 outside after that raises `IndexError` naming the method the user called.
 `spec/spec_ai/test_index_out_of_range.rb` lists the doors.
 
+A Ruby value stored into an integer cell goes through
+`ca_obj2integer_fitting(v, data_type)` (`carray_internal.h`): it is read as an
+Integer (`Integer()` for a Float) and refused with `RangeError` when it does
+not fit the cell, as an operator refuses the same scalar. The generated store
+readers (`carray_cast_func.rb`) and record members call it; an array cast
+(`to_type`) keeps the C conversion. `rake integer_store_check`
+(`utils/check_integer_store_narrowing.rb`) reports a C cast that narrows a
+Ruby value into a cell without saying why it fits.
+
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
 matches Ruby convention. A data_type an operation cannot take is
 `CArray::DataTypeError` (`rb_eCADataTypeError`), a subclass of

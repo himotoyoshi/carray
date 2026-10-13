@@ -896,6 +896,7 @@ rb_ca_select_axis_s_new_debug (VALUE klass, VALUE rparent, VALUE rindirect,
                                 VALUE rap_count, VALUE rap_step)
 {
   CArray *parent, *selector;
+  /* fits: an axis number from the view that made it */
   int8_t indirect_axis = (int8_t) NUM2INT(rindirect);
   int8_t ndim;
   int8_t k;

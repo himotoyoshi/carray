@@ -453,6 +453,7 @@ rb_ca_moncmp_build (VALUE p_cary, uint16_t op_id)
 static VALUE
 rb_ca_moncmp_s_build (VALUE klass, VALUE p_cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_moncmp_build(p_cary, op_id);

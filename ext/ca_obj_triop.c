@@ -627,6 +627,7 @@ static VALUE
 rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
                      VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_triop_build(cary1, cary2, cary3, op_id);

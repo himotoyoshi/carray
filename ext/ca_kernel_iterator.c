@@ -4143,6 +4143,7 @@ rb_t1_smoke_init_rc (VALUE klass, VALUE vsrc, VALUE vflags)
   CArray         *src;
   ca_iter_state   st;
   int             rc;
+  /* fits: a development smoke argument, not a cell */
   uint32_t        flags = (uint32_t) NUM2UINT(vflags);
 
   TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
@@ -4185,6 +4186,7 @@ rb_t1_smoke_sum_axes_f64 (int argc, VALUE *argv, VALUE klass)
     rb_raise(rb_eArgError, "too many axes");
   }
   for ( i = 0; i < naxes; i++ ) {
+    /* fits: an axis number, checked by the engine's init */
     slab_axes[i] = (int8_t) NUM2INT(argv[i + 1]);
   }
 
@@ -4298,6 +4300,7 @@ rb_t1_test_new_reduced (int argc, VALUE *argv, VALUE klass)
     rb_raise(rb_eArgError, "too many axes");
   }
   for ( int i = 0; i < naxes; i++ ) {
+    /* fits: an axis number, checked by the engine's init */
     axes[i] = (int8_t) NUM2INT(argv[2 + i]);
   }
   return rb_ca_new_reduced(argv[0], axes, naxes, data_type, 0);
@@ -4382,6 +4385,7 @@ rb_t1_smoke_reduce_write_broadcast (VALUE klass, VALUE vparent,
   ca_size_t       n, i;
   int             rc;
   CArray         *reduce;
+  /* fits: a development smoke argument, not a cell */
   uint8_t         v = (uint8_t) NUM2UINT(vval);
 
   TypedData_Get_Struct(vparent, CArray, &carray_data_type, parent);
@@ -4560,6 +4564,7 @@ rb_caf_smoke_sum_f64 (int argc, VALUE *argv, VALUE klass)
     rb_raise(rb_eArgError, "bad axes count");
   }
   for ( int8_t k = 0; k < naxes; k++ ) {
+    /* fits: an axis number, checked by the engine's init */
     slab_axes[k] = (int8_t) NUM2INT(argv[1 + k]);
     if ( slab_axes[k] < 0 ) slab_axes[k] += ca->ndim;
   }

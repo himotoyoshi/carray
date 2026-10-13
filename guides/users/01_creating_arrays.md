@@ -392,6 +392,8 @@ a = CArray.int64(4).seq!(2**30, 2**30)
 a.max <= CArray::Int32::MAX     #  => false, so a.int32 would wrap
 ```
 
+Storing a value is checked instead. A number that an integer cell cannot hold raises `RangeError` -- in `CA_INT8([300])`, `a[0] = 300`, `a[] = [-1]` on an unsigned array, `fill`, and a record's member -- just as `a + 300` does on an `int8` array. A Float is truncated first, so `1.9` stores as `1` and `1000.0` into `int8` raises. Only a cast between arrays, as above, keeps the wrap.
+
 ## Data type casting
 
 An array's data type is settled when it is made, so changing it means making another array. There are two spellings for that.

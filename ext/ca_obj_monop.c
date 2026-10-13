@@ -925,6 +925,7 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
 static VALUE
 rb_ca_monop_s_build (VALUE klass, VALUE cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_monop_build(cary, op_id);

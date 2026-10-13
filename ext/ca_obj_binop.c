@@ -679,6 +679,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 static VALUE
 rb_ca_binop_s_build (VALUE klass, VALUE l_cary, VALUE r_cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_binop_build(l_cary, r_cary, op_id);

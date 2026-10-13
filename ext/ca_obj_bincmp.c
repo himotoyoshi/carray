@@ -712,6 +712,7 @@ rb_ca_bincmp_s_build (int argc, VALUE *argv, VALUE klass)
   double eps = 0.0;
   (void) klass;
   rb_scan_args(argc, argv, "31", &l_cary, &r_cary, &op_id_val, &eps_val);
+  /* fits: an operation number from the library's own table */
   op_id = (uint16_t) NUM2UINT(op_id_val);
   if ( argc >= 4 ) eps = NUM2DBL(eps_val);
   return rb_ca_bincmp_build(l_cary, r_cary, op_id, eps);
