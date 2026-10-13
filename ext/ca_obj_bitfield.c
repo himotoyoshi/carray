@@ -273,9 +273,6 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
 
   memcpy(ca->dim, parent->dim, ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   return 0;
 }
@@ -288,6 +285,7 @@ ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen,
   ca_bitfield_setup(NULL, parent, offset, bitlen, data_type);
   ca = (CABitfield *) ca_array_alloc(CA_OBJ_BITFIELD, parent->ndim);
   ca_bitfield_setup(ca, parent, offset, bitlen, data_type);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -708,6 +706,7 @@ rb_ca_bitfield_initialize_copy (VALUE self, VALUE other)
   }
   ca_bitfield_setup(ca, cs->parent, cs->bit_start, cs->bit_length,
                     cs->data_type);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

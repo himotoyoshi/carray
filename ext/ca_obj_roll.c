@@ -126,9 +126,6 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
     ca->reps[i] = s;
   }
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   return 0;
 }
@@ -140,6 +137,7 @@ ca_roll_new (CArray *parent, ca_size_t *shift)
   ca_roll_setup(NULL, parent, shift);
   ca = ALLOC(CARoll);
   ca_roll_setup(ca, parent, shift);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -659,6 +657,7 @@ rb_ca_roll_initialize_copy (VALUE self, VALUE other)
   ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CARoll, &caroll_data_type, cs);
   ca_roll_setup(ca, cs->parent, cs->reps);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

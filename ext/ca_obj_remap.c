@@ -147,9 +147,6 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
   ca->nosync    = 0;
   ca->idx       = idx;
 
-  if ( ca_has_mask(ref) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(ref) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -163,6 +160,7 @@ ca_remap_new (CArray *ref, CArray *idx)
 {
   CARemap *ca = (CARemap *) ca_array_alloc(CA_OBJ_REMAP, ref->ndim);
   ca_remap_setup(ca, ref, idx);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 

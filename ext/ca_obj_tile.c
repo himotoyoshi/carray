@@ -116,9 +116,6 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
     ca->dim[i]  = parent->dim[i] * reps[i];
   }
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   return 0;
 }
@@ -130,6 +127,7 @@ ca_tile_new (CArray *parent, ca_size_t *reps)
   ca_tile_setup(NULL, parent, reps);
   ca = ALLOC(CATile);
   ca_tile_setup(ca, parent, reps);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -585,6 +583,7 @@ rb_ca_tile_initialize_copy (VALUE self, VALUE other)
   ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATile, &catile_data_type, cs);
   ca_tile_setup(ca, cs->parent, cs->reps);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

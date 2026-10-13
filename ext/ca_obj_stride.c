@@ -94,10 +94,10 @@ int8_t CA_OBJ_STRIDE;       /* assigned at Init time via ca_install_obj_type */
    override pattern and makes the C-level dispatch wire up correctly
    on the first try. */
 int
-ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
-                 int8_t data_type, ca_size_t bytes,
-                 int8_t ndim, ca_size_t *dim,
-                 ca_size_t *strides, ca_size_t base_offset)
+ca_stride_setup_view (CAStride *ca, int8_t obj_type, CArray *parent,
+                      int8_t data_type, ca_size_t bytes,
+                      int8_t ndim, ca_size_t *dim,
+                      ca_size_t *strides, ca_size_t base_offset)
 {
   ca_size_t elements;
   int  i;
@@ -144,10 +144,23 @@ ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
     ca->strides[i] = strides[i];
   }
 
-  if (parent && ca_has_mask(parent)) {
-    ca_create_mask(ca);
-  }
+  return 0;
+}
 
+/* The public form also takes the parent's mask.  A struct that no Ruby
+   object owns yet is lost if the parent's answer raises; the in-tree
+   constructors use ca_stride_setup_view and ca_view_inherit_mask. */
+int
+ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
+                 int8_t data_type, ca_size_t bytes,
+                 int8_t ndim, ca_size_t *dim,
+                 ca_size_t *strides, ca_size_t base_offset)
+{
+  ca_stride_setup_view(ca, obj_type, parent, data_type, bytes,
+                       ndim, dim, strides, base_offset);
+  if ( ca != NULL ) {
+    ca_view_inherit_mask((VALUE) ca);
+  }
   return 0;
 }
 
@@ -158,11 +171,12 @@ ca_stride_new (int8_t obj_type, CArray *parent,
                ca_size_t *strides, ca_size_t base_offset)
 {
   CAStride *ca;
-  ca_stride_setup(NULL, obj_type, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view(NULL, obj_type, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
   ca = (CAStride *) ca_array_alloc(obj_type, ndim);
-  ca_stride_setup(ca, obj_type, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view(ca, obj_type, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 

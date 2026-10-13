@@ -36,6 +36,17 @@ ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg)
   }
 }
 
+VALUE
+ca_view_inherit_mask (VALUE view)
+{
+  CArray *ca     = (CArray *) view;
+  CArray *parent = ((CAView *) ca)->parent;
+  if ( parent && ca_has_mask(parent) ) {
+    ca_create_mask(ca);
+  }
+  return Qnil;
+}
+
 static VALUE
 ca_copy_fill (VALUE arg)
 {

@@ -103,9 +103,6 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 
   memcpy(ca->dim, dim, ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -119,6 +116,7 @@ ca_fake_new (CArray *parent, int8_t data_type, ca_size_t bytes)
 {
   CAFake *ca = (CAFake *) ca_array_alloc(CA_OBJ_FAKE, parent->ndim);
   ca_fake_setup(ca, parent, data_type, bytes);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -478,6 +476,7 @@ rb_ca_fake_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_FAKE, cs->parent->ndim);
   }
   ca_fake_setup(ca, cs->parent, cs->data_type, cs->bytes);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

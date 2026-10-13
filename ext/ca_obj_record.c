@@ -119,9 +119,6 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
 
   ca->data_class = data_class;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -139,6 +136,7 @@ ca_record_new (CArray *parent, VALUE data_class)
 {
   CARecord *ca = (CARecord *) ca_array_alloc(CA_OBJ_RECORD, parent->ndim);
   ca_record_setup(ca, parent, data_class);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -362,6 +360,7 @@ rb_ca_record_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_RECORD, cs->parent->ndim);
   }
   ca_record_setup(ca, cs->parent, cs->data_class);
+  ca_view_inherit_mask((VALUE) ca);
   /* Marshal loads into an empty instance through here without copying
      ivars, so the parent pin is set from `other`, not inherited. */
   rb_ca_set_parent(self, rb_ca_parent(other));

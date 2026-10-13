@@ -197,9 +197,6 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
   ca->unit      = unit;
   ca->count     = count;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -219,6 +216,7 @@ ca_timedelta_new (CArray *parent, int8_t unit, int64_t count)
   ca_timedelta_setup(NULL, parent, unit, count);
   ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
   ca_timedelta_setup(ca, parent, unit, count);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -333,6 +331,7 @@ rb_ca_timedelta_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_TIMEDELTA, cs->parent->ndim);
   }
   ca_timedelta_setup(ca, cs->parent, cs->unit, cs->count);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

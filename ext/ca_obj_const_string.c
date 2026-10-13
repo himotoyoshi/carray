@@ -143,9 +143,6 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
   ca->buffer      = buffer;
   ca->encoding_id = encoding_id;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -162,6 +159,7 @@ ca_const_string_new (CArray *parent, VALUE buffer, int encoding_id)
 {
   CAConstString *ca = (CAConstString *) ca_array_alloc(CA_OBJ_CONST_STRING, parent->ndim);
   ca_const_string_setup(ca, parent, buffer, encoding_id);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -1146,6 +1144,7 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_CONST_STRING, cs->parent->ndim);
   }
   ca_const_string_setup(ca, cs->parent, cs->buffer, cs->encoding_id);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

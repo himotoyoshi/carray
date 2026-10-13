@@ -75,9 +75,6 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
   ca->count     = count;
   ca->offset    = offset;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -91,6 +88,7 @@ ca_reduce_new (CArray *parent, ca_size_t count, ca_size_t offset)
 {
   CAReduce *ca = ALLOC(CAReduce);
   ca_reduce_setup(ca, parent, count, offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -312,6 +310,7 @@ rb_ca_reduce_initialize_copy (VALUE self, VALUE other)
   TypedData_Get_Struct(other, CAReduce, &careduce_data_type, cs);
 
   ca_reduce_setup(ca, cs->parent, cs->count, cs->offset);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

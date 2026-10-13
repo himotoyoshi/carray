@@ -182,6 +182,28 @@ VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
 
 void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
+/* A view takes its parent's mask by asking the parent whether it has one,
+   and a parent that is a CAObject answers in Ruby and can raise.  A view's
+   setup therefore does not ask: its constructor calls this under
+   ca_fill_or_free once the struct holds everything the setup allocated,
+   and an initialize_copy, whose struct Ruby already owns, calls it
+   directly.  `view` is the CArray * cast to VALUE. */
+
+VALUE   ca_view_inherit_mask (VALUE view);
+
+/* The same for the mask a CAWindow / CAShift with an axis of MASK bounds
+   makes for itself (ca_obj_window.c). */
+
+VALUE   ca_window_create_bounds_mask (VALUE view);
+
+/* ca_stride_setup without asking the parent for its mask; see
+   ca_view_inherit_mask.  The in-tree subclasses use this. */
+
+int     ca_stride_setup_view (CAStride *ca, int8_t obj_type, CArray *parent,
+                              int8_t data_type, ca_size_t bytes,
+                              int8_t ndim, ca_size_t *dim,
+                              ca_size_t *strides, ca_size_t base_offset);
+
 /* Non-zero iff the object is an element-wise lazy view (CAMonOp / CABinOp /
    CABinCmp / CAMonCmp / CALazyMarker).  The streaming branch of the
    mkkernel-generated reduction kernels tests this to decide whether it can

@@ -141,10 +141,9 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t ndim, ca_size_t *dim,
     }
   }
 
-  /* CAREFUL: the CABlock tail (offset / start / step / count / size0)
-     must be filled BEFORE ca_stride_setup.  ca_stride_setup may auto-
-     dispatch ca_create_mask when the parent has a mask, and
-     ca_block_func_create_mask reads those tail fields.
+  /* The CABlock tail (offset / start / step / count / size0) is filled
+     here; ca_block_func_create_mask reads it when the constructor takes
+     the parent's mask (ca_view_inherit_mask) after this setup.
 
      Pool path: start/step/count/size0 already point into _pool (wired
      by ca_block_pool_init); only memcpy the values.  Non-pool path:
@@ -161,10 +160,10 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t ndim, ca_size_t *dim,
   memcpy(ca->count, count, ndim * sizeof(ca_size_t));
   memcpy(ca->size0, dim,   ndim * sizeof(ca_size_t));
 
-  ca_stride_setup((CAStride *) ca, CA_OBJ_BLOCK, parent,
-                  parent->data_type, parent->bytes,
-                  ndim, count, strides,
-                  base_offset_elements * parent->bytes);
+  ca_stride_setup_view((CAStride *) ca, CA_OBJ_BLOCK, parent,
+                       parent->data_type, parent->bytes,
+                       ndim, count, strides,
+                       base_offset_elements * parent->bytes);
 
   return 0;
 }
@@ -176,6 +175,7 @@ ca_block_new (CArray *parent, int8_t ndim, ca_size_t *dim,
 {
   CABlock *ca = (CABlock *) ca_array_alloc(CA_OBJ_BLOCK, ndim);
   ca_block_setup(ca, parent, ndim, dim, start, step, count, offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -265,6 +265,7 @@ rb_cb_initialize_copy (VALUE self, VALUE other)
   }
   ca_block_setup(ca, cs->parent, cs->ndim, cs->size0,
                  cs->start, cs->step, cs->count, cs->offset);
+  ca_view_inherit_mask((VALUE) ca);
   rb_ca_set_parent(self, rb_ca_parent(other));
   return self;
 }

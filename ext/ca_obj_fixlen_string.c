@@ -137,9 +137,6 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
   ca->attach    = 0;
   ca->nosync    = 0;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -159,6 +156,7 @@ ca_fixlen_string_new (CArray *parent)
   ca_fixlen_string_setup(NULL, parent);
   ca = (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
   ca_fixlen_string_setup(ca, parent);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -282,6 +280,7 @@ rb_ca_fixlen_string_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_FIXLEN_STRING, cs->parent->ndim);
   }
   ca_fixlen_string_setup(ca, cs->parent);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

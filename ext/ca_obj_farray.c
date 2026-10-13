@@ -7,6 +7,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_view_inherit_mask */
 
 extern ca_operation_function_t ca_stride_func;
 
@@ -46,9 +47,9 @@ ca_farray_setup (CAStride *ca, CArray *parent)
     strides[i] = parent_byte_stride[ndim - 1 - i];
   }
 
-  ca_stride_setup(ca, CA_OBJ_FARRAY, parent,
-                  parent->data_type, parent->bytes,
-                  ndim, newdim, strides, 0);
+  ca_stride_setup_view(ca, CA_OBJ_FARRAY, parent,
+                       parent->data_type, parent->bytes,
+                       ndim, newdim, strides, 0);
 
   if (ca_is_scalar(parent)) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -61,6 +62,7 @@ ca_farray_new (CArray *parent)
 {
   CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_FARRAY, parent->ndim);
   ca_farray_setup(ca, parent);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 

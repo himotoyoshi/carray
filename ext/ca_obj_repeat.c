@@ -86,9 +86,9 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
     return 0;
   }
 
-  ca_stride_setup(ca, CA_OBJ_REPEAT, parent,
-                  parent->data_type, parent->bytes,
-                  ndim, newdim, strides, 0);
+  ca_stride_setup_view(ca, CA_OBJ_REPEAT, parent,
+                       parent->data_type, parent->bytes,
+                       ndim, newdim, strides, 0);
 
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
   if (ca->mask) {
@@ -104,6 +104,7 @@ ca_repeat_new (CArray *parent, int8_t ndim, ca_size_t *count)
   ca_repeat_setup(NULL, parent, ndim, count);
   ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
   ca_repeat_setup(ca, parent, ndim, count);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 

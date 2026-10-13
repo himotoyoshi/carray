@@ -129,14 +129,13 @@ ca_refer_setup (CARefer *ca, CArray *parent,
     return 0;
   }
 
-  /* CAREFUL: initialise mask0 before ca_stride_setup — the setup
-     may dispatch to ca_refer_func_create_mask, which writes to
-     mask0.  Leaving it uninitialised risks freeing a garbage
-     pointer during error unwind. */
+  /* mask0 is written by ca_refer_func_create_mask when the constructor
+     takes the parent's mask, and freed on error unwind, so it starts
+     NULL. */
   ca->mask0 = NULL;
 
-  ca_stride_setup((CAStride *) ca, CA_OBJ_REFER, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view((CAStride *) ca, CA_OBJ_REFER, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
 
   if (ca_is_scalar(parent)) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -153,6 +152,7 @@ ca_refer_new (CArray *parent,
   ca_refer_setup(NULL, parent, data_type, ndim, dim, bytes, offset);
   ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
   ca_refer_setup(ca, parent, data_type, ndim, dim, bytes, offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -260,6 +260,7 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
      unusual mod-bytes alignments. */
   ca_refer_setup(ca, cs->parent, cs->data_type, cs->ndim, cs->dim,
                  cs->bytes, cs->base_offset / cs->parent->bytes);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 
