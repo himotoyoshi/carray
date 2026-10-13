@@ -72,6 +72,18 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     assert_equal 0, empty.group_by("k").to_frame.nrow
   end
 
+  # The index is a key, named by the row axis name, as resample takes it.
+  def test_group_by_the_index
+    df  = frame.set_index("station")
+    grp = df.group_by("station")
+    assert_equal %w[tokyo osaka nagoya], grp.labels
+    assert_equal [11.5, 20.0, 30.0], grp.mean("temp").to_a
+    assert_equal %w[tokyo osaka nagoya], grp.mean.index.to_a
+    assert_equal %w[osaka nagoya], grp.filter { |g| g.mean("temp") > 15.0 }.index.to_a
+    assert_equal [false, false, true, false, true, false], df.is_duplicate("station").to_a
+    assert_raise(KeyError) { df.group_by("nope") }
+  end
+
   def test_resample_bins
     t  = CArray.time_range("2024-01-01T00:00", "2024-01-01T05:00", unit: :h)
     v  = CA_FLOAT64([1, 2, 3, 4, 5, 6])

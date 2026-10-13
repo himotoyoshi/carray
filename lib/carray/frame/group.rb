@@ -29,7 +29,8 @@ class CAFrame
   # +is_duplicate(except: :none).not+ is the rows that appear only once.
   # Values compare as group_by compares keys (NaN is one value, -0.0 is 0.0),
   # and a row with a masked cell in those columns is never a duplicate, as a
-  # masked key is in no group. The index is not compared.
+  # masked key is in no group. The index is compared only when named
+  # (by the row axis name, as group_by takes it).
   #
   #   df[df.is_duplicate.not]                # the rows without repeats
   #   df.is_duplicate("station", "time")     # repeats of the pair
@@ -50,7 +51,10 @@ class CAFrame
     names = column_names if names.empty?
     raise ArgumentError, "is_duplicate: the frame has no column to compare" if names.empty?
     cols = names.map do |n|
-      col = @columns.fetch(n) { raise KeyError, "is_duplicate: no column #{n.inspect}" }
+      col = @columns.fetch(n) do
+        next @index if @index && @axis_name == n      # the index, as group_by takes it
+        raise KeyError, "is_duplicate: no column #{n.inspect}"
+      end
       unless col.ndim == 1
         raise ArgumentError,
               "is_duplicate: #{n.inspect} has shape #{col.shape.inspect}, not one value " \
@@ -175,7 +179,12 @@ class CAFrame
   private def key_column(key, verb = "group_by")
     col = case key
           when String
-            @columns.fetch(key) { raise KeyError, "#{verb}: no column #{key.inspect}" }
+            # The index names the rows, so it is a key as a column is, by the
+            # row axis name, as resample and pivot take it.
+            @columns.fetch(key) do
+              next @index if @index && @axis_name == key
+              raise KeyError, "#{verb}: no column #{key.inspect}"
+            end
           when CArray
             unless key.shape[0] == nrow
               raise ArgumentError,

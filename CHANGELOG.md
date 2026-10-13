@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CAFrame#group_by` and `is_duplicate` take the index as a key, named
+  by the row axis name, as `resample` and `pivot` already did: after
+  `set_index("station")`, `group_by("station")` groups by it. It raised
+  `KeyError` before. A column of that name, if there is one, comes first.
+
 - New: masked cells can be filled within each group. The slab, block,
   segment, categorical and axis-group iterators have
   `strip_mask(method: :ffill)` / `:bfill` (also `:forward` / `:backward`),

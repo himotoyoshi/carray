@@ -521,7 +521,7 @@ df[df.is_duplicate(except: :none).not]     # only the rows that appear once
 
 - Values compare as [`group_by`](#keys-and-groups) compares keys: NaN is one value, and `-0.0` and `0.0` are one value.
 - A row with a masked cell in the compared columns is never a duplicate, as a row with a masked key belongs to no group.
-- The index is not compared, and an N-D column cannot be: compare one of its components.
+- The index is compared only when named, by the row axis name (`df.is_duplicate("station")` after `set_index("station")`). An N-D column cannot be compared: compare one of its components.
 
 ---
 
@@ -885,7 +885,7 @@ osaka     25.3
 
 ### Keys and groups
 
-The key is a column name, several names (a composite key), or a `CArray` of one value per row.
+The key is a column name, several names (a composite key), or a `CArray` of one value per row. The index is a key too, named by the row axis name: after `set_index("station")`, `group_by("station")` groups by it, as `resample` takes a time index.
 
 ```ruby
 grp = df.group_by("station")
