@@ -686,6 +686,21 @@ ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
   char *modes;
   int i, some_has_mask = 0;
 
+  if ( elements > ca->elements ) {
+    elements = ca->elements;
+  }
+
+  /* An array source is read cell by cell over the destination's cells;
+     a scalar source's one cell applies to all of them. */
+  for (i=0; i<n; i++) {
+    cs = slist[i];
+    if ( cs && ! ca_is_scalar(cs) && cs->elements < elements ) {
+      rb_raise(rb_eArgError,
+               "mask source has %lld elements, fewer than the %lld of the destination",
+               (long long) cs->elements, (long long) elements);
+    }
+  }
+
   for (i=0; i<n; i++) {
     if ( slist[i] && ca_has_mask(slist[i]) ) {
       some_has_mask = 1;
@@ -702,10 +717,6 @@ ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
       }
     }
     return;
-  }
-
-  if ( elements > ca->elements ) {
-    elements = ca->elements;
   }
 
   o.list     = ALLOCA_N(CArray *, n + 1);

@@ -164,6 +164,8 @@ class CArray
   #   @param others [Array<CArray>] arrays whose mask states are
   #     OR-ed into `self`. Non-CArray arguments are ignored.
   #   @return [self]
+  #   @raise [ArgumentError] if an array in `others` other than a scalar
+  #     has fewer elements than `self`.
   def inherit_mask(*others); end
 
   # @overload inherit_mask_replace(*others)
@@ -173,6 +175,8 @@ class CArray
   #   @param others [Array<CArray>] arrays whose mask states form the
   #     new mask of `self`.
   #   @return [self]
+  #   @raise [ArgumentError] if an array in `others` other than a scalar
+  #     has fewer elements than `self`.
   def inherit_mask_replace(*others); end
 
   # @overload count_masked
