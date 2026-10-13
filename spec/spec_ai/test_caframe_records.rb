@@ -187,4 +187,13 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
     assert_equal [Rational(1, 3)], df["r"].to_a
     assert_equal [BigDecimal("0.1")], df["b"].to_a
   end
+
+  # Symbol keys are read as their names; two keys that give one name would
+  # make one column of two, so they raise, within a record or across records.
+  def test_symbol_and_string_spellings_of_one_name_raise
+    assert_equal ["temp", "rh"], CAFrame.from_records([{ temp: 1, rh: 2 }]).column_names
+    err = assert_raise(ArgumentError) { CAFrame.from_records([{ :temp => 1, "temp" => 2 }]) }
+    assert_equal 'from_records: the keys :temp and "temp" both name the column "temp"; use one spelling', err.message
+    assert_raise(ArgumentError) { CAFrame.from_records([{ temp: 1 }, { "temp" => 2 }]) }
+  end
 end

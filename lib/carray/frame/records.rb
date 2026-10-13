@@ -16,7 +16,8 @@
 
 class CAFrame
   # Build a frame from an Array of row Hashes. Column set is the union of keys
-  # in first-appearance order; keys are stringified. +types:+ takes
+  # in first-appearance order; keys are stringified, and two keys that
+  # stringify to one name (+:temp+ and +"temp"+) raise. +types:+ takes
   # anything +cast+ takes as a map (a name => type map, :infer, or a map with
   # +default:+) and casts the built frame with it, with +on_error:+ as for
   # +cast+.
@@ -27,6 +28,12 @@ class CAFrame
     return new if records.empty?
 
     keys = record_key_union(records)
+    keys.group_by(&:to_s).each do |name, same|
+      next if same.size == 1
+      raise ArgumentError,
+            "from_records: the keys #{same.map(&:inspect).join(' and ')} both name " \
+            "the column #{name.inspect}; use one spelling"
+    end
     n = records.size
     cols = {}
     keys.each do |key|

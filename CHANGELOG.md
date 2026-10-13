@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CAFrame.from_records` with records that spell one column both as a
+  Symbol and as a String (`{ :temp => 1, "temp" => 2 }`, or `temp:` in one
+  record and `"temp"` in another) kept one of the values and dropped the
+  other. It now raises `ArgumentError`; use one spelling.
+
 - Change: CAFrame takes column names as Strings only. `CAFrame.new({ a:
   col })`, `df.drop(:a)`, `df.select(:a)`, `df.rename("a" => :b)`,
   `df.join(other, on: :a)` and the other verbs that name a column turned a
