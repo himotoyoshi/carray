@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `windows(on:)` with a uint64 key above 2**63 - 1, or with a time
+  key whose widths need a finer grid late in the time range, wrapped the
+  key and gave wrong windows; such keys are now measured from the smallest
+  one, and a span that int64 cannot hold raises. A `before:` or `after:` of
+  NaN raises, as `interval:` of NaN does, and `bounds:` / `fill_value:` with
+  `on:` raise instead of being ignored.
+
 - Fix: `shuffle!` and `shuffle` moved the values but not the mask, so a
   masked cell's value came into view and another cell went masked; the mask
   now moves with the values. `project(idx, UNDEF)` filled out-of-range cells

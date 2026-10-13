@@ -331,13 +331,15 @@ class CAKeyWindowIterator < CAIterator
 
   # The keys and widths as numbers the walk compares: ticks for a time or a
   # duration key, the values for a numeric one.  Widths that are not whole
-  # in the key's ticks scale both up to a finer grid.
+  # in the key's ticks scale both up to a finer grid.  A window is decided
+  # by differences of keys alone, so integer keys are measured from their
+  # smallest value: that is what lets a uint64 key, or ticks on a finer
+  # grid, be compared as int64.
   def key_numbers (key, before, after, interval)
     if key.is_a?(CATime) || key.is_a?(CATimedelta)
-      ticks = key.ticks.int64
       widths = [before, after, interval].map { |w| w.nil? ? nil : duration_in_ticks(w, key.unit) }
       scale = widths.compact.map(&:denominator).inject(1, :lcm)
-      ticks = ticks * scale unless scale == 1
+      ticks = from_smallest(key.ticks, scale)
       bw, aw, iv = widths.map { |w| w && (w * scale).to_i }
       bw ||= 0
       aw ||= 0
@@ -360,7 +362,7 @@ class CAKeyWindowIterator < CAIterator
       bw ||= 0
       aw ||= 0
       check_widths(bw, aw, iv)
-      [key.int64, bw, aw, iv]
+      [from_smallest(key, 1), bw, aw, iv]
     else
       bw, aw, iv = widths.map { |w| w && w.to_f }
       bw ||= 0.0
@@ -402,9 +404,31 @@ class CAKeyWindowIterator < CAIterator
       (unit.count * CATimeUnitAlgebra.base_ratio(unit.base))
   end
 
+  # An integer key as int64 numbers scaled by `scale`: the values
+  # themselves when they fit, else measured from the smallest value,
+  # refused when even the span does not fit.
+  def from_smallest (key, scale)
+    lo = key.min
+    return key.int64 if lo == UNDEF
+    hi = key.max
+    if lo * scale >= -2**63 && hi * scale <= 2**63 - 1
+      return scale == 1 ? key.int64 : key.int64 * scale
+    end
+    span = hi - lo
+    if span * scale > 2**63 - 1
+      raise ArgumentError,
+            "windows: the keys span #{span}#{scale == 1 ? "" : " ticks, #{span * scale} "             "on the grid the widths need,"} more than an int64 holds"
+    end
+    # uint64 subtracts in its own type, which holds every difference; any
+    # other integer type is widened first, so the subtraction cannot wrap.
+    numbers = key.data_type == CA_UINT64 ? (key - lo).int64 : key.int64 - lo
+    scale == 1 ? numbers : numbers * scale
+  end
+
   def check_widths (bw, aw, iv)
-    if bw < 0 || aw < 0
-      raise ArgumentError, "windows: before: and after: are not negative"
+    unless bw >= 0 && aw >= 0
+      raise ArgumentError, "windows: before: and after: are numbers not below 0 " \
+                           "(got #{bw.inspect}, #{aw.inspect})"
     end
     return unless iv
     unless iv > 0
