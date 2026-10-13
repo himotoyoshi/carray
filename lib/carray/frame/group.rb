@@ -294,8 +294,7 @@ class GroupedFrame
     end
     cols = {}
     (order || []).each do |name|
-      vals = collected[name]
-      cols[name] = CArray.object(vals.size) { |i| vals[i] }
+      cols[name] = column_of_values(collected[name])
     end
     result_frame(cols, keep_rows)
   end
@@ -436,7 +435,15 @@ class GroupedFrame
   private def per_group_column(in_name, proc)
     results = []
     each_group_slice(in_name) { |slice| results << proc.call(slice) }
-    CArray.object(results.size) { |i| results[i] }
+    column_of_values(results)
+  end
+
+  # A column of the Ruby values the groups gave, typed as from_records types
+  # a record's values: Integers int64, numbers float64, arrays of one shape
+  # an N-D column, anything else object. UNDEF and nil are missing.
+  private def column_of_values(values)
+    values = values.map { |v| UNDEF.equal?(v) ? nil : v }
+    CAFrame.__send__(:build_record_column, values, values.size)
   end
 
   private def each_group_slice(in_name)

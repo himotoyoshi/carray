@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: the values a `CAFrame` group's `table` block or a Proc
+  reduction of `aggregate` returns become typed columns, as `from_records`
+  types a record's values: Integers int64, numbers float64, arrays of one
+  shape an N-D column, the rest object; `nil` and `UNDEF` are missing.
+  Every such column was object before. Read a returned array from the N-D
+  column as `col[i, nil]`, where `col[i]` gave it before.
+
 - Change: `CAFrame#data_types` gives a Face column's class (`CATime`,
   `CAString`, `CACategorical`, ...) where it gave its `data_type`, which
   for most Faces is `:fixlen` -- the surface their kernels dispatch on,
@@ -51,6 +58,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `df.resample("time", "1 hour").aggregate("open" => ["v", :first], ...)`
   keeps the column's type. Like the core ones, they take no `min_count:`
   or `fill_value:`.
+
 - Change: `CArray#nunique(axis:)` takes an Array of axes, and naming every
   axis returns an Integer, as `sum(axis:)` does. Before, a 1-D
   `a.nunique(axis: 0)` returned a one-element CArray; read it as an

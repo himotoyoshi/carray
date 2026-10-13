@@ -52,8 +52,10 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     stat = @df.group_by("station").aggregate(
       "wind_mean" => ["wind", ->(c) { c.mean(axis: 0) }],
     )
-    # tokyo rows: [1,2] and [5,6] -> mean [3,4]
-    assert_equal [3.0, 4.0], stat["wind_mean"][0].to_a
+    # tokyo rows: [1,2] and [5,6] -> mean [3,4]; one vector per group stacks
+    # into an N-D column, as from_records stacks array cells
+    assert_equal [3, 2], stat["wind_mean"].shape
+    assert_equal [3.0, 4.0], stat["wind_mean"][0, nil].to_a
   end
 
   def test_table_escape_cross_column
@@ -83,7 +85,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     res = df.group_by("key").table { |g| { "members" => g["idx"].to_a } }
     assert_equal (0...ng).to_a, res.index.to_a
     ng.times do |k|
-      assert_equal (k...n).step(ng).to_a, res["members"][k]
+      assert_equal (k...n).step(ng).to_a, res["members"][k, nil].to_a
     end
   end
 
@@ -346,6 +348,21 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [true, true, true, true, false, true], df.is_duplicate(except: :none).to_a
     err = assert_raise(ArgumentError) { df.is_duplicate(except: false) }
     assert_equal "is_duplicate: except: must be :first, :last or :none (got false)", err.message
+  end
+
+  # The values the groups give are typed as from_records types a record's:
+  # Integers int64, numbers float64, missing UNDEF, anything else object.
+  def test_table_and_proc_results_are_typed
+    df = CAFrame.new("k" => CA_OBJECT(%w[a b a c]), "v" => CA_FLOAT64([1, 2, 3, 4]))
+    df["v"][3] = UNDEF
+    g = df.group_by("k")
+    t = g.table { |f| { "n" => f.nrow, "hi" => f["v"].max, "big" => f.nrow > 1, "s" => "x" } }
+    assert_equal({ "n" => :int64, "hi" => :float64, "big" => :object, "s" => :object }, t.data_types)
+    assert_equal [3.0, 2.0, UNDEF], t["hi"].to_a
+    a = g.aggregate("r" => ["v", ->(c) { c.count_not_masked == 0 ? nil : c.max - c.min }])
+    assert_equal :float64, a["r"].data_type
+    assert_equal [2.0, 0.0, UNDEF], a["r"].to_a
+    assert_equal :int64, g.table(keep_rows: true) { |f| { "n" => f.nrow } }["n"].data_type
   end
 
   def test_keep_rows_keeps_the_index
