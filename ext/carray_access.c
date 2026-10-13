@@ -94,7 +94,7 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
   CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false, not Integer 0/1.  Bulk paths
-     (to_a / cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
+     (cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
      INT2FIX(0/1) so a boolean-storage Face that decoded to its own object is
      left untouched; note INT2FIX(0) is truthy in Ruby, so map by value, not
      by RTEST. */

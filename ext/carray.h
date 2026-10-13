@@ -347,14 +347,12 @@ typedef struct {
   void   (*detach)       (void *ap);
   void   (*fill_data)    (void *ap, void *data);
   void   (*create_mask)  (void *ap);
-  /* xfer protocol.  Added at struct end so existing
-     positional initializers leave it NULL automatically.  dir = CA_XFER_GET /
-     CA_XFER_PUT. */
+  /* xfer protocol.  dir = CA_XFER_GET / CA_XFER_PUT. */
   void   (*xfer_index)   (void *ap, ca_size_t *idx, void *data, int dir);
   void   (*xfer_addrs)   (void *ap, ca_size_t n, ca_size_t *addrs,
                           void *data, int dir);
-  /* fold_stride: one compose-fold hop
-     for sometimes-fold participants (CAWindow now; CAGrid/CSA/CATile later).
+  /* fold_stride: one compose-fold hop for the views that fold only
+     sometimes (CAWindow, CAGrid, CASelectAxis, CAStack, CAMeld).
      Compose *f into next_parent's byte space and return 1, or decline
      (leave *f / *next_parent untouched) and return 0 -> this view is the
      fold boundary.  CAStride family leaves this NULL (handled open-inline
@@ -681,17 +679,17 @@ typedef struct {
                               dim[k] = parent->dim[k] * reps[k]. */
 } CATile;                /* 56 + 8*(ndim) (bytes) */
 
-typedef CATile CARoll;   /* T.4 will land CARoll-specific constructor +
-                            obj_type CA_OBJ_ROLL.  Until then CARoll path
-                            is just CATile (= typedef body identical). */
+typedef CATile CARoll;   /* same layout as CATile, its own obj_type
+                            CA_OBJ_ROLL (ext/ca_obj_roll.c) */
 
-/* CAStack: outer-axis-only stack view of K uniform-shape parents.  shape = (K, *parent_shape),
-   axis 0 maps to parent index, axes 1..ndim-1 are per-parent contig.
+/* CAStack: stack view of K uniform-shape parents.  The K axis sits at
+   k_axis in the view's shape (0 by default: shape = (K, *parent_shape));
+   the other axes are the parents' own.
    - parents stored as Ruby Array @parents on the wrapper object (= GC
      anchor); C-side tail `parents[]` is alias pointer array.
    - CAView.parent points to parents[0] (= legacy compat for paths that
      deref ca->parent without CAStack awareness).
-   - dim[0] = n_parents; dim[1..ndim-1] = parents[0]->dim[0..ndim-2]. */
+   - dim[k_axis] = n_parents; the other dims are parents[0]->dim in order. */
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
@@ -699,7 +697,7 @@ typedef struct {
   int32_t   flags;
   ca_size_t bytes;
   ca_size_t elements;      /* = n_parents * parents[0]->elements */
-  ca_size_t *dim;          /* ALLOC_N(ndim) = [n_parents, *parent->dim] */
+  ca_size_t *dim;          /* ALLOC_N(ndim): parent->dim with n_parents at k_axis */
   char     *ptr;
   CArray   *mask;
   char     *_pool;         /* framework-managed pool buffer (NULL = legacy ALLOC_N path).
@@ -731,8 +729,7 @@ typedef struct {
      shape[meld_axis] = sum_k parents[k]->dim[meld_axis]
    All other axes must match across parents (uniform check at constructor).
 
-   v0.1 stub: external-axis (meld_axis == 0) structural xfer_stride path only.
-   Other paths raise NotImplementedError. */
+   meld_axis may be any axis. */
 typedef struct {
   int16_t   obj_type;
   int8_t    data_type;
@@ -878,7 +875,8 @@ int8_t ca_promote_type (int8_t a, int8_t b);
    Complex, etc.) — distinct from rb_ca_guess_type which interprets the
    object as a data_type *representation* (e.g. T_FIXNUM as a data_type code).
    Used by rb_ca_cast_self_or_other.
-   CArray is not accepted (callers should use ca->data_type directly). */
+   A CArray, like any object it does not recognise, answers CA_OBJECT;
+   callers holding a CArray use ca->data_type. */
 int8_t ca_value_to_data_type (VALUE obj);
 
 /* Infer a data_type code from a MemoryView producer by parsing its format,
@@ -1196,8 +1194,7 @@ enum {
   CA_IDX_SCALAR,
   CA_IDX_ALL,
   CA_IDX_BLOCK,
-  CA_IDX_SYMBOL,
-  CA_IDX_REPEAT
+  CA_IDX_SYMBOL
 }; /* CA_INDEX_TYPE */
 
 typedef union {
@@ -1266,14 +1263,14 @@ VALUE    rb_carray_new_safe (int8_t data_type,
    already hold a freshly decoded buffer and want to avoid a copy.  The
    buffer must be ruby_xmalloc()'d and at least elements*bytes long; it
    is freed with xfree() when the array is collected.  data_type must not
-   be CA_OBJECT. */
+   be CA_OBJECT.  When the call raises (a bad argument), the buffer stays
+   the caller's. */
 CArray  *carray_new_adopt (int8_t data_type,
                            int8_t ndim, ca_size_t *dim, ca_size_t bytes, char *ptr);
 VALUE    rb_carray_new_adopt (int8_t data_type,
                               int8_t ndim, ca_size_t *dim, ca_size_t bytes, char *ptr);
 
-/* Capstone helper: allocate
-   a reduction-output CArray for kernel_iterator authors.  Computes
+/* Allocate a reduction-output CArray for kernel_iterator authors.  Computes
    output shape = self.dim with slab axes removed (ascending order),
    collapses to shape [1] when fully reduced.  See
    ext/carray_core.c for docstring + semantics. */
@@ -1284,10 +1281,10 @@ VALUE    rb_ca_new_reduced (VALUE self, int8_t *slab_axes,
 VALUE    rb_ca_new_reduced_bytes (VALUE self, int8_t *slab_axes, int8_t naxes,
                                   int32_t data_type, ca_size_t bytes, int keep_axis);
 
-/* Capstone helper: parse
-   variadic axis argv into validated int8_t array.  Accepts Integer
-   args or a single Array arg, normalises negative axes (Python-style),
-   range / duplicate / overflow checks all raise ArgumentError.
+/* Parse variadic axis argv into a validated int8_t array.  Accepts Integer
+   args or a single Array arg (no argument = every axis), counts negative
+   axes from the end, and raises ArgumentError for an axis out of range or
+   given twice.
    Returns the validated naxes. */
 int8_t   rb_ca_parse_reduce_axes (int argc, VALUE *argv,
                                   CArray *ca, int8_t *out_axes);
@@ -1333,7 +1330,11 @@ VALUE    rb_ca_farray (VALUE self);
 
 /* --- ca_obj_stride.c --- */
 
-/* ca_stride_setup with ca == NULL runs its checks and returns 0 without
+/* The strides and base_offset are taken as given: they are not checked
+   against the parent's extent, so a view that reaches outside it reads
+   and writes outside it.
+
+   ca_stride_setup with ca == NULL runs its checks and returns 0 without
    writing.  ca_stride_new calls it that way before it allocates, so a
    rejected argument leaves no struct behind; a subclass constructor can
    do the same through its own setup function. */
@@ -1474,12 +1475,14 @@ int     ca_is_mask_array (void *ap);
 #define GetCArray(obj, ca) \
     TypedData_Get_Struct((obj), CArray, &carray_data_type, (ca))
 
-/* True iff ca_attach(ca) is essentially O(1) — entity arrays (already
-   attached), CAWrap, CScalar, and CAStride-family views whose composed
-   strides are row-major contiguous (alias-attach path).  Used by
-   kernel_iterator's L1 alias decision (ca_iter_can_alias level 1) and
-   by overlay-view dispatch.  The name says the structural property
-   (= aliasable without materialise), not the perf characteristic. */
+/* True when ca_attach(ca) gives ca->ptr the cells in place, without
+   materialising: entity arrays, CAWrap, CScalar, and CAStride-family
+   views whose composed strides are row-major contiguous over an attached
+   root (alias-attach path).  It is not the same as "attach is O(1)": a
+   Face attaches in O(1) by borrowing its parent and answers false, and a
+   CASource entity that publishes its ptr only while attached answers
+   true.  Used by the kernel iterator's alias decision, the sweep engine,
+   and the views and mask paths that skip a sync when nothing was copied. */
 int     ca_attach_is_alias (void *ap);
 
 /* OR operand masks into
@@ -1539,20 +1542,27 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
                      internally (views carry an attach refcount; entities do
                      not).
      R5 (traffic)    Attach hands you a buffer, not a live array.  Use x->ptr;
-                     a view derived from x composes past the buffer to the
-                     root.
+                     a view derived from x may read past the buffer to the
+                     root (a CAStride-family view over a CAStride-family x
+                     does) or read the buffer (others), so writes to the
+                     buffer are not seen through derived views until x is
+                     synced.
      R6 (raising)    ca_allocate and ca_attach that raise have taken
                      nothing; ca_allocate_n and ca_attach_n take all of
                      their arrays or none.  Close a window with
                      ca_sync_detach, which detaches even when the sync
                      raises -- ca_sync then ca_detach leaves the window open
-                     on a raise.  Anything between that can raise (Ruby
+                     on a raise.  ca_sync_detach syncs, so it raises on a
+                     read-only array; a window that only read closes with
+                     ca_detach.  Anything between that can raise (Ruby
                      called from inside the window) needs an ensure of its
                      own.
 */
 
 void    ca_allocate (void *ap);
 void    ca_attach (void *ca);
+/* Re-gather an attached view's buffer from its parent (one level: a parent
+   that holds its own buffer is read as it is). */
 void    ca_update (void *ca);
 void    ca_sync (void *ca);
 void    ca_detach (void *ca);
@@ -1573,8 +1583,6 @@ CArray *ca_template_safe (void *ap);  /* use rb_ca_template() */
 CArray *ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes);
                                       /* use rb_ca_template() */
 
-/* ca_paste / ca_clip / ca_cut (sub-region copy in/out) removed in 3.0; see
-   lib/extras/crop_paste.rb for the Ruby thin wrapper replacements. */
 void    ca_fill (void *ap, void *ptr);
 
 /* API : fetch, store */
@@ -1674,6 +1682,8 @@ void    ca_fill_stride_whole (void *ap, void *ptr);
 extern VALUE CA_UNDEF;
 extern VALUE CA_UNSPECIFIED;
 
+/* The mask's buffer, which a view's mask has only while attached: NULL
+   otherwise. */
 boolean8_t *ca_mask_ptr (void *ap);
 int     ca_has_mask (void *ap);
 int     ca_is_any_masked (void *ap);
@@ -1704,7 +1714,7 @@ void    ca_ptr2val (void *ap1, void *ptr1, int8_t data_type2, void *ptr2);
 void    ca_val2ptr (int8_t data_type1, void *ptr1, void *ap2, void *ptr2);
 void    ca_val2val (int8_t data_type1, void *ptr1, int8_t data_type2, void *ptr2);
 VALUE   ca_ptr2obj (void *ap, void *ptr);            /* use rb_ca_ptr2obj() */
-void    ca_obj2ptr (void *ap, VALUE obj, void *ptr); /* use rb_ca_ptr2obj() */
+void    ca_obj2ptr (void *ap, VALUE obj, void *ptr); /* use rb_ca_obj2ptr() */
 
 #define ca_wrap_writable(obj, data_type) \
   (obj = rb_ca_wrap_writable(obj, INT2NUM(data_type)), (CArray*) DATA_PTR(obj))
@@ -1754,6 +1764,8 @@ void    rb_check_carray_object (VALUE arg);
 
 /* specific Data_Wrap_Struct for carray */
 VALUE   ca_wrap_struct (void *ap);
+/* As ca_wrap_struct, under the class klass.  klass is not checked: it must
+   be a CArray class whose instances share ap's TypedData. */
 VALUE   ca_wrap_struct_as (void *ap, VALUE klass);
 
 /* query data_type */
@@ -1762,7 +1774,8 @@ void    rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
                                     int8_t *data_type, ca_size_t *bytes);
 int     rb_ca_is_type (VALUE arg, int type);
 
-/* scan index */ 
+/* scan index.  info->range_check is read, not written: set it (1 to check
+   each index against ca_dim) before the call. */
 void    rb_ca_scan_index (int ca_ndim, ca_size_t *ca_dim, ca_size_t elements,
                           long argc, VALUE *argv, CAIndexInfo *info);
 
@@ -1869,9 +1882,14 @@ VALUE   rb_ca_fill_copy (VALUE self, VALUE val);
 /* address calculation */
 VALUE   rb_ca_addr2index (VALUE self, VALUE raddr);
 
-/* elemental access like ca[i,j,k] or ca[addr] */
+/* A cell's bytes as the Ruby value of self's data type, as the bulk paths
+   (cast, serialize) read it: a boolean is 0 or 1 and a Face cell is its
+   storage value.  For the value ca[i] gives, use rb_ca_fetch_index /
+   rb_ca_fetch_addr. */
 VALUE   rb_ca_ptr2obj (VALUE self, void *ptr);
 #define rb_ca_fetch_ptr(self, ptr) rb_ca_ptr2obj(self, ptr)
+
+/* elemental access like ca[i,j,k] or ca[addr] */
 VALUE   rb_ca_fetch_index (VALUE self, ca_size_t *idx);
 VALUE   rb_ca_fetch_addr (VALUE self, ca_size_t addr);
 VALUE   rb_ca_fetch (VALUE self, VALUE index);

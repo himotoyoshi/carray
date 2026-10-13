@@ -560,7 +560,7 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
   ca_size_t bytes = ca_sizeof[data_type];
   if ( bytes <= 0 ) {
     rb_raise(rb_eArgError,
-             "rb_ca_new_reduced: data_type=%d unsupported (CA_FIXLEN/OBJECT not supported)",
+             "rb_ca_new_reduced: data_type=%d has no fixed width (use rb_ca_new_reduced_bytes)",
              (int) data_type);
   }
   return rb_ca_new_reduced_bytes(self, slab_axes, naxes, data_type, bytes, keep_axis);
@@ -568,9 +568,8 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
 
 /* ------------------------------------------------------------------- */
 
-/* Parse the variadic axis argument of a reduction kernel into a
-   sort-ascending
-   int8_t array, with full validation.
+/* Parse the variadic axis argument of a reduction kernel into an int8_t
+   array, with full validation.
 
    Accepts:
      - Integer args:     kernel(0, 2, 3)        → axes = {0, 2, 3}
@@ -578,8 +577,9 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
      - Negative axes (Python-style): -1 = innermost, normalised to
        positive in-range indices before validation
 
+   argc == 0 means every axis (a full reduction).
+
    Validation (raises ArgumentError on failure):
-     - argc == 0                          → no axes given
      - naxes > ca->ndim                   → too many axes
      - any axis out of [0, ca->ndim)      → range
      - duplicate axes                     → duplicate
@@ -2028,7 +2028,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   return result;
 }
 
-/* attach parent's data to ca->ptr */
+/* re-gather an attached view's buffer from its parent */
 
 void
 ca_update (void *ap)
@@ -2046,7 +2046,7 @@ ca_update (void *ap)
     }
     else {
       rb_raise(rb_eRuntimeError,
-        "[BUG] ca_update() called for not-attached virtal array");
+        "[BUG] ca_update() called for not-attached virtual array");
     }
 
   }

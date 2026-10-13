@@ -1514,14 +1514,9 @@ rb_ca_mask_fill (VALUE self, VALUE fval)
   return rb_ca_unmask_method(1, &fval, self);
 }
 
-/* @overload unmask_copy (fill_value = nil)
-
-(Masking, Conversion)
-Returns new unmasked array.
-If the optional argument <code>fill_value</code> is given,
-the masked elements are filled by <code>fill_value</code>.
-The returned array doesn't have the mask array.
-*/
+/* A copy without the mask: with a fill value, the masked cells hold it.
+   Behind rb_ca_unmask_copy / rb_ca_mask_fill_copy (C only; the Ruby
+   surface is strip_mask). */
 
 static VALUE
 rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)

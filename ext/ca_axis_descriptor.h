@@ -2,13 +2,10 @@
 
   ca_axis_descriptor.h
 
-  Per-axis descriptor framework (D1 + D2 + D3) — shared C-level vocabulary
-  that lets CSA, CAGrid, CASelectAxis, CAWindow, CAShift, and future
+  Per-axis descriptor framework — shared C-level vocabulary that lets
+  CASelectAxis, CAGrid, CASelect, CAWindow, CAShift, and future
   per-axis-mixed views describe each axis the same way so a common
-  attach dispatch engine (D3, ca_axis_dispatch.c) can drive them
-  uniformly.
-
-  See devel/PROPOSAL_AXIS_DESCRIPTOR_FRAMEWORK.md for the design.
+  attach dispatch engine (ca_axis_dispatch.c) can drive them uniformly.
 
   Status: TWO-TIER FREEZE CONTRACT (3.0 onward), the same split
   ca_kernel_iterator.h declares, for the same reason: this header is
@@ -50,14 +47,14 @@
    When this header is included from carray.h mid-file, those typedefs
    are already in scope by the time we reach the include site. */
 
-/* ---- D1: per-axis descriptor types ----------------------------------------
+/* ---- per-axis descriptor types --------------------------------------------
 
    STRIDE = linear stride axis: parent index = start + i*step,
             i in [0, count).  Subsumes nil / Integer / Range index args.
    INDEX  = integer index axis:  parent index = indices[i],
             i in [0, count).  Subsumes integer-array (CAGrid)
             and boolean-mask-after-snapshot (CASelectAxis) axes.
-   SHIFT  = bound-aware stride axis (CAWindow/CAShift, Tier 2.B):
+   SHIFT  = bound-aware stride axis (CAWindow/CAShift):
             parent index = start + i*step normalised by `policy`
             (CA_BOUNDS_FILL / PERIODIC / REFLECT / NEAREST / ...)
             against `size0` (= parent dim along this axis).  When
@@ -86,16 +83,17 @@ typedef struct {
   uint8_t         policy;    /* CA_BOUNDS_FILL / PERIODIC / REFLECT / ... */
 } ca_axis_desc_t;
 
-/* ---- D2: producer interface ----------------------------------------------
+/* ---- producer interface --------------------------------------------------
 
-   Both implementations write ndim entries into `out` (caller-allocated)
-   and `out_parent_dims` (caller-allocated, sized CA_RANK_MAX).  See
-   devel/PROPOSAL_AXIS_DESCRIPTOR_FRAMEWORK.md §5 Framework Phase 1 and
-   devel/PROPOSAL_FLAT_INDEX_VIEWS.md §2.3 for rationale.
+   A producer writes one entry per descriptor axis into `out`
+   (caller-allocated) and `out_parent_dims` (caller-allocated, sized
+   CA_RANK_MAX).  The producers declared here are CASelectAxis and CAGrid;
+   CASelect and CAWindow have their own (ca_select_describe_axes /
+   ca_window_describe_axes).
 
    `out_parent_dims[k]` is the **effective** parent dim along descriptor
-   axis k — for CSA / CAGrid this is just `parent->dim[k]`, but for
-   flat-index views (CASelect / CAMapping, Tier 2.A.3+) it is
+   axis k — for CASelectAxis / CAGrid this is just `parent->dim[k]`, but
+   for a flat-index view (CASelect) it is
    `{parent->elements}` (a single-axis flat view of parent).  This
    decouples descriptor.ndim from parent.ndim so the engine can drive
    views whose iteration axes don't match the parent's physical shape.
@@ -103,13 +101,17 @@ typedef struct {
    Pointer arguments are typed `void *` here to avoid pulling the
    private CASelectAxis / CAGrid struct definitions (which live in
    their respective .c files) into this header.  Each implementation
-   casts to its concrete type inside the .c file. */
+   casts to its concrete type inside the .c file.
+
+   An INDEX axis has no way to say "no cell": a CAGrid index that is
+   masked (a hole) is written as index 0, so a caller driving a holed grid
+   through the engine reads and writes parent cell 0 there. */
 void ca_select_axis_describe_axes (void *ca, ca_axis_desc_t *out,
                                    ca_size_t *out_parent_dims);
 void ca_grid_describe_axes        (void *ca, ca_axis_desc_t *out,
                                    ca_size_t *out_parent_dims);
 
-/* ---- D3: common attach engine --------------------------------------------
+/* ---- common attach engine -------------------------------------------------
 
    Drives gather from `parent` into an output buffer driven by the
    per-axis descriptor array.  Caller must have parent attached before
@@ -119,14 +121,15 @@ void ca_grid_describe_axes        (void *ca, ca_axis_desc_t *out,
    descriptor axis (see producer interface above).  The engine never
    reads `parent->dim` directly — it only reads `parent->ptr` for
    data access — which is what allows flat-index views to lie about
-   parent's apparent shape (Tier 2.A, PROPOSAL_FLAT_INDEX_VIEWS.md).
+   parent's apparent shape.
 
    `bound_fill` is the bytes-wide value written into gather output
-   cells whose SHIFT axes resolve to an out-of-bounds parent index
-   (Tier 2.B, PROPOSAL_BOUND_AWARE_VIEWS.md).  Pass NULL when no
-   SHIFT axis is present (CSA / CAGrid / CASelect / CAMapping); the
-   engine ignores it.  On scatter, the engine simply skips parent
-   writes for OOB cells regardless of bound_fill.
+   cells whose SHIFT axes resolve to an out-of-bounds parent index.
+   Pass NULL when no SHIFT axis is present (CASelectAxis / CAGrid /
+   CASelect); the engine ignores it.  On scatter, the engine simply skips
+   parent writes for OOB cells regardless of bound_fill.  A SHIFT axis
+   under the RUBY or STRICT policy raises IndexError part way through the
+   walk for an index outside the parent.
 
    _gather — caller provides out_buf (must be sized total_elements*bytes)
    _attach — wrapper that mallocs the buffer; caller xfrees
@@ -160,7 +163,7 @@ void  ca_axis_dispatch_scatter (struct _CArray  *parent,
                                 ca_size_t        total_elements,
                                 const char      *in_buf);
 /* Broadcast scatter: write the single value `val` (bytes wide) into
-   every selected parent cell.  See D6 of the framework piece.
+   every selected parent cell.
    (SHIFT axis OOB cells are skipped — fill semantics aren't
    meaningful for broadcast-write since the destination value already
    IS the broadcast value.) */
