@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: storing an integer that an integer cell cannot hold raises
+  `RangeError`, as an operator already did (`int8_array + 300`). Before,
+  `CA_INT8([300])`, `a[0] = 300`, `a[] = [-1]` on an unsigned array,
+  `fill`, `elem_store`, a record member and `fill_value:` wrapped it
+  (`300` into `int8` was `44`, `-1` into `uint8` was `255`). A Float is
+  truncated first, so `1.9` still stores as `1`, but `1000.0` into `int8`
+  raises. To keep the wrap, cast between arrays: `to_type` (including from
+  an object array) still converts as C does.
+
+- Fix: copying a Face (`refer`, a slice of a time or string array) read
+  past the end of its struct, which could crash.
+
 - Fix: `CAFrame#resample` with month or year bins and `fill: true` gave
   labels in the bins' unit (`2024-01`) where the same call without
   `fill:` gave them in the time column's unit (`2024-01-01`). Both are
