@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: a `CAFrame` group has `filter`, which keeps the rows of the groups
+  its block chooses: the block gets the grouped frame and returns one
+  boolean per group, as in
+  `df.group_by("station").filter { |g| g["temp"].count_not_masked >= 20 }`.
+  The rows keep the frame's order and share its columns, and
+  `keep_masked:` works as for `CAFrame#filter`.
+
 - Change: `valid_index?` and `valid_addr?` accept a negative index or
   address, counting from the end as `[]` does: `a.valid_addr?(-1)` is
   true for a non-empty `a`. They answer whether the index names a cell,

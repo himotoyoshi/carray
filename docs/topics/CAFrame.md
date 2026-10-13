@@ -1005,6 +1005,20 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 - `lag` takes its step as `n:`, since the positional arguments are column names.
 - An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
 
+### Keeping whole groups — `filter`
+
+`filter` on a grouped frame keeps the rows of the groups its block chooses. The block receives the grouped frame and returns a boolean `CArray` with **one value per group**, built from the group reductions, as `CAFrame#filter`'s block returns one value per row:
+
+```ruby
+grp = df.group_by("station")
+grp.filter { |g| g["temp"].count_not_masked >= 20 }   # stations with at least 20 readings
+grp.filter { |g| g.mean("temp") > 15.0 }              # the warmer stations
+df.resample("time", "1 hour").filter { |g| g["temp"].count_not_masked == 6 }   # complete hours
+```
+
+- The rows keep the frame's order, and the result shares the frame's columns, as `CAFrame#filter`'s does.
+- A group whose value is `UNDEF` cannot be judged, and neither can a row whose key is masked, since it belongs to no group. Such rows are dropped, or with `keep_masked: true` carried with their cells masked, as for [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked).
+
 ### Time bins — `resample`
 
 `resample(name, unit)` groups the rows into **time bins** of length `unit` along a time column (or the time index). It returns a `GroupedFrame`, so every reduction above applies:
@@ -1672,6 +1686,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
 | keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
 | keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
+| keep only the stations with enough readings | [`group_by(...).filter`](#keeping-whole-groups--filter) |
 | keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |
 | sort by one or more columns | [`sort_by_key`](#sort_by_key--reorder-rows-by-key-columns) |
 | sort by a computed value, e.g. nearest to a target | [`sort_by`](#sort_by--sort-by-a-computed-key) |

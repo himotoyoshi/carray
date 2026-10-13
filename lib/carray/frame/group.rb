@@ -394,6 +394,41 @@ class GroupedFrame
     define_method(op) { |*names| transform_columns(op, names, [], {}) }
   end
 
+  # Keep the rows of the groups the block chooses. The block receives the
+  # grouped frame and returns a boolean CArray with one value per group,
+  # built from the group reductions, as +CAFrame#filter+'s block returns one
+  # per row:
+  #
+  #   grp.filter { |g| g["temp"].count_not_masked >= 20 }   # stations with 20 readings
+  #   grp.filter { |g| g.mean("temp") > 15.0 }
+  #
+  # The rows of a chosen group are kept in the frame's order, as a sub-frame
+  # sharing the frame's columns. A group whose value is UNDEF is
+  # undetermined, as is a row whose key is masked (it belongs to no group):
+  # such rows are dropped, or with +keep_masked: true+ carried with their
+  # cells masked, as +CAFrame#filter+ does.
+  #
+  # @param keep_masked [Boolean] carry the undetermined rows forward masked.
+  # @yieldparam grouped [GroupedFrame] self.
+  # @yieldreturn [CArray] boolean, one value per group.
+  # @return [CAFrame]
+  # @raise [ArgumentError] when the block does not return a boolean CArray of
+  #   shape [ngroup].
+  def filter (keep_masked: false)
+    chosen = yield(self)
+    unless chosen.is_a?(CArray) && chosen.data_type == :boolean
+      raise ArgumentError,
+            "filter block must return a boolean CArray (got #{chosen.class})"
+    end
+    unless chosen.shape == [ngroup]
+      raise ArgumentError,
+            "filter mask has shape #{chosen.shape.inspect}, " \
+            "expected [#{ngroup}] (one value per group)"
+    end
+    rows = spread_to_rows(chosen)
+    @frame.filter(keep_masked: keep_masked) { rows }
+  end
+
   # @return [String]
   def inspect
     "#<GroupedFrame ngroup=#{ngroup} by=#{@axis_name.inspect}>"
