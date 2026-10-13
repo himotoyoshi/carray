@@ -397,25 +397,29 @@ module CATimeUnitAlgebra
     widen(calendar_days_since_epoch(storage, from), r.numerator)
   end
 
+  # Whole days since the epoch (floored) of fixed-length ticks, and the
+  # remainder that says whether each instant sits on a day boundary.  A tick
+  # need not divide a day, nor be a whole number of days ("7 hours",
+  # "36 hours", "7 seconds"): the count is scaled to a grid both share.
+  def fixed_storage_days(storage, from)
+    rd     = ratio(CATime::Resolution.new(1, :D), from)  # `from` ticks per day
+    scaled = widen(storage, rd.denominator)
+    n      = rd.numerator
+    { days: scaled / n, rest: scaled % n }
+  end
+
   # fixed-length grid -> calendar time: the coarsening half of
   # convert_instant!, exact-or-raise.  Every instant must land on a day
   # boundary and then on the calendar boundary itself (the 1st, and
   # January too for :Y), since a mid-month instant has no :M value.
   def convert_instant_fixed_to_calendar(storage, from, to)
-    rd = ratio(CATime::Resolution.new(1, :D), from)  # `from` ticks per day
-    days =
-      if rd.denominator == 1
-        n = rd.numerator
-        unless (storage % n).eq(0).all
-          raise ArgumentError,
-                "cannot convert time #{from} to #{to} without loss " \
-                "(instant is not on a day boundary)"
-        end
-        storage / n
-      else                                             # coarser than a day (:W)
-        storage * (from.tick_ratio / 86400r).to_i
-      end
-    y, m, d = CATimeCivil.civil_from_days(days)
+    days = fixed_storage_days(storage, from)
+    unless (days[:rest]).eq(0).all
+      raise ArgumentError,
+            "cannot convert time #{from} to #{to} without loss " \
+            "(instant is not on a day boundary)"
+    end
+    y, m, d = CATimeCivil.civil_from_days(days[:days])
     on_boundary = d.eq(1)
     on_boundary &= m.eq(1) if to.base == :Y
     unless on_boundary.all
@@ -462,14 +466,7 @@ module CATimeUnitAlgebra
   # month, whatever day and time it carries.  The flooring counterpart of
   # convert_instant_fixed_to_calendar.
   def convert_instant_fixed_to_calendar_floor(storage, from, to)
-    rd   = ratio(CATime::Resolution.new(1, :D), from)   # `from` ticks per day
-    days =
-      if rd.denominator == 1
-        storage / rd.numerator
-      else                                             # coarser than a day (:W)
-        storage * (from.tick_ratio / 86400r).to_i
-      end
-    y, m, = CATimeCivil.civil_from_days(days)
+    y, m, = CATimeCivil.civil_from_days(fixed_storage_days(storage, from)[:days])
     ord = to.base == :M ? (y * 12 + (m - 1) - 1970 * 12) : (y - 1970)
     to.count > 1 ? ord / to.count : ord
   end

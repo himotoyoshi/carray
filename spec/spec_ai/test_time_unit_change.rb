@@ -290,4 +290,30 @@ class TestTimeUnitChange < Test::Unit::TestCase
     assert_raise(ArgumentError) { dt.timesteps(unit: "1 month", origin: mid) }
   end
 
+  # -- a tick that is not a whole fraction of a day --------------------------
+
+  def test_tick_that_does_not_divide_a_day_reaches_the_calendar
+    # "7 hours" does not divide a day and "36 hours" is not a whole number of
+    # days; the day count still comes from the instant, not from a truncated
+    # ticks-per-day factor (which read every instant as 1970).
+    t = CArray.time(["2024-03-15T04:00:00"], unit: :s).to_unit("7 hours")
+    assert_equal "2024-03", t.to_unit(:M)[0].to_s
+    assert_equal "2024", t.to_unit(:Y)[0].to_s
+    s7 = CArray.time(["2024-03-15T04:00:03"], unit: :s).to_unit("7 seconds")
+    assert_equal "2024", s7.to_unit(:Y)[0].to_s
+    h36 = CArray.time(["1972-07-01T12"], unit: :h).to_unit("36 hours")
+    assert_equal "1972-07", h36.to_unit(:M)[0].to_s
+    pre = CArray.time(["1969-12-31T20:00:00"], unit: :s).to_unit("7 hours")
+    assert_equal "1969-12", pre.to_unit(:M)[0].to_s
+  end
+
+  def test_store_of_a_tick_that_does_not_divide_a_day_into_months
+    m = CArray.time(["2000-01-01"], unit: :M)
+    on = CArray.time(["1972-06-01"], unit: :D).to_unit("7 hours")
+    m[0] = on[0]
+    assert_equal "1972-06", m[0].to_s
+    off = CArray.time(["2024-03-15T04:00:00"], unit: :s).to_unit("7 hours")
+    assert_raise(ArgumentError) { m[0] = off[0] }
+  end
+
 end
